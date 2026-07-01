@@ -27,6 +27,7 @@ type AppState = {
   renameProject: (title: string) => Promise<void>;
   resizeSelectedWall: (lengthMm: number) => Promise<void>;
   importProjectJson: (text: string) => Promise<void>;
+  resetLocalProject: () => Promise<void>;
 };
 
 const repository = new IndexedDbProjectRepository();
@@ -118,6 +119,41 @@ export const useAppStore = create<AppState>((set, get) => ({
       lastGeometryEdit: null
     });
     set({ selectedWallId: getFirstWall(project)?.id ?? null });
+  },
+
+  async resetLocalProject() {
+    const project = createSampleProject();
+    set({
+      saveState: "saving",
+      error: null,
+      placementWarnings: [],
+      lastGeometryEdit: null
+    });
+
+    try {
+      const summaries = await repository.list();
+      for (const summary of summaries) {
+        await repository.delete(summary.id);
+      }
+      await repository.save(project);
+      set({
+        project,
+        selectedWallId: getFirstWall(project)?.id ?? null,
+        viewMode: "plan",
+        saveState: "saved",
+        error: null,
+        placementWarnings: [],
+        lastGeometryEdit: null
+      });
+    } catch (error) {
+      set({
+        saveState: "error",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Could not reset the local project."
+      });
+    }
   }
 }));
 

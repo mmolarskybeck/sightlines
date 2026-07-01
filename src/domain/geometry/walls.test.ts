@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createSampleProject } from "../sample/sampleProject";
 import { feetToMm } from "../units/length";
-import { getOrthogonalQuadWallPair } from "./walls";
+import { getFloorBounds, getOrthogonalQuadWallPair } from "./walls";
 
 describe("getOrthogonalQuadWallPair", () => {
   it("returns the opposing wall for a four-wall rectangle", () => {
@@ -29,5 +29,48 @@ describe("getOrthogonalQuadWallPair", () => {
     };
 
     expect(getOrthogonalQuadWallPair(room, "wall-north")).toBeNull();
+  });
+});
+
+describe("getFloorBounds", () => {
+  it("combines placed room bounds across a shared floor", () => {
+    const project = createSampleProject();
+    const room = project.floor.rooms[0];
+    const floor = {
+      rooms: [
+        room,
+        {
+          ...room,
+          roomId: "room-east",
+          offsetXMm: feetToMm(40),
+          offsetYMm: feetToMm(8),
+          room: {
+            ...room.room,
+            id: "room-east",
+            name: "East Gallery"
+          }
+        }
+      ]
+    };
+
+    expect(getFloorBounds(floor)).toEqual({
+      minX: 0,
+      minY: 0,
+      maxX: feetToMm(68),
+      maxY: feetToMm(26),
+      width: feetToMm(68),
+      height: feetToMm(26)
+    });
+  });
+
+  it("returns a zero-sized fallback for an empty floor", () => {
+    expect(getFloorBounds({ rooms: [] })).toEqual({
+      minX: 0,
+      minY: 0,
+      maxX: 0,
+      maxY: 0,
+      width: 0,
+      height: 0
+    });
   });
 });

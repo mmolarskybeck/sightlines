@@ -6,6 +6,7 @@ import {
   Grid3X3,
   Link2,
   ListChecks,
+  RotateCcw,
   Ruler,
   Save,
   Upload,
@@ -44,7 +45,8 @@ export function App() {
     selectWall,
     renameProject,
     resizeSelectedWall,
-    importProjectJson
+    importProjectJson,
+    resetLocalProject
   } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [gridVisible, setGridVisible] = useState(false);
@@ -89,7 +91,25 @@ export function App() {
           <button
             className="icon-button"
             type="button"
+            title="Reset local project"
+            aria-label="Reset local project"
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Replace the saved local project with a fresh sample layout?"
+                )
+              ) {
+                void resetLocalProject();
+              }
+            }}
+          >
+            <RotateCcw aria-hidden="true" size={18} />
+          </button>
+          <button
+            className="icon-button"
+            type="button"
             title="Import project JSON"
+            aria-label="Import project JSON"
             onClick={() => fileInputRef.current?.click()}
           >
             <Upload aria-hidden="true" size={18} />
@@ -98,6 +118,7 @@ export function App() {
             className="icon-button"
             type="button"
             title="Export project JSON"
+            aria-label="Export project JSON"
             onClick={() => downloadProject(project)}
           >
             <Download aria-hidden="true" size={18} />

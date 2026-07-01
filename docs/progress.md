@@ -35,10 +35,10 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 - [x] Added the rectangle inspector affordance for paired dimensions, so users can see that North/South and East/West are linked.
 - [x] Added tests for rectangle paired-wall detection.
 - [x] Documented and implemented a toggleable visual grid for plan and elevation alignment.
+- [x] Added a toolbar action to reset local browser storage back to a fresh sample project during development.
 
 ## In Progress / Immediate Next
 
-- [ ] Add a clean way to reset or replace the sample/local project during development without manually clearing IndexedDB.
 - [ ] Refine the plan view framing so edited rooms stay comfortably centered and scaled.
 - [ ] Add basic room creation/editing controls for MVP 1A beyond the initial sample rectangle.
 - [ ] Add explicit room dimension controls for width/height alongside per-wall rows for rectangle rooms.

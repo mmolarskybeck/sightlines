@@ -1,4 +1,4 @@
-import type { Room, RoomPlacement, RoomVertex, Wall } from "../project";
+import type { Floor, Room, RoomPlacement, RoomVertex, Wall } from "../project";
 
 export type WallWithGeometry = Wall & {
   start: RoomVertex;
@@ -80,6 +80,34 @@ export function getPlacedRoomBounds(placement: RoomPlacement) {
     maxY: bounds.maxY + placement.offsetYMm,
     width: bounds.width,
     height: bounds.height
+  };
+}
+
+export function getFloorBounds(floor: Floor) {
+  if (floor.rooms.length === 0) {
+    return {
+      minX: 0,
+      minY: 0,
+      maxX: 0,
+      maxY: 0,
+      width: 0,
+      height: 0
+    };
+  }
+
+  const roomBounds = floor.rooms.map(getPlacedRoomBounds);
+  const minX = Math.min(...roomBounds.map((bounds) => bounds.minX));
+  const minY = Math.min(...roomBounds.map((bounds) => bounds.minY));
+  const maxX = Math.max(...roomBounds.map((bounds) => bounds.maxX));
+  const maxY = Math.max(...roomBounds.map((bounds) => bounds.maxY));
+
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: maxX - minX,
+    height: maxY - minY
   };
 }
 
