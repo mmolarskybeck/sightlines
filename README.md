@@ -1,0 +1,2 @@
+# sightlines
+Exhibition layout visualizer
