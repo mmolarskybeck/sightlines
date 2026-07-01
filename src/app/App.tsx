@@ -6,6 +6,7 @@ import {
   Grid3X3,
   Link2,
   ListChecks,
+  Plus,
   RotateCcw,
   Ruler,
   Save,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import {
   getFloorBounds,
+  getWallsWithGeometry,
   getOrthogonalQuadWallPair,
 } from "../domain/geometry/walls";
 import { formatLength, parseLength } from "../domain/units/length";
@@ -43,6 +45,7 @@ export function App() {
     boot,
     setViewMode,
     selectWall,
+    addRectangleRoom,
     renameProject,
     resizeSelectedWall,
     importProjectJson,
@@ -144,21 +147,52 @@ export function App() {
         <aside className="sidebar" aria-label="Project structure">
           <div className="panel-heading">
             <h2>Gallery</h2>
-            <span>{walls.length} walls</span>
+            <div className="panel-heading-actions">
+              <span>
+                {project.floor.rooms.length} rooms · {walls.length} walls
+              </span>
+              <button
+                aria-label="Add rectangular room"
+                className="icon-button compact"
+                title="Add rectangular room"
+                type="button"
+                onClick={() => void addRectangleRoom()}
+              >
+                <Plus aria-hidden="true" size={16} />
+              </button>
+            </div>
           </div>
 
-          <nav className="wall-list" aria-label="Walls">
-            {walls.map((wall) => (
-              <button
-                className={wall.id === selectedWall?.id ? "wall-row active" : "wall-row"}
-                key={wall.id}
-                type="button"
-                onClick={() => selectWall(wall.id)}
-              >
-                <span>{wall.name}</span>
-                <strong>{formatLength(wall.lengthMm, { unit: project.unit })}</strong>
-              </button>
-            ))}
+          <nav className="room-list" aria-label="Rooms and walls">
+            {project.floor.rooms.map((placement) => {
+              const roomWalls = getWallsWithGeometry(placement.room);
+
+              return (
+                <section className="room-group" key={placement.roomId}>
+                  <div className="room-heading">
+                    <h3>{placement.room.name}</h3>
+                    <span>{roomWalls.length} walls</span>
+                  </div>
+                  <div className="wall-list">
+                    {roomWalls.map((wall) => (
+                      <button
+                        className={
+                          wall.id === selectedWall?.id ? "wall-row active" : "wall-row"
+                        }
+                        key={wall.id}
+                        type="button"
+                        onClick={() => selectWall(wall.id)}
+                      >
+                        <span>{wall.name}</span>
+                        <strong>
+                          {formatLength(wall.lengthMm, { unit: project.unit })}
+                        </strong>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
           </nav>
 
           <div className="storage-note">

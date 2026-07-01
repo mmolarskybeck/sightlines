@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { createNextRectangleRoom } from "../domain/geometry/createRoom";
 import { resizeWallPreservingAngles } from "../domain/geometry/editRoom";
 import { getWallsWithGeometry } from "../domain/geometry/walls";
 import type { PlacementWarning } from "../domain/placement/validatePlacement";
@@ -25,6 +26,7 @@ type AppState = {
   setViewMode: (viewMode: ViewMode) => void;
   selectWall: (wallId: string) => void;
   renameProject: (title: string) => Promise<void>;
+  addRectangleRoom: () => Promise<void>;
   resizeSelectedWall: (lengthMm: number) => Promise<void>;
   importProjectJson: (text: string) => Promise<void>;
   resetLocalProject: () => Promise<void>;
@@ -86,6 +88,32 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     const nextProject = { ...project, title, updatedAt: new Date().toISOString() };
     await saveProject(nextProject, set);
+  },
+
+  async addRectangleRoom() {
+    const project = get().project;
+    if (!project) return;
+
+    const roomPlacement = createNextRectangleRoom(
+      project.floor,
+      project.defaultWallHeightMm
+    );
+    const nextProject = {
+      ...project,
+      floor: {
+        rooms: [...project.floor.rooms, roomPlacement]
+      },
+      updatedAt: new Date().toISOString()
+    };
+
+    await saveProject(nextProject, set, {
+      placementWarnings: [],
+      lastGeometryEdit: null
+    });
+    set({
+      selectedWallId: roomPlacement.room.walls[0]?.id ?? null,
+      viewMode: "plan"
+    });
   },
 
   async resizeSelectedWall(lengthMm) {

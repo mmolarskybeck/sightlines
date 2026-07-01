@@ -38,10 +38,10 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 - [x] Documented the unified precision-grid model: unit-aware intervals, zoom-adaptive display, continuous floorplan grid behavior, grid snap targets, separate show/snap preferences, and centerline guide behavior.
 - [x] Added a toolbar action to reset local browser storage back to a fresh sample project during development.
 - [x] Refined plan view framing so room layouts use full-floor bounds with proportional padding.
+- [x] Added basic rectangular room creation controls and grouped room/wall navigation in the Gallery panel.
 
 ## In Progress / Immediate Next
 
-- [ ] Add basic room creation/editing controls for MVP 1A beyond the initial sample rectangle.
 - [ ] Add explicit room dimension controls for width/height alongside per-wall rows for rectangle rooms.
 - [ ] Keep numeric edits orthogonal by default while reserving skew/non-90-degree geometry for an intentional future reshape mode.
 - [ ] Replace the temporary fixed grid interval with the shared precision system from `docs/plan.md` §5.5.
