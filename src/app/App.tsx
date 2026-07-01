@@ -2,15 +2,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Download,
   FileJson,
-  FolderOpen,
   Grid2X2,
+  Link2,
   ListChecks,
   Ruler,
   Save,
   Upload,
   AlertTriangle
 } from "lucide-react";
-import { getPlacedRoomBounds } from "../domain/geometry/walls";
+import {
+  getOrthogonalQuadWallPair,
+  getPlacedRoomBounds
+} from "../domain/geometry/walls";
 import { formatLength, parseLength } from "../domain/units/length";
 import {
   exportProjectJson,
@@ -18,6 +21,13 @@ import {
   getSelectedWall,
   useAppStore
 } from "./store";
+
+type Project = NonNullable<ReturnType<typeof useAppStore.getState>["project"]>;
+
+type WallDimensionLink = {
+  pairedWallName: string;
+  roomName: string;
+};
 
 export function App() {
   const {
@@ -43,6 +53,10 @@ export function App() {
 
   const walls = useMemo(() => (project ? getProjectWalls(project) : []), [project]);
   const selectedWall = project ? getSelectedWall(project, selectedWallId) : null;
+  const wallDimensionLink =
+    project && selectedWall
+      ? getWallDimensionLink(project, selectedWall.id)
+      : null;
 
   if (!project) {
     return (
@@ -182,6 +196,11 @@ export function App() {
           {selectedWall ? (
             <WallInspector
               centerlineMm={project.defaultCenterlineHeightMm}
+              changedWallNames={getWallNames(
+                project,
+                lastGeometryEdit?.changedWallIds ?? []
+              )}
+              dimensionLink={wallDimensionLink}
               lastGeometryEdit={lastGeometryEdit}
               onCommitLength={resizeSelectedWall}
               placementWarnings={placementWarnings}
@@ -214,7 +233,7 @@ function PlanView({
   project,
   selectedWallId
 }: {
-  project: NonNullable<ReturnType<typeof useAppStore.getState>["project"]>;
+  project: Project;
   selectedWallId: string | null;
 }) {
   const placement = project.floor.rooms[0];
@@ -313,6 +332,8 @@ function DataView({ json }: { json: string }) {
 
 function WallInspector({
   centerlineMm,
+  changedWallNames,
+  dimensionLink,
   lastGeometryEdit,
   onCommitLength,
   placementWarnings,
@@ -322,6 +343,8 @@ function WallInspector({
   wallName
 }: {
   centerlineMm: number;
+  changedWallNames: string[];
+  dimensionLink: WallDimensionLink | null;
   lastGeometryEdit: {
     anchorVertexId: string;
     changedWallIds: string[];
@@ -397,17 +420,19 @@ function WallInspector({
       ) : (
         <p className="field-hint">Accepts 28', 28 ft, 336", 853.4 cm, or 8.53 m.</p>
       )}
-      <p className="field-hint">
-        Orthogonal lock is on. Numeric edits anchor the selected wall's start
-        corner and update the paired wall.
-      </p>
+      {dimensionLink ? (
+        <div className="constraint-panel" aria-label="Linked rectangle dimension">
+          <Link2 aria-hidden="true" size={17} />
+          <div>
+            <h3>{wallName} + {dimensionLink.pairedWallName}</h3>
+            <p>{dimensionLink.roomName} keeps opposing wall lengths linked.</p>
+          </div>
+        </div>
+      ) : null}
       {lastGeometryEdit ? (
         <p className="field-hint">
-          Last edit anchor: {lastGeometryEdit.anchorVertexId}; changed walls:{" "}
-          {lastGeometryEdit.changedWallIds.length > 0
-            ? lastGeometryEdit.changedWallIds.join(", ")
-            : "none"}
-          .
+          Last edit updated{" "}
+          {changedWallNames.length > 0 ? changedWallNames.join(", ") : "no walls"}.
         </p>
       ) : null}
 
@@ -484,7 +509,36 @@ function StatusBadge({ state }: { state: "idle" | "saving" | "saved" | "error" }
   return <span className={`status-badge ${state}`}>{label}</span>;
 }
 
-function downloadProject(project: NonNullable<ReturnType<typeof useAppStore.getState>["project"]>) {
+function getWallDimensionLink(
+  project: Project,
+  wallId: string
+): WallDimensionLink | null {
+  for (const placement of project.floor.rooms) {
+    const pair = getOrthogonalQuadWallPair(placement.room, wallId);
+    if (!pair) continue;
+
+    return {
+      pairedWallName: pair.pairedWall.name,
+      roomName: placement.room.name
+    };
+  }
+
+  return null;
+}
+
+function getWallNames(project: Project, wallIds: string[]): string[] {
+  if (wallIds.length === 0) return [];
+
+  const namesById = new Map(
+    project.floor.rooms.flatMap((placement) =>
+      placement.room.walls.map((wall) => [wall.id, wall.name])
+    )
+  );
+
+  return wallIds.map((wallId) => namesById.get(wallId) ?? wallId);
+}
+
+function downloadProject(project: Project) {
   const blob = new Blob([exportProjectJson(project)], {
     type: "application/json"
   });

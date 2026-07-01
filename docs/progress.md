@@ -32,10 +32,11 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 - [x] Added an inspector warning panel for placement warnings.
 - [x] Added browser verification for wall-length edits, orthogonal lock behavior, and basic tab interactions.
 - [x] Added tests for geometry edits, schema defaults, and cascaded placement validation.
+- [x] Added the rectangle inspector affordance for paired dimensions, so users can see that North/South and East/West are linked.
+- [x] Added tests for rectangle paired-wall detection.
 
 ## In Progress / Immediate Next
 
-- [ ] Decide and implement the rectangle inspector affordance for paired dimensions, so users can see that North/South and East/West are linked.
 - [ ] Add a clean way to reset or replace the sample/local project during development without manually clearing IndexedDB.
 - [ ] Refine the plan view framing so edited rooms stay comfortably centered and scaled.
 - [ ] Add basic room creation/editing controls for MVP 1A beyond the initial sample rectangle.

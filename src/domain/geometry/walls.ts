@@ -7,6 +7,11 @@ export type WallWithGeometry = Wall & {
   angleRad: number;
 };
 
+export type OrthogonalQuadWallPair = {
+  selectedWall: WallWithGeometry;
+  pairedWall: WallWithGeometry;
+};
+
 export function getWallGeometry(room: Room, wall: Wall): WallWithGeometry {
   const start = findVertex(room, wall.startVertexId);
   const end = findVertex(room, wall.endVertexId);
@@ -24,6 +29,27 @@ export function getWallGeometry(room: Room, wall: Wall): WallWithGeometry {
 
 export function getWallsWithGeometry(room: Room): WallWithGeometry[] {
   return room.walls.map((wall) => getWallGeometry(room, wall));
+}
+
+export function getOrthogonalQuadWallPair(
+  room: Room,
+  wallId: string
+): OrthogonalQuadWallPair | null {
+  if (room.walls.length !== 4 || room.vertices.length !== 4) return null;
+
+  const wallIndex = room.walls.findIndex((wall) => wall.id === wallId);
+  if (wallIndex === -1 || !hasLoopingWallOrder(room, wallIndex)) return null;
+
+  const walls = getWallsWithGeometry(room);
+  const pairedWall = walls[(wallIndex + 2) % walls.length];
+  const selectedWall = walls[wallIndex];
+
+  if (!pairedWall || !selectedWall) return null;
+
+  return {
+    selectedWall,
+    pairedWall
+  };
 }
 
 export function getRoomBounds(room: Room) {
@@ -65,4 +91,16 @@ function findVertex(room: Room, vertexId: string): RoomVertex {
   }
 
   return vertex;
+}
+
+function hasLoopingWallOrder(room: Room, wallIndex: number): boolean {
+  const wall = room.walls[wallIndex];
+  const nextWall = room.walls[(wallIndex + 1) % room.walls.length];
+  const previousWall =
+    room.walls[(wallIndex - 1 + room.walls.length) % room.walls.length];
+
+  return (
+    nextWall.startVertexId === wall.endVertexId &&
+    previousWall.endVertexId === wall.startVertexId
+  );
 }
