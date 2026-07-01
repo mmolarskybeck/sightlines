@@ -1,0 +1,25 @@
+# Local reference copy of the original app. Keep it accessible, but do not
+# vendor the old repository into the rebuilt app's Git history.
+sightlines-old/
+
+# macOS
+.DS_Store
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+.next/
+.astro/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
