@@ -13,6 +13,7 @@ export function createSampleProject(): Project {
     defaultWallHeightMm: feetToMm(12),
     defaultCenterlineHeightMm: inchesToMm(57),
     checklistArtworkIds: [],
+    wallObjects: [],
     createdAt: now,
     updatedAt: now,
     floor: {

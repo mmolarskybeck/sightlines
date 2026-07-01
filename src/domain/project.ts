@@ -32,6 +32,7 @@ export type Project = {
   defaultCenterlineHeightMm: number;
   floor: Floor;
   checklistArtworkIds: string[];
+  wallObjects: WallObject[];
   createdAt: string;
   updatedAt: string;
 };

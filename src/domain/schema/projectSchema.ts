@@ -3,6 +3,42 @@ import { CURRENT_SCHEMA_VERSION, type Project } from "../project";
 
 const displayUnitSchema = z.enum(["in", "ft", "cm", "m"]);
 
+const dimensionsSchema = z.object({
+  widthMm: z.number().positive().optional(),
+  heightMm: z.number().positive().optional(),
+  depthMm: z.number().positive().optional(),
+  status: z.enum(["known", "approximate", "unknown"]),
+  displayUnit: displayUnitSchema.optional()
+});
+
+const wallObjectBaseSchema = z.object({
+  id: z.string().min(1),
+  wallId: z.string().min(1),
+  xMm: z.number().finite(),
+  yMm: z.number().finite(),
+  widthMm: z.number().positive(),
+  heightMm: z.number().positive(),
+  rotationDeg: z.number().finite().optional(),
+  groupId: z.string().min(1).optional()
+});
+
+const artworkWallObjectSchema = wallObjectBaseSchema.extend({
+  kind: z.literal("artwork"),
+  artworkId: z.string().min(1),
+  displayDimensionsOverride: dimensionsSchema.optional()
+});
+
+const openingWallObjectSchema = wallObjectBaseSchema.extend({
+  kind: z.enum(["door", "window", "blocked-zone"]),
+  blocksPlacement: z.literal(true),
+  connectsToWallId: z.string().min(1).optional()
+});
+
+const wallObjectSchema = z.discriminatedUnion("kind", [
+  artworkWallObjectSchema,
+  openingWallObjectSchema
+]);
+
 const roomVertexSchema = z.object({
   id: z.string().min(1),
   xMm: z.number().finite(),
@@ -68,6 +104,7 @@ export const projectSchema = z.object({
     rooms: z.array(roomPlacementSchema).min(1)
   }),
   checklistArtworkIds: z.array(z.string()),
+  wallObjects: z.array(wallObjectSchema).default([]),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime()
 });

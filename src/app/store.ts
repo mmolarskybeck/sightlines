@@ -1,5 +1,8 @@
 import { create } from "zustand";
+import { resizeWallPreservingAngles } from "../domain/geometry/editRoom";
 import { getWallsWithGeometry } from "../domain/geometry/walls";
+import type { PlacementWarning } from "../domain/placement/validatePlacement";
+import { validateChangedWallPlacements } from "../domain/placement/validatePlacement";
 import type { Project, Wall } from "../domain/project";
 import { IndexedDbProjectRepository } from "../domain/repositories/indexedDbProjectRepository";
 import { createSampleProject } from "../domain/sample/sampleProject";
@@ -13,10 +16,16 @@ type AppState = {
   viewMode: ViewMode;
   saveState: "idle" | "saving" | "saved" | "error";
   error: string | null;
+  placementWarnings: PlacementWarning[];
+  lastGeometryEdit: {
+    anchorVertexId: string;
+    changedWallIds: string[];
+  } | null;
   boot: () => Promise<void>;
   setViewMode: (viewMode: ViewMode) => void;
   selectWall: (wallId: string) => void;
   renameProject: (title: string) => Promise<void>;
+  resizeSelectedWall: (lengthMm: number) => Promise<void>;
   importProjectJson: (text: string) => Promise<void>;
 };
 
@@ -28,6 +37,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   viewMode: "plan",
   saveState: "idle",
   error: null,
+  placementWarnings: [],
+  lastGeometryEdit: null,
 
   async boot() {
     try {
@@ -40,13 +51,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       const selectedWallId = getFirstWall(project)?.id ?? null;
-      set({ project, selectedWallId, saveState: "saved", error: null });
+      set({
+        project,
+        selectedWallId,
+        saveState: "saved",
+        error: null,
+        placementWarnings: [],
+        lastGeometryEdit: null
+      });
     } catch (error) {
       set({
         project: createSampleProject(),
         selectedWallId: "wall-north",
         saveState: "error",
-        error: error instanceof Error ? error.message : "Could not load project."
+        error: error instanceof Error ? error.message : "Could not load project.",
+        placementWarnings: [],
+        lastGeometryEdit: null
       });
     }
   },
@@ -67,9 +87,36 @@ export const useAppStore = create<AppState>((set, get) => ({
     await saveProject(nextProject, set);
   },
 
+  async resizeSelectedWall(lengthMm) {
+    const project = get().project;
+    const selectedWallId = get().selectedWallId;
+    if (!project || !selectedWallId) return;
+
+    const result = resizeWallPreservingAngles(project, selectedWallId, lengthMm);
+    const nextProject = {
+      ...result.project,
+      updatedAt: new Date().toISOString()
+    };
+    const placementWarnings = validateChangedWallPlacements(
+      nextProject,
+      result.changedWallIds
+    );
+
+    await saveProject(nextProject, set, {
+      placementWarnings,
+      lastGeometryEdit: {
+        anchorVertexId: result.anchorVertexId,
+        changedWallIds: result.changedWallIds
+      }
+    });
+  },
+
   async importProjectJson(text) {
     const project = migrateProject(JSON.parse(text));
-    await saveProject(project, set);
+    await saveProject(project, set, {
+      placementWarnings: [],
+      lastGeometryEdit: null
+    });
     set({ selectedWallId: getFirstWall(project)?.id ?? null });
   }
 }));
@@ -91,18 +138,20 @@ export function getSelectedWall(project: Project, selectedWallId: string | null)
 
 async function saveProject(
   project: Project,
-  set: (partial: Partial<AppState>) => void
+  set: (partial: Partial<AppState>) => void,
+  extraState: Partial<Pick<AppState, "placementWarnings" | "lastGeometryEdit">> = {}
 ) {
   set({ saveState: "saving", error: null });
 
   try {
     await repository.save(project);
-    set({ project, saveState: "saved", error: null });
+    set({ project, saveState: "saved", error: null, ...extraState });
   } catch (error) {
     set({
       project,
       saveState: "error",
-      error: error instanceof Error ? error.message : "Could not save project."
+      error: error instanceof Error ? error.message : "Could not save project.",
+      ...extraState
     });
   }
 }

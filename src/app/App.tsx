@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Download,
   FileJson,
@@ -7,10 +7,11 @@ import {
   ListChecks,
   Ruler,
   Save,
-  Upload
+  Upload,
+  AlertTriangle
 } from "lucide-react";
-import { getPlacedRoomBounds, getRoomBounds } from "../domain/geometry/walls";
-import { formatLength } from "../domain/units/length";
+import { getPlacedRoomBounds } from "../domain/geometry/walls";
+import { formatLength, parseLength } from "../domain/units/length";
 import {
   exportProjectJson,
   getProjectWalls,
@@ -25,10 +26,13 @@ export function App() {
     viewMode,
     saveState,
     error,
+    placementWarnings,
+    lastGeometryEdit,
     boot,
     setViewMode,
     selectWall,
     renameProject,
+    resizeSelectedWall,
     importProjectJson
   } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -176,29 +180,16 @@ export function App() {
           </div>
 
           {selectedWall ? (
-            <dl className="property-list">
-              <div>
-                <dt>Selected wall</dt>
-                <dd>{selectedWall.name}</dd>
-              </div>
-              <div>
-                <dt>Length</dt>
-                <dd>{formatLength(selectedWall.lengthMm, { unit: project.unit })}</dd>
-              </div>
-              <div>
-                <dt>Height</dt>
-                <dd>{formatLength(selectedWall.heightMm, { unit: project.unit })}</dd>
-              </div>
-              <div>
-                <dt>Centerline</dt>
-                <dd>
-                  {formatLength(project.defaultCenterlineHeightMm, {
-                    unit: "ft",
-                    secondaryUnit: "cm"
-                  })}
-                </dd>
-              </div>
-            </dl>
+            <WallInspector
+              centerlineMm={project.defaultCenterlineHeightMm}
+              lastGeometryEdit={lastGeometryEdit}
+              onCommitLength={resizeSelectedWall}
+              placementWarnings={placementWarnings}
+              unit={project.unit}
+              wallHeightMm={selectedWall.heightMm}
+              wallLengthMm={selectedWall.lengthMm}
+              wallName={selectedWall.name}
+            />
           ) : (
             <p className="empty-copy">Select a wall to inspect its measurements.</p>
           )}
@@ -317,6 +308,141 @@ function DataView({ json }: { json: string }) {
     <div className="data-surface">
       <pre>{json}</pre>
     </div>
+  );
+}
+
+function WallInspector({
+  centerlineMm,
+  lastGeometryEdit,
+  onCommitLength,
+  placementWarnings,
+  unit,
+  wallHeightMm,
+  wallLengthMm,
+  wallName
+}: {
+  centerlineMm: number;
+  lastGeometryEdit: {
+    anchorVertexId: string;
+    changedWallIds: string[];
+  } | null;
+  onCommitLength: (lengthMm: number) => Promise<void>;
+  placementWarnings: { id: string; message: string; wallObjectId: string }[];
+  unit: "in" | "ft" | "cm" | "m";
+  wallHeightMm: number;
+  wallLengthMm: number;
+  wallName: string;
+}) {
+  const [lengthInput, setLengthInput] = useState(() =>
+    formatLength(wallLengthMm, { unit })
+  );
+  const [lengthError, setLengthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLengthInput(formatLength(wallLengthMm, { unit }));
+    setLengthError(null);
+  }, [unit, wallLengthMm]);
+
+  const commitLength = async () => {
+    const parsed = parseLength(lengthInput, unit);
+
+    if (!parsed.ok) {
+      setLengthError(parsed.error);
+      return;
+    }
+
+    if (parsed.valueMm <= 0) {
+      setLengthError("Wall length must be greater than zero.");
+      return;
+    }
+
+    setLengthError(null);
+    await onCommitLength(parsed.valueMm);
+    setLengthInput(formatLength(parsed.valueMm, { unit }));
+  };
+
+  return (
+    <form
+      className="inspector-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void commitLength();
+      }}
+    >
+      <label className="field-row">
+        <span>Selected wall</span>
+        <input readOnly value={wallName} />
+      </label>
+
+      <label className="field-row">
+        <span>Length</span>
+        <input
+          aria-describedby={lengthError ? "wall-length-error" : undefined}
+          aria-invalid={lengthError ? "true" : "false"}
+          inputMode="decimal"
+          value={lengthInput}
+          onBlur={() => void commitLength()}
+          onChange={(event) => setLengthInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            void commitLength();
+          }}
+        />
+      </label>
+      {lengthError ? (
+        <p className="field-error" id="wall-length-error">
+          {lengthError}
+        </p>
+      ) : (
+        <p className="field-hint">Accepts 28', 28 ft, 336", 853.4 cm, or 8.53 m.</p>
+      )}
+      <p className="field-hint">
+        Orthogonal lock is on. Numeric edits anchor the selected wall's start
+        corner and update the paired wall.
+      </p>
+      {lastGeometryEdit ? (
+        <p className="field-hint">
+          Last edit anchor: {lastGeometryEdit.anchorVertexId}; changed walls:{" "}
+          {lastGeometryEdit.changedWallIds.length > 0
+            ? lastGeometryEdit.changedWallIds.join(", ")
+            : "none"}
+          .
+        </p>
+      ) : null}
+
+      {placementWarnings.length > 0 ? (
+        <div className="warning-panel" role="status" aria-live="polite">
+          <AlertTriangle aria-hidden="true" size={18} />
+          <div>
+            <h3>Placement needs review</h3>
+            <ul>
+              {placementWarnings.map((warning) => (
+                <li key={warning.id}>
+                  {warning.message} <span>{warning.wallObjectId}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ) : null}
+
+      <dl className="property-list compact">
+        <div>
+          <dt>Height</dt>
+          <dd>{formatLength(wallHeightMm, { unit })}</dd>
+        </div>
+        <div>
+          <dt>Centerline</dt>
+          <dd>
+            {formatLength(centerlineMm, {
+              unit: "ft",
+              secondaryUnit: "cm"
+            })}
+          </dd>
+        </div>
+      </dl>
+    </form>
   );
 }
 
