@@ -34,15 +34,19 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 - [x] Added tests for geometry edits, schema defaults, and cascaded placement validation.
 - [x] Added the rectangle inspector affordance for paired dimensions, so users can see that North/South and East/West are linked.
 - [x] Added tests for rectangle paired-wall detection.
-- [x] Documented and implemented a toggleable visual grid for plan and elevation alignment.
+- [x] Implemented the first toggleable visual grid overlay for plan and elevation alignment.
+- [x] Documented the unified precision-grid model: unit-aware intervals, zoom-adaptive display, continuous floorplan grid behavior, grid snap targets, separate show/snap preferences, and centerline guide behavior.
 - [x] Added a toolbar action to reset local browser storage back to a fresh sample project during development.
+- [x] Refined plan view framing so room layouts use full-floor bounds with proportional padding.
 
 ## In Progress / Immediate Next
 
-- [ ] Refine the plan view framing so edited rooms stay comfortably centered and scaled.
 - [ ] Add basic room creation/editing controls for MVP 1A beyond the initial sample rectangle.
 - [ ] Add explicit room dimension controls for width/height alongside per-wall rows for rectangle rooms.
 - [ ] Keep numeric edits orthogonal by default while reserving skew/non-90-degree geometry for an intentional future reshape mode.
+- [ ] Replace the temporary fixed grid interval with the shared precision system from `docs/plan.md` §5.5.
+- [ ] Split the current grid control into independent "show grid" and "snap to grid" local preferences.
+- [ ] Generate grid snap targets for `resolveSnap()` from the active grid interval and visible coordinate space.
 
 ## MVP 1A Remaining
 
@@ -59,6 +63,7 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 - [ ] Add autosave behavior tied to committed document changes, not transient drag movement.
 - [ ] Add corruption/error messaging for invalid imports.
 - [ ] Add storage persistence request with `navigator.storage.persist()` where supported.
+- [ ] Add app-level preferences for view options like grid visibility, snap-to-grid, and grid density without persisting them into `Project`.
 
 ## MVP 1B Next Major Slice
 

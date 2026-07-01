@@ -64,7 +64,7 @@ resolveSnap(
 
 validatePlacement(position: Rect, obstacles: Obstacle[]): { ok: true } | { ok: false, reasons: string[] }
 ```
-No canvas access inside either. Operates in wall-local real-world units (x = distance from wall start, y = height from floor — center-anchored, not top-left). Pixel-to-world threshold conversion happens at the call site using current zoom. Explicit priority order when multiple targets are in range (centerline > neighbor-center > neighbor-edge > grid) with a stable tiebreak. Hysteresis on break-free so it feels magnetic, not jittery — since hysteresis is inherently stateful (harder to break free of a snap than to enter one), the *caller* tracks the previous target and passes it in as `previousSnapTargetId`; `resolveSnap` stays pure and testable rather than quietly accumulating state that would otherwise leak canvas/view concerns back into the snapping layer.
+No canvas access inside either. Operates in wall-local real-world units (x = distance from wall start, y = height from floor — center-anchored, not top-left). Pixel-to-world threshold conversion happens at the call site using current zoom. Explicit priority order when multiple targets are in range (centerline > neighbor-center > neighbor-edge > grid) with a stable tiebreak. Grid targets come from the shared precision system (§5.5), not from ad hoc renderer math. Hysteresis on break-free so it feels magnetic, not jittery — since hysteresis is inherently stateful (harder to break free of a snap than to enter one), the *caller* tracks the previous target and passes it in as `previousSnapTargetId`; `resolveSnap` stays pure and testable rather than quietly accumulating state that would otherwise leak canvas/view concerns back into the snapping layer.
 
 **Every persisted document is self-describing and versioned — there's no server to migrate it for you.**
 A cloud app can run a migration script once, server-side, and every user is upgraded. A local-first app has files sitting on people's disks indefinitely, opened by whatever app version happens to load them. Every `Project`, `Artwork`, and `.sightlines` package carries a `schemaVersion`, and the app ships a small chain of migration functions (`v1→v2`, `v2→v3`, ...) run on load. This is what makes "add new fields later without breaking old files" (see §4) actually safe rather than aspirational.
@@ -301,9 +301,43 @@ This is core infrastructure, not a utility function — build it before the insp
 - **Round for display only, never for storage.** Settings change how a value is *shown*, never the underlying mm value. An explicit "snap this measurement to the nearest 1/8 in" is a deliberate user action, not a side effect of changing display settings.
 - **Reformat on blur/Enter, not on keystroke.** Rewriting an input field mid-type causes cursor-jump bugs. Let the user type freely; optionally show a small live preview of the parsed value beside the field, and normalize the field's actual content only once they commit.
 
-**Tie rounding granularity to grid/nudge snap increments** so there's one coherent notion of "how precise is this project," not two settings that can drift apart.
+**Tie rounding granularity to grid/nudge snap increments** so there's one coherent notion of "how precise is this project," not separate settings that can drift apart.
 
 Build as a small, dedicated, heavily-tested module (`units/length.ts`). The conversion math is trivial and exact (1in = 25.4mm); the parsing/formatting of human input is the bespoke, valuable part.
+
+### 5.5 Precision Grid, Nudge, and Snap
+
+The core principle: **one precision system, not three.** The visual grid, grid snap targets, keyboard nudge increments, and unit-format rounding preference should be different surfaces over the same project precision model. If the user is working to the nearest `1/8"` or nearest `5mm`, the finest zoomed-in grid should bottom out there, grid snap candidates should not offer a finer contradictory interval, and formatting should not imply a different precision than the editing tools use.
+
+The current grid implementation is intentionally view-only — the right first slice, but only the easy part. The more valuable half is to turn the active grid interval into actual `resolveSnap()` candidates, still lowest priority after centerline, neighbor-center, and neighbor-edge. That keeps snapping pure: the renderer/view computes the currently relevant grid targets from zoom, viewport, active coordinate space, and user precision settings, then passes them into `resolveSnap()` like any other target.
+
+Grid intervals must be **unit-aware lookup tables**, not one fixed millimeter spacing with different labels:
+
+```ts
+const metricGridIntervals = [
+  "1cm", "2cm", "5cm", "10cm", "20cm", "50cm", "1m", "2m"
+]
+
+const imperialGridIntervals = [
+  '1"', '2"', '3"', '6"', "1'", "2'", "3'", "5'", "10'"
+]
+```
+
+Metric follows the normal 1-2-5 sequence. Imperial needs its own table because feet/inches are how people think in the gallery; `10cm` converted to `3.94"` is not a useful imperial grid, and `6"` converted to `15.24cm` is not a useful metric grid. Switching display unit should switch the interval family, not just relabel the same grid.
+
+The grid should be **zoom-adaptive**. As users zoom out, step upward through the relevant interval table so a 30-foot wall does not render thousands of 1-inch lines; as they zoom in, step downward until hitting the user's chosen precision floor. Draw two visual tiers at each level: a subtle minor grid at the active base interval, and a stronger major grid at a readable multiple such as 5x, 10x, or the next natural landmark (`1'`, `1m`). Generate or draw only lines that intersect the visible viewport; this matters once rooms and floors get large.
+
+Plan and elevation grids are separate grids in separate coordinate spaces:
+- **Plan:** floor/room XY.
+- **Elevation:** wall-local horizontal distance by height from floor.
+
+Anchor the grid to geometry, not the screen. In elevation, `x=0` should be the wall start and `y=0` should be floor level. In the overall floorplan, the grid is a single continuous floor-reference grid spanning every visible room, including inactive rooms, so the whole venue reads against one shared coordinate field. When focused room-local editing and rotated rooms are supported via `RoomPlacement.rotationDeg`, a room-local grid can rotate with the active room for precision edits; that should be an intentional focused mode, not the default overall floorplan reference.
+
+`Show grid` and `Snap to grid` should be independent local app preferences. Sometimes a curator wants the visual reference without magnetic behavior, especially during rough composition. These preferences belong with view/workspace settings rather than `Project` or `.sightlines` data, so importing a shared file does not import someone else's working-style preferences.
+
+The wall **centerline guide** is related but distinct. It is more important than an arbitrary grid interval in elevation view, because it encodes a curatorial installation convention. Keep it as a persistent highlighted guide, eventually with its own visibility/control treatment, rather than treating it as just another gridline that may or may not happen to coincide with the current grid interval.
+
+Resolved floorplan behavior: inactive rooms show the same continuous reference grid as active rooms in overall floorplan view. Do not create disconnected per-room grids in that mode.
 
 ---
 
@@ -350,7 +384,7 @@ Because layout is one serializable document mutated through defined actions, thi
 - **Sync conflict safety:** once Dropbox sync exists, never silently discard a version. At minimum, a version counter in the document and a "this changed elsewhere — keep mine / keep theirs / keep both" prompt.
 - **Corruption/recovery baseline:** a partially-corrupted `.sightlines` zip or an interrupted IndexedDB write should fail loudly with a clear error, not silently lose data.
 - **Equal distribution / spacing:** alongside center/edge/neighbor snapping, add "distribute N selected objects evenly across a span" — one of the most common curatorial moves after grouping, and easy to miss if you only build the snap-target list from the original spec.
-- **Toggleable visual grids in plan and elevation views.** Grid display is a view-layer alignment aid, not project geometry. It should be available in both bird's-eye plan and wall elevation views, share the same project precision vocabulary as snap/nudge increments (§5), and be easy to turn on/off without changing persisted layout data.
+- **Toggleable visual grids in plan and elevation views.** Grid display is a view-layer alignment aid, not project geometry. It should be available in both bird's-eye plan and wall elevation views, share the same precision vocabulary as snap/nudge increments (§5.5), and be easy to turn on/off independently from snap-to-grid without changing persisted layout data.
 - **Scale-accurate printed export:** a distinct export mode from PNG/PDF screenshots — true scale ratio (1:50, 1:25), correct paper size, tiling across multiple pages for walls longer than one sheet. Needed for anyone using a printed elevation with a tape measure on installation day.
 - **One shared "approximate/unknown" indicator component, reused everywhere.** Plan view, wall elevation, 3D preview, and the checklist row all need to show dimension uncertainty — easy to implement inconsistently if each view treats it as a local concern. Build one visual language (badge/icon/outline treatment) and reuse it across all four surfaces.
 - **Metadata intake assists, layered in over time:** auto-fill from embedded EXIF/IPTC on upload where present (cheap, real win — some museum scans already carry artist/title); later, bulk metadata import from a spreadsheet matched by filename. The extensible `metadata` bag (§4.4) absorbs whatever custom columns an institution's spreadsheet happens to have without forcing a schema change.
@@ -368,9 +402,9 @@ Because layout is one serializable document mutated through defined actions, thi
 
 MVP1 bundles a lot — geometry, artwork/checklist, snapping/collision/undo, and 3D. Sequencing it as three internal sub-phases keeps the "boring" data layer (schema, units, wall identity, import/export semantics) stable *before* Konva drag behavior gets layered on top, rather than debugging both at once:
 
-**1A — Geometry spine.** Units parser/formatter (§5) · versioned project schema + Zod validation (§2) · repository interface (§2) · single-room footprint editing with vertex-ID-based wall identity (§4.2) · wall elevation view (empty, no artwork yet) · toggleable plan/elevation visual grid (§8) · local save/load, JSON export/import. No images, no 3D yet — this phase is about the domain model and geometry transforms being correct and boring.
+**1A — Geometry spine.** Units parser/formatter (§5) · versioned project schema + Zod validation (§2) · repository interface (§2) · single-room footprint editing with vertex-ID-based wall identity (§4.2) · wall elevation view (empty, no artwork yet) · toggleable plan/elevation visual grid (§5.5/§8) · local save/load, JSON export/import. No images, no 3D yet — this phase is about the domain model and geometry transforms being correct and boring.
 
-**1B — Artwork placement.** Artwork library + project checklist membership (§4.1) · image intake + thumbnail/display tier generation (§4.5) · drag artwork onto wall, centerline auto-snap (`resolveSnap`, §2) · manual numeric placement · dimension-uncertainty indicator, consistent across views (§8) · undo/redo for placement actions, transaction-bounded (§7) · pointer-agnostic input from the start (§3.5), even before tablet visual polish exists.
+**1B — Artwork placement.** Artwork library + project checklist membership (§4.1) · image intake + thumbnail/display tier generation (§4.5) · drag artwork onto wall, centerline auto-snap and optional grid snap (`resolveSnap`, §2/§5.5) · manual numeric placement · dimension-uncertainty indicator, consistent across views (§8) · undo/redo for placement actions, transaction-bounded (§7) · pointer-agnostic input from the start (§3.5), even before tablet visual polish exists.
 
 **1C — Professional layout behaviors.** Doors/windows/blocked zones + `validatePlacement` collision (§2) · multi-select, grouping, group drag, group-centerline snap · equal-distribution spacing · floor objects (plan view only) · simple derived 3D preview, orbit camera · checklist panel: thumbnail, core fields, sort.
 
