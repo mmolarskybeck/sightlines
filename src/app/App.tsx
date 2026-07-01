@@ -3,6 +3,7 @@ import {
   Download,
   FileJson,
   Grid2X2,
+  Grid3X3,
   Link2,
   ListChecks,
   Ruler,
@@ -46,6 +47,7 @@ export function App() {
     importProjectJson
   } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [gridVisible, setGridVisible] = useState(false);
 
   useEffect(() => {
     void boot();
@@ -148,29 +150,45 @@ export function App() {
         </aside>
 
         <section className="canvas-column">
-          <div className="view-tabs" role="tablist" aria-label="Workspace view">
-            <TabButton
-              active={viewMode === "plan"}
-              icon={<Grid2X2 aria-hidden="true" size={16} />}
-              label="Plan"
-              onClick={() => setViewMode("plan")}
-            />
-            <TabButton
-              active={viewMode === "elevation"}
-              icon={<Ruler aria-hidden="true" size={16} />}
-              label="Elevation"
-              onClick={() => setViewMode("elevation")}
-            />
-            <TabButton
-              active={viewMode === "data"}
-              icon={<FileJson aria-hidden="true" size={16} />}
-              label="Data"
-              onClick={() => setViewMode("data")}
-            />
+          <div className="view-toolbar">
+            <div className="view-tabs" role="tablist" aria-label="Workspace view">
+              <TabButton
+                active={viewMode === "plan"}
+                icon={<Grid2X2 aria-hidden="true" size={16} />}
+                label="Plan"
+                onClick={() => setViewMode("plan")}
+              />
+              <TabButton
+                active={viewMode === "elevation"}
+                icon={<Ruler aria-hidden="true" size={16} />}
+                label="Elevation"
+                onClick={() => setViewMode("elevation")}
+              />
+              <TabButton
+                active={viewMode === "data"}
+                icon={<FileJson aria-hidden="true" size={16} />}
+                label="Data"
+                onClick={() => setViewMode("data")}
+              />
+            </div>
+
+            <div className="view-options" aria-label="View options">
+              <ViewOptionButton
+                active={gridVisible}
+                disabled={viewMode === "data"}
+                icon={<Grid3X3 aria-hidden="true" size={16} />}
+                label="Grid"
+                onClick={() => setGridVisible((visible) => !visible)}
+              />
+            </div>
           </div>
 
           {viewMode === "plan" ? (
-            <PlanView project={project} selectedWallId={selectedWall?.id ?? null} />
+            <PlanView
+              gridVisible={gridVisible}
+              project={project}
+              selectedWallId={selectedWall?.id ?? null}
+            />
           ) : null}
           {viewMode === "elevation" && selectedWall ? (
             <ElevationView
@@ -181,6 +199,7 @@ export function App() {
                 selectedWall.defaultCenterlineHeightMm ??
                 project.defaultCenterlineHeightMm
               }
+              gridVisible={gridVisible}
               unit={project.unit}
             />
           ) : null}
@@ -230,23 +249,40 @@ export function App() {
 }
 
 function PlanView({
+  gridVisible,
   project,
   selectedWallId
 }: {
+  gridVisible: boolean;
   project: Project;
   selectedWallId: string | null;
 }) {
   const placement = project.floor.rooms[0];
   const bounds = getPlacedRoomBounds(placement);
   const padding = 900;
-  const viewBox = `${bounds.minX - padding} ${bounds.minY - padding} ${
-    bounds.width + padding * 2
-  } ${bounds.height + padding * 2}`;
+  const viewBoxBounds = {
+    x: bounds.minX - padding,
+    y: bounds.minY - padding,
+    width: bounds.width + padding * 2,
+    height: bounds.height + padding * 2
+  };
+  const viewBox = `${viewBoxBounds.x} ${viewBoxBounds.y} ${viewBoxBounds.width} ${viewBoxBounds.height}`;
+  const gridSpacingMm = getGridSpacingMm(project.unit);
 
   return (
     <div className="drawing-surface" aria-label="Plan view">
       <svg className="plan-svg" viewBox={viewBox} role="img">
         <title>{placement.room.name} plan</title>
+        {gridVisible ? (
+          <GridOverlay
+            id="plan-grid"
+            height={viewBoxBounds.height}
+            spacingMm={gridSpacingMm}
+            width={viewBoxBounds.width}
+            x={viewBoxBounds.x}
+            y={viewBoxBounds.y}
+          />
+        ) : null}
         <polygon
           className="room-fill"
           points={placement.room.vertices
@@ -283,12 +319,14 @@ function PlanView({
 }
 
 function ElevationView({
+  gridVisible,
   wallName,
   wallLengthMm,
   wallHeightMm,
   centerlineMm,
   unit
 }: {
+  gridVisible: boolean;
   wallName: string;
   wallLengthMm: number;
   wallHeightMm: number;
@@ -296,6 +334,7 @@ function ElevationView({
   unit: "in" | "ft" | "cm" | "m";
 }) {
   const viewBox = `0 0 ${wallLengthMm} ${wallHeightMm}`;
+  const gridSpacingMm = getGridSpacingMm(unit);
 
   return (
     <div className="drawing-surface" aria-label="Wall elevation view">
@@ -309,6 +348,16 @@ function ElevationView({
       <svg className="elevation-svg" viewBox={viewBox} role="img">
         <title>{wallName} elevation</title>
         <rect className="wall-fill" x="0" y="0" width={wallLengthMm} height={wallHeightMm} />
+        {gridVisible ? (
+          <GridOverlay
+            id="elevation-grid"
+            height={wallHeightMm}
+            spacingMm={gridSpacingMm}
+            width={wallLengthMm}
+            x={0}
+            y={0}
+          />
+        ) : null}
         <line
           className="centerline"
           x1="0"
@@ -319,6 +368,71 @@ function ElevationView({
         />
       </svg>
     </div>
+  );
+}
+
+function GridOverlay({
+  height,
+  id,
+  spacingMm,
+  width,
+  x,
+  y
+}: {
+  height: number;
+  id: string;
+  spacingMm: number;
+  width: number;
+  x: number;
+  y: number;
+}) {
+  const majorSpacingMm = spacingMm * 4;
+
+  return (
+    <>
+      <defs>
+        <pattern
+          id={`${id}-minor`}
+          width={spacingMm}
+          height={spacingMm}
+          patternUnits="userSpaceOnUse"
+        >
+          <path
+            className="grid-line minor"
+            d={`M ${spacingMm} 0 L 0 0 0 ${spacingMm}`}
+            vectorEffect="non-scaling-stroke"
+          />
+        </pattern>
+        <pattern
+          id={`${id}-major`}
+          width={majorSpacingMm}
+          height={majorSpacingMm}
+          patternUnits="userSpaceOnUse"
+        >
+          <path
+            className="grid-line major"
+            d={`M ${majorSpacingMm} 0 L 0 0 0 ${majorSpacingMm}`}
+            vectorEffect="non-scaling-stroke"
+          />
+        </pattern>
+      </defs>
+      <rect
+        className="grid-fill"
+        fill={`url(#${id}-minor)`}
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+      />
+      <rect
+        className="grid-fill"
+        fill={`url(#${id}-major)`}
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+      />
+    </>
   );
 }
 
@@ -496,6 +610,34 @@ function TabButton({
   );
 }
 
+function ViewOptionButton({
+  active,
+  disabled,
+  icon,
+  label,
+  onClick
+}: {
+  active: boolean;
+  disabled: boolean;
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      aria-pressed={active}
+      className={active ? "view-option-button active" : "view-option-button"}
+      disabled={disabled}
+      type="button"
+      title={active ? "Hide grid" : "Show grid"}
+      onClick={onClick}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
+
 function StatusBadge({ state }: { state: "idle" | "saving" | "saved" | "error" }) {
   const label =
     state === "saving"
@@ -507,6 +649,10 @@ function StatusBadge({ state }: { state: "idle" | "saving" | "saved" | "error" }
           : "Idle";
 
   return <span className={`status-badge ${state}`}>{label}</span>;
+}
+
+function getGridSpacingMm(unit: Project["unit"]): number {
+  return unit === "cm" || unit === "m" ? 500 : 304.8;
 }
 
 function getWallDimensionLink(

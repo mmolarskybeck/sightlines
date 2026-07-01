@@ -34,6 +34,7 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 - [x] Added tests for geometry edits, schema defaults, and cascaded placement validation.
 - [x] Added the rectangle inspector affordance for paired dimensions, so users can see that North/South and East/West are linked.
 - [x] Added tests for rectangle paired-wall detection.
+- [x] Documented and implemented a toggleable visual grid for plan and elevation alignment.
 
 ## In Progress / Immediate Next
 
