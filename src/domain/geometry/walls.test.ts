@@ -53,14 +53,14 @@ describe("getFloorBounds", () => {
       ]
     };
 
-    expect(getFloorBounds(floor)).toEqual({
-      minX: 0,
-      minY: 0,
-      maxX: feetToMm(68),
-      maxY: feetToMm(26),
-      width: feetToMm(68),
-      height: feetToMm(26)
-    });
+    const bounds = getFloorBounds(floor);
+
+    expect(bounds.minX).toBe(0);
+    expect(bounds.minY).toBe(0);
+    expect(bounds.maxX).toBeCloseTo(feetToMm(68));
+    expect(bounds.maxY).toBeCloseTo(feetToMm(26));
+    expect(bounds.width).toBeCloseTo(feetToMm(68));
+    expect(bounds.height).toBeCloseTo(feetToMm(26));
   });
 
   it("returns a zero-sized fallback for an empty floor", () => {

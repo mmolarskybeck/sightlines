@@ -13,8 +13,8 @@ import {
   AlertTriangle
 } from "lucide-react";
 import {
+  getFloorBounds,
   getOrthogonalQuadWallPair,
-  getPlacedRoomBounds
 } from "../domain/geometry/walls";
 import { formatLength, parseLength } from "../domain/units/length";
 import {
@@ -278,9 +278,8 @@ function PlanView({
   project: Project;
   selectedWallId: string | null;
 }) {
-  const placement = project.floor.rooms[0];
-  const bounds = getPlacedRoomBounds(placement);
-  const padding = 900;
+  const bounds = getFloorBounds(project.floor);
+  const padding = getPlanViewPaddingMm(bounds);
   const viewBoxBounds = {
     x: bounds.minX - padding,
     y: bounds.minY - padding,
@@ -293,7 +292,7 @@ function PlanView({
   return (
     <div className="drawing-surface" aria-label="Plan view">
       <svg className="plan-svg" viewBox={viewBox} role="img">
-        <title>{placement.room.name} plan</title>
+        <title>{project.title} plan</title>
         {gridVisible ? (
           <GridOverlay
             id="plan-grid"
@@ -304,36 +303,42 @@ function PlanView({
             y={viewBoxBounds.y}
           />
         ) : null}
-        <polygon
-          className="room-fill"
-          points={placement.room.vertices
-            .map(
-              (vertex) =>
-                `${vertex.xMm + placement.offsetXMm},${vertex.yMm + placement.offsetYMm}`
-            )
-            .join(" ")}
-        />
-        {placement.room.walls.map((wall) => {
-          const start = placement.room.vertices.find(
-            (vertex) => vertex.id === wall.startVertexId
-          );
-          const end = placement.room.vertices.find(
-            (vertex) => vertex.id === wall.endVertexId
-          );
-          if (!start || !end) return null;
-
-          return (
-            <line
-              className={wall.id === selectedWallId ? "wall-line active" : "wall-line"}
-              key={wall.id}
-              x1={start.xMm + placement.offsetXMm}
-              y1={start.yMm + placement.offsetYMm}
-              x2={end.xMm + placement.offsetXMm}
-              y2={end.yMm + placement.offsetYMm}
-              vectorEffect="non-scaling-stroke"
+        {project.floor.rooms.map((placement) => (
+          <g key={placement.roomId}>
+            <polygon
+              className="room-fill"
+              points={placement.room.vertices
+                .map(
+                  (vertex) =>
+                    `${vertex.xMm + placement.offsetXMm},${vertex.yMm + placement.offsetYMm}`
+                )
+                .join(" ")}
             />
-          );
-        })}
+            {placement.room.walls.map((wall) => {
+              const start = placement.room.vertices.find(
+                (vertex) => vertex.id === wall.startVertexId
+              );
+              const end = placement.room.vertices.find(
+                (vertex) => vertex.id === wall.endVertexId
+              );
+              if (!start || !end) return null;
+
+              return (
+                <line
+                  className={
+                    wall.id === selectedWallId ? "wall-line active" : "wall-line"
+                  }
+                  key={wall.id}
+                  x1={start.xMm + placement.offsetXMm}
+                  y1={start.yMm + placement.offsetYMm}
+                  x2={end.xMm + placement.offsetXMm}
+                  y2={end.yMm + placement.offsetYMm}
+                  vectorEffect="non-scaling-stroke"
+                />
+              );
+            })}
+          </g>
+        ))}
       </svg>
     </div>
   );
@@ -674,6 +679,12 @@ function StatusBadge({ state }: { state: "idle" | "saving" | "saved" | "error" }
 
 function getGridSpacingMm(unit: Project["unit"]): number {
   return unit === "cm" || unit === "m" ? 500 : 304.8;
+}
+
+function getPlanViewPaddingMm(bounds: { width: number; height: number }): number {
+  const largestDimensionMm = Math.max(bounds.width, bounds.height);
+
+  return Math.max(900, largestDimensionMm * 0.14);
 }
 
 function getWallDimensionLink(
