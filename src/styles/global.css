@@ -550,6 +550,32 @@ input:focus-visible {
   stroke-width: 14;
 }
 
+.resize-handle {
+  fill: var(--bg);
+  stroke: var(--muted);
+  stroke-width: 2;
+  cursor: grab;
+  touch-action: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.resize-handle:hover {
+  stroke: var(--primary);
+}
+
+.resize-handle.active {
+  fill: var(--primary-soft);
+  stroke: var(--primary);
+  cursor: grabbing;
+}
+
+.resize-handle-label {
+  fill: var(--primary-strong);
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: var(--bg);
+}
+
 .surface-label {
   position: absolute;
   top: 36px;

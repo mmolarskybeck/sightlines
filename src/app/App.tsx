@@ -304,6 +304,7 @@ export function App() {
               gridVisible={showGrid}
               project={project}
               selectedWallId={selectedWall?.id ?? null}
+              onCommitWallLength={resizeWall}
             />
           ) : null}
           {viewMode === "elevation" ? (
