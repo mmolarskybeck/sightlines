@@ -1,40 +1,32 @@
-import type { DisplayUnit } from "../../domain/project";
-
-// Temporary fixed interval: 1ft for imperial units, 50cm for metric.
-// Replaced by the shared precision system (docs/plan.md §5.5) once built.
-export function getGridSpacingMm(unit: DisplayUnit): number {
-  return unit === "cm" || unit === "m" ? 500 : 304.8;
-}
-
 export function GridOverlay({
   height,
   id,
-  spacingMm,
+  majorSpacingMm,
+  minorSpacingMm,
   width,
   x,
   y
 }: {
   height: number;
   id: string;
-  spacingMm: number;
+  majorSpacingMm: number;
+  minorSpacingMm: number;
   width: number;
   x: number;
   y: number;
 }) {
-  const majorSpacingMm = spacingMm * 4;
-
   return (
     <>
       <defs>
         <pattern
           id={`${id}-minor`}
-          width={spacingMm}
-          height={spacingMm}
+          width={minorSpacingMm}
+          height={minorSpacingMm}
           patternUnits="userSpaceOnUse"
         >
           <path
             className="grid-line minor"
-            d={`M ${spacingMm} 0 L 0 0 0 ${spacingMm}`}
+            d={`M ${minorSpacingMm} 0 L 0 0 0 ${minorSpacingMm}`}
             vectorEffect="non-scaling-stroke"
           />
         </pattern>

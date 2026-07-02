@@ -1,6 +1,12 @@
 import type { DisplayUnit } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
-import { GridOverlay, getGridSpacingMm } from "./GridOverlay";
+import {
+  getMajorGridIntervalMm,
+  getMinorGridIntervalMm,
+  getPixelsPerMm
+} from "../../domain/units/precision";
+import { useContainerSize } from "../hooks/useContainerSize";
+import { GridOverlay } from "./GridOverlay";
 
 // Wall-local coordinates are y-up from the floor (docs/plan.md §2); SVG is
 // y-down from the top. Every elevation drawing goes through this one flip.
@@ -23,12 +29,18 @@ export function ElevationView({
   centerlineMm: number;
   unit: DisplayUnit;
 }) {
+  const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const viewBox = `0 0 ${wallLengthMm} ${wallHeightMm}`;
-  const gridSpacingMm = getGridSpacingMm(unit);
+  const pixelsPerMm = getPixelsPerMm(containerSize, {
+    width: wallLengthMm,
+    height: wallHeightMm
+  });
+  const minorGridMm = getMinorGridIntervalMm(unit, pixelsPerMm);
+  const majorGridMm = getMajorGridIntervalMm(unit, minorGridMm);
   const centerlineSvgY = wallLocalYToSvgY(wallHeightMm, centerlineMm);
 
   return (
-    <div className="drawing-surface" aria-label="Wall elevation view">
+    <div className="drawing-surface" aria-label="Wall elevation view" ref={containerRef}>
       <div className="surface-label">
         <strong>{wallName}</strong>
         <span>
@@ -43,7 +55,8 @@ export function ElevationView({
           <GridOverlay
             id="elevation-grid"
             height={wallHeightMm}
-            spacingMm={gridSpacingMm}
+            majorSpacingMm={majorGridMm}
+            minorSpacingMm={minorGridMm}
             width={wallLengthMm}
             x={0}
             y={0}

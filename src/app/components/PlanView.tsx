@@ -1,6 +1,12 @@
 import { getFloorBounds } from "../../domain/geometry/walls";
 import type { Project } from "../../domain/project";
-import { GridOverlay, getGridSpacingMm } from "./GridOverlay";
+import {
+  getMajorGridIntervalMm,
+  getMinorGridIntervalMm,
+  getPixelsPerMm
+} from "../../domain/units/precision";
+import { useContainerSize } from "../hooks/useContainerSize";
+import { GridOverlay } from "./GridOverlay";
 
 export function PlanView({
   gridVisible,
@@ -11,6 +17,7 @@ export function PlanView({
   project: Project;
   selectedWallId: string | null;
 }) {
+  const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const bounds = getFloorBounds(project.floor);
   const padding = getPlanViewPaddingMm(bounds);
   const viewBoxBounds = {
@@ -20,17 +27,20 @@ export function PlanView({
     height: bounds.height + padding * 2
   };
   const viewBox = `${viewBoxBounds.x} ${viewBoxBounds.y} ${viewBoxBounds.width} ${viewBoxBounds.height}`;
-  const gridSpacingMm = getGridSpacingMm(project.unit);
+  const pixelsPerMm = getPixelsPerMm(containerSize, viewBoxBounds);
+  const minorGridMm = getMinorGridIntervalMm(project.unit, pixelsPerMm);
+  const majorGridMm = getMajorGridIntervalMm(project.unit, minorGridMm);
 
   return (
-    <div className="drawing-surface" aria-label="Plan view">
+    <div className="drawing-surface" aria-label="Plan view" ref={containerRef}>
       <svg className="plan-svg" viewBox={viewBox} role="img">
         <title>{project.title} plan</title>
         {gridVisible ? (
           <GridOverlay
             id="plan-grid"
             height={viewBoxBounds.height}
-            spacingMm={gridSpacingMm}
+            majorSpacingMm={majorGridMm}
+            minorSpacingMm={minorGridMm}
             width={viewBoxBounds.width}
             x={viewBoxBounds.x}
             y={viewBoxBounds.y}
