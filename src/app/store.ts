@@ -40,6 +40,7 @@ type AppState = {
   selectWall: (wallId: string) => void;
   renameProject: (title: string) => Promise<void>;
   addRectangleRoom: () => Promise<void>;
+  resizeWall: (wallId: string, lengthMm: number) => Promise<void>;
   resizeSelectedWall: (lengthMm: number) => Promise<void>;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
@@ -184,12 +185,11 @@ export function createAppStore(repository: ProjectRepository) {
         );
       },
 
-      async resizeSelectedWall(lengthMm) {
+      async resizeWall(wallId, lengthMm) {
         const project = get().project;
-        const selectedWallId = get().selectedWallId;
-        if (!project || !selectedWallId) return;
+        if (!project) return;
 
-        const result = resizeWallPreservingAngles(project, selectedWallId, lengthMm);
+        const result = resizeWallPreservingAngles(project, wallId, lengthMm);
         if (result.changedWallIds.length === 0) return;
 
         const placementWarnings = validateChangedWallPlacements(
@@ -204,6 +204,13 @@ export function createAppStore(repository: ProjectRepository) {
             changedWallIds: result.changedWallIds
           }
         });
+      },
+
+      async resizeSelectedWall(lengthMm) {
+        const selectedWallId = get().selectedWallId;
+        if (!selectedWallId) return;
+
+        await get().resizeWall(selectedWallId, lengthMm);
       },
 
       async undo() {

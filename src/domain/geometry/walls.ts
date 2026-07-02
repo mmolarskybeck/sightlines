@@ -52,6 +52,30 @@ export function getOrthogonalQuadWallPair(
   };
 }
 
+export type RectangleRoomDimensions = {
+  depthMm: number;
+  depthWallId: string;
+  widthMm: number;
+  widthWallId: string;
+};
+
+// For a four-wall orthogonal loop, one opposing wall pair reads as "width"
+// and the other as "depth" — this is what lets the sidebar show one width
+// and one depth field instead of four independent wall rows.
+export function getRectangleRoomDimensions(room: Room): RectangleRoomDimensions | null {
+  if (room.walls.length !== 4 || room.vertices.length !== 4) return null;
+  if (!hasLoopingWallOrder(room, 0)) return null;
+
+  const walls = getWallsWithGeometry(room);
+
+  return {
+    widthWallId: walls[0].id,
+    widthMm: walls[0].lengthMm,
+    depthWallId: walls[1].id,
+    depthMm: walls[1].lengthMm
+  };
+}
+
 export function getRoomBounds(room: Room) {
   const xs = room.vertices.map((vertex) => vertex.xMm);
   const ys = room.vertices.map((vertex) => vertex.yMm);

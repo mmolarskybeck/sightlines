@@ -52,10 +52,10 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 - [x] Added store tests covering boot, undo/redo round-trips, redo-stack clearing, no-op edit skipping, import failure/success, and load-failure messaging.
 - [x] Split `App.tsx` into per-component files (`PlanView`, `ElevationView`, `GridOverlay`, `WallInspector`, `DataView`).
 - [x] Centralized the elevation wall-local → SVG y-flip in one `wallLocalYToSvgY` helper.
+- [x] Added explicit room Width/Depth dimension controls in the Gallery sidebar for rectangle rooms, alongside the existing per-wall rows — reuses the same paired-wall resize path as the inspector's per-wall Length field via a new generalized `resizeWall(wallId, lengthMm)` store action (`resizeSelectedWall` now delegates to it).
 
 ## In Progress / Immediate Next
 
-- [ ] Add explicit room dimension controls for width/height alongside per-wall rows for rectangle rooms.
 - [ ] Keep numeric edits orthogonal by default while reserving skew/non-90-degree geometry for an intentional future reshape mode.
 - [ ] Replace the temporary fixed grid interval with the shared precision system from `docs/plan.md` §5.5 (moves `getGridSpacingMm` out of `App.tsx` into the precision module).
 - [ ] Split the current grid control into independent "show grid" and "snap to grid" local preferences.

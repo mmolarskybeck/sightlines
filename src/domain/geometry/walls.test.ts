@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { createSampleProject } from "../sample/sampleProject";
 import { feetToMm } from "../units/length";
-import { getFloorBounds, getOrthogonalQuadWallPair } from "./walls";
+import {
+  getFloorBounds,
+  getOrthogonalQuadWallPair,
+  getRectangleRoomDimensions
+} from "./walls";
 
 describe("getOrthogonalQuadWallPair", () => {
   it("returns the opposing wall for a four-wall rectangle", () => {
@@ -29,6 +33,42 @@ describe("getOrthogonalQuadWallPair", () => {
     };
 
     expect(getOrthogonalQuadWallPair(room, "wall-north")).toBeNull();
+  });
+});
+
+describe("getRectangleRoomDimensions", () => {
+  it("reads width from the north/south pair and depth from the east/west pair", () => {
+    const project = createSampleProject();
+    const room = project.floor.rooms[0].room;
+
+    const dimensions = getRectangleRoomDimensions(room);
+
+    expect(dimensions?.widthWallId).toBe("wall-north");
+    expect(dimensions?.widthMm).toBeCloseTo(feetToMm(28));
+    expect(dimensions?.depthWallId).toBe("wall-east");
+    expect(dimensions?.depthMm).toBeCloseTo(feetToMm(18));
+  });
+
+  it("returns null when the room is not a four-wall loop", () => {
+    const project = createSampleProject();
+    const room = {
+      ...project.floor.rooms[0].room,
+      walls: project.floor.rooms[0].room.walls.slice(0, 3)
+    };
+
+    expect(getRectangleRoomDimensions(room)).toBeNull();
+  });
+
+  it("returns null when wall order no longer forms a loop", () => {
+    const project = createSampleProject();
+    const room = {
+      ...project.floor.rooms[0].room,
+      walls: project.floor.rooms[0].room.walls.map((wall) =>
+        wall.id === "wall-east" ? { ...wall, startVertexId: "v-sw" } : wall
+      )
+    };
+
+    expect(getRectangleRoomDimensions(room)).toBeNull();
   });
 });
 

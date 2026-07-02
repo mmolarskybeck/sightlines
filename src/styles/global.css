@@ -256,6 +256,32 @@ input:focus-visible {
   font-weight: 650;
 }
 
+.room-dimensions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 0 2px 4px;
+}
+
+.field-row.compact {
+  gap: 4px;
+}
+
+.field-row.compact span {
+  font-size: 0.72rem;
+}
+
+.field-row.compact input {
+  min-height: 32px;
+  padding: 6px 8px;
+  font-size: 0.84rem;
+}
+
+.field-row.compact .field-error {
+  margin: 0;
+  font-size: 0.72rem;
+}
+
 .wall-list {
   display: grid;
   gap: 6px;

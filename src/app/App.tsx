@@ -16,12 +16,14 @@ import {
 import {
   getWallsWithGeometry,
   getOrthogonalQuadWallPair,
+  getRectangleRoomDimensions,
 } from "../domain/geometry/walls";
 import type { Project } from "../domain/project";
 import { formatLength } from "../domain/units/length";
 import { DataView } from "./components/DataView";
 import { ElevationView } from "./components/ElevationView";
 import { PlanView } from "./components/PlanView";
+import { RoomDimensionFields } from "./components/RoomDimensionFields";
 import { WallInspector, type WallDimensionLink } from "./components/WallInspector";
 import {
   exportProjectJson,
@@ -47,6 +49,7 @@ export function App() {
     addRectangleRoom,
     renameProject,
     resizeSelectedWall,
+    resizeWall,
     undo,
     redo,
     importProjectJson,
@@ -201,6 +204,7 @@ export function App() {
           <nav className="room-list" aria-label="Rooms and walls">
             {project.floor.rooms.map((placement) => {
               const roomWalls = getWallsWithGeometry(placement.room);
+              const rectangleDimensions = getRectangleRoomDimensions(placement.room);
 
               return (
                 <section className="room-group" key={placement.roomId}>
@@ -208,6 +212,19 @@ export function App() {
                     <h3>{placement.room.name}</h3>
                     <span>{roomWalls.length} walls</span>
                   </div>
+                  {rectangleDimensions ? (
+                    <RoomDimensionFields
+                      depthMm={rectangleDimensions.depthMm}
+                      unit={project.unit}
+                      widthMm={rectangleDimensions.widthMm}
+                      onCommitDepth={(lengthMm) =>
+                        resizeWall(rectangleDimensions.depthWallId, lengthMm)
+                      }
+                      onCommitWidth={(lengthMm) =>
+                        resizeWall(rectangleDimensions.widthWallId, lengthMm)
+                      }
+                    />
+                  ) : null}
                   <div className="wall-list">
                     {roomWalls.map((wall) => (
                       <button

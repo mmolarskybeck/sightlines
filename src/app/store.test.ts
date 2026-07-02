@@ -77,6 +77,16 @@ describe("app store", () => {
     expect(getSelectedWall(persisted, "wall-north")!.lengthMm).toBeCloseTo(10_000);
   });
 
+  it("resizeWall edits a wall other than the current selection", async () => {
+    await store.getState().resizeWall("wall-east", 6_000);
+
+    expect(
+      getSelectedWall(store.getState().project!, "wall-east")!.lengthMm
+    ).toBeCloseTo(6_000);
+    expect(store.getState().selectedWallId).toBe("wall-north");
+    expect(store.getState().undoStack).toHaveLength(1);
+  });
+
   it("a new edit clears the redo stack", async () => {
     await store.getState().resizeSelectedWall(10_000);
     await store.getState().undo();
