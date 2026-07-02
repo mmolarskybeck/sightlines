@@ -4,34 +4,31 @@ import {
   FileJson,
   Grid2X2,
   Grid3X3,
-  Link2,
   ListChecks,
   Plus,
+  Redo2,
   RotateCcw,
   Ruler,
   Save,
-  Upload,
-  AlertTriangle
+  Undo2,
+  Upload
 } from "lucide-react";
 import {
-  getFloorBounds,
   getWallsWithGeometry,
   getOrthogonalQuadWallPair,
 } from "../domain/geometry/walls";
-import { formatLength, parseLength } from "../domain/units/length";
+import type { Project } from "../domain/project";
+import { formatLength } from "../domain/units/length";
+import { DataView } from "./components/DataView";
+import { ElevationView } from "./components/ElevationView";
+import { PlanView } from "./components/PlanView";
+import { WallInspector, type WallDimensionLink } from "./components/WallInspector";
 import {
   exportProjectJson,
   getProjectWalls,
   getSelectedWall,
   useAppStore
 } from "./store";
-
-type Project = NonNullable<ReturnType<typeof useAppStore.getState>["project"]>;
-
-type WallDimensionLink = {
-  pairedWallName: string;
-  roomName: string;
-};
 
 export function App() {
   const {
@@ -42,12 +39,16 @@ export function App() {
     error,
     placementWarnings,
     lastGeometryEdit,
+    undoStack,
+    redoStack,
     boot,
     setViewMode,
     selectWall,
     addRectangleRoom,
     renameProject,
     resizeSelectedWall,
+    undo,
+    redo,
     importProjectJson,
     resetLocalProject
   } = useAppStore();
@@ -57,6 +58,25 @@ export function App() {
   useEffect(() => {
     void boot();
   }, [boot]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey)) return;
+      if (isEditableTarget(event.target)) return;
+
+      const key = event.key.toLowerCase();
+      if (key === "z") {
+        event.preventDefault();
+        void (event.shiftKey ? redo() : undo());
+      } else if (key === "y") {
+        event.preventDefault();
+        void redo();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [undo, redo]);
 
   const walls = useMemo(() => (project ? getProjectWalls(project) : []), [project]);
   const selectedWall = project ? getSelectedWall(project, selectedWallId) : null;
@@ -80,17 +100,32 @@ export function App() {
           <div className="brand-mark">S</div>
           <div>
             <p className="app-name">Sightlines</p>
-            <input
-              className="project-title"
-              value={project.title}
-              aria-label="Project title"
-              onChange={(event) => void renameProject(event.target.value)}
-            />
+            <ProjectTitleInput title={project.title} onCommit={renameProject} />
           </div>
         </div>
 
         <div className="toolbar" aria-label="Project actions">
           <StatusBadge state={saveState} />
+          <button
+            className="icon-button"
+            type="button"
+            title="Undo"
+            aria-label="Undo"
+            disabled={undoStack.length === 0}
+            onClick={() => void undo()}
+          >
+            <Undo2 aria-hidden="true" size={18} />
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            title="Redo"
+            aria-label="Redo"
+            disabled={redoStack.length === 0}
+            onClick={() => void redo()}
+          >
+            <Redo2 aria-hidden="true" size={18} />
+          </button>
           <button
             className="icon-button"
             type="button"
@@ -303,345 +338,51 @@ export function App() {
   );
 }
 
-function PlanView({
-  gridVisible,
-  project,
-  selectedWallId
+function ProjectTitleInput({
+  title,
+  onCommit
 }: {
-  gridVisible: boolean;
-  project: Project;
-  selectedWallId: string | null;
+  title: string;
+  onCommit: (title: string) => Promise<void>;
 }) {
-  const bounds = getFloorBounds(project.floor);
-  const padding = getPlanViewPaddingMm(bounds);
-  const viewBoxBounds = {
-    x: bounds.minX - padding,
-    y: bounds.minY - padding,
-    width: bounds.width + padding * 2,
-    height: bounds.height + padding * 2
-  };
-  const viewBox = `${viewBoxBounds.x} ${viewBoxBounds.y} ${viewBoxBounds.width} ${viewBoxBounds.height}`;
-  const gridSpacingMm = getGridSpacingMm(project.unit);
-
-  return (
-    <div className="drawing-surface" aria-label="Plan view">
-      <svg className="plan-svg" viewBox={viewBox} role="img">
-        <title>{project.title} plan</title>
-        {gridVisible ? (
-          <GridOverlay
-            id="plan-grid"
-            height={viewBoxBounds.height}
-            spacingMm={gridSpacingMm}
-            width={viewBoxBounds.width}
-            x={viewBoxBounds.x}
-            y={viewBoxBounds.y}
-          />
-        ) : null}
-        {project.floor.rooms.map((placement) => (
-          <g key={placement.roomId}>
-            <polygon
-              className="room-fill"
-              points={placement.room.vertices
-                .map(
-                  (vertex) =>
-                    `${vertex.xMm + placement.offsetXMm},${vertex.yMm + placement.offsetYMm}`
-                )
-                .join(" ")}
-            />
-            {placement.room.walls.map((wall) => {
-              const start = placement.room.vertices.find(
-                (vertex) => vertex.id === wall.startVertexId
-              );
-              const end = placement.room.vertices.find(
-                (vertex) => vertex.id === wall.endVertexId
-              );
-              if (!start || !end) return null;
-
-              return (
-                <line
-                  className={
-                    wall.id === selectedWallId ? "wall-line active" : "wall-line"
-                  }
-                  key={wall.id}
-                  x1={start.xMm + placement.offsetXMm}
-                  y1={start.yMm + placement.offsetYMm}
-                  x2={end.xMm + placement.offsetXMm}
-                  y2={end.yMm + placement.offsetYMm}
-                  vectorEffect="non-scaling-stroke"
-                />
-              );
-            })}
-          </g>
-        ))}
-      </svg>
-    </div>
-  );
-}
-
-function ElevationView({
-  gridVisible,
-  wallName,
-  wallLengthMm,
-  wallHeightMm,
-  centerlineMm,
-  unit
-}: {
-  gridVisible: boolean;
-  wallName: string;
-  wallLengthMm: number;
-  wallHeightMm: number;
-  centerlineMm: number;
-  unit: "in" | "ft" | "cm" | "m";
-}) {
-  const viewBox = `0 0 ${wallLengthMm} ${wallHeightMm}`;
-  const gridSpacingMm = getGridSpacingMm(unit);
-
-  return (
-    <div className="drawing-surface" aria-label="Wall elevation view">
-      <div className="surface-label">
-        <strong>{wallName}</strong>
-        <span>
-          {formatLength(wallLengthMm, { unit })} by{" "}
-          {formatLength(wallHeightMm, { unit })}
-        </span>
-      </div>
-      <svg className="elevation-svg" viewBox={viewBox} role="img">
-        <title>{wallName} elevation</title>
-        <rect className="wall-fill" x="0" y="0" width={wallLengthMm} height={wallHeightMm} />
-        {gridVisible ? (
-          <GridOverlay
-            id="elevation-grid"
-            height={wallHeightMm}
-            spacingMm={gridSpacingMm}
-            width={wallLengthMm}
-            x={0}
-            y={0}
-          />
-        ) : null}
-        <line
-          className="centerline"
-          x1="0"
-          y1={wallHeightMm - centerlineMm}
-          x2={wallLengthMm}
-          y2={wallHeightMm - centerlineMm}
-          vectorEffect="non-scaling-stroke"
-        />
-      </svg>
-    </div>
-  );
-}
-
-function GridOverlay({
-  height,
-  id,
-  spacingMm,
-  width,
-  x,
-  y
-}: {
-  height: number;
-  id: string;
-  spacingMm: number;
-  width: number;
-  x: number;
-  y: number;
-}) {
-  const majorSpacingMm = spacingMm * 4;
-
-  return (
-    <>
-      <defs>
-        <pattern
-          id={`${id}-minor`}
-          width={spacingMm}
-          height={spacingMm}
-          patternUnits="userSpaceOnUse"
-        >
-          <path
-            className="grid-line minor"
-            d={`M ${spacingMm} 0 L 0 0 0 ${spacingMm}`}
-            vectorEffect="non-scaling-stroke"
-          />
-        </pattern>
-        <pattern
-          id={`${id}-major`}
-          width={majorSpacingMm}
-          height={majorSpacingMm}
-          patternUnits="userSpaceOnUse"
-        >
-          <path
-            className="grid-line major"
-            d={`M ${majorSpacingMm} 0 L 0 0 0 ${majorSpacingMm}`}
-            vectorEffect="non-scaling-stroke"
-          />
-        </pattern>
-      </defs>
-      <rect
-        className="grid-fill"
-        fill={`url(#${id}-minor)`}
-        x={x}
-        y={y}
-        width={width}
-        height={height}
-      />
-      <rect
-        className="grid-fill"
-        fill={`url(#${id}-major)`}
-        x={x}
-        y={y}
-        width={width}
-        height={height}
-      />
-    </>
-  );
-}
-
-function DataView({ json }: { json: string }) {
-  return (
-    <div className="data-surface">
-      <pre>{json}</pre>
-    </div>
-  );
-}
-
-function WallInspector({
-  centerlineMm,
-  changedWallNames,
-  dimensionLink,
-  lastGeometryEdit,
-  onCommitLength,
-  placementWarnings,
-  unit,
-  wallHeightMm,
-  wallLengthMm,
-  wallName
-}: {
-  centerlineMm: number;
-  changedWallNames: string[];
-  dimensionLink: WallDimensionLink | null;
-  lastGeometryEdit: {
-    anchorVertexId: string;
-    changedWallIds: string[];
-  } | null;
-  onCommitLength: (lengthMm: number) => Promise<void>;
-  placementWarnings: { id: string; message: string; wallObjectId: string }[];
-  unit: "in" | "ft" | "cm" | "m";
-  wallHeightMm: number;
-  wallLengthMm: number;
-  wallName: string;
-}) {
-  const [lengthInput, setLengthInput] = useState(() =>
-    formatLength(wallLengthMm, { unit })
-  );
-  const [lengthError, setLengthError] = useState<string | null>(null);
+  const [value, setValue] = useState(title);
 
   useEffect(() => {
-    setLengthInput(formatLength(wallLengthMm, { unit }));
-    setLengthError(null);
-  }, [unit, wallLengthMm]);
+    setValue(title);
+  }, [title]);
 
-  const commitLength = async () => {
-    const parsed = parseLength(lengthInput, unit);
-
-    if (!parsed.ok) {
-      setLengthError(parsed.error);
+  const commit = () => {
+    if (value.trim().length === 0) {
+      setValue(title);
       return;
     }
 
-    if (parsed.valueMm <= 0) {
-      setLengthError("Wall length must be greater than zero.");
-      return;
-    }
-
-    setLengthError(null);
-    await onCommitLength(parsed.valueMm);
-    setLengthInput(formatLength(parsed.valueMm, { unit }));
+    void onCommit(value);
   };
 
   return (
-    <form
-      className="inspector-form"
-      onSubmit={(event) => {
+    <input
+      className="project-title"
+      value={value}
+      aria-label="Project title"
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter") return;
         event.preventDefault();
-        void commitLength();
+        event.currentTarget.blur();
       }}
-    >
-      <label className="field-row">
-        <span>Selected wall</span>
-        <input readOnly value={wallName} />
-      </label>
+    />
+  );
+}
 
-      <label className="field-row">
-        <span>Length</span>
-        <input
-          aria-describedby={lengthError ? "wall-length-error" : undefined}
-          aria-invalid={lengthError ? "true" : "false"}
-          inputMode="decimal"
-          value={lengthInput}
-          onBlur={() => void commitLength()}
-          onChange={(event) => setLengthInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key !== "Enter") return;
-            event.preventDefault();
-            void commitLength();
-          }}
-        />
-      </label>
-      {lengthError ? (
-        <p className="field-error" id="wall-length-error">
-          {lengthError}
-        </p>
-      ) : (
-        <p className="field-hint">Accepts 28', 28 ft, 336", 853.4 cm, or 8.53 m.</p>
-      )}
-      {dimensionLink ? (
-        <div className="constraint-panel" aria-label="Linked rectangle dimension">
-          <Link2 aria-hidden="true" size={17} />
-          <div>
-            <h3>{wallName} + {dimensionLink.pairedWallName}</h3>
-            <p>{dimensionLink.roomName} keeps opposing wall lengths linked.</p>
-          </div>
-        </div>
-      ) : null}
-      {lastGeometryEdit ? (
-        <p className="field-hint">
-          Last edit updated{" "}
-          {changedWallNames.length > 0 ? changedWallNames.join(", ") : "no walls"}.
-        </p>
-      ) : null}
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
 
-      {placementWarnings.length > 0 ? (
-        <div className="warning-panel" role="status" aria-live="polite">
-          <AlertTriangle aria-hidden="true" size={18} />
-          <div>
-            <h3>Placement needs review</h3>
-            <ul>
-              {placementWarnings.map((warning) => (
-                <li key={warning.id}>
-                  {warning.message} <span>{warning.wallObjectId}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      ) : null}
-
-      <dl className="property-list compact">
-        <div>
-          <dt>Height</dt>
-          <dd>{formatLength(wallHeightMm, { unit })}</dd>
-        </div>
-        <div>
-          <dt>Centerline</dt>
-          <dd>
-            {formatLength(centerlineMm, {
-              unit: "ft",
-              secondaryUnit: "cm"
-            })}
-          </dd>
-        </div>
-      </dl>
-    </form>
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target.isContentEditable
   );
 }
 
@@ -709,16 +450,6 @@ function StatusBadge({ state }: { state: "idle" | "saving" | "saved" | "error" }
           : "Idle";
 
   return <span className={`status-badge ${state}`}>{label}</span>;
-}
-
-function getGridSpacingMm(unit: Project["unit"]): number {
-  return unit === "cm" || unit === "m" ? 500 : 304.8;
-}
-
-function getPlanViewPaddingMm(bounds: { width: number; height: number }): number {
-  const largestDimensionMm = Math.max(bounds.width, bounds.height);
-
-  return Math.max(900, largestDimensionMm * 0.14);
 }
 
 function getWallDimensionLink(

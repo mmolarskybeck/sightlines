@@ -65,9 +65,19 @@ const roomSchema = z
   })
   .superRefine((room, context) => {
     const vertexIds = new Set(room.vertices.map((vertex) => vertex.id));
+    let hasMissingVertex = false;
 
     for (const wall of room.walls) {
+      if (wall.roomId !== room.id) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Wall ${wall.id} belongs to room ${room.id} but declares roomId ${wall.roomId}`,
+          path: ["walls", wall.id, "roomId"]
+        });
+      }
+
       if (!vertexIds.has(wall.startVertexId)) {
+        hasMissingVertex = true;
         context.addIssue({
           code: z.ZodIssueCode.custom,
           message: `Wall ${wall.id} references missing start vertex ${wall.startVertexId}`,
@@ -76,6 +86,7 @@ const roomSchema = z
       }
 
       if (!vertexIds.has(wall.endVertexId)) {
+        hasMissingVertex = true;
         context.addIssue({
           code: z.ZodIssueCode.custom,
           message: `Wall ${wall.id} references missing end vertex ${wall.endVertexId}`,
@@ -83,15 +94,42 @@ const roomSchema = z
         });
       }
     }
+
+    if (hasMissingVertex) return;
+
+    for (let index = 0; index < room.walls.length; index += 1) {
+      const wall = room.walls[index];
+      const nextWall = room.walls[(index + 1) % room.walls.length];
+
+      if (nextWall.startVertexId !== wall.endVertexId) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Walls do not form a closed loop: ${wall.id} ends at ${wall.endVertexId} but ${nextWall.id} starts at ${nextWall.startVertexId}`,
+          path: ["walls", wall.id]
+        });
+      }
+    }
   });
 
-const roomPlacementSchema = z.object({
-  roomId: z.string().min(1),
-  offsetXMm: z.number().finite(),
-  offsetYMm: z.number().finite(),
-  rotationDeg: z.number().finite(),
-  room: roomSchema
-});
+const roomPlacementSchema = z
+  .object({
+    roomId: z.string().min(1),
+    offsetXMm: z.number().finite(),
+    offsetYMm: z.number().finite(),
+    rotationDeg: z
+      .number()
+      .refine((value) => value === 0, "Room rotation is not supported yet."),
+    room: roomSchema
+  })
+  .superRefine((placement, context) => {
+    if (placement.roomId !== placement.room.id) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Room placement declares roomId ${placement.roomId} but contains room ${placement.room.id}`,
+        path: ["roomId"]
+      });
+    }
+  });
 
 export const projectSchema = z.object({
   id: z.string().min(1),
@@ -113,12 +151,20 @@ export function parseProject(input: unknown): Project {
   return projectSchema.parse(input);
 }
 
-export function migrateProject(input: unknown): Project {
-  const candidate = input as { schemaVersion?: unknown };
+const versionedDocumentSchema = z.object({
+  schemaVersion: z.number().int().positive()
+});
 
-  if (candidate.schemaVersion !== CURRENT_SCHEMA_VERSION) {
+export function migrateProject(input: unknown): Project {
+  const versioned = versionedDocumentSchema.safeParse(input);
+
+  if (!versioned.success) {
+    throw new Error("Not a Sightlines project document: missing schemaVersion.");
+  }
+
+  if (versioned.data.schemaVersion !== CURRENT_SCHEMA_VERSION) {
     throw new Error(
-      `Unsupported project schema version: ${String(candidate.schemaVersion)}`
+      `Unsupported project schema version: ${versioned.data.schemaVersion}`
     );
   }
 

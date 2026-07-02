@@ -1,4 +1,4 @@
-import { migrateProject } from "../schema/projectSchema";
+import { migrateProject, parseProject } from "../schema/projectSchema";
 import type { Project, ProjectSummary } from "../project";
 import type { ProjectRepository } from "./projectRepository";
 
@@ -21,6 +21,10 @@ export class IndexedDbProjectRepository implements ProjectRepository {
   }
 
   async save(project: Project): Promise<void> {
+    // Never persist a document that fails the current schema — invalid state
+    // written here would poison every future load.
+    parseProject(project);
+
     const db = await openDatabase();
     const tx = db.transaction(PROJECT_STORE, "readwrite");
     tx.objectStore(PROJECT_STORE).put(project);
@@ -35,13 +39,20 @@ export class IndexedDbProjectRepository implements ProjectRepository {
         .getAll()
     );
 
+    // Summaries read raw fields rather than fully validating every document:
+    // a corrupt record still shows up in the list (and fails loudly on load)
+    // instead of silently taking the whole list down with it.
     return values
-      .map((value) => migrateProject(value))
-      .map((project) => ({
-        id: project.id,
-        title: project.title,
-        updatedAt: project.updatedAt
-      }))
+      .flatMap((value) => {
+        const summary = toProjectSummary(value);
+
+        if (!summary) {
+          console.warn("Skipping unreadable project record in list()", value);
+          return [];
+        }
+
+        return [summary];
+      })
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
@@ -51,6 +62,19 @@ export class IndexedDbProjectRepository implements ProjectRepository {
     tx.objectStore(PROJECT_STORE).delete(id);
     await transactionDone(tx);
   }
+}
+
+function toProjectSummary(value: unknown): ProjectSummary | null {
+  if (typeof value !== "object" || value === null) return null;
+
+  const record = value as Record<string, unknown>;
+  if (typeof record.id !== "string" || record.id.length === 0) return null;
+
+  return {
+    id: record.id,
+    title: typeof record.title === "string" ? record.title : "Untitled",
+    updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : ""
+  };
 }
 
 function openDatabase(): Promise<IDBDatabase> {
