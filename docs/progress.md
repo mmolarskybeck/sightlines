@@ -55,11 +55,11 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 - [x] Added explicit room Width/Depth dimension controls in the Gallery sidebar for rectangle rooms, alongside the existing per-wall rows — reuses the same paired-wall resize path as the inspector's per-wall Length field via a new generalized `resizeWall(wallId, lengthMm)` store action (`resizeSelectedWall` now delegates to it).
 - [x] Made numeric length edits reject non-rectangular rooms instead of silently skewing a neighboring wall's angle. `resizeWallPreservingAngles` previously fell back to moving a single end vertex for any room that wasn't a clean four-wall quad — that fallback could break an adjacent wall's right angle without telling anyone. It now throws a clear, catchable error for that case (`"only supports rectangular rooms"`), and both the wall Length field and the new Width/Depth fields surface it inline instead of producing an unhandled rejection. Skewed/non-90° reshaping stays explicitly reserved for a future dedicated reshape tool, not a numeric-field side effect.
 - [x] Replaced the temporary fixed grid interval with the shared precision system from `docs/plan.md` §5.5. Added `domain/units/precision.ts` with unit-aware metric/imperial grid interval tables and `getMinorGridIntervalMm`/`getMajorGridIntervalMm`/`getPixelsPerMm`; added a `useContainerSize` hook so `PlanView`/`ElevationView` measure their actual rendered pixel size via `ResizeObserver` and derive a real pixels-per-mm scale (matching SVG `xMidYMid meet` scaling) instead of assuming one. The grid now genuinely steps to a coarser or finer interval as available screen space changes, with a readable major-line landmark computed from the same table — `getGridSpacingMm` and its fixed constant are gone. Plan and elevation still read separate coordinate spaces, per §5.5.
+- [x] Split the single grid toggle into independent "show grid" and "snap to grid" local preferences (`useViewPreferences`), persisted to `localStorage` — never to `Project`/`.sightlines` data, so importing a shared file never imports someone else's working-style preferences. Added a second toolbar toggle (Snap, `Magnet` icon) alongside Grid; `snapToGrid` defaults on and is ready for the next step to consume once grid snap targets exist — it doesn't change rendering yet on its own.
 
 ## In Progress / Immediate Next
 
-- [ ] Split the current grid control into independent "show grid" and "snap to grid" local preferences.
-- [ ] Generate grid snap targets for `resolveSnap()` from the active grid interval and visible coordinate space.
+- [ ] Generate grid snap targets for `resolveSnap()` from the active grid interval and visible coordinate space (this is what `snapToGrid` will actually gate).
 
 ## MVP 1A Remaining
 
@@ -74,7 +74,7 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
   - [ ] JSON export/import hardening.
 - [ ] Keep transient drag state out of `applyEdit`/persist when tactile handles arrive — saves stay tied to committed edits only (the pipeline already persists exactly once per commit).
 - [ ] Add storage persistence request with `navigator.storage.persist()` where supported.
-- [ ] Add app-level preferences for view options like grid visibility, snap-to-grid, and grid density without persisting them into `Project` (grid visibility currently lives as component state in `App.tsx`).
+- [ ] Add a grid-density preference (user-adjustable target minor-grid pixel spacing / precision floor) alongside the show-grid/snap-to-grid preferences already in `useViewPreferences`.
 
 ## MVP 1B Next Major Slice
 

@@ -5,6 +5,7 @@ import {
   Grid2X2,
   Grid3X3,
   ListChecks,
+  Magnet,
   Plus,
   Redo2,
   RotateCcw,
@@ -25,6 +26,7 @@ import { ElevationView } from "./components/ElevationView";
 import { PlanView } from "./components/PlanView";
 import { RoomDimensionFields } from "./components/RoomDimensionFields";
 import { WallInspector, type WallDimensionLink } from "./components/WallInspector";
+import { useViewPreferences } from "./hooks/useViewPreferences";
 import {
   exportProjectJson,
   getProjectWalls,
@@ -56,7 +58,7 @@ export function App() {
     resetLocalProject
   } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [gridVisible, setGridVisible] = useState(false);
+  const { showGrid, snapToGrid, toggleShowGrid, toggleSnapToGrid } = useViewPreferences();
 
   useEffect(() => {
     void boot();
@@ -281,18 +283,27 @@ export function App() {
 
             <div className="view-options" aria-label="View options">
               <ViewOptionButton
-                active={gridVisible}
+                active={showGrid}
                 disabled={viewMode === "data"}
                 icon={<Grid3X3 aria-hidden="true" size={16} />}
                 label="Grid"
-                onClick={() => setGridVisible((visible) => !visible)}
+                title={showGrid ? "Hide grid" : "Show grid"}
+                onClick={toggleShowGrid}
+              />
+              <ViewOptionButton
+                active={snapToGrid}
+                disabled={viewMode === "data"}
+                icon={<Magnet aria-hidden="true" size={16} />}
+                label="Snap"
+                title={snapToGrid ? "Disable snap to grid" : "Enable snap to grid"}
+                onClick={toggleSnapToGrid}
               />
             </div>
           </div>
 
           {viewMode === "plan" ? (
             <PlanView
-              gridVisible={gridVisible}
+              gridVisible={showGrid}
               project={project}
               selectedWallId={selectedWall?.id ?? null}
             />
@@ -306,7 +317,7 @@ export function App() {
                 selectedWall.defaultCenterlineHeightMm ??
                 project.defaultCenterlineHeightMm
               }
-              gridVisible={gridVisible}
+              gridVisible={showGrid}
               unit={project.unit}
             />
           ) : null}
@@ -433,12 +444,14 @@ function ViewOptionButton({
   disabled,
   icon,
   label,
+  title,
   onClick
 }: {
   active: boolean;
   disabled: boolean;
   icon: React.ReactNode;
   label: string;
+  title: string;
   onClick: () => void;
 }) {
   return (
@@ -447,7 +460,7 @@ function ViewOptionButton({
       className={active ? "view-option-button active" : "view-option-button"}
       disabled={disabled}
       type="button"
-      title={active ? "Hide grid" : "Show grid"}
+      title={title}
       onClick={onClick}
     >
       {icon}
