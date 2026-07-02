@@ -42,16 +42,31 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 
 ## In Progress / Immediate Next
 
+- [ ] Introduce a single `applyEdit(command)` pipeline in the store (`docs/plan.md` §7): every mutating action becomes a thin command constructor; the pipeline stamps `updatedAt`, pushes the undo/redo stack, and triggers save. Do this while there are only a few mutating actions — every action added before it exists is a retrofit.
+- [ ] Fix known defects in the current wiring:
+  - [ ] Project title commits on blur/Enter like the wall-length field, not per keystroke (currently one IndexedDB write per keypress, and clearing the field persists a project that fails schema validation on next boot).
+  - [ ] Repository `save()` validates against the current schema before writing, so invalid state can never persist.
+  - [ ] Repository `list()` skips-and-reports corrupt records instead of throwing wholesale; `boot` surfaces "couldn't load your project" instead of silently swapping in the sample project.
+  - [ ] Wrap JSON import (`importProjectJson`) in error handling — a malformed file currently produces an unhandled rejection with no UI feedback.
+  - [ ] Constrain `RoomPlacement.rotationDeg` to 0 in the schema until rotation is actually rendered — reject loudly rather than draw rotated rooms in the wrong place.
 - [ ] Add explicit room dimension controls for width/height alongside per-wall rows for rectangle rooms.
 - [ ] Keep numeric edits orthogonal by default while reserving skew/non-90-degree geometry for an intentional future reshape mode.
-- [ ] Replace the temporary fixed grid interval with the shared precision system from `docs/plan.md` §5.5.
+- [ ] Replace the temporary fixed grid interval with the shared precision system from `docs/plan.md` §5.5 (moves `getGridSpacingMm` out of `App.tsx` into the precision module).
 - [ ] Split the current grid control into independent "show grid" and "snap to grid" local preferences.
 - [ ] Generate grid snap targets for `resolveSnap()` from the active grid interval and visible coordinate space.
+
+## Architecture / Cleanup (do before MVP 1B multiplies the cost)
+
+- [ ] Inject the project repository into the store (factory or setter) instead of the module-scope singleton, so the store can be tested against an in-memory fake — the repository interface exists precisely for this substitution.
+- [ ] Split `App.tsx` (~760 lines, eight components) into per-component files (`PlanView`, `ElevationView`, `GridOverlay`, `WallInspector`, ...) before artwork placement roughly doubles the view code.
+- [ ] Centralize the wall-local → SVG transform (the elevation y-flip is currently inline in the view; artwork rendering will repeat it per object).
+- [ ] Add schema refines for structural invariants: walls form a closed loop in vertex order; `RoomPlacement.roomId === placement.room.id`; `Wall.roomId` matches its containing room.
+- [ ] Replace the hardcoded `"wall-north"` fallback in `boot`'s error path with `getFirstWall`.
 
 ## MVP 1A Remaining
 
 - [ ] Finish the geometry spine from `docs/plan.md` section 9:
-  - [ ] Versioned import pipeline: parse -> validate minimal shape -> migrate -> validate current schema.
+  - [ ] Versioned import pipeline: parse -> validate minimal shape -> migrate -> validate current schema (`migrateProject` currently checks the version via a raw cast rather than a minimal shape parse).
   - [ ] Repository list/load/delete UI beyond the single auto-loaded project.
   - [ ] New project flow.
   - [ ] Single-room footprint editing beyond numeric wall length.
@@ -59,11 +74,9 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
   - [ ] Numeric room/wall fields that always route through the shared units module.
   - [ ] Empty wall elevation view polish.
   - [ ] JSON export/import hardening.
-- [ ] Add a first undo/redo command stack at the project level.
-- [ ] Add autosave behavior tied to committed document changes, not transient drag movement.
-- [ ] Add corruption/error messaging for invalid imports.
+- [ ] Add autosave behavior tied to committed document changes, not transient drag movement (attaches to the `applyEdit` pipeline above).
 - [ ] Add storage persistence request with `navigator.storage.persist()` where supported.
-- [ ] Add app-level preferences for view options like grid visibility, snap-to-grid, and grid density without persisting them into `Project`.
+- [ ] Add app-level preferences for view options like grid visibility, snap-to-grid, and grid density without persisting them into `Project` (grid visibility currently lives as component state in `App.tsx`).
 
 ## MVP 1B Next Major Slice
 

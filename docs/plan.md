@@ -171,9 +171,11 @@ type Project = {
   schemaVersion: number
   title: string
   unit: "in" | "ft" | "cm" | "m"
-  defaultWallHeight: number
-  defaultCenterlineHeight: number
+  defaultWallHeightMm: number
+  defaultCenterlineHeightMm: number
   floor: Floor
+  checklistArtworkIds: string[]   // checklist membership (§4.1) — references into the library
+  wallObjects: WallObject[]       // all placements, flat at project level — see note below
   createdAt: string
   updatedAt: string
 }
@@ -184,7 +186,7 @@ type Floor = {
 
 type RoomPlacement = {
   roomId: string
-  offsetX: number; offsetY: number; rotation: number   // room's position within the floor
+  offsetXMm: number; offsetYMm: number; rotationDeg: number   // room's position within the floor
   room: Room
 }
 
@@ -198,6 +200,7 @@ type Room = {
   name: string
   heightMm: number
   vertices: RoomVertex[]   // local to the room's own origin
+  walls: Wall[]
 }
 
 type Wall = {
@@ -211,7 +214,15 @@ type Wall = {
 }
 ```
 
+(Field names carry their unit — `offsetXMm`, `rotationDeg` — per the same rule as `widthMm` in §4.1: a bare `offsetX: 240` invites "240 what?"; the suffix doesn't.)
+
+**Wall objects live in one flat `Project.wallObjects` array, not nested inside walls or rooms.** Each object references its wall by `wallId` — the same normalization move as walls referencing vertex IDs. Moving an object between walls is a field change, not a splice across two nested arrays, and cross-wall queries (validation after a geometry edit, "everything placed in this project") don't need tree traversal.
+
+**Until room rotation is actually implemented in rendering and bounds math, the schema should constrain `rotationDeg` to 0.** The field exists so the data model doesn't assume rooms are axis-aligned forever, but a schema that accepts values the renderer silently ignores is worse than one that rejects them loudly — an imported file with a rotated room must fail validation, not draw in the wrong place. Relax the constraint in the same change that makes rotation real.
+
 **Walls reference vertex IDs, not point indices.** An earlier draft used `startPointIndex`/`endPointIndex` into the room's points array — fragile, because inserting, deleting, or reordering a vertex silently shifts every index after it, breaking wall identity without any error. Giving each vertex a stable ID and having walls reference those IDs means index churn can't corrupt wall identity. It also defines a clear behavior for editing: dragging an existing vertex moves it in place (walls referencing it just follow); inserting a new vertex on an existing wall segment splits that one wall into two new walls, each still tracing back to real vertex IDs.
+
+**Validate the structural invariants at the boundary, not deep in geometry math.** The geometry code assumes a room's walls form a closed loop in vertex order (`wall[i].endVertexId === wall[i+1].startVertexId`), and the model carries two redundant identity fields (`RoomPlacement.roomId` vs `placement.room.id`, `Wall.roomId` vs containment in `room.walls`). The schema should assert loop closure and identity agreement, so a hand-edited or corrupted file fails at import with a clear message instead of producing a wall-not-found error three function calls into a resize.
 
 Doorway connections are modeled as a property on door-type wall objects:
 
@@ -221,7 +232,7 @@ type WallObjectBase = {
   wallId: string
   xMm: number; yMm: number       // center-anchored — see §2
   widthMm: number; heightMm: number
-  rotation?: number
+  rotationDeg?: number
   groupId?: string
 }
 
@@ -374,6 +385,8 @@ Import needs explicit merge rules against the recipient's own library, not silen
 
 Because layout is one serializable document mutated through defined actions, this is cheap if designed in now and expensive to retrofit. Recommended approach: command pattern over the Zustand store — every mutation (move object, resize, group, delete, snap-commit) is a discrete action object with an inverse; maintain an undo/redo stack of these. Wire it in alongside the first drag-and-snap implementation, not after.
 
+**One `applyEdit(command)` entry point, not N hand-rolled actions.** Every store action that mutates the project should be a thin command constructor feeding a single pipeline that stamps `updatedAt`, pushes onto the undo stack, and triggers save. This is one abstraction paying three rents: it removes the per-action boilerplate (read state → build next project → stamp → save), it *is* the undo/redo stack, and it's the seam where autosave-on-commit attaches. The cheapest moment to introduce it is while there are only a handful of mutating actions; every action added before it exists is a retrofit.
+
 **Commit transactions, not pointer movement.** Dragging an artwork across a wall shouldn't produce hundreds of undo entries, one per `pointermove`. The pattern is `beginDrag` → live transient preview state (not committed, not undoable) → `commitMoveWallObject` on release → exactly one undoable command. Same shape for group drag, wall resize, and room reshape. Autosave should listen to committed document changes, not every transient update, for the same reason — otherwise it's writing to IndexedDB on every frame of a drag.
 
 ---
@@ -382,7 +395,7 @@ Because layout is one serializable document mutated through defined actions, thi
 
 - **Image tiers:** see §4.5 for the full design — thumbnail/display/original, display used for rendering and default exports.
 - **Sync conflict safety:** once Dropbox sync exists, never silently discard a version. At minimum, a version counter in the document and a "this changed elsewhere — keep mine / keep theirs / keep both" prompt.
-- **Corruption/recovery baseline:** a partially-corrupted `.sightlines` zip or an interrupted IndexedDB write should fail loudly with a clear error, not silently lose data.
+- **Corruption/recovery baseline:** a partially-corrupted `.sightlines` zip or an interrupted IndexedDB write should fail loudly with a clear error, not silently lose data. Three concrete rules that follow from this: (1) **validate before save** — the repository never writes a document that fails the current schema, so invalid state can't persist and poison the next load; (2) **one corrupt record can't take down the list** — `list()` skips-and-reports a project that fails validation rather than throwing wholesale; (3) **boot never silently substitutes** — if the saved project can't load, say so visibly; don't quietly show a fresh sample while the user's data sits unreachable in IndexedDB.
 - **Equal distribution / spacing:** alongside center/edge/neighbor snapping, add "distribute N selected objects evenly across a span" — one of the most common curatorial moves after grouping, and easy to miss if you only build the snap-target list from the original spec.
 - **Toggleable visual grids in plan and elevation views.** Grid display is a view-layer alignment aid, not project geometry. It should be available in both bird's-eye plan and wall elevation views, share the same precision vocabulary as snap/nudge increments (§5.5), and be easy to turn on/off independently from snap-to-grid without changing persisted layout data.
 - **Scale-accurate printed export:** a distinct export mode from PNG/PDF screenshots — true scale ratio (1:50, 1:25), correct paper size, tiling across multiple pages for walls longer than one sheet. Needed for anyone using a printed elevation with a tape measure on installation day.
