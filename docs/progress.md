@@ -53,10 +53,10 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 - [x] Split `App.tsx` into per-component files (`PlanView`, `ElevationView`, `GridOverlay`, `WallInspector`, `DataView`).
 - [x] Centralized the elevation wall-local → SVG y-flip in one `wallLocalYToSvgY` helper.
 - [x] Added explicit room Width/Depth dimension controls in the Gallery sidebar for rectangle rooms, alongside the existing per-wall rows — reuses the same paired-wall resize path as the inspector's per-wall Length field via a new generalized `resizeWall(wallId, lengthMm)` store action (`resizeSelectedWall` now delegates to it).
+- [x] Made numeric length edits reject non-rectangular rooms instead of silently skewing a neighboring wall's angle. `resizeWallPreservingAngles` previously fell back to moving a single end vertex for any room that wasn't a clean four-wall quad — that fallback could break an adjacent wall's right angle without telling anyone. It now throws a clear, catchable error for that case (`"only supports rectangular rooms"`), and both the wall Length field and the new Width/Depth fields surface it inline instead of producing an unhandled rejection. Skewed/non-90° reshaping stays explicitly reserved for a future dedicated reshape tool, not a numeric-field side effect.
 
 ## In Progress / Immediate Next
 
-- [ ] Keep numeric edits orthogonal by default while reserving skew/non-90-degree geometry for an intentional future reshape mode.
 - [ ] Replace the temporary fixed grid interval with the shared precision system from `docs/plan.md` §5.5 (moves `getGridSpacingMm` out of `App.tsx` into the precision module).
 - [ ] Split the current grid control into independent "show grid" and "snap to grid" local preferences.
 - [ ] Generate grid snap targets for `resolveSnap()` from the active grid interval and visible coordinate space.

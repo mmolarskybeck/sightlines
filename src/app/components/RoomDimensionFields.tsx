@@ -66,8 +66,13 @@ function DimensionField({
     }
 
     setError(null);
-    await onCommit(parsed.valueMm);
-    setInput(formatLength(parsed.valueMm, { unit }));
+
+    try {
+      await onCommit(parsed.valueMm);
+      setInput(formatLength(parsed.valueMm, { unit }));
+    } catch (error) {
+      setError(error instanceof Error ? error.message : `Could not resize ${label}.`);
+    }
   };
 
   return (

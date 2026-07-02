@@ -72,6 +72,26 @@ describe("resizeWallPreservingAngles", () => {
       /greater than zero/
     );
   });
+
+  it("rejects numeric resize on a non-rectangular room instead of skewing it", () => {
+    const project = createSampleProject();
+    const room = project.floor.rooms[0].room;
+    // Turn the sample rectangle into a triangle (still a valid closed loop
+    // per the schema) by dropping the west wall and rejoining south to nw.
+    project.floor.rooms[0].room = {
+      ...room,
+      vertices: room.vertices.filter((vertex) => vertex.id !== "v-sw"),
+      walls: [
+        room.walls[0],
+        room.walls[1],
+        { ...room.walls[2], endVertexId: "v-nw" }
+      ]
+    };
+
+    expect(() => resizeWallPreservingAngles(project, "wall-north", feetToMm(30))).toThrow(
+      /only supports rectangular rooms/
+    );
+  });
 });
 
 function dot(

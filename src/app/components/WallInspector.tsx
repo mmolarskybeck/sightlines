@@ -58,8 +58,15 @@ export function WallInspector({
     }
 
     setLengthError(null);
-    await onCommitLength(parsed.valueMm);
-    setLengthInput(formatLength(parsed.valueMm, { unit }));
+
+    try {
+      await onCommitLength(parsed.valueMm);
+      setLengthInput(formatLength(parsed.valueMm, { unit }));
+    } catch (error) {
+      setLengthError(
+        error instanceof Error ? error.message : "Could not resize this wall."
+      );
+    }
   };
 
   return (

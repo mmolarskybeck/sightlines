@@ -34,16 +34,21 @@ export function resizeWallPreservingAngles(
     didUpdate = true;
     anchorVertexId = wall.startVertexId;
 
-    if (canResizeAsOrthogonalQuad(placement.room, wallIndex)) {
-      return {
-        ...placement,
-        room: resizeOrthogonalQuad(placement.room, wallIndex, nextLengthMm)
-      };
+    if (!canResizeAsOrthogonalQuad(placement.room, wallIndex)) {
+      // Rectangles are the only shape where "resize this wall" has one
+      // unambiguous, still-orthogonal answer (opposite wall follows, the
+      // other pair translates). For any other room shape, moving just this
+      // wall's end vertex would skew its neighbor's angle — an edit numeric
+      // length entry should never do silently. Reshaping non-rectangular
+      // rooms is a future dedicated tool, not a side effect of this field.
+      throw new Error(
+        `Numeric length editing only supports rectangular rooms right now. "${placement.room.name}" isn't a simple rectangle.`
+      );
     }
 
     return {
       ...placement,
-      room: resizeSingleWallEndVertex(placement.room, wall.id, nextLengthMm)
+      room: resizeOrthogonalQuad(placement.room, wallIndex, nextLengthMm)
     };
   });
 
@@ -133,33 +138,6 @@ function resizeOrthogonalQuad(
   return {
     ...room,
     vertices: room.vertices.map((vertex) => replacementById.get(vertex.id) ?? vertex)
-  };
-}
-
-function resizeSingleWallEndVertex(
-  room: Room,
-  wallId: string,
-  nextLengthMm: number
-): Room {
-  const wall = room.walls.find((candidate) => candidate.id === wallId);
-  if (!wall) {
-    throw new Error(`Wall not found: ${wallId}`);
-  }
-
-  const start = findVertex(room, wall.startVertexId);
-  const end = findVertex(room, wall.endVertexId);
-  const axis = normalize({
-    xMm: end.xMm - start.xMm,
-    yMm: end.yMm - start.yMm
-  });
-  const nextEnd = {
-    ...end,
-    ...translate(start, scale(axis, nextLengthMm))
-  };
-
-  return {
-    ...room,
-    vertices: room.vertices.map((vertex) => (vertex.id === end.id ? nextEnd : vertex))
   };
 }
 
