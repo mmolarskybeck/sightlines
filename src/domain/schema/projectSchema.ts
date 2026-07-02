@@ -139,7 +139,10 @@ export const projectSchema = z.object({
   defaultWallHeightMm: z.number().positive(),
   defaultCenterlineHeightMm: z.number().positive(),
   floor: z.object({
-    rooms: z.array(roomPlacementSchema).min(1)
+    // No minimum: a brand-new project can start with an empty floor and go
+    // straight to the checklist (docs/plan.md §1.5) — room layout is one of
+    // two equally valid starting points, not a prerequisite.
+    rooms: z.array(roomPlacementSchema)
   }),
   checklistArtworkIds: z.array(z.string()),
   wallObjects: z.array(wallObjectSchema).default([]),

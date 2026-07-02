@@ -8,7 +8,6 @@ import {
   Magnet,
   Plus,
   Redo2,
-  RotateCcw,
   Ruler,
   Save,
   Undo2,
@@ -24,6 +23,7 @@ import { formatLength } from "../domain/units/length";
 import { DataView } from "./components/DataView";
 import { ElevationView } from "./components/ElevationView";
 import { PlanView } from "./components/PlanView";
+import { ProjectPicker } from "./components/ProjectPicker";
 import { RoomDimensionFields } from "./components/RoomDimensionFields";
 import { WallInspector, type WallDimensionLink } from "./components/WallInspector";
 import { useViewPreferences } from "./hooks/useViewPreferences";
@@ -55,7 +55,10 @@ export function App() {
     undo,
     redo,
     importProjectJson,
-    resetLocalProject
+    listProjectSummaries,
+    openProject,
+    createProject,
+    deleteProject
   } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { showGrid, snapToGrid, toggleShowGrid, toggleSnapToGrid } = useViewPreferences();
@@ -131,23 +134,13 @@ export function App() {
           >
             <Redo2 aria-hidden="true" size={18} />
           </button>
-          <button
-            className="icon-button"
-            type="button"
-            title="Reset local project"
-            aria-label="Reset local project"
-            onClick={() => {
-              if (
-                window.confirm(
-                  "Replace the saved local project with a fresh sample layout?"
-                )
-              ) {
-                void resetLocalProject();
-              }
-            }}
-          >
-            <RotateCcw aria-hidden="true" size={18} />
-          </button>
+          <ProjectPicker
+            currentProjectId={project.id}
+            listProjectSummaries={listProjectSummaries}
+            onCreateProject={createProject}
+            onDeleteProject={deleteProject}
+            onOpenProject={openProject}
+          />
           <button
             className="icon-button"
             type="button"
@@ -204,6 +197,11 @@ export function App() {
           </div>
 
           <nav className="room-list" aria-label="Rooms and walls">
+            {project.floor.rooms.length === 0 ? (
+              <p className="empty-copy">
+                No rooms yet — draw one, or skip straight to the checklist.
+              </p>
+            ) : null}
             {project.floor.rooms.map((placement) => {
               const roomWalls = getWallsWithGeometry(placement.room);
               const rectangleDimensions = getRectangleRoomDimensions(placement.room);
@@ -308,18 +306,26 @@ export function App() {
               selectedWallId={selectedWall?.id ?? null}
             />
           ) : null}
-          {viewMode === "elevation" && selectedWall ? (
-            <ElevationView
-              wallName={selectedWall.name}
-              wallLengthMm={selectedWall.lengthMm}
-              wallHeightMm={selectedWall.heightMm}
-              centerlineMm={
-                selectedWall.defaultCenterlineHeightMm ??
-                project.defaultCenterlineHeightMm
-              }
-              gridVisible={showGrid}
-              unit={project.unit}
-            />
+          {viewMode === "elevation" ? (
+            selectedWall ? (
+              <ElevationView
+                wallName={selectedWall.name}
+                wallLengthMm={selectedWall.lengthMm}
+                wallHeightMm={selectedWall.heightMm}
+                centerlineMm={
+                  selectedWall.defaultCenterlineHeightMm ??
+                  project.defaultCenterlineHeightMm
+                }
+                gridVisible={showGrid}
+                unit={project.unit}
+              />
+            ) : (
+              <div className="drawing-surface-empty">
+                <p className="empty-copy">
+                  Add a room and select a wall to see its elevation.
+                </p>
+              </div>
+            )
           ) : null}
           {viewMode === "data" ? <DataView json={exportProjectJson(project)} /> : null}
         </section>

@@ -170,4 +170,81 @@ describe("app store", () => {
 
     await expect(repository.save(invalid)).rejects.toThrow();
   });
+
+  it("createProject opens a new, blank, roomless project and lists it alongside the original", async () => {
+    const originalId = store.getState().project!.id;
+
+    await store.getState().createProject("Winter Show");
+
+    const state = store.getState();
+    expect(state.project?.title).toBe("Winter Show");
+    expect(state.project?.id).not.toBe(originalId);
+    expect(state.project?.floor.rooms).toEqual([]);
+    expect(state.selectedWallId).toBeNull();
+    expect(state.undoStack).toHaveLength(0);
+
+    const summaries = await state.listProjectSummaries();
+    expect(summaries.map((summary) => summary.title).sort()).toEqual([
+      "Untitled Exhibition",
+      "Winter Show"
+    ]);
+  });
+
+  it("openProject switches the current document and resets edit history", async () => {
+    const original = store.getState().project!;
+    await store.getState().createProject("Winter Show");
+
+    await store.getState().openProject(original.id);
+
+    const state = store.getState();
+    expect(state.project?.id).toBe(original.id);
+    expect(state.selectedWallId).toBe("wall-north");
+    expect(state.undoStack).toHaveLength(0);
+  });
+
+  it("openProject is a no-op when the requested project is already open", async () => {
+    const project = store.getState().project!;
+    await store.getState().resizeSelectedWall(9_000);
+    expect(store.getState().undoStack).toHaveLength(1);
+
+    await store.getState().openProject(project.id);
+
+    // Re-opening the already-open project must not reset the edit history
+    // that was just built up.
+    expect(store.getState().undoStack).toHaveLength(1);
+  });
+
+  it("deleteProject removes a non-open project without touching the current one", async () => {
+    const original = store.getState().project!;
+    await store.getState().createProject("Winter Show");
+    const winterShow = store.getState().project!;
+    await store.getState().openProject(original.id);
+
+    await store.getState().deleteProject(winterShow.id);
+
+    expect(repository.projects.has(winterShow.id)).toBe(false);
+    expect(store.getState().project?.id).toBe(original.id);
+  });
+
+  it("deleteProject falls back to another saved project when the open one is deleted", async () => {
+    const original = store.getState().project!;
+    await store.getState().createProject("Winter Show");
+
+    await store.getState().deleteProject(original.id);
+
+    const state = store.getState();
+    expect(repository.projects.has(original.id)).toBe(false);
+    expect(state.project?.title).toBe("Winter Show");
+  });
+
+  it("deleteProject creates a fresh blank project when the last one is deleted", async () => {
+    const original = store.getState().project!;
+
+    await store.getState().deleteProject(original.id);
+
+    const state = store.getState();
+    expect(repository.projects.has(original.id)).toBe(false);
+    expect(state.project?.floor.rooms).toEqual([]);
+    expect(repository.projects.size).toBe(1);
+  });
 });

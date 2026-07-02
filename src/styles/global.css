@@ -137,6 +137,102 @@ input:focus-visible {
   height: 32px;
 }
 
+.project-picker {
+  position: relative;
+}
+
+.project-picker-panel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  width: 260px;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  box-shadow: 0 8px 24px oklch(0 0 0 / 0.12);
+}
+
+.project-picker-new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 0.86rem;
+  font-weight: 680;
+}
+
+.project-picker-new:hover:not(:disabled) {
+  background: var(--surface-strong);
+}
+
+.project-picker-list {
+  display: grid;
+  gap: 2px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.project-picker-empty {
+  margin: 6px 4px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.project-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.project-picker-row.active .project-picker-open {
+  background: var(--primary-soft);
+}
+
+.project-picker-open {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.project-picker-open:hover {
+  background: var(--surface);
+}
+
+.project-picker-title {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.86rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-picker-updated {
+  flex: 0 0 auto;
+  color: var(--subtle);
+  font-size: 0.74rem;
+}
+
 .status-badge {
   display: inline-flex;
   align-items: center;
@@ -401,6 +497,14 @@ input:focus-visible {
   min-height: 0;
   padding: 22px;
   overflow: hidden;
+}
+
+.drawing-surface-empty {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  place-items: center;
+  padding: 22px;
 }
 
 .plan-svg,

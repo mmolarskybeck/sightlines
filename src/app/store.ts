@@ -2,9 +2,10 @@ import { create } from "zustand";
 import { createNextRectangleRoom } from "../domain/geometry/createRoom";
 import { resizeWallPreservingAngles } from "../domain/geometry/editRoom";
 import { getWallsWithGeometry } from "../domain/geometry/walls";
+import { createBlankProject } from "../domain/newProject";
 import type { PlacementWarning } from "../domain/placement/validatePlacement";
 import { validateChangedWallPlacements } from "../domain/placement/validatePlacement";
-import type { Project, Wall } from "../domain/project";
+import type { Project, ProjectSummary, Wall } from "../domain/project";
 import { IndexedDbProjectRepository } from "../domain/repositories/indexedDbProjectRepository";
 import type { ProjectRepository } from "../domain/repositories/projectRepository";
 import { createSampleProject } from "../domain/sample/sampleProject";
@@ -45,7 +46,10 @@ type AppState = {
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   importProjectJson: (text: string) => Promise<void>;
-  resetLocalProject: () => Promise<void>;
+  listProjectSummaries: () => Promise<ProjectSummary[]>;
+  openProject: (id: string) => Promise<void>;
+  createProject: (title: string) => Promise<void>;
+  deleteProject: (id: string) => Promise<void>;
 };
 
 export function createAppStore(repository: ProjectRepository) {
@@ -259,25 +263,75 @@ export function createAppStore(repository: ProjectRepository) {
         await persist(project);
       },
 
-      async resetLocalProject() {
-        const project = createSampleProject();
+      async listProjectSummaries() {
+        try {
+          return await repository.list();
+        } catch {
+          return [];
+        }
+      },
+
+      async openProject(id) {
+        if (get().project?.id === id) return;
+
         set({ saveState: "saving", error: null });
 
         try {
-          const summaries = await repository.list();
-          for (const summary of summaries) {
-            await repository.delete(summary.id);
-          }
+          const project = await repository.load(id);
+          setDocument(project, { viewMode: "plan", saveState: "saved" });
+        } catch (error) {
+          set({
+            saveState: "error",
+            error: `Could not open that project (${
+              error instanceof Error ? error.message : "unknown error"
+            }).`
+          });
+        }
+      },
+
+      async createProject(title) {
+        const project = createBlankProject(title);
+        set({ saveState: "saving", error: null });
+
+        try {
           await repository.save(project);
           setDocument(project, { viewMode: "plan", saveState: "saved" });
         } catch (error) {
           set({
             saveState: "error",
-            error:
-              error instanceof Error
-                ? error.message
-                : "Could not reset the local project."
+            error: `Could not create the new project (${
+              error instanceof Error ? error.message : "unknown error"
+            }).`
           });
+        }
+      },
+
+      async deleteProject(id) {
+        const wasOpen = get().project?.id === id;
+
+        try {
+          await repository.delete(id);
+        } catch (error) {
+          set({
+            saveState: "error",
+            error: `Could not delete that project (${
+              error instanceof Error ? error.message : "unknown error"
+            }).`
+          });
+          return;
+        }
+
+        if (!wasOpen) return;
+
+        // The open project just disappeared out from under the user —
+        // fall back to another saved project, or start a fresh one so the
+        // app never sits on a document that no longer exists.
+        const summaries = await repository.list();
+
+        if (summaries[0]) {
+          await get().openProject(summaries[0].id);
+        } else {
+          await get().createProject("Untitled Exhibition");
         }
       }
     };
