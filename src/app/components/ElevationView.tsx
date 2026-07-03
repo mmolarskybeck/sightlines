@@ -15,6 +15,7 @@ export function wallLocalYToSvgY(wallHeightMm: number, yMm: number): number {
 }
 
 export function ElevationView({
+  gridPrecisionFloorMm,
   gridVisible,
   wallName,
   wallLengthMm,
@@ -22,6 +23,7 @@ export function ElevationView({
   centerlineMm,
   unit
 }: {
+  gridPrecisionFloorMm: number | null;
   gridVisible: boolean;
   wallName: string;
   wallLengthMm: number;
@@ -35,7 +37,9 @@ export function ElevationView({
     width: wallLengthMm,
     height: wallHeightMm
   });
-  const minorGridMm = getMinorGridIntervalMm(unit, pixelsPerMm);
+  const minorGridMm = getMinorGridIntervalMm(unit, pixelsPerMm, {
+    minIntervalMm: gridPrecisionFloorMm
+  });
   const majorGridMm = getMajorGridIntervalMm(unit, minorGridMm);
   const centerlineSvgY = wallLocalYToSvgY(wallHeightMm, centerlineMm);
 

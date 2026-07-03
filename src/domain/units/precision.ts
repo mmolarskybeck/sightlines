@@ -31,6 +31,31 @@ export const IMPERIAL_GRID_INTERVALS_MM: readonly number[] = [
   feetToMm(10)
 ];
 
+// Precision-floor choices offered in the UI: a curated subset of each
+// family's own grid interval table, not a separate scale. Deliberately
+// skips the finest sub-inch/sub-cm table entries — offering those as a
+// "floor" would defeat the point of a floor — and skips the coarsest
+// multi-foot/multi-meter entries, which are grid-only landmarks nobody
+// would pick as a working precision.
+const IMPERIAL_PRECISION_FLOOR_OPTIONS_MM: readonly number[] = [
+  inchesToMm(0.5),
+  inchesToMm(1),
+  inchesToMm(6),
+  feetToMm(1)
+];
+
+const METRIC_PRECISION_FLOOR_OPTIONS_MM: readonly number[] = [
+  cmToMm(0.5),
+  cmToMm(1),
+  cmToMm(10)
+];
+
+export function getGridPrecisionFloorOptionsMm(unit: DisplayUnit): readonly number[] {
+  return isMetricUnit(unit)
+    ? METRIC_PRECISION_FLOOR_OPTIONS_MM
+    : IMPERIAL_PRECISION_FLOOR_OPTIONS_MM;
+}
+
 const DEFAULT_TARGET_MINOR_PX = 32;
 const DEFAULT_MAJOR_STEP_FACTOR = 4;
 
@@ -42,27 +67,60 @@ export function getGridIntervalTableMm(unit: DisplayUnit): readonly number[] {
   return isMetricUnit(unit) ? METRIC_GRID_INTERVALS_MM : IMPERIAL_GRID_INTERVALS_MM;
 }
 
+export type MinorGridIntervalOptions = {
+  targetMinorPx?: number;
+  // The user's chosen precision floor (§5.5: "as they zoom in, step
+  // downward until hitting the user's chosen precision floor"), in mm.
+  // Non-finite or <=0 means no floor — the null/"auto" preference state.
+  minIntervalMm?: number | null;
+};
+
 // Zoom-adaptive: pick the smallest table interval whose on-screen spacing
 // is still at least the target pixel spacing, so a wide-open floor plan
 // doesn't render thousands of hairline-close minor lines. Falls back to the
 // coarsest interval once even the largest table entry would render denser
 // than the target (deeply zoomed out), and to the finest interval once
 // pixelsPerMm isn't known yet (initial render, before layout measurement).
+//
+// When a precision floor is set, zooming in further stops shrinking the
+// interval once it would go below the floor — the same floor also bounds
+// grid snap targets (§5.4), since PlanView derives its snap candidates from
+// this same minor interval, so this is the one place that needs to enforce it.
 export function getMinorGridIntervalMm(
   unit: DisplayUnit,
   pixelsPerMm: number,
-  targetMinorPx: number = DEFAULT_TARGET_MINOR_PX
+  options: MinorGridIntervalOptions = {}
 ): number {
+  const targetMinorPx = options.targetMinorPx ?? DEFAULT_TARGET_MINOR_PX;
   const table = getGridIntervalTableMm(unit);
 
-  if (!Number.isFinite(pixelsPerMm) || pixelsPerMm <= 0) {
-    return table[0];
+  const zoomInterval = (): number => {
+    if (!Number.isFinite(pixelsPerMm) || pixelsPerMm <= 0) {
+      return table[0];
+    }
+
+    const targetIntervalMm = targetMinorPx / pixelsPerMm;
+    const smallestThatFits = table.find((interval) => interval >= targetIntervalMm);
+
+    return smallestThatFits ?? table[table.length - 1];
+  };
+
+  const interval = zoomInterval();
+  const floorMm = options.minIntervalMm;
+
+  if (!Number.isFinite(floorMm) || (floorMm as number) <= 0) {
+    return interval;
   }
 
-  const targetIntervalMm = targetMinorPx / pixelsPerMm;
-  const smallestThatFits = table.find((interval) => interval >= targetIntervalMm);
+  if (interval >= (floorMm as number)) {
+    return interval;
+  }
 
-  return smallestThatFits ?? table[table.length - 1];
+  // Zoom would otherwise go finer than the floor — clamp up to the
+  // smallest table entry that still respects it, falling back to the
+  // coarsest entry if the floor itself is coarser than the whole table.
+  const smallestAtOrAboveFloor = table.find((candidate) => candidate >= (floorMm as number));
+  return smallestAtOrAboveFloor ?? table[table.length - 1];
 }
 
 // The major (readable landmark) line: the next table entry that's at least

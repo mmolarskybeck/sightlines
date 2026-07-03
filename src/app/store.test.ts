@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { CURRENT_SCHEMA_VERSION } from "../domain/project";
 import type { Project, ProjectSummary } from "../domain/project";
 import type { ProjectRepository } from "../domain/repositories/projectRepository";
 import { createSampleProject } from "../domain/sample/sampleProject";
-import { parseProject } from "../domain/schema/projectSchema";
-import { createAppStore, getSelectedWall } from "./store";
+import { MAX_IMPORT_JSON_LENGTH, parseProject } from "../domain/schema/projectSchema";
+import { createAppStore, exportProjectJson, getSelectedWall } from "./store";
 
 class InMemoryProjectRepository implements ProjectRepository {
   projects = new Map<string, Project>();
@@ -145,16 +146,79 @@ describe("app store", () => {
     expect(store.getState().undoStack).toHaveLength(0);
   });
 
-  it("rejects an invalid import without touching the current project", async () => {
+  it("rejects text that is not valid JSON, and leaves the current project untouched", async () => {
     const before = store.getState().project;
 
     await store.getState().importProjectJson("not json at all");
+
     expect(store.getState().error).toMatch(/Import failed/);
+    expect(store.getState().error).toMatch(/not valid JSON/);
     expect(store.getState().project).toBe(before);
+  });
+
+  it("rejects valid JSON that is not a Sightlines project, and leaves the current project untouched", async () => {
+    const before = store.getState().project;
 
     await store.getState().importProjectJson(JSON.stringify({ hello: 1 }));
-    expect(store.getState().error).toMatch(/missing schemaVersion/);
+
+    expect(store.getState().error).toMatch(/Import failed/);
+    expect(store.getState().error).toMatch(/not a Sightlines project/);
     expect(store.getState().project).toBe(before);
+  });
+
+  it("rejects a project made with a newer schema version, distinctly, and leaves the current project untouched", async () => {
+    const before = store.getState().project;
+    const fromTheFuture = {
+      ...createSampleProject(),
+      schemaVersion: CURRENT_SCHEMA_VERSION + 1
+    };
+
+    await store.getState().importProjectJson(JSON.stringify(fromTheFuture));
+
+    expect(store.getState().error).toMatch(/newer version of Sightlines/);
+    expect(store.getState().project).toBe(before);
+  });
+
+  it("rejects a same-version project that fails validation, and leaves the current project untouched", async () => {
+    const before = store.getState().project;
+    const broken = createSampleProject();
+    broken.floor.rooms[0].room.walls[0].startVertexId = "missing";
+
+    await store.getState().importProjectJson(JSON.stringify(broken));
+
+    expect(store.getState().error).toMatch(/doesn't match the Sightlines format/);
+    expect(store.getState().project).toBe(before);
+  });
+
+  it("rejects an oversized import before parsing it, and leaves the current project untouched", async () => {
+    const before = store.getState().project;
+    const oversized = "a".repeat(MAX_IMPORT_JSON_LENGTH + 1);
+
+    await store.getState().importProjectJson(oversized);
+
+    expect(store.getState().error).toMatch(/too large/);
+    expect(store.getState().project).toBe(before);
+  });
+
+  it("rejects non-string input instead of throwing, and leaves the current project untouched", async () => {
+    const before = store.getState().project;
+
+    await store.getState().importProjectJson(null as unknown as string);
+
+    expect(store.getState().error).toMatch(/Import failed/);
+    expect(store.getState().project).toBe(before);
+  });
+
+  it("exported project JSON always re-imports successfully and round-trips exactly", async () => {
+    const original = store.getState().project!;
+    const json = exportProjectJson(original);
+
+    await store.getState().importProjectJson(json);
+
+    const state = store.getState();
+    expect(state.error).toBeNull();
+    expect(state.project).toEqual(original);
+    expect(repository.projects.get(original.id)).toEqual(original);
   });
 
   it("a valid import replaces the document and resets edit history", async () => {

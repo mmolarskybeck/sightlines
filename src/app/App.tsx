@@ -20,6 +20,7 @@ import {
 } from "../domain/geometry/walls";
 import type { DisplayUnit, Project } from "../domain/project";
 import { formatLength } from "../domain/units/length";
+import { getGridPrecisionFloorOptionsMm } from "../domain/units/precision";
 import { DataView } from "./components/DataView";
 import { ElevationView } from "./components/ElevationView";
 import { PlanView } from "./components/PlanView";
@@ -62,7 +63,14 @@ export function App() {
     deleteProject
   } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { showGrid, snapToGrid, toggleShowGrid, toggleSnapToGrid } = useViewPreferences();
+  const {
+    showGrid,
+    snapToGrid,
+    gridPrecisionFloorMm,
+    toggleShowGrid,
+    toggleSnapToGrid,
+    setGridPrecisionFloorMm
+  } = useViewPreferences();
 
   useEffect(() => {
     void boot();
@@ -297,6 +305,12 @@ export function App() {
                 title={snapToGrid ? "Disable snap to grid" : "Enable snap to grid"}
                 onClick={toggleSnapToGrid}
               />
+              <PrecisionSelect
+                disabled={viewMode === "data"}
+                floorMm={gridPrecisionFloorMm}
+                unit={project.unit}
+                onChange={setGridPrecisionFloorMm}
+              />
               <UnitSelect
                 disabled={viewMode === "data"}
                 unit={project.unit}
@@ -307,6 +321,7 @@ export function App() {
 
           {viewMode === "plan" ? (
             <PlanView
+              gridPrecisionFloorMm={gridPrecisionFloorMm}
               gridVisible={showGrid}
               project={project}
               selectedWallId={selectedWall?.id ?? null}
@@ -324,6 +339,7 @@ export function App() {
                   selectedWall.defaultCenterlineHeightMm ??
                   project.defaultCenterlineHeightMm
                 }
+                gridPrecisionFloorMm={gridPrecisionFloorMm}
                 gridVisible={showGrid}
                 unit={project.unit}
               />
@@ -508,6 +524,48 @@ function UnitSelect({
           <option value="m">m</option>
           <option value="cm">cm</option>
         </optgroup>
+      </select>
+    </label>
+  );
+}
+
+function PrecisionSelect({
+  disabled,
+  floorMm,
+  unit,
+  onChange
+}: {
+  disabled: boolean;
+  floorMm: number | null;
+  unit: DisplayUnit;
+  onChange: (floorMm: number | null) => void;
+}) {
+  // Options are a curated subset of the active unit family's own grid
+  // interval table (domain/units/precision.ts), so a floor picked here is
+  // guaranteed to line up with an actual grid step rather than an arbitrary
+  // value. Always formatted with the family's "natural" unit (feet-and-
+  // inches for imperial, cm for metric) regardless of the project's current
+  // display unit, since the stored value is mm and clamps to the nearest
+  // table entry if the project unit later changes.
+  const labelUnit: DisplayUnit = unit === "cm" || unit === "m" ? "cm" : "ft";
+  const options = getGridPrecisionFloorOptionsMm(unit);
+
+  return (
+    <label className="unit-select">
+      <span className="unit-select-label">Precision</span>
+      <select
+        disabled={disabled}
+        value={floorMm === null ? "auto" : String(floorMm)}
+        onChange={(event) =>
+          onChange(event.target.value === "auto" ? null : Number(event.target.value))
+        }
+      >
+        <option value="auto">Auto</option>
+        {options.map((optionMm) => (
+          <option key={optionMm} value={optionMm}>
+            {formatLength(optionMm, { unit: labelUnit })}
+          </option>
+        ))}
       </select>
     </label>
   );

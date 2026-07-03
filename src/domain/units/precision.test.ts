@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { cmToMm, feetToMm, inchesToMm, mToMm } from "./length";
 import {
   getGridPatternPhaseMm,
+  getGridPrecisionFloorOptionsMm,
   getMajorGridIntervalMm,
   getMinorGridIntervalMm,
   getPixelsPerMm
@@ -47,6 +48,72 @@ describe("getMinorGridIntervalMm", () => {
     // 0.5cm at 100px/mm is 500px on screen, likewise above target, so the
     // newly added finest metric entry should win.
     expect(getMinorGridIntervalMm("cm", 100)).toBeCloseTo(cmToMm(0.5));
+  });
+
+  describe("with a precision floor", () => {
+    it("clamps a zoomed-in interval up to the floor when zoom would go finer", () => {
+      // Zoomed in enough that 0.5" would otherwise win (see above), but a
+      // 1" floor means the user works no finer than that.
+      const interval = getMinorGridIntervalMm("ft", 100, { minIntervalMm: inchesToMm(1) });
+      expect(interval).toBeCloseTo(inchesToMm(1));
+    });
+
+    it("clamps up to the smallest table entry at or above the floor, not the floor itself", () => {
+      // A floor of 3mm doesn't land exactly on a metric table entry — the
+      // smallest entry that still respects it is 5mm (0.5cm), not 3mm.
+      const interval = getMinorGridIntervalMm("cm", 100, { minIntervalMm: 3 });
+      expect(interval).toBeCloseTo(cmToMm(0.5));
+    });
+
+    it("leaves the zoom-driven interval untouched once it's already at or coarser than the floor", () => {
+      // Zoomed out to 1' already; a 1" floor is finer than that, so it has
+      // no effect here.
+      const interval = getMinorGridIntervalMm("ft", 0.128, { minIntervalMm: inchesToMm(1) });
+      expect(interval).toBeCloseTo(feetToMm(1));
+    });
+
+    it("falls back to the coarsest table entry when the floor itself is coarser than every entry", () => {
+      const interval = getMinorGridIntervalMm("ft", 100, { minIntervalMm: feetToMm(20) });
+      expect(interval).toBeCloseTo(feetToMm(10));
+    });
+
+    it("treats a non-finite, zero, or negative floor as no floor — current unfloored behavior", () => {
+      const unfloored = getMinorGridIntervalMm("ft", 100);
+      expect(getMinorGridIntervalMm("ft", 100, { minIntervalMm: 0 })).toBeCloseTo(unfloored);
+      expect(getMinorGridIntervalMm("ft", 100, { minIntervalMm: -5 })).toBeCloseTo(unfloored);
+      expect(
+        getMinorGridIntervalMm("ft", 100, { minIntervalMm: Number.NaN })
+      ).toBeCloseTo(unfloored);
+      expect(
+        getMinorGridIntervalMm("ft", 100, { minIntervalMm: Number.POSITIVE_INFINITY })
+      ).toBeCloseTo(unfloored);
+      expect(getMinorGridIntervalMm("ft", 100, { minIntervalMm: null })).toBeCloseTo(unfloored);
+    });
+
+    it("still respects a custom targetMinorPx alongside a floor", () => {
+      const interval = getMinorGridIntervalMm("ft", 2, {
+        targetMinorPx: 16,
+        minIntervalMm: inchesToMm(2)
+      });
+      expect(interval).toBeCloseTo(inchesToMm(2));
+    });
+  });
+});
+
+describe("getGridPrecisionFloorOptionsMm", () => {
+  it("offers curated imperial floor choices as exact grid-table values", () => {
+    const options = getGridPrecisionFloorOptionsMm("ft");
+    expect(options).toEqual([inchesToMm(0.5), inchesToMm(1), inchesToMm(6), feetToMm(1)]);
+  });
+
+  it("offers curated metric floor choices as exact grid-table values", () => {
+    const options = getGridPrecisionFloorOptionsMm("cm");
+    expect(options).toEqual([cmToMm(0.5), cmToMm(1), cmToMm(10)]);
+  });
+
+  it("keys off the metric/imperial family, not the exact sub-unit", () => {
+    expect(getGridPrecisionFloorOptionsMm("in")).toEqual(getGridPrecisionFloorOptionsMm("ft"));
+    expect(getGridPrecisionFloorOptionsMm("m")).toEqual(getGridPrecisionFloorOptionsMm("cm"));
   });
 });
 

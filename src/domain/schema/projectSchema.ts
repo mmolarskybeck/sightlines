@@ -158,18 +158,81 @@ const versionedDocumentSchema = z.object({
   schemaVersion: z.number().int().positive()
 });
 
+// A grossly oversized paste/drop (a multi-hundred-MB string) would block the
+// tab just to JSON.parse it, before validation ever gets a chance to reject
+// it — so the size check in migrateProjectJson runs first, on the raw text.
+// 20 MB comfortably covers a project.json (no embedded image bytes; those
+// live in the future .sightlines package's assets/, §6 of docs/plan.md).
+export const MAX_IMPORT_JSON_LENGTH = 20 * 1024 * 1024;
+
+function formatApproxMegabytes(lengthInUtf16Units: number): string {
+  return `${(lengthInUtf16Units / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Every load path that can receive an externally-authored document runs
+// parse → validate minimal shape → migrate → validate current schema
+// (docs/plan.md §2). This function is that pipeline for a raw text payload;
+// migrateProject below is the parsed-value half of it, reused by the
+// IndexedDB repository for records that never went through JSON.parse here.
+export function migrateProjectJson(text: string): Project {
+  if (typeof text !== "string") {
+    throw new Error("no file content was provided.");
+  }
+
+  // `.length` counts UTF-16 code units, not exact UTF-8 bytes — close enough
+  // for a sanity cap, and free to read, unlike encoding the whole string
+  // just to reject it.
+  if (text.length > MAX_IMPORT_JSON_LENGTH) {
+    throw new Error(
+      `the file is too large (${formatApproxMegabytes(text.length)}) — imports are limited to ${formatApproxMegabytes(MAX_IMPORT_JSON_LENGTH)}.`
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("the file is not valid JSON.");
+  }
+
+  return migrateProject(parsed);
+}
+
 export function migrateProject(input: unknown): Project {
   const versioned = versionedDocumentSchema.safeParse(input);
 
   if (!versioned.success) {
-    throw new Error("Not a Sightlines project document: missing schemaVersion.");
+    throw new Error("this file is not a Sightlines project.");
   }
 
-  if (versioned.data.schemaVersion !== CURRENT_SCHEMA_VERSION) {
+  const { schemaVersion } = versioned.data;
+
+  if (schemaVersion > CURRENT_SCHEMA_VERSION) {
     throw new Error(
-      `Unsupported project schema version: ${versioned.data.schemaVersion}`
+      `this project was made with a newer version of Sightlines (schema version ${schemaVersion}) than this app supports (version ${CURRENT_SCHEMA_VERSION}). Open it with a newer version of the app.`
     );
   }
 
-  return parseProject(input);
+  if (schemaVersion < CURRENT_SCHEMA_VERSION) {
+    // No migration chain exists yet — CURRENT_SCHEMA_VERSION has only ever
+    // been 1, so `versionedDocumentSchema`'s `.positive()` makes this branch
+    // unreachable today. Once an older version ships, run its v1→v2→...
+    // migration chain here instead of throwing (docs/plan.md §2).
+    throw new Error(
+      `this project uses an old schema version (${schemaVersion}) that this app can no longer open.`
+    );
+  }
+
+  try {
+    return parseProject(input);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      const [issue] = error.issues;
+      const path = issue?.path.join(".");
+      throw new Error(
+        `this project's data doesn't match the Sightlines format${path ? ` (${path}: ${issue.message})` : ""}.`
+      );
+    }
+    throw error;
+  }
 }

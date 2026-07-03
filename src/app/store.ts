@@ -9,7 +9,7 @@ import type { DisplayUnit, Project, ProjectSummary, Wall } from "../domain/proje
 import { IndexedDbProjectRepository } from "../domain/repositories/indexedDbProjectRepository";
 import type { ProjectRepository } from "../domain/repositories/projectRepository";
 import { createSampleProject } from "../domain/sample/sampleProject";
-import { migrateProject } from "../domain/schema/projectSchema";
+import { migrateProjectJson } from "../domain/schema/projectSchema";
 
 type ViewMode = "plan" | "elevation" | "data";
 
@@ -259,12 +259,19 @@ export function createAppStore(repository: ProjectRepository) {
       async importProjectJson(text) {
         let project: Project;
 
+        // migrateProjectJson owns the whole parse → validate-shape →
+        // migrate → validate pipeline (docs/plan.md §2) and throws a
+        // specific, human-readable reason for every way an externally
+        // authored file can be bad — oversized, not JSON, not a Sightlines
+        // project, a newer schema version than this app knows, or a
+        // Sightlines project whose data fails validation. The current
+        // project is never touched until that pipeline has fully succeeded.
         try {
-          project = migrateProject(JSON.parse(text));
+          project = migrateProjectJson(text);
         } catch (error) {
           set({
             error: `Import failed: ${
-              error instanceof Error ? error.message : "the file is not valid JSON."
+              error instanceof Error ? error.message : "the file could not be read."
             }`
           });
           return;

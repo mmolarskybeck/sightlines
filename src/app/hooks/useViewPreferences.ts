@@ -5,11 +5,18 @@ const STORAGE_KEY = "sightlines.viewPreferences.v1";
 type ViewPreferences = {
   showGrid: boolean;
   snapToGrid: boolean;
+  // The user's chosen precision floor in mm, or null for "auto" (no floor —
+  // the grid keeps stepping down with zoom per docs/plan.md §5.5). Stored
+  // in mm regardless of display unit so a floor picked under one unit
+  // family keeps working if the project's unit later changes; consumers
+  // clamp it to the nearest table entry, so an odd stored value is safe.
+  gridPrecisionFloorMm: number | null;
 };
 
 const DEFAULT_PREFERENCES: ViewPreferences = {
   showGrid: false,
-  snapToGrid: true
+  snapToGrid: true,
+  gridPrecisionFloorMm: null
 };
 
 function readStoredPreferences(): ViewPreferences {
@@ -24,7 +31,13 @@ function readStoredPreferences(): ViewPreferences {
       snapToGrid:
         typeof parsed.snapToGrid === "boolean"
           ? parsed.snapToGrid
-          : DEFAULT_PREFERENCES.snapToGrid
+          : DEFAULT_PREFERENCES.snapToGrid,
+      gridPrecisionFloorMm:
+        typeof parsed.gridPrecisionFloorMm === "number" &&
+        Number.isFinite(parsed.gridPrecisionFloorMm) &&
+        parsed.gridPrecisionFloorMm > 0
+          ? parsed.gridPrecisionFloorMm
+          : DEFAULT_PREFERENCES.gridPrecisionFloorMm
     };
   } catch {
     return DEFAULT_PREFERENCES;
@@ -47,9 +60,12 @@ export function useViewPreferences() {
   return {
     showGrid: preferences.showGrid,
     snapToGrid: preferences.snapToGrid,
+    gridPrecisionFloorMm: preferences.gridPrecisionFloorMm,
     toggleShowGrid: () =>
       setPreferences((current) => ({ ...current, showGrid: !current.showGrid })),
     toggleSnapToGrid: () =>
-      setPreferences((current) => ({ ...current, snapToGrid: !current.snapToGrid }))
+      setPreferences((current) => ({ ...current, snapToGrid: !current.snapToGrid })),
+    setGridPrecisionFloorMm: (gridPrecisionFloorMm: number | null) =>
+      setPreferences((current) => ({ ...current, gridPrecisionFloorMm }))
   };
 }

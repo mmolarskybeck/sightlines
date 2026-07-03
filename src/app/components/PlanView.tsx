@@ -39,12 +39,14 @@ type DragState = {
 };
 
 export function PlanView({
+  gridPrecisionFloorMm,
   gridVisible,
   onCommitWallLength,
   project,
   selectedWallId,
   snapToGrid
 }: {
+  gridPrecisionFloorMm: number | null;
   gridVisible: boolean;
   onCommitWallLength: (wallId: string, lengthMm: number) => Promise<void>;
   project: Project;
@@ -66,7 +68,9 @@ export function PlanView({
   };
   const viewBox = `${viewBoxBounds.x} ${viewBoxBounds.y} ${viewBoxBounds.width} ${viewBoxBounds.height}`;
   const pixelsPerMm = getPixelsPerMm(containerSize, viewBoxBounds);
-  const minorGridMm = getMinorGridIntervalMm(project.unit, pixelsPerMm);
+  const minorGridMm = getMinorGridIntervalMm(project.unit, pixelsPerMm, {
+    minIntervalMm: gridPrecisionFloorMm
+  });
   const majorGridMm = getMajorGridIntervalMm(project.unit, minorGridMm);
   const handleSizeMm = pixelsPerMm > 0 ? HANDLE_SCREEN_SIZE_PX / pixelsPerMm : 0;
   const snapThresholdMm = pixelsPerMm > 0 ? SNAP_THRESHOLD_PX / pixelsPerMm : 0;

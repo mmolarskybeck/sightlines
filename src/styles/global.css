@@ -452,6 +452,14 @@ input:focus-visible {
   gap: 6px;
 }
 
+.view-options {
+  /* Four controls (Grid, Snap, Precision, Units) can now exceed a narrow
+     toolbar's width — wrap rather than overflow or scroll. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 8px;
+}
+
 .tab-button,
 .view-option-button {
   display: inline-flex;
