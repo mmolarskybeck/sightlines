@@ -5,7 +5,7 @@ import { getWallsWithGeometry } from "../domain/geometry/walls";
 import { createBlankProject } from "../domain/newProject";
 import type { PlacementWarning } from "../domain/placement/validatePlacement";
 import { validateChangedWallPlacements } from "../domain/placement/validatePlacement";
-import type { Project, ProjectSummary, Wall } from "../domain/project";
+import type { DisplayUnit, Project, ProjectSummary, Wall } from "../domain/project";
 import { IndexedDbProjectRepository } from "../domain/repositories/indexedDbProjectRepository";
 import type { ProjectRepository } from "../domain/repositories/projectRepository";
 import { createSampleProject } from "../domain/sample/sampleProject";
@@ -40,6 +40,7 @@ type AppState = {
   setViewMode: (viewMode: ViewMode) => void;
   selectWall: (wallId: string) => void;
   renameProject: (title: string) => Promise<void>;
+  setUnit: (unit: DisplayUnit) => Promise<void>;
   addRectangleRoom: () => Promise<void>;
   resizeWall: (wallId: string, lengthMm: number) => Promise<void>;
   resizeSelectedWall: (lengthMm: number) => Promise<void>;
@@ -164,6 +165,16 @@ export function createAppStore(repository: ProjectRepository) {
         await applyEdit("Rename project", (current) => ({
           ...current,
           title: trimmed
+        }));
+      },
+
+      async setUnit(unit) {
+        const project = get().project;
+        if (!project || project.unit === unit) return;
+
+        await applyEdit("Change display unit", (current) => ({
+          ...current,
+          unit
         }));
       },
 

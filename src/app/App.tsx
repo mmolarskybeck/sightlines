@@ -18,7 +18,7 @@ import {
   getOrthogonalQuadWallPair,
   getRectangleRoomDimensions,
 } from "../domain/geometry/walls";
-import type { Project } from "../domain/project";
+import type { DisplayUnit, Project } from "../domain/project";
 import { formatLength } from "../domain/units/length";
 import { DataView } from "./components/DataView";
 import { ElevationView } from "./components/ElevationView";
@@ -50,6 +50,7 @@ export function App() {
     selectWall,
     addRectangleRoom,
     renameProject,
+    setUnit,
     resizeSelectedWall,
     resizeWall,
     undo,
@@ -296,6 +297,11 @@ export function App() {
                 title={snapToGrid ? "Disable snap to grid" : "Enable snap to grid"}
                 onClick={toggleSnapToGrid}
               />
+              <UnitSelect
+                disabled={viewMode === "data"}
+                unit={project.unit}
+                onChange={setUnit}
+              />
             </div>
           </div>
 
@@ -304,6 +310,7 @@ export function App() {
               gridVisible={showGrid}
               project={project}
               selectedWallId={selectedWall?.id ?? null}
+              snapToGrid={snapToGrid}
               onCommitWallLength={resizeWall}
             />
           ) : null}
@@ -473,6 +480,36 @@ function ViewOptionButton({
       {icon}
       <span>{label}</span>
     </button>
+  );
+}
+
+function UnitSelect({
+  disabled,
+  unit,
+  onChange
+}: {
+  disabled: boolean;
+  unit: DisplayUnit;
+  onChange: (unit: DisplayUnit) => void;
+}) {
+  return (
+    <label className="unit-select">
+      <span className="unit-select-label">Units</span>
+      <select
+        disabled={disabled}
+        value={unit}
+        onChange={(event) => onChange(event.target.value as DisplayUnit)}
+      >
+        <optgroup label="Imperial">
+          <option value="ft">ft</option>
+          <option value="in">in</option>
+        </optgroup>
+        <optgroup label="Metric">
+          <option value="m">m</option>
+          <option value="cm">cm</option>
+        </optgroup>
+      </select>
+    </label>
   );
 }
 

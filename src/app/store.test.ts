@@ -97,6 +97,32 @@ describe("app store", () => {
     expect(store.getState().undoStack).toHaveLength(1);
   });
 
+  it("setUnit updates the project's display unit, persists, and is undoable", async () => {
+    const project = store.getState().project!;
+    expect(project.unit).toBe("ft");
+
+    await store.getState().setUnit("m");
+
+    const state = store.getState();
+    expect(state.project?.unit).toBe("m");
+    expect(state.undoStack).toHaveLength(1);
+
+    const persisted = repository.projects.get(state.project!.id)!;
+    expect(persisted.unit).toBe("m");
+
+    await store.getState().undo();
+    expect(store.getState().project?.unit).toBe("ft");
+  });
+
+  it("skips a setUnit call that does not change the unit", async () => {
+    const before = store.getState().project!;
+
+    await store.getState().setUnit(before.unit);
+
+    expect(store.getState().undoStack).toHaveLength(0);
+    expect(store.getState().project).toBe(before);
+  });
+
   it("skips no-op and empty renames instead of recording undo entries", async () => {
     const before = store.getState().project!;
 

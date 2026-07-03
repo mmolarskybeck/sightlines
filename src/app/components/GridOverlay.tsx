@@ -1,8 +1,12 @@
+import { getGridPatternPhaseMm } from "../../domain/units/precision";
+
 export function GridOverlay({
   height,
   id,
   majorSpacingMm,
   minorSpacingMm,
+  originXMm = 0,
+  originYMm = 0,
   width,
   x,
   y
@@ -11,6 +15,12 @@ export function GridOverlay({
   id: string;
   majorSpacingMm: number;
   minorSpacingMm: number;
+  // Geometry-space point the grid should be anchored to (docs/plan.md
+  // §5.5), not the screen/viewport origin. Defaults to (0, 0) so callers
+  // that don't pass these (e.g. PlanView's world-origin floor grid) keep
+  // tiling straight from userspace (0,0), unchanged.
+  originXMm?: number;
+  originYMm?: number;
   width: number;
   x: number;
   y: number;
@@ -22,6 +32,8 @@ export function GridOverlay({
           id={`${id}-minor`}
           width={minorSpacingMm}
           height={minorSpacingMm}
+          x={getGridPatternPhaseMm(originXMm, minorSpacingMm)}
+          y={getGridPatternPhaseMm(originYMm, minorSpacingMm)}
           patternUnits="userSpaceOnUse"
         >
           <path
@@ -34,6 +46,8 @@ export function GridOverlay({
           id={`${id}-major`}
           width={majorSpacingMm}
           height={majorSpacingMm}
+          x={getGridPatternPhaseMm(originXMm, majorSpacingMm)}
+          y={getGridPatternPhaseMm(originYMm, majorSpacingMm)}
           patternUnits="userSpaceOnUse"
         >
           <path

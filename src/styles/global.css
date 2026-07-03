@@ -490,6 +490,40 @@ input:focus-visible {
   opacity: 0.45;
 }
 
+.unit-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 680;
+}
+
+.unit-select-label {
+  color: var(--subtle);
+}
+
+.unit-select select {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.unit-select:has(select:disabled) {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.unit-select select:disabled {
+  cursor: not-allowed;
+}
+
 .drawing-surface,
 .data-surface {
   position: relative;
@@ -574,6 +608,13 @@ input:focus-visible {
   font-weight: 700;
   paint-order: stroke;
   stroke: var(--bg);
+}
+
+.snap-guide {
+  stroke: var(--accent);
+  stroke-dasharray: 10 8;
+  stroke-width: 2;
+  pointer-events: none;
 }
 
 .surface-label {

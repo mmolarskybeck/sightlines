@@ -7,6 +7,7 @@ import { cmToMm, feetToMm, inchesToMm, mToMm } from "./length";
 // normal 1-2-5 sequence; imperial gets its own table because feet/inches
 // are how people think in the gallery, not a relabeled metric spacing.
 export const METRIC_GRID_INTERVALS_MM: readonly number[] = [
+  cmToMm(0.5),
   cmToMm(1),
   cmToMm(2),
   cmToMm(5),
@@ -18,6 +19,7 @@ export const METRIC_GRID_INTERVALS_MM: readonly number[] = [
 ];
 
 export const IMPERIAL_GRID_INTERVALS_MM: readonly number[] = [
+  inchesToMm(0.5),
   inchesToMm(1),
   inchesToMm(2),
   inchesToMm(3),
@@ -95,4 +97,20 @@ export function getPixelsPerMm(
     containerPx.width / viewBoxMm.width,
     containerPx.height / viewBoxMm.height
   );
+}
+
+// SVG `<pattern patternUnits="userSpaceOnUse">` tiles are periodic in
+// user-space starting at (0,0), so an arbitrary anchor point (e.g. a wall's
+// floor line, which is rarely at y=0) only lands on a tile boundary by
+// coincidence. Reducing the anchor mod the tile spacing gives the pattern's
+// `x`/`y` attribute the phase offset that puts a line through the anchor
+// itself, since shifting by any whole number of tiles is a no-op — this is
+// what lets GridOverlay be told "anchor at the floor" instead of always
+// counting from the coordinate-space origin.
+export function getGridPatternPhaseMm(originMm: number, spacingMm: number): number {
+  if (!Number.isFinite(originMm) || !Number.isFinite(spacingMm) || spacingMm <= 0) {
+    return 0;
+  }
+
+  return ((originMm % spacingMm) + spacingMm) % spacingMm;
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { feetToMm, inchesToMm, mToMm } from "./length";
+import { cmToMm, feetToMm, inchesToMm, mToMm } from "./length";
 import {
+  getGridPatternPhaseMm,
   getMajorGridIntervalMm,
   getMinorGridIntervalMm,
   getPixelsPerMm
@@ -27,13 +28,25 @@ describe("getMinorGridIntervalMm", () => {
   });
 
   it("falls back to the finest interval when pixelsPerMm is not yet known", () => {
-    expect(getMinorGridIntervalMm("cm", 0)).toBeCloseTo(10);
-    expect(getMinorGridIntervalMm("cm", Number.NaN)).toBeCloseTo(10);
+    // Finest metric entry is now 0.5cm (5mm) since precision.ts added a
+    // sub-centimeter entry for close-in elevation work.
+    expect(getMinorGridIntervalMm("cm", 0)).toBeCloseTo(5);
+    expect(getMinorGridIntervalMm("cm", Number.NaN)).toBeCloseTo(5);
   });
 
   it("uses the metric table for cm and m, independent of relabeling imperial", () => {
     const metricInterval = getMinorGridIntervalMm("cm", 0.05);
     expect(metricInterval).toBeCloseTo(mToMm(1));
+  });
+
+  it("selects the finer sub-unit entries once zoomed in close enough", () => {
+    // 0.5" at 100px/mm is 1270px on screen, comfortably above the 32px
+    // target, so the newly added finest imperial entry should win.
+    expect(getMinorGridIntervalMm("ft", 100)).toBeCloseTo(inchesToMm(0.5));
+
+    // 0.5cm at 100px/mm is 500px on screen, likewise above target, so the
+    // newly added finest metric entry should win.
+    expect(getMinorGridIntervalMm("cm", 100)).toBeCloseTo(cmToMm(0.5));
   });
 });
 
@@ -66,5 +79,35 @@ describe("getPixelsPerMm", () => {
   it("returns 0 for an unmeasured container or degenerate viewBox", () => {
     expect(getPixelsPerMm({ width: 0, height: 0 }, { width: 100, height: 100 })).toBe(0);
     expect(getPixelsPerMm({ width: 100, height: 100 }, { width: 0, height: 0 })).toBe(0);
+  });
+});
+
+describe("getGridPatternPhaseMm", () => {
+  it("returns 0 when the anchor already falls on the coordinate-space origin", () => {
+    expect(getGridPatternPhaseMm(0, 100)).toBe(0);
+  });
+
+  it("reduces an anchor past a tile boundary to its in-tile remainder", () => {
+    // A wall-height anchor of 2700mm against a 500mm interval: the pattern
+    // only needs to be shifted by the leftover 200mm, since any whole
+    // number of tiles is an anchoring no-op.
+    expect(getGridPatternPhaseMm(2700, 500)).toBeCloseTo(200);
+  });
+
+  it("wraps a negative anchor into the positive [0, spacing) range", () => {
+    // JS `%` keeps the sign of the dividend, so a naive `% spacing` on a
+    // negative anchor would return a negative pattern offset — SVG accepts
+    // that, but it points the phase the wrong way, off by one full tile.
+    expect(getGridPatternPhaseMm(-100, 300)).toBeCloseTo(200);
+  });
+
+  it("is a no-op for an anchor that is an exact multiple of the spacing", () => {
+    expect(getGridPatternPhaseMm(1000, 250)).toBe(0);
+  });
+
+  it("falls back to 0 for a non-finite anchor or non-positive spacing", () => {
+    expect(getGridPatternPhaseMm(Number.NaN, 100)).toBe(0);
+    expect(getGridPatternPhaseMm(100, 0)).toBe(0);
+    expect(getGridPatternPhaseMm(100, -50)).toBe(0);
   });
 });

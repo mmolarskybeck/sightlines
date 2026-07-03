@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
-  computeDraggedLengthMm,
+  computeEdgeSnappedLengthMm,
+  getMovingWallEdgeWorldPointMm,
+  proposeMovingEdgePointMm,
   type Vector2
 } from "../../domain/geometry/dragResize";
 import { resizeWallPreservingAngles } from "../../domain/geometry/editRoom";
 import { getFloorBounds } from "../../domain/geometry/walls";
 import type { Project } from "../../domain/project";
+import { getGridSnapTargets } from "../../domain/snapping/gridSnapTargets";
+import { resolveSnap, type Guide, type SnapTarget } from "../../domain/snapping/resolveSnap";
 import {
   getMajorGridIntervalMm,
   getMinorGridIntervalMm,
@@ -16,6 +20,7 @@ import { GridOverlay } from "./GridOverlay";
 import { RoomResizeHandles, type ResizeHandleTarget } from "./RoomResizeHandles";
 
 const HANDLE_SCREEN_SIZE_PX = 16;
+const SNAP_THRESHOLD_PX = 10;
 
 type DragState = {
   roomId: string;
@@ -23,19 +28,28 @@ type DragState = {
   axis: Vector2;
   startLengthMm: number;
   startPointerMm: Vector2;
+  // The wall's own moving edge (its endVertexId, in floor coordinates) at
+  // drag start — snapping targets this point, not the pointer, so wherever
+  // inside the handle the user grabbed never leaks into the committed
+  // length. See getMovingWallEdgeWorldPointMm.
+  edgeStartMm: Vector2;
   previewLengthMm: number;
+  previousSnapTargetId?: string;
+  activeGuides: Guide[];
 };
 
 export function PlanView({
   gridVisible,
   onCommitWallLength,
   project,
-  selectedWallId
+  selectedWallId,
+  snapToGrid
 }: {
   gridVisible: boolean;
   onCommitWallLength: (wallId: string, lengthMm: number) => Promise<void>;
   project: Project;
   selectedWallId: string | null;
+  snapToGrid: boolean;
 }) {
   const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -55,6 +69,13 @@ export function PlanView({
   const minorGridMm = getMinorGridIntervalMm(project.unit, pixelsPerMm);
   const majorGridMm = getMajorGridIntervalMm(project.unit, minorGridMm);
   const handleSizeMm = pixelsPerMm > 0 ? HANDLE_SCREEN_SIZE_PX / pixelsPerMm : 0;
+  const snapThresholdMm = pixelsPerMm > 0 ? SNAP_THRESHOLD_PX / pixelsPerMm : 0;
+  const gridSnapTargets = getGridSnapTargets(minorGridMm, {
+    minXMm: viewBoxBounds.x,
+    maxXMm: viewBoxBounds.x + viewBoxBounds.width,
+    minYMm: viewBoxBounds.y,
+    maxYMm: viewBoxBounds.y + viewBoxBounds.height
+  });
 
   const displayedProject =
     drag !== null
@@ -85,17 +106,51 @@ export function PlanView({
       const pointerMm = toSvgMm(event.clientX, event.clientY);
       if (!pointerMm) return;
 
-      const deltaMm: Vector2 = {
-        xMm: pointerMm.xMm - current.startPointerMm.xMm,
-        yMm: pointerMm.yMm - current.startPointerMm.yMm
-      };
-      const previewLengthMm = computeDraggedLengthMm(
+      // Snap the wall's moving edge, not the raw pointer — the handle can be
+      // grabbed anywhere within its 16px hit target, and that grab offset
+      // must not leak into the committed length even when the pointer lands
+      // exactly on a grid line.
+      const proposedEdgeMm = proposeMovingEdgePointMm(
+        current.edgeStartMm,
+        current.startPointerMm,
+        pointerMm
+      );
+
+      // A handle only ever moves along its target wall's own axis, so only
+      // grid lines perpendicular to that axis are relevant — snapping the
+      // other coordinate would be meaningless for this drag and could
+      // trigger on incidental hand-tremor alignment.
+      let snappedEdgeMm = proposedEdgeMm;
+      let snapTargetId: string | undefined;
+      let activeGuides: Guide[] = [];
+
+      if (snapToGrid) {
+        const isXAxis = Math.abs(current.axis.xMm) >= Math.abs(current.axis.yMm);
+        const relevantTargets: SnapTarget[] = gridSnapTargets.filter(
+          (target) => target.axis === (isXAxis ? "x" : "y")
+        );
+        const snapResult = resolveSnap(proposedEdgeMm, relevantTargets, {
+          thresholdMm: snapThresholdMm,
+          previousSnapTargetId: current.previousSnapTargetId
+        });
+
+        snappedEdgeMm = snapResult.point;
+        snapTargetId = snapResult.snapTargetId;
+        activeGuides = snapResult.activeGuides;
+      }
+
+      const previewLengthMm = computeEdgeSnappedLengthMm(
         current.startLengthMm,
-        deltaMm,
+        current.edgeStartMm,
+        snappedEdgeMm,
         current.axis
       );
 
-      setDrag((state) => (state ? { ...state, previewLengthMm } : state));
+      setDrag((state) =>
+        state
+          ? { ...state, previewLengthMm, previousSnapTargetId: snapTargetId, activeGuides }
+          : state
+      );
     }
 
     function onPointerUp() {
@@ -118,6 +173,11 @@ export function PlanView({
     // Subscribed once per drag gesture (keyed on whether a drag is active,
     // not on every in-flight preview update) — onPointerMove/onPointerUp
     // read the latest state via dragRef rather than closing over `drag`.
+    // gridSnapTargets/snapToGrid/snapThresholdMm are captured by closure
+    // here too: they derive from the committed project's bounds and grid
+    // interval, which can't change mid-drag (the live preview never
+    // rewrites viewBoxBounds), so they're safe to leave out of the deps
+    // rather than resubscribing on every render.
   }, [drag !== null, onCommitWallLength]);
 
   useEffect(() => {
@@ -146,7 +206,10 @@ export function PlanView({
       axis: target.axis,
       startLengthMm: target.startLengthMm,
       startPointerMm: { xMm: startPointerMm.x, yMm: startPointerMm.y },
-      previewLengthMm: target.startLengthMm
+      edgeStartMm: getMovingWallEdgeWorldPointMm(project, target.targetWallId),
+      previewLengthMm: target.startLengthMm,
+      previousSnapTargetId: undefined,
+      activeGuides: []
     });
   }
 
@@ -213,6 +276,19 @@ export function PlanView({
               />
             ) : null}
           </g>
+        ))}
+        {drag?.activeGuides.map((guide) => (
+          <line
+            className="snap-guide"
+            key={guide.id}
+            x1={guide.axis === "x" ? guide.positionMm : viewBoxBounds.x}
+            y1={guide.axis === "y" ? guide.positionMm : viewBoxBounds.y}
+            x2={guide.axis === "x" ? guide.positionMm : viewBoxBounds.x + viewBoxBounds.width}
+            y2={
+              guide.axis === "y" ? guide.positionMm : viewBoxBounds.y + viewBoxBounds.height
+            }
+            vectorEffect="non-scaling-stroke"
+          />
         ))}
       </svg>
     </div>

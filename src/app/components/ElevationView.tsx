@@ -57,6 +57,11 @@ export function ElevationView({
             height={wallHeightMm}
             majorSpacingMm={majorGridMm}
             minorSpacingMm={minorGridMm}
+            // x=0 is the wall start (already the pattern default); y is
+            // anchored to wallHeightMm so lines land counting up from
+            // floor level (svg y = wallHeightMm) rather than down from the
+            // wall top, per docs/plan.md §5.5.
+            originYMm={wallHeightMm}
             width={wallLengthMm}
             x={0}
             y={0}
