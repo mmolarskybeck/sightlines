@@ -22,11 +22,16 @@ import type { DisplayUnit, Project } from "../domain/project";
 import { formatLength } from "../domain/units/length";
 import { getGridPrecisionFloorOptionsMm } from "../domain/units/precision";
 import { DataView } from "./components/DataView";
+import { ElevationEmptyState } from "./components/ElevationEmptyState";
 import { ElevationView } from "./components/ElevationView";
 import { PlanView } from "./components/PlanView";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { RoomDimensionFields } from "./components/RoomDimensionFields";
 import { WallInspector, type WallDimensionLink } from "./components/WallInspector";
+import {
+  useStoragePersistence,
+  type StoragePersistenceState
+} from "./hooks/useStoragePersistence";
 import { useViewPreferences } from "./hooks/useViewPreferences";
 import {
   exportProjectJson,
@@ -71,6 +76,7 @@ export function App() {
     toggleSnapToGrid,
     setGridPrecisionFloorMm
   } = useViewPreferences();
+  const storagePersistence = useStoragePersistence();
 
   useEffect(() => {
     void boot();
@@ -258,10 +264,7 @@ export function App() {
 
           <div className="storage-note">
             <Save aria-hidden="true" size={16} />
-            <span>
-              Saved locally in this browser. Export a backup for long-term
-              safekeeping.
-            </span>
+            <span>{getStorageNoteCopy(storagePersistence)}</span>
           </div>
         </aside>
 
@@ -344,11 +347,7 @@ export function App() {
                 unit={project.unit}
               />
             ) : (
-              <div className="drawing-surface-empty">
-                <p className="empty-copy">
-                  Add a room and select a wall to see its elevation.
-                </p>
-              </div>
+              <ElevationEmptyState hasRooms={project.floor.rooms.length > 0} />
             )
           ) : null}
           {viewMode === "data" ? <DataView json={exportProjectJson(project)} /> : null}
@@ -582,6 +581,24 @@ function StatusBadge({ state }: { state: "idle" | "saving" | "saved" | "error" }
           : "Idle";
 
   return <span className={`status-badge ${state}`}>{label}</span>;
+}
+
+// "granted" covers both an already-durable store and a fresh grant this
+// session; either way the browser has committed not to evict it under
+// storage pressure, so the note can say so instead of just nudging toward
+// a backup. "pending" (the check hasn't resolved yet) keeps the original
+// neutral copy rather than flashing a stronger warning that may immediately
+// flip to reassurance.
+function getStorageNoteCopy(state: StoragePersistenceState): string {
+  if (state === "granted") {
+    return "Saved locally in this browser with durable storage — the browser won't clear it under storage pressure. Export a backup for long-term safekeeping.";
+  }
+
+  if (state === "denied" || state === "unsupported") {
+    return "Saved locally in this browser, which may clear it under storage pressure. Export a backup regularly for long-term safekeeping.";
+  }
+
+  return "Saved locally in this browser. Export a backup for long-term safekeeping.";
 }
 
 function getWallDimensionLink(
