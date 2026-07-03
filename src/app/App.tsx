@@ -4,8 +4,8 @@ import {
   FileJson,
   Grid2X2,
   Grid3X3,
-  ListChecks,
   Magnet,
+  Move,
   Plus,
   Redo2,
   Ruler,
@@ -19,8 +19,10 @@ import {
   getRectangleRoomDimensions,
 } from "../domain/geometry/walls";
 import type { DisplayUnit, Project } from "../domain/project";
+import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import { formatLength } from "../domain/units/length";
 import { getGridPrecisionFloorOptionsMm } from "../domain/units/precision";
+import { ChecklistPanel } from "./components/ChecklistPanel";
 import { DataView } from "./components/DataView";
 import { ElevationEmptyState } from "./components/ElevationEmptyState";
 import { ElevationView } from "./components/ElevationView";
@@ -40,6 +42,20 @@ import {
   useAppStore
 } from "./store";
 
+// A second, independent IndexedDbAssetRepository instance dedicated to
+// reads (thumbnail lookups for the checklist). It talks to the same
+// IndexedDB database as the one store.ts constructs for writes — the
+// repository is a stateless wrapper around the browser API, not something
+// that needs a single shared instance — so this avoids exporting store.ts's
+// internals just to hand a `getBlob` down to one panel. getBlob is declared
+// at module scope (not inside the component) so it's a stable function
+// reference across renders, which keeps useAssetImageUrls from refetching
+// on every App re-render.
+const assetRepository = new IndexedDbAssetRepository();
+function getAssetBlob(key: string): Promise<Blob> {
+  return assetRepository.getBlob(key);
+}
+
 export function App() {
   const {
     project,
@@ -51,6 +67,8 @@ export function App() {
     lastGeometryEdit,
     undoStack,
     redoStack,
+    libraryArtworks,
+    intakeState,
     boot,
     setViewMode,
     selectWall,
@@ -65,7 +83,9 @@ export function App() {
     listProjectSummaries,
     openProject,
     createProject,
-    deleteProject
+    deleteProject,
+    addArtworksFromFiles,
+    removeArtworkFromChecklist
   } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const {
@@ -262,6 +282,15 @@ export function App() {
             })}
           </nav>
 
+          <ChecklistPanel
+            getBlob={getAssetBlob}
+            intakeState={intakeState}
+            libraryArtworks={libraryArtworks}
+            project={project}
+            onAddArtworksFromFiles={addArtworksFromFiles}
+            onRemoveArtworkFromChecklist={removeArtworkFromChecklist}
+          />
+
           <div className="storage-note">
             <Save aria-hidden="true" size={16} />
             <span>{getStorageNoteCopy(storagePersistence)}</span>
@@ -380,12 +409,13 @@ export function App() {
           )}
 
           <div className="next-panel">
-            <ListChecks aria-hidden="true" size={18} />
+            <Move aria-hidden="true" size={18} />
             <div>
-              <h3>Checklist coming next</h3>
+              <h3>Placement coming next</h3>
               <p>
-                The domain model already separates library records, checklist
-                membership, and wall placement.
+                Dragging checklist works onto a wall in elevation is the next
+                milestone — the domain model already separates checklist
+                membership from wall placement, so this panel is ready for it.
               </p>
             </div>
           </div>

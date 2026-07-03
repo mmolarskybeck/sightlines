@@ -1,10 +1,7 @@
 import { migrateProject, parseProject } from "../schema/projectSchema";
 import type { Project, ProjectSummary } from "../project";
 import type { ProjectRepository } from "./projectRepository";
-
-const DB_NAME = "sightlines";
-const DB_VERSION = 1;
-const PROJECT_STORE = "projects";
+import { openDatabase, PROJECT_STORE, requestToPromise, transactionDone } from "./database";
 
 export class IndexedDbProjectRepository implements ProjectRepository {
   async load(id: string): Promise<Project> {
@@ -75,36 +72,4 @@ function toProjectSummary(value: unknown): ProjectSummary | null {
     title: typeof record.title === "string" ? record.title : "Untitled",
     updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : ""
   };
-}
-
-function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onupgradeneeded = () => {
-      const db = request.result;
-
-      if (!db.objectStoreNames.contains(PROJECT_STORE)) {
-        db.createObjectStore(PROJECT_STORE, { keyPath: "id" });
-      }
-    };
-
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
-  });
-}
-
-function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
-  });
-}
-
-function transactionDone(transaction: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
-    transaction.onabort = () => reject(transaction.error);
-    transaction.onerror = () => reject(transaction.error);
-    transaction.oncomplete = () => resolve();
-  });
 }

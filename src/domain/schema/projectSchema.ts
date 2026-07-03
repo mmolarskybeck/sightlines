@@ -3,7 +3,7 @@ import { CURRENT_SCHEMA_VERSION, type Project } from "../project";
 
 const displayUnitSchema = z.enum(["in", "ft", "cm", "m"]);
 
-const dimensionsSchema = z.object({
+export const dimensionsSchema = z.object({
   widthMm: z.number().positive().optional(),
   heightMm: z.number().positive().optional(),
   depthMm: z.number().positive().optional(),

@@ -1,4 +1,6 @@
 export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_ARTWORK_SCHEMA_VERSION = 1;
+export const CURRENT_ASSET_SCHEMA_VERSION = 1;
 
 export type DisplayUnit = "in" | "ft" | "cm" | "m";
 
@@ -21,6 +23,23 @@ export type Artwork = {
   dimensions: Dimensions;
   assetId?: string;
   metadata: Record<string, string | number | boolean>;
+};
+
+// Tiered image storage (docs/plan.md §4.5) — original/display/thumbnail are
+// keys into a blob store (see repositories/assetRepository.ts), not the
+// blobs themselves, so Asset records stay small and IndexedDB-friendly.
+export type Asset = {
+  id: string;
+  schemaVersion: number;
+  mimeType: string;
+  originalFilename?: string;
+  originalKey: string;
+  displayKey: string;
+  thumbnailKey: string;
+  widthPx?: number;
+  heightPx?: number;
+  byteSize?: number;
+  sha256?: string;
 };
 
 export type Project = {

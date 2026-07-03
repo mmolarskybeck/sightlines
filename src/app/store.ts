@@ -1,11 +1,26 @@
 import { create } from "zustand";
+import { createBrowserImageProcessor } from "../domain/assets/browserImageProcessor";
+import { titleFromFilename, validateImageFile, type ImageProcessor } from "../domain/assets/imageIntake";
 import { createNextRectangleRoom } from "../domain/geometry/createRoom";
 import { resizeWallPreservingAngles } from "../domain/geometry/editRoom";
 import { getWallsWithGeometry } from "../domain/geometry/walls";
 import { createBlankProject } from "../domain/newProject";
 import type { PlacementWarning } from "../domain/placement/validatePlacement";
 import { validateChangedWallPlacements } from "../domain/placement/validatePlacement";
-import type { DisplayUnit, Project, ProjectSummary, Wall } from "../domain/project";
+import {
+  CURRENT_ARTWORK_SCHEMA_VERSION,
+  CURRENT_ASSET_SCHEMA_VERSION,
+  type Artwork,
+  type Asset,
+  type DisplayUnit,
+  type Project,
+  type ProjectSummary,
+  type Wall
+} from "../domain/project";
+import type { ArtworkLibraryRepository } from "../domain/repositories/artworkLibraryRepository";
+import { assetBlobKey, type AssetRepository } from "../domain/repositories/assetRepository";
+import { IndexedDbArtworkLibraryRepository } from "../domain/repositories/indexedDbArtworkLibraryRepository";
+import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import { IndexedDbProjectRepository } from "../domain/repositories/indexedDbProjectRepository";
 import type { ProjectRepository } from "../domain/repositories/projectRepository";
 import { createSampleProject } from "../domain/sample/sampleProject";
@@ -36,6 +51,8 @@ type AppState = {
   lastGeometryEdit: GeometryEditInfo | null;
   undoStack: EditEntry[];
   redoStack: EditEntry[];
+  libraryArtworks: Artwork[];
+  intakeState: "idle" | "processing";
   boot: () => Promise<void>;
   setViewMode: (viewMode: ViewMode) => void;
   selectWall: (wallId: string) => void;
@@ -51,15 +68,24 @@ type AppState = {
   openProject: (id: string) => Promise<void>;
   createProject: (title: string) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
+  addArtworksFromFiles: (files: File[]) => Promise<void>;
+  removeArtworkFromChecklist: (artworkId: string) => Promise<void>;
 };
 
-export function createAppStore(repository: ProjectRepository) {
+export type AppStoreDeps = {
+  projectRepository: ProjectRepository;
+  artworkLibraryRepository: ArtworkLibraryRepository;
+  assetRepository: AssetRepository;
+  imageProcessor: ImageProcessor;
+};
+
+export function createAppStore(deps: AppStoreDeps) {
   return create<AppState>((set, get) => {
     async function persist(project: Project) {
       set({ saveState: "saving", error: null });
 
       try {
-        await repository.save(project);
+        await deps.projectRepository.save(project);
         set({ saveState: "saved" });
       } catch (error) {
         set({
@@ -124,24 +150,44 @@ export function createAppStore(repository: ProjectRepository) {
       lastGeometryEdit: null,
       undoStack: [],
       redoStack: [],
+      libraryArtworks: [],
+      intakeState: "idle",
 
       async boot() {
+        // The library is a secondary document from the project's point of
+        // view (docs/plan.md §4.1) — a failure to load it shouldn't take
+        // down boot the way a failed project load does. Keep it empty and
+        // say so calmly, but only if nothing more important already needs
+        // to be surfaced.
+        let libraryArtworks: Artwork[] = [];
+        let libraryError: string | null = null;
         try {
-          const summaries = await repository.list();
+          libraryArtworks = await deps.artworkLibraryRepository.list();
+        } catch (error) {
+          libraryError = `Could not load the artwork library (${
+            error instanceof Error ? error.message : "unknown error"
+          }). Your project is unaffected — try reloading to pick the library back up.`;
+        }
+
+        try {
+          const summaries = await deps.projectRepository.list();
           const project = summaries[0]
-            ? await repository.load(summaries[0].id)
+            ? await deps.projectRepository.load(summaries[0].id)
             : createSampleProject();
 
           if (!summaries[0]) {
-            await repository.save(project);
+            await deps.projectRepository.save(project);
           }
 
-          setDocument(project, { saveState: "saved" });
+          setDocument(project, { saveState: "saved", libraryArtworks, error: libraryError });
         } catch (error) {
           // Keep the app usable with an in-memory sample, but say plainly that
           // the saved project could not load — never silently substitute.
+          // The project load failure is the more important message here, so
+          // it wins over any calmer library-load note.
           setDocument(createSampleProject(), {
             saveState: "error",
+            libraryArtworks,
             error: `Could not load the saved project (${
               error instanceof Error ? error.message : "unknown error"
             }). Showing an unsaved sample instead — your data is still in browser storage.`
@@ -283,7 +329,7 @@ export function createAppStore(repository: ProjectRepository) {
 
       async listProjectSummaries() {
         try {
-          return await repository.list();
+          return await deps.projectRepository.list();
         } catch {
           return [];
         }
@@ -295,7 +341,7 @@ export function createAppStore(repository: ProjectRepository) {
         set({ saveState: "saving", error: null });
 
         try {
-          const project = await repository.load(id);
+          const project = await deps.projectRepository.load(id);
           setDocument(project, { viewMode: "plan", saveState: "saved" });
         } catch (error) {
           set({
@@ -312,7 +358,7 @@ export function createAppStore(repository: ProjectRepository) {
         set({ saveState: "saving", error: null });
 
         try {
-          await repository.save(project);
+          await deps.projectRepository.save(project);
           setDocument(project, { viewMode: "plan", saveState: "saved" });
         } catch (error) {
           set({
@@ -328,7 +374,7 @@ export function createAppStore(repository: ProjectRepository) {
         const wasOpen = get().project?.id === id;
 
         try {
-          await repository.delete(id);
+          await deps.projectRepository.delete(id);
         } catch (error) {
           set({
             saveState: "error",
@@ -344,19 +390,143 @@ export function createAppStore(repository: ProjectRepository) {
         // The open project just disappeared out from under the user —
         // fall back to another saved project, or start a fresh one so the
         // app never sits on a document that no longer exists.
-        const summaries = await repository.list();
+        const summaries = await deps.projectRepository.list();
 
         if (summaries[0]) {
           await get().openProject(summaries[0].id);
         } else {
           await get().createProject("Untitled Exhibition");
         }
+      },
+
+      async addArtworksFromFiles(files) {
+        const project = get().project;
+        if (!project || files.length === 0) return;
+
+        set({ intakeState: "processing", error: null });
+
+        const newArtworkIds: string[] = [];
+        const failures: string[] = [];
+
+        try {
+          for (const file of files) {
+            const validation = validateImageFile(file);
+            if (!validation.ok) {
+              failures.push(validation.reason);
+              continue;
+            }
+
+            let processed;
+            try {
+              processed = await deps.imageProcessor.process(file);
+            } catch (error) {
+              failures.push(
+                error instanceof Error ? error.message : `${file.name} could not be processed.`
+              );
+              continue;
+            }
+
+            const assetId = crypto.randomUUID();
+            const asset: Asset = {
+              id: assetId,
+              schemaVersion: CURRENT_ASSET_SCHEMA_VERSION,
+              mimeType: file.type,
+              originalFilename: file.name,
+              originalKey: assetBlobKey(assetId, "original"),
+              displayKey: assetBlobKey(assetId, "display"),
+              thumbnailKey: assetBlobKey(assetId, "thumbnail"),
+              widthPx: processed.widthPx,
+              heightPx: processed.heightPx,
+              byteSize: processed.byteSize,
+              sha256: processed.sha256
+            };
+
+            const artwork: Artwork = {
+              id: crypto.randomUUID(),
+              schemaVersion: CURRENT_ARTWORK_SCHEMA_VERSION,
+              title: titleFromFilename(file.name),
+              dimensions: { status: "unknown" },
+              assetId,
+              metadata: {}
+            };
+
+            try {
+              await deps.assetRepository.saveAsset(asset, {
+                original: processed.original,
+                display: processed.display,
+                thumbnail: processed.thumbnail
+              });
+              await deps.artworkLibraryRepository.save(artwork);
+              newArtworkIds.push(artwork.id);
+            } catch (error) {
+              failures.push(
+                error instanceof Error ? error.message : `${file.name} could not be saved.`
+              );
+            }
+          }
+
+          // Library/asset writes happen outside applyEdit, on purpose: they
+          // are not part of the undoable document. Undoing this batch must
+          // only remove checklist membership, never delete the library
+          // record it points at — the same artwork may be shared with
+          // another project or a future tour stop (docs/plan.md §4.1).
+          if (newArtworkIds.length > 0) {
+            set({ libraryArtworks: await deps.artworkLibraryRepository.list() });
+
+            const label =
+              newArtworkIds.length === 1 ? "Add artwork" : `Add ${newArtworkIds.length} artworks`;
+
+            await applyEdit(label, (current) => ({
+              ...current,
+              checklistArtworkIds: [...current.checklistArtworkIds, ...newArtworkIds]
+            }));
+          }
+
+          if (failures.length > 0) {
+            set({
+              error: `${failures.length} of ${files.length} image${
+                files.length === 1 ? "" : "s"
+              } could not be added: ${failures.join(" ")}`
+            });
+          }
+        } finally {
+          set({ intakeState: "idle" });
+        }
+      },
+
+      async removeArtworkFromChecklist(artworkId) {
+        const project = get().project;
+        if (!project) return;
+
+        const isChecklisted = project.checklistArtworkIds.includes(artworkId);
+        const isPlaced = project.wallObjects.some(
+          (wallObject) => wallObject.kind === "artwork" && wallObject.artworkId === artworkId
+        );
+        if (!isChecklisted && !isPlaced) return;
+
+        // Removing from a checklist unlinks it from this project only — the
+        // library record is untouched (docs/plan.md §4.1). Also drops any
+        // placement referencing this artwork, defensively: placements don't
+        // exist in the UI yet, but a checklist entry with a dangling
+        // placement would be an invalid state to leave behind.
+        await applyEdit("Remove from checklist", (current) => ({
+          ...current,
+          checklistArtworkIds: current.checklistArtworkIds.filter((id) => id !== artworkId),
+          wallObjects: current.wallObjects.filter(
+            (wallObject) => !(wallObject.kind === "artwork" && wallObject.artworkId === artworkId)
+          )
+        }));
       }
     };
   });
 }
 
-export const useAppStore = createAppStore(new IndexedDbProjectRepository());
+export const useAppStore = createAppStore({
+  projectRepository: new IndexedDbProjectRepository(),
+  artworkLibraryRepository: new IndexedDbArtworkLibraryRepository(),
+  assetRepository: new IndexedDbAssetRepository(),
+  imageProcessor: createBrowserImageProcessor()
+});
 
 export function exportProjectJson(project: Project): string {
   return JSON.stringify(project, null, 2);

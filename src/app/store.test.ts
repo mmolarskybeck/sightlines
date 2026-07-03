@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import type { ImageProcessor, ProcessedImage } from "../domain/assets/imageIntake";
 import { CURRENT_SCHEMA_VERSION } from "../domain/project";
-import type { Project, ProjectSummary } from "../domain/project";
+import type { Artwork, Asset, Project, ProjectSummary } from "../domain/project";
+import type { ArtworkLibraryRepository } from "../domain/repositories/artworkLibraryRepository";
+import type { AssetRepository } from "../domain/repositories/assetRepository";
 import type { ProjectRepository } from "../domain/repositories/projectRepository";
 import { createSampleProject } from "../domain/sample/sampleProject";
+import { parseArtwork, parseAsset } from "../domain/schema/artworkSchema";
 import { MAX_IMPORT_JSON_LENGTH, parseProject } from "../domain/schema/projectSchema";
+import type { AppStoreDeps } from "./store";
 import { createAppStore, exportProjectJson, getSelectedWall } from "./store";
 
 class InMemoryProjectRepository implements ProjectRepository {
@@ -31,13 +36,122 @@ class InMemoryProjectRepository implements ProjectRepository {
   }
 }
 
+// Validates on save the same way IndexedDbArtworkLibraryRepository does
+// (parseArtwork), so a store bug that writes a malformed record fails the
+// test the same way it would fail against the real repository.
+class InMemoryArtworkLibraryRepository implements ArtworkLibraryRepository {
+  artworks = new Map<string, Artwork>();
+
+  async list(): Promise<Artwork[]> {
+    return [...this.artworks.values()];
+  }
+
+  async get(id: string): Promise<Artwork> {
+    const artwork = this.artworks.get(id);
+    if (!artwork) throw new Error(`Artwork not found: ${id}`);
+    return artwork;
+  }
+
+  async save(artwork: Artwork): Promise<void> {
+    parseArtwork(artwork);
+    this.artworks.set(artwork.id, artwork);
+  }
+
+  async delete(id: string): Promise<void> {
+    this.artworks.delete(id);
+  }
+}
+
+// Same validate-on-save shape as IndexedDbAssetRepository, backed by plain
+// maps instead of IndexedDB — real Blob instances flow through unchanged so
+// tests can assert on their content.
+class InMemoryAssetRepository implements AssetRepository {
+  assets = new Map<string, Asset>();
+  blobs = new Map<string, Blob>();
+
+  async saveAsset(
+    asset: Asset,
+    blobs: { original: Blob; display: Blob; thumbnail: Blob }
+  ): Promise<void> {
+    parseAsset(asset);
+    this.assets.set(asset.id, asset);
+    this.blobs.set(asset.originalKey, blobs.original);
+    this.blobs.set(asset.displayKey, blobs.display);
+    this.blobs.set(asset.thumbnailKey, blobs.thumbnail);
+  }
+
+  async getAsset(id: string): Promise<Asset> {
+    const asset = this.assets.get(id);
+    if (!asset) throw new Error(`Asset not found: ${id}`);
+    return asset;
+  }
+
+  async getBlob(key: string): Promise<Blob> {
+    const blob = this.blobs.get(key);
+    if (!blob) throw new Error(`Asset blob not found: ${key}`);
+    return blob;
+  }
+
+  async delete(id: string): Promise<void> {
+    this.assets.delete(id);
+  }
+}
+
+// A fake processor that skips real image decoding entirely (jsdom has no
+// Canvas/ImageBitmap support) — it returns tiny deterministic blobs and
+// metadata instead, and can be told to throw for specific filenames to
+// exercise the store's per-file failure containment.
+class FakeImageProcessor implements ImageProcessor {
+  processedFilenames: string[] = [];
+
+  constructor(private readonly failingFilenames: ReadonlySet<string> = new Set()) {}
+
+  async process(file: File): Promise<ProcessedImage> {
+    this.processedFilenames.push(file.name);
+
+    if (this.failingFilenames.has(file.name)) {
+      throw new Error(`${file.name} could not be read as an image.`);
+    }
+
+    return {
+      widthPx: 100,
+      heightPx: 100,
+      sha256: `sha256-${file.name}`,
+      byteSize: file.size,
+      original: new Blob([`original:${file.name}`]),
+      display: new Blob([`display:${file.name}`]),
+      thumbnail: new Blob([`thumbnail:${file.name}`])
+    };
+  }
+}
+
+function makeImageFile(name: string, type = "image/jpeg"): File {
+  return new File([new Uint8Array([1, 2, 3, 4])], name, { type });
+}
+
 describe("app store", () => {
   let repository: InMemoryProjectRepository;
+  let artworkLibraryRepository: InMemoryArtworkLibraryRepository;
+  let assetRepository: InMemoryAssetRepository;
+  let imageProcessor: FakeImageProcessor;
   let store: ReturnType<typeof createAppStore>;
+
+  function makeDeps(overrides: Partial<AppStoreDeps> = {}): AppStoreDeps {
+    return {
+      projectRepository: repository,
+      artworkLibraryRepository,
+      assetRepository,
+      imageProcessor,
+      ...overrides
+    };
+  }
 
   beforeEach(async () => {
     repository = new InMemoryProjectRepository();
-    store = createAppStore(repository);
+    artworkLibraryRepository = new InMemoryArtworkLibraryRepository();
+    assetRepository = new InMemoryAssetRepository();
+    imageProcessor = new FakeImageProcessor();
+    store = createAppStore(makeDeps());
     await store.getState().boot();
   });
 
@@ -244,7 +358,7 @@ describe("app store", () => {
       throw new Error("stored document failed validation");
     };
 
-    const failingStore = createAppStore(failing);
+    const failingStore = createAppStore(makeDeps({ projectRepository: failing }));
     await failingStore.getState().boot();
 
     const state = failingStore.getState();
@@ -337,4 +451,183 @@ describe("app store", () => {
     expect(state.project?.floor.rooms).toEqual([]);
     expect(repository.projects.size).toBe(1);
   });
+
+  describe("addArtworksFromFiles", () => {
+    it("uploads two files as two library records with three blobs each, in one undo entry", async () => {
+      const files = [makeImageFile("one.jpg"), makeImageFile("two.png", "image/png")];
+
+      await store.getState().addArtworksFromFiles(files);
+
+      const state = store.getState();
+      expect(state.error).toBeNull();
+      expect(state.intakeState).toBe("idle");
+      expect(state.undoStack).toHaveLength(1);
+      expect(state.undoStack[0].label).toBe("Add 2 artworks");
+      expect(artworkLibraryRepository.artworks.size).toBe(2);
+      expect(assetRepository.assets.size).toBe(2);
+      expect(state.libraryArtworks).toHaveLength(2);
+
+      const newIds = state.project!.checklistArtworkIds;
+      expect(newIds).toHaveLength(2);
+
+      for (const id of newIds) {
+        const artwork = artworkLibraryRepository.artworks.get(id)!;
+        expect(artwork.assetId).toBeDefined();
+        const asset = assetRepository.assets.get(artwork.assetId!)!;
+        expect(await assetRepository.getBlob(asset.originalKey)).toBeInstanceOf(Blob);
+        expect(await assetRepository.getBlob(asset.displayKey)).toBeInstanceOf(Blob);
+        expect(await assetRepository.getBlob(asset.thumbnailKey)).toBeInstanceOf(Blob);
+      }
+
+      const titles = newIds
+        .map((id) => artworkLibraryRepository.artworks.get(id)!.title)
+        .sort();
+      expect(titles).toEqual(["one", "two"]);
+    });
+
+    it("undo removes checklist membership but keeps the library records and assets; redo restores membership without duplicating them", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("keeper.jpg")]);
+
+      const afterUpload = store.getState();
+      const artworkId = afterUpload.project!.checklistArtworkIds[0];
+      expect(artworkLibraryRepository.artworks.size).toBe(1);
+      expect(assetRepository.assets.size).toBe(1);
+
+      await store.getState().undo();
+
+      const afterUndo = store.getState();
+      expect(afterUndo.project!.checklistArtworkIds).not.toContain(artworkId);
+      expect(artworkLibraryRepository.artworks.has(artworkId)).toBe(true);
+      expect(assetRepository.assets.size).toBe(1);
+
+      await store.getState().redo();
+
+      const afterRedo = store.getState();
+      expect(afterRedo.project!.checklistArtworkIds).toContain(artworkId);
+      expect(artworkLibraryRepository.artworks.size).toBe(1);
+      expect(assetRepository.assets.size).toBe(1);
+    });
+
+    it("contains a per-file validation failure: the good file is checklisted, the bad one is reported", async () => {
+      const goodFile = makeImageFile("good.jpg");
+      const badFile = makeImageFile("bad.gif", "image/gif");
+
+      await store.getState().addArtworksFromFiles([goodFile, badFile]);
+
+      const state = store.getState();
+      expect(state.intakeState).toBe("idle");
+      expect(state.undoStack).toHaveLength(1);
+      expect(state.project!.checklistArtworkIds).toHaveLength(1);
+      expect(artworkLibraryRepository.artworks.size).toBe(1);
+      expect(state.error).toMatch(/1 of 2 images could not be added/);
+      expect(state.error).toMatch(/bad\.gif/);
+      expect(state.error).toMatch(/not a supported image type/);
+
+      // The bad file never reached the processor at all.
+      expect(imageProcessor.processedFilenames).toEqual(["good.jpg"]);
+    });
+
+    it("contains a per-file processor failure: the good file is checklisted, the throwing one is reported", async () => {
+      imageProcessor = new FakeImageProcessor(new Set(["broken.jpg"]));
+      store = createAppStore(makeDeps());
+      await store.getState().boot();
+
+      const goodFile = makeImageFile("good.jpg");
+      const brokenFile = makeImageFile("broken.jpg");
+
+      await store.getState().addArtworksFromFiles([goodFile, brokenFile]);
+
+      const state = store.getState();
+      expect(state.intakeState).toBe("idle");
+      expect(state.undoStack).toHaveLength(1);
+      expect(state.project!.checklistArtworkIds).toHaveLength(1);
+      expect(artworkLibraryRepository.artworks.size).toBe(1);
+      expect(state.error).toMatch(/1 of 2 images could not be added/);
+      expect(state.error).toMatch(/broken\.jpg/);
+    });
+
+    it("is a no-op for an empty file list: no undo entry, no error", async () => {
+      const before = store.getState().project;
+
+      await store.getState().addArtworksFromFiles([]);
+
+      const state = store.getState();
+      expect(state.project).toBe(before);
+      expect(state.undoStack).toHaveLength(0);
+      expect(state.error).toBeNull();
+      expect(state.intakeState).toBe("idle");
+    });
+
+    it("is a no-op when no project is open", async () => {
+      const freshStore = createAppStore(makeDeps());
+
+      await freshStore.getState().addArtworksFromFiles([makeImageFile("orphan.jpg")]);
+
+      expect(artworkLibraryRepository.artworks.size).toBe(0);
+      expect(freshStore.getState().project).toBeNull();
+    });
+  });
+
+  describe("removeArtworkFromChecklist", () => {
+    it("removes checklist membership and any artwork wallObjects, but leaves the library record intact", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+
+      // Defensive coverage per docs/plan.md §4.1 — placements don't exist in
+      // the UI yet, but the action should still clean up a dangling one.
+      await applyPlacementDirectly(repository, store, artworkId);
+
+      await store.getState().removeArtworkFromChecklist(artworkId);
+
+      const state = store.getState();
+      expect(state.project!.checklistArtworkIds).not.toContain(artworkId);
+      expect(state.project!.wallObjects).toHaveLength(0);
+      expect(artworkLibraryRepository.artworks.has(artworkId)).toBe(true);
+      expect(assetRepository.assets.size).toBe(1);
+    });
+
+    it("is a no-op when the artwork is not on the checklist and not placed", async () => {
+      const before = store.getState().project;
+
+      await store.getState().removeArtworkFromChecklist("never-added");
+
+      const state = store.getState();
+      expect(state.project).toBe(before);
+      expect(state.undoStack).toHaveLength(0);
+    });
+  });
 });
+
+// Injects a wall placement directly into the current project, bypassing
+// applyEdit, purely to set up the "dangling placement" scenario for the
+// removeArtworkFromChecklist test above — there's no store action yet that
+// creates placements (docs/plan.md's placement UI is a later milestone).
+async function applyPlacementDirectly(
+  repository: InMemoryProjectRepository,
+  store: ReturnType<typeof createAppStore>,
+  artworkId: string
+): Promise<void> {
+  const project = store.getState().project!;
+  const wallId = getSelectedWall(project, store.getState().selectedWallId)?.id;
+  if (!wallId) throw new Error("Test setup requires a wall to place the artwork on.");
+
+  const updated: Project = {
+    ...project,
+    wallObjects: [
+      ...project.wallObjects,
+      {
+        id: "wall-object-test",
+        wallId,
+        kind: "artwork",
+        artworkId,
+        xMm: 0,
+        yMm: 0,
+        widthMm: 100,
+        heightMm: 100
+      }
+    ]
+  };
+
+  await repository.save(updated);
+  store.setState({ project: updated });
+}

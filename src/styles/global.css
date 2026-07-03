@@ -432,6 +432,88 @@ input:focus-visible {
   font-size: 0.82rem;
 }
 
+.checklist-panel {
+  margin-top: 22px;
+  padding: 10px;
+  border: 1px dashed transparent;
+  border-radius: var(--radius-md);
+}
+
+/* The whole panel — heading, input, and rows — is the drop target, so the
+   highlight goes on the section itself rather than a dedicated overlay. */
+.checklist-panel.drop-active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.intake-note {
+  color: var(--primary-strong);
+  font-weight: 650;
+}
+
+.checklist-list {
+  display: grid;
+  /* minmax(0) so the track can't grow to the rows' max-content — otherwise
+     long titles widen the list past the sidebar instead of ellipsizing. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checklist-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.checklist-row:hover {
+  background: var(--surface);
+}
+
+.checklist-thumb {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+  object-fit: cover;
+}
+
+.checklist-thumb.placeholder {
+  border: 1px solid var(--line);
+}
+
+.checklist-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.84rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checklist-title.missing {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.checklist-tag {
+  flex: 0 0 auto;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
 .canvas-column {
   display: flex;
   min-width: 0;
