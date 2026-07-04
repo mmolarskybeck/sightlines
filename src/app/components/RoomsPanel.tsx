@@ -5,6 +5,7 @@ import {
 } from "../../domain/geometry/walls";
 import type { Project } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
+import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
 import { RoomDimensionFields } from "./RoomDimensionFields";
 
 // The left workspace pane when the rail's Rooms & Walls selector is active —
@@ -26,6 +27,13 @@ export function RoomsPanel({
   onResizeWall: (wallId: string, lengthMm: number) => Promise<void>;
   onSelectWall: (wallId: string) => void;
 }) {
+  // Wall lengths read in the wall scope's unit (ft/m). RoomDimensionFields
+  // below keeps project.unit — it derives its own scopes internally.
+  const wallUnit = getScopeUnits(
+    unitSystemFromDisplayUnit(project.unit),
+    "wall"
+  ).displayUnit;
+
   return (
     <section className="rooms-panel" aria-label="Rooms and walls">
       <div className="panel-heading">
@@ -82,7 +90,7 @@ export function RoomsPanel({
                     onClick={() => onSelectWall(wall.id)}
                   >
                     <span>{wall.name}</span>
-                    <strong>{formatLength(wall.lengthMm, { unit: project.unit })}</strong>
+                    <strong>{formatLength(wall.lengthMm, { unit: wallUnit })}</strong>
                   </button>
                 ))}
               </div>

@@ -1567,14 +1567,23 @@ input:focus-visible {
 }
 
 .field-hint,
-.field-error {
+.field-error,
+.length-field-hint {
   margin: -2px 0 2px;
   font-size: 0.78rem;
   line-height: 1.4;
 }
 
-.field-hint {
+.field-hint,
+.length-field-hint {
   color: var(--muted);
+}
+
+/* Live unit-conversion preview (e.g. "→ 6' 8\"") shown while a LengthField is
+   being edited — same muted treatment as .field-hint, using tabular numerals
+   so the normalized value doesn't jitter as it updates. */
+.length-field-hint {
+  font-variant-numeric: tabular-nums;
 }
 
 .field-error {

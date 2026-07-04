@@ -21,6 +21,12 @@ import type { Artwork, ArtworkWallObject, DisplayUnit, OpeningWallObject, Projec
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import { formatLength } from "../domain/units/length";
 import { getGridPrecisionFloorOptionsMm } from "../domain/units/precision";
+import {
+  displayUnitForSystem,
+  getScopeUnits,
+  unitSystemFromDisplayUnit,
+  type UnitSystem
+} from "../domain/units/unitSystem";
 import { AppRail } from "./components/AppRail";
 import { ArtworkInspector } from "./components/ArtworkInspector";
 import { ChecklistPanel } from "./components/ChecklistPanel";
@@ -172,6 +178,12 @@ export function App() {
       </main>
     );
   }
+
+  // Scoped display units for read-only labels: a length reads in the unit
+  // natural to what it measures (walls in ft/m) rather than one global unit.
+  // The inspectors keep receiving project.unit and derive their own scopes.
+  const unitSystem = unitSystemFromDisplayUnit(project.unit);
+  const wallUnit = getScopeUnits(unitSystem, "wall").displayUnit;
 
   // A dangling selectedArtworkId (library record deleted out from under the
   // project) resolves to nothing here, so the inspector falls back to the
@@ -402,10 +414,10 @@ export function App() {
                   onClick={toggleAllowOverlappingPlacement}
                 />
               ) : null}
-              <UnitSelect
+              <UnitSystemToggle
                 disabled={viewMode === "data"}
-                unit={project.unit}
-                onChange={setUnit}
+                system={unitSystem}
+                onChange={(system) => setUnit(displayUnitForSystem(system))}
               />
             </div>
           </div>
@@ -439,7 +451,7 @@ export function App() {
                 selectedArtworkId={selectedArtworkId}
                 selectedOpeningId={selectedOpeningId}
                 snapToGrid={snapToGrid}
-                unit={project.unit}
+                unit={wallUnit}
                 wallHeightMm={selectedWall.heightMm}
                 wallId={selectedWall.id}
                 wallLengthMm={selectedWall.lengthMm}
@@ -668,33 +680,49 @@ function ViewOptionButton({
   );
 }
 
-function UnitSelect({
+function UnitSystemToggle({
   disabled,
-  unit,
+  system,
   onChange
 }: {
   disabled: boolean;
-  unit: DisplayUnit;
-  onChange: (unit: DisplayUnit) => void;
+  system: UnitSystem;
+  onChange: (system: UnitSystem) => void;
 }) {
+  // Re-clicking the already-active side is a no-op: it must never fire
+  // onChange, or a legacy project stored as "in"/"cm" would get rewritten to
+  // "ft"/"m" and land a redundant entry on the undo stack.
+  const select = (next: UnitSystem) => {
+    if (next === system) return;
+    onChange(next);
+  };
+
   return (
-    <label className="unit-select">
+    <div className="unit-select" role="group" aria-label="Units">
       <span className="unit-select-label">Units</span>
-      <select
+      <button
+        aria-pressed={system === "imperial"}
+        className={
+          system === "imperial" ? "view-option-button active" : "view-option-button"
+        }
         disabled={disabled}
-        value={unit}
-        onChange={(event) => onChange(event.target.value as DisplayUnit)}
+        type="button"
+        onClick={() => select("imperial")}
       >
-        <optgroup label="Imperial">
-          <option value="ft">ft</option>
-          <option value="in">in</option>
-        </optgroup>
-        <optgroup label="Metric">
-          <option value="m">m</option>
-          <option value="cm">cm</option>
-        </optgroup>
-      </select>
-    </label>
+        Imperial
+      </button>
+      <button
+        aria-pressed={system === "metric"}
+        className={
+          system === "metric" ? "view-option-button active" : "view-option-button"
+        }
+        disabled={disabled}
+        type="button"
+        onClick={() => select("metric")}
+      >
+        Metric
+      </button>
+    </div>
   );
 }
 

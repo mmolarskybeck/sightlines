@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link2Off } from "lucide-react";
 import type { Artwork, Dimensions, DisplayUnit } from "../../domain/project";
-import { formatLength, parseLength } from "../../domain/units/length";
+import {
+  getPlaceholderForScope,
+  getScopeUnits,
+  unitSystemFromDisplayUnit
+} from "../../domain/units/unitSystem";
+import { LengthField } from "./LengthField";
 import { UncertaintyIndicator } from "./UncertaintyIndicator";
 
 type ArtworkTextFieldKey = "title" | "artist" | "date" | "accessionNumber" | "locationOrLender";
@@ -157,6 +162,10 @@ function DimensionsSection({
   onCommitDimensions: (dimensions: Dimensions) => void;
   unit: DisplayUnit;
 }) {
+  const system = unitSystemFromDisplayUnit(unit);
+  const { displayUnit, parseUnit } = getScopeUnits(system, "artwork");
+  const placeholder = getPlaceholderForScope(system, "artwork");
+
   return (
     <div className="artwork-dimensions">
       <div className="artwork-dimensions-heading">
@@ -166,13 +175,28 @@ function DimensionsSection({
 
       <div className="artwork-dimensions-grid">
         {DIMENSION_FIELDS.map((field) => (
-          <DimensionAxisField
+          <LengthField
             key={field.key}
-            axisKey={field.key}
-            dimensions={dimensions}
+            compact
+            clearable
+            positiveOnly
             label={field.label}
-            onCommitDimensions={onCommitDimensions}
-            unit={unit}
+            valueMm={dimensions[field.key]}
+            displayUnit={displayUnit}
+            parseUnit={parseUnit}
+            placeholder={placeholder}
+            // An axis can be legitimately unmeasured even while others are
+            // known — clearing the field commits that axis as undefined.
+            onClear={() =>
+              onCommitDimensions({ ...dimensions, [field.key]: undefined })
+            }
+            // Note: committing a dimension value never touches `status` —
+            // status is the curator's own claim about how trustworthy these
+            // numbers are, not something derived from whether fields happen to
+            // be filled in.
+            onCommit={(valueMm) =>
+              onCommitDimensions({ ...dimensions, [field.key]: valueMm })
+            }
           />
         ))}
       </div>
@@ -194,85 +218,5 @@ function DimensionsSection({
         </select>
       </label>
     </div>
-  );
-}
-
-function DimensionAxisField({
-  axisKey,
-  dimensions,
-  label,
-  onCommitDimensions,
-  unit
-}: {
-  axisKey: DimensionAxisKey;
-  dimensions: Dimensions;
-  label: string;
-  onCommitDimensions: (dimensions: Dimensions) => void;
-  unit: DisplayUnit;
-}) {
-  const valueMm = dimensions[axisKey];
-  const [input, setInput] = useState(() =>
-    valueMm === undefined ? "" : formatLength(valueMm, { unit })
-  );
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setInput(valueMm === undefined ? "" : formatLength(valueMm, { unit }));
-    setError(null);
-  }, [unit, valueMm]);
-
-  const commit = () => {
-    const trimmed = input.trim();
-
-    if (trimmed.length === 0) {
-      setError(null);
-      // An axis can be legitimately unmeasured even while others are known —
-      // clearing the field commits that axis as undefined rather than 0.
-      if (valueMm !== undefined) {
-        onCommitDimensions({ ...dimensions, [axisKey]: undefined });
-      }
-      return;
-    }
-
-    const parsed = parseLength(trimmed, unit);
-
-    if (!parsed.ok) {
-      setError(parsed.error);
-      return;
-    }
-
-    if (parsed.valueMm <= 0) {
-      setError(`${label} must be greater than zero.`);
-      return;
-    }
-
-    setError(null);
-    // Note: committing a dimension value never touches `status` — status is
-    // the curator's own claim about how trustworthy these numbers are, not
-    // something derived from whether fields happen to be filled in. A
-    // placeholder mockup size can be typed in while status stays
-    // "approximate", and a precisely measured work can still be marked
-    // "unknown" if the curator hasn't verified it yet.
-    onCommitDimensions({ ...dimensions, [axisKey]: parsed.valueMm });
-    setInput(formatLength(parsed.valueMm, { unit }));
-  };
-
-  return (
-    <label className="field-row compact">
-      <span>{label}</span>
-      <input
-        aria-invalid={error ? "true" : "false"}
-        inputMode="decimal"
-        value={input}
-        onBlur={commit}
-        onChange={(event) => setInput(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          commit();
-        }}
-      />
-      {error ? <p className="field-error">{error}</p> : null}
-    </label>
   );
 }

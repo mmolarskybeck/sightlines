@@ -1,8 +1,13 @@
-import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { getOpeningKindLabel } from "../../domain/placement/createOpening";
 import type { OpeningWallObject, DisplayUnit } from "../../domain/project";
-import { formatLength, parseLength } from "../../domain/units/length";
+import type { MeasurementScope } from "../../domain/units/unitSystem";
+import {
+  getPlaceholderForScope,
+  getScopeUnits,
+  unitSystemFromDisplayUnit
+} from "../../domain/units/unitSystem";
+import { LengthField } from "./LengthField";
 
 // Numeric position/size fields for a selected door/window/blocked zone,
 // mirroring WallInspector's commit-on-blur/Enter pattern exactly — the
@@ -20,6 +25,14 @@ export function OpeningInspector({
   opening: OpeningWallObject;
   unit: DisplayUnit;
 }) {
+  const system = unitSystemFromDisplayUnit(unit);
+  const scoped = (scope: MeasurementScope) => {
+    const { displayUnit, parseUnit } = getScopeUnits(system, scope);
+    return { displayUnit, parseUnit, placeholder: getPlaceholderForScope(system, scope) };
+  };
+  const position = scoped("openingPosition");
+  const size = scoped("openingSize");
+
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
       <label className="field-row">
@@ -28,33 +41,45 @@ export function OpeningInspector({
       </label>
 
       <div className="artwork-dimensions-grid">
-        <NumericField
+        <LengthField
+          compact
           label="X (from wall start)"
-          unit={unit}
           valueMm={opening.xMm}
+          displayUnit={position.displayUnit}
+          parseUnit={position.parseUnit}
+          placeholder={position.placeholder}
           onCommit={(xMm) => onCommitPosition(xMm, opening.yMm)}
         />
-        <NumericField
+        <LengthField
+          compact
           label="Y (from floor)"
-          unit={unit}
           valueMm={opening.yMm}
+          displayUnit={size.displayUnit}
+          parseUnit={size.parseUnit}
+          placeholder={size.placeholder}
           onCommit={(yMm) => onCommitPosition(opening.xMm, yMm)}
         />
       </div>
 
       <div className="artwork-dimensions-grid">
-        <NumericField
-          label="Width"
+        <LengthField
+          compact
           positiveOnly
-          unit={unit}
+          label="Width"
           valueMm={opening.widthMm}
+          displayUnit={size.displayUnit}
+          parseUnit={size.parseUnit}
+          placeholder={size.placeholder}
           onCommit={(widthMm) => onCommitSize(widthMm, opening.heightMm)}
         />
-        <NumericField
-          label="Height"
+        <LengthField
+          compact
           positiveOnly
-          unit={unit}
+          label="Height"
           valueMm={opening.heightMm}
+          displayUnit={size.displayUnit}
+          parseUnit={size.parseUnit}
+          placeholder={size.placeholder}
           onCommit={(heightMm) => onCommitSize(opening.widthMm, heightMm)}
         />
       </div>
@@ -66,64 +91,5 @@ export function OpeningInspector({
         </button>
       </div>
     </form>
-  );
-}
-
-function NumericField({
-  label,
-  onCommit,
-  positiveOnly = false,
-  unit,
-  valueMm
-}: {
-  label: string;
-  onCommit: (valueMm: number) => void;
-  positiveOnly?: boolean;
-  unit: DisplayUnit;
-  valueMm: number;
-}) {
-  const [input, setInput] = useState(() => formatLength(valueMm, { unit }));
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setInput(formatLength(valueMm, { unit }));
-    setError(null);
-  }, [unit, valueMm]);
-
-  const commit = () => {
-    const parsed = parseLength(input, unit);
-
-    if (!parsed.ok) {
-      setError(parsed.error);
-      return;
-    }
-
-    if (positiveOnly && parsed.valueMm <= 0) {
-      setError(`${label} must be greater than zero.`);
-      return;
-    }
-
-    setError(null);
-    onCommit(parsed.valueMm);
-    setInput(formatLength(parsed.valueMm, { unit }));
-  };
-
-  return (
-    <label className="field-row compact">
-      <span>{label}</span>
-      <input
-        aria-invalid={error ? "true" : "false"}
-        inputMode="decimal"
-        value={input}
-        onBlur={commit}
-        onChange={(event) => setInput(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          commit();
-        }}
-      />
-      {error ? <p className="field-error">{error}</p> : null}
-    </label>
   );
 }

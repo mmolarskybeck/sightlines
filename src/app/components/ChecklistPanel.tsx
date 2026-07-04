@@ -3,6 +3,7 @@ import { GripVertical, ImagePlus, X } from "lucide-react";
 import { ACCEPTED_IMAGE_MIME_TYPES } from "../../domain/assets/imageIntake";
 import type { Artwork, DisplayUnit, Project } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
+import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { UncertaintyIndicator } from "./UncertaintyIndicator";
 
@@ -107,6 +108,13 @@ export function ChecklistPanel({
     rows.map((row) => row.artwork?.assetId),
     getBlob
   );
+
+  // Artwork dimension summaries read in the artwork scope's unit (in/cm),
+  // not the global project unit — a canvas is specced in inches, never feet.
+  const artworkUnit = getScopeUnits(
+    unitSystemFromDisplayUnit(project.unit),
+    "artwork"
+  ).displayUnit;
 
   const handleFiles = (files: FileList | File[]) => {
     const fileArray = Array.from(files);
@@ -213,7 +221,7 @@ export function ChecklistPanel({
                   ? thumbnailUrlsByAssetId.get(row.artwork.assetId)
                   : undefined
               }
-              unit={project.unit}
+              unit={artworkUnit}
               wallName={row.wallName}
               onRemove={() => void onRemoveArtworkFromChecklist(row.artworkId)}
               onSelect={() => onSelectArtwork(row.artworkId)}

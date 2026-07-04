@@ -15,6 +15,7 @@ import {
   getMinorGridIntervalMm,
   getPixelsPerMm
 } from "../../domain/units/precision";
+import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
 import { useContainerSize } from "../hooks/useContainerSize";
 import { GridOverlay } from "./GridOverlay";
 import { RoomResizeHandles, type ResizeHandleTarget } from "./RoomResizeHandles";
@@ -72,6 +73,12 @@ export function PlanView({
     minIntervalMm: gridPrecisionFloorMm
   });
   const majorGridMm = getMajorGridIntervalMm(project.unit, minorGridMm);
+  // Grid intervals above stay on project.unit (family-based). The resize
+  // handle labels show a wall length, so they read in the wall scope's unit.
+  const wallUnit = getScopeUnits(
+    unitSystemFromDisplayUnit(project.unit),
+    "wall"
+  ).displayUnit;
   const handleSizeMm = pixelsPerMm > 0 ? HANDLE_SCREEN_SIZE_PX / pixelsPerMm : 0;
   const snapThresholdMm = pixelsPerMm > 0 ? SNAP_THRESHOLD_PX / pixelsPerMm : 0;
   // Minor grid dot radius in mm, sized to a constant ~1.1px on screen.
@@ -283,7 +290,7 @@ export function PlanView({
                 }
                 handleSizeMm={handleSizeMm}
                 placement={placement}
-                unit={project.unit}
+                unit={wallUnit}
                 onBeginDrag={beginDrag}
               />
             ) : null}

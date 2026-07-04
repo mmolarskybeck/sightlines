@@ -1,8 +1,13 @@
-import { useEffect, useState } from "react";
 import { DoorOpen, Link2, Square, SquareDashed } from "lucide-react";
 import type { OpeningKind } from "../../domain/placement/createOpening";
 import type { DisplayUnit } from "../../domain/project";
-import { formatLength, parseLength } from "../../domain/units/length";
+import { formatLength } from "../../domain/units/length";
+import {
+  getPlaceholderForScope,
+  getScopeUnits,
+  unitSystemFromDisplayUnit
+} from "../../domain/units/unitSystem";
+import { LengthField } from "./LengthField";
 
 export type WallDimensionLink = {
   pairedWallName: string;
@@ -35,88 +40,34 @@ export function WallInspector({
   wallLengthMm: number;
   wallName: string;
 }) {
-  const [lengthInput, setLengthInput] = useState(() =>
-    formatLength(wallLengthMm, { unit })
-  );
-  const [lengthError, setLengthError] = useState<string | null>(null);
-  // The format hint is guidance while typing, not a permanent label — it
-  // shows only while the Length input is focused. The error, when present,
-  // always shows and takes precedence.
-  const [lengthFocused, setLengthFocused] = useState(false);
-
-  useEffect(() => {
-    setLengthInput(formatLength(wallLengthMm, { unit }));
-    setLengthError(null);
-  }, [unit, wallLengthMm]);
-
-  const commitLength = async () => {
-    const parsed = parseLength(lengthInput, unit);
-
-    if (!parsed.ok) {
-      setLengthError(parsed.error);
-      return;
-    }
-
-    if (parsed.valueMm <= 0) {
-      setLengthError("Wall length must be greater than zero.");
-      return;
-    }
-
-    setLengthError(null);
-
-    try {
-      await onCommitLength(parsed.valueMm);
-      setLengthInput(formatLength(parsed.valueMm, { unit }));
-    } catch (error) {
-      setLengthError(
-        error instanceof Error ? error.message : "Could not resize this wall."
-      );
-    }
-  };
+  const system = unitSystemFromDisplayUnit(unit);
+  const otherSystem = system === "imperial" ? "metric" : "imperial";
+  const wallScope = getScopeUnits(system, "wall");
+  const wallPlaceholder = getPlaceholderForScope(system, "wall");
+  // Centerline reads best in the natural size unit for each system, with the
+  // opposite system's unit as a secondary gloss: imperial shows ft (cm),
+  // metric shows cm (ft-in).
+  const centerlinePrimary = getScopeUnits(system, "openingSize").displayUnit;
+  const centerlineSecondary = getScopeUnits(otherSystem, "openingSize").displayUnit;
 
   return (
     <form
       className="inspector-form"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void commitLength();
-      }}
+      onSubmit={(event) => event.preventDefault()}
     >
-      <label className="field-row">
-        <span>Length</span>
-        <input
-          aria-describedby={
-            lengthError
-              ? "wall-length-error"
-              : lengthFocused
-                ? "wall-length-hint"
-                : undefined
-          }
-          aria-invalid={lengthError ? "true" : "false"}
-          inputMode="decimal"
-          value={lengthInput}
-          onFocus={() => setLengthFocused(true)}
-          onBlur={() => {
-            setLengthFocused(false);
-            void commitLength();
-          }}
-          onChange={(event) => setLengthInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key !== "Enter") return;
-            event.preventDefault();
-            void commitLength();
-          }}
-        />
-      </label>
-      {lengthError ? (
-        <p className="field-error" id="wall-length-error">
-          {lengthError}
-        </p>
-      ) : lengthFocused ? (
-        <p className="field-hint" id="wall-length-hint">
-          Accepts 28', 28 ft, 336", 853.4 cm, or 8.53 m.
-        </p>
-      ) : null}
+      <LengthField
+        positiveOnly
+        label="Length"
+        valueMm={wallLengthMm}
+        displayUnit={wallScope.displayUnit}
+        parseUnit={wallScope.parseUnit}
+        placeholder={wallPlaceholder}
+        onCommit={onCommitLength}
+        commitErrorFallback="Could not resize this wall."
+        // Guidance while typing, not a permanent label — shows only while
+        // focused. An error, when present, takes precedence.
+        focusHint={"Accepts 28', 28 ft, 336\", 853.4 cm, or 8.53 m."}
+      />
       {dimensionLink ? (
         <div className="constraint-panel" aria-label="Linked rectangle dimension">
           <Link2 aria-hidden="true" size={17} />
@@ -158,14 +109,14 @@ export function WallInspector({
       <dl className="property-list compact">
         <div>
           <dt>Height</dt>
-          <dd>{formatLength(wallHeightMm, { unit })}</dd>
+          <dd>{formatLength(wallHeightMm, { unit: wallScope.displayUnit })}</dd>
         </div>
         <div>
           <dt>Centerline</dt>
           <dd>
             {formatLength(centerlineMm, {
-              unit: "ft",
-              secondaryUnit: "cm"
+              unit: centerlinePrimary,
+              secondaryUnit: centerlineSecondary
             })}
           </dd>
         </div>
