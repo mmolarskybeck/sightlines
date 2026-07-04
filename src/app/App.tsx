@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertTriangle,
   Download,
   FileJson,
   Grid2X2,
   Grid3X3,
   Magnet,
-  Move,
   Plus,
   Redo2,
   Ruler,
@@ -18,10 +18,11 @@ import {
   getOrthogonalQuadWallPair,
   getRectangleRoomDimensions,
 } from "../domain/geometry/walls";
-import type { DisplayUnit, Project } from "../domain/project";
+import type { Artwork, ArtworkWallObject, DisplayUnit, Project } from "../domain/project";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import { formatLength } from "../domain/units/length";
 import { getGridPrecisionFloorOptionsMm } from "../domain/units/precision";
+import { ArtworkInspector } from "./components/ArtworkInspector";
 import { ChecklistPanel } from "./components/ChecklistPanel";
 import { DataView } from "./components/DataView";
 import { ElevationEmptyState } from "./components/ElevationEmptyState";
@@ -60,6 +61,7 @@ export function App() {
   const {
     project,
     selectedWallId,
+    selectedArtworkId,
     viewMode,
     saveState,
     error,
@@ -72,6 +74,7 @@ export function App() {
     boot,
     setViewMode,
     selectWall,
+    selectArtwork,
     addRectangleRoom,
     renameProject,
     setUnit,
@@ -85,9 +88,14 @@ export function App() {
     createProject,
     deleteProject,
     addArtworksFromFiles,
-    removeArtworkFromChecklist
+    removeArtworkFromChecklist,
+    updateArtwork,
+    placeArtwork,
+    moveArtworkPlacement,
+    removePlacement
   } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
   const {
     showGrid,
     snapToGrid,
@@ -127,6 +135,10 @@ export function App() {
     project && selectedWall
       ? getWallDimensionLink(project, selectedWall.id)
       : null;
+  const artworksById = useMemo(
+    () => new Map(libraryArtworks.map((artwork) => [artwork.id, artwork])),
+    [libraryArtworks]
+  );
 
   if (!project) {
     return (
@@ -135,6 +147,31 @@ export function App() {
       </main>
     );
   }
+
+  // A dangling selectedArtworkId (library record deleted out from under the
+  // project) resolves to nothing here, so the inspector falls back to the
+  // wall view below rather than rendering a dead end.
+  const selectedArtwork: Artwork | null =
+    (selectedArtworkId ? artworksById.get(selectedArtworkId) : undefined) ?? null;
+  const placedWallObject: ArtworkWallObject | null = selectedArtwork
+    ? (project.wallObjects.find(
+        (wallObject): wallObject is ArtworkWallObject =>
+          wallObject.kind === "artwork" && wallObject.artworkId === selectedArtwork.id
+      ) ?? null)
+    : null;
+
+  // Warnings carry a wallObjectId, but a raw id means nothing to a curator —
+  // resolve it to the artwork's title (or the object's kind) for display.
+  const labeledPlacementWarnings = placementWarnings.map((warning) => {
+    const wallObject = project.wallObjects.find(
+      (candidate) => candidate.id === warning.wallObjectId
+    );
+    const subject =
+      wallObject?.kind === "artwork"
+        ? (artworksById.get(wallObject.artworkId)?.title ?? "Untitled artwork")
+        : wallObject?.kind;
+    return { ...warning, subject };
+  });
 
   return (
     <main className="app-shell">
@@ -287,8 +324,11 @@ export function App() {
             intakeState={intakeState}
             libraryArtworks={libraryArtworks}
             project={project}
+            selectedArtworkId={selectedArtworkId}
             onAddArtworksFromFiles={addArtworksFromFiles}
+            onArtworkDragStateChange={setDraggingArtworkId}
             onRemoveArtworkFromChecklist={removeArtworkFromChecklist}
+            onSelectArtwork={selectArtwork}
           />
 
           <div className="storage-note">
@@ -364,16 +404,26 @@ export function App() {
           {viewMode === "elevation" ? (
             selectedWall ? (
               <ElevationView
-                wallName={selectedWall.name}
-                wallLengthMm={selectedWall.lengthMm}
-                wallHeightMm={selectedWall.heightMm}
+                artworksById={artworksById}
                 centerlineMm={
                   selectedWall.defaultCenterlineHeightMm ??
                   project.defaultCenterlineHeightMm
                 }
+                draggingArtworkId={draggingArtworkId}
+                getBlob={getAssetBlob}
                 gridPrecisionFloorMm={gridPrecisionFloorMm}
                 gridVisible={showGrid}
+                selectedArtworkId={selectedArtworkId}
+                snapToGrid={snapToGrid}
                 unit={project.unit}
+                wallHeightMm={selectedWall.heightMm}
+                wallId={selectedWall.id}
+                wallLengthMm={selectedWall.lengthMm}
+                wallName={selectedWall.name}
+                wallObjects={project.wallObjects}
+                onMovePlacement={moveArtworkPlacement}
+                onPlaceArtwork={placeArtwork}
+                onSelectArtwork={selectArtwork}
               />
             ) : (
               <ElevationEmptyState hasRooms={project.floor.rooms.length > 0} />
@@ -385,10 +435,43 @@ export function App() {
         <aside className="inspector" aria-label="Inspector">
           <div className="panel-heading">
             <h2>Inspector</h2>
-            <span>MVP 1A</span>
+            <span>MVP 1B</span>
           </div>
 
-          {selectedWall ? (
+          {selectedArtwork ? (
+            <>
+              {labeledPlacementWarnings.length > 0 ? (
+                <div className="warning-panel" role="status" aria-live="polite">
+                  <AlertTriangle aria-hidden="true" size={18} />
+                  <div>
+                    <h3>Placement needs review</h3>
+                    <ul>
+                      {labeledPlacementWarnings.map((warning) => (
+                        <li key={warning.id}>
+                          {warning.message}
+                          {warning.subject ? <span>{warning.subject}</span> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              ) : null}
+              <ArtworkInspector
+                artwork={selectedArtwork}
+                isPlaced={placedWallObject !== null}
+                unit={project.unit}
+                onCommitDimensions={(dimensions) =>
+                  void updateArtwork(selectedArtwork.id, { dimensions })
+                }
+                onCommitField={(changes) => void updateArtwork(selectedArtwork.id, changes)}
+                onRemovePlacement={
+                  placedWallObject
+                    ? () => void removePlacement(placedWallObject.id)
+                    : undefined
+                }
+              />
+            </>
+          ) : selectedWall ? (
             <WallInspector
               centerlineMm={project.defaultCenterlineHeightMm}
               changedWallNames={getWallNames(
@@ -398,7 +481,7 @@ export function App() {
               dimensionLink={wallDimensionLink}
               lastGeometryEdit={lastGeometryEdit}
               onCommitLength={resizeSelectedWall}
-              placementWarnings={placementWarnings}
+              placementWarnings={labeledPlacementWarnings}
               unit={project.unit}
               wallHeightMm={selectedWall.heightMm}
               wallLengthMm={selectedWall.lengthMm}
@@ -407,18 +490,6 @@ export function App() {
           ) : (
             <p className="empty-copy">Select a wall to inspect its measurements.</p>
           )}
-
-          <div className="next-panel">
-            <Move aria-hidden="true" size={18} />
-            <div>
-              <h3>Placement coming next</h3>
-              <p>
-                Dragging checklist works onto a wall in elevation is the next
-                milestone — the domain model already separates checklist
-                membership from wall placement, so this panel is ready for it.
-              </p>
-            </div>
-          </div>
         </aside>
       </section>
     </main>

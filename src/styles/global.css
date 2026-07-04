@@ -367,7 +367,8 @@ input:focus-visible {
   font-size: 0.72rem;
 }
 
-.field-row.compact input {
+.field-row.compact input,
+.field-row.compact select {
   min-height: 32px;
   padding: 6px 8px;
   font-size: 0.84rem;
@@ -468,11 +469,29 @@ input:focus-visible {
   gap: 8px;
   min-height: 40px;
   padding: 4px 6px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
+  cursor: pointer;
 }
 
 .checklist-row:hover {
   background: var(--surface);
+}
+
+/* Same active-state language as .wall-row — one selected item at a time,
+   border + soft fill rather than a filled background so it stays legible
+   next to the thumbnail and tag. */
+.checklist-row.selected {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.checklist-row[draggable="true"] {
+  cursor: grab;
+}
+
+.checklist-row[draggable="true"]:active {
+  cursor: grabbing;
 }
 
 .checklist-thumb {
@@ -512,6 +531,37 @@ input:focus-visible {
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 650;
+}
+
+/* The one shared dimension-uncertainty visual (docs/plan.md §8) — checklist
+   rows, the artwork inspector, and (later) elevation/plan/3D all reuse this
+   same badge/color language rather than inventing a per-view treatment.
+   "approximate" borrows the same amber tone as .warning-panel (a caution,
+   not an error); "unknown" borrows the danger tone (no data at all is a
+   stronger flag than a rough guess). Never rendered for "known" dimensions —
+   see UncertaintyIndicator.tsx. */
+.uncertainty-badge {
+  flex: 0 0 auto;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.uncertainty-badge.approximate {
+  background: oklch(0.93 0.055 80);
+  color: var(--primary-strong);
+}
+
+.uncertainty-badge.unknown {
+  background: oklch(0.94 0.052 28);
+  color: var(--danger);
+}
+
+.uncertainty-badge.compact {
+  padding: 1px 7px;
+  font-size: 0.68rem;
 }
 
 .canvas-column {
@@ -764,6 +814,82 @@ input:focus-visible {
   stroke-width: 8;
 }
 
+/* Elevation artwork placements (ElevationArtwork.tsx). The outline rect
+   stays visible regardless of the image (it's the artwork's true dimension
+   extent, docs/plan.md §2), and its treatment layers on top of the plain
+   "known" state below: uncertain colors the stroke using the same
+   approximate/unknown language as .uncertainty-badge (§8), out-of-bounds
+   and selected each override further, in that order, so a placement that's
+   several of these at once still reads as one clear signal rather than a
+   color collision. */
+.elevation-artwork {
+  cursor: grab;
+  touch-action: none;
+}
+
+.elevation-artwork:active {
+  cursor: grabbing;
+}
+
+.elevation-artwork-image {
+  pointer-events: none;
+}
+
+.artwork-outline {
+  fill: none;
+  /* With fill: none, SVG's default visiblePainted hit-testing leaves only
+     the hairline stroke clickable — the artwork would be draggable only by
+     its outline. "all" makes the whole true-dimension rect the hit area;
+     the :not(.ghost) scope keeps ghosts inert (pointer-events inherits, so
+     an unscoped "all" here would override the ghost group's "none"). */
+  stroke: var(--muted);
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.elevation-artwork:not(.ghost) .artwork-outline {
+  pointer-events: all;
+}
+
+.elevation-artwork.uncertain .artwork-outline {
+  stroke-dasharray: 14 10;
+  stroke-width: 4;
+}
+
+.elevation-artwork.approximate .artwork-outline {
+  stroke: var(--primary-strong);
+}
+
+.elevation-artwork.unknown .artwork-outline {
+  stroke: var(--danger);
+}
+
+.elevation-artwork.out-of-bounds .artwork-outline {
+  stroke: var(--danger);
+  stroke-dasharray: 6 6;
+  stroke-width: 4;
+}
+
+.elevation-artwork.selected .artwork-outline {
+  stroke: var(--primary);
+  stroke-width: 5;
+}
+
+/* The drop/drag preview: same shape as a real placement, rendered
+   translucent and non-interactive so it never competes with the artwork
+   the pointer is actually over. */
+.elevation-artwork.ghost {
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+.elevation-artwork.ghost .artwork-outline {
+  fill: var(--primary-soft);
+  fill-opacity: 0.4;
+  stroke: var(--primary);
+  stroke-dasharray: 10 8;
+}
+
 .data-surface {
   overflow: auto;
 }
@@ -834,7 +960,8 @@ input:focus-visible {
   font-weight: 680;
 }
 
-.field-row input {
+.field-row input,
+.field-row select {
   width: 100%;
   min-height: 38px;
   padding: 8px 10px;
@@ -844,7 +971,12 @@ input:focus-visible {
   color: var(--ink);
 }
 
-.field-row input:hover {
+.field-row select {
+  cursor: pointer;
+}
+
+.field-row input:hover,
+.field-row select:hover {
   border-color: var(--subtle);
 }
 
@@ -871,6 +1003,56 @@ input:focus-visible {
 .field-error {
   color: var(--danger);
   font-weight: 650;
+}
+
+.artwork-dimensions {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.artwork-dimensions-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.artwork-dimensions-heading h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.artwork-dimensions-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.inspector-placement {
+  padding-top: 4px;
+}
+
+.inspector-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
+.inspector-action:hover {
+  background: var(--surface-strong);
 }
 
 .constraint-panel {

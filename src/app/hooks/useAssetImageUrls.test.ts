@@ -133,6 +133,34 @@ describe("useAssetImageUrls", () => {
     expect(createObjectURL).not.toHaveBeenCalled();
   });
 
+  it("fetches the requested tier, defaulting to thumbnail", async () => {
+    const getBlob = fakeGetBlob();
+
+    const { result } = renderHook(() => useAssetImageUrls(["asset-1"], getBlob, "display"));
+
+    await waitFor(() => expect(result.current.get("asset-1")).toBeDefined());
+    expect(getBlob).toHaveBeenCalledWith(assetBlobKey("asset-1", "display"));
+  });
+
+  it("refetches at the new tier and revokes the stale-tier URL when tier changes", async () => {
+    const getBlob = fakeGetBlob();
+
+    const { result, rerender } = renderHook(
+      ({ tier }: { tier: "thumbnail" | "display" }) =>
+        useAssetImageUrls(["asset-1"], getBlob, tier),
+      { initialProps: { tier: "thumbnail" as "thumbnail" | "display" } }
+    );
+
+    await waitFor(() => expect(result.current.get("asset-1")).toBeDefined());
+    const thumbnailUrl = result.current.get("asset-1");
+    expect(getBlob).toHaveBeenCalledWith(assetBlobKey("asset-1", "thumbnail"));
+
+    rerender({ tier: "display" });
+
+    await waitFor(() => expect(getBlob).toHaveBeenCalledWith(assetBlobKey("asset-1", "display")));
+    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith(thumbnailUrl));
+  });
+
   it("does not create or apply an object URL for a fetch that resolves after unmount", async () => {
     let resolveBlob: (blob: Blob) => void = () => {};
     const getBlob = vi.fn(

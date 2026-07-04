@@ -1,19 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { assetBlobKey } from "../../domain/repositories/assetRepository";
+import { assetBlobKey, type AssetBlobTier } from "../../domain/repositories/assetRepository";
 
-// Resolves a batch of asset ids to thumbnail-tier object URLs, for list rows
-// (checklist, and future placement UI) that need a small preview without
-// paying for the display/original tiers. Object URLs are a scarce browser
+// Resolves a batch of asset ids to object URLs at a given tier (defaults to
+// thumbnail, for list rows like the checklist that need a small preview
+// without paying for the display/original tiers; elevation placement passes
+// "display" — see docs/plan.md §4.5). Object URLs are a scarce browser
 // resource — each one pins its Blob in memory until revoked — so this hook
 // owns the whole lifecycle: fetch once per id, reuse the same URL across
 // re-renders, and revoke the moment an id is no longer wanted (removed from
-// the list, or the hook unmounts). A failed fetch just leaves that id
-// unresolved rather than throwing, so a bad thumbnail never breaks the row
-// around it — callers fall back to a placeholder for any id missing from the
-// returned map.
+// the list, the tier changes, or the hook unmounts). A failed fetch just
+// leaves that id unresolved rather than throwing, so a bad thumbnail never
+// breaks the row around it — callers fall back to a placeholder for any id
+// missing from the returned map.
 export function useAssetImageUrls(
   assetIds: (string | undefined)[],
-  getBlob: (key: string) => Promise<Blob>
+  getBlob: (key: string) => Promise<Blob>,
+  tier: AssetBlobTier = "thumbnail"
 ): Map<string, string> {
   const [urlsByAssetId, setUrlsByAssetId] = useState<Map<string, string>>(
     () => new Map()
@@ -26,6 +28,11 @@ export function useAssetImageUrls(
   const urlsRef = useRef(urlsByAssetId);
   urlsRef.current = urlsByAssetId;
 
+  // Every cached URL was fetched at whatever tier was active when this ref
+  // was last updated — if `tier` changes between renders, the whole cache is
+  // stale even for ids that are still wanted, not just ids that dropped out.
+  const tierRef = useRef(tier);
+
   const assetIdsKey = JSON.stringify(assetIds);
 
   useEffect(() => {
@@ -35,13 +42,16 @@ export function useAssetImageUrls(
     // not call setState on a stale render.
     let cancelled = false;
     const wanted = new Set(assetIds.filter((id): id is string => Boolean(id)));
+    const tierChanged = tierRef.current !== tier;
+    tierRef.current = tier;
 
-    // Drop and revoke anything cached that's no longer in the list.
+    // Drop and revoke anything cached that's no longer in the list, or that
+    // was fetched at a now-stale tier.
     setUrlsByAssetId((current) => {
       let changed = false;
       const next = new Map(current);
       for (const [assetId, url] of current) {
-        if (!wanted.has(assetId)) {
+        if (tierChanged || !wanted.has(assetId)) {
           URL.revokeObjectURL(url);
           next.delete(assetId);
           changed = true;
@@ -51,9 +61,9 @@ export function useAssetImageUrls(
     });
 
     for (const assetId of wanted) {
-      if (urlsRef.current.has(assetId)) continue;
+      if (!tierChanged && urlsRef.current.has(assetId)) continue;
 
-      getBlob(assetBlobKey(assetId, "thumbnail"))
+      getBlob(assetBlobKey(assetId, tier))
         .then((blob) => {
           if (cancelled) return;
 
@@ -83,8 +93,10 @@ export function useAssetImageUrls(
     // assetIdsKey (a JSON-stringified snapshot of assetIds) is the intentional
     // dependency here rather than assetIds itself, so a caller passing a
     // fresh array of the same ids on every render doesn't retrigger this
-    // effect.
-  }, [assetIdsKey, getBlob]);
+    // effect. `tier` is a real dependency: a caller flipping tiers at
+    // runtime must refetch, which is exactly what the tierChanged branch
+    // above handles.
+  }, [assetIdsKey, getBlob, tier]);
 
   // Final cleanup: revoke everything still cached when the hook itself goes
   // away, independent of the per-id revocation above.

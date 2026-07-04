@@ -45,6 +45,22 @@ JSON import input in the topbar is the single-file `accept=.json` one),
 - Check sidebar/panel horizontal overflow after UI changes:
   `sidebar.scrollWidth > sidebar.clientWidth` is a cheap probe; grid tracks
   need `minmax(0, 1fr)` or long content defeats text ellipsis.
+- **HTML5 DnD (checklist → elevation):** synthetic works in Chrome —
+  `new DataTransfer()`, dispatch `dragstart` on the row, then
+  `dragenter/dragover/drop` (same DataTransfer, real clientX/Y) on the
+  elevation surface, `dragend` on the row. React's delegated handlers fire.
+  Payloads are unreadable during dragover by design; the app relays
+  `draggingArtworkId` via App state for ghost sizing.
+- **Pointer-drag on SVG placements:** drive with `page.mouse` down/move/up
+  plus pauses (~100ms after down, ~30ms between moves) — listeners attach in
+  a useEffect after pointerdown's render, and instant synthetic input can
+  finish before they exist.
+- **SVG hit-testing trap:** `fill: none` shapes are only hit on their stroke
+  (default `visiblePainted`). If a click/drag mysteriously lands on
+  `.wall-fill`, probe `document.elementFromPoint` at the target's center;
+  the fix pattern is `pointer-events: all` on the intended hit rect.
+- Wall-local mm → client px for input targeting:
+  `new DOMPoint(xMm, viewBoxHeight - yMm).matrixTransform(svg.getScreenCTM())`.
 
 ## Flows worth driving
 

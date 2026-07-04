@@ -28,7 +28,7 @@ export function WallInspector({
     changedWallIds: string[];
   } | null;
   onCommitLength: (lengthMm: number) => Promise<void>;
-  placementWarnings: { id: string; message: string; wallObjectId: string }[];
+  placementWarnings: { id: string; message: string; subject?: string }[];
   unit: DisplayUnit;
   wallHeightMm: number;
   wallLengthMm: number;
@@ -129,7 +129,8 @@ export function WallInspector({
             <ul>
               {placementWarnings.map((warning) => (
                 <li key={warning.id}>
-                  {warning.message} <span>{warning.wallObjectId}</span>
+                  {warning.message}
+                  {warning.subject ? <span>{warning.subject}</span> : null}
                 </li>
               ))}
             </ul>

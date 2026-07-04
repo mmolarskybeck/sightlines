@@ -5,9 +5,14 @@ import type { Artwork, Asset, Project, ProjectSummary } from "../domain/project"
 import type { ArtworkLibraryRepository } from "../domain/repositories/artworkLibraryRepository";
 import type { AssetRepository } from "../domain/repositories/assetRepository";
 import type { ProjectRepository } from "../domain/repositories/projectRepository";
+import {
+  PLACEHOLDER_ARTWORK_HEIGHT_MM,
+  PLACEHOLDER_ARTWORK_WIDTH_MM
+} from "../domain/placement/placeArtwork";
 import { createSampleProject } from "../domain/sample/sampleProject";
 import { parseArtwork, parseAsset } from "../domain/schema/artworkSchema";
 import { MAX_IMPORT_JSON_LENGTH, parseProject } from "../domain/schema/projectSchema";
+import { feetToMm } from "../domain/units/length";
 import type { AppStoreDeps } from "./store";
 import { createAppStore, exportProjectJson, getSelectedWall } from "./store";
 
@@ -594,6 +599,311 @@ describe("app store", () => {
       const state = store.getState();
       expect(state.project).toBe(before);
       expect(state.undoStack).toHaveLength(0);
+    });
+  });
+
+  describe("updateArtwork", () => {
+    it("edits metadata, persists it, and undo/redo round-trip the library record", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().updateArtwork(artworkId, { title: "Untitled No. 4" });
+
+      let state = store.getState();
+      expect(state.error).toBeNull();
+      expect(state.libraryArtworks.find((a) => a.id === artworkId)?.title).toBe(
+        "Untitled No. 4"
+      );
+      expect(artworkLibraryRepository.artworks.get(artworkId)?.title).toBe("Untitled No. 4");
+      expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+
+      await store.getState().undo();
+      state = store.getState();
+      expect(state.libraryArtworks.find((a) => a.id === artworkId)?.title).toBe("piece");
+      expect(artworkLibraryRepository.artworks.get(artworkId)?.title).toBe("piece");
+
+      await store.getState().redo();
+      state = store.getState();
+      expect(state.libraryArtworks.find((a) => a.id === artworkId)?.title).toBe(
+        "Untitled No. 4"
+      );
+    });
+
+    it("syncs a placed artwork's placement size on a dimension edit, and one undo reverts both", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const wallId = getSelectedWall(
+        store.getState().project!,
+        store.getState().selectedWallId
+      )!.id;
+
+      await store.getState().placeArtwork(artworkId, wallId, 1000, 1450);
+      const placementId = store.getState().project!.wallObjects[0].id;
+      expect(store.getState().project!.wallObjects[0].widthMm).toBe(
+        PLACEHOLDER_ARTWORK_WIDTH_MM
+      );
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().updateArtwork(artworkId, {
+        dimensions: { widthMm: 500, heightMm: 400, status: "known" }
+      });
+
+      let state = store.getState();
+      // One combined entry, not two — the artwork edit and the placement
+      // resize it caused are a single undoable step (docs/plan.md §7).
+      expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+      let placement = state.project!.wallObjects.find((w) => w.id === placementId)!;
+      expect(placement.widthMm).toBe(500);
+      expect(placement.heightMm).toBe(400);
+      expect(state.libraryArtworks.find((a) => a.id === artworkId)?.dimensions.widthMm).toBe(
+        500
+      );
+
+      await store.getState().undo();
+      state = store.getState();
+      placement = state.project!.wallObjects.find((w) => w.id === placementId)!;
+      expect(placement.widthMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
+      expect(placement.heightMm).toBe(PLACEHOLDER_ARTWORK_HEIGHT_MM);
+      expect(
+        state.libraryArtworks.find((a) => a.id === artworkId)?.dimensions.widthMm
+      ).toBeUndefined();
+    });
+
+    it("leaves a placement's displayDimensionsOverride alone on a dimension edit", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const wallId = getSelectedWall(
+        store.getState().project!,
+        store.getState().selectedWallId
+      )!.id;
+      await store.getState().placeArtwork(artworkId, wallId, 1000, 1450);
+      const placementId = store.getState().project!.wallObjects[0].id;
+
+      // No store action creates an override yet (a later milestone) — set
+      // one directly to prove updateArtwork respects it when present.
+      const projectWithOverride: Project = {
+        ...store.getState().project!,
+        wallObjects: store.getState().project!.wallObjects.map((wallObject) =>
+          wallObject.id === placementId
+            ? {
+                ...wallObject,
+                displayDimensionsOverride: {
+                  widthMm: 300,
+                  heightMm: 300,
+                  status: "known" as const
+                }
+              }
+            : wallObject
+        )
+      };
+      await repository.save(projectWithOverride);
+      store.setState({ project: projectWithOverride });
+
+      await store.getState().updateArtwork(artworkId, {
+        dimensions: { widthMm: 500, heightMm: 400, status: "known" }
+      });
+
+      const placement = store
+        .getState()
+        .project!.wallObjects.find((wallObject) => wallObject.id === placementId)!;
+      expect(placement.widthMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
+      expect(placement.heightMm).toBe(PLACEHOLDER_ARTWORK_HEIGHT_MM);
+    });
+
+    it("errors calmly on an invalid change: nothing persists, no undo entry", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const undoStackBefore = store.getState().undoStack.length;
+      const titleBefore = store.getState().libraryArtworks.find(
+        (a) => a.id === artworkId
+      )!.title;
+
+      await store.getState().updateArtwork(artworkId, {
+        dimensions: { widthMm: -10, status: "known" }
+      });
+
+      const state = store.getState();
+      expect(state.error).toBeTruthy();
+      expect(state.undoStack).toHaveLength(undoStackBefore);
+      expect(state.libraryArtworks.find((a) => a.id === artworkId)?.title).toBe(titleBefore);
+      expect(
+        artworkLibraryRepository.artworks.get(artworkId)?.dimensions.widthMm
+      ).toBeUndefined();
+    });
+
+    it("is a no-op (no undo entry) when nothing actually changes", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const titleBefore = store.getState().libraryArtworks.find(
+        (a) => a.id === artworkId
+      )!.title;
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().updateArtwork(artworkId, { title: titleBefore });
+
+      expect(store.getState().undoStack).toHaveLength(undoStackBefore);
+    });
+  });
+
+  describe("placeArtwork", () => {
+    it("appends a center-anchored wall object sized from the artwork's known dimensions", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      await store.getState().updateArtwork(artworkId, {
+        dimensions: { widthMm: 500, heightMm: 400, status: "known" }
+      });
+      const wallId = getSelectedWall(
+        store.getState().project!,
+        store.getState().selectedWallId
+      )!.id;
+
+      await store.getState().placeArtwork(artworkId, wallId, 1200, 1450);
+
+      const state = store.getState();
+      expect(state.undoStack.at(-1)?.label).toBe("Place artwork");
+      const placement = state.project!.wallObjects[0];
+      expect(placement.kind).toBe("artwork");
+      expect(placement.wallId).toBe(wallId);
+      expect(placement.xMm).toBe(1200);
+      expect(placement.yMm).toBe(1450);
+      expect(placement.widthMm).toBe(500);
+      expect(placement.heightMm).toBe(400);
+      expect(state.selectedArtworkId).toBe(artworkId);
+    });
+
+    it("falls back to placeholder dimensions for an artwork with unknown dims", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const wallId = getSelectedWall(
+        store.getState().project!,
+        store.getState().selectedWallId
+      )!.id;
+
+      await store.getState().placeArtwork(artworkId, wallId, 0, 1450);
+
+      const placement = store.getState().project!.wallObjects[0];
+      expect(placement.widthMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
+      expect(placement.heightMm).toBe(PLACEHOLDER_ARTWORK_HEIGHT_MM);
+    });
+
+    it("flags but still places an out-of-bounds placement", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const wallId = getSelectedWall(
+        store.getState().project!,
+        store.getState().selectedWallId
+      )!.id;
+
+      await store.getState().placeArtwork(artworkId, wallId, -5_000, 1450);
+
+      const state = store.getState();
+      expect(state.project!.wallObjects).toHaveLength(1);
+      expect(state.placementWarnings).toHaveLength(1);
+      expect(state.placementWarnings[0].wallId).toBe(wallId);
+    });
+  });
+
+  describe("moveArtworkPlacement", () => {
+    it("commits one undo entry and undo restores the previous position", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const wallId = getSelectedWall(
+        store.getState().project!,
+        store.getState().selectedWallId
+      )!.id;
+      await store.getState().placeArtwork(artworkId, wallId, 1000, 1450);
+      const placementId = store.getState().project!.wallObjects[0].id;
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().moveArtworkPlacement(placementId, 2000, 1600);
+
+      let state = store.getState();
+      expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+      let placement = state.project!.wallObjects.find((w) => w.id === placementId)!;
+      expect(placement.xMm).toBe(2000);
+      expect(placement.yMm).toBe(1600);
+
+      await store.getState().undo();
+      state = store.getState();
+      placement = state.project!.wallObjects.find((w) => w.id === placementId)!;
+      expect(placement.xMm).toBe(1000);
+      expect(placement.yMm).toBe(1450);
+    });
+
+    it("is a no-op when the position is unchanged", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const wallId = getSelectedWall(
+        store.getState().project!,
+        store.getState().selectedWallId
+      )!.id;
+      await store.getState().placeArtwork(artworkId, wallId, 1000, 1450);
+      const placementId = store.getState().project!.wallObjects[0].id;
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().moveArtworkPlacement(placementId, 1000, 1450);
+
+      expect(store.getState().undoStack).toHaveLength(undoStackBefore);
+    });
+  });
+
+  describe("removePlacement", () => {
+    it("removes the wall object but keeps checklist membership", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const wallId = getSelectedWall(
+        store.getState().project!,
+        store.getState().selectedWallId
+      )!.id;
+      await store.getState().placeArtwork(artworkId, wallId, 1000, 1450);
+      const placementId = store.getState().project!.wallObjects[0].id;
+
+      await store.getState().removePlacement(placementId);
+
+      const state = store.getState();
+      expect(state.project!.wallObjects).toHaveLength(0);
+      expect(state.project!.checklistArtworkIds).toContain(artworkId);
+    });
+  });
+
+  it("revalidates a placed artwork's bounds when its wall is later resized shorter", async () => {
+    await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+    const artworkId = store.getState().project!.checklistArtworkIds[0];
+    await store.getState().updateArtwork(artworkId, {
+      dimensions: { widthMm: 500, heightMm: 400, status: "known" }
+    });
+    const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+
+    // Comfortably inside today's wall length, near the far end.
+    await store.getState().placeArtwork(artworkId, wall.id, wall.lengthMm - 300, 1450);
+    expect(store.getState().placementWarnings).toHaveLength(0);
+
+    await store.getState().resizeWall(wall.id, feetToMm(5));
+
+    const state = store.getState();
+    expect(state.placementWarnings).toHaveLength(1);
+    expect(state.placementWarnings[0].wallId).toBe(wall.id);
+  });
+
+  describe("selection", () => {
+    it("selectWall clears any selected artwork", () => {
+      store.getState().selectArtwork("some-artwork");
+      expect(store.getState().selectedArtworkId).toBe("some-artwork");
+
+      store.getState().selectWall("wall-east");
+
+      expect(store.getState().selectedWallId).toBe("wall-east");
+      expect(store.getState().selectedArtworkId).toBeNull();
+    });
+
+    it("selectArtwork sets the selected artwork without touching the selected wall", () => {
+      const wallId = store.getState().selectedWallId;
+
+      store.getState().selectArtwork("artwork-x");
+
+      expect(store.getState().selectedArtworkId).toBe("artwork-x");
+      expect(store.getState().selectedWallId).toBe(wallId);
     });
   });
 });

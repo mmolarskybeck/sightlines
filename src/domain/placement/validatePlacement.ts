@@ -1,4 +1,4 @@
-import { getWallsWithGeometry } from "../geometry/walls";
+import { getWallsWithGeometry, type WallWithGeometry } from "../geometry/walls";
 import type { Project, WallObject } from "../project";
 
 export type PlacementWarning = {
@@ -17,15 +17,43 @@ export function validateChangedWallPlacements(
   }
 
   const changedWallIdSet = new Set(changedWallIds);
-  const wallGeometryById = new Map(
+  const wallObjects = project.wallObjects.filter((wallObject) =>
+    changedWallIdSet.has(wallObject.wallId)
+  );
+
+  return validateWallObjects(project, wallObjects);
+}
+
+// Validates specific wall objects (by id) against their wall's current
+// geometry — the same bounds check as validateChangedWallPlacements, just
+// keyed by wall object rather than by which walls just changed. Used after a
+// fresh placement or move, where there's no "changed wall" to key off of.
+export function validateWallObjectPlacements(
+  project: Project,
+  wallObjectIds: string[]
+): PlacementWarning[] {
+  if (wallObjectIds.length === 0 || project.wallObjects.length === 0) {
+    return [];
+  }
+
+  const wallObjectIdSet = new Set(wallObjectIds);
+  const wallObjects = project.wallObjects.filter((wallObject) =>
+    wallObjectIdSet.has(wallObject.id)
+  );
+
+  return validateWallObjects(project, wallObjects);
+}
+
+function validateWallObjects(project: Project, wallObjects: WallObject[]): PlacementWarning[] {
+  if (wallObjects.length === 0) return [];
+
+  const wallGeometryById = new Map<string, WallWithGeometry>(
     project.floor.rooms.flatMap((placement) =>
       getWallsWithGeometry(placement.room).map((wall) => [wall.id, wall])
     )
   );
 
-  return project.wallObjects.flatMap((wallObject) => {
-    if (!changedWallIdSet.has(wallObject.wallId)) return [];
-
+  return wallObjects.flatMap((wallObject) => {
     const wall = wallGeometryById.get(wallObject.wallId);
     if (!wall) {
       return [
@@ -58,7 +86,7 @@ function validateWallObjectBounds(
       id: `${wallObject.id}:horizontal-bounds`,
       wallObjectId: wallObject.id,
       wallId: wallObject.wallId,
-      message: "Placement is outside the resized wall length."
+      message: "Placement extends beyond the wall's length."
     });
   }
 

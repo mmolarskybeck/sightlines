@@ -3,6 +3,12 @@ import { ImagePlus, X } from "lucide-react";
 import { ACCEPTED_IMAGE_MIME_TYPES } from "../../domain/assets/imageIntake";
 import type { Artwork, Project } from "../../domain/project";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
+import { UncertaintyIndicator } from "./UncertaintyIndicator";
+
+// MIME key for the HTML5 drag payload carrying an artworkId — a later task
+// wires the elevation view's drop target to read this same constant, so the
+// drag source and drop target can't drift out of sync on the string value.
+export const ARTWORK_DRAG_MIME = "application/x-sightlines-artwork";
 
 type ChecklistRowData = {
   artworkId: string;
@@ -19,15 +25,25 @@ export function ChecklistPanel({
   project,
   libraryArtworks,
   intakeState,
+  selectedArtworkId,
   onAddArtworksFromFiles,
+  onArtworkDragStateChange,
   onRemoveArtworkFromChecklist,
+  onSelectArtwork,
   getBlob
 }: {
   project: Project;
   libraryArtworks: Artwork[];
   intakeState: "idle" | "processing";
+  selectedArtworkId: string | null;
   onAddArtworksFromFiles: (files: File[]) => Promise<void>;
+  // Optional: App.tsx uses this to track which artwork is mid-drag so
+  // ElevationView can size its drop ghost during dragover, since dataTransfer
+  // payloads are unreadable until drop. Fired with the artworkId on
+  // dragstart and null on dragend.
+  onArtworkDragStateChange?: (artworkId: string | null) => void;
   onRemoveArtworkFromChecklist: (artworkId: string) => Promise<void>;
+  onSelectArtwork: (artworkId: string) => void;
   getBlob: (key: string) => Promise<Blob>;
 }) {
   const [isDropActive, setIsDropActive] = useState(false);
@@ -130,13 +146,17 @@ export function ChecklistPanel({
             <ChecklistRow
               key={row.artworkId}
               artwork={row.artwork}
+              artworkId={row.artworkId}
               isPlaced={row.isPlaced}
+              isSelected={row.artworkId === selectedArtworkId}
               thumbnailUrl={
                 row.artwork?.assetId
                   ? thumbnailUrlsByAssetId.get(row.artwork.assetId)
                   : undefined
               }
               onRemove={() => void onRemoveArtworkFromChecklist(row.artworkId)}
+              onSelect={() => onSelectArtwork(row.artworkId)}
+              onDragStateChange={onArtworkDragStateChange}
             />
           ))}
         </ul>
@@ -147,19 +167,53 @@ export function ChecklistPanel({
 
 function ChecklistRow({
   artwork,
+  artworkId,
   isPlaced,
+  isSelected,
   thumbnailUrl,
-  onRemove
+  onRemove,
+  onSelect,
+  onDragStateChange
 }: {
   artwork: Artwork | null;
+  artworkId: string;
   isPlaced: boolean;
+  isSelected: boolean;
   thumbnailUrl: string | undefined;
   onRemove: () => void;
+  onSelect: () => void;
+  onDragStateChange?: (artworkId: string | null) => void;
 }) {
   const title = artwork ? artwork.title ?? "Untitled" : "Missing from library";
+  // A degraded stub (library record deleted out from under the project, see
+  // the module comment above) has nothing to place on a wall, so it isn't a
+  // valid drag source even though it still shows up and can be selected.
+  const isDraggable = artwork !== null;
 
   return (
-    <li className="checklist-row">
+    <li
+      aria-pressed={isSelected}
+      className={isSelected ? "checklist-row selected" : "checklist-row"}
+      draggable={isDraggable}
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onDragStart={
+        isDraggable
+          ? (event) => {
+              event.dataTransfer.setData(ARTWORK_DRAG_MIME, artworkId);
+              event.dataTransfer.effectAllowed = "copy";
+              onDragStateChange?.(artworkId);
+            }
+          : undefined
+      }
+      onDragEnd={isDraggable ? () => onDragStateChange?.(null) : undefined}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        onSelect();
+      }}
+    >
       {thumbnailUrl ? (
         <img alt="" className="checklist-thumb" src={thumbnailUrl} />
       ) : (
@@ -168,13 +222,19 @@ function ChecklistRow({
       <span className={artwork ? "checklist-title" : "checklist-title missing"}>
         {title}
       </span>
+      {artwork && artwork.dimensions.status !== "known" ? (
+        <UncertaintyIndicator compact status={artwork.dimensions.status} />
+      ) : null}
       <span className="checklist-tag">{isPlaced ? "Placed" : "Unplaced"}</span>
       <button
         aria-label="Remove from checklist"
         className="icon-button compact"
         title="Remove from checklist"
         type="button"
-        onClick={onRemove}
+        onClick={(event) => {
+          event.stopPropagation();
+          onRemove();
+        }}
       >
         <X aria-hidden="true" size={14} />
       </button>

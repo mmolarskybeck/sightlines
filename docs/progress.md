@@ -72,6 +72,14 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 - [x] Implemented image intake split between pure decision logic and browser-specific effects: `domain/assets/imageIntake.ts` enforces MIME allowlist (jpeg/png/webp), 50 MB cap, and never-upscale `fitWithin`; `browserImageProcessor.ts` handles `createImageBitmap` with `imageOrientation: "from-image"` for EXIF rotation, `OffscreenCanvas` (canvas fallback), WebP q=0.82, and SHA-256 of original bytes. Generates thumbnail ≤400px and display ≤1800px tiers. Web Worker offload and OPFS storage deferred behind `ImageProcessor`/`AssetRepository` seams.
 - [x] Wired `createAppStore(deps)` to inject `ImageProcessor`. Batch intake via `addArtworksFromFiles` writes library/asset records outside `applyEdit`, then commits a single undo entry per batch that only touches `checklistArtworkIds` — undoing removes checklist membership, never library records, so assets remain available for reuse (§4.1). Per-file failures aggregate without sinking the batch; `removeArtworkFromChecklist` leaves library records intact but defensively drops dangling `artwork` wallObjects.
 - [x] Built checklist UI in `ChecklistPanel` left sidebar: pointer-agnostic intake (drag-drop + file picker), `useAssetImageUrls` object-URL hook prevents memory bloat, missing-library-record rows degrade visually instead of vanishing, placed/unplaced tag derived from `wallObjects` not hardcoded state. Both input paths route through `addArtworksFromFiles` so intake errors surface uniformly.
+- [x] Implemented artwork metadata editing: `ArtworkInspector` component (title, artist, date, accession, location; dimension W/H/D fields via `parseLength`/`formatLength` with a Status select; commit-on-blur; empty commits as undefined since fields are optional) — `updateArtwork` validates via `parseArtwork` before persisting, invalid edits error calmly with no undo entry. Typing a dimension never auto-flips status; status is the curator's claim, not derived.
+- [x] Generalized undo per docs/plan.md §7: `EditEntry` now carries an optional project half and/or artwork half (`{label, project?: {before,after}, artwork?: {before,after}}`), making artwork metadata edits undoable despite library records living outside the project document — a dimension edit that resyncs placed sizes bundles both halves into one atomic entry. Placements with `displayDimensionsOverride` are left alone by the sync.
+- [x] Dimension uncertainty: shared `UncertaintyIndicator` component (§8 one visual language — "Approx."/"No dims" badge) reused in checklist rows and artwork inspector; elevation mirrors the same amber tokens as dashed outlines on uncertain placements.
+- [x] Drag-to-wall placement: checklist rows are HTML5 drag sources (`ARTWORK_DRAG_MIME`); elevation is the drop target with a live snapped ghost (App relays `draggingArtworkId` from dragstart because dataTransfer payloads are unreadable until drop). Unknown dims place at 610×760mm placeholders (`PLACEHOLDER_ARTWORK_*` constants) per plan §1.5 "place without waiting for precision"; out-of-bounds placements are flagged (warning + danger outline), never blocked or clamped.
+- [x] Elevation rendering: `ElevationArtwork` renders display-tier images (useAssetImageUrls grew a tier param, default "thumbnail" so existing call sites unchanged) inside stroke-only outline rects that always show the true dimension extent (xMidYMid meet — art is never cropped); selection + click-to-select wired.
+- [x] Pure snapping: new `getArtworkSnapTargets`/`resolveArtworkSnap` (centerline > neighbor-center > neighbor-edge > grid, §2 priority, grid tier gated on `snapToGrid`) — drop ghost and move drag share the identical resolve path so preview and commit can never disagree.
+- [x] Transaction-bounded placement undo (§7): pointer-drag move previews locally and commits exactly one `moveArtworkPlacement` on release; sub-threshold release is a no-op. Geometry-change revalidation was already wired from 1A (resizeWall → `validateChangedWallPlacements`) — now proven by a store test (artwork near wall end + shrink → warning); horizontal bounds message reworded to read correctly for both resize and fresh placement.
+- [x] Fixed two issues surfaced by end-to-end browser verification of the placement slice: (1) placed artworks were hit-testable only on their hairline outline stroke — the outline rect is `fill: none`, and SVG's default `visiblePainted` hit-testing ignores unpainted fill, so clicking/dragging the artwork body did nothing; `.elevation-artwork:not(.ghost) .artwork-outline { pointer-events: all }` makes the whole true-dimension rect the hit area while ghosts stay inert. (2) The placement-warning panel showed raw wallObject UUIDs; warnings are now labeled App-side with the artwork's title (or the object kind) before rendering — the domain `PlacementWarning` keeps carrying only ids.
 
 ## In Progress / Immediate Next
 
@@ -82,16 +90,6 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 - [ ] Finish the geometry spine from `docs/plan.md` section 9:
   - [ ] Migration function chain (`v1→v2`, ...) when a schema v2 first ships — the parse → validate → migrate → validate pipeline shape already exists in `migrateProject`.
 - [ ] Keep transient drag state out of `applyEdit`/persist when tactile handles arrive — already true for the new wall-resize drag (live preview is computed locally in `PlanView` via the pure `resizeWallPreservingAngles`, never through `applyEdit`, until the single commit on release).
-
-## MVP 1B Next Major Slice
-
-- [ ] Add artwork metadata editing.
-- [ ] Add artwork dimension uncertainty state and shared indicator.
-- [ ] Add drag-to-wall placement.
-- [ ] Render placed artwork in wall elevation.
-- [ ] Run placement changes through pure snapping and validation functions.
-- [ ] Add transaction-bounded undo/redo for placement movement.
-- [ ] Revalidate placements after any wall geometry change.
 
 ## MVP 1C / Later
 

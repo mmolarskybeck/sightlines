@@ -1,12 +1,17 @@
 import { create } from "zustand";
+import { z } from "zod";
 import { createBrowserImageProcessor } from "../domain/assets/browserImageProcessor";
 import { titleFromFilename, validateImageFile, type ImageProcessor } from "../domain/assets/imageIntake";
 import { createNextRectangleRoom } from "../domain/geometry/createRoom";
 import { resizeWallPreservingAngles } from "../domain/geometry/editRoom";
 import { getWallsWithGeometry } from "../domain/geometry/walls";
 import { createBlankProject } from "../domain/newProject";
+import { createArtworkPlacement, getEffectivePlacementSizeMm } from "../domain/placement/placeArtwork";
 import type { PlacementWarning } from "../domain/placement/validatePlacement";
-import { validateChangedWallPlacements } from "../domain/placement/validatePlacement";
+import {
+  validateChangedWallPlacements,
+  validateWallObjectPlacements
+} from "../domain/placement/validatePlacement";
 import {
   CURRENT_ARTWORK_SCHEMA_VERSION,
   CURRENT_ASSET_SCHEMA_VERSION,
@@ -24,14 +29,21 @@ import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetR
 import { IndexedDbProjectRepository } from "../domain/repositories/indexedDbProjectRepository";
 import type { ProjectRepository } from "../domain/repositories/projectRepository";
 import { createSampleProject } from "../domain/sample/sampleProject";
+import { parseArtwork } from "../domain/schema/artworkSchema";
 import { migrateProjectJson } from "../domain/schema/projectSchema";
 
 type ViewMode = "plan" | "elevation" | "data";
 
+// An entry may carry either half, or both. A pure geometry/metadata edit
+// (resize a wall, rename the project) only ever needs `project`. A checklist
+// artwork edit (updateArtwork) only needs `artwork` — unless the edit also
+// resizes a placement on a wall, in which case both halves ride together so
+// undo reverts the artwork record and the placement it drove in one step
+// (docs/plan.md §7: "a single command stack lives at the project level").
 type EditEntry = {
   label: string;
-  before: Project;
-  after: Project;
+  project?: { before: Project; after: Project };
+  artwork?: { before: Artwork; after: Artwork };
 };
 
 const UNDO_STACK_LIMIT = 100;
@@ -41,9 +53,14 @@ type GeometryEditInfo = {
   changedWallIds: string[];
 };
 
+type UpdateArtworkChanges = Partial<
+  Pick<Artwork, "title" | "artist" | "date" | "accessionNumber" | "locationOrLender" | "dimensions">
+>;
+
 type AppState = {
   project: Project | null;
   selectedWallId: string | null;
+  selectedArtworkId: string | null;
   viewMode: ViewMode;
   saveState: "idle" | "saving" | "saved" | "error";
   error: string | null;
@@ -56,6 +73,7 @@ type AppState = {
   boot: () => Promise<void>;
   setViewMode: (viewMode: ViewMode) => void;
   selectWall: (wallId: string) => void;
+  selectArtwork: (artworkId: string) => void;
   renameProject: (title: string) => Promise<void>;
   setUnit: (unit: DisplayUnit) => Promise<void>;
   addRectangleRoom: () => Promise<void>;
@@ -70,6 +88,10 @@ type AppState = {
   deleteProject: (id: string) => Promise<void>;
   addArtworksFromFiles: (files: File[]) => Promise<void>;
   removeArtworkFromChecklist: (artworkId: string) => Promise<void>;
+  updateArtwork: (artworkId: string, changes: UpdateArtworkChanges) => Promise<void>;
+  placeArtwork: (artworkId: string, wallId: string, xMm: number, yMm: number) => Promise<void>;
+  moveArtworkPlacement: (wallObjectId: string, xMm: number, yMm: number) => Promise<void>;
+  removePlacement: (wallObjectId: string) => Promise<void>;
 };
 
 export type AppStoreDeps = {
@@ -95,14 +117,37 @@ export function createAppStore(deps: AppStoreDeps) {
       }
     }
 
-    // Every document mutation flows through here: stamp updatedAt, push the
-    // undo stack, drop the redo stack, persist. Actions stay thin constructors.
+    type EditExtras = Partial<
+      Pick<
+        AppState,
+        "placementWarnings" | "lastGeometryEdit" | "selectedWallId" | "selectedArtworkId" | "viewMode"
+      >
+    >;
+
+    // Pushes one entry onto the undo stack and applies whichever half(s) it
+    // carries to state — project-only, artwork-only, or both (see EditEntry
+    // above). Split out from applyEdit so updateArtwork can push a single
+    // combined entry when a dimension edit also resizes a placement.
+    function pushEditEntry(entry: EditEntry, extras: EditExtras = {}) {
+      set({
+        ...(entry.project ? { project: entry.project.after } : {}),
+        undoStack: [...get().undoStack, entry].slice(-UNDO_STACK_LIMIT),
+        redoStack: [],
+        placementWarnings: [],
+        lastGeometryEdit: null,
+        ...extras
+      });
+    }
+
+    // Every project-only mutation flows through here: stamp updatedAt, push
+    // the undo stack, drop the redo stack, persist. Actions stay thin
+    // constructors. (An edit that also touches the artwork library —
+    // updateArtwork — builds its EditEntry directly and calls pushEditEntry
+    // itself, since it needs to persist both halves.)
     async function applyEdit(
       label: string,
       buildNextProject: (project: Project) => Project,
-      extras: Partial<
-        Pick<AppState, "placementWarnings" | "lastGeometryEdit" | "selectedWallId" | "viewMode">
-      > = {}
+      extras: EditExtras = {}
     ) {
       const before = get().project;
       if (!before) return;
@@ -112,17 +157,23 @@ export function createAppStore(deps: AppStoreDeps) {
         updatedAt: new Date().toISOString()
       };
 
-      set({
-        project: after,
-        undoStack: [...get().undoStack, { label, before, after }].slice(
-          -UNDO_STACK_LIMIT
-        ),
-        redoStack: [],
-        placementWarnings: [],
-        lastGeometryEdit: null,
-        ...extras
-      });
+      pushEditEntry({ label, project: { before, after } }, extras);
       await persist(after);
+    }
+
+    // Shared by undo/redo to reapply an entry's artwork half: save the given
+    // side of the artwork to the library and refresh libraryArtworks from
+    // it, the same shape as a forward updateArtwork commit.
+    async function saveArtworkHalf(artwork: Artwork) {
+      try {
+        await deps.artworkLibraryRepository.save(artwork);
+        set({ libraryArtworks: await deps.artworkLibraryRepository.list() });
+      } catch (error) {
+        set({
+          saveState: "error",
+          error: error instanceof Error ? error.message : "Could not save the artwork library."
+        });
+      }
     }
 
     // Replacing the whole document (boot, import, reset) starts a new edit
@@ -131,6 +182,7 @@ export function createAppStore(deps: AppStoreDeps) {
       set({
         project,
         selectedWallId: getFirstWall(project)?.id ?? null,
+        selectedArtworkId: null,
         placementWarnings: [],
         lastGeometryEdit: null,
         undoStack: [],
@@ -143,6 +195,7 @@ export function createAppStore(deps: AppStoreDeps) {
     return {
       project: null,
       selectedWallId: null,
+      selectedArtworkId: null,
       viewMode: "plan",
       saveState: "idle",
       error: null,
@@ -200,7 +253,13 @@ export function createAppStore(deps: AppStoreDeps) {
       },
 
       selectWall(wallId) {
-        set({ selectedWallId: wallId });
+        // Wall focus replaces artwork focus in the inspector — the two
+        // selections are mutually exclusive, not independent.
+        set({ selectedWallId: wallId, selectedArtworkId: null });
+      },
+
+      selectArtwork(artworkId) {
+        set({ selectedArtworkId: artworkId });
       },
 
       async renameProject(title) {
@@ -279,13 +338,15 @@ export function createAppStore(deps: AppStoreDeps) {
         if (!entry) return;
 
         set({
-          project: entry.before,
+          ...(entry.project ? { project: entry.project.before } : {}),
           undoStack: get().undoStack.slice(0, -1),
           redoStack: [...get().redoStack, entry],
           placementWarnings: [],
           lastGeometryEdit: null
         });
-        await persist(entry.before);
+
+        if (entry.project) await persist(entry.project.before);
+        if (entry.artwork) await saveArtworkHalf(entry.artwork.before);
       },
 
       async redo() {
@@ -293,13 +354,15 @@ export function createAppStore(deps: AppStoreDeps) {
         if (!entry) return;
 
         set({
-          project: entry.after,
+          ...(entry.project ? { project: entry.project.after } : {}),
           redoStack: get().redoStack.slice(0, -1),
           undoStack: [...get().undoStack, entry],
           placementWarnings: [],
           lastGeometryEdit: null
         });
-        await persist(entry.after);
+
+        if (entry.project) await persist(entry.project.after);
+        if (entry.artwork) await saveArtworkHalf(entry.artwork.after);
       },
 
       async importProjectJson(text) {
@@ -506,9 +569,8 @@ export function createAppStore(deps: AppStoreDeps) {
 
         // Removing from a checklist unlinks it from this project only — the
         // library record is untouched (docs/plan.md §4.1). Also drops any
-        // placement referencing this artwork, defensively: placements don't
-        // exist in the UI yet, but a checklist entry with a dangling
-        // placement would be an invalid state to leave behind.
+        // placement referencing this artwork — a checklist entry with a
+        // dangling placement would be an invalid state to leave behind.
         await applyEdit("Remove from checklist", (current) => ({
           ...current,
           checklistArtworkIds: current.checklistArtworkIds.filter((id) => id !== artworkId),
@@ -516,9 +578,157 @@ export function createAppStore(deps: AppStoreDeps) {
             (wallObject) => !(wallObject.kind === "artwork" && wallObject.artworkId === artworkId)
           )
         }));
+      },
+
+      async updateArtwork(artworkId, changes) {
+        const before = get().libraryArtworks.find((artwork) => artwork.id === artworkId);
+        if (!before) return;
+
+        const next: Artwork = { ...before, ...changes };
+        const touchedKeys = Object.keys(changes) as (keyof UpdateArtworkChanges)[];
+        const hasChange = touchedKeys.some(
+          (key) => JSON.stringify(before[key]) !== JSON.stringify(next[key])
+        );
+        if (!hasChange) return;
+
+        let parsed: Artwork;
+        try {
+          parsed = parseArtwork(next);
+        } catch (error) {
+          // Validate before touching anything persisted — a bad edit (e.g. a
+          // negative widthMm) should error calmly and leave the library,
+          // project, and undo stack exactly as they were.
+          set({
+            error: `Could not save that change (${
+              error instanceof z.ZodError ? formatZodIssue(error) : "invalid value."
+            }).`
+          });
+          return;
+        }
+
+        // A dimension edit should resize any placement of this artwork that
+        // doesn't have its own displayDimensionsOverride (docs/plan.md
+        // §4.2) — otherwise the wall would silently drift out of sync with
+        // the library record it renders. Both halves ride in one EditEntry
+        // so undo reverts the artwork and the placement size together.
+        const project = get().project;
+        let projectEdit: { before: Project; after: Project } | undefined;
+        let placementWarnings: PlacementWarning[] = [];
+
+        if (project) {
+          const affectedIds: string[] = [];
+          const nextWallObjects = project.wallObjects.map((wallObject) => {
+            if (
+              wallObject.kind !== "artwork" ||
+              wallObject.artworkId !== artworkId ||
+              wallObject.displayDimensionsOverride
+            ) {
+              return wallObject;
+            }
+
+            const size = getEffectivePlacementSizeMm(parsed.dimensions);
+            if (size.widthMm === wallObject.widthMm && size.heightMm === wallObject.heightMm) {
+              return wallObject;
+            }
+
+            affectedIds.push(wallObject.id);
+            return { ...wallObject, widthMm: size.widthMm, heightMm: size.heightMm };
+          });
+
+          if (affectedIds.length > 0) {
+            const after = {
+              ...project,
+              wallObjects: nextWallObjects,
+              updatedAt: new Date().toISOString()
+            };
+            projectEdit = { before: project, after };
+            placementWarnings = validateWallObjectPlacements(after, affectedIds);
+          }
+        }
+
+        pushEditEntry(
+          {
+            label: "Edit artwork",
+            artwork: { before, after: parsed },
+            ...(projectEdit ? { project: projectEdit } : {})
+          },
+          { placementWarnings }
+        );
+
+        await saveArtworkHalf(parsed);
+        if (projectEdit) await persist(projectEdit.after);
+      },
+
+      async placeArtwork(artworkId, wallId, xMm, yMm) {
+        const project = get().project;
+        if (!project) return;
+
+        const artwork = get().libraryArtworks.find((candidate) => candidate.id === artworkId);
+        if (!artwork) return;
+        if (!getProjectWalls(project).some((wall) => wall.id === wallId)) return;
+
+        const placement = createArtworkPlacement(artwork, wallId, xMm, yMm);
+        const nextWallObjects = [...project.wallObjects, placement];
+
+        await applyEdit(
+          "Place artwork",
+          (current) => ({ ...current, wallObjects: nextWallObjects }),
+          {
+            placementWarnings: validateWallObjectPlacements(
+              { ...project, wallObjects: nextWallObjects },
+              [placement.id]
+            ),
+            selectedArtworkId: artworkId
+          }
+        );
+      },
+
+      async moveArtworkPlacement(wallObjectId, xMm, yMm) {
+        const project = get().project;
+        if (!project) return;
+
+        const target = project.wallObjects.find((wallObject) => wallObject.id === wallObjectId);
+        if (!target || (target.xMm === xMm && target.yMm === yMm)) return;
+
+        const nextWallObjects = project.wallObjects.map((wallObject) =>
+          wallObject.id === wallObjectId ? { ...wallObject, xMm, yMm } : wallObject
+        );
+
+        // The UI previews the drag locally and calls this exactly once on
+        // release (docs/plan.md §7) — one call here is already one undo
+        // entry, nothing extra to batch.
+        await applyEdit(
+          "Move artwork",
+          (current) => ({ ...current, wallObjects: nextWallObjects }),
+          {
+            placementWarnings: validateWallObjectPlacements(
+              { ...project, wallObjects: nextWallObjects },
+              [wallObjectId]
+            )
+          }
+        );
+      },
+
+      async removePlacement(wallObjectId) {
+        const project = get().project;
+        if (!project) return;
+        if (!project.wallObjects.some((wallObject) => wallObject.id === wallObjectId)) return;
+
+        // Removes the placement only — checklist membership is a separate
+        // concept (docs/plan.md §4.1) and is untouched here.
+        await applyEdit("Remove from wall", (current) => ({
+          ...current,
+          wallObjects: current.wallObjects.filter((wallObject) => wallObject.id !== wallObjectId)
+        }));
       }
     };
   });
+}
+
+function formatZodIssue(error: z.ZodError): string {
+  const [issue] = error.issues;
+  const path = issue?.path.join(".");
+  return `${path ? `${path}: ` : ""}${issue?.message ?? "invalid value."}`;
 }
 
 export const useAppStore = createAppStore({
