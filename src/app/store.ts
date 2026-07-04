@@ -53,6 +53,14 @@ type EditEntry = {
 
 const UNDO_STACK_LIMIT = 100;
 
+// Collisions between an artwork and a door/window/blocked-zone are rejected
+// by default (see validatePlacement.ts's "collision" warning type) — the
+// caller opts in per-call via allowOverlap, sourced from the workspace's
+// "Allow overlap" view option, so a curator who genuinely wants to stack
+// pieces over an obstacle for now isn't blocked outright.
+const OVERLAP_BLOCKED_MESSAGE =
+  'Can’t place it there — it would overlap another object on this wall. Turn on "Allow overlap" in view options to allow it.';
+
 type GeometryEditInfo = {
   anchorVertexId: string;
   changedWallIds: string[];
@@ -96,12 +104,33 @@ type AppState = {
   addArtworksFromFiles: (files: File[]) => Promise<void>;
   removeArtworkFromChecklist: (artworkId: string) => Promise<void>;
   updateArtwork: (artworkId: string, changes: UpdateArtworkChanges) => Promise<void>;
-  placeArtwork: (artworkId: string, wallId: string, xMm: number, yMm: number) => Promise<void>;
-  moveArtworkPlacement: (wallObjectId: string, xMm: number, yMm: number) => Promise<void>;
+  placeArtwork: (
+    artworkId: string,
+    wallId: string,
+    xMm: number,
+    yMm: number,
+    allowOverlap?: boolean
+  ) => Promise<void>;
+  moveArtworkPlacement: (
+    wallObjectId: string,
+    xMm: number,
+    yMm: number,
+    allowOverlap?: boolean
+  ) => Promise<void>;
   removePlacement: (wallObjectId: string) => Promise<void>;
   addOpening: (wallId: string, kind: OpeningKind) => Promise<void>;
-  moveOpening: (wallObjectId: string, xMm: number, yMm: number) => Promise<void>;
-  resizeOpening: (wallObjectId: string, widthMm: number, heightMm: number) => Promise<void>;
+  moveOpening: (
+    wallObjectId: string,
+    xMm: number,
+    yMm: number,
+    allowOverlap?: boolean
+  ) => Promise<void>;
+  resizeOpening: (
+    wallObjectId: string,
+    widthMm: number,
+    heightMm: number,
+    allowOverlap?: boolean
+  ) => Promise<void>;
 };
 
 export type AppStoreDeps = {
@@ -680,7 +709,7 @@ export function createAppStore(deps: AppStoreDeps) {
         if (projectEdit) await persist(projectEdit.after);
       },
 
-      async placeArtwork(artworkId, wallId, xMm, yMm) {
+      async placeArtwork(artworkId, wallId, xMm, yMm, allowOverlap = false) {
         const project = get().project;
         if (!project) return;
 
@@ -690,21 +719,24 @@ export function createAppStore(deps: AppStoreDeps) {
 
         const placement = createArtworkPlacement(artwork, wallId, xMm, yMm);
         const nextWallObjects = [...project.wallObjects, placement];
+        const placementWarnings = validateWallObjectPlacements(
+          { ...project, wallObjects: nextWallObjects },
+          [placement.id]
+        );
+
+        if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
+          set({ error: OVERLAP_BLOCKED_MESSAGE });
+          return;
+        }
 
         await applyEdit(
           "Place artwork",
           (current) => ({ ...current, wallObjects: nextWallObjects }),
-          {
-            placementWarnings: validateWallObjectPlacements(
-              { ...project, wallObjects: nextWallObjects },
-              [placement.id]
-            ),
-            selectedArtworkId: artworkId
-          }
+          { placementWarnings, selectedArtworkId: artworkId }
         );
       },
 
-      async moveArtworkPlacement(wallObjectId, xMm, yMm) {
+      async moveArtworkPlacement(wallObjectId, xMm, yMm, allowOverlap = false) {
         const project = get().project;
         if (!project) return;
 
@@ -714,6 +746,15 @@ export function createAppStore(deps: AppStoreDeps) {
         const nextWallObjects = project.wallObjects.map((wallObject) =>
           wallObject.id === wallObjectId ? { ...wallObject, xMm, yMm } : wallObject
         );
+        const placementWarnings = validateWallObjectPlacements(
+          { ...project, wallObjects: nextWallObjects },
+          [wallObjectId]
+        );
+
+        if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
+          set({ error: OVERLAP_BLOCKED_MESSAGE });
+          return;
+        }
 
         // The UI previews the drag locally and calls this exactly once on
         // release (docs/plan.md §7) — one call here is already one undo
@@ -721,12 +762,7 @@ export function createAppStore(deps: AppStoreDeps) {
         await applyEdit(
           "Move artwork",
           (current) => ({ ...current, wallObjects: nextWallObjects }),
-          {
-            placementWarnings: validateWallObjectPlacements(
-              { ...project, wallObjects: nextWallObjects },
-              [wallObjectId]
-            )
-          }
+          { placementWarnings }
         );
       },
 
@@ -772,7 +808,7 @@ export function createAppStore(deps: AppStoreDeps) {
         );
       },
 
-      async moveOpening(wallObjectId, xMm, yMm) {
+      async moveOpening(wallObjectId, xMm, yMm, allowOverlap = false) {
         const project = get().project;
         if (!project) return;
 
@@ -783,22 +819,26 @@ export function createAppStore(deps: AppStoreDeps) {
         const nextWallObjects = project.wallObjects.map((wallObject) =>
           wallObject.id === wallObjectId ? { ...wallObject, xMm, yMm } : wallObject
         );
+        const placementWarnings = validateWallObjectPlacements(
+          { ...project, wallObjects: nextWallObjects },
+          [wallObjectId]
+        );
+
+        if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
+          set({ error: OVERLAP_BLOCKED_MESSAGE });
+          return;
+        }
 
         // Same shape as moveArtworkPlacement: the UI previews the drag
         // locally and calls this exactly once on release.
         await applyEdit(
           `Move ${openingNoun(target.kind)}`,
           (current) => ({ ...current, wallObjects: nextWallObjects }),
-          {
-            placementWarnings: validateWallObjectPlacements(
-              { ...project, wallObjects: nextWallObjects },
-              [wallObjectId]
-            )
-          }
+          { placementWarnings }
         );
       },
 
-      async resizeOpening(wallObjectId, widthMm, heightMm) {
+      async resizeOpening(wallObjectId, widthMm, heightMm, allowOverlap = false) {
         const project = get().project;
         if (!project) return;
 
@@ -809,16 +849,20 @@ export function createAppStore(deps: AppStoreDeps) {
         const nextWallObjects = project.wallObjects.map((wallObject) =>
           wallObject.id === wallObjectId ? { ...wallObject, widthMm, heightMm } : wallObject
         );
+        const placementWarnings = validateWallObjectPlacements(
+          { ...project, wallObjects: nextWallObjects },
+          [wallObjectId]
+        );
+
+        if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
+          set({ error: OVERLAP_BLOCKED_MESSAGE });
+          return;
+        }
 
         await applyEdit(
           `Resize ${openingNoun(target.kind)}`,
           (current) => ({ ...current, wallObjects: nextWallObjects }),
-          {
-            placementWarnings: validateWallObjectPlacements(
-              { ...project, wallObjects: nextWallObjects },
-              [wallObjectId]
-            )
-          }
+          { placementWarnings }
         );
       }
     };

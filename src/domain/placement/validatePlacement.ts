@@ -7,6 +7,12 @@ export type PlacementWarning = {
   wallObjectId: string;
   wallId: string;
   message: string;
+  // "collision" warnings are the ones a caller can choose to block on (an
+  // artwork/opening overlap, by default disallowed — see store.ts's
+  // allowOverlappingPlacement). "bounds" warnings (off the wall's edges, or
+  // a dangling wall reference) stay advisory only; there's no "override" for
+  // a placement that isn't on the wall at all.
+  type: "bounds" | "collision";
 };
 
 export function validateChangedWallPlacements(
@@ -62,7 +68,8 @@ function validateWallObjects(project: Project, wallObjects: WallObject[]): Place
           id: `${wallObject.id}:missing-wall`,
           wallObjectId: wallObject.id,
           wallId: wallObject.wallId,
-          message: "Placement references a wall that no longer exists."
+          message: "Placement references a wall that no longer exists.",
+          type: "bounds"
         }
       ];
     }
@@ -90,7 +97,8 @@ function validateWallObjectBounds(
       id: `${wallObject.id}:horizontal-bounds`,
       wallObjectId: wallObject.id,
       wallId: wallObject.wallId,
-      message: "Placement extends beyond the wall's length."
+      message: "Placement extends beyond the wall's length.",
+      type: "bounds"
     });
   }
 
@@ -99,7 +107,8 @@ function validateWallObjectBounds(
       id: `${wallObject.id}:vertical-bounds`,
       wallObjectId: wallObject.id,
       wallId: wallObject.wallId,
-      message: "Placement is outside the wall height."
+      message: "Placement is outside the wall height.",
+      type: "bounds"
     });
   }
 
@@ -108,11 +117,12 @@ function validateWallObjectBounds(
 
 // Flags an artwork that overlaps a door/window/blocked-zone on the same
 // wall, and symmetrically flags an opening that overlaps an artwork —
-// whichever side was actually moved gets the warning attached to it, so
-// dragging either one away clears it (docs/plan.md §2: never block, clamp,
-// or auto-move; only flag). Two openings overlapping each other (e.g. a
-// door inside a blocked zone) isn't checked — out of scope for this slice,
-// which is about protecting artwork placements from real obstacles.
+// whichever side was actually moved gets the warning attached to it. This is
+// detection only: the store decides what to do with a "collision" warning
+// (by default, reject the edit — see allowOverlappingPlacement in store.ts).
+// Two openings overlapping each other (e.g. a door inside a blocked zone)
+// isn't checked — out of scope for this slice, which is about protecting
+// artwork placements from real obstacles.
 function validateWallObjectCollisions(
   wallObject: WallObject,
   allWallObjects: WallObject[]
@@ -130,7 +140,8 @@ function validateWallObjectCollisions(
       id: `${wallObject.id}:collision:${other.id}`,
       wallObjectId: wallObject.id,
       wallId: wallObject.wallId,
-      message: "Placement overlaps another object on this wall."
+      message: "Placement overlaps another object on this wall.",
+      type: "collision" as const
     }));
 }
 

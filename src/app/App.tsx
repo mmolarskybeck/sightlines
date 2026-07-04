@@ -5,6 +5,7 @@ import {
   FileJson,
   Grid2X2,
   Grid3X3,
+  Layers,
   Magnet,
   Plus,
   Redo2,
@@ -107,9 +108,11 @@ export function App() {
     showGrid,
     snapToGrid,
     gridPrecisionFloorMm,
+    allowOverlappingPlacement,
     toggleShowGrid,
     toggleSnapToGrid,
-    setGridPrecisionFloorMm
+    setGridPrecisionFloorMm,
+    toggleAllowOverlappingPlacement
   } = useViewPreferences();
   const storagePersistence = useStoragePersistence();
 
@@ -403,6 +406,18 @@ export function App() {
                 unit={project.unit}
                 onChange={setGridPrecisionFloorMm}
               />
+              <ViewOptionButton
+                active={allowOverlappingPlacement}
+                disabled={viewMode !== "elevation"}
+                icon={<Layers aria-hidden="true" size={16} />}
+                label="Overlap"
+                title={
+                  allowOverlappingPlacement
+                    ? "Prevent overlapping placement"
+                    : "Allow overlapping placement"
+                }
+                onClick={toggleAllowOverlappingPlacement}
+              />
               <UnitSelect
                 disabled={viewMode === "data"}
                 unit={project.unit}
@@ -442,9 +457,15 @@ export function App() {
                 wallLengthMm={selectedWall.lengthMm}
                 wallName={selectedWall.name}
                 wallObjects={project.wallObjects}
-                onMoveOpening={moveOpening}
-                onMovePlacement={moveArtworkPlacement}
-                onPlaceArtwork={placeArtwork}
+                onMoveOpening={(wallObjectId, xMm, yMm) =>
+                  void moveOpening(wallObjectId, xMm, yMm, allowOverlappingPlacement)
+                }
+                onMovePlacement={(wallObjectId, xMm, yMm) =>
+                  void moveArtworkPlacement(wallObjectId, xMm, yMm, allowOverlappingPlacement)
+                }
+                onPlaceArtwork={(artworkId, wallId, xMm, yMm) =>
+                  void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement)
+                }
                 onSelectArtwork={selectArtwork}
                 onSelectOpening={selectOpening}
               />
@@ -499,9 +520,11 @@ export function App() {
               opening={selectedOpening}
               placementWarnings={labeledPlacementWarnings}
               unit={project.unit}
-              onCommitPosition={(xMm, yMm) => void moveOpening(selectedOpening.id, xMm, yMm)}
+              onCommitPosition={(xMm, yMm) =>
+                void moveOpening(selectedOpening.id, xMm, yMm, allowOverlappingPlacement)
+              }
               onCommitSize={(widthMm, heightMm) =>
-                void resizeOpening(selectedOpening.id, widthMm, heightMm)
+                void resizeOpening(selectedOpening.id, widthMm, heightMm, allowOverlappingPlacement)
               }
               onDelete={() => void removePlacement(selectedOpening.id)}
             />
