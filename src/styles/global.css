@@ -7,18 +7,20 @@
   font-weight: 400;
 
   --bg: oklch(1 0 0);
-  --surface: oklch(0.972 0.004 80);
-  --surface-strong: oklch(0.935 0.008 80);
-  --ink: oklch(0.205 0.019 75);
-  --muted: oklch(0.43 0.024 75);
-  --subtle: oklch(0.69 0.018 75);
-  --line: oklch(0.872 0.011 78);
-  --primary: oklch(0.61 0.142 78);
-  --primary-strong: oklch(0.47 0.118 78);
-  --primary-soft: oklch(0.91 0.055 80);
-  --accent: oklch(0.36 0.073 158);
+  --surface: oklch(0.975 0.004 240);
+  --surface-strong: oklch(0.935 0.006 240);
+  --ink: oklch(0.16 0.004 240);
+  --muted: oklch(0.42 0.006 240);
+  --subtle: oklch(0.55 0.008 240);
+  --line: oklch(0.87 0.007 240);
+  --primary: oklch(0.42 0.07 200);
+  --primary-strong: oklch(0.3 0.065 200);
+  --primary-soft: oklch(0.93 0.025 200);
+  --accent: oklch(0.32 0.1 15);
   --danger: oklch(0.53 0.18 28);
-  --focus: oklch(0.62 0.16 78);
+  --caution: oklch(0.5 0.13 75);
+  --caution-soft: oklch(0.94 0.045 75);
+  --focus: oklch(0.5 0.12 200);
   --radius-sm: 6px;
   --radius-md: 8px;
   --shadow-tight: 0 1px 2px oklch(0 0 0 / 0.08);
@@ -90,7 +92,7 @@ input:focus-visible {
   height: 38px;
   place-items: center;
   border-radius: var(--radius-md);
-  background: var(--ink);
+  background: var(--accent);
   color: var(--bg);
   font-weight: 750;
 }
@@ -246,8 +248,8 @@ input:focus-visible {
 }
 
 .status-badge.saved {
-  background: oklch(0.93 0.045 158);
-  color: var(--accent);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
 }
 
 .status-badge.saving {
@@ -550,8 +552,8 @@ input:focus-visible {
 }
 
 .uncertainty-badge.approximate {
-  background: oklch(0.93 0.055 80);
-  color: var(--primary-strong);
+  background: var(--caution-soft);
+  color: var(--caution);
 }
 
 .uncertainty-badge.unknown {
@@ -730,12 +732,12 @@ input:focus-visible {
 }
 
 .grid-line.minor {
-  stroke: oklch(0.78 0.014 78 / 0.42);
+  stroke: oklch(0.78 0.008 240 / 0.42);
   stroke-width: 1;
 }
 
 .grid-line.major {
-  stroke: oklch(0.62 0.018 78 / 0.5);
+  stroke: oklch(0.62 0.01 240 / 0.5);
   stroke-width: 1.3;
 }
 
@@ -777,7 +779,7 @@ input:focus-visible {
 }
 
 .snap-guide {
-  stroke: var(--accent);
+  stroke: var(--primary-strong);
   stroke-dasharray: 10 8;
   stroke-width: 2;
   pointer-events: none;
@@ -857,7 +859,7 @@ input:focus-visible {
 }
 
 .elevation-artwork.approximate .artwork-outline {
-  stroke: var(--primary-strong);
+  stroke: var(--caution);
 }
 
 .elevation-artwork.unknown .artwork-outline {
@@ -1068,7 +1070,7 @@ input:focus-visible {
 .constraint-panel svg {
   flex: 0 0 auto;
   margin-top: 2px;
-  color: var(--accent);
+  color: var(--primary-strong);
 }
 
 .constraint-panel h3 {
@@ -1091,10 +1093,10 @@ input:focus-visible {
   gap: 10px;
   margin-top: 2px;
   padding: 12px;
-  border: 1px solid oklch(0.82 0.08 78);
+  border: 1px solid oklch(0.8 0.09 75);
   border-radius: var(--radius-md);
-  background: oklch(0.955 0.04 82);
-  color: var(--primary-strong);
+  background: var(--caution-soft);
+  color: var(--caution);
 }
 
 .warning-panel h3 {
@@ -1227,4 +1229,98 @@ input:focus-visible {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Openings (doors/windows/blocked zones) — ElevationOpening.tsx. Same
+   stroke-based visual language as .elevation-artwork/.artwork-outline
+   (§2/§8's "restrained, dense, task-focused" note): one shared outline
+   treatment, one small kind-specific glyph layered on top, and the same
+   selected/out-of-bounds override language already established for
+   artwork, reusing the same tokens rather than inventing new colors. */
+.elevation-opening {
+  cursor: grab;
+  touch-action: none;
+}
+
+.elevation-opening:active {
+  cursor: grabbing;
+}
+
+.opening-outline {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+  /* Same reasoning as .artwork-outline: with fill:none, only the hairline
+     stroke is hit-testable by default — "all" makes the whole rect (down
+     to the floor for a door) the drag/click target. */
+  pointer-events: all;
+}
+
+.elevation-opening.out-of-bounds .opening-outline {
+  stroke: var(--danger);
+  stroke-dasharray: 6 6;
+  stroke-width: 4;
+}
+
+.elevation-opening.selected .opening-outline {
+  stroke: var(--primary);
+  stroke-width: 5;
+}
+
+.door-swing {
+  stroke: var(--subtle);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.elevation-opening.selected .door-swing {
+  stroke: var(--primary);
+}
+
+.window-mullions line {
+  stroke: var(--muted);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.elevation-opening.selected .window-mullions line {
+  stroke: var(--primary);
+}
+
+.blocked-zone-hatch-line {
+  stroke: var(--subtle);
+  stroke-width: 1.5;
+}
+
+.blocked-zone-fill {
+  pointer-events: none;
+}
+
+/* WallInspector's "Add to this wall" row — three compact actions reusing
+   the existing .inspector-action button treatment (ArtworkInspector's
+   "Remove from wall"), just laid out horizontally since these three are a
+   set rather than a single action. */
+.opening-add-row {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.opening-add-row > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 680;
+}
+
+.opening-add-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.opening-add-buttons .inspector-action {
+  flex: 1 1 auto;
 }
