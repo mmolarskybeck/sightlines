@@ -6,6 +6,11 @@ import { createNextRectangleRoom } from "../domain/geometry/createRoom";
 import { resizeWallPreservingAngles } from "../domain/geometry/editRoom";
 import { getWallsWithGeometry } from "../domain/geometry/walls";
 import { createBlankProject } from "../domain/newProject";
+import {
+  createOpeningPlacement,
+  getOpeningKindLabel,
+  type OpeningKind
+} from "../domain/placement/createOpening";
 import { createArtworkPlacement, getEffectivePlacementSizeMm } from "../domain/placement/placeArtwork";
 import type { PlacementWarning } from "../domain/placement/validatePlacement";
 import {
@@ -61,6 +66,7 @@ type AppState = {
   project: Project | null;
   selectedWallId: string | null;
   selectedArtworkId: string | null;
+  selectedOpeningId: string | null;
   viewMode: ViewMode;
   saveState: "idle" | "saving" | "saved" | "error";
   error: string | null;
@@ -74,6 +80,7 @@ type AppState = {
   setViewMode: (viewMode: ViewMode) => void;
   selectWall: (wallId: string) => void;
   selectArtwork: (artworkId: string) => void;
+  selectOpening: (wallObjectId: string) => void;
   renameProject: (title: string) => Promise<void>;
   setUnit: (unit: DisplayUnit) => Promise<void>;
   addRectangleRoom: () => Promise<void>;
@@ -92,6 +99,9 @@ type AppState = {
   placeArtwork: (artworkId: string, wallId: string, xMm: number, yMm: number) => Promise<void>;
   moveArtworkPlacement: (wallObjectId: string, xMm: number, yMm: number) => Promise<void>;
   removePlacement: (wallObjectId: string) => Promise<void>;
+  addOpening: (wallId: string, kind: OpeningKind) => Promise<void>;
+  moveOpening: (wallObjectId: string, xMm: number, yMm: number) => Promise<void>;
+  resizeOpening: (wallObjectId: string, widthMm: number, heightMm: number) => Promise<void>;
 };
 
 export type AppStoreDeps = {
@@ -120,7 +130,12 @@ export function createAppStore(deps: AppStoreDeps) {
     type EditExtras = Partial<
       Pick<
         AppState,
-        "placementWarnings" | "lastGeometryEdit" | "selectedWallId" | "selectedArtworkId" | "viewMode"
+        | "placementWarnings"
+        | "lastGeometryEdit"
+        | "selectedWallId"
+        | "selectedArtworkId"
+        | "selectedOpeningId"
+        | "viewMode"
       >
     >;
 
@@ -183,6 +198,7 @@ export function createAppStore(deps: AppStoreDeps) {
         project,
         selectedWallId: getFirstWall(project)?.id ?? null,
         selectedArtworkId: null,
+        selectedOpeningId: null,
         placementWarnings: [],
         lastGeometryEdit: null,
         undoStack: [],
@@ -196,6 +212,7 @@ export function createAppStore(deps: AppStoreDeps) {
       project: null,
       selectedWallId: null,
       selectedArtworkId: null,
+      selectedOpeningId: null,
       viewMode: "plan",
       saveState: "idle",
       error: null,
@@ -253,13 +270,17 @@ export function createAppStore(deps: AppStoreDeps) {
       },
 
       selectWall(wallId) {
-        // Wall focus replaces artwork focus in the inspector — the two
-        // selections are mutually exclusive, not independent.
-        set({ selectedWallId: wallId, selectedArtworkId: null });
+        // Wall focus replaces artwork/opening focus in the inspector — the
+        // three selections are mutually exclusive, not independent.
+        set({ selectedWallId: wallId, selectedArtworkId: null, selectedOpeningId: null });
       },
 
       selectArtwork(artworkId) {
-        set({ selectedArtworkId: artworkId });
+        set({ selectedArtworkId: artworkId, selectedOpeningId: null });
+      },
+
+      selectOpening(wallObjectId) {
+        set({ selectedOpeningId: wallObjectId, selectedArtworkId: null });
       },
 
       async renameProject(title) {
@@ -715,14 +736,100 @@ export function createAppStore(deps: AppStoreDeps) {
         if (!project.wallObjects.some((wallObject) => wallObject.id === wallObjectId)) return;
 
         // Removes the placement only — checklist membership is a separate
-        // concept (docs/plan.md §4.1) and is untouched here.
+        // concept (docs/plan.md §4.1) and is untouched here. Generic over
+        // wall object kind, so this same action deletes an opening too —
+        // there's no checklist-membership concept to preserve for those.
         await applyEdit("Remove from wall", (current) => ({
           ...current,
           wallObjects: current.wallObjects.filter((wallObject) => wallObject.id !== wallObjectId)
         }));
+      },
+
+      async addOpening(wallId, kind) {
+        const project = get().project;
+        if (!project) return;
+
+        const wall = getProjectWalls(project).find((candidate) => candidate.id === wallId);
+        if (!wall) return;
+
+        // Centered on the wall by default — the curator adjusts from there,
+        // same "place first, refine after" spirit as artwork placement.
+        const centerlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
+        const placement = createOpeningPlacement(kind, wallId, wall.lengthMm / 2, centerlineYMm);
+        const nextWallObjects = [...project.wallObjects, placement];
+
+        await applyEdit(
+          `Add ${openingNoun(kind)}`,
+          (current) => ({ ...current, wallObjects: nextWallObjects }),
+          {
+            placementWarnings: validateWallObjectPlacements(
+              { ...project, wallObjects: nextWallObjects },
+              [placement.id]
+            ),
+            selectedOpeningId: placement.id,
+            selectedArtworkId: null
+          }
+        );
+      },
+
+      async moveOpening(wallObjectId, xMm, yMm) {
+        const project = get().project;
+        if (!project) return;
+
+        const target = project.wallObjects.find((wallObject) => wallObject.id === wallObjectId);
+        if (!target || target.kind === "artwork") return;
+        if (target.xMm === xMm && target.yMm === yMm) return;
+
+        const nextWallObjects = project.wallObjects.map((wallObject) =>
+          wallObject.id === wallObjectId ? { ...wallObject, xMm, yMm } : wallObject
+        );
+
+        // Same shape as moveArtworkPlacement: the UI previews the drag
+        // locally and calls this exactly once on release.
+        await applyEdit(
+          `Move ${openingNoun(target.kind)}`,
+          (current) => ({ ...current, wallObjects: nextWallObjects }),
+          {
+            placementWarnings: validateWallObjectPlacements(
+              { ...project, wallObjects: nextWallObjects },
+              [wallObjectId]
+            )
+          }
+        );
+      },
+
+      async resizeOpening(wallObjectId, widthMm, heightMm) {
+        const project = get().project;
+        if (!project) return;
+
+        const target = project.wallObjects.find((wallObject) => wallObject.id === wallObjectId);
+        if (!target || target.kind === "artwork") return;
+        if (target.widthMm === widthMm && target.heightMm === heightMm) return;
+
+        const nextWallObjects = project.wallObjects.map((wallObject) =>
+          wallObject.id === wallObjectId ? { ...wallObject, widthMm, heightMm } : wallObject
+        );
+
+        await applyEdit(
+          `Resize ${openingNoun(target.kind)}`,
+          (current) => ({ ...current, wallObjects: nextWallObjects }),
+          {
+            placementWarnings: validateWallObjectPlacements(
+              { ...project, wallObjects: nextWallObjects },
+              [wallObjectId]
+            )
+          }
+        );
       }
     };
   });
+}
+
+// Lowercase noun for undo-stack labels ("Add door", "Move blocked zone"),
+// matching the "Add artwork"/"Move artwork" label casing already in use —
+// getOpeningKindLabel's Title Case is for UI headings/subjects instead.
+function openingNoun(kind: OpeningKind): string {
+  return getOpeningKindLabel(kind).toLowerCase();
 }
 
 function formatZodIssue(error: z.ZodError): string {
