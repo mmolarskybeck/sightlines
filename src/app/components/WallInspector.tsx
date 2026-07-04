@@ -81,11 +81,6 @@ export function WallInspector({
       }}
     >
       <label className="field-row">
-        <span>Selected wall</span>
-        <input readOnly value={wallName} />
-      </label>
-
-      <label className="field-row">
         <span>Length</span>
         <input
           aria-describedby={lengthError ? "wall-length-error" : undefined}

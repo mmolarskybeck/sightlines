@@ -74,6 +74,8 @@ export function PlanView({
   const majorGridMm = getMajorGridIntervalMm(project.unit, minorGridMm);
   const handleSizeMm = pixelsPerMm > 0 ? HANDLE_SCREEN_SIZE_PX / pixelsPerMm : 0;
   const snapThresholdMm = pixelsPerMm > 0 ? SNAP_THRESHOLD_PX / pixelsPerMm : 0;
+  // Minor grid dot radius in mm, sized to a constant ~1.1px on screen.
+  const dotRadiusMm = pixelsPerMm > 0 ? 1.1 / pixelsPerMm : undefined;
   const gridSnapTargets = getGridSnapTargets(minorGridMm, {
     minXMm: viewBoxBounds.x,
     maxXMm: viewBoxBounds.x + viewBoxBounds.width,
@@ -221,9 +223,24 @@ export function PlanView({
     <div className="drawing-surface" aria-label="Plan view" ref={containerRef}>
       <svg className="plan-svg" ref={svgRef} viewBox={viewBox} role="img">
         <title>{project.title} plan</title>
+        {/* Room interiors render below the grid (the grid must stay visible
+            on the room's "paper"), walls and handles above it. */}
+        {displayedProject.floor.rooms.map((placement) => (
+          <polygon
+            className="room-fill"
+            key={placement.roomId}
+            points={placement.room.vertices
+              .map(
+                (vertex) =>
+                  `${vertex.xMm + placement.offsetXMm},${vertex.yMm + placement.offsetYMm}`
+              )
+              .join(" ")}
+          />
+        ))}
         {gridVisible ? (
           <GridOverlay
             id="plan-grid"
+            dotRadiusMm={dotRadiusMm}
             height={viewBoxBounds.height}
             majorSpacingMm={majorGridMm}
             minorSpacingMm={minorGridMm}
@@ -234,15 +251,6 @@ export function PlanView({
         ) : null}
         {displayedProject.floor.rooms.map((placement) => (
           <g key={placement.roomId}>
-            <polygon
-              className="room-fill"
-              points={placement.room.vertices
-                .map(
-                  (vertex) =>
-                    `${vertex.xMm + placement.offsetXMm},${vertex.yMm + placement.offsetYMm}`
-                )
-                .join(" ")}
-            />
             {placement.room.walls.map((wall) => {
               const start = placement.room.vertices.find(
                 (vertex) => vertex.id === wall.startVertexId

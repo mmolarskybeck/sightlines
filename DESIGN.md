@@ -16,31 +16,37 @@ colors:
   danger: "oklch(0.53 0.18 28)"
   caution: "oklch(0.5 0.13 75)"
   caution-soft: "oklch(0.94 0.045 75)"
+  danger-soft: "oklch(0.94 0.052 28)"
+  danger-line: "oklch(0.82 0.08 28)"
+  caution-line: "oklch(0.8 0.09 75)"
+  grid-minor: "oklch(0.78 0.008 240 / 0.42)"
+  grid-major: "oklch(0.62 0.01 240 / 0.5)"
+  grid-dot: "oklch(0.72 0.008 240 / 0.55)"
   focus: "oklch(0.5 0.12 200)"
 typography:
   title:
-    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    fontFamily: '"Montserrat Variable", ui-sans-serif, system-ui, sans-serif'
     fontSize: "1.08rem"
     fontWeight: 720
     lineHeight: 1.3
   headline:
-    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    fontFamily: '"Montserrat Variable", ui-sans-serif, system-ui, sans-serif'
     fontSize: "0.95rem"
     fontWeight: 760
     lineHeight: 1.3
   body:
-    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    fontFamily: '"Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, sans-serif'
     fontSize: "0.86rem"
     fontWeight: 400
     lineHeight: 1.5
   label:
-    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    fontFamily: '"Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, sans-serif'
     fontSize: "0.78rem"
     fontWeight: 680
     lineHeight: 1.4
 rounded:
-  sm: "6px"
-  md: "8px"
+  sm: "3px"
+  md: "3px"
 spacing:
   xs: "4px"
   sm: "8px"
@@ -76,62 +82,105 @@ components:
 
 **Creative North Star: "The Curator's Desk"**
 
-Sightlines should feel like a clean exhibition drafting table: a white working surface where wall plans, object checklists, measurements, and placement decisions can sit together without visual noise. The interface is minimalist but not generic, precise but not cold, elegant without becoming decorative. Black linework, crisp typography, measured spacing, subtle grids, and restrained color make the workspace feel trustworthy, calm, and professional — a serious studio instrument, not a CAD program, not a SketchUp clone, not a generic SaaS dashboard, and not a collections-management database.
+Sightlines is a calm exhibition-planning surface for rooms, walls, measurements, and artwork placement. It should feel like a museum workroom tool: exact, legible, composed, and durable. The interface is not decorative, but it is not generic. It earns elegance through proportion, alignment, typography, and restraint.
 
-Color is functional before it is expressive. The surface is white; text is black and grey; a single petrol blue-green carries every routine interactive state (selection, focus, in-progress); a deep oxblood appears exactly once, on the brand mark, as the one deliberate flourish the system allows itself. A separate amber-caution color exists purely to make uncertain data visible without making it feel like an error — a distinct concern from both the interactive color and the alarm-red used for genuine invalid states.
+The visual language is built from line, measure, spacing, and quiet contrast. The canvas is white. The plan is drawn in black, graphite, and petrol. Panels are fixed work surfaces, not floating cards. Controls feel drawn and fitted into the grid, not inflated.
+
+Sightlines should not look like a CAD program, a SketchUp clone, a startup dashboard, or a collections-management database. It should borrow seriousness from drafting tools, clarity from productivity software, and restraint from museum print materials.
 
 **Key Characteristics:**
-- Pure white canvas; near-black ink text; barely-tinted cool greys for panel separation
-- One interactive hue (petrol) governs selection, focus, and active state everywhere
-- Oxblood is rationed to a single component: the brand mark
-- Selection is always a border + soft tint, never a solid filled button
-- Uncertainty has its own amber-caution language, independent of both petrol and danger-red
-- Flat by default; shadow appears only on the two genuinely floating elements in the whole app
+- White canvas, near-black linework, graphite secondary text
+- Petrol used sparingly for active tools, selected geometry, focus, and measurement guides
+- Rectangular before rounded
+- Line-based before filled
+- Fixed panels rather than card stacks
+- Semantic color only for uncertainty and error
+- Shadow reserved for true overlays
 
 ## 2. Colors
 
-Restrained by design: white bg, black/grey ink, one petrol accent for interaction, one oxblood accent for identity, plus the semantic caution/danger pair.
+The palette is restrained: white, cool greys, near-black ink, one petrol interaction hue, and a separate caution/danger pair for data confidence.
 
-### Primary
-- **Petrol** (oklch(0.42 0.07 200) / #04585c): the app's only interactive color. Selection borders, active tabs, pressed states, resize handles, snap guides, and the "in progress / saved" status badges all draw from this single hue at varying weight (`primary`, `primary-strong`, `primary-soft`).
+### Primary Interaction
 
-### Secondary
-- **Oxblood** (oklch(0.32 0.1 15) / #5b1622): the brand mark only. Nowhere else in the system. Its rarity is what makes it read as identity rather than decoration.
+**Petrol** (`oklch(0.42 0.07 200)`) is the only routine interaction hue.
+
+Use petrol for:
+
+- Active drawing tools
+- Selected room, wall, artwork, or handle
+- Focus rings
+- Measurement guides
+- Snap guides
+- Active view indicators
+- Confirmed successful states, when a status indicator is necessary
+
+Petrol should usually appear as a line, rule, outline, or soft wash. A solid petrol fill is reserved for global toggles or high-commitment actions.
 
 ### Neutral
-- **Ink** (oklch(0.16 0.004 240) / #0c0e0f): primary text, near-black with an almost imperceptible cool undertone.
-- **Graphite** (oklch(0.42 0.006 240) / #4a4e50): secondary text — labels, section headers, field hints.
-- **Fog** (oklch(0.55 0.008 240) / #6e7276): tertiary/meta text — timestamps, counts, de-emphasized captions.
-- **Hairline** (oklch(0.87 0.007 240) / #d0d5d8): all borders and dividers.
-- **Cool Fog / Cool Ash** (oklch(0.975 0.004 240) and oklch(0.935 0.006 240)): the two panel-background steps (sidebar/inspector fills, hover states) above the pure-white canvas.
+
+- **Ink** (`oklch(0.16 0.004 240)`): primary text and the strongest plan linework
+- **Graphite** (`oklch(0.38 0.006 240)`): labels, secondary text, inspector metadata
+- **Fog** (`oklch(0.56 0.008 240)`): captions, counts, quiet helper text
+- **Hairline** (`oklch(0.87 0.007 240)`): borders, dividers, grid-adjacent UI lines
+- **Line Strong** (`oklch(0.72 0.009 240)`): hover borders, inactive but visible strokes, door swings
+- **Surface / Surface Quiet**: panel backgrounds and hover fills, used lightly above the white canvas
+
+### Brand
+
+The brand mark should be typographic or line-based, not a generic colored app tile. The current monogram-on-white direction is stronger than an oxblood square.
+
+Use the brand color only if the mark itself needs warmth or distinction. Do not use brand color for product interactions, badges, selected states, or buttons.
 
 ### Semantic
-- **Alarm Red** (oklch(0.53 0.18 28) / #be3029): invalid dimensions, save errors, "unknown" placement data. Reserved for genuine failure states.
-- **Caution Amber** (oklch(0.5 0.13 75) / #8d5500, on oklch(0.94 0.045 75) / #fde8cb): "approximate" dimensions and placements, and advisory warnings. One tier below Alarm Red on the confidence ladder, and visually unrelated to Petrol so a user never confuses "this is selected" with "this is a guess."
+
+**Caution Amber** marks approximate data or advisory warnings.
+
+Examples:
+
+- approximate artwork dimensions
+- approximate placement
+- advisory spacing warning
+- uncertain checklist metadata
+
+**Alarm Red** marks invalid, missing, or failed states.
+
+Examples:
+
+- invalid dimensions
+- artwork cannot fit
+- save failed
+- unknown critical metadata
+
+Approximate and invalid states must not be confused with selection. A selected approximate artwork should show both states: petrol for selection, amber for confidence.
 
 ### Named Rules
-**The One Voice Rule.** Petrol is the only color used for routine interaction anywhere in the app. If a new component needs to signal "active" or "selected," it reaches for `primary`/`primary-soft`, never a new hue.
+**The One Voice Rule.** Petrol is the primary color used for routine interaction anywhere in the app. If a new component needs to signal "active" or "selected," it reaches for `primary`/`primary-soft`, never a new hue.
 
 **The Rationed Accent Rule.** Oxblood appears in exactly one place: the brand mark. It is not a secondary button color, not a hover state, not a tag color. The moment it starts showing up twice, it has stopped being identity and started being decoration.
 
-**The Tinted Selection Rule.** No component in this system uses a solid filled background for its default or selected state. Selection is always `border-color: var(--primary)` plus `background: var(--primary-soft)` — a border and a wash, never a block of color.
+**The Tinted Selection Rule.** Selection remains border plus petrol-soft wash, but the system now allows exactly ONE solid petrol CTA per screen — currently "Add Artwork" in the checklist (solid --primary, white text). All other interactions use outlined or tinted buttons.
+
+**The Square Architecture Rule.** Panels, containers, and all major layout divisions are square (radius 0), separated by 1px hairlines. Only small interactive controls (buttons, inputs, tags) carry a subtle 3px radius. There are no 999px pills anywhere. Badge count is deliberately minimal: the uncertainty badge is the only remaining soft-fill badge (2px radius); placement status is plain text (petrol wall name / subtle "Unplaced"); save status is a dot + text.
 
 **The Caution Ladder Rule.** Confidence in placement/dimension data has exactly two visual tiers: Caution Amber for "approximate" and Alarm Red for "unknown/invalid." Both are independent of Petrol — a selected-and-approximate object must never be visually confusable with a selected-and-normal one.
 
 ## 3. Typography
 
-**Body/UI Font:** Inter (with ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif fallback)
+**Two-family system:** Montserrat Variable (display roles) and Inter Variable (body/UI). Both self-hosted via @fontsource-variable packages — no external font requests, per privacy positioning.
 
-**Character:** One family, no display face. A product-register tool where the type disappears into the task — the only variation is weight and size, tuned in small increments rather than jumping between a few loud steps.
+**Montserrat Variable** (`"Montserrat Variable", ui-sans-serif, system-ui, sans-serif`): the display voice. Used only for the SIGHTLINES wordmark, panel headings, mode tabs, and the rail monogram, at weights 600–700.
+
+**Inter Variable** (`"Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, sans-serif`): carries everything else — body, forms, labels, data. Genuinely supports fractional weights now that it ships as a live font file (previously no font file was loaded; the app silently fell back to system fonts).
 
 ### Hierarchy
-- **Title** (720, 1.08rem, line-height 1.3): the editable project name in the top bar — the single largest piece of text in the entire app.
-- **Headline** (760, 0.95rem, line-height 1.3): panel section headers (Rooms, Checklist, Data).
-- **Body** (400–680, 0.82–0.9rem, line-height 1.5): field values, checklist titles, property lists, general content. Caps at conversational widths where it appears as prose; most of it is compact UI text, not paragraphs.
-- **Label** (650–760, 0.68–0.78rem, line-height 1.4): captions, tags, badges, field hints — almost always set in Graphite or Fog, never Ink.
+- **Title** (Montserrat, 720, 1.08rem, line-height 1.3): the editable project name in the top bar — the single largest piece of text in the entire app.
+- **Headline** (Montserrat, 760, 0.95rem, line-height 1.3): panel section headers (Rooms, Checklist, Data).
+- **Body** (Inter, 400–680, 0.82–0.9rem, line-height 1.5): field values, checklist titles, property lists, general content. Caps at conversational widths where it appears as prose; most of it is compact UI text, not paragraphs.
+- **Label** (Inter, 650–760, 0.68–0.78rem, line-height 1.4): captions, tags, badges, field hints — almost always set in Graphite or Fog, never Ink.
 
 ### Named Rules
-**The Fractional Weight Rule.** Weights are tuned per element along Inter's variable axis — 650, 680, 700, 720, 750, 760 — rather than snapped to the standard 400/500/600/700 steps. At this density, a 30-unit difference is the only signal separating "section header" from "field label," so the increments are deliberate, not arbitrary.
+**The Fractional Weight Rule.** Inter roles are tuned per element along Inter's variable axis — 650, 680, 700, 720, 750, 760 — rather than snapped to the standard 400/500/600/700 steps. At this density, a 30-unit difference is the only signal separating "section header" from "field label," so the increments are deliberate, not arbitrary. Montserrat stays on standard weights 600 and 700 only.
 
 ## 4. Elevation
 
@@ -147,11 +196,11 @@ Flat by default. Borders (Hairline) do the separating work everywhere; shadow is
 ## 5. Components
 
 ### Buttons
-- **Shape:** 6px radius (`radius-sm`) on nearly everything; 8px (`radius-md`) on containers and the brand mark.
-- **Icon buttons:** 36px (32px compact) square, Hairline border, white fill at rest, Cool Fog fill on hover. No color until interaction.
+- **Shape:** 3px radius on small interactive controls; panels and containers use radius 0 (see the Square Architecture Rule).
+- **Icon buttons:** 36px square, Hairline border, white fill at rest, Cool Fog fill on hover. No color until interaction.
 - **Tab / view-option buttons:** transparent at rest, Graphite text; active state gets a Hairline border and Cool Fog fill with Ink text; a "pressed" toggle (e.g. Snap) gets the Tinted Selection treatment instead (Petrol border + Petrol-soft fill).
-- **Text buttons** (`project-picker-new`, `inspector-action`): bordered, Cool Fog fill, Ink text, Cool Ash fill on hover.
-- There is no solid-fill primary button anywhere in the system — see the Tinted Selection Rule.
+- **Text buttons** (`project-picker-new`, `inspector-action`): outlined or tinted, never solid fills. Bordered, Cool Fog fill, Ink text, Cool Ash fill on hover.
+- **CTA (Add Artwork in checklist):** solid petrol fill, white text — the one solid primary CTA per screen. Everything else outlined or tinted.
 
 ### Badges & Pills
 - **Style:** fully rounded (999px), compact padding, small Label-weight text.
@@ -166,8 +215,15 @@ Flat by default. Borders (Hairline) do the separating work everywhere; shadow is
 - **Readonly:** Cool Fog fill, Graphite text.
 
 ### Navigation
-- **Top bar:** white background, Hairline bottom border, brand mark (Oxblood square) anchoring the left edge next to the editable project Title.
-- **View tabs** (Plan / Elevation / Data): the tab-button treatment above; the active tab is the only wayfinding needed, no underline or additional accent.
+- **Left icon rail:** 52px, full-height, right hairline. S monogram top (32px oxblood square, 3px radius — still the only oxblood element). Checklist panel toggle (functional, persisted showChecklistPanel view preference). Data view (relocated from top tabs). Issues (live placement-warning count as a square danger tag; click selects the first offending object). Disabled 3D placeholder. Disabled Settings/Help placeholders. Rail buttons: 36px, borderless, hover Cool Fog, active petrol-soft.
+- **Top bar:** three-zone grid on white background with Hairline bottom border. Left zone: SIGHTLINES wordmark (Montserrat, uppercase, 0.12em tracking) + hairline + project title (editable). Center zone: Plan / Elevation tabs only, styled as underline tabs (muted → ink on hover; active = ink + 2px petrol underline). Right zone: dot+text save status, undo/redo group, hairline divider, import button, outlined Export.
+- **Workspace layout:** Checklist panel (left, ~320px, toggled via rail; grid collapses when hidden), canvas (center), Rooms + contextual Inspector (right, ~300px). The inspector heading names the selected subject (wall name / artwork title / opening kind) with a small kind label.
+
+### Canvas
+- **Background:** pure white throughout. Backgrounds are white, not Cool Fog — --surface is demoted to hover fills and readonly inputs only.
+- **No inner border:** canvas floats flush within its viewport.
+- **Stroke hierarchy:** all strokes use screen-px via non-scaling strokes (SVG `vector-effect: non-scaling-stroke`). Walls are the heaviest: 5px ink normally, 7px petrol when selected. Elevation floor line 3px ink. Wall boundaries, artwork/opening outlines 1.5px (2.5px selected). Centerline and snap guides are thin dashed petrol 1.5px — reference lines never outweigh geometry.
+- **Grid:** defaults ON as a workspace preference (persisted in local preferences, not project data). The minor grid renders as small dots at grid intersections (--grid-dot) with quiet 1px major lines. Visible grid reflects the active minor interval; major landmarks use the major interval from the precision table.
 
 ### Panels & Containers
 - **Corner style:** 8px radius.
@@ -175,21 +231,37 @@ Flat by default. Borders (Hairline) do the separating work everywhere; shadow is
 - **Border:** always Hairline, 1px — never a shadow (see Elevation).
 - **Warning panels** use the Caution pair (Caution-soft fill, Caution text/icon, a slightly stronger amber border) to separate "here's something to double-check" from both ordinary panels and genuine errors.
 
+### Checklist
+- **Filter tabs:** All / Placed / Unplaced. Ink text at rest; active tab gets a 2px petrol underline and Ink text.
+- **Thumbnails:** 48px square slots, white fill, hairline border, radius 0. Object-fit: contain so uncropped image shows true proportions (portrait vs landscape reads at a glance).
+- **Rows:** two-line layout (48px thumbnail on left), title line with placement status (wall name as plain text when placed, subtle "Unplaced" tag otherwise), meta line with artist · dimensions and uncertainty badge where applicable.
+- **Remove button:** in-flow, hidden at rest, reveals on hover/focus/selection. Always visible on coarse pointers (touch).
+- **Bottom:** full-width solid petrol CTA "Add Artwork" button (the one solid primary CTA per screen, white text).
+- **Empty state:** dashed-border dropzone with hint copy.
+
 ### Brand Mark (signature)
-38px rounded-square, Oxblood fill, white glyph. The one place in the entire interface where the rationed secondary color appears — see the Rationed Accent Rule.
+Petrol "S" monogram inspired by measurement tools and architectural planning on transparent/white background. Optionally paired with "Sightlines" textmark.
 
 ## 6. Do's and Don'ts
 
 ### Do:
-- **Do** keep Petrol as the only color used for selection, focus, and active state — one hue, three weights (`primary`, `primary-strong`, `primary-soft`).
-- **Do** express selection as a border + soft-tint background, never a solid fill.
-- **Do** keep the caution/danger pair independent of the interactive color family, so confidence-in-data and interaction-state never collide visually.
-- **Do** default every panel to flat + Hairline border; reserve shadow for the dropdown menu and the floating dimension label only.
-- **Do** tune type weight in small increments (650/680/700/720/750/760) rather than jumping between a few standard steps.
+- Use petrol as the single routine interaction color.
+- Use line, underline, rule, outline, and wash before filled color.
+- Keep panels flat and architectural with square corners (radius 0).
+- Use 3px radius for small interactive controls only (buttons, inputs, tags).
+- Reserve badges for semantic data confidence or errors (uncertainty badge is the one remaining soft-fill badge).
+- Make dimensions and numeric values feel precise through alignment and tabular numerals.
+- Let the canvas carry the visual identity.
+- **Do** use one solid petrol CTA per screen (Add Artwork); everything else outlined or tinted.
+- **Do** tune Inter weights in small increments (650/680/700/720/750/760) rather than jumping between a few standard steps.
 
-### Don't:
-- **Don't** introduce a second decorative accent color. Oxblood is rationed to the brand mark; if a new component wants "warmth" or "identity," it doesn't get a new hue — it gets restraint.
-- **Don't** fill a button with a solid brand color. This system has no filled-primary-button anywhere, by design.
-- **Don't** let this look like a CAD program, a SketchUp clone, a generic SaaS dashboard, or a collections-management database — no decorative complexity, no marketing-page flourish, no dark-mode theatrics, no visual metaphor that makes the workspace feel less trustworthy than the measurements it displays.
-- **Don't** reuse Caution Amber or Alarm Red for anything other than data-confidence and error states respectively — they are semantic, not decorative, colors.
-- **Don't** add shadow to a panel that lives in normal document flow (sidebars, cards, banners). If it's not floating above the page, it's flat.
+### Don’t:
+- Don’t scatter solid fills — exactly one solid primary CTA per screen.
+- Don’t turn ordinary metadata into pills.
+- Don’t make every selected state a rounded capsule.
+- Don’t use oxblood as a product interaction color.
+- Don’t add shadows to panels in the normal layout.
+- Don’t use filled petrol buttons for routine actions.
+- Don’t overdecorate with cards, gradients, oversized radius, or soft SaaS affordances.
+- Don’t let warning/error color collide with selection color.
+- **Don’t** reuse Caution Amber or Alarm Red for anything other than data-confidence and error states respectively — they are semantic, not decorative, colors.

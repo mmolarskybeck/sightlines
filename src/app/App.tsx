@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Download,
-  FileJson,
   Grid2X2,
   Grid3X3,
   Layers,
@@ -24,12 +23,14 @@ import type { Artwork, ArtworkWallObject, DisplayUnit, OpeningWallObject, Projec
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import { formatLength } from "../domain/units/length";
 import { getGridPrecisionFloorOptionsMm } from "../domain/units/precision";
+import { AppRail } from "./components/AppRail";
 import { ArtworkInspector } from "./components/ArtworkInspector";
 import { ChecklistPanel } from "./components/ChecklistPanel";
 import { DataView } from "./components/DataView";
 import { ElevationEmptyState } from "./components/ElevationEmptyState";
 import { ElevationView } from "./components/ElevationView";
 import { OpeningInspector } from "./components/OpeningInspector";
+import { PlanEmptyState } from "./components/PlanEmptyState";
 import { PlanView } from "./components/PlanView";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { RoomDimensionFields } from "./components/RoomDimensionFields";
@@ -41,7 +42,6 @@ import {
 import { useViewPreferences } from "./hooks/useViewPreferences";
 import {
   exportProjectJson,
-  getProjectWalls,
   getSelectedWall,
   useAppStore
 } from "./store";
@@ -109,6 +109,8 @@ export function App() {
     snapToGrid,
     gridPrecisionFloorMm,
     allowOverlappingPlacement,
+    showChecklistPanel,
+    toggleShowChecklistPanel,
     toggleShowGrid,
     toggleSnapToGrid,
     setGridPrecisionFloorMm,
@@ -139,7 +141,6 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [undo, redo]);
 
-  const walls = useMemo(() => (project ? getProjectWalls(project) : []), [project]);
   const selectedWall = project ? getSelectedWall(project, selectedWallId) : null;
   const wallDimensionLink =
     project && selectedWall
@@ -196,46 +197,92 @@ export function App() {
     return { ...warning, subject };
   });
 
+  // The rail's Issues button jumps to the first warning's wall object so the
+  // inspector reveals it — an artwork placement selects its artwork, any
+  // other kind (door/window/blocked zone) selects the opening.
+  const selectFirstWarningObject = () => {
+    const first = placementWarnings[0];
+    if (!first) return;
+
+    const wallObject = project.wallObjects.find(
+      (candidate) => candidate.id === first.wallObjectId
+    );
+    if (!wallObject) return;
+
+    if (wallObject.kind === "artwork") {
+      selectArtwork(wallObject.artworkId);
+    } else {
+      selectOpening(wallObject.id);
+    }
+  };
+
   return (
     <main className="app-shell">
+      <AppRail
+        showChecklistPanel={showChecklistPanel}
+        onToggleChecklistPanel={toggleShowChecklistPanel}
+        isDataView={viewMode === "data"}
+        onOpenDataView={() => setViewMode("data")}
+        issueCount={placementWarnings.length}
+        onSelectFirstIssue={selectFirstWarningObject}
+      />
+      <div className="app-main">
       <header className="topbar">
-        <div className="brand-lockup" aria-label="Sightlines">
-          <div className="brand-mark">S</div>
-          <div>
-            <p className="app-name">Sightlines</p>
+        <div className="topbar-left">
+          <p className="app-name">Sightlines</p>
+          <div className="brand-divider" aria-hidden="true" />
+          <div className="project-switcher">
             <ProjectTitleInput title={project.title} onCommit={renameProject} />
+            <ProjectPicker
+              currentProjectId={project.id}
+              listProjectSummaries={listProjectSummaries}
+              onCreateProject={createProject}
+              onDeleteProject={deleteProject}
+              onOpenProject={openProject}
+            />
           </div>
         </div>
 
-        <div className="toolbar" aria-label="Project actions">
-          <StatusBadge state={saveState} />
-          <button
-            className="icon-button"
-            type="button"
-            title="Undo"
-            aria-label="Undo"
-            disabled={undoStack.length === 0}
-            onClick={() => void undo()}
-          >
-            <Undo2 aria-hidden="true" size={18} />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            title="Redo"
-            aria-label="Redo"
-            disabled={redoStack.length === 0}
-            onClick={() => void redo()}
-          >
-            <Redo2 aria-hidden="true" size={18} />
-          </button>
-          <ProjectPicker
-            currentProjectId={project.id}
-            listProjectSummaries={listProjectSummaries}
-            onCreateProject={createProject}
-            onDeleteProject={deleteProject}
-            onOpenProject={openProject}
+        <div className="view-tabs topbar-center" role="tablist" aria-label="Workspace view">
+          <TabButton
+            active={viewMode === "plan"}
+            icon={<Grid2X2 aria-hidden="true" size={16} />}
+            label="Plan"
+            onClick={() => setViewMode("plan")}
           />
+          <TabButton
+            active={viewMode === "elevation"}
+            icon={<Ruler aria-hidden="true" size={16} />}
+            label="Elevation"
+            onClick={() => setViewMode("elevation")}
+          />
+        </div>
+
+        <div className="topbar-right" aria-label="Project actions">
+          <StatusBadge state={saveState} />
+          <div className="toolbar-group">
+            <button
+              className="icon-button"
+              type="button"
+              title="Undo"
+              aria-label="Undo"
+              disabled={undoStack.length === 0}
+              onClick={() => void undo()}
+            >
+              <Undo2 aria-hidden="true" size={18} />
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              title="Redo"
+              aria-label="Redo"
+              disabled={redoStack.length === 0}
+              onClick={() => void redo()}
+            >
+              <Redo2 aria-hidden="true" size={18} />
+            </button>
+          </div>
+          <div className="toolbar-divider" aria-hidden="true" />
           <button
             className="icon-button"
             type="button"
@@ -246,13 +293,14 @@ export function App() {
             <Upload aria-hidden="true" size={18} />
           </button>
           <button
-            className="icon-button"
+            className="topbar-button"
             type="button"
             title="Export project JSON"
             aria-label="Export project JSON"
             onClick={() => downloadProject(project)}
           >
             <Download aria-hidden="true" size={18} />
+            <span>Export</span>
           </button>
           <input
             ref={fileInputRef}
@@ -271,77 +319,10 @@ export function App() {
 
       {error ? <p className="error-banner">{error}</p> : null}
 
-      <section className="workspace">
-        <aside className="sidebar" aria-label="Project structure">
-          <div className="panel-heading">
-            <h2>Gallery</h2>
-            <div className="panel-heading-actions">
-              <span>
-                {project.floor.rooms.length} rooms · {walls.length} walls
-              </span>
-              <button
-                aria-label="Add rectangular room"
-                className="icon-button compact"
-                title="Add rectangular room"
-                type="button"
-                onClick={() => void addRectangleRoom()}
-              >
-                <Plus aria-hidden="true" size={16} />
-              </button>
-            </div>
-          </div>
-
-          <nav className="room-list" aria-label="Rooms and walls">
-            {project.floor.rooms.length === 0 ? (
-              <p className="empty-copy">
-                No rooms yet — draw one, or skip straight to the checklist.
-              </p>
-            ) : null}
-            {project.floor.rooms.map((placement) => {
-              const roomWalls = getWallsWithGeometry(placement.room);
-              const rectangleDimensions = getRectangleRoomDimensions(placement.room);
-
-              return (
-                <section className="room-group" key={placement.roomId}>
-                  <div className="room-heading">
-                    <h3>{placement.room.name}</h3>
-                    <span>{roomWalls.length} walls</span>
-                  </div>
-                  {rectangleDimensions ? (
-                    <RoomDimensionFields
-                      depthMm={rectangleDimensions.depthMm}
-                      unit={project.unit}
-                      widthMm={rectangleDimensions.widthMm}
-                      onCommitDepth={(lengthMm) =>
-                        resizeWall(rectangleDimensions.depthWallId, lengthMm)
-                      }
-                      onCommitWidth={(lengthMm) =>
-                        resizeWall(rectangleDimensions.widthWallId, lengthMm)
-                      }
-                    />
-                  ) : null}
-                  <div className="wall-list">
-                    {roomWalls.map((wall) => (
-                      <button
-                        className={
-                          wall.id === selectedWall?.id ? "wall-row active" : "wall-row"
-                        }
-                        key={wall.id}
-                        type="button"
-                        onClick={() => selectWall(wall.id)}
-                      >
-                        <span>{wall.name}</span>
-                        <strong>
-                          {formatLength(wall.lengthMm, { unit: project.unit })}
-                        </strong>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              );
-            })}
-          </nav>
-
+      <section
+        className={showChecklistPanel ? "workspace" : "workspace checklist-hidden"}
+      >
+        {showChecklistPanel ? (
           <ChecklistPanel
             getBlob={getAssetBlob}
             intakeState={intakeState}
@@ -353,36 +334,10 @@ export function App() {
             onRemoveArtworkFromChecklist={removeArtworkFromChecklist}
             onSelectArtwork={selectArtwork}
           />
-
-          <div className="storage-note">
-            <Save aria-hidden="true" size={16} />
-            <span>{getStorageNoteCopy(storagePersistence)}</span>
-          </div>
-        </aside>
+        ) : null}
 
         <section className="canvas-column">
           <div className="view-toolbar">
-            <div className="view-tabs" role="tablist" aria-label="Workspace view">
-              <TabButton
-                active={viewMode === "plan"}
-                icon={<Grid2X2 aria-hidden="true" size={16} />}
-                label="Plan"
-                onClick={() => setViewMode("plan")}
-              />
-              <TabButton
-                active={viewMode === "elevation"}
-                icon={<Ruler aria-hidden="true" size={16} />}
-                label="Elevation"
-                onClick={() => setViewMode("elevation")}
-              />
-              <TabButton
-                active={viewMode === "data"}
-                icon={<FileJson aria-hidden="true" size={16} />}
-                label="Data"
-                onClick={() => setViewMode("data")}
-              />
-            </div>
-
             <div className="view-options" aria-label="View options">
               <ViewOptionButton
                 active={showGrid}
@@ -406,18 +361,20 @@ export function App() {
                 unit={project.unit}
                 onChange={setGridPrecisionFloorMm}
               />
-              <ViewOptionButton
-                active={allowOverlappingPlacement}
-                disabled={viewMode !== "elevation"}
-                icon={<Layers aria-hidden="true" size={16} />}
-                label="Overlap"
-                title={
-                  allowOverlappingPlacement
-                    ? "Prevent overlapping placement"
-                    : "Allow overlapping placement"
-                }
-                onClick={toggleAllowOverlappingPlacement}
-              />
+              {viewMode === "elevation" ? (
+                <ViewOptionButton
+                  active={allowOverlappingPlacement}
+                  disabled={false}
+                  icon={<Layers aria-hidden="true" size={16} />}
+                  label="Overlap"
+                  title={
+                    allowOverlappingPlacement
+                      ? "Prevent overlapping placement"
+                      : "Allow overlapping placement"
+                  }
+                  onClick={toggleAllowOverlappingPlacement}
+                />
+              ) : null}
               <UnitSelect
                 disabled={viewMode === "data"}
                 unit={project.unit}
@@ -427,14 +384,18 @@ export function App() {
           </div>
 
           {viewMode === "plan" ? (
-            <PlanView
-              gridPrecisionFloorMm={gridPrecisionFloorMm}
-              gridVisible={showGrid}
-              project={project}
-              selectedWallId={selectedWall?.id ?? null}
-              snapToGrid={snapToGrid}
-              onCommitWallLength={resizeWall}
-            />
+            project.floor.rooms.length === 0 ? (
+              <PlanEmptyState onAddRoom={() => void addRectangleRoom()} />
+            ) : (
+              <PlanView
+                gridPrecisionFloorMm={gridPrecisionFloorMm}
+                gridVisible={showGrid}
+                project={project}
+                selectedWallId={selectedWall?.id ?? null}
+                snapToGrid={snapToGrid}
+                onCommitWallLength={resizeWall}
+              />
+            )
           ) : null}
           {viewMode === "elevation" ? (
             selectedWall ? (
@@ -476,13 +437,95 @@ export function App() {
           {viewMode === "data" ? <DataView json={exportProjectJson(project)} /> : null}
         </section>
 
-        <aside className="inspector" aria-label="Inspector">
-          <div className="panel-heading">
-            <h2>Inspector</h2>
-            <span>MVP 1B</span>
+        <aside className="inspector" aria-label="Rooms and inspector">
+          <div className="rooms-section">
+            <div className="panel-heading">
+              <h2>Rooms</h2>
+              <div className="panel-heading-actions">
+                <span>{pluralize(project.floor.rooms.length, "room")}</span>
+                <button
+                  aria-label="Add rectangular room"
+                  className="icon-button compact"
+                  title="Add rectangular room"
+                  type="button"
+                  onClick={() => void addRectangleRoom()}
+                >
+                  <Plus aria-hidden="true" size={16} />
+                </button>
+              </div>
+            </div>
+
+            <nav className="room-list" aria-label="Rooms and walls">
+              {project.floor.rooms.length === 0 ? (
+                <p className="empty-copy">
+                  No rooms yet — draw one, or skip straight to the checklist.
+                </p>
+              ) : null}
+              {project.floor.rooms.map((placement) => {
+                const roomWalls = getWallsWithGeometry(placement.room);
+                const rectangleDimensions = getRectangleRoomDimensions(placement.room);
+
+                return (
+                  <section className="room-group" key={placement.roomId}>
+                    <div className="room-heading">
+                      <h3>{placement.room.name}</h3>
+                      <span>{pluralize(roomWalls.length, "wall")}</span>
+                    </div>
+                    {rectangleDimensions ? (
+                      <RoomDimensionFields
+                        depthMm={rectangleDimensions.depthMm}
+                        unit={project.unit}
+                        widthMm={rectangleDimensions.widthMm}
+                        onCommitDepth={(lengthMm) =>
+                          resizeWall(rectangleDimensions.depthWallId, lengthMm)
+                        }
+                        onCommitWidth={(lengthMm) =>
+                          resizeWall(rectangleDimensions.widthWallId, lengthMm)
+                        }
+                      />
+                    ) : null}
+                    <div className="wall-list">
+                      {roomWalls.map((wall) => (
+                        <button
+                          className={
+                            wall.id === selectedWall?.id ? "wall-row active" : "wall-row"
+                          }
+                          key={wall.id}
+                          type="button"
+                          onClick={() => selectWall(wall.id)}
+                        >
+                          <span>{wall.name}</span>
+                          <strong>
+                            {formatLength(wall.lengthMm, { unit: project.unit })}
+                          </strong>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+            </nav>
           </div>
 
-          {selectedArtwork ? (
+          <div className="panel-divider" aria-hidden="true" />
+
+          <div className="inspector-zone">
+            {selectedArtwork || selectedOpening || selectedWall ? (
+              <div className="panel-heading inspector-subject">
+                <h2>
+                  {selectedArtwork
+                    ? selectedArtwork.title ?? "Untitled"
+                    : selectedOpening
+                      ? getOpeningKindLabel(selectedOpening.kind)
+                      : selectedWall?.name}
+                </h2>
+                <span>
+                  {selectedArtwork ? "Artwork" : selectedOpening ? "Opening" : "Wall"}
+                </span>
+              </div>
+            ) : null}
+
+            {selectedArtwork ? (
             <>
               {labeledPlacementWarnings.length > 0 ? (
                 <div className="warning-panel" role="status" aria-live="polite">
@@ -545,13 +588,26 @@ export function App() {
               wallLengthMm={selectedWall.lengthMm}
               wallName={selectedWall.name}
             />
-          ) : (
-            <p className="empty-copy">Select a wall to inspect its measurements.</p>
-          )}
+            ) : (
+              <p className="empty-copy">
+                Select a wall, artwork, or opening to inspect it.
+              </p>
+            )}
+          </div>
+
+          <div className="storage-note">
+            <Save aria-hidden="true" size={16} />
+            <span>{getStorageNoteCopy(storagePersistence)}</span>
+          </div>
         </aside>
       </section>
+      </div>
     </main>
   );
+}
+
+function pluralize(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 function ProjectTitleInput({
@@ -581,6 +637,10 @@ function ProjectTitleInput({
       className="project-title"
       value={value}
       aria-label="Project title"
+      // Sized to the text so the picker chevron sits right beside the title
+      // instead of at the far end of a fixed-width field. The CSS clamp
+      // still bounds it on both ends.
+      style={{ width: `${Math.max(value.length, 8) + 2}ch` }}
       onChange={(event) => setValue(event.target.value)}
       onBlur={commit}
       onKeyDown={(event) => {
@@ -739,7 +799,12 @@ function StatusBadge({ state }: { state: "idle" | "saving" | "saved" | "error" }
           ? "Save issue"
           : "Idle";
 
-  return <span className={`status-badge ${state}`}>{label}</span>;
+  return (
+    <span className={`status-badge ${state}`}>
+      <span className="status-dot" aria-hidden="true" />
+      {label}
+    </span>
+  );
 }
 
 // "granted" covers both an already-durable store and a fresh grant this

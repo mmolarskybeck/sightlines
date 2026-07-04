@@ -17,9 +17,12 @@ describe("useViewPreferences", () => {
     const { result } = renderHook(() => useViewPreferences());
 
     expect(result.current.gridPrecisionFloorMm).toBeNull();
-    // Untouched behavior from before this preference existed.
-    expect(result.current.showGrid).toBe(false);
+    // Grid now defaults on (a measured drafting surface on first open); snap
+    // stays on as before.
+    expect(result.current.showGrid).toBe(true);
     expect(result.current.snapToGrid).toBe(true);
+    // The checklist is the left anchor of the workspace on first open.
+    expect(result.current.showChecklistPanel).toBe(true);
   });
 
   it("persists a chosen floor to localStorage and reflects it in state", () => {
@@ -84,7 +87,7 @@ describe("useViewPreferences", () => {
     const { result } = renderHook(() => useViewPreferences());
 
     expect(result.current.gridPrecisionFloorMm).toBeNull();
-    expect(result.current.showGrid).toBe(false);
+    expect(result.current.showGrid).toBe(true);
     expect(result.current.snapToGrid).toBe(true);
   });
 });

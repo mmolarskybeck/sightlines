@@ -732,7 +732,10 @@ export function createAppStore(deps: AppStoreDeps) {
         await applyEdit(
           "Place artwork",
           (current) => ({ ...current, wallObjects: nextWallObjects }),
-          { placementWarnings, selectedArtworkId: artworkId }
+          // Selecting the placed artwork must also clear any opening
+          // selection — the two are mutually exclusive everywhere else
+          // (selectArtwork/selectOpening/addOpening all clear the other).
+          { placementWarnings, selectedArtworkId: artworkId, selectedOpeningId: null }
         );
       },
 

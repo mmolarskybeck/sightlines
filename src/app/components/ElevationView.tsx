@@ -131,10 +131,17 @@ export function ElevationView({
   const moveDragRef = useRef<MoveDragState | null>(null);
   const [dropGhost, setDropGhost] = useState<DropGhostState | null>(null);
 
-  const viewBox = `0 0 ${wallLengthMm} ${wallHeightMm}`;
+  // Pad the viewBox so the wall reads as a figure on the canvas field
+  // rather than bleeding edge-to-edge, and so boundary strokes (centered on
+  // the wall edge) aren't half-clipped. All wall-local coordinates are
+  // unchanged — only the visible window widens.
+  const viewPadMm = Math.max(wallLengthMm, wallHeightMm) * 0.06;
+  const viewBox = `${-viewPadMm} ${-viewPadMm} ${wallLengthMm + viewPadMm * 2} ${
+    wallHeightMm + viewPadMm * 2
+  }`;
   const pixelsPerMm = getPixelsPerMm(containerSize, {
-    width: wallLengthMm,
-    height: wallHeightMm
+    width: wallLengthMm + viewPadMm * 2,
+    height: wallHeightMm + viewPadMm * 2
   });
   const minorGridMm = getMinorGridIntervalMm(unit, pixelsPerMm, {
     minIntervalMm: gridPrecisionFloorMm
@@ -142,6 +149,8 @@ export function ElevationView({
   const majorGridMm = getMajorGridIntervalMm(unit, minorGridMm);
   const centerlineSvgY = wallLocalYToSvgY(wallHeightMm, centerlineMm);
   const snapThresholdMm = pixelsPerMm > 0 ? SNAP_THRESHOLD_PX / pixelsPerMm : 0;
+  // Minor grid dot radius in mm, sized to a constant ~1.1px on screen.
+  const dotRadiusMm = pixelsPerMm > 0 ? 1.1 / pixelsPerMm : undefined;
 
   const placements: ArtworkWallObject[] = (wallObjects ?? []).filter(
     (object): object is ArtworkWallObject => object.kind === "artwork" && object.wallId === wallId
@@ -370,10 +379,18 @@ export function ElevationView({
       </div>
       <svg className="elevation-svg" ref={svgRef} viewBox={viewBox} role="img">
         <title>{wallName} elevation</title>
-        <rect className="wall-fill" x="0" y="0" width={wallLengthMm} height={wallHeightMm} />
+        <rect
+          className="wall-fill"
+          x="0"
+          y="0"
+          width={wallLengthMm}
+          height={wallHeightMm}
+          vectorEffect="non-scaling-stroke"
+        />
         {gridVisible ? (
           <GridOverlay
             id="elevation-grid"
+            dotRadiusMm={dotRadiusMm}
             height={wallHeightMm}
             majorSpacingMm={majorGridMm}
             minorSpacingMm={minorGridMm}
@@ -393,6 +410,14 @@ export function ElevationView({
           y1={centerlineSvgY}
           x2={wallLengthMm}
           y2={centerlineSvgY}
+          vectorEffect="non-scaling-stroke"
+        />
+        <line
+          className="floor-line"
+          x1="0"
+          y1={wallHeightMm}
+          x2={wallLengthMm}
+          y2={wallHeightMm}
           vectorEffect="non-scaling-stroke"
         />
         {placements.map((placement) => {

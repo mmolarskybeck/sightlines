@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FolderOpen, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import type { ProjectSummary } from "../../domain/project";
 
 export function ProjectPicker({
@@ -91,12 +91,12 @@ export function ProjectPicker({
       <button
         aria-expanded={isOpen}
         aria-label="Projects"
-        className="icon-button"
-        title="Projects"
+        className="icon-button project-switcher-trigger"
+        title="Switch project"
         type="button"
         onClick={() => setIsOpen((open) => !open)}
       >
-        <FolderOpen aria-hidden="true" size={18} />
+        <ChevronDown aria-hidden="true" size={18} />
       </button>
 
       {isOpen ? (

@@ -1,7 +1,8 @@
-import { useRef, useState } from "react";
-import { ImagePlus, X } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { GripVertical, ImagePlus, X } from "lucide-react";
 import { ACCEPTED_IMAGE_MIME_TYPES } from "../../domain/assets/imageIntake";
-import type { Artwork, Project } from "../../domain/project";
+import type { Artwork, DisplayUnit, Project } from "../../domain/project";
+import { formatLength } from "../../domain/units/length";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { UncertaintyIndicator } from "./UncertaintyIndicator";
 
@@ -10,17 +11,22 @@ import { UncertaintyIndicator } from "./UncertaintyIndicator";
 // drag source and drop target can't drift out of sync on the string value.
 export const ARTWORK_DRAG_MIME = "application/x-sightlines-artwork";
 
+type ChecklistFilter = "all" | "placed" | "unplaced";
+
 type ChecklistRowData = {
   artworkId: string;
   artwork: Artwork | null;
   isPlaced: boolean;
+  // The wall a placed artwork lives on, resolved to a human name — null when
+  // unplaced, or when the placement points at a wall that no longer exists.
+  wallName: string | null;
 };
 
-// The sidebar's second nav section (docs/plan.md §3.5, §4.1): checklist
-// membership is independent of both the library and wall placement, so a row
-// here can be a fully-formed artwork, or — if its library record has since
-// been deleted out from under this project — a degraded stub that still
-// shows up rather than silently disappearing.
+// The left workspace pane (docs/plan.md §3.5, §4.1): checklist membership is
+// independent of both the library and wall placement, so a row here can be a
+// fully-formed artwork, or — if its library record has since been deleted out
+// from under this project — a degraded stub that still shows up rather than
+// silently disappearing.
 export function ChecklistPanel({
   project,
   libraryArtworks,
@@ -47,6 +53,7 @@ export function ChecklistPanel({
   getBlob: (key: string) => Promise<Blob>;
 }) {
   const [isDropActive, setIsDropActive] = useState(false);
+  const [filter, setFilter] = useState<ChecklistFilter>("all");
   // dragenter/dragleave fire on every child element the pointer crosses, not
   // just the section boundary — a plain enter/leave toggle would flicker the
   // drop-active state as the drag passes over rows and buttons. Counting
@@ -54,18 +61,47 @@ export function ChecklistPanel({
   const dragDepthRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const artworksById = new Map(libraryArtworks.map((artwork) => [artwork.id, artwork]));
-  const placedArtworkIds = new Set(
-    project.wallObjects
-      .filter((wallObject) => wallObject.kind === "artwork")
-      .map((wallObject) => wallObject.artworkId)
+  const artworksById = useMemo(
+    () => new Map(libraryArtworks.map((artwork) => [artwork.id, artwork])),
+    [libraryArtworks]
   );
 
-  const rows: ChecklistRowData[] = project.checklistArtworkIds.map((artworkId) => ({
-    artworkId,
-    artwork: artworksById.get(artworkId) ?? null,
-    isPlaced: placedArtworkIds.has(artworkId)
-  }));
+  // Wall names by id (across every room) and the placement each artwork sits
+  // on, so a placed row can show the wall it lives on rather than a flat
+  // "Placed". Derived here from `project` — the panel already receives it.
+  const { placedArtworkWallIds, wallNamesById } = useMemo(() => {
+    const wallNames = new Map<string, string>();
+    for (const placement of project.floor.rooms) {
+      for (const wall of placement.room.walls) {
+        wallNames.set(wall.id, wall.name);
+      }
+    }
+
+    const placedWalls = new Map<string, string>();
+    for (const wallObject of project.wallObjects) {
+      if (wallObject.kind === "artwork") {
+        placedWalls.set(wallObject.artworkId, wallObject.wallId);
+      }
+    }
+
+    return { placedArtworkWallIds: placedWalls, wallNamesById: wallNames };
+  }, [project.floor.rooms, project.wallObjects]);
+
+  const rows: ChecklistRowData[] = project.checklistArtworkIds.map((artworkId) => {
+    const wallId = placedArtworkWallIds.get(artworkId);
+    return {
+      artworkId,
+      artwork: artworksById.get(artworkId) ?? null,
+      isPlaced: wallId !== undefined,
+      wallName: wallId !== undefined ? (wallNamesById.get(wallId) ?? null) : null
+    };
+  });
+
+  const placedCount = rows.filter((row) => row.isPlaced).length;
+  const unplacedCount = rows.length - placedCount;
+  const visibleRows = rows.filter((row) =>
+    filter === "placed" ? row.isPlaced : filter === "unplaced" ? !row.isPlaced : true
+  );
 
   const thumbnailUrlsByAssetId = useAssetImageUrls(
     rows.map((row) => row.artwork?.assetId),
@@ -112,15 +148,6 @@ export function ChecklistPanel({
           {intakeState === "processing" ? (
             <span className="intake-note">Adding…</span>
           ) : null}
-          <button
-            aria-label="Add artwork"
-            className="icon-button compact"
-            title="Add artwork"
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <ImagePlus aria-hidden="true" size={16} />
-          </button>
         </div>
       </div>
 
@@ -138,11 +165,43 @@ export function ChecklistPanel({
         }}
       />
 
+      {rows.length > 0 ? (
+        <div className="checklist-filters" role="group" aria-label="Filter checklist">
+          <FilterTab
+            active={filter === "all"}
+            count={rows.length}
+            label="All"
+            onClick={() => setFilter("all")}
+          />
+          <FilterTab
+            active={filter === "placed"}
+            count={placedCount}
+            label="Placed"
+            onClick={() => setFilter("placed")}
+          />
+          <FilterTab
+            active={filter === "unplaced"}
+            count={unplacedCount}
+            label="Unplaced"
+            onClick={() => setFilter("unplaced")}
+          />
+        </div>
+      ) : null}
+
       {rows.length === 0 ? (
-        <p className="empty-copy">Drop images here or click + — no room required.</p>
+        <div className="checklist-empty">
+          <ImagePlus aria-hidden="true" size={26} />
+          <p className="empty-copy">
+            Drop images here or click Add Artwork — no room required.
+          </p>
+        </div>
+      ) : visibleRows.length === 0 ? (
+        <p className="empty-copy checklist-filter-empty">
+          {filter === "placed" ? "Nothing placed yet." : "Everything is placed."}
+        </p>
       ) : (
         <ul className="checklist-list">
-          {rows.map((row) => (
+          {visibleRows.map((row) => (
             <ChecklistRow
               key={row.artworkId}
               artwork={row.artwork}
@@ -154,6 +213,8 @@ export function ChecklistPanel({
                   ? thumbnailUrlsByAssetId.get(row.artwork.assetId)
                   : undefined
               }
+              unit={project.unit}
+              wallName={row.wallName}
               onRemove={() => void onRemoveArtworkFromChecklist(row.artworkId)}
               onSelect={() => onSelectArtwork(row.artworkId)}
               onDragStateChange={onArtworkDragStateChange}
@@ -161,7 +222,39 @@ export function ChecklistPanel({
           ))}
         </ul>
       )}
+
+      <button
+        className="checklist-add"
+        type="button"
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <ImagePlus aria-hidden="true" size={16} />
+        <span>Add Artwork</span>
+      </button>
     </section>
+  );
+}
+
+function FilterTab({
+  active,
+  count,
+  label,
+  onClick
+}: {
+  active: boolean;
+  count: number;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      aria-pressed={active}
+      className={active ? "checklist-filter active" : "checklist-filter"}
+      type="button"
+      onClick={onClick}
+    >
+      {label} · {count}
+    </button>
   );
 }
 
@@ -171,6 +264,8 @@ function ChecklistRow({
   isPlaced,
   isSelected,
   thumbnailUrl,
+  unit,
+  wallName,
   onRemove,
   onSelect,
   onDragStateChange
@@ -180,6 +275,8 @@ function ChecklistRow({
   isPlaced: boolean;
   isSelected: boolean;
   thumbnailUrl: string | undefined;
+  unit: DisplayUnit;
+  wallName: string | null;
   onRemove: () => void;
   onSelect: () => void;
   onDragStateChange?: (artworkId: string | null) => void;
@@ -189,6 +286,24 @@ function ChecklistRow({
   // the module comment above) has nothing to place on a wall, so it isn't a
   // valid drag source even though it still shows up and can be selected.
   const isDraggable = artwork !== null;
+
+  const metaParts: string[] = [];
+  if (artwork?.artist) metaParts.push(artwork.artist);
+  if (
+    artwork &&
+    artwork.dimensions.widthMm !== undefined &&
+    artwork.dimensions.heightMm !== undefined
+  ) {
+    metaParts.push(
+      `${formatLength(artwork.dimensions.widthMm, { unit })} × ${formatLength(
+        artwork.dimensions.heightMm,
+        { unit }
+      )}`
+    );
+  }
+  const showUncertainty = artwork !== null && artwork.dimensions.status !== "known";
+  const hasMeta = metaParts.length > 0 || showUncertainty;
+  const tagLabel = isPlaced ? wallName ?? "Placed" : "Unplaced";
 
   return (
     <li
@@ -214,21 +329,33 @@ function ChecklistRow({
         onSelect();
       }}
     >
+      <GripVertical aria-hidden="true" className="checklist-grip" size={16} />
       {thumbnailUrl ? (
         <img alt="" className="checklist-thumb" src={thumbnailUrl} />
       ) : (
         <div aria-hidden="true" className="checklist-thumb placeholder" />
       )}
-      <span className={artwork ? "checklist-title" : "checklist-title missing"}>
-        {title}
-      </span>
-      {artwork && artwork.dimensions.status !== "known" ? (
-        <UncertaintyIndicator compact status={artwork.dimensions.status} />
-      ) : null}
-      <span className="checklist-tag">{isPlaced ? "Placed" : "Unplaced"}</span>
+      <div className="checklist-row-main">
+        <span className="checklist-title-line">
+          <span className={artwork ? "checklist-title" : "checklist-title missing"}>
+            {title}
+          </span>
+          <span className={isPlaced ? "checklist-tag placed" : "checklist-tag"}>
+            {tagLabel}
+          </span>
+        </span>
+        {hasMeta ? (
+          <span className="checklist-meta">
+            {metaParts.length > 0 ? <span>{metaParts.join(" · ")}</span> : null}
+            {showUncertainty ? (
+              <UncertaintyIndicator compact status={artwork.dimensions.status} />
+            ) : null}
+          </span>
+        ) : null}
+      </div>
       <button
         aria-label="Remove from checklist"
-        className="icon-button compact"
+        className="icon-button compact checklist-remove"
         title="Remove from checklist"
         type="button"
         onClick={(event) => {

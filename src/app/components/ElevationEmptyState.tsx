@@ -11,10 +11,10 @@ export function ElevationEmptyState({ hasRooms }: { hasRooms: boolean }) {
 
   return (
     <div className="drawing-surface-empty">
-      <div className="elevation-empty">
+      <div className="canvas-empty">
         <svg
           aria-hidden="true"
-          className="elevation-empty-glyph"
+          className="canvas-empty-glyph"
           focusable="false"
           viewBox="0 0 120 84"
         >

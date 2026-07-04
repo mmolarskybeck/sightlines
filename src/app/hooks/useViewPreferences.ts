@@ -16,6 +16,10 @@ type ViewPreferences = {
   // here, so this is a rare, low-visibility override rather than a
   // frequently-toggled option like grid/snap.
   allowOverlappingPlacement: boolean;
+  // On by default: the checklist is the left anchor of the workspace on first
+  // open. Toggled from the rail; hiding it collapses the left column. A
+  // workspace preference like grid/snap — the state sticks.
+  showChecklistPanel: boolean;
 };
 
 const DEFAULT_PREFERENCES: ViewPreferences = {
@@ -25,7 +29,8 @@ const DEFAULT_PREFERENCES: ViewPreferences = {
   showGrid: true,
   snapToGrid: true,
   gridPrecisionFloorMm: null,
-  allowOverlappingPlacement: false
+  allowOverlappingPlacement: false,
+  showChecklistPanel: true
 };
 
 function readStoredPreferences(): ViewPreferences {
@@ -50,7 +55,11 @@ function readStoredPreferences(): ViewPreferences {
       allowOverlappingPlacement:
         typeof parsed.allowOverlappingPlacement === "boolean"
           ? parsed.allowOverlappingPlacement
-          : DEFAULT_PREFERENCES.allowOverlappingPlacement
+          : DEFAULT_PREFERENCES.allowOverlappingPlacement,
+      showChecklistPanel:
+        typeof parsed.showChecklistPanel === "boolean"
+          ? parsed.showChecklistPanel
+          : DEFAULT_PREFERENCES.showChecklistPanel
     };
   } catch {
     return DEFAULT_PREFERENCES;
@@ -75,6 +84,12 @@ export function useViewPreferences() {
     snapToGrid: preferences.snapToGrid,
     gridPrecisionFloorMm: preferences.gridPrecisionFloorMm,
     allowOverlappingPlacement: preferences.allowOverlappingPlacement,
+    showChecklistPanel: preferences.showChecklistPanel,
+    toggleShowChecklistPanel: () =>
+      setPreferences((current) => ({
+        ...current,
+        showChecklistPanel: !current.showChecklistPanel
+      })),
     toggleShowGrid: () =>
       setPreferences((current) => ({ ...current, showGrid: !current.showGrid })),
     toggleSnapToGrid: () =>

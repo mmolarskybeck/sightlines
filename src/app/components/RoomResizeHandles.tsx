@@ -127,6 +127,7 @@ function ResizeHandle({
       <rect
         className={isActive ? "resize-handle active" : "resize-handle"}
         height={handleSizeMm}
+        rx={handleSizeMm * 0.25}
         width={handleSizeMm}
         x={midXMm - handleSizeMm / 2}
         y={midYMm - handleSizeMm / 2}

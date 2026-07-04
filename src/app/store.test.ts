@@ -1000,8 +1000,49 @@ describe("app store", () => {
     });
   });
 
-  describe("collision warnings between artwork and openings", () => {
-    it("flags an artwork placed onto a door, and clears once the door moves away", async () => {
+  describe("collision between artwork and openings", () => {
+    it("rejects placing an artwork onto a door by default, leaving the project untouched", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      await store.getState().updateArtwork(artworkId, {
+        dimensions: { widthMm: 500, heightMm: 400, status: "known" }
+      });
+      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+
+      await store.getState().addOpening(wall.id, "door");
+      const door = store.getState().project!.wallObjects[0];
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().placeArtwork(artworkId, wall.id, door.xMm, door.yMm);
+
+      const state = store.getState();
+      expect(state.project!.wallObjects).toHaveLength(1);
+      expect(state.undoStack).toHaveLength(undoStackBefore);
+      expect(state.error).toBeTruthy();
+    });
+
+    it("rejects moving a door onto an existing artwork by default", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      await store.getState().placeArtwork(artworkId, wall.id, 1000, 1450, true);
+      const artwork = store.getState().project!.wallObjects[0];
+
+      await store.getState().addOpening(wall.id, "door");
+      const door = store.getState().project!.wallObjects[1];
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().moveOpening(door.id, artwork.xMm, artwork.yMm);
+
+      const state = store.getState();
+      const doorAfter = state.project!.wallObjects.find((o) => o.id === door.id)!;
+      expect(doorAfter.xMm).toBe(door.xMm);
+      expect(doorAfter.yMm).toBe(door.yMm);
+      expect(state.undoStack).toHaveLength(undoStackBefore);
+      expect(state.error).toBeTruthy();
+    });
+
+    it("allows the overlap when allowOverlap is true, and still surfaces a warning", async () => {
       await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
       const artworkId = store.getState().project!.checklistArtworkIds[0];
       await store.getState().updateArtwork(artworkId, {
@@ -1013,13 +1054,14 @@ describe("app store", () => {
       const doorId = store.getState().project!.wallObjects[0].id;
       const door = store.getState().project!.wallObjects[0];
 
-      await store.getState().placeArtwork(artworkId, wall.id, door.xMm, door.yMm);
+      await store.getState().placeArtwork(artworkId, wall.id, door.xMm, door.yMm, true);
 
+      expect(store.getState().project!.wallObjects).toHaveLength(2);
       expect(store.getState().placementWarnings).toEqual([
         expect.objectContaining({ message: "Placement overlaps another object on this wall." })
       ]);
 
-      await store.getState().moveOpening(doorId, door.xMm + 2000, door.yMm);
+      await store.getState().moveOpening(doorId, door.xMm + 2000, door.yMm, true);
 
       // moveOpening only revalidates the door itself, so its own warning
       // clears — proving the collision check is symmetric and re-run live,
