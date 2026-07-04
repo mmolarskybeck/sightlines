@@ -159,9 +159,9 @@ Approximate and invalid states must not be confused with selection. A selected a
 
 **The Rationed Accent Rule.** Oxblood (`--accent`) is reserved for a future custom SVG logotype and currently appears nowhere in the product UI — the token remains defined, but unused. It is not a secondary button color, not a hover state, not a tag color, not a decoration. The moment a custom brand mark is designed, this rule will move oxblood into exactly one place: that mark. If it ever starts showing up elsewhere, it has stopped being identity and started being decoration.
 
-**The Tinted Selection Rule.** Selection remains border plus petrol-soft wash, but the system now allows exactly ONE solid petrol CTA per screen — currently "Add Artwork" in the checklist (solid --primary, white text). All other interactions use outlined or tinted buttons.
+**The Tinted Selection Rule.** Selection is a petrol-soft wash with no border — `.wall-row.active` and `.checklist-row.selected` carry only `background: var(--primary-soft)`, never a petrol border. (Older revisions of this rule paired the wash with a border; that border is gone — see the Square Architecture Rule's `--radius-fill` addendum below for why.) The system still allows exactly ONE solid petrol CTA per screen — currently "Add Artwork" in the checklist (solid --primary, white text). All other interactions use outlined or tinted buttons.
 
-**The Square Architecture Rule.** Panels, containers, and all major layout divisions are square (radius 0), separated by 1px hairlines. Only small interactive controls (buttons, inputs, tags) carry a subtle 3px radius. There are no 999px pills anywhere. Badge count is deliberately minimal: the uncertainty badge is the only remaining soft-fill badge (2px radius); placement status is plain text (petrol wall name / subtle "Unplaced"); save status is a dot + text.
+**The Square Architecture Rule.** Panels, containers, and all major layout divisions are square (radius 0), separated by 1px hairlines. Small controls that keep a border (buttons, inputs, tags) carry a subtle 3px radius (`--radius-sm`). Interactive **fills** — list-row selection/hover (`.wall-row`, `.checklist-row`), rail buttons, and the topbar's icon buttons — are a different case: they're borderless washes, not boxed controls, so they round further to `--radius-fill` (6px) instead. Rounding a fill reads as "this whole shape is one soft surface"; rounding a bordered control would look like a mistake. There are no 999px pills anywhere. Badge count is deliberately minimal: the uncertainty badge is the only remaining soft-fill badge (2px radius); placement status is plain text (petrol wall name / subtle "Unplaced"); save status is a dot + text.
 
 **The Caution Ladder Rule.** Confidence in placement/dimension data has exactly two visual tiers: Caution Amber for "approximate" and Alarm Red for "unknown/invalid." Both are independent of Petrol — a selected-and-approximate object must never be visually confusable with a selected-and-normal one.
 
@@ -174,13 +174,20 @@ Approximate and invalid states must not be confused with selection. A selected a
 **Inter Variable** (`"Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, sans-serif`): carries everything else — body, forms, labels, data. Genuinely supports fractional weights now that it ships as a live font file (previously no font file was loaded; the app silently fell back to system fonts).
 
 ### Hierarchy
-- **Title** (Montserrat, 720, 1.08rem, line-height 1.3): the editable project name in the top bar — the single largest piece of text in the entire app.
-- **Headline** (Montserrat, 760, 0.95rem, line-height 1.3): panel section headers (Rooms, Checklist, Data).
-- **Body** (Inter, 400–680, 0.82–0.9rem, line-height 1.5): field values, checklist titles, property lists, general content. Caps at conversational widths where it appears as prose; most of it is compact UI text, not paragraphs.
-- **Label** (Inter, 650–760, 0.68–0.78rem, line-height 1.4): captions, tags, badges, field hints — almost always set in Graphite or Fog, never Ink.
+- **Title** (Montserrat, 680, 1.02rem, line-height 1.3): the editable project name in the top bar — the single largest piece of text in the entire app.
+- **Headline** (Montserrat, 600, 0.95rem, line-height 1.3): panel section headers (Rooms, Checklist, Data) and the inspector's subject heading (1.02rem — a notch above the others so the selected wall/artwork/opening outranks a plain section label).
+- **Body** (Inter, 500–550, 0.78–0.88rem, line-height 1.5): field values (500), row/list titles — checklist title, wall-row name, project-picker title (550). Caps at conversational widths where it appears as prose; most of it is compact UI text, not paragraphs.
+- **Label** (Inter, 450–600, 0.68–0.78rem, line-height 1.4): captions, tags, badges, field hints — almost always set in Graphite or Fog, never Ink. Meta/caption text sits at 450, field labels and badges at 600.
 
 ### Named Rules
-**The Fractional Weight Rule.** Inter roles are tuned per element along Inter's variable axis — 650, 680, 700, 720, 750, 760 — rather than snapped to the standard 400/500/600/700 steps. At this density, a 30-unit difference is the only signal separating "section header" from "field label," so the increments are deliberate, not arbitrary. Montserrat stays on standard weights 600 and 700 only.
+**The Weight Ladder Rule.** A hierarchy pass replaced the old fractional-weight tuning (which had drifted to 650–700 almost everywhere, so nothing actually ranked against anything else) with a small, deliberate ladder used consistently across the app:
+- **450** — quiet meta text (checklist artist/dimensions line).
+- **500** — field values (input/select text, the thing the curator typed).
+- **550** — row/list titles (checklist title, wall-row name, project-picker title, checklist tag, view-option controls) and inactive filter/tab labels.
+- **600** — field labels, buttons (`.inspector-action`, `.topbar-button`, `.checklist-add`, `.project-picker-new`), Montserrat panel headings, active filter tabs, the uncertainty badge, `dt`/`dd` labels.
+- **700** — the SIGHTLINES wordmark and rail monogram only (Montserrat) — the two elements that are allowed to outrank everything.
+
+Montserrat stays on standard weights 600 (headings, tabs) and 700 (wordmark/monogram) only — never the old 650/760 in-between values. Every measurement value in the app (wall length, property-list values, checklist dimensions, the elevation chip's dims line, field inputs) also carries `font-variant-numeric: tabular-nums`, so numbers align column-for-column instead of jittering as digits change width.
 
 ## 4. Elevation
 
@@ -196,9 +203,9 @@ Flat by default. Borders (Hairline) do the separating work everywhere; shadow is
 ## 5. Components
 
 ### Buttons
-- **Shape:** 3px radius on small interactive controls; panels and containers use radius 0 (see the Square Architecture Rule).
-- **Icon buttons:** 36px square, Hairline border, white fill at rest, Cool Fog fill on hover. No color until interaction.
-- **Tab / view-option buttons:** transparent at rest, Graphite text; active state gets a Hairline border and Cool Fog fill with Ink text; a "pressed" toggle (e.g. Snap) gets the Tinted Selection treatment instead (Petrol border + Petrol-soft fill).
+- **Shape:** 3px radius (`--radius-sm`) on small bordered controls; interactive fills (list rows, rail buttons, topbar icon buttons) use the rounder borderless `--radius-fill` (6px); panels and containers use radius 0 (see the Square Architecture Rule).
+- **Topbar utility icons** (`.icon-button` — undo, redo, import, the project-picker chevron): borderless, transparent at rest, Cool Fog fill on hover, Graphite icon that shifts to Ink on hover. `.topbar-button` (Export) is the one exception: it keeps a Hairline border and white fill, since it's the single labeled/outlined action in the topbar rather than a bare utility icon. The checklist's remove-× keeps an explicit white-fill-plus-border look (it overlays row content and needs its own ground to stay legible), even though it shares the `.icon-button` base class.
+- **Tab / view-option buttons:** transparent at rest, Graphite text; active state gets a Cool Fog fill with Ink text; a "pressed" toggle (e.g. Snap) gets the Tinted Selection treatment instead (Petrol-soft fill, no border, `--radius-sm` since it's a control, not a row).
 - **Text buttons** (`project-picker-new`, `inspector-action`): outlined or tinted, never solid fills. Bordered, Cool Fog fill, Ink text, Cool Ash fill on hover.
 - **CTA (Add Artwork in checklist):** solid petrol fill, white text — the one solid primary CTA per screen. Everything else outlined or tinted.
 
@@ -225,7 +232,7 @@ Flat by default. Borders (Hairline) do the separating work everywhere; shadow is
 
 - **Rail order:** Brand cell (S monogram) / Checklist toggle (PanelLeft icon) / Rooms & Walls toggle (Blocks icon) / Issues (TriangleAlert icon with live count badge) / spacer / Data view (FileJson, dev slot) / Settings placeholder (disabled) / Help placeholder (disabled). Buttons: 48px, borderless, muted text at rest, Cool Fog fill on hover, petrol-soft fill + petrol-strong text when active/pressed. Issues button disabled when no placement warnings exist; clicking it jumps selection to the first offending wall object.
 
-- **Topbar.** Three-zone grid on white background with Hairline bottom border. Left zone: SIGHTLINES wordmark (Montserrat, uppercase, 0.12em tracking, 0.8rem) + hairline divider + project title (editable, 1.02rem, weight 680, max ~320px). Center zone: Plan / Elevation tabs only, styled as underline tabs (muted → ink on hover; active = ink + 2px petrol underline); Montserrat 600, 0.95rem. Right zone: dot+text save status + undo/redo group (two joined icon buttons) + hairline divider + import button + labeled Export button (outlined, Cool Fog fill, never solid).
+- **Topbar.** Three-zone grid on white background with Hairline bottom border. Left zone: SIGHTLINES wordmark (Montserrat, uppercase, 0.12em tracking, 0.8rem) + hairline divider + project title (editable, 1.02rem, weight 680, max ~320px). Center zone: Plan / Elevation tabs only, styled as underline tabs (muted → ink on hover; active = ink + 2px petrol underline); Montserrat 600, 0.95rem. Right zone: dot+text save status + undo/redo group (two adjacent borderless icon buttons, 2px gap — no seam to collapse since neither carries a border) + hairline divider + borderless import button + labeled Export button (the one bordered/outlined action in the group, Cool Fog fill on hover, never solid).
 
 - **Elevation wall switcher.** The floating canvas chip in the top-left corner of the elevation surface now owns wall navigation: two compact 24px chevron buttons (prev/next) flanking a borderless wall `<select>` grouped by room name (never just flat wall names). Chevrons wrap the select, both borderless with hover-fog treatment. The select itself is borderless like the Units control (Montserrat 700, 0.95rem, ink text). Chip background white, 1px hairline border, box-shadow tight, positioned absolutely at 14px from both edges. Wall hopping in elevation no longer requires leaving the Checklist panel — the two workflows are now independent.
 
@@ -267,7 +274,7 @@ Bare petrol "S" monogram (Montserrat 700, no background, no decoration) — a pl
 - Make dimensions and numeric values feel precise through alignment and tabular numerals.
 - Let the canvas carry the visual identity.
 - **Do** use one solid petrol CTA per screen (Add Artwork); everything else outlined or tinted.
-- **Do** tune Inter weights in small increments (650/680/700/720/750/760) rather than jumping between a few standard steps.
+- **Do** hold Inter to the weight ladder (450 meta / 500 values / 550 row titles / 600 labels+buttons) so weight actually ranks content instead of clustering at one value.
 
 ### Don’t:
 - Don’t scatter solid fills — exactly one solid primary CTA per screen.

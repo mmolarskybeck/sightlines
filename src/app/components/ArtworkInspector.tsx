@@ -6,10 +6,17 @@ import { UncertaintyIndicator } from "./UncertaintyIndicator";
 
 type ArtworkTextFieldKey = "title" | "artist" | "date" | "accessionNumber" | "locationOrLender";
 
-const TEXT_FIELDS: { key: ArtworkTextFieldKey; label: string }[] = [
+// Grouped into two rhythm clusters (see .field-group in global.css): identity
+// (what the work is) and registrar (where its record/loan lives) — each
+// cluster reads as one unit, separated from the other by the more generous
+// gap on .inspector-form itself.
+const IDENTITY_FIELDS: { key: ArtworkTextFieldKey; label: string }[] = [
   { key: "title", label: "Title" },
   { key: "artist", label: "Artist" },
-  { key: "date", label: "Date" },
+  { key: "date", label: "Date" }
+];
+
+const REGISTRAR_FIELDS: { key: ArtworkTextFieldKey; label: string }[] = [
   { key: "accessionNumber", label: "Accession no." },
   { key: "locationOrLender", label: "Location / lender" }
 ];
@@ -45,15 +52,29 @@ export function ArtworkInspector({
 }) {
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
-      {TEXT_FIELDS.map((field) => (
-        <TextField
-          key={field.key}
-          fieldKey={field.key}
-          label={field.label}
-          value={artwork[field.key]}
-          onCommitField={onCommitField}
-        />
-      ))}
+      <div className="field-group">
+        {IDENTITY_FIELDS.map((field) => (
+          <TextField
+            key={field.key}
+            fieldKey={field.key}
+            label={field.label}
+            value={artwork[field.key]}
+            onCommitField={onCommitField}
+          />
+        ))}
+      </div>
+
+      <div className="field-group">
+        {REGISTRAR_FIELDS.map((field) => (
+          <TextField
+            key={field.key}
+            fieldKey={field.key}
+            label={field.label}
+            value={artwork[field.key]}
+            onCommitField={onCommitField}
+          />
+        ))}
+      </div>
 
       <DimensionsSection
         dimensions={artwork.dimensions}
