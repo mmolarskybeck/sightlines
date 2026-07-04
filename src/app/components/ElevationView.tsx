@@ -5,6 +5,7 @@ import {
   type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent
 } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { Vector2 } from "../../domain/geometry/dragResize";
 import {
   getEffectivePlacementSizeMm,
@@ -99,7 +100,9 @@ export function ElevationView({
   wallId,
   wallLengthMm,
   wallName,
-  wallObjects
+  wallObjects,
+  walls = [],
+  onSelectWall
 }: {
   gridPrecisionFloorMm: number | null;
   gridVisible: boolean;
@@ -124,6 +127,11 @@ export function ElevationView({
   onMoveOpening?: (wallObjectId: string, xMm: number, yMm: number) => void;
   onSelectArtwork?: (artworkId: string) => void;
   onSelectOpening?: (wallObjectId: string) => void;
+  // The full wall inventory (in room order) plus a selector, so the elevation
+  // chip can double as a wall switcher — the navigation the right panel used
+  // to carry. Optional/inert until App wires them.
+  walls?: { id: string; name: string; roomName: string }[];
+  onSelectWall?: (wallId: string) => void;
 }) {
   const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -361,6 +369,18 @@ export function ElevationView({
 
   const activeGuides = moveDrag?.activeGuides ?? dropGhost?.activeGuides ?? [];
 
+  // Wall switcher wiring for the chip. Prev/next cycle through every wall in
+  // room order (wrapping), and the <select> lists them all — grouped by room
+  // once more than one room exists.
+  const currentWallIndex = walls.findIndex((wall) => wall.id === wallId);
+  const canSwitchWalls = walls.length > 0 && currentWallIndex >= 0 && Boolean(onSelectWall);
+  const roomNames = [...new Set(walls.map((wall) => wall.roomName))];
+  const stepWall = (delta: number) => {
+    if (currentWallIndex < 0) return;
+    const next = walls[(currentWallIndex + delta + walls.length) % walls.length];
+    if (next) onSelectWall?.(next.id);
+  };
+
   return (
     <div
       aria-label="Wall elevation view"
@@ -371,7 +391,52 @@ export function ElevationView({
       onDrop={handleDrop}
     >
       <div className="surface-label">
-        <strong>{wallName}</strong>
+        {canSwitchWalls ? (
+          <div className="surface-label-nav">
+            <button
+              aria-label="Previous wall"
+              className="surface-label-switch"
+              type="button"
+              onClick={() => stepWall(-1)}
+            >
+              <ChevronLeft aria-hidden="true" size={16} />
+            </button>
+            <select
+              aria-label="Select wall"
+              className="surface-label-select"
+              value={wallId}
+              onChange={(event) => onSelectWall?.(event.target.value)}
+            >
+              {roomNames.length > 1
+                ? roomNames.map((roomName) => (
+                    <optgroup key={roomName} label={roomName}>
+                      {walls
+                        .filter((wall) => wall.roomName === roomName)
+                        .map((wall) => (
+                          <option key={wall.id} value={wall.id}>
+                            {wall.name}
+                          </option>
+                        ))}
+                    </optgroup>
+                  ))
+                : walls.map((wall) => (
+                    <option key={wall.id} value={wall.id}>
+                      {wall.name}
+                    </option>
+                  ))}
+            </select>
+            <button
+              aria-label="Next wall"
+              className="surface-label-switch"
+              type="button"
+              onClick={() => stepWall(1)}
+            >
+              <ChevronRight aria-hidden="true" size={16} />
+            </button>
+          </div>
+        ) : (
+          <strong>{wallName}</strong>
+        )}
         <span>
           {formatLength(wallLengthMm, { unit })} by{" "}
           {formatLength(wallHeightMm, { unit })}

@@ -6,7 +6,6 @@ import {
   Grid3X3,
   Layers,
   Magnet,
-  Plus,
   Redo2,
   Ruler,
   Save,
@@ -16,7 +15,6 @@ import {
 import {
   getWallsWithGeometry,
   getOrthogonalQuadWallPair,
-  getRectangleRoomDimensions,
 } from "../domain/geometry/walls";
 import { getOpeningKindLabel } from "../domain/placement/createOpening";
 import type { Artwork, ArtworkWallObject, DisplayUnit, OpeningWallObject, Project } from "../domain/project";
@@ -33,7 +31,7 @@ import { OpeningInspector } from "./components/OpeningInspector";
 import { PlanEmptyState } from "./components/PlanEmptyState";
 import { PlanView } from "./components/PlanView";
 import { ProjectPicker } from "./components/ProjectPicker";
-import { RoomDimensionFields } from "./components/RoomDimensionFields";
+import { RoomsPanel } from "./components/RoomsPanel";
 import { WallInspector, type WallDimensionLink } from "./components/WallInspector";
 import {
   useStoragePersistence,
@@ -109,8 +107,8 @@ export function App() {
     snapToGrid,
     gridPrecisionFloorMm,
     allowOverlappingPlacement,
-    showChecklistPanel,
-    toggleShowChecklistPanel,
+    leftPanel,
+    setLeftPanel,
     toggleShowGrid,
     toggleSnapToGrid,
     setGridPrecisionFloorMm,
@@ -149,6 +147,22 @@ export function App() {
   const artworksById = useMemo(
     () => new Map(libraryArtworks.map((artwork) => [artwork.id, artwork])),
     [libraryArtworks]
+  );
+
+  // The flat wall inventory (room order) that feeds the elevation chip's wall
+  // switcher — the navigation that used to live in the right-panel wall list.
+  const wallsForSwitcher = useMemo(
+    () =>
+      project
+        ? project.floor.rooms.flatMap((placement) =>
+            getWallsWithGeometry(placement.room).map((wall) => ({
+              id: wall.id,
+              name: wall.name,
+              roomName: placement.room.name
+            }))
+          )
+        : [],
+    [project]
   );
 
   if (!project) {
@@ -216,11 +230,16 @@ export function App() {
     }
   };
 
+  // Rail toggle semantic: clicking the active panel's icon collapses the
+  // column (null), clicking the other switches to it.
+  const selectLeftPanel = (panel: "checklist" | "rooms") =>
+    setLeftPanel(leftPanel === panel ? null : panel);
+
   return (
     <main className="app-shell">
       <AppRail
-        showChecklistPanel={showChecklistPanel}
-        onToggleChecklistPanel={toggleShowChecklistPanel}
+        leftPanel={leftPanel}
+        onSelectLeftPanel={selectLeftPanel}
         isDataView={viewMode === "data"}
         onOpenDataView={() => setViewMode("data")}
         issueCount={placementWarnings.length}
@@ -320,9 +339,9 @@ export function App() {
       {error ? <p className="error-banner">{error}</p> : null}
 
       <section
-        className={showChecklistPanel ? "workspace" : "workspace checklist-hidden"}
+        className={leftPanel ? "workspace" : "workspace left-collapsed"}
       >
-        {showChecklistPanel ? (
+        {leftPanel === "checklist" ? (
           <ChecklistPanel
             getBlob={getAssetBlob}
             intakeState={intakeState}
@@ -333,6 +352,14 @@ export function App() {
             onArtworkDragStateChange={setDraggingArtworkId}
             onRemoveArtworkFromChecklist={removeArtworkFromChecklist}
             onSelectArtwork={selectArtwork}
+          />
+        ) : leftPanel === "rooms" ? (
+          <RoomsPanel
+            project={project}
+            selectedWallId={selectedWall?.id ?? null}
+            onAddRectangleRoom={() => void addRectangleRoom()}
+            onResizeWall={resizeWall}
+            onSelectWall={selectWall}
           />
         ) : null}
 
@@ -418,6 +445,8 @@ export function App() {
                 wallLengthMm={selectedWall.lengthMm}
                 wallName={selectedWall.name}
                 wallObjects={project.wallObjects}
+                walls={wallsForSwitcher}
+                onSelectWall={selectWall}
                 onMoveOpening={(wallObjectId, xMm, yMm) =>
                   void moveOpening(wallObjectId, xMm, yMm, allowOverlappingPlacement)
                 }
@@ -437,79 +466,25 @@ export function App() {
           {viewMode === "data" ? <DataView json={exportProjectJson(project)} /> : null}
         </section>
 
-        <aside className="inspector" aria-label="Rooms and inspector">
-          <div className="rooms-section">
-            <div className="panel-heading">
-              <h2>Rooms</h2>
-              <div className="panel-heading-actions">
-                <span>{pluralize(project.floor.rooms.length, "room")}</span>
-                <button
-                  aria-label="Add rectangular room"
-                  className="icon-button compact"
-                  title="Add rectangular room"
-                  type="button"
-                  onClick={() => void addRectangleRoom()}
-                >
-                  <Plus aria-hidden="true" size={16} />
-                </button>
-              </div>
-            </div>
-
-            <nav className="room-list" aria-label="Rooms and walls">
-              {project.floor.rooms.length === 0 ? (
-                <p className="empty-copy">
-                  No rooms yet — draw one, or skip straight to the checklist.
-                </p>
-              ) : null}
-              {project.floor.rooms.map((placement) => {
-                const roomWalls = getWallsWithGeometry(placement.room);
-                const rectangleDimensions = getRectangleRoomDimensions(placement.room);
-
-                return (
-                  <section className="room-group" key={placement.roomId}>
-                    <div className="room-heading">
-                      <h3>{placement.room.name}</h3>
-                      <span>{pluralize(roomWalls.length, "wall")}</span>
-                    </div>
-                    {rectangleDimensions ? (
-                      <RoomDimensionFields
-                        depthMm={rectangleDimensions.depthMm}
-                        unit={project.unit}
-                        widthMm={rectangleDimensions.widthMm}
-                        onCommitDepth={(lengthMm) =>
-                          resizeWall(rectangleDimensions.depthWallId, lengthMm)
-                        }
-                        onCommitWidth={(lengthMm) =>
-                          resizeWall(rectangleDimensions.widthWallId, lengthMm)
-                        }
-                      />
-                    ) : null}
-                    <div className="wall-list">
-                      {roomWalls.map((wall) => (
-                        <button
-                          className={
-                            wall.id === selectedWall?.id ? "wall-row active" : "wall-row"
-                          }
-                          key={wall.id}
-                          type="button"
-                          onClick={() => selectWall(wall.id)}
-                        >
-                          <span>{wall.name}</span>
-                          <strong>
-                            {formatLength(wall.lengthMm, { unit: project.unit })}
-                          </strong>
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                );
-              })}
-            </nav>
-          </div>
-
-          <div className="panel-divider" aria-hidden="true" />
-
+        <aside className="inspector" aria-label="Inspector">
           <div className="inspector-zone">
+            {labeledPlacementWarnings.length > 0 ? (
+              <div className="warning-panel" role="status" aria-live="polite">
+                <AlertTriangle aria-hidden="true" size={18} />
+                <div>
+                  <h3>Placement needs review</h3>
+                  <ul>
+                    {labeledPlacementWarnings.map((warning) => (
+                      <li key={warning.id}>
+                        {warning.message}
+                        {warning.subject ? <span>{warning.subject}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            ) : null}
+
             {selectedArtwork || selectedOpening || selectedWall ? (
               <div className="panel-heading inspector-subject">
                 <h2>
@@ -526,23 +501,6 @@ export function App() {
             ) : null}
 
             {selectedArtwork ? (
-            <>
-              {labeledPlacementWarnings.length > 0 ? (
-                <div className="warning-panel" role="status" aria-live="polite">
-                  <AlertTriangle aria-hidden="true" size={18} />
-                  <div>
-                    <h3>Placement needs review</h3>
-                    <ul>
-                      {labeledPlacementWarnings.map((warning) => (
-                        <li key={warning.id}>
-                          {warning.message}
-                          {warning.subject ? <span>{warning.subject}</span> : null}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              ) : null}
               <ArtworkInspector
                 artwork={selectedArtwork}
                 isPlaced={placedWallObject !== null}
@@ -557,11 +515,9 @@ export function App() {
                     : undefined
                 }
               />
-            </>
           ) : selectedOpening ? (
             <OpeningInspector
               opening={selectedOpening}
-              placementWarnings={labeledPlacementWarnings}
               unit={project.unit}
               onCommitPosition={(xMm, yMm) =>
                 void moveOpening(selectedOpening.id, xMm, yMm, allowOverlappingPlacement)
@@ -582,7 +538,6 @@ export function App() {
               lastGeometryEdit={lastGeometryEdit}
               onAddOpening={(kind) => void addOpening(selectedWall.id, kind)}
               onCommitLength={resizeSelectedWall}
-              placementWarnings={labeledPlacementWarnings}
               unit={project.unit}
               wallHeightMm={selectedWall.heightMm}
               wallLengthMm={selectedWall.lengthMm}
@@ -604,10 +559,6 @@ export function App() {
       </div>
     </main>
   );
-}
-
-function pluralize(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 function ProjectTitleInput({

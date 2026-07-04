@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { getOpeningKindLabel } from "../../domain/placement/createOpening";
 import type { OpeningWallObject, DisplayUnit } from "../../domain/project";
 import { formatLength, parseLength } from "../../domain/units/length";
@@ -12,14 +12,12 @@ export function OpeningInspector({
   onCommitSize,
   onDelete,
   opening,
-  placementWarnings,
   unit
 }: {
   onCommitPosition: (xMm: number, yMm: number) => void;
   onCommitSize: (widthMm: number, heightMm: number) => void;
   onDelete: () => void;
   opening: OpeningWallObject;
-  placementWarnings: { id: string; message: string; subject?: string }[];
   unit: DisplayUnit;
 }) {
   return (
@@ -28,23 +26,6 @@ export function OpeningInspector({
         <span>Kind</span>
         <input readOnly value={getOpeningKindLabel(opening.kind)} />
       </label>
-
-      {placementWarnings.length > 0 ? (
-        <div className="warning-panel" role="status" aria-live="polite">
-          <AlertTriangle aria-hidden="true" size={18} />
-          <div>
-            <h3>Placement needs review</h3>
-            <ul>
-              {placementWarnings.map((warning) => (
-                <li key={warning.id}>
-                  {warning.message}
-                  {warning.subject ? <span>{warning.subject}</span> : null}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      ) : null}
 
       <div className="artwork-dimensions-grid">
         <NumericField

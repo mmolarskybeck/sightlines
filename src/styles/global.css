@@ -70,34 +70,49 @@ input:focus-visible {
    the topbar and the workspace), everything else in column 2. */
 .app-shell {
   display: grid;
-  grid-template-columns: 52px 1fr;
+  grid-template-columns: 80px 1fr;
   min-height: 100vh;
 }
 
+/* The 80px module: the rail is one module wide, its brand cell one module
+   tall. The brand cell's bottom hairline continues the topbar's bottom rule
+   straight across the rail, so the rail's right border and that rule form a
+   true intersecting cross at (80, 80). */
 .app-rail {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 10px 0;
   background: var(--bg);
   border-right: 1px solid var(--line);
 }
 
+/* The button stack fills the rail below the brand cell; the spacer's
+   margin-top:auto splits the top selectors from the bottom utility cluster. */
+.rail-buttons {
+  display: flex;
+  flex: 1;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding-top: 14px;
+}
+
 .app-main {
   display: flex;
+  height: 100vh;
   min-width: 0;
   flex-direction: column;
 }
 
-/* Rail buttons: 36px square, borderless, muted at rest; hover fills Cool Fog,
+/* Rail buttons: 48px square, borderless, muted at rest; hover fills Cool Fog,
    active/pressed uses the petrol selection wash. */
 .rail-button {
   position: relative;
   display: grid;
   flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
+  width: 48px;
+  height: 48px;
   place-items: center;
   border: 0;
   border-radius: var(--radius-sm);
@@ -127,20 +142,21 @@ input:focus-visible {
   margin-top: auto;
 }
 
-/* The S monogram — the app's only oxblood element. */
+/* The brand cell — the top 80×80 module of the rail. The "S" monogram is a
+   bare petrol letterform (no tile, no fill), a placeholder for a future SVG.
+   Its bottom hairline continues the topbar rule across the rail. */
 .rail-brand {
   display: grid;
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
+  align-self: stretch;
+  height: 80px;
   place-items: center;
-  margin-bottom: 6px;
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: var(--bg);
+  border-bottom: 1px solid var(--line);
+  color: var(--primary);
   font-family: var(--font-display);
-  font-size: 0.9rem;
+  font-size: 1.6rem;
   font-weight: 700;
+  line-height: 1;
 }
 
 /* Live issue count overlaying the Issues rail icon — a square-cornered danger
@@ -165,7 +181,7 @@ input:focus-visible {
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 16px;
-  min-height: 64px;
+  min-height: 80px;
   padding: 10px 18px;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
@@ -466,12 +482,12 @@ input:focus-visible {
 .workspace {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr) 300px;
-  height: calc(100vh - 64px);
-  min-height: 560px;
+  flex: 1;
+  min-height: 0;
 }
 
-/* Checklist toggled off from the rail — the left column collapses. */
-.workspace.checklist-hidden {
+/* Left panel collapsed from the rail — the left column drops. */
+.workspace.left-collapsed {
   grid-template-columns: minmax(0, 1fr) 300px;
 }
 
@@ -634,22 +650,24 @@ input:focus-visible {
   color: var(--subtle);
 }
 
-/* Right-panel zones: Rooms up top, a hairline divider, then the Inspector,
-   with the storage note pinned to the bottom (margin-top:auto above). */
-.rooms-section {
-  flex: 0 0 auto;
-}
-
-.panel-divider {
-  flex: 0 0 auto;
-  height: 1px;
-  margin: 18px 0;
-  background: var(--line);
-}
-
+/* The right panel is now a pure inspector: warnings (when present), the
+   subject heading, its fields, then the storage note pinned to the bottom
+   (margin-top:auto above). */
 .inspector-zone {
   flex: 0 0 auto;
   padding-bottom: 18px;
+}
+
+/* The Rooms & Walls left pane — same box idiom as the checklist panel: a flat
+   white column, scrollable, with a hairline toward the canvas. */
+.rooms-panel {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: auto;
+  padding: 18px;
+  background: var(--bg);
+  border-right: 1px solid var(--line);
 }
 
 /* The Inspector heading names its subject (wall/artwork/opening) rather than
@@ -1013,7 +1031,9 @@ input:focus-visible {
   min-height: 34px;
   padding: 0 10px;
   font-family: var(--font-display);
-  font-size: 0.84rem;
+  /* Scaled up slightly so the mode tabs hold their weight in the taller
+     (80px) topbar rather than floating in it. */
+  font-size: 0.95rem;
   font-weight: 600;
 }
 
@@ -1258,6 +1278,49 @@ input:focus-visible {
 .surface-label span {
   color: var(--muted);
   font-size: 0.8rem;
+}
+
+/* The elevation chip doubles as a wall switcher: compact chevron buttons
+   flanking a borderless <select> of every wall. Buttons borderless with the
+   hover-fog treatment; the select borderless like .unit-select. */
+.surface-label-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: -2px 0 0 -4px;
+}
+
+.surface-label-switch {
+  display: grid;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.surface-label-switch:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.surface-label-select {
+  max-width: 180px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.surface-label-select:hover {
+  background: var(--surface);
 }
 
 /* Elevation wall anatomy: white face, thin muted boundary, a heavier ink
@@ -1644,7 +1707,7 @@ input:focus-visible {
     grid-template-columns: 280px minmax(0, 1fr) 280px;
   }
 
-  .workspace.checklist-hidden {
+  .workspace.left-collapsed {
     grid-template-columns: minmax(0, 1fr) 280px;
   }
 }
@@ -1654,7 +1717,7 @@ input:focus-visible {
     grid-template-columns: 240px minmax(0, 1fr) 260px;
   }
 
-  .workspace.checklist-hidden {
+  .workspace.left-collapsed {
     grid-template-columns: minmax(0, 1fr) 260px;
   }
 
@@ -1666,6 +1729,34 @@ input:focus-visible {
 }
 
 @media (max-width: 760px) {
+  /* The rail narrows to 56px: 40px buttons, smaller icons, a 56px brand cell
+     — everything else stacks. */
+  .app-shell {
+    grid-template-columns: 56px 1fr;
+  }
+
+  .rail-brand {
+    height: 56px;
+    font-size: 1.3rem;
+  }
+
+  .rail-button {
+    width: 40px;
+    height: 40px;
+  }
+
+  .rail-button svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* The full-height fixed shell relaxes on mobile so the stacked panels grow
+     the page instead of clipping inside a 100vh column. */
+  .app-main {
+    height: auto;
+    min-height: 100vh;
+  }
+
   .topbar {
     grid-template-columns: 1fr;
     align-items: stretch;
@@ -1679,13 +1770,13 @@ input:focus-visible {
   }
 
   .workspace,
-  .workspace.checklist-hidden {
+  .workspace.left-collapsed {
     grid-template-columns: 1fr;
-    height: auto;
-    min-height: calc(100vh - 64px);
+    min-height: 0;
   }
 
   .checklist-panel,
+  .rooms-panel,
   .canvas-column {
     border-right: 0;
     border-bottom: 1px solid var(--line);

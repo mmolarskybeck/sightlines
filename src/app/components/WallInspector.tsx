@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, DoorOpen, Link2, Square, SquareDashed } from "lucide-react";
+import { DoorOpen, Link2, Square, SquareDashed } from "lucide-react";
 import type { OpeningKind } from "../../domain/placement/createOpening";
 import type { DisplayUnit } from "../../domain/project";
 import { formatLength, parseLength } from "../../domain/units/length";
@@ -16,7 +16,6 @@ export function WallInspector({
   lastGeometryEdit,
   onAddOpening,
   onCommitLength,
-  placementWarnings,
   unit,
   wallHeightMm,
   wallLengthMm,
@@ -31,7 +30,6 @@ export function WallInspector({
   } | null;
   onAddOpening: (kind: OpeningKind) => void;
   onCommitLength: (lengthMm: number) => Promise<void>;
-  placementWarnings: { id: string; message: string; subject?: string }[];
   unit: DisplayUnit;
   wallHeightMm: number;
   wallLengthMm: number;
@@ -41,6 +39,10 @@ export function WallInspector({
     formatLength(wallLengthMm, { unit })
   );
   const [lengthError, setLengthError] = useState<string | null>(null);
+  // The format hint is guidance while typing, not a permanent label — it
+  // shows only while the Length input is focused. The error, when present,
+  // always shows and takes precedence.
+  const [lengthFocused, setLengthFocused] = useState(false);
 
   useEffect(() => {
     setLengthInput(formatLength(wallLengthMm, { unit }));
@@ -83,11 +85,21 @@ export function WallInspector({
       <label className="field-row">
         <span>Length</span>
         <input
-          aria-describedby={lengthError ? "wall-length-error" : undefined}
+          aria-describedby={
+            lengthError
+              ? "wall-length-error"
+              : lengthFocused
+                ? "wall-length-hint"
+                : undefined
+          }
           aria-invalid={lengthError ? "true" : "false"}
           inputMode="decimal"
           value={lengthInput}
-          onBlur={() => void commitLength()}
+          onFocus={() => setLengthFocused(true)}
+          onBlur={() => {
+            setLengthFocused(false);
+            void commitLength();
+          }}
           onChange={(event) => setLengthInput(event.target.value)}
           onKeyDown={(event) => {
             if (event.key !== "Enter") return;
@@ -100,9 +112,11 @@ export function WallInspector({
         <p className="field-error" id="wall-length-error">
           {lengthError}
         </p>
-      ) : (
-        <p className="field-hint">Accepts 28', 28 ft, 336", 853.4 cm, or 8.53 m.</p>
-      )}
+      ) : lengthFocused ? (
+        <p className="field-hint" id="wall-length-hint">
+          Accepts 28', 28 ft, 336", 853.4 cm, or 8.53 m.
+        </p>
+      ) : null}
       {dimensionLink ? (
         <div className="constraint-panel" aria-label="Linked rectangle dimension">
           <Link2 aria-hidden="true" size={17} />
@@ -118,39 +132,6 @@ export function WallInspector({
           {changedWallNames.length > 0 ? changedWallNames.join(", ") : "no walls"}.
         </p>
       ) : null}
-
-      {placementWarnings.length > 0 ? (
-        <div className="warning-panel" role="status" aria-live="polite">
-          <AlertTriangle aria-hidden="true" size={18} />
-          <div>
-            <h3>Placement needs review</h3>
-            <ul>
-              {placementWarnings.map((warning) => (
-                <li key={warning.id}>
-                  {warning.message}
-                  {warning.subject ? <span>{warning.subject}</span> : null}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      ) : null}
-
-      <dl className="property-list compact">
-        <div>
-          <dt>Height</dt>
-          <dd>{formatLength(wallHeightMm, { unit })}</dd>
-        </div>
-        <div>
-          <dt>Centerline</dt>
-          <dd>
-            {formatLength(centerlineMm, {
-              unit: "ft",
-              secondaryUnit: "cm"
-            })}
-          </dd>
-        </div>
-      </dl>
 
       <div className="opening-add-row">
         <span>Add to this wall</span>
@@ -173,6 +154,22 @@ export function WallInspector({
           </button>
         </div>
       </div>
+
+      <dl className="property-list compact">
+        <div>
+          <dt>Height</dt>
+          <dd>{formatLength(wallHeightMm, { unit })}</dd>
+        </div>
+        <div>
+          <dt>Centerline</dt>
+          <dd>
+            {formatLength(centerlineMm, {
+              unit: "ft",
+              secondaryUnit: "cm"
+            })}
+          </dd>
+        </div>
+      </dl>
     </form>
   );
 }

@@ -157,7 +157,7 @@ Approximate and invalid states must not be confused with selection. A selected a
 ### Named Rules
 **The One Voice Rule.** Petrol is the primary color used for routine interaction anywhere in the app. If a new component needs to signal "active" or "selected," it reaches for `primary`/`primary-soft`, never a new hue.
 
-**The Rationed Accent Rule.** Oxblood appears in exactly one place: the brand mark. It is not a secondary button color, not a hover state, not a tag color. The moment it starts showing up twice, it has stopped being identity and started being decoration.
+**The Rationed Accent Rule.** Oxblood (`--accent`) is reserved for a future custom SVG logotype and currently appears nowhere in the product UI — the token remains defined, but unused. It is not a secondary button color, not a hover state, not a tag color, not a decoration. The moment a custom brand mark is designed, this rule will move oxblood into exactly one place: that mark. If it ever starts showing up elsewhere, it has stopped being identity and started being decoration.
 
 **The Tinted Selection Rule.** Selection remains border plus petrol-soft wash, but the system now allows exactly ONE solid petrol CTA per screen — currently "Add Artwork" in the checklist (solid --primary, white text). All other interactions use outlined or tinted buttons.
 
@@ -208,16 +208,30 @@ Flat by default. Borders (Hairline) do the separating work everywhere; shadow is
 - **Uncertainty badges** (signature component): "approximate" renders in Caution Amber, "unknown" in Alarm Red, and a fully-known dimension renders no badge at all — absence of a badge is itself the "trust this number" signal. The identical amber/red logic reappears on the elevation canvas as the artwork-outline stroke style, so a placement reads the same confidence level whether you're looking at the checklist or the wall.
 
 ### Inputs / Fields
-- **Style:** Hairline border, 6px radius, white fill, Ink text.
+- **Style:** Hairline border, 3px radius, white fill, Ink text.
 - **Hover:** border shifts from Hairline to Fog.
 - **Focus:** 2px Petrol-family outline ring, 2px offset.
-- **Invalid:** border shifts to Alarm Red; an inline Label-sized error line appears below in the same red.
+- **Format hints:** appear only while the field is focused (e.g., "Accepts 28', 336""). 
+- **Invalid:** border shifts to Alarm Red; an inline Label-sized error line appears below in the same red — errors always show regardless of focus state.
 - **Readonly:** Cool Fog fill, Graphite text.
 
 ### Navigation
-- **Left icon rail:** 52px, full-height, right hairline. S monogram top (32px oxblood square, 3px radius — still the only oxblood element). Checklist panel toggle (functional, persisted showChecklistPanel view preference). Data view (relocated from top tabs). Issues (live placement-warning count as a square danger tag; click selects the first offending object). Disabled 3D placeholder. Disabled Settings/Help placeholders. Rail buttons: 36px, borderless, hover Cool Fog, active petrol-soft.
-- **Top bar:** three-zone grid on white background with Hairline bottom border. Left zone: SIGHTLINES wordmark (Montserrat, uppercase, 0.12em tracking) + hairline + project title (editable). Center zone: Plan / Elevation tabs only, styled as underline tabs (muted → ink on hover; active = ink + 2px petrol underline). Right zone: dot+text save status, undo/redo group, hairline divider, import button, outlined Export.
-- **Workspace layout:** Checklist panel (left, ~320px, toggled via rail; grid collapses when hidden), canvas (center), Rooms + contextual Inspector (right, ~300px). The inspector heading names the selected subject (wall name / artwork title / opening kind) with a small kind label.
+
+**The Workspace Grammar.** The rail (left, 80px) selects which left panel is open: the Checklist, the Rooms & Walls inventory, or null (both hidden). The topbar (top, 80px) owns the central view mode: Plan or Elevation; 3D will be a future mode tab. The right panel (300px) is a pure inspector: warnings first (when present), then the selected subject (wall / artwork / opening), its editable fields, actions, and read-only properties. Selection state is mutually exclusive within each region — one wall, one artwork, one opening, or none.
+
+**The 80px Module Rule.** One 80px module governs the shell geometry: the rail is 80px wide, the topbar 80px tall, and the brand cell (top-left corner) is 80×80 where the rail's right hairline and the topbar's bottom hairline visibly cross, forming an intersecting cross that anchors the frame. Rail buttons are 48px square (22px icons, 3px radius, centered). At ≤760px the module drops to 56px (rail), 40px buttons (18px icons), matching the responsive grid step-down across the whole interface.
+
+**Monogram.** A bare petrol (--primary) Montserrat 700 "S" letterform, no tile, no background, no fill — an explicit placeholder for a future custom SVG logotype. Type-based and dense, not an icon shape or an app-icon tile. The moment a custom mark ships, this text will disappear and the SVG will center in the same 80×80 cell using the exact same baseline centering math.
+
+- **Rail order:** Brand cell (S monogram) / Checklist toggle (PanelLeft icon) / Rooms & Walls toggle (Blocks icon) / Issues (TriangleAlert icon with live count badge) / spacer / Data view (FileJson, dev slot) / Settings placeholder (disabled) / Help placeholder (disabled). Buttons: 48px, borderless, muted text at rest, Cool Fog fill on hover, petrol-soft fill + petrol-strong text when active/pressed. Issues button disabled when no placement warnings exist; clicking it jumps selection to the first offending wall object.
+
+- **Topbar.** Three-zone grid on white background with Hairline bottom border. Left zone: SIGHTLINES wordmark (Montserrat, uppercase, 0.12em tracking, 0.8rem) + hairline divider + project title (editable, 1.02rem, weight 680, max ~320px). Center zone: Plan / Elevation tabs only, styled as underline tabs (muted → ink on hover; active = ink + 2px petrol underline); Montserrat 600, 0.95rem. Right zone: dot+text save status + undo/redo group (two joined icon buttons) + hairline divider + import button + labeled Export button (outlined, Cool Fog fill, never solid).
+
+- **Elevation wall switcher.** The floating canvas chip in the top-left corner of the elevation surface now owns wall navigation: two compact 24px chevron buttons (prev/next) flanking a borderless wall `<select>` grouped by room name (never just flat wall names). Chevrons wrap the select, both borderless with hover-fog treatment. The select itself is borderless like the Units control (Montserrat 700, 0.95rem, ink text). Chip background white, 1px hairline border, box-shadow tight, positioned absolutely at 14px from both edges. Wall hopping in elevation no longer requires leaving the Checklist panel — the two workflows are now independent.
+
+- **Left panels:** Checklist (when open) or Rooms & Walls (when open) — never both, always one or neither (toggled via rail). Both are 320px wide (collapsing at ≤1200px), white background, hairline toward canvas, scrollable flex columns. The rail preference persisted as `leftPanel: "checklist" | "rooms" | null` (workspace preference, not project data). Grid template responds: `grid-template-columns: 320px minmax(0, 1fr) 300px;` when left panel open, or `grid-template-columns: minmax(0, 1fr) 300px;` when collapsed.
+
+- **Right panel (Inspector).** Always 300px wide (collapsing at ≤1200px), white background, hairline toward canvas, scrollable flex column. Heading names the selected subject (wall name / artwork title / opening kind) with a small kind label. Layout order: placement warnings (when present, in a Caution-soft panel) → subject heading → editable fields (commit on blur/Enter or via dedicated action buttons) → action buttons ("Add door", "Remove from wall", etc.) → read-only properties (wall/object info). Storage note pinned to bottom with `margin-top: auto`. No Rooms list here — rooms are now in the left Rooms & Walls panel with Width/Depth fields and wall rows.
 
 ### Canvas
 - **Background:** pure white throughout. Backgrounds are white, not Cool Fog — --surface is demoted to hover fills and readonly inputs only.
@@ -240,7 +254,7 @@ Flat by default. Borders (Hairline) do the separating work everywhere; shadow is
 - **Empty state:** dashed-border dropzone with hint copy.
 
 ### Brand Mark (signature)
-Petrol "S" monogram inspired by measurement tools and architectural planning on transparent/white background. Optionally paired with "Sightlines" textmark.
+Bare petrol "S" monogram (Montserrat 700, no background, no decoration) — a placeholder for a future custom SVG logotype. Type-based and text-dense, echoing measurement tools and drafting conventions. The moment a custom mark is designed, this letterform will disappear and the SVG will use the exact same centered positioning in the 80×80 rail brand cell. Optionally paired with "Sightlines" textmark in marketing contexts, never in the product itself.
 
 ## 6. Do's and Don'ts
 

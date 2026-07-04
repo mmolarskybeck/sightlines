@@ -22,7 +22,36 @@ describe("useViewPreferences", () => {
     expect(result.current.showGrid).toBe(true);
     expect(result.current.snapToGrid).toBe(true);
     // The checklist is the left anchor of the workspace on first open.
-    expect(result.current.showChecklistPanel).toBe(true);
+    expect(result.current.leftPanel).toBe("checklist");
+  });
+
+  it("switches and collapses the left panel, persisting each state", () => {
+    const { result } = renderHook(() => useViewPreferences());
+
+    act(() => {
+      result.current.setLeftPanel("rooms");
+    });
+    expect(result.current.leftPanel).toBe("rooms");
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}").leftPanel).toBe(
+      "rooms"
+    );
+
+    act(() => {
+      result.current.setLeftPanel(null);
+    });
+    expect(result.current.leftPanel).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}").leftPanel).toBeNull();
+  });
+
+  it("honors a stored null (collapsed) but falls back to default for a bad value", () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ leftPanel: null }));
+    expect(renderHook(() => useViewPreferences()).result.current.leftPanel).toBeNull();
+
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ leftPanel: "nope" }));
+    expect(renderHook(() => useViewPreferences()).result.current.leftPanel).toBe("checklist");
+
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ showGrid: true }));
+    expect(renderHook(() => useViewPreferences()).result.current.leftPanel).toBe("checklist");
   });
 
   it("persists a chosen floor to localStorage and reflects it in state", () => {

@@ -16,10 +16,11 @@ type ViewPreferences = {
   // here, so this is a rare, low-visibility override rather than a
   // frequently-toggled option like grid/snap.
   allowOverlappingPlacement: boolean;
-  // On by default: the checklist is the left anchor of the workspace on first
-  // open. Toggled from the rail; hiding it collapses the left column. A
-  // workspace preference like grid/snap — the state sticks.
-  showChecklistPanel: boolean;
+  // Which inventory the left column shows, or null when collapsed. The rail
+  // selects it: clicking the active panel's icon collapses to null, clicking
+  // the other switches. Defaults to "checklist" — the left anchor of the
+  // workspace on first open. A workspace preference like grid/snap; it sticks.
+  leftPanel: "checklist" | "rooms" | null;
 };
 
 const DEFAULT_PREFERENCES: ViewPreferences = {
@@ -30,7 +31,7 @@ const DEFAULT_PREFERENCES: ViewPreferences = {
   snapToGrid: true,
   gridPrecisionFloorMm: null,
   allowOverlappingPlacement: false,
-  showChecklistPanel: true
+  leftPanel: "checklist"
 };
 
 function readStoredPreferences(): ViewPreferences {
@@ -56,10 +57,14 @@ function readStoredPreferences(): ViewPreferences {
         typeof parsed.allowOverlappingPlacement === "boolean"
           ? parsed.allowOverlappingPlacement
           : DEFAULT_PREFERENCES.allowOverlappingPlacement,
-      showChecklistPanel:
-        typeof parsed.showChecklistPanel === "boolean"
-          ? parsed.showChecklistPanel
-          : DEFAULT_PREFERENCES.showChecklistPanel
+      // A stored `null` means the user deliberately collapsed the column, so
+      // it's honored; only a missing/invalid value falls back to the default.
+      leftPanel:
+        parsed.leftPanel === "checklist" ||
+        parsed.leftPanel === "rooms" ||
+        parsed.leftPanel === null
+          ? parsed.leftPanel
+          : DEFAULT_PREFERENCES.leftPanel
     };
   } catch {
     return DEFAULT_PREFERENCES;
@@ -84,12 +89,9 @@ export function useViewPreferences() {
     snapToGrid: preferences.snapToGrid,
     gridPrecisionFloorMm: preferences.gridPrecisionFloorMm,
     allowOverlappingPlacement: preferences.allowOverlappingPlacement,
-    showChecklistPanel: preferences.showChecklistPanel,
-    toggleShowChecklistPanel: () =>
-      setPreferences((current) => ({
-        ...current,
-        showChecklistPanel: !current.showChecklistPanel
-      })),
+    leftPanel: preferences.leftPanel,
+    setLeftPanel: (leftPanel: ViewPreferences["leftPanel"]) =>
+      setPreferences((current) => ({ ...current, leftPanel })),
     toggleShowGrid: () =>
       setPreferences((current) => ({ ...current, showGrid: !current.showGrid })),
     toggleSnapToGrid: () =>
