@@ -1,5 +1,6 @@
 import { getWallsWithGeometry, type WallWithGeometry } from "../geometry/walls";
 import type { Project, WallObject } from "../project";
+import { doWallObjectsOverlap } from "./collision";
 
 export type PlacementWarning = {
   id: string;
@@ -66,7 +67,10 @@ function validateWallObjects(project: Project, wallObjects: WallObject[]): Place
       ];
     }
 
-    return validateWallObjectBounds(wallObject, wall.lengthMm, wall.heightMm);
+    return [
+      ...validateWallObjectBounds(wallObject, wall.lengthMm, wall.heightMm),
+      ...validateWallObjectCollisions(wallObject, project.wallObjects)
+    ];
   });
 }
 
@@ -100,4 +104,39 @@ function validateWallObjectBounds(
   }
 
   return warnings;
+}
+
+// Flags an artwork that overlaps a door/window/blocked-zone on the same
+// wall, and symmetrically flags an opening that overlaps an artwork —
+// whichever side was actually moved gets the warning attached to it, so
+// dragging either one away clears it (docs/plan.md §2: never block, clamp,
+// or auto-move; only flag). Two openings overlapping each other (e.g. a
+// door inside a blocked zone) isn't checked — out of scope for this slice,
+// which is about protecting artwork placements from real obstacles.
+function validateWallObjectCollisions(
+  wallObject: WallObject,
+  allWallObjects: WallObject[]
+): PlacementWarning[] {
+  const others = allWallObjects.filter(
+    (other) =>
+      other.id !== wallObject.id &&
+      other.wallId === wallObject.wallId &&
+      isBlockingPair(wallObject, other)
+  );
+
+  return others
+    .filter((other) => doWallObjectsOverlap(wallObject, other))
+    .map((other) => ({
+      id: `${wallObject.id}:collision:${other.id}`,
+      wallObjectId: wallObject.id,
+      wallId: wallObject.wallId,
+      message: "Placement overlaps another object on this wall."
+    }));
+}
+
+// Only an artwork/obstacle pair is a real conflict — an obstacle is never
+// blocked by another obstacle, and two artworks overlapping is a separate,
+// not-yet-built concern (multi-select/grouping, docs/plan.md's MVP1C list).
+function isBlockingPair(a: WallObject, b: WallObject): boolean {
+  return (a.kind === "artwork") !== (b.kind === "artwork");
 }

@@ -1,12 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { CURRENT_SCHEMA_VERSION } from "../project";
+import { CURRENT_SCHEMA_VERSION, type OpeningWallObject } from "../project";
 import { createSampleProject } from "../sample/sampleProject";
+import { feetToMm, inchesToMm } from "../units/length";
 import {
   MAX_IMPORT_JSON_LENGTH,
   migrateProject,
   migrateProjectJson,
   parseProject
 } from "./projectSchema";
+
+function makeOpening(overrides: Partial<OpeningWallObject> = {}): OpeningWallObject {
+  return {
+    id: "opening-1",
+    kind: "door",
+    blocksPlacement: true,
+    wallId: "wall-north",
+    xMm: feetToMm(5),
+    yMm: inchesToMm(40),
+    widthMm: feetToMm(3),
+    heightMm: inchesToMm(80),
+    ...overrides
+  };
+}
 
 describe("projectSchema", () => {
   it("accepts the sample project", () => {
@@ -55,6 +70,81 @@ describe("projectSchema", () => {
     project.floor.rooms[0].room.walls[0].roomId = "some-other-room";
 
     expect(() => parseProject(project)).toThrow(/declares roomId/);
+  });
+
+  describe("OpeningWallObject", () => {
+    it("accepts a door, a window, and a blocked zone", () => {
+      const project = createSampleProject();
+      project.wallObjects = [
+        makeOpening({ id: "door-1", kind: "door" }),
+        makeOpening({ id: "window-1", kind: "window" }),
+        makeOpening({ id: "zone-1", kind: "blocked-zone" })
+      ];
+
+      const parsed = parseProject(project);
+      expect(parsed.wallObjects.map((wallObject) => wallObject.kind)).toEqual([
+        "door",
+        "window",
+        "blocked-zone"
+      ]);
+    });
+
+    it("accepts an optional connectsToWallId (schema field only, no UI yet)", () => {
+      const project = createSampleProject();
+      project.wallObjects = [makeOpening({ connectsToWallId: "wall-south" })];
+
+      const parsed = parseProject(project);
+      expect((parsed.wallObjects[0] as OpeningWallObject).connectsToWallId).toBe("wall-south");
+    });
+
+    it("rejects an opening kind outside door/window/blocked-zone", () => {
+      const project = createSampleProject();
+      project.wallObjects = [makeOpening({ kind: "skylight" as OpeningWallObject["kind"] })];
+
+      expect(() => parseProject(project)).toThrow();
+    });
+
+    it("rejects an opening whose wallId references a wall that doesn't exist — same invariant as artwork placements", () => {
+      // Note: wallId isn't cross-checked against the room's walls at parse
+      // time for either artwork or opening placements today (that check
+      // happens at validatePlacement time, via a "missing wall" warning,
+      // not at schema time) — this test documents that an opening still
+      // parses structurally even with a dangling wallId, the same as an
+      // artwork wall object does.
+      const project = createSampleProject();
+      project.wallObjects = [makeOpening({ wallId: "wall-does-not-exist" })];
+
+      expect(() => parseProject(project)).not.toThrow();
+    });
+
+    it("rejects blocksPlacement: false — the schema pins it to the literal true", () => {
+      const project = createSampleProject();
+      project.wallObjects = [
+        { ...makeOpening(), blocksPlacement: false as unknown as true }
+      ];
+
+      expect(() => parseProject(project)).toThrow();
+    });
+
+    it("keeps existing artwork-only projects valid — additive, no schema version bump", () => {
+      const project = createSampleProject();
+      expect(project.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+
+      project.wallObjects = [
+        {
+          id: "artwork-placement-1",
+          kind: "artwork",
+          artworkId: "artwork-1",
+          wallId: "wall-north",
+          xMm: feetToMm(5),
+          yMm: inchesToMm(57),
+          widthMm: feetToMm(2),
+          heightMm: feetToMm(3)
+        }
+      ];
+
+      expect(() => parseProject(project)).not.toThrow();
+    });
   });
 });
 

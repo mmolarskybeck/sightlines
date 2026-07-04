@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Link2 } from "lucide-react";
+import { AlertTriangle, DoorOpen, Link2, Square, SquareDashed } from "lucide-react";
+import type { OpeningKind } from "../../domain/placement/createOpening";
 import type { DisplayUnit } from "../../domain/project";
 import { formatLength, parseLength } from "../../domain/units/length";
 
@@ -13,6 +14,7 @@ export function WallInspector({
   changedWallNames,
   dimensionLink,
   lastGeometryEdit,
+  onAddOpening,
   onCommitLength,
   placementWarnings,
   unit,
@@ -27,6 +29,7 @@ export function WallInspector({
     anchorVertexId: string;
     changedWallIds: string[];
   } | null;
+  onAddOpening: (kind: OpeningKind) => void;
   onCommitLength: (lengthMm: number) => Promise<void>;
   placementWarnings: { id: string; message: string; subject?: string }[];
   unit: DisplayUnit;
@@ -153,6 +156,28 @@ export function WallInspector({
           </dd>
         </div>
       </dl>
+
+      <div className="opening-add-row">
+        <span>Add to this wall</span>
+        <div className="opening-add-buttons">
+          <button className="inspector-action" type="button" onClick={() => onAddOpening("door")}>
+            <DoorOpen aria-hidden="true" size={15} />
+            Door
+          </button>
+          <button className="inspector-action" type="button" onClick={() => onAddOpening("window")}>
+            <Square aria-hidden="true" size={15} />
+            Window
+          </button>
+          <button
+            className="inspector-action"
+            type="button"
+            onClick={() => onAddOpening("blocked-zone")}
+          >
+            <SquareDashed aria-hidden="true" size={15} />
+            Blocked zone
+          </button>
+        </div>
+      </div>
     </form>
   );
 }

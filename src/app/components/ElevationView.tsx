@@ -11,7 +11,14 @@ import {
   PLACEHOLDER_ARTWORK_HEIGHT_MM,
   PLACEHOLDER_ARTWORK_WIDTH_MM
 } from "../../domain/placement/placeArtwork";
-import type { Artwork, ArtworkWallObject, DisplayUnit, WallObject } from "../../domain/project";
+import type {
+  Artwork,
+  ArtworkWallObject,
+  DisplayUnit,
+  OpeningWallObject,
+  WallObject,
+  WallObjectBase
+} from "../../domain/project";
 import { resolveArtworkSnap } from "../../domain/snapping/artworkSnapTargets";
 import type { Guide } from "../../domain/snapping/resolveSnap";
 import { formatLength } from "../../domain/units/length";
@@ -24,6 +31,7 @@ import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { useContainerSize } from "../hooks/useContainerSize";
 import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
 import { ElevationArtwork } from "./ElevationArtwork";
+import { ElevationOpening } from "./ElevationOpening";
 import { isArtworkOutOfWallBounds, wallLocalYToSvgY } from "./elevationArtworkGeometry";
 import { GridOverlay } from "./GridOverlay";
 
@@ -45,9 +53,12 @@ const NO_OP_GET_BLOB: (key: string) => Promise<Blob> = () =>
 // A pointer-drag move of an existing placement, transient until release
 // (docs/plan.md §7: live preview, exactly one store commit on release).
 // Mirrors PlanView's DragState shape/naming for the resize-handle drag.
+// Generalized over wall object kind (artwork or opening) — `kind` decides
+// which store action commits on release, everything else about the drag
+// (preview, snapping, sub-threshold no-op) is identical either way.
 type MoveDragState = {
   wallObjectId: string;
-  artworkId: string;
+  kind: WallObject["kind"];
   sizeMm: { widthMm: number; heightMm: number };
   startPointerMm: Vector2;
   startCenterMm: Vector2;
@@ -70,15 +81,18 @@ type DropGhostState = {
 
 export function ElevationView({
   artworksById,
-  centerlineMm,
   draggingArtworkId = null,
+  centerlineMm,
   getBlob,
   gridPrecisionFloorMm,
   gridVisible,
+  onMoveOpening,
   onMovePlacement,
   onPlaceArtwork,
   onSelectArtwork,
+  onSelectOpening,
   selectedArtworkId = null,
+  selectedOpeningId = null,
   snapToGrid = false,
   unit,
   wallHeightMm,
@@ -101,12 +115,15 @@ export function ElevationView({
   wallObjects?: WallObject[];
   artworksById?: Map<string, Artwork>;
   selectedArtworkId?: string | null;
+  selectedOpeningId?: string | null;
   getBlob?: (key: string) => Promise<Blob>;
   snapToGrid?: boolean;
   draggingArtworkId?: string | null;
   onPlaceArtwork?: (artworkId: string, wallId: string, xMm: number, yMm: number) => void;
   onMovePlacement?: (wallObjectId: string, xMm: number, yMm: number) => void;
+  onMoveOpening?: (wallObjectId: string, xMm: number, yMm: number) => void;
   onSelectArtwork?: (artworkId: string) => void;
+  onSelectOpening?: (wallObjectId: string) => void;
 }) {
   const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -129,6 +146,14 @@ export function ElevationView({
   const placements: ArtworkWallObject[] = (wallObjects ?? []).filter(
     (object): object is ArtworkWallObject => object.kind === "artwork" && object.wallId === wallId
   );
+  const openings: OpeningWallObject[] = (wallObjects ?? []).filter(
+    (object): object is OpeningWallObject => object.kind !== "artwork" && object.wallId === wallId
+  );
+  // Every wall object on this wall is a valid snap neighbor for any other —
+  // an artwork can align to a door's edge just as readily as to another
+  // artwork's (docs/plan.md §2 snap-target priority doesn't distinguish by
+  // kind, only centerline > neighbor-center > neighbor-edge > grid).
+  const wallObjectsOnThisWall: WallObjectBase[] = [...placements, ...openings];
 
   const assetIds = placements.map((placement) => artworksById?.get(placement.artworkId)?.assetId);
   const imageUrlsByAssetId = useAssetImageUrls(assetIds, getBlob ?? NO_OP_GET_BLOB, "display");
@@ -178,7 +203,9 @@ export function ElevationView({
         yMm: current.startCenterMm.yMm + (pointerMm.yMm - current.startPointerMm.yMm)
       };
 
-      const neighbors = placements.filter((placement) => placement.id !== current.wallObjectId);
+      const neighbors = wallObjectsOnThisWall.filter(
+        (wallObject) => wallObject.id !== current.wallObjectId
+      );
 
       const snapResult = resolveArtworkSnap(proposedCenterMm, {
         centerlineYMm: centerlineMm,
@@ -217,7 +244,11 @@ export function ElevationView({
       );
       if (movedMm < 0.5) return;
 
-      onMovePlacement?.(current.wallObjectId, current.previewCenterMm.xMm, current.previewCenterMm.yMm);
+      if (current.kind === "artwork") {
+        onMovePlacement?.(current.wallObjectId, current.previewCenterMm.xMm, current.previewCenterMm.yMm);
+      } else {
+        onMoveOpening?.(current.wallObjectId, current.previewCenterMm.xMm, current.previewCenterMm.yMm);
+      }
     }
 
     window.addEventListener("pointermove", onPointerMove);
@@ -231,27 +262,28 @@ export function ElevationView({
     // Same shape as PlanView's drag effect: subscribed once per gesture,
     // reading live state via moveDragRef rather than closing over `moveDrag`.
     // wallLengthMm/wallHeightMm/centerlineMm/minorGridMm/snapToGrid/
-    // snapThresholdMm/placements all derive from the committed project and
-    // current viewport, which can't change mid-drag (the transient preview
-    // never rewrites them), so they're intentionally left out of the deps.
-  }, [moveDrag !== null, onMovePlacement]);
+    // snapThresholdMm/wallObjectsOnThisWall all derive from the committed
+    // project and current viewport, which can't change mid-drag (the
+    // transient preview never rewrites them), so they're intentionally left
+    // out of the deps.
+  }, [moveDrag !== null, onMovePlacement, onMoveOpening]);
 
   useEffect(() => {
     moveDragRef.current = moveDrag;
   }, [moveDrag]);
 
-  function beginMoveDrag(placement: ArtworkWallObject, event: ReactPointerEvent<SVGGElement>) {
+  function beginMoveDrag(wallObject: WallObject, event: ReactPointerEvent<SVGGElement>) {
     event.stopPropagation();
     const startPointerMm = toWallLocalMm(event.clientX, event.clientY);
     if (!startPointerMm) return;
 
     setMoveDrag({
-      wallObjectId: placement.id,
-      artworkId: placement.artworkId,
-      sizeMm: { widthMm: placement.widthMm, heightMm: placement.heightMm },
+      wallObjectId: wallObject.id,
+      kind: wallObject.kind,
+      sizeMm: { widthMm: wallObject.widthMm, heightMm: wallObject.heightMm },
       startPointerMm,
-      startCenterMm: { xMm: placement.xMm, yMm: placement.yMm },
-      previewCenterMm: { xMm: placement.xMm, yMm: placement.yMm },
+      startCenterMm: { xMm: wallObject.xMm, yMm: wallObject.yMm },
+      previewCenterMm: { xMm: wallObject.xMm, yMm: wallObject.yMm },
       previousSnapTargetId: undefined,
       activeGuides: []
     });
@@ -271,7 +303,7 @@ export function ElevationView({
       wallLengthMm,
       wallHeightMm,
       gridIntervalMm: minorGridMm,
-      neighbors: placements,
+      neighbors: wallObjectsOnThisWall,
       movingSize: sizeMm,
       snapToGrid,
       thresholdMm: snapThresholdMm,
@@ -308,7 +340,7 @@ export function ElevationView({
       wallLengthMm,
       wallHeightMm,
       gridIntervalMm: minorGridMm,
-      neighbors: placements,
+      neighbors: wallObjectsOnThisWall,
       movingSize: sizeMm,
       snapToGrid,
       thresholdMm: snapThresholdMm,
@@ -383,6 +415,28 @@ export function ElevationView({
               wallHeightMm={wallHeightMm}
               onPointerDown={(event) => beginMoveDrag(placement, event)}
               onSelect={() => onSelectArtwork?.(placement.artworkId)}
+            />
+          );
+        })}
+        {openings.map((opening) => {
+          const isDraggingThis = moveDrag?.wallObjectId === opening.id;
+          const center = isDraggingThis ? moveDrag.previewCenterMm : { xMm: opening.xMm, yMm: opening.yMm };
+          const size = isDraggingThis
+            ? moveDrag.sizeMm
+            : { widthMm: opening.widthMm, heightMm: opening.heightMm };
+
+          return (
+            <ElevationOpening
+              key={opening.id}
+              center={center}
+              isOutOfBounds={isArtworkOutOfWallBounds(wallLengthMm, wallHeightMm, center, size)}
+              isSelected={selectedOpeningId === opening.id}
+              kind={opening.kind}
+              size={size}
+              wallHeightMm={wallHeightMm}
+              wallObjectId={opening.id}
+              onPointerDown={(event) => beginMoveDrag(opening, event)}
+              onSelect={() => onSelectOpening?.(opening.id)}
             />
           );
         })}

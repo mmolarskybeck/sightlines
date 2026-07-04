@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Project } from "../project";
+import type { OpeningWallObject, Project } from "../project";
 import { createSampleProject } from "../sample/sampleProject";
 import { feetToMm, inchesToMm } from "../units/length";
 import { resizeWallPreservingAngles } from "../geometry/editRoom";
@@ -77,6 +77,114 @@ describe("validateWallObjectPlacements", () => {
     expect(warnings).toEqual([]);
   });
 });
+
+describe("collision validation against openings", () => {
+  it("flags an artwork that overlaps a door on the same wall", () => {
+    const project = withSouthWallArtworkAndDoor({ artworkXMm: feetToMm(10), doorXMm: feetToMm(10) });
+
+    const warnings = validateWallObjectPlacements(project, ["placement-south-far"]);
+
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        wallObjectId: "placement-south-far",
+        wallId: "wall-south",
+        message: "Placement overlaps another object on this wall."
+      })
+    ]);
+  });
+
+  it("symmetrically flags a door that overlaps an artwork when the door itself is revalidated", () => {
+    const project = withSouthWallArtworkAndDoor({ artworkXMm: feetToMm(10), doorXMm: feetToMm(10) });
+
+    const warnings = validateWallObjectPlacements(project, ["door-1"]);
+
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        wallObjectId: "door-1",
+        wallId: "wall-south",
+        message: "Placement overlaps another object on this wall."
+      })
+    ]);
+  });
+
+  it("does not flag an artwork and a door that don't overlap", () => {
+    const project = withSouthWallArtworkAndDoor({ artworkXMm: feetToMm(2), doorXMm: feetToMm(20) });
+
+    expect(validateWallObjectPlacements(project, ["placement-south-far"])).toEqual([]);
+    expect(validateWallObjectPlacements(project, ["door-1"])).toEqual([]);
+  });
+
+  it("clears once the overlapping object moves away", () => {
+    const overlapping = withSouthWallArtworkAndDoor({ artworkXMm: feetToMm(10), doorXMm: feetToMm(10) });
+    expect(validateWallObjectPlacements(overlapping, ["door-1"])).not.toEqual([]);
+
+    const movedAway: Project = {
+      ...overlapping,
+      wallObjects: overlapping.wallObjects.map((wallObject) =>
+        wallObject.id === "door-1" ? { ...wallObject, xMm: feetToMm(25) } : wallObject
+      )
+    };
+
+    expect(validateWallObjectPlacements(movedAway, ["door-1"])).toEqual([]);
+  });
+
+  it("does not flag two openings overlapping each other — out of scope for this slice", () => {
+    const project = withSouthWallArtworkAndDoor({ artworkXMm: feetToMm(2), doorXMm: feetToMm(10) });
+    const blockedZone: OpeningWallObject = {
+      id: "zone-1",
+      kind: "blocked-zone",
+      blocksPlacement: true,
+      wallId: "wall-south",
+      xMm: feetToMm(10),
+      yMm: inchesToMm(57),
+      widthMm: feetToMm(1),
+      heightMm: feetToMm(1)
+    };
+    const withOverlappingOpenings: Project = {
+      ...project,
+      wallObjects: [...project.wallObjects, blockedZone]
+    };
+
+    expect(validateWallObjectPlacements(withOverlappingOpenings, ["door-1", "zone-1"])).toEqual([]);
+  });
+});
+
+function withSouthWallArtworkAndDoor({
+  artworkXMm,
+  doorXMm
+}: {
+  artworkXMm: number;
+  doorXMm: number;
+}): Project {
+  const project = createSampleProject();
+  const door: OpeningWallObject = {
+    id: "door-1",
+    kind: "door",
+    blocksPlacement: true,
+    wallId: "wall-south",
+    xMm: doorXMm,
+    yMm: inchesToMm(40),
+    widthMm: feetToMm(3),
+    heightMm: inchesToMm(80)
+  };
+
+  return {
+    ...project,
+    wallObjects: [
+      {
+        id: "placement-south-far",
+        kind: "artwork",
+        artworkId: "artwork-1",
+        wallId: "wall-south",
+        xMm: artworkXMm,
+        yMm: inchesToMm(57),
+        widthMm: feetToMm(2),
+        heightMm: feetToMm(3)
+      },
+      door
+    ]
+  };
+}
 
 function withSouthWallArtwork(project: Project): Project {
   return {

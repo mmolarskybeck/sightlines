@@ -886,6 +886,148 @@ describe("app store", () => {
     expect(state.placementWarnings[0].wallId).toBe(wall.id);
   });
 
+  describe("addOpening", () => {
+    it("adds a door centered on the wall, reaching the floor, in one undo entry", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+
+      await store.getState().addOpening(wall.id, "door");
+
+      const state = store.getState();
+      expect(state.undoStack.at(-1)?.label).toBe("Add door");
+      const opening = state.project!.wallObjects[0];
+      expect(opening.kind).toBe("door");
+      expect(opening.wallId).toBe(wall.id);
+      expect(opening.xMm).toBeCloseTo(wall.lengthMm / 2);
+      expect(opening.yMm - opening.heightMm / 2).toBeCloseTo(0);
+      expect((opening as { blocksPlacement: true }).blocksPlacement).toBe(true);
+      expect(state.selectedOpeningId).toBe(opening.id);
+    });
+
+    it("adds a window centered on the wall's centerline height", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+
+      await store.getState().addOpening(wall.id, "window");
+
+      const state = store.getState();
+      const opening = state.project!.wallObjects[0];
+      expect(opening.kind).toBe("window");
+      expect(opening.yMm).toBeCloseTo(state.project!.defaultCenterlineHeightMm);
+    });
+
+    it("adds a blocked zone", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+
+      await store.getState().addOpening(wall.id, "blocked-zone");
+
+      expect(store.getState().project!.wallObjects[0].kind).toBe("blocked-zone");
+    });
+
+    it("is a no-op for an unknown wall id", async () => {
+      const before = store.getState().project;
+
+      await store.getState().addOpening("no-such-wall", "door");
+
+      expect(store.getState().project).toBe(before);
+      expect(store.getState().undoStack).toHaveLength(0);
+    });
+  });
+
+  describe("moveOpening", () => {
+    it("commits one undo entry and undo restores the previous position", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      await store.getState().addOpening(wall.id, "window");
+      const openingId = store.getState().project!.wallObjects[0].id;
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().moveOpening(openingId, 2000, 1600);
+
+      let state = store.getState();
+      expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+      expect(state.undoStack.at(-1)?.label).toBe("Move window");
+      let opening = state.project!.wallObjects.find((o) => o.id === openingId)!;
+      expect(opening.xMm).toBe(2000);
+      expect(opening.yMm).toBe(1600);
+
+      await store.getState().undo();
+      state = store.getState();
+      opening = state.project!.wallObjects.find((o) => o.id === openingId)!;
+      expect(opening.xMm).not.toBe(2000);
+    });
+
+    it("is a no-op when the position is unchanged", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      await store.getState().addOpening(wall.id, "window");
+      const opening = store.getState().project!.wallObjects[0];
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().moveOpening(opening.id, opening.xMm, opening.yMm);
+
+      expect(store.getState().undoStack).toHaveLength(undoStackBefore);
+    });
+  });
+
+  describe("resizeOpening", () => {
+    it("resizes an opening about its own center and is undoable", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      await store.getState().addOpening(wall.id, "window");
+      const openingId = store.getState().project!.wallObjects[0].id;
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().resizeOpening(openingId, 1500, 1000);
+
+      let state = store.getState();
+      expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+      let opening = state.project!.wallObjects.find((o) => o.id === openingId)!;
+      expect(opening.widthMm).toBe(1500);
+      expect(opening.heightMm).toBe(1000);
+
+      await store.getState().undo();
+      state = store.getState();
+      opening = state.project!.wallObjects.find((o) => o.id === openingId)!;
+      expect(opening.widthMm).not.toBe(1500);
+    });
+  });
+
+  describe("removePlacement for an opening", () => {
+    it("deletes the opening (the same generic action used for artwork)", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      await store.getState().addOpening(wall.id, "door");
+      const openingId = store.getState().project!.wallObjects[0].id;
+
+      await store.getState().removePlacement(openingId);
+
+      expect(store.getState().project!.wallObjects).toHaveLength(0);
+    });
+  });
+
+  describe("collision warnings between artwork and openings", () => {
+    it("flags an artwork placed onto a door, and clears once the door moves away", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      await store.getState().updateArtwork(artworkId, {
+        dimensions: { widthMm: 500, heightMm: 400, status: "known" }
+      });
+      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+
+      await store.getState().addOpening(wall.id, "door");
+      const doorId = store.getState().project!.wallObjects[0].id;
+      const door = store.getState().project!.wallObjects[0];
+
+      await store.getState().placeArtwork(artworkId, wall.id, door.xMm, door.yMm);
+
+      expect(store.getState().placementWarnings).toEqual([
+        expect.objectContaining({ message: "Placement overlaps another object on this wall." })
+      ]);
+
+      await store.getState().moveOpening(doorId, door.xMm + 2000, door.yMm);
+
+      // moveOpening only revalidates the door itself, so its own warning
+      // clears — proving the collision check is symmetric and re-run live,
+      // not a stale flag left over from the artwork's placement.
+      expect(store.getState().placementWarnings).toEqual([]);
+    });
+  });
+
   describe("selection", () => {
     it("selectWall clears any selected artwork", () => {
       store.getState().selectArtwork("some-artwork");
@@ -904,6 +1046,33 @@ describe("app store", () => {
 
       expect(store.getState().selectedArtworkId).toBe("artwork-x");
       expect(store.getState().selectedWallId).toBe(wallId);
+    });
+
+    it("selectOpening clears the selected artwork but not the selected wall", () => {
+      const wallId = store.getState().selectedWallId;
+      store.getState().selectArtwork("some-artwork");
+
+      store.getState().selectOpening("some-opening");
+
+      expect(store.getState().selectedOpeningId).toBe("some-opening");
+      expect(store.getState().selectedArtworkId).toBeNull();
+      expect(store.getState().selectedWallId).toBe(wallId);
+    });
+
+    it("selectWall clears the selected opening", () => {
+      store.getState().selectOpening("some-opening");
+
+      store.getState().selectWall("wall-east");
+
+      expect(store.getState().selectedOpeningId).toBeNull();
+    });
+
+    it("selectArtwork clears the selected opening", () => {
+      store.getState().selectOpening("some-opening");
+
+      store.getState().selectArtwork("some-artwork");
+
+      expect(store.getState().selectedOpeningId).toBeNull();
     });
   });
 });

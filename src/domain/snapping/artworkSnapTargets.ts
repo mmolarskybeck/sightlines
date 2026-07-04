@@ -1,4 +1,4 @@
-import type { ArtworkWallObject } from "../project";
+import type { WallObjectBase } from "../project";
 import { getGridSnapTargets } from "./gridSnapTargets";
 import { resolveSnap, type Guide, type Point, type SnapTarget } from "./resolveSnap";
 
@@ -12,13 +12,16 @@ export type ArtworkSize = {
 // wall geometry and the current neighbor set on every call — never owned by
 // the renderer, same discipline as getGridSnapTargets. Callers exclude the
 // object actually being moved from `neighbors` before calling this; a moving
-// object should never snap to itself.
+// object should never snap to itself. `neighbors` is typed at the
+// WallObjectBase level (not ArtworkWallObject) so any wall object — artwork
+// or an opening — can act as a snap neighbor for any other; only the shared
+// center/size fields are ever read here.
 export function getArtworkSnapTargets(args: {
   centerlineYMm: number;
   wallLengthMm: number;
   wallHeightMm: number;
   gridIntervalMm: number;
-  neighbors: ArtworkWallObject[];
+  neighbors: WallObjectBase[];
   movingSize: ArtworkSize;
 }): SnapTarget[] {
   const { centerlineYMm, wallLengthMm, wallHeightMm, gridIntervalMm, neighbors, movingSize } =
@@ -113,7 +116,7 @@ export function resolveArtworkSnap(
     wallLengthMm: number;
     wallHeightMm: number;
     gridIntervalMm: number;
-    neighbors: ArtworkWallObject[];
+    neighbors: WallObjectBase[];
     movingSize: ArtworkSize;
     snapToGrid: boolean;
     thresholdMm: number;

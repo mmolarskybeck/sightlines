@@ -18,7 +18,8 @@ import {
   getOrthogonalQuadWallPair,
   getRectangleRoomDimensions,
 } from "../domain/geometry/walls";
-import type { Artwork, ArtworkWallObject, DisplayUnit, Project } from "../domain/project";
+import { getOpeningKindLabel } from "../domain/placement/createOpening";
+import type { Artwork, ArtworkWallObject, DisplayUnit, OpeningWallObject, Project } from "../domain/project";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import { formatLength } from "../domain/units/length";
 import { getGridPrecisionFloorOptionsMm } from "../domain/units/precision";
@@ -27,6 +28,7 @@ import { ChecklistPanel } from "./components/ChecklistPanel";
 import { DataView } from "./components/DataView";
 import { ElevationEmptyState } from "./components/ElevationEmptyState";
 import { ElevationView } from "./components/ElevationView";
+import { OpeningInspector } from "./components/OpeningInspector";
 import { PlanView } from "./components/PlanView";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { RoomDimensionFields } from "./components/RoomDimensionFields";
@@ -62,6 +64,7 @@ export function App() {
     project,
     selectedWallId,
     selectedArtworkId,
+    selectedOpeningId,
     viewMode,
     saveState,
     error,
@@ -75,6 +78,7 @@ export function App() {
     setViewMode,
     selectWall,
     selectArtwork,
+    selectOpening,
     addRectangleRoom,
     renameProject,
     setUnit,
@@ -92,7 +96,10 @@ export function App() {
     updateArtwork,
     placeArtwork,
     moveArtworkPlacement,
-    removePlacement
+    removePlacement,
+    addOpening,
+    moveOpening,
+    resizeOpening
   } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
@@ -160,8 +167,19 @@ export function App() {
       ) ?? null)
     : null;
 
+  // A dangling selectedOpeningId (the opening was just deleted) resolves to
+  // nothing here too, the same fallback shape as selectedArtwork above.
+  const selectedOpening: OpeningWallObject | null = selectedOpeningId
+    ? (project.wallObjects.find(
+        (wallObject): wallObject is OpeningWallObject =>
+          wallObject.kind !== "artwork" && wallObject.id === selectedOpeningId
+      ) ?? null)
+    : null;
+
   // Warnings carry a wallObjectId, but a raw id means nothing to a curator —
-  // resolve it to the artwork's title (or the object's kind) for display.
+  // resolve it to the artwork's title, or the opening's human-readable kind
+  // label ("Door"/"Window"/"Blocked zone", never a raw `kind` string), for
+  // display.
   const labeledPlacementWarnings = placementWarnings.map((warning) => {
     const wallObject = project.wallObjects.find(
       (candidate) => candidate.id === warning.wallObjectId
@@ -169,7 +187,9 @@ export function App() {
     const subject =
       wallObject?.kind === "artwork"
         ? (artworksById.get(wallObject.artworkId)?.title ?? "Untitled artwork")
-        : wallObject?.kind;
+        : wallObject
+          ? getOpeningKindLabel(wallObject.kind)
+          : undefined;
     return { ...warning, subject };
   });
 
@@ -414,6 +434,7 @@ export function App() {
                 gridPrecisionFloorMm={gridPrecisionFloorMm}
                 gridVisible={showGrid}
                 selectedArtworkId={selectedArtworkId}
+                selectedOpeningId={selectedOpeningId}
                 snapToGrid={snapToGrid}
                 unit={project.unit}
                 wallHeightMm={selectedWall.heightMm}
@@ -421,9 +442,11 @@ export function App() {
                 wallLengthMm={selectedWall.lengthMm}
                 wallName={selectedWall.name}
                 wallObjects={project.wallObjects}
+                onMoveOpening={moveOpening}
                 onMovePlacement={moveArtworkPlacement}
                 onPlaceArtwork={placeArtwork}
                 onSelectArtwork={selectArtwork}
+                onSelectOpening={selectOpening}
               />
             ) : (
               <ElevationEmptyState hasRooms={project.floor.rooms.length > 0} />
@@ -471,6 +494,17 @@ export function App() {
                 }
               />
             </>
+          ) : selectedOpening ? (
+            <OpeningInspector
+              opening={selectedOpening}
+              placementWarnings={labeledPlacementWarnings}
+              unit={project.unit}
+              onCommitPosition={(xMm, yMm) => void moveOpening(selectedOpening.id, xMm, yMm)}
+              onCommitSize={(widthMm, heightMm) =>
+                void resizeOpening(selectedOpening.id, widthMm, heightMm)
+              }
+              onDelete={() => void removePlacement(selectedOpening.id)}
+            />
           ) : selectedWall ? (
             <WallInspector
               centerlineMm={project.defaultCenterlineHeightMm}
@@ -480,6 +514,7 @@ export function App() {
               )}
               dimensionLink={wallDimensionLink}
               lastGeometryEdit={lastGeometryEdit}
+              onAddOpening={(kind) => void addOpening(selectedWall.id, kind)}
               onCommitLength={resizeSelectedWall}
               placementWarnings={labeledPlacementWarnings}
               unit={project.unit}
