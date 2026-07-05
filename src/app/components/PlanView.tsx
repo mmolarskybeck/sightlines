@@ -69,7 +69,27 @@ export function PlanView({
   };
   const viewBox = `${viewBoxBounds.x} ${viewBoxBounds.y} ${viewBoxBounds.width} ${viewBoxBounds.height}`;
   const pixelsPerMm = getPixelsPerMm(containerSize, viewBoxBounds);
+  // The viewBox is letterboxed inside the full-size canvas (default
+  // "xMidYMid meet"), but SVG userspace outside the viewBox still renders —
+  // and the grid patterns tile in userspace — so sizing the grid rect to the
+  // whole container (in mm, centered on the viewBox center) fills the entire
+  // visible workspace instead of leaving bare margins beside the letterboxed
+  // viewBox. Falls back to the viewBox itself on first render, before the
+  // container is measured.
+  const gridBounds =
+    pixelsPerMm > 0
+      ? {
+          x: viewBoxBounds.x + (viewBoxBounds.width - containerSize.width / pixelsPerMm) / 2,
+          y: viewBoxBounds.y + (viewBoxBounds.height - containerSize.height / pixelsPerMm) / 2,
+          width: containerSize.width / pixelsPerMm,
+          height: containerSize.height / pixelsPerMm
+        }
+      : viewBoxBounds;
   const minorGridMm = getMinorGridIntervalMm(project.unit, pixelsPerMm, {
+    // Plan reads in feet/meters: room layout is a whole-feet activity, so a
+    // coarser target than the shared default keeps the plan lattice on the
+    // (1ft, 5ft) / (20cm, 1m) rung at typical whole-floor zoom.
+    targetMinorPx: 12,
     minIntervalMm: gridPrecisionFloorMm
   });
   const majorGridMm = getMajorGridIntervalMm(project.unit, minorGridMm);
@@ -81,8 +101,6 @@ export function PlanView({
   ).displayUnit;
   const handleSizeMm = pixelsPerMm > 0 ? HANDLE_SCREEN_SIZE_PX / pixelsPerMm : 0;
   const snapThresholdMm = pixelsPerMm > 0 ? SNAP_THRESHOLD_PX / pixelsPerMm : 0;
-  // Minor grid dot radius in mm, sized to a constant ~1.1px on screen.
-  const dotRadiusMm = pixelsPerMm > 0 ? 1.1 / pixelsPerMm : undefined;
   const gridSnapTargets = getGridSnapTargets(minorGridMm, {
     minXMm: viewBoxBounds.x,
     maxXMm: viewBoxBounds.x + viewBoxBounds.width,
@@ -247,13 +265,12 @@ export function PlanView({
         {gridVisible ? (
           <GridOverlay
             id="plan-grid"
-            dotRadiusMm={dotRadiusMm}
-            height={viewBoxBounds.height}
+            height={gridBounds.height}
             majorSpacingMm={majorGridMm}
             minorSpacingMm={minorGridMm}
-            width={viewBoxBounds.width}
-            x={viewBoxBounds.x}
-            y={viewBoxBounds.y}
+            width={gridBounds.width}
+            x={gridBounds.x}
+            y={gridBounds.y}
           />
         ) : null}
         {displayedProject.floor.rooms.map((placement) => (

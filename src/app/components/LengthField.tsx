@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from "react";
 import type { DisplayUnit } from "../../domain/project";
 import { formatLength, parseLength } from "../../domain/units/length";
 import { getConversionHint } from "../../domain/units/conversionHint";
+import { Input } from "./ui/input";
 
 // Shared commit-on-blur/Enter measurement field. Consolidates the parse,
 // validate, and reformat dance that ArtworkInspector, OpeningInspector,
@@ -121,11 +122,12 @@ export function LengthField({
   return (
     <label className={compact ? "field-row compact" : "field-row"}>
       <span>{label}</span>
-      <input
+      <Input
         aria-describedby={message ? messageId : undefined}
         aria-invalid={error ? "true" : "false"}
         inputMode="decimal"
         placeholder={placeholder}
+        size={compact ? "compact" : "default"}
         value={input}
         onFocus={() => setFocused(true)}
         onBlur={() => {

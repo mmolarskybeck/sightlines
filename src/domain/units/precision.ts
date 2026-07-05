@@ -3,40 +3,53 @@ import { cmToMm, feetToMm, inchesToMm, mToMm } from "./length";
 
 // One shared precision system (docs/plan.md §5.5): the visual grid, grid
 // snap targets, and nudge increments should all read from these same
-// unit-aware interval tables rather than drifting apart. Metric follows the
-// normal 1-2-5 sequence; imperial gets its own table because feet/inches
-// are how people think in the gallery, not a relabeled metric spacing.
-export const METRIC_GRID_INTERVALS_MM: readonly number[] = [
-  cmToMm(0.5),
-  cmToMm(1),
-  cmToMm(2),
-  cmToMm(5),
-  cmToMm(10),
-  cmToMm(20),
-  cmToMm(50),
-  mToMm(1),
-  mToMm(2)
+// unit-aware ladders rather than drifting apart. Each rung is a (minor,
+// major) PAIR: the minor is the fine dot lattice spacing, the major is a
+// round, human-meaningful landmark that's an exact integer multiple
+// (~4-12x) of that minor — so "1ft minor" always draws its major at 5ft,
+// never at whatever the next zoom bucket happens to be. Imperial gets its
+// own ladder because feet/inches are how people think in the gallery, not a
+// relabeled metric spacing.
+export type GridIntervalPairMm = {
+  minorMm: number;
+  majorMm: number;
+};
+
+// Sorted finest -> coarsest. Selection walks up from the finest pair, so
+// this ordering is load-bearing (see getMinorGridIntervalMm).
+export const METRIC_GRID_INTERVAL_PAIRS_MM: readonly GridIntervalPairMm[] = [
+  { minorMm: cmToMm(0.5), majorMm: cmToMm(5) },
+  { minorMm: cmToMm(1), majorMm: cmToMm(10) },
+  { minorMm: cmToMm(2), majorMm: cmToMm(20) },
+  { minorMm: cmToMm(5), majorMm: cmToMm(50) },
+  { minorMm: cmToMm(10), majorMm: mToMm(1) },
+  { minorMm: cmToMm(20), majorMm: mToMm(1) },
+  { minorMm: cmToMm(50), majorMm: mToMm(5) },
+  { minorMm: mToMm(1), majorMm: mToMm(5) }
 ];
 
-export const IMPERIAL_GRID_INTERVALS_MM: readonly number[] = [
-  inchesToMm(0.5),
-  inchesToMm(1),
-  inchesToMm(2),
-  inchesToMm(3),
-  inchesToMm(6),
-  feetToMm(1),
-  feetToMm(2),
-  feetToMm(3),
-  feetToMm(5),
-  feetToMm(10)
+export const IMPERIAL_GRID_INTERVAL_PAIRS_MM: readonly GridIntervalPairMm[] = [
+  { minorMm: inchesToMm(0.5), majorMm: inchesToMm(6) },
+  { minorMm: inchesToMm(1), majorMm: inchesToMm(6) },
+  { minorMm: inchesToMm(3), majorMm: feetToMm(1) },
+  { minorMm: inchesToMm(6), majorMm: feetToMm(2) },
+  { minorMm: feetToMm(1), majorMm: feetToMm(5) },
+  { minorMm: feetToMm(2), majorMm: feetToMm(10) },
+  { minorMm: feetToMm(5), majorMm: feetToMm(20) }
 ];
+
+function getGridIntervalPairsMm(unit: DisplayUnit): readonly GridIntervalPairMm[] {
+  return isMetricUnit(unit)
+    ? METRIC_GRID_INTERVAL_PAIRS_MM
+    : IMPERIAL_GRID_INTERVAL_PAIRS_MM;
+}
 
 // Precision-floor choices offered in the UI: a curated subset of each
-// family's own grid interval table, not a separate scale. Deliberately
-// skips the finest sub-inch/sub-cm table entries — offering those as a
-// "floor" would defeat the point of a floor — and skips the coarsest
-// multi-foot/multi-meter entries, which are grid-only landmarks nobody
-// would pick as a working precision.
+// family's own ladder minors, not a separate scale. Deliberately skips the
+// finest sub-inch/sub-cm minors — offering those as a "floor" would defeat
+// the point of a floor — and skips the coarsest multi-foot/multi-meter
+// minors, which are grid-only landmarks nobody would pick as a working
+// precision. Every value here must be a minor present in the ladder.
 const IMPERIAL_PRECISION_FLOOR_OPTIONS_MM: readonly number[] = [
   inchesToMm(0.5),
   inchesToMm(1),
@@ -56,15 +69,27 @@ export function getGridPrecisionFloorOptionsMm(unit: DisplayUnit): readonly numb
     : IMPERIAL_PRECISION_FLOOR_OPTIONS_MM;
 }
 
-const DEFAULT_TARGET_MINOR_PX = 32;
-const DEFAULT_MAJOR_STEP_FACTOR = 4;
+// The minor dot lattice is quiet and dense by design (docs/plan.md §5.5), so
+// the "still readable" target is small — as long as minor dots stay ~8px
+// apart on screen they read as a lattice rather than a smear. This is tuned
+// against the imperial ladder's two anchor zooms: a wide plan view
+// (pixelsPerMm ~= 0.05) lands on the (1ft, 5ft) pair, and a close elevation
+// view (pixelsPerMm ~= 0.13) lands on the (3in, 1ft) pair.
+const DEFAULT_TARGET_MINOR_PX = 8;
+// Fallback major multiple used only when a minor isn't a ladder rung (i.e.
+// a floor-clamped minor that somehow escaped the ladder). Every ladder minor
+// already carries its own round major.
+const MAJOR_FALLBACK_FACTOR = 5;
 
 function isMetricUnit(unit: DisplayUnit): boolean {
   return unit === "cm" || unit === "m";
 }
 
+// The ladder's minor spacings, finest -> coarsest. Kept as the "interval
+// table" export name so grid snap targets and useViewPreferences keep
+// reading the same shared list of working spacings.
 export function getGridIntervalTableMm(unit: DisplayUnit): readonly number[] {
-  return isMetricUnit(unit) ? METRIC_GRID_INTERVALS_MM : IMPERIAL_GRID_INTERVALS_MM;
+  return getGridIntervalPairsMm(unit).map((pair) => pair.minorMm);
 }
 
 export type MinorGridIntervalOptions = {
@@ -75,12 +100,12 @@ export type MinorGridIntervalOptions = {
   minIntervalMm?: number | null;
 };
 
-// Zoom-adaptive: pick the smallest table interval whose on-screen spacing
-// is still at least the target pixel spacing, so a wide-open floor plan
-// doesn't render thousands of hairline-close minor lines. Falls back to the
-// coarsest interval once even the largest table entry would render denser
-// than the target (deeply zoomed out), and to the finest interval once
-// pixelsPerMm isn't known yet (initial render, before layout measurement).
+// Zoom-adaptive: pick the finest ladder pair whose minor spacing is still at
+// least the target pixel spacing on screen, so a wide-open floor plan doesn't
+// render thousands of hairline-close minor dots. Falls back to the coarsest
+// pair once even its minor would render denser than the target (deeply zoomed
+// out), and to the finest pair once pixelsPerMm isn't known yet (initial
+// render, before layout measurement).
 //
 // When a precision floor is set, zooming in further stops shrinking the
 // interval once it would go below the floor — the same floor also bounds
@@ -92,53 +117,51 @@ export function getMinorGridIntervalMm(
   options: MinorGridIntervalOptions = {}
 ): number {
   const targetMinorPx = options.targetMinorPx ?? DEFAULT_TARGET_MINOR_PX;
-  const table = getGridIntervalTableMm(unit);
+  const minors = getGridIntervalTableMm(unit);
 
-  const zoomInterval = (): number => {
+  const zoomMinor = (): number => {
     if (!Number.isFinite(pixelsPerMm) || pixelsPerMm <= 0) {
-      return table[0];
+      return minors[0];
     }
 
     const targetIntervalMm = targetMinorPx / pixelsPerMm;
-    const smallestThatFits = table.find((interval) => interval >= targetIntervalMm);
+    const finestThatFits = minors.find((minor) => minor >= targetIntervalMm);
 
-    return smallestThatFits ?? table[table.length - 1];
+    return finestThatFits ?? minors[minors.length - 1];
   };
 
-  const interval = zoomInterval();
+  const minor = zoomMinor();
   const floorMm = options.minIntervalMm;
 
   if (!Number.isFinite(floorMm) || (floorMm as number) <= 0) {
-    return interval;
+    return minor;
   }
 
-  if (interval >= (floorMm as number)) {
-    return interval;
+  if (minor >= (floorMm as number)) {
+    return minor;
   }
 
-  // Zoom would otherwise go finer than the floor — clamp up to the
-  // smallest table entry that still respects it, falling back to the
-  // coarsest entry if the floor itself is coarser than the whole table.
-  const smallestAtOrAboveFloor = table.find((candidate) => candidate >= (floorMm as number));
-  return smallestAtOrAboveFloor ?? table[table.length - 1];
+  // Zoom would otherwise go finer than the floor — clamp up to the finest
+  // ladder minor that still respects it, falling back to the coarsest minor
+  // if the floor itself is coarser than the whole ladder.
+  const finestAtOrAboveFloor = minors.find((candidate) => candidate >= (floorMm as number));
+  return finestAtOrAboveFloor ?? minors[minors.length - 1];
 }
 
-// The major (readable landmark) line: the next table entry that's at least
-// a few multiples past the minor interval, e.g. 1" minor -> 6" major,
-// 2' minor -> 10' major. Falls back to a plain 5x multiple once the minor
-// interval is already the coarsest the table offers.
+// The major (readable landmark) line: the round value paired with this minor
+// in the ladder, e.g. 1" minor -> 6" major, 1' minor -> 5' major. If the
+// minor isn't a ladder rung (only reachable when a precision floor lands off
+// the ladder), fall back to a plain 5x multiple so the caller still gets a
+// sane landmark.
 export function getMajorGridIntervalMm(
   unit: DisplayUnit,
   minorIntervalMm: number
 ): number {
-  const table = getGridIntervalTableMm(unit);
-  const minorIndex = table.indexOf(minorIntervalMm);
-  const searchFrom = minorIndex === -1 ? 0 : minorIndex + 1;
-  const landmark = table
-    .slice(searchFrom)
-    .find((interval) => interval >= minorIntervalMm * DEFAULT_MAJOR_STEP_FACTOR);
+  const pair = getGridIntervalPairsMm(unit).find(
+    (candidate) => candidate.minorMm === minorIntervalMm
+  );
 
-  return landmark ?? minorIntervalMm * 5;
+  return pair ? pair.majorMm : minorIntervalMm * MAJOR_FALLBACK_FACTOR;
 }
 
 // Effective on-screen scale for an SVG using the default "xMidYMid meet"

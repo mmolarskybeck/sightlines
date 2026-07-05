@@ -163,13 +163,15 @@ export function ElevationView({
     height: wallHeightMm + viewPadMm * 2
   });
   const minorGridMm = getMinorGridIntervalMm(unit, pixelsPerMm, {
+    // Elevation reads finer than plan: hang heights are an inches/centimeters
+    // activity, so a tighter target keeps the lattice on the (6in, 2ft) /
+    // (10cm, 1m) rung at typical single-wall zoom.
+    targetMinorPx: 7,
     minIntervalMm: gridPrecisionFloorMm
   });
   const majorGridMm = getMajorGridIntervalMm(unit, minorGridMm);
   const centerlineSvgY = wallLocalYToSvgY(wallHeightMm, centerlineMm);
   const snapThresholdMm = pixelsPerMm > 0 ? SNAP_THRESHOLD_PX / pixelsPerMm : 0;
-  // Minor grid dot radius in mm, sized to a constant ~1.1px on screen.
-  const dotRadiusMm = pixelsPerMm > 0 ? 1.1 / pixelsPerMm : undefined;
 
   const placements: ArtworkWallObject[] = (wallObjects ?? []).filter(
     (object): object is ArtworkWallObject => object.kind === "artwork" && object.wallId === wallId
@@ -472,7 +474,6 @@ export function ElevationView({
         {gridVisible ? (
           <GridOverlay
             id="elevation-grid"
-            dotRadiusMm={dotRadiusMm}
             height={wallHeightMm}
             majorSpacingMm={majorGridMm}
             minorSpacingMm={minorGridMm}

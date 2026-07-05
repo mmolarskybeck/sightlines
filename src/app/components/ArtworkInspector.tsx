@@ -9,6 +9,7 @@ import {
 import { LengthField } from "./LengthField";
 import { UncertaintyIndicator } from "./UncertaintyIndicator";
 import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 import {
   Select,
   SelectContent,
@@ -147,7 +148,7 @@ function TextField({
   return (
     <label className="field-row">
       <span>{label}</span>
-      <input
+      <Input
         value={input}
         onBlur={commit}
         onChange={(event) => setInput(event.target.value)}

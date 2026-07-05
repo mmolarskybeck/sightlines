@@ -1,7 +1,9 @@
 import { getGridPatternPhaseMm } from "../../domain/units/precision";
 
+// A drafting-style two-tier line grid: pale hairlines at the minor interval,
+// heavier landmark lines at the major interval. Both tiers tile in userspace
+// so the lattice stays continuous under any rect placement.
 export function GridOverlay({
-  dotRadiusMm,
   height,
   id,
   majorSpacingMm,
@@ -12,11 +14,6 @@ export function GridOverlay({
   x,
   y
 }: {
-  // When provided (and positive), the minor grid renders as dots of this
-  // radius (in mm) at each intersection rather than fine hairlines. Omitted
-  // (the default), the minor grid falls back to the original line rendering
-  // so existing callers/tests keep working unchanged.
-  dotRadiusMm?: number;
   height: number;
   id: string;
   majorSpacingMm: number;
@@ -31,10 +28,6 @@ export function GridOverlay({
   x: number;
   y: number;
 }) {
-  // A circle at the tile origin (0,0): four adjacent tiles each contribute a
-  // quarter that meet to form a full dot on the grid intersection.
-  const useDots = dotRadiusMm !== undefined && dotRadiusMm > 0;
-
   return (
     <>
       <defs>
@@ -46,15 +39,11 @@ export function GridOverlay({
           y={getGridPatternPhaseMm(originYMm, minorSpacingMm)}
           patternUnits="userSpaceOnUse"
         >
-          {useDots ? (
-            <circle className="grid-dot minor" cx={0} cy={0} r={dotRadiusMm} />
-          ) : (
-            <path
-              className="grid-line minor"
-              d={`M ${minorSpacingMm} 0 L 0 0 0 ${minorSpacingMm}`}
-              vectorEffect="non-scaling-stroke"
-            />
-          )}
+          <path
+            className="grid-line minor"
+            d={`M ${minorSpacingMm} 0 L 0 0 0 ${minorSpacingMm}`}
+            vectorEffect="non-scaling-stroke"
+          />
         </pattern>
         <pattern
           id={`${id}-major`}

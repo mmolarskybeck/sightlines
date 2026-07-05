@@ -9,6 +9,7 @@ import {
 } from "../../domain/units/unitSystem";
 import { LengthField } from "./LengthField";
 import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 
 // Numeric position/size fields for a selected door/window/blocked zone,
 // mirroring WallInspector's commit-on-blur/Enter pattern exactly — the
@@ -38,7 +39,7 @@ export function OpeningInspector({
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
       <label className="field-row">
         <span>Kind</span>
-        <input readOnly value={getOpeningKindLabel(opening.kind)} />
+        <Input readOnly value={getOpeningKindLabel(opening.kind)} />
       </label>
 
       <div className="artwork-dimensions-grid">

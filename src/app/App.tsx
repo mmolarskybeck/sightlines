@@ -38,6 +38,7 @@ import { ProjectPicker } from "./components/ProjectPicker";
 import { RoomsPanel } from "./components/RoomsPanel";
 import { WallInspector, type WallDimensionLink } from "./components/WallInspector";
 import { Button } from "./components/ui/button";
+import { Input } from "./components/ui/input";
 import {
   Select,
   SelectContent,
@@ -95,6 +96,8 @@ export function App() {
     selectOpening,
     addRectangleRoom,
     renameProject,
+    renameRoom,
+    deleteRoom,
     setUnit,
     resizeSelectedWall,
     resizeWall,
@@ -387,6 +390,8 @@ export function App() {
             project={project}
             selectedWallId={selectedWall?.id ?? null}
             onAddRectangleRoom={() => void addRectangleRoom()}
+            onDeleteRoom={deleteRoom}
+            onRenameRoom={renameRoom}
             onResizeWall={resizeWall}
             onSelectWall={selectWall}
           />
@@ -613,14 +618,16 @@ function ProjectTitleInput({
   };
 
   return (
-    <input
+    <Input
       className="project-title"
       value={value}
       aria-label="Project title"
+      size="title"
       // Sized to the text so the picker chevron sits right beside the title
       // instead of at the far end of a fixed-width field. The CSS clamp
       // still bounds it on both ends.
       style={{ width: `${Math.max(value.length, 8) + 2}ch` }}
+      variant="title"
       onChange={(event) => setValue(event.target.value)}
       onBlur={commit}
       onKeyDown={(event) => {
