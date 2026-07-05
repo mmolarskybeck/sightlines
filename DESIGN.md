@@ -23,8 +23,8 @@ typography:
   display: '"Montserrat Variable", ui-sans-serif, system-ui, sans-serif'
   ui: '"Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, sans-serif'
 radii:
-  control: "4px"
-  fill: "6px"
+  control: "6px"
+  fill: "8px"
   panel: "0"
 ---
 
@@ -63,8 +63,8 @@ Avoid decorative color. The UI should not become teal-themed; petrol is an inter
 Sightlines is rectangular before rounded.
 
 - Major panes and layout divisions stay square and separated by 1px borders.
-- Inputs, buttons, selects, and compact toolbar controls use a 4px radius.
-- Borderless selected fills, rail buttons, and menu rows may use a 6px radius.
+- Inputs, buttons, selects, and compact toolbar controls use a 6px radius.
+- Borderless selected fills, rail buttons, and menu rows may use an 8px radius.
 - Shadows are reserved for real overlays and canvas chips, not normal panels.
 
 ## Typography

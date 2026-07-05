@@ -75,23 +75,22 @@
   --focus: var(--ring);
   --grid-minor: oklch(0.78 0.008 240 / 0.42);
   --grid-major: oklch(0.62 0.01 240 / 0.5);
-  --grid-dot: oklch(0.72 0.008 240 / 0.55);
   --bg: var(--background);
   --ink: var(--foreground);
   --line: var(--border);
   --danger: var(--destructive);
-  /* Small controls keep a subtle 3px radius; panels and layout divisions are
-     square (radius 0). No 999px pills anywhere. */
+  /* Small bordered controls use a restrained radius so inputs feel editable
+     without going pill-shaped; panels and layout divisions stay square. */
   --radius: 0.25rem;
-  --radius-control: 4px;
+  --radius-control: 6px;
   --radius-panel: 0;
   --radius-sm: var(--radius-control);
   --radius-md: var(--radius-control);
   /* Interactive fills — list rows (wall-row, checklist-row), rail buttons,
      the topbar's icon buttons — are rounded and borderless, a selection wash
      rather than a boxed outline. Structural containers (panels, dividers)
-     stay square; small controls (inputs, buttons with a border) stay 3px. */
-  --radius-fill: 6px;
+     stay square; selection fills get a touch more radius than inputs. */
+  --radius-fill: 8px;
   --shadow-tight: 0 1px 2px oklch(0 0 0 / 0.08);
   --shadow-panel: 0 8px 24px oklch(0 0 0 / 0.12);
 }
@@ -121,6 +120,14 @@ button:focus-visible,
 input:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
+
+.input-control:focus-visible {
+  outline: none;
+}
+
+.input-control[aria-invalid="true"] {
+  border-color: var(--danger);
 }
 
 .loading-shell {
@@ -355,12 +362,25 @@ input:focus-visible {
 .project-title {
   max-width: clamp(140px, 22vw, 320px);
   min-width: 0;
-  padding: 0;
+  padding: 3px 6px;
   border: 0;
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--ink);
   font-size: 1.02rem;
   font-weight: 680;
+  transition:
+    background-color 150ms ease-out,
+    box-shadow 150ms ease-out;
+}
+
+.project-title:hover {
+  background: var(--surface);
+}
+
+.project-title:focus-visible {
+  background: var(--bg);
+  box-shadow: 0 0 0 2px var(--focus);
 }
 
 /* Topbar utility icons (undo/redo, import, the project-picker chevron) are
@@ -598,13 +618,15 @@ input:focus-visible {
 
 .room-heading {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-height: 32px;
   padding: 0 2px;
 }
 
 .room-heading h3 {
+  flex: 1 1 auto;
   min-width: 0;
   margin: 0;
   overflow: hidden;
@@ -620,6 +642,39 @@ input:focus-visible {
   color: var(--subtle);
   font-size: 0.74rem;
   font-weight: 650;
+}
+
+.room-heading-actions,
+.room-delete-confirmation {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.room-delete-confirmation {
+  gap: 6px;
+}
+
+.room-delete-confirmation .button,
+.room-delete-confirmation button {
+  min-height: 32px;
+}
+
+.room-rename-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px 32px;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.room-rename-form input {
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
 }
 
 .room-dimensions {
@@ -1442,8 +1497,8 @@ input:focus-visible {
 }
 
 /* Clean white canvas everywhere — the figure is carried by wall strokes and
-   the dotted grid, not a background tint. No inner border: the view toolbar
-   and side panels already frame the surface. */
+   the drafting-line grid, not a background tint. No inner border: the view
+   toolbar and side panels already frame the surface. */
 .plan-svg,
 .elevation-svg {
   display: block;
@@ -1465,25 +1520,19 @@ input:focus-visible {
   shape-rendering: crispEdges;
 }
 
+/* Minor grid: pale, delicate hairlines — quiet drafting-paper increments
+   that stay clearly subordinate to the major landmarks and the geometry. */
 .grid-line.minor {
   stroke: var(--grid-minor);
   stroke-width: 1;
 }
 
-/* Major grid demoted to a quiet landmark at minor strength — the dots do the
-   fine work now. */
+/* Major grid: a readable landmark line, clearly stronger than the minor
+   hairlines but still quieter than the walls, so the two tiers read as a
+   real hierarchy without competing with the geometry. */
 .grid-line.major {
-  stroke: var(--grid-minor);
-  stroke-width: 1;
-}
-
-/* The minor grid rendered as dots at each intersection (a slightly stronger
-   neutral than the old minor line). Each pattern tile draws a circle at its
-   origin corner; four adjacent tiles meet to form a full dot on the grid
-   point. */
-.grid-dot {
-  fill: var(--grid-dot);
-  stroke: none;
+  stroke: var(--grid-major);
+  stroke-width: 1.3;
 }
 
 /* Stroke widths below are screen px, not mm — every canvas stroke uses
@@ -1819,10 +1868,6 @@ input:focus-visible {
 .field-row input[readonly] {
   background: var(--surface);
   color: var(--muted);
-}
-
-.field-row input[aria-invalid="true"] {
-  border-color: var(--danger);
 }
 
 .field-hint,
