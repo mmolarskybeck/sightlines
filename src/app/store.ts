@@ -4,10 +4,14 @@ import { createBrowserImageProcessor } from "../domain/assets/browserImageProces
 import { titleFromFilename, validateImageFile, type ImageProcessor } from "../domain/assets/imageIntake";
 import { createNextRectangleRoom } from "../domain/geometry/createRoom";
 import { resizeWallPreservingAngles } from "../domain/geometry/editRoom";
-import { getWallsWithGeometry } from "../domain/geometry/walls";
+import { getWallsWithGeometry, type WallWithGeometry } from "../domain/geometry/walls";
+import { getFloorWalls } from "../domain/geometry/planObjects";
+import type { PlanPlacement } from "../domain/snapping/planSnapTargets";
 import { createBlankProject } from "../domain/newProject";
 import {
   createOpeningPlacement,
+  getDefaultOpeningCenterYMm,
+  getDefaultOpeningSizeMm,
   getOpeningKindLabel,
   type OpeningKind
 } from "../domain/placement/createOpening";
@@ -20,12 +24,19 @@ import {
 import {
   CURRENT_ARTWORK_SCHEMA_VERSION,
   CURRENT_ASSET_SCHEMA_VERSION,
+  DEFAULT_FLOOR_OBJECT_DEPTH_MM,
   type Artwork,
+  type ArtworkFloorObject,
   type Asset,
+  type BlockedZoneFloorObject,
   type DisplayUnit,
+  type FloorObject,
+  type FloorObjectBase,
+  type OpeningWallObject,
   type Project,
   type ProjectSummary,
-  type Wall
+  type Wall,
+  type WallObject
 } from "../domain/project";
 import type { ArtworkLibraryRepository } from "../domain/repositories/artworkLibraryRepository";
 import { assetBlobKey, type AssetRepository } from "../domain/repositories/assetRepository";
@@ -132,6 +143,17 @@ type AppState = {
     widthMm: number,
     heightMm: number,
     allowOverlap?: boolean
+  ) => Promise<void>;
+  placeOpeningFromPlan: (kind: OpeningKind, placement: PlanPlacement) => Promise<void>;
+  placeArtworkOnFloor: (artworkId: string, xMm: number, yMm: number) => Promise<void>;
+  commitPlanMove: (
+    objectId: string,
+    placement: PlanPlacement,
+    allowOverlap?: boolean
+  ) => Promise<void>;
+  updateFloorObject: (
+    objectId: string,
+    changes: Partial<Pick<FloorObjectBase, "xMm" | "yMm" | "widthMm" | "depthMm">>
   ) => Promise<void>;
 };
 
@@ -677,20 +699,28 @@ export function createAppStore(deps: AppStoreDeps) {
         if (!project) return;
 
         const isChecklisted = project.checklistArtworkIds.includes(artworkId);
-        const isPlaced = project.wallObjects.some(
-          (wallObject) => wallObject.kind === "artwork" && wallObject.artworkId === artworkId
-        );
+        const isPlaced =
+          project.wallObjects.some(
+            (wallObject) => wallObject.kind === "artwork" && wallObject.artworkId === artworkId
+          ) ||
+          project.floorObjects.some(
+            (floorObject) => floorObject.kind === "artwork" && floorObject.artworkId === artworkId
+          );
         if (!isChecklisted && !isPlaced) return;
 
         // Removing from a checklist unlinks it from this project only — the
         // library record is untouched (docs/plan.md §4.1). Also drops any
-        // placement referencing this artwork — a checklist entry with a
-        // dangling placement would be an invalid state to leave behind.
+        // placement referencing this artwork — on a wall or on the floor — a
+        // checklist entry with a dangling placement would be an invalid state
+        // to leave behind.
         await applyEdit("Remove from checklist", (current) => ({
           ...current,
           checklistArtworkIds: current.checklistArtworkIds.filter((id) => id !== artworkId),
           wallObjects: current.wallObjects.filter(
             (wallObject) => !(wallObject.kind === "artwork" && wallObject.artworkId === artworkId)
+          ),
+          floorObjects: current.floorObjects.filter(
+            (floorObject) => !(floorObject.kind === "artwork" && floorObject.artworkId === artworkId)
           )
         }));
       },
@@ -837,15 +867,23 @@ export function createAppStore(deps: AppStoreDeps) {
       async removePlacement(wallObjectId) {
         const project = get().project;
         if (!project) return;
-        if (!project.wallObjects.some((wallObject) => wallObject.id === wallObjectId)) return;
+        const isWallObject = project.wallObjects.some(
+          (wallObject) => wallObject.id === wallObjectId
+        );
+        const isFloorObject = project.floorObjects.some(
+          (floorObject) => floorObject.id === wallObjectId
+        );
+        if (!isWallObject && !isFloorObject) return;
 
         // Removes the placement only — checklist membership is a separate
         // concept (docs/plan.md §4.1) and is untouched here. Generic over
-        // wall object kind, so this same action deletes an opening too —
+        // object kind, so this same action deletes an opening or a
+        // floor-placed object too (ids are unique across both arrays) —
         // there's no checklist-membership concept to preserve for those.
         await applyEdit("Remove from wall", (current) => ({
           ...current,
-          wallObjects: current.wallObjects.filter((wallObject) => wallObject.id !== wallObjectId)
+          wallObjects: current.wallObjects.filter((wallObject) => wallObject.id !== wallObjectId),
+          floorObjects: current.floorObjects.filter((floorObject) => floorObject.id !== wallObjectId)
         }));
       },
 
@@ -858,8 +896,9 @@ export function createAppStore(deps: AppStoreDeps) {
 
         // Centered on the wall by default — the curator adjusts from there,
         // same "place first, refine after" spirit as artwork placement.
-        const centerlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
-        const placement = createOpeningPlacement(kind, wallId, wall.lengthMm / 2, centerlineYMm);
+        // buildOpeningOnWall is shared with placeOpeningFromPlan, whose only
+        // difference is the chosen xMm (the plan drop point vs. wall center).
+        const placement = buildOpeningOnWall(project, wall, kind, wall.lengthMm / 2);
         const nextWallObjects = [...project.wallObjects, placement];
 
         await applyEdit(
@@ -932,6 +971,299 @@ export function createAppStore(deps: AppStoreDeps) {
           (current) => ({ ...current, wallObjects: nextWallObjects }),
           { placementWarnings }
         );
+      },
+
+      async placeOpeningFromPlan(kind, placement) {
+        const project = get().project;
+        if (!project) return;
+
+        if (placement.anchor === "floor") {
+          // Only blocked zones can float. Doors and windows are excluded from
+          // floor placement by the domain (FloorObject has no door/window
+          // kind) and callers gate this on canFloat, so a door/window landing
+          // here is an invariant break, not a user path — fail loudly.
+          if (kind !== "blocked-zone") {
+            throw new Error(
+              `Cannot place a ${kind} on the floor — only blocked zones can be floor-placed.`
+            );
+          }
+
+          const { widthMm, heightMm } = getDefaultOpeningSizeMm(kind);
+          const floorObject: BlockedZoneFloorObject = {
+            id: crypto.randomUUID(),
+            kind: "blocked-zone",
+            xMm: placement.xMm,
+            yMm: placement.yMm,
+            widthMm,
+            depthMm: DEFAULT_FLOOR_OBJECT_DEPTH_MM,
+            rotationDeg: 0,
+            heightMm,
+            // Remembered hang-height for a later floor→wall conversion: the
+            // same centerline default the object would take on a wall.
+            wallYMm: getDefaultOpeningCenterYMm(kind, heightMm, project.defaultCenterlineHeightMm)
+          };
+
+          await applyEdit(
+            `Add ${openingNoun(kind)}`,
+            (current) => ({ ...current, floorObjects: [...current.floorObjects, floorObject] }),
+            { selectedOpeningId: floorObject.id, selectedArtworkId: null }
+          );
+          return;
+        }
+
+        // Wall placement: identical to addOpening, but at the plan-chosen xMm
+        // rather than the wall center.
+        const wall = getProjectWalls(project).find((candidate) => candidate.id === placement.wallId);
+        if (!wall) return;
+
+        const opening = buildOpeningOnWall(project, wall, kind, placement.xMm);
+        const nextWallObjects = [...project.wallObjects, opening];
+
+        await applyEdit(
+          `Add ${openingNoun(kind)}`,
+          (current) => ({ ...current, wallObjects: nextWallObjects }),
+          {
+            placementWarnings: validateWallObjectPlacements(
+              { ...project, wallObjects: nextWallObjects },
+              [opening.id]
+            ),
+            selectedOpeningId: opening.id,
+            selectedArtworkId: null
+          }
+        );
+      },
+
+      async placeArtworkOnFloor(artworkId, xMm, yMm) {
+        const project = get().project;
+        if (!project) return;
+
+        const artwork = get().libraryArtworks.find((candidate) => candidate.id === artworkId);
+        if (!artwork) return;
+
+        const { widthMm, heightMm } = getEffectivePlacementSizeMm(artwork.dimensions);
+        const floorObject: ArtworkFloorObject = {
+          id: crypto.randomUUID(),
+          kind: "artwork",
+          artworkId,
+          xMm,
+          yMm,
+          widthMm,
+          // A floor-standing sculpture's real depth if known, else the editable
+          // default footprint depth.
+          depthMm: artwork.dimensions.depthMm ?? DEFAULT_FLOOR_OBJECT_DEPTH_MM,
+          rotationDeg: 0,
+          heightMm,
+          // Remembered hang-height center for a later floor→wall conversion.
+          wallYMm: project.defaultCenterlineHeightMm
+        };
+
+        // Floor objects get no bounds/collision validation in v1 (no wall
+        // bounds; 2-D footprint collision is a v2 candidate).
+        await applyEdit(
+          "Place artwork",
+          (current) => ({ ...current, floorObjects: [...current.floorObjects, floorObject] }),
+          { selectedArtworkId: artworkId, selectedOpeningId: null }
+        );
+      },
+
+      async commitPlanMove(objectId, placement, allowOverlap = false) {
+        const project = get().project;
+        if (!project) return;
+
+        const wallObject = project.wallObjects.find((object) => object.id === objectId);
+        const floorObject = project.floorObjects.find((object) => object.id === objectId);
+        if (!wallObject && !floorObject) return;
+
+        // --- Source: wall object -------------------------------------------
+        if (wallObject) {
+          if (placement.anchor === "wall") {
+            // Same wall (x only) or re-anchor to another wall: either way the
+            // hang height (yMm) and size are carried over unchanged — the
+            // requirement is that an artwork keeps its height across a wall
+            // change. No-op if nothing moved.
+            if (wallObject.wallId === placement.wallId && wallObject.xMm === placement.xMm) {
+              return;
+            }
+
+            const nextWallObjects = project.wallObjects.map((object) =>
+              object.id === objectId
+                ? { ...object, wallId: placement.wallId, xMm: placement.xMm }
+                : object
+            );
+            const placementWarnings = validateWallObjectPlacements(
+              { ...project, wallObjects: nextWallObjects },
+              [objectId]
+            );
+
+            if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
+              set({ error: OVERLAP_BLOCKED_MESSAGE });
+              return;
+            }
+
+            await applyEdit(
+              `Move ${moveObjectNoun(wallObject.kind)}`,
+              (current) => ({ ...current, wallObjects: nextWallObjects }),
+              { placementWarnings }
+            );
+            return;
+          }
+
+          // wall → floor conversion. Doors/windows must never leave a wall.
+          if (wallObject.kind !== "artwork" && wallObject.kind !== "blocked-zone") {
+            throw new Error(
+              `A ${wallObject.kind} cannot be moved onto the floor — it must stay on a wall.`
+            );
+          }
+
+          // Preserve the wall's floor-space angle so the freed object keeps
+          // its orientation at the moment of release (0 if the wall vanished).
+          const sourceWall = getFloorWalls(project.floor).find(
+            (candidate) => candidate.id === wallObject.wallId
+          );
+          const rotationDeg = sourceWall ? (sourceWall.angleRad * 180) / Math.PI : 0;
+
+          const base = {
+            id: objectId,
+            xMm: placement.xMm,
+            yMm: placement.yMm,
+            widthMm: wallObject.widthMm,
+            rotationDeg,
+            heightMm: wallObject.heightMm,
+            // Remember the hang height so a later floor→wall conversion can
+            // restore it.
+            wallYMm: wallObject.yMm
+          };
+
+          let newFloorObject: FloorObject;
+          if (wallObject.kind === "artwork") {
+            const artwork = get().libraryArtworks.find(
+              (candidate) => candidate.id === wallObject.artworkId
+            );
+            newFloorObject = {
+              ...base,
+              kind: "artwork",
+              artworkId: wallObject.artworkId,
+              depthMm:
+                wallObject.displayDimensionsOverride?.depthMm ??
+                artwork?.dimensions.depthMm ??
+                DEFAULT_FLOOR_OBJECT_DEPTH_MM,
+              ...(wallObject.displayDimensionsOverride
+                ? { displayDimensionsOverride: wallObject.displayDimensionsOverride }
+                : {})
+            };
+          } else {
+            newFloorObject = {
+              ...base,
+              kind: "blocked-zone",
+              depthMm: DEFAULT_FLOOR_OBJECT_DEPTH_MM
+            };
+          }
+
+          // Selection survives for free: the id is preserved, and the
+          // selection slots store the id (openings) / artworkId (artworks),
+          // neither of which changes here.
+          await applyEdit(
+            `Move ${moveObjectNoun(wallObject.kind)}`,
+            (current) => ({
+              ...current,
+              wallObjects: current.wallObjects.filter((object) => object.id !== objectId),
+              floorObjects: [...current.floorObjects, newFloorObject]
+            })
+          );
+          return;
+        }
+
+        // --- Source: floor object ------------------------------------------
+        if (!floorObject) return; // unreachable — narrows the type below.
+
+        if (placement.anchor === "floor") {
+          if (floorObject.xMm === placement.xMm && floorObject.yMm === placement.yMm) {
+            return;
+          }
+
+          const nextFloorObjects = project.floorObjects.map((object) =>
+            object.id === objectId
+              ? { ...object, xMm: placement.xMm, yMm: placement.yMm }
+              : object
+          );
+
+          await applyEdit(`Move ${moveObjectNoun(floorObject.kind)}`, (current) => ({
+            ...current,
+            floorObjects: nextFloorObjects
+          }));
+          return;
+        }
+
+        // floor → wall conversion: restore the remembered hang height and
+        // elevation height, reconstruct the kind-specific wall fields.
+        const base = {
+          id: objectId,
+          wallId: placement.wallId,
+          xMm: placement.xMm,
+          yMm: floorObject.wallYMm,
+          widthMm: floorObject.widthMm,
+          heightMm: floorObject.heightMm
+        };
+
+        let newWallObject: WallObject;
+        if (floorObject.kind === "artwork") {
+          newWallObject = {
+            ...base,
+            kind: "artwork",
+            artworkId: floorObject.artworkId,
+            ...(floorObject.displayDimensionsOverride
+              ? { displayDimensionsOverride: floorObject.displayDimensionsOverride }
+              : {})
+          };
+        } else {
+          newWallObject = { ...base, kind: "blocked-zone", blocksPlacement: true };
+        }
+
+        const nextWallObjects = [...project.wallObjects, newWallObject];
+        const placementWarnings = validateWallObjectPlacements(
+          { ...project, wallObjects: nextWallObjects },
+          [objectId]
+        );
+
+        if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
+          set({ error: OVERLAP_BLOCKED_MESSAGE });
+          return;
+        }
+
+        await applyEdit(
+          `Move ${moveObjectNoun(floorObject.kind)}`,
+          (current) => ({
+            ...current,
+            floorObjects: current.floorObjects.filter((object) => object.id !== objectId),
+            wallObjects: nextWallObjects
+          }),
+          { placementWarnings }
+        );
+      },
+
+      async updateFloorObject(objectId, changes) {
+        const project = get().project;
+        if (!project) return;
+
+        const target = project.floorObjects.find((object) => object.id === objectId);
+        if (!target) return;
+
+        const keys = ["xMm", "yMm", "widthMm", "depthMm"] as const;
+        const hasChange = keys.some(
+          (key) => changes[key] !== undefined && changes[key] !== target[key]
+        );
+        if (!hasChange) return;
+
+        const nextFloorObjects = project.floorObjects.map((object) =>
+          object.id === objectId ? { ...object, ...changes } : object
+        );
+
+        // Floor objects carry no wall bounds, so there's nothing to validate
+        // here in v1 (see placeArtworkOnFloor).
+        await applyEdit(`Edit ${moveObjectNoun(target.kind)}`, (current) => ({
+          ...current,
+          floorObjects: nextFloorObjects
+        }));
       }
     };
   });
@@ -942,6 +1274,27 @@ export function createAppStore(deps: AppStoreDeps) {
 // getOpeningKindLabel's Title Case is for UI headings/subjects instead.
 function openingNoun(kind: OpeningKind): string {
   return getOpeningKindLabel(kind).toLowerCase();
+}
+
+// Lowercase noun for any placeable object (wall or floor), so a plan move's
+// label reads "Move artwork" / "Move door" / "Move blocked zone" the same way
+// whether the object is wall-anchored or floor-placed.
+function moveObjectNoun(kind: WallObject["kind"]): string {
+  return kind === "artwork" ? "artwork" : openingNoun(kind);
+}
+
+// Shared by addOpening (centers on the wall) and placeOpeningFromPlan (places
+// at the plan-chosen xMm): builds the opening record with the wall's
+// centerline default for y. The only thing that differs between the two
+// callers is xMm, so the record construction lives in one place.
+function buildOpeningOnWall(
+  project: Project,
+  wall: WallWithGeometry,
+  kind: OpeningKind,
+  xMm: number
+): OpeningWallObject {
+  const centerlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
+  return createOpeningPlacement(kind, wall.id, xMm, centerlineYMm);
 }
 
 function formatZodIssue(error: z.ZodError): string {

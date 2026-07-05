@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 export const CURRENT_ARTWORK_SCHEMA_VERSION = 1;
 export const CURRENT_ASSET_SCHEMA_VERSION = 1;
 
@@ -52,6 +52,7 @@ export type Project = {
   floor: Floor;
   checklistArtworkIds: string[];
   wallObjects: WallObject[];
+  floorObjects: FloorObject[];
   createdAt: string;
   updatedAt: string;
 };
@@ -116,6 +117,40 @@ export type OpeningWallObject = WallObjectBase & {
 };
 
 export type WallObject = ArtworkWallObject | OpeningWallObject;
+
+// Editable default depth for floor-placed objects (doors/windows have a
+// fixed nominal wall-object thickness instead; see WALL_OBJECT_PLAN_DEPTH_MM).
+export const DEFAULT_FLOOR_OBJECT_DEPTH_MM = 400;
+
+export type FloorObjectBase = {
+  id: string;
+  // Floor-space center, not top-left — mirrors WallObjectBase's xMm/yMm
+  // convention for its own coordinate space.
+  xMm: number;
+  yMm: number;
+  widthMm: number;
+  depthMm: number;
+  // Wall angle preserved on wall→floor conversion; 0 for fresh floor placements.
+  rotationDeg: number;
+  // Remembered elevation height, restored on floor→wall conversion.
+  heightMm: number;
+  // Remembered hang-height center, restored on floor→wall conversion.
+  wallYMm: number;
+};
+
+export type ArtworkFloorObject = FloorObjectBase & {
+  kind: "artwork";
+  artworkId: string;
+  displayDimensionsOverride?: Dimensions;
+};
+
+export type BlockedZoneFloorObject = FloorObjectBase & {
+  kind: "blocked-zone";
+};
+
+// Doors/windows are excluded from floor placement by the type system —
+// they only ever exist as WallObjects.
+export type FloorObject = ArtworkFloorObject | BlockedZoneFloorObject;
 
 export type ProjectSummary = {
   id: string;

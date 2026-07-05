@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ImageProcessor, ProcessedImage } from "../domain/assets/imageIntake";
-import { CURRENT_SCHEMA_VERSION } from "../domain/project";
+import { CURRENT_SCHEMA_VERSION, DEFAULT_FLOOR_OBJECT_DEPTH_MM } from "../domain/project";
 import type { Artwork, Asset, Project, ProjectSummary } from "../domain/project";
 import type { ArtworkLibraryRepository } from "../domain/repositories/artworkLibraryRepository";
 import type { AssetRepository } from "../domain/repositories/assetRepository";
@@ -1184,6 +1184,296 @@ describe("app store", () => {
       store.getState().selectArtwork("some-artwork");
 
       expect(store.getState().selectedOpeningId).toBeNull();
+    });
+  });
+
+  describe("placeOpeningFromPlan", () => {
+    it("places a wall opening at the plan-chosen xMm with addOpening's defaults", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+
+      await store.getState().placeOpeningFromPlan("door", {
+        anchor: "wall",
+        wallId: wall.id,
+        xMm: 1234
+      });
+
+      const state = store.getState();
+      expect(state.undoStack.at(-1)?.label).toBe("Add door");
+      const opening = state.project!.wallObjects[0];
+      expect(opening.kind).toBe("door");
+      expect(opening.wallId).toBe(wall.id);
+      expect(opening.xMm).toBe(1234);
+      // Same defaults addOpening uses: a door reaches the floor.
+      expect(opening.yMm - opening.heightMm / 2).toBeCloseTo(0);
+      expect(state.selectedOpeningId).toBe(opening.id);
+      expect(state.project!.floorObjects).toHaveLength(0);
+    });
+
+    it("places a blocked zone on the floor, remembering its wall centerline height", async () => {
+      const centerline = store.getState().project!.defaultCenterlineHeightMm;
+
+      await store.getState().placeOpeningFromPlan("blocked-zone", {
+        anchor: "floor",
+        xMm: 2000,
+        yMm: 3000
+      });
+
+      const state = store.getState();
+      expect(state.undoStack.at(-1)?.label).toBe("Add blocked zone");
+      expect(state.project!.wallObjects).toHaveLength(0);
+      const floorObject = state.project!.floorObjects[0];
+      expect(floorObject.kind).toBe("blocked-zone");
+      expect(floorObject.xMm).toBe(2000);
+      expect(floorObject.yMm).toBe(3000);
+      expect(floorObject.depthMm).toBe(DEFAULT_FLOOR_OBJECT_DEPTH_MM);
+      expect(floorObject.rotationDeg).toBe(0);
+      expect(floorObject.wallYMm).toBeCloseTo(centerline);
+      expect(state.selectedOpeningId).toBe(floorObject.id);
+    });
+
+    it("rejects placing a door on the floor", async () => {
+      await expect(
+        store.getState().placeOpeningFromPlan("door", { anchor: "floor", xMm: 0, yMm: 0 })
+      ).rejects.toThrow(/floor/);
+      expect(store.getState().project!.floorObjects).toHaveLength(0);
+    });
+
+    it("rejects placing a window on the floor", async () => {
+      await expect(
+        store.getState().placeOpeningFromPlan("window", { anchor: "floor", xMm: 0, yMm: 0 })
+      ).rejects.toThrow(/floor/);
+      expect(store.getState().project!.floorObjects).toHaveLength(0);
+    });
+  });
+
+  describe("placeArtworkOnFloor", () => {
+    it("creates a floor artwork sized from the artwork, with depth and wall height, and selects it", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      await store.getState().updateArtwork(artworkId, {
+        dimensions: { widthMm: 500, heightMm: 400, depthMm: 120, status: "known" }
+      });
+      const centerline = store.getState().project!.defaultCenterlineHeightMm;
+
+      await store.getState().placeArtworkOnFloor(artworkId, 1500, 2500);
+
+      const state = store.getState();
+      expect(state.undoStack.at(-1)?.label).toBe("Place artwork");
+      const floorObject = state.project!.floorObjects[0];
+      expect(floorObject.kind).toBe("artwork");
+      expect((floorObject as { artworkId: string }).artworkId).toBe(artworkId);
+      expect(floorObject.xMm).toBe(1500);
+      expect(floorObject.yMm).toBe(2500);
+      expect(floorObject.widthMm).toBe(500);
+      expect(floorObject.heightMm).toBe(400);
+      expect(floorObject.depthMm).toBe(120);
+      expect(floorObject.rotationDeg).toBe(0);
+      expect(floorObject.wallYMm).toBeCloseTo(centerline);
+      expect(state.selectedArtworkId).toBe(artworkId);
+    });
+
+    it("falls back to the default depth when the artwork's depth is unknown", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+
+      await store.getState().placeArtworkOnFloor(artworkId, 0, 0);
+
+      const floorObject = store.getState().project!.floorObjects[0];
+      expect(floorObject.widthMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
+      expect(floorObject.heightMm).toBe(PLACEHOLDER_ARTWORK_HEIGHT_MM);
+      expect(floorObject.depthMm).toBe(DEFAULT_FLOOR_OBJECT_DEPTH_MM);
+    });
+  });
+
+  describe("commitPlanMove", () => {
+    async function placeArtworkOnWall(xMm = 1000, yMm = 1450) {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      await store.getState().placeArtwork(artworkId, wall.id, xMm, yMm);
+      return {
+        artworkId,
+        wall,
+        placementId: store.getState().project!.wallObjects[0].id
+      };
+    }
+
+    it("moves an object along the same wall, keeping its height", async () => {
+      const { placementId, wall } = await placeArtworkOnWall(1000, 1450);
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().commitPlanMove(placementId, {
+        anchor: "wall",
+        wallId: wall.id,
+        xMm: 2000
+      });
+
+      const state = store.getState();
+      expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+      const placement = state.project!.wallObjects.find((o) => o.id === placementId)!;
+      expect(placement.wallId).toBe(wall.id);
+      expect(placement.xMm).toBe(2000);
+      expect(placement.yMm).toBe(1450);
+    });
+
+    it("re-anchors an object onto a different wall, keeping yMm and size", async () => {
+      const { placementId } = await placeArtworkOnWall(1000, 1450);
+      const before = store.getState().project!.wallObjects.find((o) => o.id === placementId)!;
+
+      await store.getState().commitPlanMove(placementId, {
+        anchor: "wall",
+        wallId: "wall-east",
+        xMm: 800
+      });
+
+      const placement = store.getState().project!.wallObjects.find((o) => o.id === placementId)!;
+      expect(placement.wallId).toBe("wall-east");
+      expect(placement.xMm).toBe(800);
+      expect(placement.yMm).toBe(1450);
+      expect(placement.widthMm).toBe(before.widthMm);
+      expect(placement.heightMm).toBe(before.heightMm);
+    });
+
+    it("converts a wall artwork to a floor object: same id, one undo entry, and undo restores the wall placement", async () => {
+      const { placementId } = await placeArtworkOnWall(1000, 1450);
+      const before = store.getState().project!.wallObjects.find((o) => o.id === placementId)!;
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().commitPlanMove(placementId, {
+        anchor: "floor",
+        xMm: 5000,
+        yMm: 3000
+      });
+
+      let state = store.getState();
+      expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+      expect(state.project!.wallObjects).toHaveLength(0);
+      const floorObject = state.project!.floorObjects[0];
+      expect(floorObject.id).toBe(placementId);
+      expect(floorObject.kind).toBe("artwork");
+      expect(floorObject.xMm).toBe(5000);
+      expect(floorObject.yMm).toBe(3000);
+      // Remembered hang height + elevation height, for a later floor→wall trip.
+      expect(floorObject.wallYMm).toBe(1450);
+      expect(floorObject.heightMm).toBe(before.heightMm);
+
+      await store.getState().undo();
+      state = store.getState();
+      expect(state.project!.floorObjects).toHaveLength(0);
+      const restored = state.project!.wallObjects.find((o) => o.id === placementId)!;
+      expect(restored.xMm).toBe(1000);
+      expect(restored.yMm).toBe(1450);
+    });
+
+    it("converts a floor object back to a wall, restoring yMm from wallYMm", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      await store.getState().placeArtworkOnFloor(artworkId, 4000, 4000);
+      const floorObject = store.getState().project!.floorObjects[0];
+      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+
+      await store.getState().commitPlanMove(floorObject.id, {
+        anchor: "wall",
+        wallId: wall.id,
+        xMm: 1200
+      });
+
+      const state = store.getState();
+      expect(state.project!.floorObjects).toHaveLength(0);
+      const wallObject = state.project!.wallObjects.find((o) => o.id === floorObject.id)!;
+      expect(wallObject.kind).toBe("artwork");
+      expect(wallObject.wallId).toBe(wall.id);
+      expect(wallObject.xMm).toBe(1200);
+      expect(wallObject.yMm).toBe(floorObject.wallYMm);
+      expect(wallObject.heightMm).toBe(floorObject.heightMm);
+    });
+
+    it("moves a floor object to a new floor position", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      await store.getState().placeArtworkOnFloor(artworkId, 1000, 1000);
+      const floorId = store.getState().project!.floorObjects[0].id;
+
+      await store.getState().commitPlanMove(floorId, { anchor: "floor", xMm: 7000, yMm: 8000 });
+
+      const floorObject = store.getState().project!.floorObjects.find((o) => o.id === floorId)!;
+      expect(floorObject.xMm).toBe(7000);
+      expect(floorObject.yMm).toBe(8000);
+    });
+
+    it("rejects moving a door onto the floor", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      await store.getState().addOpening(wall.id, "door");
+      const doorId = store.getState().project!.wallObjects[0].id;
+
+      await expect(
+        store.getState().commitPlanMove(doorId, { anchor: "floor", xMm: 0, yMm: 0 })
+      ).rejects.toThrow(/floor/);
+      expect(store.getState().project!.floorObjects).toHaveLength(0);
+      expect(store.getState().project!.wallObjects).toHaveLength(1);
+    });
+  });
+
+  describe("updateFloorObject", () => {
+    it("edits X/Y/Width/Depth in one undo entry", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      await store.getState().placeArtworkOnFloor(artworkId, 1000, 1000);
+      const floorId = store.getState().project!.floorObjects[0].id;
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().updateFloorObject(floorId, { xMm: 1500, depthMm: 600 });
+
+      const state = store.getState();
+      expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+      const floorObject = state.project!.floorObjects.find((o) => o.id === floorId)!;
+      expect(floorObject.xMm).toBe(1500);
+      expect(floorObject.depthMm).toBe(600);
+      expect(floorObject.yMm).toBe(1000);
+    });
+
+    it("is a no-op when nothing changes", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      await store.getState().placeArtworkOnFloor(artworkId, 1000, 1000);
+      const floorObject = store.getState().project!.floorObjects[0];
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().updateFloorObject(floorObject.id, {
+        xMm: floorObject.xMm,
+        depthMm: floorObject.depthMm
+      });
+
+      expect(store.getState().undoStack).toHaveLength(undoStackBefore);
+    });
+  });
+
+  describe("floor object ripples on removal", () => {
+    it("removeArtworkFromChecklist drops the artwork's floor placements", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      await store.getState().placeArtworkOnFloor(artworkId, 1000, 1000);
+      expect(store.getState().project!.floorObjects).toHaveLength(1);
+
+      await store.getState().removeArtworkFromChecklist(artworkId);
+
+      const state = store.getState();
+      expect(state.project!.floorObjects).toHaveLength(0);
+      expect(state.project!.checklistArtworkIds).not.toContain(artworkId);
+      expect(artworkLibraryRepository.artworks.has(artworkId)).toBe(true);
+    });
+
+    it("removePlacement removes a floor object by id", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      await store.getState().placeArtworkOnFloor(artworkId, 1000, 1000);
+      const floorId = store.getState().project!.floorObjects[0].id;
+
+      await store.getState().removePlacement(floorId);
+
+      const state = store.getState();
+      expect(state.project!.floorObjects).toHaveLength(0);
+      expect(state.project!.checklistArtworkIds).toContain(artworkId);
     });
   });
 });

@@ -13,6 +13,54 @@ export type ArtworkSize = {
   heightMm: number;
 };
 
+// The x-axis neighbor tiers (neighbor-center + neighbor-edge) for a set of
+// neighbors, given the moving object's width. Extracted so plan snapping can
+// build the SAME neighbor x-targets when a wall-anchored object is dragged
+// along a wall in wall-local coordinates — there the wall's length runs along
+// x and there is no y to align against, so only these x-targets apply. Elevation
+// placement (getArtworkSnapTargets) composes this with the y counterparts.
+// Neighbors are typed at WallObjectBase level so any wall object can act as a
+// neighbor; only the shared center/size fields are read. Callers exclude the
+// object actually being moved before calling.
+export function getNeighborXSnapTargets(
+  neighbors: WallObjectBase[],
+  movingWidthMm: number
+): SnapTarget[] {
+  const targets: SnapTarget[] = [];
+
+  for (const neighbor of neighbors) {
+    const neighborLeftMm = neighbor.xMm - neighbor.widthMm / 2;
+    const neighborRightMm = neighbor.xMm + neighbor.widthMm / 2;
+
+    // Neighbor-center: align the moving object's center with the neighbor's.
+    targets.push({
+      id: `neighbor-center:${neighbor.id}:x`,
+      kind: "neighbor-center",
+      axis: "x",
+      point: { xMm: neighbor.xMm, yMm: 0 }
+    });
+
+    // Neighbor-edge: candidate CENTER positions such that the moving object's
+    // own edge lands flush against the neighbor's corresponding edge. These
+    // are centers, not the edge coordinates themselves, since resolveSnap
+    // always snaps the point being dragged — the object's center.
+    targets.push({
+      id: `neighbor-edge:${neighbor.id}:left`,
+      kind: "neighbor-edge",
+      axis: "x",
+      point: { xMm: neighborLeftMm - movingWidthMm / 2, yMm: 0 }
+    });
+    targets.push({
+      id: `neighbor-edge:${neighbor.id}:right`,
+      kind: "neighbor-edge",
+      axis: "x",
+      point: { xMm: neighborRightMm + movingWidthMm / 2, yMm: 0 }
+    });
+  }
+
+  return targets;
+}
+
 // The snap-target tiers for elevation placement (docs/plan.md §2), built
 // fresh from wall geometry and the current neighbor set on every call —
 // never owned by the renderer, same discipline as getGridSnapTargets.
@@ -71,21 +119,19 @@ export function getArtworkSnapTargets(args: {
     }
   ];
 
+  // The x-axis neighbor tiers, shared verbatim with plan snapping's wall-local
+  // resolve via getNeighborXSnapTargets.
+  targets.push(...getNeighborXSnapTargets(neighbors, movingSize.widthMm));
+
+  // The y-axis neighbor tiers stay elevation-specific: there is no vertical
+  // alignment when dragging along a wall in plan, so plan snapping never needs
+  // these. One target per axis so a horizontal-only or vertical-only alignment
+  // can each snap independently.
   for (const neighbor of neighbors) {
-    const neighborLeftMm = neighbor.xMm - neighbor.widthMm / 2;
-    const neighborRightMm = neighbor.xMm + neighbor.widthMm / 2;
     const neighborTopMm = neighbor.yMm + neighbor.heightMm / 2;
     const neighborBottomMm = neighbor.yMm - neighbor.heightMm / 2;
 
-    // Neighbor-center: align the moving artwork's center with the
-    // neighbor's, one target per axis so a horizontal-only or
-    // vertical-only alignment can each snap independently.
-    targets.push({
-      id: `neighbor-center:${neighbor.id}:x`,
-      kind: "neighbor-center",
-      axis: "x",
-      point: { xMm: neighbor.xMm, yMm: 0 }
-    });
+    // Neighbor-center on y: align the moving artwork's center with the neighbor's.
     targets.push({
       id: `neighbor-center:${neighbor.id}:y`,
       kind: "neighbor-center",
@@ -93,23 +139,8 @@ export function getArtworkSnapTargets(args: {
       point: { xMm: 0, yMm: neighbor.yMm }
     });
 
-    // Neighbor-edge: candidate CENTER positions for the moving artwork such
-    // that its own edge lands flush against (left/right) or aligned with
-    // (top/bottom) the neighbor's corresponding edge. These are centers,
-    // not the edge coordinates themselves, since resolveSnap always snaps
-    // the point being dragged — the artwork's center (docs/plan.md §2).
-    targets.push({
-      id: `neighbor-edge:${neighbor.id}:left`,
-      kind: "neighbor-edge",
-      axis: "x",
-      point: { xMm: neighborLeftMm - movingSize.widthMm / 2, yMm: 0 }
-    });
-    targets.push({
-      id: `neighbor-edge:${neighbor.id}:right`,
-      kind: "neighbor-edge",
-      axis: "x",
-      point: { xMm: neighborRightMm + movingSize.widthMm / 2, yMm: 0 }
-    });
+    // Neighbor-edge on y: candidate CENTER positions such that the moving
+    // artwork's top/bottom edge aligns with the neighbor's (docs/plan.md §2).
     targets.push({
       id: `neighbor-edge:${neighbor.id}:top`,
       kind: "neighbor-edge",

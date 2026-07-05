@@ -75,7 +75,7 @@ The visual language should favor line, measure, alignment, and restraint:
 * Thin borders before heavy fills
 * Semantic color only for uncertainty, warnings, and errors
 
-Icons are moving toward **Phosphor** as the default icon family, using quiet line-style icons and avoiding mixed icon systems inside the same surface.
+Icons use **Phosphor** as the default icon family, using quiet line-style icons and avoiding mixed icon systems inside the same surface.
 
 ## Architecture Principles
 
@@ -163,6 +163,7 @@ Implemented or substantially underway:
 * Transaction-bounded drag commits.
 * Door, window, and blocked-zone wall objects.
 * Placement warnings for overlaps and out-of-bounds works.
+* Floor objects in plan view with snapping and drag-to-wall conversion.
 * JSON import/export for development backup.
 
 ## Roadmap
@@ -175,7 +176,6 @@ Next major slice:
 * Grouping
 * Group drag
 * Equal distribution spacing
-* Floor objects in plan view
 * Simple derived 3D preview
 * Checklist sorting and richer checklist fields
 

@@ -74,7 +74,7 @@ export function ChecklistPanel({
   // Wall names by id (across every room) and the placement each artwork sits
   // on, so a placed row can show the wall it lives on rather than a flat
   // "Placed". Derived here from `project` — the panel already receives it.
-  const { placedArtworkWallIds, wallNamesById } = useMemo(() => {
+  const { placedArtworkWallIds, floorPlacedArtworkIds, wallNamesById } = useMemo(() => {
     const wallNames = new Map<string, string>();
     for (const placement of project.floor.rooms) {
       for (const wall of placement.room.walls) {
@@ -89,15 +89,29 @@ export function ChecklistPanel({
       }
     }
 
-    return { placedArtworkWallIds: placedWalls, wallNamesById: wallNames };
-  }, [project.floor.rooms, project.wallObjects]);
+    // A floor-placed artwork counts as placed too — it has no wall name, so
+    // its row falls back to the plain "Placed" tag.
+    const floorPlaced = new Set<string>();
+    for (const floorObject of project.floorObjects) {
+      if (floorObject.kind === "artwork") {
+        floorPlaced.add(floorObject.artworkId);
+      }
+    }
+
+    return {
+      placedArtworkWallIds: placedWalls,
+      floorPlacedArtworkIds: floorPlaced,
+      wallNamesById: wallNames
+    };
+  }, [project.floor.rooms, project.wallObjects, project.floorObjects]);
 
   const rows: ChecklistRowData[] = project.checklistArtworkIds.map((artworkId) => {
     const wallId = placedArtworkWallIds.get(artworkId);
+    const isFloorPlaced = floorPlacedArtworkIds.has(artworkId);
     return {
       artworkId,
       artwork: artworksById.get(artworkId) ?? null,
-      isPlaced: wallId !== undefined,
+      isPlaced: wallId !== undefined || isFloorPlaced,
       wallName: wallId !== undefined ? (wallNamesById.get(wallId) ?? null) : null
     };
   });

@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent
+} from "react";
 import {
   computeEdgeSnappedLengthMm,
   getMovingWallEdgeWorldPointMm,
@@ -7,9 +15,32 @@ import {
 } from "../../domain/geometry/dragResize";
 import { resizeWallPreservingAngles } from "../../domain/geometry/editRoom";
 import { getFloorBounds } from "../../domain/geometry/walls";
-import type { Project } from "../../domain/project";
+import {
+  getFloorObjectPlanRect,
+  getFloorWalls,
+  getWallObjectPlanRect,
+  WALL_OBJECT_PLAN_DEPTH_MM,
+  type PlanRect
+} from "../../domain/geometry/planObjects";
+import { getDefaultOpeningSizeMm } from "../../domain/placement/createOpening";
+import {
+  getEffectivePlacementSizeMm,
+  PLACEHOLDER_ARTWORK_HEIGHT_MM,
+  PLACEHOLDER_ARTWORK_WIDTH_MM
+} from "../../domain/placement/placeArtwork";
+import {
+  DEFAULT_FLOOR_OBJECT_DEPTH_MM,
+  type Artwork,
+  type Project,
+  type WallObject
+} from "../../domain/project";
 import { getGridSnapTargets } from "../../domain/snapping/gridSnapTargets";
-import { resolveSnap, type Guide, type SnapTarget } from "../../domain/snapping/resolveSnap";
+import {
+  resolvePlanPlacement,
+  WALL_CAPTURE_PX,
+  type PlanPlacement
+} from "../../domain/snapping/planSnapTargets";
+import { resolveSnap, type Guide, type SnapTarget, type SnapTargetIds } from "../../domain/snapping/resolveSnap";
 import {
   getMajorGridIntervalMm,
   getMinorGridIntervalMm,
@@ -17,7 +48,10 @@ import {
 } from "../../domain/units/precision";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
 import { useContainerSize } from "../hooks/useContainerSize";
+import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
 import { GridOverlay } from "./GridOverlay";
+import { PlanObject } from "./PlanObject";
+import { PlanToolbar, type PlanTool } from "./PlanToolbar";
 import { RoomResizeHandles, type ResizeHandleTarget } from "./RoomResizeHandles";
 
 const HANDLE_SCREEN_SIZE_PX = 16;
@@ -42,18 +76,90 @@ type DragState = {
   activeGuides: Guide[];
 };
 
+// The click-to-place preview for an armed palette tool — parallels
+// ElevationView's DropGhostState, but there's no HTML5 drag gesture here:
+// this follows plain pointer hover over the plan SVG and commits on click.
+type ToolGhostState = {
+  planRect: PlanRect;
+  placement: PlanPlacement;
+  activeGuides: Guide[];
+};
+
+// A pointer-drag move of an existing placed object (wall-anchored or floor-
+// placed), transient until release: live preview, exactly one commitPlanMove
+// on release (that single action handles same-wall / re-anchor / wall↔floor
+// atomically). Mirrors ElevationView's MoveDragState and PlanView's own
+// wall-resize DragState — the effect reads the latest values from a ref and
+// omits them from deps, so the drag never resubscribes mid-gesture.
+type ObjectDragState = {
+  objectId: string;
+  kind: WallObject["kind"];
+  // artwork | blocked-zone → true; door | window → false (never float).
+  canFloat: boolean;
+  movingSize: { widthMm: number; heightMm: number; depthMm: number };
+  // The rotation to preview a floated result at: the wall's floor-space angle
+  // for a wall object (so a wall→floor preview keeps its orientation, matching
+  // commitPlanMove), or the floor object's own rotation.
+  rotationDeg: number;
+  startPointerMm: Vector2;
+  startCenterMm: Vector2;
+  // The wall the live preview is currently anchored to (null when floating),
+  // threaded back into resolvePlanPlacement so its cross-boundary hysteresis
+  // tracks the drag rather than the object's committed wall.
+  currentAnchorWallId: string | null;
+  previewPlanRect: PlanRect;
+  previewPlacement: PlanPlacement;
+  previousSnapTargetIds?: SnapTargetIds;
+  activeGuides: Guide[];
+};
+
+// The HTML5-drop preview for an artwork dragged in from the checklist —
+// mirrors ElevationView's DropGhostState, flowing through the same
+// resolvePlanPlacement call as the commit so a drop can never land where the
+// ghost didn't just show.
+type DropGhostState = {
+  planRect: PlanRect;
+  placement: PlanPlacement;
+  activeGuides: Guide[];
+};
+
 export function PlanView({
+  artworksById,
+  draggingArtworkId = null,
   gridPrecisionFloorMm,
   gridVisible,
+  onCommitPlanMove,
   onCommitWallLength,
+  onPlaceArtwork,
+  onPlaceArtworkOnFloor,
+  onPlaceOpeningFromPlan,
+  onSelectArtwork,
+  onSelectOpening,
   project,
+  selectedArtworkId,
+  selectedOpeningId,
   selectedWallId,
   snapToGrid
 }: {
+  artworksById?: Map<string, Artwork>;
+  // Which artwork the checklist is mid-drag, so a plan dragover can size its
+  // ghost — HTML5 dragover can't read the payload, so App threads this the
+  // same way it does for ElevationView.
+  draggingArtworkId?: string | null;
   gridPrecisionFloorMm: number | null;
   gridVisible: boolean;
+  // THE single commit for a plan object move — handles same-wall move,
+  // re-anchor, and wall↔floor conversion atomically (one undo entry).
+  onCommitPlanMove?: (objectId: string, placement: PlanPlacement) => void;
   onCommitWallLength: (wallId: string, lengthMm: number) => Promise<void>;
+  onPlaceArtwork?: (artworkId: string, wallId: string, xMm: number, yMm: number) => void;
+  onPlaceArtworkOnFloor?: (artworkId: string, xMm: number, yMm: number) => void;
+  onPlaceOpeningFromPlan?: (kind: PlanTool, placement: PlanPlacement) => Promise<void>;
+  onSelectArtwork?: (artworkId: string) => void;
+  onSelectOpening?: (wallObjectId: string) => void;
   project: Project;
+  selectedArtworkId?: string | null;
+  selectedOpeningId?: string | null;
   selectedWallId: string | null;
   snapToGrid: boolean;
 }) {
@@ -61,6 +167,27 @@ export function PlanView({
   const svgRef = useRef<SVGSVGElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  // A move of an existing placed object, and the HTML5 drop preview for a
+  // checklist artwork. Both flow through resolvePlanPlacement, so preview and
+  // commit can never disagree.
+  const [objectDrag, setObjectDrag] = useState<ObjectDragState | null>(null);
+  const objectDragRef = useRef<ObjectDragState | null>(null);
+  const [dropGhost, setDropGhost] = useState<DropGhostState | null>(null);
+  const dropSnapTargetIdsRef = useRef<SnapTargetIds | undefined>(undefined);
+
+  // Transient UI state, not store/view-prefs: which palette tool is armed,
+  // its live ghost, and the hysteresis id threaded across pointer moves (the
+  // same discipline as the wall-resize drag's previousSnapTargetId, just
+  // keyed on hover instead of a pointer-capture gesture). Reset whenever the
+  // tool disarms so re-arming starts clean.
+  const [activeTool, setActiveTool] = useState<PlanTool | null>(null);
+  const [toolGhost, setToolGhost] = useState<ToolGhostState | null>(null);
+  const toolSnapTargetIdsRef = useRef<SnapTargetIds | undefined>(undefined);
+  // Set on pointerdown-capture when the gesture starts on a resize handle or
+  // an existing plan object, so the click that follows (native click fires
+  // even when the underlying pointerdown/up were consumed elsewhere) doesn't
+  // also commit a placement underneath it.
+  const suppressNextToolClickRef = useRef(false);
 
   const bounds = getFloorBounds(project.floor);
   const padding = getPlanViewPaddingMm(bounds);
@@ -116,22 +243,151 @@ export function PlanView({
       ? resizeWallPreservingAngles(project, drag.targetWallId, drag.previewLengthMm).project
       : project;
 
+  // Shared by the wall-resize drag effect below and the palette-tool pointer
+  // handlers — both need the same client-px → viewBox-mm conversion.
+  function toSvgMm(clientX: number, clientY: number): Vector2 | null {
+    const svg = svgRef.current;
+    if (!svg) return null;
+
+    const point = svg.createSVGPoint();
+    point.x = clientX;
+    point.y = clientY;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return null;
+
+    const transformed = point.matrixTransform(ctm.inverse());
+    return { xMm: transformed.x, yMm: transformed.y };
+  }
+
+  // Only the committed project's walls matter for tool placement — a tool
+  // can't be armed mid wall-resize-drag anyway (see the drag guard in the
+  // pointer/click handlers below), so there's no live-preview geometry to
+  // reconcile here the way displayedProject does for rendering.
+  const floorWallsForTool = useMemo(() => getFloorWalls(project.floor), [project.floor]);
+
+  const movingSize = useMemo(() => {
+    if (!activeTool) return null;
+    const { widthMm, heightMm } = getDefaultOpeningSizeMm(activeTool);
+    const depthMm =
+      activeTool === "blocked-zone" ? DEFAULT_FLOOR_OBJECT_DEPTH_MM : WALL_OBJECT_PLAN_DEPTH_MM;
+    return { widthMm, heightMm, depthMm };
+  }, [activeTool]);
+
+  const captureDistanceMm = pixelsPerMm > 0 ? WALL_CAPTURE_PX / pixelsPerMm : 0;
+
+  function disarmTool() {
+    setActiveTool(null);
+    setToolGhost(null);
+    toolSnapTargetIdsRef.current = undefined;
+  }
+
+  function handleToolChange(tool: PlanTool | null) {
+    setActiveTool(tool);
+    setToolGhost(null);
+    toolSnapTargetIdsRef.current = undefined;
+  }
+
+  useEffect(() => {
+    if (!activeTool) return;
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") disarmTool();
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // Scoped to only listen while a tool is armed, so it never competes with
+    // App.tsx's global undo/redo keydown handler (that one is gated on
+    // Cmd/Ctrl, this one on Escape — but no sense listening when there's
+    // nothing to cancel).
+  }, [activeTool]);
+
+  function handleToolPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
+    if (!activeTool || !movingSize || drag) return;
+
+    const pointerMm = toSvgMm(event.clientX, event.clientY);
+    if (!pointerMm) return;
+
+    const result = resolvePlanPlacement(pointerMm, {
+      walls: floorWallsForTool,
+      wallObjects: project.wallObjects,
+      movingSize,
+      movingKind: activeTool,
+      canFloat: activeTool === "blocked-zone",
+      currentAnchorWallId: null,
+      captureDistanceMm,
+      gridTargets: gridSnapTargets,
+      snapToGrid,
+      thresholdMm: snapThresholdMm,
+      previousSnapTargetIds: toolSnapTargetIdsRef.current
+    });
+
+    toolSnapTargetIdsRef.current = result.snapTargetIds;
+    setToolGhost({
+      planRect: result.planRect,
+      placement: result.placement,
+      activeGuides: result.activeGuides
+    });
+  }
+
+  function handleToolPointerLeave() {
+    setToolGhost(null);
+  }
+
+  // A resize handle's pointerdown stops its own propagation (so it doesn't
+  // also start a room-resize's sibling behavior), but the native `click`
+  // that follows a pointerdown/pointerup pair still fires on — and bubbles
+  // from — that same element regardless. Marking the gesture here in the
+  // capture phase (before any handler's stopPropagation can run) lets the
+  // click handler below recognize "this click started on something else"
+  // and skip placing, without needing RoomResizeHandles/PlanObject to know
+  // anything about the plan-view tool.
+  function handleSvgPointerDownCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    const target = event.target as Element | null;
+    // The ghost itself carries the `.plan-object` class too (so it shares
+    // PlanObject's rendering), and it sits directly under the pointer at the
+    // moment of a placement click — excluding `.is-ghost` here is what lets
+    // that click through to actually commit instead of being mistaken for a
+    // click on a real, already-placed object.
+    if (target?.closest(".resize-handle, .plan-object:not(.is-ghost)")) {
+      suppressNextToolClickRef.current = true;
+    }
+  }
+
+  function handleSvgClick(event: ReactMouseEvent<SVGSVGElement>) {
+    if (suppressNextToolClickRef.current) {
+      suppressNextToolClickRef.current = false;
+      return;
+    }
+    if (!activeTool || !movingSize || !onPlaceOpeningFromPlan || drag) return;
+
+    const pointerMm = toSvgMm(event.clientX, event.clientY);
+    if (!pointerMm) return;
+
+    const result = resolvePlanPlacement(pointerMm, {
+      walls: floorWallsForTool,
+      wallObjects: project.wallObjects,
+      movingSize,
+      movingKind: activeTool,
+      canFloat: activeTool === "blocked-zone",
+      currentAnchorWallId: null,
+      captureDistanceMm,
+      gridTargets: gridSnapTargets,
+      snapToGrid,
+      thresholdMm: snapThresholdMm,
+      previousSnapTargetIds: toolSnapTargetIdsRef.current
+    });
+
+    const kind = activeTool;
+    // Single-shot: disarm immediately so the tool never lingers armed after
+    // a placement, matching WallInspector's "Add to this wall" buttons
+    // (one click, one object) rather than a rubber-stamp mode.
+    disarmTool();
+    void onPlaceOpeningFromPlan(kind, result.placement);
+  }
+
   useEffect(() => {
     if (!drag) return;
-
-    function toSvgMm(clientX: number, clientY: number): Vector2 | null {
-      const svg = svgRef.current;
-      if (!svg) return null;
-
-      const point = svg.createSVGPoint();
-      point.x = clientX;
-      point.y = clientY;
-      const ctm = svg.getScreenCTM();
-      if (!ctm) return null;
-
-      const transformed = point.matrixTransform(ctm.inverse());
-      return { xMm: transformed.x, yMm: transformed.y };
-    }
 
     function onPointerMove(event: PointerEvent) {
       const current = dragRef.current;
@@ -253,9 +509,233 @@ export function PlanView({
     });
   }
 
+  useEffect(() => {
+    if (!objectDrag) return;
+
+    function onPointerMove(event: PointerEvent) {
+      const current = objectDragRef.current;
+      if (!current) return;
+
+      const pointerMm = toSvgMm(event.clientX, event.clientY);
+      if (!pointerMm) return;
+
+      // Move the object's own center by the pointer delta, not the raw pointer
+      // — wherever inside the object the user grabbed must not leak into the
+      // committed center.
+      const proposedCenterMm: Vector2 = {
+        xMm: current.startCenterMm.xMm + (pointerMm.xMm - current.startPointerMm.xMm),
+        yMm: current.startCenterMm.yMm + (pointerMm.yMm - current.startPointerMm.yMm)
+      };
+
+      const result = resolvePlanPlacement(proposedCenterMm, {
+        walls: floorWallsForTool,
+        // Exclude the moving object so it never snaps to its own old position.
+        wallObjects: project.wallObjects.filter((object) => object.id !== current.objectId),
+        movingSize: current.movingSize,
+        movingKind: current.kind,
+        canFloat: current.canFloat,
+        // Live preview's current wall, so hysteresis tracks the drag.
+        currentAnchorWallId: current.currentAnchorWallId,
+        captureDistanceMm,
+        gridTargets: gridSnapTargets,
+        snapToGrid,
+        thresholdMm: snapThresholdMm,
+        previousSnapTargetIds: current.previousSnapTargetIds,
+        rotationDeg: current.rotationDeg
+      });
+
+      setObjectDrag((state) =>
+        state
+          ? {
+              ...state,
+              previewPlanRect: result.planRect,
+              previewPlacement: result.placement,
+              currentAnchorWallId:
+                result.placement.anchor === "wall" ? result.placement.wallId : null,
+              previousSnapTargetIds: result.snapTargetIds,
+              activeGuides: result.activeGuides
+            }
+          : state
+      );
+    }
+
+    function onPointerUp() {
+      const current = objectDragRef.current;
+      setObjectDrag(null);
+      if (!current) return;
+
+      // Sub-threshold release is a click, not a move — it must not commit (and
+      // so land a phantom undo entry); the object's onClick still selects it.
+      const movedMm = Math.hypot(
+        current.previewPlanRect.centerXMm - current.startCenterMm.xMm,
+        current.previewPlanRect.centerYMm - current.startCenterMm.yMm
+      );
+      if (movedMm < 0.5) return;
+
+      onCommitPlanMove?.(current.objectId, current.previewPlacement);
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+    // Subscribed once per gesture (keyed on whether a drag is active), reading
+    // live state via objectDragRef rather than closing over `objectDrag` —
+    // same discipline as the wall-resize drag effect above.
+    // floorWallsForTool/project.wallObjects/gridSnapTargets/snapToGrid/
+    // snapThresholdMm/captureDistanceMm derive from the committed project and
+    // viewport, which can't change mid-drag (nothing commits until release),
+    // so they're intentionally left out of the deps.
+  }, [objectDrag !== null, onCommitPlanMove]);
+
+  useEffect(() => {
+    objectDragRef.current = objectDrag;
+  }, [objectDrag]);
+
+  function beginObjectDrag(
+    params: {
+      objectId: string;
+      kind: WallObject["kind"];
+      startCenterMm: Vector2;
+      movingSize: { widthMm: number; heightMm: number; depthMm: number };
+      rotationDeg: number;
+      currentPlacement: PlanPlacement;
+      initialPlanRect: PlanRect;
+    },
+    event: ReactPointerEvent<SVGGElement>
+  ) {
+    const startPointerMm = toSvgMm(event.clientX, event.clientY);
+    if (!startPointerMm) return;
+
+    setObjectDrag({
+      objectId: params.objectId,
+      kind: params.kind,
+      canFloat: params.kind === "artwork" || params.kind === "blocked-zone",
+      movingSize: params.movingSize,
+      rotationDeg: params.rotationDeg,
+      startPointerMm,
+      startCenterMm: params.startCenterMm,
+      currentAnchorWallId:
+        params.currentPlacement.anchor === "wall" ? params.currentPlacement.wallId : null,
+      previewPlanRect: params.initialPlanRect,
+      previewPlacement: params.currentPlacement,
+      previousSnapTargetIds: undefined,
+      activeGuides: []
+    });
+  }
+
+  // The effective footprint of an artwork being dragged from the checklist:
+  // its real size if we know which one (draggingArtworkId), otherwise the same
+  // placeholder placement itself falls back to. depthMm feeds a floor-drop
+  // preview; it's ignored for a wall drop.
+  function effectiveArtworkDims(artworkId: string | null): {
+    widthMm: number;
+    heightMm: number;
+    depthMm: number;
+  } {
+    const artwork = artworkId ? artworksById?.get(artworkId) : undefined;
+    if (artwork) {
+      const { widthMm, heightMm } = getEffectivePlacementSizeMm(artwork.dimensions);
+      return {
+        widthMm,
+        heightMm,
+        depthMm: artwork.dimensions.depthMm ?? DEFAULT_FLOOR_OBJECT_DEPTH_MM
+      };
+    }
+    return {
+      widthMm: PLACEHOLDER_ARTWORK_WIDTH_MM,
+      heightMm: PLACEHOLDER_ARTWORK_HEIGHT_MM,
+      depthMm: DEFAULT_FLOOR_OBJECT_DEPTH_MM
+    };
+  }
+
+  function resolveArtworkDrop(pointerMm: Vector2, dims: ReturnType<typeof effectiveArtworkDims>) {
+    return resolvePlanPlacement(pointerMm, {
+      walls: floorWallsForTool,
+      wallObjects: project.wallObjects,
+      movingSize: dims,
+      movingKind: "artwork",
+      canFloat: true,
+      currentAnchorWallId: null,
+      captureDistanceMm,
+      gridTargets: gridSnapTargets,
+      snapToGrid,
+      thresholdMm: snapThresholdMm,
+      previousSnapTargetIds: dropSnapTargetIdsRef.current
+    });
+  }
+
+  function handleArtworkDragOver(event: ReactDragEvent<HTMLDivElement>) {
+    if (!event.dataTransfer.types.includes(ARTWORK_DRAG_MIME)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+
+    const pointerMm = toSvgMm(event.clientX, event.clientY);
+    if (!pointerMm) return;
+
+    const result = resolveArtworkDrop(pointerMm, effectiveArtworkDims(draggingArtworkId));
+    dropSnapTargetIdsRef.current = result.snapTargetIds;
+    setDropGhost({
+      planRect: result.planRect,
+      placement: result.placement,
+      activeGuides: result.activeGuides
+    });
+  }
+
+  function handleArtworkDragLeave(event: ReactDragEvent<HTMLDivElement>) {
+    // Only clear when the pointer actually leaves the surface, not when it
+    // crosses between child elements (which also fire dragleave).
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    setDropGhost(null);
+    dropSnapTargetIdsRef.current = undefined;
+  }
+
+  function handleArtworkDrop(event: ReactDragEvent<HTMLDivElement>) {
+    const artworkId = event.dataTransfer.getData(ARTWORK_DRAG_MIME);
+    setDropGhost(null);
+    dropSnapTargetIdsRef.current = undefined;
+    if (!artworkId) return;
+    event.preventDefault();
+
+    const pointerMm = toSvgMm(event.clientX, event.clientY);
+    if (!pointerMm) return;
+
+    const placement = resolveArtworkDrop(pointerMm, effectiveArtworkDims(artworkId)).placement;
+    if (placement.anchor === "wall") {
+      const wall = floorWallsForTool.find((candidate) => candidate.id === placement.wallId);
+      // A wall-dropped artwork hangs at the wall's centerline (its own default,
+      // or the project default) — plan view chooses no y itself.
+      const yMm = wall?.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
+      onPlaceArtwork?.(artworkId, placement.wallId, placement.xMm, yMm);
+    } else {
+      onPlaceArtworkOnFloor?.(artworkId, placement.xMm, placement.yMm);
+    }
+  }
+
   return (
-    <div className="drawing-surface" aria-label="Plan view" ref={containerRef}>
-      <svg className="plan-svg" ref={svgRef} viewBox={viewBox} role="img">
+    <div
+      className="drawing-surface"
+      aria-label="Plan view"
+      ref={containerRef}
+      onDragLeave={handleArtworkDragLeave}
+      onDragOver={handleArtworkDragOver}
+      onDrop={handleArtworkDrop}
+    >
+      <PlanToolbar activeTool={activeTool} onToolChange={handleToolChange} />
+      <svg
+        className={activeTool ? "plan-svg tool-armed" : "plan-svg"}
+        ref={svgRef}
+        viewBox={viewBox}
+        role="img"
+        onClick={handleSvgClick}
+        onPointerDownCapture={handleSvgPointerDownCapture}
+        onPointerLeave={handleToolPointerLeave}
+        onPointerMove={handleToolPointerMove}
+      >
         <title>{project.title} plan</title>
         {/* Room interiors render below the grid (the grid must stay visible
             on the room's "paper"), walls and handles above it. */}
@@ -322,7 +802,145 @@ export function PlanView({
             ) : null}
           </g>
         ))}
-        {drag?.activeGuides.map((guide) => (
+        {/* Placed objects render above walls/handles' room grouping but
+            below drag guides — matching the elevation-view convention that
+            geometry (walls/rooms) reads as structure and placements sit on
+            top of it. Wall-anchored objects need their FloorWall for the
+            wall-line-relative projection; floor-placed objects (later
+            phases) carry their own center/rotation already. */}
+        {(() => {
+          const floorWalls = getFloorWalls(displayedProject.floor);
+          const floorWallsById = new Map(floorWalls.map((wall) => [wall.id, wall]));
+
+          return (
+            <>
+              {displayedProject.wallObjects.map((wallObject) => {
+                const wall = floorWallsById.get(wallObject.wallId);
+                if (!wall) return null;
+
+                const restRect = getWallObjectPlanRect(wall, wallObject);
+                const isDragging = objectDrag?.objectId === wallObject.id;
+                const planRect = isDragging ? objectDrag.previewPlanRect : restRect;
+                // While dragging, reflect whether the live preview has left the
+                // wall (dashed floor look) so the cue matches the pending
+                // commit; at rest a wall object is never floor-placed.
+                const isFloorPlaced =
+                  isDragging && objectDrag.previewPlacement.anchor === "floor";
+                const isSelected =
+                  wallObject.kind === "artwork"
+                    ? wallObject.artworkId === selectedArtworkId
+                    : wallObject.id === selectedOpeningId;
+
+                return (
+                  <PlanObject
+                    isFloorPlaced={isFloorPlaced}
+                    isSelected={isSelected}
+                    key={wallObject.id}
+                    kind={wallObject.kind}
+                    planRect={planRect}
+                    onBeginDrag={(event) =>
+                      beginObjectDrag(
+                        {
+                          objectId: wallObject.id,
+                          kind: wallObject.kind,
+                          startCenterMm: {
+                            xMm: restRect.centerXMm,
+                            yMm: restRect.centerYMm
+                          },
+                          movingSize: {
+                            widthMm: wallObject.widthMm,
+                            heightMm: wallObject.heightMm,
+                            // The eventual floor footprint depth if this drags
+                            // off the wall; unused while it stays on a wall.
+                            depthMm: DEFAULT_FLOOR_OBJECT_DEPTH_MM
+                          },
+                          // Preview a floated result at the wall's angle so a
+                          // wall→floor drag keeps its orientation (matching
+                          // commitPlanMove).
+                          rotationDeg: restRect.angleDeg,
+                          currentPlacement: {
+                            anchor: "wall",
+                            wallId: wallObject.wallId,
+                            xMm: wallObject.xMm
+                          },
+                          initialPlanRect: restRect
+                        },
+                        event
+                      )
+                    }
+                    onSelect={() =>
+                      wallObject.kind === "artwork"
+                        ? onSelectArtwork?.(wallObject.artworkId)
+                        : onSelectOpening?.(wallObject.id)
+                    }
+                  />
+                );
+              })}
+              {displayedProject.floorObjects.map((floorObject) => {
+                const restRect = getFloorObjectPlanRect(floorObject);
+                const isDragging = objectDrag?.objectId === floorObject.id;
+                const planRect = isDragging ? objectDrag.previewPlanRect : restRect;
+                // A floor object reads floor-placed at rest; while dragging it
+                // follows the preview (a floor→wall drag drops the dashed look).
+                const isFloorPlaced = isDragging
+                  ? objectDrag.previewPlacement.anchor === "floor"
+                  : true;
+                const isSelected =
+                  floorObject.kind === "artwork"
+                    ? floorObject.artworkId === selectedArtworkId
+                    : floorObject.id === selectedOpeningId;
+
+                return (
+                  <PlanObject
+                    isFloorPlaced={isFloorPlaced}
+                    isSelected={isSelected}
+                    key={floorObject.id}
+                    kind={floorObject.kind}
+                    planRect={planRect}
+                    onBeginDrag={(event) =>
+                      beginObjectDrag(
+                        {
+                          objectId: floorObject.id,
+                          kind: floorObject.kind,
+                          startCenterMm: { xMm: floorObject.xMm, yMm: floorObject.yMm },
+                          movingSize: {
+                            widthMm: floorObject.widthMm,
+                            heightMm: floorObject.heightMm,
+                            depthMm: floorObject.depthMm
+                          },
+                          rotationDeg: floorObject.rotationDeg,
+                          currentPlacement: {
+                            anchor: "floor",
+                            xMm: floorObject.xMm,
+                            yMm: floorObject.yMm
+                          },
+                          initialPlanRect: restRect
+                        },
+                        event
+                      )
+                    }
+                    onSelect={() =>
+                      floorObject.kind === "artwork"
+                        ? onSelectArtwork?.(floorObject.artworkId)
+                        : onSelectOpening?.(floorObject.id)
+                    }
+                  />
+                );
+              })}
+            </>
+          );
+        })()}
+        {toolGhost ? (
+          <PlanObject isGhost kind={activeTool ?? "door"} planRect={toolGhost.planRect} />
+        ) : null}
+        {dropGhost ? <PlanObject isGhost kind="artwork" planRect={dropGhost.planRect} /> : null}
+        {(
+          objectDrag?.activeGuides ??
+          dropGhost?.activeGuides ??
+          drag?.activeGuides ??
+          toolGhost?.activeGuides ??
+          []
+        ).map((guide) => (
           <line
             className="snap-guide"
             key={guide.id}

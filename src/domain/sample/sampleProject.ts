@@ -14,6 +14,7 @@ export function createSampleProject(): Project {
     defaultCenterlineHeightMm: inchesToMm(57),
     checklistArtworkIds: [],
     wallObjects: [],
+    floorObjects: [],
     createdAt: now,
     updatedAt: now,
     floor: {

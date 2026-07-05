@@ -39,6 +39,32 @@ const wallObjectSchema = z.discriminatedUnion("kind", [
   openingWallObjectSchema
 ]);
 
+const floorObjectBaseSchema = z.object({
+  id: z.string().min(1),
+  xMm: z.number().finite(),
+  yMm: z.number().finite(),
+  widthMm: z.number().positive(),
+  depthMm: z.number().positive(),
+  rotationDeg: z.number().finite(),
+  heightMm: z.number().positive(),
+  wallYMm: z.number().finite()
+});
+
+const artworkFloorObjectSchema = floorObjectBaseSchema.extend({
+  kind: z.literal("artwork"),
+  artworkId: z.string().min(1),
+  displayDimensionsOverride: dimensionsSchema.optional()
+});
+
+const blockedZoneFloorObjectSchema = floorObjectBaseSchema.extend({
+  kind: z.literal("blocked-zone")
+});
+
+const floorObjectSchema = z.discriminatedUnion("kind", [
+  artworkFloorObjectSchema,
+  blockedZoneFloorObjectSchema
+]);
+
 const roomVertexSchema = z.object({
   id: z.string().min(1),
   xMm: z.number().finite(),
@@ -146,6 +172,7 @@ export const projectSchema = z.object({
   }),
   checklistArtworkIds: z.array(z.string()),
   wallObjects: z.array(wallObjectSchema).default([]),
+  floorObjects: z.array(floorObjectSchema).default([]),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime()
 });
@@ -213,18 +240,27 @@ export function migrateProject(input: unknown): Project {
     );
   }
 
+  let migrated = input;
+
   if (schemaVersion < CURRENT_SCHEMA_VERSION) {
-    // No migration chain exists yet — CURRENT_SCHEMA_VERSION has only ever
-    // been 1, so `versionedDocumentSchema`'s `.positive()` makes this branch
-    // unreachable today. Once an older version ships, run its v1→v2→...
-    // migration chain here instead of throwing (docs/plan.md §2).
-    throw new Error(
-      `this project uses an old schema version (${schemaVersion}) that this app can no longer open.`
-    );
+    if (schemaVersion !== 1 || typeof migrated !== "object" || migrated === null) {
+      throw new Error(
+        `this project uses an old schema version (${schemaVersion}) that this app can no longer open.`
+      );
+    }
+
+    // v1 → v2: floor objects (plan-view artwork/blocked-zone placements not
+    // anchored to a wall) are a new concept in v2, so v1 documents simply
+    // never had any — an empty array is the only valid migration.
+    migrated = {
+      ...(migrated as Record<string, unknown>),
+      floorObjects: [],
+      schemaVersion: 2
+    };
   }
 
   try {
-    return parseProject(input);
+    return parseProject(migrated);
   } catch (error) {
     if (error instanceof z.ZodError) {
       const [issue] = error.issues;

@@ -1507,6 +1507,13 @@ input:focus-visible {
   background: var(--bg);
 }
 
+/* An armed PlanToolbar tool: the crosshair signals "click to place" the way
+   a drawing tool would, distinct from the plain pointer used for selecting
+   and dragging existing geometry. */
+.plan-svg.tool-armed {
+  cursor: crosshair;
+}
+
 .room-fill {
   fill: var(--bg);
 }
@@ -1646,6 +1653,28 @@ input:focus-visible {
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+}
+
+/* PlanToolbar: the palette for click-to-place insertion, anchored to the
+   opposite corner from .surface-label (there is none in plan view today,
+   but this keeps the door open) so a future chip never collides with it. */
+.plan-toolbar {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  gap: 6px;
+  z-index: 1;
+}
+
+.plan-toolbar-button {
+  gap: 6px;
+}
+
+.plan-toolbar-button[aria-pressed="true"] {
+  border-color: var(--primary);
+  background: var(--petrol-soft);
+  color: var(--petrol-strong);
 }
 
 .surface-label-select:hover {
@@ -2232,6 +2261,58 @@ input:focus-visible {
 
 .blocked-zone-fill {
   pointer-events: none;
+}
+
+/* Plan-view placements — PlanObject.tsx. Same restrained, stroke-only
+   language as .elevation-opening/.elevation-artwork (one shared outline
+   treatment, selected reuses the same --primary override) so a door/window/
+   blocked-zone/artwork reads as the same object whether you're looking at
+   its elevation placement or its thin plan-view rect. Read-only in this
+   phase: no drag cursor yet (that's a later phase), just click-to-select. */
+.plan-object-outline {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Same reasoning as .elevation-artwork:not(.ghost) .artwork-outline: fill:none
+   leaves only the hairline stroke hit-testable, but that must NOT apply to a
+   ghost — pointer-events:all on the child would otherwise override the
+   ghost group's own pointer-events:none (a more-specific rule always beats
+   an inherited one), letting a click-to-place click land on the ghost
+   sitting directly under the pointer instead of committing the placement. */
+.plan-object:not(.is-ghost) .plan-object-outline {
+  pointer-events: all;
+}
+
+.plan-object--blocked-zone .plan-object-outline {
+  fill: var(--subtle);
+  fill-opacity: 0.15;
+}
+
+.plan-object.is-floor .plan-object-outline {
+  stroke-dasharray: 5 4;
+}
+
+.plan-object.is-selected .plan-object-outline {
+  stroke: var(--primary);
+  stroke-width: 2.5;
+}
+
+/* Click-to-place preview: same translucent/dashed/non-interactive treatment
+   as .elevation-artwork.ghost, so the plan and elevation ghosts read as the
+   same convention. */
+.plan-object.is-ghost {
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+.plan-object.is-ghost .plan-object-outline {
+  fill: var(--primary-soft);
+  fill-opacity: 0.4;
+  stroke: var(--primary);
+  stroke-dasharray: 6 5;
 }
 
 /* WallInspector's "Add to this wall" row — three compact actions reusing

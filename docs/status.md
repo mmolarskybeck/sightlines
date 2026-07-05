@@ -1,11 +1,11 @@
 ⏺ Here's my read after going through both docs and the source tree.
 
   Where you are: MVP 1A is done, 1B is done, and you're further into 1C than
-  progress.md's "Later" section suggests — openings and collision validation
-  (both 1C items) just landed. What's genuinely left in MVP1:
-  multi-select/grouping/group drag, equal distribution, floor objects, the 3D
-  preview, and checklist sorting/fields. The vertex-reshape item is real but
-  gated on designing a reshape mode, so it's not the natural next move.
+  progress.md's "Later" section suggests — openings, collision validation, and
+  floor objects (all 1C items) just landed. What's genuinely left in MVP1:
+  multi-select/grouping/group drag, equal distribution, the 3D preview, and
+  checklist sorting/fields. The vertex-reshape item is real but gated on
+  designing a reshape mode, so it's not the natural next move.
 
   Best next slice: multi-select → group drag → equal distribution, as one arc
 

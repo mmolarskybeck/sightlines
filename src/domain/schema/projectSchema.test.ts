@@ -177,6 +177,42 @@ describe("migrateProject", () => {
 
     expect(migrateProject(olderProject).wallObjects).toEqual([]);
   });
+
+  it("migrates a real v1 document to v2, adding an empty floorObjects array", () => {
+    const { floorObjects: _floorObjects, ...currentShape } = createSampleProject();
+    const v1Document = { ...currentShape, schemaVersion: 1 };
+
+    const migrated = migrateProject(v1Document);
+
+    expect(migrated.schemaVersion).toBe(2);
+    expect(migrated.floorObjects).toEqual([]);
+  });
+
+  it("round-trips a v2 document that already has floor objects", () => {
+    const project = createSampleProject();
+    project.floorObjects = [
+      {
+        id: "floor-artwork-1",
+        kind: "artwork",
+        artworkId: "artwork-1",
+        xMm: feetToMm(10),
+        yMm: feetToMm(5),
+        widthMm: feetToMm(2),
+        depthMm: 400,
+        rotationDeg: 0,
+        heightMm: feetToMm(3),
+        wallYMm: inchesToMm(57)
+      }
+    ];
+
+    expect(migrateProject(project)).toEqual(project);
+  });
+
+  it("rejects a document from schema version 3 (newer than this app supports)", () => {
+    const fromTheFuture = { ...createSampleProject(), schemaVersion: 3 };
+
+    expect(() => migrateProject(fromTheFuture)).toThrow(/newer version of Sightlines/);
+  });
 });
 
 describe("migrateProjectJson", () => {

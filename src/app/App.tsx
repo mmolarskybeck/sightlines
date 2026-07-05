@@ -15,7 +15,15 @@ import {
   getOrthogonalQuadWallPair,
 } from "../domain/geometry/walls";
 import { getOpeningKindLabel } from "../domain/placement/createOpening";
-import type { Artwork, ArtworkWallObject, DisplayUnit, OpeningWallObject, Project } from "../domain/project";
+import type {
+  Artwork,
+  ArtworkFloorObject,
+  ArtworkWallObject,
+  BlockedZoneFloorObject,
+  DisplayUnit,
+  OpeningWallObject,
+  Project
+} from "../domain/project";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import { formatLength } from "../domain/units/length";
 import { getGridPrecisionFloorOptionsMm } from "../domain/units/precision";
@@ -31,6 +39,7 @@ import { ChecklistPanel } from "./components/ChecklistPanel";
 import { DataView } from "./components/DataView";
 import { ElevationEmptyState } from "./components/ElevationEmptyState";
 import { ElevationView } from "./components/ElevationView";
+import { FloorObjectInspector, FloorPlacementFields } from "./components/FloorObjectInspector";
 import { OpeningInspector } from "./components/OpeningInspector";
 import { PlanEmptyState } from "./components/PlanEmptyState";
 import { PlanView } from "./components/PlanView";
@@ -116,7 +125,11 @@ export function App() {
     removePlacement,
     addOpening,
     moveOpening,
-    resizeOpening
+    resizeOpening,
+    placeOpeningFromPlan,
+    placeArtworkOnFloor,
+    commitPlanMove,
+    updateFloorObject
   } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
@@ -208,6 +221,19 @@ export function App() {
           wallObject.kind === "artwork" && wallObject.artworkId === selectedArtwork.id
       ) ?? null)
     : null;
+  // An artwork placed on the floor (dragged off a wall, or dropped straight
+  // onto open floor) — ids/artworkId survive wall↔floor conversion, so the
+  // same selectedArtworkId resolves here when it isn't on a wall.
+  const placedFloorArtwork: ArtworkFloorObject | null = selectedArtwork
+    ? (project.floorObjects.find(
+        (floorObject): floorObject is ArtworkFloorObject =>
+          floorObject.kind === "artwork" && floorObject.artworkId === selectedArtwork.id
+      ) ?? null)
+    : null;
+  const isArtworkPlaced = placedWallObject !== null || placedFloorArtwork !== null;
+  // The placement to remove when the artwork inspector's action fires —
+  // whichever surface it currently lives on.
+  const artworkPlacementId = placedWallObject?.id ?? placedFloorArtwork?.id ?? null;
 
   // A dangling selectedOpeningId (the opening was just deleted) resolves to
   // nothing here too, the same fallback shape as selectedArtwork above.
@@ -217,6 +243,16 @@ export function App() {
           wallObject.kind !== "artwork" && wallObject.id === selectedOpeningId
       ) ?? null)
     : null;
+  // selectedOpeningId doubles as the slot for a floor-placed blocked zone
+  // (no separate selection slot — ids are unique across both arrays), so a
+  // selection that isn't a wall opening may resolve to a floor blocked zone.
+  const selectedFloorBlockedZone: BlockedZoneFloorObject | null =
+    selectedOpeningId && !selectedOpening
+      ? (project.floorObjects.find(
+          (floorObject): floorObject is BlockedZoneFloorObject =>
+            floorObject.kind === "blocked-zone" && floorObject.id === selectedOpeningId
+        ) ?? null)
+      : null;
 
   // Warnings carry a wallObjectId, but a raw id means nothing to a curator —
   // resolve it to the artwork's title, or the opening's human-readable kind
@@ -449,12 +485,28 @@ export function App() {
               <PlanEmptyState onAddRoom={() => void addRectangleRoom()} />
             ) : (
               <PlanView
+                artworksById={artworksById}
+                draggingArtworkId={draggingArtworkId}
                 gridPrecisionFloorMm={gridPrecisionFloorMm}
                 gridVisible={showGrid}
                 project={project}
+                selectedArtworkId={selectedArtworkId}
+                selectedOpeningId={selectedOpeningId}
                 selectedWallId={selectedWall?.id ?? null}
                 snapToGrid={snapToGrid}
+                onCommitPlanMove={(objectId, placement) =>
+                  void commitPlanMove(objectId, placement, allowOverlappingPlacement)
+                }
                 onCommitWallLength={resizeWall}
+                onPlaceArtwork={(artworkId, wallId, xMm, yMm) =>
+                  void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement)
+                }
+                onPlaceArtworkOnFloor={(artworkId, xMm, yMm) =>
+                  void placeArtworkOnFloor(artworkId, xMm, yMm)
+                }
+                onPlaceOpeningFromPlan={placeOpeningFromPlan}
+                onSelectArtwork={selectArtwork}
+                onSelectOpening={selectOpening}
               />
             )
           ) : null}
@@ -519,36 +571,73 @@ export function App() {
               </div>
             ) : null}
 
-            {selectedArtwork || selectedOpening || selectedWall ? (
+            {selectedArtwork || selectedOpening || selectedFloorBlockedZone || selectedWall ? (
               <div className="panel-heading inspector-subject">
                 <h2>
                   {selectedArtwork
                     ? selectedArtwork.title ?? "Untitled"
                     : selectedOpening
                       ? getOpeningKindLabel(selectedOpening.kind)
-                      : selectedWall?.name}
+                      : selectedFloorBlockedZone
+                        ? getOpeningKindLabel(selectedFloorBlockedZone.kind)
+                        : selectedWall?.name}
                 </h2>
                 <span>
-                  {selectedArtwork ? "Artwork" : selectedOpening ? "Opening" : "Wall"}
+                  {selectedArtwork
+                    ? "Artwork"
+                    : selectedOpening
+                      ? "Opening"
+                      : selectedFloorBlockedZone
+                        ? "Floor object"
+                        : "Wall"}
                 </span>
               </div>
             ) : null}
 
             {selectedArtwork ? (
-              <ArtworkInspector
-                artwork={selectedArtwork}
-                isPlaced={placedWallObject !== null}
-                unit={project.unit}
-                onCommitDimensions={(dimensions) =>
-                  void updateArtwork(selectedArtwork.id, { dimensions })
-                }
-                onCommitField={(changes) => void updateArtwork(selectedArtwork.id, changes)}
-                onRemovePlacement={
-                  placedWallObject
-                    ? () => void removePlacement(placedWallObject.id)
-                    : undefined
-                }
-              />
+              <>
+                <ArtworkInspector
+                  artwork={selectedArtwork}
+                  isPlaced={isArtworkPlaced}
+                  unit={project.unit}
+                  onCommitDimensions={(dimensions) =>
+                    void updateArtwork(selectedArtwork.id, { dimensions })
+                  }
+                  onCommitField={(changes) => void updateArtwork(selectedArtwork.id, changes)}
+                  onRemovePlacement={
+                    artworkPlacementId
+                      ? () => void removePlacement(artworkPlacementId)
+                      : undefined
+                  }
+                />
+                {placedFloorArtwork ? (
+                  <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
+                    <p className="field-hint">Floor-placed in plan view.</p>
+                    <FloorPlacementFields
+                      floorObject={placedFloorArtwork}
+                      unit={project.unit}
+                      onCommitPosition={(xMm, yMm) =>
+                        void updateFloorObject(placedFloorArtwork.id, { xMm, yMm })
+                      }
+                      onCommitSize={(widthMm, depthMm) =>
+                        void updateFloorObject(placedFloorArtwork.id, { widthMm, depthMm })
+                      }
+                    />
+                  </form>
+                ) : null}
+              </>
+          ) : selectedFloorBlockedZone ? (
+            <FloorObjectInspector
+              floorObject={selectedFloorBlockedZone}
+              unit={project.unit}
+              onCommitPosition={(xMm, yMm) =>
+                void updateFloorObject(selectedFloorBlockedZone.id, { xMm, yMm })
+              }
+              onCommitSize={(widthMm, depthMm) =>
+                void updateFloorObject(selectedFloorBlockedZone.id, { widthMm, depthMm })
+              }
+              onDelete={() => void removePlacement(selectedFloorBlockedZone.id)}
+            />
           ) : selectedOpening ? (
             <OpeningInspector
               opening={selectedOpening}
