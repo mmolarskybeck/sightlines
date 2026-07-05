@@ -8,6 +8,11 @@ export type SnapTarget = {
   point: Point;
   kind: "floor" | "centerline" | "neighbor-center" | "neighbor-edge" | "grid";
   axis: "x" | "y" | "both";
+  // Optional explicit rank overriding the kind's default (lower wins). Used
+  // by the floor target, whose rank depends on what is being moved: primary
+  // (0, above centerline) for a door, just below the centerline for
+  // everything else — a static per-kind map can't express that.
+  priority?: number;
 };
 
 export type Guide = {
@@ -32,25 +37,31 @@ export type SnapOptions = {
   previousSnapTargetIds?: SnapTargetIds;
 };
 
-// Floor outranks even the centerline: it only exists for objects that are
-// expected to sit on the floor (doors — see getArtworkSnapTargets), and for
-// those the floor is the primary destination, not the eyeline.
-const PRIORITY: Record<SnapTarget["kind"], number> = {
-  floor: 0,
+// Default tier ranks per kind (lower wins). The floor default sits between
+// the centerline (1) and neighbor-center (2): every wall object can settle
+// onto the floor, but for most of them the eyeline comes first. Door drags
+// override the floor target's rank to 0 via SnapTarget.priority — for a
+// door the floor IS the primary destination (see getArtworkSnapTargets).
+const KIND_PRIORITY: Record<SnapTarget["kind"], number> = {
   centerline: 1,
+  floor: 1.5,
   "neighbor-center": 2,
   "neighbor-edge": 3,
   grid: 4
 };
 
+function priorityOf(target: SnapTarget): number {
+  return target.priority ?? KIND_PRIORITY[target.kind];
+}
+
 // Resolves each axis INDEPENDENTLY: the x winner and the y winner are picked
 // from separate per-axis candidate pools, so a high-priority y-only target
 // (the centerline) never suppresses an x snap (a grid line) — an artwork can
 // sit on the eyeline and land on the grid at the same time. Within one axis
-// the tier ordering is: floor (doors only) > centerline > neighbor-center >
-// neighbor-edge > grid (docs/plan.md §2), then distance, then id for a
-// stable tiebreak. An `axis: "both"` target competes on each axis using that
-// axis's own delta and may win either or both.
+// the tier ordering is: [floor first for doors] > centerline > floor >
+// neighbor-center > neighbor-edge > grid (docs/plan.md §2), then distance,
+// then id for a stable tiebreak. An `axis: "both"` target competes on each
+// axis using that axis's own delta and may win either or both.
 export function resolveSnap(
   proposed: Point,
   candidates: SnapTarget[],
@@ -72,7 +83,7 @@ export function resolveSnap(
       .map((candidate) => ({ candidate, distance: distanceForAxis(proposed, candidate, axis) }))
       .filter(({ candidate, distance }) => distance <= thresholdFor(candidate))
       .sort((a, b) => {
-        const priorityDelta = PRIORITY[a.candidate.kind] - PRIORITY[b.candidate.kind];
+        const priorityDelta = priorityOf(a.candidate) - priorityOf(b.candidate);
         if (priorityDelta !== 0) return priorityDelta;
 
         const distanceDelta = a.distance - b.distance;

@@ -28,20 +28,46 @@ describe("resolveSnap", () => {
     expect(result.activeGuides.map((guide) => guide.axis).sort()).toEqual(["x", "y"]);
   });
 
-  it("ranks a floor target above the centerline within the y axis", () => {
+  it("lets an explicit priority: 0 floor target outrank the centerline (door case)", () => {
     const result = resolveSnap(
       { xMm: 500, yMm: 1449 },
       [
         centerline,
-        // 2mm farther away than the centerline (1mm), but floor is the
-        // highest tier — a door held near both must land on the floor.
-        { id: "floor", kind: "floor", axis: "y", point: { xMm: 0, yMm: 1451 } }
+        // 2mm farther away than the centerline (1mm), but the explicit
+        // priority override makes floor the primary tier — a door held near
+        // both must land on the floor.
+        { id: "floor", kind: "floor", axis: "y", priority: 0, point: { xMm: 0, yMm: 1451 } }
       ],
       { thresholdMm: 10 }
     );
 
     expect(result.point.yMm).toBe(1451);
     expect(result.snapTargetIds).toEqual({ y: "floor" });
+  });
+
+  it("ranks a default floor target below the centerline but above neighbor-center", () => {
+    const targets: SnapTarget[] = [
+      centerline,
+      { id: "floor", kind: "floor", axis: "y", point: { xMm: 0, yMm: 1451 } },
+      {
+        id: "neighbor-center:n1:y",
+        kind: "neighbor-center",
+        axis: "y",
+        point: { xMm: 0, yMm: 1452 }
+      }
+    ];
+
+    // Centerline in range: it beats the (closer) default-rank floor.
+    const nearCenterline = resolveSnap({ xMm: 500, yMm: 1450 }, targets, { thresholdMm: 10 });
+    expect(nearCenterline.snapTargetIds).toEqual({ y: "centerline" });
+
+    // Centerline out of the pool: floor beats the (closer) neighbor-center.
+    const nearFloor = resolveSnap(
+      { xMm: 500, yMm: 1453 },
+      targets.filter((target) => target.id !== "centerline"),
+      { thresholdMm: 10 }
+    );
+    expect(nearFloor.snapTargetIds).toEqual({ y: "floor" });
   });
 
   it("keeps tier priority within an axis: centerline beats a closer grid target on y", () => {

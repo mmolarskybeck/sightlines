@@ -237,34 +237,11 @@ describe("resolveArtworkSnap", () => {
       expect(result.snapTargetIds.y).toBe("floor");
     });
 
-    it("offers no floor target for a window or an artwork with the same geometry", () => {
-      for (const movingKind of ["window", "artwork"] as const) {
-        const targets = getArtworkSnapTargets({
-          centerlineYMm: baseArgs.centerlineYMm,
-          wallLengthMm: baseArgs.wallLengthMm,
-          wallHeightMm: baseArgs.wallHeightMm,
-          gridIntervalMm: 0,
-          neighbors: [],
-          movingSize: { widthMm: 900, heightMm: 2100 },
-          movingKind
-        });
-        expect(targets.some((target) => target.kind === "floor")).toBe(false);
-
-        // And a drag near the would-be floor position does not snap in y.
-        const result = resolveArtworkSnap(
-          { xMm: 555, yMm: 1062 },
-          { ...doorArgs, movingKind, snapToGrid: false }
-        );
-        expect(result.point.yMm).toBe(1062);
-        expect(result.snapTargetIds.y).toBeUndefined();
-      }
-    });
-
     it("keeps the floor tier active regardless of the snapToGrid preference", () => {
-      // The floor target is kind-gated (doors only), never preference-gated:
-      // snapToGrid toggles only the grid tier. Nearest grid-y lines (1000,
-      // 1100) are outside the 20mm threshold either way, so the floor is the
-      // sole y candidate in both calls.
+      // The floor target is never preference-gated: snapToGrid toggles only
+      // the grid tier. Nearest grid-y lines (1000, 1100) are outside the
+      // 20mm threshold either way, so the floor is the sole y candidate in
+      // both calls.
       const withGrid = resolveArtworkSnap(
         { xMm: 555, yMm: 1062 },
         { ...doorArgs, snapToGrid: true }
@@ -276,6 +253,78 @@ describe("resolveArtworkSnap", () => {
 
       expect(withGrid.snapTargetIds.y).toBe("floor");
       expect(withoutGrid.snapTargetIds.y).toBe("floor");
+    });
+  });
+
+  describe("floor snapping for non-door kinds", () => {
+    it("gives every moving kind a floor target, ranked below centerline for non-doors", () => {
+      for (const movingKind of ["artwork", "window", "blocked-zone"] as const) {
+        const targets = getArtworkSnapTargets({
+          centerlineYMm: baseArgs.centerlineYMm,
+          wallLengthMm: baseArgs.wallLengthMm,
+          wallHeightMm: baseArgs.wallHeightMm,
+          gridIntervalMm: 0,
+          neighbors: [],
+          movingSize: { widthMm: 900, heightMm: 2100 },
+          movingKind
+        });
+
+        const floor = targets.find((target) => target.kind === "floor");
+        expect(floor).toMatchObject({
+          id: "floor",
+          axis: "y",
+          priority: 1.5,
+          point: { yMm: 1050 }
+        });
+      }
+    });
+
+    it("snaps an artwork's bottom edge to the floor when the centerline is out of range", () => {
+      // 300 x 400 artwork: floor target at heightMm / 2 = 200. Proposed
+      // y=210 is 10mm from the floor and nowhere near the 1450 centerline.
+      const result = resolveArtworkSnap(
+        { xMm: 555, yMm: 210 },
+        { ...baseArgs, snapToGrid: false }
+      );
+
+      expect(result.point.yMm).toBe(200);
+      expect(result.snapTargetIds.y).toBe("floor");
+      expect(result.activeGuides).toEqual([
+        { id: "floor-y", axis: "y", positionMm: 200, targetId: "floor" }
+      ]);
+    });
+
+    it("prefers the centerline over the floor for a tall artwork with both in range", () => {
+      // Mirror of the door priority test with the ranks flipped: a
+      // 2800-tall artwork puts the floor target at y=1400, 50mm below the
+      // 1450 centerline. Proposed y=1430 is 30mm from the floor and 20mm
+      // from the centerline — and unlike the door, the centerline wins.
+      const result = resolveArtworkSnap(
+        { xMm: 555, yMm: 1430 },
+        {
+          ...baseArgs,
+          movingSize: { widthMm: 900, heightMm: 2800 },
+          movingKind: "artwork",
+          snapToGrid: false,
+          thresholdMm: 40
+        }
+      );
+
+      expect(result.point.yMm).toBe(1450);
+      expect(result.snapTargetIds.y).toBe("centerline");
+    });
+
+    it("floor-snaps the artwork drop-ghost path (movingKind 'artwork', grid on)", () => {
+      // The HTML5 drag-in path passes movingKind "artwork" with snapToGrid
+      // live: near the floor, the floor target (priority 1.5) outranks the
+      // coincident grid-y-200 line (priority 4).
+      const result = resolveArtworkSnap(
+        { xMm: 555, yMm: 210 },
+        { ...baseArgs, movingKind: "artwork", snapToGrid: true }
+      );
+
+      expect(result.point.yMm).toBe(200);
+      expect(result.snapTargetIds.y).toBe("floor");
     });
   });
 });

@@ -341,6 +341,9 @@ export function ElevationView({
       gridIntervalMm: minorGridMm,
       neighbors: wallObjectsOnThisWall,
       movingSize: sizeMm,
+      // A checklist drag-in is always an artwork: eyeline first, floor just
+      // below it (see getArtworkSnapTargets' kind-dependent floor rank).
+      movingKind: "artwork",
       snapToGrid,
       thresholdMm: snapThresholdMm,
       previousSnapTargetIds: dropGhost?.previousSnapTargetIds
@@ -378,6 +381,7 @@ export function ElevationView({
       gridIntervalMm: minorGridMm,
       neighbors: wallObjectsOnThisWall,
       movingSize: sizeMm,
+      movingKind: "artwork",
       snapToGrid,
       thresholdMm: snapThresholdMm,
       previousSnapTargetIds: undefined

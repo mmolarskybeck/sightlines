@@ -13,17 +13,22 @@ export type ArtworkSize = {
   heightMm: number;
 };
 
-// The snap-target tiers for elevation placement (docs/plan.md §2: floor for
-// doors > centerline > neighbor-center > neighbor-edge > grid), built fresh
-// from wall geometry and the current neighbor set on every call — never
-// owned by the renderer, same discipline as getGridSnapTargets. Callers
-// exclude the object actually being moved from `neighbors` before calling
-// this; a moving object should never snap to itself. `neighbors` is typed at
-// the WallObjectBase level (not ArtworkWallObject) so any wall object —
-// artwork or an opening — can act as a snap neighbor for any other; only the
-// shared center/size fields are ever read here. `movingKind` decides whether
-// the floor tier exists at all: doors always sit on the floor, so only a
-// door drag gets (and primarily wants) a floor target.
+// The snap-target tiers for elevation placement (docs/plan.md §2), built
+// fresh from wall geometry and the current neighbor set on every call —
+// never owned by the renderer, same discipline as getGridSnapTargets.
+// Callers exclude the object actually being moved from `neighbors` before
+// calling this; a moving object should never snap to itself. `neighbors` is
+// typed at the WallObjectBase level (not ArtworkWallObject) so any wall
+// object — artwork or an opening — can act as a snap neighbor for any
+// other; only the shared center/size fields are ever read here.
+//
+// Every moving kind gets a floor target (anything can settle onto the
+// floor), but its RANK depends on `movingKind`: for a door the floor is the
+// primary tier (above the centerline — doors are expected to sit on the
+// floor); for artwork/windows/blocked zones the eyeline comes first and the
+// floor slots directly below it, above the neighbor and grid tiers. So the
+// per-axis ordering reads: [floor first for doors] > centerline > floor >
+// neighbor-center > neighbor-edge > grid.
 export function getArtworkSnapTargets(args: {
   centerlineYMm: number;
   wallLengthMm: number;
@@ -43,28 +48,28 @@ export function getArtworkSnapTargets(args: {
     movingKind
   } = args;
 
-  const targets: SnapTarget[] = [];
-
-  if (movingKind === "door") {
-    // A door's PRIMARY target: the center-y that puts its bottom edge on the
-    // floor line (wall-local y=0, y up). Ranked above even the centerline —
-    // doors are expected to sit on the floor, not the eyeline.
-    targets.push({
+  const targets: SnapTarget[] = [
+    // The center-y that puts the moving object's bottom edge on the floor
+    // line (wall-local y=0, y up). Emitted for every kind, but ranked
+    // per-kind via the explicit priority: a door's primary target (0, above
+    // the centerline's 1); for everything else just below the centerline
+    // (1.5) and above the neighbor tiers.
+    {
       id: "floor",
       kind: "floor",
       axis: "y",
+      priority: movingKind === "door" ? 0 : 1.5,
       point: { xMm: 0, yMm: movingSize.heightMm / 2 }
-    });
-  }
-
-  // The curatorial convention (docs/plan.md §5.5): a work's CENTER lands
-  // on the centerline, not its top or bottom edge.
-  targets.push({
-    id: "centerline",
-    kind: "centerline",
-    axis: "y",
-    point: { xMm: 0, yMm: centerlineYMm }
-  });
+    },
+    // The curatorial convention (docs/plan.md §5.5): a work's CENTER lands
+    // on the centerline, not its top or bottom edge.
+    {
+      id: "centerline",
+      kind: "centerline",
+      axis: "y",
+      point: { xMm: 0, yMm: centerlineYMm }
+    }
+  ];
 
   for (const neighbor of neighbors) {
     const neighborLeftMm = neighbor.xMm - neighbor.widthMm / 2;
