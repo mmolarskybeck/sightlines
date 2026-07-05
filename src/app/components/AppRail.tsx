@@ -1,12 +1,10 @@
 import type { ReactNode } from "react";
-import {
-  Blocks,
-  CircleHelp,
-  FileJson,
-  PanelLeft,
-  Settings,
-  TriangleAlert
-} from "lucide-react";
+import { FileCodeIcon } from "@phosphor-icons/react/dist/csr/FileCode";
+import { BoundingBoxIcon } from "@phosphor-icons/react/dist/csr/BoundingBox";
+import { ListChecksIcon } from "@phosphor-icons/react/dist/csr/ListChecks";
+import { QuestionIcon } from "@phosphor-icons/react/dist/csr/Question";
+import { SlidersHorizontalIcon } from "@phosphor-icons/react/dist/csr/SlidersHorizontal";
+import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
 
 // The full-height icon rail — the layout's left anchor, spanning beside both
 // the topbar and the workspace. Its top 80×80 cell is the brand cell (the "S"
@@ -41,7 +39,7 @@ export function AppRail({
       <div className="rail-buttons">
         <RailButton
           active={leftPanel === "checklist"}
-          icon={<PanelLeft aria-hidden="true" size={22} />}
+          icon={<ListChecksIcon aria-hidden="true" size={22} />}
           label={leftPanel === "checklist" ? "Hide checklist" : "Show checklist"}
           pressed={leftPanel === "checklist"}
           onClick={() => onSelectLeftPanel("checklist")}
@@ -49,7 +47,7 @@ export function AppRail({
 
         <RailButton
           active={leftPanel === "rooms"}
-          icon={<Blocks aria-hidden="true" size={22} />}
+          icon={<BoundingBoxIcon aria-hidden="true" size={22} />}
           label={leftPanel === "rooms" ? "Hide rooms & walls" : "Show rooms & walls"}
           pressed={leftPanel === "rooms"}
           onClick={() => onSelectLeftPanel("rooms")}
@@ -57,7 +55,7 @@ export function AppRail({
 
         <RailButton
           disabled={!hasIssues}
-          icon={<TriangleAlert aria-hidden="true" size={22} />}
+          icon={<WarningIcon aria-hidden="true" size={22} />}
           label={
             hasIssues
               ? `${issueCount} placement issue${issueCount === 1 ? "" : "s"}`
@@ -76,18 +74,18 @@ export function AppRail({
 
         <RailButton
           active={isDataView}
-          icon={<FileJson aria-hidden="true" size={22} />}
+          icon={<FileCodeIcon aria-hidden="true" size={22} />}
           label="Data view"
           onClick={onOpenDataView}
         />
         <RailButton
           disabled
-          icon={<Settings aria-hidden="true" size={22} />}
+          icon={<SlidersHorizontalIcon aria-hidden="true" size={22} />}
           label="Settings — coming soon"
         />
         <RailButton
           disabled
-          icon={<CircleHelp aria-hidden="true" size={22} />}
+          icon={<QuestionIcon aria-hidden="true" size={22} />}
           label="Help — coming soon"
         />
       </div>

@@ -5,7 +5,8 @@ import {
   type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent
 } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
+import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import type { Vector2 } from "../../domain/geometry/dragResize";
 import {
   getEffectivePlacementSizeMm,
@@ -399,7 +400,7 @@ export function ElevationView({
               type="button"
               onClick={() => stepWall(-1)}
             >
-              <ChevronLeft aria-hidden="true" size={16} />
+              <CaretLeftIcon aria-hidden="true" size={16} />
             </button>
             <select
               aria-label="Select wall"
@@ -431,7 +432,7 @@ export function ElevationView({
               type="button"
               onClick={() => stepWall(1)}
             >
-              <ChevronRight aria-hidden="true" size={16} />
+              <CaretRightIcon aria-hidden="true" size={16} />
             </button>
           </div>
         ) : (

@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react";
+import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 
 // The Plan tab's own empty state, mirroring ElevationEmptyState's idiom: a
 // decorative aria-hidden glyph (a stroked room rectangle with two resize
@@ -22,7 +22,7 @@ export function PlanEmptyState({ onAddRoom }: { onAddRoom: () => void }) {
         </svg>
         <p className="empty-copy">Draw your first room</p>
         <button className="inspector-action" type="button" onClick={onAddRoom}>
-          <Plus aria-hidden="true" size={15} />
+          <PlusIcon aria-hidden="true" size={15} />
           Add a room
         </button>
         <p className="empty-copy">

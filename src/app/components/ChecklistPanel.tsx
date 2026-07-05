@@ -1,5 +1,7 @@
 import { useMemo, useRef, useState } from "react";
-import { GripVertical, ImagePlus, X } from "lucide-react";
+import { DotsSixVerticalIcon } from "@phosphor-icons/react/dist/csr/DotsSixVertical";
+import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
+import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { ACCEPTED_IMAGE_MIME_TYPES } from "../../domain/assets/imageIntake";
 import type { Artwork, DisplayUnit, Project } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
@@ -198,7 +200,7 @@ export function ChecklistPanel({
 
       {rows.length === 0 ? (
         <div className="checklist-empty">
-          <ImagePlus aria-hidden="true" size={26} />
+          <ImageSquareIcon aria-hidden="true" size={26} />
           <p className="empty-copy">
             Drop images here or click Add Artwork — no room required.
           </p>
@@ -236,7 +238,7 @@ export function ChecklistPanel({
         type="button"
         onClick={() => fileInputRef.current?.click()}
       >
-        <ImagePlus aria-hidden="true" size={16} />
+        <ImageSquareIcon aria-hidden="true" size={16} />
         <span>Add Artwork</span>
       </button>
     </section>
@@ -337,7 +339,7 @@ function ChecklistRow({
         onSelect();
       }}
     >
-      <GripVertical aria-hidden="true" className="checklist-grip" size={16} />
+      <DotsSixVerticalIcon aria-hidden="true" className="checklist-grip" size={16} />
       {thumbnailUrl ? (
         <img alt="" className="checklist-thumb" src={thumbnailUrl} />
       ) : (
@@ -371,7 +373,7 @@ function ChecklistRow({
           onRemove();
         }}
       >
-        <X aria-hidden="true" size={14} />
+        <XIcon aria-hidden="true" size={14} />
       </button>
     </li>
   );

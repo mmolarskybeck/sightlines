@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link2Off } from "lucide-react";
+import { LinkBreakIcon } from "@phosphor-icons/react/dist/csr/LinkBreak";
 import type { Artwork, Dimensions, DisplayUnit } from "../../domain/project";
 import {
   getPlaceholderForScope,
@@ -94,7 +94,7 @@ export function ArtworkInspector({
             type="button"
             onClick={onRemovePlacement}
           >
-            <Link2Off aria-hidden="true" size={15} />
+            <LinkBreakIcon aria-hidden="true" size={15} />
             Remove from wall
           </button>
         </div>

@@ -19,7 +19,7 @@ The rail is the highest-priority replacement. Current Lucide glyphs read too muc
 | Current Lucide | Current Use | Preferred Phosphor | Alternatives | Notes |
 |---|---|---|---|---|
 | `PanelLeft` | Checklist panel | `ListChecksIcon` | `RowsIcon`, custom artwork-list icon | `ListChecks` is a clearer checklist metaphor than a layout panel. |
-| `Blocks` | Rooms & walls panel | `WallIcon` | `BoundingBoxIcon`, custom floor-plan icon | `Wall` is worth trying first. `BoundingBox` may read more like selection/resize. |
+| `Blocks` | Rooms & walls panel | `BoundingBoxIcon` | `WallIcon`, custom floor-plan icon | `BoundingBox` is clearer for the room-and-wall inventory rail button. |
 | `TriangleAlert` | Placement issues | `WarningIcon` | `WarningCircleIcon`, `WarningDiamondIcon` | Consider showing stronger color only when issues exist; disabled warning can be very quiet. |
 | `FileJson` | Data view | `FileCodeIcon` | `BracketsCurlyIcon`, `CodeBlockIcon` | Keep this in the lower utility cluster; it is still developer-facing. |
 | `Settings` | Settings placeholder | `SlidersHorizontalIcon` | `GearSixIcon` | `SlidersHorizontal` feels more product-settings/workspace-preferences than gear. |
@@ -47,9 +47,9 @@ Future rail candidate:
 
 | Current Lucide | Current Use | Proposed Phosphor | Alternatives | Notes |
 |---|---|---|---|---|
-| `Grid2X2` | Plan tab | `GridFourIcon` | custom plan icon | A custom room-plan icon may eventually be stronger. |
+| `Grid2X2` | Plan tab | `MapTrifoldIcon` | `GridFourIcon`, custom plan icon | `MapTrifold` reads more like a floor-plan than a generic grid. |
 | `Ruler` | Elevation tab | `RulerIcon` | custom elevation/wall icon | `Ruler` is acceptable, but risks being confused with measurement tools later. |
-| `Grid3X3` | Show grid | `GridNineIcon` | `DotsNineIcon` | Keep visually quieter than Plan mode. |
+| `Grid3X3` | Show grid | `GridFourIcon` | `DotsNineIcon` | Keep visually quieter than Plan mode. |
 | `Magnet` | Snap to grid | `MagnetIcon` | none | Direct replacement. |
 | `Layers` | Allow overlap | `StackIcon` | `StackSimpleIcon`, `SquaresFourIcon` | `Stack` may read better than literal layers for artwork overlap. |
 | `ChevronLeft` | Previous wall | `CaretLeftIcon` | `ArrowLeftIcon` | Carets are better for compact switchers. |
@@ -102,5 +102,4 @@ Future domain actions:
 - Should Plan and Elevation eventually use custom Sightlines view icons instead of stock grid/ruler icons?
 - Should the rail hide disabled Settings/Help until those views exist, or keep them as future affordances?
 - Should artwork library and checklist be separate rail destinations once the library exists?
-- Does `WallIcon` read as architectural enough in the 48px rail button, or does it look like masonry? Test against `BoundingBoxIcon` and a custom floor-plan mark.
-
+- Does `BoundingBoxIcon` read as architectural enough in the 48px rail button, or does it feel too generic? Test against a custom floor-plan mark if it does.

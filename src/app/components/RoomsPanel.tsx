@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react";
+import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import {
   getRectangleRoomDimensions,
   getWallsWithGeometry
@@ -47,7 +47,7 @@ export function RoomsPanel({
             type="button"
             onClick={onAddRectangleRoom}
           >
-            <Plus aria-hidden="true" size={16} />
+            <PlusIcon aria-hidden="true" size={16} />
           </button>
         </div>
       </div>

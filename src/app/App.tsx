@@ -1,17 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  AlertTriangle,
-  Download,
-  Grid2X2,
-  Grid3X3,
-  Layers,
-  Magnet,
-  Redo2,
-  Ruler,
-  Save,
-  Undo2,
-  Upload
-} from "lucide-react";
+import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
+import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
+import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
+import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
+import { GridFourIcon } from "@phosphor-icons/react/dist/csr/GridFour";
+import { MagnetIcon } from "@phosphor-icons/react/dist/csr/Magnet";
+import { MapTrifoldIcon } from "@phosphor-icons/react/dist/csr/MapTrifold";
+import { RulerIcon } from "@phosphor-icons/react/dist/csr/Ruler";
+import { StackIcon } from "@phosphor-icons/react/dist/csr/Stack";
+import { UploadSimpleIcon } from "@phosphor-icons/react/dist/csr/UploadSimple";
+import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
 import {
   getWallsWithGeometry,
   getOrthogonalQuadWallPair,
@@ -277,13 +275,13 @@ export function App() {
         <div className="view-tabs topbar-center" role="tablist" aria-label="Workspace view">
           <TabButton
             active={viewMode === "plan"}
-            icon={<Grid2X2 aria-hidden="true" size={16} />}
+            icon={<MapTrifoldIcon aria-hidden="true" size={16} />}
             label="Plan"
             onClick={() => setViewMode("plan")}
           />
           <TabButton
             active={viewMode === "elevation"}
-            icon={<Ruler aria-hidden="true" size={16} />}
+            icon={<RulerIcon aria-hidden="true" size={16} />}
             label="Elevation"
             onClick={() => setViewMode("elevation")}
           />
@@ -300,7 +298,7 @@ export function App() {
               disabled={undoStack.length === 0}
               onClick={() => void undo()}
             >
-              <Undo2 aria-hidden="true" size={18} />
+              <ArrowCounterClockwiseIcon aria-hidden="true" size={18} />
             </button>
             <button
               className="icon-button"
@@ -310,7 +308,7 @@ export function App() {
               disabled={redoStack.length === 0}
               onClick={() => void redo()}
             >
-              <Redo2 aria-hidden="true" size={18} />
+              <ArrowClockwiseIcon aria-hidden="true" size={18} />
             </button>
           </div>
           <div className="toolbar-divider" aria-hidden="true" />
@@ -321,7 +319,7 @@ export function App() {
             aria-label="Import project JSON"
             onClick={() => fileInputRef.current?.click()}
           >
-            <Upload aria-hidden="true" size={18} />
+            <UploadSimpleIcon aria-hidden="true" size={18} />
           </button>
           <button
             className="topbar-button"
@@ -330,7 +328,7 @@ export function App() {
             aria-label="Export project JSON"
             onClick={() => downloadProject(project)}
           >
-            <Download aria-hidden="true" size={18} />
+            <DownloadSimpleIcon aria-hidden="true" size={18} />
             <span>Export</span>
           </button>
           <input
@@ -381,7 +379,7 @@ export function App() {
               <ViewOptionButton
                 active={showGrid}
                 disabled={viewMode === "data"}
-                icon={<Grid3X3 aria-hidden="true" size={16} />}
+                icon={<GridFourIcon aria-hidden="true" size={16} />}
                 label="Grid"
                 title={showGrid ? "Hide grid" : "Show grid"}
                 onClick={toggleShowGrid}
@@ -389,7 +387,7 @@ export function App() {
               <ViewOptionButton
                 active={snapToGrid}
                 disabled={viewMode === "data"}
-                icon={<Magnet aria-hidden="true" size={16} />}
+                icon={<MagnetIcon aria-hidden="true" size={16} />}
                 label="Snap"
                 title={snapToGrid ? "Disable snap to grid" : "Enable snap to grid"}
                 onClick={toggleSnapToGrid}
@@ -404,7 +402,7 @@ export function App() {
                 <ViewOptionButton
                   active={allowOverlappingPlacement}
                   disabled={false}
-                  icon={<Layers aria-hidden="true" size={16} />}
+                  icon={<StackIcon aria-hidden="true" size={16} />}
                   label="Overlap"
                   title={
                     allowOverlappingPlacement
@@ -482,7 +480,7 @@ export function App() {
           <div className="inspector-zone">
             {labeledPlacementWarnings.length > 0 ? (
               <div className="warning-panel" role="status" aria-live="polite">
-                <AlertTriangle aria-hidden="true" size={18} />
+                <WarningIcon aria-hidden="true" size={18} />
                 <div>
                   <h3>Placement needs review</h3>
                   <ul>
@@ -563,7 +561,7 @@ export function App() {
           </div>
 
           <div className="storage-note">
-            <Save aria-hidden="true" size={16} />
+            <FloppyDiskIcon aria-hidden="true" size={16} />
             <span>{getStorageNoteCopy(storagePersistence)}</span>
           </div>
         </aside>
@@ -668,7 +666,8 @@ function ViewOptionButton({
   return (
     <button
       aria-pressed={active}
-      className={active ? "view-option-button active" : "view-option-button"}
+      className="view-option-button"
+      data-state={active ? "on" : "off"}
       disabled={disabled}
       type="button"
       title={title}
@@ -698,29 +697,28 @@ function UnitSystemToggle({
   };
 
   return (
-    <div className="unit-select" role="group" aria-label="Units">
-      <span className="unit-select-label">Units</span>
+    <div className="unit-switch" role="group" aria-label="Units">
+      <span className="unit-select-label" id="unit-system-label">
+        Units
+      </span>
       <button
-        aria-pressed={system === "imperial"}
-        className={
-          system === "imperial" ? "view-option-button active" : "view-option-button"
-        }
+        aria-checked={system === "metric"}
+        aria-labelledby="unit-system-label unit-system-value"
+        className="unit-switch-control"
+        data-state={system === "metric" ? "checked" : "unchecked"}
         disabled={disabled}
+        role="switch"
         type="button"
-        onClick={() => select("imperial")}
+        onClick={() => select(system === "metric" ? "imperial" : "metric")}
       >
-        Imperial
-      </button>
-      <button
-        aria-pressed={system === "metric"}
-        className={
-          system === "metric" ? "view-option-button active" : "view-option-button"
-        }
-        disabled={disabled}
-        type="button"
-        onClick={() => select("metric")}
-      >
-        Metric
+        <span className="unit-switch-option">Imperial</span>
+        <span className="unit-switch-track" aria-hidden="true">
+          <span className="unit-switch-thumb" />
+        </span>
+        <span className="unit-switch-option">Metric</span>
+        <span className="visually-hidden" id="unit-system-value">
+          {system === "metric" ? "Metric" : "Imperial"}
+        </span>
       </button>
     </div>
   );

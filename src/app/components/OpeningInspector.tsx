@@ -1,4 +1,4 @@
-import { Trash2 } from "lucide-react";
+import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { getOpeningKindLabel } from "../../domain/placement/createOpening";
 import type { OpeningWallObject, DisplayUnit } from "../../domain/project";
 import type { MeasurementScope } from "../../domain/units/unitSystem";
@@ -86,7 +86,7 @@ export function OpeningInspector({
 
       <div className="inspector-placement">
         <button className="inspector-action" type="button" onClick={onDelete}>
-          <Trash2 aria-hidden="true" size={15} />
+          <TrashIcon aria-hidden="true" size={15} />
           Delete {getOpeningKindLabel(opening.kind).toLowerCase()}
         </button>
       </div>

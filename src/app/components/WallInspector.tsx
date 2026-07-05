@@ -1,4 +1,7 @@
-import { DoorOpen, Link2, Square, SquareDashed } from "lucide-react";
+import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
+import { LinkIcon } from "@phosphor-icons/react/dist/csr/Link";
+import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
+import { SquareIcon } from "@phosphor-icons/react/dist/csr/Square";
 import type { OpeningKind } from "../../domain/placement/createOpening";
 import type { DisplayUnit } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
@@ -70,7 +73,7 @@ export function WallInspector({
       />
       {dimensionLink ? (
         <div className="constraint-panel" aria-label="Linked rectangle dimension">
-          <Link2 aria-hidden="true" size={17} />
+          <LinkIcon aria-hidden="true" size={17} />
           <div>
             <h3>{wallName} + {dimensionLink.pairedWallName}</h3>
             <p>{dimensionLink.roomName} keeps opposing wall lengths linked.</p>
@@ -88,11 +91,11 @@ export function WallInspector({
         <span>Add to this wall</span>
         <div className="opening-add-buttons">
           <button className="inspector-action" type="button" onClick={() => onAddOpening("door")}>
-            <DoorOpen aria-hidden="true" size={15} />
+            <DoorIcon aria-hidden="true" size={15} />
             Door
           </button>
           <button className="inspector-action" type="button" onClick={() => onAddOpening("window")}>
-            <Square aria-hidden="true" size={15} />
+            <SquareIcon aria-hidden="true" size={15} />
             Window
           </button>
           <button
@@ -100,7 +103,7 @@ export function WallInspector({
             type="button"
             onClick={() => onAddOpening("blocked-zone")}
           >
-            <SquareDashed aria-hidden="true" size={15} />
+            <RectangleDashedIcon aria-hidden="true" size={15} />
             Blocked zone
           </button>
         </div>

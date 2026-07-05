@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Plus, Trash2 } from "lucide-react";
+import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
+import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
+import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import type { ProjectSummary } from "../../domain/project";
 
 export function ProjectPicker({
@@ -96,7 +98,7 @@ export function ProjectPicker({
         type="button"
         onClick={() => setIsOpen((open) => !open)}
       >
-        <ChevronDown aria-hidden="true" size={18} />
+        <CaretDownIcon aria-hidden="true" size={18} />
       </button>
 
       {isOpen ? (
@@ -107,7 +109,7 @@ export function ProjectPicker({
             type="button"
             onClick={() => void handleCreate()}
           >
-            <Plus aria-hidden="true" size={16} />
+            <PlusIcon aria-hidden="true" size={16} />
             <span>New project</span>
           </button>
 
@@ -145,7 +147,7 @@ export function ProjectPicker({
                     type="button"
                     onClick={() => void handleDelete(summary)}
                   >
-                    <Trash2 aria-hidden="true" size={14} />
+                    <TrashIcon aria-hidden="true" size={14} />
                   </button>
                 </div>
               ))
