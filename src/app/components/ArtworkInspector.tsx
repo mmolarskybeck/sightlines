@@ -8,6 +8,14 @@ import {
 } from "../../domain/units/unitSystem";
 import { LengthField } from "./LengthField";
 import { UncertaintyIndicator } from "./UncertaintyIndicator";
+import { Button } from "./ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "./ui/select";
 
 type ArtworkTextFieldKey = "title" | "artist" | "date" | "accessionNumber" | "locationOrLender";
 
@@ -89,14 +97,13 @@ export function ArtworkInspector({
 
       {isPlaced ? (
         <div className="inspector-placement">
-          <button
+          <Button
             className="inspector-action"
-            type="button"
             onClick={onRemovePlacement}
           >
             <LinkBreakIcon aria-hidden="true" size={15} />
             Remove from wall
-          </button>
+          </Button>
         </div>
       ) : (
         <p className="field-hint">Not currently placed on a wall.</p>
@@ -203,19 +210,24 @@ function DimensionsSection({
 
       <label className="field-row compact">
         <span>Status</span>
-        <select
+        <Select
           value={dimensions.status}
-          onChange={(event) =>
+          onValueChange={(value) =>
             onCommitDimensions({
               ...dimensions,
-              status: event.target.value as Dimensions["status"]
+              status: value as Dimensions["status"]
             })
           }
         >
-          <option value="known">Known</option>
-          <option value="approximate">Approximate</option>
-          <option value="unknown">Unknown</option>
-        </select>
+          <SelectTrigger aria-label="Dimension status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="known">Known</SelectItem>
+            <SelectItem value="approximate">Approximate</SelectItem>
+            <SelectItem value="unknown">Unknown</SelectItem>
+          </SelectContent>
+        </Select>
       </label>
     </div>
   );

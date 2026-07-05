@@ -1,8 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import type { ProjectSummary } from "../../domain/project";
+import { Button } from "./ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from "./ui/dropdown-menu";
 
 export function ProjectPicker({
   currentProjectId,
@@ -20,7 +27,6 @@ export function ProjectPicker({
   const [isOpen, setIsOpen] = useState(false);
   const [summaries, setSummaries] = useState<ProjectSummary[] | null>(null);
   const [busy, setBusy] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -30,22 +36,8 @@ export function ProjectPicker({
       if (!cancelled) setSummaries(result);
     });
 
-    function onPointerDown(event: PointerEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setIsOpen(false);
-    }
-
-    window.addEventListener("pointerdown", onPointerDown);
-    window.addEventListener("keydown", onKeyDown);
     return () => {
       cancelled = true;
-      window.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("keydown", onKeyDown);
     };
   }, [isOpen, listProjectSummaries]);
 
@@ -89,73 +81,79 @@ export function ProjectPicker({
   };
 
   return (
-    <div className="project-picker" ref={containerRef}>
-      <button
-        aria-expanded={isOpen}
-        aria-label="Projects"
-        className="icon-button project-switcher-trigger"
-        title="Switch project"
-        type="button"
-        onClick={() => setIsOpen((open) => !open)}
+    <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label="Projects"
+          className="icon-button project-switcher-trigger"
+          title="Switch project"
+        >
+          <CaretDownIcon aria-hidden="true" size={18} />
+        </Button>
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent
+        align="end"
+        aria-label="Saved projects"
+        className="project-picker-panel"
       >
-        <CaretDownIcon aria-hidden="true" size={18} />
-      </button>
+        <DropdownMenuItem
+          className="project-picker-new"
+          disabled={busy}
+          onSelect={(event) => {
+            event.preventDefault();
+            void handleCreate();
+          }}
+        >
+          <PlusIcon aria-hidden="true" size={16} />
+          <span>New project</span>
+        </DropdownMenuItem>
 
-      {isOpen ? (
-        <div className="project-picker-panel" role="menu" aria-label="Saved projects">
-          <button
-            className="project-picker-new"
-            disabled={busy}
-            type="button"
-            onClick={() => void handleCreate()}
-          >
-            <PlusIcon aria-hidden="true" size={16} />
-            <span>New project</span>
-          </button>
-
-          <div className="project-picker-list">
-            {summaries === null ? (
-              <p className="project-picker-empty">Loading…</p>
-            ) : summaries.length === 0 ? (
-              <p className="project-picker-empty">No saved projects yet.</p>
-            ) : (
-              summaries.map((summary) => (
-                <div
-                  className={
-                    summary.id === currentProjectId
-                      ? "project-picker-row active"
-                      : "project-picker-row"
-                  }
-                  key={summary.id}
+        <div className="project-picker-list">
+          {summaries === null ? (
+            <p className="project-picker-empty">Loading…</p>
+          ) : summaries.length === 0 ? (
+            <p className="project-picker-empty">No saved projects yet.</p>
+          ) : (
+            summaries.map((summary) => (
+              <div
+                className={
+                  summary.id === currentProjectId
+                    ? "project-picker-row active"
+                    : "project-picker-row"
+                }
+                key={summary.id}
+              >
+                <DropdownMenuItem
+                  className="project-picker-open"
+                  disabled={busy}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    void handleOpen(summary.id);
+                  }}
                 >
-                  <button
-                    className="project-picker-open"
-                    disabled={busy}
-                    type="button"
-                    onClick={() => void handleOpen(summary.id)}
-                  >
-                    <span className="project-picker-title">{summary.title}</span>
-                    <span className="project-picker-updated">
-                      {formatUpdatedAt(summary.updatedAt)}
-                    </span>
-                  </button>
-                  <button
-                    aria-label={`Delete ${summary.title}`}
-                    className="icon-button compact"
-                    disabled={busy}
-                    title="Delete project"
-                    type="button"
-                    onClick={() => void handleDelete(summary)}
-                  >
-                    <TrashIcon aria-hidden="true" size={14} />
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
+                  <span className="project-picker-title">{summary.title}</span>
+                  <span className="project-picker-updated">
+                    {formatUpdatedAt(summary.updatedAt)}
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  aria-label={`Delete ${summary.title}`}
+                  className="icon-button compact"
+                  disabled={busy}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    void handleDelete(summary);
+                  }}
+                >
+                  <TrashIcon aria-hidden="true" size={14} />
+                </DropdownMenuItem>
+              </div>
+            ))
+          )}
         </div>
-      ) : null}
-    </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

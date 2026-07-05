@@ -132,7 +132,8 @@ input:focus-visible {
 }
 
 .rail-button.active,
-.rail-button[aria-pressed="true"] {
+.rail-button[aria-pressed="true"],
+.rail-button[data-state="on"] {
   background: var(--primary-soft);
   color: var(--primary-strong);
 }
@@ -322,23 +323,11 @@ input:focus-visible {
   height: 32px;
 }
 
-.project-picker {
-  position: relative;
-}
-
 .project-picker-panel {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 6px);
-  right: 0;
   display: grid;
   width: 260px;
   gap: 6px;
   padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--bg);
-  box-shadow: var(--shadow-panel);
 }
 
 .project-picker-new {
@@ -356,7 +345,8 @@ input:focus-visible {
   font-weight: 600;
 }
 
-.project-picker-new:hover:not(:disabled) {
+.project-picker-new:hover:not(:disabled),
+.project-picker-new[data-highlighted] {
   background: var(--surface-strong);
 }
 
@@ -569,12 +559,13 @@ input:focus-visible {
   gap: 4px;
 }
 
-.field-row.compact span {
+.field-row.compact > span {
   font-size: 0.72rem;
 }
 
 .field-row.compact input,
-.field-row.compact select {
+.field-row.compact select,
+.field-row.compact .select-trigger {
   min-height: 32px;
   padding: 6px 8px;
   font-size: 0.84rem;
@@ -733,7 +724,7 @@ input:focus-visible {
   font-weight: 500;
 }
 
-.checklist-filter.active {
+.checklist-filter[data-state="on"] {
   font-weight: 600;
 }
 
@@ -1066,8 +1057,8 @@ input:focus-visible {
   color: var(--ink);
 }
 
-.tab-button.active,
-.checklist-filter.active {
+.tab-button[data-state="active"],
+.checklist-filter[data-state="on"] {
   color: var(--ink);
   border-bottom-color: var(--primary);
 }
@@ -1085,16 +1076,23 @@ input:focus-visible {
   cursor: pointer;
   font-size: 0.8rem;
   font-weight: 550;
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    color 150ms ease-out;
 }
 
 .view-option-button:hover:not(:disabled) {
-  background: var(--surface);
+  border-color: var(--line);
+  background: transparent;
   color: var(--ink);
 }
 
-/* Active view toggle: petrol-soft square, borderless at rest. */
-.view-option-button.active,
-.view-option-button[aria-pressed="true"] {
+/* Shadcn-style toggle state: active state wins over hover, and off-hover uses
+   a hairline instead of the old grey fill so a click from on -> off visibly
+   changes immediately while the pointer is still over the control. */
+.view-option-button[data-state="on"],
+.view-option-button[data-state="on"]:hover:not(:disabled) {
   border-color: transparent;
   background: var(--primary-soft);
   color: var(--primary-strong);
@@ -1122,7 +1120,11 @@ input:focus-visible {
   color: var(--subtle);
 }
 
-.unit-select select {
+.select-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   border: 0;
   background: transparent;
   color: var(--ink);
@@ -1130,13 +1132,154 @@ input:focus-visible {
   cursor: pointer;
 }
 
-.unit-select:has(select:disabled) {
+.precision-select-trigger {
+  min-width: 54px;
+  padding: 0;
+}
+
+.unit-select:has(.select-trigger:disabled) {
   cursor: not-allowed;
   opacity: 0.45;
 }
 
-.unit-select select:disabled {
+.select-trigger:disabled {
   cursor: not-allowed;
+}
+
+.select-content,
+.dropdown-menu-content {
+  z-index: 30;
+  min-width: var(--radix-select-trigger-width);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  box-shadow: var(--shadow-panel);
+}
+
+.select-viewport {
+  padding: 4px;
+}
+
+.select-label {
+  padding: 5px 8px;
+  color: var(--subtle);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.select-item,
+.dropdown-menu-item {
+  position: relative;
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 28px 0 8px;
+  border-radius: var(--radius-fill);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 0.82rem;
+  outline: none;
+  user-select: none;
+}
+
+.select-item[data-highlighted],
+.dropdown-menu-item[data-highlighted] {
+  background: var(--surface);
+}
+
+.select-item[data-disabled],
+.dropdown-menu-item[data-disabled] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.select-item-indicator {
+  position: absolute;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--primary-strong);
+}
+
+.unit-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 550;
+}
+
+.unit-switch-control {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  min-height: 26px;
+  min-width: 118px;
+  padding: 0 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+}
+
+.unit-switch-control:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.unit-switch-control:disabled {
+  cursor: not-allowed;
+}
+
+.unit-switch:has(.unit-switch-control:disabled) {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.unit-switch-option {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 7px;
+  color: var(--muted);
+  transition: color 150ms ease-out;
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc(50% - 2px);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  box-shadow: var(--shadow-tight);
+  transform: translateX(0);
+  transition:
+    background-color 150ms ease-out,
+    transform 150ms ease-out;
+}
+
+.unit-switch-control[data-state="unchecked"] .unit-switch-option:first-child,
+.unit-switch-control[data-state="checked"] .unit-switch-option:nth-of-type(2) {
+  color: var(--primary-strong);
+}
+
+.unit-switch-control[data-state="checked"] .switch-thumb {
+  background: var(--primary-soft);
+  transform: translateX(100%);
 }
 
 .drawing-surface,
@@ -1299,7 +1442,7 @@ input:focus-visible {
   box-shadow: var(--shadow-tight);
 }
 
-.surface-label span {
+.surface-label > span {
   color: var(--muted);
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
@@ -1310,8 +1453,8 @@ input:focus-visible {
 }
 
 /* The elevation chip doubles as a wall switcher: compact chevron buttons
-   flanking a borderless <select> of every wall. Buttons borderless with the
-   hover-fog treatment; the select borderless like .unit-select. */
+   flanking a Radix Select of every wall. Buttons stay borderless with the
+   hover-fog treatment; the select is borderless like .unit-select. */
 .surface-label-nav {
   display: flex;
   align-items: center;
@@ -1339,6 +1482,8 @@ input:focus-visible {
 
 .surface-label-select {
   max-width: 180px;
+  min-height: 24px;
+  padding: 0 4px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -1526,14 +1671,15 @@ input:focus-visible {
   gap: 6px;
 }
 
-.field-row span {
+.field-row > span {
   color: var(--muted);
   font-size: 0.75rem;
   font-weight: 600;
 }
 
 .field-row input,
-.field-row select {
+.field-row select,
+.field-row .select-trigger {
   width: 100%;
   min-height: 38px;
   padding: 8px 10px;
@@ -1553,7 +1699,8 @@ input:focus-visible {
 }
 
 .field-row input:hover,
-.field-row select:hover {
+.field-row select:hover,
+.field-row .select-trigger:hover {
   border-color: var(--subtle);
 }
 

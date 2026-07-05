@@ -8,6 +8,8 @@ import { formatLength } from "../../domain/units/length";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { UncertaintyIndicator } from "./UncertaintyIndicator";
+import { Button } from "./ui/button";
+import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 
 // MIME key for the HTML5 drag payload carrying an artworkId — a later task
 // wires the elevation view's drop target to read this same constant, so the
@@ -176,26 +178,33 @@ export function ChecklistPanel({
       />
 
       {rows.length > 0 ? (
-        <div className="checklist-filters" role="group" aria-label="Filter checklist">
+        <ToggleGroup
+          aria-label="Filter checklist"
+          className="checklist-filters"
+          type="single"
+          value={filter}
+          onValueChange={(value) => {
+            if (value === "all" || value === "placed" || value === "unplaced") {
+              setFilter(value);
+            }
+          }}
+        >
           <FilterTab
-            active={filter === "all"}
             count={rows.length}
             label="All"
-            onClick={() => setFilter("all")}
+            value="all"
           />
           <FilterTab
-            active={filter === "placed"}
             count={placedCount}
             label="Placed"
-            onClick={() => setFilter("placed")}
+            value="placed"
           />
           <FilterTab
-            active={filter === "unplaced"}
             count={unplacedCount}
             label="Unplaced"
-            onClick={() => setFilter("unplaced")}
+            value="unplaced"
           />
-        </div>
+        </ToggleGroup>
       ) : null}
 
       {rows.length === 0 ? (
@@ -233,38 +242,33 @@ export function ChecklistPanel({
         </ul>
       )}
 
-      <button
+      <Button
         className="checklist-add"
-        type="button"
         onClick={() => fileInputRef.current?.click()}
       >
         <ImageSquareIcon aria-hidden="true" size={16} />
         <span>Add Artwork</span>
-      </button>
+      </Button>
     </section>
   );
 }
 
 function FilterTab({
-  active,
   count,
   label,
-  onClick
+  value
 }: {
-  active: boolean;
   count: number;
   label: string;
-  onClick: () => void;
+  value: ChecklistFilter;
 }) {
   return (
-    <button
-      aria-pressed={active}
-      className={active ? "checklist-filter active" : "checklist-filter"}
-      type="button"
-      onClick={onClick}
+    <ToggleGroupItem
+      className="checklist-filter"
+      value={value}
     >
       {label} · {count}
-    </button>
+    </ToggleGroupItem>
   );
 }
 
@@ -363,18 +367,17 @@ function ChecklistRow({
           </span>
         ) : null}
       </div>
-      <button
+      <Button
         aria-label="Remove from checklist"
         className="icon-button compact checklist-remove"
         title="Remove from checklist"
-        type="button"
         onClick={(event) => {
           event.stopPropagation();
           onRemove();
         }}
       >
         <XIcon aria-hidden="true" size={14} />
-      </button>
+      </Button>
     </li>
   );
 }

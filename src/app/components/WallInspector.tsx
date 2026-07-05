@@ -11,6 +11,7 @@ import {
   unitSystemFromDisplayUnit
 } from "../../domain/units/unitSystem";
 import { LengthField } from "./LengthField";
+import { Button } from "./ui/button";
 
 export type WallDimensionLink = {
   pairedWallName: string;
@@ -90,22 +91,21 @@ export function WallInspector({
       <div className="opening-add-row">
         <span>Add to this wall</span>
         <div className="opening-add-buttons">
-          <button className="inspector-action" type="button" onClick={() => onAddOpening("door")}>
+          <Button className="inspector-action" onClick={() => onAddOpening("door")}>
             <DoorIcon aria-hidden="true" size={15} />
             Door
-          </button>
-          <button className="inspector-action" type="button" onClick={() => onAddOpening("window")}>
+          </Button>
+          <Button className="inspector-action" onClick={() => onAddOpening("window")}>
             <SquareIcon aria-hidden="true" size={15} />
             Window
-          </button>
-          <button
+          </Button>
+          <Button
             className="inspector-action"
-            type="button"
             onClick={() => onAddOpening("blocked-zone")}
           >
             <RectangleDashedIcon aria-hidden="true" size={15} />
             Blocked zone
-          </button>
+          </Button>
         </div>
       </div>
 

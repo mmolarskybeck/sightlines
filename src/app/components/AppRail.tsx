@@ -5,6 +5,8 @@ import { ListChecksIcon } from "@phosphor-icons/react/dist/csr/ListChecks";
 import { QuestionIcon } from "@phosphor-icons/react/dist/csr/Question";
 import { SlidersHorizontalIcon } from "@phosphor-icons/react/dist/csr/SlidersHorizontal";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
+import { Button } from "./ui/button";
+import { Toggle } from "./ui/toggle";
 
 // The full-height icon rail — the layout's left anchor, spanning beside both
 // the topbar and the workspace. Its top 80×80 cell is the brand cell (the "S"
@@ -113,17 +115,29 @@ function RailButton({
   onClick?: () => void;
 }) {
   return (
-    <button
-      aria-label={label}
-      aria-pressed={pressed}
-      className={active ? "rail-button active" : "rail-button"}
-      disabled={disabled}
-      title={label}
-      type="button"
-      onClick={onClick}
-    >
-      {icon}
-      {children}
-    </button>
+    pressed !== undefined ? (
+      <Toggle
+        aria-label={label}
+        className="rail-button"
+        disabled={disabled}
+        pressed={pressed}
+        title={label}
+        onPressedChange={() => onClick?.()}
+      >
+        {icon}
+        {children}
+      </Toggle>
+    ) : (
+      <Button
+        aria-label={label}
+        className={active ? "rail-button active" : "rail-button"}
+        disabled={disabled}
+        title={label}
+        onClick={onClick}
+      >
+        {icon}
+        {children}
+      </Button>
+    )
   );
 }

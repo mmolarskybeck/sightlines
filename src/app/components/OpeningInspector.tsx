@@ -8,6 +8,7 @@ import {
   unitSystemFromDisplayUnit
 } from "../../domain/units/unitSystem";
 import { LengthField } from "./LengthField";
+import { Button } from "./ui/button";
 
 // Numeric position/size fields for a selected door/window/blocked zone,
 // mirroring WallInspector's commit-on-blur/Enter pattern exactly — the
@@ -85,10 +86,10 @@ export function OpeningInspector({
       </div>
 
       <div className="inspector-placement">
-        <button className="inspector-action" type="button" onClick={onDelete}>
+        <Button className="inspector-action" onClick={onDelete}>
           <TrashIcon aria-hidden="true" size={15} />
           Delete {getOpeningKindLabel(opening.kind).toLowerCase()}
-        </button>
+        </Button>
       </div>
     </form>
   );

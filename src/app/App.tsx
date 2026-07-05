@@ -37,6 +37,17 @@ import { PlanView } from "./components/PlanView";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { RoomsPanel } from "./components/RoomsPanel";
 import { WallInspector, type WallDimensionLink } from "./components/WallInspector";
+import { Button } from "./components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "./components/ui/select";
+import { Switch } from "./components/ui/switch";
+import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { Toggle } from "./components/ui/toggle";
 import {
   useStoragePersistence,
   type StoragePersistenceState
@@ -272,65 +283,65 @@ export function App() {
           </div>
         </div>
 
-        <div className="view-tabs topbar-center" role="tablist" aria-label="Workspace view">
-          <TabButton
-            active={viewMode === "plan"}
-            icon={<MapTrifoldIcon aria-hidden="true" size={16} />}
-            label="Plan"
-            onClick={() => setViewMode("plan")}
-          />
-          <TabButton
-            active={viewMode === "elevation"}
-            icon={<RulerIcon aria-hidden="true" size={16} />}
-            label="Elevation"
-            onClick={() => setViewMode("elevation")}
-          />
-        </div>
+        <Tabs
+          className="view-tabs topbar-center"
+          value={viewMode}
+          onValueChange={(value) => {
+            if (value === "plan" || value === "elevation") setViewMode(value);
+          }}
+        >
+          <TabsList aria-label="Workspace view" className="view-tabs">
+            <TabsTrigger className="tab-button" value="plan">
+              <MapTrifoldIcon aria-hidden="true" size={16} />
+              <span>Plan</span>
+            </TabsTrigger>
+            <TabsTrigger className="tab-button" value="elevation">
+              <RulerIcon aria-hidden="true" size={16} />
+              <span>Elevation</span>
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         <div className="topbar-right" aria-label="Project actions">
           <StatusBadge state={saveState} />
           <div className="toolbar-group">
-            <button
+            <Button
               className="icon-button"
-              type="button"
               title="Undo"
               aria-label="Undo"
               disabled={undoStack.length === 0}
               onClick={() => void undo()}
             >
               <ArrowCounterClockwiseIcon aria-hidden="true" size={18} />
-            </button>
-            <button
+            </Button>
+            <Button
               className="icon-button"
-              type="button"
               title="Redo"
               aria-label="Redo"
               disabled={redoStack.length === 0}
               onClick={() => void redo()}
             >
               <ArrowClockwiseIcon aria-hidden="true" size={18} />
-            </button>
+            </Button>
           </div>
           <div className="toolbar-divider" aria-hidden="true" />
-          <button
+          <Button
             className="icon-button"
-            type="button"
             title="Import project JSON"
             aria-label="Import project JSON"
             onClick={() => fileInputRef.current?.click()}
           >
             <UploadSimpleIcon aria-hidden="true" size={18} />
-          </button>
-          <button
+          </Button>
+          <Button
             className="topbar-button"
-            type="button"
             title="Export project JSON"
             aria-label="Export project JSON"
             onClick={() => downloadProject(project)}
           >
             <DownloadSimpleIcon aria-hidden="true" size={18} />
             <span>Export</span>
-          </button>
+          </Button>
           <input
             ref={fileInputRef}
             className="visually-hidden"
@@ -623,31 +634,6 @@ function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
-function TabButton({
-  active,
-  icon,
-  label,
-  onClick
-}: {
-  active: boolean;
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      className={active ? "tab-button active" : "tab-button"}
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-    >
-      {icon}
-      <span>{label}</span>
-    </button>
-  );
-}
-
 function ViewOptionButton({
   active,
   disabled,
@@ -664,18 +650,17 @@ function ViewOptionButton({
   onClick: () => void;
 }) {
   return (
-    <button
-      aria-pressed={active}
+    <Toggle
+      aria-label={label}
       className="view-option-button"
-      data-state={active ? "on" : "off"}
       disabled={disabled}
-      type="button"
+      pressed={active}
       title={title}
-      onClick={onClick}
+      onPressedChange={onClick}
     >
       {icon}
       <span>{label}</span>
-    </button>
+    </Toggle>
   );
 }
 
@@ -701,25 +686,19 @@ function UnitSystemToggle({
       <span className="unit-select-label" id="unit-system-label">
         Units
       </span>
-      <button
-        aria-checked={system === "metric"}
+      <Switch
         aria-labelledby="unit-system-label unit-system-value"
+        checked={system === "metric"}
         className="unit-switch-control"
-        data-state={system === "metric" ? "checked" : "unchecked"}
         disabled={disabled}
-        role="switch"
-        type="button"
-        onClick={() => select(system === "metric" ? "imperial" : "metric")}
+        onCheckedChange={(checked) => select(checked ? "metric" : "imperial")}
       >
         <span className="unit-switch-option">Imperial</span>
-        <span className="unit-switch-track" aria-hidden="true">
-          <span className="unit-switch-thumb" />
-        </span>
         <span className="unit-switch-option">Metric</span>
         <span className="visually-hidden" id="unit-system-value">
           {system === "metric" ? "Metric" : "Imperial"}
         </span>
-      </button>
+      </Switch>
     </div>
   );
 }
@@ -746,23 +725,28 @@ function PrecisionSelect({
   const options = getGridPrecisionFloorOptionsMm(unit);
 
   return (
-    <label className="unit-select">
+    <div className="unit-select">
       <span className="unit-select-label">Precision</span>
-      <select
+      <Select
         disabled={disabled}
         value={floorMm === null ? "auto" : String(floorMm)}
-        onChange={(event) =>
-          onChange(event.target.value === "auto" ? null : Number(event.target.value))
+        onValueChange={(value) =>
+          onChange(value === "auto" ? null : Number(value))
         }
       >
-        <option value="auto">Auto</option>
+        <SelectTrigger className="precision-select-trigger" aria-label="Grid precision">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="auto">Auto</SelectItem>
         {options.map((optionMm) => (
-          <option key={optionMm} value={optionMm}>
+          <SelectItem key={optionMm} value={String(optionMm)}>
             {formatLength(optionMm, { unit: labelUnit })}
-          </option>
+          </SelectItem>
         ))}
-      </select>
-    </label>
+        </SelectContent>
+      </Select>
+    </div>
   );
 }
 

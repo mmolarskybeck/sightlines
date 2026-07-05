@@ -36,6 +36,16 @@ import { ElevationArtwork } from "./ElevationArtwork";
 import { ElevationOpening } from "./ElevationOpening";
 import { isArtworkOutOfWallBounds, wallLocalYToSvgY } from "./elevationArtworkGeometry";
 import { GridOverlay } from "./GridOverlay";
+import { Button } from "./ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue
+} from "./ui/select";
 
 // Re-exported for backward compatibility — this used to be defined here,
 // and nothing outside this file depends on the distinction between "defined
@@ -371,7 +381,7 @@ export function ElevationView({
   const activeGuides = moveDrag?.activeGuides ?? dropGhost?.activeGuides ?? [];
 
   // Wall switcher wiring for the chip. Prev/next cycle through every wall in
-  // room order (wrapping), and the <select> lists them all — grouped by room
+  // room order (wrapping), and the Select lists them all — grouped by room
   // once more than one room exists.
   const currentWallIndex = walls.findIndex((wall) => wall.id === wallId);
   const canSwitchWalls = walls.length > 0 && currentWallIndex >= 0 && Boolean(onSelectWall);
@@ -394,46 +404,48 @@ export function ElevationView({
       <div className="surface-label">
         {canSwitchWalls ? (
           <div className="surface-label-nav">
-            <button
+            <Button
               aria-label="Previous wall"
               className="surface-label-switch"
-              type="button"
               onClick={() => stepWall(-1)}
             >
               <CaretLeftIcon aria-hidden="true" size={16} />
-            </button>
-            <select
-              aria-label="Select wall"
-              className="surface-label-select"
+            </Button>
+            <Select
               value={wallId}
-              onChange={(event) => onSelectWall?.(event.target.value)}
+              onValueChange={(value) => onSelectWall?.(value)}
             >
-              {roomNames.length > 1
-                ? roomNames.map((roomName) => (
-                    <optgroup key={roomName} label={roomName}>
+              <SelectTrigger aria-label="Select wall" className="surface-label-select">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {roomNames.length > 1
+                  ? roomNames.map((roomName) => (
+                    <SelectGroup key={roomName}>
+                      <SelectLabel>{roomName}</SelectLabel>
                       {walls
                         .filter((wall) => wall.roomName === roomName)
                         .map((wall) => (
-                          <option key={wall.id} value={wall.id}>
+                          <SelectItem key={wall.id} value={wall.id}>
                             {wall.name}
-                          </option>
+                          </SelectItem>
                         ))}
-                    </optgroup>
+                    </SelectGroup>
                   ))
-                : walls.map((wall) => (
-                    <option key={wall.id} value={wall.id}>
+                  : walls.map((wall) => (
+                    <SelectItem key={wall.id} value={wall.id}>
                       {wall.name}
-                    </option>
+                    </SelectItem>
                   ))}
-            </select>
-            <button
+              </SelectContent>
+            </Select>
+            <Button
               aria-label="Next wall"
               className="surface-label-switch"
-              type="button"
               onClick={() => stepWall(1)}
             >
               <CaretRightIcon aria-hidden="true" size={16} />
-            </button>
+            </Button>
           </div>
         ) : (
           <strong>{wallName}</strong>

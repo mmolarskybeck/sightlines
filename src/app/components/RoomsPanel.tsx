@@ -7,6 +7,7 @@ import type { Project } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
 import { RoomDimensionFields } from "./RoomDimensionFields";
+import { Button } from "./ui/button";
 
 // The left workspace pane when the rail's Rooms & Walls selector is active —
 // the room/wall inventory that used to live atop the right panel. Same idioms
@@ -40,15 +41,14 @@ export function RoomsPanel({
         <h2>Rooms</h2>
         <div className="panel-heading-actions">
           <span>{pluralize(project.floor.rooms.length, "room")}</span>
-          <button
+          <Button
             aria-label="Add rectangular room"
             className="icon-button compact"
             title="Add rectangular room"
-            type="button"
             onClick={onAddRectangleRoom}
           >
             <PlusIcon aria-hidden="true" size={16} />
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -83,15 +83,14 @@ export function RoomsPanel({
               ) : null}
               <div className="wall-list">
                 {roomWalls.map((wall) => (
-                  <button
+                  <Button
                     className={wall.id === selectedWallId ? "wall-row active" : "wall-row"}
                     key={wall.id}
-                    type="button"
                     onClick={() => onSelectWall(wall.id)}
                   >
                     <span>{wall.name}</span>
                     <strong>{formatLength(wall.lengthMm, { unit: wallUnit })}</strong>
-                  </button>
+                  </Button>
                 ))}
               </div>
             </section>

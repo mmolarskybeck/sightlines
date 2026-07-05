@@ -1,4 +1,5 @@
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
+import { Button } from "./ui/button";
 
 // The Plan tab's own empty state, mirroring ElevationEmptyState's idiom: a
 // decorative aria-hidden glyph (a stroked room rectangle with two resize
@@ -21,10 +22,10 @@ export function PlanEmptyState({ onAddRoom }: { onAddRoom: () => void }) {
           <rect className="handle" height="8" width="8" x="98" y="64" />
         </svg>
         <p className="empty-copy">Draw your first room</p>
-        <button className="inspector-action" type="button" onClick={onAddRoom}>
+        <Button className="inspector-action" onClick={onAddRoom}>
           <PlusIcon aria-hidden="true" size={15} />
           Add a room
-        </button>
+        </Button>
         <p className="empty-copy">
           …or drop images into the checklist and place them later.
         </p>
