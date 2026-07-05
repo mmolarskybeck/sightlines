@@ -99,6 +99,14 @@ Use the primitive variants first. Add bespoke CSS only when the component is can
 - Use petrol-filled primary buttons sparingly. `Add Artwork` is currently the main solid CTA in the workspace.
 - Every interactive control needs hover, pressed/active, disabled, and focus-visible states.
 
+## Canvas Grid
+
+The plan and elevation grids use a refined two-tier line hierarchy with no dots. Minor gridlines are pale 1px hairlines (`--grid-minor: oklch(0.78 0.008 240 / 0.42)`); major gridlines are heavier 1.3px strokes (`--grid-major: oklch(0.62 0.01 240 / 0.5)`). The grid always reads quieter than walls and objects, serving as an alignment reference without competing for attention.
+
+Plan view grids fill the entire visible workspace to maintain coordinate continuity edge-to-edge. Elevation view grids are clipped to the wall rectangle, with y=0 anchored at the floor — the wall reads as a figure against bare canvas, not a viewport into an infinite space.
+
+Grid intervals are semantic minor/major pairs (per §5.5 of plan.md): each major is a round human value and a 4–12× multiple of its minor. Selection is zoom-adaptive within the pair ladder, automatically stepping to coarser intervals as you zoom out and finer intervals as you zoom in. Per-view density targets keep the grid readable without overwhelming: plan view reads in whole feet/meters at default zoom (1' / 5' imperial, 20cm / 1m metric); elevation reads finer for hang-height work (6" / 2' imperial, 10cm / 1m metric).
+
 ## Custom Surfaces
 
 Some parts should remain custom because they are domain tools, not generic shadcn components:

@@ -59,12 +59,12 @@ Async even though it's local. This is what lets Cloud (if it ever happens) be a 
 resolveSnap(
   proposed: Point,
   candidates: SnapTarget[],
-  opts: SnapOptions & { previousSnapTargetId?: string }
-): { point: Point, activeGuides: Guide[], snapTargetId?: string }
+  opts: SnapOptions & { previousSnapTargetIds?: { x?: string; y?: string } }
+): { point: Point, activeGuides: Guide[], snapTargetIds: { x?: string; y?: string } }
 
 validatePlacement(position: Rect, obstacles: Obstacle[]): { ok: true } | { ok: false, reasons: string[] }
 ```
-No canvas access inside either. Operates in wall-local real-world units (x = distance from wall start, y = height from floor — center-anchored, not top-left). Pixel-to-world threshold conversion happens at the call site using current zoom. Explicit priority order when multiple targets are in range (centerline > neighbor-center > neighbor-edge > grid) with a stable tiebreak. Grid targets come from the shared precision system (§5.5), not from ad hoc renderer math. Hysteresis on break-free so it feels magnetic, not jittery — since hysteresis is inherently stateful (harder to break free of a snap than to enter one), the *caller* tracks the previous target and passes it in as `previousSnapTargetId`; `resolveSnap` stays pure and testable rather than quietly accumulating state that would otherwise leak canvas/view concerns back into the snapping layer.
+No canvas access inside either. Operates in wall-local real-world units (x = distance from wall start, y = height from floor — center-anchored, not top-left). Pixel-to-world threshold conversion happens at the call site using current zoom. **Per-axis resolution:** x and y resolve independently. Each axis pools targets with that axis or "both", filters by threshold, sorts by priority → distance → id, and applies its own winner. This allows, for example, an artwork to ride the eyeline (y centerline snap) while simultaneously snapping its x to the grid. Explicit priority order when multiple targets are in range: floor (doors only, rank 0) > centerline (rank 1) > floor (other kinds, rank 1.5) > neighbor-center (rank 2) > neighbor-edge (rank 3) > grid (rank 4) with a stable tiebreak. Grid targets come from the shared precision system (§5.5), not from ad hoc renderer math. Hysteresis on break-free so it feels magnetic, not jittery — since hysteresis is inherently stateful (harder to break free of a snap than to enter one), the *caller* tracks the previous targets per axis and passes them in as `previousSnapTargetIds: { x?, y? }`; `resolveSnap` stays pure and testable rather than quietly accumulating state that would otherwise leak canvas/view concerns back into the snapping layer.
 
 **Every persisted document is self-describing and versioned — there's no server to migrate it for you.**
 A cloud app can run a migration script once, server-side, and every user is upgraded. A local-first app has files sitting on people's disks indefinitely, opened by whatever app version happens to load them. Every `Project`, `Artwork`, and `.sightlines` package carries a `schemaVersion`, and the app ships a small chain of migration functions (`v1→v2`, `v2→v3`, ...) run on load. This is what makes "add new fields later without breaking old files" (see §4) actually safe rather than aspirational.
@@ -320,29 +320,30 @@ Build as a small, dedicated, heavily-tested module (`units/length.ts`). The conv
 
 The core principle: **one precision system, not three.** The visual grid, grid snap targets, keyboard nudge increments, and unit-format rounding preference should be different surfaces over the same project precision model. If the user is working to the nearest `1/8"` or nearest `5mm`, the finest zoomed-in grid should bottom out there, grid snap candidates should not offer a finer contradictory interval, and formatting should not imply a different precision than the editing tools use.
 
-The current grid implementation is intentionally view-only — the right first slice, but only the easy part. The more valuable half is to turn the active grid interval into actual `resolveSnap()` candidates, still lowest priority after centerline, neighbor-center, and neighbor-edge. That keeps snapping pure: the renderer/view computes the currently relevant grid targets from zoom, viewport, active coordinate space, and user precision settings, then passes them into `resolveSnap()` like any other target.
+The active grid interval now generates actual `resolveSnap()` candidates — the lowest-priority snap tier. Snapping stays pure: the renderer/view computes the currently relevant grid targets from zoom, viewport, active coordinate space, and user precision settings, then passes them into `resolveSnap()` like any other target.
 
-Grid intervals must be **unit-aware lookup tables**, not one fixed millimeter spacing with different labels:
+Grid intervals must be **semantic minor/major pairs**, not a flat sequence with inconsistent major-to-minor ratios. Each unit family carries a curated ladder of (minor, major) pairs where every major is a round human value and an exact 4–12× multiple of its minor:
 
-```ts
-const metricGridIntervals = [
-  "1cm", "2cm", "5cm", "10cm", "20cm", "50cm", "1m", "2m"
-]
+**Imperial:** (½", 6") (1", 6") (3", 1') (6", 2') (1', 5') (2', 10') (5', 20')
+**Metric:** (5mm, 5cm) (1cm, 10cm) (2cm, 20cm) (5cm, 50cm) (10cm, 1m) (20cm, 1m) (50cm, 5m) (1m, 5m)
 
-const imperialGridIntervals = [
-  '1"', '2"', '3"', '6"', "1'", "2'", "3'", "5'", "10'"
-]
-```
+This replaces the old heuristic where minor was the smallest table entry ≥ 32px and major was picked by magnitude thresholds — which at typical plan zoom produced sparse 15ft majors with near-invisible minors.
 
-Metric follows the normal 1-2-5 sequence. Imperial needs its own table because feet/inches are how people think in the gallery; `10cm` converted to `3.94"` is not a useful imperial grid, and `6"` converted to `15.24cm` is not a useful metric grid. Switching display unit should switch the interval family, not just relabel the same grid.
+The grid should be **zoom-adaptive within the pair ladder**. As users zoom out, step upward to a coarser pair; as they zoom in, step downward until hitting the user's chosen precision floor. Selection stays dynamic: find the finest pair whose minor interval is ≥ a target pixel size on screen (shared default 8px, with per-view overrides: PlanView 12px, ElevationView 7px). The choice governs both rendering tiers and snap candidates. Draw two visual tiers at each level: a subtle minor grid at the active pair's base interval, and a stronger major grid at the pair's major (always ≥ 4× and ≤ 12× the minor). Generate or draw only lines that intersect the visible viewport; this matters once rooms and floors get large.
 
-The grid should be **zoom-adaptive**. As users zoom out, step upward through the relevant interval table so a 30-foot wall does not render thousands of 1-inch lines; as they zoom in, step downward until hitting the user's chosen precision floor. Draw two visual tiers at each level: a subtle minor grid at the active base interval, and a stronger major grid at a readable multiple such as 5x, 10x, or the next natural landmark (`1'`, `1m`). Generate or draw only lines that intersect the visible viewport; this matters once rooms and floors get large.
+**Per-view density targeting:** Plan view at default zoom reads whole units/meters (1' + 5' imperial, 20cm + 1m metric); elevation reads finer because hang heights are an inches/centimeters activity (6" + 2' imperial, 10cm + 1m metric). The user's precision-floor preference still clamps the minor interval; snap targets and the visual grid still read the same interval (one precision system preserved).
 
 Plan and elevation grids are separate grids in separate coordinate spaces:
 - **Plan:** floor/room XY.
 - **Elevation:** wall-local horizontal distance by height from floor.
 
 Anchor the grid to geometry, not the screen. In elevation, `x=0` should be the wall start and `y=0` should be floor level. In the overall floorplan, the grid is a single continuous floor-reference grid spanning every visible room, including inactive rooms, so the whole venue reads against one shared coordinate field. When focused room-local editing and rotated rooms are supported via `RoomPlacement.rotationDeg`, a room-local grid can rotate with the active room for precision edits; that should be an intentional focused mode, not the default overall floorplan reference.
+
+**Grid rendering: lines-only drafting style.** Grid is rendered as two-tier line hierarchy with no dots (a dot lattice colliding with major lines reads as awkward, not refined). Minor lines are pale 1px hairlines (`oklch(0.78 0.008 240 / 0.42)`), major lines are heavier 1.3px (`oklch(0.62 0.01 240 / 0.5)`). Grid always reads quieter than walls, keeping it an alignment reference, not a visual distraction.
+
+**Plan view grid fills the entire visible workspace,** not just the wall layout rectangle. The SVG viewBox is letterboxed inside the canvas (preserveAspectRatio meet), so the grid extends to the full container extent in world coordinates (containerSize / pixelsPerMm, centered on the viewBox center), keeping the coordinate space continuous edge-to-edge.
+
+**Elevation view grid is deliberately clipped to the wall rectangle** (0,0 → wallLength × wallHeight), floor-anchored with `y=0` at the bottom. Bare canvas around the wall figure is intentional — the wall reads as the figure, not a cropped view onto an infinite space.
 
 `Show grid` and `Snap to grid` should be independent local app preferences. Sometimes a curator wants the visual reference without magnetic behavior, especially during rough composition. These preferences belong with view/workspace settings rather than `Project` or `.sightlines` data, so importing a shared file does not import someone else's working-style preferences.
 
