@@ -244,6 +244,7 @@ export function ChecklistPanel({
 
       <Button
         className="checklist-add"
+        variant="primary"
         onClick={() => fileInputRef.current?.click()}
       >
         <ImageSquareIcon aria-hidden="true" size={16} />
@@ -265,6 +266,8 @@ function FilterTab({
   return (
     <ToggleGroupItem
       className="checklist-filter"
+      size="sm"
+      variant="tab"
       value={value}
     >
       {label} · {count}
@@ -370,7 +373,9 @@ function ChecklistRow({
       <Button
         aria-label="Remove from checklist"
         className="icon-button compact checklist-remove"
+        size="icon-sm"
         title="Remove from checklist"
+        variant="outline"
         onClick={(event) => {
           event.stopPropagation();
           onRemove();

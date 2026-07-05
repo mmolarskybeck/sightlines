@@ -91,16 +91,25 @@ export function WallInspector({
       <div className="opening-add-row">
         <span>Add to this wall</span>
         <div className="opening-add-buttons">
-          <Button className="inspector-action" onClick={() => onAddOpening("door")}>
+          <Button
+            className="inspector-action"
+            variant="inspector"
+            onClick={() => onAddOpening("door")}
+          >
             <DoorIcon aria-hidden="true" size={15} />
             Door
           </Button>
-          <Button className="inspector-action" onClick={() => onAddOpening("window")}>
+          <Button
+            className="inspector-action"
+            variant="inspector"
+            onClick={() => onAddOpening("window")}
+          >
             <SquareIcon aria-hidden="true" size={15} />
             Window
           </Button>
           <Button
             className="inspector-action"
+            variant="inspector"
             onClick={() => onAddOpening("blocked-zone")}
           >
             <RectangleDashedIcon aria-hidden="true" size={15} />

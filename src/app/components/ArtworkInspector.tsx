@@ -99,6 +99,7 @@ export function ArtworkInspector({
         <div className="inspector-placement">
           <Button
             className="inspector-action"
+            variant="inspector"
             onClick={onRemovePlacement}
           >
             <LinkBreakIcon aria-hidden="true" size={15} />

@@ -310,6 +310,8 @@ export function App() {
               title="Undo"
               aria-label="Undo"
               disabled={undoStack.length === 0}
+              size="icon"
+              variant="ghost"
               onClick={() => void undo()}
             >
               <ArrowCounterClockwiseIcon aria-hidden="true" size={18} />
@@ -319,6 +321,8 @@ export function App() {
               title="Redo"
               aria-label="Redo"
               disabled={redoStack.length === 0}
+              size="icon"
+              variant="ghost"
               onClick={() => void redo()}
             >
               <ArrowClockwiseIcon aria-hidden="true" size={18} />
@@ -329,6 +333,8 @@ export function App() {
             className="icon-button"
             title="Import project JSON"
             aria-label="Import project JSON"
+            size="icon"
+            variant="ghost"
             onClick={() => fileInputRef.current?.click()}
           >
             <UploadSimpleIcon aria-hidden="true" size={18} />
@@ -337,6 +343,8 @@ export function App() {
             className="topbar-button"
             title="Export project JSON"
             aria-label="Export project JSON"
+            size="default"
+            variant="outline"
             onClick={() => downloadProject(project)}
           >
             <DownloadSimpleIcon aria-hidden="true" size={18} />
@@ -656,6 +664,7 @@ function ViewOptionButton({
       disabled={disabled}
       pressed={active}
       title={title}
+      variant="default"
       onPressedChange={onClick}
     >
       {icon}

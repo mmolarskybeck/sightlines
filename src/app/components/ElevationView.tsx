@@ -407,6 +407,8 @@ export function ElevationView({
             <Button
               aria-label="Previous wall"
               className="surface-label-switch"
+              size="icon-sm"
+              variant="ghost"
               onClick={() => stepWall(-1)}
             >
               <CaretLeftIcon aria-hidden="true" size={16} />
@@ -442,6 +444,8 @@ export function ElevationView({
             <Button
               aria-label="Next wall"
               className="surface-label-switch"
+              size="icon-sm"
+              variant="ghost"
               onClick={() => stepWall(1)}
             >
               <CaretRightIcon aria-hidden="true" size={16} />

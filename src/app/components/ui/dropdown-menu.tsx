@@ -13,7 +13,10 @@ export const DropdownMenuContent = React.forwardRef<
   <DropdownMenuPrimitive.Portal>
     <DropdownMenuPrimitive.Content
       ref={ref}
-      className={cn("dropdown-menu-content", className)}
+      className={cn(
+        "dropdown-menu-content z-50 min-w-40 overflow-hidden rounded-sm border border-border bg-popover p-1 text-popover-foreground shadow-[var(--shadow-panel)] outline-none data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1",
+        className
+      )}
       sideOffset={sideOffset}
       {...props}
     />
@@ -28,7 +31,10 @@ export const DropdownMenuItem = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DropdownMenuPrimitive.Item
     ref={ref}
-    className={cn("dropdown-menu-item", className)}
+    className={cn(
+      "dropdown-menu-item relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-lg px-2 py-1.5 text-[0.82rem] outline-none transition-colors duration-150 ease-out data-[disabled]:pointer-events-none data-[highlighted]:bg-surface data-[disabled]:opacity-45",
+      className
+    )}
     {...props}
   />
 ));

@@ -121,7 +121,9 @@ function RailButton({
         className="rail-button"
         disabled={disabled}
         pressed={pressed}
+        size="rail"
         title={label}
+        variant="rail"
         onPressedChange={() => onClick?.()}
       >
         {icon}
@@ -130,9 +132,12 @@ function RailButton({
     ) : (
       <Button
         aria-label={label}
+        data-active={active ? "true" : undefined}
         className={active ? "rail-button active" : "rail-button"}
         disabled={disabled}
+        size="rail"
         title={label}
+        variant="rail"
         onClick={onClick}
       >
         {icon}

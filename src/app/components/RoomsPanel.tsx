@@ -44,7 +44,9 @@ export function RoomsPanel({
           <Button
             aria-label="Add rectangular room"
             className="icon-button compact"
+            size="icon-sm"
             title="Add rectangular room"
+            variant="ghost"
             onClick={onAddRectangleRoom}
           >
             <PlusIcon aria-hidden="true" size={16} />
@@ -85,7 +87,9 @@ export function RoomsPanel({
                 {roomWalls.map((wall) => (
                   <Button
                     className={wall.id === selectedWallId ? "wall-row active" : "wall-row"}
+                    data-active={wall.id === selectedWallId ? "true" : undefined}
                     key={wall.id}
+                    variant="ghost"
                     onClick={() => onSelectWall(wall.id)}
                   >
                     <span>{wall.name}</span>

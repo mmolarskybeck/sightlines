@@ -86,7 +86,7 @@ export function OpeningInspector({
       </div>
 
       <div className="inspector-placement">
-        <Button className="inspector-action" onClick={onDelete}>
+        <Button className="inspector-action" variant="inspector" onClick={onDelete}>
           <TrashIcon aria-hidden="true" size={15} />
           Delete {getOpeningKindLabel(opening.kind).toLowerCase()}
         </Button>

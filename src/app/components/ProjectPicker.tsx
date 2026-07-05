@@ -86,7 +86,9 @@ export function ProjectPicker({
         <Button
           aria-label="Projects"
           className="icon-button project-switcher-trigger"
+          size="icon"
           title="Switch project"
+          variant="ghost"
         >
           <CaretDownIcon aria-hidden="true" size={18} />
         </Button>
