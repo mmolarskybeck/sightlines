@@ -129,7 +129,7 @@ describe("getArtworkSnapTargets", () => {
 
     const result = resolveSnap({ xMm: 1000, yMm: 1502 }, targets, { thresholdMm: 20 });
 
-    expect(result.snapTargetId).toBe("centerline");
+    expect(result.snapTargetIds.y).toBe("centerline");
     expect(result.point.yMm).toBe(1500);
   });
 });
@@ -153,7 +153,7 @@ describe("resolveArtworkSnap", () => {
 
     // No centerline/neighbor target is anywhere near (205, 900); with grid
     // disabled there is nothing left to snap to.
-    expect(result.snapTargetId).toBeUndefined();
+    expect(result.snapTargetIds).toEqual({});
     expect(result.point).toEqual({ xMm: 205, yMm: 900 });
   });
 
@@ -162,24 +162,120 @@ describe("resolveArtworkSnap", () => {
     // outside the 20mm threshold) so only the x-axis grid target is in play.
     const result = resolveArtworkSnap({ xMm: 205, yMm: 930 }, { ...baseArgs, snapToGrid: true });
 
-    expect(result.snapTargetId).toBe("grid-x-200");
+    expect(result.snapTargetIds).toEqual({ x: "grid-x-200" });
     expect(result.point.xMm).toBe(200);
   });
 
-  it("carries hysteresis through via previousSnapTargetId, same as resolveSnap", () => {
+  it("snaps y to the centerline and x to the grid simultaneously", () => {
+    // The user-reported elevation drag: near the eyeline in y AND near a
+    // grid line in x with Snap on — both must engage at once (centerline
+    // first on its axis, grid on the other), with one guide per axis.
+    const result = resolveArtworkSnap(
+      { xMm: 205, yMm: 1442 },
+      { ...baseArgs, snapToGrid: true }
+    );
+
+    expect(result.snapTargetIds).toEqual({ x: "grid-x-200", y: "centerline" });
+    expect(result.point).toEqual({ xMm: 200, yMm: 1450 });
+    expect(result.activeGuides).toHaveLength(2);
+  });
+
+  it("carries per-axis hysteresis through via previousSnapTargetIds, same as resolveSnap", () => {
     const result = resolveArtworkSnap(
       { xMm: 213, yMm: 930 },
       {
         ...baseArgs,
         snapToGrid: true,
         thresholdMm: 10,
-        previousSnapTargetId: "grid-x-200"
+        previousSnapTargetIds: { x: "grid-x-200" }
       }
     );
 
     // 13mm away exceeds the plain 10mm threshold but not resolveSnap's
-    // default 1.5x break-free multiplier (15mm) applied to the previously-
-    // active target.
-    expect(result.snapTargetId).toBe("grid-x-200");
+    // default 1.5x break-free multiplier (15mm) applied to the target this
+    // axis was previously snapped to.
+    expect(result.snapTargetIds.x).toBe("grid-x-200");
+  });
+
+  describe("door floor snapping", () => {
+    // A 900 x 2100 door: its bottom edge sits on the floor when its center-y
+    // is heightMm / 2 = 1050 (wall-local y=0 is the floor, y up).
+    const doorArgs = {
+      ...baseArgs,
+      movingSize: { widthMm: 900, heightMm: 2100 },
+      movingKind: "door" as const
+    };
+
+    it("snaps a door's bottom edge to the floor with a floor guide", () => {
+      const result = resolveArtworkSnap(
+        { xMm: 555, yMm: 1062 },
+        { ...doorArgs, snapToGrid: false }
+      );
+
+      expect(result.point.yMm).toBe(1050);
+      expect(result.snapTargetIds.y).toBe("floor");
+      expect(result.activeGuides).toEqual([
+        { id: "floor-y", axis: "y", positionMm: 1050, targetId: "floor" }
+      ]);
+    });
+
+    it("prefers the floor over the centerline when both are within threshold", () => {
+      // A 2800-tall door puts the floor target at y=1400, 50mm below the
+      // 1450 centerline. Proposed y=1430 is 30mm from the floor and only
+      // 20mm from the centerline — floor still wins by tier priority.
+      const result = resolveArtworkSnap(
+        { xMm: 555, yMm: 1430 },
+        {
+          ...doorArgs,
+          movingSize: { widthMm: 900, heightMm: 2800 },
+          snapToGrid: false,
+          thresholdMm: 40
+        }
+      );
+
+      expect(result.point.yMm).toBe(1400);
+      expect(result.snapTargetIds.y).toBe("floor");
+    });
+
+    it("offers no floor target for a window or an artwork with the same geometry", () => {
+      for (const movingKind of ["window", "artwork"] as const) {
+        const targets = getArtworkSnapTargets({
+          centerlineYMm: baseArgs.centerlineYMm,
+          wallLengthMm: baseArgs.wallLengthMm,
+          wallHeightMm: baseArgs.wallHeightMm,
+          gridIntervalMm: 0,
+          neighbors: [],
+          movingSize: { widthMm: 900, heightMm: 2100 },
+          movingKind
+        });
+        expect(targets.some((target) => target.kind === "floor")).toBe(false);
+
+        // And a drag near the would-be floor position does not snap in y.
+        const result = resolveArtworkSnap(
+          { xMm: 555, yMm: 1062 },
+          { ...doorArgs, movingKind, snapToGrid: false }
+        );
+        expect(result.point.yMm).toBe(1062);
+        expect(result.snapTargetIds.y).toBeUndefined();
+      }
+    });
+
+    it("keeps the floor tier active regardless of the snapToGrid preference", () => {
+      // The floor target is kind-gated (doors only), never preference-gated:
+      // snapToGrid toggles only the grid tier. Nearest grid-y lines (1000,
+      // 1100) are outside the 20mm threshold either way, so the floor is the
+      // sole y candidate in both calls.
+      const withGrid = resolveArtworkSnap(
+        { xMm: 555, yMm: 1062 },
+        { ...doorArgs, snapToGrid: true }
+      );
+      const withoutGrid = resolveArtworkSnap(
+        { xMm: 555, yMm: 1062 },
+        { ...doorArgs, snapToGrid: false }
+      );
+
+      expect(withGrid.snapTargetIds.y).toBe("floor");
+      expect(withoutGrid.snapTargetIds.y).toBe("floor");
+    });
   });
 });

@@ -22,7 +22,7 @@ import type {
   WallObjectBase
 } from "../../domain/project";
 import { resolveArtworkSnap } from "../../domain/snapping/artworkSnapTargets";
-import type { Guide } from "../../domain/snapping/resolveSnap";
+import type { Guide, SnapTargetIds } from "../../domain/snapping/resolveSnap";
 import { formatLength } from "../../domain/units/length";
 import {
   getMajorGridIntervalMm,
@@ -75,7 +75,9 @@ type MoveDragState = {
   startPointerMm: Vector2;
   startCenterMm: Vector2;
   previewCenterMm: Vector2;
-  previousSnapTargetId?: string;
+  // Per-axis hysteresis ids: x and y snap independently (centerline in y
+  // while the grid holds x), so each axis remembers its own active target.
+  previousSnapTargetIds?: SnapTargetIds;
   activeGuides: Guide[];
 };
 
@@ -87,7 +89,7 @@ type MoveDragState = {
 type DropGhostState = {
   centerMm: Vector2;
   sizeMm: { widthMm: number; heightMm: number };
-  previousSnapTargetId?: string;
+  previousSnapTargetIds?: SnapTargetIds;
   activeGuides: Guide[];
 };
 
@@ -244,9 +246,13 @@ export function ElevationView({
         gridIntervalMm: minorGridMm,
         neighbors,
         movingSize: current.sizeMm,
+        // The dragged object's kind gates the floor tier: a door drag gets a
+        // floor target (its primary snap); artworks/windows/blocked zones
+        // never do. The artwork drop-ghost/drop paths below omit this.
+        movingKind: current.kind,
         snapToGrid,
         thresholdMm: snapThresholdMm,
-        previousSnapTargetId: current.previousSnapTargetId
+        previousSnapTargetIds: current.previousSnapTargetIds
       });
 
       setMoveDrag((state) =>
@@ -254,7 +260,7 @@ export function ElevationView({
           ? {
               ...state,
               previewCenterMm: snapResult.point,
-              previousSnapTargetId: snapResult.snapTargetId,
+              previousSnapTargetIds: snapResult.snapTargetIds,
               activeGuides: snapResult.activeGuides
             }
           : state
@@ -314,7 +320,7 @@ export function ElevationView({
       startPointerMm,
       startCenterMm: { xMm: wallObject.xMm, yMm: wallObject.yMm },
       previewCenterMm: { xMm: wallObject.xMm, yMm: wallObject.yMm },
-      previousSnapTargetId: undefined,
+      previousSnapTargetIds: undefined,
       activeGuides: []
     });
   }
@@ -337,13 +343,13 @@ export function ElevationView({
       movingSize: sizeMm,
       snapToGrid,
       thresholdMm: snapThresholdMm,
-      previousSnapTargetId: dropGhost?.previousSnapTargetId
+      previousSnapTargetIds: dropGhost?.previousSnapTargetIds
     });
 
     setDropGhost({
       centerMm: snapResult.point,
       sizeMm,
-      previousSnapTargetId: snapResult.snapTargetId,
+      previousSnapTargetIds: snapResult.snapTargetIds,
       activeGuides: snapResult.activeGuides
     });
   }
@@ -374,7 +380,7 @@ export function ElevationView({
       movingSize: sizeMm,
       snapToGrid,
       thresholdMm: snapThresholdMm,
-      previousSnapTargetId: undefined
+      previousSnapTargetIds: undefined
     });
 
     onPlaceArtwork?.(artworkId, wallId, snapResult.point.xMm, snapResult.point.yMm);

@@ -1,21 +1,29 @@
-import type { WallObjectBase } from "../project";
+import type { WallObject, WallObjectBase } from "../project";
 import { getGridSnapTargets } from "./gridSnapTargets";
-import { resolveSnap, type Guide, type Point, type SnapTarget } from "./resolveSnap";
+import {
+  resolveSnap,
+  type Guide,
+  type Point,
+  type SnapTarget,
+  type SnapTargetIds
+} from "./resolveSnap";
 
 export type ArtworkSize = {
   widthMm: number;
   heightMm: number;
 };
 
-// The four snap-target families for elevation placement (docs/plan.md §2:
-// centerline > neighbor-center > neighbor-edge > grid), built fresh from
-// wall geometry and the current neighbor set on every call — never owned by
-// the renderer, same discipline as getGridSnapTargets. Callers exclude the
-// object actually being moved from `neighbors` before calling this; a moving
-// object should never snap to itself. `neighbors` is typed at the
-// WallObjectBase level (not ArtworkWallObject) so any wall object — artwork
-// or an opening — can act as a snap neighbor for any other; only the shared
-// center/size fields are ever read here.
+// The snap-target tiers for elevation placement (docs/plan.md §2: floor for
+// doors > centerline > neighbor-center > neighbor-edge > grid), built fresh
+// from wall geometry and the current neighbor set on every call — never
+// owned by the renderer, same discipline as getGridSnapTargets. Callers
+// exclude the object actually being moved from `neighbors` before calling
+// this; a moving object should never snap to itself. `neighbors` is typed at
+// the WallObjectBase level (not ArtworkWallObject) so any wall object —
+// artwork or an opening — can act as a snap neighbor for any other; only the
+// shared center/size fields are ever read here. `movingKind` decides whether
+// the floor tier exists at all: doors always sit on the floor, so only a
+// door drag gets (and primarily wants) a floor target.
 export function getArtworkSnapTargets(args: {
   centerlineYMm: number;
   wallLengthMm: number;
@@ -23,20 +31,40 @@ export function getArtworkSnapTargets(args: {
   gridIntervalMm: number;
   neighbors: WallObjectBase[];
   movingSize: ArtworkSize;
+  movingKind?: WallObject["kind"];
 }): SnapTarget[] {
-  const { centerlineYMm, wallLengthMm, wallHeightMm, gridIntervalMm, neighbors, movingSize } =
-    args;
+  const {
+    centerlineYMm,
+    wallLengthMm,
+    wallHeightMm,
+    gridIntervalMm,
+    neighbors,
+    movingSize,
+    movingKind
+  } = args;
 
-  const targets: SnapTarget[] = [
-    // The curatorial convention (docs/plan.md §5.5): a work's CENTER lands
-    // on the centerline, not its top or bottom edge.
-    {
-      id: "centerline",
-      kind: "centerline",
+  const targets: SnapTarget[] = [];
+
+  if (movingKind === "door") {
+    // A door's PRIMARY target: the center-y that puts its bottom edge on the
+    // floor line (wall-local y=0, y up). Ranked above even the centerline —
+    // doors are expected to sit on the floor, not the eyeline.
+    targets.push({
+      id: "floor",
+      kind: "floor",
       axis: "y",
-      point: { xMm: 0, yMm: centerlineYMm }
-    }
-  ];
+      point: { xMm: 0, yMm: movingSize.heightMm / 2 }
+    });
+  }
+
+  // The curatorial convention (docs/plan.md §5.5): a work's CENTER lands
+  // on the centerline, not its top or bottom edge.
+  targets.push({
+    id: "centerline",
+    kind: "centerline",
+    axis: "y",
+    point: { xMm: 0, yMm: centerlineYMm }
+  });
 
   for (const neighbor of neighbors) {
     const neighborLeftMm = neighbor.xMm - neighbor.widthMm / 2;
@@ -105,10 +133,10 @@ export function getArtworkSnapTargets(args: {
 // HTML5 drop-ghost preview and the pointer-drag move preview in
 // ElevationView can never disagree about where an artwork would land — both
 // call this exact function with the same arguments shape. `snapToGrid`
-// gates only the grid tier; centerline/neighbor targets are always active
-// per docs/plan.md §5.5 ("Show grid"/"Snap to grid" are independent, but
-// grid is still lowest priority and the only tier either preference
-// touches).
+// gates only the grid tier; the floor (doors), centerline, and neighbor
+// targets are always active per docs/plan.md §5.5 ("Show grid"/"Snap to
+// grid" are independent, but grid is still lowest priority and the only
+// tier either preference touches).
 export function resolveArtworkSnap(
   proposedCenterMm: Point,
   args: {
@@ -118,18 +146,20 @@ export function resolveArtworkSnap(
     gridIntervalMm: number;
     neighbors: WallObjectBase[];
     movingSize: ArtworkSize;
+    movingKind?: WallObject["kind"];
     snapToGrid: boolean;
     thresholdMm: number;
-    previousSnapTargetId?: string;
+    previousSnapTargetIds?: SnapTargetIds;
   }
-): { point: Point; activeGuides: Guide[]; snapTargetId?: string } {
+): { point: Point; activeGuides: Guide[]; snapTargetIds: SnapTargetIds } {
   const allTargets = getArtworkSnapTargets({
     centerlineYMm: args.centerlineYMm,
     wallLengthMm: args.wallLengthMm,
     wallHeightMm: args.wallHeightMm,
     gridIntervalMm: args.gridIntervalMm,
     neighbors: args.neighbors,
-    movingSize: args.movingSize
+    movingSize: args.movingSize,
+    movingKind: args.movingKind
   });
 
   const candidates = args.snapToGrid
@@ -138,6 +168,6 @@ export function resolveArtworkSnap(
 
   return resolveSnap(proposedCenterMm, candidates, {
     thresholdMm: args.thresholdMm,
-    previousSnapTargetId: args.previousSnapTargetId
+    previousSnapTargetIds: args.previousSnapTargetIds
   });
 }

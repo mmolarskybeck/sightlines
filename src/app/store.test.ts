@@ -253,6 +253,75 @@ describe("app store", () => {
     expect(store.getState().project).toBe(before);
   });
 
+  it("renames a room, persists the change, and is undoable", async () => {
+    await store.getState().renameRoom("room-main", "East Gallery");
+
+    let state = store.getState();
+    expect(state.project!.floor.rooms[0].room.name).toBe("East Gallery");
+    expect(state.undoStack).toHaveLength(1);
+    expect(state.undoStack.at(-1)?.label).toBe("Rename room");
+    expect(repository.projects.get(state.project!.id)!.floor.rooms[0].room.name).toBe(
+      "East Gallery"
+    );
+
+    await store.getState().undo();
+
+    state = store.getState();
+    expect(state.project!.floor.rooms[0].room.name).toBe("Main Gallery");
+  });
+
+  it("skips no-op, empty, and missing room renames", async () => {
+    const before = store.getState().project!;
+
+    await store.getState().renameRoom("room-main", "   ");
+    await store.getState().renameRoom("room-main", before.floor.rooms[0].room.name);
+    await store.getState().renameRoom("missing-room", "Back Gallery");
+
+    expect(store.getState().undoStack).toHaveLength(0);
+    expect(store.getState().project).toBe(before);
+  });
+
+  it("deletes a room, removes its wall objects, and moves selection to a surviving wall", async () => {
+    await store.getState().addRectangleRoom();
+    await store.getState().addOpening("room-2-wall-north", "door");
+
+    expect(store.getState().project!.floor.rooms).toHaveLength(2);
+    expect(store.getState().project!.wallObjects).toHaveLength(1);
+    expect(store.getState().selectedWallId).toBe("room-2-wall-north");
+    expect(store.getState().selectedOpeningId).toBeDefined();
+
+    await store.getState().deleteRoom("room-2");
+
+    let state = store.getState();
+    expect(state.project!.floor.rooms.map((placement) => placement.roomId)).toEqual([
+      "room-main"
+    ]);
+    expect(state.project!.wallObjects).toEqual([]);
+    expect(state.selectedWallId).toBe("wall-north");
+    expect(state.selectedOpeningId).toBeNull();
+    expect(state.viewMode).toBe("plan");
+    expect(state.undoStack.at(-1)?.label).toBe("Delete Gallery 2");
+    expect(repository.projects.get(state.project!.id)!.floor.rooms).toHaveLength(1);
+
+    await store.getState().undo();
+
+    state = store.getState();
+    expect(state.project!.floor.rooms.map((placement) => placement.roomId)).toEqual([
+      "room-main",
+      "room-2"
+    ]);
+    expect(state.project!.wallObjects).toHaveLength(1);
+  });
+
+  it("deleting a missing room is a no-op", async () => {
+    const before = store.getState().project!;
+
+    await store.getState().deleteRoom("missing-room");
+
+    expect(store.getState().undoStack).toHaveLength(0);
+    expect(store.getState().project).toBe(before);
+  });
+
   it("skips a resize that does not change any wall", async () => {
     const state = store.getState();
     const currentLength = getSelectedWall(

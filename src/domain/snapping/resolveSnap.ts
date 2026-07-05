@@ -6,7 +6,7 @@ export type Point = {
 export type SnapTarget = {
   id: string;
   point: Point;
-  kind: "centerline" | "neighbor-center" | "neighbor-edge" | "grid";
+  kind: "floor" | "centerline" | "neighbor-center" | "neighbor-edge" | "grid";
   axis: "x" | "y" | "both";
 };
 
@@ -17,88 +17,102 @@ export type Guide = {
   targetId: string;
 };
 
+// The ids of the targets that won each axis on a previous resolve, so the
+// break-free hysteresis can be tracked per axis: an artwork held on the
+// centerline in y must not lose (or leak) its stickiness through whatever
+// grid line the x axis happens to be snapped to at the same time.
+export type SnapTargetIds = {
+  x?: string;
+  y?: string;
+};
+
 export type SnapOptions = {
   thresholdMm: number;
   breakFreeMultiplier?: number;
-  previousSnapTargetId?: string;
+  previousSnapTargetIds?: SnapTargetIds;
 };
 
+// Floor outranks even the centerline: it only exists for objects that are
+// expected to sit on the floor (doors — see getArtworkSnapTargets), and for
+// those the floor is the primary destination, not the eyeline.
 const PRIORITY: Record<SnapTarget["kind"], number> = {
-  centerline: 0,
-  "neighbor-center": 1,
-  "neighbor-edge": 2,
-  grid: 3
+  floor: 0,
+  centerline: 1,
+  "neighbor-center": 2,
+  "neighbor-edge": 3,
+  grid: 4
 };
 
+// Resolves each axis INDEPENDENTLY: the x winner and the y winner are picked
+// from separate per-axis candidate pools, so a high-priority y-only target
+// (the centerline) never suppresses an x snap (a grid line) — an artwork can
+// sit on the eyeline and land on the grid at the same time. Within one axis
+// the tier ordering is: floor (doors only) > centerline > neighbor-center >
+// neighbor-edge > grid (docs/plan.md §2), then distance, then id for a
+// stable tiebreak. An `axis: "both"` target competes on each axis using that
+// axis's own delta and may win either or both.
 export function resolveSnap(
   proposed: Point,
   candidates: SnapTarget[],
   opts: SnapOptions
-): { point: Point; activeGuides: Guide[]; snapTargetId?: string } {
-  const thresholdFor = (candidate: SnapTarget) =>
-    candidate.id === opts.previousSnapTargetId
-      ? opts.thresholdMm * (opts.breakFreeMultiplier ?? 1.5)
-      : opts.thresholdMm;
-
-  const eligible = candidates
-    .map((candidate) => {
-      const distance = distanceForAxis(proposed, candidate);
-      return { candidate, distance };
-    })
-    .filter(({ candidate, distance }) => distance <= thresholdFor(candidate))
-    .sort((a, b) => {
-      const priorityDelta = PRIORITY[a.candidate.kind] - PRIORITY[b.candidate.kind];
-      if (priorityDelta !== 0) return priorityDelta;
-
-      const distanceDelta = a.distance - b.distance;
-      if (distanceDelta !== 0) return distanceDelta;
-
-      return a.candidate.id.localeCompare(b.candidate.id);
-    });
-
-  const best = eligible[0]?.candidate;
-
-  if (!best) {
-    return { point: proposed, activeGuides: [] };
-  }
-
+): { point: Point; activeGuides: Guide[]; snapTargetIds: SnapTargetIds } {
   const point = { ...proposed };
   const activeGuides: Guide[] = [];
+  const snapTargetIds: SnapTargetIds = {};
 
-  if (best.axis === "x" || best.axis === "both") {
-    point.xMm = best.point.xMm;
+  for (const axis of ["x", "y"] as const) {
+    const previousId = opts.previousSnapTargetIds?.[axis];
+    const thresholdFor = (candidate: SnapTarget) =>
+      candidate.id === previousId
+        ? opts.thresholdMm * (opts.breakFreeMultiplier ?? 1.5)
+        : opts.thresholdMm;
+
+    const eligible = candidates
+      .filter((candidate) => candidate.axis === axis || candidate.axis === "both")
+      .map((candidate) => ({ candidate, distance: distanceForAxis(proposed, candidate, axis) }))
+      .filter(({ candidate, distance }) => distance <= thresholdFor(candidate))
+      .sort((a, b) => {
+        const priorityDelta = PRIORITY[a.candidate.kind] - PRIORITY[b.candidate.kind];
+        if (priorityDelta !== 0) return priorityDelta;
+
+        const distanceDelta = a.distance - b.distance;
+        if (distanceDelta !== 0) return distanceDelta;
+
+        return a.candidate.id.localeCompare(b.candidate.id);
+      });
+
+    const best = eligible[0]?.candidate;
+    if (!best) continue;
+
+    const positionMm = axis === "x" ? best.point.xMm : best.point.yMm;
+    if (axis === "x") {
+      point.xMm = positionMm;
+    } else {
+      point.yMm = positionMm;
+    }
+
     activeGuides.push({
-      id: `${best.id}-x`,
-      axis: "x",
-      positionMm: best.point.xMm,
+      id: `${best.id}-${axis}`,
+      axis,
+      positionMm,
       targetId: best.id
     });
+    snapTargetIds[axis] = best.id;
   }
 
-  if (best.axis === "y" || best.axis === "both") {
-    point.yMm = best.point.yMm;
-    activeGuides.push({
-      id: `${best.id}-y`,
-      axis: "y",
-      positionMm: best.point.yMm,
-      targetId: best.id
-    });
-  }
-
-  return { point, activeGuides, snapTargetId: best.id };
+  return { point, activeGuides, snapTargetIds };
 }
 
-function distanceForAxis(proposed: Point, candidate: SnapTarget): number {
-  if (candidate.axis === "x") {
-    return Math.abs(proposed.xMm - candidate.point.xMm);
-  }
-
-  if (candidate.axis === "y") {
-    return Math.abs(proposed.yMm - candidate.point.yMm);
-  }
-
-  return Math.hypot(
-    proposed.xMm - candidate.point.xMm,
-    proposed.yMm - candidate.point.yMm
-  );
+// The candidate's distance from the proposed point ALONG the axis being
+// resolved — an `axis: "both"` target evaluated for the x pool competes on
+// its x delta alone (and likewise for y), never the hypot, since each axis's
+// pool is ranked and applied independently.
+function distanceForAxis(
+  proposed: Point,
+  candidate: SnapTarget,
+  axis: "x" | "y"
+): number {
+  return axis === "x"
+    ? Math.abs(proposed.xMm - candidate.point.xMm)
+    : Math.abs(proposed.yMm - candidate.point.yMm);
 }

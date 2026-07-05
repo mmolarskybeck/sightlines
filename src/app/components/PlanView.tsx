@@ -35,6 +35,9 @@ type DragState = {
   // length. See getMovingWallEdgeWorldPointMm.
   edgeStartMm: Vector2;
   previewLengthMm: number;
+  // A wall-resize drag only ever snaps along the wall's own single axis, so
+  // one id is enough here — it maps into that axis's slot of resolveSnap's
+  // per-axis previousSnapTargetIds.
   previousSnapTargetId?: string;
   activeGuides: Guide[];
 };
@@ -157,16 +160,22 @@ export function PlanView({
 
       if (snapToGrid) {
         const isXAxis = Math.abs(current.axis.xMm) >= Math.abs(current.axis.yMm);
+        const dragAxis = isXAxis ? "x" : "y";
         const relevantTargets: SnapTarget[] = gridSnapTargets.filter(
-          (target) => target.axis === (isXAxis ? "x" : "y")
+          (target) => target.axis === dragAxis
         );
         const snapResult = resolveSnap(proposedEdgeMm, relevantTargets, {
           thresholdMm: snapThresholdMm,
-          previousSnapTargetId: current.previousSnapTargetId
+          // Single-axis drag: the remembered id lives in the drag axis's
+          // slot of the per-axis hysteresis map.
+          previousSnapTargetIds:
+            dragAxis === "x"
+              ? { x: current.previousSnapTargetId }
+              : { y: current.previousSnapTargetId }
         });
 
         snappedEdgeMm = snapResult.point;
-        snapTargetId = snapResult.snapTargetId;
+        snapTargetId = snapResult.snapTargetIds[dragAxis];
         activeGuides = snapResult.activeGuides;
       }
 

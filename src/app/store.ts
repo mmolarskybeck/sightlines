@@ -90,6 +90,8 @@ type AppState = {
   selectArtwork: (artworkId: string) => void;
   selectOpening: (wallObjectId: string) => void;
   renameProject: (title: string) => Promise<void>;
+  renameRoom: (roomId: string, name: string) => Promise<void>;
+  deleteRoom: (roomId: string) => Promise<void>;
   setUnit: (unit: DisplayUnit) => Promise<void>;
   addRectangleRoom: () => Promise<void>;
   resizeWall: (wallId: string, lengthMm: number) => Promise<void>;
@@ -321,6 +323,69 @@ export function createAppStore(deps: AppStoreDeps) {
           ...current,
           title: trimmed
         }));
+      },
+
+      async renameRoom(roomId, name) {
+        const project = get().project;
+        const trimmed = name.trim();
+        const roomPlacement = project?.floor.rooms.find(
+          (placement) => placement.roomId === roomId
+        );
+        if (!project || !roomPlacement || trimmed.length === 0) return;
+        if (trimmed === roomPlacement.room.name) return;
+
+        await applyEdit("Rename room", (current) => ({
+          ...current,
+          floor: {
+            rooms: current.floor.rooms.map((placement) =>
+              placement.roomId === roomId
+                ? { ...placement, room: { ...placement.room, name: trimmed } }
+                : placement
+            )
+          }
+        }));
+      },
+
+      async deleteRoom(roomId) {
+        const project = get().project;
+        const roomPlacement = project?.floor.rooms.find(
+          (placement) => placement.roomId === roomId
+        );
+        if (!project || !roomPlacement) return;
+
+        const deletedWallIds = new Set(
+          roomPlacement.room.walls.map((wall) => wall.id)
+        );
+        const nextRooms = project.floor.rooms.filter(
+          (placement) => placement.roomId !== roomId
+        );
+        const selectedWallId = get().selectedWallId;
+        const selectedOpeningId = get().selectedOpeningId;
+        const nextSelectedWallId = selectedWallId && deletedWallIds.has(selectedWallId)
+          ? (nextRooms[0]?.room.walls[0]?.id ?? null)
+          : selectedWallId;
+        const nextSelectedOpeningId = selectedOpeningId && project.wallObjects.some(
+          (wallObject) =>
+            wallObject.id === selectedOpeningId && deletedWallIds.has(wallObject.wallId)
+        )
+          ? null
+          : selectedOpeningId;
+
+        await applyEdit(
+          `Delete ${roomPlacement.room.name}`,
+          (current) => ({
+            ...current,
+            floor: { rooms: nextRooms },
+            wallObjects: current.wallObjects.filter(
+              (wallObject) => !deletedWallIds.has(wallObject.wallId)
+            )
+          }),
+          {
+            selectedWallId: nextSelectedWallId,
+            selectedOpeningId: nextSelectedOpeningId,
+            viewMode: "plan"
+          }
+        );
       },
 
       async setUnit(unit) {

@@ -83,6 +83,6 @@ describe("getGridSnapTargets", () => {
     const result = resolveSnap({ xMm: 203, yMm: 5 }, gridTargets, { thresholdMm: 10 });
 
     expect(result.point.xMm).toBeCloseTo(200);
-    expect(result.snapTargetId).toBe("grid-x-200");
+    expect(result.snapTargetIds.x).toBe("grid-x-200");
   });
 });
