@@ -1,0 +1,164 @@
+{
+  "name": "Wikimedia public-domain artwork corpus",
+  "description": "Small artwork fixture set for Sightlines image-intake and placement testing. Images were downloaded from Wikimedia Commons using resized file URLs to keep the corpus lightweight.",
+  "downloadedAt": "2026-07-05",
+  "licenseNote": "All works in this fixture set are public domain due to age; verify the linked Wikimedia Commons file pages before reusing outside test/dev contexts.",
+  "artworks": [
+    {
+      "id": "mona-lisa",
+      "title": "Mona Lisa",
+      "artistName": "Leonardo da Vinci",
+      "year": "c. 1503-1506",
+      "medium": "Oil on poplar panel",
+      "physicalDimensions": {
+        "heightCm": 77,
+        "widthCm": 53,
+        "display": "77 x 53 cm"
+      },
+      "image": {
+        "path": "images/mona-lisa.jpg",
+        "mimeType": "image/jpeg",
+        "widthPx": 1280,
+        "heightPx": 1908,
+        "byteSize": 980329,
+        "sha256": "8056105c343c16563f8afd4615b4653067e168ec41f344ef5b7e8aaea97463ad"
+      },
+      "source": {
+        "repository": "Wikimedia Commons",
+        "filePageUrl": "https://commons.wikimedia.org/wiki/File:Mona_Lisa,_by_Leonardo_da_Vinci,_from_C2RMF_retouched.jpg",
+        "downloadUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Mona%20Lisa%2C%20by%20Leonardo%20da%20Vinci%2C%20from%20C2RMF%20retouched.jpg?width=1200",
+        "license": "Public domain"
+      }
+    },
+    {
+      "id": "starry-night",
+      "title": "The Starry Night",
+      "artistName": "Vincent van Gogh",
+      "year": "1889",
+      "medium": "Oil on canvas",
+      "physicalDimensions": {
+        "heightCm": 73.7,
+        "widthCm": 92.1,
+        "display": "73.7 x 92.1 cm"
+      },
+      "image": {
+        "path": "images/starry-night.jpg",
+        "mimeType": "image/jpeg",
+        "widthPx": 1920,
+        "heightPx": 1520,
+        "byteSize": 1381879,
+        "sha256": "dbca2f16b195f6e83feb98d44c0d98eb0b39f560314efbedfedab9e45caa8a2f"
+      },
+      "source": {
+        "repository": "Wikimedia Commons",
+        "filePageUrl": "https://commons.wikimedia.org/wiki/File:Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg",
+        "downloadUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Van%20Gogh%20-%20Starry%20Night%20-%20Google%20Art%20Project.jpg?width=1800",
+        "license": "Public domain"
+      }
+    },
+    {
+      "id": "girl-with-a-pearl-earring",
+      "title": "Girl with a Pearl Earring",
+      "artistName": "Johannes Vermeer",
+      "year": "c. 1665",
+      "medium": "Oil on canvas",
+      "physicalDimensions": {
+        "heightCm": 44.5,
+        "widthCm": 39,
+        "display": "44.5 x 39 cm"
+      },
+      "image": {
+        "path": "images/girl-with-a-pearl-earring.jpg",
+        "mimeType": "image/jpeg",
+        "widthPx": 1280,
+        "heightPx": 1516,
+        "byteSize": 594446,
+        "sha256": "fc7aa0b6dcae15e41f1b9b64ba8e89db6fd5e6cbbd9ca74d61eefe8d135fa6f7"
+      },
+      "source": {
+        "repository": "Wikimedia Commons",
+        "filePageUrl": "https://commons.wikimedia.org/wiki/File:1665_Girl_with_a_Pearl_Earring.jpg",
+        "downloadUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/1665%20Girl%20with%20a%20Pearl%20Earring.jpg?width=1200",
+        "license": "Public domain"
+      }
+    },
+    {
+      "id": "great-wave-off-kanagawa",
+      "title": "The Great Wave off Kanagawa",
+      "artistName": "Katsushika Hokusai",
+      "year": "1831",
+      "medium": "Woodblock print",
+      "physicalDimensions": {
+        "heightCm": 24.6,
+        "widthCm": 36.5,
+        "display": "24.6 x 36.5 cm"
+      },
+      "image": {
+        "path": "images/great-wave-off-kanagawa.jpg",
+        "mimeType": "image/jpeg",
+        "widthPx": 1920,
+        "heightPx": 1291,
+        "byteSize": 973284,
+        "sha256": "9c8cf3fd80816f5c09332f41f149070473276b115849065e28afec60b56824f9"
+      },
+      "source": {
+        "repository": "Wikimedia Commons",
+        "filePageUrl": "https://commons.wikimedia.org/wiki/File:Tsunami_by_hokusai_19th_century.jpg",
+        "downloadUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Tsunami%20by%20hokusai%2019th%20century.jpg?width=1800",
+        "license": "Public domain"
+      }
+    },
+    {
+      "id": "birth-of-venus",
+      "title": "The Birth of Venus",
+      "artistName": "Sandro Botticelli",
+      "year": "c. 1484-1486",
+      "medium": "Tempera on canvas",
+      "physicalDimensions": {
+        "heightCm": 172.5,
+        "widthCm": 278.9,
+        "display": "172.5 x 278.9 cm"
+      },
+      "image": {
+        "path": "images/birth-of-venus.jpg",
+        "mimeType": "image/jpeg",
+        "widthPx": 1920,
+        "heightPx": 1206,
+        "byteSize": 869957,
+        "sha256": "294eb953f64fb19cc4da2635e49edaebaaffd03772679c87743fa8ed76529cce"
+      },
+      "source": {
+        "repository": "Wikimedia Commons",
+        "filePageUrl": "https://commons.wikimedia.org/wiki/File:Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg",
+        "downloadUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Sandro%20Botticelli%20-%20La%20nascita%20di%20Venere%20-%20Google%20Art%20Project%20-%20edited.jpg?width=1800",
+        "license": "Public domain"
+      }
+    },
+    {
+      "id": "the-swing",
+      "title": "The Swing",
+      "artistName": "Jean-Honore Fragonard",
+      "year": "c. 1767-1768",
+      "medium": "Oil on canvas",
+      "physicalDimensions": {
+        "heightCm": 81,
+        "widthCm": 64.2,
+        "display": "81 x 64.2 cm"
+      },
+      "image": {
+        "path": "images/the-swing.jpg",
+        "mimeType": "image/jpeg",
+        "widthPx": 1280,
+        "heightPx": 1653,
+        "byteSize": 560555,
+        "sha256": "50464ae4eca76d2ddf1e429c7cfdb86cbe0da8a2beab9becae0baf2d6c4a2c5a"
+      },
+      "source": {
+        "repository": "Wikimedia Commons",
+        "filePageUrl": "https://commons.wikimedia.org/wiki/File:The_Swing_(P430).jpg",
+        "downloadUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/The%20Swing%20%28P430%29.jpg?width=1200",
+        "license": "Public domain"
+      }
+    }
+  ]
+}
