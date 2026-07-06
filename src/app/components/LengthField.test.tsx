@@ -98,4 +98,103 @@ describe("LengthField", () => {
     await waitFor(() => expect(input.value).toBe('11 13/16"'));
     expect(screen.queryByText(/→/)).not.toBeInTheDocument();
   });
+
+  it("renders no stepper buttons when stepMm is not provided (regression guard)", () => {
+    renderField({ valueMm: 304.8 });
+
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  describe("stepMm", () => {
+    it("renders a stepper column when stepMm is provided", () => {
+      renderField({ valueMm: 304.8, stepMm: 25.4 });
+
+      expect(screen.getByRole("button", { name: "Increase Width" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Decrease Width" })).toBeInTheDocument();
+    });
+
+    it("ArrowUp in the input commits valueMm + stepMm", () => {
+      const onCommit = vi.fn();
+      const { input } = renderField({ valueMm: 304.8, stepMm: 25.4, onCommit });
+
+      fireEvent.keyDown(input, { key: "ArrowUp" });
+
+      expect(onCommit).toHaveBeenCalledTimes(1);
+      expect(onCommit).toHaveBeenCalledWith(expect.closeTo(330.2, 5));
+    });
+
+    it("ArrowDown in the input commits valueMm - stepMm", () => {
+      const onCommit = vi.fn();
+      const { input } = renderField({ valueMm: 304.8, stepMm: 25.4, onCommit });
+
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+
+      expect(onCommit).toHaveBeenCalledTimes(1);
+      expect(onCommit).toHaveBeenCalledWith(expect.closeTo(279.4, 5));
+    });
+
+    it("clicking the increase chevron commits valueMm + stepMm", () => {
+      const onCommit = vi.fn();
+      renderField({ valueMm: 304.8, stepMm: 25.4, onCommit });
+
+      fireEvent.click(screen.getByRole("button", { name: "Increase Width" }));
+
+      expect(onCommit).toHaveBeenCalledTimes(1);
+      expect(onCommit).toHaveBeenCalledWith(expect.closeTo(330.2, 5));
+    });
+
+    it("clicking the decrease chevron commits valueMm - stepMm", () => {
+      const onCommit = vi.fn();
+      renderField({ valueMm: 304.8, stepMm: 25.4, onCommit });
+
+      fireEvent.click(screen.getByRole("button", { name: "Decrease Width" }));
+
+      expect(onCommit).toHaveBeenCalledTimes(1);
+      expect(onCommit).toHaveBeenCalledWith(expect.closeTo(279.4, 5));
+    });
+
+    it("steps from the committed valueMm when the input text is unparseable", () => {
+      const onCommit = vi.fn();
+      const { input } = renderField({ valueMm: 304.8, stepMm: 25.4, onCommit });
+
+      fireEvent.change(input, { target: { value: "garbage" } });
+      fireEvent.keyDown(input, { key: "ArrowUp" });
+
+      expect(onCommit).toHaveBeenCalledTimes(1);
+      expect(onCommit).toHaveBeenCalledWith(expect.closeTo(330.2, 5));
+    });
+  });
+
+  describe("onEnterWhenClean", () => {
+    it("fires onEnterWhenClean (not onCommit) on Enter when the value is unchanged", () => {
+      const onCommit = vi.fn();
+      const onEnterWhenClean = vi.fn();
+      const { input } = renderField({
+        valueMm: 304.8,
+        onCommit,
+        onEnterWhenClean
+      });
+
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(onEnterWhenClean).toHaveBeenCalledTimes(1);
+      expect(onCommit).not.toHaveBeenCalled();
+    });
+
+    it("fires onCommit (not onEnterWhenClean) on Enter when the value changed", () => {
+      const onCommit = vi.fn();
+      const onEnterWhenClean = vi.fn();
+      const { input } = renderField({
+        valueMm: 304.8,
+        onCommit,
+        onEnterWhenClean
+      });
+
+      fireEvent.change(input, { target: { value: "24" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(onCommit).toHaveBeenCalledTimes(1);
+      expect(onEnterWhenClean).not.toHaveBeenCalled();
+    });
+  });
 });

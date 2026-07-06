@@ -1,8 +1,14 @@
 import { useEffect, useId, useState } from "react";
+import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
+import { CaretUpIcon } from "@phosphor-icons/react/dist/csr/CaretUp";
 import type { DisplayUnit } from "../../domain/project";
 import { formatLength, parseLength } from "../../domain/units/length";
 import { getConversionHint } from "../../domain/units/conversionHint";
 import { Input } from "./ui/input";
+
+// Epsilon below which two lengths (in mm) are treated as identical for
+// "clean" (unchanged) detection — well under any unit's display precision.
+const CLEAN_EPSILON_MM = 0.001;
 
 // Shared commit-on-blur/Enter measurement field. Consolidates the parse,
 // validate, and reformat dance that ArtworkInspector, OpeningInspector,
@@ -23,7 +29,9 @@ export function LengthField({
   positiveOnly = false,
   onCommit,
   focusHint,
-  commitErrorFallback = "Could not save this measurement."
+  commitErrorFallback = "Could not save this measurement.",
+  stepMm,
+  onEnterWhenClean
 }: {
   label: string;
   valueMm: number | undefined;
@@ -37,6 +45,12 @@ export function LengthField({
   onCommit: (valueMm: number) => void | Promise<void>;
   focusHint?: string;
   commitErrorFallback?: string;
+  /** Enables the chevron stepper column + ArrowUp/ArrowDown nudge, stepping by this many mm. */
+  stepMm?: number;
+  /** On Enter, when the input is "clean" (parses to the committed value, or is untouched),
+   * call this instead of re-committing. Lets a caller distinguish "Enter to apply a live
+   * preview" from "Enter again to accept it". */
+  onEnterWhenClean?: () => void;
 }) {
   const [input, setInput] = useState(() =>
     valueMm === undefined ? "" : formatLength(valueMm, { unit: displayUnit })
@@ -89,6 +103,34 @@ export function LengthField({
     }
   };
 
+  // Step from the currently typed value when it parses; otherwise fall back
+  // to the last committed value. No clamping — negative lengths are
+  // legitimate (e.g. an inset past a wall edge), and any real constraint is
+  // enforced by the caller's own collision/validation logic. The resync
+  // effect above reformats `input` once the caller's `valueMm` prop updates.
+  const step = (direction: 1 | -1) => {
+    if (stepMm === undefined) return;
+    const parsed = parseLength(input, parseUnit);
+    const base = parsed.ok ? parsed.valueMm : valueMm ?? 0;
+    const next = base + direction * stepMm;
+    setError(null);
+    Promise.resolve(onCommit(next)).catch((err) => {
+      setError(err instanceof Error ? err.message : commitErrorFallback);
+    });
+  };
+
+  // "Clean" = the input doesn't represent a pending edit: either it parses to
+  // (within epsilon of) the committed value, or it's simply untouched from
+  // what the committed value would format as (covers e.g. an empty,
+  // unparseable field that was never edited).
+  const isInputClean = () => {
+    const trimmed = input.trim();
+    const committedText = valueMm === undefined ? "" : formatLength(valueMm, { unit: displayUnit });
+    if (trimmed === committedText) return true;
+    const parsed = parseLength(input, parseUnit);
+    return parsed.ok && valueMm !== undefined && Math.abs(parsed.valueMm - valueMm) < CLEAN_EPSILON_MM;
+  };
+
   // Message precedence: error > live conversion hint > focus hint. The
   // conversion hint is computed from the current input, so it naturally
   // vanishes once a successful commit reformats the field to its committed
@@ -119,28 +161,69 @@ export function LengthField({
     );
   }
 
+  const inputElement = (
+    <Input
+      aria-describedby={message ? messageId : undefined}
+      aria-invalid={error ? "true" : "false"}
+      className={stepMm !== undefined ? "length-field-input-stepped" : undefined}
+      inputMode="decimal"
+      placeholder={placeholder}
+      size={compact ? "compact" : "default"}
+      value={input}
+      onFocus={() => setFocused(true)}
+      onBlur={() => {
+        setFocused(false);
+        void commit();
+      }}
+      onChange={(event) => setInput(event.target.value)}
+      onKeyDown={(event) => {
+        if (stepMm !== undefined && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+          event.preventDefault();
+          step(event.key === "ArrowUp" ? 1 : -1);
+          return;
+        }
+
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+
+        if (onEnterWhenClean && isInputClean()) {
+          onEnterWhenClean();
+          return;
+        }
+
+        void commit();
+      }}
+    />
+  );
+
   return (
     <label className={compact ? "field-row compact" : "field-row"}>
       <span>{label}</span>
-      <Input
-        aria-describedby={message ? messageId : undefined}
-        aria-invalid={error ? "true" : "false"}
-        inputMode="decimal"
-        placeholder={placeholder}
-        size={compact ? "compact" : "default"}
-        value={input}
-        onFocus={() => setFocused(true)}
-        onBlur={() => {
-          setFocused(false);
-          void commit();
-        }}
-        onChange={(event) => setInput(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          void commit();
-        }}
-      />
+      {stepMm !== undefined ? (
+        <div className="length-field-input-wrap">
+          {inputElement}
+          <div className="length-field-steppers">
+            <button
+              aria-label={`Increase ${label}`}
+              tabIndex={-1}
+              type="button"
+              onClick={() => step(1)}
+            >
+              <CaretUpIcon aria-hidden="true" size={10} />
+            </button>
+            <button
+              aria-label={`Decrease ${label}`}
+              tabIndex={-1}
+              type="button"
+              onClick={() => step(-1)}
+            >
+              <CaretDownIcon aria-hidden="true" size={10} />
+            </button>
+          </div>
+        </div>
+      ) : (
+        inputElement
+      )}
       {message}
     </label>
   );

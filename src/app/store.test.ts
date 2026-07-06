@@ -9,6 +9,7 @@ import {
   PLACEHOLDER_ARTWORK_HEIGHT_MM,
   PLACEHOLDER_ARTWORK_WIDTH_MM
 } from "../domain/placement/placeArtwork";
+import { arrangeOnWall, solveEqualArrangement } from "../domain/placement/arrangeOnWall";
 import { createSampleProject } from "../domain/sample/sampleProject";
 import { parseArtwork, parseAsset } from "../domain/schema/artworkSchema";
 import { MAX_IMPORT_JSON_LENGTH, parseProject } from "../domain/schema/projectSchema";
@@ -1844,6 +1845,350 @@ describe("app store", () => {
         expect(state.selectedObjectIds).toEqual([]);
       });
     });
+
+    describe("arrange session", () => {
+      // Canonical setup: a 2540mm wall with three 508mm works, matching the
+      // arrangeSelectedOnWall example. Returns the three placement ids.
+      async function threeWorksOnWall() {
+        const wallId = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!.id;
+        await store.getState().resizeWall(wallId, 2540);
+        const a = await placeArtworkOnWall(200, 1450, 508);
+        const b = await placeArtworkOnWall(1000, 1450, 508);
+        const c = await placeArtworkOnWall(2000, 1450, 508);
+        store.getState().setObjectSelection([a.placementId, b.placementId, c.placementId]);
+        // Re-fetch after the resize so lengthMm reflects the 2540mm wall.
+        const wall = getSelectedWall(store.getState().project!, wallId)!;
+        return { wall, a, b, c };
+      }
+
+      function xById(id: string): number {
+        return store.getState().project!.wallObjects.find((o) => o.id === id)!.xMm;
+      }
+
+      describe("beginArrangeSession guards", () => {
+        it("creates no session when the selection includes a floor object", async () => {
+          const a = await placeArtworkOnWall(500, 1450);
+          await store.getState().addArtworksFromFiles([makeImageFile("floor-arr.jpg")]);
+          const floorArtworkId = store.getState().project!.checklistArtworkIds.at(-1)!;
+          await store.getState().placeArtworkOnFloor(floorArtworkId, 1000, 1000);
+          const floorObjectId = store.getState().project!.floorObjects[0].id;
+          store.getState().setObjectSelection([a.placementId, floorObjectId]);
+
+          store.getState().beginArrangeSession("equal");
+
+          expect(store.getState().arrangeSession).toBeNull();
+        });
+
+        it("creates no session when the selection spans two walls", async () => {
+          const a = await placeArtworkOnWall(500, 1450);
+          await store.getState().addArtworksFromFiles([makeImageFile("other-wall-arr.jpg")]);
+          const otherId = store.getState().project!.checklistArtworkIds.at(-1)!;
+          await store.getState().placeArtwork(otherId, "wall-east", 500, 1450, true);
+          const b = store.getState().project!.wallObjects.find(
+            (o) => o.kind === "artwork" && (o as { artworkId: string }).artworkId === otherId
+          )!;
+          store.getState().setObjectSelection([a.placementId, b.id]);
+
+          store.getState().beginArrangeSession("equal");
+
+          expect(store.getState().arrangeSession).toBeNull();
+        });
+
+        it("creates no session with fewer than two members", async () => {
+          const a = await placeArtworkOnWall(500, 1450);
+          store.getState().setObjectSelection([a.placementId]);
+
+          store.getState().beginArrangeSession("equal");
+
+          expect(store.getState().arrangeSession).toBeNull();
+        });
+
+        it("seeds original and preview from committed positions on the happy path", async () => {
+          const { a, b, c } = await threeWorksOnWall();
+
+          store.getState().beginArrangeSession("equal");
+
+          const session = store.getState().arrangeSession!;
+          expect(session).not.toBeNull();
+          expect(session.mode).toBe("equal");
+          expect(session.memberIds.sort()).toEqual(
+            [a.placementId, b.placementId, c.placementId].sort()
+          );
+          for (const id of [a.placementId, b.placementId, c.placementId]) {
+            const committed = store.getState().project!.wallObjects.find((o) => o.id === id)!;
+            expect(session.originalById[id]).toEqual({ xMm: committed.xMm, yMm: committed.yMm });
+            expect(session.previewById[id]).toEqual({ xMm: committed.xMm, yMm: committed.yMm });
+          }
+        });
+
+        it("is idempotent for the same member set, only switching mode", async () => {
+          await threeWorksOnWall();
+          store.getState().beginArrangeSession("equal");
+          store.getState().updateArrangeSession({ equal: true });
+          const previewAfterEqual = store.getState().arrangeSession!.previewById;
+
+          store.getState().beginArrangeSession("inset");
+
+          const session = store.getState().arrangeSession!;
+          expect(session.mode).toBe("inset");
+          // Preview survived the mode switch (not re-seeded from committed).
+          expect(session.previewById).toEqual(previewAfterEqual);
+        });
+
+        it("remembers the last arrange mode across begins (default inset)", async () => {
+          // Plain view state seeded to "inset" so the panel always opens in a
+          // real mode, and it tracks the mode the curator last worked in.
+          expect(store.getState().lastArrangeMode).toBe("inset");
+
+          await threeWorksOnWall();
+          store.getState().beginArrangeSession("gap");
+          expect(store.getState().lastArrangeMode).toBe("gap");
+
+          store.getState().beginArrangeSession("equal");
+          expect(store.getState().lastArrangeMode).toBe("equal");
+
+          // A no-op begin (guards fail) must not disturb the remembered mode.
+          store.getState().clearObjectSelection();
+          store.getState().beginArrangeSession("inset");
+          expect(store.getState().lastArrangeMode).toBe("equal");
+        });
+      });
+
+      describe("membership is artworks only", () => {
+        it("a marquee-style selection of two artworks plus an opening seeds a session with the artworks only", async () => {
+          const { wall, a, b } = await threeWorksOnWall();
+          await store.getState().addOpening(wall.id, "door");
+          const door = store.getState().project!.wallObjects.find((o) => o.kind === "door")!;
+          store.getState().setObjectSelection([a.placementId, b.placementId, door.id]);
+
+          store.getState().beginArrangeSession("equal");
+
+          const session = store.getState().arrangeSession!;
+          expect(session).not.toBeNull();
+          expect(session.memberIds.sort()).toEqual(
+            [a.placementId, b.placementId].sort()
+          );
+          expect(session.memberIds).not.toContain(door.id);
+        });
+
+        it("committing the session moves only the artworks and leaves the opening in place", async () => {
+          const { wall, a, b } = await threeWorksOnWall();
+          await store.getState().addOpening(wall.id, "door");
+          const door = store.getState().project!.wallObjects.find((o) => o.kind === "door")!;
+          const doorXBefore = door.xMm;
+          const doorYBefore = door.yMm;
+          store.getState().setObjectSelection([a.placementId, b.placementId, door.id]);
+          const undoBefore = store.getState().undoStack.length;
+
+          store.getState().beginArrangeSession("equal");
+          store.getState().updateArrangeSession({ equal: true });
+          const preview = store.getState().arrangeSession!.previewById;
+          // allowOverlap so a work landing over the centered door can't block.
+          store.getState().commitArrangeSession(true);
+
+          const state = store.getState();
+          expect(state.arrangeSession).toBeNull();
+          expect(state.undoStack).toHaveLength(undoBefore + 1);
+          expect(state.undoStack.at(-1)?.label).toBe("Arrange on wall");
+          for (const id of [a.placementId, b.placementId]) {
+            expect(xById(id)).toBeCloseTo(preview[id].xMm);
+          }
+          const doorAfter = state.project!.wallObjects.find((o) => o.id === door.id)!;
+          expect(doorAfter.xMm).toBe(doorXBefore);
+          expect(doorAfter.yMm).toBe(doorYBefore);
+        });
+
+        it("a selection of one artwork plus an opening is not arrange-eligible", async () => {
+          const a = await placeArtworkOnWall(500, 1450);
+          await store.getState().addOpening(a.wall.id, "door");
+          const door = store.getState().project!.wallObjects.find((o) => o.kind === "door")!;
+          store.getState().setObjectSelection([a.placementId, door.id]);
+
+          store.getState().beginArrangeSession("equal");
+          expect(store.getState().arrangeSession).toBeNull();
+
+          const undoBefore = store.getState().undoStack.length;
+          await store.getState().arrangeSelectedOnWall({ insetMm: 100 });
+          expect(store.getState().undoStack).toHaveLength(undoBefore);
+          expect(store.getState().error).toBeTruthy();
+        });
+      });
+
+      it("updateArrangeSession({equal:true}) previews the solveEqualArrangement layout without touching the project", async () => {
+        const { wall } = await threeWorksOnWall();
+        const projectBefore = store.getState().project!;
+        const undoBefore = store.getState().undoStack.length;
+        const selectedIds = store.getState().selectedObjectIds;
+        const members = projectBefore.wallObjects.filter((o) => selectedIds.includes(o.id));
+        expect(members).toHaveLength(3);
+
+        store.getState().beginArrangeSession("equal");
+        store.getState().updateArrangeSession({ equal: true });
+
+        const insetMm = solveEqualArrangement(members, wall.lengthMm).insetMm;
+        const expected = arrangeOnWall(members, wall.lengthMm, { insetMm });
+
+        const preview = store.getState().arrangeSession!.previewById;
+        for (const move of expected) {
+          expect(preview[move.id].xMm).toBeCloseTo(move.xMm);
+        }
+        // Project untouched while previewing.
+        expect(store.getState().project).toBe(projectBefore);
+        expect(store.getState().undoStack).toHaveLength(undoBefore);
+      });
+
+      it("commitArrangeSession applies the preview as exactly one 'Arrange on wall' entry and clears the session", async () => {
+        const { wall, a, b, c } = await threeWorksOnWall();
+        const undoBefore = store.getState().undoStack.length;
+
+        store.getState().beginArrangeSession("equal");
+        store.getState().updateArrangeSession({ equal: true });
+        const preview = store.getState().arrangeSession!.previewById;
+        store.getState().commitArrangeSession();
+
+        const state = store.getState();
+        expect(state.undoStack).toHaveLength(undoBefore + 1);
+        expect(state.undoStack.at(-1)?.label).toBe("Arrange on wall");
+        expect(state.arrangeSession).toBeNull();
+        for (const id of [a.placementId, b.placementId, c.placementId]) {
+          expect(xById(id)).toBeCloseTo(preview[id].xMm);
+        }
+        expect(wall.lengthMm).toBe(2540);
+      });
+
+      it("cancelArrangeSession leaves the project deep-equal to before and clears the session", async () => {
+        await threeWorksOnWall();
+        store.getState().beginArrangeSession("equal");
+        const projectBefore = store.getState().project!;
+        const undoBefore = store.getState().undoStack.length;
+
+        store.getState().updateArrangeSession({ equal: true });
+        store.getState().cancelArrangeSession();
+
+        expect(store.getState().arrangeSession).toBeNull();
+        expect(store.getState().project).toBe(projectBefore);
+        expect(store.getState().undoStack).toHaveLength(undoBefore);
+      });
+
+      it("a commit with no preview delta pushes no undo entry", async () => {
+        await threeWorksOnWall();
+        const undoBefore = store.getState().undoStack.length;
+
+        store.getState().beginArrangeSession("equal");
+        store.getState().commitArrangeSession();
+
+        expect(store.getState().undoStack).toHaveLength(undoBefore);
+        expect(store.getState().arrangeSession).toBeNull();
+      });
+
+      it("selectObject mid-session auto-accepts the pending arrangement", async () => {
+        const { a, b, c } = await threeWorksOnWall();
+        store.getState().beginArrangeSession("equal");
+        store.getState().updateArrangeSession({ equal: true });
+        const preview = store.getState().arrangeSession!.previewById;
+        const undoBefore = store.getState().undoStack.length;
+
+        store.getState().selectObject(a.placementId);
+
+        const state = store.getState();
+        expect(state.arrangeSession).toBeNull();
+        expect(state.undoStack).toHaveLength(undoBefore + 1);
+        expect(state.undoStack.at(-1)?.label).toBe("Arrange on wall");
+        for (const id of [a.placementId, b.placementId, c.placementId]) {
+          expect(xById(id)).toBeCloseTo(preview[id].xMm);
+        }
+        // The click collapsed the group to a single selection.
+        expect(state.selectedObjectIds).toEqual([a.placementId]);
+      });
+
+      it("clearObjectSelection mid-session auto-accepts the pending arrangement", async () => {
+        const { a } = await threeWorksOnWall();
+        store.getState().beginArrangeSession("equal");
+        store.getState().updateArrangeSession({ equal: true });
+        const preview = store.getState().arrangeSession!.previewById;
+        const undoBefore = store.getState().undoStack.length;
+
+        store.getState().clearObjectSelection();
+
+        const state = store.getState();
+        expect(state.arrangeSession).toBeNull();
+        expect(state.undoStack).toHaveLength(undoBefore + 1);
+        expect(xById(a.placementId)).toBeCloseTo(preview[a.placementId].xMm);
+        expect(state.selectedObjectIds).toEqual([]);
+      });
+
+      it("a foreign edit cancels the session (preview discarded)", async () => {
+        const { a } = await threeWorksOnWall();
+        const originalX = xById(a.placementId);
+        store.getState().beginArrangeSession("equal");
+        store.getState().updateArrangeSession({ equal: true });
+
+        await store.getState().renameProject("Session Foreign Edit");
+
+        const state = store.getState();
+        expect(state.arrangeSession).toBeNull();
+        expect(state.undoStack.at(-1)?.label).toBe("Rename project");
+        // The preview was dropped, not committed — the work never moved.
+        expect(xById(a.placementId)).toBe(originalX);
+      });
+
+      it("undo cancels the session", async () => {
+        await threeWorksOnWall();
+        store.getState().beginArrangeSession("equal");
+        store.getState().updateArrangeSession({ equal: true });
+
+        await store.getState().undo();
+
+        expect(store.getState().arrangeSession).toBeNull();
+      });
+
+      it("a collision-blocked explicit commit keeps the session open with an error", async () => {
+        const a = await placeArtworkOnWall(500, 1450, 400);
+        const b = await placeArtworkOnWall(1500, 1450, 400);
+        const wall = a.wall;
+        await store.getState().addOpening(wall.id, "door");
+        const door = store.getState().project!.wallObjects.find((o) => o.kind === "door")!;
+        store.getState().setObjectSelection([a.placementId, b.placementId]);
+        const undoBefore = store.getState().undoStack.length;
+
+        store.getState().beginArrangeSession("gap");
+        store.getState().setArrangeSessionPreview([
+          { id: a.placementId, xMm: door.xMm, yMm: door.yMm },
+          { id: b.placementId, xMm: 1600, yMm: 1450 }
+        ]);
+        store.getState().commitArrangeSession();
+
+        const state = store.getState();
+        expect(state.arrangeSession).not.toBeNull();
+        expect(state.error).toMatch(/overlap/i);
+        expect(state.undoStack).toHaveLength(undoBefore);
+        // Nothing committed — the work stayed at its original x.
+        expect(xById(a.placementId)).toBe(500);
+      });
+
+      it("a collision-blocked auto-accept cancels the session (it can't outlive its selection)", async () => {
+        const a = await placeArtworkOnWall(500, 1450, 400);
+        const b = await placeArtworkOnWall(1500, 1450, 400);
+        const wall = a.wall;
+        await store.getState().addOpening(wall.id, "door");
+        const door = store.getState().project!.wallObjects.find((o) => o.kind === "door")!;
+        store.getState().setObjectSelection([a.placementId, b.placementId]);
+        const undoBefore = store.getState().undoStack.length;
+
+        store.getState().beginArrangeSession("gap");
+        store.getState().setArrangeSessionPreview([
+          { id: a.placementId, xMm: door.xMm, yMm: door.yMm },
+          { id: b.placementId, xMm: 1600, yMm: 1450 }
+        ]);
+        store.getState().selectObject(door.id);
+
+        const state = store.getState();
+        expect(state.arrangeSession).toBeNull();
+        expect(state.error).toMatch(/overlap/i);
+        expect(state.undoStack).toHaveLength(undoBefore);
+        expect(xById(a.placementId)).toBe(500);
+      });
+    });
   });
 
   describe("floor object ripples on removal", () => {
@@ -1872,6 +2217,43 @@ describe("app store", () => {
       const state = store.getState();
       expect(state.project!.floorObjects).toHaveLength(0);
       expect(state.project!.checklistArtworkIds).toContain(artworkId);
+    });
+  });
+
+  // Kept as its own describe block, separate from the "arrange session"
+  // tests above — artwork/artwork overlap is a non-blocking "overlap"
+  // warning (see validatePlacement.ts), unlike the artwork/opening
+  // "collision" warnings the gates above reject.
+  describe("artwork/artwork overlap (non-blocking)", () => {
+    it("commitArrangeSession succeeds when two artworks land on top of each other, surfacing a non-blocking 'overlap' warning instead of blocking", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("overlap-a.jpg")]);
+      const artworkAId = store.getState().project!.checklistArtworkIds.at(-1)!;
+      await store.getState().addArtworksFromFiles([makeImageFile("overlap-b.jpg")]);
+      const artworkBId = store.getState().project!.checklistArtworkIds.at(-1)!;
+
+      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      await store.getState().placeArtwork(artworkAId, wall.id, 500, 1450, true);
+      const a = store.getState().project!.wallObjects.at(-1)!;
+      await store.getState().placeArtwork(artworkBId, wall.id, 1500, 1450, true);
+      const b = store.getState().project!.wallObjects.at(-1)!;
+
+      store.getState().setObjectSelection([a.id, b.id]);
+      const undoBefore = store.getState().undoStack.length;
+
+      store.getState().beginArrangeSession("gap");
+      store.getState().setArrangeSessionPreview([
+        { id: a.id, xMm: 1000, yMm: 1450 },
+        { id: b.id, xMm: 1000, yMm: 1450 }
+      ]);
+      store.getState().commitArrangeSession();
+
+      const state = store.getState();
+      expect(state.error).toBeNull();
+      expect(state.arrangeSession).toBeNull();
+      expect(state.undoStack).toHaveLength(undoBefore + 1);
+      expect(state.undoStack.at(-1)?.label).toBe("Arrange on wall");
+      expect(state.placementWarnings.some((warning) => warning.type === "overlap")).toBe(true);
+      expect(state.placementWarnings.every((warning) => warning.type !== "collision")).toBe(true);
     });
   });
 });

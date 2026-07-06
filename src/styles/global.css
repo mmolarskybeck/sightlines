@@ -62,6 +62,9 @@
   --primary-foreground: oklch(1 0 0);
   --primary-strong: oklch(0.3 0.065 200);
   --primary-soft: oklch(0.94 0.022 200);
+  /* Petrol hairline for selected-row/pressed-fill edges — the same rank as
+     --danger-line/--caution-line in their families. */
+  --primary-line: var(--primary-line);
   --destructive: oklch(0.53 0.18 28);
   --destructive-foreground: oklch(1 0 0);
   --danger-soft: oklch(0.94 0.052 28);
@@ -203,7 +206,7 @@ input:focus-visible {
 .rail-button[data-state="on"] {
   background: var(--primary-soft);
   color: var(--primary-strong);
-  box-shadow: inset 0 0 0 1px oklch(0.74 0.04 200 / 0.45);
+  box-shadow: inset 0 0 0 1px var(--primary-line);
 }
 
 .rail-button:disabled {
@@ -740,7 +743,7 @@ input:focus-visible {
 
 .wall-row.active {
   background: var(--primary-soft);
-  box-shadow: inset 0 0 0 1px oklch(0.74 0.04 200 / 0.45);
+  box-shadow: inset 0 0 0 1px var(--primary-line);
 }
 
 .wall-row span,
@@ -928,12 +931,12 @@ input:focus-visible {
    petrol-soft wash with no border. */
 .checklist-row.selected {
   background: var(--primary-soft);
-  box-shadow: inset 0 0 0 1px oklch(0.74 0.04 200 / 0.45);
+  box-shadow: inset 0 0 0 1px var(--primary-line);
 }
 
 .checklist-row:focus-visible {
   box-shadow:
-    inset 0 0 0 1px oklch(0.74 0.04 200 / 0.45),
+    inset 0 0 0 1px var(--primary-line),
     0 0 0 2px var(--bg),
     0 0 0 4px var(--ring);
 }
@@ -1590,6 +1593,53 @@ input:focus-visible {
   pointer-events: none;
 }
 
+/* Persistent identity for an arrange-eligible multi-selection: a pale teal
+   "selection zone" — the marquee metaphor kept alive after release (dashed
+   petrol hairline + faint fill wash over the group's union bounds). Slightly
+   quieter stroke than the live rubber band below, so in-progress vs settled
+   still read apart. */
+.selection-group-outline {
+  fill: var(--primary);
+  fill-opacity: 0.06;
+  stroke: var(--primary);
+  stroke-opacity: 0.7;
+  stroke-dasharray: 6 4;
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+/* The in-progress rubber-band selection: petrol like every other selection
+   signal (never generic blue), a notch stronger than the settled selection
+   zone above so dragging still reads as "pending". */
+.marquee-rect {
+  fill: var(--primary);
+  fill-opacity: 0.07;
+  stroke: var(--primary);
+  stroke-opacity: 0.9;
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+}
+
+/* On-canvas margin/gap dimension lines for the selected group (GroupDimension-
+   Lines). Muted ink, quieter than the snap guides — annotation, not action. */
+.dimension-line,
+.dimension-tick {
+  stroke: var(--muted);
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+.dimension-label {
+  fill: var(--muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  /* Same halo treatment as .resize-handle-label: the bg-colored stroke is
+     painted under the fill so the label stays legible over the wall grid. */
+  paint-order: stroke;
+  stroke: var(--bg);
+  pointer-events: none;
+}
+
 .surface-label {
   position: absolute;
   top: 14px;
@@ -1899,6 +1949,64 @@ input:focus-visible {
   color: var(--muted);
 }
 
+/* Chevron stepper column for LengthField's optional `stepMm` prop. The wrap
+   is a bare positioning context — its height is just the input's, so the
+   stepper column (inset 1px to sit inside the input's own border) always
+   matches whichever size variant (default/compact) is in play. Extra
+   selector weight (`.field-row …`) keeps these padding overrides winning
+   over `.field-row input` / `.field-row.compact input` regardless of source
+   order. */
+.field-row .length-field-input-wrap {
+  position: relative;
+}
+
+.field-row .length-field-input-wrap input {
+  padding-right: 22px;
+}
+
+.field-row.compact .length-field-input-wrap input {
+  padding-right: 20px;
+}
+
+.length-field-steppers {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  display: flex;
+  flex-direction: column;
+  width: 16px;
+  border-left: 1px solid var(--input);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  overflow: hidden;
+}
+
+.length-field-steppers button {
+  display: flex;
+  flex: 1 1 50%;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--subtle);
+  cursor: pointer;
+}
+
+.length-field-steppers button:first-child {
+  border-bottom: 1px solid var(--input);
+}
+
+.length-field-steppers button:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.length-field-steppers button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
 .field-hint,
 .field-error,
 .length-field-hint {
@@ -1949,6 +2057,220 @@ input:focus-visible {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
+}
+
+/* Arrange-on-wall controls: a full-width segmented mode switch, then the one
+   editable measurement for the chosen mode plus its "Calculated" companion,
+   and (only during a live session) the Apply/Cancel row. */
+.arrange-controls {
+  display: grid;
+  gap: 12px;
+}
+
+/* Spacing-method switch: three equal-third segments inside one hairline-
+   bordered box, hairline dividers between them, the active segment filled with
+   the petrol wash. Each segment is an icon over a label that may wrap to two
+   lines — square corners, instrument-quiet, never a pill. */
+.arrange-modes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  /* Override the ui/toggle-group wrapper's inline-flex items-center gap-1:
+     segments must sit flush in equal thirds so the hairline dividers read as
+     one drawn control, not three floating buttons. */
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.arrange-modes .arrange-mode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+  min-width: 0;
+  min-height: 0;
+  /* Beat the ui/toggle variant's fixed h-8 (32px) without !important: the
+     segment must grow to fit icon + a label that may wrap to two lines. */
+  height: auto;
+  padding: 10px 6px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
+  white-space: normal;
+}
+
+.arrange-mode:first-child {
+  border-left: 0;
+}
+
+.arrange-mode svg {
+  flex: 0 0 auto;
+}
+
+.arrange-mode:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* Active row: petrol wash + weight shift, so the state survives without color
+   (the 500→650 weight step is the color-blind-safe cue). Focus ring comes from
+   the shared toggle primitive. */
+.arrange-mode[data-state="on"] {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-weight: 650;
+}
+
+.arrange-mode-body {
+  display: grid;
+  gap: 8px;
+}
+
+/* One locked two-line readout everywhere: a small muted label on line 1, the
+   value (semibold, larger) with the "Calculated" tag inline right after it on
+   line 2. Kept as one block so a screen reader reads them together. */
+.arrange-readout {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+
+.arrange-readout-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.arrange-readout-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.arrange-readout-value {
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+/* A single small hairline tag (deliberately the only one in this panel) with
+   the controls' 6px radius, in a muted ink that clears AA at this size
+   against the surface wash. Sits inline right after the value. */
+.arrange-calculated {
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.arrange-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.arrange-actions .inspector-action {
+  justify-content: center;
+  width: 100%;
+}
+
+/* Apply is the primary action — a solid petrol fill (white text + Check icon)
+   so it reads as the clear commit. Cancel is the quiet ghost beside it: no
+   fill, borderless, muted until hovered. */
+/* Chained with .inspector-action: the base rule is declared later in this
+   file and would otherwise win the equal-specificity tie, washing these
+   variants back to neutral. */
+.inspector-action.arrange-apply {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.inspector-action.arrange-apply:hover {
+  border-color: var(--primary-strong);
+  background: var(--primary-strong);
+}
+
+.inspector-action.arrange-cancel {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.inspector-action.arrange-cancel:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* Remove all is destructive: danger ink + hairline, filling with the danger
+   wash on hover. The two-step confirm keeps the same danger vocabulary. */
+.inspector-action.inspector-remove-all {
+  border-color: var(--danger-line);
+  background: transparent;
+  color: var(--danger);
+}
+
+.inspector-action.inspector-remove-all:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.remove-all-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.remove-all-confirm-label {
+  flex: 1 1 auto;
+  color: var(--danger);
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.arrange-confirm-btn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.arrange-confirm-btn:hover {
+  background: var(--surface-strong);
+}
+
+.arrange-confirm-yes {
+  border-color: var(--danger-line);
+  color: var(--danger);
+}
+
+.arrange-confirm-yes:hover {
+  background: var(--danger-soft);
 }
 
 .inspector-placement {

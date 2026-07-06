@@ -8,6 +8,10 @@ import {
 import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import type { Vector2 } from "../../domain/geometry/dragResize";
+import {
+  getNeighborAwareSegments,
+  getSpacingSegments
+} from "../../domain/placement/arrangeOnWall";
 import { getGroupBounds, getIdsIntersectingRect } from "../../domain/placement/groupBounds";
 import {
   getEffectivePlacementSizeMm,
@@ -38,6 +42,7 @@ import { ElevationOpening } from "./ElevationOpening";
 import { ArtworkTooltipContent, OpeningTooltipContent } from "./PlacementTooltip";
 import { isArtworkOutOfWallBounds, wallLocalYToSvgY } from "./elevationArtworkGeometry";
 import { GridOverlay } from "./GridOverlay";
+import { GroupDimensionLines } from "./GroupDimensionLines";
 import { Button } from "./ui/button";
 import {
   Select,
@@ -94,6 +99,11 @@ type MoveDragState = {
     offsetFromGroupCenterMm: Vector2;
   }[];
   startGroupCenterMm?: Vector2;
+  // Alt-drag of one member of a multi-selection: the drag moves only the
+  // pressed object, but the release must still suppress the trailing click
+  // (the same suppressNextSelect mechanism group drags use) so the browser's
+  // post-drag click can't collapse the multi-selection to that one member.
+  preserveSelection?: boolean;
 };
 
 // A pending marquee (rubber-band) selection on the elevation background —
@@ -153,6 +163,8 @@ export function ElevationView({
   onMarqueeSelect,
   selectedArtworkId = null,
   selectedOpeningId = null,
+  previewPositionsById,
+  arrangeSessionActive = false,
   selectedObjectIds = [],
   snapToGrid = false,
   unit,
@@ -176,6 +188,17 @@ export function ElevationView({
   // component renders and behaves exactly as it did before this change.
   wallId?: string;
   wallObjects?: WallObject[];
+  // Live arrange-session preview positions (id → center), layered over the
+  // committed wallObjects before anything downstream reads them — rendering,
+  // snap neighbors, drag start centers, group bounds, marquee hit-testing all
+  // see the preview as if it were committed. The in-flight drag preview
+  // (previewCenterById) then stacks on top of this layer.
+  previewPositionsById?: Record<string, { xMm: number; yMm: number }>;
+  // True while an arrange session is live. It switches the dimension lines from
+  // neighbour-aware outer segments (idle) to wall-edge outer segments — the
+  // arrange modes solve against the wall edges, so during a session the lines
+  // must show the values being edited rather than the space beside the works.
+  arrangeSessionActive?: boolean;
   artworksById?: Map<string, Artwork>;
   selectedArtworkId?: string | null;
   selectedOpeningId?: string | null;
@@ -236,17 +259,26 @@ export function ElevationView({
   const centerlineSvgY = wallLocalYToSvgY(wallHeightMm, centerlineMm);
   const snapThresholdMm = pixelsPerMm > 0 ? SNAP_THRESHOLD_PX / pixelsPerMm : 0;
 
-  const placements: ArtworkWallObject[] = (wallObjects ?? []).filter(
+  // Arrange-session previews applied once, up front: every downstream
+  // consumer (rendering, snap-neighbor pool, beginMoveDrag start centers,
+  // group bounds, marquee hit-testing, dimension lines) derives from this
+  // array and therefore sees the preview positions for free.
+  const effectiveWallObjects: WallObject[] = (wallObjects ?? []).map((object) => {
+    const preview = previewPositionsById?.[object.id];
+    return preview ? { ...object, xMm: preview.xMm, yMm: preview.yMm } : object;
+  });
+
+  const placements: ArtworkWallObject[] = effectiveWallObjects.filter(
     (object): object is ArtworkWallObject => object.kind === "artwork" && object.wallId === wallId
   );
-  const openings: OpeningWallObject[] = (wallObjects ?? []).filter(
+  const openings: OpeningWallObject[] = effectiveWallObjects.filter(
     (object): object is OpeningWallObject => object.kind !== "artwork" && object.wallId === wallId
   );
   // Every wall object on this wall is a valid snap neighbor for any other —
   // an artwork can align to a door's edge just as readily as to another
   // artwork's (docs/plan.md §2 snap-target priority doesn't distinguish by
   // kind, only centerline > neighbor-center > neighbor-edge > grid).
-  const wallObjectsOnThisWall: WallObjectBase[] = [...placements, ...openings];
+  const wallObjectsOnThisWall: WallObject[] = [...placements, ...openings];
 
   const assetIds = placements.map((placement) => artworksById?.get(placement.artworkId)?.assetId);
   const imageUrlsByAssetId = useAssetImageUrls(assetIds, getBlob ?? NO_OP_GET_BLOB, "display");
@@ -362,6 +394,10 @@ export function ElevationView({
         return;
       }
 
+      // Alt-drag of one group member: same single-object commit below, but the
+      // trailing click must not collapse the multi-selection it came from.
+      if (current.preserveSelection) suppressNextSelect();
+
       if (current.kind === "artwork") {
         onMovePlacement?.(current.wallObjectId, current.previewCenterMm.xMm, current.previewCenterMm.yMm);
       } else {
@@ -381,9 +417,12 @@ export function ElevationView({
     // reading live state via moveDragRef rather than closing over `moveDrag`.
     // wallLengthMm/wallHeightMm/centerlineMm/minorGridMm/snapToGrid/
     // snapThresholdMm/wallObjectsOnThisWall all derive from the committed
-    // project and current viewport, which can't change mid-drag (the
-    // transient preview never rewrites them), so they're intentionally left
-    // out of the deps.
+    // project (plus the arrange-session preview layer) and current viewport,
+    // none of which can change mid-drag: the transient drag preview never
+    // rewrites them, panel edits are impossible while a pointer is captured
+    // (the pointer is on the canvas, not the inspector), and the session
+    // preview only changes from this very drag's own commits — so they're
+    // intentionally left out of the deps.
   }, [moveDrag !== null, onMovePlacement, onMoveOpening, onMoveWallObjects]);
 
   useEffect(() => {
@@ -484,11 +523,18 @@ export function ElevationView({
     const startPointerMm = toWallLocalMm(event.clientX, event.clientY);
     if (!startPointerMm) return;
 
+    // Alt-drag opts out of the group branch: one member moves alone while the
+    // multi-selection survives the release (preserveSelection below).
+    const altSoloDrag =
+      event.altKey &&
+      selectedObjectIds.includes(wallObject.id) &&
+      selectedObjectIds.length > 1;
+
     // Group drag: the pressed object is part of a multi-selection. Resolve the
     // live members from this wall (stale ids simply drop out), size the union
     // box, and remember each member's offset from that box's center. Everything
     // downstream then treats the group as one virtual object.
-    if (selectedObjectIds.includes(wallObject.id) && selectedObjectIds.length > 1) {
+    if (!altSoloDrag && selectedObjectIds.includes(wallObject.id) && selectedObjectIds.length > 1) {
       const groupMembers: WallObject[] = [...placements, ...openings].filter((object) =>
         selectedObjectIds.includes(object.id)
       );
@@ -527,7 +573,8 @@ export function ElevationView({
       startCenterMm: { xMm: wallObject.xMm, yMm: wallObject.yMm },
       previewCenterMm: { xMm: wallObject.xMm, yMm: wallObject.yMm },
       previousSnapTargetIds: undefined,
-      activeGuides: []
+      activeGuides: [],
+      preserveSelection: altSoloDrag
     });
   }
 
@@ -615,6 +662,53 @@ export function ElevationView({
       previewCenterById.set(moveDrag.wallObjectId, moveDrag.previewCenterMm);
     }
   }
+
+  // The persistent group annotations (outline + dimension lines) exist only
+  // when the whole selection resolves to wall objects on THIS wall — a cross-
+  // wall or wall+floor selection keeps per-object outlines only. Members carry
+  // the arrange-session preview (already baked into wallObjectsOnThisWall) plus
+  // the in-flight drag preview on top, so both annotations track every live
+  // movement.
+  const applyDragPreview = (wallObject: WallObjectBase): WallObjectBase => {
+    const preview = previewCenterById.get(wallObject.id);
+    return preview ? { ...wallObject, xMm: preview.xMm, yMm: preview.yMm } : wallObject;
+  };
+  const selectedMembersOnThisWall = wallObjectsOnThisWall.filter((wallObject) =>
+    selectedObjectIds.includes(wallObject.id)
+  );
+  const selectionAllOnThisWall =
+    selectedMembersOnThisWall.length === selectedObjectIds.length;
+  // The group OUTLINE bounds the WHOLE selection (artworks + openings alike) and
+  // needs 2+ to be worth drawing — a single object already carries its own
+  // selected outline.
+  const isGroupOutlineEligible =
+    selectedMembersOnThisWall.length >= 2 && selectionAllOnThisWall;
+  const effectiveOutlineMembers: WallObjectBase[] =
+    selectedMembersOnThisWall.map(applyDragPreview);
+
+  // The dimension lines describe what ARRANGE affects. For a multi-selection
+  // that's the ARTWORK members only (openings are architecture — arrange never
+  // moves them, so they don't get gap lines). A single selection of ANY kind
+  // gets its own outer margins (useful to read a lone door/window/work's space
+  // on the wall too). "others" for the neighbour-aware outer segments is every
+  // effective wall object on this wall that isn't a dimension member.
+  const dimensionMemberSource =
+    selectedObjectIds.length === 1
+      ? selectedMembersOnThisWall
+      : selectedMembersOnThisWall.filter((wallObject) => wallObject.kind === "artwork");
+  const isDimensionLinesEligible =
+    dimensionMemberSource.length >= 1 && selectionAllOnThisWall;
+  const effectiveDimensionMembers: WallObjectBase[] =
+    dimensionMemberSource.map(applyDragPreview);
+  const dimensionMemberIds = new Set(dimensionMemberSource.map((wallObject) => wallObject.id));
+  const dimensionOthers: WallObjectBase[] = wallObjectsOnThisWall
+    .filter((wallObject) => !dimensionMemberIds.has(wallObject.id))
+    .map(applyDragPreview);
+  // Idle → neighbour-aware (stop at the nearest window/door/work). Active
+  // arrange session → wall-edge segments, matching the values the panel edits.
+  const dimensionSegments = arrangeSessionActive
+    ? getSpacingSegments(effectiveDimensionMembers, wallLengthMm)
+    : getNeighborAwareSegments(effectiveDimensionMembers, dimensionOthers, wallLengthMm);
 
   // Wall switcher wiring for the chip. Prev/next cycle through every wall in
   // room order (wrapping), and the Select lists them all — grouped by room
@@ -832,14 +926,38 @@ export function ElevationView({
             wallHeightMm={wallHeightMm}
           />
         ) : null}
+        {isGroupOutlineEligible && pixelsPerMm > 0
+          ? (() => {
+              // Persistent group identity: a quiet SOLID outline around the
+              // union bounds (visually distinct from the dashed in-progress
+              // marquee below), padded a constant 6 screen px so it never
+              // hugs the artwork edges regardless of zoom.
+              const bounds = getGroupBounds(effectiveOutlineMembers);
+              const padMm = 6 / pixelsPerMm;
+              return (
+                <rect
+                  className="selection-group-outline"
+                  x={bounds.centerXMm - bounds.widthMm / 2 - padMm}
+                  y={
+                    wallLocalYToSvgY(wallHeightMm, bounds.centerYMm + bounds.heightMm / 2) -
+                    padMm
+                  }
+                  width={bounds.widthMm + padMm * 2}
+                  height={bounds.heightMm + padMm * 2}
+                  vectorEffect="non-scaling-stroke"
+                />
+              );
+            })()
+          : null}
         {marquee
           ? (() => {
               const rect = marqueeRectMm(marquee);
               // Wall-local y is up; svg y is down. The rect's top edge (maxYMm)
               // maps to the smaller svg y, so anchor the <rect> there and let
-              // its positive height run downward. Dashed stroke borrows the
-              // snap-guide visual language; presentation attributes only (no CSS
-              // file owned here).
+              // its positive height run downward. Dashed petrol stroke (see
+              // .marquee-rect) — selection is a petrol signal everywhere else
+              // in the app, and the dash keeps it distinct from the SOLID
+              // group outline that persists after release.
               return (
                 <rect
                   className="marquee-rect"
@@ -847,9 +965,6 @@ export function ElevationView({
                   y={wallLocalYToSvgY(wallHeightMm, rect.maxYMm)}
                   width={rect.maxXMm - rect.minXMm}
                   height={rect.maxYMm - rect.minYMm}
-                  fill="rgba(59, 130, 246, 0.08)"
-                  stroke="rgba(59, 130, 246, 0.9)"
-                  strokeDasharray="6 4"
                   vectorEffect="non-scaling-stroke"
                 />
               );
@@ -868,6 +983,15 @@ export function ElevationView({
             vectorEffect="non-scaling-stroke"
           />
         ))}
+        {isDimensionLinesEligible ? (
+          <GroupDimensionLines
+            members={effectiveDimensionMembers}
+            segments={dimensionSegments}
+            pixelsPerMm={pixelsPerMm}
+            unit={unit}
+            wallHeightMm={wallHeightMm}
+          />
+        ) : null}
       </svg>
     </div>
   );

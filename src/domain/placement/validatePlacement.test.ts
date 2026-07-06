@@ -149,6 +149,96 @@ describe("collision validation against openings", () => {
   });
 });
 
+describe("overlap validation between artworks", () => {
+  it("flags two overlapping artworks on the same wall as non-blocking overlaps", () => {
+    const project = withSouthWallTwoArtworks({ firstXMm: feetToMm(10), secondXMm: feetToMm(10) });
+
+    const warnings = validateWallObjectPlacements(project, ["artwork-placement-1"]);
+
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        wallObjectId: "artwork-placement-1",
+        wallId: "wall-south",
+        message: "Artworks overlap on this wall.",
+        type: "overlap"
+      })
+    ]);
+  });
+
+  it("symmetrically flags the other artwork when it is the one revalidated", () => {
+    const project = withSouthWallTwoArtworks({ firstXMm: feetToMm(10), secondXMm: feetToMm(10) });
+
+    const warnings = validateWallObjectPlacements(project, ["artwork-placement-2"]);
+
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        wallObjectId: "artwork-placement-2",
+        wallId: "wall-south",
+        message: "Artworks overlap on this wall.",
+        type: "overlap"
+      })
+    ]);
+  });
+
+  it("does not flag two artworks that don't overlap", () => {
+    const project = withSouthWallTwoArtworks({ firstXMm: feetToMm(2), secondXMm: feetToMm(20) });
+
+    expect(validateWallObjectPlacements(project, ["artwork-placement-1"])).toEqual([]);
+    expect(validateWallObjectPlacements(project, ["artwork-placement-2"])).toEqual([]);
+  });
+
+  it("still flags an artwork/obstacle pair as a blocking collision, unaffected by overlap detection", () => {
+    const project = withSouthWallArtworkAndDoor({ artworkXMm: feetToMm(10), doorXMm: feetToMm(10) });
+
+    const warnings = validateWallObjectPlacements(project, ["placement-south-far"]);
+
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        wallObjectId: "placement-south-far",
+        wallId: "wall-south",
+        message: "Placement overlaps another object on this wall.",
+        type: "collision"
+      })
+    ]);
+  });
+});
+
+function withSouthWallTwoArtworks({
+  firstXMm,
+  secondXMm
+}: {
+  firstXMm: number;
+  secondXMm: number;
+}): Project {
+  const project = createSampleProject();
+
+  return {
+    ...project,
+    wallObjects: [
+      {
+        id: "artwork-placement-1",
+        kind: "artwork",
+        artworkId: "artwork-1",
+        wallId: "wall-south",
+        xMm: firstXMm,
+        yMm: inchesToMm(57),
+        widthMm: feetToMm(2),
+        heightMm: feetToMm(3)
+      },
+      {
+        id: "artwork-placement-2",
+        kind: "artwork",
+        artworkId: "artwork-1",
+        wallId: "wall-south",
+        xMm: secondXMm,
+        yMm: inchesToMm(57),
+        widthMm: feetToMm(2),
+        heightMm: feetToMm(3)
+      }
+    ]
+  };
+}
+
 function withSouthWallArtworkAndDoor({
   artworkXMm,
   doorXMm

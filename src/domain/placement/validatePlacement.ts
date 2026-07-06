@@ -11,8 +11,11 @@ export type PlacementWarning = {
   // artwork/opening overlap, by default disallowed — see store.ts's
   // allowOverlappingPlacement). "bounds" warnings (off the wall's edges, or
   // a dangling wall reference) stay advisory only; there's no "override" for
-  // a placement that isn't on the wall at all.
-  type: "bounds" | "collision";
+  // a placement that isn't on the wall at all. "overlap" (two artworks
+  // sharing space on the same wall) is advisory-only too — it's a real
+  // layout concern worth surfacing, but never blocks a commit the way an
+  // artwork/opening "collision" does.
+  type: "bounds" | "collision" | "overlap";
 };
 
 export function validateChangedWallPlacements(
@@ -123,19 +126,20 @@ function validateWallObjectBounds(
 // Two openings overlapping each other (e.g. a door inside a blocked zone)
 // isn't checked — out of scope for this slice, which is about protecting
 // artwork placements from real obstacles.
+//
+// Two artworks overlapping each other on the same wall is a separate,
+// non-blocking concern — flagged below as an "overlap" warning so a curator
+// notices, but never rejected the way an artwork/obstacle "collision" is.
 function validateWallObjectCollisions(
   wallObject: WallObject,
   allWallObjects: WallObject[]
 ): PlacementWarning[] {
-  const others = allWallObjects.filter(
-    (other) =>
-      other.id !== wallObject.id &&
-      other.wallId === wallObject.wallId &&
-      isBlockingPair(wallObject, other)
+  const sameWallOthers = allWallObjects.filter(
+    (other) => other.id !== wallObject.id && other.wallId === wallObject.wallId
   );
 
-  return others
-    .filter((other) => doWallObjectsOverlap(wallObject, other))
+  const collisions: PlacementWarning[] = sameWallOthers
+    .filter((other) => isBlockingPair(wallObject, other) && doWallObjectsOverlap(wallObject, other))
     .map((other) => ({
       id: `${wallObject.id}:collision:${other.id}`,
       wallObjectId: wallObject.id,
@@ -143,11 +147,26 @@ function validateWallObjectCollisions(
       message: "Placement overlaps another object on this wall.",
       type: "collision" as const
     }));
+
+  const overlaps: PlacementWarning[] =
+    wallObject.kind === "artwork"
+      ? sameWallOthers
+          .filter((other) => other.kind === "artwork" && doWallObjectsOverlap(wallObject, other))
+          .map((other) => ({
+            id: `${wallObject.id}:overlap:${other.id}`,
+            wallObjectId: wallObject.id,
+            wallId: wallObject.wallId,
+            message: "Artworks overlap on this wall.",
+            type: "overlap" as const
+          }))
+      : [];
+
+  return [...collisions, ...overlaps];
 }
 
-// Only an artwork/obstacle pair is a real conflict — an obstacle is never
-// blocked by another obstacle, and two artworks overlapping is a separate,
-// not-yet-built concern (multi-select/grouping, docs/plan.md's MVP1C list).
+// Only an artwork/obstacle pair is a real (blocking) conflict — an obstacle
+// is never blocked by another obstacle. Two artworks overlapping is handled
+// separately above as a non-blocking "overlap" warning, not a "collision".
 function isBlockingPair(a: WallObject, b: WallObject): boolean {
   return (a.kind === "artwork") !== (b.kind === "artwork");
 }

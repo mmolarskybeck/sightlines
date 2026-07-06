@@ -55,6 +55,22 @@ import { migrateProjectJson } from "../domain/schema/projectSchema";
 
 type ViewMode = "plan" | "elevation" | "data";
 
+// A transient, NON-undoable arrange interaction (precedent: selectedObjectIds
+// is view state, not on the undo stack). While a session is live, panel edits,
+// group drags and arrow nudges write to previewById only — the committed
+// project is untouched until the session settles. Accepting flushes previewById
+// into ONE "Arrange on wall" undo entry; cancelling just drops the slice.
+// originalById is the committed layout at begin, used for cancel/no-op
+// detection. Exported so the elevation view / inspector (later work packages)
+// can read previewById to render the live preview.
+export type ArrangeSession = {
+  wallId: string;
+  memberIds: string[];
+  originalById: Record<string, { xMm: number; yMm: number }>;
+  previewById: Record<string, { xMm: number; yMm: number }>;
+  mode: "equal" | "inset" | "gap";
+};
+
 // An entry may carry either half, or both. A pure geometry/metadata edit
 // (resize a wall, rename the project) only ever needs `project`. A checklist
 // artwork edit (updateArtwork) only needs `artwork` — unless the edit also
@@ -99,6 +115,16 @@ type AppState = {
   // pre-existing single-select inspectors (selectedArtworkId/selectedOpeningId)
   // in sync.
   selectedObjectIds: string[];
+  // Transient arrange interaction, null unless a session is in flight. Settles
+  // (accept/cancel) on any selection/view change, undo/redo, or foreign edit —
+  // see the settle table around settleArrangeSession.
+  arrangeSession: ArrangeSession | null;
+  // The spacing mode the arrange panel should default to when there's no live
+  // session and the layout doesn't already read as evenly spaced — plain view
+  // state (not undoable, not persisted), remembered across selections so the
+  // panel opens in the mode the curator last worked in. Updated whenever a
+  // session begins or changes mode.
+  lastArrangeMode: "equal" | "inset" | "gap";
   viewMode: ViewMode;
   saveState: "idle" | "saving" | "saved" | "error";
   error: string | null;
@@ -183,6 +209,14 @@ type AppState = {
     params: { insetMm: number } | { gapMm: number } | { equal: true },
     allowOverlap?: boolean
   ) => Promise<void>;
+  // Ephemeral arrange session (live preview → single commit). See ArrangeSession.
+  beginArrangeSession: (mode: ArrangeSession["mode"]) => void;
+  updateArrangeSession: (
+    params: { insetMm: number } | { gapMm: number } | { equal: true }
+  ) => void;
+  setArrangeSessionPreview: (moves: { id: string; xMm: number; yMm: number }[]) => void;
+  commitArrangeSession: (allowOverlap?: boolean) => void;
+  cancelArrangeSession: () => void;
   removeSelectedPlacements: () => Promise<void>;
 };
 
@@ -218,6 +252,7 @@ export function createAppStore(deps: AppStoreDeps) {
         | "selectedArtworkId"
         | "selectedOpeningId"
         | "selectedObjectIds"
+        | "arrangeSession"
         | "viewMode"
       >
     >;
@@ -233,6 +268,10 @@ export function createAppStore(deps: AppStoreDeps) {
         redoStack: [],
         placementWarnings: [],
         lastGeometryEdit: null,
+        // Any committed edit settles a pending arrange session by default — a
+        // foreign edit (or the session's own commit, which re-passes this via
+        // extras) can't leave a stale session pointing at pre-edit positions.
+        arrangeSession: null,
         ...extras
       });
     }
@@ -283,6 +322,7 @@ export function createAppStore(deps: AppStoreDeps) {
         selectedArtworkId: null,
         selectedOpeningId: null,
         selectedObjectIds: [],
+        arrangeSession: null,
         placementWarnings: [],
         lastGeometryEdit: null,
         undoStack: [],
@@ -292,12 +332,160 @@ export function createAppStore(deps: AppStoreDeps) {
       });
     }
 
+    // Shared commit path for a batch of wall-object x/y moves: all-or-nothing
+    // collision gate (a single overlap blocks the whole batch), then one undo
+    // entry. Extracted from moveWallObjectsGroup so the arrange session can
+    // commit its preview through the exact same validation. Deliberately does
+    // NOT persist — it returns the after-project so the caller decides whether
+    // to `await persist` (group drag) or fire `void persist` (session settle,
+    // which must finish its synchronous state changes before the caller
+    // continues). The pushEditEntry `set()` here runs synchronously.
+    function commitWallObjectMoves(
+      moves: { id: string; xMm: number; yMm: number }[],
+      label: string | ((movedCount: number) => string),
+      allowOverlap: boolean,
+      extras: EditExtras = {}
+    ):
+      | { status: "committed"; project: Project }
+      | { status: "no-op" }
+      | { status: "blocked" } {
+      const project = get().project;
+      if (!project) return { status: "no-op" };
+
+      // A stale id (a member removed since the group was selected, e.g. by an
+      // undo) is filtered out rather than treated as an error — the rest of
+      // the group still moves.
+      const applicable = moves.filter((move) =>
+        project.wallObjects.some((wallObject) => wallObject.id === move.id)
+      );
+      if (applicable.length === 0) return { status: "no-op" };
+
+      const moveById = new Map(applicable.map((move) => [move.id, move]));
+      const movedIds: string[] = [];
+      const nextWallObjects = project.wallObjects.map((wallObject) => {
+        const move = moveById.get(wallObject.id);
+        if (!move || (wallObject.xMm === move.xMm && wallObject.yMm === move.yMm)) {
+          return wallObject;
+        }
+        movedIds.push(wallObject.id);
+        return { ...wallObject, xMm: move.xMm, yMm: move.yMm };
+      });
+      if (movedIds.length === 0) return { status: "no-op" };
+
+      // One batch is one commit: either every member's move lands together, or
+      // a single collision anywhere blocks the whole thing.
+      const placementWarnings = validateWallObjectPlacements(
+        { ...project, wallObjects: nextWallObjects },
+        movedIds
+      );
+
+      if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
+        set({ error: OVERLAP_BLOCKED_MESSAGE });
+        return { status: "blocked" };
+      }
+
+      const after = {
+        ...project,
+        wallObjects: nextWallObjects,
+        updatedAt: new Date().toISOString()
+      };
+      const resolvedLabel = typeof label === "function" ? label(movedIds.length) : label;
+      pushEditEntry(
+        { label: resolvedLabel, project: { before: project, after } },
+        { placementWarnings, ...extras }
+      );
+      return { status: "committed", project: after };
+    }
+
+    // Internal, SYNCHRONOUS settle for a pending arrange session — the single
+    // place accept/cancel semantics live (see the table in
+    // docs/plan wild-floating-babbage.md).
+    //
+    // LOAD-BEARING ordering: the accept path completes all of its state changes
+    // synchronously (pushEditEntry's `set()` runs before any await; persist is
+    // fired as `void persist(...)`, not awaited). Callers such as selectObject
+    // rely on this: they call the auto-accept as their first line and then
+    // proceed to change selection in the same synchronous tick, trusting the
+    // arrangement is already committed by the time they run.
+    //
+    // Returns "committed" (one undo entry pushed), "cleared" (session dropped
+    // with no edit — cancel or a no-op accept), or "blocked" (collision gate
+    // rejected the commit; session left intact with the error surfaced).
+    function settleArrangeSession(
+      outcome: "accept" | "cancel",
+      allowOverlap = false
+    ): "committed" | "cleared" | "blocked" {
+      const session = get().arrangeSession;
+      if (!session) return "cleared";
+
+      if (outcome === "cancel") {
+        set({ arrangeSession: null });
+        return "cleared";
+      }
+
+      // No-op guard: if every preview position is within 0.01mm of where it
+      // started, there's nothing to commit — drop the session without an
+      // undo entry.
+      const isNoOp = session.memberIds.every((id) => {
+        const original = session.originalById[id];
+        const preview = session.previewById[id];
+        if (!original || !preview) return true;
+        return (
+          Math.abs(original.xMm - preview.xMm) < 0.01 &&
+          Math.abs(original.yMm - preview.yMm) < 0.01
+        );
+      });
+      if (isNoOp) {
+        set({ arrangeSession: null });
+        return "cleared";
+      }
+
+      const moves = session.memberIds
+        .filter((id) => session.previewById[id])
+        .map((id) => ({
+          id,
+          xMm: session.previewById[id].xMm,
+          yMm: session.previewById[id].yMm
+        }));
+
+      const result = commitWallObjectMoves(moves, "Arrange on wall", allowOverlap, {
+        arrangeSession: null
+      });
+
+      if (result.status === "committed") {
+        // Fire-and-forget so the state change above is fully synchronous.
+        void persist(result.project);
+        return "committed";
+      }
+      if (result.status === "blocked") {
+        // Session left intact (commit didn't clear it); error already surfaced.
+        return "blocked";
+      }
+      // Commit found nothing to move (preview matched committed positions) —
+      // clear the session without an undo entry.
+      set({ arrangeSession: null });
+      return "cleared";
+    }
+
+    // Auto-accept used by selection/view changes: a pending arrangement can't
+    // outlive the selection it belongs to, so a collision-blocked commit here
+    // is cancelled (keeping the surfaced error) rather than left open the way an
+    // explicit commitArrangeSession would.
+    function autoAcceptArrangeSession() {
+      if (!get().arrangeSession) return;
+      if (settleArrangeSession("accept") === "blocked") {
+        set({ arrangeSession: null });
+      }
+    }
+
     return {
       project: null,
       selectedWallId: null,
       selectedArtworkId: null,
       selectedOpeningId: null,
       selectedObjectIds: [],
+      arrangeSession: null,
+      lastArrangeMode: "inset",
       viewMode: "plan",
       saveState: "idle",
       error: null,
@@ -351,10 +539,12 @@ export function createAppStore(deps: AppStoreDeps) {
       },
 
       setViewMode(viewMode) {
+        autoAcceptArrangeSession();
         set({ viewMode });
       },
 
       selectWall(wallId) {
+        autoAcceptArrangeSession();
         // Wall focus replaces artwork/opening focus in the inspector — the
         // three selections are mutually exclusive, not independent. It also
         // drops any multi-select — a wall click is a fresh focus gesture, not
@@ -368,10 +558,12 @@ export function createAppStore(deps: AppStoreDeps) {
       },
 
       selectArtwork(artworkId) {
+        autoAcceptArrangeSession();
         set({ selectedArtworkId: artworkId, selectedOpeningId: null, selectedObjectIds: [] });
       },
 
       selectOpening(wallObjectId) {
+        autoAcceptArrangeSession();
         set({ selectedOpeningId: wallObjectId, selectedArtworkId: null, selectedObjectIds: [] });
       },
 
@@ -381,6 +573,11 @@ export function createAppStore(deps: AppStoreDeps) {
       // just rendered, but a stale id from a race should be inert, not
       // clear the selection out from under the user).
       selectObject(id, opts = {}) {
+        // Auto-accept FIRST, before the selection changes: a plain click on a
+        // group member commits the pending arrangement and then collapses the
+        // selection — intended UX (see the settle table).
+        autoAcceptArrangeSession();
+
         const project = get().project;
         if (!project) return;
 
@@ -403,6 +600,8 @@ export function createAppStore(deps: AppStoreDeps) {
       // Silently drops any id that isn't a live placement, the same
       // tolerance selectObject has for a single stale id.
       setObjectSelection(ids) {
+        autoAcceptArrangeSession();
+
         const project = get().project;
         if (!project) return;
 
@@ -416,6 +615,7 @@ export function createAppStore(deps: AppStoreDeps) {
       },
 
       clearObjectSelection() {
+        autoAcceptArrangeSession();
         if (get().selectedObjectIds.length === 0) return;
         set({ selectedObjectIds: [], selectedArtworkId: null, selectedOpeningId: null });
       },
@@ -563,7 +763,8 @@ export function createAppStore(deps: AppStoreDeps) {
           undoStack: get().undoStack.slice(0, -1),
           redoStack: [...get().redoStack, entry],
           placementWarnings: [],
-          lastGeometryEdit: null
+          lastGeometryEdit: null,
+          arrangeSession: null
         });
 
         if (entry.project) await persist(entry.project.before);
@@ -579,7 +780,8 @@ export function createAppStore(deps: AppStoreDeps) {
           redoStack: get().redoStack.slice(0, -1),
           undoStack: [...get().undoStack, entry],
           placementWarnings: [],
-          lastGeometryEdit: null
+          lastGeometryEdit: null,
+          arrangeSession: null
         });
 
         if (entry.project) await persist(entry.project.after);
@@ -1350,48 +1552,16 @@ export function createAppStore(deps: AppStoreDeps) {
         }));
       },
 
+      // A direct group drag with no active session: one "Move N objects" undo
+      // entry via the shared commit path. (When a session is active the drag
+      // routes into setArrangeSessionPreview instead — see App.tsx.)
       async moveWallObjectsGroup(moves, allowOverlap = false) {
-        const project = get().project;
-        if (!project) return;
-
-        // A stale id (a member removed since the group was selected, e.g. by
-        // an undo) is filtered out rather than treated as an error — the
-        // rest of the group still moves.
-        const applicable = moves.filter((move) =>
-          project.wallObjects.some((wallObject) => wallObject.id === move.id)
+        const result = commitWallObjectMoves(
+          moves,
+          (count) => `Move ${count} objects`,
+          allowOverlap
         );
-        if (applicable.length === 0) return;
-
-        const moveById = new Map(applicable.map((move) => [move.id, move]));
-        const movedIds: string[] = [];
-        const nextWallObjects = project.wallObjects.map((wallObject) => {
-          const move = moveById.get(wallObject.id);
-          if (!move || (wallObject.xMm === move.xMm && wallObject.yMm === move.yMm)) {
-            return wallObject;
-          }
-          movedIds.push(wallObject.id);
-          return { ...wallObject, xMm: move.xMm, yMm: move.yMm };
-        });
-        if (movedIds.length === 0) return;
-
-        // One drag of a group is one commit: either every member's move
-        // lands together, or a single collision anywhere in the group blocks
-        // the whole thing — there's no such thing as half a group move.
-        const placementWarnings = validateWallObjectPlacements(
-          { ...project, wallObjects: nextWallObjects },
-          movedIds
-        );
-
-        if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
-          set({ error: OVERLAP_BLOCKED_MESSAGE });
-          return;
-        }
-
-        await applyEdit(
-          `Move ${movedIds.length} objects`,
-          (current) => ({ ...current, wallObjects: nextWallObjects }),
-          { placementWarnings }
-        );
+        if (result.status === "committed") await persist(result.project);
       },
 
       async movePlanObjectsGroup(moves, allowOverlap = false) {
@@ -1459,6 +1629,11 @@ export function createAppStore(deps: AppStoreDeps) {
         );
       },
 
+      // Direct, one-shot arrange (still used by tests). The inspector panel now
+      // drives arrangement through the ephemeral session actions below
+      // (beginArrangeSession/updateArrangeSession/commit...) so panel edits are
+      // a live preview that commits as a single undo entry; this action remains
+      // the immediate-commit path.
       async arrangeSelectedOnWall(params, allowOverlap = false) {
         const project = get().project;
         if (!project) return;
@@ -1478,8 +1653,12 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
-        const members = project.wallObjects.filter((wallObject) =>
-          selectedIds.includes(wallObject.id)
+        // Arranging operates on ARTWORKS only — openings (doors/windows/blocked
+        // zones) are architecture, not part of the hang. A selected opening is
+        // simply not a member: it neither moves on arrange nor counts toward the
+        // 2-member minimum.
+        const members = project.wallObjects.filter(
+          (wallObject) => wallObject.kind === "artwork" && selectedIds.includes(wallObject.id)
         );
         if (members.length < 2) {
           set({ error: cannotArrangeMessage });
@@ -1534,6 +1713,129 @@ export function createAppStore(deps: AppStoreDeps) {
         );
       },
 
+      beginArrangeSession(mode) {
+        const project = get().project;
+        if (!project) return;
+
+        // Guards identical to arrangeSelectedOnWall (2+ wall members, no floor
+        // members, all on one wall) — but a silent no-op on failure, since the
+        // panel only offers a begin when the selection already qualifies.
+        const selectedIds = get().selectedObjectIds;
+        const hasFloorMember = selectedIds.some((id) =>
+          project.floorObjects.some((floorObject) => floorObject.id === id)
+        );
+        if (hasFloorMember) return;
+
+        // Members are ARTWORKS only — a selected opening is architecture, never
+        // arranged (see arrangeSelectedOnWall). It doesn't move on arrange and
+        // doesn't count toward the 2-member minimum, but it also doesn't block
+        // eligibility.
+        const members = project.wallObjects.filter(
+          (wallObject) => wallObject.kind === "artwork" && selectedIds.includes(wallObject.id)
+        );
+        if (members.length < 2) return;
+
+        const wallIds = new Set(members.map((member) => member.wallId));
+        if (wallIds.size > 1) return;
+
+        const memberIds = members.map((member) => member.id);
+
+        // Idempotent: re-begin on the same member set just switches mode, so
+        // previewById built up so far survives (a mode switch never re-seeds
+        // from committed positions mid-session).
+        const existing = get().arrangeSession;
+        if (existing && sameIdSet(existing.memberIds, memberIds)) {
+          set({ arrangeSession: { ...existing, mode }, lastArrangeMode: mode });
+          return;
+        }
+
+        const originalById: Record<string, { xMm: number; yMm: number }> = {};
+        const previewById: Record<string, { xMm: number; yMm: number }> = {};
+        for (const member of members) {
+          originalById[member.id] = { xMm: member.xMm, yMm: member.yMm };
+          previewById[member.id] = { xMm: member.xMm, yMm: member.yMm };
+        }
+
+        set({
+          arrangeSession: {
+            wallId: members[0].wallId,
+            memberIds,
+            originalById,
+            previewById,
+            mode
+          },
+          lastArrangeMode: mode
+        });
+      },
+
+      updateArrangeSession(params) {
+        const session = get().arrangeSession;
+        const project = get().project;
+        if (!session || !project) return;
+
+        const wall = getProjectWalls(project).find(
+          (candidate) => candidate.id === session.wallId
+        );
+        if (!wall) return;
+
+        // Run the arrange math against PREVIEW positions (committed objects
+        // overridden with previewById), so successive edits compose. No
+        // collision gate during preview — overlaps surface only at commit.
+        const previewMembers = project.wallObjects
+          .filter((wallObject) => session.memberIds.includes(wallObject.id))
+          .map((wallObject) => {
+            const preview = session.previewById[wallObject.id];
+            return preview ? { ...wallObject, xMm: preview.xMm, yMm: preview.yMm } : wallObject;
+          });
+
+        const insetMm =
+          "insetMm" in params
+            ? params.insetMm
+            : "gapMm" in params
+              ? insetForGap(previewMembers, wall.lengthMm, params.gapMm)
+              : solveEqualArrangement(previewMembers, wall.lengthMm).insetMm;
+
+        const moves = arrangeOnWall(previewMembers, wall.lengthMm, { insetMm });
+        if (moves.length === 0) return;
+
+        // x only — arranging is a horizontal move; y stays as previewed.
+        const previewById = { ...session.previewById };
+        for (const move of moves) {
+          const current = previewById[move.id];
+          previewById[move.id] = { xMm: move.xMm, yMm: current ? current.yMm : 0 };
+        }
+
+        const mode: ArrangeSession["mode"] =
+          "insetMm" in params ? "inset" : "gapMm" in params ? "gap" : "equal";
+
+        set({ arrangeSession: { ...session, previewById, mode }, lastArrangeMode: mode });
+      },
+
+      setArrangeSessionPreview(moves) {
+        const session = get().arrangeSession;
+        if (!session) return;
+
+        const memberSet = new Set(session.memberIds);
+        const previewById = { ...session.previewById };
+        for (const move of moves) {
+          if (!memberSet.has(move.id)) continue;
+          previewById[move.id] = { xMm: move.xMm, yMm: move.yMm };
+        }
+
+        set({ arrangeSession: { ...session, previewById } });
+      },
+
+      commitArrangeSession(allowOverlap = false) {
+        // A collision block keeps the session open (error surfaced) so the
+        // curator can adjust — settleArrangeSession returns "blocked" and does
+        // not clear the slice.
+        settleArrangeSession("accept", allowOverlap);
+      },
+
+      cancelArrangeSession() {
+        settleArrangeSession("cancel");
+      },
+
       async removeSelectedPlacements() {
         const project = get().project;
         const selectedIds = get().selectedObjectIds;
@@ -1573,6 +1875,15 @@ function openingNoun(kind: OpeningKind): string {
 // whether the object is wall-anchored or floor-placed.
 function moveObjectNoun(kind: WallObject["kind"]): string {
   return kind === "artwork" ? "artwork" : openingNoun(kind);
+}
+
+// Order-insensitive equality of two id lists — used to detect that a
+// beginArrangeSession call names the same members as the live session (a
+// mode switch), so the running preview isn't discarded.
+function sameIdSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((id) => set.has(id));
 }
 
 // The only place placement ids (selectedObjectIds) and library ids

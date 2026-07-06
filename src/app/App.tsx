@@ -14,7 +14,10 @@ import {
   getWallsWithGeometry,
   getOrthogonalQuadWallPair,
 } from "../domain/geometry/walls";
-import { getArrangeReadout } from "../domain/placement/arrangeOnWall";
+import {
+  getArrangeReadoutDetailed,
+  solveEqualArrangement
+} from "../domain/placement/arrangeOnWall";
 import { getOpeningKindLabel } from "../domain/placement/createOpening";
 import type {
   Artwork,
@@ -48,6 +51,10 @@ import { TooltipProvider } from "./components/ui/tooltip";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { RoomsPanel } from "./components/RoomsPanel";
 import { SelectionInspector } from "./components/SelectionInspector";
+import {
+  WallPlacementFields,
+  getWallPlacementNeighborEdges
+} from "./components/WallPlacementFields";
 import { WallInspector, type WallDimensionLink } from "./components/WallInspector";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
@@ -94,6 +101,8 @@ export function App() {
     selectedArtworkId,
     selectedOpeningId,
     selectedObjectIds,
+    arrangeSession,
+    lastArrangeMode,
     viewMode,
     saveState,
     error,
@@ -140,8 +149,12 @@ export function App() {
     updateFloorObject,
     moveWallObjectsGroup,
     movePlanObjectsGroup,
-    arrangeSelectedOnWall,
-    removeSelectedPlacements
+    removeSelectedPlacements,
+    beginArrangeSession,
+    updateArrangeSession,
+    setArrangeSessionPreview,
+    commitArrangeSession,
+    cancelArrangeSession
   } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
@@ -192,12 +205,17 @@ export function App() {
   // checklist drag, the same idiom as the undo/redo effect above.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      // Escape clears the multi-selection (the single-selection slots have no
-      // clear-on-Escape convention to preserve). PlanView's own Escape
-      // listener disarms an armed placement tool; both firing together is
-      // harmless.
+      // Escape first reverts a live arrange session (leaving the selection
+      // intact so a second Escape can then clear it), then clears the multi-
+      // selection (the single-selection slots have no clear-on-Escape
+      // convention to preserve). PlanView's own Escape listener disarms an
+      // armed placement tool; both firing together is harmless.
       if (event.key === "Escape") {
         if (isEditableTarget(event.target)) return;
+        if (arrangeSession) {
+          cancelArrangeSession();
+          return;
+        }
         if (selectedObjectIds.length > 0) clearObjectSelection();
         return;
       }
@@ -248,7 +266,127 @@ export function App() {
     draggingArtworkId,
     removePlacement,
     removeSelectedPlacements,
-    clearObjectSelection
+    clearObjectSelection,
+    arrangeSession,
+    cancelArrangeSession
+  ]);
+
+  // Arrange keyboard shortcuts, scoped to the elevation view: Enter commits a
+  // live arrange session, and arrow keys nudge the whole selected group (a
+  // series of nudges auto-opens one session so they commit as a single undo
+  // entry). Both stay out of the way of text editing (isEditableTarget) and of
+  // an in-flight checklist drag. Eligibility mirrors the arrange readout — 2+
+  // wall objects, no floor member, all on one wall.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (isEditableTarget(event.target)) return;
+      if (!project) return;
+
+      if (event.key === "Enter") {
+        if (!arrangeSession) return;
+        event.preventDefault();
+        commitArrangeSession(allowOverlappingPlacement);
+        return;
+      }
+
+      const isArrow =
+        event.key === "ArrowLeft" ||
+        event.key === "ArrowRight" ||
+        event.key === "ArrowUp" ||
+        event.key === "ArrowDown";
+      if (!isArrow) return;
+      if (viewMode !== "elevation") return;
+      if (draggingArtworkId) return;
+
+      const selectedWallObjects = project.wallObjects.filter((wallObject) =>
+        selectedObjectIds.includes(wallObject.id)
+      );
+      const hasFloorMember = project.floorObjects.some((floorObject) =>
+        selectedObjectIds.includes(floorObject.id)
+      );
+      // A pure wall selection with no stale/floor ids: 1 object nudges directly
+      // (below), 2+ go through the arrange session over its ARTWORK members. A
+      // cross-wall or partly-stale selection bails.
+      if (hasFloorMember) return;
+      if (
+        selectedWallObjects.length === 0 ||
+        selectedWallObjects.length !== selectedObjectIds.length
+      ) {
+        return;
+      }
+
+      // ½″ / 1cm fine, 2″ / 50mm with Shift. Metric rounds to tidy numbers;
+      // imperial to clean fractions of an inch. The fine step matches the
+      // arrange field's stepMm so keyboard nudges and the stepper agree.
+      const system = unitSystemFromDisplayUnit(project.unit);
+      const fineMm = system === "metric" ? 10 : 12.7;
+      const coarseMm = system === "metric" ? 50 : 50.8;
+      const stepMm = event.shiftKey ? coarseMm : fineMm;
+
+      // ArrowUp raises the works (higher yMm = higher on the wall = up on
+      // screen); ArrowRight moves them along +x.
+      const dxMm =
+        event.key === "ArrowRight" ? stepMm : event.key === "ArrowLeft" ? -stepMm : 0;
+      const dyMm =
+        event.key === "ArrowUp" ? stepMm : event.key === "ArrowDown" ? -stepMm : 0;
+
+      event.preventDefault();
+
+      // A single selected placement nudges directly, one store commit per press
+      // (per-press undo entries — deliberately NOT an arrange session: its
+      // guards need 2+ artwork members, and an invisible single-work session
+      // would have no Apply/Cancel affordance). Artworks move via
+      // moveArtworkPlacement, openings via moveOpening, matching the single-
+      // object pointer-drag split — a lone opening still nudges here.
+      if (selectedWallObjects.length === 1) {
+        const member = selectedWallObjects[0];
+        const nextXMm = member.xMm + dxMm;
+        const nextYMm = member.yMm + dyMm;
+        if (member.kind === "artwork") {
+          void moveArtworkPlacement(member.id, nextXMm, nextYMm, allowOverlappingPlacement);
+        } else {
+          void moveOpening(member.id, nextXMm, nextYMm, allowOverlappingPlacement);
+        }
+        return;
+      }
+
+      // A multi-selection nudges through the arrange session, which moves ARTWORK
+      // members only (a selected opening is architecture — it stays put). Needs
+      // 2+ artwork members on one wall, mirroring the session's own guards.
+      const members = selectedWallObjects.filter((member) => member.kind === "artwork");
+      if (members.length < 2) return;
+      const sameWall = members.every((member) => member.wallId === members[0].wallId);
+      if (!sameWall) return;
+
+      // Nudge from the current preview if a session is already open, else from
+      // the committed layout. beginArrangeSession is a synchronous set(), so
+      // the freshly-begun session is in place before setArrangeSessionPreview
+      // reads it below.
+      const moves = members.map((member) => {
+        const preview = arrangeSession?.previewById[member.id];
+        const baseX = preview ? preview.xMm : member.xMm;
+        const baseY = preview ? preview.yMm : member.yMm;
+        return { id: member.id, xMm: baseX + dxMm, yMm: baseY + dyMm };
+      });
+
+      if (!arrangeSession) beginArrangeSession("inset");
+      setArrangeSessionPreview(moves);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    project,
+    viewMode,
+    selectedObjectIds,
+    draggingArtworkId,
+    arrangeSession,
+    allowOverlappingPlacement,
+    beginArrangeSession,
+    setArrangeSessionPreview,
+    commitArrangeSession,
+    moveArtworkPlacement,
+    moveOpening
   ]);
 
   const selectedWall = project ? getSelectedWall(project, selectedWallId) : null;
@@ -316,6 +454,23 @@ export function App() {
   // whichever surface it currently lives on.
   const artworkPlacementId = placedWallObject?.id ?? placedFloorArtwork?.id ?? null;
 
+  // The wall a wall-placed work hangs on (for its "Position on wall" section's
+  // length + header) and the nearest artwork neighbours on each side — both
+  // derived here from the live project so the section stays purely
+  // presentational. Neighbours are artwork-kind wall objects only; openings and
+  // blocked zones are not "works".
+  const placedWallObjectWall = placedWallObject
+    ? (getProjectWalls(project).find((wall) => wall.id === placedWallObject.wallId) ?? null)
+    : null;
+  const wallPlacementNeighbors = placedWallObject
+    ? getWallPlacementNeighborEdges(
+        placedWallObject,
+        project.wallObjects.filter(
+          (wallObject): wallObject is ArtworkWallObject => wallObject.kind === "artwork"
+        )
+      )
+    : { leftNeighborRightEdgeMm: undefined, rightNeighborLeftEdgeMm: undefined };
+
   // A dangling selectedOpeningId (the opening was just deleted) resolves to
   // nothing here too, the same fallback shape as selectedArtwork above.
   const selectedOpening: OpeningWallObject | null = selectedOpeningId
@@ -338,29 +493,78 @@ export function App() {
   // The multi-selection resolved against the live project — stale ids (undo/
   // redo or a document swap can orphan them) simply drop out here rather than
   // ever reaching an action. The arrange readout only exists when the whole
-  // selection is 2+ wall objects on a single wall — the same guard
-  // arrangeSelectedOnWall enforces, computed here so the inspector can show
-  // the current margin/spacing values (or a hint) instead of failing on
-  // commit.
+  // selection is 2+ wall objects on a single wall — the same guard the
+  // arrange-session actions enforce, computed here so the inspector can show
+  // the current spacing (or a hint) instead of failing on commit.
   const isMultiSelect = selectedObjectIds.length > 1;
-  const selectedWallMembers = project.wallObjects.filter((wallObject) =>
-    selectedObjectIds.includes(wallObject.id)
+  // Arranging operates on ARTWORKS only — a selected opening (door/window/
+  // blocked zone) is architecture, never a member. So the readout, the panel's
+  // eligibility, and the keyboard nudges all derive from artwork members;
+  // openings in the selection are ignored rather than blocking arrangement.
+  const selectedArtworkMembers = project.wallObjects.filter(
+    (wallObject) =>
+      wallObject.kind === "artwork" && selectedObjectIds.includes(wallObject.id)
   );
   const selectionHasFloorMember = project.floorObjects.some((floorObject) =>
     selectedObjectIds.includes(floorObject.id)
   );
   const arrangeWall =
     !selectionHasFloorMember &&
-    selectedWallMembers.length >= 2 &&
-    selectedWallMembers.every(
-      (member) => member.wallId === selectedWallMembers[0]?.wallId
+    selectedArtworkMembers.length >= 2 &&
+    selectedArtworkMembers.every(
+      (member) => member.wallId === selectedArtworkMembers[0]?.wallId
     )
       ? (getProjectWalls(project).find(
-          (wall) => wall.id === selectedWallMembers[0]?.wallId
+          (wall) => wall.id === selectedArtworkMembers[0]?.wallId
         ) ?? null)
       : null;
+  // A live session ties itself to the current selection (the store auto-
+  // accepts on any selection/view change), so its previewById describes these
+  // very members — override their committed positions with it before reading
+  // the layout back, so the panel and its Apply/Cancel reflect the preview.
+  const activeArrangeSession =
+    arrangeWall && arrangeSession && arrangeSession.wallId === arrangeWall.id
+      ? arrangeSession
+      : null;
+  const arrangeMembers = activeArrangeSession
+    ? selectedArtworkMembers.map((member) => {
+        const preview = activeArrangeSession.previewById[member.id];
+        return preview ? { ...member, xMm: preview.xMm, yMm: preview.yMm } : member;
+      })
+    : selectedArtworkMembers;
   const arrangeReadout = arrangeWall
-    ? getArrangeReadout(selectedWallMembers, arrangeWall.lengthMm)
+    ? (() => {
+        const detailed = getArrangeReadoutDetailed(
+          arrangeMembers,
+          arrangeWall.lengthMm
+        );
+        const equal = solveEqualArrangement(arrangeMembers, arrangeWall.lengthMm);
+        // The panel always shows an active mode — never a blank "choose one"
+        // state. With a session open the segment follows the session's mode;
+        // idle, a freeform layout reads as "Space evenly" only when it already
+        // matches the equal solution on both axes within 0.5mm (and isn't
+        // mixed); otherwise it falls back to the last mode the curator used
+        // (default "From wall edges"). Showing a mode idle never moves anything
+        // — inset/gap seed their field from the current layout readout, and
+        // only an edit begins a session.
+        const mode: "equal" | "inset" | "gap" = activeArrangeSession
+          ? activeArrangeSession.mode
+          : !detailed.gapIsMixed &&
+              !detailed.insetIsMixed &&
+              Math.abs(detailed.insetMm - equal.insetMm) < 0.5 &&
+              Math.abs(detailed.gapMm - equal.gapMm) < 0.5
+            ? "equal"
+            : lastArrangeMode;
+        return {
+          mode,
+          insetMm: detailed.insetMm,
+          gapMm: detailed.gapMm,
+          insetIsMixed: detailed.insetIsMixed,
+          gapIsMixed: detailed.gapIsMixed,
+          equalSpacingMm: equal.insetMm,
+          sessionActive: activeArrangeSession !== null
+        };
+      })()
     : null;
 
   // Warnings carry a wallObjectId, but a raw id means nothing to a curator —
@@ -653,12 +857,26 @@ export function App() {
                 wallObjects={project.wallObjects}
                 walls={wallsForSwitcher}
                 onSelectWall={selectWall}
-                onMoveOpening={(wallObjectId, xMm, yMm) =>
-                  void moveOpening(wallObjectId, xMm, yMm, allowOverlappingPlacement)
-                }
-                onMovePlacement={(wallObjectId, xMm, yMm) =>
-                  void moveArtworkPlacement(wallObjectId, xMm, yMm, allowOverlappingPlacement)
-                }
+                previewPositionsById={arrangeSession?.previewById}
+                arrangeSessionActive={arrangeSession !== null}
+                onMoveOpening={(wallObjectId, xMm, yMm) => {
+                  // A move of a session member (alt-drag of one work in the
+                  // group) stays inside the live preview — the session's
+                  // single commit will carry it; everything else commits
+                  // directly as before.
+                  if (arrangeSession?.memberIds.includes(wallObjectId)) {
+                    setArrangeSessionPreview([{ id: wallObjectId, xMm, yMm }]);
+                    return;
+                  }
+                  void moveOpening(wallObjectId, xMm, yMm, allowOverlappingPlacement);
+                }}
+                onMovePlacement={(wallObjectId, xMm, yMm) => {
+                  if (arrangeSession?.memberIds.includes(wallObjectId)) {
+                    setArrangeSessionPreview([{ id: wallObjectId, xMm, yMm }]);
+                    return;
+                  }
+                  void moveArtworkPlacement(wallObjectId, xMm, yMm, allowOverlappingPlacement);
+                }}
                 onPlaceArtwork={(artworkId, wallId, xMm, yMm) =>
                   void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement)
                 }
@@ -667,9 +885,16 @@ export function App() {
                 selectedObjectIds={selectedObjectIds}
                 onSelectObject={selectObject}
                 onClearSelection={clearObjectSelection}
-                onMoveWallObjects={(moves) =>
-                  void moveWallObjectsGroup(moves, allowOverlappingPlacement)
-                }
+                onMoveWallObjects={(moves) => {
+                  // With a session open, a group drag becomes more live
+                  // preview (one undo entry on session commit); without one
+                  // it keeps committing directly as "Move N objects".
+                  if (arrangeSession) {
+                    setArrangeSessionPreview(moves);
+                    return;
+                  }
+                  void moveWallObjectsGroup(moves, allowOverlappingPlacement);
+                }}
                 onMarqueeSelect={(ids, additive) =>
                   // An additive (shift) marquee extends the selection; a plain
                   // one replaces it. The union preserves already-selected ids'
@@ -739,9 +964,25 @@ export function App() {
                 arrangeDisabledReason="Select at least two objects on the same wall to arrange them."
                 count={selectedObjectIds.length}
                 unit={project.unit}
-                onArrange={(params) =>
-                  void arrangeSelectedOnWall(params, allowOverlappingPlacement)
+                wallName={arrangeWall?.name ?? null}
+                onSetMode={(mode) => {
+                  // A "Space evenly" click both opens the session and snaps to
+                  // the equal solution; switching to "From wall edges"/"Between
+                  // works" opens the session but moves nothing until a value is
+                  // typed (a bare mode switch must never jump the works).
+                  beginArrangeSession(mode);
+                  if (mode === "equal") updateArrangeSession({ equal: true });
+                }}
+                onArrangeValue={(params) => {
+                  if (!arrangeSession) {
+                    beginArrangeSession("insetMm" in params ? "inset" : "gap");
+                  }
+                  updateArrangeSession(params);
+                }}
+                onAcceptArrange={() =>
+                  commitArrangeSession(allowOverlappingPlacement)
                 }
+                onCancelArrange={cancelArrangeSession}
                 onRemoveAll={() => void removeSelectedPlacements()}
               />
             ) : selectedArtwork ? (
@@ -760,6 +1001,26 @@ export function App() {
                       : undefined
                   }
                 />
+                {placedWallObject && placedWallObjectWall ? (
+                  <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
+                    <WallPlacementFields
+                      placement={placedWallObject}
+                      wallLengthMm={placedWallObjectWall.lengthMm}
+                      wallName={placedWallObjectWall.name}
+                      leftNeighborRightEdgeMm={wallPlacementNeighbors.leftNeighborRightEdgeMm}
+                      rightNeighborLeftEdgeMm={wallPlacementNeighbors.rightNeighborLeftEdgeMm}
+                      unit={project.unit}
+                      onCommit={(xMm, yMm) =>
+                        void moveArtworkPlacement(
+                          placedWallObject.id,
+                          xMm,
+                          yMm,
+                          allowOverlappingPlacement
+                        )
+                      }
+                    />
+                  </form>
+                ) : null}
                 {placedFloorArtwork ? (
                   <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
                     <p className="field-hint">Floor-placed in plan view.</p>
