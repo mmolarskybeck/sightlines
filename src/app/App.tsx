@@ -6,7 +6,7 @@ import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { GridFourIcon } from "@phosphor-icons/react/dist/csr/GridFour";
 import { MagnetIcon } from "@phosphor-icons/react/dist/csr/Magnet";
 import { MapTrifoldIcon } from "@phosphor-icons/react/dist/csr/MapTrifold";
-import { RulerIcon } from "@phosphor-icons/react/dist/csr/Ruler";
+import { PresentationIcon } from "@phosphor-icons/react/dist/csr/Presentation";
 import { StackIcon } from "@phosphor-icons/react/dist/csr/Stack";
 import { UploadSimpleIcon } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
@@ -15,15 +15,7 @@ import {
   getOrthogonalQuadWallPair,
 } from "../domain/geometry/walls";
 import { getOpeningKindLabel } from "../domain/placement/createOpening";
-import type {
-  Artwork,
-  ArtworkFloorObject,
-  ArtworkWallObject,
-  BlockedZoneFloorObject,
-  DisplayUnit,
-  OpeningWallObject,
-  Project
-} from "../domain/project";
+import type { Artwork, ArtworkWallObject, DisplayUnit, OpeningWallObject, Project } from "../domain/project";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import { formatLength } from "../domain/units/length";
 import { getGridPrecisionFloorOptionsMm } from "../domain/units/precision";
@@ -39,11 +31,9 @@ import { ChecklistPanel } from "./components/ChecklistPanel";
 import { DataView } from "./components/DataView";
 import { ElevationEmptyState } from "./components/ElevationEmptyState";
 import { ElevationView } from "./components/ElevationView";
-import { FloorObjectInspector, FloorPlacementFields } from "./components/FloorObjectInspector";
 import { OpeningInspector } from "./components/OpeningInspector";
 import { PlanEmptyState } from "./components/PlanEmptyState";
 import { PlanView } from "./components/PlanView";
-import { TooltipProvider } from "./components/ui/tooltip";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { RoomsPanel } from "./components/RoomsPanel";
 import { WallInspector, type WallDimensionLink } from "./components/WallInspector";
@@ -126,11 +116,7 @@ export function App() {
     removePlacement,
     addOpening,
     moveOpening,
-    resizeOpening,
-    placeOpeningFromPlan,
-    placeArtworkOnFloor,
-    commitPlanMove,
-    updateFloorObject
+    resizeOpening
   } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
@@ -170,48 +156,6 @@ export function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [undo, redo]);
-
-  // Delete/Backspace removes whichever placement is currently selected — a
-  // wall opening, a floor blocked zone (both live in the selectedOpeningId
-  // slot, and removePlacement is generic over wall/floor ids so one call
-  // covers either), or a placed artwork (selectedArtworkId resolved against
-  // wallObjects/floorObjects). An unplaced checklist selection is left
-  // alone — there's no placement id to remove. Guarded against editable
-  // targets (LengthFields use Backspace for text editing) and an in-flight
-  // checklist drag, the same idiom as the undo/redo effect above.
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Delete" && event.key !== "Backspace") return;
-      if (isEditableTarget(event.target)) return;
-      if (draggingArtworkId) return;
-      if (!project) return;
-
-      if (selectedOpeningId) {
-        event.preventDefault();
-        void removePlacement(selectedOpeningId);
-        return;
-      }
-
-      if (selectedArtworkId) {
-        const placement =
-          project.wallObjects.find(
-            (wallObject): wallObject is ArtworkWallObject =>
-              wallObject.kind === "artwork" && wallObject.artworkId === selectedArtworkId
-          ) ??
-          project.floorObjects.find(
-            (floorObject): floorObject is ArtworkFloorObject =>
-              floorObject.kind === "artwork" && floorObject.artworkId === selectedArtworkId
-          );
-        if (!placement) return;
-
-        event.preventDefault();
-        void removePlacement(placement.id);
-      }
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [project, selectedArtworkId, selectedOpeningId, draggingArtworkId, removePlacement]);
 
   const selectedWall = project ? getSelectedWall(project, selectedWallId) : null;
   const wallDimensionLink =
@@ -264,19 +208,6 @@ export function App() {
           wallObject.kind === "artwork" && wallObject.artworkId === selectedArtwork.id
       ) ?? null)
     : null;
-  // An artwork placed on the floor (dragged off a wall, or dropped straight
-  // onto open floor) — ids/artworkId survive wall↔floor conversion, so the
-  // same selectedArtworkId resolves here when it isn't on a wall.
-  const placedFloorArtwork: ArtworkFloorObject | null = selectedArtwork
-    ? (project.floorObjects.find(
-        (floorObject): floorObject is ArtworkFloorObject =>
-          floorObject.kind === "artwork" && floorObject.artworkId === selectedArtwork.id
-      ) ?? null)
-    : null;
-  const isArtworkPlaced = placedWallObject !== null || placedFloorArtwork !== null;
-  // The placement to remove when the artwork inspector's action fires —
-  // whichever surface it currently lives on.
-  const artworkPlacementId = placedWallObject?.id ?? placedFloorArtwork?.id ?? null;
 
   // A dangling selectedOpeningId (the opening was just deleted) resolves to
   // nothing here too, the same fallback shape as selectedArtwork above.
@@ -286,16 +217,6 @@ export function App() {
           wallObject.kind !== "artwork" && wallObject.id === selectedOpeningId
       ) ?? null)
     : null;
-  // selectedOpeningId doubles as the slot for a floor-placed blocked zone
-  // (no separate selection slot — ids are unique across both arrays), so a
-  // selection that isn't a wall opening may resolve to a floor blocked zone.
-  const selectedFloorBlockedZone: BlockedZoneFloorObject | null =
-    selectedOpeningId && !selectedOpening
-      ? (project.floorObjects.find(
-          (floorObject): floorObject is BlockedZoneFloorObject =>
-            floorObject.kind === "blocked-zone" && floorObject.id === selectedOpeningId
-        ) ?? null)
-      : null;
 
   // Warnings carry a wallObjectId, but a raw id means nothing to a curator —
   // resolve it to the artwork's title, or the opening's human-readable kind
@@ -339,9 +260,6 @@ export function App() {
     setLeftPanel(leftPanel === panel ? null : panel);
 
   return (
-    // One provider for every hover tooltip in the app (plan/elevation
-    // placements), so they share a single warm-up delay and skip-delay window.
-    <TooltipProvider delayDuration={400}>
     <main className="app-shell">
       <AppRail
         leftPanel={leftPanel}
@@ -465,7 +383,6 @@ export function App() {
             onAddArtworksFromFiles={addArtworksFromFiles}
             onArtworkDragStateChange={setDraggingArtworkId}
             onRemoveArtworkFromChecklist={removeArtworkFromChecklist}
-            onRemovePlacement={removePlacement}
             onSelectArtwork={selectArtwork}
           />
         ) : leftPanel === "rooms" ? (
@@ -532,29 +449,12 @@ export function App() {
               <PlanEmptyState onAddRoom={() => void addRectangleRoom()} />
             ) : (
               <PlanView
-                artworksById={artworksById}
-                draggingArtworkId={draggingArtworkId}
-                getBlob={getAssetBlob}
                 gridPrecisionFloorMm={gridPrecisionFloorMm}
                 gridVisible={showGrid}
                 project={project}
-                selectedArtworkId={selectedArtworkId}
-                selectedOpeningId={selectedOpeningId}
                 selectedWallId={selectedWall?.id ?? null}
                 snapToGrid={snapToGrid}
-                onCommitPlanMove={(objectId, placement) =>
-                  void commitPlanMove(objectId, placement, allowOverlappingPlacement)
-                }
                 onCommitWallLength={resizeWall}
-                onPlaceArtwork={(artworkId, wallId, xMm, yMm) =>
-                  void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement)
-                }
-                onPlaceArtworkOnFloor={(artworkId, xMm, yMm) =>
-                  void placeArtworkOnFloor(artworkId, xMm, yMm)
-                }
-                onPlaceOpeningFromPlan={placeOpeningFromPlan}
-                onSelectArtwork={selectArtwork}
-                onSelectOpening={selectOpening}
               />
             )
           ) : null}
@@ -619,73 +519,36 @@ export function App() {
               </div>
             ) : null}
 
-            {selectedArtwork || selectedOpening || selectedFloorBlockedZone || selectedWall ? (
+            {selectedArtwork || selectedOpening || selectedWall ? (
               <div className="panel-heading inspector-subject">
                 <h2>
                   {selectedArtwork
                     ? selectedArtwork.title ?? "Untitled"
                     : selectedOpening
                       ? getOpeningKindLabel(selectedOpening.kind)
-                      : selectedFloorBlockedZone
-                        ? getOpeningKindLabel(selectedFloorBlockedZone.kind)
-                        : selectedWall?.name}
+                      : selectedWall?.name}
                 </h2>
                 <span>
-                  {selectedArtwork
-                    ? "Artwork"
-                    : selectedOpening
-                      ? "Opening"
-                      : selectedFloorBlockedZone
-                        ? "Floor object"
-                        : "Wall"}
+                  {selectedArtwork ? "Artwork" : selectedOpening ? "Opening" : "Wall"}
                 </span>
               </div>
             ) : null}
 
             {selectedArtwork ? (
-              <>
-                <ArtworkInspector
-                  artwork={selectedArtwork}
-                  isPlaced={isArtworkPlaced}
-                  unit={project.unit}
-                  onCommitDimensions={(dimensions) =>
-                    void updateArtwork(selectedArtwork.id, { dimensions })
-                  }
-                  onCommitField={(changes) => void updateArtwork(selectedArtwork.id, changes)}
-                  onRemovePlacement={
-                    artworkPlacementId
-                      ? () => void removePlacement(artworkPlacementId)
-                      : undefined
-                  }
-                />
-                {placedFloorArtwork ? (
-                  <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
-                    <p className="field-hint">Floor-placed in plan view.</p>
-                    <FloorPlacementFields
-                      floorObject={placedFloorArtwork}
-                      unit={project.unit}
-                      onCommitPosition={(xMm, yMm) =>
-                        void updateFloorObject(placedFloorArtwork.id, { xMm, yMm })
-                      }
-                      onCommitSize={(widthMm, depthMm) =>
-                        void updateFloorObject(placedFloorArtwork.id, { widthMm, depthMm })
-                      }
-                    />
-                  </form>
-                ) : null}
-              </>
-          ) : selectedFloorBlockedZone ? (
-            <FloorObjectInspector
-              floorObject={selectedFloorBlockedZone}
-              unit={project.unit}
-              onCommitPosition={(xMm, yMm) =>
-                void updateFloorObject(selectedFloorBlockedZone.id, { xMm, yMm })
-              }
-              onCommitSize={(widthMm, depthMm) =>
-                void updateFloorObject(selectedFloorBlockedZone.id, { widthMm, depthMm })
-              }
-              onDelete={() => void removePlacement(selectedFloorBlockedZone.id)}
-            />
+              <ArtworkInspector
+                artwork={selectedArtwork}
+                isPlaced={placedWallObject !== null}
+                unit={project.unit}
+                onCommitDimensions={(dimensions) =>
+                  void updateArtwork(selectedArtwork.id, { dimensions })
+                }
+                onCommitField={(changes) => void updateArtwork(selectedArtwork.id, changes)}
+                onRemovePlacement={
+                  placedWallObject
+                    ? () => void removePlacement(placedWallObject.id)
+                    : undefined
+                }
+              />
           ) : selectedOpening ? (
             <OpeningInspector
               opening={selectedOpening}
@@ -729,7 +592,6 @@ export function App() {
       </section>
       </div>
     </main>
-    </TooltipProvider>
   );
 }
 
