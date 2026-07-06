@@ -1,4 +1,8 @@
-import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type {
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode
+} from "react";
 import type { OpeningWallObject } from "../../domain/project";
 import { getArtworkRectSvg, type ArtworkCenterMm, type ArtworkSizeMm, type SvgRectMm } from "./elevationArtworkGeometry";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
@@ -28,7 +32,10 @@ export function ElevationOpening({
   isSelected?: boolean;
   kind: OpeningWallObject["kind"];
   onPointerDown?: (event: ReactPointerEvent<SVGGElement>) => void;
-  onSelect?: () => void;
+  // Receives the click event so the caller can read modifier keys (shift/
+  // cmd/ctrl) for additive multi-select. Passed straight to onClick, which
+  // already provides it.
+  onSelect?: (event: ReactMouseEvent<SVGGElement>) => void;
   size: ArtworkSizeMm;
   // Hover-tooltip body (see PlacementTooltip): kind icon + label + dims.
   tooltip?: ReactNode;

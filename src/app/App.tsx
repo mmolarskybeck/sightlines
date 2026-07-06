@@ -14,6 +14,7 @@ import {
   getWallsWithGeometry,
   getOrthogonalQuadWallPair,
 } from "../domain/geometry/walls";
+import { getArrangeReadout } from "../domain/placement/arrangeOnWall";
 import { getOpeningKindLabel } from "../domain/placement/createOpening";
 import type {
   Artwork,
@@ -46,6 +47,7 @@ import { PlanView } from "./components/PlanView";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { RoomsPanel } from "./components/RoomsPanel";
+import { SelectionInspector } from "./components/SelectionInspector";
 import { WallInspector, type WallDimensionLink } from "./components/WallInspector";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
@@ -66,6 +68,7 @@ import {
 import { useViewPreferences } from "./hooks/useViewPreferences";
 import {
   exportProjectJson,
+  getProjectWalls,
   getSelectedWall,
   useAppStore
 } from "./store";
@@ -90,6 +93,7 @@ export function App() {
     selectedWallId,
     selectedArtworkId,
     selectedOpeningId,
+    selectedObjectIds,
     viewMode,
     saveState,
     error,
@@ -104,6 +108,9 @@ export function App() {
     selectWall,
     selectArtwork,
     selectOpening,
+    selectObject,
+    setObjectSelection,
+    clearObjectSelection,
     addRectangleRoom,
     renameProject,
     renameRoom,
@@ -130,7 +137,11 @@ export function App() {
     placeOpeningFromPlan,
     placeArtworkOnFloor,
     commitPlanMove,
-    updateFloorObject
+    updateFloorObject,
+    moveWallObjectsGroup,
+    movePlanObjectsGroup,
+    arrangeSelectedOnWall,
+    removeSelectedPlacements
   } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
@@ -181,10 +192,28 @@ export function App() {
   // checklist drag, the same idiom as the undo/redo effect above.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      // Escape clears the multi-selection (the single-selection slots have no
+      // clear-on-Escape convention to preserve). PlanView's own Escape
+      // listener disarms an armed placement tool; both firing together is
+      // harmless.
+      if (event.key === "Escape") {
+        if (isEditableTarget(event.target)) return;
+        if (selectedObjectIds.length > 0) clearObjectSelection();
+        return;
+      }
+
       if (event.key !== "Delete" && event.key !== "Backspace") return;
       if (isEditableTarget(event.target)) return;
       if (draggingArtworkId) return;
       if (!project) return;
+
+      // A multi-selection takes precedence over the legacy single slots —
+      // one keypress removes every selected placement in one undo entry.
+      if (selectedObjectIds.length > 0) {
+        event.preventDefault();
+        void removeSelectedPlacements();
+        return;
+      }
 
       if (selectedOpeningId) {
         event.preventDefault();
@@ -211,7 +240,16 @@ export function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [project, selectedArtworkId, selectedOpeningId, draggingArtworkId, removePlacement]);
+  }, [
+    project,
+    selectedArtworkId,
+    selectedOpeningId,
+    selectedObjectIds,
+    draggingArtworkId,
+    removePlacement,
+    removeSelectedPlacements,
+    clearObjectSelection
+  ]);
 
   const selectedWall = project ? getSelectedWall(project, selectedWallId) : null;
   const wallDimensionLink =
@@ -296,6 +334,34 @@ export function App() {
             floorObject.kind === "blocked-zone" && floorObject.id === selectedOpeningId
         ) ?? null)
       : null;
+
+  // The multi-selection resolved against the live project — stale ids (undo/
+  // redo or a document swap can orphan them) simply drop out here rather than
+  // ever reaching an action. The arrange readout only exists when the whole
+  // selection is 2+ wall objects on a single wall — the same guard
+  // arrangeSelectedOnWall enforces, computed here so the inspector can show
+  // the current margin/spacing values (or a hint) instead of failing on
+  // commit.
+  const isMultiSelect = selectedObjectIds.length > 1;
+  const selectedWallMembers = project.wallObjects.filter((wallObject) =>
+    selectedObjectIds.includes(wallObject.id)
+  );
+  const selectionHasFloorMember = project.floorObjects.some((floorObject) =>
+    selectedObjectIds.includes(floorObject.id)
+  );
+  const arrangeWall =
+    !selectionHasFloorMember &&
+    selectedWallMembers.length >= 2 &&
+    selectedWallMembers.every(
+      (member) => member.wallId === selectedWallMembers[0]?.wallId
+    )
+      ? (getProjectWalls(project).find(
+          (wall) => wall.id === selectedWallMembers[0]?.wallId
+        ) ?? null)
+      : null;
+  const arrangeReadout = arrangeWall
+    ? getArrangeReadout(selectedWallMembers, arrangeWall.lengthMm)
+    : null;
 
   // Warnings carry a wallObjectId, but a raw id means nothing to a curator —
   // resolve it to the artwork's title, or the opening's human-readable kind
@@ -555,6 +621,12 @@ export function App() {
                 onPlaceOpeningFromPlan={placeOpeningFromPlan}
                 onSelectArtwork={selectArtwork}
                 onSelectOpening={selectOpening}
+                selectedObjectIds={selectedObjectIds}
+                onSelectObject={selectObject}
+                onClearSelection={clearObjectSelection}
+                onCommitPlanMoveGroup={(moves) =>
+                  void movePlanObjectsGroup(moves, allowOverlappingPlacement)
+                }
               />
             )
           ) : null}
@@ -592,6 +664,20 @@ export function App() {
                 }
                 onSelectArtwork={selectArtwork}
                 onSelectOpening={selectOpening}
+                selectedObjectIds={selectedObjectIds}
+                onSelectObject={selectObject}
+                onClearSelection={clearObjectSelection}
+                onMoveWallObjects={(moves) =>
+                  void moveWallObjectsGroup(moves, allowOverlappingPlacement)
+                }
+                onMarqueeSelect={(ids, additive) =>
+                  // An additive (shift) marquee extends the selection; a plain
+                  // one replaces it. The union preserves already-selected ids'
+                  // order so repeated shift-marquees stay stable.
+                  setObjectSelection(
+                    additive ? [...new Set([...selectedObjectIds, ...ids])] : ids
+                  )
+                }
               />
             ) : (
               <ElevationEmptyState hasRooms={project.floor.rooms.length > 0} />
@@ -619,7 +705,8 @@ export function App() {
               </div>
             ) : null}
 
-            {selectedArtwork || selectedOpening || selectedFloorBlockedZone || selectedWall ? (
+            {!isMultiSelect &&
+            (selectedArtwork || selectedOpening || selectedFloorBlockedZone || selectedWall) ? (
               <div className="panel-heading inspector-subject">
                 <h2>
                   {selectedArtwork
@@ -642,7 +729,22 @@ export function App() {
               </div>
             ) : null}
 
-            {selectedArtwork ? (
+            {isMultiSelect ? (
+              // A multi-selection replaces the whole single-subject chain —
+              // the legacy inspector slots are already null (the store clears
+              // them whenever more than one object is selected), so nothing
+              // below could render meaningfully anyway.
+              <SelectionInspector
+                arrange={arrangeReadout}
+                arrangeDisabledReason="Select at least two objects on the same wall to arrange them."
+                count={selectedObjectIds.length}
+                unit={project.unit}
+                onArrange={(params) =>
+                  void arrangeSelectedOnWall(params, allowOverlappingPlacement)
+                }
+                onRemoveAll={() => void removeSelectedPlacements()}
+              />
+            ) : selectedArtwork ? (
               <>
                 <ArtworkInspector
                   artwork={selectedArtwork}

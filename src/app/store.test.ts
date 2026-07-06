@@ -1448,6 +1448,404 @@ describe("app store", () => {
     });
   });
 
+  describe("multi-select", () => {
+    async function placeArtworkOnWall(xMm = 1000, yMm = 1450, widthMm?: number) {
+      await store.getState().addArtworksFromFiles([makeImageFile(`piece-${xMm}-${yMm}.jpg`)]);
+      const artworkId = store.getState().project!.checklistArtworkIds.at(-1)!;
+      if (widthMm !== undefined) {
+        await store.getState().updateArtwork(artworkId, {
+          dimensions: { widthMm, heightMm: 400, status: "known" }
+        });
+      }
+      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      await store.getState().placeArtwork(artworkId, wall.id, xMm, yMm, true);
+      const placement = store.getState().project!.wallObjects.at(-1)!;
+      return { artworkId, wall, placementId: placement.id };
+    }
+
+    describe("selectObject", () => {
+      it("non-additive replaces the selection", async () => {
+        const a = await placeArtworkOnWall(500, 1450);
+        const b = await placeArtworkOnWall(1500, 1450);
+
+        store.getState().selectObject(a.placementId);
+        expect(store.getState().selectedObjectIds).toEqual([a.placementId]);
+
+        store.getState().selectObject(b.placementId);
+        expect(store.getState().selectedObjectIds).toEqual([b.placementId]);
+      });
+
+      it("additive toggles membership on and off", async () => {
+        const a = await placeArtworkOnWall(500, 1450);
+        const b = await placeArtworkOnWall(1500, 1450);
+
+        store.getState().selectObject(a.placementId);
+        store.getState().selectObject(b.placementId, { additive: true });
+        expect(store.getState().selectedObjectIds.sort()).toEqual(
+          [a.placementId, b.placementId].sort()
+        );
+
+        store.getState().selectObject(a.placementId, { additive: true });
+        expect(store.getState().selectedObjectIds).toEqual([b.placementId]);
+      });
+
+      it("selecting exactly one artwork placement syncs selectedArtworkId to its artworkId", async () => {
+        const a = await placeArtworkOnWall(500, 1450);
+
+        store.getState().selectObject(a.placementId);
+
+        expect(store.getState().selectedArtworkId).toBe(a.artworkId);
+        expect(store.getState().selectedOpeningId).toBeNull();
+      });
+
+      it("selecting two placements clears both legacy slots", async () => {
+        const a = await placeArtworkOnWall(500, 1450);
+        const b = await placeArtworkOnWall(1500, 1450);
+
+        store.getState().selectObject(a.placementId);
+        store.getState().selectObject(b.placementId, { additive: true });
+
+        expect(store.getState().selectedArtworkId).toBeNull();
+        expect(store.getState().selectedOpeningId).toBeNull();
+      });
+
+      it("is a no-op for an id that isn't a live placement", async () => {
+        const before = store.getState().selectedObjectIds;
+
+        store.getState().selectObject("no-such-placement");
+
+        expect(store.getState().selectedObjectIds).toBe(before);
+      });
+    });
+
+    describe("clearing selectedObjectIds via existing selection actions", () => {
+      it("selectWall clears selectedObjectIds", async () => {
+        const a = await placeArtworkOnWall();
+        store.getState().selectObject(a.placementId);
+
+        store.getState().selectWall("wall-east");
+
+        expect(store.getState().selectedObjectIds).toEqual([]);
+      });
+
+      it("selectArtwork clears selectedObjectIds", async () => {
+        const a = await placeArtworkOnWall();
+        store.getState().selectObject(a.placementId);
+
+        store.getState().selectArtwork("some-artwork");
+
+        expect(store.getState().selectedObjectIds).toEqual([]);
+      });
+
+      it("selectOpening clears selectedObjectIds", async () => {
+        const a = await placeArtworkOnWall();
+        store.getState().selectObject(a.placementId);
+
+        store.getState().selectOpening("some-opening");
+
+        expect(store.getState().selectedObjectIds).toEqual([]);
+      });
+
+      it("setDocument (via importProjectJson) clears selectedObjectIds", async () => {
+        const a = await placeArtworkOnWall();
+        store.getState().selectObject(a.placementId);
+
+        const imported = { ...createSampleProject(), id: "imported-2", title: "Imported 2" };
+        await store.getState().importProjectJson(JSON.stringify(imported));
+
+        expect(store.getState().selectedObjectIds).toEqual([]);
+      });
+
+      it("setDocument (via openProject) clears selectedObjectIds", async () => {
+        const original = store.getState().project!;
+        const a = await placeArtworkOnWall();
+        await store.getState().createProject("Another Show");
+        store.getState().selectObject(a.placementId);
+
+        // Re-select back onto the original project (a fresh document swap).
+        await store.getState().openProject(original.id);
+
+        expect(store.getState().selectedObjectIds).toEqual([]);
+      });
+    });
+
+    describe("moveWallObjectsGroup", () => {
+      it("moves N placements in one undo entry, and one undo restores all members", async () => {
+        const a = await placeArtworkOnWall(500, 1450);
+        const b = await placeArtworkOnWall(1500, 1450);
+        const undoStackBefore = store.getState().undoStack.length;
+
+        await store.getState().moveWallObjectsGroup([
+          { id: a.placementId, xMm: 600, yMm: 1500 },
+          { id: b.placementId, xMm: 1600, yMm: 1550 }
+        ]);
+
+        let state = store.getState();
+        expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+        expect(state.undoStack.at(-1)?.label).toBe("Move 2 objects");
+        let placementA = state.project!.wallObjects.find((o) => o.id === a.placementId)!;
+        let placementB = state.project!.wallObjects.find((o) => o.id === b.placementId)!;
+        expect(placementA.xMm).toBe(600);
+        expect(placementA.yMm).toBe(1500);
+        expect(placementB.xMm).toBe(1600);
+        expect(placementB.yMm).toBe(1550);
+
+        await store.getState().undo();
+
+        state = store.getState();
+        placementA = state.project!.wallObjects.find((o) => o.id === a.placementId)!;
+        placementB = state.project!.wallObjects.find((o) => o.id === b.placementId)!;
+        expect(placementA.xMm).toBe(500);
+        expect(placementA.yMm).toBe(1450);
+        expect(placementB.xMm).toBe(1500);
+        expect(placementB.yMm).toBe(1450);
+      });
+
+      it("blocks the whole commit when any member would collide, and allowOverlap lets it through", async () => {
+        const a = await placeArtworkOnWall(500, 1450, 400);
+        const b = await placeArtworkOnWall(1500, 1450, 400);
+        const wall = a.wall;
+        await store.getState().addOpening(wall.id, "door");
+        const door = store.getState().project!.wallObjects.find((o) => o.kind === "door")!;
+        const undoStackBefore = store.getState().undoStack.length;
+
+        await store.getState().moveWallObjectsGroup([
+          { id: a.placementId, xMm: door.xMm, yMm: door.yMm },
+          { id: b.placementId, xMm: 1600, yMm: 1450 }
+        ]);
+
+        let state = store.getState();
+        expect(state.undoStack).toHaveLength(undoStackBefore);
+        expect(state.error).toBeTruthy();
+        let placementA = state.project!.wallObjects.find((o) => o.id === a.placementId)!;
+        let placementB = state.project!.wallObjects.find((o) => o.id === b.placementId)!;
+        expect(placementA.xMm).toBe(500);
+        expect(placementB.xMm).toBe(1500);
+
+        await store.getState().moveWallObjectsGroup(
+          [
+            { id: a.placementId, xMm: door.xMm, yMm: door.yMm },
+            { id: b.placementId, xMm: 1600, yMm: 1450 }
+          ],
+          true
+        );
+
+        state = store.getState();
+        expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+        placementA = state.project!.wallObjects.find((o) => o.id === a.placementId)!;
+        placementB = state.project!.wallObjects.find((o) => o.id === b.placementId)!;
+        expect(placementA.xMm).toBe(door.xMm);
+        expect(placementB.xMm).toBe(1600);
+      });
+    });
+
+    describe("movePlanObjectsGroup", () => {
+      async function placeArtworkOnFloor(xMm = 1500, yMm = 2500) {
+        await store.getState().addArtworksFromFiles([makeImageFile(`floor-${xMm}-${yMm}.jpg`)]);
+        const artworkId = store.getState().project!.checklistArtworkIds.at(-1)!;
+        await store.getState().placeArtworkOnFloor(artworkId, xMm, yMm);
+        const floorObject = store.getState().project!.floorObjects.at(-1)!;
+        return { artworkId, floorObjectId: floorObject.id };
+      }
+
+      it("moves a mixed wall+floor group in one undo entry, and one undo restores both", async () => {
+        const wall = await placeArtworkOnWall(500, 1450);
+        const floor = await placeArtworkOnFloor(1500, 2500);
+        const undoStackBefore = store.getState().undoStack.length;
+
+        await store.getState().movePlanObjectsGroup([
+          { id: wall.placementId, xMm: 600 },
+          { id: floor.floorObjectId, xMm: 1600, yMm: 2600 }
+        ]);
+
+        let state = store.getState();
+        expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+        expect(state.undoStack.at(-1)?.label).toBe("Move 2 objects");
+        let wallObject = state.project!.wallObjects.find((o) => o.id === wall.placementId)!;
+        let floorObject = state.project!.floorObjects.find((o) => o.id === floor.floorObjectId)!;
+        expect(wallObject.xMm).toBe(600);
+        expect(wallObject.yMm).toBe(1450);
+        expect(wallObject.wallId).toBe(wall.wall.id);
+        expect(floorObject.xMm).toBe(1600);
+        expect(floorObject.yMm).toBe(2600);
+
+        await store.getState().undo();
+
+        state = store.getState();
+        wallObject = state.project!.wallObjects.find((o) => o.id === wall.placementId)!;
+        floorObject = state.project!.floorObjects.find((o) => o.id === floor.floorObjectId)!;
+        expect(wallObject.xMm).toBe(500);
+        expect(wallObject.yMm).toBe(1450);
+        expect(floorObject.xMm).toBe(1500);
+        expect(floorObject.yMm).toBe(2500);
+      });
+
+      it("filters out stale/unknown ids without throwing, and is a no-op when nothing remains", async () => {
+        const wall = await placeArtworkOnWall(500, 1450);
+        const undoStackBefore = store.getState().undoStack.length;
+
+        await expect(
+          store.getState().movePlanObjectsGroup([
+            { id: wall.placementId, xMm: 600 },
+            { id: "no-such-object", xMm: 999, yMm: 999 }
+          ])
+        ).resolves.not.toThrow();
+
+        let state = store.getState();
+        expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+        let wallObject = state.project!.wallObjects.find((o) => o.id === wall.placementId)!;
+        expect(wallObject.xMm).toBe(600);
+
+        const undoStackAfterFirstMove = store.getState().undoStack.length;
+
+        await expect(
+          store.getState().movePlanObjectsGroup([{ id: "no-such-object", xMm: 1, yMm: 1 }])
+        ).resolves.not.toThrow();
+
+        state = store.getState();
+        expect(state.undoStack).toHaveLength(undoStackAfterFirstMove);
+        wallObject = state.project!.wallObjects.find((o) => o.id === wall.placementId)!;
+        expect(wallObject.xMm).toBe(600);
+      });
+
+      it("blocks the whole commit when the wall member would collide, and allowOverlap lets it through", async () => {
+        const wall = await placeArtworkOnWall(500, 1450, 400);
+        const floor = await placeArtworkOnFloor(1500, 2500);
+        await store.getState().addOpening(wall.wall.id, "door");
+        const door = store.getState().project!.wallObjects.find((o) => o.kind === "door")!;
+        const undoStackBefore = store.getState().undoStack.length;
+
+        await store.getState().movePlanObjectsGroup([
+          { id: wall.placementId, xMm: door.xMm },
+          { id: floor.floorObjectId, xMm: 1600, yMm: 2600 }
+        ]);
+
+        let state = store.getState();
+        expect(state.undoStack).toHaveLength(undoStackBefore);
+        expect(state.error).toBeTruthy();
+        let wallObject = state.project!.wallObjects.find((o) => o.id === wall.placementId)!;
+        let floorObject = state.project!.floorObjects.find((o) => o.id === floor.floorObjectId)!;
+        expect(wallObject.xMm).toBe(500);
+        expect(floorObject.xMm).toBe(1500);
+        expect(floorObject.yMm).toBe(2500);
+
+        await store.getState().movePlanObjectsGroup(
+          [
+            { id: wall.placementId, xMm: door.xMm },
+            { id: floor.floorObjectId, xMm: 1600, yMm: 2600 }
+          ],
+          true
+        );
+
+        state = store.getState();
+        expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+        wallObject = state.project!.wallObjects.find((o) => o.id === wall.placementId)!;
+        floorObject = state.project!.floorObjects.find((o) => o.id === floor.floorObjectId)!;
+        expect(wallObject.xMm).toBe(door.xMm);
+        expect(floorObject.xMm).toBe(1600);
+        expect(floorObject.yMm).toBe(2600);
+      });
+    });
+
+    describe("arrangeSelectedOnWall", () => {
+      it("the canonical example: 2540mm wall, three 508mm works, insetMm 254", async () => {
+        const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+        await store.getState().resizeWall(wall.id, 2540);
+
+        const a = await placeArtworkOnWall(200, 1450, 508);
+        const b = await placeArtworkOnWall(1000, 1450, 508);
+        const c = await placeArtworkOnWall(2000, 1450, 508);
+        store.getState().setObjectSelection([a.placementId, b.placementId, c.placementId]);
+        const undoStackBefore = store.getState().undoStack.length;
+
+        await store.getState().arrangeSelectedOnWall({ insetMm: 254 });
+
+        const state = store.getState();
+        expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+        expect(state.undoStack.at(-1)?.label).toBe("Arrange on wall");
+
+        const placementA = state.project!.wallObjects.find((o) => o.id === a.placementId)!;
+        const placementB = state.project!.wallObjects.find((o) => o.id === b.placementId)!;
+        const placementC = state.project!.wallObjects.find((o) => o.id === c.placementId)!;
+
+        expect(placementA.xMm - placementA.widthMm / 2).toBeCloseTo(254);
+        expect(placementC.xMm + placementC.widthMm / 2).toBeCloseTo(2540 - 254);
+        // Equal 254mm edge-to-edge gaps between the three works.
+        expect(placementB.xMm - placementB.widthMm / 2 - (placementA.xMm + placementA.widthMm / 2)).toBeCloseTo(
+          254
+        );
+        expect(placementC.xMm - placementC.widthMm / 2 - (placementB.xMm + placementB.widthMm / 2)).toBeCloseTo(
+          254
+        );
+      });
+
+      it("errors without an edit when fewer than two members are selected", async () => {
+        const a = await placeArtworkOnWall(500, 1450);
+        store.getState().setObjectSelection([a.placementId]);
+        const undoStackBefore = store.getState().undoStack.length;
+
+        await store.getState().arrangeSelectedOnWall({ insetMm: 100 });
+
+        expect(store.getState().undoStack).toHaveLength(undoStackBefore);
+        expect(store.getState().error).toBeTruthy();
+      });
+
+      it("errors without an edit when the selection spans two different walls", async () => {
+        const a = await placeArtworkOnWall(500, 1450);
+        await store.getState().addArtworksFromFiles([makeImageFile("other-wall.jpg")]);
+        const otherArtworkId = store.getState().project!.checklistArtworkIds.at(-1)!;
+        await store.getState().placeArtwork(otherArtworkId, "wall-east", 500, 1450, true);
+        const b = store.getState().project!.wallObjects.find(
+          (o) => o.kind === "artwork" && (o as { artworkId: string }).artworkId === otherArtworkId
+        )!;
+        store.getState().setObjectSelection([a.placementId, b.id]);
+        const undoStackBefore = store.getState().undoStack.length;
+
+        await store.getState().arrangeSelectedOnWall({ insetMm: 100 });
+
+        expect(store.getState().undoStack).toHaveLength(undoStackBefore);
+        expect(store.getState().error).toBeTruthy();
+      });
+
+      it("errors without an edit when the selection includes a floor object", async () => {
+        const a = await placeArtworkOnWall(500, 1450);
+        await store.getState().addArtworksFromFiles([makeImageFile("floor-piece.jpg")]);
+        const floorArtworkId = store.getState().project!.checklistArtworkIds.at(-1)!;
+        await store.getState().placeArtworkOnFloor(floorArtworkId, 1000, 1000);
+        const floorObjectId = store.getState().project!.floorObjects[0].id;
+        store.getState().setObjectSelection([a.placementId, floorObjectId]);
+        const undoStackBefore = store.getState().undoStack.length;
+
+        await store.getState().arrangeSelectedOnWall({ insetMm: 100 });
+
+        expect(store.getState().undoStack).toHaveLength(undoStackBefore);
+        expect(store.getState().error).toBeTruthy();
+      });
+    });
+
+    describe("removeSelectedPlacements", () => {
+      it("removes a wall placement and a floor placement in one undo entry, and clears selection", async () => {
+        const a = await placeArtworkOnWall(500, 1450);
+        await store.getState().addArtworksFromFiles([makeImageFile("floor-piece-2.jpg")]);
+        const floorArtworkId = store.getState().project!.checklistArtworkIds.at(-1)!;
+        await store.getState().placeArtworkOnFloor(floorArtworkId, 1000, 1000);
+        const floorObjectId = store.getState().project!.floorObjects[0].id;
+
+        store.getState().setObjectSelection([a.placementId, floorObjectId]);
+        const undoStackBefore = store.getState().undoStack.length;
+
+        await store.getState().removeSelectedPlacements();
+
+        const state = store.getState();
+        expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+        expect(state.undoStack.at(-1)?.label).toBe("Remove 2 objects");
+        expect(state.project!.wallObjects.some((o) => o.id === a.placementId)).toBe(false);
+        expect(state.project!.floorObjects.some((o) => o.id === floorObjectId)).toBe(false);
+        expect(state.selectedObjectIds).toEqual([]);
+      });
+    });
+  });
+
   describe("floor object ripples on removal", () => {
     it("removeArtworkFromChecklist drops the artwork's floor placements", async () => {
       await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);

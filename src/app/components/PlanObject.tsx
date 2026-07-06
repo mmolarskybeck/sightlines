@@ -1,4 +1,8 @@
-import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type {
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode
+} from "react";
 import type { PlanRect } from "../../domain/geometry/planObjects";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
@@ -28,7 +32,9 @@ export function PlanObject({
   // + commit-on-release). A click without real movement still falls through to
   // onSelect — the drag release is a no-op below its movement threshold.
   onBeginDrag?: (event: ReactPointerEvent<SVGGElement>) => void;
-  onSelect?: () => void;
+  // Receives the click event so the caller can read modifier keys (shift/
+  // cmd/ctrl) for additive multi-select.
+  onSelect?: (event: ReactMouseEvent<SVGGElement>) => void;
   planRect: PlanRect;
   // Hover-tooltip body (see PlacementTooltip). Ghosts never get one.
   tooltip?: ReactNode;
@@ -57,7 +63,7 @@ export function PlanObject({
               // background does on click (there's none today, but this keeps the
               // click scoped to the object the way ElevationView's placements do).
               event.stopPropagation();
-              onSelect?.();
+              onSelect?.(event);
             }
       }
       onPointerDown={

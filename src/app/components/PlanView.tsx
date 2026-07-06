@@ -41,6 +41,11 @@ import {
   WALL_CAPTURE_PX,
   type PlanPlacement
 } from "../../domain/snapping/planSnapTargets";
+import {
+  getPlanGroupCenterMm,
+  resolvePlanGroupMemberMove,
+  type PlanGroupMember
+} from "../../domain/snapping/planGroupMove";
 import { resolveSnap, type Guide, type SnapTarget, type SnapTargetIds } from "../../domain/snapping/resolveSnap";
 import {
   getMajorGridIntervalMm,
@@ -120,6 +125,18 @@ type ObjectDragState = {
   previewPlacement: PlanPlacement;
   previousSnapTargetIds?: SnapTargetIds;
   activeGuides: Guide[];
+  // Group drag: a rigid, translation-only move of a multi-selection.
+  // resolvePlanPlacement is skipped entirely (no mid-group wall re-anchoring —
+  // deliberate); the pointer delta is optionally grid-snapped on the group's
+  // box center, then applied to every member. Wall members stay glued to their
+  // own wall, floor members translate. Absent for a single-object drag — that
+  // path (previewPlanRect/previewPlacement/currentAnchorWallId) is untouched.
+  members?: PlanGroupMember[];
+  startGroupCenterMm?: Vector2;
+  previewGroupCenterMm?: Vector2;
+  // Per-member preview rects, id → PlanRect, recomputed each move — the group
+  // counterpart to the single object's previewPlanRect.
+  previewRectById?: Map<string, PlanRect>;
 };
 
 // The HTML5-drop preview for an artwork dragged in from the checklist —
@@ -139,15 +156,19 @@ export function PlanView({
   gridPrecisionFloorMm,
   gridVisible,
   onCommitPlanMove,
+  onCommitPlanMoveGroup,
   onCommitWallLength,
   onPlaceArtwork,
   onPlaceArtworkOnFloor,
   onPlaceOpeningFromPlan,
   onSelectArtwork,
   onSelectOpening,
+  onSelectObject,
+  onClearSelection,
   project,
   selectedArtworkId,
   selectedOpeningId,
+  selectedObjectIds = [],
   selectedWallId,
   snapToGrid
 }: {
@@ -164,15 +185,26 @@ export function PlanView({
   // THE single commit for a plan object move — handles same-wall move,
   // re-anchor, and wall↔floor conversion atomically (one undo entry).
   onCommitPlanMove?: (objectId: string, placement: PlanPlacement) => void;
+  // Commits a plan group drag in ONE call: wall members carry a new wall-local
+  // x (yMm omitted); floor members carry a new floor center (xMm + yMm). The
+  // single-object move keeps onCommitPlanMove; this is the multi-select path.
+  onCommitPlanMoveGroup?: (moves: { id: string; xMm: number; yMm?: number }[]) => void;
   onCommitWallLength: (wallId: string, lengthMm: number) => Promise<void>;
   onPlaceArtwork?: (artworkId: string, wallId: string, xMm: number, yMm: number) => void;
   onPlaceArtworkOnFloor?: (artworkId: string, xMm: number, yMm: number) => void;
   onPlaceOpeningFromPlan?: (kind: PlanTool, placement: PlanPlacement) => Promise<void>;
   onSelectArtwork?: (artworkId: string) => void;
   onSelectOpening?: (wallObjectId: string) => void;
+  // Multi-select entry points. Selection ids are PLACEMENT ids (wall/floor
+  // object ids), never artwork-library ids. Optional/inert until App wires
+  // them — click-to-select falls back to today's onSelectArtwork/onSelectOpening
+  // and a background click does nothing when these are absent.
+  onSelectObject?: (id: string, opts: { additive: boolean }) => void;
+  onClearSelection?: () => void;
   project: Project;
   selectedArtworkId?: string | null;
   selectedOpeningId?: string | null;
+  selectedObjectIds?: string[];
   selectedWallId: string | null;
   snapToGrid: boolean;
 }) {
@@ -387,7 +419,16 @@ export function PlanView({
       suppressNextToolClickRef.current = false;
       return;
     }
-    if (!activeTool || !movingSize || !onPlaceOpeningFromPlan || drag) return;
+    if (drag) return;
+    // A background click with no tool armed clears the current selection (the
+    // plan counterpart to elevation's marquee click-clear). Object clicks never
+    // reach here — PlanObject stops propagation, and the capture-phase suppress
+    // catches a click that merely started on an object but landed elsewhere.
+    if (!activeTool) {
+      onClearSelection?.();
+      return;
+    }
+    if (!movingSize || !onPlaceOpeningFromPlan) return;
 
     const pointerMm = toSvgMm(event.clientX, event.clientY);
     if (!pointerMm) return;
@@ -547,6 +588,59 @@ export function PlanView({
       const pointerMm = toSvgMm(event.clientX, event.clientY);
       if (!pointerMm) return;
 
+      // Group drag: rigid translation, no per-object re-anchoring. Snap the
+      // whole group's box center to the grid (grid tier only), then apply the
+      // snapped delta to every member — wall members reproject onto their own
+      // wall, floor members translate.
+      if (current.members && current.startGroupCenterMm) {
+        const rawDeltaMm: Vector2 = {
+          xMm: pointerMm.xMm - current.startPointerMm.xMm,
+          yMm: pointerMm.yMm - current.startPointerMm.yMm
+        };
+        const proposedGroupCenterMm: Vector2 = {
+          xMm: current.startGroupCenterMm.xMm + rawDeltaMm.xMm,
+          yMm: current.startGroupCenterMm.yMm + rawDeltaMm.yMm
+        };
+
+        let snappedGroupCenterMm = proposedGroupCenterMm;
+        let snapTargetIds = current.previousSnapTargetIds;
+        let activeGuides: Guide[] = [];
+        if (snapToGrid) {
+          // gridSnapTargets are already all kind:"grid" — no filtering needed.
+          const snap = resolveSnap(proposedGroupCenterMm, gridSnapTargets, {
+            thresholdMm: snapThresholdMm,
+            previousSnapTargetIds: current.previousSnapTargetIds
+          });
+          snappedGroupCenterMm = snap.point;
+          snapTargetIds = snap.snapTargetIds;
+          activeGuides = snap.activeGuides;
+        }
+
+        const deltaMm: Vector2 = {
+          xMm: snappedGroupCenterMm.xMm - current.startGroupCenterMm.xMm,
+          yMm: snappedGroupCenterMm.yMm - current.startGroupCenterMm.yMm
+        };
+        const previewRectById = new Map<string, PlanRect>(
+          current.members.map((member) => [
+            member.id,
+            resolvePlanGroupMemberMove(member, deltaMm).rect
+          ])
+        );
+
+        setObjectDrag((state) =>
+          state
+            ? {
+                ...state,
+                previewGroupCenterMm: snappedGroupCenterMm,
+                previewRectById,
+                previousSnapTargetIds: snapTargetIds,
+                activeGuides
+              }
+            : state
+        );
+        return;
+      }
+
       // Move the object's own center by the pointer delta, not the raw pointer
       // — wherever inside the object the user grabbed must not leak into the
       // committed center.
@@ -592,6 +686,26 @@ export function PlanView({
       setObjectDrag(null);
       if (!current) return;
 
+      // Group drag: sub-threshold release is a click (no commit, no phantom
+      // undo); else one commit carrying every member's translated result.
+      if (current.members && current.startGroupCenterMm && current.previewGroupCenterMm) {
+        const deltaMm: Vector2 = {
+          xMm: current.previewGroupCenterMm.xMm - current.startGroupCenterMm.xMm,
+          yMm: current.previewGroupCenterMm.yMm - current.startGroupCenterMm.yMm
+        };
+        if (Math.hypot(deltaMm.xMm, deltaMm.yMm) < 0.5) return;
+
+        // Whether or not the commit survives the collision gate, the click
+        // that trails the release must not collapse the multi-selection to
+        // the one grabbed member (see suppressNextSelect).
+        suppressNextSelect();
+        const moves = current.members.map(
+          (member) => resolvePlanGroupMemberMove(member, deltaMm).commit
+        );
+        onCommitPlanMoveGroup?.(moves);
+        return;
+      }
+
       // Sub-threshold release is a click, not a move — it must not commit (and
       // so land a phantom undo entry); the object's onClick still selects it.
       const movedMm = Math.hypot(
@@ -618,11 +732,31 @@ export function PlanView({
     // snapThresholdMm/captureDistanceMm derive from the committed project and
     // viewport, which can't change mid-drag (nothing commits until release),
     // so they're intentionally left out of the deps.
-  }, [objectDrag !== null, onCommitPlanMove]);
+  }, [objectDrag !== null, onCommitPlanMove, onCommitPlanMoveGroup]);
 
   useEffect(() => {
     objectDragRef.current = objectDrag;
   }, [objectDrag]);
+
+  // The browser fires a `click` on the grabbed element right after a drag's
+  // pointerup. For a single object that click merely re-selects it (today's
+  // behavior, harmless); after a real GROUP drag the same click would call
+  // onSelectObject non-additively and collapse the whole multi-selection to
+  // the one grabbed member — so the release marks the very next select to be
+  // swallowed. Cleared on a timeout too, in case the release lands where no
+  // click follows. Same idiom as ElevationView's.
+  const suppressNextSelectRef = useRef(false);
+  function suppressNextSelect() {
+    suppressNextSelectRef.current = true;
+    window.setTimeout(() => {
+      suppressNextSelectRef.current = false;
+    }, 0);
+  }
+  function consumeSelectSuppression(): boolean {
+    const suppressed = suppressNextSelectRef.current;
+    suppressNextSelectRef.current = false;
+    return suppressed;
+  }
 
   function beginObjectDrag(
     params: {
@@ -638,6 +772,69 @@ export function PlanView({
   ) {
     const startPointerMm = toSvgMm(event.clientX, event.clientY);
     if (!startPointerMm) return;
+
+    // Group drag: the pressed object is part of a multi-selection. Resolve live
+    // members from BOTH wall objects (world center via getWallObjectPlanRect —
+    // stale ids or objects whose wall vanished drop out) and floor objects.
+    if (selectedObjectIds.includes(params.objectId) && selectedObjectIds.length > 1) {
+      const wallsById = new Map(floorWallsForTool.map((wall) => [wall.id, wall]));
+      const members: PlanGroupMember[] = [];
+
+      for (const object of project.wallObjects) {
+        if (!selectedObjectIds.includes(object.id)) continue;
+        const wall = wallsById.get(object.wallId);
+        if (!wall) continue;
+        const rest = getWallObjectPlanRect(wall, object);
+        members.push({
+          id: object.id,
+          anchor: "wall",
+          wall,
+          worldCenterMm: { xMm: rest.centerXMm, yMm: rest.centerYMm },
+          widthMm: object.widthMm,
+          depthMm: WALL_OBJECT_PLAN_DEPTH_MM
+        });
+      }
+      for (const object of project.floorObjects) {
+        if (!selectedObjectIds.includes(object.id)) continue;
+        members.push({
+          id: object.id,
+          anchor: "floor",
+          centerMm: { xMm: object.xMm, yMm: object.yMm },
+          widthMm: object.widthMm,
+          depthMm: object.depthMm,
+          rotationDeg: object.rotationDeg
+        });
+      }
+
+      if (members.length > 1) {
+        const groupCenterMm = getPlanGroupCenterMm(members);
+        const previewRectById = new Map<string, PlanRect>(
+          members.map((member) => [
+            member.id,
+            resolvePlanGroupMemberMove(member, { xMm: 0, yMm: 0 }).rect
+          ])
+        );
+        setObjectDrag({
+          objectId: params.objectId,
+          kind: params.kind,
+          canFloat: params.kind === "artwork" || params.kind === "blocked-zone",
+          movingSize: params.movingSize,
+          rotationDeg: params.rotationDeg,
+          startPointerMm,
+          startCenterMm: params.startCenterMm,
+          currentAnchorWallId: null,
+          previewPlanRect: params.initialPlanRect,
+          previewPlacement: params.currentPlacement,
+          previousSnapTargetIds: undefined,
+          activeGuides: [],
+          members,
+          startGroupCenterMm: groupCenterMm,
+          previewGroupCenterMm: groupCenterMm,
+          previewRectById
+        });
+        return;
+      }
+    }
 
     setObjectDrag({
       objectId: params.objectId,
@@ -868,17 +1065,30 @@ export function PlanView({
                 if (!wall) return null;
 
                 const restRect = getWallObjectPlanRect(wall, wallObject);
-                const isDragging = objectDrag?.objectId === wallObject.id;
-                const planRect = isDragging ? objectDrag.previewPlanRect : restRect;
-                // While dragging, reflect whether the live preview has left the
-                // wall (dashed floor look) so the cue matches the pending
-                // commit; at rest a wall object is never floor-placed.
+                // Preview position, generalized over single and group drags: a
+                // group member reads its own rect from previewRectById, a single
+                // dragged object reads previewPlanRect, everything else rests.
+                const groupPreviewRect = objectDrag?.members
+                  ? objectDrag.previewRectById?.get(wallObject.id)
+                  : undefined;
+                const planRect =
+                  groupPreviewRect ??
+                  (objectDrag && !objectDrag.members && objectDrag.objectId === wallObject.id
+                    ? objectDrag.previewPlanRect
+                    : restRect);
+                // A single drag reflects whether the live preview left the wall
+                // (dashed floor look); a group drag is translation-only so a
+                // wall member stays on its wall; at rest never floor-placed.
                 const isFloorPlaced =
-                  isDragging && objectDrag.previewPlacement.anchor === "floor";
+                  objectDrag != null &&
+                  !objectDrag.members &&
+                  objectDrag.objectId === wallObject.id &&
+                  objectDrag.previewPlacement.anchor === "floor";
                 const isSelected =
-                  wallObject.kind === "artwork"
+                  (wallObject.kind === "artwork"
                     ? wallObject.artworkId === selectedArtworkId
-                    : wallObject.id === selectedOpeningId;
+                    : wallObject.id === selectedOpeningId) ||
+                  selectedObjectIds.includes(wallObject.id);
 
                 return (
                   <PlanObject
@@ -930,27 +1140,43 @@ export function PlanView({
                         event
                       )
                     }
-                    onSelect={() =>
-                      wallObject.kind === "artwork"
-                        ? onSelectArtwork?.(wallObject.artworkId)
-                        : onSelectOpening?.(wallObject.id)
-                    }
+                    onSelect={(event) => {
+                      if (consumeSelectSuppression()) return;
+                      if (onSelectObject) {
+                        onSelectObject(wallObject.id, {
+                          additive: event.shiftKey || event.metaKey || event.ctrlKey
+                        });
+                      } else if (wallObject.kind === "artwork") {
+                        onSelectArtwork?.(wallObject.artworkId);
+                      } else {
+                        onSelectOpening?.(wallObject.id);
+                      }
+                    }}
                   />
                 );
               })}
               {displayedProject.floorObjects.map((floorObject) => {
                 const restRect = getFloorObjectPlanRect(floorObject);
-                const isDragging = objectDrag?.objectId === floorObject.id;
-                const planRect = isDragging ? objectDrag.previewPlanRect : restRect;
-                // A floor object reads floor-placed at rest; while dragging it
+                const groupPreviewRect = objectDrag?.members
+                  ? objectDrag.previewRectById?.get(floorObject.id)
+                  : undefined;
+                const planRect =
+                  groupPreviewRect ??
+                  (objectDrag && !objectDrag.members && objectDrag.objectId === floorObject.id
+                    ? objectDrag.previewPlanRect
+                    : restRect);
+                // A floor object reads floor-placed at rest and under a group
+                // drag (translation-only keeps it on the floor); a single drag
                 // follows the preview (a floor→wall drag drops the dashed look).
-                const isFloorPlaced = isDragging
-                  ? objectDrag.previewPlacement.anchor === "floor"
-                  : true;
+                const isFloorPlaced =
+                  objectDrag && !objectDrag.members && objectDrag.objectId === floorObject.id
+                    ? objectDrag.previewPlacement.anchor === "floor"
+                    : true;
                 const isSelected =
-                  floorObject.kind === "artwork"
+                  (floorObject.kind === "artwork"
                     ? floorObject.artworkId === selectedArtworkId
-                    : floorObject.id === selectedOpeningId;
+                    : floorObject.id === selectedOpeningId) ||
+                  selectedObjectIds.includes(floorObject.id);
 
                 return (
                   <PlanObject
@@ -996,11 +1222,18 @@ export function PlanView({
                         event
                       )
                     }
-                    onSelect={() =>
-                      floorObject.kind === "artwork"
-                        ? onSelectArtwork?.(floorObject.artworkId)
-                        : onSelectOpening?.(floorObject.id)
-                    }
+                    onSelect={(event) => {
+                      if (consumeSelectSuppression()) return;
+                      if (onSelectObject) {
+                        onSelectObject(floorObject.id, {
+                          additive: event.shiftKey || event.metaKey || event.ctrlKey
+                        });
+                      } else if (floorObject.kind === "artwork") {
+                        onSelectArtwork?.(floorObject.artworkId);
+                      } else {
+                        onSelectOpening?.(floorObject.id);
+                      }
+                    }}
                   />
                 );
               })}
