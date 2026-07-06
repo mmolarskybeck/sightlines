@@ -31,6 +31,7 @@ import {
 import {
   DEFAULT_FLOOR_OBJECT_DEPTH_MM,
   type Artwork,
+  type Dimensions,
   type Project,
   type WallObject
 } from "../../domain/project";
@@ -47,15 +48,23 @@ import {
   getPixelsPerMm
 } from "../../domain/units/precision";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
+import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { useContainerSize } from "../hooks/useContainerSize";
 import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
 import { GridOverlay } from "./GridOverlay";
+import { ArtworkTooltipContent, OpeningTooltipContent } from "./PlacementTooltip";
 import { PlanObject } from "./PlanObject";
 import { PlanToolbar, type PlanTool } from "./PlanToolbar";
 import { RoomResizeHandles, type ResizeHandleTarget } from "./RoomResizeHandles";
 
 const HANDLE_SCREEN_SIZE_PX = 16;
 const SNAP_THRESHOLD_PX = 10;
+
+// Stable module-level reference so a caller that doesn't pass `getBlob`
+// doesn't retrigger useAssetImageUrls' effect on every render (same idiom as
+// ElevationView's NO_OP_GET_BLOB).
+const NO_OP_GET_BLOB: (key: string) => Promise<Blob> = () =>
+  Promise.reject(new Error("PlanView: no getBlob provided"));
 
 type DragState = {
   roomId: string;
@@ -126,6 +135,7 @@ type DropGhostState = {
 export function PlanView({
   artworksById,
   draggingArtworkId = null,
+  getBlob,
   gridPrecisionFloorMm,
   gridVisible,
   onCommitPlanMove,
@@ -146,6 +156,9 @@ export function PlanView({
   // ghost — HTML5 dragover can't read the payload, so App threads this the
   // same way it does for ElevationView.
   draggingArtworkId?: string | null;
+  // Resolves asset blob keys for artwork tooltip thumbnails (same contract as
+  // ElevationView's getBlob, but at the thumbnail tier).
+  getBlob?: (key: string) => Promise<Blob>;
   gridPrecisionFloorMm: number | null;
   gridVisible: boolean;
   // THE single commit for a plan object move — handles same-wall move,
@@ -181,6 +194,21 @@ export function PlanView({
   // keyed on hover instead of a pointer-capture gesture). Reset whenever the
   // tool disarms so re-arming starts clean.
   const [activeTool, setActiveTool] = useState<PlanTool | null>(null);
+
+  // Thumbnails for placed-artwork tooltips (thumbnail tier — the plan rect is
+  // too small to justify display-tier blobs the way elevation does).
+  const placedArtworkAssetIds = [
+    ...project.wallObjects.map((object) =>
+      object.kind === "artwork" ? artworksById?.get(object.artworkId)?.assetId : undefined
+    ),
+    ...project.floorObjects.map((object) =>
+      object.kind === "artwork" ? artworksById?.get(object.artworkId)?.assetId : undefined
+    )
+  ];
+  const thumbnailUrlsByAssetId = useAssetImageUrls(
+    placedArtworkAssetIds,
+    getBlob ?? NO_OP_GET_BLOB
+  );
   const [toolGhost, setToolGhost] = useState<ToolGhostState | null>(null);
   const toolSnapTargetIdsRef = useRef<SnapTargetIds | undefined>(undefined);
   // Set on pointerdown-capture when the gesture starts on a resize handle or
@@ -811,6 +839,27 @@ export function PlanView({
         {(() => {
           const floorWalls = getFloorWalls(displayedProject.floor);
           const floorWallsById = new Map(floorWalls.map((wall) => [wall.id, wall]));
+          // Any in-flight gesture suppresses hover tooltips: they'd sit on top
+          // of the very geometry the user is trying to read while dragging,
+          // resizing, or aiming an armed placement tool.
+          const tooltipsDisabled = Boolean(drag || objectDrag || dropGhost || activeTool);
+          const artworkTooltip = (
+            artworkId: string,
+            displayDimensionsOverride?: Dimensions
+          ) => {
+            const artwork = artworksById?.get(artworkId);
+            if (!artwork) return undefined;
+            return (
+              <ArtworkTooltipContent
+                artwork={artwork}
+                dimensions={displayDimensionsOverride ?? artwork.dimensions}
+                thumbnailUrl={
+                  artwork.assetId ? thumbnailUrlsByAssetId.get(artwork.assetId) : undefined
+                }
+                unit={project.unit}
+              />
+            );
+          };
 
           return (
             <>
@@ -838,6 +887,19 @@ export function PlanView({
                     key={wallObject.id}
                     kind={wallObject.kind}
                     planRect={planRect}
+                    tooltip={
+                      wallObject.kind === "artwork" ? (
+                        artworkTooltip(wallObject.artworkId, wallObject.displayDimensionsOverride)
+                      ) : (
+                        <OpeningTooltipContent
+                          kind={wallObject.kind}
+                          secondaryMm={wallObject.heightMm}
+                          unit={project.unit}
+                          widthMm={wallObject.widthMm}
+                        />
+                      )
+                    }
+                    tooltipDisabled={tooltipsDisabled}
                     onBeginDrag={(event) =>
                       beginObjectDrag(
                         {
@@ -897,6 +959,21 @@ export function PlanView({
                     key={floorObject.id}
                     kind={floorObject.kind}
                     planRect={planRect}
+                    tooltip={
+                      floorObject.kind === "artwork" ? (
+                        artworkTooltip(floorObject.artworkId, floorObject.displayDimensionsOverride)
+                      ) : (
+                        // A floor blocked zone's footprint reads width × depth
+                        // (its plan axes), not width × height.
+                        <OpeningTooltipContent
+                          kind={floorObject.kind}
+                          secondaryMm={floorObject.depthMm}
+                          unit={project.unit}
+                          widthMm={floorObject.widthMm}
+                        />
+                      )
+                    }
+                    tooltipDisabled={tooltipsDisabled}
                     onBeginDrag={(event) =>
                       beginObjectDrag(
                         {

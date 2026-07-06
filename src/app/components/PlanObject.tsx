@@ -1,12 +1,12 @@
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import type { PlanRect } from "../../domain/geometry/planObjects";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 // Renders one placed object (wall-anchored door/window/blocked-zone, or a
 // floor-placed artwork/blocked-zone) as a thin rect in plan view — the plan
 // counterpart to ElevationOpening/ElevationArtwork, reusing the same
 // restrained stroke-only visual language (no fill illustration) so a plan
-// rect and its elevation placement read as the same object. Read-only in
-// this phase: click-to-select only, no drag/resize.
+// rect and its elevation placement read as the same object.
 export function PlanObject({
   isFloorPlaced = false,
   isGhost = false,
@@ -14,10 +14,12 @@ export function PlanObject({
   kind,
   onBeginDrag,
   onSelect,
-  planRect
+  planRect,
+  tooltip,
+  tooltipDisabled = false
 }: {
   isFloorPlaced?: boolean;
-  // A click-to-place (or, later, drop) preview: non-interactive, translucent,
+  // A click-to-place (or drop) preview: non-interactive, translucent,
   // dashed — same convention as ElevationArtwork's `isGhost`.
   isGhost?: boolean;
   isSelected?: boolean;
@@ -28,6 +30,13 @@ export function PlanObject({
   onBeginDrag?: (event: ReactPointerEvent<SVGGElement>) => void;
   onSelect?: () => void;
   planRect: PlanRect;
+  // Hover-tooltip body (see PlacementTooltip). Ghosts never get one.
+  tooltip?: ReactNode;
+  // Suppresses the tooltip while a drag or armed placement tool is active.
+  // The Tooltip wrapper stays mounted and only the content is withheld, so
+  // toggling this mid-drag never remounts the <g> out from under a
+  // pointer-capture sequence.
+  tooltipDisabled?: boolean;
 }) {
   const classNames = ["plan-object", `plan-object--${kind}`];
   if (isFloorPlaced) classNames.push("is-floor");
@@ -37,7 +46,7 @@ export function PlanObject({
   const x = planRect.centerXMm - planRect.widthMm / 2;
   const y = planRect.centerYMm - planRect.depthMm / 2;
 
-  return (
+  const shape = (
     <g
       className={classNames.join(" ")}
       onClick={
@@ -70,5 +79,14 @@ export function PlanObject({
         y={y}
       />
     </g>
+  );
+
+  if (!tooltip || isGhost) return shape;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{shape}</TooltipTrigger>
+      {tooltipDisabled ? null : <TooltipContent>{tooltip}</TooltipContent>}
+    </Tooltip>
   );
 }

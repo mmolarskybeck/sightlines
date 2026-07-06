@@ -2342,3 +2342,58 @@ input:focus-visible {
 .opening-add-buttons .inspector-action {
   flex: 1 1 auto;
 }
+
+/* ---- Placement hover tooltips (plan + elevation) ---------------------- */
+/* The Radix content shell (.placement-tooltip, styled inline in
+   ui/tooltip.tsx via tokens) carries the border/background/shadow; these
+   rules lay out the body: an opening reads icon + kind over its dims, an
+   artwork reads thumbnail beside title / artist / dims. Square corners,
+   hairline borders, restrained type — same vocabulary as the checklist. */
+.placement-tooltip-opening,
+.placement-tooltip-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.placement-tooltip-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.placement-tooltip-artwork {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+/* Same 56px-capped slot treatment as .checklist-thumb: aspect-true via
+   object-fit, never cropped. */
+.placement-tooltip-thumb {
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg);
+  object-fit: contain;
+}
+
+.placement-tooltip-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.placement-tooltip-artist {
+  font-size: 0.76rem;
+}
+
+.placement-tooltip-dims {
+  font-size: 0.74rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}

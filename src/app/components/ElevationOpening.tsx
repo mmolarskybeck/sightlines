@@ -1,6 +1,7 @@
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import type { OpeningWallObject } from "../../domain/project";
 import { getArtworkRectSvg, type ArtworkCenterMm, type ArtworkSizeMm, type SvgRectMm } from "./elevationArtworkGeometry";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 // Renders one door/window/blocked-zone placement — the opening counterpart
 // to ElevationArtwork, reusing the same rect-geometry helper so an opening
@@ -17,6 +18,8 @@ export function ElevationOpening({
   onPointerDown,
   onSelect,
   size,
+  tooltip,
+  tooltipDisabled = false,
   wallHeightMm,
   wallObjectId
 }: {
@@ -27,6 +30,12 @@ export function ElevationOpening({
   onPointerDown?: (event: ReactPointerEvent<SVGGElement>) => void;
   onSelect?: () => void;
   size: ArtworkSizeMm;
+  // Hover-tooltip body (see PlacementTooltip): kind icon + label + dims.
+  tooltip?: ReactNode;
+  // Suppresses the tooltip while a drag is active. The Tooltip wrapper stays
+  // mounted and only the content is withheld, so toggling this mid-drag never
+  // remounts the <g> out from under a pointer sequence.
+  tooltipDisabled?: boolean;
   wallHeightMm: number;
   wallObjectId: string;
 }) {
@@ -36,7 +45,7 @@ export function ElevationOpening({
   if (isOutOfBounds) classNames.push("out-of-bounds");
   if (isSelected) classNames.push("selected");
 
-  return (
+  const shape = (
     <g className={classNames.join(" ")} onClick={onSelect} onPointerDown={onPointerDown}>
       {kind === "blocked-zone" ? <BlockedZoneHatch rect={rect} wallObjectId={wallObjectId} /> : null}
       <rect
@@ -50,6 +59,15 @@ export function ElevationOpening({
       {kind === "door" ? <DoorSwingHint rect={rect} /> : null}
       {kind === "window" ? <WindowMullions rect={rect} /> : null}
     </g>
+  );
+
+  if (!tooltip) return shape;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{shape}</TooltipTrigger>
+      {tooltipDisabled ? null : <TooltipContent>{tooltip}</TooltipContent>}
+    </Tooltip>
   );
 }
 

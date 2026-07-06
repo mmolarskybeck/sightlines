@@ -1,6 +1,7 @@
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import type { Dimensions } from "../../domain/project";
 import { getArtworkRectSvg, type ArtworkCenterMm, type ArtworkSizeMm } from "./elevationArtworkGeometry";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 // One placement's visual, reused for both a real (persisted) placement and
 // the transient drop/drag ghost — a ghost is just a non-interactive instance
@@ -18,6 +19,8 @@ export function ElevationArtwork({
   onPointerDown,
   onSelect,
   size,
+  tooltip,
+  tooltipDisabled = false,
   wallHeightMm
 }: {
   center: ArtworkCenterMm;
@@ -32,6 +35,14 @@ export function ElevationArtwork({
   onPointerDown?: (event: ReactPointerEvent<SVGGElement>) => void;
   onSelect?: () => void;
   size: ArtworkSizeMm;
+  // Hover-tooltip body (see PlacementTooltip); elevation passes title/artist/
+  // dims but no thumbnail — the artwork itself is already visible. Ghosts
+  // never get one.
+  tooltip?: ReactNode;
+  // Suppresses the tooltip while a drag is active. The Tooltip wrapper stays
+  // mounted and only the content is withheld, so toggling this mid-drag never
+  // remounts the <g> out from under a pointer sequence.
+  tooltipDisabled?: boolean;
   wallHeightMm: number;
 }) {
   const rect = getArtworkRectSvg(wallHeightMm, center, size);
@@ -43,7 +54,7 @@ export function ElevationArtwork({
   if (isOutOfBounds) classNames.push("out-of-bounds");
   if (isSelected) classNames.push("selected");
 
-  return (
+  const shape = (
     <g
       className={classNames.join(" ")}
       onClick={isGhost ? undefined : onSelect}
@@ -73,5 +84,14 @@ export function ElevationArtwork({
         y={rect.yMm}
       />
     </g>
+  );
+
+  if (!tooltip || isGhost) return shape;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{shape}</TooltipTrigger>
+      {tooltipDisabled ? null : <TooltipContent>{tooltip}</TooltipContent>}
+    </Tooltip>
   );
 }

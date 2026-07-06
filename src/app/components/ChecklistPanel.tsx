@@ -25,6 +25,10 @@ type ChecklistRowData = {
   // The wall a placed artwork lives on, resolved to a human name — null when
   // unplaced, or when the placement points at a wall that no longer exists.
   wallName: string | null;
+  // Every placement (wall or floor) referencing this artwork — in practice
+  // there's at most one, but the X button removes all of them so a row
+  // never ends up half-unplaced.
+  placementIds: string[];
 };
 
 // The left workspace pane (docs/plan.md §3.5, §4.1): checklist membership is
@@ -40,6 +44,7 @@ export function ChecklistPanel({
   onAddArtworksFromFiles,
   onArtworkDragStateChange,
   onRemoveArtworkFromChecklist,
+  onRemovePlacement,
   onSelectArtwork,
   getBlob
 }: {
@@ -54,6 +59,7 @@ export function ChecklistPanel({
   // dragstart and null on dragend.
   onArtworkDragStateChange?: (artworkId: string | null) => void;
   onRemoveArtworkFromChecklist: (artworkId: string) => Promise<void>;
+  onRemovePlacement: (wallObjectId: string) => Promise<void>;
   onSelectArtwork: (artworkId: string) => void;
   getBlob: (key: string) => Promise<Blob>;
 }) {
@@ -74,36 +80,47 @@ export function ChecklistPanel({
   // Wall names by id (across every room) and the placement each artwork sits
   // on, so a placed row can show the wall it lives on rather than a flat
   // "Placed". Derived here from `project` — the panel already receives it.
-  const { placedArtworkWallIds, floorPlacedArtworkIds, wallNamesById } = useMemo(() => {
-    const wallNames = new Map<string, string>();
-    for (const placement of project.floor.rooms) {
-      for (const wall of placement.room.walls) {
-        wallNames.set(wall.id, wall.name);
+  const { placedArtworkWallIds, floorPlacedArtworkIds, wallNamesById, placementIdsByArtworkId } =
+    useMemo(() => {
+      const wallNames = new Map<string, string>();
+      for (const placement of project.floor.rooms) {
+        for (const wall of placement.room.walls) {
+          wallNames.set(wall.id, wall.name);
+        }
       }
-    }
 
-    const placedWalls = new Map<string, string>();
-    for (const wallObject of project.wallObjects) {
-      if (wallObject.kind === "artwork") {
-        placedWalls.set(wallObject.artworkId, wallObject.wallId);
+      const placedWalls = new Map<string, string>();
+      const placementIds = new Map<string, string[]>();
+      for (const wallObject of project.wallObjects) {
+        if (wallObject.kind === "artwork") {
+          placedWalls.set(wallObject.artworkId, wallObject.wallId);
+          placementIds.set(wallObject.artworkId, [
+            ...(placementIds.get(wallObject.artworkId) ?? []),
+            wallObject.id
+          ]);
+        }
       }
-    }
 
-    // A floor-placed artwork counts as placed too — it has no wall name, so
-    // its row falls back to the plain "Placed" tag.
-    const floorPlaced = new Set<string>();
-    for (const floorObject of project.floorObjects) {
-      if (floorObject.kind === "artwork") {
-        floorPlaced.add(floorObject.artworkId);
+      // A floor-placed artwork counts as placed too — it has no wall name, so
+      // its row falls back to the plain "Placed" tag.
+      const floorPlaced = new Set<string>();
+      for (const floorObject of project.floorObjects) {
+        if (floorObject.kind === "artwork") {
+          floorPlaced.add(floorObject.artworkId);
+          placementIds.set(floorObject.artworkId, [
+            ...(placementIds.get(floorObject.artworkId) ?? []),
+            floorObject.id
+          ]);
+        }
       }
-    }
 
-    return {
-      placedArtworkWallIds: placedWalls,
-      floorPlacedArtworkIds: floorPlaced,
-      wallNamesById: wallNames
-    };
-  }, [project.floor.rooms, project.wallObjects, project.floorObjects]);
+      return {
+        placedArtworkWallIds: placedWalls,
+        floorPlacedArtworkIds: floorPlaced,
+        wallNamesById: wallNames,
+        placementIdsByArtworkId: placementIds
+      };
+    }, [project.floor.rooms, project.wallObjects, project.floorObjects]);
 
   const rows: ChecklistRowData[] = project.checklistArtworkIds.map((artworkId) => {
     const wallId = placedArtworkWallIds.get(artworkId);
@@ -112,7 +129,8 @@ export function ChecklistPanel({
       artworkId,
       artwork: artworksById.get(artworkId) ?? null,
       isPlaced: wallId !== undefined || isFloorPlaced,
-      wallName: wallId !== undefined ? (wallNamesById.get(wallId) ?? null) : null
+      wallName: wallId !== undefined ? (wallNamesById.get(wallId) ?? null) : null,
+      placementIds: placementIdsByArtworkId.get(artworkId) ?? []
     };
   });
 
@@ -248,7 +266,19 @@ export function ChecklistPanel({
               }
               unit={artworkUnit}
               wallName={row.wallName}
-              onRemove={() => void onRemoveArtworkFromChecklist(row.artworkId)}
+              onRemove={() => {
+                // Placed: the X unplaces (removes the placement(s), keeps
+                // the checklist row) — deleting from the checklist entirely
+                // is a separate affordance for later. Unplaced: the X still
+                // removes the row, same as before.
+                if (row.placementIds.length > 0) {
+                  for (const placementId of row.placementIds) {
+                    void onRemovePlacement(placementId);
+                  }
+                  return;
+                }
+                void onRemoveArtworkFromChecklist(row.artworkId);
+              }}
               onSelect={() => onSelectArtwork(row.artworkId)}
               onDragStateChange={onArtworkDragStateChange}
             />
@@ -385,10 +415,10 @@ function ChecklistRow({
         ) : null}
       </div>
       <Button
-        aria-label="Remove from checklist"
+        aria-label={isPlaced ? "Remove placement" : "Remove from checklist"}
         className="icon-button compact checklist-remove"
         size="icon-sm"
-        title="Remove from checklist"
+        title={isPlaced ? "Remove placement" : "Remove from checklist"}
         variant="outline"
         onClick={(event) => {
           event.stopPropagation();

@@ -43,6 +43,7 @@ import { FloorObjectInspector, FloorPlacementFields } from "./components/FloorOb
 import { OpeningInspector } from "./components/OpeningInspector";
 import { PlanEmptyState } from "./components/PlanEmptyState";
 import { PlanView } from "./components/PlanView";
+import { TooltipProvider } from "./components/ui/tooltip";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { RoomsPanel } from "./components/RoomsPanel";
 import { WallInspector, type WallDimensionLink } from "./components/WallInspector";
@@ -170,6 +171,48 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [undo, redo]);
 
+  // Delete/Backspace removes whichever placement is currently selected — a
+  // wall opening, a floor blocked zone (both live in the selectedOpeningId
+  // slot, and removePlacement is generic over wall/floor ids so one call
+  // covers either), or a placed artwork (selectedArtworkId resolved against
+  // wallObjects/floorObjects). An unplaced checklist selection is left
+  // alone — there's no placement id to remove. Guarded against editable
+  // targets (LengthFields use Backspace for text editing) and an in-flight
+  // checklist drag, the same idiom as the undo/redo effect above.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Delete" && event.key !== "Backspace") return;
+      if (isEditableTarget(event.target)) return;
+      if (draggingArtworkId) return;
+      if (!project) return;
+
+      if (selectedOpeningId) {
+        event.preventDefault();
+        void removePlacement(selectedOpeningId);
+        return;
+      }
+
+      if (selectedArtworkId) {
+        const placement =
+          project.wallObjects.find(
+            (wallObject): wallObject is ArtworkWallObject =>
+              wallObject.kind === "artwork" && wallObject.artworkId === selectedArtworkId
+          ) ??
+          project.floorObjects.find(
+            (floorObject): floorObject is ArtworkFloorObject =>
+              floorObject.kind === "artwork" && floorObject.artworkId === selectedArtworkId
+          );
+        if (!placement) return;
+
+        event.preventDefault();
+        void removePlacement(placement.id);
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [project, selectedArtworkId, selectedOpeningId, draggingArtworkId, removePlacement]);
+
   const selectedWall = project ? getSelectedWall(project, selectedWallId) : null;
   const wallDimensionLink =
     project && selectedWall
@@ -296,6 +339,9 @@ export function App() {
     setLeftPanel(leftPanel === panel ? null : panel);
 
   return (
+    // One provider for every hover tooltip in the app (plan/elevation
+    // placements), so they share a single warm-up delay and skip-delay window.
+    <TooltipProvider delayDuration={400}>
     <main className="app-shell">
       <AppRail
         leftPanel={leftPanel}
@@ -419,6 +465,7 @@ export function App() {
             onAddArtworksFromFiles={addArtworksFromFiles}
             onArtworkDragStateChange={setDraggingArtworkId}
             onRemoveArtworkFromChecklist={removeArtworkFromChecklist}
+            onRemovePlacement={removePlacement}
             onSelectArtwork={selectArtwork}
           />
         ) : leftPanel === "rooms" ? (
@@ -487,6 +534,7 @@ export function App() {
               <PlanView
                 artworksById={artworksById}
                 draggingArtworkId={draggingArtworkId}
+                getBlob={getAssetBlob}
                 gridPrecisionFloorMm={gridPrecisionFloorMm}
                 gridVisible={showGrid}
                 project={project}
@@ -681,6 +729,7 @@ export function App() {
       </section>
       </div>
     </main>
+    </TooltipProvider>
   );
 }
 

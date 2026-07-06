@@ -34,6 +34,7 @@ import { useContainerSize } from "../hooks/useContainerSize";
 import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
 import { ElevationArtwork } from "./ElevationArtwork";
 import { ElevationOpening } from "./ElevationOpening";
+import { ArtworkTooltipContent, OpeningTooltipContent } from "./PlacementTooltip";
 import { isArtworkOutOfWallBounds, wallLocalYToSvgY } from "./elevationArtworkGeometry";
 import { GridOverlay } from "./GridOverlay";
 import { Button } from "./ui/button";
@@ -530,6 +531,17 @@ export function ElevationView({
               isOutOfBounds={isArtworkOutOfWallBounds(wallLengthMm, wallHeightMm, center, size)}
               isSelected={selectedArtworkId === placement.artworkId}
               size={size}
+              tooltip={
+                artwork ? (
+                  // No thumbnail here — the artwork itself is on the wall.
+                  <ArtworkTooltipContent
+                    artwork={artwork}
+                    dimensions={placement.displayDimensionsOverride ?? artwork.dimensions}
+                    unit={unit}
+                  />
+                ) : undefined
+              }
+              tooltipDisabled={Boolean(moveDrag || dropGhost)}
               wallHeightMm={wallHeightMm}
               onPointerDown={(event) => beginMoveDrag(placement, event)}
               onSelect={() => onSelectArtwork?.(placement.artworkId)}
@@ -551,6 +563,15 @@ export function ElevationView({
               isSelected={selectedOpeningId === opening.id}
               kind={opening.kind}
               size={size}
+              tooltip={
+                <OpeningTooltipContent
+                  kind={opening.kind}
+                  secondaryMm={opening.heightMm}
+                  unit={unit}
+                  widthMm={opening.widthMm}
+                />
+              }
+              tooltipDisabled={Boolean(moveDrag || dropGhost)}
               wallHeightMm={wallHeightMm}
               wallObjectId={opening.id}
               onPointerDown={(event) => beginMoveDrag(opening, event)}
