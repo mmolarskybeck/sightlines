@@ -16,6 +16,11 @@ import {
   type OpeningKind
 } from "../domain/placement/createOpening";
 import { createArtworkPlacement, getEffectivePlacementSizeMm } from "../domain/placement/placeArtwork";
+import {
+  arrangeOnWall,
+  insetForGap,
+  solveEqualArrangement
+} from "../domain/placement/arrangeOnWall";
 import type { PlacementWarning } from "../domain/placement/validatePlacement";
 import {
   validateChangedWallPlacements,
@@ -86,6 +91,14 @@ type AppState = {
   selectedWallId: string | null;
   selectedArtworkId: string | null;
   selectedOpeningId: string | null;
+  // Multi-select for group operations (move/arrange/delete). These are
+  // PLACEMENT ids — wallObjects/floorObjects entries — never artwork library
+  // ids, and never anything else on the undo stack (docs/plan.md §7 scopes
+  // undo to the document; what's currently selected is view state, same as
+  // selectedWallId). See legacySelectionSlots for how this array keeps the
+  // pre-existing single-select inspectors (selectedArtworkId/selectedOpeningId)
+  // in sync.
+  selectedObjectIds: string[];
   viewMode: ViewMode;
   saveState: "idle" | "saving" | "saved" | "error";
   error: string | null;
@@ -100,6 +113,9 @@ type AppState = {
   selectWall: (wallId: string) => void;
   selectArtwork: (artworkId: string) => void;
   selectOpening: (wallObjectId: string) => void;
+  selectObject: (id: string, opts?: { additive?: boolean }) => void;
+  setObjectSelection: (ids: string[]) => void;
+  clearObjectSelection: () => void;
   renameProject: (title: string) => Promise<void>;
   renameRoom: (roomId: string, name: string) => Promise<void>;
   deleteRoom: (roomId: string) => Promise<void>;
@@ -155,6 +171,19 @@ type AppState = {
     objectId: string,
     changes: Partial<Pick<FloorObjectBase, "xMm" | "yMm" | "widthMm" | "depthMm">>
   ) => Promise<void>;
+  moveWallObjectsGroup: (
+    moves: { id: string; xMm: number; yMm: number }[],
+    allowOverlap?: boolean
+  ) => Promise<void>;
+  movePlanObjectsGroup: (
+    moves: { id: string; xMm: number; yMm?: number }[],
+    allowOverlap?: boolean
+  ) => Promise<void>;
+  arrangeSelectedOnWall: (
+    params: { insetMm: number } | { gapMm: number } | { equal: true },
+    allowOverlap?: boolean
+  ) => Promise<void>;
+  removeSelectedPlacements: () => Promise<void>;
 };
 
 export type AppStoreDeps = {
@@ -188,6 +217,7 @@ export function createAppStore(deps: AppStoreDeps) {
         | "selectedWallId"
         | "selectedArtworkId"
         | "selectedOpeningId"
+        | "selectedObjectIds"
         | "viewMode"
       >
     >;
@@ -252,6 +282,7 @@ export function createAppStore(deps: AppStoreDeps) {
         selectedWallId: getFirstWall(project)?.id ?? null,
         selectedArtworkId: null,
         selectedOpeningId: null,
+        selectedObjectIds: [],
         placementWarnings: [],
         lastGeometryEdit: null,
         undoStack: [],
@@ -266,6 +297,7 @@ export function createAppStore(deps: AppStoreDeps) {
       selectedWallId: null,
       selectedArtworkId: null,
       selectedOpeningId: null,
+      selectedObjectIds: [],
       viewMode: "plan",
       saveState: "idle",
       error: null,
@@ -324,16 +356,68 @@ export function createAppStore(deps: AppStoreDeps) {
 
       selectWall(wallId) {
         // Wall focus replaces artwork/opening focus in the inspector — the
-        // three selections are mutually exclusive, not independent.
-        set({ selectedWallId: wallId, selectedArtworkId: null, selectedOpeningId: null });
+        // three selections are mutually exclusive, not independent. It also
+        // drops any multi-select — a wall click is a fresh focus gesture, not
+        // an addition to a group of placements.
+        set({
+          selectedWallId: wallId,
+          selectedArtworkId: null,
+          selectedOpeningId: null,
+          selectedObjectIds: []
+        });
       },
 
       selectArtwork(artworkId) {
-        set({ selectedArtworkId: artworkId, selectedOpeningId: null });
+        set({ selectedArtworkId: artworkId, selectedOpeningId: null, selectedObjectIds: [] });
       },
 
       selectOpening(wallObjectId) {
-        set({ selectedOpeningId: wallObjectId, selectedArtworkId: null });
+        set({ selectedOpeningId: wallObjectId, selectedArtworkId: null, selectedObjectIds: [] });
+      },
+
+      // Placement multi-select: id must be a live wallObject/floorObject id,
+      // else the click is a no-op rather than selecting nothing (docs/
+      // plan.md's plan/elevation views only ever call this with an id they
+      // just rendered, but a stale id from a race should be inert, not
+      // clear the selection out from under the user).
+      selectObject(id, opts = {}) {
+        const project = get().project;
+        if (!project) return;
+
+        const exists =
+          project.wallObjects.some((object) => object.id === id) ||
+          project.floorObjects.some((object) => object.id === id);
+        if (!exists) return;
+
+        const current = get().selectedObjectIds;
+        const next = opts.additive
+          ? current.includes(id)
+            ? current.filter((existingId) => existingId !== id)
+            : [...current, id]
+          : [id];
+
+        set({ selectedObjectIds: next, ...legacySelectionSlots(project, next) });
+      },
+
+      // Bulk replace (e.g. a marquee-drag selection from the plan view).
+      // Silently drops any id that isn't a live placement, the same
+      // tolerance selectObject has for a single stale id.
+      setObjectSelection(ids) {
+        const project = get().project;
+        if (!project) return;
+
+        const next = ids.filter(
+          (id) =>
+            project.wallObjects.some((object) => object.id === id) ||
+            project.floorObjects.some((object) => object.id === id)
+        );
+
+        set({ selectedObjectIds: next, ...legacySelectionSlots(project, next) });
+      },
+
+      clearObjectSelection() {
+        if (get().selectedObjectIds.length === 0) return;
+        set({ selectedObjectIds: [], selectedArtworkId: null, selectedOpeningId: null });
       },
 
       async renameProject(title) {
@@ -1264,6 +1348,214 @@ export function createAppStore(deps: AppStoreDeps) {
           ...current,
           floorObjects: nextFloorObjects
         }));
+      },
+
+      async moveWallObjectsGroup(moves, allowOverlap = false) {
+        const project = get().project;
+        if (!project) return;
+
+        // A stale id (a member removed since the group was selected, e.g. by
+        // an undo) is filtered out rather than treated as an error — the
+        // rest of the group still moves.
+        const applicable = moves.filter((move) =>
+          project.wallObjects.some((wallObject) => wallObject.id === move.id)
+        );
+        if (applicable.length === 0) return;
+
+        const moveById = new Map(applicable.map((move) => [move.id, move]));
+        const movedIds: string[] = [];
+        const nextWallObjects = project.wallObjects.map((wallObject) => {
+          const move = moveById.get(wallObject.id);
+          if (!move || (wallObject.xMm === move.xMm && wallObject.yMm === move.yMm)) {
+            return wallObject;
+          }
+          movedIds.push(wallObject.id);
+          return { ...wallObject, xMm: move.xMm, yMm: move.yMm };
+        });
+        if (movedIds.length === 0) return;
+
+        // One drag of a group is one commit: either every member's move
+        // lands together, or a single collision anywhere in the group blocks
+        // the whole thing — there's no such thing as half a group move.
+        const placementWarnings = validateWallObjectPlacements(
+          { ...project, wallObjects: nextWallObjects },
+          movedIds
+        );
+
+        if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
+          set({ error: OVERLAP_BLOCKED_MESSAGE });
+          return;
+        }
+
+        await applyEdit(
+          `Move ${movedIds.length} objects`,
+          (current) => ({ ...current, wallObjects: nextWallObjects }),
+          { placementWarnings }
+        );
+      },
+
+      async movePlanObjectsGroup(moves, allowOverlap = false) {
+        const project = get().project;
+        if (!project) return;
+
+        const wallMoveById = new Map(
+          moves
+            .filter((move) => project.wallObjects.some((wallObject) => wallObject.id === move.id))
+            .map((move) => [move.id, move])
+        );
+        const floorMoveById = new Map(
+          moves
+            .filter((move) =>
+              project.floorObjects.some((floorObject) => floorObject.id === move.id)
+            )
+            .map((move) => [move.id, move])
+        );
+        if (wallMoveById.size === 0 && floorMoveById.size === 0) return;
+
+        const movedWallIds: string[] = [];
+        const nextWallObjects = project.wallObjects.map((wallObject) => {
+          const move = wallMoveById.get(wallObject.id);
+          // Wall-anchored members slide along their wall only — the plan
+          // view has no notion of hang height, so yMm (if present on the
+          // move) is ignored for these, same as commitPlanMove's same-wall
+          // branch.
+          if (!move || wallObject.xMm === move.xMm) return wallObject;
+          movedWallIds.push(wallObject.id);
+          return { ...wallObject, xMm: move.xMm };
+        });
+
+        const movedFloorIds: string[] = [];
+        const nextFloorObjects = project.floorObjects.map((floorObject) => {
+          const move = floorMoveById.get(floorObject.id);
+          if (!move) return floorObject;
+          const yMm = move.yMm ?? floorObject.yMm;
+          if (floorObject.xMm === move.xMm && floorObject.yMm === yMm) return floorObject;
+          movedFloorIds.push(floorObject.id);
+          return { ...floorObject, xMm: move.xMm, yMm };
+        });
+
+        if (movedWallIds.length === 0 && movedFloorIds.length === 0) return;
+
+        // Floor objects get no bounds/collision validation in v1 (see
+        // placeArtworkOnFloor) — only the wall-anchored members are checked.
+        const placementWarnings = validateWallObjectPlacements(
+          { ...project, wallObjects: nextWallObjects },
+          movedWallIds
+        );
+
+        if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
+          set({ error: OVERLAP_BLOCKED_MESSAGE });
+          return;
+        }
+
+        await applyEdit(
+          `Move ${movedWallIds.length + movedFloorIds.length} objects`,
+          (current) => ({
+            ...current,
+            wallObjects: nextWallObjects,
+            floorObjects: nextFloorObjects
+          }),
+          { placementWarnings }
+        );
+      },
+
+      async arrangeSelectedOnWall(params, allowOverlap = false) {
+        const project = get().project;
+        if (!project) return;
+
+        // Friendly, single message for every way the selection can't be
+        // arranged — the inspector's disabled-state copy uses the same
+        // string (see SelectionInspector's arrangeDisabledReason).
+        const cannotArrangeMessage =
+          "Select at least two objects on the same wall to arrange them.";
+
+        const selectedIds = get().selectedObjectIds;
+        const hasFloorMember = selectedIds.some((id) =>
+          project.floorObjects.some((floorObject) => floorObject.id === id)
+        );
+        if (hasFloorMember) {
+          set({ error: cannotArrangeMessage });
+          return;
+        }
+
+        const members = project.wallObjects.filter((wallObject) =>
+          selectedIds.includes(wallObject.id)
+        );
+        if (members.length < 2) {
+          set({ error: cannotArrangeMessage });
+          return;
+        }
+
+        const wallIds = new Set(members.map((member) => member.wallId));
+        if (wallIds.size > 1) {
+          set({ error: cannotArrangeMessage });
+          return;
+        }
+
+        const wall = getProjectWalls(project).find(
+          (candidate) => candidate.id === members[0].wallId
+        );
+        if (!wall) return;
+
+        const insetMm =
+          "insetMm" in params
+            ? params.insetMm
+            : "gapMm" in params
+              ? insetForGap(members, wall.lengthMm, params.gapMm)
+              : solveEqualArrangement(members, wall.lengthMm).insetMm;
+
+        const moves = arrangeOnWall(members, wall.lengthMm, { insetMm });
+        if (moves.length === 0) return;
+
+        const moveById = new Map(moves.map((move) => [move.id, move]));
+        const movedIds: string[] = [];
+        const nextWallObjects = project.wallObjects.map((wallObject) => {
+          const move = moveById.get(wallObject.id);
+          if (!move || wallObject.xMm === move.xMm) return wallObject;
+          movedIds.push(wallObject.id);
+          return { ...wallObject, xMm: move.xMm };
+        });
+        if (movedIds.length === 0) return;
+
+        const placementWarnings = validateWallObjectPlacements(
+          { ...project, wallObjects: nextWallObjects },
+          movedIds
+        );
+
+        if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
+          set({ error: OVERLAP_BLOCKED_MESSAGE });
+          return;
+        }
+
+        await applyEdit(
+          "Arrange on wall",
+          (current) => ({ ...current, wallObjects: nextWallObjects }),
+          { placementWarnings }
+        );
+      },
+
+      async removeSelectedPlacements() {
+        const project = get().project;
+        const selectedIds = get().selectedObjectIds;
+        if (!project || selectedIds.length === 0) return;
+
+        const idSet = new Set(selectedIds);
+        const removedCount =
+          project.wallObjects.filter((wallObject) => idSet.has(wallObject.id)).length +
+          project.floorObjects.filter((floorObject) => idSet.has(floorObject.id)).length;
+        if (removedCount === 0) return;
+
+        await applyEdit(
+          `Remove ${removedCount} objects`,
+          (current) => ({
+            ...current,
+            wallObjects: current.wallObjects.filter((wallObject) => !idSet.has(wallObject.id)),
+            floorObjects: current.floorObjects.filter(
+              (floorObject) => !idSet.has(floorObject.id)
+            )
+          }),
+          { selectedObjectIds: [], selectedArtworkId: null, selectedOpeningId: null }
+        );
       }
     };
   });
@@ -1281,6 +1573,35 @@ function openingNoun(kind: OpeningKind): string {
 // whether the object is wall-anchored or floor-placed.
 function moveObjectNoun(kind: WallObject["kind"]): string {
   return kind === "artwork" ? "artwork" : openingNoun(kind);
+}
+
+// The only place placement ids (selectedObjectIds) and library ids
+// (selectedArtworkId) meet. With exactly one placement selected, resolve it
+// against the live project and mirror it into the legacy single-select
+// slots the existing artwork/opening inspectors read — selectedArtworkId
+// holds a *library* artworkId (App.tsx's inspector resolves it further),
+// while selectedObjectIds holds *placement* ids throughout. Any other count
+// (0, or 2+ for a group) clears both — there's no single object left for
+// them to describe.
+function legacySelectionSlots(
+  project: Project,
+  ids: string[]
+): { selectedArtworkId: string | null; selectedOpeningId: string | null } {
+  if (ids.length !== 1) {
+    return { selectedArtworkId: null, selectedOpeningId: null };
+  }
+
+  const [id] = ids;
+  const placement =
+    project.wallObjects.find((wallObject) => wallObject.id === id) ??
+    project.floorObjects.find((floorObject) => floorObject.id === id);
+  if (!placement) {
+    return { selectedArtworkId: null, selectedOpeningId: null };
+  }
+
+  return placement.kind === "artwork"
+    ? { selectedArtworkId: placement.artworkId, selectedOpeningId: null }
+    : { selectedArtworkId: null, selectedOpeningId: id };
 }
 
 // Shared by addOpening (centers on the wall) and placeOpeningFromPlan (places

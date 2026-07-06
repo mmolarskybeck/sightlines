@@ -1,4 +1,8 @@
-import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type {
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode
+} from "react";
 import type { Dimensions } from "../../domain/project";
 import { getArtworkRectSvg, type ArtworkCenterMm, type ArtworkSizeMm } from "./elevationArtworkGeometry";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
@@ -33,7 +37,10 @@ export function ElevationArtwork({
   isOutOfBounds?: boolean;
   isSelected?: boolean;
   onPointerDown?: (event: ReactPointerEvent<SVGGElement>) => void;
-  onSelect?: () => void;
+  // Receives the click event so the caller can read modifier keys (shift/
+  // cmd/ctrl) for additive multi-select. Passed straight to onClick, which
+  // already provides it.
+  onSelect?: (event: ReactMouseEvent<SVGGElement>) => void;
   size: ArtworkSizeMm;
   // Hover-tooltip body (see PlacementTooltip); elevation passes title/artist/
   // dims but no thumbnail — the artwork itself is already visible. Ghosts

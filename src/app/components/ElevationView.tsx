@@ -8,6 +8,7 @@ import {
 import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import type { Vector2 } from "../../domain/geometry/dragResize";
+import { getGroupBounds, getIdsIntersectingRect } from "../../domain/placement/groupBounds";
 import {
   getEffectivePlacementSizeMm,
   PLACEHOLDER_ARTWORK_HEIGHT_MM,
@@ -80,7 +81,47 @@ type MoveDragState = {
   // while the grid holds x), so each axis remembers its own active target.
   previousSnapTargetIds?: SnapTargetIds;
   activeGuides: Guide[];
+  // Group drag: when the pressed object belongs to a multi-selection, the whole
+  // group translates rigidly. `members` records each member's kind/size and its
+  // offset from the group's union-box center; for a group drag startCenterMm /
+  // previewCenterMm track that union-box center (and sizeMm is the union box's
+  // size, fed to resolveArtworkSnap as one virtual object). Absent for a
+  // single-object drag — that path is left exactly as it was.
+  members?: {
+    id: string;
+    kind: WallObject["kind"];
+    sizeMm: { widthMm: number; heightMm: number };
+    offsetFromGroupCenterMm: Vector2;
+  }[];
+  startGroupCenterMm?: Vector2;
 };
+
+// A pending marquee (rubber-band) selection on the elevation background —
+// tracked as two wall-local-mm pointer samples (start + current). toWallLocalMm
+// returns y-UP coordinates, matching placements' yMm centers, so the min/max
+// rect built from these two samples is already in the space getIdsIntersecting-
+// Rect expects. Same ref-based effect discipline as MoveDragState so the
+// gesture never resubscribes mid-drag.
+type MarqueeState = {
+  startMm: Vector2;
+  currentMm: Vector2;
+};
+
+// Min/max wall-local rect from a marquee's two pointer samples — the shape
+// getIdsIntersectingRect consumes. Both samples are already y-up, so no flip.
+function marqueeRectMm(marquee: MarqueeState): {
+  minXMm: number;
+  maxXMm: number;
+  minYMm: number;
+  maxYMm: number;
+} {
+  return {
+    minXMm: Math.min(marquee.startMm.xMm, marquee.currentMm.xMm),
+    maxXMm: Math.max(marquee.startMm.xMm, marquee.currentMm.xMm),
+    minYMm: Math.min(marquee.startMm.yMm, marquee.currentMm.yMm),
+    maxYMm: Math.max(marquee.startMm.yMm, marquee.currentMm.yMm)
+  };
+}
 
 // The HTML5-drop preview for a not-yet-placed artwork being dragged in from
 // the checklist. Separate from MoveDragState because it has no existing
@@ -103,11 +144,16 @@ export function ElevationView({
   gridVisible,
   onMoveOpening,
   onMovePlacement,
+  onMoveWallObjects,
   onPlaceArtwork,
   onSelectArtwork,
   onSelectOpening,
+  onSelectObject,
+  onClearSelection,
+  onMarqueeSelect,
   selectedArtworkId = null,
   selectedOpeningId = null,
+  selectedObjectIds = [],
   snapToGrid = false,
   unit,
   wallHeightMm,
@@ -139,8 +185,20 @@ export function ElevationView({
   onPlaceArtwork?: (artworkId: string, wallId: string, xMm: number, yMm: number) => void;
   onMovePlacement?: (wallObjectId: string, xMm: number, yMm: number) => void;
   onMoveOpening?: (wallObjectId: string, xMm: number, yMm: number) => void;
+  // Commits a group drag in ONE call — every member's final center, artworks
+  // and openings alike (the single-object drag keeps its onMovePlacement/
+  // onMoveOpening split; this is the multi-select path only).
+  onMoveWallObjects?: (moves: { id: string; xMm: number; yMm: number }[]) => void;
   onSelectArtwork?: (artworkId: string) => void;
   onSelectOpening?: (wallObjectId: string) => void;
+  // Multi-select entry points. Selection ids are PLACEMENT ids (wall object
+  // ids), never artwork-library ids. All optional/inert until App wires them —
+  // click-to-select and the marquee both fall back to today's behavior when
+  // these are absent.
+  selectedObjectIds?: string[];
+  onSelectObject?: (id: string, opts: { additive: boolean }) => void;
+  onClearSelection?: () => void;
+  onMarqueeSelect?: (ids: string[], additive: boolean) => void;
   // The full wall inventory (in room order) plus a selector, so the elevation
   // chip can double as a wall switcher — the navigation the right panel used
   // to carry. Optional/inert until App wires them.
@@ -152,6 +210,8 @@ export function ElevationView({
   const [moveDrag, setMoveDrag] = useState<MoveDragState | null>(null);
   const moveDragRef = useRef<MoveDragState | null>(null);
   const [dropGhost, setDropGhost] = useState<DropGhostState | null>(null);
+  const [marquee, setMarquee] = useState<MarqueeState | null>(null);
+  const marqueeRef = useRef<MarqueeState | null>(null);
 
   // Pad the viewBox so the wall reads as a figure on the canvas field
   // rather than bleeding edge-to-edge, and so boundary strokes (centered on
@@ -236,8 +296,13 @@ export function ElevationView({
         yMm: current.startCenterMm.yMm + (pointerMm.yMm - current.startPointerMm.yMm)
       };
 
-      const neighbors = wallObjectsOnThisWall.filter(
-        (wallObject) => wallObject.id !== current.wallObjectId
+      // For a group drag exclude every member from the neighbor pool (the group
+      // must never snap to its own members); for a single drag just the one.
+      const memberIds = current.members
+        ? new Set(current.members.map((member) => member.id))
+        : null;
+      const neighbors = wallObjectsOnThisWall.filter((wallObject) =>
+        memberIds ? !memberIds.has(wallObject.id) : wallObject.id !== current.wallObjectId
       );
 
       const snapResult = resolveArtworkSnap(proposedCenterMm, {
@@ -246,11 +311,11 @@ export function ElevationView({
         wallHeightMm,
         gridIntervalMm: minorGridMm,
         neighbors,
+        // For a group, sizeMm is the union box and the whole thing snaps as one
+        // virtual artwork (no per-kind floor tier — a mixed group has no single
+        // kind); a single object keeps its own size and kind-gated floor tier.
         movingSize: current.sizeMm,
-        // The dragged object's kind gates the floor tier: a door drag gets a
-        // floor target (its primary snap); artworks/windows/blocked zones
-        // never do. The artwork drop-ghost/drop paths below omit this.
-        movingKind: current.kind,
+        movingKind: current.members ? "artwork" : current.kind,
         snapToGrid,
         thresholdMm: snapThresholdMm,
         previousSnapTargetIds: current.previousSnapTargetIds
@@ -281,6 +346,22 @@ export function ElevationView({
       );
       if (movedMm < 0.5) return;
 
+      // Group drag: one commit carrying every member's final center (both kinds
+      // through the single onMoveWallObjects prop). Member center = the snapped
+      // group center plus that member's stored offset.
+      if (current.members) {
+        // Whether or not the commit survives the collision gate, the trailing
+        // click must not collapse the multi-selection (see suppressNextSelect).
+        suppressNextSelect();
+        const moves = current.members.map((member) => ({
+          id: member.id,
+          xMm: current.previewCenterMm.xMm + member.offsetFromGroupCenterMm.xMm,
+          yMm: current.previewCenterMm.yMm + member.offsetFromGroupCenterMm.yMm
+        }));
+        onMoveWallObjects?.(moves);
+        return;
+      }
+
       if (current.kind === "artwork") {
         onMovePlacement?.(current.wallObjectId, current.previewCenterMm.xMm, current.previewCenterMm.yMm);
       } else {
@@ -303,16 +384,140 @@ export function ElevationView({
     // project and current viewport, which can't change mid-drag (the
     // transient preview never rewrites them), so they're intentionally left
     // out of the deps.
-  }, [moveDrag !== null, onMovePlacement, onMoveOpening]);
+  }, [moveDrag !== null, onMovePlacement, onMoveOpening, onMoveWallObjects]);
 
   useEffect(() => {
     moveDragRef.current = moveDrag;
   }, [moveDrag]);
 
+  // The browser fires a `click` on the grabbed element right after a drag's
+  // pointerup. For a single object that click merely re-selects it (today's
+  // behavior, harmless); after a real GROUP drag the same click would call
+  // onSelectObject non-additively and collapse the whole multi-selection to
+  // the one grabbed member — so the release marks the very next select to be
+  // swallowed. Cleared on a timeout too, in case the release lands where no
+  // click follows (pointer left the element mid-drag).
+  const suppressNextSelectRef = useRef(false);
+  function suppressNextSelect() {
+    suppressNextSelectRef.current = true;
+    window.setTimeout(() => {
+      suppressNextSelectRef.current = false;
+    }, 0);
+  }
+  function consumeSelectSuppression(): boolean {
+    const suppressed = suppressNextSelectRef.current;
+    suppressNextSelectRef.current = false;
+    return suppressed;
+  }
+
+  useEffect(() => {
+    if (!marquee) return;
+
+    function onPointerMove(event: PointerEvent) {
+      const current = marqueeRef.current;
+      if (!current) return;
+
+      const pointerMm = toWallLocalMm(event.clientX, event.clientY);
+      if (!pointerMm) return;
+
+      setMarquee((state) => (state ? { ...state, currentMm: pointerMm } : state));
+    }
+
+    function onPointerUp(event: PointerEvent) {
+      const current = marqueeRef.current;
+      setMarquee(null);
+      if (!current) return;
+
+      const rect = marqueeRectMm(current);
+      // A sub-threshold rect is a plain background click, not a drag: clear the
+      // selection rather than marquee-select an empty band. The threshold is
+      // the same pointer slop the snap plumbing uses (SNAP_THRESHOLD_PX in mm).
+      const draggedMm = Math.hypot(rect.maxXMm - rect.minXMm, rect.maxYMm - rect.minYMm);
+      if (draggedMm < snapThresholdMm) {
+        onClearSelection?.();
+        return;
+      }
+
+      onMarqueeSelect?.(getIdsIntersectingRect(wallObjectsOnThisWall, rect), event.shiftKey);
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+    // Same ref-based discipline as the move-drag effect: subscribed once per
+    // gesture, reading the live rect via marqueeRef. snapThresholdMm and
+    // wallObjectsOnThisWall derive from the committed project/viewport and
+    // can't change mid-gesture, so they're intentionally out of the deps.
+  }, [marquee !== null, onClearSelection, onMarqueeSelect]);
+
+  useEffect(() => {
+    marqueeRef.current = marquee;
+  }, [marquee]);
+
+  function beginMarquee(event: ReactPointerEvent<SVGSVGElement>) {
+    // Only true background reaches here: placements/openings stopPropagation in
+    // their own pointerdown. Gated on the multi-select handlers being wired so
+    // that pre-wiring a background press stays inert (no marquee, no clear),
+    // exactly as today. Never start over an in-flight move or HTML5 drop.
+    if (!onMarqueeSelect && !onClearSelection) return;
+    if (moveDrag || dropGhost) return;
+
+    const startMm = toWallLocalMm(event.clientX, event.clientY);
+    if (!startMm) return;
+
+    // Suppress the browser's default press-drag semantics for this gesture:
+    // without this, dragging across the svg selects its text nodes (the
+    // <title>, the chip label), and the NEXT marquee that starts inside that
+    // stale selection becomes a native drag of the selected text — Chrome
+    // then fires pointercancel and kills the gesture mid-flight.
+    event.preventDefault();
+    setMarquee({ startMm, currentMm: startMm });
+  }
+
   function beginMoveDrag(wallObject: WallObject, event: ReactPointerEvent<SVGGElement>) {
     event.stopPropagation();
     const startPointerMm = toWallLocalMm(event.clientX, event.clientY);
     if (!startPointerMm) return;
+
+    // Group drag: the pressed object is part of a multi-selection. Resolve the
+    // live members from this wall (stale ids simply drop out), size the union
+    // box, and remember each member's offset from that box's center. Everything
+    // downstream then treats the group as one virtual object.
+    if (selectedObjectIds.includes(wallObject.id) && selectedObjectIds.length > 1) {
+      const groupMembers: WallObject[] = [...placements, ...openings].filter((object) =>
+        selectedObjectIds.includes(object.id)
+      );
+      if (groupMembers.length > 1) {
+        const box = getGroupBounds(groupMembers);
+        const groupCenterMm: Vector2 = { xMm: box.centerXMm, yMm: box.centerYMm };
+        setMoveDrag({
+          wallObjectId: wallObject.id,
+          kind: wallObject.kind,
+          sizeMm: { widthMm: box.widthMm, heightMm: box.heightMm },
+          startPointerMm,
+          startCenterMm: groupCenterMm,
+          previewCenterMm: groupCenterMm,
+          previousSnapTargetIds: undefined,
+          activeGuides: [],
+          members: groupMembers.map((member) => ({
+            id: member.id,
+            kind: member.kind,
+            sizeMm: { widthMm: member.widthMm, heightMm: member.heightMm },
+            offsetFromGroupCenterMm: {
+              xMm: member.xMm - groupCenterMm.xMm,
+              yMm: member.yMm - groupCenterMm.yMm
+            }
+          })),
+          startGroupCenterMm: groupCenterMm
+        });
+        return;
+      }
+    }
 
     setMoveDrag({
       wallObjectId: wallObject.id,
@@ -393,6 +598,24 @@ export function ElevationView({
 
   const activeGuides = moveDrag?.activeGuides ?? dropGhost?.activeGuides ?? [];
 
+  // Preview center per object being moved, id → center. Covers the single
+  // dragged object, or every group member (member center = the snapped group
+  // center plus that member's offset). Placements/openings look themselves up
+  // here to decide whether to render at their committed center or a preview.
+  const previewCenterById = new Map<string, Vector2>();
+  if (moveDrag) {
+    if (moveDrag.members) {
+      for (const member of moveDrag.members) {
+        previewCenterById.set(member.id, {
+          xMm: moveDrag.previewCenterMm.xMm + member.offsetFromGroupCenterMm.xMm,
+          yMm: moveDrag.previewCenterMm.yMm + member.offsetFromGroupCenterMm.yMm
+        });
+      }
+    } else {
+      previewCenterById.set(moveDrag.wallObjectId, moveDrag.previewCenterMm);
+    }
+  }
+
   // Wall switcher wiring for the chip. Prev/next cycle through every wall in
   // room order (wrapping), and the Select lists them all — grouped by room
   // once more than one room exists.
@@ -472,7 +695,13 @@ export function ElevationView({
           {formatLength(wallHeightMm, { unit })}
         </span>
       </div>
-      <svg className="elevation-svg" ref={svgRef} viewBox={viewBox} role="img">
+      <svg
+        className="elevation-svg"
+        ref={svgRef}
+        viewBox={viewBox}
+        role="img"
+        onPointerDown={beginMarquee}
+      >
         <title>{wallName} elevation</title>
         <rect
           className="wall-fill"
@@ -515,11 +744,11 @@ export function ElevationView({
           vectorEffect="non-scaling-stroke"
         />
         {placements.map((placement) => {
-          const isDraggingThis = moveDrag?.wallObjectId === placement.id;
-          const center = isDraggingThis ? moveDrag.previewCenterMm : { xMm: placement.xMm, yMm: placement.yMm };
-          const size = isDraggingThis
-            ? moveDrag.sizeMm
-            : { widthMm: placement.widthMm, heightMm: placement.heightMm };
+          const previewCenter = previewCenterById.get(placement.id);
+          const center = previewCenter ?? { xMm: placement.xMm, yMm: placement.yMm };
+          // A move never resizes, so the object's own size always applies (for a
+          // group, moveDrag.sizeMm is the union box, not this member's size).
+          const size = { widthMm: placement.widthMm, heightMm: placement.heightMm };
           const artwork = artworksById?.get(placement.artworkId);
 
           return (
@@ -529,7 +758,7 @@ export function ElevationView({
               dimensionStatus={artwork?.dimensions.status}
               imageUrl={artwork?.assetId ? imageUrlsByAssetId.get(artwork.assetId) : undefined}
               isOutOfBounds={isArtworkOutOfWallBounds(wallLengthMm, wallHeightMm, center, size)}
-              isSelected={selectedArtworkId === placement.artworkId}
+              isSelected={selectedArtworkId === placement.artworkId || selectedObjectIds.includes(placement.id)}
               size={size}
               tooltip={
                 artwork ? (
@@ -544,23 +773,30 @@ export function ElevationView({
               tooltipDisabled={Boolean(moveDrag || dropGhost)}
               wallHeightMm={wallHeightMm}
               onPointerDown={(event) => beginMoveDrag(placement, event)}
-              onSelect={() => onSelectArtwork?.(placement.artworkId)}
+              onSelect={(event) => {
+                if (consumeSelectSuppression()) return;
+                if (onSelectObject) {
+                  onSelectObject(placement.id, {
+                    additive: event.shiftKey || event.metaKey || event.ctrlKey
+                  });
+                } else {
+                  onSelectArtwork?.(placement.artworkId);
+                }
+              }}
             />
           );
         })}
         {openings.map((opening) => {
-          const isDraggingThis = moveDrag?.wallObjectId === opening.id;
-          const center = isDraggingThis ? moveDrag.previewCenterMm : { xMm: opening.xMm, yMm: opening.yMm };
-          const size = isDraggingThis
-            ? moveDrag.sizeMm
-            : { widthMm: opening.widthMm, heightMm: opening.heightMm };
+          const previewCenter = previewCenterById.get(opening.id);
+          const center = previewCenter ?? { xMm: opening.xMm, yMm: opening.yMm };
+          const size = { widthMm: opening.widthMm, heightMm: opening.heightMm };
 
           return (
             <ElevationOpening
               key={opening.id}
               center={center}
               isOutOfBounds={isArtworkOutOfWallBounds(wallLengthMm, wallHeightMm, center, size)}
-              isSelected={selectedOpeningId === opening.id}
+              isSelected={selectedOpeningId === opening.id || selectedObjectIds.includes(opening.id)}
               kind={opening.kind}
               size={size}
               tooltip={
@@ -575,7 +811,16 @@ export function ElevationView({
               wallHeightMm={wallHeightMm}
               wallObjectId={opening.id}
               onPointerDown={(event) => beginMoveDrag(opening, event)}
-              onSelect={() => onSelectOpening?.(opening.id)}
+              onSelect={(event) => {
+                if (consumeSelectSuppression()) return;
+                if (onSelectObject) {
+                  onSelectObject(opening.id, {
+                    additive: event.shiftKey || event.metaKey || event.ctrlKey
+                  });
+                } else {
+                  onSelectOpening?.(opening.id);
+                }
+              }}
             />
           );
         })}
@@ -587,6 +832,29 @@ export function ElevationView({
             wallHeightMm={wallHeightMm}
           />
         ) : null}
+        {marquee
+          ? (() => {
+              const rect = marqueeRectMm(marquee);
+              // Wall-local y is up; svg y is down. The rect's top edge (maxYMm)
+              // maps to the smaller svg y, so anchor the <rect> there and let
+              // its positive height run downward. Dashed stroke borrows the
+              // snap-guide visual language; presentation attributes only (no CSS
+              // file owned here).
+              return (
+                <rect
+                  className="marquee-rect"
+                  x={rect.minXMm}
+                  y={wallLocalYToSvgY(wallHeightMm, rect.maxYMm)}
+                  width={rect.maxXMm - rect.minXMm}
+                  height={rect.maxYMm - rect.minYMm}
+                  fill="rgba(59, 130, 246, 0.08)"
+                  stroke="rgba(59, 130, 246, 0.9)"
+                  strokeDasharray="6 4"
+                  vectorEffect="non-scaling-stroke"
+                />
+              );
+            })()
+          : null}
         {activeGuides.map((guide) => (
           <line
             className="snap-guide"
