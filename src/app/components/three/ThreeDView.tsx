@@ -1,10 +1,11 @@
 import { OrbitControls } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
-import { Box3, MathUtils, Vector3 } from "three";
+import { Box3, MathUtils, PerspectiveCamera, Vector3 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { deriveScene3d, type Scene3d } from "../../../domain/geometry/scene3d";
 import type { Project } from "../../../domain/project";
+import { fitDistance } from "./cameraFit";
 import { MM_TO_WORLD } from "./coordinates";
 import { SceneRooms } from "./SceneRooms";
 
@@ -12,7 +13,7 @@ import { SceneRooms } from "./SceneRooms";
 // from a corner (spec §4.2).
 const FIT_ELEVATION_DEG = 40;
 const FIT_AZIMUTH_DEG = 45;
-const FIT_MARGIN = 1.6;
+const CAMERA_FOV_DEG = 50;
 
 // World-space bounding box of the union of every room's floor + wall heights.
 // null when there is nothing to frame.
@@ -62,17 +63,18 @@ function CameraRig({ scene, fitKey }: { scene: Scene3d; fitKey: string }) {
     if (!bounds) return;
 
     const center = bounds.getCenter(new Vector3());
-    const size = bounds.getSize(new Vector3());
-    const extent = Math.max(size.x, size.y, size.z, MM_TO_WORLD);
-    const distance = extent * FIT_MARGIN;
-
     const elevation = MathUtils.degToRad(FIT_ELEVATION_DEG);
     const azimuth = MathUtils.degToRad(FIT_AZIMUTH_DEG);
-    camera.position.set(
-      center.x + distance * Math.cos(elevation) * Math.sin(azimuth),
-      center.y + distance * Math.sin(elevation),
-      center.z + distance * Math.cos(elevation) * Math.cos(azimuth)
+    const direction = new Vector3(
+      Math.cos(elevation) * Math.sin(azimuth),
+      Math.sin(elevation),
+      Math.cos(elevation) * Math.cos(azimuth)
     );
+    const aspect =
+      camera instanceof PerspectiveCamera ? camera.aspect : 1;
+    const distance = fitDistance(bounds, direction, CAMERA_FOV_DEG, aspect);
+
+    camera.position.copy(center).addScaledVector(direction, distance);
     camera.near = Math.max(distance / 1000, 0.01);
     camera.far = distance * 100;
     camera.updateProjectionMatrix();
@@ -128,7 +130,7 @@ export function ThreeDView({ project }: { project: Project }) {
         frameloop="demand"
         dpr={[1, 2]}
         gl={{ alpha: true, antialias: true }}
-        camera={{ fov: 50, near: 0.01, far: 1000, position: [4, 4, 4] }}
+        camera={{ fov: CAMERA_FOV_DEG, near: 0.01, far: 1000, position: [4, 4, 4] }}
       >
         {/* Soft, shadowless lighting (spec §6.1): flat ambient plus one gentle
             high front-left key so walls shade apart and read as volume. */}
