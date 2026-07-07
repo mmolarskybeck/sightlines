@@ -21,8 +21,8 @@ colors:
   destructive: "oklch(0.53 0.18 28)"
   caution: "oklch(0.5 0.13 75)"
 typography:
-  display: '"Montserrat Variable", ui-sans-serif, system-ui, sans-serif'
-  ui: '"Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, sans-serif'
+  display: '"Figtree Variable", Figtree, ui-sans-serif, system-ui, sans-serif'
+  ui: '"Geist Variable", Geist, ui-sans-serif, system-ui, -apple-system, sans-serif'
 radii:
   control: "6px"
   fill: "8px"
@@ -73,8 +73,8 @@ Sightlines is rectangular before rounded.
 
 Use one practical UI family plus a restrained display accent.
 
-- Inter carries labels, body text, rows, forms, metrics, and menus.
-- Montserrat is limited to the wordmark, panel headings, and top-level mode tabs.
+- Geist carries labels, body text, rows, forms, metrics, and menus.
+- Figtree is limited to the wordmark, panel headings, and top-level mode tabs.
 - Numeric values should use tabular numerals where alignment matters.
 - UI labels should stay compact and readable; do not introduce large display type inside panes.
 

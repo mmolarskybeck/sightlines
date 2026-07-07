@@ -103,6 +103,9 @@ const DataView = lazy(() =>
 const ElevationView = lazy(() =>
   import("./components/ElevationView").then((module) => ({ default: module.ElevationView }))
 );
+const FontLab = import.meta.env.DEV
+  ? lazy(() => import("./components/FontLab"))
+  : null;
 
 // A second, independent IndexedDbAssetRepository instance dedicated to
 // reads (thumbnail lookups for the checklist). It talks to the same
@@ -1447,6 +1450,11 @@ export function App() {
         ) : null}
       </section>
       </div>
+      {FontLab ? (
+        <Suspense fallback={null}>
+          <FontLab />
+        </Suspense>
+      ) : null}
     </main>
     </TooltipProvider>
   );
