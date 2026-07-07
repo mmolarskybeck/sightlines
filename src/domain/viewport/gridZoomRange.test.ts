@@ -1,35 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { getGridSnapTargets } from "../snapping/gridSnapTargets";
+import { getGridSnapTargets, MAX_LINES_PER_AXIS } from "../snapping/gridSnapTargets";
 import {
-  getGridPatternPhaseMm,
   getGridPrecisionFloorOptionsMm,
   getMinorGridIntervalMm
 } from "../units/precision";
-import {
-  getViewBox2D,
-  panBy,
-  PLAN_ZOOM_LIMITS,
-  type ViewBox,
-  type Viewport2D
-} from "./viewport2d";
+import { getViewBox2D, PLAN_ZOOM_LIMITS, type ViewBox, type Viewport2D } from "./viewport2d";
 
 // Task M3 regression pins (docs: task-m3-brief.md). M2 already made the
 // getViewBox2D → precision → gridSnapTargets pipeline correct (the viewBox
 // IS the visible window, aspect-matched, no letterboxing) — these tests pin
 // that behavior across the zoom range so a future change can't silently
-// regress grid density, snap-threshold scaling, or pattern anchoring.
+// regress grid density or snap-threshold scaling. The companion pin for
+// grid-pattern anchoring under pan (Test D) renders the real GridOverlay
+// and lives with that component: src/app/components/GridOverlay.test.tsx.
 
 // A realistic worst case: a modest room-scale plan (10m x 10m) viewed in a
 // wide, short container — the aspect mismatch (1.6 vs 1.0) is deliberate,
 // it's what makes the viewBox's non-constrained axis extend past contentBounds.
 const CONTENT_BOUNDS: ViewBox = { x: 0, y: 0, width: 10000, height: 10000 };
 const CONTAINER = { width: 1600, height: 1000 };
-
-// gridSnapTargets.ts's own defensive cap — kept in sync here as a literal
-// (not imported) since it's not exported; Test A's job is to prove the real
-// zoom-adaptive interval stays comfortably under it, not to reach into the
-// module's internals.
-const MAX_LINES_PER_AXIS = 1000;
 
 function manualViewport(zoom: number): Viewport2D {
   return {
@@ -156,66 +145,6 @@ describe("grid/snap correctness across the zoom range (M3)", () => {
       const expectedRatio = prev.zoom / curr.zoom;
       const actualRatio = curr.snapThresholdMm / prev.snapThresholdMm;
       expect(actualRatio).toBeCloseTo(expectedRatio, 9);
-    }
-  });
-
-  it("Test D: grid pattern phase stays anchored to world space (does not swim) as the viewBox pans", () => {
-    // GridOverlay (src/app/components/GridOverlay.tsx) renders its pattern
-    // with patternUnits="userSpaceOnUse" and x/y = getGridPatternPhaseMm(
-    // originXMm/originYMm, spacingMm). PlanView's call site passes no
-    // originXMm/originYMm at all (they default to 0) — i.e. the plan grid is
-    // anchored to world (0,0), NOT to the current viewBox origin. That's what
-    // keeps the lattice from shifting as the user pans: the pattern's phase
-    // is a function of the fixed world anchor only, never of viewBox.x/y.
-    const worldOriginXMm = 0;
-    const spacingMm = 500;
-
-    const viewportStart = manualViewport(1);
-    const { viewBox: viewBoxStart } = getViewBox2D(viewportStart, CONTENT_BOUNDS, CONTAINER);
-
-    const viewportAfterPan1 = panBy(viewportStart, { x: 340, y: 0 }, CONTENT_BOUNDS, CONTAINER);
-    const { viewBox: viewBoxAfterPan1 } = getViewBox2D(
-      viewportAfterPan1,
-      CONTENT_BOUNDS,
-      CONTAINER
-    );
-
-    const viewportAfterPan2 = panBy(
-      viewportAfterPan1,
-      { x: -777, y: 0 },
-      CONTENT_BOUNDS,
-      CONTAINER
-    );
-    const { viewBox: viewBoxAfterPan2 } = getViewBox2D(
-      viewportAfterPan2,
-      CONTENT_BOUNDS,
-      CONTAINER
-    );
-
-    // Sanity: the two pans actually moved the visible window (else the rest
-    // of this test would pass vacuously).
-    expect(viewBoxAfterPan1.x).not.toBeCloseTo(viewBoxStart.x);
-    expect(viewBoxAfterPan2.x).not.toBeCloseTo(viewBoxAfterPan1.x);
-
-    // The pattern phase PlanView would hand to GridOverlay is recomputed from
-    // the SAME fixed world anchor at every pan step — never from the panned
-    // viewBox's own x — so it comes out identical every time.
-    const phaseAtStart = getGridPatternPhaseMm(worldOriginXMm, spacingMm);
-    const phaseAfterPan1 = getGridPatternPhaseMm(worldOriginXMm, spacingMm);
-    const phaseAfterPan2 = getGridPatternPhaseMm(worldOriginXMm, spacingMm);
-    expect(phaseAfterPan1).toBe(phaseAtStart);
-    expect(phaseAfterPan2).toBe(phaseAtStart);
-
-    // And the world-space grid lattice implied by that (fixed) phase lands on
-    // an exact multiple-of-spacing offset from the world anchor for every one
-    // of the three (differently panned) viewBoxes — i.e. it's one continuous
-    // lattice that the viewBox slides across, not three different lattices
-    // that happen to line up.
-    for (const viewBox of [viewBoxStart, viewBoxAfterPan1, viewBoxAfterPan2]) {
-      const nearestLineAtOrAfterLeftEdge =
-        Math.ceil((viewBox.x - phaseAtStart) / spacingMm) * spacingMm + phaseAtStart;
-      const remainder = (nearestLineAtOrAfterLeftEdge - worldOriginXMm) % spacingMm;
-      expect(Math.abs(remainder)).toBeLessThan(1e-6);
     }
   });
 });

@@ -11,7 +11,9 @@ export type VisibleBoundsMm = {
 // a caller passes in. The zoom-adaptive interval from precision.ts already
 // keeps this well under the cap in practice; this just stops a misused
 // (huge bounds, tiny interval) call from generating an unbounded array.
-const MAX_LINES_PER_AXIS = 1000;
+// Exported so regression tests can assert real-world target volumes stay
+// comfortably under it without hardcoding a drift-prone copy.
+export const MAX_LINES_PER_AXIS = 1000;
 
 // Grid candidates are the lowest-priority snap target (docs/plan.md §2:
 // centerline > neighbor-center > neighbor-edge > grid) and are generated
