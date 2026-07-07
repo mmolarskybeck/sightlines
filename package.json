@@ -11,8 +11,10 @@
     "preview": "vite preview",
     "cf:login": "wrangler login",
     "cf:whoami": "wrangler whoami",
+    "cf:deploy:prod": "wrangler deploy",
+    "cf:deploy:preview": "node scripts/cloudflare-preview-upload.mjs",
     "deploy:dry-run": "npm run build && wrangler deploy --dry-run",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "npm run build && npm run cf:deploy:prod"
   },
   "dependencies": {
     "@fontsource-variable/figtree": "^5.2.10",

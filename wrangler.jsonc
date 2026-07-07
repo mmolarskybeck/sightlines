@@ -1,6 +1,13 @@
 {
+  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "sightlines",
   "compatibility_date": "2026-07-07",
+  "routes": [
+    {
+      "pattern": "sightlines.art",
+      "custom_domain": true
+    }
+  ],
   "assets": {
     "directory": "./dist/",
     "not_found_handling": "single-page-application"
