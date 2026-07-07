@@ -5,15 +5,13 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
-    // Named manual chunks get entry-level modulepreload hints even when only
-    // reachable via dynamic import; without this filter the browser would
-    // eagerly fetch the ~834 kB three chunk on first load.
-    modulePreload: {
-      resolveDependencies: (_url, deps) => deps.filter((dep) => !/assets\/three-/.test(dep)),
-    },
     rollupOptions: {
       output: {
         manualChunks(id) {
+          // Vite's preload helper is used by both the eager entry and the lazy 3D
+          // stack; without pinning it eagerly, Rollup can place it inside the three
+          // chunk, giving index a static import of all of three.js.
+          if (id.includes("vite/preload-helper")) return "vendor";
           if (!id.includes("node_modules")) return undefined;
           // 3D stack is reachable only from the lazy ThreeDView import; its own chunk
           // keeps it off the critical path. Includes fiber/drei transitive deps.
