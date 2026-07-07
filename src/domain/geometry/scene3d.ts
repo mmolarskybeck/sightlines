@@ -1,4 +1,10 @@
-import type { Dimensions, Project, RoomPlacement } from "../project";
+import type {
+  Artwork,
+  Dimensions,
+  Project,
+  RoomPlacement,
+  WallObject
+} from "../project";
 import { getWallsWithGeometry } from "./walls";
 
 // Pure derivation: Project -> a serializable 3D scene description. NO three.js
@@ -34,15 +40,38 @@ export type Rect3d = {
   yMaxMm: number;
 };
 
-// Wall-local, center-anchored artwork placement. Not populated in M1.
+// Wall-local, center-anchored artwork placement. The placement's stored size
+// is already placeholder-resolved (placeArtwork.ts), so no sizing rules live
+// here; `status` (from the joined Artwork record) drives only the uncertainty
+// treatment. assetId/status are undefined when the artwork record is missing
+// — same neutral fallback the elevation view uses.
 export type WallArtwork3d = {
   objectId: string;
+  artworkId: string;
   assetId?: string;
-  status: Dimensions["status"];
-  xMm: number; // wall-local center along the wall
+  status?: Dimensions["status"];
+  xMm: number; // wall-local center along the wall, measured from `start`
   yMm: number; // wall-local center, 0 = floor
   widthMm: number;
   heightMm: number;
+};
+
+// A floor-placed object (artwork pedestal-box or blocked zone), floor-space
+// center coordinates — floor objects are stored in floor-space already, so no
+// placement transform applies. rotationDeg keeps the plan-space convention;
+// the render layer owns the single plan->three yaw mapping.
+export type FloorObject3d = {
+  objectId: string;
+  kind: "artwork" | "blocked-zone";
+  artworkId?: string;
+  assetId?: string;
+  status?: Dimensions["status"];
+  xMm: number;
+  yMm: number;
+  widthMm: number;
+  depthMm: number;
+  heightMm: number;
+  rotationDeg: number;
 };
 
 export type WallPanel3d = {
@@ -67,11 +96,50 @@ export type Room3d = {
 
 export type Scene3d = {
   rooms: Room3d[];
+  floorObjects: FloorObject3d[];
 };
 
-export function deriveScene3d(project: Project): Scene3d {
+const EMPTY_ARTWORKS: ReadonlyMap<string, Artwork> = new Map();
+
+export function deriveScene3d(
+  project: Project,
+  artworksById: ReadonlyMap<string, Artwork> = EMPTY_ARTWORKS
+): Scene3d {
+  const wallObjectsByWallId = new Map<string, WallObject[]>();
+  for (const object of project.wallObjects) {
+    const list = wallObjectsByWallId.get(object.wallId);
+    if (list) {
+      list.push(object);
+    } else {
+      wallObjectsByWallId.set(object.wallId, [object]);
+    }
+  }
+
   return {
-    rooms: project.floor.rooms.map(deriveRoom)
+    rooms: project.floor.rooms.map((placement) =>
+      deriveRoom(placement, wallObjectsByWallId, artworksById)
+    ),
+    floorObjects: project.floorObjects.map((object) => {
+      const artwork =
+        object.kind === "artwork" ? artworksById.get(object.artworkId) : undefined;
+      return {
+        objectId: object.id,
+        kind: object.kind,
+        ...(object.kind === "artwork"
+          ? {
+              artworkId: object.artworkId,
+              assetId: artwork?.assetId,
+              status: artwork?.dimensions.status
+            }
+          : {}),
+        xMm: object.xMm,
+        yMm: object.yMm,
+        widthMm: object.widthMm,
+        depthMm: object.depthMm,
+        heightMm: object.heightMm,
+        rotationDeg: object.rotationDeg
+      };
+    })
   };
 }
 
@@ -87,7 +155,11 @@ export function wallInwardNormal(panel: WallPanel3d): Vec2 {
   return { xMm: -dy / length, yMm: dx / length };
 }
 
-function deriveRoom(placement: RoomPlacement): Room3d {
+function deriveRoom(
+  placement: RoomPlacement,
+  wallObjectsByWallId: ReadonlyMap<string, WallObject[]>,
+  artworksById: ReadonlyMap<string, Artwork>
+): Room3d {
   const { room } = placement;
 
   // Floor polygon in floor-space, wound to a canonical CCW so the left-normal
@@ -106,6 +178,40 @@ function deriveRoom(placement: RoomPlacement): Room3d {
     // swapping endpoints flips the left-normal to point inward. This keeps the
     // convention identical for every room regardless of authored winding.
     const oriented = isCounterClockwise ? { start, end } : { start: end, end: start };
+    const lengthMm = Math.hypot(end.xMm - start.xMm, end.yMm - start.yMm);
+    // Domain wall-local x is measured from the AUTHORED start vertex. When the
+    // endpoints were swapped above, panel-local x runs the other way — this is
+    // the single place that remap happens (holes reuse it in M3).
+    const toPanelLocalX = (xMm: number) =>
+      isCounterClockwise ? xMm : lengthMm - xMm;
+
+    const objects = wallObjectsByWallId.get(wall.id) ?? [];
+    const artworks: WallArtwork3d[] = [];
+    const blockedZones: Rect3d[] = [];
+    for (const object of objects) {
+      if (object.kind === "artwork") {
+        const artwork = artworksById.get(object.artworkId);
+        artworks.push({
+          objectId: object.id,
+          artworkId: object.artworkId,
+          assetId: artwork?.assetId,
+          status: artwork?.dimensions.status,
+          xMm: toPanelLocalX(object.xMm),
+          yMm: object.yMm,
+          widthMm: object.widthMm,
+          heightMm: object.heightMm
+        });
+      } else if (object.kind === "blocked-zone") {
+        const centerX = toPanelLocalX(object.xMm);
+        blockedZones.push({
+          xMinMm: centerX - object.widthMm / 2,
+          xMaxMm: centerX + object.widthMm / 2,
+          yMinMm: object.yMm - object.heightMm / 2,
+          yMaxMm: object.yMm + object.heightMm / 2
+        });
+      }
+      // Doors/windows become holes in M3.
+    }
 
     return {
       wallId: wall.id,
@@ -113,8 +219,8 @@ function deriveRoom(placement: RoomPlacement): Room3d {
       end: oriented.end,
       heightMm: wall.heightMm,
       holes: [],
-      artworks: [],
-      blockedZones: []
+      artworks,
+      blockedZones
     };
   });
 

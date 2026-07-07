@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { Project, Room, RoomPlacement, Wall } from "../project";
-import { CURRENT_SCHEMA_VERSION } from "../project";
+import type {
+  Artwork,
+  FloorObject,
+  Project,
+  Room,
+  RoomPlacement,
+  Wall,
+  WallObject
+} from "../project";
+import { CURRENT_ARTWORK_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION } from "../project";
 import {
   deriveScene3d,
   wallInwardNormal,
@@ -48,7 +56,10 @@ function makePlacement(
   };
 }
 
-function makeProject(placements: RoomPlacement[]): Project {
+function makeProject(
+  placements: RoomPlacement[],
+  objects: { wallObjects?: WallObject[]; floorObjects?: FloorObject[] } = {}
+): Project {
   const now = new Date("2026-07-07T00:00:00.000Z").toISOString();
   return {
     id: "test-project",
@@ -59,10 +70,21 @@ function makeProject(placements: RoomPlacement[]): Project {
     defaultCenterlineHeightMm: 1450,
     floor: { rooms: placements },
     checklistArtworkIds: [],
-    wallObjects: [],
-    floorObjects: [],
+    wallObjects: objects.wallObjects ?? [],
+    floorObjects: objects.floorObjects ?? [],
     createdAt: now,
     updatedAt: now
+  };
+}
+
+function makeArtwork(id: string, overrides: Partial<Artwork> = {}): Artwork {
+  return {
+    id,
+    schemaVersion: CURRENT_ARTWORK_SCHEMA_VERSION,
+    dimensions: { status: "known", widthMm: 600, heightMm: 800 },
+    assetId: `asset-${id}`,
+    metadata: {},
+    ...overrides
   };
 }
 
@@ -156,7 +178,7 @@ describe("deriveScene3d", () => {
   });
 
   it("returns an empty scene when there are no rooms", () => {
-    expect(deriveScene3d(makeProject([]))).toEqual({ rooms: [] });
+    expect(deriveScene3d(makeProject([]))).toEqual({ rooms: [], floorObjects: [] });
   });
 });
 
@@ -288,6 +310,210 @@ describe("wallInwardNormal — winding / orientation", () => {
       };
       expect(pointInPolygon(probe, room.floorPolygon)).toBe(true);
     }
+  });
+});
+
+describe("deriveScene3d — wall artworks (M2)", () => {
+  it("populates wall artworks with wall-local coords, size, and artwork joins", () => {
+    const artwork = makeArtwork("art-1", {
+      dimensions: { status: "approximate", widthMm: 600, heightMm: 800 }
+    });
+    const scene = deriveScene3d(
+      makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))], {
+        wallObjects: [
+          {
+            id: "obj-1",
+            kind: "artwork",
+            artworkId: "art-1",
+            wallId: "room-a-wall-0",
+            xMm: 1500,
+            yMm: 1450,
+            widthMm: 600,
+            heightMm: 800
+          }
+        ]
+      }),
+      new Map([[artwork.id, artwork]])
+    );
+
+    const wall = scene.rooms[0].walls.find((w) => w.wallId === "room-a-wall-0");
+    expect(wall?.artworks).toEqual([
+      {
+        objectId: "obj-1",
+        artworkId: "art-1",
+        assetId: "asset-art-1",
+        status: "approximate",
+        xMm: 1500,
+        yMm: 1450,
+        widthMm: 600,
+        heightMm: 800
+      }
+    ]);
+    // No artworks leak onto other walls.
+    for (const other of scene.rooms[0].walls) {
+      if (other.wallId !== "room-a-wall-0") expect(other.artworks).toEqual([]);
+    }
+  });
+
+  it("remaps wall-local x on walls whose endpoints were swapped by CW normalisation", () => {
+    // CW_RECT wall 0 is authored v0(0,0) -> v1(0,3000); the derivation swaps
+    // its endpoints to keep the inward normal on the left of start->end. A
+    // domain x of 1000 (measured from the AUTHORED start, v0) must become
+    // length - 1000 = 2000 so the artwork stays at the same floor-space spot.
+    const artwork = makeArtwork("art-1");
+    const scene = deriveScene3d(
+      makeProject([makePlacement(makeRoom("room-a", CW_RECT, 2500))], {
+        wallObjects: [
+          {
+            id: "obj-1",
+            kind: "artwork",
+            artworkId: "art-1",
+            wallId: "room-a-wall-0",
+            xMm: 1000,
+            yMm: 1450,
+            widthMm: 600,
+            heightMm: 800
+          }
+        ]
+      }),
+      new Map([[artwork.id, artwork]])
+    );
+
+    const wall = scene.rooms[0].walls.find((w) => w.wallId === "room-a-wall-0");
+    expect(wall?.artworks[0]?.xMm).toBe(2000);
+    // The floor-space position implied by the panel-local x is the authored
+    // one: start + x * direction = (0,3000) + 2000 * (0,-1) = (0, 1000).
+    expect(wall?.start).toEqual({ xMm: 0, yMm: 3000 });
+  });
+
+  it("leaves the artwork join empty when the artwork record is missing", () => {
+    const scene = deriveScene3d(
+      makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))], {
+        wallObjects: [
+          {
+            id: "obj-1",
+            kind: "artwork",
+            artworkId: "art-gone",
+            wallId: "room-a-wall-0",
+            xMm: 1500,
+            yMm: 1450,
+            widthMm: 600,
+            heightMm: 800
+          }
+        ]
+      })
+    );
+
+    const placed = scene.rooms[0].walls[0].artworks[0];
+    expect(placed.objectId).toBe("obj-1");
+    expect(placed.assetId).toBeUndefined();
+    expect(placed.status).toBeUndefined();
+  });
+
+  it("derives wall blocked zones as wall-local extents", () => {
+    const scene = deriveScene3d(
+      makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))], {
+        wallObjects: [
+          {
+            id: "zone-1",
+            kind: "blocked-zone",
+            blocksPlacement: true,
+            wallId: "room-a-wall-0",
+            xMm: 1000,
+            yMm: 1250,
+            widthMm: 800,
+            heightMm: 2500
+          }
+        ]
+      })
+    );
+
+    expect(scene.rooms[0].walls[0].blockedZones).toEqual([
+      { xMinMm: 600, xMaxMm: 1400, yMinMm: 0, yMaxMm: 2500 }
+    ]);
+  });
+});
+
+describe("deriveScene3d — floor objects (M2)", () => {
+  it("derives floor artworks with size, rotation, and artwork joins", () => {
+    const artwork = makeArtwork("art-1", {
+      dimensions: { status: "unknown" }
+    });
+    const scene = deriveScene3d(
+      makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))], {
+        floorObjects: [
+          {
+            id: "fobj-1",
+            kind: "artwork",
+            artworkId: "art-1",
+            xMm: 2000,
+            yMm: 1500,
+            widthMm: 900,
+            depthMm: 400,
+            heightMm: 1200,
+            rotationDeg: 30,
+            wallYMm: 1450
+          }
+        ]
+      }),
+      new Map([[artwork.id, artwork]])
+    );
+
+    expect(scene.floorObjects).toEqual([
+      {
+        objectId: "fobj-1",
+        kind: "artwork",
+        artworkId: "art-1",
+        assetId: "asset-art-1",
+        status: "unknown",
+        xMm: 2000,
+        yMm: 1500,
+        widthMm: 900,
+        depthMm: 400,
+        heightMm: 1200,
+        rotationDeg: 30
+      }
+    ]);
+  });
+
+  it("derives floor blocked zones without artwork fields", () => {
+    const scene = deriveScene3d(
+      makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))], {
+        floorObjects: [
+          {
+            id: "fzone-1",
+            kind: "blocked-zone",
+            xMm: 500,
+            yMm: 500,
+            widthMm: 1000,
+            depthMm: 1000,
+            heightMm: 0,
+            rotationDeg: 0,
+            wallYMm: 0
+          }
+        ]
+      })
+    );
+
+    expect(scene.floorObjects).toEqual([
+      {
+        objectId: "fzone-1",
+        kind: "blocked-zone",
+        xMm: 500,
+        yMm: 500,
+        widthMm: 1000,
+        depthMm: 1000,
+        heightMm: 0,
+        rotationDeg: 0
+      }
+    ]);
+  });
+
+  it("emits an empty floorObjects array when there are none", () => {
+    const scene = deriveScene3d(
+      makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))])
+    );
+    expect(scene.floorObjects).toEqual([]);
   });
 });
 

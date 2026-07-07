@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { Box3, MathUtils, PerspectiveCamera, Vector3 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { deriveScene3d, type Scene3d } from "../../../domain/geometry/scene3d";
-import type { Project } from "../../../domain/project";
+import type { Artwork, Project } from "../../../domain/project";
 import { fitDistance } from "./cameraFit";
 import { MM_TO_WORLD } from "./coordinates";
 import { SceneRooms } from "./SceneRooms";
@@ -115,8 +115,19 @@ function ThreeDEmptyState() {
   );
 }
 
-export function ThreeDView({ project }: { project: Project }) {
-  const scene = useMemo(() => deriveScene3d(project), [project]);
+export function ThreeDView({
+  project,
+  artworksById,
+  getBlob
+}: {
+  project: Project;
+  artworksById: ReadonlyMap<string, Artwork>;
+  getBlob: (key: string) => Promise<Blob>;
+}) {
+  const scene = useMemo(
+    () => deriveScene3d(project, artworksById),
+    [project, artworksById]
+  );
 
   if (scene.rooms.length === 0) {
     return <ThreeDEmptyState />;
@@ -131,12 +142,22 @@ export function ThreeDView({ project }: { project: Project }) {
         dpr={[1, 2]}
         gl={{ alpha: true, antialias: true }}
         camera={{ fov: CAMERA_FOV_DEG, near: 0.01, far: 1000, position: [4, 4, 4] }}
+        onCreated={(state) => {
+          if (import.meta.env.DEV) {
+            // Dev-only escape hatch so browser-driven verification (and
+            // debugging) can reach the LIVE R3F state (the state object is
+            // replaced on internal updates, so expose the getter, not a
+            // snapshot); stripped from prod builds.
+            (window as unknown as { __sightlines3d?: unknown }).__sightlines3d =
+              state.get;
+          }
+        }}
       >
         {/* Soft, shadowless lighting (spec §6.1): flat ambient plus one gentle
             high front-left key so walls shade apart and read as volume. */}
         <ambientLight intensity={0.9} />
         <directionalLight intensity={0.4} position={[-6, 8, 6]} />
-        <SceneRooms scene={scene} />
+        <SceneRooms scene={scene} getBlob={getBlob} />
         <OrbitControls makeDefault enableDamping dampingFactor={0.1} />
         <CameraRig scene={scene} fitKey={project.id} />
       </Canvas>

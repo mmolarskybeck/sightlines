@@ -1238,7 +1238,11 @@ export function App() {
           ) : null}
           {viewMode === "3d" ? (
             <Suspense fallback={<div className="skeleton-panel" />}>
-              <ThreeDView project={project} />
+              <ThreeDView
+                project={project}
+                artworksById={artworksById}
+                getBlob={getAssetBlob}
+              />
             </Suspense>
           ) : null}
         </section>
