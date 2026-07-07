@@ -18,6 +18,8 @@ import {
 import { createArtworkPlacement, getEffectivePlacementSizeMm } from "../domain/placement/placeArtwork";
 import {
   arrangeOnWall,
+  arrangeOnWallInZone,
+  getOpenSpaceBounds,
   insetForGap,
   slideGroupToEdgeInset,
   solveEqualArrangement,
@@ -78,6 +80,17 @@ export type ArrangeSession = {
   // while mode === "inset", but carried on the session so switching mode and
   // back remembers it. See lastInsetAnchor for the idle default.
   insetAnchor: "left" | "both" | "right";
+  // Which span the "Space evenly" mode distributes across: the whole wall, or
+  // just the "open space" beside the group (bounded by the nearest unselected
+  // neighbours — see openZoneBoundsMm). Only meaningful while mode === "equal",
+  // but carried on the session so switching mode and back remembers it. See
+  // lastEvenZone for the idle default.
+  evenZone: "wall" | "open";
+  // The open-space span, computed ONCE at session begin from the members'
+  // ORIGINAL positions and the unselected wall objects on this wall, so the
+  // zone stays fixed while previews move the members around inside it. Ignored
+  // when evenZone === "wall".
+  openZoneBoundsMm: { startMm: number; endMm: number };
 };
 
 // An entry may carry either half, or both. A pure geometry/metadata edit
@@ -138,6 +151,11 @@ type AppState = {
   // no live session — plain view state (not undoable, not persisted), mirroring
   // lastArrangeMode. Updated whenever a session's anchor is set or changed.
   lastInsetAnchor: "left" | "both" | "right";
+  // The "Space within" zone the "Space evenly" mode should default to. null
+  // until the curator first picks one — the smart default (open when the group
+  // is boxed in by neighbours, else whole wall) applies while it's null. Plain
+  // view state (not undoable, not persisted), mirroring lastInsetAnchor.
+  lastEvenZone: "wall" | "open" | null;
   viewMode: ViewMode;
   saveState: "idle" | "saving" | "saved" | "error";
   error: string | null;
@@ -228,6 +246,13 @@ type AppState = {
   // (mirrors how switching mode never jumps the works). Updates the live
   // session's anchor when one is open, and always the remembered default.
   setArrangeAnchor: (anchor: ArrangeSession["insetAnchor"]) => void;
+  // Sets which span the "Space evenly" mode distributes across (whole wall vs.
+  // the open space beside the group). Unlike the anchor row, choosing a zone is
+  // an ACTION: it re-applies the equal solve live when a session is open in
+  // equal mode, and begins one (in equal mode) when none is open — clicking a
+  // zone spaces evenly the same way clicking "Space evenly" does. Always
+  // remembers the choice in lastEvenZone.
+  setArrangeEvenZone: (zone: ArrangeSession["evenZone"]) => void;
   updateArrangeSession: (
     params:
       | { insetMm: number; anchor?: ArrangeSession["insetAnchor"] }
@@ -507,6 +532,7 @@ export function createAppStore(deps: AppStoreDeps) {
       arrangeSession: null,
       lastArrangeMode: "inset",
       lastInsetAnchor: "both",
+      lastEvenZone: null,
       viewMode: "plan",
       saveState: "idle",
       error: null,
@@ -1766,9 +1792,33 @@ export function createAppStore(deps: AppStoreDeps) {
         // from committed positions mid-session).
         const existing = get().arrangeSession;
         if (existing && sameIdSet(existing.memberIds, memberIds)) {
+          // Preserves the existing session's zone fields (evenZone/
+          // openZoneBoundsMm) via the spread — a mode switch never re-computes
+          // the zone mid-session.
           set({ arrangeSession: { ...existing, mode }, lastArrangeMode: mode });
           return;
         }
+
+        const wall = getProjectWalls(project).find(
+          (candidate) => candidate.id === members[0].wallId
+        );
+        if (!wall) return;
+
+        // The open-space span, fixed for the life of the session: bounded by the
+        // nearest UNSELECTED wall objects beside the group, from the members'
+        // committed positions (the same "others" filter the dimension lines use
+        // — every same-wall object that isn't part of this selection).
+        const others = project.wallObjects.filter(
+          (wallObject) =>
+            wallObject.wallId === wall.id && !selectedIds.includes(wallObject.id)
+        );
+        const openZoneBoundsMm = getOpenSpaceBounds(members, others, wall.lengthMm);
+        // Smart default: honour a remembered choice, else open the zone when the
+        // group is boxed in by neighbours (span narrower than the whole wall),
+        // otherwise the whole wall.
+        const isBounded =
+          openZoneBoundsMm.startMm > 0 || openZoneBoundsMm.endMm < wall.lengthMm;
+        const evenZone = get().lastEvenZone ?? (isBounded ? "open" : "wall");
 
         const originalById: Record<string, { xMm: number; yMm: number }> = {};
         const previewById: Record<string, { xMm: number; yMm: number }> = {};
@@ -1786,7 +1836,9 @@ export function createAppStore(deps: AppStoreDeps) {
             mode,
             // A fresh session opens on the remembered anchor; switching mode
             // and back keeps whatever the session already carried.
-            insetAnchor: get().lastInsetAnchor
+            insetAnchor: get().lastInsetAnchor,
+            evenZone,
+            openZoneBoundsMm
           },
           lastArrangeMode: mode
         });
@@ -1805,6 +1857,32 @@ export function createAppStore(deps: AppStoreDeps) {
         } else {
           set({ lastInsetAnchor: anchor });
         }
+      },
+
+      setArrangeEvenZone(zone) {
+        // The picked zone is always remembered, even when the selection can't
+        // be arranged (mirrors setArrangeAnchor remembering lastInsetAnchor).
+        set({ lastEvenZone: zone });
+
+        const session = get().arrangeSession;
+        if (session) {
+          set({ arrangeSession: { ...session, evenZone: zone } });
+          // In equal mode, switching the zone re-spaces the works live (x only,
+          // y untouched) — updateArrangeSession reads the freshly-set zone.
+          if (session.mode === "equal") {
+            get().updateArrangeSession({ equal: true });
+          }
+          return;
+        }
+
+        // No session: clicking a zone acts like clicking "Space evenly" — begin
+        // an equal session (smart default now reads the zone just remembered, so
+        // the session opens on it) and apply the solve. If the selection is
+        // ineligible, beginArrangeSession is a no-op and only lastEvenZone
+        // stuck; nothing else happens.
+        get().beginArrangeSession("equal");
+        if (!get().arrangeSession) return;
+        get().updateArrangeSession({ equal: true });
       },
 
       updateArrangeSession(params) {
@@ -1853,11 +1931,14 @@ export function createAppStore(deps: AppStoreDeps) {
           // the wall (that would teleport an off-center pair toward the middle).
           moves = spaceGroupAboutCenter(previewMembers, params.gapMm);
         } else {
-          const insetMm = solveEqualArrangement(
-            previewMembers,
-            wall.lengthMm
-          ).insetMm;
-          moves = arrangeOnWall(previewMembers, wall.lengthMm, { insetMm });
+          // "Space evenly" distributes within the chosen zone: the whole wall,
+          // or the fixed open-space span beside the group. A whole-wall zone of
+          // [0, wallLengthMm] is exactly the original centred solve.
+          const bounds =
+            session.evenZone === "open"
+              ? session.openZoneBoundsMm
+              : { startMm: 0, endMm: wall.lengthMm };
+          moves = arrangeOnWallInZone(previewMembers, bounds.startMm, bounds.endMm);
         }
         if (moves.length === 0) return;
 

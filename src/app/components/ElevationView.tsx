@@ -27,6 +27,10 @@ import type {
   WallObjectBase
 } from "../../domain/project";
 import { resolveArtworkSnap } from "../../domain/snapping/artworkSnapTargets";
+import {
+  quantizeXToCleanIncrement,
+  quantizeYToCleanIncrement
+} from "../../domain/snapping/cleanIncrement";
 import type { Guide, SnapTargetIds } from "../../domain/snapping/resolveSnap";
 import { formatLength } from "../../domain/units/length";
 import {
@@ -313,6 +317,73 @@ export function ElevationView({
     return { xMm: transformed.x, yMm: wallLocalYToSvgY(wallHeightMm, transformed.y) };
   }
 
+  // The elevation placement pipeline shared by the move-drag preview and the
+  // checklist drop-ghost: alignment snaps (floor/centerline/neighbor) keep
+  // priority, then any axis a snap target did NOT capture is quantized to a
+  // clean measurement instead of left free. Grid targets are deliberately
+  // excluded here (snapToGrid: false to resolveArtworkSnap) — center-on-grid
+  // snapping re-creates the 1/16" edge problem, so the quantizer is the new
+  // lowest tier. The whole quantization pass is gated on the real snapToGrid
+  // preference (OFF = today's alignment-only, free-otherwise behavior), and a
+  // held ⌘/Ctrl (precisionBypass) skips ALL snapping for fully free movement.
+  function resolveElevationPlacement(
+    proposed: Vector2,
+    sizeMm: { widthMm: number; heightMm: number },
+    neighbors: WallObject[],
+    movingKind: WallObject["kind"],
+    previousSnapTargetIds: SnapTargetIds | undefined,
+    precisionBypass: boolean
+  ): { point: Vector2; activeGuides: Guide[]; snapTargetIds: SnapTargetIds } {
+    if (precisionBypass) {
+      return { point: proposed, activeGuides: [], snapTargetIds: {} };
+    }
+
+    const snapResult = resolveArtworkSnap(proposed, {
+      centerlineYMm: centerlineMm,
+      wallLengthMm,
+      wallHeightMm,
+      gridIntervalMm: minorGridMm,
+      neighbors,
+      movingSize: sizeMm,
+      movingKind,
+      // Grid tier removed for elevation placement — the quantizer replaces it.
+      snapToGrid: false,
+      thresholdMm: snapThresholdMm,
+      previousSnapTargetIds
+    });
+
+    // snapToGrid OFF reproduces today's behavior exactly: alignment snaps only,
+    // no quantization.
+    if (!snapToGrid) return snapResult;
+
+    const incrementMm = gridPrecisionFloorMm ?? minorGridMm;
+    const point: Vector2 = { ...snapResult.point };
+    // Quantize y first so the (band-filtered) x pass reads the object's settled
+    // vertical position; an axis a snap captured is left exactly as snapped.
+    if (snapResult.snapTargetIds.y === undefined) {
+      point.yMm = quantizeYToCleanIncrement(
+        { xMm: proposed.xMm, yMm: proposed.yMm },
+        sizeMm,
+        incrementMm
+      );
+    }
+    if (snapResult.snapTargetIds.x === undefined) {
+      point.xMm = quantizeXToCleanIncrement(
+        { xMm: proposed.xMm, yMm: point.yMm },
+        sizeMm,
+        incrementMm,
+        wallLengthMm,
+        neighbors
+      );
+    }
+
+    return {
+      point,
+      activeGuides: snapResult.activeGuides,
+      snapTargetIds: snapResult.snapTargetIds
+    };
+  }
+
   useEffect(() => {
     if (!moveDrag) return;
 
@@ -337,21 +408,22 @@ export function ElevationView({
         memberIds ? !memberIds.has(wallObject.id) : wallObject.id !== current.wallObjectId
       );
 
-      const snapResult = resolveArtworkSnap(proposedCenterMm, {
-        centerlineYMm: centerlineMm,
-        wallLengthMm,
-        wallHeightMm,
-        gridIntervalMm: minorGridMm,
+      // ⌘/Ctrl held mid-drag → momentary precision bypass (fully free move,
+      // Figma convention). Read live off each pointer event so it can toggle
+      // during the drag. Alt is untouched (alt-drag = solo-move a group member).
+      const precisionBypass = event.metaKey || event.ctrlKey;
+
+      const snapResult = resolveElevationPlacement(
+        proposedCenterMm,
+        // For a group, sizeMm is the union box and the whole thing resolves as
+        // one virtual artwork (no per-kind floor tier — a mixed group has no
+        // single kind); a single object keeps its own size and kind-gated floor.
+        current.sizeMm,
         neighbors,
-        // For a group, sizeMm is the union box and the whole thing snaps as one
-        // virtual artwork (no per-kind floor tier — a mixed group has no single
-        // kind); a single object keeps its own size and kind-gated floor tier.
-        movingSize: current.sizeMm,
-        movingKind: current.members ? "artwork" : current.kind,
-        snapToGrid,
-        thresholdMm: snapThresholdMm,
-        previousSnapTargetIds: current.previousSnapTargetIds
-      });
+        current.members ? "artwork" : current.kind,
+        current.previousSnapTargetIds,
+        precisionBypass
+      );
 
       setMoveDrag((state) =>
         state
@@ -365,7 +437,7 @@ export function ElevationView({
       );
     }
 
-    function onPointerUp() {
+    function onPointerUp(event: PointerEvent) {
       const current = moveDragRef.current;
       setMoveDrag(null);
       if (!current) return;
@@ -397,6 +469,12 @@ export function ElevationView({
       // Alt-drag of one group member: same single-object commit below, but the
       // trailing click must not collapse the multi-selection it came from.
       if (current.preserveSelection) suppressNextSelect();
+
+      // A drag released with an additive-select modifier still down (⌘/Ctrl
+      // precision drag, or Shift held) ends with the browser's trailing click,
+      // which would otherwise read as an additive toggle and deselect the
+      // object that was just moved.
+      if (event.metaKey || event.ctrlKey || event.shiftKey) suppressNextSelect();
 
       if (current.kind === "artwork") {
         onMovePlacement?.(current.wallObjectId, current.previewCenterMm.xMm, current.previewCenterMm.yMm);
@@ -587,20 +665,17 @@ export function ElevationView({
     if (!pointerMm) return;
 
     const sizeMm = effectiveSizeForArtworkId(draggingArtworkId);
-    const snapResult = resolveArtworkSnap(pointerMm, {
-      centerlineYMm: centerlineMm,
-      wallLengthMm,
-      wallHeightMm,
-      gridIntervalMm: minorGridMm,
-      neighbors: wallObjectsOnThisWall,
-      movingSize: sizeMm,
-      // A checklist drag-in is always an artwork: eyeline first, floor just
-      // below it (see getArtworkSnapTargets' kind-dependent floor rank).
-      movingKind: "artwork",
-      snapToGrid,
-      thresholdMm: snapThresholdMm,
-      previousSnapTargetIds: dropGhost?.previousSnapTargetIds
-    });
+    // A checklist drag-in is always an artwork: eyeline first, floor just below
+    // it (see getArtworkSnapTargets' kind-dependent floor rank). ⌘/Ctrl held
+    // over the surface bypasses snapping/quantization, same as a move-drag.
+    const snapResult = resolveElevationPlacement(
+      pointerMm,
+      sizeMm,
+      wallObjectsOnThisWall,
+      "artwork",
+      dropGhost?.previousSnapTargetIds,
+      event.metaKey || event.ctrlKey
+    );
 
     setDropGhost({
       centerMm: snapResult.point,
@@ -627,18 +702,15 @@ export function ElevationView({
     if (!pointerMm) return;
 
     const sizeMm = effectiveSizeForArtworkId(artworkId);
-    const snapResult = resolveArtworkSnap(pointerMm, {
-      centerlineYMm: centerlineMm,
-      wallLengthMm,
-      wallHeightMm,
-      gridIntervalMm: minorGridMm,
-      neighbors: wallObjectsOnThisWall,
-      movingSize: sizeMm,
-      movingKind: "artwork",
-      snapToGrid,
-      thresholdMm: snapThresholdMm,
-      previousSnapTargetIds: undefined
-    });
+    // Must land exactly where the ghost showed — same resolver, same bypass.
+    const snapResult = resolveElevationPlacement(
+      pointerMm,
+      sizeMm,
+      wallObjectsOnThisWall,
+      "artwork",
+      undefined,
+      event.metaKey || event.ctrlKey
+    );
 
     onPlaceArtwork?.(artworkId, wallId, snapResult.point.xMm, snapResult.point.yMm);
   }

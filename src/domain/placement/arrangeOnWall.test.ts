@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 import type { WallObjectBase } from "../project";
 import {
   arrangeOnWall,
+  arrangeOnWallInZone,
   gapForInset,
   getArrangeReadoutDetailed,
   getNeighborAwareSegments,
+  getOpenSpaceBounds,
   getSpacingSegments,
   insetForGap,
   slideGroupToEdgeInset,
   solveEqualArrangement,
+  solveEqualArrangementInZone,
   spaceGroupAboutCenter
 } from "./arrangeOnWall";
 
@@ -621,6 +624,224 @@ describe("getNeighborAwareSegments", () => {
       { fromMm: 400, toMm: 800 }, // a right edge -> b left edge (interior, unchanged)
       { fromMm: 1000, toMm: 1300 } // b right edge -> window left edge
     ]);
+  });
+});
+
+describe("getOpenSpaceBounds", () => {
+  it("with no others, returns the whole wall", () => {
+    const members = [
+      makeMember({ id: "a", widthMm: 300, xMm: 250 }),
+      makeMember({ id: "b", widthMm: 400, xMm: 800 })
+    ];
+    expect(getOpenSpaceBounds(members, [], 2000)).toEqual({
+      startMm: 0,
+      endMm: 2000
+    });
+  });
+
+  it("with no members, returns the whole wall", () => {
+    expect(getOpenSpaceBounds([], [], 2000)).toEqual({ startMm: 0, endMm: 2000 });
+  });
+
+  it("bounds the right at a window's left edge, the left at the wall start", () => {
+    // artwork center 500, width 300 -> edges [350, 650]
+    const members = [makeMember({ id: "a", widthMm: 300, xMm: 500 })];
+    // window center 1000, width 200 -> edges [900, 1100]; same y-band
+    const others = [makeMember({ id: "w", widthMm: 200, xMm: 1000 })];
+
+    expect(getOpenSpaceBounds(members, others, 2000)).toEqual({
+      startMm: 0,
+      endMm: 900
+    });
+  });
+
+  it("bounds only the side that has a neighbour", () => {
+    // artwork center 1500, width 300 -> edges [1350, 1650]
+    const members = [makeMember({ id: "a", widthMm: 300, xMm: 1500 })];
+    // left neighbour center 500, width 200 -> right edge 600
+    const others = [makeMember({ id: "n", widthMm: 200, xMm: 500 })];
+
+    expect(getOpenSpaceBounds(members, others, 2000)).toEqual({
+      startMm: 600,
+      endMm: 2000
+    });
+  });
+
+  it("ignores a neighbour outside the selection's vertical band", () => {
+    const members = [makeMember({ id: "a", widthMm: 300, xMm: 500 })];
+    const others = [
+      makeMember({ id: "low", widthMm: 200, xMm: 1000, yMm: -1000, heightMm: 400 })
+    ];
+
+    expect(getOpenSpaceBounds(members, others, 2000)).toEqual({
+      startMm: 0,
+      endMm: 2000
+    });
+  });
+
+  it("an overlapping neighbour lands a boundary inside the span (unclamped)", () => {
+    // artwork center 500, width 400 -> edges [300, 700]
+    const members = [makeMember({ id: "a", widthMm: 400, xMm: 500 })];
+    // object center 800, width 400 -> left edge 600, overlaps from the right
+    const others = [makeMember({ id: "o", widthMm: 400, xMm: 800 })];
+
+    const bounds = getOpenSpaceBounds(members, others, 2000);
+    // Right boundary (600) sits left of the member's own right edge (700).
+    expect(bounds).toEqual({ startMm: 0, endMm: 600 });
+  });
+
+  it("agrees with getNeighborAwareSegments' outer boundaries", () => {
+    const members = [
+      makeMember({ id: "a", widthMm: 200, xMm: 300 }),
+      makeMember({ id: "b", widthMm: 200, xMm: 900 })
+    ];
+    const others = [makeMember({ id: "w", widthMm: 200, xMm: 1400 })];
+
+    const bounds = getOpenSpaceBounds(members, others, 2000);
+    const segments = getNeighborAwareSegments(members, others, 2000);
+    // segment[0].fromMm is the left boundary; the last segment's toMm the right.
+    expect(bounds.startMm).toBe(segments[0].fromMm);
+    expect(bounds.endMm).toBe(segments[segments.length - 1].toMm);
+  });
+});
+
+describe("solveEqualArrangementInZone", () => {
+  it("is solveEqualArrangement over the zone length", () => {
+    const members = [
+      makeMember({ widthMm: 300 }),
+      makeMember({ widthMm: 500 }),
+      makeMember({ widthMm: 400 })
+    ];
+    // zone [500, 2500] has length 2000
+    expect(solveEqualArrangementInZone(members, 500, 2500)).toEqual(
+      solveEqualArrangement(members, 2000)
+    );
+  });
+
+  it("degenerates to the whole-wall solve for zone [0, wallLength]", () => {
+    const members = [
+      makeMember({ widthMm: 508 }),
+      makeMember({ widthMm: 508 }),
+      makeMember({ widthMm: 508 })
+    ];
+    expect(solveEqualArrangementInZone(members, 0, 2540)).toEqual(
+      solveEqualArrangement(members, 2540)
+    );
+  });
+
+  it("yields a negative spacing when the zone is too small for the works", () => {
+    const members = [
+      makeMember({ widthMm: 1500 }),
+      makeMember({ widthMm: 1500 })
+    ];
+    // zone length 500, Σwidths 3000 -> spacing = (500 - 3000)/3 < 0
+    const { insetMm, gapMm } = solveEqualArrangementInZone(members, 1000, 1500);
+    expect(insetMm).toBeLessThan(0);
+    expect(gapMm).toBe(insetMm);
+  });
+});
+
+describe("arrangeOnWallInZone", () => {
+  it("returns [] for fewer than 2 members", () => {
+    expect(arrangeOnWallInZone([], 0, 2000)).toEqual([]);
+    expect(arrangeOnWallInZone([makeMember()], 0, 2000)).toEqual([]);
+  });
+
+  it("reproduces the whole-wall equal arrangement for zone [0, wallLength]", () => {
+    const members = [
+      makeMember({ id: "a", widthMm: 508, xMm: 100 }),
+      makeMember({ id: "b", widthMm: 508, xMm: 1000 }),
+      makeMember({ id: "c", widthMm: 508, xMm: 2000 })
+    ];
+    const wallLengthMm = 2540;
+    const { insetMm } = solveEqualArrangement(members, wallLengthMm);
+    const wholeWall = arrangeOnWall(members, wallLengthMm, { insetMm });
+
+    expect(arrangeOnWallInZone(members, 0, wallLengthMm)).toEqual(wholeWall);
+  });
+
+  it("distributes evenly within the zone, offset by the zone start", () => {
+    // 3 works of 508 in the zone [500, 2532] (length 2032)
+    // Σwidths = 1524, spacing = (2032 - 1524)/4 = 127
+    const members = [
+      makeMember({ id: "a", widthMm: 508, xMm: 600 }),
+      makeMember({ id: "b", widthMm: 508, xMm: 1400 }),
+      makeMember({ id: "c", widthMm: 508, xMm: 2200 })
+    ];
+
+    const result = arrangeOnWallInZone(members, 500, 2532);
+
+    expect(result).toHaveLength(3);
+    // Leftmost left edge sits at zoneStart + inset = 500 + 127 = 627
+    expect(result[0].xMm - 508 / 2).toBeCloseTo(627, 6);
+    // Rightmost right edge sits at zoneEnd - inset = 2532 - 127 = 2405
+    expect(result[2].xMm + 508 / 2).toBeCloseTo(2405, 6);
+    // Every gap equal to the spacing (127)
+    const aRight = result[0].xMm + 508 / 2;
+    const bLeft = result[1].xMm - 508 / 2;
+    expect(bLeft - aRight).toBeCloseTo(127, 6);
+  });
+
+  it("equals the whole-wall solve translated by the zone start", () => {
+    const members = [
+      makeMember({ id: "a", widthMm: 300, xMm: 400 }),
+      makeMember({ id: "b", widthMm: 200, xMm: 900 })
+    ];
+    const zoneStartMm = 350;
+    const zoneEndMm = 1650;
+    const inZone = arrangeOnWallInZone(members, zoneStartMm, zoneEndMm);
+
+    const { insetMm } = solveEqualArrangement(members, zoneEndMm - zoneStartMm);
+    const localWhole = arrangeOnWall(members, zoneEndMm - zoneStartMm, { insetMm });
+
+    for (const move of inZone) {
+      const local = localWhole.find((m) => m.id === move.id)!;
+      expect(move.xMm).toBeCloseTo(local.xMm + zoneStartMm, 6);
+    }
+  });
+
+  it("keeps left-to-right order for unsorted input", () => {
+    const members = [
+      makeMember({ id: "c", widthMm: 200, xMm: 1500 }),
+      makeMember({ id: "a", widthMm: 200, xMm: 300 }),
+      makeMember({ id: "b", widthMm: 200, xMm: 800 })
+    ];
+    const result = arrangeOnWallInZone(members, 200, 1800);
+    expect(result.map((m) => m.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("returns negative gaps unclamped when the zone is too small for the works", () => {
+    const members = [
+      makeMember({ id: "a", widthMm: 2000, xMm: 500 }),
+      makeMember({ id: "b", widthMm: 2000, xMm: 2500 })
+    ];
+    // zone length 3000, Σwidths 4000, spacing = (3000 - 4000)/3 = -333.33
+    const result = arrangeOnWallInZone(members, 0, 3000);
+    const aRight = result[0].xMm + 2000 / 2;
+    const bLeft = result[1].xMm - 2000 / 2;
+    // The interior gap is negative (overlap), returned as-is.
+    expect(bLeft - aRight).toBeCloseTo(-1000 / 3, 5);
+    expect(bLeft - aRight).toBeLessThan(0);
+  });
+
+  it("handles a zone whose end is inside the span (overlapping neighbour) unclamped", () => {
+    // Two works whose combined right edge is bounded by an overlapping
+    // neighbour, so the open zone reads backwards (start > end) — the solve
+    // still runs and returns positions, no clamping.
+    const members = [
+      makeMember({ id: "a", widthMm: 400, xMm: 500 }),
+      makeMember({ id: "b", widthMm: 400, xMm: 1000 })
+    ];
+    // A neighbour overlapping from the right places the boundary at 700, left
+    // of the members' union right edge (1200) — a backwards zone.
+    const others = [makeMember({ id: "o", widthMm: 400, xMm: 900 })];
+    const bounds = getOpenSpaceBounds(members, others, 2000);
+    expect(bounds.endMm).toBeLessThan(1200);
+
+    const result = arrangeOnWallInZone(members, bounds.startMm, bounds.endMm);
+    // Still two moves, order preserved, no throw/clamp.
+    expect(result.map((m) => m.id)).toEqual(["a", "b"]);
+    expect(result).toHaveLength(2);
   });
 });
 

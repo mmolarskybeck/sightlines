@@ -2201,6 +2201,68 @@ input:focus-visible {
   font-weight: 650;
 }
 
+/* "Space within" zone picker: the twin of the "Measured from" anchor row, but
+   inside "Space evenly" — same quiet, text-only, single-line treatment, just
+   two options (Whole wall / Open space) instead of three. */
+.arrange-zone-group {
+  display: grid;
+  gap: 5px;
+}
+
+.arrange-zone-caption {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.arrange-zone {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  /* Override the ui/toggle-group wrapper's inline-flex items-center gap-1 so
+     the two options sit flush in equal halves behind one hairline box. */
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.arrange-zone .arrange-zone-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 30px;
+  padding: 0 6px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 500;
+  line-height: 1.1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.arrange-zone .arrange-zone-item:first-child {
+  border-left: 0;
+}
+
+.arrange-zone .arrange-zone-item:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.arrange-zone .arrange-zone-item[data-state="on"] {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-weight: 650;
+}
+
 /* One locked two-line readout everywhere: a small muted label on line 1, the
    value (semibold, larger) with the "Calculated" tag inline right after it on
    line 2. Kept as one block so a screen reader reads them together. */

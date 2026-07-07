@@ -27,6 +27,22 @@ export function solveEqualArrangement(
   return { insetMm: spacingMm, gapMm: spacingMm };
 }
 
+// The same equal solve, but confined to an arbitrary zone [zoneStartMm,
+// zoneEndMm] along the wall rather than the whole wall — the "Space within →
+// Open space" case, where the works spread evenly across just the free span
+// between the nearest neighbours (see getOpenSpaceBounds). The zone's length is
+// the only thing the spacing depends on, so this is solveEqualArrangement over
+// (zoneEndMm − zoneStartMm); a zone of [0, wallLengthMm] reproduces the whole-
+// wall solve exactly. A zone too small for Σwidths yields a negative spacing,
+// returned unclamped like every other solver here.
+export function solveEqualArrangementInZone(
+  members: WallObjectBase[],
+  zoneStartMm: number,
+  zoneEndMm: number
+): { insetMm: number; gapMm: number } {
+  return solveEqualArrangement(members, zoneEndMm - zoneStartMm);
+}
+
 // The gap that a given inset forces (and vice versa below). May legitimately
 // go negative when the works are wider than the available span — callers
 // surface that rather than clamping, and the collision gate catches any
@@ -73,6 +89,31 @@ export function arrangeOnWall(
     cursorMm += member.widthMm + gapMm;
     return { id: member.id, xMm };
   });
+}
+
+// The zone-aware equal arrangement: like arrangeOnWall, but the group is
+// centred within [zoneStartMm, zoneEndMm] instead of the whole wall, with the
+// equal margins measured from the zone edges (not the wall edges). Positions
+// are the whole-wall equal solve over the zone's length, translated right by
+// zoneStartMm — so a zone of [0, wallLengthMm] reproduces
+// arrangeOnWall(members, wallLengthMm, { insetMm: solveEqualArrangement(...) })
+// exactly. Same conventions as arrangeOnWall: keeps left-to-right order, x-only
+// (yMm untouched), unclamped (a too-small zone yields negative gaps and
+// overlap, caught by the commit-time collision gate, not here). Returns new
+// CENTER xMm per member; returns [] for fewer than 2 members.
+export function arrangeOnWallInZone(
+  members: WallObjectBase[],
+  zoneStartMm: number,
+  zoneEndMm: number
+): { id: string; xMm: number }[] {
+  if (members.length < 2) return [];
+
+  const zoneLengthMm = zoneEndMm - zoneStartMm;
+  const { insetMm } = solveEqualArrangement(members, zoneLengthMm);
+  return arrangeOnWall(members, zoneLengthMm, { insetMm }).map((move) => ({
+    id: move.id,
+    xMm: move.xMm + zoneStartMm
+  }));
 }
 
 // Slides the whole group as a RIGID unit so one of its outer edges lands a
@@ -214,12 +255,32 @@ export function getSpacingSegments(
 //
 // `others` is the caller's responsibility: the unselected wall objects on the
 // SAME wall as the members (the caller filters by wall and by selection).
-export function getNeighborAwareSegments(
+// The free span a selection sits in: the wall-local [startMm, endMm] bounded on
+// each side by the nearest qualifying UNSELECTED neighbour beside the works,
+// falling back to the wall edge when there's nothing beside them on that side.
+// This is exactly the outer-boundary rule getNeighborAwareSegments uses for its
+// two outer segments, lifted out so the "Space evenly → Open space" arrange can
+// distribute the works within just this span (see arrangeOnWallInZone).
+//
+// A neighbour counts only when its vertical extent overlaps the selection's
+// union y-band — a low pedestal or a high transom sits outside the works' band
+// and is not "beside" them. On each side the boundary is the nearest qualifying
+// neighbour edge (left → the greatest right-edge lying left of the selection's
+// right edge; right → the least left-edge lying right of the selection's left
+// edge). An overlapping neighbour puts a boundary INSIDE the selection's span,
+// which yields startMm > endMm or an outer segment that reads backwards —
+// returned unclamped, the same convention getNeighborAwareSegments follows.
+// With no qualifying others on a side the boundary is the wall edge, so a
+// members-only call returns { startMm: 0, endMm: wallLengthMm }.
+//
+// `others` is the caller's responsibility: the unselected wall objects on the
+// SAME wall as the members (the caller filters by wall and by selection).
+export function getOpenSpaceBounds(
   members: WallObjectBase[],
   others: WallObjectBase[],
   wallLengthMm: number
-): { fromMm: number; toMm: number }[] {
-  if (members.length === 0) return [];
+): { startMm: number; endMm: number } {
+  if (members.length === 0) return { startMm: 0, endMm: wallLengthMm };
 
   const sorted = [...members].sort((a, b) => a.xMm - b.xMm);
   const leftEdgeMm = sorted[0].xMm - sorted[0].widthMm / 2;
@@ -237,24 +298,47 @@ export function getNeighborAwareSegments(
   // Left boundary: nearest right-edge that lies left of the selection's right
   // edge (fully-left neighbour, or one overlapping from the left). Wall start
   // when there's nothing beside the works on the left.
-  let leftBoundaryMm = 0;
+  let startMm = 0;
   for (const object of bandOthers) {
     const objectRightMm = object.xMm + object.widthMm / 2;
-    if (objectRightMm < rightEdgeMm && objectRightMm > leftBoundaryMm) {
-      leftBoundaryMm = objectRightMm;
+    if (objectRightMm < rightEdgeMm && objectRightMm > startMm) {
+      startMm = objectRightMm;
     }
   }
 
   // Right boundary: nearest left-edge that lies right of the selection's left
   // edge (fully-right neighbour, or one overlapping from the right). Wall end
   // when there's nothing beside the works on the right.
-  let rightBoundaryMm = wallLengthMm;
+  let endMm = wallLengthMm;
   for (const object of bandOthers) {
     const objectLeftMm = object.xMm - object.widthMm / 2;
-    if (objectLeftMm > leftEdgeMm && objectLeftMm < rightBoundaryMm) {
-      rightBoundaryMm = objectLeftMm;
+    if (objectLeftMm > leftEdgeMm && objectLeftMm < endMm) {
+      endMm = objectLeftMm;
     }
   }
+
+  return { startMm, endMm };
+}
+
+export function getNeighborAwareSegments(
+  members: WallObjectBase[],
+  others: WallObjectBase[],
+  wallLengthMm: number
+): { fromMm: number; toMm: number }[] {
+  if (members.length === 0) return [];
+
+  const sorted = [...members].sort((a, b) => a.xMm - b.xMm);
+  const leftEdgeMm = sorted[0].xMm - sorted[0].widthMm / 2;
+  const rightmost = sorted[sorted.length - 1];
+  const rightEdgeMm = rightmost.xMm + rightmost.widthMm / 2;
+
+  // The two outer boundaries are exactly the open-space bounds; the interior
+  // segments are member-edge ↔ member-edge, unaffected by neighbours.
+  const { startMm: leftBoundaryMm, endMm: rightBoundaryMm } = getOpenSpaceBounds(
+    members,
+    others,
+    wallLengthMm
+  );
 
   const segments: { fromMm: number; toMm: number }[] = [
     { fromMm: leftBoundaryMm, toMm: leftEdgeMm }

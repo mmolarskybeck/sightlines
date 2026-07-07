@@ -25,6 +25,7 @@ const METRIC_STEP_MM = 10;
 
 type ArrangeMode = "equal" | "inset" | "gap";
 type InsetAnchor = "left" | "both" | "right";
+type EvenZone = "wall" | "open";
 
 // Right-inspector panel for a multi-object selection (2+ placements picked in
 // the plan/elevation view). Props-driven, same discipline as
@@ -47,6 +48,7 @@ export function SelectionInspector({
   wallName,
   onSetMode,
   onSetAnchor,
+  onSetEvenZone,
   onArrangeValue,
   onAcceptArrange,
   onCancelArrange,
@@ -69,6 +71,9 @@ export function SelectionInspector({
     // Which wall edge the "From wall edges" mode measures from. Only affects
     // the inset-mode body; "both" is the centred default.
     insetAnchor: InsetAnchor;
+    // Which span "Space evenly" distributes across. Only affects the equal-mode
+    // body; "wall" is the whole-wall default.
+    evenZone: EvenZone;
     insetMm: number;
     gapMm: number;
     // Distance from the wall's left edge to the group's leftmost edge, and
@@ -84,6 +89,7 @@ export function SelectionInspector({
   arrangeDisabledReason?: string;
   onSetMode: (mode: ArrangeMode) => void;
   onSetAnchor: (anchor: InsetAnchor) => void;
+  onSetEvenZone: (zone: EvenZone) => void;
   onArrangeValue: (
     params: { insetMm: number; anchor: InsetAnchor } | { gapMm: number }
   ) => void;
@@ -165,6 +171,38 @@ export function SelectionInspector({
 
             {arrange.mode === "equal" ? (
               <div className="arrange-mode-body">
+                <div className="arrange-zone-group">
+                  <span className="arrange-zone-caption" id="arrange-zone-caption">
+                    Space within
+                  </span>
+                  <ToggleGroup
+                    aria-labelledby="arrange-zone-caption"
+                    className="arrange-zone"
+                    // A quieter, text-only sub-choice inside "Space evenly", the
+                    // twin of the inset mode's "Measured from" anchor row.
+                    orientation="horizontal"
+                    type="single"
+                    value={arrange.evenZone}
+                    onValueChange={(value) => {
+                      // Same re-click guard as the mode/anchor toggles: a single
+                      // ToggleGroup fires "" when the active item is clicked
+                      // again, so re-apply the current zone instead of clearing
+                      // to a no-zone state.
+                      if (value === "wall" || value === "open") {
+                        onSetEvenZone(value);
+                      } else {
+                        onSetEvenZone(arrange.evenZone);
+                      }
+                    }}
+                  >
+                    <ToggleGroupItem className="arrange-zone-item" value="wall">
+                      Whole wall
+                    </ToggleGroupItem>
+                    <ToggleGroupItem className="arrange-zone-item" value="open">
+                      Open space
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
                 <div className="arrange-readout">
                   <span className="arrange-readout-label">Equal distance</span>
                   <span className="arrange-readout-value-row">
@@ -173,7 +211,11 @@ export function SelectionInspector({
                     </span>
                   </span>
                 </div>
-                <p className="field-hint">Same from wall edges and between works.</p>
+                <p className="field-hint">
+                  {arrange.evenZone === "open"
+                    ? "Same from the open space's edges and between works."
+                    : "Same from wall edges and between works."}
+                </p>
               </div>
             ) : arrange.mode === "inset" ? (
               <div className="arrange-mode-body">

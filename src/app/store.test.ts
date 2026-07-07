@@ -11,8 +11,10 @@ import {
 } from "../domain/placement/placeArtwork";
 import {
   arrangeOnWall,
+  arrangeOnWallInZone,
   getSpacingSegments,
-  solveEqualArrangement
+  solveEqualArrangement,
+  solveEqualArrangementInZone
 } from "../domain/placement/arrangeOnWall";
 import { createSampleProject } from "../domain/sample/sampleProject";
 import { parseArtwork, parseAsset } from "../domain/schema/artworkSchema";
@@ -2337,6 +2339,185 @@ describe("app store", () => {
         expect(state.undoStack.at(-1)?.label).toBe("Arrange on wall");
         expect(xById(c.placementId)).toBeCloseTo(cx1);
         expect(xById(d.placementId)).toBeCloseTo(dx1);
+      });
+
+      describe("space-within zone (Space evenly)", () => {
+        // The canonical three works to arrange, plus an UNSELECTED neighbour to
+        // their left, so the open-space span is bounded on the left (narrower
+        // than the whole 3000mm wall). Neighbour: width 800, center 400 -> right
+        // edge 800. Works: 508mm each at 1200/1800/2400 (group left edge 946),
+        // so the left boundary is the neighbour's right edge (800), the right
+        // the wall end (3000).
+        async function boundedScenario() {
+          const wallId = getSelectedWall(
+            store.getState().project!,
+            store.getState().selectedWallId
+          )!.id;
+          await store.getState().resizeWall(wallId, 3000);
+          const neighbor = await placeArtworkOnWall(400, 1450, 800);
+          const a = await placeArtworkOnWall(1200, 1450, 508);
+          const b = await placeArtworkOnWall(1800, 1450, 508);
+          const c = await placeArtworkOnWall(2400, 1450, 508);
+          store
+            .getState()
+            .setObjectSelection([a.placementId, b.placementId, c.placementId]);
+          const wall = getSelectedWall(store.getState().project!, wallId)!;
+          return { wall, neighbor, a, b, c };
+        }
+
+        const groupLeftEdge = (ids: string[]) => {
+          const preview = store.getState().arrangeSession!.previewById;
+          const objs = store
+            .getState()
+            .project!.wallObjects.filter((o) => ids.includes(o.id));
+          return Math.min(...objs.map((o) => preview[o.id].xMm - o.widthMm / 2));
+        };
+
+        it("smart default opens the zone when the group is boxed in by a neighbour", async () => {
+          await boundedScenario();
+          store.getState().beginArrangeSession("equal");
+          const session = store.getState().arrangeSession!;
+          expect(session.evenZone).toBe("open");
+          expect(session.openZoneBoundsMm).toEqual({ startMm: 800, endMm: 3000 });
+        });
+
+        it("smart default keeps the whole wall when nothing is beside the group", async () => {
+          await threeWorksOnWall();
+          store.getState().beginArrangeSession("equal");
+          const session = store.getState().arrangeSession!;
+          expect(session.evenZone).toBe("wall");
+          expect(session.openZoneBoundsMm).toEqual({ startMm: 0, endMm: 2540 });
+        });
+
+        it("a remembered zone choice wins over the smart default", async () => {
+          await boundedScenario(); // bounded -> smart default would be "open"
+          store.getState().setArrangeEvenZone("wall");
+          store.getState().cancelArrangeSession();
+          expect(store.getState().lastEvenZone).toBe("wall");
+
+          store.getState().beginArrangeSession("equal");
+          expect(store.getState().arrangeSession!.evenZone).toBe("wall");
+        });
+
+        it("choosing a zone with no session begins an equal session and applies the solve", async () => {
+          const { a, b, c } = await boundedScenario();
+          const ids = [a.placementId, b.placementId, c.placementId];
+          const members = store
+            .getState()
+            .project!.wallObjects.filter((o) => ids.includes(o.id));
+          expect(store.getState().arrangeSession).toBeNull();
+          const undoBefore = store.getState().undoStack.length;
+
+          store.getState().setArrangeEvenZone("open");
+
+          const session = store.getState().arrangeSession!;
+          expect(session).not.toBeNull();
+          expect(session.mode).toBe("equal");
+          expect(session.evenZone).toBe("open");
+          expect(store.getState().lastEvenZone).toBe("open");
+          // The preview spread the works across the open zone [800, 3000].
+          const equalOpen = solveEqualArrangementInZone(members, 800, 3000);
+          expect(groupLeftEdge(ids)).toBeCloseTo(800 + equalOpen.insetMm, 4);
+          // Preview only — the project isn't touched until commit.
+          expect(store.getState().undoStack).toHaveLength(undoBefore);
+        });
+
+        it("switching the zone in equal mode re-spaces the works live", async () => {
+          const { wall, a, b, c } = await boundedScenario();
+          const ids = [a.placementId, b.placementId, c.placementId];
+          const members = store
+            .getState()
+            .project!.wallObjects.filter((o) => ids.includes(o.id));
+
+          store.getState().beginArrangeSession("equal"); // smart default "open"
+          store.getState().updateArrangeSession({ equal: true });
+          expect(store.getState().arrangeSession!.evenZone).toBe("open");
+          const equalOpen = solveEqualArrangementInZone(members, 800, 3000);
+          expect(groupLeftEdge(ids)).toBeCloseTo(800 + equalOpen.insetMm, 4);
+
+          // Switch to the whole wall — the works re-space across [0, 3000].
+          store.getState().setArrangeEvenZone("wall");
+          expect(store.getState().arrangeSession!.evenZone).toBe("wall");
+          const equalWhole = solveEqualArrangement(members, wall.lengthMm);
+          expect(groupLeftEdge(ids)).toBeCloseTo(equalWhole.insetMm, 4);
+        });
+
+        it("keeps the open-zone bounds fixed while previews move the members", async () => {
+          await boundedScenario();
+          store.getState().beginArrangeSession("equal");
+          const boundsBefore = store.getState().arrangeSession!.openZoneBoundsMm;
+
+          store.getState().updateArrangeSession({ equal: true }); // moves members
+          store.getState().setArrangeEvenZone("wall");
+          store.getState().setArrangeEvenZone("open");
+
+          expect(store.getState().arrangeSession!.openZoneBoundsMm).toEqual(
+            boundsBefore
+          );
+        });
+
+        it("commits the open-zone equal layout matching arrangeOnWallInZone", async () => {
+          const { a, b, c } = await boundedScenario();
+          const ids = [a.placementId, b.placementId, c.placementId];
+          const members = store
+            .getState()
+            .project!.wallObjects.filter((o) => ids.includes(o.id));
+          const undoBefore = store.getState().undoStack.length;
+
+          store.getState().beginArrangeSession("equal");
+          store.getState().updateArrangeSession({ equal: true });
+          const bounds = store.getState().arrangeSession!.openZoneBoundsMm;
+          const expected = arrangeOnWallInZone(members, bounds.startMm, bounds.endMm);
+          store.getState().commitArrangeSession(true);
+
+          expect(store.getState().undoStack).toHaveLength(undoBefore + 1);
+          expect(store.getState().undoStack.at(-1)?.label).toBe("Arrange on wall");
+          for (const move of expected) {
+            expect(xById(move.id)).toBeCloseTo(move.xMm, 4);
+          }
+        });
+
+        it("cancelling an open-zone equal session reverts the project", async () => {
+          await boundedScenario();
+          store.getState().beginArrangeSession("equal");
+          const projectBefore = store.getState().project!;
+          const undoBefore = store.getState().undoStack.length;
+
+          store.getState().updateArrangeSession({ equal: true });
+          store.getState().cancelArrangeSession();
+
+          expect(store.getState().arrangeSession).toBeNull();
+          expect(store.getState().project).toBe(projectBefore);
+          expect(store.getState().undoStack).toHaveLength(undoBefore);
+        });
+
+        it("remembers lastEvenZone even when the selection can't be arranged", async () => {
+          const a = await placeArtworkOnWall(500, 1450);
+          store.getState().setObjectSelection([a.placementId]); // single, ineligible
+
+          store.getState().setArrangeEvenZone("open");
+
+          expect(store.getState().arrangeSession).toBeNull();
+          expect(store.getState().lastEvenZone).toBe("open");
+        });
+
+        it("a whole-wall zone reproduces the original centred equal solve", async () => {
+          const { wall, a, b, c } = await threeWorksOnWall();
+          const ids = [a.placementId, b.placementId, c.placementId];
+          const members = store
+            .getState()
+            .project!.wallObjects.filter((o) => ids.includes(o.id));
+
+          store.getState().beginArrangeSession("equal"); // unbounded -> "wall"
+          store.getState().updateArrangeSession({ equal: true });
+
+          const insetMm = solveEqualArrangement(members, wall.lengthMm).insetMm;
+          const expected = arrangeOnWall(members, wall.lengthMm, { insetMm });
+          const preview = store.getState().arrangeSession!.previewById;
+          for (const move of expected) {
+            expect(preview[move.id].xMm).toBeCloseTo(move.xMm, 6);
+          }
+        });
       });
     });
   });

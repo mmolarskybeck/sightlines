@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
@@ -16,10 +16,17 @@ import {
 } from "../domain/geometry/walls";
 import {
   getArrangeReadoutDetailed,
+  getOpenSpaceBounds,
   getSpacingSegments,
-  solveEqualArrangement
+  solveEqualArrangement,
+  solveEqualArrangementInZone
 } from "../domain/placement/arrangeOnWall";
 import { getOpeningKindLabel } from "../domain/placement/createOpening";
+import { getGroupBounds } from "../domain/placement/groupBounds";
+import {
+  quantizeXToCleanIncrement,
+  quantizeYToCleanIncrement
+} from "../domain/snapping/cleanIncrement";
 import type {
   Artwork,
   ArtworkFloorObject,
@@ -41,9 +48,7 @@ import {
 import { AppRail } from "./components/AppRail";
 import { ArtworkInspector } from "./components/ArtworkInspector";
 import { ChecklistPanel } from "./components/ChecklistPanel";
-import { DataView } from "./components/DataView";
 import { ElevationEmptyState } from "./components/ElevationEmptyState";
-import { ElevationView } from "./components/ElevationView";
 import { FloorObjectInspector, FloorPlacementFields } from "./components/FloorObjectInspector";
 import { OpeningInspector } from "./components/OpeningInspector";
 import { PlanEmptyState } from "./components/PlanEmptyState";
@@ -81,6 +86,13 @@ import {
   useAppStore
 } from "./store";
 
+const DataView = lazy(() =>
+  import("./components/DataView").then((module) => ({ default: module.DataView }))
+);
+const ElevationView = lazy(() =>
+  import("./components/ElevationView").then((module) => ({ default: module.ElevationView }))
+);
+
 // A second, independent IndexedDbAssetRepository instance dedicated to
 // reads (thumbnail lookups for the checklist). It talks to the same
 // IndexedDB database as the one store.ts constructs for writes — the
@@ -105,6 +117,7 @@ export function App() {
     arrangeSession,
     lastArrangeMode,
     lastInsetAnchor,
+    lastEvenZone,
     viewMode,
     saveState,
     error,
@@ -154,6 +167,7 @@ export function App() {
     removeSelectedPlacements,
     beginArrangeSession,
     setArrangeAnchor,
+    setArrangeEvenZone,
     updateArrangeSession,
     setArrangeSessionPreview,
     commitArrangeSession,
@@ -318,13 +332,32 @@ export function App() {
         return;
       }
 
-      // ½″ / 1cm fine, 2″ / 50mm with Shift. Metric rounds to tidy numbers;
-      // imperial to clean fractions of an inch. The fine step matches the
-      // arrange field's stepMm so keyboard nudges and the stepper agree.
+      // Nudge steps under the "default movement lands on clean values,
+      // precision movement is opt-in" rule:
+      //  • snapToGrid OFF → today's raw deltas exactly (½″/1cm fine, 2″/50mm
+      //    Shift), no quantization at all.
+      //  • snapToGrid ON, no modifier → step = the precision floor (or 1″/1cm
+      //    when Auto), Shift = 4× that; the moved axis is then cleaned via
+      //    quantize* below, so a first press off a messy spot lands clean in the
+      //    travel direction and later presses stay clean (the §1 invariant).
+      //  • Alt/Option → honest fine precision (1/16″ / 1mm), NEVER quantized —
+      //    the deliberate opt-in to unclean values.
+      // Typed inputs and the arrange inset/gap steppers are untouched.
       const system = unitSystemFromDisplayUnit(project.unit);
-      const fineMm = system === "metric" ? 10 : 12.7;
-      const coarseMm = system === "metric" ? 50 : 50.8;
-      const stepMm = event.shiftKey ? coarseMm : fineMm;
+      const autoStepMm = system === "metric" ? 10 : 12.7;
+      const useQuantize = snapToGrid && !event.altKey;
+      let stepMm: number;
+      if (!snapToGrid) {
+        stepMm = event.shiftKey ? (system === "metric" ? 50 : 50.8) : autoStepMm;
+      } else if (event.altKey) {
+        stepMm = system === "metric" ? 1 : 1.5875;
+      } else {
+        const normalMm = gridPrecisionFloorMm ?? autoStepMm;
+        stepMm = event.shiftKey ? normalMm * 4 : normalMm;
+      }
+      // The quantizer's period is always the normal (non-Shift) increment, so a
+      // 4× Shift press still lands on the same clean lattice.
+      const incrementMm = gridPrecisionFloorMm ?? autoStepMm;
 
       // ArrowUp raises the works (higher yMm = higher on the wall = up on
       // screen); ArrowRight moves them along +x.
@@ -343,8 +376,29 @@ export function App() {
       // object pointer-drag split — a lone opening still nudges here.
       if (selectedWallObjects.length === 1) {
         const member = selectedWallObjects[0];
-        const nextXMm = member.xMm + dxMm;
-        const nextYMm = member.yMm + dyMm;
+        let nextXMm = member.xMm + dxMm;
+        let nextYMm = member.yMm + dyMm;
+        if (useQuantize) {
+          const wall = getProjectWalls(project).find((candidate) => candidate.id === member.wallId);
+          if (wall) {
+            const size = { widthMm: member.widthMm, heightMm: member.heightMm };
+            const neighbors = project.wallObjects.filter(
+              (object) => object.wallId === member.wallId && object.id !== member.id
+            );
+            if (dxMm !== 0) {
+              nextXMm = quantizeXToCleanIncrement(
+                { xMm: nextXMm, yMm: nextYMm },
+                size,
+                incrementMm,
+                wall.lengthMm,
+                neighbors
+              );
+            }
+            if (dyMm !== 0) {
+              nextYMm = quantizeYToCleanIncrement({ xMm: nextXMm, yMm: nextYMm }, size, incrementMm);
+            }
+          }
+        }
         if (member.kind === "artwork") {
           void moveArtworkPlacement(member.id, nextXMm, nextYMm, allowOverlappingPlacement);
         } else {
@@ -365,12 +419,46 @@ export function App() {
       // the committed layout. beginArrangeSession is a synchronous set(), so
       // the freshly-begun session is in place before setArrangeSessionPreview
       // reads it below.
-      const moves = members.map((member) => {
+      const based = members.map((member) => {
         const preview = arrangeSession?.previewById[member.id];
-        const baseX = preview ? preview.xMm : member.xMm;
-        const baseY = preview ? preview.yMm : member.yMm;
-        return { id: member.id, xMm: baseX + dxMm, yMm: baseY + dyMm };
+        return preview ? { ...member, xMm: preview.xMm, yMm: preview.yMm } : member;
       });
+
+      // Quantize the group as ONE virtual object (its union box) and apply the
+      // resulting common delta to every member, so the rigid group lands on a
+      // clean measurement without disturbing interior spacing.
+      const box = getGroupBounds(based);
+      let centerXMm = box.centerXMm + dxMm;
+      let centerYMm = box.centerYMm + dyMm;
+      if (useQuantize) {
+        const wall = getProjectWalls(project).find((candidate) => candidate.id === members[0].wallId);
+        if (wall) {
+          const size = { widthMm: box.widthMm, heightMm: box.heightMm };
+          const memberIds = new Set(members.map((member) => member.id));
+          const neighbors = project.wallObjects.filter(
+            (object) => object.wallId === members[0].wallId && !memberIds.has(object.id)
+          );
+          if (dxMm !== 0) {
+            centerXMm = quantizeXToCleanIncrement(
+              { xMm: centerXMm, yMm: centerYMm },
+              size,
+              incrementMm,
+              wall.lengthMm,
+              neighbors
+            );
+          }
+          if (dyMm !== 0) {
+            centerYMm = quantizeYToCleanIncrement({ xMm: centerXMm, yMm: centerYMm }, size, incrementMm);
+          }
+        }
+      }
+      const deltaXMm = centerXMm - box.centerXMm;
+      const deltaYMm = centerYMm - box.centerYMm;
+      const moves = based.map((member) => ({
+        id: member.id,
+        xMm: member.xMm + deltaXMm,
+        yMm: member.yMm + deltaYMm
+      }));
 
       if (!arrangeSession) beginArrangeSession("inset");
       setArrangeSessionPreview(moves);
@@ -385,6 +473,8 @@ export function App() {
     draggingArtworkId,
     arrangeSession,
     allowOverlappingPlacement,
+    snapToGrid,
+    gridPrecisionFloorMm,
     beginArrangeSession,
     setArrangeSessionPreview,
     commitArrangeSession,
@@ -542,6 +632,26 @@ export function App() {
           arrangeWall.lengthMm
         );
         const equal = solveEqualArrangement(arrangeMembers, arrangeWall.lengthMm);
+        // The open-space span the "Open space" zone spreads within. Live, use
+        // the session's fixed bounds so previews don't move it; idle, derive it
+        // from the committed members and the unselected same-wall objects (the
+        // same "others" filter the session uses at begin).
+        const openBounds = activeArrangeSession
+          ? activeArrangeSession.openZoneBoundsMm
+          : getOpenSpaceBounds(
+              selectedArtworkMembers,
+              project.wallObjects.filter(
+                (wallObject) =>
+                  wallObject.wallId === arrangeWall.id &&
+                  !selectedObjectIds.includes(wallObject.id)
+              ),
+              arrangeWall.lengthMm
+            );
+        const equalOpen = solveEqualArrangementInZone(
+          arrangeMembers,
+          openBounds.startMm,
+          openBounds.endMm
+        );
         // The two single-sided distances the left/right anchors edit and read
         // back: getSpacingSegments returns n+1 segments with segment[0] the
         // left-edge distance and the last the right-edge distance — reuse it
@@ -555,32 +665,62 @@ export function App() {
         const insetAnchor = activeArrangeSession
           ? activeArrangeSession.insetAnchor
           : lastInsetAnchor;
+        // Does the idle layout already read as evenly spaced? Whole-wall equal
+        // wants uniform gaps AND symmetric insets. Open-zone equal wants uniform
+        // gaps and the leftmost left edge at (zone start + zone inset) — its
+        // insets are asymmetric by design, so insetIsMixed is NOT required here.
+        const matchesWholeWallEqual =
+          !detailed.gapIsMixed &&
+          !detailed.insetIsMixed &&
+          Math.abs(detailed.insetMm - equal.insetMm) < 0.5 &&
+          Math.abs(detailed.gapMm - equal.gapMm) < 0.5;
+        const matchesOpenZoneEqual =
+          !detailed.gapIsMixed &&
+          Math.abs(detailed.insetMm - (openBounds.startMm + equalOpen.insetMm)) < 0.5 &&
+          Math.abs(detailed.gapMm - equalOpen.gapMm) < 0.5;
+        // Which zone (if either) the idle layout matches — whole wall wins ties
+        // (the unbounded case, where the two solves are identical).
+        const idleEqualZone: "wall" | "open" | null = matchesWholeWallEqual
+          ? "wall"
+          : matchesOpenZoneEqual
+            ? "open"
+            : null;
+        // The smart default used when nothing has been chosen and no layout
+        // matches: open when the group is boxed in by neighbours, else whole
+        // wall — the same rule beginArrangeSession applies.
+        const smartDefaultZone: "wall" | "open" =
+          openBounds.startMm > 0 || openBounds.endMm < arrangeWall.lengthMm
+            ? "open"
+            : "wall";
         // The panel always shows an active mode — never a blank "choose one"
         // state. With a session open the segment follows the session's mode;
-        // idle, a freeform layout reads as "Space evenly" only when it already
-        // matches the equal solution on both axes within 0.5mm (and isn't
-        // mixed); otherwise it falls back to the last mode the curator used
-        // (default "From wall edges"). Showing a mode idle never moves anything
-        // — inset/gap seed their field from the current layout readout, and
-        // only an edit begins a session.
+        // idle, a freeform layout reads as "Space evenly" when it matches either
+        // the whole-wall or the open-zone equal solve; otherwise it falls back
+        // to the last mode the curator used (default "From wall edges"). Showing
+        // a mode idle never moves anything — inset/gap seed their field from the
+        // current layout readout, and only an edit begins a session.
         const mode: "equal" | "inset" | "gap" = activeArrangeSession
           ? activeArrangeSession.mode
-          : !detailed.gapIsMixed &&
-              !detailed.insetIsMixed &&
-              Math.abs(detailed.insetMm - equal.insetMm) < 0.5 &&
-              Math.abs(detailed.gapMm - equal.gapMm) < 0.5
+          : idleEqualZone !== null
             ? "equal"
             : lastArrangeMode;
+        // Displayed zone: the session's when active, else the idle-matched zone,
+        // else the remembered choice or the smart default.
+        const evenZone: "wall" | "open" = activeArrangeSession
+          ? activeArrangeSession.evenZone
+          : idleEqualZone ?? lastEvenZone ?? smartDefaultZone;
         return {
           mode,
           insetAnchor,
+          evenZone,
           insetMm: detailed.insetMm,
           gapMm: detailed.gapMm,
           leftEdgeDistanceMm,
           rightEdgeDistanceMm,
           insetIsMixed: detailed.insetIsMixed,
           gapIsMixed: detailed.gapIsMixed,
-          equalSpacingMm: equal.insetMm,
+          // The "Equal distance" readout reflects the displayed zone.
+          equalSpacingMm: evenZone === "open" ? equalOpen.insetMm : equal.insetMm,
           sessionActive: activeArrangeSession !== null
         };
       })()
@@ -855,79 +995,85 @@ export function App() {
           ) : null}
           {viewMode === "elevation" ? (
             selectedWall ? (
-              <ElevationView
-                artworksById={artworksById}
-                centerlineMm={
-                  selectedWall.defaultCenterlineHeightMm ??
-                  project.defaultCenterlineHeightMm
-                }
-                draggingArtworkId={draggingArtworkId}
-                getBlob={getAssetBlob}
-                gridPrecisionFloorMm={gridPrecisionFloorMm}
-                gridVisible={showGrid}
-                selectedArtworkId={selectedArtworkId}
-                selectedOpeningId={selectedOpeningId}
-                snapToGrid={snapToGrid}
-                unit={wallUnit}
-                wallHeightMm={selectedWall.heightMm}
-                wallId={selectedWall.id}
-                wallLengthMm={selectedWall.lengthMm}
-                wallName={selectedWall.name}
-                wallObjects={project.wallObjects}
-                walls={wallsForSwitcher}
-                onSelectWall={selectWall}
-                previewPositionsById={arrangeSession?.previewById}
-                arrangeSessionActive={arrangeSession !== null}
-                onMoveOpening={(wallObjectId, xMm, yMm) => {
-                  // A move of a session member (alt-drag of one work in the
-                  // group) stays inside the live preview — the session's
-                  // single commit will carry it; everything else commits
-                  // directly as before.
-                  if (arrangeSession?.memberIds.includes(wallObjectId)) {
-                    setArrangeSessionPreview([{ id: wallObjectId, xMm, yMm }]);
-                    return;
+              <Suspense fallback={<div className="skeleton-panel" />}>
+                <ElevationView
+                  artworksById={artworksById}
+                  centerlineMm={
+                    selectedWall.defaultCenterlineHeightMm ??
+                    project.defaultCenterlineHeightMm
                   }
-                  void moveOpening(wallObjectId, xMm, yMm, allowOverlappingPlacement);
-                }}
-                onMovePlacement={(wallObjectId, xMm, yMm) => {
-                  if (arrangeSession?.memberIds.includes(wallObjectId)) {
-                    setArrangeSessionPreview([{ id: wallObjectId, xMm, yMm }]);
-                    return;
+                  draggingArtworkId={draggingArtworkId}
+                  getBlob={getAssetBlob}
+                  gridPrecisionFloorMm={gridPrecisionFloorMm}
+                  gridVisible={showGrid}
+                  selectedArtworkId={selectedArtworkId}
+                  selectedOpeningId={selectedOpeningId}
+                  snapToGrid={snapToGrid}
+                  unit={wallUnit}
+                  wallHeightMm={selectedWall.heightMm}
+                  wallId={selectedWall.id}
+                  wallLengthMm={selectedWall.lengthMm}
+                  wallName={selectedWall.name}
+                  wallObjects={project.wallObjects}
+                  walls={wallsForSwitcher}
+                  onSelectWall={selectWall}
+                  previewPositionsById={arrangeSession?.previewById}
+                  arrangeSessionActive={arrangeSession !== null}
+                  onMoveOpening={(wallObjectId, xMm, yMm) => {
+                    // A move of a session member (alt-drag of one work in the
+                    // group) stays inside the live preview — the session's
+                    // single commit will carry it; everything else commits
+                    // directly as before.
+                    if (arrangeSession?.memberIds.includes(wallObjectId)) {
+                      setArrangeSessionPreview([{ id: wallObjectId, xMm, yMm }]);
+                      return;
+                    }
+                    void moveOpening(wallObjectId, xMm, yMm, allowOverlappingPlacement);
+                  }}
+                  onMovePlacement={(wallObjectId, xMm, yMm) => {
+                    if (arrangeSession?.memberIds.includes(wallObjectId)) {
+                      setArrangeSessionPreview([{ id: wallObjectId, xMm, yMm }]);
+                      return;
+                    }
+                    void moveArtworkPlacement(wallObjectId, xMm, yMm, allowOverlappingPlacement);
+                  }}
+                  onPlaceArtwork={(artworkId, wallId, xMm, yMm) =>
+                    void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement)
                   }
-                  void moveArtworkPlacement(wallObjectId, xMm, yMm, allowOverlappingPlacement);
-                }}
-                onPlaceArtwork={(artworkId, wallId, xMm, yMm) =>
-                  void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement)
-                }
-                onSelectArtwork={selectArtwork}
-                onSelectOpening={selectOpening}
-                selectedObjectIds={selectedObjectIds}
-                onSelectObject={selectObject}
-                onClearSelection={clearObjectSelection}
-                onMoveWallObjects={(moves) => {
-                  // With a session open, a group drag becomes more live
-                  // preview (one undo entry on session commit); without one
-                  // it keeps committing directly as "Move N objects".
-                  if (arrangeSession) {
-                    setArrangeSessionPreview(moves);
-                    return;
+                  onSelectArtwork={selectArtwork}
+                  onSelectOpening={selectOpening}
+                  selectedObjectIds={selectedObjectIds}
+                  onSelectObject={selectObject}
+                  onClearSelection={clearObjectSelection}
+                  onMoveWallObjects={(moves) => {
+                    // With a session open, a group drag becomes more live
+                    // preview (one undo entry on session commit); without one
+                    // it keeps committing directly as "Move N objects".
+                    if (arrangeSession) {
+                      setArrangeSessionPreview(moves);
+                      return;
+                    }
+                    void moveWallObjectsGroup(moves, allowOverlappingPlacement);
+                  }}
+                  onMarqueeSelect={(ids, additive) =>
+                    // An additive (shift) marquee extends the selection; a plain
+                    // one replaces it. The union preserves already-selected ids'
+                    // order so repeated shift-marquees stay stable.
+                    setObjectSelection(
+                      additive ? [...new Set([...selectedObjectIds, ...ids])] : ids
+                    )
                   }
-                  void moveWallObjectsGroup(moves, allowOverlappingPlacement);
-                }}
-                onMarqueeSelect={(ids, additive) =>
-                  // An additive (shift) marquee extends the selection; a plain
-                  // one replaces it. The union preserves already-selected ids'
-                  // order so repeated shift-marquees stay stable.
-                  setObjectSelection(
-                    additive ? [...new Set([...selectedObjectIds, ...ids])] : ids
-                  )
-                }
-              />
+                />
+              </Suspense>
             ) : (
               <ElevationEmptyState hasRooms={project.floor.rooms.length > 0} />
             )
           ) : null}
-          {viewMode === "data" ? <DataView json={exportProjectJson(project)} /> : null}
+          {viewMode === "data" ? (
+            <Suspense fallback={<div className="skeleton-panel" />}>
+              <DataView json={exportProjectJson(project)} />
+            </Suspense>
+          ) : null}
         </section>
 
         <aside className="inspector" aria-label="Inspector">
@@ -993,6 +1139,7 @@ export function App() {
                   if (mode === "equal") updateArrangeSession({ equal: true });
                 }}
                 onSetAnchor={setArrangeAnchor}
+                onSetEvenZone={setArrangeEvenZone}
                 onArrangeValue={(params) => {
                   if (!arrangeSession) {
                     beginArrangeSession("insetMm" in params ? "inset" : "gap");
