@@ -374,8 +374,16 @@ export function useSvgViewportGestures(options: {
   // Begin a one-finger canvas pan (touch only). Called from the svg's
   // bubble-phase pointerdown, which only fires for a press on true background
   // (an object's pointerdown stopPropagation keeps it from reaching here — that
-  // touch stays an object/placement move-drag instead).
+  // touch stays an object/placement move-drag instead). Callers may invoke it
+  // UNCONDITIONALLY from that handler: the guard below only starts a pan when
+  // exactly one pointer is tracked and no pinch is live — the same condition
+  // the views used to check at their call sites before the extraction. (A
+  // pinch's own 2nd finger never reaches the bubble phase — the capture
+  // handler stopPropagation's it — but a 3rd+ finger landing on background
+  // during a live pinch does; this guard is what makes that a no-op instead
+  // of hijacking the pinch as a pan.)
   function beginTouchPan(clientX: number, clientY: number) {
+    if (touchPointsRef.current.size !== 1 || touchModeRef.current === "pinch") return;
     touchModeRef.current = "pan";
     touchPanLastRef.current = { x: clientX, y: clientY };
     touchPanTapCandidateRef.current = true;

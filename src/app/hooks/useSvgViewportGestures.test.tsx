@@ -330,6 +330,60 @@ describe("useSvgViewportGestures — touch pan (beginTouchPan)", () => {
     const info = onGestureEnd.mock.calls[0][0] as ViewportGestureEnd;
     expect(info).toMatchObject({ kind: "touch", isTap: true, startedOnBackground: true, movedPx: 0 });
   });
+
+  it("a 3rd-finger beginTouchPan during a live pinch is a no-op (pinch survives)", () => {
+    const onViewportChange = vi.fn();
+    const onGestureEnd = vi.fn();
+    const { holder } = renderGestures({ viewport: FIT_VIEWPORT, onViewportChange, onGestureEnd });
+    mockCtm(holder.svg!);
+
+    // Two fingers → live pinch.
+    act(() => {
+      holder.api!.handlePointerDownCapture(
+        reactPointer({ pointerType: "touch", pointerId: 1, clientX: 0, clientY: 0 })
+      );
+    });
+    act(() => {
+      holder.api!.handlePointerDownCapture(
+        reactPointer({ pointerType: "touch", pointerId: 2, clientX: 100, clientY: 0 })
+      );
+    });
+
+    // A 3rd finger lands on true background: the capture handler only does
+    // bookkeeping (returns false, no stopPropagation), so the view's
+    // bubble-phase background handler fires and calls beginTouchPan
+    // unconditionally. The internal guard must ignore it.
+    let thirdClaimed = true;
+    act(() => {
+      thirdClaimed = holder.api!.handlePointerDownCapture(
+        reactPointer({ pointerType: "touch", pointerId: 3, clientX: 200, clientY: 200 })
+      );
+    });
+    expect(thirdClaimed).toBe(false);
+    holder.api!.beginTouchPan(200, 200);
+
+    // The pinch still owns the gesture: spreading the two pinch fingers keeps
+    // firing viewport changes...
+    onViewportChange.mockClear();
+    act(() => {
+      window.dispatchEvent(
+        pointerEvent("pointermove", { pointerType: "touch", pointerId: 2, clientX: 150, clientY: 0 })
+      );
+    });
+    expect(onViewportChange).toHaveBeenCalled();
+
+    // ...and the release reports NO background pan-start — had beginTouchPan
+    // hijacked the pinch as a pan, startedOnBackground would be true here.
+    act(() => {
+      window.dispatchEvent(pointerEvent("pointerup", { pointerType: "touch", pointerId: 1 }));
+      window.dispatchEvent(pointerEvent("pointerup", { pointerType: "touch", pointerId: 2 }));
+      window.dispatchEvent(pointerEvent("pointerup", { pointerType: "touch", pointerId: 3 }));
+    });
+    expect(onGestureEnd).toHaveBeenCalledTimes(1);
+    const info = onGestureEnd.mock.calls[0][0] as ViewportGestureEnd;
+    expect(info.startedOnBackground).toBe(false);
+    expect(info.isTap).toBe(false);
+  });
 });
 
 describe("useSvgViewportGestures — zoom affordances (real math)", () => {
