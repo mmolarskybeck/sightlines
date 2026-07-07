@@ -185,9 +185,20 @@ Recently completed:
 * Equal distribution spacing
 * Checklist filtering/sorting and 2D workflow confidence fixes
 
-### MVP 2 — Project packages and export
+### MVP 2 — Room shape and multi-room flow
 
-Planned next phase:
+Planned soon after simple 3D preview:
+
+* Keep the quick rectangle room path.
+* Polygon room drawing in Plan view.
+* Polygon reshape mode with vertex dragging.
+* Multi-room placement in the shared floor coordinate space.
+* Door connections between rooms.
+* 3D sightlines through aligned connected doorways.
+
+### MVP 3 — Project packages and export
+
+Planned after 3D preview and room-shape tools:
 
 * `.sightlines` package export/import
 * Self-contained project packages with project data and relevant artwork assets
@@ -197,13 +208,12 @@ Planned next phase:
 * PDF checklist export
 * Missing/approximate-data readiness report
 
-### MVP 3 — Tablet and workflow depth
+### MVP 4 — Tablet and workflow depth
 
 Planned after the core desktop workflow is stable:
 
 * iPad-adapted layout and touch interaction
 * Touch-sized handles and bottom-sheet panels
-* Multi-room UI
 * Dropbox-folder sync
 * Spreadsheet metadata import
 * Richer checklist sorting and custom ordering

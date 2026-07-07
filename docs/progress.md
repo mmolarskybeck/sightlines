@@ -110,7 +110,6 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 ## In Progress / Immediate Next
 
 - [ ] Simple derived 3D preview.
-- [ ] Extend tactile handles to vertex-level dragging for non-rectangular rooms once a reshape mode is designed (today's handles only cover the rectangle width/depth case, matching numeric editing's current scope).
 
 ## MVP 1A Remaining
 
@@ -128,6 +127,17 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 - [ ] Simple 3D preview.
 
 ## MVP 2 / Later
+
+- [ ] Room shape tools:
+  - [ ] Keep the current quick rectangle room path.
+  - [ ] Add polygon room drawing in Plan view as a dedicated mode: click vertices line by line, preview the active segment, close via first point or Enter.
+  - [ ] Add polygon reshape mode after polygon creation exists: drag existing vertices, preserve closed rooms/wall identity, revalidate changed-wall placements, one undo entry per drag.
+- [ ] Multi-room flow:
+  - [ ] Place additional rooms in the shared floor coordinate space.
+  - [ ] Connect paired doors between rooms (`connectsToWallId`) once room shape semantics are clear.
+  - [ ] Let 3D sightlines pass through aligned connected doorways.
+
+## MVP 3 / Later
 
 - [ ] `.sightlines` package export/import.
 - [ ] Import safety checks for zip traversal, size caps, MIME validation, and corrupted assets.

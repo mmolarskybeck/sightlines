@@ -222,6 +222,8 @@ type Wall = {
 
 **Walls reference vertex IDs, not point indices.** An earlier draft used `startPointIndex`/`endPointIndex` into the room's points array — fragile, because inserting, deleting, or reordering a vertex silently shifts every index after it, breaking wall identity without any error. Giving each vertex a stable ID and having walls reference those IDs means index churn can't corrupt wall identity. It also defines a clear behavior for editing: dragging an existing vertex moves it in place (walls referencing it just follow); inserting a new vertex on an existing wall segment splits that one wall into two new walls, each still tracing back to real vertex IDs.
 
+**Room shape tools are a dedicated floorplan mode, not an extension of ordinary selection.** The fast rectangle path stays because most rooms are rectangles and should remain easy. Irregular galleries are created through a polygon-drawing mode: click corner by corner in Plan view, preview the next segment as the pointer moves, then close by clicking the first point or pressing Enter. Vertex-level dragging/reshaping comes after polygon creation exists, so reshape is designed around real non-rectangular rooms rather than bolted onto the rectangle resize handles. Outside room-shape mode, clicks keep their current meanings: select walls, select placements, or use an armed placement tool.
+
 **Validate the structural invariants at the boundary, not deep in geometry math.** The geometry code assumes a room's walls form a closed loop in vertex order (`wall[i].endVertexId === wall[i+1].startVertexId`), and the model carries two redundant identity fields (`RoomPlacement.roomId` vs `placement.room.id`, `Wall.roomId` vs containment in `room.walls`). The schema should assert loop closure and identity agreement, so a hand-edited or corrupted file fails at import with a clear message instead of producing a wall-not-found error three function calls into a resize.
 
 Doorway connections are modeled as a property on door-type wall objects:
@@ -422,7 +424,14 @@ MVP1 bundles a lot — geometry, artwork/checklist, snapping/collision/undo, and
 
 **1C — Professional layout behaviors.** Doors/windows/blocked zones + `validatePlacement` collision (§2) · multi-select, grouping, group drag, group-centerline snap · equal-distribution spacing · floor objects (plan view only) · simple derived 3D preview, orbit camera · checklist panel: thumbnail, core fields, sort.
 
-### MVP 2 — Project packages, sharing, polish
+### MVP 2 — Room shape tools + multi-room flow
+- Polygon room drawing in Plan view: dedicated draw mode, click-to-place vertices, live segment preview, Enter/click-first-point to close
+- Polygon reshape mode: drag existing vertices, preserve closed rooms and wall identity, revalidate placements on changed walls, one undo entry per drag
+- Multi-room UI: place additional rooms in the shared floor coordinate space
+- Doorway connections between rooms (`connectsToWallId`) once irregular room creation/reshape semantics are clear
+- 3D camera sightlines through aligned doorways; render current room plus visible connected rooms before attempting whole-floor 3D rendering
+
+### MVP 3 — Project packages, sharing, polish
 - `.sightlines` export/import as a self-contained `SightlinesPackage` (§6) — embeds the artwork snapshot the project actually needs, not just references into the local library — including library-wide `exportAll()`/`importAll()` alongside per-project export (§8)
 - Import safety pipeline (§13) applied to every import path
 - Prominent "Save backup" UX, `navigator.storage.persist()`, and a visible storage-status message — IndexedDB/OPFS are caches, not archives (§11)
@@ -431,9 +440,8 @@ MVP1 bundles a lot — geometry, artwork/checklist, snapping/collision/undo, and
 - PDF checklist export (client-side, pdf-lib)
 - Missing/approximate-data readiness report
 
-### MVP 3 — Tablet + professional workflow depth
+### MVP 4 — Tablet + professional workflow depth
 - **Responsive/touch-adapted layout for iPad** (§3.5): touch-sized handles, gesture disambiguation, bottom-sheet panels, on-screen shortcut equivalents, 3D validated on real tablet hardware
-- Multi-room UI: place additional rooms in the shared floor coordinate space
 - Dropbox-folder sync (PKCE + offline access, app-folder-scoped — §6)
 - EXIF/IPTC metadata auto-fill on upload; spreadsheet bulk metadata import matched by filename
 - Full checklist metadata editing, all sort modes, drag-reorder in custom mode
@@ -441,11 +449,9 @@ MVP1 bundles a lot — geometry, artwork/checklist, snapping/collision/undo, and
 - Project packet export (cover page + checklist + plans + elevations + 3D views)
 - Command palette, context menus, better inspector
 
-### MVP 4 — Multi-room sightlines + phone tier
-- Doorway connections between rooms (`connectsToWallId`)
-- 3D camera sightlines through aligned doorways
-- Room-visibility-scoped 3D rendering for performance
+### MVP 5 — Phone tier + advanced viewing
 - Phone tier: checklist browsing, plan/elevation/3D viewing, light repositioning (§3.5) — reuses much of the tablet-viewing groundwork
+- Room-visibility-scoped 3D rendering refinements for larger multi-room floors
 
 ### Backlog (not scheduled — revisit only on real demand)
 - Accounts, Supabase/RLS, hosted cloud projects, public snapshot links
