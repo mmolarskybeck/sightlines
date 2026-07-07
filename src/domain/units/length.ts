@@ -54,7 +54,12 @@ export function parseLength(
   );
 
   if (feetMatch) {
-    const feet = Number(feetMatch[1]);
+    // A leading minus negates the ENTIRE compound value, not just the feet
+    // component: "-5' 3 9/16" is −(5' + 3 9/16"), so format→parse round-trips.
+    // Parsing the sign separately and taking |feet| keeps the inches from
+    // being added back in with the wrong polarity.
+    const negative = feetMatch[1].startsWith("-");
+    const feet = Math.abs(Number(feetMatch[1]));
     const wholeInches = Number(feetMatch[2] ?? 0);
     const numerator = Number(feetMatch[3] ?? 0);
     const denominator = Number(feetMatch[4] ?? 1);
@@ -63,10 +68,10 @@ export function parseLength(
       return { ok: false, error: "Fractions cannot divide by zero." };
     }
 
-    return {
-      ok: true,
-      valueMm: feetToMm(feet) + inchesToMm(wholeInches + numerator / denominator)
-    };
+    const magnitudeMm =
+      feetToMm(feet) + inchesToMm(wholeInches + numerator / denominator);
+
+    return { ok: true, valueMm: negative ? -magnitudeMm : magnitudeMm };
   }
 
   const mixedFractionMatch = source.match(
@@ -74,7 +79,12 @@ export function parseLength(
   );
 
   if (mixedFractionMatch) {
-    const whole = Number(mixedFractionMatch[1] ?? 0);
+    // Same leading-minus rule as the feet branch: "-3 9/16" is −(3 9/16"), so
+    // the fraction isn't subtracted from a negative whole (which would read as
+    // −2 7/16"). Parse the sign off the whole part and negate the total.
+    const wholeRaw = mixedFractionMatch[1] ?? "0";
+    const negative = wholeRaw.startsWith("-");
+    const whole = Math.abs(Number(wholeRaw));
     const numerator = Number(mixedFractionMatch[2]);
     const denominator = Number(mixedFractionMatch[3]);
 
@@ -82,7 +92,9 @@ export function parseLength(
       return { ok: false, error: "Fractions cannot divide by zero." };
     }
 
-    return { ok: true, valueMm: inchesToMm(whole + numerator / denominator) };
+    const magnitudeMm = inchesToMm(whole + numerator / denominator);
+
+    return { ok: true, valueMm: negative ? -magnitudeMm : magnitudeMm };
   }
 
   const explicitUnitMatch = source.match(

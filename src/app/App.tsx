@@ -16,6 +16,7 @@ import {
 } from "../domain/geometry/walls";
 import {
   getArrangeReadoutDetailed,
+  getSpacingSegments,
   solveEqualArrangement
 } from "../domain/placement/arrangeOnWall";
 import { getOpeningKindLabel } from "../domain/placement/createOpening";
@@ -103,6 +104,7 @@ export function App() {
     selectedObjectIds,
     arrangeSession,
     lastArrangeMode,
+    lastInsetAnchor,
     viewMode,
     saveState,
     error,
@@ -151,6 +153,7 @@ export function App() {
     movePlanObjectsGroup,
     removeSelectedPlacements,
     beginArrangeSession,
+    setArrangeAnchor,
     updateArrangeSession,
     setArrangeSessionPreview,
     commitArrangeSession,
@@ -539,6 +542,19 @@ export function App() {
           arrangeWall.lengthMm
         );
         const equal = solveEqualArrangement(arrangeMembers, arrangeWall.lengthMm);
+        // The two single-sided distances the left/right anchors edit and read
+        // back: getSpacingSegments returns n+1 segments with segment[0] the
+        // left-edge distance and the last the right-edge distance — reuse it
+        // rather than re-deriving edges here.
+        const segments = getSpacingSegments(arrangeMembers, arrangeWall.lengthMm);
+        const leftEdgeDistanceMm = segments[0].toMm - segments[0].fromMm;
+        const lastSegment = segments[segments.length - 1];
+        const rightEdgeDistanceMm = lastSegment.toMm - lastSegment.fromMm;
+        // The anchor follows the session when one is open, else the remembered
+        // default — the mirror of how `mode` resolves just below.
+        const insetAnchor = activeArrangeSession
+          ? activeArrangeSession.insetAnchor
+          : lastInsetAnchor;
         // The panel always shows an active mode — never a blank "choose one"
         // state. With a session open the segment follows the session's mode;
         // idle, a freeform layout reads as "Space evenly" only when it already
@@ -557,8 +573,11 @@ export function App() {
             : lastArrangeMode;
         return {
           mode,
+          insetAnchor,
           insetMm: detailed.insetMm,
           gapMm: detailed.gapMm,
+          leftEdgeDistanceMm,
+          rightEdgeDistanceMm,
           insetIsMixed: detailed.insetIsMixed,
           gapIsMixed: detailed.gapIsMixed,
           equalSpacingMm: equal.insetMm,
@@ -973,6 +992,7 @@ export function App() {
                   beginArrangeSession(mode);
                   if (mode === "equal") updateArrangeSession({ equal: true });
                 }}
+                onSetAnchor={setArrangeAnchor}
                 onArrangeValue={(params) => {
                   if (!arrangeSession) {
                     beginArrangeSession("insetMm" in params ? "inset" : "gap");

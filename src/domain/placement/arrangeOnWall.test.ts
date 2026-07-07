@@ -3,12 +3,13 @@ import type { WallObjectBase } from "../project";
 import {
   arrangeOnWall,
   gapForInset,
-  getArrangeReadout,
   getArrangeReadoutDetailed,
   getNeighborAwareSegments,
   getSpacingSegments,
   insetForGap,
-  solveEqualArrangement
+  slideGroupToEdgeInset,
+  solveEqualArrangement,
+  spaceGroupAboutCenter
 } from "./arrangeOnWall";
 
 function makeMember(overrides: Partial<WallObjectBase> = {}): WallObjectBase {
@@ -138,6 +139,109 @@ describe("arrangeOnWall", () => {
   });
 });
 
+describe("slideGroupToEdgeInset", () => {
+  it("returns empty array for fewer than 2 members", () => {
+    expect(slideGroupToEdgeInset([], 2000, "left", 100)).toEqual([]);
+    expect(
+      slideGroupToEdgeInset([makeMember()], 2000, "left", 100)
+    ).toEqual([]);
+  });
+
+  it("left: slides the group so its leftmost edge lands at insetMm from the wall start", () => {
+    // a: width 300, center 250 -> edges [100, 400]
+    // b: width 400, center 800 -> edges [600, 1000]  (leftmost edge = 100)
+    const members = [
+      makeMember({ id: "a", widthMm: 300, xMm: 250 }),
+      makeMember({ id: "b", widthMm: 400, xMm: 800 })
+    ];
+
+    // Target left edge = 500, current leftmost edge = 100 -> delta = +400
+    const result = slideGroupToEdgeInset(members, 2000, "left", 500);
+
+    expect(result).toEqual([
+      { id: "a", xMm: 650 },
+      { id: "b", xMm: 1200 }
+    ]);
+    // New leftmost left edge sits exactly at the requested inset.
+    const newLeftEdge = Math.min(
+      ...result.map((r, i) => r.xMm - members[i].widthMm / 2)
+    );
+    expect(newLeftEdge).toBe(500);
+  });
+
+  it("right: slides the group so its rightmost edge lands at insetMm from the wall end", () => {
+    // a: width 300, center 250 -> edges [100, 400]
+    // b: width 400, center 800 -> edges [600, 1000]  (rightmost edge = 1000)
+    const members = [
+      makeMember({ id: "a", widthMm: 300, xMm: 250 }),
+      makeMember({ id: "b", widthMm: 400, xMm: 800 })
+    ];
+
+    // Target right edge = wall - inset = 2000 - 300 = 1700; current = 1000 -> delta = +700
+    const result = slideGroupToEdgeInset(members, 2000, "right", 300);
+
+    expect(result).toEqual([
+      { id: "a", xMm: 950 },
+      { id: "b", xMm: 1500 }
+    ]);
+    const newRightEdge = Math.max(
+      ...result.map((r, i) => r.xMm + members[i].widthMm / 2)
+    );
+    expect(newRightEdge).toBe(2000 - 300);
+  });
+
+  it("preserves interior spacing (rigid translation, same delta for every member)", () => {
+    const members = [
+      makeMember({ id: "a", widthMm: 200, xMm: 300 }),
+      makeMember({ id: "b", widthMm: 500, xMm: 900 }),
+      makeMember({ id: "c", widthMm: 300, xMm: 1600 })
+    ];
+    const before = getSpacingSegments(members, 2500)
+      .slice(1, -1)
+      .map((s) => s.toMm - s.fromMm);
+
+    const result = slideGroupToEdgeInset(members, 2500, "left", 50);
+    const moved = result.map((r, i) => ({ ...members[i], xMm: r.xMm }));
+    const after = getSpacingSegments(moved, 2500)
+      .slice(1, -1)
+      .map((s) => s.toMm - s.fromMm);
+
+    // The absolute positions shift, but the interior gap WIDTHS are preserved.
+    expect(after).toEqual(before);
+    // Every member moved by exactly the same delta.
+    const deltas = result.map((r, i) => r.xMm - members[i].xMm);
+    expect(new Set(deltas).size).toBe(1);
+  });
+
+  it("allows a negative inset (unclamped)", () => {
+    const members = [
+      makeMember({ id: "a", widthMm: 300, xMm: 250 }),
+      makeMember({ id: "b", widthMm: 400, xMm: 800 })
+    ];
+
+    // Negative left inset pushes the group's left edge past the wall start.
+    const result = slideGroupToEdgeInset(members, 2000, "left", -100);
+    const newLeftEdge = Math.min(
+      ...result.map((r, i) => r.xMm - members[i].widthMm / 2)
+    );
+    expect(newLeftEdge).toBe(-100);
+  });
+
+  it("is absolute, not cumulative: applying the same inset twice moves nothing further", () => {
+    const members = [
+      makeMember({ id: "a", widthMm: 300, xMm: 250 }),
+      makeMember({ id: "b", widthMm: 400, xMm: 800 })
+    ];
+
+    const first = slideGroupToEdgeInset(members, 2000, "left", 500);
+    const firstMembers = first.map((r, i) => ({ ...members[i], xMm: r.xMm }));
+    const second = slideGroupToEdgeInset(firstMembers, 2000, "left", 500);
+
+    // Second pass yields the same positions — no additional movement.
+    expect(second).toEqual(first);
+  });
+});
+
 describe("solveEqualArrangement", () => {
   it("computes equal inset and gap for canonical example", () => {
     const members = [
@@ -247,60 +351,102 @@ describe("insetForGap", () => {
   });
 });
 
-describe("getArrangeReadout", () => {
-  it("reads inset from leftmost member's left edge position", () => {
-    const members = [
-      makeMember({ id: "a", widthMm: 300, xMm: 250 }),
-      makeMember({ id: "b", widthMm: 300, xMm: 650 })
-    ];
+describe("spaceGroupAboutCenter", () => {
+  const unionCenter = (members: { xMm: number; widthMm: number }[]) => {
+    const left = Math.min(...members.map((m) => m.xMm - m.widthMm / 2));
+    const right = Math.max(...members.map((m) => m.xMm + m.widthMm / 2));
+    return (left + right) / 2;
+  };
 
-    const readout = getArrangeReadout(members, 1500);
-
-    // Leftmost left edge = 250 - 150 = 100
-    expect(readout.insetMm).toBe(100);
+  it("returns [] for fewer than 2 members", () => {
+    expect(spaceGroupAboutCenter([], 100)).toEqual([]);
+    expect(spaceGroupAboutCenter([makeMember()], 100)).toEqual([]);
   });
 
-  it("is exact after arrangeOnWall: apply arrangement, build moved members, readout returns same insetMm/gapMm", () => {
-    const originalMembers = [
-      makeMember({ id: "a", widthMm: 300, xMm: 100 }),
-      makeMember({ id: "b", widthMm: 400, xMm: 200 }),
-      makeMember({ id: "c", widthMm: 250, xMm: 300 })
+  it("keeps the group's union-bounds center fixed while setting the gap", () => {
+    // Two works well off-center on the wall; union center = (leftEdge+rightEdge)/2.
+    // a: width 300, center 900 -> edges [750, 1050]
+    // b: width 200, center 1300 -> edges [1200, 1400]
+    // union center = (750 + 1400)/2 = 1075
+    const members = [
+      makeMember({ id: "a", widthMm: 300, xMm: 900 }),
+      makeMember({ id: "b", widthMm: 200, xMm: 1300 })
     ];
-    const wallLengthMm = 2000;
-    const insetMm = 150;
+    const before = unionCenter(members);
 
-    // Arrange with given inset
-    const arranged = arrangeOnWall(originalMembers, wallLengthMm, { insetMm });
-
-    // Build moved members from arrangement
-    const movedMembers = arranged.map((item, idx) => ({
-      ...originalMembers[idx],
-      id: item.id,
-      xMm: item.xMm
+    const moves = spaceGroupAboutCenter(members, 100);
+    const moved = members.map((m) => ({
+      ...m,
+      xMm: moves.find((mv) => mv.id === m.id)!.xMm
     }));
 
-    // Read back should return the same inset
-    const readout = getArrangeReadout(movedMembers, wallLengthMm);
-    expect(readout.insetMm).toBe(insetMm);
-
-    // And gap should be derivable
-    const expectedGap = gapForInset(originalMembers, wallLengthMm, insetMm);
-    expect(readout.gapMm).toBe(expectedGap);
+    // Center preserved
+    expect(unionCenter(moved)).toBeCloseTo(before, 6);
+    // Interior gap is now exactly 100: a right edge -> b left edge
+    const aRight = moved[0].xMm + moved[0].widthMm / 2;
+    const bLeft = moved[1].xMm - moved[1].widthMm / 2;
+    expect(bLeft - aRight).toBeCloseTo(100, 6);
   });
 
-  it("finds min left edge among all members", () => {
+  it("sets every interior gap equal and preserves left-to-right order", () => {
     const members = [
-      makeMember({ id: "a", widthMm: 200, xMm: 500 }),
-      makeMember({ id: "b", widthMm: 300, xMm: 300 }),
-      makeMember({ id: "c", widthMm: 400, xMm: 700 })
+      makeMember({ id: "c", widthMm: 250, xMm: 1400 }),
+      makeMember({ id: "a", widthMm: 200, xMm: 300 }),
+      makeMember({ id: "b", widthMm: 300, xMm: 800 })
     ];
 
-    const readout = getArrangeReadout(members, 2000);
+    const moves = spaceGroupAboutCenter(members, 120);
 
-    // Member b's left edge: 300 - 150 = 150 (min)
-    // Member a's left edge: 500 - 100 = 400
-    // Member c's left edge: 700 - 200 = 500
-    expect(readout.insetMm).toBe(150);
+    // Order preserved (sorted by xMm): a, b, c
+    expect(moves.map((m) => m.id)).toEqual(["a", "b", "c"]);
+
+    const byId = new Map(moves.map((m) => [m.id, m.xMm]));
+    const width = new Map(members.map((m) => [m.id, m.widthMm]));
+    const gap1 =
+      byId.get("b")! - width.get("b")! / 2 - (byId.get("a")! + width.get("a")! / 2);
+    const gap2 =
+      byId.get("c")! - width.get("c")! / 2 - (byId.get("b")! + width.get("b")! / 2);
+    expect(gap1).toBeCloseTo(120, 6);
+    expect(gap2).toBeCloseTo(120, 6);
+  });
+
+  it("allows a negative gap (overlap) without clamping, center still fixed", () => {
+    const members = [
+      makeMember({ id: "a", widthMm: 300, xMm: 900 }),
+      makeMember({ id: "b", widthMm: 200, xMm: 1300 })
+    ];
+    const before = unionCenter(members);
+
+    const moves = spaceGroupAboutCenter(members, -50);
+    const moved = members.map((m) => ({
+      ...m,
+      xMm: moves.find((mv) => mv.id === m.id)!.xMm
+    }));
+
+    const aRight = moved[0].xMm + moved[0].widthMm / 2;
+    const bLeft = moved[1].xMm - moved[1].widthMm / 2;
+    expect(bLeft - aRight).toBeCloseTo(-50, 6);
+    expect(unionCenter(moved)).toBeCloseTo(before, 6);
+  });
+
+  it("is absolute/idempotent: applying the same gap twice is a no-op", () => {
+    const members = [
+      makeMember({ id: "a", widthMm: 300, xMm: 900 }),
+      makeMember({ id: "b", widthMm: 200, xMm: 1300 }),
+      makeMember({ id: "c", widthMm: 250, xMm: 1600 })
+    ];
+
+    const first = spaceGroupAboutCenter(members, 90);
+    const afterFirst = members.map((m) => ({
+      ...m,
+      xMm: first.find((mv) => mv.id === m.id)!.xMm
+    }));
+    const second = spaceGroupAboutCenter(afterFirst, 90);
+
+    for (const move of first) {
+      const again = second.find((mv) => mv.id === move.id)!;
+      expect(again.xMm).toBeCloseTo(move.xMm, 6);
+    }
   });
 });
 
@@ -479,19 +625,51 @@ describe("getNeighborAwareSegments", () => {
 });
 
 describe("getArrangeReadoutDetailed", () => {
-  it("matches getArrangeReadout's insetMm/gapMm", () => {
+  it("insetMm reads the leftmost member's left-edge offset", () => {
     const members = [
-      makeMember({ id: "a", widthMm: 300, xMm: 250 }),
-      makeMember({ id: "b", widthMm: 400, xMm: 800 }),
-      makeMember({ id: "c", widthMm: 250, xMm: 1300 })
+      makeMember({ id: "a", widthMm: 200, xMm: 500 }),
+      makeMember({ id: "b", widthMm: 300, xMm: 300 }),
+      makeMember({ id: "c", widthMm: 400, xMm: 700 })
     ];
-    const wallLengthMm = 2000;
 
-    const basic = getArrangeReadout(members, wallLengthMm);
-    const detailed = getArrangeReadoutDetailed(members, wallLengthMm);
+    // Member b's left edge: 300 - 150 = 150 (min of all left edges)
+    const { insetMm } = getArrangeReadoutDetailed(members, 2000);
+    expect(insetMm).toBe(150);
+  });
 
-    expect(detailed.insetMm).toBe(basic.insetMm);
-    expect(detailed.gapMm).toBe(basic.gapMm);
+  it("gapMm is the ACTUAL gap for an off-center 2-member selection (regression)", () => {
+    // The exact reported bug: a ~15'6" wall, an off-center pair 9" apart.
+    // The old readout derived gap from the (huge) left inset via the symmetric
+    // equation and returned a nonsense large-negative number. It must instead
+    // report the single real edge-to-edge gap.
+    // wall 4724.4mm (15'6"); 9" = 228.6mm.
+    // a: width 400, center 3000 -> edges [2800, 3200]
+    // b: width 400, center 3628.6 -> left edge 3428.6; gap = 3428.6 - 3200 = 228.6
+    const wallLengthMm = 4724.4;
+    const members = [
+      makeMember({ id: "a", widthMm: 400, xMm: 3000 }),
+      makeMember({ id: "b", widthMm: 400, xMm: 3628.6 })
+    ];
+
+    const { gapMm } = getArrangeReadoutDetailed(members, wallLengthMm);
+    expect(gapMm).toBeCloseTo(228.6, 6);
+    // Sanity: the old inset-derived formula would have gone hugely negative.
+    expect(gapMm).toBeGreaterThan(0);
+  });
+
+  it("gapMm is the mean of the actual interior gaps for a 3+ mixed layout", () => {
+    // a: width 200, center 100 -> right edge 200; gap a->b = 400 - 200 = 200
+    // b: width 200, center 500 -> edges [400, 600]; gap b->c = 900 - 600 = 300
+    // c: width 200, center 1000 -> left edge 900
+    // mean of [200, 300] = 250
+    const members = [
+      makeMember({ id: "a", widthMm: 200, xMm: 100 }),
+      makeMember({ id: "b", widthMm: 200, xMm: 500 }),
+      makeMember({ id: "c", widthMm: 200, xMm: 1000 })
+    ];
+
+    const { gapMm } = getArrangeReadoutDetailed(members, 2000);
+    expect(gapMm).toBeCloseTo(250, 6);
   });
 
   it("gapIsMixed is false for exactly 2 members (only 1 interior gap, never mixed)", () => {

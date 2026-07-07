@@ -19,7 +19,9 @@ import { createArtworkPlacement, getEffectivePlacementSizeMm } from "../domain/p
 import {
   arrangeOnWall,
   insetForGap,
-  solveEqualArrangement
+  slideGroupToEdgeInset,
+  solveEqualArrangement,
+  spaceGroupAboutCenter
 } from "../domain/placement/arrangeOnWall";
 import type { PlacementWarning } from "../domain/placement/validatePlacement";
 import {
@@ -69,6 +71,13 @@ export type ArrangeSession = {
   originalById: Record<string, { xMm: number; yMm: number }>;
   previewById: Record<string, { xMm: number; yMm: number }>;
   mode: "equal" | "inset" | "gap";
+  // Which wall edge the "From wall edges" (inset) mode measures from. "both"
+  // keeps the group centred (the original symmetric solve); "left"/"right"
+  // slide the group as a rigid unit so the named outer edge sits a given
+  // distance from that wall edge, preserving interior spacing. Only meaningful
+  // while mode === "inset", but carried on the session so switching mode and
+  // back remembers it. See lastInsetAnchor for the idle default.
+  insetAnchor: "left" | "both" | "right";
 };
 
 // An entry may carry either half, or both. A pure geometry/metadata edit
@@ -125,6 +134,10 @@ type AppState = {
   // panel opens in the mode the curator last worked in. Updated whenever a
   // session begins or changes mode.
   lastArrangeMode: "equal" | "inset" | "gap";
+  // The wall edge the "From wall edges" mode should measure from when there's
+  // no live session — plain view state (not undoable, not persisted), mirroring
+  // lastArrangeMode. Updated whenever a session's anchor is set or changed.
+  lastInsetAnchor: "left" | "both" | "right";
   viewMode: ViewMode;
   saveState: "idle" | "saving" | "saved" | "error";
   error: string | null;
@@ -211,8 +224,15 @@ type AppState = {
   ) => Promise<void>;
   // Ephemeral arrange session (live preview → single commit). See ArrangeSession.
   beginArrangeSession: (mode: ArrangeSession["mode"]) => void;
+  // Sets which wall edge the inset mode measures from, WITHOUT moving anything
+  // (mirrors how switching mode never jumps the works). Updates the live
+  // session's anchor when one is open, and always the remembered default.
+  setArrangeAnchor: (anchor: ArrangeSession["insetAnchor"]) => void;
   updateArrangeSession: (
-    params: { insetMm: number } | { gapMm: number } | { equal: true }
+    params:
+      | { insetMm: number; anchor?: ArrangeSession["insetAnchor"] }
+      | { gapMm: number }
+      | { equal: true }
   ) => void;
   setArrangeSessionPreview: (moves: { id: string; xMm: number; yMm: number }[]) => void;
   commitArrangeSession: (allowOverlap?: boolean) => void;
@@ -486,6 +506,7 @@ export function createAppStore(deps: AppStoreDeps) {
       selectedObjectIds: [],
       arrangeSession: null,
       lastArrangeMode: "inset",
+      lastInsetAnchor: "both",
       viewMode: "plan",
       saveState: "idle",
       error: null,
@@ -1762,10 +1783,28 @@ export function createAppStore(deps: AppStoreDeps) {
             memberIds,
             originalById,
             previewById,
-            mode
+            mode,
+            // A fresh session opens on the remembered anchor; switching mode
+            // and back keeps whatever the session already carried.
+            insetAnchor: get().lastInsetAnchor
           },
           lastArrangeMode: mode
         });
+      },
+
+      setArrangeAnchor(anchor) {
+        // Pure preference change — never moves a work. The inset field only
+        // re-slides the group once its VALUE is edited (updateArrangeSession),
+        // exactly as a mode switch waits for a value before moving anything.
+        const session = get().arrangeSession;
+        if (session) {
+          set({
+            arrangeSession: { ...session, insetAnchor: anchor },
+            lastInsetAnchor: anchor
+          });
+        } else {
+          set({ lastInsetAnchor: anchor });
+        }
       },
 
       updateArrangeSession(params) {
@@ -1788,14 +1827,38 @@ export function createAppStore(deps: AppStoreDeps) {
             return preview ? { ...wallObject, xMm: preview.xMm, yMm: preview.yMm } : wallObject;
           });
 
-        const insetMm =
-          "insetMm" in params
-            ? params.insetMm
-            : "gapMm" in params
-              ? insetForGap(previewMembers, wall.lengthMm, params.gapMm)
-              : solveEqualArrangement(previewMembers, wall.lengthMm).insetMm;
+        // An inset edit resolves against the anchor the field was measured
+        // from — "both" re-solves the symmetric centred arrangement, while
+        // "left"/"right" slide the group rigidly so the named outer edge lands
+        // at the typed distance, interior spacing untouched. The anchor rides
+        // in with the value (the field knows which edge it's showing) and
+        // falls back to whatever the session already carried.
+        const insetAnchor: ArrangeSession["insetAnchor"] =
+          "insetMm" in params ? (params.anchor ?? session.insetAnchor) : session.insetAnchor;
 
-        const moves = arrangeOnWall(previewMembers, wall.lengthMm, { insetMm });
+        let moves: { id: string; xMm: number }[];
+        if ("insetMm" in params) {
+          moves =
+            insetAnchor === "both"
+              ? arrangeOnWall(previewMembers, wall.lengthMm, { insetMm: params.insetMm })
+              : slideGroupToEdgeInset(
+                  previewMembers,
+                  wall.lengthMm,
+                  insetAnchor,
+                  params.insetMm
+                );
+        } else if ("gapMm" in params) {
+          // "Between works" keeps the group's current center fixed and only
+          // changes the interior spacing — it must NOT re-center the subset on
+          // the wall (that would teleport an off-center pair toward the middle).
+          moves = spaceGroupAboutCenter(previewMembers, params.gapMm);
+        } else {
+          const insetMm = solveEqualArrangement(
+            previewMembers,
+            wall.lengthMm
+          ).insetMm;
+          moves = arrangeOnWall(previewMembers, wall.lengthMm, { insetMm });
+        }
         if (moves.length === 0) return;
 
         // x only — arranging is a horizontal move; y stays as previewed.
@@ -1808,7 +1871,11 @@ export function createAppStore(deps: AppStoreDeps) {
         const mode: ArrangeSession["mode"] =
           "insetMm" in params ? "inset" : "gapMm" in params ? "gap" : "equal";
 
-        set({ arrangeSession: { ...session, previewById, mode }, lastArrangeMode: mode });
+        set({
+          arrangeSession: { ...session, previewById, mode, insetAnchor },
+          lastArrangeMode: mode,
+          lastInsetAnchor: insetAnchor
+        });
       },
 
       setArrangeSessionPreview(moves) {

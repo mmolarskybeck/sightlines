@@ -2137,6 +2137,70 @@ input:focus-visible {
   gap: 8px;
 }
 
+/* "Measured from" anchor picker: a deliberately quieter sibling of the mode
+   tabs — text-only, single line, smaller type — so it reads as a sub-choice
+   inside "From wall edges", not a peer of the three modes above it. */
+.arrange-anchor-group {
+  display: grid;
+  gap: 5px;
+}
+
+.arrange-anchor-caption {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.arrange-anchor {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  /* Override the ui/toggle-group wrapper's inline-flex items-center gap-1 so
+     the three options sit flush in equal thirds behind one hairline box. */
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.arrange-anchor .arrange-anchor-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  /* h-8 from the toggle base is fine for one line; keep it explicit so the
+     row height doesn't drift with the font. */
+  height: 30px;
+  padding: 0 6px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 500;
+  line-height: 1.1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.arrange-anchor .arrange-anchor-item:first-child {
+  border-left: 0;
+}
+
+.arrange-anchor .arrange-anchor-item:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.arrange-anchor .arrange-anchor-item[data-state="on"] {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-weight: 650;
+}
+
 /* One locked two-line readout everywhere: a small muted label on line 1, the
    value (semibold, larger) with the "Calculated" tag inline right after it on
    line 2. Kept as one block so a screen reader reads them together. */

@@ -75,20 +75,82 @@ export function arrangeOnWall(
   });
 }
 
-// Seeds the inspector's linked fields from the CURRENT layout: inset reads
-// as the leftmost member's left-edge offset from the wall start, and gap as
-// whatever that inset forces through the shared equation. Exact once a
-// layout has been arranged; a sensible seed for a freehand layout (the two
-// values stay mutually consistent by construction either way, so the fields
-// can never disagree with what a commit would produce).
-export function getArrangeReadout(
+// Slides the whole group as a RIGID unit so one of its outer edges lands a
+// given distance from a wall edge, preserving every interior gap (x-only, a
+// single shared translation applied to every member). Unlike arrangeOnWall,
+// which re-solves the interior spacing to centre the group, this keeps the
+// hang exactly as it is and only moves it sideways.
+//
+//   side "left"  → the group's leftmost edge lands at insetMm from the wall
+//                  start:  delta = insetMm − (current leftmost left edge)
+//   side "right" → the group's rightmost edge lands at insetMm from the wall
+//                  end:    delta = (wallLengthMm − insetMm) − (current
+//                          rightmost right edge)
+//
+// The semantics are ABSOLUTE, not cumulative: calling twice with the same
+// insetMm produces no additional movement (the second delta is 0), because
+// the target edge is already there. insetMm is unclamped — a negative or
+// overflowing distance is allowed and the commit-time collision gate is what
+// catches any resulting overlap, same convention as arrangeOnWall. Returns new
+// CENTER xMm per member; yMm is untouched. Returns [] for fewer than 2 members.
+export function slideGroupToEdgeInset(
   members: WallObjectBase[],
-  wallLengthMm: number
-): { insetMm: number; gapMm: number } {
-  const insetMm = Math.min(
+  wallLengthMm: number,
+  side: "left" | "right",
+  insetMm: number
+): { id: string; xMm: number }[] {
+  if (members.length < 2) return [];
+
+  const leftEdgeMm = Math.min(
     ...members.map((member) => member.xMm - member.widthMm / 2)
   );
-  return { insetMm, gapMm: gapForInset(members, wallLengthMm, insetMm) };
+  const rightEdgeMm = Math.max(
+    ...members.map((member) => member.xMm + member.widthMm / 2)
+  );
+
+  const deltaMm =
+    side === "left"
+      ? insetMm - leftEdgeMm
+      : wallLengthMm - insetMm - rightEdgeMm;
+
+  return members.map((member) => ({ id: member.id, xMm: member.xMm + deltaMm }));
+}
+
+// Re-spaces the group in place: every interior edge-to-edge gap is set to
+// gapMm while the group's union-bounds CENTER stays exactly where it is — the
+// "Between works" curatorial move, which changes only the spacing and never
+// re-centers the hang on the wall. Members keep their left-to-right order
+// (sorted by xMm; arranging must never reshuffle the hang). x-only, yMm is
+// untouched, no clamping — a negative gapMm is allowed and the commit-time
+// collision gate catches any resulting overlap, same convention as
+// arrangeOnWall. Semantics are ABSOLUTE: calling twice with the same gapMm is
+// a no-op the second time (the center and widths are unchanged, so the run
+// lands in the same place). Needs no wallLengthMm — the wall never enters in.
+// Returns new CENTER xMm per member; returns [] for fewer than 2 members.
+export function spaceGroupAboutCenter(
+  members: WallObjectBase[],
+  gapMm: number
+): { id: string; xMm: number }[] {
+  if (members.length < 2) return [];
+
+  const sorted = [...members].sort((a, b) => a.xMm - b.xMm);
+
+  const oldLeftEdgeMm = Math.min(
+    ...members.map((member) => member.xMm - member.widthMm / 2)
+  );
+  const oldRightEdgeMm = Math.max(
+    ...members.map((member) => member.xMm + member.widthMm / 2)
+  );
+  const oldCenterMm = (oldLeftEdgeMm + oldRightEdgeMm) / 2;
+
+  const runWidthMm = sumWidthsMm(sorted) + (sorted.length - 1) * gapMm;
+
+  let cursorMm = oldCenterMm - runWidthMm / 2;
+  return sorted.map((member) => {
+    const xMm = cursorMm + member.widthMm / 2;
+    cursorMm += member.widthMm + gapMm;
+    return { id: member.id, xMm };
+  });
 }
 
 // The wall-local spans left over once every member is placed: the left
@@ -216,11 +278,16 @@ export function getNeighborAwareSegments(
 // still reads as mixed.
 const MIXED_EPSILON_MM = 0.5;
 
-// The inspector's richer readout: the same inset/gap seed as
-// getArrangeReadout (so switching modes or typing a value still starts from
-// where the layout already is), plus whether the CURRENT layout is uniform
-// enough for those single numbers to be trusted — a freeform hang shows
-// "Mixed" in the panel instead of a misleadingly precise gap or inset.
+// The inspector's richer readout, seeded from the CURRENT layout so switching
+// modes or typing a value starts from where the works already are, plus
+// whether the layout is uniform enough for those single numbers to be trusted
+// — a freeform hang shows "Mixed" in the panel instead of a misleadingly
+// precise gap or inset. Both the inset and the gap describe what is ACTUALLY
+// on the wall: insetMm is the leftmost member's left-edge offset, and gapMm is
+// the mean of the real interior edge-to-edge gaps (the single actual gap for 2
+// members). gapMm must NOT be derived from the inset via the symmetric
+// equation — for an off-center group that huge left inset forces a hugely
+// negative solved gap that has nothing to do with the real spacing.
 // gapIsMixed only makes sense with 2+ interior gaps, i.e. 3+ members (2
 // members have exactly one interior gap, which can't disagree with itself).
 export function getArrangeReadoutDetailed(
@@ -232,12 +299,20 @@ export function getArrangeReadoutDetailed(
   gapIsMixed: boolean;
   insetIsMixed: boolean;
 } {
-  const { insetMm, gapMm } = getArrangeReadout(members, wallLengthMm);
+  const insetMm = Math.min(
+    ...members.map((member) => member.xMm - member.widthMm / 2)
+  );
 
   const segments = getSpacingSegments(members, wallLengthMm);
   const interiorGapsMm = segments
     .slice(1, -1)
     .map((segment) => segment.toMm - segment.fromMm);
+
+  const gapMm =
+    interiorGapsMm.length > 0
+      ? interiorGapsMm.reduce((sum, gap) => sum + gap, 0) /
+        interiorGapsMm.length
+      : 0;
 
   const gapIsMixed =
     interiorGapsMm.length >= 2 &&

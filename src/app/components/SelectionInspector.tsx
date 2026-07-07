@@ -24,6 +24,7 @@ const IMPERIAL_STEP_MM = 12.7;
 const METRIC_STEP_MM = 10;
 
 type ArrangeMode = "equal" | "inset" | "gap";
+type InsetAnchor = "left" | "both" | "right";
 
 // Right-inspector panel for a multi-object selection (2+ placements picked in
 // the plan/elevation view). Props-driven, same discipline as
@@ -45,6 +46,7 @@ export function SelectionInspector({
   unit,
   wallName,
   onSetMode,
+  onSetAnchor,
   onArrangeValue,
   onAcceptArrange,
   onCancelArrange,
@@ -64,8 +66,16 @@ export function SelectionInspector({
   // value can be trusted.
   arrange: {
     mode: ArrangeMode;
+    // Which wall edge the "From wall edges" mode measures from. Only affects
+    // the inset-mode body; "both" is the centred default.
+    insetAnchor: InsetAnchor;
     insetMm: number;
     gapMm: number;
+    // Distance from the wall's left edge to the group's leftmost edge, and
+    // from the group's rightmost edge to the wall's right edge — the two
+    // single-sided measurements the left/right anchors edit and read back.
+    leftEdgeDistanceMm: number;
+    rightEdgeDistanceMm: number;
     insetIsMixed: boolean;
     gapIsMixed: boolean;
     equalSpacingMm: number;
@@ -73,7 +83,10 @@ export function SelectionInspector({
   } | null;
   arrangeDisabledReason?: string;
   onSetMode: (mode: ArrangeMode) => void;
-  onArrangeValue: (params: { insetMm: number } | { gapMm: number }) => void;
+  onSetAnchor: (anchor: InsetAnchor) => void;
+  onArrangeValue: (
+    params: { insetMm: number; anchor: InsetAnchor } | { gapMm: number }
+  ) => void;
   onAcceptArrange: () => void;
   onCancelArrange: () => void;
   onRemoveAll: () => void;
@@ -164,23 +177,103 @@ export function SelectionInspector({
               </div>
             ) : arrange.mode === "inset" ? (
               <div className="arrange-mode-body">
-                <LengthField
-                  compact
-                  label="Distance from each wall edge"
-                  valueMm={arrange.insetMm}
-                  displayUnit={displayUnit}
-                  parseUnit={parseUnit}
-                  placeholder={placeholder}
-                  stepMm={stepMm}
-                  onCommit={(insetMm) => onArrangeValue({ insetMm })}
-                  onEnterWhenClean={onAcceptArrange}
-                />
-                <ArrangeCalculatedReadout
-                  label="Distance between works"
-                  value={arrange.gapIsMixed ? "Mixed" : formatValue(arrange.gapMm)}
-                  isMixed={arrange.gapIsMixed}
-                />
-                <p className="field-hint">The group stays centered.</p>
+                <div className="arrange-anchor-group">
+                  <span className="arrange-anchor-caption" id="arrange-anchor-caption">
+                    Measured from
+                  </span>
+                  <ToggleGroup
+                    aria-labelledby="arrange-anchor-caption"
+                    className="arrange-anchor"
+                    // A quieter, text-only sibling of the mode tabs — Radix
+                    // roving tabindex gives arrow-key nav for free.
+                    orientation="horizontal"
+                    type="single"
+                    value={arrange.insetAnchor}
+                    onValueChange={(value) => {
+                      // Same re-click guard as the mode toggle: a single
+                      // ToggleGroup fires "" when the active item is clicked
+                      // again, so re-apply the current anchor instead of
+                      // clearing to a no-anchor state.
+                      if (value === "left" || value === "both" || value === "right") {
+                        onSetAnchor(value);
+                      } else {
+                        onSetAnchor(arrange.insetAnchor);
+                      }
+                    }}
+                  >
+                    <ToggleGroupItem className="arrange-anchor-item" value="left">
+                      Left wall
+                    </ToggleGroupItem>
+                    <ToggleGroupItem className="arrange-anchor-item" value="both">
+                      Both walls
+                    </ToggleGroupItem>
+                    <ToggleGroupItem className="arrange-anchor-item" value="right">
+                      Right wall
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
+
+                {arrange.insetAnchor === "both" ? (
+                  <>
+                    <LengthField
+                      compact
+                      label="Distance from each wall edge"
+                      valueMm={arrange.insetMm}
+                      displayUnit={displayUnit}
+                      parseUnit={parseUnit}
+                      placeholder={placeholder}
+                      stepMm={stepMm}
+                      onCommit={(insetMm) => onArrangeValue({ insetMm, anchor: "both" })}
+                      onEnterWhenClean={onAcceptArrange}
+                    />
+                    <ArrangeCalculatedReadout
+                      label="Distance between works"
+                      value={arrange.gapIsMixed ? "Mixed" : formatValue(arrange.gapMm)}
+                      isMixed={arrange.gapIsMixed}
+                    />
+                    <p className="field-hint">The group stays centered.</p>
+                  </>
+                ) : arrange.insetAnchor === "left" ? (
+                  <>
+                    <LengthField
+                      compact
+                      label="Distance from left wall edge"
+                      valueMm={arrange.leftEdgeDistanceMm}
+                      displayUnit={displayUnit}
+                      parseUnit={parseUnit}
+                      placeholder={placeholder}
+                      stepMm={stepMm}
+                      onCommit={(insetMm) => onArrangeValue({ insetMm, anchor: "left" })}
+                      onEnterWhenClean={onAcceptArrange}
+                    />
+                    <ArrangeCalculatedReadout
+                      label="Distance from right wall edge"
+                      value={formatValue(arrange.rightEdgeDistanceMm)}
+                      isMixed={false}
+                    />
+                    <p className="field-hint">Spacing between works stays the same.</p>
+                  </>
+                ) : (
+                  <>
+                    <LengthField
+                      compact
+                      label="Distance from right wall edge"
+                      valueMm={arrange.rightEdgeDistanceMm}
+                      displayUnit={displayUnit}
+                      parseUnit={parseUnit}
+                      placeholder={placeholder}
+                      stepMm={stepMm}
+                      onCommit={(insetMm) => onArrangeValue({ insetMm, anchor: "right" })}
+                      onEnterWhenClean={onAcceptArrange}
+                    />
+                    <ArrangeCalculatedReadout
+                      label="Distance from left wall edge"
+                      value={formatValue(arrange.leftEdgeDistanceMm)}
+                      isMixed={false}
+                    />
+                    <p className="field-hint">Spacing between works stays the same.</p>
+                  </>
+                )}
               </div>
             ) : (
               <div className="arrange-mode-body">
@@ -200,7 +293,7 @@ export function SelectionInspector({
                   value={arrange.insetIsMixed ? "Mixed" : formatValue(arrange.insetMm)}
                   isMixed={arrange.insetIsMixed}
                 />
-                <p className="field-hint">The group stays centered.</p>
+                <p className="field-hint">The group stays where it is.</p>
               </div>
             )}
 

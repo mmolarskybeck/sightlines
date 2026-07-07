@@ -9,7 +9,11 @@ import {
   PLACEHOLDER_ARTWORK_HEIGHT_MM,
   PLACEHOLDER_ARTWORK_WIDTH_MM
 } from "../domain/placement/placeArtwork";
-import { arrangeOnWall, solveEqualArrangement } from "../domain/placement/arrangeOnWall";
+import {
+  arrangeOnWall,
+  getSpacingSegments,
+  solveEqualArrangement
+} from "../domain/placement/arrangeOnWall";
 import { createSampleProject } from "../domain/sample/sampleProject";
 import { parseArtwork, parseAsset } from "../domain/schema/artworkSchema";
 import { MAX_IMPORT_JSON_LENGTH, parseProject } from "../domain/schema/projectSchema";
@@ -2037,6 +2041,97 @@ describe("app store", () => {
         expect(store.getState().undoStack).toHaveLength(undoBefore);
       });
 
+      it("setArrangeAnchor alone moves nothing (no preview change, no project touch)", async () => {
+        await threeWorksOnWall();
+        store.getState().beginArrangeSession("inset");
+        const projectBefore = store.getState().project!;
+        const previewBefore = store.getState().arrangeSession!.previewById;
+        const undoBefore = store.getState().undoStack.length;
+
+        store.getState().setArrangeAnchor("left");
+
+        const session = store.getState().arrangeSession!;
+        expect(session.insetAnchor).toBe("left");
+        // Preview object is untouched — switching the anchor never re-slides.
+        expect(session.previewById).toBe(previewBefore);
+        expect(store.getState().project).toBe(projectBefore);
+        expect(store.getState().undoStack).toHaveLength(undoBefore);
+        expect(store.getState().lastInsetAnchor).toBe("left");
+      });
+
+      it("setArrangeAnchor with no session remembers lastInsetAnchor", async () => {
+        await threeWorksOnWall();
+        expect(store.getState().lastInsetAnchor).toBe("both");
+
+        store.getState().setArrangeAnchor("right");
+
+        expect(store.getState().arrangeSession).toBeNull();
+        expect(store.getState().lastInsetAnchor).toBe("right");
+
+        // A freshly begun session opens on the remembered anchor.
+        store.getState().beginArrangeSession("inset");
+        expect(store.getState().arrangeSession!.insetAnchor).toBe("right");
+      });
+
+      it("an inset update with anchor 'left' slides the group rigidly and preserves interior gaps", async () => {
+        const { wall, a, b, c } = await threeWorksOnWall();
+        const projectBefore = store.getState().project!;
+        const membersBefore = projectBefore.wallObjects.filter((o) =>
+          [a.placementId, b.placementId, c.placementId].includes(o.id)
+        );
+        const gapsBefore = getSpacingSegments(membersBefore, wall.lengthMm)
+          .slice(1, -1)
+          .map((s) => s.toMm - s.fromMm);
+        const undoBefore = store.getState().undoStack.length;
+
+        store.getState().beginArrangeSession("inset");
+        store.getState().setArrangeAnchor("left");
+        store.getState().updateArrangeSession({ insetMm: 300, anchor: "left" });
+
+        const preview = store.getState().arrangeSession!.previewById;
+        const movedMembers = membersBefore.map((m) => ({
+          ...m,
+          xMm: preview[m.id].xMm
+        }));
+        // Leftmost edge now sits at 300mm from the wall start.
+        const newLeftEdge = Math.min(
+          ...movedMembers.map((m) => m.xMm - m.widthMm / 2)
+        );
+        expect(newLeftEdge).toBeCloseTo(300);
+        // Interior gaps are unchanged (rigid translation).
+        const gapsAfter = getSpacingSegments(movedMembers, wall.lengthMm)
+          .slice(1, -1)
+          .map((s) => s.toMm - s.fromMm);
+        expect(gapsAfter).toEqual(gapsBefore);
+        // Every member moved by the same delta.
+        const deltas = movedMembers.map(
+          (m, i) => m.xMm - membersBefore[i].xMm
+        );
+        expect(new Set(deltas.map((d) => d.toFixed(6))).size).toBe(1);
+        // Preview only — project untouched, no undo entry yet.
+        expect(store.getState().project).toBe(projectBefore);
+        expect(store.getState().undoStack).toHaveLength(undoBefore);
+      });
+
+      it("a left-anchor session commits as exactly one 'Arrange on wall' entry", async () => {
+        const { a, b, c } = await threeWorksOnWall();
+        const undoBefore = store.getState().undoStack.length;
+
+        store.getState().beginArrangeSession("inset");
+        store.getState().setArrangeAnchor("left");
+        store.getState().updateArrangeSession({ insetMm: 300, anchor: "left" });
+        const preview = store.getState().arrangeSession!.previewById;
+        store.getState().commitArrangeSession();
+
+        const state = store.getState();
+        expect(state.undoStack).toHaveLength(undoBefore + 1);
+        expect(state.undoStack.at(-1)?.label).toBe("Arrange on wall");
+        expect(state.arrangeSession).toBeNull();
+        for (const id of [a.placementId, b.placementId, c.placementId]) {
+          expect(xById(id)).toBeCloseTo(preview[id].xMm);
+        }
+      });
+
       it("commitArrangeSession applies the preview as exactly one 'Arrange on wall' entry and clears the session", async () => {
         const { wall, a, b, c } = await threeWorksOnWall();
         const undoBefore = store.getState().undoStack.length;
@@ -2187,6 +2282,61 @@ describe("app store", () => {
         expect(state.error).toMatch(/overlap/i);
         expect(state.undoStack).toHaveLength(undoBefore);
         expect(xById(a.placementId)).toBe(500);
+      });
+
+      it("a gap-mode update on an off-center pair re-spaces about the pair's center without recentering on the wall", async () => {
+        // Repro of the reported bug's fix: select only the right-hand 2 of 4
+        // works (the pair hangs well right of wall center). Editing the spacing
+        // must keep the pair where it is, moving each work by half the gap
+        // delta in opposite directions — NOT teleport the pair to wall center.
+        const wallId = getSelectedWall(
+          store.getState().project!,
+          store.getState().selectedWallId
+        )!.id;
+        await store.getState().resizeWall(wallId, 4724.4); // ~15'6"
+        await placeArtworkOnWall(800, 1450, 400);
+        await placeArtworkOnWall(1600, 1450, 400);
+        const c = await placeArtworkOnWall(3000, 1450, 400);
+        const d = await placeArtworkOnWall(3800, 1450, 400);
+        store.getState().setObjectSelection([c.placementId, d.placementId]);
+
+        const wall = getSelectedWall(store.getState().project!, wallId)!;
+        const w = 400;
+        const cx0 = xById(c.placementId);
+        const dx0 = xById(d.placementId);
+        const oldGap = dx0 - w / 2 - (cx0 + w / 2);
+        const oldCenter = (cx0 - w / 2 + (dx0 + w / 2)) / 2;
+        const undoBefore = store.getState().undoStack.length;
+
+        store.getState().beginArrangeSession("gap");
+        const newGap = 200;
+        store.getState().updateArrangeSession({ gapMm: newGap });
+
+        const preview = store.getState().arrangeSession!.previewById;
+        const cx1 = preview[c.placementId].xMm;
+        const dx1 = preview[d.placementId].xMm;
+
+        // Interior gap is now exactly the requested value.
+        expect(dx1 - w / 2 - (cx1 + w / 2)).toBeCloseTo(newGap);
+        // The pair's union center is preserved — no recentering on the wall.
+        const newCenter = (cx1 - w / 2 + (dx1 + w / 2)) / 2;
+        expect(newCenter).toBeCloseTo(oldCenter);
+        // And it emphatically did NOT jump toward the wall's midpoint.
+        expect(Math.abs(newCenter - wall.lengthMm / 2)).toBeGreaterThan(500);
+        // Each work moved by half the gap delta, in opposite directions.
+        const delta = newGap - oldGap;
+        expect(cx1 - cx0).toBeCloseTo(-delta / 2);
+        expect(dx1 - dx0).toBeCloseTo(delta / 2);
+        // Preview only — project untouched.
+        expect(store.getState().undoStack).toHaveLength(undoBefore);
+
+        // Commit yields exactly one "Arrange on wall" entry.
+        store.getState().commitArrangeSession();
+        const state = store.getState();
+        expect(state.undoStack).toHaveLength(undoBefore + 1);
+        expect(state.undoStack.at(-1)?.label).toBe("Arrange on wall");
+        expect(xById(c.placementId)).toBeCloseTo(cx1);
+        expect(xById(d.placementId)).toBeCloseTo(dx1);
       });
     });
   });
