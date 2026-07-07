@@ -1669,8 +1669,9 @@ body.panels-resizing * {
 }
 
 /* Keep a wheel-pan gesture from escaping to the browser's history back-swipe
-   (trackpad) or rubber-banding the page. touch-action stays untouched here —
-   touch panning is a later task. */
+   (trackpad) or rubber-banding the page. The svg surfaces themselves also set
+   touch-action: none (below) so pinch/one-finger-pan gestures are ours to
+   handle rather than the browser's page zoom/scroll. */
 .drawing-surface {
   overscroll-behavior: contain;
 }
@@ -1753,6 +1754,10 @@ body.panels-resizing * {
   width: 100%;
   height: 100%;
   background: var(--bg);
+  /* Pinch, two-finger pan and one-finger canvas pan are handled in JS via
+     pointer events; opt out of the browser's own touch panning/zooming so it
+     never competes with or cancels those gestures. */
+  touch-action: none;
 }
 
 /* An armed PlanToolbar tool: the crosshair signals "click to place" the way

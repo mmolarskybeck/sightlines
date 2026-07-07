@@ -7,6 +7,7 @@ import {
   getFitBoundsViewport,
   getViewBox2D,
   panBy,
+  pinchZoomPan,
   zoomAtPoint
 } from "./viewport2d";
 import type { Size, Viewport2D, ViewBox, ZoomLimits } from "./viewport2d";
@@ -305,6 +306,118 @@ describe("panBy", () => {
     const zeroContainer: Size = { width: 0, height: 0 };
     const next = panBy(viewport, { x: 10, y: 10 }, wideContent, zeroContainer);
     expect(next).toBe(viewport);
+  });
+});
+
+describe("pinchZoomPan", () => {
+  const limits: ZoomLimits = PLAN_ZOOM_LIMITS;
+
+  function screenPositionOf(
+    viewport: Viewport2D,
+    pointMm: { xMm: number; yMm: number },
+    contentBounds: ViewBox,
+    containerPx: Size
+  ): { x: number; y: number } {
+    const { viewBox, pixelsPerMm } = getViewBox2D(viewport, contentBounds, containerPx);
+    return {
+      x: (pointMm.xMm - viewBox.x) * pixelsPerMm,
+      y: (pointMm.yMm - viewBox.y) * pixelsPerMm
+    };
+  }
+
+  const manual: Viewport2D = { mode: "manual", centerXMm: 1800, centerYMm: 900, zoom: 2 };
+  const prevMidWorld = { xMm: 1600, yMm: 700 };
+
+  it("with no midpoint movement, equals a pure zoomAtPoint about the midpoint", () => {
+    const factor = 1.4;
+    const combined = pinchZoomPan(
+      manual,
+      prevMidWorld,
+      factor,
+      { x: 0, y: 0 },
+      wideContent,
+      wideContainer,
+      limits
+    );
+    const zoomOnly = zoomAtPoint(manual, prevMidWorld, factor, wideContent, wideContainer, limits);
+    expect(combined.mode).toBe(zoomOnly.mode);
+    expect(combined.zoom).toBeCloseTo(zoomOnly.zoom, PPM_PRECISION);
+    expect(combined.centerXMm).toBeCloseTo(zoomOnly.centerXMm, MM_PRECISION);
+    expect(combined.centerYMm).toBeCloseTo(zoomOnly.centerYMm, MM_PRECISION);
+  });
+
+  it("with a unit zoom factor, equals a pure two-finger panBy of the negated midpoint delta", () => {
+    const midDelta = { x: 34, y: -22 };
+    const combined = pinchZoomPan(
+      manual,
+      prevMidWorld,
+      1,
+      midDelta,
+      wideContent,
+      wideContainer,
+      limits
+    );
+    // factor 1 on a manual viewport is an exact zoom identity, so the result
+    // must be panBy of the negated midpoint delta.
+    const panOnly = panBy(
+      manual,
+      { x: -midDelta.x, y: -midDelta.y },
+      wideContent,
+      wideContainer
+    );
+    expect(combined.centerXMm).toBeCloseTo(panOnly.centerXMm, MM_PRECISION);
+    expect(combined.centerYMm).toBeCloseTo(panOnly.centerYMm, MM_PRECISION);
+    expect(combined.zoom).toBeCloseTo(panOnly.zoom, PPM_PRECISION);
+  });
+
+  it("combined: the world point under the previous midpoint lands under the new midpoint", () => {
+    const factor = 1.6;
+    const midDelta = { x: 40, y: -25 };
+    const before = screenPositionOf(manual, prevMidWorld, wideContent, wideContainer);
+    const next = pinchZoomPan(
+      manual,
+      prevMidWorld,
+      factor,
+      midDelta,
+      wideContent,
+      wideContainer,
+      limits
+    );
+    const after = screenPositionOf(next, prevMidWorld, wideContent, wideContainer);
+
+    // zoomAtPoint pins the world point at the prev midpoint's screen position;
+    // panBy(-midDelta) then shifts the content by +midDelta on screen, so the
+    // point ends up exactly under the new (prev + delta) screen midpoint.
+    expect(after.x).toBeCloseTo(before.x + midDelta.x, MM_PRECISION);
+    expect(after.y).toBeCloseTo(before.y + midDelta.y, MM_PRECISION);
+  });
+
+  it("clamps the zoom factor but still applies the pan", () => {
+    const hugeFactor = 100000;
+    const midDelta = { x: 30, y: 18 };
+    const zoomOnly = zoomAtPoint(manual, prevMidWorld, hugeFactor, wideContent, wideContainer, limits);
+    const combined = pinchZoomPan(
+      manual,
+      prevMidWorld,
+      hugeFactor,
+      midDelta,
+      wideContent,
+      wideContainer,
+      limits
+    );
+    // Zoom is clamped identically...
+    expect(combined.zoom).toBeCloseTo(zoomOnly.zoom, PPM_PRECISION);
+    // ...and the pan is still applied on top of the clamped zoom.
+    const expected = panBy(
+      zoomOnly,
+      { x: -midDelta.x, y: -midDelta.y },
+      wideContent,
+      wideContainer
+    );
+    expect(combined.centerXMm).toBeCloseTo(expected.centerXMm, MM_PRECISION);
+    expect(combined.centerYMm).toBeCloseTo(expected.centerYMm, MM_PRECISION);
+    // The pan genuinely moved the center off the pure-zoom result.
+    expect(Math.hypot(combined.centerXMm - zoomOnly.centerXMm, combined.centerYMm - zoomOnly.centerYMm)).toBeGreaterThan(1);
   });
 });
 

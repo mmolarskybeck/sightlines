@@ -104,6 +104,31 @@ export function panBy(
   };
 }
 
+// Two-finger pinch = zoom about the finger midpoint while tracking the
+// midpoint's movement (the standard map-app "zoom+pan under the fingers"
+// feel). Composes the two primitives, in order:
+//   1. zoomAtPoint(prevMidWorldMm, factor) — holds the world point that was
+//      under the PREVIOUS midpoint at that midpoint's screen position;
+//   2. panBy(-midDeltaPx) — shifts the content so it follows the fingers as
+//      the midpoint itself moves (same negated-delta convention drag-pan uses).
+// The caller CTM-converts prevMidWorldMm (the world point under the previous
+// screen midpoint) and passes factor = nextDistPx / prevDistPx and
+// midDeltaPx = nextMidClient - prevMidClient. No new math here — the invariance
+// (world point under prev midpoint ends up under the new midpoint) falls out of
+// zoomAtPoint's fixed-point guarantee plus panBy's exact px→center shift.
+export function pinchZoomPan(
+  viewport: Viewport2D,
+  prevMidWorldMm: { xMm: number; yMm: number },
+  zoomFactor: number,
+  midDeltaPx: { x: number; y: number },
+  contentBounds: ViewBox,
+  containerPx: Size,
+  limits: ZoomLimits
+): Viewport2D {
+  const zoomed = zoomAtPoint(viewport, prevMidWorldMm, zoomFactor, contentBounds, containerPx, limits);
+  return panBy(zoomed, { x: -midDeltaPx.x, y: -midDeltaPx.y }, contentBounds, containerPx);
+}
+
 // Frame an arbitrary world-space target (powers elevation "Fit selected").
 // targetBounds: SVG-userspace mm, padding already applied by the caller.
 export function getFitBoundsViewport(

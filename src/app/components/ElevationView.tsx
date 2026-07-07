@@ -42,6 +42,7 @@ import {
   getFitBoundsViewport,
   getViewBox2D,
   panBy,
+  pinchZoomPan,
   WHEEL_ZOOM_SENSITIVITY,
   ZOOM_STEP,
   zoomAtPoint,
@@ -74,6 +75,10 @@ import {
 export { wallLocalYToSvgY };
 
 const SNAP_THRESHOLD_PX = 10;
+// A touch gesture (one-finger pan or two-finger pinch) that moves less than
+// this many client px on release is treated as a stationary tap — a background
+// tap then clears the selection; beyond it, the release is a pan/pinch.
+const TOUCH_TAP_SLOP_PX = 8;
 
 // Stable module-level reference so a caller that doesn't pass `getBlob`
 // (the pre-wiring default) doesn't retrigger useAssetImageUrls's fetch
@@ -274,6 +279,30 @@ export function ElevationView({
   // the drag gestures use for their transient state.
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
+
+  // Touch (tablet) gestures: one-finger canvas pan and two-finger pinch-zoom,
+  // mirroring PlanView's M5 wiring. Same small state machine keyed off the
+  // count of tracked touch pointers (touchPointsRef → touchModeRef →
+  // touchPanLastRef / touchPinchRef, with touchMovedPxRef distinguishing tap
+  // from pan). `touchTracking` (state) gates the window move/up effect on/off.
+  // A single finger that lands on a placement owns its own move-drag — touchMode
+  // stays "idle" and these handlers keep out of its way.
+  const touchPointsRef = useRef(new Map<number, { x: number; y: number }>());
+  const touchModeRef = useRef<"idle" | "pan" | "pinch">("idle");
+  const touchPanLastRef = useRef<{ x: number; y: number } | null>(null);
+  const touchPinchRef = useRef<{
+    idA: number;
+    idB: number;
+    prevMid: { x: number; y: number };
+    prevDist: number;
+  } | null>(null);
+  const touchMovedPxRef = useRef(0);
+  // True once a one-finger pan begins on true background — so a stationary
+  // release clears the selection (elevation has no svg click handler, so the
+  // clear can't ride a trailing click the way it does in plan). Stays false for
+  // a finger that started on a placement, so tapping one still just selects it.
+  const touchPanTapCandidateRef = useRef(false);
+  const [touchTracking, setTouchTracking] = useState(false);
 
   // Pad the viewBox so the wall reads as a figure on the canvas field
   // rather than bleeding edge-to-edge, and so boundary strokes (centered on
@@ -549,6 +578,159 @@ export function ElevationView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panning, onViewportChange]);
 
+  // Begin a two-finger pinch from the two currently tracked touch pointers.
+  // Ends any in-flight one-finger pan (pinch owns the gesture from here).
+  function beginPinch() {
+    const entries = [...touchPointsRef.current.entries()];
+    if (entries.length < 2) return;
+    const [idA, a] = entries[0];
+    const [idB, b] = entries[1];
+    touchModeRef.current = "pinch";
+    touchPanLastRef.current = null;
+    touchPanTapCandidateRef.current = false;
+    touchPinchRef.current = {
+      idA,
+      idB,
+      prevMid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+      prevDist: Math.max(Math.hypot(a.x - b.x, a.y - b.y), 0)
+    };
+  }
+
+  // Begin a one-finger canvas pan (touch only). Called from the svg's
+  // bubble-phase pointerdown, which only fires for a press on true background
+  // (a placement's pointerdown stopPropagation keeps it from reaching here —
+  // that touch stays a move-drag instead).
+  function beginTouchPan(clientX: number, clientY: number) {
+    touchModeRef.current = "pan";
+    touchPanLastRef.current = { x: clientX, y: clientY };
+    touchPanTapCandidateRef.current = true;
+  }
+
+  // Touch move/up/cancel/blur, subscribed once while ≥1 touch is tracked
+  // (keyed on `touchTracking`), reading live state via the touch refs — the
+  // same discipline the mouse-pan effect uses. viewport is read fresh via
+  // viewportRef; contentBounds/containerSize are captured by closure and can't
+  // change mid-gesture (no commit, no wall switch while fingers are down).
+  useEffect(() => {
+    if (!touchTracking) return;
+
+    function onPointerMove(event: PointerEvent) {
+      if (event.pointerType !== "touch") return;
+      const points = touchPointsRef.current;
+      if (!points.has(event.pointerId)) return;
+      points.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+      if (touchModeRef.current === "pan") {
+        const last = touchPanLastRef.current;
+        if (!last) return;
+        const dx = event.clientX - last.x;
+        const dy = event.clientY - last.y;
+        touchMovedPxRef.current += Math.hypot(dx, dy);
+        onViewportChange(
+          panBy(viewportRef.current, { x: -dx, y: -dy }, contentBounds, containerSize)
+        );
+        touchPanLastRef.current = { x: event.clientX, y: event.clientY };
+        return;
+      }
+
+      if (touchModeRef.current === "pinch") {
+        const pinch = touchPinchRef.current;
+        if (!pinch) return;
+        const a = points.get(pinch.idA);
+        const b = points.get(pinch.idB);
+        if (!a || !b) return;
+        const nextMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        const nextDist = Math.hypot(a.x - b.x, a.y - b.y);
+        const midDelta = { x: nextMid.x - pinch.prevMid.x, y: nextMid.y - pinch.prevMid.y };
+        if (pinch.prevDist > 0 && nextDist > 0) {
+          const factor = nextDist / pinch.prevDist;
+          // World point under the PREVIOUS midpoint, via the live CTM in plain
+          // SVG userspace (toSvgPoint, not the y-flipped toWallLocalMm) — the
+          // same anchor space the wheel-zoom handler uses.
+          const prevMidWorld = toSvgPoint(pinch.prevMid.x, pinch.prevMid.y);
+          if (prevMidWorld) {
+            touchMovedPxRef.current +=
+              Math.hypot(midDelta.x, midDelta.y) + Math.abs(nextDist - pinch.prevDist);
+            onViewportChange(
+              pinchZoomPan(
+                viewportRef.current,
+                prevMidWorld,
+                factor,
+                midDelta,
+                contentBounds,
+                containerSize,
+                ELEVATION_ZOOM_LIMITS
+              )
+            );
+          }
+        }
+        pinch.prevMid = nextMid;
+        pinch.prevDist = nextDist;
+      }
+    }
+
+    function onPointerUp(event: PointerEvent) {
+      if (event.pointerType !== "touch") return;
+      const points = touchPointsRef.current;
+      if (!points.has(event.pointerId)) return;
+      points.delete(event.pointerId);
+
+      if (touchModeRef.current === "pinch") {
+        const pinch = touchPinchRef.current;
+        // Only a lift of one of the two pinch fingers ends the pinch; a 3rd
+        // finger lifting leaves it running. A 2→1 lift never hands off to a new
+        // pan — the lone remaining finger idles until a fresh touch-down.
+        if (pinch && (event.pointerId === pinch.idA || event.pointerId === pinch.idB)) {
+          touchModeRef.current = "idle";
+          touchPinchRef.current = null;
+        }
+      } else if (touchModeRef.current === "pan") {
+        touchModeRef.current = "idle";
+        touchPanLastRef.current = null;
+      }
+
+      if (points.size === 0) {
+        // Whole gesture over. A stationary one-finger background tap clears the
+        // selection — elevation has no svg click handler, so unlike plan this
+        // can't ride a trailing click. A real pan/pinch, or a finger that
+        // started on a placement, leaves the selection alone.
+        if (
+          touchMovedPxRef.current <= TOUCH_TAP_SLOP_PX &&
+          touchPanTapCandidateRef.current
+        ) {
+          onClearSelection?.();
+        }
+        touchMovedPxRef.current = 0;
+        touchPanTapCandidateRef.current = false;
+        setTouchTracking(false);
+      }
+    }
+
+    function onBlur() {
+      // Losing the window (⌘Tab, notification) mid-gesture would otherwise
+      // strand tracked pointers — reset everything.
+      touchPointsRef.current.clear();
+      touchModeRef.current = "idle";
+      touchPanLastRef.current = null;
+      touchPinchRef.current = null;
+      touchMovedPxRef.current = 0;
+      touchPanTapCandidateRef.current = false;
+      setTouchTracking(false);
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+      window.removeEventListener("blur", onBlur);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [touchTracking, onViewportChange, onClearSelection]);
+
   // Capture-phase pan intercept: space-held (left button) or middle-mouse
   // press claims the gesture BEFORE any of ElevationView's own gestures
   // (move-drag via beginMoveDrag, the background marquee via beginMarquee,
@@ -561,6 +743,34 @@ export function ElevationView({
   // beginMoveDrag/beginMarquee from ever firing for this gesture; it also
   // kills middle-click autoscroll.
   function handleSvgPointerDownCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    // Touch pointers feed the pinch/pan state machine (mirrors PlanView). This
+    // capture-phase handler fires before any placement's own pointerdown, so
+    // every touch is recorded regardless of what it lands on. The 2nd finger
+    // claims the gesture as a pinch (unless a move-drag is already in flight, in
+    // which case we defer to that edit and just block the finger), stopping
+    // propagation so no placement under it starts its own move-drag.
+    if (event.pointerType === "touch") {
+      const points = touchPointsRef.current;
+      const isFirst = points.size === 0;
+      points.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (isFirst) {
+        touchMovedPxRef.current = 0;
+        touchPanTapCandidateRef.current = false;
+      }
+      setTouchTracking(true);
+      if (points.size === 2) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!moveDragRef.current) beginPinch();
+        return;
+      }
+      if (points.size >= 3) return; // ignore 3rd+ touches
+      // A single touch falls through; whether it becomes a pan is decided in
+      // beginMarquee (bubble). A finger on a placement never reaches beginMarquee
+      // (the placement stopPropagation), so it stays a move-drag.
+      return;
+    }
+
     if (spaceHeldRef.current || event.button === 1) {
       event.preventDefault();
       event.stopPropagation();
@@ -830,6 +1040,18 @@ export function ElevationView({
   }, [marquee]);
 
   function beginMarquee(event: ReactPointerEvent<SVGSVGElement>) {
+    // Touch: a single finger on true background pans the canvas instead of
+    // marqueeing (the marquee is a mouse-only gesture on tablets). Only the sole
+    // tracked touch starts a pan — a pinch's touches were already claimed in the
+    // capture handler. Returns unconditionally for touch so a finger never falls
+    // through into the marquee path below.
+    if (event.pointerType === "touch") {
+      if (touchPointsRef.current.size === 1 && touchModeRef.current !== "pinch") {
+        beginTouchPan(event.clientX, event.clientY);
+      }
+      return;
+    }
+
     // Only true background reaches here: placements/openings stopPropagation in
     // their own pointerdown. Gated on the multi-select handlers being wired so
     // that pre-wiring a background press stays inert (no marquee, no clear),
