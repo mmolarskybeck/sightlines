@@ -214,6 +214,51 @@ describe("app store", () => {
     expect(store.getState().undoStack).toHaveLength(1);
   });
 
+  it("resizeRoomHeight updates the room and every wall in that room", async () => {
+    const nextHeightMm = feetToMm(10);
+
+    await store.getState().resizeRoomHeight("room-main", nextHeightMm);
+
+    const room = store.getState().project!.floor.rooms[0].room;
+    expect(room.heightMm).toBeCloseTo(nextHeightMm);
+    expect(room.walls.map((wall) => wall.heightMm)).toEqual(
+      room.walls.map(() => nextHeightMm)
+    );
+    expect(store.getState().undoStack.at(-1)?.label).toBe("Resize room height");
+  });
+
+  it("resizeRoomHeight surfaces placement warnings for objects above the new height", async () => {
+    const project = store.getState().project!;
+    store.setState({
+      project: {
+        ...project,
+        wallObjects: [
+          {
+            id: "high-blocked-zone",
+            wallId: "wall-north",
+            kind: "blocked-zone",
+            blocksPlacement: true,
+            xMm: feetToMm(4),
+            yMm: feetToMm(11),
+            widthMm: feetToMm(2),
+            heightMm: feetToMm(2)
+          }
+        ]
+      }
+    });
+
+    await store.getState().resizeRoomHeight("room-main", feetToMm(10));
+
+    expect(
+      store.getState().placementWarnings.some(
+        (warning) =>
+          warning.wallObjectId === "high-blocked-zone" &&
+          warning.type === "bounds" &&
+          warning.message === "Placement is outside the wall height."
+      )
+    ).toBe(true);
+  });
+
   it("a new edit clears the redo stack", async () => {
     await store.getState().resizeSelectedWall(10_000);
     await store.getState().undo();

@@ -154,6 +154,7 @@ export function App() {
     deleteRoom,
     setUnit,
     resizeSelectedWall,
+    resizeRoomHeight,
     resizeWall,
     moveRoom,
     undo,
@@ -503,6 +504,12 @@ export function App() {
   ]);
 
   const selectedWall = project ? getSelectedWall(project, selectedWallId) : null;
+  const selectedWallRoomPlacement =
+    project && selectedWall
+      ? (project.floor.rooms.find((placement) =>
+          placement.room.walls.some((wall) => wall.id === selectedWall.id)
+        ) ?? null)
+      : null;
   const wallDimensionLink =
     project && selectedWall
       ? getWallDimensionLink(project, selectedWall.id)
@@ -1399,6 +1406,9 @@ export function App() {
                   ? resizeWall(selectedRoomDimensions.depthWallId, lengthMm)
                   : Promise.resolve()
               }
+              onCommitHeight={(heightMm) =>
+                resizeRoomHeight(selectedRoomPlacement.roomId, heightMm)
+              }
             />
           ) : selectedWall ? (
             <WallInspector
@@ -1410,7 +1420,13 @@ export function App() {
               dimensionLink={wallDimensionLink}
               lastGeometryEdit={lastGeometryEdit}
               onAddOpening={(kind) => void addOpening(selectedWall.id, kind)}
+              onCommitHeight={(heightMm) =>
+                selectedWallRoomPlacement
+                  ? resizeRoomHeight(selectedWallRoomPlacement.roomId, heightMm)
+                  : Promise.resolve()
+              }
               onCommitLength={resizeSelectedWall}
+              roomName={selectedWallRoomPlacement?.room.name ?? "this room"}
               unit={project.unit}
               wallHeightMm={selectedWall.heightMm}
               wallLengthMm={selectedWall.lengthMm}

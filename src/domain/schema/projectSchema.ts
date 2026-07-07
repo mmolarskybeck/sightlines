@@ -8,7 +8,8 @@ export const dimensionsSchema = z.object({
   heightMm: z.number().positive().optional(),
   depthMm: z.number().positive().optional(),
   status: z.enum(["known", "approximate", "unknown"]),
-  displayUnit: displayUnitSchema.optional()
+  displayUnit: displayUnitSchema.optional(),
+  aspectLocked: z.boolean().optional()
 });
 
 const wallObjectBaseSchema = z.object({

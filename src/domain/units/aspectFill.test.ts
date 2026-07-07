@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Dimensions } from "../project";
-import { applyAspectFill, imageAspectRatio } from "./aspectFill";
+import { applyAspectFill, imageAspectRatio, isAspectLocked } from "./aspectFill";
 
 // A 3:2 landscape image (e.g. 3000×2000 px) — ratio 1.5.
 const LANDSCAPE = { widthPx: 3000, heightPx: 2000 };
@@ -31,18 +31,21 @@ describe("applyAspectFill", () => {
     const next = applyAspectFill(dims(), "widthMm", 300, LANDSCAPE);
     expect(next.widthMm).toBe(300);
     expect(next.heightMm).toBe(200); // 300 / 1.5
+    expect(next.aspectLocked).toBe(true);
   });
 
   it("derives width from height when the other axis is empty", () => {
     const next = applyAspectFill(dims(), "heightMm", 200, LANDSCAPE);
     expect(next.heightMm).toBe(200);
     expect(next.widthMm).toBe(300); // 200 × 1.5
+    expect(next.aspectLocked).toBe(true);
   });
 
-  it("re-derives the counterpart when the previous pair matched the ratio", () => {
-    // Existing 300×200 matches 1.5; editing width to 600 should pull height to 400.
+  it("re-derives the counterpart when the pair is explicitly locked", () => {
+    // Existing 300×200 matches 1.5 and is locked; editing width to 600
+    // should pull height to 400.
     const next = applyAspectFill(
-      dims({ widthMm: 300, heightMm: 200 }),
+      dims({ widthMm: 300, heightMm: 200, aspectLocked: true }),
       "widthMm",
       600,
       LANDSCAPE
@@ -50,8 +53,9 @@ describe("applyAspectFill", () => {
     expect(next.heightMm).toBe(400);
   });
 
-  it("re-derives when the previous pair matched within rounding tolerance", () => {
-    // 305×200 is ~1.525, within the 2% slack of 1.5 — treated as a match.
+  it("re-derives via the legacy tolerance fallback when aspectLocked is unset", () => {
+    // Pre-existing data with no aspectLocked field: 305×200 is ~1.525, within
+    // the 2% slack of 1.5, so isAspectLocked's fallback treats it as locked.
     const next = applyAspectFill(
       dims({ widthMm: 305, heightMm: 200 }),
       "widthMm",
@@ -61,9 +65,10 @@ describe("applyAspectFill", () => {
     expect(next.heightMm).toBe(400);
   });
 
-  it("preserves a deliberately off-ratio counterpart", () => {
-    // Existing 300×500 is nowhere near 1.5 (a tall mat) — editing width must
-    // not clobber the curator's height.
+  it("preserves a deliberately off-ratio counterpart (legacy fallback, no match)", () => {
+    // Existing 300×500 is nowhere near 1.5 (a tall mat) and has no explicit
+    // aspectLocked — the fallback heuristic sees no match, so editing width
+    // must not clobber the curator's height.
     const next = applyAspectFill(
       dims({ widthMm: 300, heightMm: 500 }),
       "widthMm",
@@ -72,6 +77,21 @@ describe("applyAspectFill", () => {
     );
     expect(next.widthMm).toBe(600);
     expect(next.heightMm).toBe(500);
+  });
+
+  it("never re-derives when explicitly unlocked, even if the pair still matches the ratio", () => {
+    // Regression test: a curator auto-derived 300×200 (matches 1.5), then
+    // unlocked it to enter a real, mismatched height. Before this fix,
+    // committing height would clobber the already-correct width because the
+    // pre-commit pair still matched the ratio.
+    const next = applyAspectFill(
+      dims({ widthMm: 300, heightMm: 200, aspectLocked: false }),
+      "heightMm",
+      220,
+      LANDSCAPE
+    );
+    expect(next.heightMm).toBe(220);
+    expect(next.widthMm).toBe(300);
   });
 
   it("never derives from or into depth", () => {
@@ -110,5 +130,44 @@ describe("applyAspectFill", () => {
     });
     // 100 / (700/500) = 100 / 1.4 = 71.4285… → 71.43
     expect(next.heightMm).toBe(71.43);
+  });
+});
+
+describe("isAspectLocked", () => {
+  it("honors an explicit true regardless of whether the pair matches", () => {
+    expect(
+      isAspectLocked(
+        dims({ widthMm: 300, heightMm: 500, aspectLocked: true }),
+        LANDSCAPE
+      )
+    ).toBe(true);
+  });
+
+  it("honors an explicit false regardless of whether the pair matches", () => {
+    expect(
+      isAspectLocked(
+        dims({ widthMm: 300, heightMm: 200, aspectLocked: false }),
+        LANDSCAPE
+      )
+    ).toBe(false);
+  });
+
+  it("falls back to tolerance-matching when aspectLocked is unset", () => {
+    expect(isAspectLocked(dims({ widthMm: 300, heightMm: 200 }), LANDSCAPE)).toBe(
+      true
+    );
+    expect(isAspectLocked(dims({ widthMm: 300, heightMm: 500 }), LANDSCAPE)).toBe(
+      false
+    );
+  });
+
+  it("falls back to false when unset and there is no usable image ratio", () => {
+    expect(isAspectLocked(dims(), {})).toBe(false);
+  });
+
+  it("honors an explicit true even with no usable image ratio", () => {
+    // The caller (ArtworkInspector) is expected to gate the lock UI on
+    // imageAspectRatio itself; isAspectLocked just reports the stored intent.
+    expect(isAspectLocked(dims({ aspectLocked: true }), {})).toBe(true);
   });
 });

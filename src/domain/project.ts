@@ -10,6 +10,11 @@ export type Dimensions = {
   depthMm?: number;
   status: "known" | "approximate" | "unknown";
   displayUnit?: DisplayUnit;
+  // Explicit curator choice: whether editing width/height should
+  // proportionally scale the other to match the image's aspect ratio.
+  // Undefined (legacy records) falls back to a tolerance-based heuristic —
+  // see isAspectLocked in domain/units/aspectFill.ts.
+  aspectLocked?: boolean;
 };
 
 export type Artwork = {

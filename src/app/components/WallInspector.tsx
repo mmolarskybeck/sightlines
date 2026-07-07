@@ -25,7 +25,9 @@ export function WallInspector({
   dimensionLink,
   lastGeometryEdit,
   onAddOpening,
+  onCommitHeight,
   onCommitLength,
+  roomName,
   unit,
   wallHeightMm,
   wallLengthMm,
@@ -39,7 +41,9 @@ export function WallInspector({
     changedWallIds: string[];
   } | null;
   onAddOpening: (kind: OpeningKind) => void;
+  onCommitHeight: (heightMm: number) => Promise<void>;
   onCommitLength: (lengthMm: number) => Promise<void>;
+  roomName: string;
   unit: DisplayUnit;
   wallHeightMm: number;
   wallLengthMm: number;
@@ -73,6 +77,25 @@ export function WallInspector({
         // focused. An error, when present, takes precedence.
         focusHint={"Accepts 28', 28 ft, 336\", 853.4 cm, or 8.53 m."}
       />
+      <div className="artwork-dimensions">
+        <div className="artwork-dimensions-heading">
+          <h3>Room height</h3>
+        </div>
+        <LengthField
+          positiveOnly
+          label="Height"
+          valueMm={wallHeightMm}
+          displayUnit={wallScope.displayUnit}
+          parseUnit={wallScope.parseUnit}
+          placeholder={wallPlaceholder}
+          onCommit={onCommitHeight}
+          commitErrorFallback="Could not resize this room's walls."
+          focusHint={"Accepts 12', 12 ft, 144\", 365.8 cm, or 3.66 m."}
+        />
+        <p className="field-hint">
+          Applies to every wall in {roomName}.
+        </p>
+      </div>
       {dimensionLink ? (
         <div className="constraint-panel" aria-label="Linked rectangle dimension">
           <LinkIcon aria-hidden="true" size={17} />
@@ -144,10 +167,6 @@ export function WallInspector({
       </div>
 
       <dl className="property-list compact">
-        <div>
-          <dt>Height</dt>
-          <dd>{formatLength(wallHeightMm, { unit: wallScope.displayUnit })}</dd>
-        </div>
         <div>
           <dt>Centerline</dt>
           <dd>

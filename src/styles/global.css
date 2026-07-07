@@ -2128,6 +2128,16 @@ body.panels-resizing * {
   gap: 20px;
 }
 
+/* An artwork selection can stack up to three independent forms — its own
+   inspector-form, then (when placed) a wall- or floor-position form beneath
+   it — as siblings rather than one form (see ArtworkInspector.tsx / App.tsx).
+   .inspector-zone has no gap of its own, so without this the second form's
+   content would butt directly against the first with ~4px at most; this
+   restores the same 20px section rhythm .inspector-form uses internally. */
+.inspector-form + .inspector-form {
+  margin-top: 20px;
+}
+
 /* Groups related fields into one tight cluster (identity, registrar, etc.)
    within the more generous 20px rhythm of .inspector-form. */
 .field-group {
@@ -2299,8 +2309,34 @@ body.panels-resizing * {
 
 .artwork-dimensions-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* Width | lock toggle | Height | Depth — the lock column is a fixed slim
+     track so Width/Height/Depth stay evenly sized whether or not the toggle
+     renders (see artwork-dimensions-lock, always present as button or
+     spacer). */
+  grid-template-columns: 1fr auto 1fr 1fr;
+  align-items: end;
   gap: 8px;
+}
+
+.artwork-dimensions-lock {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.artwork-dimensions-lock:hover {
+  color: var(--foreground);
+}
+
+.artwork-dimensions-lock[aria-pressed="true"] {
+  color: var(--foreground);
 }
 
 /* Artwork inspector header: an aspect-true thumbnail beside the identity

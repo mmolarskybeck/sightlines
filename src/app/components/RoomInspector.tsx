@@ -1,7 +1,11 @@
 import type { DisplayUnit } from "../../domain/project";
 import type { RectangleRoomDimensions } from "../../domain/geometry/walls";
-import { formatLength } from "../../domain/units/length";
-import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
+import {
+  getPlaceholderForScope,
+  getScopeUnits,
+  unitSystemFromDisplayUnit
+} from "../../domain/units/unitSystem";
+import { LengthField } from "./LengthField";
 import { RoomDimensionFields } from "./RoomDimensionFields";
 
 export function RoomInspector({
@@ -13,6 +17,7 @@ export function RoomInspector({
   unit,
   wallCount,
   onCommitDepth,
+  onCommitHeight,
   onCommitWidth
 }: {
   artworkCount: number;
@@ -23,10 +28,12 @@ export function RoomInspector({
   unit: DisplayUnit;
   wallCount: number;
   onCommitDepth: (lengthMm: number) => Promise<void>;
+  onCommitHeight: (heightMm: number) => Promise<void>;
   onCommitWidth: (lengthMm: number) => Promise<void>;
 }) {
   const system = unitSystemFromDisplayUnit(unit);
-  const wallUnit = getScopeUnits(system, "wall").displayUnit;
+  const { displayUnit, parseUnit } = getScopeUnits(system, "wall");
+  const placeholder = getPlaceholderForScope(system, "wall");
 
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
@@ -55,6 +62,26 @@ export function RoomInspector({
         </div>
       )}
 
+      <div className="artwork-dimensions">
+        <div className="artwork-dimensions-heading">
+          <h3>Wall height</h3>
+        </div>
+        <LengthField
+          positiveOnly
+          label="Height"
+          valueMm={roomHeightMm}
+          displayUnit={displayUnit}
+          parseUnit={parseUnit}
+          placeholder={placeholder}
+          onCommit={onCommitHeight}
+          commitErrorFallback="Could not resize this room's walls."
+          focusHint={"Accepts 12', 12 ft, 144\", 365.8 cm, or 3.66 m."}
+        />
+        <p className="field-hint">
+          Applies to all {wallCount} wall{wallCount === 1 ? "" : "s"} in {roomName}.
+        </p>
+      </div>
+
       <dl className="property-list compact">
         <div>
           <dt>Objects</dt>
@@ -67,10 +94,6 @@ export function RoomInspector({
         <div>
           <dt>Walls</dt>
           <dd>{wallCount}</dd>
-        </div>
-        <div>
-          <dt>Wall height</dt>
-          <dd>{formatLength(roomHeightMm, { unit: wallUnit })}</dd>
         </div>
       </dl>
     </form>

@@ -187,6 +187,7 @@ type AppState = {
   deleteRoom: (roomId: string) => Promise<void>;
   setUnit: (unit: DisplayUnit) => Promise<void>;
   addRectangleRoom: () => Promise<void>;
+  resizeRoomHeight: (roomId: string, heightMm: number) => Promise<void>;
   resizeWall: (wallId: string, lengthMm: number, anchor?: ResizeAnchor) => Promise<void>;
   resizeSelectedWall: (lengthMm: number) => Promise<void>;
   moveRoom: (roomId: string, offsetXMm: number, offsetYMm: number) => Promise<void>;
@@ -835,6 +836,55 @@ export function createAppStore(deps: AppStoreDeps) {
             viewMode: "plan"
           }
         );
+      },
+
+      async resizeRoomHeight(roomId, heightMm) {
+        const project = get().project;
+        if (!project) return;
+        if (!Number.isFinite(heightMm) || heightMm <= 0) {
+          throw new Error("Room height must be greater than zero.");
+        }
+
+        const roomPlacement = project.floor.rooms.find(
+          (placement) => placement.roomId === roomId
+        );
+        if (!roomPlacement) return;
+        if (
+          roomPlacement.room.heightMm === heightMm &&
+          roomPlacement.room.walls.every((wall) => wall.heightMm === heightMm)
+        ) {
+          return;
+        }
+
+        const changedWallIds = roomPlacement.room.walls.map((wall) => wall.id);
+        const nextProject: Project = {
+          ...project,
+          floor: {
+            rooms: project.floor.rooms.map((placement) =>
+              placement.roomId === roomId
+                ? {
+                    ...placement,
+                    room: {
+                      ...placement.room,
+                      heightMm,
+                      walls: placement.room.walls.map((wall) => ({
+                        ...wall,
+                        heightMm
+                      }))
+                    }
+                  }
+                : placement
+            )
+          }
+        };
+        const placementWarnings = validateChangedWallPlacements(
+          nextProject,
+          changedWallIds
+        );
+
+        await applyEdit("Resize room height", () => nextProject, {
+          placementWarnings
+        });
       },
 
       async resizeWall(wallId, lengthMm, anchor = "start") {

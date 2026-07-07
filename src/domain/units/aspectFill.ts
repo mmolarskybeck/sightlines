@@ -39,16 +39,31 @@ function pairMatchesRatio(
   return Math.abs(widthMm / heightMm - ratio) <= ratio * RATIO_MATCH_TOLERANCE;
 }
 
+// Whether committing width/height should currently scale its counterpart to
+// track the image. Honors an explicit curator choice (Dimensions.aspectLocked)
+// first; legacy records that predate the field fall back to the old
+// tolerance-match heuristic so existing data doesn't change behavior until the
+// curator actually touches the lock toggle.
+export function isAspectLocked(dimensions: Dimensions, aspect: PixelAspect): boolean {
+  if (dimensions.aspectLocked !== undefined) return dimensions.aspectLocked;
+
+  const ratio = imageAspectRatio(aspect);
+  if (ratio === undefined) return false;
+  return pairMatchesRatio(dimensions.widthMm, dimensions.heightMm, ratio);
+}
+
 // Returns the next Dimensions after committing `axis` to `valueMm`, auto-
 // filling the OTHER face axis from the image's pixel aspect ratio when it
 // makes sense to. Never touches depth or status.
 //
-// The rule (chosen to be least surprising): the counterpart axis is (re)derived
-// only when it is currently empty, OR when the pre-commit width/height pair
-// already matched the image ratio — i.e. the curator hadn't deliberately
-// entered an off-ratio value. If they had (a mat, a frame, a sculpture photo
-// cropped tight), their number is preserved. With no usable ratio, only the
-// committed axis changes, matching the prior no-auto-fill behavior.
+// The rule: when the other axis is currently empty, derive it and mark the
+// pair as locked (a freshly-derived pair naturally tracks the image until the
+// curator says otherwise). When the other axis already has a value, only
+// re-derive it while the pair is locked (see isAspectLocked) — once
+// unlocked, each axis commits independently, so a curator correcting one
+// dimension to a real, mismatched value (a mat, a frame, a cropped photo)
+// never has it silently overwritten. With no usable ratio, only the
+// committed axis changes.
 export function applyAspectFill(
   dimensions: Dimensions,
   axis: FaceAxis,
@@ -63,11 +78,11 @@ export function applyAspectFill(
   const otherAxis: FaceAxis = axis === "widthMm" ? "heightMm" : "widthMm";
   const previousOther = dimensions[otherAxis];
 
-  const shouldDerive =
-    previousOther === undefined ||
-    pairMatchesRatio(dimensions.widthMm, dimensions.heightMm, ratio);
-
-  if (!shouldDerive) return next;
+  if (previousOther === undefined) {
+    next.aspectLocked = true;
+  } else if (!isAspectLocked(dimensions, aspect)) {
+    return next;
+  }
 
   // width = height × ratio; height = width ÷ ratio. Round to 0.01 mm so the
   // stored value stays tidy — well below any unit's display precision, and the
