@@ -51,6 +51,14 @@ export function PlanObject({
 
   const x = planRect.centerXMm - planRect.widthMm / 2;
   const y = planRect.centerYMm - planRect.depthMm / 2;
+  const rightX = x + planRect.widthMm;
+  const bottomY = y + planRect.depthMm;
+  const midX = planRect.centerXMm;
+  const midY = planRect.centerYMm;
+  const insetMm = Math.min(planRect.widthMm, planRect.depthMm) * 0.22;
+  const insetWidthMm = Math.max(0, planRect.widthMm - insetMm * 2);
+  const insetDepthMm = Math.max(0, planRect.depthMm - insetMm * 2);
+  const hatchRunMm = Math.min(planRect.widthMm, planRect.depthMm);
 
   const shape = (
     <g
@@ -84,6 +92,66 @@ export function PlanObject({
         x={x}
         y={y}
       />
+      {kind === "artwork" ? (
+        <rect
+          className="plan-object-mark plan-object-mark--artwork"
+          height={insetDepthMm}
+          vectorEffect="non-scaling-stroke"
+          width={insetWidthMm}
+          x={x + insetMm}
+          y={y + insetMm}
+        />
+      ) : null}
+      {kind === "door" ? (
+        <path
+          className="plan-object-mark plan-object-mark--door"
+          d={`M ${x} ${bottomY} L ${x} ${y} L ${rightX} ${bottomY}`}
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : null}
+      {kind === "window" ? (
+        <g className="plan-object-mark plan-object-mark--window">
+          <line
+            vectorEffect="non-scaling-stroke"
+            x1={x}
+            x2={rightX}
+            y1={midY}
+            y2={midY}
+          />
+          <line
+            vectorEffect="non-scaling-stroke"
+            x1={midX}
+            x2={midX}
+            y1={y}
+            y2={bottomY}
+          />
+        </g>
+      ) : null}
+      {kind === "blocked-zone" ? (
+        <g className="plan-object-mark plan-object-mark--blocked-zone">
+          <line
+            vectorEffect="non-scaling-stroke"
+            x1={x}
+            x2={x + hatchRunMm}
+            y1={bottomY}
+            y2={y}
+          />
+          <line
+            vectorEffect="non-scaling-stroke"
+            x1={midX - hatchRunMm / 2}
+            x2={midX + hatchRunMm / 2}
+            y1={bottomY}
+            y2={y}
+          />
+          <line
+            vectorEffect="non-scaling-stroke"
+            x1={rightX - hatchRunMm}
+            x2={rightX}
+            y1={bottomY}
+            y2={y}
+          />
+        </g>
+      ) : null}
     </g>
   );
 

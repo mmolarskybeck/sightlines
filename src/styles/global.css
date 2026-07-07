@@ -845,11 +845,32 @@ input:focus-visible {
 .checklist-filters {
   display: flex;
   gap: 6px;
-  margin-bottom: 14px;
   border-bottom: 1px solid var(--line);
   /* Tabs never wrap — at a narrow panel the row pans instead of stacking. */
   overflow-x: auto;
   scrollbar-width: none;
+}
+
+.checklist-controls {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.checklist-sort {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.checklist-sort .select-trigger {
+  min-height: 32px;
+  padding: 6px 8px;
+  font-size: 0.78rem;
 }
 
 /* Sizing (and weight) only — base color/hover/active underline come from the
@@ -2026,9 +2047,18 @@ input:focus-visible {
 .field-hint,
 .field-error,
 .length-field-hint {
-  margin: -2px 0 2px;
+  margin: 0;
   font-size: 0.78rem;
   line-height: 1.4;
+}
+
+.length-field-message {
+  min-height: 1.25rem;
+  margin: -2px 0 2px;
+}
+
+.field-row.compact .length-field-message {
+  min-height: 1.2rem;
 }
 
 .field-hint,
@@ -2727,16 +2757,15 @@ input:focus-visible {
   pointer-events: none;
 }
 
-/* Plan-view placements — PlanObject.tsx. Same restrained, stroke-only
-   language as .elevation-opening/.elevation-artwork (one shared outline
-   treatment, selected reuses the same --primary override) so a door/window/
-   blocked-zone/artwork reads as the same object whether you're looking at
-   its elevation placement or its thin plan-view rect. Read-only in this
-   phase: no drag cursor yet (that's a later phase), just click-to-select. */
+/* Plan-view placements — PlanObject.tsx. The outline is a little clearer than
+   the elevation hairline because these objects sit on top of room geometry at
+   plan scale. Kind-specific interior marks add recognition without adding a
+   new color vocabulary. */
 .plan-object-outline {
-  fill: none;
+  fill: var(--bg);
+  fill-opacity: 0.78;
   stroke: var(--muted);
-  stroke-width: 1.5;
+  stroke-width: 2;
   vector-effect: non-scaling-stroke;
 }
 
@@ -2751,8 +2780,8 @@ input:focus-visible {
 }
 
 .plan-object--blocked-zone .plan-object-outline {
-  fill: var(--subtle);
-  fill-opacity: 0.15;
+  fill: var(--surface-strong);
+  fill-opacity: 0.72;
 }
 
 .plan-object.is-floor .plan-object-outline {
@@ -2760,8 +2789,29 @@ input:focus-visible {
 }
 
 .plan-object.is-selected .plan-object-outline {
+  fill: var(--primary-soft);
+  fill-opacity: 0.72;
   stroke: var(--primary);
   stroke-width: 2.5;
+}
+
+.plan-object-mark {
+  fill: none;
+  stroke: var(--subtle);
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+  stroke-width: 1.15;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.plan-object-mark--blocked-zone {
+  opacity: 0.75;
+}
+
+.plan-object.is-selected .plan-object-mark {
+  stroke: var(--primary);
+  opacity: 1;
 }
 
 /* Click-to-place preview: same translucent/dashed/non-interactive treatment

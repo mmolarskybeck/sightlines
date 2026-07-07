@@ -7,7 +7,7 @@ afterEach(cleanup);
 
 function renderField(overrides: Partial<ComponentProps<typeof LengthField>> = {}) {
   const onCommit = overrides.onCommit ?? vi.fn();
-  render(
+  const result = render(
     <LengthField
       label="Width"
       valueMm={undefined}
@@ -18,7 +18,7 @@ function renderField(overrides: Partial<ComponentProps<typeof LengthField>> = {}
       {...overrides}
     />
   );
-  return { onCommit, input: screen.getByRole("textbox") as HTMLInputElement };
+  return { onCommit, input: screen.getByRole("textbox") as HTMLInputElement, ...result };
 }
 
 describe("LengthField", () => {
@@ -97,6 +97,12 @@ describe("LengthField", () => {
 
     await waitFor(() => expect(input.value).toBe('11 13/16"'));
     expect(screen.queryByText(/→/)).not.toBeInTheDocument();
+  });
+
+  it("keeps a reserved message slot even when there is no hint or error", () => {
+    const { container } = renderField({ valueMm: 304.8 });
+
+    expect(container.querySelector(".length-field-message")).toBeInTheDocument();
   });
 
   it("renders no stepper buttons when stepMm is not provided (regression guard)", () => {

@@ -9,6 +9,13 @@ import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/uni
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { UncertaintyIndicator } from "./UncertaintyIndicator";
 import { Button } from "./ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "./ui/select";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 
 // MIME key for the HTML5 drag payload carrying an artworkId — a later task
@@ -17,11 +24,13 @@ import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 export const ARTWORK_DRAG_MIME = "application/x-sightlines-artwork";
 
 type ChecklistFilter = "all" | "placed" | "unplaced";
+export type ChecklistSort = "project" | "title" | "artist" | "status";
 
-type ChecklistRowData = {
+export type ChecklistRowData = {
   artworkId: string;
   artwork: Artwork | null;
   isPlaced: boolean;
+  projectIndex: number;
   // The wall a placed artwork lives on, resolved to a human name — null when
   // unplaced, or when the placement points at a wall that no longer exists.
   wallName: string | null;
@@ -65,6 +74,7 @@ export function ChecklistPanel({
 }) {
   const [isDropActive, setIsDropActive] = useState(false);
   const [filter, setFilter] = useState<ChecklistFilter>("all");
+  const [sort, setSort] = useState<ChecklistSort>("project");
   // dragenter/dragleave fire on every child element the pointer crosses, not
   // just the section boundary — a plain enter/leave toggle would flicker the
   // drop-active state as the drag passes over rows and buttons. Counting
@@ -122,13 +132,14 @@ export function ChecklistPanel({
       };
     }, [project.floor.rooms, project.wallObjects, project.floorObjects]);
 
-  const rows: ChecklistRowData[] = project.checklistArtworkIds.map((artworkId) => {
+  const rows: ChecklistRowData[] = project.checklistArtworkIds.map((artworkId, projectIndex) => {
     const wallId = placedArtworkWallIds.get(artworkId);
     const isFloorPlaced = floorPlacedArtworkIds.has(artworkId);
     return {
       artworkId,
       artwork: artworksById.get(artworkId) ?? null,
       isPlaced: wallId !== undefined || isFloorPlaced,
+      projectIndex,
       wallName: wallId !== undefined ? (wallNamesById.get(wallId) ?? null) : null,
       placementIds: placementIdsByArtworkId.get(artworkId) ?? []
     };
@@ -136,8 +147,11 @@ export function ChecklistPanel({
 
   const placedCount = rows.filter((row) => row.isPlaced).length;
   const unplacedCount = rows.length - placedCount;
-  const visibleRows = rows.filter((row) =>
-    filter === "placed" ? row.isPlaced : filter === "unplaced" ? !row.isPlaced : true
+  const visibleRows = sortChecklistRows(
+    rows.filter((row) =>
+      filter === "placed" ? row.isPlaced : filter === "unplaced" ? !row.isPlaced : true
+    ),
+    sort
   );
 
   const thumbnailUrlsByAssetId = useAssetImageUrls(
@@ -210,33 +224,50 @@ export function ChecklistPanel({
       />
 
       {rows.length > 0 ? (
-        <ToggleGroup
-          aria-label="Filter checklist"
-          className="checklist-filters"
-          type="single"
-          value={filter}
-          onValueChange={(value) => {
-            if (value === "all" || value === "placed" || value === "unplaced") {
-              setFilter(value);
-            }
-          }}
-        >
-          <FilterTab
-            count={rows.length}
-            label="All"
-            value="all"
-          />
-          <FilterTab
-            count={placedCount}
-            label="Placed"
-            value="placed"
-          />
-          <FilterTab
-            count={unplacedCount}
-            label="Unplaced"
-            value="unplaced"
-          />
-        </ToggleGroup>
+        <div className="checklist-controls">
+          <ToggleGroup
+            aria-label="Filter checklist"
+            className="checklist-filters"
+            type="single"
+            value={filter}
+            onValueChange={(value) => {
+              if (value === "all" || value === "placed" || value === "unplaced") {
+                setFilter(value);
+              }
+            }}
+          >
+            <FilterTab
+              count={rows.length}
+              label="All"
+              value="all"
+            />
+            <FilterTab
+              count={placedCount}
+              label="Placed"
+              value="placed"
+            />
+            <FilterTab
+              count={unplacedCount}
+              label="Unplaced"
+              value="unplaced"
+            />
+          </ToggleGroup>
+
+          <div className="checklist-sort">
+            <span>Sort</span>
+            <Select value={sort} onValueChange={(value) => setSort(value as ChecklistSort)}>
+              <SelectTrigger aria-label="Sort checklist">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="project">Project order</SelectItem>
+                <SelectItem value="title">Title</SelectItem>
+                <SelectItem value="artist">Artist</SelectItem>
+                <SelectItem value="status">Status</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
       ) : null}
 
       {rows.length === 0 ? (
@@ -296,6 +327,42 @@ export function ChecklistPanel({
       </Button>
     </section>
   );
+}
+
+export function sortChecklistRows(
+  rows: ChecklistRowData[],
+  sort: ChecklistSort
+): ChecklistRowData[] {
+  return [...rows].sort((a, b) => {
+    switch (sort) {
+      case "title":
+        return byText(a.artwork?.title, b.artwork?.title) || byProjectOrder(a, b);
+      case "artist":
+        return (
+          byText(a.artwork?.artist, b.artwork?.artist) ||
+          byText(a.artwork?.title, b.artwork?.title) ||
+          byProjectOrder(a, b)
+        );
+      case "status":
+        return Number(a.isPlaced) - Number(b.isPlaced) || byProjectOrder(a, b);
+      case "project":
+      default:
+        return byProjectOrder(a, b);
+    }
+  });
+}
+
+function byProjectOrder(a: ChecklistRowData, b: ChecklistRowData) {
+  return a.projectIndex - b.projectIndex;
+}
+
+function byText(a: string | undefined, b: string | undefined) {
+  const aText = a?.trim();
+  const bText = b?.trim();
+  if (aText && bText) return aText.localeCompare(bText, undefined, { sensitivity: "base" });
+  if (aText) return -1;
+  if (bText) return 1;
+  return 0;
 }
 
 function FilterTab({

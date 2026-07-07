@@ -224,7 +224,9 @@ export function LengthField({
       ) : (
         inputElement
       )}
-      {message}
+      <div aria-live="polite" className="length-field-message">
+        {message}
+      </div>
     </label>
   );
 }

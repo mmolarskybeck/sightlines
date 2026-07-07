@@ -164,6 +164,10 @@ Implemented or substantially underway:
 * Door, window, and blocked-zone wall objects.
 * Placement warnings for overlaps and out-of-bounds works.
 * Floor objects in plan view with snapping and drag-to-wall conversion.
+* Multi-select, group drag, and equal wall distribution.
+* Checklist filtering and sorting.
+* Stable measurement-field conversion hints.
+* More legible plan-view placement markers.
 * JSON import/export for development backup.
 
 ## Roadmap
@@ -172,12 +176,14 @@ Implemented or substantially underway:
 
 Next major slice:
 
-* Multi-select
-* Grouping
-* Group drag
-* Equal distribution spacing
 * Simple derived 3D preview
-* Checklist sorting and richer checklist fields
+
+Recently completed:
+
+* Multi-select
+* Grouping and group drag
+* Equal distribution spacing
+* Checklist filtering/sorting and 2D workflow confidence fixes
 
 ### MVP 2 — Project packages and export
 
