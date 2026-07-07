@@ -1675,15 +1675,18 @@ body.panels-resizing * {
   overscroll-behavior: contain;
 }
 
-/* Space-held / middle-drag pan affordance (PlanView). Applied to the whole
-   surface so the cursor is consistent over the SVG and its chrome. */
+/* Space-held / middle-drag pan affordance (PlanView + ElevationView). Applied
+   to the whole surface so the cursor is consistent over the SVG and its
+   chrome. */
 .drawing-surface.is-pan-ready,
-.drawing-surface.is-pan-ready .plan-svg {
+.drawing-surface.is-pan-ready .plan-svg,
+.drawing-surface.is-pan-ready .elevation-svg {
   cursor: grab;
 }
 
 .drawing-surface.is-panning,
-.drawing-surface.is-panning .plan-svg {
+.drawing-surface.is-panning .plan-svg,
+.drawing-surface.is-panning .elevation-svg {
   cursor: grabbing;
 }
 

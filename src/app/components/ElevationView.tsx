@@ -33,21 +33,31 @@ import {
 } from "../../domain/snapping/cleanIncrement";
 import type { Guide, SnapTargetIds } from "../../domain/snapping/resolveSnap";
 import { formatLength } from "../../domain/units/length";
+import { getMajorGridIntervalMm, getMinorGridIntervalMm } from "../../domain/units/precision";
 import {
-  getMajorGridIntervalMm,
-  getMinorGridIntervalMm,
-  getPixelsPerMm
-} from "../../domain/units/precision";
+  clampZoom,
+  ELEVATION_ZOOM_LIMITS,
+  FIT_VIEWPORT,
+  getEffectiveZoom,
+  getFitBoundsViewport,
+  getViewBox2D,
+  panBy,
+  WHEEL_ZOOM_SENSITIVITY,
+  ZOOM_STEP,
+  zoomAtPoint,
+  type Viewport2D
+} from "../../domain/viewport/viewport2d";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { useContainerSize } from "../hooks/useContainerSize";
 import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
 import { ElevationArtwork } from "./ElevationArtwork";
 import { ElevationOpening } from "./ElevationOpening";
 import { ArtworkTooltipContent, OpeningTooltipContent } from "./PlacementTooltip";
-import { isArtworkOutOfWallBounds, wallLocalYToSvgY } from "./elevationArtworkGeometry";
+import { getFitSelectionBoundsSvg, isArtworkOutOfWallBounds, wallLocalYToSvgY } from "./elevationArtworkGeometry";
 import { GridOverlay } from "./GridOverlay";
 import { GroupDimensionLines } from "./GroupDimensionLines";
 import { Button } from "./ui/button";
+import { ViewportZoomControls } from "./ViewportZoomControls";
 import {
   Select,
   SelectContent,
@@ -178,7 +188,9 @@ export function ElevationView({
   wallName,
   wallObjects,
   walls = [],
-  onSelectWall
+  onSelectWall,
+  viewport,
+  onViewportChange
 }: {
   gridPrecisionFloorMm: number | null;
   gridVisible: boolean;
@@ -187,6 +199,12 @@ export function ElevationView({
   wallHeightMm: number;
   centerlineMm: number;
   unit: DisplayUnit;
+  // The manual/fit viewport for this surface (owned by App via useViewport2D,
+  // keyed on project id + wall id so a wall switch resets to fit), and the
+  // setter every zoom/pan gesture (plus "Fit selected") routes its next
+  // viewport through. Mirrors PlanView's viewport/onViewportChange contract.
+  viewport: Viewport2D;
+  onViewportChange: (v: Viewport2D) => void;
   // Everything below is new and optional (safe, inert defaults) — App.tsx
   // doesn't pass these yet, that's the next task's wiring. Until then this
   // component renders and behaves exactly as it did before this change.
@@ -240,18 +258,40 @@ export function ElevationView({
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
   const marqueeRef = useRef<MarqueeState | null>(null);
 
+  // Space-drag / middle-mouse pan — same idiom as PlanView's M2 wiring.
+  // `isSpaceDown` drives the container cursor (grab), `panning` drives it
+  // while a pan drag is live (grabbing). Both are mirrored into refs so the
+  // capture-phase pointerdown and the window-level pan move handlers read
+  // fresh values without resubscribing.
+  const [isSpaceDown, setIsSpaceDown] = useState(false);
+  const spaceHeldRef = useRef(false);
+  const [panning, setPanning] = useState(false);
+  const panningRef = useRef(false);
+  // Last pointer client position of the in-flight pan, for incremental deltas.
+  const panLastRef = useRef<{ x: number; y: number } | null>(null);
+  // Fresh viewport for gesture handlers that were subscribed once (pan moves,
+  // wheel) and must not close over a stale prop — same ref-mirror discipline
+  // the drag gestures use for their transient state.
+  const viewportRef = useRef(viewport);
+  viewportRef.current = viewport;
+
   // Pad the viewBox so the wall reads as a figure on the canvas field
   // rather than bleeding edge-to-edge, and so boundary strokes (centered on
   // the wall edge) aren't half-clipped. All wall-local coordinates are
-  // unchanged — only the visible window widens.
+  // unchanged — only the visible window widens. This padded rect is the
+  // FIT extent every gesture measures against; getViewBox2D turns the
+  // current viewport (fit or manual pan/zoom) into the concrete viewBox
+  // rect + its exact pixels-per-mm, so every downstream consumer (grid,
+  // snap threshold, group-outline pad) inherits the zoom automatically.
   const viewPadMm = Math.max(wallLengthMm, wallHeightMm) * 0.06;
-  const viewBox = `${-viewPadMm} ${-viewPadMm} ${wallLengthMm + viewPadMm * 2} ${
-    wallHeightMm + viewPadMm * 2
-  }`;
-  const pixelsPerMm = getPixelsPerMm(containerSize, {
+  const contentBounds = {
+    x: -viewPadMm,
+    y: -viewPadMm,
     width: wallLengthMm + viewPadMm * 2,
     height: wallHeightMm + viewPadMm * 2
-  });
+  };
+  const { viewBox: viewBoxBounds, pixelsPerMm } = getViewBox2D(viewport, contentBounds, containerSize);
+  const viewBox = `${viewBoxBounds.x} ${viewBoxBounds.y} ${viewBoxBounds.width} ${viewBoxBounds.height}`;
   const minorGridMm = getMinorGridIntervalMm(unit, pixelsPerMm, {
     // Elevation reads finer than plan: hang heights are an inches/centimeters
     // activity, so a tighter target keeps the lattice on the (6in, 2ft) /
@@ -315,6 +355,219 @@ export function ElevationView({
     // elevation element, applied here in the inverse direction (it's
     // self-inverse, since it's just wallHeightMm minus the value).
     return { xMm: transformed.x, yMm: wallLocalYToSvgY(wallHeightMm, transformed.y) };
+  }
+
+  // Same client-px → viewBox-mm conversion as toWallLocalMm, WITHOUT the
+  // y-flip: every viewport helper (zoomAtPoint, panBy, getViewBox2D) works in
+  // plain SVG userspace (y-down), never wall-local (y-up) — mirrors PlanView's
+  // toSvgMm. Used for the wheel-zoom anchor point only; every other gesture
+  // (move-drag, marquee) still reads pointer position through toWallLocalMm.
+  function toSvgPoint(clientX: number, clientY: number): Vector2 | null {
+    const svg = svgRef.current;
+    if (!svg) return null;
+
+    const point = svg.createSVGPoint();
+    point.x = clientX;
+    point.y = clientY;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return null;
+
+    const transformed = point.matrixTransform(ctm.inverse());
+    return { xMm: transformed.x, yMm: transformed.y };
+  }
+
+  // Zoom the current viewBox about its own center — the [+]/[−] buttons' target
+  // point, since there's no cursor to anchor on for a button press. Mirrors
+  // PlanView's zoomAtCenter, with ELEVATION_ZOOM_LIMITS.
+  function zoomAtCenter(factor: number) {
+    onViewportChange(
+      zoomAtPoint(
+        viewport,
+        { xMm: viewBoxBounds.x + viewBoxBounds.width / 2, yMm: viewBoxBounds.y + viewBoxBounds.height / 2 },
+        factor,
+        contentBounds,
+        containerSize,
+        ELEVATION_ZOOM_LIMITS
+      )
+    );
+  }
+
+  // Wheel = zoom (ctrl/⌘ or trackpad pinch) or pan (plain / shift-horizontal).
+  // Reassigned every render so it always sees the latest viewport/bounds;
+  // registered once as a NON-passive native listener (React's onWheel can be
+  // passive, which would make preventDefault a no-op) in the effect below.
+  // Identical logic to PlanView's M2 wheel handler, just anchored on
+  // toSvgPoint (SVG userspace) instead of toSvgMm and ELEVATION_ZOOM_LIMITS
+  // instead of PLAN_ZOOM_LIMITS.
+  const wheelHandlerRef = useRef<(e: WheelEvent) => void>(() => {});
+  wheelHandlerRef.current = (e: WheelEvent) => {
+    e.preventDefault();
+    // Line-mode wheels (deltaMode 1) report in lines, not pixels — scale up so
+    // one detent moves a comparable amount to a pixel-mode wheel.
+    const norm = (d: number) => (e.deltaMode === 1 ? d * 16 : d);
+    if (e.ctrlKey || e.metaKey) {
+      // ctrlKey===true is also how a trackpad pinch arrives in Chrome/Firefox/
+      // Safari — same code path, anchored on the cursor's world point.
+      const point = toSvgPoint(e.clientX, e.clientY);
+      if (!point) return;
+      const factor = Math.min(2, Math.max(0.5, Math.exp(-norm(e.deltaY) * WHEEL_ZOOM_SENSITIVITY)));
+      onViewportChange(
+        zoomAtPoint(viewportRef.current, point, factor, contentBounds, containerSize, ELEVATION_ZOOM_LIMITS)
+      );
+    } else {
+      // Plain wheel pans; shift+wheel pans horizontally on Windows (macOS
+      // already flips deltaX for a shifted wheel, so only synthesize when the
+      // browser left deltaX at 0).
+      const dx = e.shiftKey && e.deltaX === 0 ? norm(e.deltaY) : norm(e.deltaX);
+      const dy = e.shiftKey && e.deltaX === 0 ? 0 : norm(e.deltaY);
+      onViewportChange(panBy(viewportRef.current, { x: dx, y: dy }, contentBounds, containerSize));
+    }
+  };
+
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => wheelHandlerRef.current(e);
+    // Safari's non-standard pinch events would otherwise page-zoom the app.
+    const onGesture = (e: Event) => e.preventDefault();
+    el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("gesturestart", onGesture);
+    el.addEventListener("gesturechange", onGesture);
+    el.addEventListener("gestureend", onGesture);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("gesturestart", onGesture);
+      el.removeEventListener("gesturechange", onGesture);
+      el.removeEventListener("gestureend", onGesture);
+    };
+  }, []);
+
+  // Track Space (for the grab cursor + capture-phase pan intercept) and handle
+  // ⌘0 / Ctrl+0 = reset to fit. Window-scoped, mirroring PlanView's M2
+  // listener; skips edit fields so typing a literal "0" or space in an input
+  // (e.g. the wall-switcher Select, though it has no text entry today) is
+  // never hijacked. plan/elevation are never both mounted at once (viewMode
+  // gates which one App renders), so there's no risk of two of these
+  // double-firing on the same keystroke.
+  useEffect(() => {
+    function isEditable(target: EventTarget | null): boolean {
+      const el = target as HTMLElement | null;
+      if (!el) return false;
+      const tag = el.tagName;
+      return (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        el.isContentEditable === true
+      );
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (isEditable(event.target)) return;
+      if ((event.metaKey || event.ctrlKey) && event.key === "0") {
+        // Also blocks the browser's own zoom-reset.
+        event.preventDefault();
+        onViewportChange(FIT_VIEWPORT);
+        return;
+      }
+      if (event.code === "Space" || event.key === " ") {
+        if (!spaceHeldRef.current) {
+          spaceHeldRef.current = true;
+          setIsSpaceDown(true);
+        }
+        // Stops the page from scrolling / a focused button from activating
+        // while space engages pan. e.repeat is ignored for the flag (already
+        // set) but still prevented so held-space never scrolls.
+        event.preventDefault();
+      }
+    }
+
+    function onKeyUp(event: KeyboardEvent) {
+      if (event.code === "Space" || event.key === " ") {
+        spaceHeldRef.current = false;
+        setIsSpaceDown(false);
+      }
+    }
+
+    function onBlur() {
+      // ⌘Tab away while holding space would otherwise leave the flag stuck.
+      spaceHeldRef.current = false;
+      setIsSpaceDown(false);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [onViewportChange]);
+
+  // Space/middle-mouse pan drag. Subscribed once per gesture (keyed on
+  // `panning`), reading the live viewport via viewportRef and applying the
+  // negated incremental pointer delta so the drawing tracks the pointer.
+  // contentBounds/containerSize are captured by closure — they can't change
+  // mid-gesture (no commit, no resize while a button is held). Unlike
+  // PlanView's endPan, there's no trailing-click suppression to arm here:
+  // ElevationView has no click handler on its svg background (background
+  // clear runs off the marquee's own pointerup, which never starts once the
+  // capture-phase handler below claims the gesture as a pan), so a foiled
+  // pan simply leaves selection state untouched — nothing to suppress.
+  useEffect(() => {
+    if (!panning) return;
+
+    function onPointerMove(event: PointerEvent) {
+      const last = panLastRef.current;
+      if (!last) return;
+      onViewportChange(
+        panBy(
+          viewportRef.current,
+          { x: -(event.clientX - last.x), y: -(event.clientY - last.y) },
+          contentBounds,
+          containerSize
+        )
+      );
+      panLastRef.current = { x: event.clientX, y: event.clientY };
+    }
+
+    function endPan() {
+      panningRef.current = false;
+      panLastRef.current = null;
+      setPanning(false);
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", endPan);
+    window.addEventListener("pointercancel", endPan);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", endPan);
+      window.removeEventListener("pointercancel", endPan);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panning, onViewportChange]);
+
+  // Capture-phase pan intercept: space-held (left button) or middle-mouse
+  // press claims the gesture BEFORE any of ElevationView's own gestures
+  // (move-drag via beginMoveDrag, the background marquee via beginMarquee,
+  // or a checklist drop-ghost) can start — same precedence PlanView's M2
+  // handleSvgPointerDownCapture gives pan over its own resize/room/object
+  // drags and marquee. Guarded on spaceHeldRef || button === 1 so an ordinary
+  // left press with space up flows through untouched. Right-click (button 2)
+  // is never intercepted. stopPropagation here (during the capture phase, on
+  // the svg — an ancestor of every placement's own <g>) is what keeps
+  // beginMoveDrag/beginMarquee from ever firing for this gesture; it also
+  // kills middle-click autoscroll.
+  function handleSvgPointerDownCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    if (spaceHeldRef.current || event.button === 1) {
+      event.preventDefault();
+      event.stopPropagation();
+      panningRef.current = true;
+      panLastRef.current = { x: event.clientX, y: event.clientY };
+      setPanning(true);
+    }
   }
 
   // The elevation placement pipeline shared by the move-drag preview and the
@@ -758,6 +1011,36 @@ export function ElevationView({
   const effectiveOutlineMembers: WallObjectBase[] =
     selectedMembersOnThisWall.map(applyDragPreview);
 
+  // "Fit selected" bounds — the padded union (SVG-userspace) of every
+  // selected artwork/opening ON THIS WALL, drag preview applied (harmless
+  // no-op when no drag is live — the button can't be clicked mid-drag
+  // anyway, since the pointer is captured). null when nothing on this wall
+  // is selected, which also disables the chip's button.
+  const selectedSvgBounds = getFitSelectionBoundsSvg(
+    wallHeightMm,
+    effectiveOutlineMembers.map((wallObject) => ({
+      center: { xMm: wallObject.xMm, yMm: wallObject.yMm },
+      size: { widthMm: wallObject.widthMm, heightMm: wallObject.heightMm }
+    }))
+  );
+
+  function handleFitSelected() {
+    if (!selectedSvgBounds) return;
+    onViewportChange(
+      getFitBoundsViewport(
+        {
+          x: selectedSvgBounds.xMm,
+          y: selectedSvgBounds.yMm,
+          width: selectedSvgBounds.widthMm,
+          height: selectedSvgBounds.heightMm
+        },
+        contentBounds,
+        containerSize,
+        ELEVATION_ZOOM_LIMITS
+      )
+    );
+  }
+
   // The dimension lines describe what ARRANGE affects. For a multi-selection
   // that's the ARTWORK members only (openings are architecture — arrange never
   // moves them, so they don't get gap lines). A single selection of ANY kind
@@ -794,10 +1077,19 @@ export function ElevationView({
     if (next) onSelectWall?.(next.id);
   };
 
+  // Pan cursor affordance: grabbing while a pan drag is live, grab while space
+  // is merely held ready. Otherwise the surface keeps its default cursor.
+  // Mirrors PlanView's surfaceClassName.
+  const surfaceClassName = panning
+    ? "drawing-surface is-panning"
+    : isSpaceDown
+      ? "drawing-surface is-pan-ready"
+      : "drawing-surface";
+
   return (
     <div
       aria-label="Wall elevation view"
-      className="drawing-surface"
+      className={surfaceClassName}
       ref={containerRef}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
@@ -861,12 +1153,30 @@ export function ElevationView({
           {formatLength(wallHeightMm, { unit })}
         </span>
       </div>
+      <ViewportZoomControls
+        zoom={getEffectiveZoom(viewport)}
+        isFit={viewport.mode === "fit"}
+        canZoomIn={
+          clampZoom(getEffectiveZoom(viewport) * ZOOM_STEP, contentBounds, containerSize, ELEVATION_ZOOM_LIMITS) !==
+          getEffectiveZoom(viewport)
+        }
+        canZoomOut={
+          clampZoom(getEffectiveZoom(viewport) / ZOOM_STEP, contentBounds, containerSize, ELEVATION_ZOOM_LIMITS) !==
+          getEffectiveZoom(viewport)
+        }
+        onZoomIn={() => zoomAtCenter(ZOOM_STEP)}
+        onZoomOut={() => zoomAtCenter(1 / ZOOM_STEP)}
+        onFit={() => onViewportChange(FIT_VIEWPORT)}
+        onFitSelected={handleFitSelected}
+        fitSelectedDisabled={selectedSvgBounds === null}
+      />
       <svg
         className="elevation-svg"
         ref={svgRef}
         viewBox={viewBox}
         role="img"
         onPointerDown={beginMarquee}
+        onPointerDownCapture={handleSvgPointerDownCapture}
       >
         <title>{wallName} elevation</title>
         <rect

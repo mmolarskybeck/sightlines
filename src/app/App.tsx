@@ -219,6 +219,13 @@ export function App() {
   const storagePersistence = useStoragePersistence();
   // One plan viewport per active project — resets to fit on project switch.
   const [planViewport, setPlanViewport] = useViewport2D(project?.id ?? "none");
+  // One elevation viewport, keyed on project id + wall id so it resets to fit
+  // on either a project switch OR a wall switch (no other reset code needed)
+  // — independent of planViewport, so switching views never leaks one
+  // surface's pan/zoom into the other's.
+  const [elevationViewport, setElevationViewport] = useViewport2D(
+    `${project?.id ?? "none"}:${selectedWallId ?? "none"}`
+  );
 
   useEffect(() => {
     void boot();
@@ -1184,6 +1191,8 @@ export function App() {
                   wallObjects={project.wallObjects}
                   walls={wallsForSwitcher}
                   onSelectWall={selectWall}
+                  viewport={elevationViewport}
+                  onViewportChange={setElevationViewport}
                   previewPositionsById={arrangeSession?.previewById}
                   arrangeSessionActive={arrangeSession !== null}
                   onMoveOpening={(wallObjectId, xMm, yMm) => {

@@ -42,6 +42,43 @@ export function getArtworkRectSvg(
   };
 }
 
+export type SelectedElevationRect = {
+  center: ArtworkCenterMm;
+  size: ArtworkSizeMm;
+};
+
+// Union of every selected object's SVG rect (via getArtworkRectSvg above),
+// padded by 20% of the larger union dimension with a 150mm floor — so a
+// single small work still frames with a generous, readable margin rather
+// than hugging its own edges. Returns null for an empty selection so the
+// caller (ElevationView's "Fit selected") can no-op / disable its button.
+// Callers pass wall-local centers exactly as stored (openings included —
+// getArtworkRectSvg's math is generic over any center+size pair, not
+// artwork-specific despite the name).
+export function getFitSelectionBoundsSvg(
+  wallHeightMm: number,
+  selected: SelectedElevationRect[]
+): SvgRectMm | null {
+  if (selected.length === 0) return null;
+
+  const rects = selected.map((item) => getArtworkRectSvg(wallHeightMm, item.center, item.size));
+  const minXMm = Math.min(...rects.map((rect) => rect.xMm));
+  const minYMm = Math.min(...rects.map((rect) => rect.yMm));
+  const maxXMm = Math.max(...rects.map((rect) => rect.xMm + rect.widthMm));
+  const maxYMm = Math.max(...rects.map((rect) => rect.yMm + rect.heightMm));
+
+  const unionWidthMm = maxXMm - minXMm;
+  const unionHeightMm = maxYMm - minYMm;
+  const padMm = Math.max(Math.max(unionWidthMm, unionHeightMm) * 0.2, 150);
+
+  return {
+    xMm: minXMm - padMm,
+    yMm: minYMm - padMm,
+    widthMm: unionWidthMm + padMm * 2,
+    heightMm: unionHeightMm + padMm * 2
+  };
+}
+
 // A local visibility flag only — "make constraints visible" (docs/plan.md
 // §1.5), not a constraint enforced here. The store's own validator remains
 // the authoritative source of placement warnings; this just lets the
