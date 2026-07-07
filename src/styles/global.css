@@ -2002,6 +2002,24 @@ body.panels-resizing * {
   z-index: 1;
 }
 
+/* 3D preview surface + its camera-preset cluster (ThreeDView.tsx). Same
+   floating-chip language as .plan-toolbar, anchored bottom-left per the 3D
+   spec so it never collides with the shared top-right view options. */
+.three-view {
+  position: relative;
+  height: 100%;
+  background: var(--bg);
+}
+
+.three-toolbar {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  display: flex;
+  gap: 6px;
+  z-index: 1;
+}
+
 .plan-toolbar-button {
   gap: 6px;
 }

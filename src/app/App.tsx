@@ -1242,6 +1242,12 @@ export function App() {
                 project={project}
                 artworksById={artworksById}
                 getBlob={getAssetBlob}
+                selectedObjectIds={selectedObjectIds}
+                selectedArtworkId={selectedArtworkId}
+                selectedWallId={selectedWall?.id ?? null}
+                onSelectWall={selectWall}
+                onSelectObject={selectObject}
+                onClearSelection={clearObjectSelection}
               />
             </Suspense>
           ) : null}

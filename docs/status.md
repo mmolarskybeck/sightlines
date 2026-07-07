@@ -1,20 +1,25 @@
 # Sightlines Status Snapshot
 
-Last refreshed: 2026-07-06
+Last refreshed: 2026-07-07
 
 ## Current Read
 
-MVP 1A and 1B are effectively complete, and MVP 1C is now mostly through its 2D planning behaviors. Multi-select, group drag, equal wall distribution, floor objects in plan view, checklist filtering/sorting, and the 2D workflow confidence fixes are done.
+MVP 1A and 1B are effectively complete, and MVP 1C is through its 2D planning behaviors **and the simple derived 3D preview**. The 3D mode shipped per `docs/3d-preview-spec.md`: a read-only projection (pure `scene3d.ts` derivation → R3F dollhouse room shell, textured artwork planes, door/window cutouts, floor boxes, blocked zones, shared uncertainty language), click-to-select synced with the shared store, and animated Overview / Eye-level camera presets. No 3D editing — the inspector remains the numeric editing surface in 3D mode.
 
-The next best major slice is the simple derived 3D preview. It should stay a disposable projection of project data, like Plan and Elevation, and should not introduce 3D editing yet. After that, prioritize room shape tools before deeper doorway connections: keep the fast rectangle path, add polygon room drawing, then add polygon reshape/vertex dragging.
+The next best major slice is room shape tools before deeper doorway connections: keep the fast rectangle path, add polygon room drawing, then add polygon reshape/vertex dragging. The 3D derivation already iterates room polygons generically (non-rectangular fixture tests are in place), so polygon rooms should project into 3D unchanged.
 
 ## Near-Term Order
 
-1. Simple derived 3D preview — spec approved, see `docs/3d-preview-spec.md`.
-2. Room shape tools: polygon room drawing, then polygon reshape/vertex dragging.
-3. Multi-room flow: additional room placement, paired door connections, and 3D sightlines through aligned doorways.
-4. MVP package/export work: `.sightlines` import/export, backup flow, PNG/PDF exports, and readiness reporting.
+1. Room shape tools: polygon room drawing, then polygon reshape/vertex dragging.
+2. Multi-room flow: additional room placement, paired door connections, and 3D sightlines through aligned doorways.
+3. MVP package/export work: `.sightlines` import/export, backup flow, PNG/PDF exports (incl. the deferred 3D screenshot), and readiness reporting.
+
+## Known Follow-Ups From the 3D Slice
+
+- three.js currently ships in the eager `vendor` chunk (`vite.config.ts` `manualChunks` routes all of `node_modules` there), so ~350 kB gzip downloads even for users who never open 3D. Worth a dedicated code-splitting pass.
+- Overlapping door/window holes on one wall triangulate with minor artifacts (see `docs/3d-preview-spec.md` §10); the domain already flags overlapping placements for review.
+- Eye height uses `project.defaultCenterlineHeightMm` as a proxy; add a per-project `eyeHeightMm` if users trip on it.
 
 ## Deferred
 
-Vertex-level dragging for non-rectangular rooms remains gated on polygon room creation and a dedicated reshape mode. Package/export work should wait until the core planning loop includes 3D preview and the basic irregular-room story feels stable.
+Vertex-level dragging for non-rectangular rooms remains gated on polygon room creation and a dedicated reshape mode. Package/export work should wait until the basic irregular-room story feels stable.

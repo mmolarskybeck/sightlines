@@ -1,10 +1,17 @@
+import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
+import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import { OrbitControls } from "@react-three/drei";
-import { Canvas, useThree } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import { Box3, MathUtils, PerspectiveCamera, Vector3 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
-import { deriveScene3d, type Scene3d } from "../../../domain/geometry/scene3d";
+import {
+  deriveScene3d,
+  type Scene3d,
+  type WallPanel3d
+} from "../../../domain/geometry/scene3d";
 import type { Artwork, Project } from "../../../domain/project";
+import { Button } from "../ui/button";
 import { fitDistance } from "./cameraFit";
 import { MM_TO_WORLD } from "./coordinates";
 import { SceneRooms } from "./SceneRooms";
@@ -14,6 +21,26 @@ import { SceneRooms } from "./SceneRooms";
 const FIT_ELEVATION_DEG = 40;
 const FIT_AZIMUTH_DEG = 45;
 const CAMERA_FOV_DEG = 50;
+
+// Preset flights are quick enough to stay an instrument, slow enough to keep
+// spatial continuity.
+const FLIGHT_MS = 600;
+
+// Eye-level standoff bounds (spec §4.2): far enough back to read the hang,
+// never through the opposite wall.
+const EYE_MIN_STANDOFF_MM = 1200;
+const EYE_DEPTH_FRACTION = 0.8;
+
+// A click that traveled further than this (px) was an orbit drag, not a
+// selection (browsers still fire click after a drag on the same element).
+const CLICK_DRAG_TOLERANCE_PX = 6;
+
+type CameraPose = { position: Vector3; target: Vector3 };
+
+type CameraRigApi = {
+  overview: () => void;
+  eyeLevel: (wall: WallPanel3d, eyeHeightMm: number) => void;
+};
 
 // World-space bounding box of the union of every room's floor + wall heights.
 // null when there is nothing to frame.
@@ -44,53 +71,206 @@ function sceneBounds(scene: Scene3d): Box3 | null {
   return hasPoint ? box : null;
 }
 
-// Frames the scene once per `fitKey` (mount = first entry to 3D, and project
-// switch). Deliberately does NOT depend on the scene contents, so inspector
-// edits / selection changes never yank the camera (spec §4.2). The user
-// reclaims framing via the Overview preset (M4).
-function CameraRig({ scene, fitKey }: { scene: Scene3d; fitKey: string }) {
+// The fitted overview pose: the union of all room floor polygons framed from
+// a corner at ~40° elevation, solved against the real frustum (cameraFit.ts).
+function overviewPose(scene: Scene3d, aspect: number): CameraPose | null {
+  const bounds = sceneBounds(scene);
+  if (!bounds) return null;
+
+  const target = bounds.getCenter(new Vector3());
+  const elevation = MathUtils.degToRad(FIT_ELEVATION_DEG);
+  const azimuth = MathUtils.degToRad(FIT_AZIMUTH_DEG);
+  const direction = new Vector3(
+    Math.cos(elevation) * Math.sin(azimuth),
+    Math.sin(elevation),
+    Math.cos(elevation) * Math.cos(azimuth)
+  );
+  const distance = fitDistance(bounds, direction, CAMERA_FOV_DEG, aspect);
+  const position = target.clone().addScaledVector(direction, distance);
+  return { position, target };
+}
+
+// A standing viewpoint facing `wall` (spec §4.2): eye at the project's
+// centerline height, backed off along the wall's inward normal — 80% of the
+// room's depth behind that wall, never closer than EYE_MIN_STANDOFF_MM. The
+// orbit target moves to the wall's center at eye height so subsequent
+// orbiting pivots around what you're looking at.
+function eyeLevelPose(
+  scene: Scene3d,
+  wall: WallPanel3d,
+  eyeHeightMm: number
+): CameraPose {
+  const centerXMm = (wall.start.xMm + wall.end.xMm) / 2;
+  const centerYMm = (wall.start.yMm + wall.end.yMm) / 2;
+  const dxMm = wall.end.xMm - wall.start.xMm;
+  const dyMm = wall.end.yMm - wall.start.yMm;
+  const lengthMm = Math.hypot(dxMm, dyMm) || 1;
+  // Inward normal: left normal of start -> end (scene3d.ts convention).
+  const normalX = -dyMm / lengthMm;
+  const normalY = dxMm / lengthMm;
+
+  // Room depth behind this wall: the farthest floor vertex measured along the
+  // inward normal, across the room that owns the wall.
+  const room = scene.rooms.find((candidate) =>
+    candidate.walls.some((w) => w.wallId === wall.wallId)
+  );
+  let depthMm = EYE_MIN_STANDOFF_MM;
+  for (const point of room?.floorPolygon ?? []) {
+    const along =
+      (point.xMm - centerXMm) * normalX + (point.yMm - centerYMm) * normalY;
+    depthMm = Math.max(depthMm, along);
+  }
+  const standoffMm = Math.max(EYE_MIN_STANDOFF_MM, depthMm * EYE_DEPTH_FRACTION);
+
+  const eyeY = eyeHeightMm * MM_TO_WORLD;
+  const target = new Vector3(centerXMm * MM_TO_WORLD, eyeY, centerYMm * MM_TO_WORLD);
+  const position = new Vector3(
+    (centerXMm + normalX * standoffMm) * MM_TO_WORLD,
+    eyeY,
+    (centerYMm + normalY * standoffMm) * MM_TO_WORLD
+  );
+  return { position, target };
+}
+
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+// Owns the camera: jumps to the fitted overview on entry/project switch
+// (deliberately NOT on scene edits — spec §4.2; Overview reclaims framing),
+// and animates the two presets. Both presets end in free orbit.
+function CameraRig({
+  scene,
+  fitKey,
+  apiRef
+}: {
+  scene: Scene3d;
+  fitKey: string;
+  apiRef: React.MutableRefObject<CameraRigApi | null>;
+}) {
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as OrbitControlsImpl | null;
   const invalidate = useThree((state) => state.invalidate);
 
-  // Latest scene without making it an effect dependency — the fit reads current
-  // geometry when it does run, but only runs on fitKey change.
+  // Latest scene without making it an effect dependency — reads current
+  // geometry when a fit/preset runs, but never re-runs the entry fit on edits.
   const sceneRef = useRef(scene);
   sceneRef.current = scene;
 
-  useEffect(() => {
-    const bounds = sceneBounds(sceneRef.current);
-    if (!bounds) return;
+  const flightRef = useRef<{
+    startedAt: number;
+    from: CameraPose;
+    to: CameraPose;
+  } | null>(null);
 
-    const center = bounds.getCenter(new Vector3());
-    const elevation = MathUtils.degToRad(FIT_ELEVATION_DEG);
-    const azimuth = MathUtils.degToRad(FIT_AZIMUTH_DEG);
-    const direction = new Vector3(
-      Math.cos(elevation) * Math.sin(azimuth),
-      Math.sin(elevation),
-      Math.cos(elevation) * Math.cos(azimuth)
-    );
-    const aspect =
-      camera instanceof PerspectiveCamera ? camera.aspect : 1;
-    const distance = fitDistance(bounds, direction, CAMERA_FOV_DEG, aspect);
+  const aspect = () => (camera instanceof PerspectiveCamera ? camera.aspect : 1);
 
-    camera.position.copy(center).addScaledVector(direction, distance);
+  const applyPose = (pose: CameraPose) => {
+    camera.position.copy(pose.position);
+    const distance = pose.position.distanceTo(pose.target);
     camera.near = Math.max(distance / 1000, 0.01);
-    camera.far = distance * 100;
+    camera.far = Math.max(distance * 100, 100);
     camera.updateProjectionMatrix();
-    camera.lookAt(center);
-
+    camera.lookAt(pose.target);
     if (controls) {
-      controls.target.copy(center);
+      controls.target.copy(pose.target);
       controls.update();
     }
     invalidate();
+  };
+
+  const flyTo = (pose: CameraPose) => {
+    flightRef.current = {
+      startedAt: performance.now(),
+      from: {
+        position: camera.position.clone(),
+        target: controls
+          ? controls.target.clone()
+          : camera.getWorldDirection(new Vector3()).add(camera.position)
+      },
+      to: pose
+    };
+    invalidate();
+  };
+
+  useFrame(() => {
+    const flight = flightRef.current;
+    if (!flight) return;
+    const t = Math.min(1, (performance.now() - flight.startedAt) / FLIGHT_MS);
+    const eased = easeInOutCubic(t);
+    camera.position.lerpVectors(flight.from.position, flight.to.position, eased);
+    if (controls) {
+      controls.target.lerpVectors(flight.from.target, flight.to.target, eased);
+      controls.update();
+    } else {
+      camera.lookAt(flight.to.target);
+    }
+    if (t >= 1) {
+      flightRef.current = null;
+      applyPose(flight.to);
+    } else {
+      // demand frameloop: keep the animation chain alive.
+      invalidate();
+    }
+  });
+
+  apiRef.current = {
+    overview: () => {
+      const pose = overviewPose(sceneRef.current, aspect());
+      if (pose) flyTo(pose);
+    },
+    eyeLevel: (wall, eyeHeightMm) => {
+      flyTo(eyeLevelPose(sceneRef.current, wall, eyeHeightMm));
+    }
+  };
+
+  useEffect(() => {
+    const pose = overviewPose(sceneRef.current, aspect());
+    if (pose) applyPose(pose);
     // fitKey / controls only: refit on entry + project switch, and once when
     // OrbitControls first registers. Not on scene edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitKey, controls]);
 
   return null;
+}
+
+// Eye-level target wall priority (spec §4.2): selected wall, then the wall
+// holding the selected artwork placement, then the longest wall, then the
+// first.
+function pickEyeLevelWall(
+  scene: Scene3d,
+  selectedWallId: string | null,
+  selectedObjectIds: string[],
+  selectedArtworkId: string | null
+): WallPanel3d | null {
+  const walls = scene.rooms.flatMap((room) => room.walls);
+  if (walls.length === 0) return null;
+
+  if (selectedWallId) {
+    const wall = walls.find((w) => w.wallId === selectedWallId);
+    if (wall) return wall;
+  }
+  const holdingSelected = walls.find((wall) =>
+    wall.artworks.some(
+      (artwork) =>
+        selectedObjectIds.includes(artwork.objectId) ||
+        artwork.artworkId === selectedArtworkId
+    )
+  );
+  if (holdingSelected) return holdingSelected;
+
+  return walls.reduce((longest, wall) => {
+    const length = Math.hypot(
+      wall.end.xMm - wall.start.xMm,
+      wall.end.yMm - wall.start.yMm
+    );
+    const longestLength = Math.hypot(
+      longest.end.xMm - longest.start.xMm,
+      longest.end.yMm - longest.start.yMm
+    );
+    return length > longestLength ? wall : longest;
+  }, walls[0]);
 }
 
 // Same idiom as the Plan/Elevation empty states: an aria-hidden glyph (a cube,
@@ -118,16 +298,32 @@ function ThreeDEmptyState() {
 export function ThreeDView({
   project,
   artworksById,
-  getBlob
+  getBlob,
+  selectedObjectIds,
+  selectedArtworkId,
+  selectedWallId,
+  onSelectWall,
+  onSelectObject,
+  onClearSelection
 }: {
   project: Project;
   artworksById: ReadonlyMap<string, Artwork>;
   getBlob: (key: string) => Promise<Blob>;
+  selectedObjectIds: string[];
+  selectedArtworkId: string | null;
+  selectedWallId: string | null;
+  onSelectWall: (wallId: string) => void;
+  onSelectObject: (objectId: string, opts: { additive: boolean }) => void;
+  onClearSelection: () => void;
 }) {
   const scene = useMemo(
     () => deriveScene3d(project, artworksById),
     [project, artworksById]
   );
+  const rigApi = useRef<CameraRigApi | null>(null);
+  // Where the pointer went down, to tell a click from an orbit-drag release
+  // in onPointerMissed (mesh handlers get the same guard via event.delta).
+  const pointerDownAt = useRef<{ x: number; y: number } | null>(null);
 
   if (scene.rooms.length === 0) {
     return <ThreeDEmptyState />;
@@ -136,7 +332,12 @@ export function ThreeDView({
   return (
     // The app canvas background token carries the backdrop (spec §6.1); a
     // transparent WebGL canvas lets it show through so 3D honours the theme.
-    <div className="three-view" style={{ height: "100%", background: "var(--bg)" }}>
+    <div
+      className="three-view"
+      onPointerDown={(event) => {
+        pointerDownAt.current = { x: event.clientX, y: event.clientY };
+      }}
+    >
       <Canvas
         frameloop="demand"
         dpr={[1, 2]}
@@ -152,15 +353,64 @@ export function ThreeDView({
               state.get;
           }
         }}
+        onPointerMissed={(event) => {
+          // Empty space clears the object selection (spec §4.3) — but only
+          // for true clicks, not the release of an orbit drag.
+          const down = pointerDownAt.current;
+          const moved = down
+            ? Math.hypot(event.clientX - down.x, event.clientY - down.y)
+            : 0;
+          if (moved <= CLICK_DRAG_TOLERANCE_PX) onClearSelection();
+        }}
       >
         {/* Soft, shadowless lighting (spec §6.1): flat ambient plus one gentle
             high front-left key so walls shade apart and read as volume. */}
         <ambientLight intensity={0.9} />
         <directionalLight intensity={0.4} position={[-6, 8, 6]} />
-        <SceneRooms scene={scene} getBlob={getBlob} />
+        <SceneRooms
+          scene={scene}
+          getBlob={getBlob}
+          selectedObjectIds={selectedObjectIds}
+          selectedArtworkId={selectedArtworkId}
+          selectedWallId={selectedWallId}
+          onSelectWall={onSelectWall}
+          onSelectObject={onSelectObject}
+          onClearSelection={onClearSelection}
+        />
         <OrbitControls makeDefault enableDamping dampingFactor={0.1} />
-        <CameraRig scene={scene} fitKey={project.id} />
+        <CameraRig scene={scene} fitKey={project.id} apiRef={rigApi} />
       </Canvas>
+      <div className="three-toolbar" role="toolbar" aria-label="3D Preview camera">
+        <Button
+          className="plan-toolbar-button"
+          variant="inspector"
+          onClick={() => rigApi.current?.overview()}
+        >
+          <CornersOutIcon aria-hidden="true" size={16} />
+          Overview
+        </Button>
+        <Button
+          className="plan-toolbar-button"
+          variant="inspector"
+          onClick={() => {
+            const wall = pickEyeLevelWall(
+              scene,
+              selectedWallId,
+              selectedObjectIds,
+              selectedArtworkId
+            );
+            if (wall) {
+              rigApi.current?.eyeLevel(
+                wall,
+                project.defaultCenterlineHeightMm
+              );
+            }
+          }}
+        >
+          <EyeIcon aria-hidden="true" size={16} />
+          Eye level
+        </Button>
+      </div>
     </div>
   );
 }

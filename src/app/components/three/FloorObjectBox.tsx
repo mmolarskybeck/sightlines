@@ -1,7 +1,14 @@
+import { useCursor } from "@react-three/drei";
+import type { ThreeEvent } from "@react-three/fiber";
+import { useState } from "react";
 import { MathUtils } from "three";
 import type { FloorObject3d } from "../../../domain/geometry/scene3d";
 import { mmToWorld } from "./coordinates";
-import { DashedBoxOutline, isUncertain } from "./UncertaintyOutline";
+import {
+  DashedBoxOutline,
+  isUncertain,
+  SelectionBoxOutline
+} from "./UncertaintyOutline";
 
 // Neutral matte volume — deliberately not textured (spec §5.3): draping an
 // image over a pedestal box misleads more than it informs.
@@ -23,10 +30,23 @@ function planRotationToYaw(rotationDeg: number): number {
 
 // One floor-placed object: artwork pedestal-boxes as neutral volumes with the
 // shared uncertainty edge treatment, blocked zones as flat translucent quads.
-export function FloorObjectBox({ object }: { object: FloorObject3d }) {
+// Artwork boxes are click-to-select (spec §4.3) and consume their clicks so
+// the floor beneath doesn't clear the selection; blocked zones stay inert and
+// let the click fall through.
+export function FloorObjectBox({
+  object,
+  isSelected,
+  onSelect
+}: {
+  object: FloorObject3d;
+  isSelected: boolean;
+  onSelect: (objectId: string, opts: { additive: boolean }) => void;
+}) {
   const x = mmToWorld(object.xMm);
   const z = mmToWorld(object.yMm);
   const yaw = planRotationToYaw(object.rotationDeg);
+  const [hovered, setHovered] = useState(false);
+  useCursor(hovered && object.kind === "artwork");
 
   if (object.kind === "blocked-zone") {
     return (
@@ -45,10 +65,22 @@ export function FloorObjectBox({ object }: { object: FloorObject3d }) {
     );
   }
 
+  const handleClick = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    // An orbit drag's release also fires click — only a true click selects.
+    if (event.delta > 6) return;
+    const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
+    onSelect(object.objectId, { additive: shiftKey || metaKey || ctrlKey });
+  };
+
   const height = mmToWorld(object.heightMm);
   return (
     <group position={[x, height / 2, z]} rotation={[0, yaw, 0]}>
-      <mesh>
+      <mesh
+        onClick={handleClick}
+        onPointerOver={() => setHovered(true)}
+        onPointerOut={() => setHovered(false)}
+      >
         <boxGeometry
           args={[mmToWorld(object.widthMm), height, mmToWorld(object.depthMm)]}
         />
@@ -60,6 +92,13 @@ export function FloorObjectBox({ object }: { object: FloorObject3d }) {
           heightMm={object.heightMm}
           depthMm={object.depthMm}
           status={object.status}
+        />
+      ) : null}
+      {isSelected ? (
+        <SelectionBoxOutline
+          widthMm={object.widthMm + 20}
+          heightMm={object.heightMm + 20}
+          depthMm={object.depthMm + 20}
         />
       ) : null}
     </group>

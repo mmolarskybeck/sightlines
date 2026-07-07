@@ -3,12 +3,15 @@ import { BoxGeometry, type LineLoop, type LineSegments } from "three";
 import type { Dimensions } from "../../../domain/project";
 import { mmToWorld } from "./coordinates";
 
-// The shared dimension-uncertainty language (docs/plan.md §8), in WebGL: the
-// 2D views draw a dashed outline stroked --caution (approximate) or --danger
-// (unknown); these are those tokens' oklch values as hex, since three.js
-// materials can't resolve CSS custom properties.
-const APPROXIMATE_COLOR = "#8a6210"; // ≈ --caution  oklch(0.5 0.13 75)
-const UNKNOWN_COLOR = "#b03a28"; // ≈ --danger   oklch(0.53 0.18 28)
+// The shared outline language of the 2D views, in WebGL: dashed strokes for
+// dimension uncertainty (--caution approximate / --danger unknown, docs/
+// plan.md §8) and a solid accent stroke for selection (--selection). Hex
+// equivalents of those tokens' oklch values, since three.js materials can't
+// resolve CSS custom properties. Selection never tints an artwork's image
+// texture (spec §4.3) — it's outline-only on textured planes.
+const APPROXIMATE_COLOR = "#8a6210"; // ≈ --caution   oklch(0.5 0.13 75)
+const UNKNOWN_COLOR = "#b03a28"; // ≈ --danger    oklch(0.53 0.18 28)
+export const SELECTION_COLOR = "#1d7e8c"; // ≈ --selection oklch(0.55 0.11 200)
 
 // ~7:5 dash rhythm, matching .elevation-artwork.uncertain's stroke-dasharray.
 const DASH_SIZE = 0.05;
@@ -62,6 +65,58 @@ export function DashedRectOutline({
         gapSize={GAP_SIZE}
       />
     </lineLoop>
+  );
+}
+
+// Solid selection rectangle, same local frame as DashedRectOutline.
+export function SelectionRectOutline({
+  widthMm,
+  heightMm
+}: {
+  widthMm: number;
+  heightMm: number;
+}) {
+  const positions = useMemo(() => {
+    const halfW = mmToWorld(widthMm) / 2;
+    const halfH = mmToWorld(heightMm) / 2;
+    return new Float32Array([
+      -halfW, -halfH, 0,
+      halfW, -halfH, 0,
+      halfW, halfH, 0,
+      -halfW, halfH, 0
+    ]);
+  }, [widthMm, heightMm]);
+
+  return (
+    <lineLoop>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
+      </bufferGeometry>
+      <lineBasicMaterial color={SELECTION_COLOR} />
+    </lineLoop>
+  );
+}
+
+// Solid selection box edges, same local frame as DashedBoxOutline.
+export function SelectionBoxOutline({
+  widthMm,
+  heightMm,
+  depthMm
+}: {
+  widthMm: number;
+  heightMm: number;
+  depthMm: number;
+}) {
+  const box = useMemo(
+    () => new BoxGeometry(mmToWorld(widthMm), mmToWorld(heightMm), mmToWorld(depthMm)),
+    [widthMm, heightMm, depthMm]
+  );
+
+  return (
+    <lineSegments>
+      <edgesGeometry args={[box]} />
+      <lineBasicMaterial color={SELECTION_COLOR} />
+    </lineSegments>
   );
 }
 
