@@ -990,6 +990,14 @@ export function App() {
                 onCommitPlanMoveGroup={(moves) =>
                   void movePlanObjectsGroup(moves, allowOverlappingPlacement)
                 }
+                onMarqueeSelect={(ids, additive) =>
+                  // An additive (shift) marquee extends the selection; a plain
+                  // one replaces it. The union preserves already-selected ids'
+                  // order so repeated shift-marquees stay stable.
+                  setObjectSelection(
+                    additive ? [...new Set([...selectedObjectIds, ...ids])] : ids
+                  )
+                }
               />
             )
           ) : null}

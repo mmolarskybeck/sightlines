@@ -63,6 +63,75 @@ export function getWallObjectPlanRect(
   };
 }
 
+// Does a (possibly rotated) plan rect intersect an axis-aligned marquee rect?
+// Elevation's counterpart (getIdsIntersectingRect) gets away with a plain
+// min/max overlap test because wall objects are axis-aligned in wall-local
+// space — but plan objects are NOT: wall objects lie along angled walls
+// (angleDeg = the wall's floor-space direction) and floor objects carry their
+// own rotationDeg. An axis-aligned bounding-box test on a 45°-rotated rect
+// would false-positive on the empty corners of its bounding box, so this uses
+// the separating-axis theorem instead: two convex polygons are disjoint iff
+// their projections onto some candidate axis don't overlap. For two rectangles
+// the only candidates are the four edge normals — world x, world y, and the
+// plan rect's two local axes — so testing those four axes is exact.
+export function planRectIntersectsRect(
+  planRect: PlanRect,
+  rect: { minXMm: number; maxXMm: number; minYMm: number; maxYMm: number }
+): boolean {
+  const angleRad = (planRect.angleDeg * Math.PI) / 180;
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+  const halfW = planRect.widthMm / 2;
+  const halfD = planRect.depthMm / 2;
+
+  // The plan rect's 4 corners: center ± halfWidth along its local x axis
+  // (cos, sin) ± halfDepth along its local y axis (-sin, cos).
+  const planCorners: Point[] = [
+    { xMm: -halfW, yMm: -halfD },
+    { xMm: halfW, yMm: -halfD },
+    { xMm: halfW, yMm: halfD },
+    { xMm: -halfW, yMm: halfD }
+  ].map((local) => ({
+    xMm: planRect.centerXMm + local.xMm * cos - local.yMm * sin,
+    yMm: planRect.centerYMm + local.xMm * sin + local.yMm * cos
+  }));
+
+  // The marquee's 4 corners, straight from its min/max bounds.
+  const rectCorners: Point[] = [
+    { xMm: rect.minXMm, yMm: rect.minYMm },
+    { xMm: rect.maxXMm, yMm: rect.minYMm },
+    { xMm: rect.maxXMm, yMm: rect.maxYMm },
+    { xMm: rect.minXMm, yMm: rect.maxYMm }
+  ];
+
+  // The four candidate separating axes: world x, world y, and the plan rect's
+  // two local axes. (The marquee's own axes ARE world x/y, so they don't add
+  // new candidates.)
+  const axes: Point[] = [
+    { xMm: 1, yMm: 0 },
+    { xMm: 0, yMm: 1 },
+    { xMm: cos, yMm: sin },
+    { xMm: -sin, yMm: cos }
+  ];
+
+  for (const axis of axes) {
+    const planProj = planCorners.map((corner) => corner.xMm * axis.xMm + corner.yMm * axis.yMm);
+    const rectProj = rectCorners.map((corner) => corner.xMm * axis.xMm + corner.yMm * axis.yMm);
+    const planMin = Math.min(...planProj);
+    const planMax = Math.max(...planProj);
+    const rectMin = Math.min(...rectProj);
+    const rectMax = Math.max(...rectProj);
+
+    // Strictly disjoint on this axis → the axis separates them → no overlap.
+    // Edge-touch (planMax === rectMin) does NOT separate, matching getIds-
+    // IntersectingRect's inclusive-on-edge-touch behavior: a marquee that just
+    // grazes an edge still selects.
+    if (planMax < rectMin || rectMax < planMin) return false;
+  }
+
+  return true;
+}
+
 // Floor-placed objects (artworks/blocked-zones dragged off all walls) carry
 // their own center, footprint, and rotation directly — no wall to project onto.
 export function getFloorObjectPlanRect(object: FloorObject): PlanRect {

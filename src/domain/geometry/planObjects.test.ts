@@ -8,6 +8,7 @@ import {
   getFloorObjectPlanRect,
   getFloorWalls,
   getWallObjectPlanRect,
+  planRectIntersectsRect,
   projectPointToWall
 } from "./planObjects";
 
@@ -280,5 +281,94 @@ describe("getFloorObjectPlanRect", () => {
       depthMm: 400,
       angleDeg: 37
     });
+  });
+});
+
+describe("planRectIntersectsRect", () => {
+  it("reports overlap for an unrotated rect that overlaps the marquee", () => {
+    const planRect = {
+      centerXMm: 100,
+      centerYMm: 100,
+      widthMm: 200,
+      depthMm: 200,
+      angleDeg: 0
+    };
+    // Marquee covering the rect's bottom-right quadrant and beyond.
+    const rect = { minXMm: 150, maxXMm: 400, minYMm: 150, maxYMm: 400 };
+
+    expect(planRectIntersectsRect(planRect, rect)).toBe(true);
+  });
+
+  it("reports no overlap for an unrotated rect clear of the marquee", () => {
+    const planRect = {
+      centerXMm: 100,
+      centerYMm: 100,
+      widthMm: 200,
+      depthMm: 200,
+      angleDeg: 0
+    };
+    // Rect spans x [0,200]; marquee starts at x=300 — a clean gap on world x.
+    const rect = { minXMm: 300, maxXMm: 400, minYMm: 0, maxYMm: 200 };
+
+    expect(planRectIntersectsRect(planRect, rect)).toBe(false);
+  });
+
+  it("counts edge-touch as intersecting (inclusive, matching getIdsIntersectingRect)", () => {
+    const planRect = {
+      centerXMm: 100,
+      centerYMm: 100,
+      widthMm: 200,
+      depthMm: 200,
+      angleDeg: 0
+    };
+    // Rect's right edge sits exactly at x=200; marquee's left edge starts there.
+    const rect = { minXMm: 200, maxXMm: 400, minYMm: 0, maxYMm: 200 };
+
+    expect(planRectIntersectsRect(planRect, rect)).toBe(true);
+  });
+
+  it("returns false for a 45°-rotated rect whose bounding box overlaps but whose shape does not", () => {
+    // A 45°-rotated square of side 200 centered at the origin: its corners are
+    // at (±~141, 0) and (0, ±~141), so its axis-aligned bounding box spans
+    // roughly [-141,141]². A tiny marquee tucked into the bounding box's corner
+    // overlaps that box but lies entirely OUTSIDE the diamond — the case a
+    // plain AABB test would get wrong and SAT gets right.
+    const planRect = {
+      centerXMm: 0,
+      centerYMm: 0,
+      widthMm: 200,
+      depthMm: 200,
+      angleDeg: 45
+    };
+    const rect = { minXMm: 120, maxXMm: 140, minYMm: 120, maxYMm: 140 };
+
+    expect(planRectIntersectsRect(planRect, rect)).toBe(false);
+  });
+
+  it("returns true for a rotated rect genuinely overlapping the marquee", () => {
+    // Same diamond, but the marquee straddles its right vertex (~141, 0).
+    const planRect = {
+      centerXMm: 0,
+      centerYMm: 0,
+      widthMm: 200,
+      depthMm: 200,
+      angleDeg: 45
+    };
+    const rect = { minXMm: 100, maxXMm: 200, minYMm: -20, maxYMm: 20 };
+
+    expect(planRectIntersectsRect(planRect, rect)).toBe(true);
+  });
+
+  it("returns true when the marquee sits fully inside the plan rect", () => {
+    const planRect = {
+      centerXMm: 0,
+      centerYMm: 0,
+      widthMm: 400,
+      depthMm: 400,
+      angleDeg: 30
+    };
+    const rect = { minXMm: -20, maxXMm: 20, minYMm: -20, maxYMm: 20 };
+
+    expect(planRectIntersectsRect(planRect, rect)).toBe(true);
   });
 });

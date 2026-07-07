@@ -19,6 +19,7 @@ import {
   getFloorObjectPlanRect,
   getFloorWalls,
   getWallObjectPlanRect,
+  planRectIntersectsRect,
   WALL_OBJECT_PLAN_DEPTH_MM,
   type PlanRect
 } from "../../domain/geometry/planObjects";
@@ -149,6 +150,34 @@ type DropGhostState = {
   activeGuides: Guide[];
 };
 
+// A pending marquee (rubber-band) selection on the plan background — tracked
+// as two floor-mm pointer samples (start + current). Mirrors ElevationView's
+// MarqueeState, but plan floor coordinates are plain SVG coordinates (y-down,
+// no y-flip anywhere), so the min/max rect built from the two samples is valid
+// regardless of drag direction. Same ref-based effect discipline as the drag
+// states so the gesture never resubscribes mid-drag.
+type MarqueeState = {
+  startMm: Vector2;
+  currentMm: Vector2;
+};
+
+// Min/max floor-mm rect from a marquee's two pointer samples — the shape both
+// planRectIntersectsRect and the rendered <rect> consume. No y-flip: plan is
+// already y-down, so the smaller sample is always the top-left.
+function marqueeRectMm(marquee: MarqueeState): {
+  minXMm: number;
+  maxXMm: number;
+  minYMm: number;
+  maxYMm: number;
+} {
+  return {
+    minXMm: Math.min(marquee.startMm.xMm, marquee.currentMm.xMm),
+    maxXMm: Math.max(marquee.startMm.xMm, marquee.currentMm.xMm),
+    minYMm: Math.min(marquee.startMm.yMm, marquee.currentMm.yMm),
+    maxYMm: Math.max(marquee.startMm.yMm, marquee.currentMm.yMm)
+  };
+}
+
 export function PlanView({
   artworksById,
   draggingArtworkId = null,
@@ -165,6 +194,7 @@ export function PlanView({
   onSelectOpening,
   onSelectObject,
   onClearSelection,
+  onMarqueeSelect,
   project,
   selectedArtworkId,
   selectedOpeningId,
@@ -201,6 +231,11 @@ export function PlanView({
   // and a background click does nothing when these are absent.
   onSelectObject?: (id: string, opts: { additive: boolean }) => void;
   onClearSelection?: () => void;
+  // A rubber-band marquee committed on release: ids are PLACEMENT ids (wall/
+  // floor object ids), never artwork-library ids, and `additive` reflects a
+  // held shift. Optional/inert until App wires it, exactly like onSelectObject/
+  // onClearSelection above.
+  onMarqueeSelect?: (ids: string[], additive: boolean) => void;
   project: Project;
   selectedArtworkId?: string | null;
   selectedOpeningId?: string | null;
@@ -219,6 +254,8 @@ export function PlanView({
   const objectDragRef = useRef<ObjectDragState | null>(null);
   const [dropGhost, setDropGhost] = useState<DropGhostState | null>(null);
   const dropSnapTargetIdsRef = useRef<SnapTargetIds | undefined>(undefined);
+  const [marquee, setMarquee] = useState<MarqueeState | null>(null);
+  const marqueeRef = useRef<MarqueeState | null>(null);
 
   // Transient UI state, not store/view-prefs: which palette tool is armed,
   // its live ghost, and the hysteresis id threaded across pointer moves (the
@@ -758,6 +795,122 @@ export function PlanView({
     return suppressed;
   }
 
+  // Placement ids whose (possibly rotated) plan rects intersect the marquee.
+  // The committed project is correct here — no drag can be in flight during a
+  // marquee (beginMarquee bails when one is). Wall objects need their FloorWall
+  // for the wall-line projection (objects whose wall vanished drop out, same as
+  // beginObjectDrag); floor objects carry their own center/rotation.
+  function idsIntersectingMarquee(marqueeRect: {
+    minXMm: number;
+    maxXMm: number;
+    minYMm: number;
+    maxYMm: number;
+  }): string[] {
+    const wallsById = new Map(floorWallsForTool.map((wall) => [wall.id, wall]));
+    const ids: string[] = [];
+
+    for (const object of project.wallObjects) {
+      const wall = wallsById.get(object.wallId);
+      if (!wall) continue;
+      if (planRectIntersectsRect(getWallObjectPlanRect(wall, object), marqueeRect)) {
+        ids.push(object.id);
+      }
+    }
+    for (const object of project.floorObjects) {
+      if (planRectIntersectsRect(getFloorObjectPlanRect(object), marqueeRect)) {
+        ids.push(object.id);
+      }
+    }
+
+    return ids;
+  }
+
+  useEffect(() => {
+    if (!marquee) return;
+
+    function onPointerMove(event: PointerEvent) {
+      const current = marqueeRef.current;
+      if (!current) return;
+
+      const pointerMm = toSvgMm(event.clientX, event.clientY);
+      if (!pointerMm) return;
+
+      setMarquee((state) => (state ? { ...state, currentMm: pointerMm } : state));
+    }
+
+    function onPointerUp(event: PointerEvent) {
+      const current = marqueeRef.current;
+      setMarquee(null);
+      if (!current) return;
+
+      const rect = marqueeRectMm(current);
+      // A sub-threshold rect is a plain background click, not a drag. Unlike
+      // elevation (which clears the selection here), PlanView must do NOTHING:
+      // the browser fires a `click` on the svg right after this pointerup, and
+      // handleSvgClick's no-tool branch already calls onClearSelection for that
+      // background click — clearing here too would be redundant.
+      const draggedMm = Math.hypot(rect.maxXMm - rect.minXMm, rect.maxYMm - rect.minYMm);
+      if (draggedMm < snapThresholdMm) return;
+
+      // A real marquee. CRITICALLY suppress the trailing background click: the
+      // browser fires `click` on the svg right after pointerup, and handleSvg-
+      // Click's no-tool branch calls onClearSelection — which would instantly
+      // wipe the selection this marquee just made. suppressNextToolClickRef is
+      // the same flag handleSvgClick already consumes for placement clicks; the
+      // window.setTimeout(..., 0) is the safety net for a release that lands
+      // where no click follows (pointer left the svg mid-drag), same idiom as
+      // suppressNextSelect.
+      suppressNextToolClickRef.current = true;
+      window.setTimeout(() => {
+        suppressNextToolClickRef.current = false;
+      }, 0);
+      onMarqueeSelect?.(idsIntersectingMarquee(rect), event.shiftKey);
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+    // Same ref-based discipline as the drag effects above: subscribed once per
+    // gesture, reading the live rect via marqueeRef. snapThresholdMm and the
+    // committed project geometry idsIntersectingMarquee reads derive from the
+    // committed project/viewport and can't change mid-gesture, so they're
+    // intentionally out of the deps.
+  }, [marquee !== null, onMarqueeSelect]);
+
+  useEffect(() => {
+    marqueeRef.current = marquee;
+  }, [marquee]);
+
+  function beginMarquee(event: ReactPointerEvent<SVGSVGElement>) {
+    // Only true background reaches here: PlanObject and the resize handles
+    // stopPropagation in their own pointerdown. (This is a separate mechanism
+    // from onPointerDownCapture, which fires in the capture phase to flag a
+    // click as started-on-an-object — that handler stays untouched.)
+    //
+    // Bail when a tool is armed: a marquee drag would fight click-to-place.
+    // Stay inert until App wires the multi-select handlers (same gate as
+    // elevation). Never start over an in-flight gesture.
+    if (activeTool) return;
+    if (!onMarqueeSelect && !onClearSelection) return;
+    if (drag || objectDrag || dropGhost) return;
+
+    const startMm = toSvgMm(event.clientX, event.clientY);
+    if (!startMm) return;
+
+    // Suppress the browser's default press-drag semantics for this gesture:
+    // without this, dragging across the svg selects its text nodes (the
+    // <title>), and the NEXT marquee that starts inside that stale selection
+    // becomes a native drag of the selected text — Chrome then fires
+    // pointercancel and kills the gesture mid-flight.
+    event.preventDefault();
+    setMarquee({ startMm, currentMm: startMm });
+  }
+
   function beginObjectDrag(
     params: {
       objectId: string;
@@ -957,6 +1110,7 @@ export function PlanView({
         viewBox={viewBox}
         role="img"
         onClick={handleSvgClick}
+        onPointerDown={beginMarquee}
         onPointerDownCapture={handleSvgPointerDownCapture}
         onPointerLeave={handleToolPointerLeave}
         onPointerMove={handleToolPointerMove}
@@ -1263,6 +1417,24 @@ export function PlanView({
             vectorEffect="non-scaling-stroke"
           />
         ))}
+        {marquee
+          ? (() => {
+              // Plan is y-down (no flip), so the min/max rect maps straight to
+              // the <rect>. Dashed petrol stroke (.marquee-rect) — the same
+              // in-progress marquee look elevation uses.
+              const rect = marqueeRectMm(marquee);
+              return (
+                <rect
+                  className="marquee-rect"
+                  x={rect.minXMm}
+                  y={rect.minYMm}
+                  width={rect.maxXMm - rect.minXMm}
+                  height={rect.maxYMm - rect.minYMm}
+                  vectorEffect="non-scaling-stroke"
+                />
+              );
+            })()
+          : null}
       </svg>
     </div>
   );
