@@ -262,6 +262,20 @@ describe("clampZoom", () => {
     expect(clampZoom(999999, wideContent, zeroContainer, limits)).toBe(limits.maxZoom);
     expect(clampZoom(3, wideContent, zeroContainer, limits)).toBe(3);
   });
+
+  it("never caps below fit scale for content narrower than minViewBoxWidthMm", () => {
+    // 200mm content is below PLAN_ZOOM_LIMITS.minViewBoxWidthMm (250), so the
+    // naive world-space cap (widthCap = containerPx.width / (fitPpm * 250))
+    // would fall below 1 here and clamp fit scale itself down.
+    const tinyContent: ViewBox = { x: 0, y: 0, width: 200, height: 160 };
+    const container: Size = { width: 1000, height: 800 };
+
+    expect(clampZoom(1, tinyContent, container, limits)).toBe(1);
+
+    // Zooming in from fit must never land below fit scale either.
+    const zoomedIn = clampZoom(1.01, tinyContent, container, limits);
+    expect(zoomedIn).toBeGreaterThanOrEqual(1);
+  });
 });
 
 describe("panBy", () => {

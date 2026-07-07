@@ -55,7 +55,10 @@ export function clampZoom(
   if (fitPpm <= 0) return Math.min(Math.max(zoom, limits.minZoom), limits.maxZoom);
   // viewBoxWidth = containerPx.width / (fitPpm * zoom) >= minViewBoxWidthMm
   const widthCap = containerPx.width / (fitPpm * limits.minViewBoxWidthMm);
-  const max = Math.min(limits.maxZoom, Math.max(widthCap, limits.minZoom));
+  // Content already narrower than minViewBoxWidthMm makes widthCap < 1, which
+  // would otherwise cap zoom below fit scale — clampZoom(1, ...) must always
+  // return 1, so the cap can never fall below fit (1).
+  const max = Math.min(limits.maxZoom, Math.max(widthCap, limits.minZoom, 1));
   return Math.min(Math.max(zoom, limits.minZoom), max);
 }
 

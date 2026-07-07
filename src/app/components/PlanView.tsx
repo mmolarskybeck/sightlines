@@ -347,13 +347,13 @@ export function PlanView({
   const marqueeRef = useRef<MarqueeState | null>(null);
 
   // Space-drag / middle-mouse pan. `isSpaceDown` drives the container cursor
-  // (grab), `panning` drives it while a pan drag is live (grabbing). Both are
-  // mirrored into refs so the capture-phase pointerdown and the window-level
-  // pan move handlers read fresh values without resubscribing.
+  // (grab), `panning` drives it while a pan drag is live (grabbing).
+  // `isSpaceDown` is mirrored into `spaceHeldRef` so the capture-phase
+  // pointerdown and the window-level pan move handlers read a fresh value
+  // without resubscribing.
   const [isSpaceDown, setIsSpaceDown] = useState(false);
   const spaceHeldRef = useRef(false);
   const [panning, setPanning] = useState(false);
-  const panningRef = useRef(false);
   // Last pointer client position of the in-flight pan, for incremental deltas.
   const panLastRef = useRef<{ x: number; y: number } | null>(null);
   // Fresh viewport for gesture handlers that were subscribed once (pan moves,
@@ -587,13 +587,18 @@ export function PlanView({
         return;
       }
       if (event.code === "Space" || event.key === " ") {
+        // A Tab-focused button/link must still activate on Space — only
+        // hijack the key when it isn't targeting an interactive control.
+        if ((event.target as HTMLElement)?.closest?.('button, a, [role="button"]')) {
+          return;
+        }
         if (!spaceHeldRef.current) {
           spaceHeldRef.current = true;
           setIsSpaceDown(true);
         }
-        // Stops the page from scrolling / a focused button from activating
-        // while space engages pan. e.repeat is ignored for the flag (already
-        // set) but still prevented so held-space never scrolls.
+        // Stops the page from scrolling while space engages pan. e.repeat is
+        // ignored for the flag (already set) but still prevented so
+        // held-space never scrolls.
         event.preventDefault();
       }
     }
@@ -644,7 +649,6 @@ export function PlanView({
     }
 
     function endPan() {
-      panningRef.current = false;
       panLastRef.current = null;
       setPanning(false);
       // A left-button (space) pan fires a trailing `click` on the svg just like
@@ -942,7 +946,6 @@ export function PlanView({
     if (spaceHeldRef.current || event.button === 1) {
       event.preventDefault();
       event.stopPropagation();
-      panningRef.current = true;
       panLastRef.current = { x: event.clientX, y: event.clientY };
       setPanning(true);
       return;

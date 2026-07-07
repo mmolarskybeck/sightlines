@@ -219,12 +219,17 @@ export function App() {
   const storagePersistence = useStoragePersistence();
   // One plan viewport per active project — resets to fit on project switch.
   const [planViewport, setPlanViewport] = useViewport2D(project?.id ?? "none");
-  // One elevation viewport, keyed on project id + wall id so it resets to fit
-  // on either a project switch OR a wall switch (no other reset code needed)
-  // — independent of planViewport, so switching views never leaks one
-  // surface's pan/zoom into the other's.
+  // The wall actually rendered by ElevationView — falls back to the floor's
+  // first wall when selectedWallId is null/stale, so the viewport key below
+  // must use ITS id (not the raw selectedWallId) or explicitly selecting that
+  // same fallback wall would look like a wall switch and spuriously reset pan/zoom.
+  const selectedWall = project ? getSelectedWall(project, selectedWallId) : null;
+  // One elevation viewport, keyed on project id + resolved wall id so it
+  // resets to fit on either a project switch OR a genuine wall switch (no
+  // other reset code needed) — independent of planViewport, so switching
+  // views never leaks one surface's pan/zoom into the other's.
   const [elevationViewport, setElevationViewport] = useViewport2D(
-    `${project?.id ?? "none"}:${selectedWallId ?? "none"}`
+    `${project?.id ?? "none"}:${selectedWall?.id ?? "none"}`
   );
 
   useEffect(() => {
@@ -520,7 +525,6 @@ export function App() {
     moveOpening
   ]);
 
-  const selectedWall = project ? getSelectedWall(project, selectedWallId) : null;
   const selectedWallRoomPlacement =
     project && selectedWall
       ? (project.floor.rooms.find((placement) =>
