@@ -2,16 +2,17 @@ import { useLayoutEffect, useMemo, useRef } from "react";
 import { BoxGeometry, type LineLoop, type LineSegments } from "three";
 import type { Dimensions } from "../../../domain/project";
 import { mmToWorld } from "./coordinates";
+import { APPROXIMATE_COLOR, SELECTION_COLOR, UNKNOWN_COLOR } from "./tokens";
 
 // The shared outline language of the 2D views, in WebGL: dashed strokes for
 // dimension uncertainty (--caution approximate / --danger unknown, docs/
 // plan.md §8) and a solid accent stroke for selection (--selection). Hex
-// equivalents of those tokens' oklch values, since three.js materials can't
-// resolve CSS custom properties. Selection never tints an artwork's image
-// texture (spec §4.3) — it's outline-only on textured planes.
-const APPROXIMATE_COLOR = "#8a6210"; // ≈ --caution   oklch(0.5 0.13 75)
-const UNKNOWN_COLOR = "#b03a28"; // ≈ --danger    oklch(0.53 0.18 28)
-export const SELECTION_COLOR = "#1d7e8c"; // ≈ --selection oklch(0.55 0.11 200)
+// equivalents of those tokens' oklch values are mirrored in tokens.ts since
+// three.js materials can't resolve CSS custom properties. Selection never tints
+// an artwork's image texture (spec §4.3) — it's outline-only on textured planes.
+
+// Re-export for backwards compatibility (check if needed).
+export { SELECTION_COLOR };
 
 // ~7:5 dash rhythm, matching .elevation-artwork.uncertain's stroke-dasharray.
 const DASH_SIZE = 0.05;

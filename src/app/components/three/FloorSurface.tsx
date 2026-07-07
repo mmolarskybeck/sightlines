@@ -3,9 +3,7 @@ import { useMemo } from "react";
 import { DoubleSide, Shape } from "three";
 import type { Vec2 } from "../../../domain/geometry/scene3d";
 import { MM_TO_WORLD } from "./coordinates";
-
-// Matte warm-grey floor (spec §5.3). MeshLambertMaterial so it takes the light.
-const FLOOR_COLOR = "#e8e4de";
+import { FLOOR_COLOR } from "./tokens";
 
 // The room floor as a single ShapeGeometry triangulated from the polygon,
 // laid flat in the xz-plane. Rendered double-sided so the ground reads whether

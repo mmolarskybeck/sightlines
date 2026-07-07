@@ -9,17 +9,13 @@ import {
   isUncertain,
   SelectionRectOutline
 } from "./UncertaintyOutline";
+import { PLACEHOLDER_COLOR } from "./tokens";
 
 // Off-the-wall offset (spec §5.3): enough to never z-fight the wall plane,
 // small enough to read as hanging flush.
 const WALL_OFFSET_MM = 20;
 // Outlines sit slightly proud of the artwork plane itself.
 const OUTLINE_OFFSET_MM = 5;
-
-// Neutral placeholder for artworks whose image is missing or still loading —
-// a shade between the wall white and the floor grey so it reads as "a work
-// goes here" rather than a hole in the wall.
-const PLACEHOLDER_COLOR = "#e7e4df";
 
 // One placed wall artwork, in WALL-LOCAL coordinates: the parent WallPanel
 // group maps local +x along the wall, +y up from the floor, +z inward, so

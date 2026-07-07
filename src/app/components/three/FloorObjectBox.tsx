@@ -9,14 +9,10 @@ import {
   isUncertain,
   SelectionBoxOutline
 } from "./UncertaintyOutline";
-
-// Neutral matte volume — deliberately not textured (spec §5.3): draping an
-// image over a pedestal box misleads more than it informs.
-const BOX_COLOR = "#dbd8d2";
+import { BLOCKED_ZONE_COLOR, BOX_COLOR } from "./tokens";
 
 // Planning annotation, not physical (spec §5.3) — same subdued grey family
 // as the 2D blocked-zone hatch, as a translucent wash.
-const BLOCKED_ZONE_COLOR = "#565b60";
 const BLOCKED_ZONE_OPACITY = 0.15;
 
 // Sits just above the floor plane to avoid z-fighting.

@@ -4,19 +4,12 @@ import { Path, Shape, ShapeGeometry, type Texture } from "three";
 import type { WallPanel3d } from "../../../domain/geometry/scene3d";
 import { ArtworkPlane } from "./ArtworkPlane";
 import { mmToWorld, MM_TO_WORLD } from "./coordinates";
-
-// Near-white wall — MeshLambertMaterial so the single directional light shades
-// adjacent walls slightly differently and the room reads as volume (spec §6.2).
-// Selection may tint untextured surfaces (spec §4.3): the selected wall gets a
-// whisper of the selection petrol.
-const WALL_COLOR = "#f4f2ef";
-const WALL_SELECTED_COLOR = "#e4edee";
+import { BLOCKED_ZONE_COLOR, WALL_COLOR, WALL_SELECTED_COLOR } from "./tokens";
 
 // Wall blocked zones are planning annotations, not physical (spec §5.3): a
 // translucent wash in the same subdued grey family as the 2D hatch, flush to
 // the wall (small offset to avoid z-fighting; less than the artworks' 20 mm
 // so a zone never reads as covering a work).
-const BLOCKED_ZONE_COLOR = "#565b60";
 const BLOCKED_ZONE_OPACITY = 0.15;
 const BLOCKED_ZONE_OFFSET_MM = 6;
 
