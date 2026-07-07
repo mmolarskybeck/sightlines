@@ -8,6 +8,7 @@ import { GridFourIcon } from "@phosphor-icons/react/dist/csr/GridFour";
 import { MagnetIcon } from "@phosphor-icons/react/dist/csr/Magnet";
 import { MapTrifoldIcon } from "@phosphor-icons/react/dist/csr/MapTrifold";
 import { PresentationIcon } from "@phosphor-icons/react/dist/csr/Presentation";
+import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
 import { StackIcon } from "@phosphor-icons/react/dist/csr/Stack";
 import { UploadSimpleIcon } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
@@ -102,6 +103,9 @@ const DataView = lazy(() =>
 );
 const ElevationView = lazy(() =>
   import("./components/ElevationView").then((module) => ({ default: module.ElevationView }))
+);
+const ThreeDView = lazy(() =>
+  import("./components/three/ThreeDView").then((module) => ({ default: module.ThreeDView }))
 );
 const FontLab = import.meta.env.DEV
   ? lazy(() => import("./components/FontLab"))
@@ -912,7 +916,9 @@ export function App() {
           className="view-tabs topbar-center"
           value={viewMode}
           onValueChange={(value) => {
-            if (value === "plan" || value === "elevation") setViewMode(value);
+            if (value === "plan" || value === "elevation" || value === "3d") {
+              setViewMode(value);
+            }
           }}
         >
           <TabsList aria-label="Workspace view" className="view-tabs">
@@ -923,6 +929,10 @@ export function App() {
             <TabsTrigger className="tab-button" value="elevation">
               <PresentationIcon aria-hidden="true" size={16} />
               <span>Elevation</span>
+            </TabsTrigger>
+            <TabsTrigger className="tab-button" value="3d">
+              <CubeIcon aria-hidden="true" size={16} />
+              <span>3D</span>
             </TabsTrigger>
           </TabsList>
         </Tabs>
@@ -1054,7 +1064,7 @@ export function App() {
             <div className="view-options" aria-label="View options">
               <ViewOptionButton
                 active={showGrid}
-                disabled={viewMode === "data"}
+                disabled={viewMode === "data" || viewMode === "3d"}
                 icon={<GridFourIcon aria-hidden="true" size={16} />}
                 label="Grid"
                 title={showGrid ? "Hide grid" : "Show grid"}
@@ -1062,14 +1072,14 @@ export function App() {
               />
               <ViewOptionButton
                 active={snapToGrid}
-                disabled={viewMode === "data"}
+                disabled={viewMode === "data" || viewMode === "3d"}
                 icon={<MagnetIcon aria-hidden="true" size={16} />}
                 label="Snap"
                 title={snapToGrid ? "Disable snap to grid" : "Enable snap to grid"}
                 onClick={toggleSnapToGrid}
               />
               <PrecisionSelect
-                disabled={viewMode === "data"}
+                disabled={viewMode === "data" || viewMode === "3d"}
                 floorMm={gridPrecisionFloorMm}
                 unit={project.unit}
                 onChange={setGridPrecisionFloorMm}
@@ -1089,7 +1099,7 @@ export function App() {
                 />
               ) : null}
               <UnitSystemToggle
-                disabled={viewMode === "data"}
+                disabled={viewMode === "data" || viewMode === "3d"}
                 system={unitSystem}
                 onChange={(system) => setUnit(displayUnitForSystem(system))}
               />
@@ -1224,6 +1234,11 @@ export function App() {
           {viewMode === "data" ? (
             <Suspense fallback={<div className="skeleton-panel" />}>
               <DataView json={exportProjectJson(project)} />
+            </Suspense>
+          ) : null}
+          {viewMode === "3d" ? (
+            <Suspense fallback={<div className="skeleton-panel" />}>
+              <ThreeDView project={project} />
             </Suspense>
           ) : null}
         </section>

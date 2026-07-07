@@ -1713,6 +1713,15 @@ body.panels-resizing * {
   stroke-width: 1;
 }
 
+/* The 3D empty-state cube is drawn as strokes, matching the plan/elevation
+   glyph treatment — outline only, no fill. */
+.canvas-empty-glyph path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
 /* Clean white canvas everywhere — the figure is carried by wall strokes and
    the drafting-line grid, not a background tint. No inner border: the view
    toolbar and side panels already frame the surface. */

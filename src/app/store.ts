@@ -57,7 +57,7 @@ import { createSampleProject } from "../domain/sample/sampleProject";
 import { parseArtwork } from "../domain/schema/artworkSchema";
 import { migrateProjectJson } from "../domain/schema/projectSchema";
 
-type ViewMode = "plan" | "elevation" | "data";
+type ViewMode = "plan" | "elevation" | "data" | "3d";
 
 // A transient, NON-undoable arrange interaction (precedent: selectedObjectIds
 // is view state, not on the undo stack). While a session is live, panel edits,
