@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { clamp } from "../../domain/geometry/scalar";
 
 // A hand-rolled drag handle for the resizable workspace panels — deliberately
 // not a dependency (the app has no split-pane library and one thin pointer
@@ -38,8 +39,6 @@ export function PanelResizeHandle({
   // while the right pane (inspector) inverts it, so both feel natural.
   const directionSign = side === "left" ? 1 : -1;
 
-  const clamp = (value: number) => Math.min(max, Math.max(min, value));
-
   function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
     // Ignore secondary buttons so a right-click never starts a phantom drag.
     if (event.button !== 0) return;
@@ -59,7 +58,7 @@ export function PanelResizeHandle({
     const origin = dragOrigin.current;
     if (!origin) return;
     const delta = (event.clientX - origin.pointerX) * directionSign;
-    onResize(clamp(origin.startWidth + delta));
+    onResize(clamp(origin.startWidth + delta, min, max));
   }
 
   function endDrag(event: React.PointerEvent<HTMLDivElement>) {
@@ -78,10 +77,10 @@ export function PanelResizeHandle({
     const step = (event.shiftKey ? 48 : 16) * directionSign;
     if (event.key === "ArrowLeft") {
       event.preventDefault();
-      onResize(clamp(width - step));
+      onResize(clamp(width - step, min, max));
     } else if (event.key === "ArrowRight") {
       event.preventDefault();
-      onResize(clamp(width + step));
+      onResize(clamp(width + step, min, max));
     } else if (event.key === "Home") {
       event.preventDefault();
       onResize(min);

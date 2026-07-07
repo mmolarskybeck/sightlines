@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { clamp } from "../../domain/geometry/scalar";
 
 const STORAGE_KEY = "sightlines.viewPreferences.v1";
 
@@ -13,10 +14,6 @@ export const LEFT_PANEL_DEFAULT_WIDTH = 320;
 export const INSPECTOR_MIN_WIDTH = 260;
 export const INSPECTOR_MAX_WIDTH = 420;
 export const INSPECTOR_DEFAULT_WIDTH = 300;
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
 
 type ViewPreferences = {
   showGrid: boolean;
