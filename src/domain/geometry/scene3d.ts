@@ -145,8 +145,9 @@ export function deriveScene3d(
 
 // The inward-facing unit normal for a wall panel: the left normal of
 // `start -> end`. Walls are normalised (see `deriveRoom`) so this always points
-// into the room. Exposed for the render layer (to face the single-sided wall
-// inward) and asserted directly in tests.
+// into the room. This is the documented orientation contract the render layer
+// relies on (WallPanel derives its yaw from the same start->end convention);
+// asserted directly in tests via point-in-polygon probes.
 export function wallInwardNormal(panel: WallPanel3d): Vec2 {
   const dx = panel.end.xMm - panel.start.xMm;
   const dy = panel.end.yMm - panel.start.yMm;

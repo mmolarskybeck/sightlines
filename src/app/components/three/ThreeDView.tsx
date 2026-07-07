@@ -214,15 +214,19 @@ function CameraRig({
     }
   });
 
-  apiRef.current = {
-    overview: () => {
-      const pose = overviewPose(sceneRef.current, aspect());
-      if (pose) flyTo(pose);
-    },
-    eyeLevel: (wall, eyeHeightMm) => {
-      flyTo(eyeLevelPose(sceneRef.current, wall, eyeHeightMm));
-    }
-  };
+  // Refs must not be written during render; publish the preset API after
+  // commit (no deps — closures read refs/three objects, never stale props).
+  useEffect(() => {
+    apiRef.current = {
+      overview: () => {
+        const pose = overviewPose(sceneRef.current, aspect());
+        if (pose) flyTo(pose);
+      },
+      eyeLevel: (wall, eyeHeightMm) => {
+        flyTo(eyeLevelPose(sceneRef.current, wall, eyeHeightMm));
+      }
+    };
+  });
 
   useEffect(() => {
     const pose = overviewPose(sceneRef.current, aspect());
