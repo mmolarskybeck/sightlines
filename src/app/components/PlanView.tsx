@@ -70,6 +70,14 @@ import { RoomResizeHandles, type ResizeHandleTarget } from "./RoomResizeHandles"
 // for the one selected room rather than floating outside every room at rest.
 const SELECTED_HANDLE_PX = 10;
 const SNAP_THRESHOLD_PX = 10;
+// Wall objects render at their true model depth once it's on-screen large
+// enough to read as a rect; below that, clamp to a visible floor (doors/
+// windows are thin by design and would otherwise vanish to a hairline when
+// zoomed out).
+const MIN_WALL_OBJECT_DEPTH_PX = 9;
+// Every plan object gets an invisible hit pad at least this big on both axes
+// so small objects (esp. thin wall objects) stay clickable at any zoom.
+const MIN_OBJECT_HIT_PX = 20;
 
 // Stable module-level reference so a caller that doesn't pass `getBlob`
 // doesn't retrigger useAssetImageUrls' effect on every render (same idiom as
@@ -450,6 +458,9 @@ export function PlanView({
   }, [activeTool]);
 
   const captureDistanceMm = pixelsPerMm > 0 ? WALL_CAPTURE_PX / pixelsPerMm : 0;
+  const wallObjectMinDepthMm =
+    pixelsPerMm > 0 ? MIN_WALL_OBJECT_DEPTH_PX / pixelsPerMm : 0;
+  const objectHitMinMm = pixelsPerMm > 0 ? MIN_OBJECT_HIT_PX / pixelsPerMm : 0;
 
   function disarmTool() {
     setActiveTool(null);
@@ -1020,10 +1031,19 @@ export function PlanView({
     const wallsById = new Map(floorWallsForTool.map((wall) => [wall.id, wall]));
     const ids: string[] = [];
 
+    // Deliberately viewport-dependent: this must capture the same on-screen
+    // extent the object is rendered with, including the min-depth clamp, or a
+    // marquee could visibly enclose an object without selecting it.
+    const effectiveWallObjectDepthMm = Math.max(WALL_OBJECT_PLAN_DEPTH_MM, wallObjectMinDepthMm);
     for (const object of project.wallObjects) {
       const wall = wallsById.get(object.wallId);
       if (!wall) continue;
-      if (planRectIntersectsRect(getWallObjectPlanRect(wall, object), marqueeRect)) {
+      if (
+        planRectIntersectsRect(
+          getWallObjectPlanRect(wall, object, effectiveWallObjectDepthMm),
+          marqueeRect
+        )
+      ) {
         ids.push(object.id);
       }
     }
@@ -1519,14 +1539,21 @@ export function PlanView({
                     ? wallObject.artworkId === selectedArtworkId
                     : wallObject.id === selectedOpeningId) ||
                   selectedObjectIds.includes(wallObject.id);
+                // On-screen depth floor so thin doors/windows stay visible when
+                // zoomed out — only while still wall-anchored (a floated preview
+                // already carries its real floor-object depth).
+                const renderedPlanRect = isFloorPlaced
+                  ? planRect
+                  : { ...planRect, depthMm: Math.max(planRect.depthMm, wallObjectMinDepthMm) };
 
                 return (
                   <PlanObject
+                    hitMinSizeMm={objectHitMinMm}
                     isFloorPlaced={isFloorPlaced}
                     isSelected={isSelected}
                     key={wallObject.id}
                     kind={wallObject.kind}
-                    planRect={planRect}
+                    planRect={renderedPlanRect}
                     tooltip={
                       wallObject.kind === "artwork" ? (
                         artworkTooltip(wallObject.artworkId, wallObject.displayDimensionsOverride)
@@ -1610,6 +1637,7 @@ export function PlanView({
 
                 return (
                   <PlanObject
+                    hitMinSizeMm={objectHitMinMm}
                     isFloorPlaced={isFloorPlaced}
                     isSelected={isSelected}
                     key={floorObject.id}
@@ -1710,9 +1738,33 @@ export function PlanView({
           );
         })()}
         {toolGhost ? (
-          <PlanObject isGhost kind={activeTool ?? "door"} planRect={toolGhost.planRect} />
+          <PlanObject
+            isGhost
+            kind={activeTool ?? "door"}
+            planRect={
+              toolGhost.placement.anchor === "wall"
+                ? {
+                    ...toolGhost.planRect,
+                    depthMm: Math.max(toolGhost.planRect.depthMm, wallObjectMinDepthMm)
+                  }
+                : toolGhost.planRect
+            }
+          />
         ) : null}
-        {dropGhost ? <PlanObject isGhost kind="artwork" planRect={dropGhost.planRect} /> : null}
+        {dropGhost ? (
+          <PlanObject
+            isGhost
+            kind="artwork"
+            planRect={
+              dropGhost.placement.anchor === "wall"
+                ? {
+                    ...dropGhost.planRect,
+                    depthMm: Math.max(dropGhost.planRect.depthMm, wallObjectMinDepthMm)
+                  }
+                : dropGhost.planRect
+            }
+          />
+        ) : null}
         {(
           objectDrag?.activeGuides ??
           dropGhost?.activeGuides ??

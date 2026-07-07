@@ -12,6 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 // restrained stroke-only visual language (no fill illustration) so a plan
 // rect and its elevation placement read as the same object.
 export function PlanObject({
+  hitMinSizeMm = 0,
   isFloorPlaced = false,
   isGhost = false,
   isSelected = false,
@@ -22,6 +23,9 @@ export function PlanObject({
   tooltip,
   tooltipDisabled = false
 }: {
+  // Floor of the invisible hit rect on both axes, in model mm — keeps small
+  // (esp. thin wall) objects clickable at any zoom. Ghosts never get one.
+  hitMinSizeMm?: number;
   isFloorPlaced?: boolean;
   // A click-to-place (or drop) preview: non-interactive, translucent,
   // dashed — same convention as ElevationArtwork's `isGhost`.
@@ -59,6 +63,8 @@ export function PlanObject({
   const insetWidthMm = Math.max(0, planRect.widthMm - insetMm * 2);
   const insetDepthMm = Math.max(0, planRect.depthMm - insetMm * 2);
   const hatchRunMm = Math.min(planRect.widthMm, planRect.depthMm);
+  const hitWidthMm = Math.max(planRect.widthMm, hitMinSizeMm);
+  const hitDepthMm = Math.max(planRect.depthMm, hitMinSizeMm);
 
   const shape = (
     <g
@@ -84,6 +90,15 @@ export function PlanObject({
       }
       transform={`rotate(${planRect.angleDeg} ${planRect.centerXMm} ${planRect.centerYMm})`}
     >
+      {isGhost ? null : (
+        <rect
+          className="plan-object-hit"
+          height={hitDepthMm}
+          width={hitWidthMm}
+          x={planRect.centerXMm - hitWidthMm / 2}
+          y={planRect.centerYMm - hitDepthMm / 2}
+        />
+      )}
       <rect
         className="plan-object-outline"
         height={planRect.depthMm}

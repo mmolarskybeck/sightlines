@@ -62,9 +62,12 @@
   --primary-foreground: oklch(1 0 0);
   --primary-strong: oklch(0.3 0.065 200);
   --primary-soft: oklch(0.94 0.022 200);
+  /* Canvas selection petrol: same hue as --primary, lifted so selected
+     strokes read clearly apart from ink walls at canvas stroke weights. */
+  --selection: oklch(0.55 0.11 200);
   /* Petrol hairline for selected-row/pressed-fill edges — the same rank as
      --danger-line/--caution-line in their families. */
-  --primary-line: var(--primary-line);
+  --primary-line: oklch(0.82 0.045 200);
   --destructive: oklch(0.53 0.18 28);
   --destructive-foreground: oklch(1 0 0);
   --danger-soft: oklch(0.94 0.052 28);
@@ -1558,7 +1561,7 @@ input:focus-visible {
 /* Faint interior wash marking the selected room — never interactive (the
    room-hit polygon underneath already owns the click). */
 .room-selection-wash {
-  fill: var(--primary);
+  fill: var(--selection);
   fill-opacity: 0.07;
   pointer-events: none;
 }
@@ -1568,7 +1571,7 @@ input:focus-visible {
    handles below. */
 .room-selection-outline {
   fill: none;
-  stroke: var(--primary);
+  stroke: var(--selection);
   stroke-width: 2;
   pointer-events: none;
 }
@@ -1608,7 +1611,7 @@ input:focus-visible {
 }
 
 .wall-line.active {
-  stroke: var(--primary);
+  stroke: var(--selection);
   stroke-width: 7;
 }
 
@@ -1628,12 +1631,18 @@ input:focus-visible {
   cursor: pointer;
 }
 
+/* Predict-the-click: hovering a wall's hit stroke tints its visible line.
+   .wall-hit is the next sibling of .wall-line. */
+.plan-svg:not(.tool-armed) .wall-line:not(.active):has(+ .wall-hit:hover) {
+  stroke: var(--primary-strong);
+}
+
 /* Square (no rounded corners — this design language has no pills), always
    petrol-stroked since these only ever render for the one selected room
    rather than floating, muted, outside every room at rest. */
 .resize-handle {
   fill: var(--bg);
-  stroke: var(--primary);
+  stroke: var(--selection);
   stroke-width: 1.5;
   cursor: grab;
   touch-action: none;
@@ -1650,7 +1659,7 @@ input:focus-visible {
 
 .resize-handle.active {
   fill: var(--primary-soft);
-  stroke: var(--primary);
+  stroke: var(--selection);
   cursor: grabbing;
 }
 
@@ -1674,9 +1683,9 @@ input:focus-visible {
    quieter stroke than the live rubber band below, so in-progress vs settled
    still read apart. */
 .selection-group-outline {
-  fill: var(--primary);
+  fill: var(--selection);
   fill-opacity: 0.06;
-  stroke: var(--primary);
+  stroke: var(--selection);
   stroke-opacity: 0.7;
   stroke-dasharray: 6 4;
   stroke-width: 1;
@@ -1687,9 +1696,9 @@ input:focus-visible {
    signal (never generic blue), a notch stronger than the settled selection
    zone above so dragging still reads as "pending". */
 .marquee-rect {
-  fill: var(--primary);
+  fill: var(--selection);
   fill-opacity: 0.07;
-  stroke: var(--primary);
+  stroke: var(--selection);
   stroke-opacity: 0.9;
   stroke-dasharray: 6 4;
   pointer-events: none;
@@ -1798,8 +1807,8 @@ input:focus-visible {
 
 .plan-toolbar-button[aria-pressed="true"] {
   border-color: var(--primary);
-  background: var(--petrol-soft);
-  color: var(--petrol-strong);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
 }
 
 .surface-label-select:hover {
@@ -1885,7 +1894,7 @@ input:focus-visible {
 }
 
 .elevation-artwork.selected .artwork-outline {
-  stroke: var(--primary);
+  stroke: var(--selection);
   stroke-width: 2.5;
 }
 
@@ -1900,7 +1909,7 @@ input:focus-visible {
 .elevation-artwork.ghost .artwork-outline {
   fill: var(--primary-soft);
   fill-opacity: 0.4;
-  stroke: var(--primary);
+  stroke: var(--selection);
   stroke-dasharray: 6 5;
 }
 
@@ -2762,7 +2771,7 @@ input:focus-visible {
 }
 
 .elevation-opening.selected .opening-outline {
-  stroke: var(--primary);
+  stroke: var(--selection);
   stroke-width: 2.5;
 }
 
@@ -2773,7 +2782,7 @@ input:focus-visible {
 }
 
 .elevation-opening.selected .door-swing {
-  stroke: var(--primary);
+  stroke: var(--selection);
 }
 
 .window-mullions line {
@@ -2783,7 +2792,7 @@ input:focus-visible {
 }
 
 .elevation-opening.selected .window-mullions line {
-  stroke: var(--primary);
+  stroke: var(--selection);
 }
 
 .blocked-zone-hatch-line {
@@ -2799,6 +2808,22 @@ input:focus-visible {
    the elevation hairline because these objects sit on top of room geometry at
    plan scale. Kind-specific interior marks add recognition without adding a
    new color vocabulary. */
+/* Invisible padded hit target (PlanObject's hitMinSizeMm) — keeps small/thin
+   objects clickable at any zoom without inflating what's actually drawn. */
+.plan-object-hit {
+  fill: none;
+  stroke: none;
+}
+
+.plan-object:not(.is-ghost) .plan-object-hit {
+  pointer-events: all;
+}
+
+/* Armed tool: the pad must not steal click-to-place near walls. */
+.plan-svg.tool-armed .plan-object-hit {
+  pointer-events: none;
+}
+
 .plan-object-outline {
   fill: var(--bg);
   fill-opacity: 0.78;
@@ -2826,10 +2851,20 @@ input:focus-visible {
   stroke-dasharray: 5 4;
 }
 
+.plan-object:not(.is-ghost) {
+  cursor: grab;
+}
+
+/* :not(.is-selected) is required — without it this hover selector's
+   specificity (0,4,0) would override the selection stroke below (0,3,0). */
+.plan-object:not(.is-ghost):not(.is-selected):hover .plan-object-outline {
+  stroke: var(--ink);
+}
+
 .plan-object.is-selected .plan-object-outline {
   fill: var(--primary-soft);
   fill-opacity: 0.72;
-  stroke: var(--primary);
+  stroke: var(--selection);
   stroke-width: 2.5;
 }
 
@@ -2848,7 +2883,7 @@ input:focus-visible {
 }
 
 .plan-object.is-selected .plan-object-mark {
-  stroke: var(--primary);
+  stroke: var(--selection);
   opacity: 1;
 }
 
@@ -2863,7 +2898,7 @@ input:focus-visible {
 .plan-object.is-ghost .plan-object-outline {
   fill: var(--primary-soft);
   fill-opacity: 0.4;
-  stroke: var(--primary);
+  stroke: var(--selection);
   stroke-dasharray: 6 5;
 }
 

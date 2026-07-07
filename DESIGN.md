@@ -17,6 +17,7 @@ colors:
   primary: "oklch(0.42 0.07 200)"
   primary-strong: "oklch(0.3 0.065 200)"
   primary-soft: "oklch(0.94 0.022 200)"
+  selection: "oklch(0.55 0.11 200)"
   destructive: "oklch(0.53 0.18 28)"
   caution: "oklch(0.5 0.13 75)"
 typography:
@@ -52,8 +53,9 @@ Use a restrained white, black, graphite, and petrol system.
 - White (`--background`) is the workspace and panel ground.
 - Near-black (`--foreground`) is primary text and structural drawing.
 - Thin neutral borders (`--border`, `--input`) separate panes and controls.
-- Petrol (`--primary`) is reserved for active modes, selected objects, focus rings, snap guides, and high-commitment toggles.
+- Petrol (`--primary`) is reserved for active modes, focus rings, snap guides, and high-commitment toggles — the chrome/interaction token.
 - Petrol soft (`--primary-soft`) is the selected-row and pressed-toggle wash.
+- Canvas selection strokes (plan objects, rooms, resize handles, marquee, elevation openings/artwork) use `--selection`, a lighter petrol lifted for contrast against ink walls at canvas stroke weights, rather than `--primary`.
 - Caution amber and destructive red are semantic only: approximate data, invalid state, placement warnings, and failures.
 
 Avoid decorative color. The UI should not become teal-themed; petrol is an interaction signal, not wallpaper.

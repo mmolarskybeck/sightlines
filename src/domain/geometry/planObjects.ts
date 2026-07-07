@@ -3,9 +3,9 @@ import type { Point } from "../snapping/resolveSnap";
 import { getWallsWithGeometry, type WallWithGeometry } from "./walls";
 
 // Doors/windows render as zero-thickness lines in plan view, so their rects
-// need a nominal thickness to be visible/clickable — fixed (not editable),
-// unlike floor objects' DEFAULT_FLOOR_OBJECT_DEPTH_MM.
-export const WALL_OBJECT_PLAN_DEPTH_MM = 100;
+// need a nominal frame/leaf depth to be visible/clickable — fixed (not
+// editable), unlike floor objects' DEFAULT_FLOOR_OBJECT_DEPTH_MM.
+export const WALL_OBJECT_PLAN_DEPTH_MM = 150;
 
 // A room's wall lifted into floor coordinates: RoomPlacement.rotationDeg is
 // validated to be 0 elsewhere (rooms are placed axis-aligned), so lifting a

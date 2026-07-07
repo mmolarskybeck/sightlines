@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OpeningWallObject, WallObjectBase } from "../project";
-import type { FloorWall } from "../geometry/planObjects";
+import { WALL_OBJECT_PLAN_DEPTH_MM, type FloorWall } from "../geometry/planObjects";
 import { getGridSnapTargets } from "./gridSnapTargets";
 import { resolvePlanPlacement, WALL_CAPTURE_PX } from "./planSnapTargets";
 
@@ -68,7 +68,7 @@ describe("resolvePlanPlacement — wall capture", () => {
     expect(result.activeGuides).toEqual([]);
     expect(result.planRect.centerXMm).toBeCloseTo(2000);
     expect(result.planRect.centerYMm).toBeCloseTo(0);
-    expect(result.planRect.depthMm).toBe(100); // WALL_OBJECT_PLAN_DEPTH_MM
+    expect(result.planRect.depthMm).toBe(WALL_OBJECT_PLAN_DEPTH_MM);
     expect(result.planRect.angleDeg).toBeCloseTo(0);
   });
 
