@@ -8,8 +8,13 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes("node_modules")) return "vendor";
-          return undefined;
+          if (!id.includes("node_modules")) return undefined;
+          // 3D stack is reachable only from the lazy ThreeDView import; its own chunk
+          // keeps it off the critical path. Includes fiber/drei transitive deps.
+          if (/node_modules\/(three|@react-three|three-stdlib|react-reconciler|its-fine|suspend-react|maath)\//.test(id)) {
+            return "three";
+          }
+          return "vendor";
         }
       }
     }
