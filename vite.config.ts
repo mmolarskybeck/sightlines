@@ -5,6 +5,12 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
+    // Named manual chunks get entry-level modulepreload hints even when only
+    // reachable via dynamic import; without this filter the browser would
+    // eagerly fetch the ~834 kB three chunk on first load.
+    modulePreload: {
+      resolveDependencies: (_url, deps) => deps.filter((dep) => !/assets\/three-/.test(dep)),
+    },
     rollupOptions: {
       output: {
         manualChunks(id) {
