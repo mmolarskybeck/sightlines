@@ -1,10 +1,17 @@
 import type { Project, Room, RoomVertex } from "../project";
-import { getWallsWithGeometry } from "./walls";
+import { getWallGeometry, getWallsWithGeometry } from "./walls";
 
 type Vector = {
   xMm: number;
   yMm: number;
 };
+
+// Which end of the wall stays fixed in WORLD space during a resize. The local
+// resize always anchors the start vertex in room-local coordinates (see
+// resizeOrthogonalQuad); "end" then translates the whole placement so the
+// wall's end vertex, offset included, doesn't move — which is what lets a
+// handle live on any of the four walls instead of only the down/right pair.
+export type ResizeAnchor = "start" | "end";
 
 export type GeometryEditResult = {
   project: Project;
@@ -15,7 +22,8 @@ export type GeometryEditResult = {
 export function resizeWallPreservingAngles(
   project: Project,
   wallId: string,
-  nextLengthMm: number
+  nextLengthMm: number,
+  anchor: ResizeAnchor = "start"
 ): GeometryEditResult {
   if (!Number.isFinite(nextLengthMm) || nextLengthMm <= 0) {
     throw new Error("Wall length must be greater than zero.");
@@ -32,7 +40,9 @@ export function resizeWallPreservingAngles(
     if (!wall) return placement;
 
     didUpdate = true;
-    anchorVertexId = wall.startVertexId;
+    // Report whichever vertex actually held still in world space, so callers
+    // (the store's lastGeometryEdit, the plan-view handles) can anchor UI to it.
+    anchorVertexId = anchor === "end" ? wall.endVertexId : wall.startVertexId;
 
     if (!canResizeAsOrthogonalQuad(placement.room, wallIndex)) {
       // Rectangles are the only shape where "resize this wall" has one
@@ -46,9 +56,23 @@ export function resizeWallPreservingAngles(
       );
     }
 
+    const resizedRoom = resizeOrthogonalQuad(placement.room, wallIndex, nextLengthMm);
+    if (anchor === "start") {
+      return { ...placement, room: resizedRoom };
+    }
+
+    // resizeOrthogonalQuad grew the room away from the start vertex, so the
+    // end vertex drifted by +(nextLength - previousLength) along the wall's
+    // axis in room-local space. Cancelling that on the placement offset pins
+    // the end vertex in world space and lets the start side move instead.
+    const { lengthMm: previousLengthMm, start, end } = getWallGeometry(placement.room, wall);
+    const axis = normalize({ xMm: end.xMm - start.xMm, yMm: end.yMm - start.yMm });
+    const shift = scale(axis, nextLengthMm - previousLengthMm);
     return {
       ...placement,
-      room: resizeOrthogonalQuad(placement.room, wallIndex, nextLengthMm)
+      offsetXMm: placement.offsetXMm - shift.xMm,
+      offsetYMm: placement.offsetYMm - shift.yMm,
+      room: resizedRoom
     };
   });
 

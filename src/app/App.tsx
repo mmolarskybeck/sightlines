@@ -114,6 +114,7 @@ export function App() {
     selectedArtworkId,
     selectedOpeningId,
     selectedObjectIds,
+    selectedRoomId,
     arrangeSession,
     lastArrangeMode,
     lastInsetAnchor,
@@ -132,6 +133,7 @@ export function App() {
     selectWall,
     selectArtwork,
     selectOpening,
+    selectRoom,
     selectObject,
     setObjectSelection,
     clearObjectSelection,
@@ -142,6 +144,7 @@ export function App() {
     setUnit,
     resizeSelectedWall,
     resizeWall,
+    moveRoom,
     undo,
     redo,
     importProjectJson,
@@ -989,12 +992,14 @@ export function App() {
                 project={project}
                 selectedArtworkId={selectedArtworkId}
                 selectedOpeningId={selectedOpeningId}
+                selectedRoomId={selectedRoomId}
                 selectedWallId={selectedWall?.id ?? null}
                 snapToGrid={snapToGrid}
                 onCommitPlanMove={(objectId, placement) =>
                   void commitPlanMove(objectId, placement, allowOverlappingPlacement)
                 }
                 onCommitWallLength={resizeWall}
+                onMoveRoom={moveRoom}
                 onPlaceArtwork={(artworkId, wallId, xMm, yMm) =>
                   void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement)
                 }
@@ -1004,6 +1009,7 @@ export function App() {
                 onPlaceOpeningFromPlan={placeOpeningFromPlan}
                 onSelectArtwork={selectArtwork}
                 onSelectOpening={selectOpening}
+                onSelectRoom={selectRoom}
                 onSelectWall={selectWall}
                 selectedObjectIds={selectedObjectIds}
                 onSelectObject={selectObject}

@@ -61,6 +61,14 @@ JSON import input in the topbar is the single-file `accept=.json` one),
   the fix pattern is `pointer-events: all` on the intended hit rect.
 - Wall-local mm → client px for input targeting:
   `new DOMPoint(xMm, viewBoxHeight - yMm).matrixTransform(svg.getScreenCTM())`.
+- **Plan-view geometry assertions must read model mm, not client px:** the
+  plan viewBox auto-refits to project bounds on every committed resize/move,
+  so `getBoundingClientRect` deltas across a commit are meaningless (a grown
+  room can keep the same on-screen size). Parse world coordinates out of the
+  SVG instead (e.g. the `.room-hit` polygon's `points` attribute).
+- A fresh origin boots the SAMPLE project (one room, a wall pre-selected in
+  the inspector), not a blank one — count `.room-hit` elements before
+  assuming "Add a room" is needed, or you'll test against two rooms.
 
 ## Flows worth driving
 

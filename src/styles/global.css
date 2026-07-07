@@ -1542,6 +1542,37 @@ input:focus-visible {
   fill: var(--bg);
 }
 
+/* Transparent hit polygon for a room's floor — invisible chrome that turns a
+   click on empty floor into a room selection. Default cursor at rest; the
+   selected room's copy switches to "move" since a pointerdown there begins
+   the room-move drag instead (see PlanView's room-hit onPointerDown). */
+.room-hit {
+  fill: transparent;
+  cursor: default;
+}
+
+.room-hit.selected {
+  cursor: move;
+}
+
+/* Faint interior wash marking the selected room — never interactive (the
+   room-hit polygon underneath already owns the click). */
+.room-selection-wash {
+  fill: var(--primary);
+  fill-opacity: 0.07;
+  pointer-events: none;
+}
+
+/* Thin petrol outline traced over the selected room's own walls — the only
+   visual sign of selection when nothing is mid-drag besides the wash and the
+   handles below. */
+.room-selection-outline {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 2;
+  pointer-events: none;
+}
+
 .grid-fill {
   pointer-events: none;
 }
@@ -1597,17 +1628,24 @@ input:focus-visible {
   cursor: pointer;
 }
 
+/* Square (no rounded corners — this design language has no pills), always
+   petrol-stroked since these only ever render for the one selected room
+   rather than floating, muted, outside every room at rest. */
 .resize-handle {
   fill: var(--bg);
-  stroke: var(--muted);
+  stroke: var(--primary);
   stroke-width: 1.5;
   cursor: grab;
   touch-action: none;
   vector-effect: non-scaling-stroke;
 }
 
-.resize-handle:hover {
-  stroke: var(--primary);
+/* Padded hit target rendered behind the visible handle; transparent so
+   clicks on the generous hit area match the same .resize-handle selector
+   in PlanView's event capture logic. */
+.resize-handle.handle-hit {
+  fill: transparent;
+  stroke: none;
 }
 
 .resize-handle.active {

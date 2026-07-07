@@ -14,8 +14,8 @@ import {
   proposeMovingEdgePointMm,
   type Vector2
 } from "../../domain/geometry/dragResize";
-import { resizeWallPreservingAngles } from "../../domain/geometry/editRoom";
-import { getFloorBounds } from "../../domain/geometry/walls";
+import { resizeWallPreservingAngles, type ResizeAnchor } from "../../domain/geometry/editRoom";
+import { getFloorBounds, getRoomBounds } from "../../domain/geometry/walls";
 import {
   getFloorObjectPlanRect,
   getFloorWalls,
@@ -35,6 +35,7 @@ import {
   type Artwork,
   type Dimensions,
   type Project,
+  type RoomPlacement,
   type WallObject
 } from "../../domain/project";
 import { getGridSnapTargets } from "../../domain/snapping/gridSnapTargets";
@@ -64,7 +65,10 @@ import { PlanObject } from "./PlanObject";
 import { PlanToolbar, type PlanTool } from "./PlanToolbar";
 import { RoomResizeHandles, type ResizeHandleTarget } from "./RoomResizeHandles";
 
-const HANDLE_SCREEN_SIZE_PX = 16;
+// On-screen size of a selected room's wall-midpoint resize handles — small
+// and square (the design language has no pills), since they only ever render
+// for the one selected room rather than floating outside every room at rest.
+const SELECTED_HANDLE_PX = 10;
 const SNAP_THRESHOLD_PX = 10;
 
 // Stable module-level reference so a caller that doesn't pass `getBlob`
@@ -77,18 +81,42 @@ type DragState = {
   roomId: string;
   targetWallId: string;
   axis: Vector2;
+  // Which vertex of the target wall stays fixed in world space — determines
+  // both which handle wall this drag was started from (RoomResizeHandles
+  // picks the handle whose target wall actually moves for a given anchor)
+  // and the sign of the length delta (see computeDraggedLengthMm).
+  anchor: ResizeAnchor;
   startLengthMm: number;
   startPointerMm: Vector2;
-  // The wall's own moving edge (its endVertexId, in floor coordinates) at
-  // drag start — snapping targets this point, not the pointer, so wherever
-  // inside the handle the user grabbed never leaks into the committed
-  // length. See getMovingWallEdgeWorldPointMm.
+  // The wall's own moving edge (in floor coordinates) at drag start —
+  // snapping targets this point, not the pointer, so wherever inside the
+  // handle the user grabbed never leaks into the committed length. See
+  // getMovingWallEdgeWorldPointMm.
   edgeStartMm: Vector2;
   previewLengthMm: number;
   // A wall-resize drag only ever snaps along the wall's own single axis, so
   // one id is enough here — it maps into that axis's slot of resolveSnap's
   // per-axis previousSnapTargetIds.
   previousSnapTargetId?: string;
+  activeGuides: Guide[];
+};
+
+// A pointer-drag move of a whole room, transient until release: live preview
+// via displayedProject's offset override, exactly one onMoveRoom commit on
+// release. Mirrors the wall-resize DragState's discipline (effect keyed on
+// whether a drag is active, latest values read via a ref) rather than
+// reusing ObjectDragState, since a room move has no wall re-anchoring or
+// floor/wall conversion to resolve — just a translated offset.
+type RoomDragState = {
+  roomId: string;
+  startPointerMm: Vector2;
+  startOffsetMm: Vector2;
+  // The room's bounding-box top-left corner in world space at drag start —
+  // grid snapping targets this corner (not the raw pointer), the same
+  // grab-offset-cancelling trick the wall-resize drag's edgeStartMm uses.
+  startMinCornerMm: Vector2;
+  previewOffsetMm: Vector2;
+  previousSnapTargetIds?: SnapTargetIds;
   activeGuides: Guide[];
 };
 
@@ -179,6 +207,15 @@ function marqueeRectMm(marquee: MarqueeState): {
   };
 }
 
+// World-space (offset-applied) vertex loop for a room's polygon — shared by
+// the floor fill, the floor hit target, and the selected-room outline/wash,
+// so all four always trace the exact same boundary.
+function roomPolygonPoints(placement: RoomPlacement): string {
+  return placement.room.vertices
+    .map((vertex) => `${vertex.xMm + placement.offsetXMm},${vertex.yMm + placement.offsetYMm}`)
+    .join(" ");
+}
+
 export function PlanView({
   artworksById,
   draggingArtworkId = null,
@@ -188,6 +225,7 @@ export function PlanView({
   onCommitPlanMove,
   onCommitPlanMoveGroup,
   onCommitWallLength,
+  onMoveRoom,
   onPlaceArtwork,
   onPlaceArtworkOnFloor,
   onPlaceOpeningFromPlan,
@@ -196,11 +234,13 @@ export function PlanView({
   onSelectObject,
   onClearSelection,
   onMarqueeSelect,
+  onSelectRoom,
   onSelectWall,
   project,
   selectedArtworkId,
   selectedOpeningId,
   selectedObjectIds = [],
+  selectedRoomId = null,
   selectedWallId,
   snapToGrid
 }: {
@@ -221,7 +261,11 @@ export function PlanView({
   // x (yMm omitted); floor members carry a new floor center (xMm + yMm). The
   // single-object move keeps onCommitPlanMove; this is the multi-select path.
   onCommitPlanMoveGroup?: (moves: { id: string; xMm: number; yMm?: number }[]) => void;
-  onCommitWallLength: (wallId: string, lengthMm: number) => Promise<void>;
+  onCommitWallLength: (wallId: string, lengthMm: number, anchor: ResizeAnchor) => Promise<void>;
+  // Commits a room-move drag on release. Optional/inert until App wires it —
+  // same "stay inert absent" convention as onCommitPlanMove above; the grip
+  // still drags and previews live either way, it just never commits.
+  onMoveRoom?: (roomId: string, offsetXMm: number, offsetYMm: number) => Promise<void>;
   onPlaceArtwork?: (artworkId: string, wallId: string, xMm: number, yMm: number) => void;
   onPlaceArtworkOnFloor?: (artworkId: string, xMm: number, yMm: number) => void;
   onPlaceOpeningFromPlan?: (kind: PlanTool, placement: PlanPlacement) => Promise<void>;
@@ -238,6 +282,9 @@ export function PlanView({
   // held shift. Optional/inert until App wires it, exactly like onSelectObject/
   // onClearSelection above.
   onMarqueeSelect?: (ids: string[], additive: boolean) => void;
+  // Click-to-select a room's floor (its interior hit polygon) — optional/
+  // inert until App wires it, same convention as onSelectWall below.
+  onSelectRoom?: (roomId: string) => void;
   // Click-to-select for a wall line, same contract as ElevationView's
   // onSelectWall: optional/inert until App wires it, so the wall stays
   // unclickable (today's behavior) when this prop is absent.
@@ -246,6 +293,9 @@ export function PlanView({
   selectedArtworkId?: string | null;
   selectedOpeningId?: string | null;
   selectedObjectIds?: string[];
+  // Which room shows its selection-scoped outline/wash/resize-handles — at
+  // rest (null) the canvas shows nothing but the drawing itself.
+  selectedRoomId?: string | null;
   selectedWallId: string | null;
   snapToGrid: boolean;
 }) {
@@ -253,6 +303,8 @@ export function PlanView({
   const svgRef = useRef<SVGSVGElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  const [roomDrag, setRoomDrag] = useState<RoomDragState | null>(null);
+  const roomDragRef = useRef<RoomDragState | null>(null);
   // A move of an existing placed object, and the HTML5 drop preview for a
   // checklist artwork. Both flow through resolvePlanPlacement, so preview and
   // commit can never disagree.
@@ -332,7 +384,7 @@ export function PlanView({
     unitSystemFromDisplayUnit(project.unit),
     "wall"
   ).displayUnit;
-  const handleSizeMm = pixelsPerMm > 0 ? HANDLE_SCREEN_SIZE_PX / pixelsPerMm : 0;
+  const handleSizeMm = pixelsPerMm > 0 ? SELECTED_HANDLE_PX / pixelsPerMm : 0;
   const snapThresholdMm = pixelsPerMm > 0 ? SNAP_THRESHOLD_PX / pixelsPerMm : 0;
   const gridSnapTargets = getGridSnapTargets(minorGridMm, {
     minXMm: viewBoxBounds.x,
@@ -341,10 +393,31 @@ export function PlanView({
     maxYMm: viewBoxBounds.y + viewBoxBounds.height
   });
 
-  const displayedProject =
+  const resizePreviewProject =
     drag !== null
-      ? resizeWallPreservingAngles(project, drag.targetWallId, drag.previewLengthMm).project
+      ? resizeWallPreservingAngles(project, drag.targetWallId, drag.previewLengthMm, drag.anchor)
+          .project
       : project;
+  // A room-move drag overrides its placement's offset directly — no domain
+  // helper needed (unlike the wall resize above, a translation doesn't touch
+  // any other room's geometry) — layered on top of the resize preview so the
+  // two gestures never fight, even though only one can be in flight at once.
+  const displayedProject = roomDrag
+    ? {
+        ...resizePreviewProject,
+        floor: {
+          rooms: resizePreviewProject.floor.rooms.map((candidate) =>
+            candidate.roomId === roomDrag.roomId
+              ? {
+                  ...candidate,
+                  offsetXMm: roomDrag.previewOffsetMm.xMm,
+                  offsetYMm: roomDrag.previewOffsetMm.yMm
+                }
+              : candidate
+          )
+        }
+      }
+    : resizePreviewProject;
 
   // Shared by the wall-resize drag effect below and the palette-tool pointer
   // handlers — both need the same client-px → viewBox-mm conversion.
@@ -406,7 +479,7 @@ export function PlanView({
   }, [activeTool]);
 
   function handleToolPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
-    if (!activeTool || !movingSize || drag) return;
+    if (!activeTool || !movingSize || drag || roomDrag) return;
 
     const pointerMm = toSvgMm(event.clientX, event.clientY);
     if (!pointerMm) return;
@@ -460,6 +533,14 @@ export function PlanView({
     // here clears that stale state at the start of every gesture. The one
     // setter that runs AFTER pointerdown — the marquee's pointerup — is safe:
     // its trailing click arrives before any next pointerdown could reset this.
+    // .room-hit is deliberately absent here: an unselected room's hit
+    // polygon must NOT stopPropagation on pointerdown (a drag over it has to
+    // still start the marquee — see the room-hit rendering below), so
+    // marking it here would suppress the click that's supposed to select the
+    // room. The selected room's hit polygon DOES stopPropagation (it starts
+    // a room-move drag instead), but its trailing click merely re-selects
+    // the same already-selected room — a harmless no-op, the same precedent
+    // PlanObject's own drag-then-click re-select relies on.
     suppressNextToolClickRef.current = Boolean(
       target?.closest(".resize-handle, .plan-object:not(.is-ghost)")
     );
@@ -559,7 +640,8 @@ export function PlanView({
         current.startLengthMm,
         current.edgeStartMm,
         snappedEdgeMm,
-        current.axis
+        current.axis,
+        current.anchor
       );
 
       setDrag((state) =>
@@ -575,7 +657,7 @@ export function PlanView({
       if (!current) return;
 
       if (Math.abs(current.previewLengthMm - current.startLengthMm) < 0.5) return;
-      void onCommitWallLength(current.targetWallId, current.previewLengthMm);
+      void onCommitWallLength(current.targetWallId, current.previewLengthMm, current.anchor);
     }
 
     window.addEventListener("pointermove", onPointerMove);
@@ -620,11 +702,126 @@ export function PlanView({
       roomId,
       targetWallId: target.targetWallId,
       axis: target.axis,
+      anchor: target.anchor,
       startLengthMm: target.startLengthMm,
       startPointerMm: { xMm: startPointerMm.x, yMm: startPointerMm.y },
-      edgeStartMm: getMovingWallEdgeWorldPointMm(project, target.targetWallId),
+      edgeStartMm: getMovingWallEdgeWorldPointMm(project, target.targetWallId, target.anchor),
       previewLengthMm: target.startLengthMm,
       previousSnapTargetId: undefined,
+      activeGuides: []
+    });
+  }
+
+  useEffect(() => {
+    if (!roomDrag) return;
+
+    function onPointerMove(event: PointerEvent) {
+      const current = roomDragRef.current;
+      if (!current) return;
+
+      const pointerMm = toSvgMm(event.clientX, event.clientY);
+      if (!pointerMm) return;
+
+      const deltaMm: Vector2 = {
+        xMm: pointerMm.xMm - current.startPointerMm.xMm,
+        yMm: pointerMm.yMm - current.startPointerMm.yMm
+      };
+      const proposedMinCornerMm: Vector2 = {
+        xMm: current.startMinCornerMm.xMm + deltaMm.xMm,
+        yMm: current.startMinCornerMm.yMm + deltaMm.yMm
+      };
+
+      let snappedMinCornerMm = proposedMinCornerMm;
+      let snapTargetIds = current.previousSnapTargetIds;
+      let activeGuides: Guide[] = [];
+      if (snapToGrid) {
+        // gridSnapTargets are already all kind:"grid" — resolveSnap resolves
+        // both axes independently against them in one call, the same idiom
+        // objectDrag's group-drag branch uses for its box-center snap.
+        const snap = resolveSnap(proposedMinCornerMm, gridSnapTargets, {
+          thresholdMm: snapThresholdMm,
+          previousSnapTargetIds: current.previousSnapTargetIds
+        });
+        snappedMinCornerMm = snap.point;
+        snapTargetIds = snap.snapTargetIds;
+        activeGuides = snap.activeGuides;
+      }
+
+      const cornerDeltaMm: Vector2 = {
+        xMm: snappedMinCornerMm.xMm - current.startMinCornerMm.xMm,
+        yMm: snappedMinCornerMm.yMm - current.startMinCornerMm.yMm
+      };
+
+      setRoomDrag((state) =>
+        state
+          ? {
+              ...state,
+              previewOffsetMm: {
+                xMm: current.startOffsetMm.xMm + cornerDeltaMm.xMm,
+                yMm: current.startOffsetMm.yMm + cornerDeltaMm.yMm
+              },
+              previousSnapTargetIds: snapTargetIds,
+              activeGuides
+            }
+          : state
+      );
+    }
+
+    function onPointerUp() {
+      const current = roomDragRef.current;
+      setRoomDrag(null);
+      if (!current) return;
+
+      // Sub-threshold release is a click, not a move — must not commit (and
+      // so land a phantom undo entry), same guard as the object/group drags.
+      const movedMm = Math.hypot(
+        current.previewOffsetMm.xMm - current.startOffsetMm.xMm,
+        current.previewOffsetMm.yMm - current.startOffsetMm.yMm
+      );
+      if (movedMm < 0.5) return;
+
+      void onMoveRoom?.(current.roomId, current.previewOffsetMm.xMm, current.previewOffsetMm.yMm);
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+    // Same ref-based discipline as the wall-resize drag effect above:
+    // subscribed once per gesture, reading live state via roomDragRef rather
+    // than closing over `roomDrag`. gridSnapTargets/snapToGrid/snapThresholdMm
+    // derive from the committed project/viewport and can't change mid-drag,
+    // so they're intentionally left out of the deps.
+  }, [roomDrag !== null, onMoveRoom]);
+
+  useEffect(() => {
+    roomDragRef.current = roomDrag;
+  }, [roomDrag]);
+
+  function beginRoomDrag(roomId: string, event: ReactPointerEvent<SVGPolygonElement>) {
+    const placement = project.floor.rooms.find((candidate) => candidate.roomId === roomId);
+    if (!placement) return;
+
+    const startPointerMm = toSvgMm(event.clientX, event.clientY);
+    if (!startPointerMm) return;
+
+    const bounds = getRoomBounds(placement.room);
+    const startOffsetMm: Vector2 = { xMm: placement.offsetXMm, yMm: placement.offsetYMm };
+
+    setRoomDrag({
+      roomId,
+      startPointerMm,
+      startOffsetMm,
+      startMinCornerMm: {
+        xMm: bounds.minX + startOffsetMm.xMm,
+        yMm: bounds.minY + startOffsetMm.yMm
+      },
+      previewOffsetMm: startOffsetMm,
+      previousSnapTargetIds: undefined,
       activeGuides: []
     });
   }
@@ -911,7 +1108,7 @@ export function PlanView({
     // elevation). Never start over an in-flight gesture.
     if (activeTool) return;
     if (!onMarqueeSelect && !onClearSelection) return;
-    if (drag || objectDrag || dropGhost) return;
+    if (drag || objectDrag || dropGhost || roomDrag) return;
 
     const startMm = toSvgMm(event.clientX, event.clientY);
     if (!startMm) return;
@@ -1136,12 +1333,7 @@ export function PlanView({
           <polygon
             className="room-fill"
             key={placement.roomId}
-            points={placement.room.vertices
-              .map(
-                (vertex) =>
-                  `${vertex.xMm + placement.offsetXMm},${vertex.yMm + placement.offsetYMm}`
-              )
-              .join(" ")}
+            points={roomPolygonPoints(placement)}
           />
         ))}
         {gridVisible ? (
@@ -1221,21 +1413,48 @@ export function PlanView({
                 </Fragment>
               );
             })}
-            {handleSizeMm > 0 ? (
-              <RoomResizeHandles
-                activeDrag={
-                  drag && drag.roomId === placement.roomId
-                    ? { targetWallId: drag.targetWallId, previewLengthMm: drag.previewLengthMm }
-                    : null
-                }
-                handleSizeMm={handleSizeMm}
-                placement={placement}
-                unit={wallUnit}
-                onBeginDrag={beginDrag}
-              />
-            ) : null}
           </g>
         ))}
+        {/* Transparent hit polygon per room, painted after the walls so it
+            sits above the wall lines but still below placed objects (next
+            block) — those must keep winning their own clicks by paint order.
+            At rest a room is otherwise unclickable chrome; this is the only
+            surface that turns a plain floor click into a selection. */}
+        {displayedProject.floor.rooms.map((placement) => {
+          const isSelected = placement.roomId === selectedRoomId;
+          return (
+            <polygon
+              className={isSelected ? "room-hit selected" : "room-hit"}
+              key={placement.roomId}
+              points={roomPolygonPoints(placement)}
+              onPointerDown={(event) => {
+                // Unselected: let the pointerdown bubble untouched — a drag
+                // from here must still be able to start the background
+                // marquee (marquee-selecting placements inside a room is an
+                // existing feature this must not break). Selected: this
+                // polygon IS the move affordance now (the old corner grip is
+                // gone), so it claims the gesture the same way a resize
+                // handle does.
+                if (!isSelected) return;
+                event.stopPropagation();
+                beginRoomDrag(placement.roomId, event);
+              }}
+              onClick={(event) => {
+                // Mirrors the wall-hit TRAP comments above: an armed tool
+                // must click through to place, and a marquee's trailing
+                // click (suppressNextToolClickRef, set by the marquee's own
+                // pointerup) must not be reinterpreted as a room select.
+                if (activeTool) return;
+                event.stopPropagation();
+                if (suppressNextToolClickRef.current) {
+                  suppressNextToolClickRef.current = false;
+                  return;
+                }
+                onSelectRoom?.(placement.roomId);
+              }}
+            />
+          );
+        })}
         {/* Placed objects render above walls/handles' room grouping but
             below drag guides — matching the elevation-view convention that
             geometry (walls/rooms) reads as structure and placements sit on
@@ -1248,7 +1467,9 @@ export function PlanView({
           // Any in-flight gesture suppresses hover tooltips: they'd sit on top
           // of the very geometry the user is trying to read while dragging,
           // resizing, or aiming an armed placement tool.
-          const tooltipsDisabled = Boolean(drag || objectDrag || dropGhost || activeTool);
+          const tooltipsDisabled = Boolean(
+            drag || objectDrag || dropGhost || activeTool || roomDrag
+          );
           const artworkTooltip = (
             artworkId: string,
             displayDimensionsOverride?: Dimensions
@@ -1449,6 +1670,45 @@ export function PlanView({
             </>
           );
         })()}
+        {/* The selected room's outline/wash/handles paint in their own layer
+            ABOVE placed objects — at rest a room shows none of this (no
+            outline, no wash, no handles), so this block renders at most once,
+            for whichever room selectedRoomId names. */}
+        {(() => {
+          const selectedPlacement = displayedProject.floor.rooms.find(
+            (placement) => placement.roomId === selectedRoomId
+          );
+          if (!selectedPlacement || handleSizeMm <= 0) return null;
+
+          return (
+            <g>
+              <polygon
+                className="room-selection-wash"
+                points={roomPolygonPoints(selectedPlacement)}
+              />
+              <polygon
+                className="room-selection-outline"
+                points={roomPolygonPoints(selectedPlacement)}
+                vectorEffect="non-scaling-stroke"
+              />
+              <RoomResizeHandles
+                activeDrag={
+                  drag && drag.roomId === selectedPlacement.roomId
+                    ? {
+                        targetWallId: drag.targetWallId,
+                        anchor: drag.anchor,
+                        previewLengthMm: drag.previewLengthMm
+                      }
+                    : null
+                }
+                handleSizeMm={handleSizeMm}
+                placement={selectedPlacement}
+                unit={wallUnit}
+                onBeginDrag={beginDrag}
+              />
+            </g>
+          );
+        })()}
         {toolGhost ? (
           <PlanObject isGhost kind={activeTool ?? "door"} planRect={toolGhost.planRect} />
         ) : null}
@@ -1457,6 +1717,7 @@ export function PlanView({
           objectDrag?.activeGuides ??
           dropGhost?.activeGuides ??
           drag?.activeGuides ??
+          roomDrag?.activeGuides ??
           toolGhost?.activeGuides ??
           []
         ).map((guide) => (

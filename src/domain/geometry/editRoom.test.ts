@@ -65,6 +65,73 @@ describe("resizeWallPreservingAngles", () => {
     ).toBeCloseTo(feetToMm(28));
   });
 
+  it("anchor \"end\" holds a width wall's end vertex fixed in world space while the start side moves", () => {
+    const project = createSampleProject();
+    const worldEndBefore = worldVertex(project, "v-ne");
+    const worldStartBefore = worldVertex(project, "v-nw");
+
+    const result = resizeWallPreservingAngles(
+      project,
+      "wall-north",
+      feetToMm(30),
+      "end"
+    );
+
+    const walls = getWallsWithGeometry(result.project.floor.rooms[0].room);
+    const northWall = walls.find((wall) => wall.id === "wall-north");
+    expect(northWall?.lengthMm).toBeCloseTo(feetToMm(30));
+    expect(result.anchorVertexId).toBe("v-ne");
+
+    // The end side is pinned in world space; the start side absorbs the growth.
+    const worldEndAfter = worldVertex(result.project, "v-ne");
+    expect(worldEndAfter.xMm).toBeCloseTo(worldEndBefore.xMm);
+    expect(worldEndAfter.yMm).toBeCloseTo(worldEndBefore.yMm);
+    expect(worldVertex(result.project, "v-nw").xMm).toBeCloseTo(
+      worldStartBefore.xMm - feetToMm(2)
+    );
+  });
+
+  it("anchor \"end\" holds a depth wall's end vertex fixed in world space too", () => {
+    const project = createSampleProject();
+    const worldEndBefore = worldVertex(project, "v-se");
+    const worldStartBefore = worldVertex(project, "v-ne");
+
+    const result = resizeWallPreservingAngles(
+      project,
+      "wall-east",
+      feetToMm(20),
+      "end"
+    );
+
+    const walls = getWallsWithGeometry(result.project.floor.rooms[0].room);
+    const eastWall = walls.find((wall) => wall.id === "wall-east");
+    expect(eastWall?.lengthMm).toBeCloseTo(feetToMm(20));
+    expect(result.anchorVertexId).toBe("v-se");
+
+    const worldEndAfter = worldVertex(result.project, "v-se");
+    expect(worldEndAfter.xMm).toBeCloseTo(worldEndBefore.xMm);
+    expect(worldEndAfter.yMm).toBeCloseTo(worldEndBefore.yMm);
+    expect(worldVertex(result.project, "v-ne").yMm).toBeCloseTo(
+      worldStartBefore.yMm - feetToMm(2)
+    );
+  });
+
+  it("anchor \"start\" is unchanged from the default: end vertex moves, offset untouched", () => {
+    const project = createSampleProject();
+    const explicit = resizeWallPreservingAngles(
+      project,
+      "wall-north",
+      feetToMm(30),
+      "start"
+    );
+    const defaulted = resizeWallPreservingAngles(project, "wall-north", feetToMm(30));
+
+    expect(explicit.anchorVertexId).toBe("v-nw");
+    expect(explicit.project.floor.rooms[0].offsetXMm).toBe(0);
+    expect(explicit.project.floor.rooms[0].offsetYMm).toBe(0);
+    expect(explicit.project).toEqual(defaulted.project);
+  });
+
   it("rejects non-positive lengths", () => {
     const project = createSampleProject();
 
@@ -93,6 +160,20 @@ describe("resizeWallPreservingAngles", () => {
     );
   });
 });
+
+// A vertex's position in world/floor space is its room-local position plus
+// the placement offset — the invariant an "end"-anchored resize must hold.
+function worldVertex(
+  project: ReturnType<typeof createSampleProject>,
+  vertexId: string
+): { xMm: number; yMm: number } {
+  const placement = project.floor.rooms[0];
+  const vertex = placement.room.vertices.find((candidate) => candidate.id === vertexId)!;
+  return {
+    xMm: vertex.xMm + placement.offsetXMm,
+    yMm: vertex.yMm + placement.offsetYMm
+  };
+}
 
 function dot(
   a: { start: { xMm: number; yMm: number }; end: { xMm: number; yMm: number } },

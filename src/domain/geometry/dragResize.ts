@@ -1,4 +1,5 @@
 import type { Project } from "../project";
+import type { ResizeAnchor } from "./editRoom";
 import { getWallGeometry } from "./walls";
 
 export type Vector2 = {
@@ -15,22 +16,26 @@ export const MIN_DRAG_LENGTH_MM = 152.4; // 6 inches
 // resizeOrthogonalQuad (editRoom.ts) always anchors a resized wall's
 // startVertexId and moves its endVertexId along the wall's own axis — so
 // the wall's end vertex, in floor/world coordinates, *is* the point a
-// resize drag actually moves. Snapping needs to operate on that point, not
-// on wherever inside the 16px handle hit-target the user happened to grab,
-// or the grab offset leaks into the committed length even when the pointer
+// "start"-anchored resize drag actually moves. An "end"-anchored resize pins
+// that end vertex instead and moves the start side, so the moving point is
+// the start vertex. Snapping needs to operate on whichever point moves, not
+// on wherever inside the 16px handle hit-target the user happened to grab, or
+// the grab offset leaks into the committed length even when the pointer
 // itself lands exactly on a grid line.
 export function getMovingWallEdgeWorldPointMm(
   project: Project,
-  wallId: string
+  wallId: string,
+  anchor: ResizeAnchor = "start"
 ): Vector2 {
   for (const placement of project.floor.rooms) {
     const wall = placement.room.walls.find((candidate) => candidate.id === wallId);
     if (!wall) continue;
 
     const geometry = getWallGeometry(placement.room, wall);
+    const movingVertex = anchor === "end" ? geometry.start : geometry.end;
     return {
-      xMm: geometry.end.xMm + placement.offsetXMm,
-      yMm: geometry.end.yMm + placement.offsetYMm
+      xMm: movingVertex.xMm + placement.offsetXMm,
+      yMm: movingVertex.yMm + placement.offsetYMm
     };
   }
 
@@ -60,14 +65,19 @@ export function projectDeltaOntoAxis(deltaMm: Vector2, axis: Vector2): number {
 // one-dimensional — only the pointer's movement along that wall's own axis
 // direction should affect it. Using the dot product (rather than hardcoding
 // "x means width, y means depth") keeps this correct regardless of which
-// wall of the pair happens to carry which dimension.
+// wall of the pair happens to carry which dimension. The axis always points
+// start→end, so for an "end"-anchored resize the moving start vertex travels
+// against the axis to lengthen the wall — hence the sign flip.
 export function computeDraggedLengthMm(
   startLengthMm: number,
   deltaMm: Vector2,
-  axis: Vector2
+  axis: Vector2,
+  anchor: ResizeAnchor = "start"
 ): number {
   const projectedDeltaMm = projectDeltaOntoAxis(deltaMm, axis);
-  return Math.max(MIN_DRAG_LENGTH_MM, startLengthMm + projectedDeltaMm);
+  const nextLengthMm =
+    anchor === "end" ? startLengthMm - projectedDeltaMm : startLengthMm + projectedDeltaMm;
+  return Math.max(MIN_DRAG_LENGTH_MM, nextLengthMm);
 }
 
 // Bundles "how far did the moving edge actually travel" with "what length
@@ -79,11 +89,12 @@ export function computeEdgeSnappedLengthMm(
   startLengthMm: number,
   edgeStartMm: Vector2,
   snappedEdgeMm: Vector2,
-  axis: Vector2
+  axis: Vector2,
+  anchor: ResizeAnchor = "start"
 ): number {
   const deltaMm: Vector2 = {
     xMm: snappedEdgeMm.xMm - edgeStartMm.xMm,
     yMm: snappedEdgeMm.yMm - edgeStartMm.yMm
   };
-  return computeDraggedLengthMm(startLengthMm, deltaMm, axis);
+  return computeDraggedLengthMm(startLengthMm, deltaMm, axis, anchor);
 }

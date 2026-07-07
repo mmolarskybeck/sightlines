@@ -74,6 +74,41 @@ describe("computeDraggedLengthMm", () => {
 
     expect(result).toBe(MIN_DRAG_LENGTH_MM);
   });
+
+  it("flips sign for an end-anchored resize: moving with the axis shortens the wall", () => {
+    // The moving vertex is the start, and the axis points start→end, so a
+    // positive-axis drag pulls the start toward the end and shrinks the wall.
+    const result = computeDraggedLengthMm(
+      3000,
+      { xMm: 500, yMm: 0 },
+      { xMm: 1, yMm: 0 },
+      "end"
+    );
+
+    expect(result).toBeCloseTo(2500);
+  });
+
+  it("lengthens an end-anchored wall when the start vertex moves against the axis", () => {
+    const result = computeDraggedLengthMm(
+      3000,
+      { xMm: -500, yMm: 0 },
+      { xMm: 1, yMm: 0 },
+      "end"
+    );
+
+    expect(result).toBeCloseTo(3500);
+  });
+
+  it("still clamps an end-anchored resize to the minimum drag length", () => {
+    const result = computeDraggedLengthMm(
+      500,
+      { xMm: 10_000, yMm: 0 },
+      { xMm: 1, yMm: 0 },
+      "end"
+    );
+
+    expect(result).toBe(MIN_DRAG_LENGTH_MM);
+  });
 });
 
 describe("getMovingWallEdgeWorldPointMm", () => {
@@ -93,6 +128,19 @@ describe("getMovingWallEdgeWorldPointMm", () => {
 
     expect(getMovingWallEdgeWorldPointMm(project, "wall-north")).toEqual({
       xMm: feetToMm(38),
+      yMm: feetToMm(5)
+    });
+  });
+
+  it("returns the resized wall's START vertex for an end-anchored resize", () => {
+    const project = createSampleProject();
+    project.floor.rooms[0].offsetXMm = feetToMm(10);
+    project.floor.rooms[0].offsetYMm = feetToMm(5);
+
+    // wall-north runs v-nw (0,0) → v-ne (28',0); anchoring the end pins v-ne
+    // and moves v-nw, so the start vertex (plus placement offset) is the point.
+    expect(getMovingWallEdgeWorldPointMm(project, "wall-north", "end")).toEqual({
+      xMm: feetToMm(10),
       yMm: feetToMm(5)
     });
   });
@@ -145,6 +193,23 @@ describe("computeEdgeSnappedLengthMm", () => {
 
     expect(previewLengthMm).toBeCloseTo(legacyLengthMm);
     expect(previewLengthMm).toBeCloseTo(startLengthMm + 500);
+  });
+
+  it("flips sign for an end-anchored drag: the snapped edge moving with the axis shortens the wall", () => {
+    const axis: Vector2 = { xMm: 1, yMm: 0 };
+    const startLengthMm = feetToMm(28);
+    const edgeStartMm: Vector2 = { xMm: 0, yMm: 0 };
+    const snappedEdgeMm: Vector2 = { xMm: 500, yMm: 0 };
+
+    const previewLengthMm = computeEdgeSnappedLengthMm(
+      startLengthMm,
+      edgeStartMm,
+      snappedEdgeMm,
+      axis,
+      "end"
+    );
+
+    expect(previewLengthMm).toBeCloseTo(startLengthMm - 500);
   });
 });
 

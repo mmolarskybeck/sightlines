@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createBrowserImageProcessor } from "../domain/assets/browserImageProcessor";
 import { titleFromFilename, validateImageFile, type ImageProcessor } from "../domain/assets/imageIntake";
 import { createNextRectangleRoom } from "../domain/geometry/createRoom";
-import { resizeWallPreservingAngles } from "../domain/geometry/editRoom";
+import { resizeWallPreservingAngles, type ResizeAnchor } from "../domain/geometry/editRoom";
 import { getWallsWithGeometry, type WallWithGeometry } from "../domain/geometry/walls";
 import { getFloorWalls } from "../domain/geometry/planObjects";
 import type { PlanPlacement } from "../domain/snapping/planSnapTargets";
@@ -137,6 +137,14 @@ type AppState = {
   // pre-existing single-select inspectors (selectedArtworkId/selectedOpeningId)
   // in sync.
   selectedObjectIds: string[];
+  // Which room shows its selection-scoped resize/move affordances in plan
+  // view — view state, not undoable, not persisted, same as selectedWallId.
+  // Mutually exclusive with every other selection slot: selecting a room
+  // clears them all (selectRoom), and selecting any of them clears the room
+  // (see selectWall/selectArtwork/selectOpening/selectObject/
+  // setObjectSelection) — unlike selectedWallId, which persists as sidebar
+  // context across artwork/opening selection.
+  selectedRoomId: string | null;
   // Transient arrange interaction, null unless a session is in flight. Settles
   // (accept/cancel) on any selection/view change, undo/redo, or foreign edit —
   // see the settle table around settleArrangeSession.
@@ -170,6 +178,7 @@ type AppState = {
   selectWall: (wallId: string) => void;
   selectArtwork: (artworkId: string) => void;
   selectOpening: (wallObjectId: string) => void;
+  selectRoom: (roomId: string) => void;
   selectObject: (id: string, opts?: { additive?: boolean }) => void;
   setObjectSelection: (ids: string[]) => void;
   clearObjectSelection: () => void;
@@ -178,8 +187,9 @@ type AppState = {
   deleteRoom: (roomId: string) => Promise<void>;
   setUnit: (unit: DisplayUnit) => Promise<void>;
   addRectangleRoom: () => Promise<void>;
-  resizeWall: (wallId: string, lengthMm: number) => Promise<void>;
+  resizeWall: (wallId: string, lengthMm: number, anchor?: ResizeAnchor) => Promise<void>;
   resizeSelectedWall: (lengthMm: number) => Promise<void>;
+  moveRoom: (roomId: string, offsetXMm: number, offsetYMm: number) => Promise<void>;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   importProjectJson: (text: string) => Promise<void>;
@@ -297,6 +307,7 @@ export function createAppStore(deps: AppStoreDeps) {
         | "selectedArtworkId"
         | "selectedOpeningId"
         | "selectedObjectIds"
+        | "selectedRoomId"
         | "arrangeSession"
         | "viewMode"
       >
@@ -367,6 +378,7 @@ export function createAppStore(deps: AppStoreDeps) {
         selectedArtworkId: null,
         selectedOpeningId: null,
         selectedObjectIds: [],
+        selectedRoomId: null,
         arrangeSession: null,
         placementWarnings: [],
         lastGeometryEdit: null,
@@ -529,6 +541,7 @@ export function createAppStore(deps: AppStoreDeps) {
       selectedArtworkId: null,
       selectedOpeningId: null,
       selectedObjectIds: [],
+      selectedRoomId: null,
       arrangeSession: null,
       lastArrangeMode: "inset",
       lastInsetAnchor: "both",
@@ -595,23 +608,50 @@ export function createAppStore(deps: AppStoreDeps) {
         // Wall focus replaces artwork/opening focus in the inspector — the
         // three selections are mutually exclusive, not independent. It also
         // drops any multi-select — a wall click is a fresh focus gesture, not
-        // an addition to a group of placements.
+        // an addition to a group of placements. Also drops room focus (a
+        // selected room's handles are a different, exclusive canvas mode).
         set({
           selectedWallId: wallId,
           selectedArtworkId: null,
           selectedOpeningId: null,
-          selectedObjectIds: []
+          selectedObjectIds: [],
+          selectedRoomId: null
         });
       },
 
       selectArtwork(artworkId) {
         autoAcceptArrangeSession();
-        set({ selectedArtworkId: artworkId, selectedOpeningId: null, selectedObjectIds: [] });
+        set({
+          selectedArtworkId: artworkId,
+          selectedOpeningId: null,
+          selectedObjectIds: [],
+          selectedRoomId: null
+        });
       },
 
       selectOpening(wallObjectId) {
         autoAcceptArrangeSession();
-        set({ selectedOpeningId: wallObjectId, selectedArtworkId: null, selectedObjectIds: [] });
+        set({
+          selectedOpeningId: wallObjectId,
+          selectedArtworkId: null,
+          selectedObjectIds: [],
+          selectedRoomId: null
+        });
+      },
+
+      // Room focus for plan view's selection-scoped handles/wash — mutually
+      // exclusive with every other selection slot (see selectedRoomId), so
+      // this is the one action, besides clearObjectSelection, that also
+      // drops the wall focus other selects leave untouched.
+      selectRoom(roomId) {
+        autoAcceptArrangeSession();
+        set({
+          selectedRoomId: roomId,
+          selectedWallId: null,
+          selectedArtworkId: null,
+          selectedOpeningId: null,
+          selectedObjectIds: []
+        });
       },
 
       // Placement multi-select: id must be a live wallObject/floorObject id,
@@ -640,7 +680,11 @@ export function createAppStore(deps: AppStoreDeps) {
             : [...current, id]
           : [id];
 
-        set({ selectedObjectIds: next, ...legacySelectionSlots(project, next) });
+        set({
+          selectedObjectIds: next,
+          selectedRoomId: null,
+          ...legacySelectionSlots(project, next)
+        });
       },
 
       // Bulk replace (e.g. a marquee-drag selection from the plan view).
@@ -658,13 +702,30 @@ export function createAppStore(deps: AppStoreDeps) {
             project.floorObjects.some((object) => object.id === id)
         );
 
-        set({ selectedObjectIds: next, ...legacySelectionSlots(project, next) });
+        set({
+          selectedObjectIds: next,
+          selectedRoomId: null,
+          ...legacySelectionSlots(project, next)
+        });
       },
 
       clearObjectSelection() {
         autoAcceptArrangeSession();
-        if (get().selectedObjectIds.length === 0) return;
-        set({ selectedObjectIds: [], selectedArtworkId: null, selectedOpeningId: null });
+        const state = get();
+        if (
+          state.selectedObjectIds.length === 0 &&
+          state.selectedArtworkId === null &&
+          state.selectedOpeningId === null &&
+          state.selectedRoomId === null
+        ) {
+          return;
+        }
+        set({
+          selectedObjectIds: [],
+          selectedArtworkId: null,
+          selectedOpeningId: null,
+          selectedRoomId: null
+        });
       },
 
       async renameProject(title) {
@@ -723,6 +784,8 @@ export function createAppStore(deps: AppStoreDeps) {
         )
           ? null
           : selectedOpeningId;
+        const nextSelectedRoomId =
+          get().selectedRoomId === roomId ? null : get().selectedRoomId;
 
         await applyEdit(
           `Delete ${roomPlacement.room.name}`,
@@ -736,6 +799,7 @@ export function createAppStore(deps: AppStoreDeps) {
           {
             selectedWallId: nextSelectedWallId,
             selectedOpeningId: nextSelectedOpeningId,
+            selectedRoomId: nextSelectedRoomId,
             viewMode: "plan"
           }
         );
@@ -773,11 +837,11 @@ export function createAppStore(deps: AppStoreDeps) {
         );
       },
 
-      async resizeWall(wallId, lengthMm) {
+      async resizeWall(wallId, lengthMm, anchor = "start") {
         const project = get().project;
         if (!project) return;
 
-        const result = resizeWallPreservingAngles(project, wallId, lengthMm);
+        const result = resizeWallPreservingAngles(project, wallId, lengthMm, anchor);
         if (result.changedWallIds.length === 0) return;
 
         const placementWarnings = validateChangedWallPlacements(
@@ -799,6 +863,35 @@ export function createAppStore(deps: AppStoreDeps) {
         if (!selectedWallId) return;
 
         await get().resizeWall(selectedWallId, lengthMm);
+      },
+
+      async moveRoom(roomId, offsetXMm, offsetYMm) {
+        const project = get().project;
+        if (!project) return;
+
+        const placement = project.floor.rooms.find(
+          (candidate) => candidate.roomId === roomId
+        );
+        if (!placement) {
+          throw new Error(`Room not found: ${roomId}`);
+        }
+
+        // Dropping a room back where it started shouldn't cost an undo entry —
+        // same no-op guard the placement moves (moveArtworkPlacement) use.
+        if (placement.offsetXMm === offsetXMm && placement.offsetYMm === offsetYMm) {
+          return;
+        }
+
+        await applyEdit("Move room", (current) => ({
+          ...current,
+          floor: {
+            rooms: current.floor.rooms.map((candidate) =>
+              candidate.roomId === roomId
+                ? { ...candidate, offsetXMm, offsetYMm }
+                : candidate
+            )
+          }
+        }));
       },
 
       async undo() {

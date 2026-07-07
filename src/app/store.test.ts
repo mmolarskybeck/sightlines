@@ -341,6 +341,52 @@ describe("app store", () => {
     expect(store.getState().undoStack).toHaveLength(0);
   });
 
+  describe("moveRoom", () => {
+    it("updates a room's placement offsets, persists, and is undoable/redoable", async () => {
+      const before = store.getState().project!.floor.rooms[0];
+      expect(before.offsetXMm).toBe(0);
+      expect(before.offsetYMm).toBe(0);
+
+      await store.getState().moveRoom("room-main", feetToMm(10), feetToMm(5));
+
+      let state = store.getState();
+      expect(state.undoStack).toHaveLength(1);
+      expect(state.undoStack.at(-1)?.label).toBe("Move room");
+      let placement = state.project!.floor.rooms[0];
+      expect(placement.offsetXMm).toBeCloseTo(feetToMm(10));
+      expect(placement.offsetYMm).toBeCloseTo(feetToMm(5));
+      const persisted = repository.projects.get(state.project!.id)!;
+      expect(persisted.floor.rooms[0].offsetXMm).toBeCloseTo(feetToMm(10));
+
+      await store.getState().undo();
+      placement = store.getState().project!.floor.rooms[0];
+      expect(placement.offsetXMm).toBe(0);
+      expect(placement.offsetYMm).toBe(0);
+
+      await store.getState().redo();
+      placement = store.getState().project!.floor.rooms[0];
+      expect(placement.offsetXMm).toBeCloseTo(feetToMm(10));
+      expect(placement.offsetYMm).toBeCloseTo(feetToMm(5));
+    });
+
+    it("is a no-op (no undo entry) when the offsets are unchanged", async () => {
+      const before = store.getState().project!;
+      const placement = before.floor.rooms[0];
+
+      await store.getState().moveRoom("room-main", placement.offsetXMm, placement.offsetYMm);
+
+      expect(store.getState().undoStack).toHaveLength(0);
+      expect(store.getState().project).toBe(before);
+    });
+
+    it("throws for an unknown room id", async () => {
+      await expect(
+        store.getState().moveRoom("missing-room", 100, 100)
+      ).rejects.toThrow(/Room not found/);
+      expect(store.getState().undoStack).toHaveLength(0);
+    });
+  });
+
   it("rejects text that is not valid JSON, and leaves the current project untouched", async () => {
     const before = store.getState().project;
 
@@ -1191,6 +1237,52 @@ describe("app store", () => {
       store.getState().selectArtwork("some-artwork");
 
       expect(store.getState().selectedOpeningId).toBeNull();
+    });
+
+    it("selectRoom clears the selected wall, artwork, opening, and multi-select", () => {
+      store.getState().selectArtwork("some-artwork");
+      store.getState().selectOpening("some-opening");
+
+      store.getState().selectRoom("room-main");
+
+      const state = store.getState();
+      expect(state.selectedRoomId).toBe("room-main");
+      expect(state.selectedWallId).toBeNull();
+      expect(state.selectedArtworkId).toBeNull();
+      expect(state.selectedOpeningId).toBeNull();
+      expect(state.selectedObjectIds).toEqual([]);
+    });
+
+    it("selectWall clears the selected room", () => {
+      store.getState().selectRoom("room-main");
+
+      store.getState().selectWall("wall-east");
+
+      expect(store.getState().selectedRoomId).toBeNull();
+    });
+
+    it("selectArtwork clears the selected room", () => {
+      store.getState().selectRoom("room-main");
+
+      store.getState().selectArtwork("some-artwork");
+
+      expect(store.getState().selectedRoomId).toBeNull();
+    });
+
+    it("selectOpening clears the selected room", () => {
+      store.getState().selectRoom("room-main");
+
+      store.getState().selectOpening("some-opening");
+
+      expect(store.getState().selectedRoomId).toBeNull();
+    });
+
+    it("clearObjectSelection clears the selected room even with no objects selected", () => {
+      store.getState().selectRoom("room-main");
+
+      store.getState().clearObjectSelection();
+
+      expect(store.getState().selectedRoomId).toBeNull();
     });
   });
 
