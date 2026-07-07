@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
 import { DotsSixVerticalIcon } from "@phosphor-icons/react/dist/csr/DotsSixVertical";
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
@@ -17,6 +18,7 @@ import {
   SelectValue
 } from "./ui/select";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 // MIME key for the HTML5 drag payload carrying an artworkId — a later task
 // wires the elevation view's drop target to read this same constant, so the
@@ -25,6 +27,15 @@ export const ARTWORK_DRAG_MIME = "application/x-sightlines-artwork";
 
 type ChecklistFilter = "all" | "placed" | "unplaced";
 export type ChecklistSort = "project" | "title" | "artist" | "status";
+
+const CHECKLIST_SORTS: ChecklistSort[] = ["project", "title", "artist", "status"];
+
+const SORT_LABELS: Record<ChecklistSort, string> = {
+  project: "Project order",
+  title: "Title",
+  artist: "Artist",
+  status: "Status"
+};
 
 export type ChecklistRowData = {
   artworkId: string;
@@ -253,20 +264,35 @@ export function ChecklistPanel({
             />
           </ToggleGroup>
 
-          <div className="checklist-sort">
-            <span>Sort</span>
-            <Select value={sort} onValueChange={(value) => setSort(value as ChecklistSort)}>
-              <SelectTrigger aria-label="Sort checklist">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="project">Project order</SelectItem>
-                <SelectItem value="title">Title</SelectItem>
-                <SelectItem value="artist">Artist</SelectItem>
-                <SelectItem value="status">Status</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          {/* Sort is deliberately subordinate to the filter tabs: an
+              icon-only trigger at the row's right edge. The Select semantics
+              are unchanged — the visually-hidden SelectValue still announces
+              the active sort — and a non-default sort tints the icon petrol
+              so a surprising row order always has a visible cause. */}
+          <Select value={sort} onValueChange={(value) => setSort(value as ChecklistSort)}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <SelectTrigger
+                  aria-label="Sort checklist"
+                  className="checklist-sort-trigger"
+                  data-nondefault={sort === "project" ? undefined : ""}
+                >
+                  <ArrowsDownUpIcon aria-hidden="true" size={14} />
+                  <span className="visually-hidden">
+                    <SelectValue />
+                  </span>
+                </SelectTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Sort: {SORT_LABELS[sort]}</TooltipContent>
+            </Tooltip>
+            <SelectContent align="end">
+              {CHECKLIST_SORTS.map((value) => (
+                <SelectItem key={value} value={value}>
+                  {SORT_LABELS[value]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       ) : null}
 
@@ -415,6 +441,36 @@ function ChecklistRow({
   // valid drag source even though it still shows up and can be selected.
   const isDraggable = artwork !== null;
 
+  // Store image dimensions for creating a properly-sized drag preview with
+  // correct aspect ratio (task: fix squished drag thumbnail).
+  const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
+  const thumbnailImgRef = useRef<HTMLImageElement>(null);
+
+  useEffect(() => {
+    if (!thumbnailImgRef.current) return;
+    const img = thumbnailImgRef.current;
+
+    // Once the thumbnail image loads, measure its natural dimensions.
+    // These will be used to compute the correct aspect ratio for the drag image.
+    const handleLoad = () => {
+      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+        setImageDimensions({
+          width: img.naturalWidth,
+          height: img.naturalHeight
+        });
+      }
+    };
+
+    if (img.complete && img.naturalWidth > 0) {
+      // Image is already loaded (cached).
+      handleLoad();
+    } else {
+      // Wait for image to load.
+      img.addEventListener("load", handleLoad);
+      return () => img.removeEventListener("load", handleLoad);
+    }
+  }, [thumbnailUrl]);
+
   const metaParts: string[] = [];
   if (artwork?.artist) metaParts.push(artwork.artist);
   if (
@@ -446,6 +502,29 @@ function ChecklistRow({
           ? (event) => {
               event.dataTransfer.setData(ARTWORK_DRAG_MIME, artworkId);
               event.dataTransfer.effectAllowed = "copy";
+
+              // Create a properly-sized drag image that preserves aspect ratio
+              // (fix for squished drag thumbnail). Max size is 120px on the
+              // longer dimension, scaled down proportionally.
+              if (imageDimensions && thumbnailUrl && thumbnailImgRef.current) {
+                const MAX_DIM = 120;
+                const { width, height } = imageDimensions;
+                const scale = Math.min(MAX_DIM / width, MAX_DIM / height);
+                const dragWidth = Math.round(width * scale);
+                const dragHeight = Math.round(height * scale);
+
+                const canvas = document.createElement("canvas");
+                canvas.width = dragWidth;
+                canvas.height = dragHeight;
+
+                // Draw the thumbnail image onto the canvas, preserving aspect ratio.
+                const ctx = canvas.getContext("2d");
+                if (ctx) {
+                  ctx.drawImage(thumbnailImgRef.current, 0, 0, dragWidth, dragHeight);
+                  event.dataTransfer.setDragImage(canvas, dragWidth / 2, dragHeight / 2);
+                }
+              }
+
               onDragStateChange?.(artworkId);
             }
           : undefined
@@ -459,7 +538,12 @@ function ChecklistRow({
     >
       <DotsSixVerticalIcon aria-hidden="true" className="checklist-grip" size={16} />
       {thumbnailUrl ? (
-        <img alt="" className="checklist-thumb" src={thumbnailUrl} />
+        <img
+          ref={thumbnailImgRef}
+          alt=""
+          className="checklist-thumb"
+          src={thumbnailUrl}
+        />
       ) : (
         <div aria-hidden="true" className="checklist-thumb placeholder" />
       )}

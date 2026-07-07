@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { LinkBreakIcon } from "@phosphor-icons/react/dist/csr/LinkBreak";
 import type { Artwork, Dimensions, DisplayUnit } from "../../domain/project";
+import { applyAspectFill, type PixelAspect } from "../../domain/units/aspectFill";
 import {
   getPlaceholderForScope,
   getScopeUnits,
   unitSystemFromDisplayUnit
 } from "../../domain/units/unitSystem";
+import { useArtworkAsset } from "../hooks/useArtworkAsset";
 import { LengthField } from "./LengthField";
 import { UncertaintyIndicator } from "./UncertaintyIndicator";
 import { Button } from "./ui/button";
@@ -21,9 +23,11 @@ import {
 type ArtworkTextFieldKey = "title" | "artist" | "date" | "accessionNumber" | "locationOrLender";
 
 // Grouped into two rhythm clusters (see .field-group in global.css): identity
-// (what the work is) and registrar (where its record/loan lives) — each
-// cluster reads as one unit, separated from the other by the more generous
-// gap on .inspector-form itself.
+// (what the work is) reads at the top beside the thumbnail, and registrar
+// (where its record/loan lives — provenance) sinks to the bottom of the panel,
+// below the dimensions, since it's reference data a curator consults less often
+// than the physical measurements. Each cluster reads as one unit, separated
+// from the other by the more generous gap on .inspector-form itself.
 const IDENTITY_FIELDS: { key: ArtworkTextFieldKey; label: string }[] = [
   { key: "title", label: "Title" },
   { key: "artist", label: "Artist" },
@@ -64,20 +68,57 @@ export function ArtworkInspector({
   onRemovePlacement?: () => void;
   unit: DisplayUnit;
 }) {
+  const { asset, thumbnailUrl } = useArtworkAsset(artwork.assetId);
+  const aspect: PixelAspect = {
+    widthPx: asset?.widthPx,
+    heightPx: asset?.heightPx
+  };
+
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
-      <div className="field-group">
-        {IDENTITY_FIELDS.map((field) => (
-          <TextField
-            key={field.key}
-            fieldKey={field.key}
-            label={field.label}
-            value={artwork[field.key]}
-            onCommitField={onCommitField}
+      {/* Thumbnail beside identity when the panel is wide enough, stacking
+          above it when narrow (see .artwork-inspector-header). */}
+      <div className="artwork-inspector-header">
+        {thumbnailUrl ? (
+          <img
+            alt=""
+            className="artwork-inspector-thumb"
+            src={thumbnailUrl}
+            // Aspect-true: the square slot's object-fit contains the image, but
+            // handing the browser the intrinsic ratio avoids a paint-time
+            // reflow once it loads.
+            style={
+              aspect.widthPx && aspect.heightPx
+                ? { aspectRatio: `${aspect.widthPx} / ${aspect.heightPx}` }
+                : undefined
+            }
           />
-        ))}
+        ) : (
+          <div aria-hidden="true" className="artwork-inspector-thumb placeholder" />
+        )}
+
+        <div className="field-group artwork-inspector-identity">
+          {IDENTITY_FIELDS.map((field) => (
+            <TextField
+              key={field.key}
+              fieldKey={field.key}
+              label={field.label}
+              value={artwork[field.key]}
+              onCommitField={onCommitField}
+            />
+          ))}
+        </div>
       </div>
 
+      {/* Dimensions ride high — the measurement a curator reaches for most. */}
+      <DimensionsSection
+        aspect={aspect}
+        dimensions={artwork.dimensions}
+        onCommitDimensions={onCommitDimensions}
+        unit={unit}
+      />
+
+      {/* Provenance / registrar data sits at the bottom (see IDENTITY_FIELDS). */}
       <div className="field-group">
         {REGISTRAR_FIELDS.map((field) => (
           <TextField
@@ -89,12 +130,6 @@ export function ArtworkInspector({
           />
         ))}
       </div>
-
-      <DimensionsSection
-        dimensions={artwork.dimensions}
-        onCommitDimensions={onCommitDimensions}
-        unit={unit}
-      />
 
       {isPlaced ? (
         <div className="inspector-placement">
@@ -163,10 +198,12 @@ function TextField({
 }
 
 function DimensionsSection({
+  aspect,
   dimensions,
   onCommitDimensions,
   unit
 }: {
+  aspect: PixelAspect;
   dimensions: Dimensions;
   onCommitDimensions: (dimensions: Dimensions) => void;
   unit: DisplayUnit;
@@ -203,8 +240,18 @@ function DimensionsSection({
             // status is the curator's own claim about how trustworthy these
             // numbers are, not something derived from whether fields happen to
             // be filled in.
+            //
+            // Committing width or height also auto-fills the other 2D face dim
+            // from the image's aspect ratio when appropriate (see
+            // applyAspectFill for the rule). Depth carries no ratio, so it
+            // commits alone. The derived value is a plain committed number —
+            // fully editable afterwards, just like a typed one.
             onCommit={(valueMm) =>
-              onCommitDimensions({ ...dimensions, [field.key]: valueMm })
+              onCommitDimensions(
+                field.key === "depthMm"
+                  ? { ...dimensions, depthMm: valueMm }
+                  : applyAspectFill(dimensions, field.key, valueMm, aspect)
+              )
             }
           />
         ))}

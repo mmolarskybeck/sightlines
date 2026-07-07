@@ -2,6 +2,22 @@ import { useEffect, useState } from "react";
 
 const STORAGE_KEY = "sightlines.viewPreferences.v1";
 
+// Resizable-panel bounds, exported so both the drag handles (for their
+// aria-valuemin/max and clamping) and the stored-preference sanitizer share a
+// single source of truth. The defaults match the original fixed grid tracks
+// (320px / 300px in global.css's .workspace) so an existing user with no stored
+// widths sees no layout shift the first time this ships.
+export const LEFT_PANEL_MIN_WIDTH = 240;
+export const LEFT_PANEL_MAX_WIDTH = 480;
+export const LEFT_PANEL_DEFAULT_WIDTH = 320;
+export const INSPECTOR_MIN_WIDTH = 260;
+export const INSPECTOR_MAX_WIDTH = 420;
+export const INSPECTOR_DEFAULT_WIDTH = 300;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
 type ViewPreferences = {
   showGrid: boolean;
   snapToGrid: boolean;
@@ -21,6 +37,17 @@ type ViewPreferences = {
   // the other switches. Defaults to "checklist" — the left anchor of the
   // workspace on first open. A workspace preference like grid/snap; it sticks.
   leftPanel: "checklist" | "rooms" | null;
+  // User-dragged panel widths in px, clamped to the bounds above. Like the
+  // other fields here they're workspace preferences (a working-style choice,
+  // not project geometry), so they live in localStorage and never travel with
+  // an exported .sightlines file.
+  leftPanelWidth: number;
+  inspectorWidth: number;
+  // Whether the right inspector is collapsed entirely. Symmetric with
+  // leftPanel === null on the other side — toggled from the rail. Defaults to
+  // open: the inspector is where a selection's editable fields live, so hiding
+  // it is a deliberate opt-out.
+  inspectorCollapsed: boolean;
 };
 
 const DEFAULT_PREFERENCES: ViewPreferences = {
@@ -31,7 +58,10 @@ const DEFAULT_PREFERENCES: ViewPreferences = {
   snapToGrid: true,
   gridPrecisionFloorMm: null,
   allowOverlappingPlacement: false,
-  leftPanel: "checklist"
+  leftPanel: "checklist",
+  leftPanelWidth: LEFT_PANEL_DEFAULT_WIDTH,
+  inspectorWidth: INSPECTOR_DEFAULT_WIDTH,
+  inspectorCollapsed: false
 };
 
 function readStoredPreferences(): ViewPreferences {
@@ -64,7 +94,22 @@ function readStoredPreferences(): ViewPreferences {
         parsed.leftPanel === "rooms" ||
         parsed.leftPanel === null
           ? parsed.leftPanel
-          : DEFAULT_PREFERENCES.leftPanel
+          : DEFAULT_PREFERENCES.leftPanel,
+      // Stored widths are clamped on read as well as on write: a hand-edited
+      // localStorage value, or one saved before the bounds changed, can never
+      // push a panel to an unusable size.
+      leftPanelWidth:
+        typeof parsed.leftPanelWidth === "number" && Number.isFinite(parsed.leftPanelWidth)
+          ? clamp(parsed.leftPanelWidth, LEFT_PANEL_MIN_WIDTH, LEFT_PANEL_MAX_WIDTH)
+          : DEFAULT_PREFERENCES.leftPanelWidth,
+      inspectorWidth:
+        typeof parsed.inspectorWidth === "number" && Number.isFinite(parsed.inspectorWidth)
+          ? clamp(parsed.inspectorWidth, INSPECTOR_MIN_WIDTH, INSPECTOR_MAX_WIDTH)
+          : DEFAULT_PREFERENCES.inspectorWidth,
+      inspectorCollapsed:
+        typeof parsed.inspectorCollapsed === "boolean"
+          ? parsed.inspectorCollapsed
+          : DEFAULT_PREFERENCES.inspectorCollapsed
     };
   } catch {
     return DEFAULT_PREFERENCES;
@@ -90,8 +135,26 @@ export function useViewPreferences() {
     gridPrecisionFloorMm: preferences.gridPrecisionFloorMm,
     allowOverlappingPlacement: preferences.allowOverlappingPlacement,
     leftPanel: preferences.leftPanel,
+    leftPanelWidth: preferences.leftPanelWidth,
+    inspectorWidth: preferences.inspectorWidth,
+    inspectorCollapsed: preferences.inspectorCollapsed,
     setLeftPanel: (leftPanel: ViewPreferences["leftPanel"]) =>
       setPreferences((current) => ({ ...current, leftPanel })),
+    setLeftPanelWidth: (leftPanelWidth: number) =>
+      setPreferences((current) => ({
+        ...current,
+        leftPanelWidth: clamp(leftPanelWidth, LEFT_PANEL_MIN_WIDTH, LEFT_PANEL_MAX_WIDTH)
+      })),
+    setInspectorWidth: (inspectorWidth: number) =>
+      setPreferences((current) => ({
+        ...current,
+        inspectorWidth: clamp(inspectorWidth, INSPECTOR_MIN_WIDTH, INSPECTOR_MAX_WIDTH)
+      })),
+    toggleInspectorCollapsed: () =>
+      setPreferences((current) => ({
+        ...current,
+        inspectorCollapsed: !current.inspectorCollapsed
+      })),
     toggleShowGrid: () =>
       setPreferences((current) => ({ ...current, showGrid: !current.showGrid })),
     toggleSnapToGrid: () =>

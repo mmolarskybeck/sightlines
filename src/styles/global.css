@@ -564,14 +564,130 @@ input:focus-visible {
 
 .workspace {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr) 300px;
+  /* Widths are user-draggable; App sets --left-panel-width / --inspector-width
+     inline (persisted via useViewPreferences), with the original 320/300 as the
+     fallback. Kept as CSS custom properties rather than an inline template so
+     the narrow-viewport media query below can still collapse to one column —
+     an inline grid-template-columns would outrank the stylesheet. */
+  grid-template-columns:
+    var(--left-panel-width, 320px) minmax(0, 1fr) var(--inspector-width, 300px);
+  /* The seam handles are absolutely positioned against this box. */
+  position: relative;
   flex: 1;
   min-height: 0;
 }
 
 /* Left panel collapsed from the rail — the left column drops. */
 .workspace.left-collapsed {
-  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(0, 1fr) var(--inspector-width, 300px);
+}
+
+/* Inspector collapsed from the rail — the right column drops. */
+.workspace.right-collapsed {
+  grid-template-columns: var(--left-panel-width, 320px) minmax(0, 1fr);
+}
+
+.workspace.left-collapsed.right-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* The seam splitters between panes. Each sits centered on a boundary; at rest
+   it's transparent (the panel's own hairline border is the visible line) and
+   only its ::after tints/thickens on hover, focus, or drag — discoverable but
+   quiet, per the design language. Absolutely positioned off --*-width rather
+   than living in the grid, so they never consume a track. */
+.panel-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 6;
+  width: 9px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.panel-resize-handle.left {
+  left: var(--left-panel-width, 320px);
+  transform: translateX(-50%);
+}
+
+.panel-resize-handle.right {
+  right: var(--inspector-width, 300px);
+  transform: translateX(50%);
+}
+
+.panel-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: transparent;
+  transition:
+    width 120ms ease,
+    background 120ms ease;
+}
+
+.panel-resize-handle:hover::after,
+.panel-resize-handle.dragging::after {
+  width: 2px;
+  background: var(--primary);
+}
+
+/* Keyboard focus gets the same visible line plus the app's standard focus ring
+   (this is a div, so the global button:focus-visible rule doesn't reach it). */
+.panel-resize-handle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+}
+
+.panel-resize-handle:focus-visible::after {
+  width: 2px;
+  background: var(--primary);
+}
+
+/* While a drag is in flight, force the resize cursor everywhere and suppress
+   text selection so sweeping over the canvas or a label never flickers. */
+body.panels-resizing,
+body.panels-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+/* When the inspector is collapsed but a selection (or warning) still has
+   content to show, this tab clings to the workspace's right edge as a one-click
+   way back in — the same square, hairline-bordered vocabulary as the rest of
+   the chrome. */
+.inspector-reopen {
+  position: absolute;
+  top: 16px;
+  right: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 40px;
+  padding: 0;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-right: 0;
+  border-radius: var(--radius-control) 0 0 var(--radius-control);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background 120ms ease;
+}
+
+.inspector-reopen:hover {
+  color: var(--ink);
+  background: var(--surface);
 }
 
 .inspector {
@@ -847,33 +963,59 @@ input:focus-visible {
 
 .checklist-filters {
   display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
   gap: 6px;
-  border-bottom: 1px solid var(--line);
   /* Tabs never wrap — at a narrow panel the row pans instead of stacking. */
   overflow-x: auto;
   scrollbar-width: none;
 }
 
+/* The filter tabs own this row; sort is a subordinate icon at its right
+   edge. The row carries the full-width hairline, and the tabs stretch to
+   the row's bottom so the active 2px petrol underline sits directly on it
+   (which is why the row has no bottom padding). */
 .checklist-controls {
-  display: grid;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.checklist-sort {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
   gap: 8px;
-  color: var(--muted);
-  font-size: 0.74rem;
-  font-weight: 600;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--line);
 }
 
-.checklist-sort .select-trigger {
-  min-height: 32px;
-  padding: 6px 8px;
-  font-size: 0.78rem;
+.checklist-sort-trigger {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 26px;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  transition:
+    background-color 150ms ease-out,
+    color 150ms ease-out;
+}
+
+.checklist-sort-trigger:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* The select primitive's baked-in caret would make the icon-only trigger
+   read as two glyphs; the sort icon alone is the whole affordance. */
+.checklist-sort-trigger > svg:last-of-type {
+  display: none;
+}
+
+/* A non-default sort is state, not decoration — petrol per the
+   active-control vocabulary, so a surprising row order has a visible
+   cause even after the menu closes. */
+.checklist-sort-trigger[data-nondefault] {
+  color: var(--primary-strong);
 }
 
 /* Sizing (and weight) only — base color/hover/active underline come from the
@@ -1386,12 +1528,17 @@ input:focus-visible {
   color: var(--primary-strong);
 }
 
+/* Units control: a traditional slide switch — one small track with the two
+   unit systems as flanking words, not labels nested inside the track. The
+   same boxed-row treatment as .unit-select keeps it at the toolbar's height,
+   and the active side's word carries the state through an ink + weight step
+   so the reading survives without color. */
 .unit-switch {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   min-height: 30px;
-  padding: 0 8px 0 10px;
+  padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--muted);
@@ -1404,24 +1551,48 @@ input:focus-visible {
   border-color: var(--input);
 }
 
-.unit-switch-control {
-  position: relative;
-  display: inline-grid;
-  grid-template-columns: 1fr 1fr;
-  align-items: center;
-  min-height: 26px;
-  min-width: 124px;
-  padding: 0 2px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
+/* Flanking words: quiet text buttons that are pointer shortcuts to a side —
+   the switch is the one accessible control, so the markup keeps these
+   aria-hidden and unfocusable. */
+.unit-switch-side {
+  padding: 0;
+  border: 0;
+  background: none;
   color: var(--muted);
   cursor: pointer;
   font: inherit;
+  transition: color 150ms ease-out;
+}
+
+.unit-switch-side:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.unit-switch-side[data-active="true"] {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.unit-switch-side:disabled {
+  cursor: not-allowed;
+}
+
+/* The track: petrol both ways — neither side is an "off" state, so the fill
+   never drops to grey the way a boolean switch's would. */
+.unit-switch-control {
+  position: relative;
+  width: 34px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--primary);
+  cursor: pointer;
+  transition: background-color 150ms ease-out;
 }
 
 .unit-switch-control:hover:not(:disabled) {
-  color: var(--ink);
+  background: var(--primary-strong);
 }
 
 .unit-switch-control:disabled {
@@ -1433,41 +1604,21 @@ input:focus-visible {
   opacity: 0.45;
 }
 
-.unit-switch-option {
-  position: relative;
-  z-index: 1;
-  display: inline-flex;
-  min-height: 22px;
-  align-items: center;
-  justify-content: center;
-  padding: 0 7px;
-  color: var(--muted);
-  transition: color 150ms ease-out;
-}
-
 .switch-thumb {
   position: absolute;
   top: 2px;
-  bottom: 2px;
   left: 2px;
-  width: calc(50% - 2px);
-  border-radius: var(--radius-sm);
-  background: var(--primary);
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--primary-foreground);
   box-shadow: none;
   transform: translateX(0);
-  transition:
-    background-color 150ms ease-out,
-    transform 150ms ease-out;
-}
-
-.unit-switch-control[data-state="unchecked"] .unit-switch-option:first-child,
-.unit-switch-control[data-state="checked"] .unit-switch-option:nth-of-type(2) {
-  color: var(--primary-foreground);
-  font-weight: 650;
+  transition: transform 150ms ease-out;
 }
 
 .unit-switch-control[data-state="checked"] .switch-thumb {
-  transform: translateX(100%);
+  transform: translateX(16px);
 }
 
 .drawing-surface,
@@ -2152,6 +2303,46 @@ input:focus-visible {
   gap: 8px;
 }
 
+/* Artwork inspector header: an aspect-true thumbnail beside the identity
+   fields when the panel has room, wrapping to a stack (thumbnail above the
+   fields) once it's narrow. flex-wrap + the identity block's flex-basis/
+   min-width set the wrap threshold, so no media query is needed. */
+.artwork-inspector-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+/* Same square-slot vocabulary as .checklist-thumb — white bg, hairline border,
+   square corners, uncropped — but sized to the image's own proportions rather
+   than a fixed square: the intrinsic pixels (via the inline aspect-ratio) cap
+   inside a 96px box, so a portrait reads tall and a landscape wide. */
+.artwork-inspector-thumb {
+  flex: 0 0 auto;
+  width: auto;
+  height: auto;
+  max-width: 96px;
+  max-height: 96px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg);
+  object-fit: contain;
+}
+
+/* No image yet: a plain square placeholder holds the slot. */
+.artwork-inspector-thumb.placeholder {
+  width: 88px;
+  height: 88px;
+}
+
+/* Grows to fill the row beside the thumbnail; min-width is the wrap threshold —
+   below it the identity fields drop under the thumbnail. */
+.artwork-inspector-identity {
+  flex: 1 1 180px;
+  min-width: 180px;
+}
+
 /* Arrange-on-wall controls: a full-width segmented mode switch, then the one
    editable measurement for the chosen mode plus its "Calculated" companion,
    and (only during a live session) the Apply/Cancel row. */
@@ -2699,9 +2890,19 @@ input:focus-visible {
   }
 
   .workspace,
-  .workspace.left-collapsed {
+  .workspace.left-collapsed,
+  .workspace.right-collapsed,
+  .workspace.left-collapsed.right-collapsed {
     grid-template-columns: 1fr;
     min-height: 0;
+  }
+
+  /* Resizing is meaningless once the panes stack vertically — hide the seam
+     handles and the reopen tab, both of which are positioned off horizontal
+     column widths that no longer exist here. */
+  .panel-resize-handle,
+  .inspector-reopen {
+    display: none;
   }
 
   .checklist-panel,
@@ -2902,10 +3103,9 @@ input:focus-visible {
   stroke-dasharray: 6 5;
 }
 
-/* WallInspector's "Add to this wall" row — three compact actions reusing
-   the existing .inspector-action button treatment (ArtworkInspector's
-   "Remove from wall"), just laid out horizontally since these three are a
-   set rather than a single action. */
+/* WallInspector's "Add to this wall" row — three equal-width chips (icon
+   over label, same recipe as .arrange-mode) so "Door" and "Blocked zone"
+   occupy identical footprints instead of ragged flex widths. */
 .opening-add-row {
   display: grid;
   gap: 8px;
@@ -2921,13 +3121,39 @@ input:focus-visible {
 }
 
 .opening-add-buttons {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
 }
 
-.opening-add-buttons .inspector-action {
-  flex: 1 1 auto;
+.opening-add-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  /* Beat the ui/button variant's fixed h-9 without !important: the chip
+     grows to fit icon + a label that may wrap to two lines. */
+  height: auto;
+  min-height: 52px;
+  padding: 8px 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  white-space: normal;
+}
+
+.opening-add-chip svg {
+  flex: 0 0 auto;
+}
+
+/* The chips' hover glosses reuse the placement-tooltip shell; this only
+   scales the copy down to inspector hint size. */
+.opening-add-tooltip {
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
 
 /* ---- Placement hover tooltips (plan + elevation) ---------------------- */

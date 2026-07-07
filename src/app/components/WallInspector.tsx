@@ -12,6 +12,7 @@ import {
 } from "../../domain/units/unitSystem";
 import { LengthField } from "./LengthField";
 import { Button } from "./ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export type WallDimensionLink = {
   pairedWallName: string;
@@ -91,30 +92,54 @@ export function WallInspector({
       <div className="opening-add-row">
         <span>Add to this wall</span>
         <div className="opening-add-buttons">
-          <Button
-            className="inspector-action"
-            variant="inspector"
-            onClick={() => onAddOpening("door")}
-          >
-            <DoorIcon aria-hidden="true" size={15} />
-            Door
-          </Button>
-          <Button
-            className="inspector-action"
-            variant="inspector"
-            onClick={() => onAddOpening("window")}
-          >
-            <SquareIcon aria-hidden="true" size={15} />
-            Window
-          </Button>
-          <Button
-            className="inspector-action"
-            variant="inspector"
-            onClick={() => onAddOpening("blocked-zone")}
-          >
-            <RectangleDashedIcon aria-hidden="true" size={15} />
-            Blocked zone
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                className="opening-add-chip"
+                variant="inspector"
+                onClick={() => onAddOpening("door")}
+              >
+                <DoorIcon aria-hidden="true" size={16} />
+                <span>Door</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="opening-add-tooltip" side="bottom">
+              A standard doorway reaching the floor. Artwork can&rsquo;t hang
+              over it.
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                className="opening-add-chip"
+                variant="inspector"
+                onClick={() => onAddOpening("window")}
+              >
+                <SquareIcon aria-hidden="true" size={16} />
+                <span>Window</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="opening-add-tooltip" side="bottom">
+              A window centered on the wall&rsquo;s midline. Artwork can&rsquo;t
+              hang over it.
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                className="opening-add-chip"
+                variant="inspector"
+                onClick={() => onAddOpening("blocked-zone")}
+              >
+                <RectangleDashedIcon aria-hidden="true" size={16} />
+                <span>Blocked zone</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="opening-add-tooltip" side="bottom">
+              Marks a region where artwork can&rsquo;t be hung — a vent,
+              outlet, thermostat, or other obstruction.
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
 

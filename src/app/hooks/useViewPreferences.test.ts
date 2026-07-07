@@ -1,6 +1,14 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { useViewPreferences } from "./useViewPreferences";
+import {
+  useViewPreferences,
+  LEFT_PANEL_DEFAULT_WIDTH,
+  LEFT_PANEL_MIN_WIDTH,
+  LEFT_PANEL_MAX_WIDTH,
+  INSPECTOR_DEFAULT_WIDTH,
+  INSPECTOR_MIN_WIDTH,
+  INSPECTOR_MAX_WIDTH
+} from "./useViewPreferences";
 
 const STORAGE_KEY = "sightlines.viewPreferences.v1";
 
@@ -118,5 +126,82 @@ describe("useViewPreferences", () => {
     expect(result.current.gridPrecisionFloorMm).toBeNull();
     expect(result.current.showGrid).toBe(true);
     expect(result.current.snapToGrid).toBe(true);
+  });
+
+  it("defaults the panel widths and inspector-collapsed state on first open", () => {
+    const { result } = renderHook(() => useViewPreferences());
+
+    expect(result.current.leftPanelWidth).toBe(LEFT_PANEL_DEFAULT_WIDTH);
+    expect(result.current.inspectorWidth).toBe(INSPECTOR_DEFAULT_WIDTH);
+    expect(result.current.inspectorCollapsed).toBe(false);
+  });
+
+  it("persists dragged panel widths to localStorage", () => {
+    const { result } = renderHook(() => useViewPreferences());
+
+    act(() => {
+      result.current.setLeftPanelWidth(360);
+      result.current.setInspectorWidth(340);
+    });
+
+    expect(result.current.leftPanelWidth).toBe(360);
+    expect(result.current.inspectorWidth).toBe(340);
+
+    const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}");
+    expect(stored.leftPanelWidth).toBe(360);
+    expect(stored.inspectorWidth).toBe(340);
+  });
+
+  it("clamps widths to their bounds on write", () => {
+    const { result } = renderHook(() => useViewPreferences());
+
+    act(() => {
+      result.current.setLeftPanelWidth(9999);
+      result.current.setInspectorWidth(10);
+    });
+
+    expect(result.current.leftPanelWidth).toBe(LEFT_PANEL_MAX_WIDTH);
+    expect(result.current.inspectorWidth).toBe(INSPECTOR_MIN_WIDTH);
+  });
+
+  it("clamps out-of-range stored widths on read", () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ leftPanelWidth: 5, inspectorWidth: 9999 })
+    );
+
+    const { result } = renderHook(() => useViewPreferences());
+
+    expect(result.current.leftPanelWidth).toBe(LEFT_PANEL_MIN_WIDTH);
+    expect(result.current.inspectorWidth).toBe(INSPECTOR_MAX_WIDTH);
+  });
+
+  it("falls back to default widths for malformed stored values", () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ leftPanelWidth: "wide", inspectorWidth: null })
+    );
+
+    const { result } = renderHook(() => useViewPreferences());
+
+    expect(result.current.leftPanelWidth).toBe(LEFT_PANEL_DEFAULT_WIDTH);
+    expect(result.current.inspectorWidth).toBe(INSPECTOR_DEFAULT_WIDTH);
+  });
+
+  it("toggles and persists the inspector-collapsed state", () => {
+    const { result } = renderHook(() => useViewPreferences());
+
+    act(() => {
+      result.current.toggleInspectorCollapsed();
+    });
+    expect(result.current.inspectorCollapsed).toBe(true);
+    expect(
+      JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}").inspectorCollapsed
+    ).toBe(true);
+
+    act(() => {
+      result.current.toggleInspectorCollapsed();
+    });
+    expect(result.current.inspectorCollapsed).toBe(false);
   });
 });

@@ -3,6 +3,7 @@ import { FileCodeIcon } from "@phosphor-icons/react/dist/csr/FileCode";
 import { BoundingBoxIcon } from "@phosphor-icons/react/dist/csr/BoundingBox";
 import { ListChecksIcon } from "@phosphor-icons/react/dist/csr/ListChecks";
 import { QuestionIcon } from "@phosphor-icons/react/dist/csr/Question";
+import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { SlidersHorizontalIcon } from "@phosphor-icons/react/dist/csr/SlidersHorizontal";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
 import { Button } from "./ui/button";
@@ -16,6 +17,8 @@ import { Toggle } from "./ui/toggle";
 export function AppRail({
   leftPanel,
   onSelectLeftPanel,
+  inspectorCollapsed,
+  onToggleInspector,
   isDataView,
   onOpenDataView,
   issueCount,
@@ -25,6 +28,11 @@ export function AppRail({
   // Toggle semantic: the active panel's icon collapses to null, the other
   // switches. App owns that logic; the rail just reports which was clicked.
   onSelectLeftPanel: (panel: "checklist" | "rooms") => void;
+  // The right inspector's collapse toggle — the symmetric counterpart to the
+  // left-panel selectors above, so both sides of the workspace are governed
+  // from the rail. Pressed (aria-pressed) when the inspector is showing.
+  inspectorCollapsed: boolean;
+  onToggleInspector: () => void;
   isDataView: boolean;
   onOpenDataView: () => void;
   issueCount: number;
@@ -71,6 +79,22 @@ export function AppRail({
             </span>
           ) : null}
         </RailButton>
+
+        <RailButton
+          active={!inspectorCollapsed}
+          // The icon is a left-anchored sidebar glyph flipped horizontally so it
+          // reads as the right-hand inspector, matching where the panel lives.
+          icon={
+            <SidebarSimpleIcon
+              aria-hidden="true"
+              size={22}
+              style={{ transform: "scaleX(-1)" }}
+            />
+          }
+          label={inspectorCollapsed ? "Show inspector" : "Hide inspector"}
+          pressed={!inspectorCollapsed}
+          onClick={onToggleInspector}
+        />
 
         <div className="rail-spacer" />
 
