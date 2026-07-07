@@ -434,6 +434,110 @@ describe("deriveScene3d — wall artworks (M2)", () => {
   });
 });
 
+describe("deriveScene3d — door/window holes (M3)", () => {
+  function makeOpening(
+    kind: "door" | "window",
+    overrides: Partial<WallObject> = {}
+  ): WallObject {
+    return {
+      id: `${kind}-1`,
+      kind,
+      blocksPlacement: true,
+      wallId: "room-a-wall-0",
+      xMm: 1000,
+      yMm: 1000,
+      widthMm: 900,
+      heightMm: 2000,
+      ...overrides
+    } as WallObject;
+  }
+
+  function deriveWall0(opening: WallObject, ring = CCW_RECT) {
+    const scene = deriveScene3d(
+      makeProject([makePlacement(makeRoom("room-a", ring, 2500))], {
+        wallObjects: [opening]
+      })
+    );
+    return scene.rooms[0].walls.find((w) => w.wallId === "room-a-wall-0")!;
+  }
+
+  it("derives a door as a floor-to-top cutout regardless of its stored center", () => {
+    // Door centered at y=1000, height 2000 -> top edge at 2000; the hole must
+    // run from the floor (0) to that top edge.
+    const wall = deriveWall0(makeOpening("door"));
+    expect(wall.holes).toEqual([
+      {
+        kind: "door",
+        xMinMm: 550,
+        xMaxMm: 1450,
+        yMinMm: 0,
+        yMaxMm: 2000,
+        clamped: false
+      }
+    ]);
+  });
+
+  it("derives a window as a floating cutout", () => {
+    const wall = deriveWall0(
+      makeOpening("window", { yMm: 1500, widthMm: 1200, heightMm: 1000 })
+    );
+    expect(wall.holes).toEqual([
+      {
+        kind: "window",
+        xMinMm: 400,
+        xMaxMm: 1600,
+        yMinMm: 1000,
+        yMaxMm: 2000,
+        clamped: false
+      }
+    ]);
+  });
+
+  it("clamps holes to the wall bounds and flags them", () => {
+    // Window pushed past the wall's start and above its top (wall is 4000 long,
+    // 2500 high).
+    const wall = deriveWall0(
+      makeOpening("window", { xMm: 200, yMm: 2300, widthMm: 800, heightMm: 800 })
+    );
+    expect(wall.holes).toEqual([
+      {
+        kind: "window",
+        xMinMm: 0,
+        xMaxMm: 600,
+        yMinMm: 1900,
+        yMaxMm: 2500,
+        clamped: true
+      }
+    ]);
+  });
+
+  it("drops holes that fall entirely outside the wall", () => {
+    const wall = deriveWall0(
+      makeOpening("window", { xMm: -2000, widthMm: 800 })
+    );
+    expect(wall.holes).toEqual([]);
+  });
+
+  it("remaps hole x extents on walls swapped by CW normalisation", () => {
+    // CW_RECT wall 0 is 3000 long and gets its endpoints swapped; a door
+    // centered at authored x=1000 lands at panel-local center 2000.
+    const wall = deriveWall0(
+      makeOpening("door", { xMm: 1000, widthMm: 800, heightMm: 2000 }),
+      CW_RECT
+    );
+    expect(wall.holes).toEqual([
+      {
+        kind: "door",
+        xMinMm: 1600,
+        xMaxMm: 2400,
+        yMinMm: 0,
+        yMaxMm: 2000,
+        clamped: false
+      }
+    ]);
+  });
+});
+
 describe("deriveScene3d — floor objects (M2)", () => {
   it("derives floor artworks with size, rotation, and artwork joins", () => {
     const artwork = makeArtwork("art-1", {

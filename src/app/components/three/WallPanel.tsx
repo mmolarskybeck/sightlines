@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import type { Texture } from "three";
+import { useEffect, useMemo } from "react";
+import { Path, Shape, ShapeGeometry, type Texture } from "three";
 import type { WallPanel3d } from "../../../domain/geometry/scene3d";
 import { ArtworkPlane } from "./ArtworkPlane";
 import { mmToWorld, MM_TO_WORLD } from "./coordinates";
@@ -39,7 +39,7 @@ export function WallPanel({
       originZ: wall.start.yMm * MM_TO_WORLD,
       // Rotate the group's local +x (world x) onto the wall direction in the
       // xz-plane. World z = plan y, so the direction is (dx, dy) -> yaw of
-      // atan2(-dy, dx); this also lands the plane's front (+z) face on the
+      // atan2(-dyMm, dxMm); this also lands the plane's front (+z) face on the
       // inward normal.
       rotationY: Math.atan2(-dyMm, dxMm),
       lengthWorld: Math.hypot(dxMm, dyMm) * MM_TO_WORLD,
@@ -47,10 +47,40 @@ export function WallPanel({
     };
   }, [wall]);
 
+  // The wall rectangle with door/window cutouts punched through as Shape
+  // holes (spec §5.3). Shape coordinates are wall-local world units with the
+  // origin at the wall's start-bottom corner, which is exactly the group's
+  // local frame — so the mesh sits at the group origin, un-centered.
+  const geometry = useMemo(() => {
+    const shape = new Shape();
+    shape.moveTo(0, 0);
+    shape.lineTo(lengthWorld, 0);
+    shape.lineTo(lengthWorld, heightWorld);
+    shape.lineTo(0, heightWorld);
+    shape.closePath();
+
+    for (const hole of wall.holes) {
+      const path = new Path();
+      path.moveTo(mmToWorld(hole.xMinMm), mmToWorld(hole.yMinMm));
+      path.lineTo(mmToWorld(hole.xMaxMm), mmToWorld(hole.yMinMm));
+      path.lineTo(mmToWorld(hole.xMaxMm), mmToWorld(hole.yMaxMm));
+      path.lineTo(mmToWorld(hole.xMinMm), mmToWorld(hole.yMaxMm));
+      path.closePath();
+      shape.holes.push(path);
+    }
+
+    return new ShapeGeometry(shape);
+  }, [wall.holes, lengthWorld, heightWorld]);
+
+  // R3F only auto-disposes on unmount; a geometry replaced by a re-derive
+  // (resize, opening added) must be released here.
+  useEffect(() => {
+    return () => geometry.dispose();
+  }, [geometry]);
+
   return (
     <group position={[originX, 0, originZ]} rotation={[0, rotationY, 0]}>
-      <mesh position={[lengthWorld / 2, heightWorld / 2, 0]}>
-        <planeGeometry args={[lengthWorld, heightWorld]} />
+      <mesh geometry={geometry}>
         <meshLambertMaterial color={WALL_COLOR} />
       </mesh>
       {wall.blockedZones.map((zone, index) => (

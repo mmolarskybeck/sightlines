@@ -188,6 +188,7 @@ function deriveRoom(
     const objects = wallObjectsByWallId.get(wall.id) ?? [];
     const artworks: WallArtwork3d[] = [];
     const blockedZones: Rect3d[] = [];
+    const holes: Hole3d[] = [];
     for (const object of objects) {
       if (object.kind === "artwork") {
         const artwork = artworksById.get(object.artworkId);
@@ -209,8 +210,39 @@ function deriveRoom(
           yMinMm: object.yMm - object.heightMm / 2,
           yMaxMm: object.yMm + object.heightMm / 2
         });
+      } else {
+        // Door/window -> cutout. Doors run floor-to-top regardless of the
+        // stored center (spec §5.1); windows keep their floating extent. The
+        // render layer punches these through the wall verbatim — this is the
+        // one place hole coordinate math lives.
+        const centerX = toPanelLocalX(object.xMm);
+        const rawXMin = centerX - object.widthMm / 2;
+        const rawXMax = centerX + object.widthMm / 2;
+        const rawYMin = object.kind === "door" ? 0 : object.yMm - object.heightMm / 2;
+        const rawYMax = object.yMm + object.heightMm / 2;
+
+        const xMinMm = Math.max(rawXMin, 0);
+        const xMaxMm = Math.min(rawXMax, lengthMm);
+        const yMinMm = Math.max(rawYMin, 0);
+        const yMaxMm = Math.min(rawYMax, wall.heightMm);
+
+        // A hole clamped to nothing (entirely off the wall) would be a
+        // degenerate Shape hole — drop it rather than break triangulation.
+        if (xMinMm >= xMaxMm || yMinMm >= yMaxMm) continue;
+
+        holes.push({
+          kind: object.kind,
+          xMinMm,
+          xMaxMm,
+          yMinMm,
+          yMaxMm,
+          clamped:
+            xMinMm !== rawXMin ||
+            xMaxMm !== rawXMax ||
+            yMinMm !== rawYMin ||
+            yMaxMm !== rawYMax
+        });
       }
-      // Doors/windows become holes in M3.
     }
 
     return {
@@ -218,7 +250,7 @@ function deriveRoom(
       start: oriented.start,
       end: oriented.end,
       heightMm: wall.heightMm,
-      holes: [],
+      holes,
       artworks,
       blockedZones
     };
