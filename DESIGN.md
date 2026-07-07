@@ -73,8 +73,8 @@ Sightlines is rectangular before rounded.
 
 Use one practical UI family plus a restrained display accent.
 
-- Geist carries labels, body text, rows, forms, metrics, and menus.
-- Figtree is limited to the wordmark, panel headings, and top-level mode tabs.
+- Geist carries functional UI: labels, body text, rows, forms, metrics, menus, panel headings, and mode tabs.
+- Figtree is limited to the Sightlines wordmark and rail monogram.
 - Numeric values should use tabular numerals where alignment matters.
 - UI labels should stay compact and readable; do not introduce large display type inside panes.
 

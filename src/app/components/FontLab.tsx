@@ -112,6 +112,7 @@ export default function FontLab() {
     const root = document.documentElement;
     root.dataset.fontLab = "active";
     root.style.setProperty("--font-ui", uiFont.stack);
+    root.style.setProperty("--font-brand", displayFont.stack);
     root.style.setProperty("--font-display", displayFont.stack);
     root.style.setProperty(
       "--font-numeric",
@@ -121,6 +122,7 @@ export default function FontLab() {
 
     return () => {
       root.style.removeProperty("--font-ui");
+      root.style.removeProperty("--font-brand");
       root.style.removeProperty("--font-display");
       root.style.removeProperty("--font-numeric");
       delete root.dataset.fontLab;

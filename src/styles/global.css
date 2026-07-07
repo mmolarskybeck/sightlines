@@ -2,7 +2,7 @@
 
 @theme inline {
   --font-sans: var(--font-ui);
-  --font-display: var(--font-display);
+  --font-display: var(--font-brand);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -36,11 +36,29 @@
 
 :root {
   color-scheme: light;
-  --font-display: "Figtree Variable", Figtree, ui-sans-serif, system-ui, sans-serif;
+  --font-brand: "Figtree Variable", Figtree, ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-brand);
   --font-ui: "Geist Variable", Geist, ui-sans-serif, system-ui, -apple-system, sans-serif;
   font-family: var(--font-ui);
   line-height: 1.5;
   font-weight: 400;
+  font-kerning: normal;
+  font-optical-sizing: auto;
+
+  --type-2xs: 0.6875rem;
+  --type-xs: 0.75rem;
+  --type-sm: 0.8125rem;
+  --type-md: 0.875rem;
+  --type-lg: 0.9375rem;
+  --type-xl: 1rem;
+  --type-project: 1.0625rem;
+  --leading-tight: 1.15;
+  --leading-ui: 1.3;
+  --leading-copy: 1.55;
+  --weight-regular: 420;
+  --weight-medium: 520;
+  --weight-semibold: 620;
+  --weight-strong: 680;
 
   --background: oklch(1 0 0);
   --foreground: oklch(0.155 0.004 240);
@@ -118,7 +136,9 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -238,7 +258,7 @@ input:focus-visible {
   border-bottom: 1px solid var(--line);
   color: var(--primary);
   font-family: var(--font-display);
-  font-size: 1.6rem;
+  font-size: 1.5rem;
   font-weight: 700;
   line-height: 1;
 }
@@ -254,8 +274,8 @@ input:focus-visible {
   border-radius: 2px;
   background: var(--danger-soft);
   color: var(--danger);
-  font-size: 0.62rem;
-  font-weight: 650;
+  font-size: var(--type-2xs);
+  font-weight: var(--weight-strong);
   line-height: 15px;
   text-align: center;
 }
@@ -338,8 +358,8 @@ input:focus-visible {
   background: var(--bg);
   color: var(--ink);
   cursor: pointer;
-  font-size: 0.84rem;
-  font-weight: 600;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
   transition:
     background-color 150ms ease-out,
     border-color 150ms ease-out,
@@ -356,9 +376,10 @@ input:focus-visible {
   margin: 0;
   color: var(--ink);
   font-family: var(--font-display);
-  font-size: 0.8rem;
+  font-size: var(--type-sm);
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
+  line-height: var(--leading-tight);
   text-transform: uppercase;
 }
 
@@ -377,8 +398,9 @@ input:focus-visible {
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--ink);
-  font-size: 1.02rem;
-  font-weight: 680;
+  font-size: var(--type-project);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-ui);
   transition:
     background-color 150ms ease-out,
     box-shadow 150ms ease-out;
@@ -441,8 +463,8 @@ input:focus-visible {
   background: var(--surface);
   color: var(--ink);
   cursor: pointer;
-  font-size: 0.86rem;
-  font-weight: 600;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
 }
 
 .project-picker-new:hover:not(:disabled),
@@ -461,7 +483,8 @@ input:focus-visible {
 .project-picker-empty {
   margin: 6px 4px;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: var(--type-sm);
+  line-height: var(--leading-ui);
 }
 
 .project-picker-row {
@@ -498,8 +521,8 @@ input:focus-visible {
 .project-picker-title {
   overflow: hidden;
   color: var(--ink);
-  font-size: 0.86rem;
-  font-weight: 550;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -507,7 +530,8 @@ input:focus-visible {
 .project-picker-updated {
   flex: 0 0 auto;
   color: var(--subtle);
-  font-size: 0.74rem;
+  font-size: var(--type-xs);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Save status: a small dot + muted text label. No pill, no fill. */
@@ -517,8 +541,9 @@ input:focus-visible {
   gap: 7px;
   min-height: 28px;
   color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 550;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
 }
 
 .status-dot {
@@ -563,7 +588,8 @@ input:focus-visible {
   border-bottom: 1px solid var(--danger-line);
   background: var(--danger-soft);
   color: var(--danger);
-  font-size: 0.9rem;
+  font-size: var(--type-md);
+  line-height: var(--leading-ui);
 }
 
 .workspace {
@@ -715,15 +741,17 @@ body.panels-resizing * {
 
 .panel-heading h2 {
   margin: 0;
-  font-family: var(--font-display);
-  font-size: 0.9rem;
-  font-weight: 600;
+  font-family: var(--font-ui);
+  font-size: var(--type-lg);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
 }
 
 .panel-heading span {
   color: var(--muted);
-  font-size: 0.75rem;
-  font-weight: 500;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-ui);
 }
 
 .panel-heading-actions {
@@ -757,8 +785,9 @@ body.panels-resizing * {
   margin: 0;
   overflow: hidden;
   color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 600;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -766,8 +795,9 @@ body.panels-resizing * {
 .room-heading span {
   flex: 0 0 auto;
   color: var(--subtle);
-  font-size: 0.74rem;
-  font-weight: 650;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
 }
 
 .room-heading-actions,
@@ -799,8 +829,8 @@ body.panels-resizing * {
   width: 100%;
   min-height: 32px;
   padding: 6px 8px;
-  font-size: 0.8rem;
-  font-weight: 600;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
 }
 
 .room-dimensions {
@@ -815,7 +845,7 @@ body.panels-resizing * {
 }
 
 .field-row.compact > span {
-  font-size: 0.72rem;
+  font-size: var(--type-xs);
 }
 
 .field-row.compact input,
@@ -823,12 +853,12 @@ body.panels-resizing * {
 .field-row.compact .select-trigger {
   min-height: 32px;
   padding: 6px 8px;
-  font-size: 0.84rem;
+  font-size: var(--type-sm);
 }
 
 .field-row.compact .field-error {
   margin: 0;
-  font-size: 0.72rem;
+  font-size: var(--type-xs);
 }
 
 .wall-list {
@@ -877,13 +907,15 @@ body.panels-resizing * {
 }
 
 .wall-row span {
-  font-weight: 550;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-ui);
 }
 
 .wall-row strong {
   color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 600;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
 }
 
@@ -896,7 +928,8 @@ body.panels-resizing * {
   padding: 12px 0 0;
   border-top: 1px solid var(--line);
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: var(--type-sm);
+  line-height: var(--leading-copy);
 }
 
 .storage-note svg {
@@ -932,7 +965,7 @@ body.panels-resizing * {
 .inspector-subject h2 {
   min-width: 0;
   overflow: hidden;
-  font-size: 1.02rem;
+  font-size: var(--type-xl);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -962,7 +995,7 @@ body.panels-resizing * {
 
 .intake-note {
   color: var(--primary-strong);
-  font-weight: 650;
+  font-weight: var(--weight-strong);
 }
 
 .checklist-filters {
@@ -1027,12 +1060,12 @@ body.panels-resizing * {
    600 reads as a real rank shift, not just the underline. */
 .checklist-filter {
   padding: 4px 8px;
-  font-size: 0.76rem;
-  font-weight: 500;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
 }
 
 .checklist-filter[data-state="on"] {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .checklist-filter-empty {
@@ -1175,8 +1208,9 @@ body.panels-resizing * {
   min-width: 0;
   overflow: hidden;
   color: var(--ink);
-  font-size: 0.84rem;
-  font-weight: 550;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1192,8 +1226,8 @@ body.panels-resizing * {
   align-items: center;
   gap: 6px;
   color: var(--muted);
-  font-size: 0.74rem;
-  font-weight: 450;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-regular);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1210,8 +1244,8 @@ body.panels-resizing * {
   max-width: 104px;
   overflow: hidden;
   color: var(--subtle);
-  font-size: 0.72rem;
-  font-weight: 550;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1273,8 +1307,8 @@ body.panels-resizing * {
   background: var(--primary);
   color: var(--bg);
   cursor: pointer;
-  font-size: 0.86rem;
-  font-weight: 600;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
   transition:
     background-color 150ms ease-out,
     border-color 150ms ease-out;
@@ -1296,8 +1330,8 @@ body.panels-resizing * {
   flex: 0 0 auto;
   padding: 2px 7px;
   border-radius: 2px;
-  font-size: 0.72rem;
-  font-weight: 600;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
   white-space: nowrap;
 }
 
@@ -1313,7 +1347,7 @@ body.panels-resizing * {
 
 .uncertainty-badge.compact {
   padding: 1px 7px;
-  font-size: 0.68rem;
+  font-size: var(--type-2xs);
 }
 
 .canvas-column {
@@ -1348,8 +1382,8 @@ body.panels-resizing * {
 
 /* Underline tabs — the shared idiom for the top mode tabs (Plan/Elevation)
    and the checklist filters: transparent, no border-box, muted text, an
-   active 2px petrol bottom border. Mode tabs carry the Figtree display
-   voice; the checklist filters stay Geist (smaller, denser). */
+   active 2px petrol bottom border. Geist carries functional navigation;
+   Figtree is reserved for the brandmark. */
 .tab-button,
 .checklist-filter {
   flex: 0 0 auto;
@@ -1367,11 +1401,11 @@ body.panels-resizing * {
 .tab-button {
   min-height: 34px;
   padding: 0 10px;
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   /* Scaled up slightly so the mode tabs hold their weight in the taller
      (80px) topbar rather than floating in it. */
-  font-size: 0.95rem;
-  font-weight: 600;
+  font-size: var(--type-md);
+  font-weight: var(--weight-semibold);
 }
 
 .tab-button:hover,
@@ -1396,8 +1430,8 @@ body.panels-resizing * {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  font-size: 0.8rem;
-  font-weight: 600;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
   transition:
     background-color 150ms ease-out,
     border-color 150ms ease-out,
@@ -1434,8 +1468,8 @@ body.panels-resizing * {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--muted);
-  font-size: 0.8rem;
-  font-weight: 550;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
   transition:
     border-color 150ms ease-out,
     background-color 150ms ease-out;
@@ -1493,8 +1527,8 @@ body.panels-resizing * {
 .select-label {
   padding: 5px 8px;
   color: var(--subtle);
-  font-size: 0.72rem;
-  font-weight: 600;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
 }
 
 .select-item,
@@ -1508,7 +1542,8 @@ body.panels-resizing * {
   border-radius: var(--radius-sm);
   color: var(--ink);
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: var(--type-sm);
+  line-height: var(--leading-ui);
   outline: none;
   user-select: none;
 }
@@ -1546,8 +1581,8 @@ body.panels-resizing * {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--muted);
-  font-size: 0.8rem;
-  font-weight: 550;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
   transition: border-color 150ms ease-out;
 }
 
@@ -1574,7 +1609,7 @@ body.panels-resizing * {
 
 .unit-switch-side[data-active="true"] {
   color: var(--ink);
-  font-weight: 650;
+  font-weight: var(--weight-strong);
 }
 
 .unit-switch-side:disabled {
@@ -1820,7 +1855,7 @@ body.panels-resizing * {
 
 .resize-handle-label {
   fill: var(--primary-strong);
-  font-weight: 700;
+  font-weight: var(--weight-strong);
   paint-order: stroke;
   stroke: var(--bg);
 }
@@ -1870,7 +1905,7 @@ body.panels-resizing * {
 
 .dimension-label {
   fill: var(--muted);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
   /* Same halo treatment as .resize-handle-label: the bg-colored stroke is
      painted under the fill so the label stays legible over the wall grid. */
@@ -1895,12 +1930,13 @@ body.panels-resizing * {
 
 .surface-label > span {
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: var(--type-sm);
   font-variant-numeric: tabular-nums;
+  line-height: var(--leading-ui);
 }
 
 .surface-label strong {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 /* The elevation chip doubles as a wall switcher: compact chevron buttons
@@ -1940,7 +1976,8 @@ body.panels-resizing * {
   background: transparent;
   color: var(--ink);
   font: inherit;
-  font-weight: 700;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-strong);
   cursor: pointer;
 }
 
@@ -2080,8 +2117,8 @@ body.panels-resizing * {
   border-radius: 0;
   background: var(--bg);
   color: var(--ink);
-  font-size: 0.82rem;
-  line-height: 1.55;
+  font-size: var(--type-sm);
+  line-height: var(--leading-copy);
 }
 
 .property-list {
@@ -2107,16 +2144,18 @@ body.panels-resizing * {
 
 .property-list dt {
   color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 600;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
 }
 
 .property-list dd {
   min-width: 0;
   margin: 0;
-  font-size: 0.88rem;
-  font-weight: 560;
+  font-size: var(--type-md);
+  font-weight: var(--weight-medium);
   font-variant-numeric: tabular-nums;
+  line-height: var(--leading-ui);
 }
 
 .property-list.compact {
@@ -2156,8 +2195,9 @@ body.panels-resizing * {
 
 .field-row > span {
   color: var(--muted);
-  font-size: 0.75rem;
-  font-weight: 600;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
 }
 
 .field-row input,
@@ -2170,7 +2210,9 @@ body.panels-resizing * {
   border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--ink);
-  font-weight: 500;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-ui);
 }
 
 .field-row input {
@@ -2260,8 +2302,8 @@ body.panels-resizing * {
 .field-error,
 .length-field-hint {
   margin: 0;
-  font-size: 0.78rem;
-  line-height: 1.4;
+  font-size: var(--type-xs);
+  line-height: var(--leading-copy);
 }
 
 .length-field-message {
@@ -2287,7 +2329,7 @@ body.panels-resizing * {
 
 .field-error {
   color: var(--danger);
-  font-weight: 650;
+  font-weight: var(--weight-strong);
 }
 
 .artwork-dimensions {
@@ -2307,8 +2349,8 @@ body.panels-resizing * {
 .artwork-dimensions-heading h3 {
   margin: 0;
   color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 700;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-strong);
 }
 
 .artwork-dimensions-grid {
@@ -2427,8 +2469,8 @@ body.panels-resizing * {
   background: var(--bg);
   color: var(--muted);
   cursor: pointer;
-  font-size: 0.7rem;
-  font-weight: 500;
+  font-size: var(--type-2xs);
+  font-weight: var(--weight-medium);
   line-height: 1.2;
   text-align: center;
   white-space: normal;
@@ -2453,7 +2495,7 @@ body.panels-resizing * {
 .arrange-mode[data-state="on"] {
   background: var(--primary-soft);
   color: var(--primary-strong);
-  font-weight: 650;
+  font-weight: var(--weight-strong);
 }
 
 .arrange-mode-body {
@@ -2471,8 +2513,8 @@ body.panels-resizing * {
 
 .arrange-anchor-caption {
   color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 600;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
 }
 
 .arrange-anchor {
@@ -2503,8 +2545,8 @@ body.panels-resizing * {
   background: var(--bg);
   color: var(--muted);
   cursor: pointer;
-  font-size: 0.68rem;
-  font-weight: 500;
+  font-size: var(--type-2xs);
+  font-weight: var(--weight-medium);
   line-height: 1.1;
   text-align: center;
   white-space: nowrap;
@@ -2522,7 +2564,7 @@ body.panels-resizing * {
 .arrange-anchor .arrange-anchor-item[data-state="on"] {
   background: var(--primary-soft);
   color: var(--primary-strong);
-  font-weight: 650;
+  font-weight: var(--weight-strong);
 }
 
 /* "Space within" zone picker: the twin of the "Measured from" anchor row, but
@@ -2535,8 +2577,8 @@ body.panels-resizing * {
 
 .arrange-zone-caption {
   color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 600;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
 }
 
 .arrange-zone {
@@ -2565,8 +2607,8 @@ body.panels-resizing * {
   background: var(--bg);
   color: var(--muted);
   cursor: pointer;
-  font-size: 0.68rem;
-  font-weight: 500;
+  font-size: var(--type-2xs);
+  font-weight: var(--weight-medium);
   line-height: 1.1;
   text-align: center;
   white-space: nowrap;
@@ -2584,7 +2626,7 @@ body.panels-resizing * {
 .arrange-zone .arrange-zone-item[data-state="on"] {
   background: var(--primary-soft);
   color: var(--primary-strong);
-  font-weight: 650;
+  font-weight: var(--weight-strong);
 }
 
 /* One locked two-line readout everywhere: a small muted label on line 1, the
@@ -2598,8 +2640,8 @@ body.panels-resizing * {
 
 .arrange-readout-label {
   color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 600;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
 }
 
 .arrange-readout-value-row {
@@ -2610,9 +2652,9 @@ body.panels-resizing * {
 
 .arrange-readout-value {
   color: var(--ink);
-  font-size: 0.95rem;
+  font-size: var(--type-lg);
   font-variant-numeric: tabular-nums;
-  font-weight: 650;
+  font-weight: var(--weight-strong);
 }
 
 /* A single small hairline tag (deliberately the only one in this panel) with
@@ -2624,8 +2666,8 @@ body.panels-resizing * {
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--muted);
-  font-size: 0.68rem;
-  font-weight: 600;
+  font-size: var(--type-2xs);
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
@@ -2691,8 +2733,8 @@ body.panels-resizing * {
 .remove-all-confirm-label {
   flex: 1 1 auto;
   color: var(--danger);
-  font-size: 0.84rem;
-  font-weight: 600;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
 }
 
 .arrange-confirm-btn {
@@ -2738,8 +2780,8 @@ body.panels-resizing * {
   background: var(--surface);
   color: var(--ink);
   cursor: pointer;
-  font-size: 0.84rem;
-  font-weight: 600;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
 }
 
 .inspector-action:hover {
@@ -2764,16 +2806,16 @@ body.panels-resizing * {
 
 .constraint-panel h3 {
   margin: 0 0 2px;
-  font-size: 0.84rem;
-  line-height: 1.3;
+  font-size: var(--type-sm);
+  line-height: var(--leading-ui);
   text-wrap: balance;
 }
 
 .constraint-panel p {
   margin: 0;
   color: var(--muted);
-  font-size: 0.78rem;
-  line-height: 1.4;
+  font-size: var(--type-xs);
+  line-height: var(--leading-copy);
 }
 
 .warning-panel {
@@ -2791,7 +2833,8 @@ body.panels-resizing * {
 .warning-panel h3 {
   margin: 0 0 6px;
   color: var(--ink);
-  font-size: 0.9rem;
+  font-size: var(--type-md);
+  line-height: var(--leading-ui);
 }
 
 .warning-panel ul {
@@ -2802,13 +2845,13 @@ body.panels-resizing * {
 }
 
 .warning-panel li {
-  font-size: 0.8rem;
-  line-height: 1.4;
+  font-size: var(--type-sm);
+  line-height: var(--leading-copy);
 }
 
 .warning-panel span {
   color: var(--muted);
-  font-weight: 650;
+  font-weight: var(--weight-strong);
 }
 
 .next-panel {
@@ -2822,14 +2865,16 @@ body.panels-resizing * {
 
 .next-panel h3 {
   margin: 0 0 4px;
-  font-size: 0.9rem;
+  font-size: var(--type-md);
+  line-height: var(--leading-ui);
 }
 
 .next-panel p,
 .empty-copy {
   margin: 0;
   color: var(--muted);
-  font-size: 0.84rem;
+  font-size: var(--type-sm);
+  line-height: var(--leading-copy);
 }
 
 .skeleton-panel {
@@ -3156,8 +3201,8 @@ body.panels-resizing * {
 
 .opening-add-row > span {
   color: var(--muted);
-  font-size: 0.75rem;
-  font-weight: 600;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
 }
 
 .opening-add-buttons {
@@ -3178,8 +3223,8 @@ body.panels-resizing * {
   height: auto;
   min-height: 52px;
   padding: 8px 6px;
-  font-size: 0.72rem;
-  font-weight: 600;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
   line-height: 1.2;
   text-align: center;
   white-space: normal;
@@ -3192,8 +3237,8 @@ body.panels-resizing * {
 /* The chips' hover glosses reuse the placement-tooltip shell; this only
    scales the copy down to inspector hint size. */
 .opening-add-tooltip {
-  font-size: 0.78rem;
-  line-height: 1.4;
+  font-size: var(--type-xs);
+  line-height: var(--leading-copy);
 }
 
 /* ---- Placement hover tooltips (plan + elevation) ---------------------- */
@@ -3214,8 +3259,8 @@ body.panels-resizing * {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.8rem;
-  font-weight: 600;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
 }
 
 .placement-tooltip-artwork {
@@ -3237,16 +3282,17 @@ body.panels-resizing * {
 }
 
 .placement-tooltip-title {
-  font-size: 0.8rem;
-  font-weight: 600;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
 }
 
 .placement-tooltip-artist {
-  font-size: 0.76rem;
+  font-size: var(--type-xs);
+  line-height: var(--leading-ui);
 }
 
 .placement-tooltip-dims {
-  font-size: 0.74rem;
+  font-size: var(--type-xs);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -3283,7 +3329,7 @@ body.panels-resizing * {
   box-shadow: var(--shadow-tight);
   cursor: pointer;
   font-family: var(--font-display);
-  font-size: 0.9rem;
+  font-size: var(--type-lg);
   font-weight: 700;
 }
 
@@ -3301,8 +3347,8 @@ body.panels-resizing * {
 
 .font-lab-header p {
   color: var(--muted);
-  font-size: 0.68rem;
-  font-weight: 650;
+  font-size: var(--type-2xs);
+  font-weight: var(--weight-strong);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -3310,7 +3356,7 @@ body.panels-resizing * {
 .font-lab-header h2 {
   margin-top: 2px;
   font-family: var(--font-display);
-  font-size: 1rem;
+  font-size: var(--type-xl);
   font-weight: 700;
   line-height: 1.2;
 }
@@ -3322,8 +3368,8 @@ body.panels-resizing * {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  font-size: 0.76rem;
-  font-weight: 600;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
 }
 
 .font-lab-header button:hover,
@@ -3349,8 +3395,8 @@ body.panels-resizing * {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  font-size: 0.78rem;
-  font-weight: 650;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-strong);
 }
 
 .font-lab-segment button[aria-pressed="true"] {
@@ -3365,8 +3411,8 @@ body.panels-resizing * {
   align-items: center;
   gap: 10px;
   color: var(--muted);
-  font-size: 0.76rem;
-  font-weight: 650;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-strong);
 }
 
 .font-lab-field select {
@@ -3377,7 +3423,7 @@ body.panels-resizing * {
   background: var(--bg);
   color: var(--ink);
   font: inherit;
-  font-weight: 550;
+  font-weight: var(--weight-medium);
 }
 
 .font-lab-field select:disabled {
@@ -3397,7 +3443,7 @@ body.panels-resizing * {
 .font-lab-preview-brand {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 0.86rem;
+  font-size: var(--type-sm);
   font-weight: 700;
   letter-spacing: 0.08em;
   line-height: 1;
@@ -3410,8 +3456,8 @@ body.panels-resizing * {
 }
 
 .font-lab-preview strong {
-  font-size: 0.86rem;
-  font-weight: 650;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-strong);
   line-height: 1.25;
 }
 
@@ -3419,7 +3465,7 @@ body.panels-resizing * {
   margin-top: 2px;
   color: var(--muted);
   font-family: var(--font-numeric, var(--font-ui));
-  font-size: 0.74rem;
+  font-size: var(--type-xs);
   font-variant-numeric: tabular-nums;
   line-height: 1.35;
 }
