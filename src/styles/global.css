@@ -2060,7 +2060,15 @@ body.panels-resizing * {
   bottom: 14px;
   display: flex;
   align-items: center;
+  /* On a narrow surface (small window + inspector open) the five-button row
+     can exceed the drawing area, and the surface's overflow:hidden would clip
+     the leading buttons. Cap the chip at the surface width minus its own 14px
+     insets and wrap to a second row, keeping every button anchored
+     bottom-right and fully inside the surface. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 4px;
+  max-width: calc(100% - 28px);
   z-index: 1;
 }
 
