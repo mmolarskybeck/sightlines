@@ -1560,6 +1560,22 @@ input:focus-visible {
   stroke-width: 7;
 }
 
+/* Invisible, generously wide companion stroke that makes the 5px wall line
+   actually clickable (click-to-select in plan). Painted after the visible
+   line, so it owns the wall's hit area; placed objects render later still
+   and keep winning clicks on top of it. The cursor only advertises
+   clickability when no placement tool is armed — with one armed the wall
+   is click-through for click-to-place (see PlanView's wall onClick). */
+.wall-hit {
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+}
+
+.plan-svg:not(.tool-armed) .wall-hit {
+  cursor: pointer;
+}
+
 .resize-handle {
   fill: var(--bg);
   stroke: var(--muted);

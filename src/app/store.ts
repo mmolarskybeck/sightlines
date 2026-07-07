@@ -1686,10 +1686,13 @@ export function createAppStore(deps: AppStoreDeps) {
         if (!project) return;
 
         // Friendly, single message for every way the selection can't be
-        // arranged — the inspector's disabled-state copy uses the same
-        // string (see SelectionInspector's arrangeDisabledReason).
+        // arranged. The inspector's disabled-state copy is richer — App.tsx
+        // derives a cause-specific arrangeDisabledReason (floor members / too
+        // few works / multiple walls) — but this immediate-commit path keeps
+        // one generic line: it only fires when an action races a selection
+        // change, not while a user is reading the panel.
         const cannotArrangeMessage =
-          "Select at least two objects on the same wall to arrange them.";
+          "Select at least two works on the same wall to arrange them.";
 
         const selectedIds = get().selectedObjectIds;
         const hasFloorMember = selectedIds.some((id) =>

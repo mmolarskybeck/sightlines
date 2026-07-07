@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useMemo,
   useRef,
@@ -195,6 +196,7 @@ export function PlanView({
   onSelectObject,
   onClearSelection,
   onMarqueeSelect,
+  onSelectWall,
   project,
   selectedArtworkId,
   selectedOpeningId,
@@ -236,6 +238,10 @@ export function PlanView({
   // held shift. Optional/inert until App wires it, exactly like onSelectObject/
   // onClearSelection above.
   onMarqueeSelect?: (ids: string[], additive: boolean) => void;
+  // Click-to-select for a wall line, same contract as ElevationView's
+  // onSelectWall: optional/inert until App wires it, so the wall stays
+  // unclickable (today's behavior) when this prop is absent.
+  onSelectWall?: (wallId: string) => void;
   project: Project;
   selectedArtworkId?: string | null;
   selectedOpeningId?: string | null;
@@ -446,9 +452,17 @@ export function PlanView({
     // moment of a placement click — excluding `.is-ghost` here is what lets
     // that click through to actually commit instead of being mistaken for a
     // click on a real, already-placed object.
-    if (target?.closest(".resize-handle, .plan-object:not(.is-ghost)")) {
-      suppressNextToolClickRef.current = true;
-    }
+    //
+    // Assigned (not just set) so the flag is per-gesture: an object's own
+    // click stops propagation, so a flag set by an object press was never
+    // consumed by handleSvgClick and would silently swallow the NEXT svg
+    // click — a placement, a wall select, or a background clear. Recomputing
+    // here clears that stale state at the start of every gesture. The one
+    // setter that runs AFTER pointerdown — the marquee's pointerup — is safe:
+    // its trailing click arrives before any next pointerdown could reset this.
+    suppressNextToolClickRef.current = Boolean(
+      target?.closest(".resize-handle, .plan-object:not(.is-ghost)")
+    );
   }
 
   function handleSvgClick(event: ReactMouseEvent<SVGSVGElement>) {
@@ -1152,18 +1166,59 @@ export function PlanView({
               );
               if (!start || !end) return null;
 
+              const x1 = start.xMm + placement.offsetXMm;
+              const y1 = start.yMm + placement.offsetYMm;
+              const x2 = end.xMm + placement.offsetXMm;
+              const y2 = end.yMm + placement.offsetYMm;
+
               return (
-                <line
-                  className={
-                    wall.id === selectedWallId ? "wall-line active" : "wall-line"
-                  }
-                  key={wall.id}
-                  x1={start.xMm + placement.offsetXMm}
-                  y1={start.yMm + placement.offsetYMm}
-                  x2={end.xMm + placement.offsetXMm}
-                  y2={end.yMm + placement.offsetYMm}
-                  vectorEffect="non-scaling-stroke"
-                />
+                <Fragment key={wall.id}>
+                  <line
+                    className={
+                      wall.id === selectedWallId ? "wall-line active" : "wall-line"
+                    }
+                    x1={x1}
+                    y1={y1}
+                    x2={x2}
+                    y2={y2}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {/* Invisible, wide hit target painted on top of the visible
+                      line so it owns the click — wall-anchored doors/windows
+                      render in a later section of this svg, so they still
+                      paint above this and keep winning clicks by paint order
+                      alone, no z-ordering code needed. */}
+                  <line
+                    className="wall-hit"
+                    x1={x1}
+                    y1={y1}
+                    x2={x2}
+                    y2={y2}
+                    vectorEffect="non-scaling-stroke"
+                    onClick={(event) => {
+                      // TRAP 1 — armed placement tool: doors/windows are
+                      // click-placed ON walls via handleSvgClick's tool
+                      // branch. Swallowing this click would break
+                      // click-to-place entirely, so with a tool armed the
+                      // wall is inert and the click bubbles through to the
+                      // svg handler.
+                      if (activeTool) return;
+                      event.stopPropagation();
+                      // TRAP 2 — a marquee that starts AND ends on this
+                      // wall's hit stroke fires its trailing click here
+                      // instead of on the svg, so handleSvgClick never
+                      // consumes the suppression flag. Consuming it here
+                      // keeps that click from hijacking the fresh marquee
+                      // selection into a wall select (selectWall drops
+                      // multi-select by design).
+                      if (suppressNextToolClickRef.current) {
+                        suppressNextToolClickRef.current = false;
+                        return;
+                      }
+                      onSelectWall?.(wall.id);
+                    }}
+                  />
+                </Fragment>
               );
             })}
             {handleSizeMm > 0 ? (

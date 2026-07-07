@@ -43,6 +43,7 @@ type EvenZone = "wall" | "open";
 export function SelectionInspector({
   arrange,
   arrangeDisabledReason,
+  arrangeIgnoredNote,
   count,
   unit,
   wallName,
@@ -87,6 +88,10 @@ export function SelectionInspector({
     sessionActive: boolean;
   } | null;
   arrangeDisabledReason?: string;
+  // Set when the selection IS arrangeable but also contains openings (doors/
+  // windows/blocked zones), which arranging ignores rather than blocks — shown
+  // so that artwork-only scope is explicit instead of silent.
+  arrangeIgnoredNote?: string;
   onSetMode: (mode: ArrangeMode) => void;
   onSetAnchor: (anchor: InsetAnchor) => void;
   onSetEvenZone: (zone: EvenZone) => void;
@@ -132,6 +137,9 @@ export function SelectionInspector({
 
         {arrange ? (
           <div className="arrange-controls">
+            {arrangeIgnoredNote ? (
+              <p className="field-hint">{arrangeIgnoredNote}</p>
+            ) : null}
             <ToggleGroup
               aria-label="Spacing method"
               className="arrange-modes"

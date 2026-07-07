@@ -726,6 +726,26 @@ export function App() {
       })()
     : null;
 
+  // Why the arrange panel is disabled, named specifically — the static "select
+  // two objects" line read as nonsense to a user who already had three objects
+  // selected but only one work among them. Branch order mirrors the arrangeWall
+  // guard above (floor members block first, then the works count, then the
+  // single-wall rule) so the hint always names the actual blocker.
+  const arrangeDisabledReason = selectionHasFloorMember
+    ? "Arranging is for works hung on a wall — this selection includes floor-placed objects."
+    : selectedArtworkMembers.length === 0
+      ? "Arranging is for works only — doors, windows, and blocked zones stay where they are."
+      : selectedArtworkMembers.length === 1
+        ? "Arranging is for works only — select at least two works on the same wall to arrange them."
+        : "Select works on a single wall to arrange them — this selection spans more than one wall.";
+  // When the selection IS arrangeable but also contains openings, arranging
+  // silently ignores them (see selectedArtworkMembers above) — surface that
+  // explicitly rather than let the curator wonder why a door didn't move.
+  const arrangeIgnoredNote =
+    arrangeWall && selectedObjectIds.length > selectedArtworkMembers.length
+      ? "Only the works are arranged — doors, windows, and blocked zones stay put."
+      : undefined;
+
   // Warnings carry a wallObjectId, but a raw id means nothing to a curator —
   // resolve it to the artwork's title, or the opening's human-readable kind
   // label ("Door"/"Window"/"Blocked zone", never a raw `kind` string), for
@@ -984,6 +1004,7 @@ export function App() {
                 onPlaceOpeningFromPlan={placeOpeningFromPlan}
                 onSelectArtwork={selectArtwork}
                 onSelectOpening={selectOpening}
+                onSelectWall={selectWall}
                 selectedObjectIds={selectedObjectIds}
                 onSelectObject={selectObject}
                 onClearSelection={clearObjectSelection}
@@ -1134,7 +1155,8 @@ export function App() {
               // below could render meaningfully anyway.
               <SelectionInspector
                 arrange={arrangeReadout}
-                arrangeDisabledReason="Select at least two objects on the same wall to arrange them."
+                arrangeDisabledReason={arrangeDisabledReason}
+                arrangeIgnoredNote={arrangeIgnoredNote}
                 count={selectedObjectIds.length}
                 unit={project.unit}
                 wallName={arrangeWall?.name ?? null}
