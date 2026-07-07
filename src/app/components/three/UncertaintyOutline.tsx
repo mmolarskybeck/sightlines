@@ -11,9 +11,6 @@ import { APPROXIMATE_COLOR, SELECTION_COLOR, UNKNOWN_COLOR } from "./tokens";
 // three.js materials can't resolve CSS custom properties. Selection never tints
 // an artwork's image texture (spec §4.3) — it's outline-only on textured planes.
 
-// Re-export for backwards compatibility (check if needed).
-export { SELECTION_COLOR };
-
 // ~7:5 dash rhythm, matching .elevation-artwork.uncertain's stroke-dasharray.
 const DASH_SIZE = 0.05;
 const GAP_SIZE = 0.036;
