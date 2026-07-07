@@ -1668,6 +1668,25 @@ body.panels-resizing * {
   overflow: hidden;
 }
 
+/* Keep a wheel-pan gesture from escaping to the browser's history back-swipe
+   (trackpad) or rubber-banding the page. touch-action stays untouched here —
+   touch panning is a later task. */
+.drawing-surface {
+  overscroll-behavior: contain;
+}
+
+/* Space-held / middle-drag pan affordance (PlanView). Applied to the whole
+   surface so the cursor is consistent over the SVG and its chrome. */
+.drawing-surface.is-pan-ready,
+.drawing-surface.is-pan-ready .plan-svg {
+  cursor: grab;
+}
+
+.drawing-surface.is-panning,
+.drawing-surface.is-panning .plan-svg {
+  cursor: grabbing;
+}
+
 .data-surface {
   padding: 22px;
 }
@@ -2022,6 +2041,50 @@ body.panels-resizing * {
 
 .plan-toolbar-button {
   gap: 6px;
+}
+
+/* Zoom cluster (ViewportZoomControls) — floating chip anchored bottom-right
+   inside the 2D drawing surface, opposite the top-right PlanToolbar. Square
+   corners, white ground, no accent stripes, matching the app's chip language. */
+.viewport-zoom {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 1;
+}
+
+/* The effective-zoom readout doubles as a reset-to-fit button. Styled to match
+   the inspector-variant chips flanking it (bordered, surface ground) rather
+   than a bare number. */
+.viewport-zoom-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 150ms ease-out;
+}
+
+.viewport-zoom-value:hover {
+  background: var(--surface-strong);
+}
+
+.viewport-zoom-value:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 .plan-toolbar-button[aria-pressed="true"] {

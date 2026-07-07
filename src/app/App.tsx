@@ -91,6 +91,7 @@ import {
   INSPECTOR_MIN_WIDTH,
   INSPECTOR_MAX_WIDTH
 } from "./hooks/useViewPreferences";
+import { useViewport2D } from "./hooks/useViewport2D";
 import {
   exportProjectJson,
   getProjectWalls,
@@ -216,6 +217,8 @@ export function App() {
     toggleAllowOverlappingPlacement
   } = useViewPreferences();
   const storagePersistence = useStoragePersistence();
+  // One plan viewport per active project — resets to fit on project switch.
+  const [planViewport, setPlanViewport] = useViewport2D(project?.id ?? "none");
 
   useEffect(() => {
     void boot();
@@ -1122,6 +1125,8 @@ export function App() {
                 selectedRoomId={selectedRoomId}
                 selectedWallId={selectedWall?.id ?? null}
                 snapToGrid={snapToGrid}
+                viewport={planViewport}
+                onViewportChange={setPlanViewport}
                 onCommitPlanMove={(objectId, placement) =>
                   void commitPlanMove(objectId, placement, allowOverlappingPlacement)
                 }

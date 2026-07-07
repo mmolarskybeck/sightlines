@@ -52,9 +52,20 @@ import {
 import { resolveSnap, type Guide, type SnapTarget, type SnapTargetIds } from "../../domain/snapping/resolveSnap";
 import {
   getMajorGridIntervalMm,
-  getMinorGridIntervalMm,
-  getPixelsPerMm
+  getMinorGridIntervalMm
 } from "../../domain/units/precision";
+import {
+  clampZoom,
+  FIT_VIEWPORT,
+  getEffectiveZoom,
+  getViewBox2D,
+  panBy,
+  PLAN_ZOOM_LIMITS,
+  WHEEL_ZOOM_SENSITIVITY,
+  ZOOM_STEP,
+  zoomAtPoint,
+  type Viewport2D
+} from "../../domain/viewport/viewport2d";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { useContainerSize } from "../hooks/useContainerSize";
@@ -64,6 +75,7 @@ import { ArtworkTooltipContent, OpeningTooltipContent } from "./PlacementTooltip
 import { PlanObject } from "./PlanObject";
 import { PlanToolbar, type PlanTool } from "./PlanToolbar";
 import { RoomResizeHandles, type ResizeHandleTarget } from "./RoomResizeHandles";
+import { ViewportZoomControls } from "./ViewportZoomControls";
 
 // On-screen size of a selected room's wall-midpoint resize handles — small
 // and square (the design language has no pills), since they only ever render
@@ -250,7 +262,9 @@ export function PlanView({
   selectedObjectIds = [],
   selectedRoomId = null,
   selectedWallId,
-  snapToGrid
+  snapToGrid,
+  viewport,
+  onViewportChange
 }: {
   artworksById?: Map<string, Artwork>;
   // Which artwork the checklist is mid-drag, so a plan dragover can size its
@@ -306,6 +320,10 @@ export function PlanView({
   selectedRoomId?: string | null;
   selectedWallId: string | null;
   snapToGrid: boolean;
+  // The manual/fit viewport for this surface (owned by App via useViewport2D),
+  // and the setter every zoom/pan gesture routes its next viewport through.
+  viewport: Viewport2D;
+  onViewportChange: (v: Viewport2D) => void;
 }) {
   const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -322,6 +340,22 @@ export function PlanView({
   const dropSnapTargetIdsRef = useRef<SnapTargetIds | undefined>(undefined);
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
   const marqueeRef = useRef<MarqueeState | null>(null);
+
+  // Space-drag / middle-mouse pan. `isSpaceDown` drives the container cursor
+  // (grab), `panning` drives it while a pan drag is live (grabbing). Both are
+  // mirrored into refs so the capture-phase pointerdown and the window-level
+  // pan move handlers read fresh values without resubscribing.
+  const [isSpaceDown, setIsSpaceDown] = useState(false);
+  const spaceHeldRef = useRef(false);
+  const [panning, setPanning] = useState(false);
+  const panningRef = useRef(false);
+  // Last pointer client position of the in-flight pan, for incremental deltas.
+  const panLastRef = useRef<{ x: number; y: number } | null>(null);
+  // Fresh viewport for gesture handlers that were subscribed once (pan moves,
+  // wheel) and must not close over a stale prop — same ref-mirror discipline
+  // the drag gestures use for their transient state.
+  const viewportRef = useRef(viewport);
+  viewportRef.current = viewport;
 
   // Transient UI state, not store/view-prefs: which palette tool is armed,
   // its live ghost, and the hysteresis id threaded across pointer moves (the
@@ -354,14 +388,23 @@ export function PlanView({
 
   const bounds = getFloorBounds(project.floor);
   const padding = getPlanViewPaddingMm(bounds);
-  const viewBoxBounds = {
+  // The fit extent every gesture measures against: the padded floor bounds.
+  // getViewBox2D turns the current viewport (fit or manual pan/zoom) into the
+  // concrete viewBox rect + its exact pixels-per-mm, so `viewBoxBounds` below
+  // is the ZOOMED window — every downstream consumer (grid, snap targets,
+  // px→mm constants, guide extents) inherits the zoom automatically.
+  const contentBounds = {
     x: bounds.minX - padding,
     y: bounds.minY - padding,
     width: bounds.width + padding * 2,
     height: bounds.height + padding * 2
   };
+  const { viewBox: viewBoxBounds, pixelsPerMm } = getViewBox2D(
+    viewport,
+    contentBounds,
+    containerSize
+  );
   const viewBox = `${viewBoxBounds.x} ${viewBoxBounds.y} ${viewBoxBounds.width} ${viewBoxBounds.height}`;
-  const pixelsPerMm = getPixelsPerMm(containerSize, viewBoxBounds);
   // The viewBox is letterboxed inside the full-size canvas (default
   // "xMidYMid meet"), but SVG userspace outside the viewBox still renders —
   // and the grid patterns tile in userspace — so sizing the grid rect to the
@@ -442,6 +485,176 @@ export function PlanView({
     const transformed = point.matrixTransform(ctm.inverse());
     return { xMm: transformed.x, yMm: transformed.y };
   }
+
+  // Zoom the current viewBox about its own center — the [+]/[−] buttons' target
+  // point, since there's no cursor to anchor on for a button press.
+  function zoomAtCenter(factor: number) {
+    onViewportChange(
+      zoomAtPoint(
+        viewport,
+        { xMm: viewBoxBounds.x + viewBoxBounds.width / 2, yMm: viewBoxBounds.y + viewBoxBounds.height / 2 },
+        factor,
+        contentBounds,
+        containerSize,
+        PLAN_ZOOM_LIMITS
+      )
+    );
+  }
+
+  // Wheel = zoom (ctrl/⌘ or trackpad pinch) or pan (plain / shift-horizontal).
+  // Reassigned every render so it always sees the latest viewport/bounds;
+  // registered once as a NON-passive native listener (React's onWheel can be
+  // passive, which would make preventDefault a no-op) in the effect below.
+  const wheelHandlerRef = useRef<(e: WheelEvent) => void>(() => {});
+  wheelHandlerRef.current = (e: WheelEvent) => {
+    e.preventDefault();
+    // Line-mode wheels (deltaMode 1) report in lines, not pixels — scale up so
+    // one detent moves a comparable amount to a pixel-mode wheel.
+    const norm = (d: number) => (e.deltaMode === 1 ? d * 16 : d);
+    if (e.ctrlKey || e.metaKey) {
+      // ctrlKey===true is also how a trackpad pinch arrives in Chrome/Firefox/
+      // Safari — same code path, anchored on the cursor's world point.
+      const point = toSvgMm(e.clientX, e.clientY);
+      if (!point) return;
+      const factor = Math.min(2, Math.max(0.5, Math.exp(-norm(e.deltaY) * WHEEL_ZOOM_SENSITIVITY)));
+      onViewportChange(
+        zoomAtPoint(viewportRef.current, point, factor, contentBounds, containerSize, PLAN_ZOOM_LIMITS)
+      );
+    } else {
+      // Plain wheel pans; shift+wheel pans horizontally on Windows (macOS
+      // already flips deltaX for a shifted wheel, so only synthesize when the
+      // browser left deltaX at 0).
+      const dx = e.shiftKey && e.deltaX === 0 ? norm(e.deltaY) : norm(e.deltaX);
+      const dy = e.shiftKey && e.deltaX === 0 ? 0 : norm(e.deltaY);
+      onViewportChange(panBy(viewportRef.current, { x: dx, y: dy }, contentBounds, containerSize));
+    }
+  };
+
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => wheelHandlerRef.current(e);
+    // Safari's non-standard pinch events would otherwise page-zoom the app.
+    const onGesture = (e: Event) => e.preventDefault();
+    el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("gesturestart", onGesture);
+    el.addEventListener("gesturechange", onGesture);
+    el.addEventListener("gestureend", onGesture);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("gesturestart", onGesture);
+      el.removeEventListener("gesturechange", onGesture);
+      el.removeEventListener("gestureend", onGesture);
+    };
+  }, []);
+
+  // Track Space (for the grab cursor + capture-phase pan intercept) and handle
+  // ⌘0 / Ctrl+0 = reset to fit. Window-scoped, mirroring PlanView's other
+  // window listeners; skips edit fields so typing a literal "0" or space in an
+  // input is never hijacked.
+  useEffect(() => {
+    function isEditable(target: EventTarget | null): boolean {
+      const el = target as HTMLElement | null;
+      if (!el) return false;
+      const tag = el.tagName;
+      return (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        el.isContentEditable === true
+      );
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (isEditable(event.target)) return;
+      if ((event.metaKey || event.ctrlKey) && event.key === "0") {
+        // Also blocks the browser's own zoom-reset.
+        event.preventDefault();
+        onViewportChange(FIT_VIEWPORT);
+        return;
+      }
+      if (event.code === "Space" || event.key === " ") {
+        if (!spaceHeldRef.current) {
+          spaceHeldRef.current = true;
+          setIsSpaceDown(true);
+        }
+        // Stops the page from scrolling / a focused button from activating
+        // while space engages pan. e.repeat is ignored for the flag (already
+        // set) but still prevented so held-space never scrolls.
+        event.preventDefault();
+      }
+    }
+
+    function onKeyUp(event: KeyboardEvent) {
+      if (event.code === "Space" || event.key === " ") {
+        spaceHeldRef.current = false;
+        setIsSpaceDown(false);
+      }
+    }
+
+    function onBlur() {
+      // ⌘Tab away while holding space would otherwise leave the flag stuck.
+      spaceHeldRef.current = false;
+      setIsSpaceDown(false);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [onViewportChange]);
+
+  // Space/middle-mouse pan drag. Subscribed once per gesture (keyed on
+  // `panning`), reading the live viewport via viewportRef and applying the
+  // negated incremental pointer delta so the drawing tracks the pointer.
+  // contentBounds/containerSize are captured by closure — they can't change
+  // mid-gesture (no commit, no resize while a button is held).
+  useEffect(() => {
+    if (!panning) return;
+
+    function onPointerMove(event: PointerEvent) {
+      const last = panLastRef.current;
+      if (!last) return;
+      onViewportChange(
+        panBy(
+          viewportRef.current,
+          { x: -(event.clientX - last.x), y: -(event.clientY - last.y) },
+          contentBounds,
+          containerSize
+        )
+      );
+      panLastRef.current = { x: event.clientX, y: event.clientY };
+    }
+
+    function endPan() {
+      panningRef.current = false;
+      panLastRef.current = null;
+      setPanning(false);
+      // A left-button (space) pan fires a trailing `click` on the svg just like
+      // a marquee does; without this, handleSvgClick's no-tool branch would
+      // read it as a background click and clear the selection. Same suppress
+      // flag + setTimeout safety net the marquee uses. (Middle-button pan fires
+      // auxclick, not click, so this is harmless there.)
+      suppressNextToolClickRef.current = true;
+      window.setTimeout(() => {
+        suppressNextToolClickRef.current = false;
+      }, 0);
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", endPan);
+    window.addEventListener("pointercancel", endPan);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", endPan);
+      window.removeEventListener("pointercancel", endPan);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panning, onViewportChange]);
 
   // Only the committed project's walls matter for tool placement — a tool
   // can't be armed mid wall-resize-drag anyway (see the drag guard in the
@@ -530,6 +743,22 @@ export function PlanView({
   // and skip placing, without needing RoomResizeHandles/PlanObject to know
   // anything about the plan-view tool.
   function handleSvgPointerDownCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    // Space-held (left button) or middle-mouse press = pan, intercepted in the
+    // capture phase BEFORE any gesture (marquee, room/object/handle drag,
+    // click-to-place) can claim it. Guarded on `spaceHeldRef || button === 1`
+    // so an ordinary left press with space up flows through untouched — every
+    // existing gesture behaves exactly as before. Right-click (button 2) is
+    // never intercepted. stopPropagation/preventDefault keep the marquee's own
+    // pointerdown from also firing and kill middle-click autoscroll.
+    if (spaceHeldRef.current || event.button === 1) {
+      event.preventDefault();
+      event.stopPropagation();
+      panningRef.current = true;
+      panLastRef.current = { x: event.clientX, y: event.clientY };
+      setPanning(true);
+      return;
+    }
+
     const target = event.target as Element | null;
     // The ghost itself carries the `.plan-object` class too (so it shares
     // PlanObject's rendering), and it sits directly under the pointer at the
@@ -1325,9 +1554,17 @@ export function PlanView({
     }
   }
 
+  // Pan cursor affordance: grabbing while a pan drag is live, grab while space
+  // is merely held ready. Otherwise the surface keeps its default/tool cursor.
+  const surfaceClassName = panning
+    ? "drawing-surface is-panning"
+    : isSpaceDown
+      ? "drawing-surface is-pan-ready"
+      : "drawing-surface";
+
   return (
     <div
-      className="drawing-surface"
+      className={surfaceClassName}
       aria-label="Plan view"
       ref={containerRef}
       onDragLeave={handleArtworkDragLeave}
@@ -1335,6 +1572,21 @@ export function PlanView({
       onDrop={handleArtworkDrop}
     >
       <PlanToolbar activeTool={activeTool} onToolChange={handleToolChange} />
+      <ViewportZoomControls
+        zoom={getEffectiveZoom(viewport)}
+        isFit={viewport.mode === "fit"}
+        canZoomIn={
+          clampZoom(getEffectiveZoom(viewport) * ZOOM_STEP, contentBounds, containerSize, PLAN_ZOOM_LIMITS) !==
+          getEffectiveZoom(viewport)
+        }
+        canZoomOut={
+          clampZoom(getEffectiveZoom(viewport) / ZOOM_STEP, contentBounds, containerSize, PLAN_ZOOM_LIMITS) !==
+          getEffectiveZoom(viewport)
+        }
+        onZoomIn={() => zoomAtCenter(ZOOM_STEP)}
+        onZoomOut={() => zoomAtCenter(1 / ZOOM_STEP)}
+        onFit={() => onViewportChange(FIT_VIEWPORT)}
+      />
       <svg
         className={activeTool ? "plan-svg tool-armed" : "plan-svg"}
         ref={svgRef}
