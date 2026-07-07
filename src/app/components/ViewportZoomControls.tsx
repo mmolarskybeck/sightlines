@@ -38,6 +38,7 @@ export function ViewportZoomControls({
       {onFitSelected ? (
         <Button
           aria-label="Fit selected"
+          title="Fit selected"
           className="plan-toolbar-button"
           disabled={fitSelectedDisabled}
           type="button"
@@ -52,6 +53,7 @@ export function ViewportZoomControls({
       ) : null}
       <Button
         aria-label="Fit to view"
+        title="Fit to view (⌘0)"
         className="plan-toolbar-button"
         disabled={isFit}
         type="button"
@@ -65,6 +67,7 @@ export function ViewportZoomControls({
       </Button>
       <Button
         aria-label="Zoom out"
+        title="Zoom out"
         className="viewport-zoom-step"
         disabled={!canZoomOut}
         size="icon-sm"
@@ -79,6 +82,7 @@ export function ViewportZoomControls({
       </Button>
       <button
         className="viewport-zoom-value"
+        aria-label={`Zoom level ${Math.round(zoom * 100)} percent — reset to fit`}
         title="Reset to fit"
         type="button"
         onClick={(event) => {
@@ -90,6 +94,7 @@ export function ViewportZoomControls({
       </button>
       <Button
         aria-label="Zoom in"
+        title="Zoom in"
         className="viewport-zoom-step"
         disabled={!canZoomIn}
         size="icon-sm"
