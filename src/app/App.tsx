@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
+import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { GridFourIcon } from "@phosphor-icons/react/dist/csr/GridFour";
@@ -11,6 +12,8 @@ import { StackIcon } from "@phosphor-icons/react/dist/csr/Stack";
 import { UploadSimpleIcon } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
 import {
+  getPlacedRoomBounds,
+  getRectangleRoomDimensions,
   getWallsWithGeometry,
   getOrthogonalQuadWallPair,
 } from "../domain/geometry/walls";
@@ -47,6 +50,7 @@ import {
 } from "../domain/units/unitSystem";
 import { AppRail } from "./components/AppRail";
 import { ArtworkInspector } from "./components/ArtworkInspector";
+import { PanelResizeHandle } from "./components/PanelResizeHandle";
 import { ChecklistPanel } from "./components/ChecklistPanel";
 import { ElevationEmptyState } from "./components/ElevationEmptyState";
 import { FloorObjectInspector, FloorPlacementFields } from "./components/FloorObjectInspector";
@@ -55,6 +59,7 @@ import { PlanEmptyState } from "./components/PlanEmptyState";
 import { PlanView } from "./components/PlanView";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { ProjectPicker } from "./components/ProjectPicker";
+import { RoomInspector } from "./components/RoomInspector";
 import { RoomsPanel } from "./components/RoomsPanel";
 import { SelectionInspector } from "./components/SelectionInspector";
 import {
@@ -78,7 +83,13 @@ import {
   useStoragePersistence,
   type StoragePersistenceState
 } from "./hooks/useStoragePersistence";
-import { useViewPreferences } from "./hooks/useViewPreferences";
+import {
+  useViewPreferences,
+  LEFT_PANEL_MIN_WIDTH,
+  LEFT_PANEL_MAX_WIDTH,
+  INSPECTOR_MIN_WIDTH,
+  INSPECTOR_MAX_WIDTH
+} from "./hooks/useViewPreferences";
 import {
   exportProjectJson,
   getProjectWalls,
@@ -184,7 +195,13 @@ export function App() {
     gridPrecisionFloorMm,
     allowOverlappingPlacement,
     leftPanel,
+    leftPanelWidth,
+    inspectorWidth,
+    inspectorCollapsed,
     setLeftPanel,
+    setLeftPanelWidth,
+    setInspectorWidth,
+    toggleInspectorCollapsed,
     toggleShowGrid,
     toggleSnapToGrid,
     setGridPrecisionFloorMm,
@@ -524,6 +541,35 @@ export function App() {
   // The inspectors keep receiving project.unit and derive their own scopes.
   const unitSystem = unitSystemFromDisplayUnit(project.unit);
   const wallUnit = getScopeUnits(unitSystem, "wall").displayUnit;
+  const selectedRoomPlacement = selectedRoomId
+    ? (project.floor.rooms.find((placement) => placement.roomId === selectedRoomId) ?? null)
+    : null;
+  const selectedRoomDimensions = selectedRoomPlacement
+    ? getRectangleRoomDimensions(selectedRoomPlacement.room)
+    : null;
+  const selectedRoomWallIds = new Set(
+    selectedRoomPlacement?.room.walls.map((wall) => wall.id) ?? []
+  );
+  const selectedRoomBounds = selectedRoomPlacement
+    ? getPlacedRoomBounds(selectedRoomPlacement)
+    : null;
+  const selectedRoomWallObjects = selectedRoomPlacement
+    ? project.wallObjects.filter((wallObject) => selectedRoomWallIds.has(wallObject.wallId))
+    : [];
+  const selectedRoomFloorObjects = selectedRoomBounds
+    ? project.floorObjects.filter(
+        (floorObject) =>
+          floorObject.xMm >= selectedRoomBounds.minX &&
+          floorObject.xMm <= selectedRoomBounds.maxX &&
+          floorObject.yMm >= selectedRoomBounds.minY &&
+          floorObject.yMm <= selectedRoomBounds.maxY
+      )
+    : [];
+  const selectedRoomObjectCount =
+    selectedRoomWallObjects.length + selectedRoomFloorObjects.length;
+  const selectedRoomArtworkCount =
+    selectedRoomWallObjects.filter((wallObject) => wallObject.kind === "artwork").length +
+    selectedRoomFloorObjects.filter((floorObject) => floorObject.kind === "artwork").length;
 
   // A dangling selectedArtworkId (library record deleted out from under the
   // project) resolves to nothing here, so the inspector falls back to the
@@ -790,6 +836,36 @@ export function App() {
   const selectLeftPanel = (panel: "checklist" | "rooms") =>
     setLeftPanel(leftPanel === panel ? null : panel);
 
+  // Whether the inspector currently has anything to show — a resolved single
+  // subject, a multi-selection, or a placement warning. Drives the contextual
+  // "reopen inspector" tab that surfaces only when the panel is collapsed AND
+  // there's something in it worth reopening for (a bare rail toggle is always
+  // available, but this makes the hidden content discoverable in the moment).
+  const hasInspectorContent =
+    isMultiSelect ||
+    selectedArtwork !== null ||
+    selectedOpening !== null ||
+    selectedFloorBlockedZone !== null ||
+    selectedRoomPlacement !== null ||
+    selectedWall !== null ||
+    labeledPlacementWarnings.length > 0;
+
+  // The grid tracks are driven by CSS custom properties (see .workspace in
+  // global.css) rather than an inline grid-template-columns, so the narrow-
+  // viewport media query can still override to a single stacked column — an
+  // inline template would win over the stylesheet and defeat requirement 7.
+  const workspaceStyle = {
+    "--left-panel-width": `${leftPanelWidth}px`,
+    "--inspector-width": `${inspectorWidth}px`
+  } as React.CSSProperties;
+  const workspaceClassName = [
+    "workspace",
+    leftPanel ? null : "left-collapsed",
+    inspectorCollapsed ? "right-collapsed" : null
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     // One provider for every hover tooltip in the app (plan/elevation
     // placements), so they share a single warm-up delay and skip-delay window.
@@ -798,6 +874,8 @@ export function App() {
       <AppRail
         leftPanel={leftPanel}
         onSelectLeftPanel={selectLeftPanel}
+        inspectorCollapsed={inspectorCollapsed}
+        onToggleInspector={toggleInspectorCollapsed}
         isDataView={viewMode === "data"}
         onOpenDataView={() => setViewMode("data")}
         issueCount={placementWarnings.length}
@@ -904,9 +982,38 @@ export function App() {
 
       {error ? <p className="error-banner">{error}</p> : null}
 
-      <section
-        className={leftPanel ? "workspace" : "workspace left-collapsed"}
-      >
+      <section className={workspaceClassName} style={workspaceStyle}>
+        {leftPanel ? (
+          <PanelResizeHandle
+            side="left"
+            width={leftPanelWidth}
+            min={LEFT_PANEL_MIN_WIDTH}
+            max={LEFT_PANEL_MAX_WIDTH}
+            label="Resize left panel"
+            onResize={setLeftPanelWidth}
+          />
+        ) : null}
+        {!inspectorCollapsed ? (
+          <PanelResizeHandle
+            side="right"
+            width={inspectorWidth}
+            min={INSPECTOR_MIN_WIDTH}
+            max={INSPECTOR_MAX_WIDTH}
+            label="Resize inspector"
+            onResize={setInspectorWidth}
+          />
+        ) : null}
+        {inspectorCollapsed && hasInspectorContent ? (
+          <button
+            type="button"
+            className="inspector-reopen"
+            title="Show inspector"
+            aria-label="Show inspector"
+            onClick={toggleInspectorCollapsed}
+          >
+            <CaretLeftIcon aria-hidden="true" size={16} />
+          </button>
+        ) : null}
         {leftPanel === "checklist" ? (
           <ChecklistPanel
             getBlob={getAssetBlob}
@@ -1111,6 +1218,7 @@ export function App() {
           ) : null}
         </section>
 
+        {!inspectorCollapsed ? (
         <aside className="inspector" aria-label="Inspector">
           <div className="inspector-zone">
             {labeledPlacementWarnings.length > 0 ? (
@@ -1131,7 +1239,11 @@ export function App() {
             ) : null}
 
             {!isMultiSelect &&
-            (selectedArtwork || selectedOpening || selectedFloorBlockedZone || selectedWall) ? (
+            (selectedArtwork ||
+              selectedOpening ||
+              selectedFloorBlockedZone ||
+              selectedRoomPlacement ||
+              selectedWall) ? (
               <div className="panel-heading inspector-subject">
                 <h2>
                   {selectedArtwork
@@ -1140,7 +1252,9 @@ export function App() {
                       ? getOpeningKindLabel(selectedOpening.kind)
                       : selectedFloorBlockedZone
                         ? getOpeningKindLabel(selectedFloorBlockedZone.kind)
-                        : selectedWall?.name}
+                        : selectedRoomPlacement
+                          ? selectedRoomPlacement.room.name
+                          : selectedWall?.name}
                 </h2>
                 <span>
                   {selectedArtwork
@@ -1149,7 +1263,9 @@ export function App() {
                       ? "Opening"
                       : selectedFloorBlockedZone
                         ? "Floor object"
-                        : "Wall"}
+                        : selectedRoomPlacement
+                          ? "Room"
+                          : "Wall"}
                 </span>
               </div>
             ) : null}
@@ -1264,6 +1380,26 @@ export function App() {
               }
               onDelete={() => void removePlacement(selectedOpening.id)}
             />
+          ) : selectedRoomPlacement ? (
+            <RoomInspector
+              artworkCount={selectedRoomArtworkCount}
+              objectCount={selectedRoomObjectCount}
+              rectangleDimensions={selectedRoomDimensions}
+              roomHeightMm={selectedRoomPlacement.room.heightMm}
+              roomName={selectedRoomPlacement.room.name}
+              unit={project.unit}
+              wallCount={selectedRoomPlacement.room.walls.length}
+              onCommitWidth={(lengthMm) =>
+                selectedRoomDimensions
+                  ? resizeWall(selectedRoomDimensions.widthWallId, lengthMm)
+                  : Promise.resolve()
+              }
+              onCommitDepth={(lengthMm) =>
+                selectedRoomDimensions
+                  ? resizeWall(selectedRoomDimensions.depthWallId, lengthMm)
+                  : Promise.resolve()
+              }
+            />
           ) : selectedWall ? (
             <WallInspector
               centerlineMm={project.defaultCenterlineHeightMm}
@@ -1282,7 +1418,7 @@ export function App() {
             />
             ) : (
               <p className="empty-copy">
-                Select a wall, artwork, or opening to inspect it.
+                Select a room, wall, artwork, or opening to inspect it.
               </p>
             )}
           </div>
@@ -1292,6 +1428,7 @@ export function App() {
             <span>{getStorageNoteCopy(storagePersistence)}</span>
           </div>
         </aside>
+        ) : null}
       </section>
       </div>
     </main>
@@ -1401,11 +1538,25 @@ function UnitSystemToggle({
     onChange(next);
   };
 
+  // A traditional slide switch with the two unit systems as flanking words —
+  // one small track, no label-inside-track nesting. The words are pointer
+  // shortcuts to a specific side (routed through select(), so clicking the
+  // already-active side stays inert); the switch itself is the single
+  // accessible control, so the words stay out of the tab order and the
+  // accessibility tree rather than announcing as three separate controls.
   return (
     <div className="unit-switch" role="group" aria-label="Units">
-      <span className="unit-select-label" id="unit-system-label">
-        Units
-      </span>
+      <button
+        aria-hidden="true"
+        className="unit-switch-side"
+        data-active={system === "imperial"}
+        disabled={disabled}
+        tabIndex={-1}
+        type="button"
+        onClick={() => select("imperial")}
+      >
+        Imperial
+      </button>
       <Switch
         aria-labelledby="unit-system-label unit-system-value"
         checked={system === "metric"}
@@ -1413,12 +1564,24 @@ function UnitSystemToggle({
         disabled={disabled}
         onCheckedChange={(checked) => select(checked ? "metric" : "imperial")}
       >
-        <span className="unit-switch-option">Imperial</span>
-        <span className="unit-switch-option">Metric</span>
+        <span className="visually-hidden" id="unit-system-label">
+          Units
+        </span>
         <span className="visually-hidden" id="unit-system-value">
           {system === "metric" ? "Metric" : "Imperial"}
         </span>
       </Switch>
+      <button
+        aria-hidden="true"
+        className="unit-switch-side"
+        data-active={system === "metric"}
+        disabled={disabled}
+        tabIndex={-1}
+        type="button"
+        onClick={() => select("metric")}
+      >
+        Metric
+      </button>
     </div>
   );
 }
