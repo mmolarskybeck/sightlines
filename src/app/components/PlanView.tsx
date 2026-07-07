@@ -405,22 +405,6 @@ export function PlanView({
     containerSize
   );
   const viewBox = `${viewBoxBounds.x} ${viewBoxBounds.y} ${viewBoxBounds.width} ${viewBoxBounds.height}`;
-  // The viewBox is letterboxed inside the full-size canvas (default
-  // "xMidYMid meet"), but SVG userspace outside the viewBox still renders —
-  // and the grid patterns tile in userspace — so sizing the grid rect to the
-  // whole container (in mm, centered on the viewBox center) fills the entire
-  // visible workspace instead of leaving bare margins beside the letterboxed
-  // viewBox. Falls back to the viewBox itself on first render, before the
-  // container is measured.
-  const gridBounds =
-    pixelsPerMm > 0
-      ? {
-          x: viewBoxBounds.x + (viewBoxBounds.width - containerSize.width / pixelsPerMm) / 2,
-          y: viewBoxBounds.y + (viewBoxBounds.height - containerSize.height / pixelsPerMm) / 2,
-          width: containerSize.width / pixelsPerMm,
-          height: containerSize.height / pixelsPerMm
-        }
-      : viewBoxBounds;
   const minorGridMm = getMinorGridIntervalMm(project.unit, pixelsPerMm, {
     // Plan reads in feet/meters: room layout is a whole-feet activity, so a
     // coarser target than the shared default keeps the plan lattice on the
@@ -1611,12 +1595,12 @@ export function PlanView({
         {gridVisible ? (
           <GridOverlay
             id="plan-grid"
-            height={gridBounds.height}
+            height={viewBoxBounds.height}
             majorSpacingMm={majorGridMm}
             minorSpacingMm={minorGridMm}
-            width={gridBounds.width}
-            x={gridBounds.x}
-            y={gridBounds.y}
+            width={viewBoxBounds.width}
+            x={viewBoxBounds.x}
+            y={viewBoxBounds.y}
           />
         ) : null}
         {displayedProject.floor.rooms.map((placement) => (
