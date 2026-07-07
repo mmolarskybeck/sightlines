@@ -170,6 +170,10 @@ Implemented or substantially underway:
 * More legible plan-view placement markers.
 * JSON import/export for development backup.
 
+## Deployment
+
+Sightlines is prepared for Cloudflare Workers static-assets deployment with Wrangler. See [docs/deployment.md](docs/deployment.md) for login, dry-run, deploy, and Cloudflare build settings.
+
 ## Roadmap
 
 ### MVP 1C — Professional layout behaviors

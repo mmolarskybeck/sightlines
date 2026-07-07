@@ -8,7 +8,11 @@
     "build": "tsc && vite build",
     "check": "tsc --noEmit",
     "test": "vitest run",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cf:login": "wrangler login",
+    "cf:whoami": "wrangler whoami",
+    "deploy:dry-run": "npm run build && wrangler deploy --dry-run",
+    "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "@fontsource-variable/figtree": "^5.2.10",
@@ -49,6 +53,7 @@
     "tailwindcss": "^4.3.2",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "wrangler": "^4.107.0"
   }
 }
