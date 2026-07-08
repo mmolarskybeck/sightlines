@@ -26,6 +26,7 @@ import {
   validateChangedWallPlacements,
   validateWallObjectPlacements
 } from "../domain/placement/validatePlacement";
+import type { ArtworkImportDraft } from "../domain/import/types";
 import {
   CURRENT_ARTWORK_SCHEMA_VERSION,
   CURRENT_ASSET_SCHEMA_VERSION,
@@ -162,6 +163,7 @@ export type AppState = ArrangeSliceState &
     files: File[],
     opts?: { skipDuplicateCheck?: boolean }
   ) => Promise<void>;
+  importArtworkDrafts: (drafts: ArtworkImportDraft[]) => Promise<void>;
   confirmDuplicateUploads: () => Promise<void>;
   dismissDuplicateUploads: () => void;
   removeArtworkFromChecklist: (artworkId: string) => Promise<void>;
@@ -1065,6 +1067,96 @@ export function createAppStore(deps: AppStoreDeps) {
               error: `${failures.length} of ${files.length} image${
                 files.length === 1 ? "" : "s"
               } could not be added: ${failures.join(" ")}`
+            });
+          }
+        } finally {
+          set({ intakeState: "idle" });
+        }
+      },
+
+      async importArtworkDrafts(drafts) {
+        const project = get().project;
+        const selectedDrafts = drafts.filter((draft) => draft.selected);
+        if (!project || selectedDrafts.length === 0) return;
+
+        set({ intakeState: "processing", error: null });
+
+        const newArtworkIds: string[] = [];
+        const failures: string[] = [];
+
+        try {
+          for (const draft of selectedDrafts) {
+            let artwork = draft.artwork;
+
+            if (draft.imageFile) {
+              const validation = validateImageFile(draft.imageFile);
+              if (!validation.ok) {
+                failures.push(validation.reason);
+              } else {
+                try {
+                  const processed = await deps.imageProcessor.process(draft.imageFile);
+                  const assetId = crypto.randomUUID();
+                  const asset: Asset = {
+                    id: assetId,
+                    schemaVersion: CURRENT_ASSET_SCHEMA_VERSION,
+                    mimeType: draft.imageFile.type,
+                    originalFilename: draft.imageFile.name,
+                    originalKey: assetBlobKey(assetId, "original"),
+                    displayKey: assetBlobKey(assetId, "display"),
+                    thumbnailKey: assetBlobKey(assetId, "thumbnail"),
+                    widthPx: processed.widthPx,
+                    heightPx: processed.heightPx,
+                    byteSize: processed.byteSize,
+                    sha256: processed.sha256
+                  };
+
+                  await deps.assetRepository.saveAsset(asset, {
+                    original: processed.original,
+                    display: processed.display,
+                    thumbnail: processed.thumbnail
+                  });
+                  artwork = { ...artwork, assetId };
+                } catch (error) {
+                  failures.push(
+                    error instanceof Error
+                      ? error.message
+                      : `${draft.imageFile.name} could not be processed.`
+                  );
+                }
+              }
+            }
+
+            try {
+              await deps.artworkLibraryRepository.save(artwork);
+              newArtworkIds.push(artwork.id);
+            } catch (error) {
+              failures.push(
+                error instanceof Error
+                  ? error.message
+                  : `${artwork.title ?? "Untitled"} could not be saved.`
+              );
+            }
+          }
+
+          if (newArtworkIds.length > 0) {
+            set({ libraryArtworks: await deps.artworkLibraryRepository.list() });
+
+            const label =
+              newArtworkIds.length === 1
+                ? "Import artwork"
+                : `Import ${newArtworkIds.length} artworks`;
+
+            await applyEdit(label, (current) => ({
+              ...current,
+              checklistArtworkIds: [...current.checklistArtworkIds, ...newArtworkIds]
+            }));
+          }
+
+          if (failures.length > 0) {
+            set({
+              error: `${failures.length} import issue${
+                failures.length === 1 ? "" : "s"
+              }: ${failures.join(" ")}`
             });
           }
         } finally {

@@ -66,6 +66,7 @@ export function ChecklistPanel({
   onArtworkDragStateChange,
   onConfirmDuplicateUploads,
   onDismissDuplicateUploads,
+  onOpenImportWizard,
   onRemoveArtworkFromChecklist,
   onRemovePlacement,
   onSelectArtwork,
@@ -79,6 +80,7 @@ export function ChecklistPanel({
   onAddArtworksFromFiles: (files: File[]) => Promise<void>;
   onConfirmDuplicateUploads: () => Promise<void>;
   onDismissDuplicateUploads: () => void;
+  onOpenImportWizard: () => void;
   // Optional: App.tsx uses this to track which artwork is mid-drag so
   // ElevationView can size its drop ghost during dragover, since dataTransfer
   // payloads are unreadable until drop. Fired with the artworkId on
@@ -369,14 +371,20 @@ export function ChecklistPanel({
         </ul>
       )}
 
-      <Button
-        className="checklist-add"
-        variant="primary"
-        onClick={() => fileInputRef.current?.click()}
-      >
-        <ImageSquareIcon aria-hidden="true" size={16} />
-        <span>Add Artwork</span>
-      </Button>
+      <div className="checklist-actions">
+        <Button
+          className="checklist-add-images"
+          variant="outline"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <ImageSquareIcon aria-hidden="true" size={16} />
+          <span>Add images</span>
+        </Button>
+        <Button className="checklist-add" variant="primary" onClick={onOpenImportWizard}>
+          <ImageSquareIcon aria-hidden="true" size={16} />
+          <span>Import</span>
+        </Button>
+      </div>
     </section>
   );
 }

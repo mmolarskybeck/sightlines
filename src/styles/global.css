@@ -750,6 +750,79 @@ input:focus-visible {
   line-height: var(--leading-ui);
 }
 
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: color-mix(in oklch, var(--foreground) 26%, transparent);
+}
+
+.dialog-content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 50;
+  display: flex;
+  width: min(calc(100vw - 32px), 980px);
+  max-height: min(760px, calc(100dvh - 32px));
+  flex-direction: column;
+  transform: translate(-50%, -50%);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--bg);
+  box-shadow: var(--shadow-panel);
+}
+
+.dialog-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-fill);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.dialog-close:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.dialog-header {
+  display: grid;
+  gap: 4px;
+  padding: 22px 56px 18px 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dialog-title {
+  margin: 0;
+  font-size: var(--type-project);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-ui);
+}
+
+.dialog-description {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-sm);
+  line-height: var(--leading-copy);
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--line);
+}
+
 .workspace {
   display: grid;
   /* Widths are user-draggable; App sets --left-panel-width / --inspector-width
@@ -1476,6 +1549,17 @@ body.panels-resizing * {
   }
 }
 
+.checklist-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.checklist-add-images {
+  min-height: 40px;
+}
+
 /* The app's one solid primary CTA (exactly one solid petrol per screen). */
 .checklist-add {
   display: inline-flex;
@@ -1484,7 +1568,6 @@ body.panels-resizing * {
   gap: 8px;
   width: 100%;
   min-height: 40px;
-  margin-top: 14px;
   border: 1px solid var(--primary);
   border-radius: var(--radius-sm);
   background: var(--primary);
@@ -1500,6 +1583,327 @@ body.panels-resizing * {
 .checklist-add:hover {
   background: var(--primary-strong);
   border-color: var(--primary-strong);
+}
+
+.import-dialog {
+  width: min(calc(100vw - 32px), 1040px);
+}
+
+.import-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+}
+
+.import-step {
+  height: 42px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+}
+
+.import-step:last-child {
+  border-right: 0;
+}
+
+.import-step:hover:not(:disabled),
+.import-step[data-active] {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.import-step[data-active] {
+  box-shadow: inset 0 -2px 0 var(--primary);
+  font-weight: var(--weight-semibold);
+}
+
+.import-step:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.import-error {
+  margin: 0;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--danger-line);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--type-sm);
+}
+
+.import-body {
+  min-height: 420px;
+  overflow: auto;
+  padding: 18px;
+}
+
+.import-upload-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 360px;
+}
+
+.import-upload-tile {
+  display: flex;
+  min-height: 220px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 18px;
+  border: 1px dashed var(--line);
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    color 150ms ease-out;
+}
+
+.import-upload-tile:hover {
+  border-color: var(--primary-line);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.import-upload-tile span {
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.import-upload-tile strong {
+  color: var(--ink);
+  font-size: var(--type-lg);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
+}
+
+.import-map {
+  display: grid;
+  gap: 16px;
+}
+
+.import-map-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  gap: 10px;
+}
+
+.import-field,
+.import-mapping-row {
+  display: grid;
+  gap: 6px;
+}
+
+.import-field > span,
+.import-mapping-row > span {
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
+}
+
+.import-mapping-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.import-mapping-row {
+  align-content: start;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.import-mapping-row small {
+  margin-left: 6px;
+  color: var(--primary-strong);
+  font-size: var(--type-2xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.import-review {
+  display: grid;
+  gap: 14px;
+}
+
+.import-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--line);
+}
+
+.import-stat {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-right: 1px solid var(--line);
+}
+
+.import-stat:last-child {
+  border-right: 0;
+}
+
+.import-stat span {
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+}
+
+.import-stat strong {
+  font-size: var(--type-xl);
+  font-weight: var(--weight-strong);
+  line-height: 1;
+}
+
+.import-review-list {
+  display: grid;
+  gap: 4px;
+}
+
+.import-review-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) minmax(180px, 260px);
+  gap: 12px;
+  align-items: center;
+  min-height: 82px;
+  padding: 10px;
+  border-radius: var(--radius-fill);
+}
+
+.import-review-row:hover,
+.import-review-row[data-selected] {
+  background: var(--surface);
+}
+
+.import-review-check {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.import-review-main {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.import-review-title,
+.import-review-meta,
+.import-review-warnings,
+.import-review-ok {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.import-review-title strong,
+.import-review-title span,
+.import-review-meta span,
+.import-review-image span,
+.import-review-warnings span,
+.import-review-ok span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-review-title strong {
+  color: var(--ink);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.import-review-title span,
+.import-review-meta,
+.import-review-image {
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-regular);
+}
+
+.import-review-meta {
+  font-variant-numeric: tabular-nums;
+}
+
+.import-review-warnings {
+  color: var(--caution);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+}
+
+.import-review-ok {
+  color: var(--primary-strong);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+}
+
+.import-review-image {
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .dialog-content {
+    width: calc(100vw - 20px);
+    max-height: calc(100dvh - 20px);
+  }
+
+  .dialog-header {
+    padding: 18px 52px 14px 16px;
+  }
+
+  .import-body {
+    min-height: 0;
+    padding: 12px;
+  }
+
+  .import-upload-grid,
+  .import-map-toolbar,
+  .import-mapping-list,
+  .import-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .import-upload-grid {
+    min-height: 0;
+  }
+
+  .import-upload-tile {
+    min-height: 150px;
+  }
+
+  .import-stat {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .import-stat:last-child {
+    border-bottom: 0;
+  }
+
+  .import-review-row {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .import-review-image {
+    grid-column: 2;
+  }
 }
 
 /* The one shared dimension-uncertainty visual (docs/plan.md §8) — checklist

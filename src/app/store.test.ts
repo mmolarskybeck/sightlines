@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { CURRENT_SCHEMA_VERSION, DEFAULT_FLOOR_OBJECT_DEPTH_MM } from "../domain/project";
+import {
+  CURRENT_ARTWORK_SCHEMA_VERSION,
+  CURRENT_SCHEMA_VERSION,
+  DEFAULT_FLOOR_OBJECT_DEPTH_MM
+} from "../domain/project";
 import type { Project } from "../domain/project";
+import type { ArtworkImportDraft } from "../domain/import/types";
 import {
   PLACEHOLDER_ARTWORK_HEIGHT_MM,
   PLACEHOLDER_ARTWORK_WIDTH_MM
@@ -631,6 +636,68 @@ describe("app store", () => {
 
       expect(artworkLibraryRepository.artworks.size).toBe(0);
       expect(freshStore.getState().project).toBeNull();
+    });
+  });
+
+  describe("importArtworkDrafts", () => {
+    it("imports selected metadata drafts, processes matched images, and commits checklist membership once", async () => {
+      const image = makeImageFile("mona-lisa.jpg");
+      const draft: ArtworkImportDraft = {
+        id: "draft-1",
+        row: { sourceRowIndex: 2, values: ["Mona Lisa"] },
+        artwork: {
+          id: "imported-artwork-1",
+          schemaVersion: CURRENT_ARTWORK_SCHEMA_VERSION,
+          title: "Mona Lisa",
+          artist: "Leonardo da Vinci",
+          date: "c. 1503-1506",
+          dimensions: { status: "known", widthMm: 530, heightMm: 770 },
+          metadata: { sourceFilename: "metadata.csv", sourceRow: 2 }
+        },
+        imageFile: image,
+        imageMatch: { status: "matched", file: image, score: 100, reason: "exact filename" },
+        warnings: [],
+        raw: { title: "Mona Lisa" },
+        selected: true
+      };
+
+      await store.getState().importArtworkDrafts([draft]);
+
+      const state = store.getState();
+      expect(state.error).toBeNull();
+      expect(state.undoStack).toHaveLength(1);
+      expect(state.undoStack.at(-1)?.label).toBe("Import artwork");
+      expect(state.project!.checklistArtworkIds).toEqual(["imported-artwork-1"]);
+      expect(state.libraryArtworks).toHaveLength(1);
+      expect(artworkLibraryRepository.artworks.get("imported-artwork-1")?.assetId).toBeDefined();
+      expect(assetRepository.assets.size).toBe(1);
+      expect(imageProcessor.processedFilenames).toEqual(["mona-lisa.jpg"]);
+    });
+
+    it("imports metadata-only rows even when no image is attached", async () => {
+      const draft: ArtworkImportDraft = {
+        id: "draft-1",
+        row: { sourceRowIndex: 2, values: ["Untitled"] },
+        artwork: {
+          id: "metadata-only-artwork",
+          schemaVersion: CURRENT_ARTWORK_SCHEMA_VERSION,
+          title: "Untitled",
+          dimensions: { status: "unknown" },
+          metadata: { sourceFilename: "metadata.csv", sourceRow: 2 }
+        },
+        imageMatch: { status: "none", candidates: [] },
+        warnings: [{ field: "image", message: "No image matched this row." }],
+        raw: { title: "Untitled" },
+        selected: true
+      };
+
+      await store.getState().importArtworkDrafts([draft]);
+
+      const state = store.getState();
+      expect(state.error).toBeNull();
+      expect(state.project!.checklistArtworkIds).toEqual(["metadata-only-artwork"]);
+      expect(artworkLibraryRepository.artworks.get("metadata-only-artwork")?.assetId).toBeUndefined();
+      expect(assetRepository.assets.size).toBe(0);
     });
   });
 

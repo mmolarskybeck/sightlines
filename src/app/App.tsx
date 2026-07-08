@@ -102,6 +102,7 @@ import {
 const DataView = lazy(() =>
   import("./components/DataView").then((module) => ({ default: module.DataView }))
 );
+const ImportWizard = lazy(() => import("./components/ImportWizard"));
 const ElevationView = lazy(() =>
   import("./components/ElevationView").then((module) => ({ default: module.ElevationView }))
 );
@@ -171,6 +172,7 @@ export function App() {
     createProject,
     deleteProject,
     addArtworksFromFiles,
+    importArtworkDrafts,
     confirmDuplicateUploads,
     dismissDuplicateUploads,
     removeArtworkFromChecklist,
@@ -206,6 +208,7 @@ export function App() {
   const selectedArtworkId = getSelectedArtworkId(project, selection);
   const selectedOpeningId = getSelectedOpeningId(project, selection);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importWizardOpen, setImportWizardOpen] = useState(false);
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   // Which insertion tool (door/window/blocked-zone) is armed on the plan
@@ -791,6 +794,7 @@ export function App() {
             onArtworkDragStateChange={setDraggingArtworkId}
             onConfirmDuplicateUploads={confirmDuplicateUploads}
             onDismissDuplicateUploads={dismissDuplicateUploads}
+            onOpenImportWizard={() => setImportWizardOpen(true)}
             onRemoveArtworkFromChecklist={removeArtworkFromChecklist}
             onRemovePlacement={removePlacement}
             onSelectArtwork={selectArtwork}
@@ -1250,6 +1254,15 @@ export function App() {
         </Suspense>
       ) : null}
       {isHelpOpen ? <HelpDialog onClose={() => setIsHelpOpen(false)} /> : null}
+      <Suspense fallback={null}>
+        <ImportWizard
+          intakeState={intakeState}
+          open={importWizardOpen}
+          projectUnit={project.unit}
+          onImportDrafts={importArtworkDrafts}
+          onOpenChange={setImportWizardOpen}
+        />
+      </Suspense>
     </main>
     </TooltipProvider>
   );
