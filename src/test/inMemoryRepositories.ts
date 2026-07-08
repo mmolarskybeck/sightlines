@@ -99,7 +99,14 @@ export class InMemoryAssetRepository implements AssetRepository {
 export class FakeImageProcessor implements ImageProcessor {
   processedFilenames: string[] = [];
 
-  constructor(private readonly failingFilenames: ReadonlySet<string> = new Set()) {}
+  // `hashForName` lets a test pin a specific sha256 per filename so two
+  // differently-named files can be made content-identical (or vice versa).
+  // Names absent from the map fall back to a name-derived hash, so distinct
+  // filenames stay distinct by default.
+  constructor(
+    private readonly failingFilenames: ReadonlySet<string> = new Set(),
+    private readonly hashForName: ReadonlyMap<string, string> = new Map()
+  ) {}
 
   async process(file: File): Promise<ProcessedImage> {
     this.processedFilenames.push(file.name);
@@ -111,7 +118,7 @@ export class FakeImageProcessor implements ImageProcessor {
     return {
       widthPx: 100,
       heightPx: 100,
-      sha256: `sha256-${file.name}`,
+      sha256: this.hashForName.get(file.name) ?? `sha256-${file.name}`,
       byteSize: file.size,
       original: new Blob([`original:${file.name}`]),
       display: new Blob([`display:${file.name}`]),

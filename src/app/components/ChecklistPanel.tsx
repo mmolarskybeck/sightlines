@@ -61,8 +61,11 @@ export function ChecklistPanel({
   libraryArtworks,
   intakeState,
   selectedArtworkId,
+  pendingDuplicateUploads,
   onAddArtworksFromFiles,
   onArtworkDragStateChange,
+  onConfirmDuplicateUploads,
+  onDismissDuplicateUploads,
   onRemoveArtworkFromChecklist,
   onRemovePlacement,
   onSelectArtwork,
@@ -72,7 +75,10 @@ export function ChecklistPanel({
   libraryArtworks: Artwork[];
   intakeState: "idle" | "processing";
   selectedArtworkId: string | null;
+  pendingDuplicateUploads: { file: File; existingArtworkTitle: string }[];
   onAddArtworksFromFiles: (files: File[]) => Promise<void>;
+  onConfirmDuplicateUploads: () => Promise<void>;
+  onDismissDuplicateUploads: () => void;
   // Optional: App.tsx uses this to track which artwork is mid-drag so
   // ElevationView can size its drop ghost during dragover, since dataTransfer
   // payloads are unreadable until drop. Fired with the artworkId on
@@ -177,6 +183,8 @@ export function ChecklistPanel({
     "artwork"
   ).displayUnit;
 
+  const duplicateNotice = duplicateNoticeCopy(pendingDuplicateUploads);
+
   const handleFiles = (files: FileList | File[]) => {
     const fileArray = Array.from(files);
     if (fileArray.length === 0) return;
@@ -233,6 +241,24 @@ export function ChecklistPanel({
           event.target.value = "";
         }}
       />
+
+      {duplicateNotice ? (
+        <div className="checklist-duplicate-notice" role="status">
+          <p>{duplicateNotice}</p>
+          <div className="checklist-duplicate-actions">
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => void onConfirmDuplicateUploads()}
+            >
+              Add anyway
+            </Button>
+            <Button size="sm" variant="outline" onClick={onDismissDuplicateUploads}>
+              Don't add
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {rows.length > 0 ? (
         <div className="checklist-controls">
@@ -353,6 +379,19 @@ export function ChecklistPanel({
       </Button>
     </section>
   );
+}
+
+// Confirm-strip copy for held duplicate uploads. Singular names the one work;
+// plural lists every held title so it's clear which uploads are in question.
+function duplicateNoticeCopy(
+  pending: { file: File; existingArtworkTitle: string }[]
+): string | null {
+  if (pending.length === 0) return null;
+  if (pending.length === 1) {
+    return `This image looks identical to “${pending[0].existingArtworkTitle}” already in the checklist. Add it anyway?`;
+  }
+  const titles = pending.map((entry) => `“${entry.existingArtworkTitle}”`).join(", ");
+  return `${pending.length} images look identical to works already in the checklist: ${titles}. Add them anyway?`;
 }
 
 export function sortChecklistRows(

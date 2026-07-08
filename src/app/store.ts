@@ -134,6 +134,7 @@ export type AppState = ArrangeSliceState &
   redoStack: EditEntry[];
   libraryArtworks: Artwork[];
   intakeState: "idle" | "processing";
+  pendingDuplicateUploads: { file: File; existingArtworkTitle: string }[];
   boot: () => Promise<void>;
   setViewMode: (viewMode: ViewMode) => void;
   selectWall: (wallId: string) => void;
@@ -159,7 +160,12 @@ export type AppState = ArrangeSliceState &
   openProject: (id: string) => Promise<void>;
   createProject: (title: string) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
-  addArtworksFromFiles: (files: File[]) => Promise<void>;
+  addArtworksFromFiles: (
+    files: File[],
+    opts?: { skipDuplicateCheck?: boolean }
+  ) => Promise<void>;
+  confirmDuplicateUploads: () => Promise<void>;
+  dismissDuplicateUploads: () => void;
   removeArtworkFromChecklist: (artworkId: string) => Promise<void>;
   updateArtwork: (artworkId: string, changes: UpdateArtworkChanges) => Promise<void>;
   placeArtwork: (
@@ -321,6 +327,7 @@ export function createAppStore(deps: AppStoreDeps) {
         undoStack: [],
         redoStack: [],
         error: null,
+        pendingDuplicateUploads: [],
         ...extras
       });
     }
@@ -407,6 +414,7 @@ export function createAppStore(deps: AppStoreDeps) {
       redoStack: [],
       libraryArtworks: [],
       intakeState: "idle",
+      pendingDuplicateUploads: [],
 
       async boot() {
         // The library is a secondary document from the project's point of
@@ -930,7 +938,7 @@ export function createAppStore(deps: AppStoreDeps) {
         }
       },
 
-      async addArtworksFromFiles(files) {
+      async addArtworksFromFiles(files, opts = {}) {
         const project = get().project;
         if (!project || files.length === 0) return;
 
@@ -938,6 +946,26 @@ export function createAppStore(deps: AppStoreDeps) {
 
         const newArtworkIds: string[] = [];
         const failures: string[] = [];
+
+        // Duplicate screen: exact content-hash match against the current
+        // library's assets (and earlier files in this batch). Legacy assets
+        // without a sha256 never match. Held files are surfaced for
+        // confirmation instead of intaken — re-uploading the same image is
+        // usually a mistake, occasionally deliberate.
+        const skipDuplicateCheck = opts.skipDuplicateCheck === true;
+        const titleBySha = new Map<string, string>();
+        if (!skipDuplicateCheck) {
+          for (const libraryArtwork of get().libraryArtworks) {
+            if (!libraryArtwork.assetId) continue;
+            try {
+              const asset = await deps.assetRepository.getAsset(libraryArtwork.assetId);
+              if (asset.sha256) titleBySha.set(asset.sha256, libraryArtwork.title ?? "Untitled");
+            } catch {
+              // A dangling assetId can't match anything — skip it.
+            }
+          }
+        }
+        const heldDuplicates: { file: File; existingArtworkTitle: string }[] = [];
 
         try {
           for (const file of files) {
@@ -955,6 +983,15 @@ export function createAppStore(deps: AppStoreDeps) {
                 error instanceof Error ? error.message : `${file.name} could not be processed.`
               );
               continue;
+            }
+
+            if (!skipDuplicateCheck) {
+              const existingTitle = titleBySha.get(processed.sha256);
+              if (existingTitle !== undefined) {
+                heldDuplicates.push({ file, existingArtworkTitle: existingTitle });
+                continue;
+              }
+              titleBySha.set(processed.sha256, titleFromFilename(file.name)); // batch-internal twins
             }
 
             const assetId = crypto.randomUUID();
@@ -1013,6 +1050,12 @@ export function createAppStore(deps: AppStoreDeps) {
             }));
           }
 
+          if (heldDuplicates.length > 0) {
+            set({
+              pendingDuplicateUploads: [...get().pendingDuplicateUploads, ...heldDuplicates]
+            });
+          }
+
           if (failures.length > 0) {
             set({
               error: `${failures.length} of ${files.length} image${
@@ -1023,6 +1066,20 @@ export function createAppStore(deps: AppStoreDeps) {
         } finally {
           set({ intakeState: "idle" });
         }
+      },
+
+      async confirmDuplicateUploads() {
+        const held = get().pendingDuplicateUploads;
+        if (held.length === 0) return;
+        set({ pendingDuplicateUploads: [] });
+        await get().addArtworksFromFiles(
+          held.map((entry) => entry.file),
+          { skipDuplicateCheck: true }
+        );
+      },
+
+      dismissDuplicateUploads() {
+        set({ pendingDuplicateUploads: [] });
       },
 
       async removeArtworkFromChecklist(artworkId) {

@@ -140,6 +140,7 @@ export function App() {
     redoStack,
     libraryArtworks,
     intakeState,
+    pendingDuplicateUploads,
     boot,
     setViewMode,
     selectWall,
@@ -166,6 +167,8 @@ export function App() {
     createProject,
     deleteProject,
     addArtworksFromFiles,
+    confirmDuplicateUploads,
+    dismissDuplicateUploads,
     removeArtworkFromChecklist,
     updateArtwork,
     placeArtwork,
@@ -753,8 +756,11 @@ export function App() {
             libraryArtworks={libraryArtworks}
             project={project}
             selectedArtworkId={selectedArtworkId}
+            pendingDuplicateUploads={pendingDuplicateUploads}
             onAddArtworksFromFiles={addArtworksFromFiles}
             onArtworkDragStateChange={setDraggingArtworkId}
+            onConfirmDuplicateUploads={confirmDuplicateUploads}
+            onDismissDuplicateUploads={dismissDuplicateUploads}
             onRemoveArtworkFromChecklist={removeArtworkFromChecklist}
             onRemovePlacement={removePlacement}
             onSelectArtwork={selectArtwork}

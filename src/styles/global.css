@@ -998,6 +998,31 @@ body.panels-resizing * {
   font-weight: var(--weight-strong);
 }
 
+/* Held-duplicate confirm strip: a plain square panel (flat per DESIGN.md, no
+   pill, no new color) sitting above the list. The hairline frame and surface
+   fill mark it as a hold to resolve, not an error. */
+.checklist-duplicate-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0;
+}
+
+.checklist-duplicate-notice p {
+  margin: 0;
+  font-size: var(--type-sm);
+  color: var(--ink);
+}
+
+.checklist-duplicate-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .checklist-filters {
   display: flex;
   flex: 1 1 auto;

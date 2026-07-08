@@ -634,6 +634,127 @@ describe("app store", () => {
     });
   });
 
+  describe("upload duplicate detection", () => {
+    // Rebuilds the store with a processor that pins a shared sha256 across the
+    // named files, so intake sees them as content-identical.
+    async function useSharedHash(names: string[], sha: string): Promise<void> {
+      imageProcessor = new FakeImageProcessor(
+        new Set(),
+        new Map(names.map((name) => [name, sha]))
+      );
+      store = createAppStore(makeDeps());
+      await store.getState().boot();
+    }
+
+    it("holds an upload whose sha256 matches an existing checklist asset", async () => {
+      await useSharedHash(["twin-a.jpg", "twin-b.jpg"], "shared-sha");
+
+      await store.getState().addArtworksFromFiles([makeImageFile("twin-a.jpg")]);
+      const countAfterFirst = store.getState().libraryArtworks.length;
+
+      await store.getState().addArtworksFromFiles([makeImageFile("twin-b.jpg")]);
+
+      const state = store.getState();
+      expect(state.libraryArtworks).toHaveLength(countAfterFirst);
+      expect(state.pendingDuplicateUploads).toHaveLength(1);
+      expect(state.pendingDuplicateUploads[0].existingArtworkTitle).toBe("twin-a");
+      expect(state.pendingDuplicateUploads[0].file.name).toBe("twin-b.jpg");
+    });
+
+    it("catches a twin within one batch", async () => {
+      await useSharedHash(["twin-a.jpg", "twin-b.jpg"], "shared-sha");
+
+      await store
+        .getState()
+        .addArtworksFromFiles([makeImageFile("twin-a.jpg"), makeImageFile("twin-b.jpg")]);
+
+      const state = store.getState();
+      expect(state.libraryArtworks).toHaveLength(1);
+      expect(state.pendingDuplicateUploads).toHaveLength(1);
+      expect(state.pendingDuplicateUploads[0].existingArtworkTitle).toBe("twin-a");
+    });
+
+    it("intakes non-duplicates in a mixed batch and holds only the duplicate", async () => {
+      await useSharedHash(["twin-a.jpg", "twin-b.jpg"], "shared-sha");
+
+      await store.getState().addArtworksFromFiles([makeImageFile("twin-a.jpg")]);
+      const countAfterFirst = store.getState().libraryArtworks.length;
+
+      await store
+        .getState()
+        .addArtworksFromFiles([makeImageFile("twin-b.jpg"), makeImageFile("fresh.jpg")]);
+
+      const state = store.getState();
+      expect(state.libraryArtworks).toHaveLength(countAfterFirst + 1);
+      expect(state.libraryArtworks.some((a) => a.title === "fresh")).toBe(true);
+      expect(state.pendingDuplicateUploads).toHaveLength(1);
+      expect(state.pendingDuplicateUploads[0].existingArtworkTitle).toBe("twin-a");
+    });
+
+    it("confirmDuplicateUploads intakes the held files in one undo entry; pending clears", async () => {
+      await useSharedHash(["twin-a.jpg", "twin-b.jpg"], "shared-sha");
+
+      await store.getState().addArtworksFromFiles([makeImageFile("twin-a.jpg")]);
+      await store.getState().addArtworksFromFiles([makeImageFile("twin-b.jpg")]);
+      const countBeforeConfirm = store.getState().libraryArtworks.length;
+      const checklistBefore = store.getState().project!.checklistArtworkIds.length;
+      const undoBefore = store.getState().undoStack.length;
+
+      await store.getState().confirmDuplicateUploads();
+
+      const state = store.getState();
+      expect(state.pendingDuplicateUploads).toHaveLength(0);
+      expect(state.libraryArtworks).toHaveLength(countBeforeConfirm + 1);
+      expect(state.project!.checklistArtworkIds).toHaveLength(checklistBefore + 1);
+      expect(state.undoStack).toHaveLength(undoBefore + 1);
+    });
+
+    it("dismissDuplicateUploads drops the held files and touches no undo state", async () => {
+      await useSharedHash(["twin-a.jpg", "twin-b.jpg"], "shared-sha");
+
+      await store.getState().addArtworksFromFiles([makeImageFile("twin-a.jpg")]);
+      await store.getState().addArtworksFromFiles([makeImageFile("twin-b.jpg")]);
+      const countBeforeDismiss = store.getState().libraryArtworks.length;
+      const undoBefore = store.getState().undoStack.length;
+
+      store.getState().dismissDuplicateUploads();
+
+      const state = store.getState();
+      expect(state.pendingDuplicateUploads).toHaveLength(0);
+      expect(state.libraryArtworks).toHaveLength(countBeforeDismiss);
+      expect(state.undoStack).toHaveLength(undoBefore);
+    });
+
+    it("a library asset without a sha256 never matches", async () => {
+      // A legacy asset predates sha256. Intake one, strip its stored hash, then
+      // upload a content-identical file: with no hash on record it can't match,
+      // and reading the sha-less asset must not throw.
+      await useSharedHash(["legacy.jpg", "other.jpg"], "shared-sha");
+
+      await store.getState().addArtworksFromFiles([makeImageFile("legacy.jpg")]);
+      const countAfterFirst = store.getState().libraryArtworks.length;
+      for (const asset of assetRepository.assets.values()) delete asset.sha256;
+
+      await store.getState().addArtworksFromFiles([makeImageFile("other.jpg")]);
+
+      const state = store.getState();
+      expect(state.pendingDuplicateUploads).toHaveLength(0);
+      expect(state.libraryArtworks).toHaveLength(countAfterFirst + 1);
+    });
+
+    it("clears pending holds when the project is replaced", async () => {
+      await useSharedHash(["twin-a.jpg", "twin-b.jpg"], "shared-sha");
+
+      await store.getState().addArtworksFromFiles([makeImageFile("twin-a.jpg")]);
+      await store.getState().addArtworksFromFiles([makeImageFile("twin-b.jpg")]);
+      expect(store.getState().pendingDuplicateUploads).toHaveLength(1);
+
+      await store.getState().createProject("Another Show");
+
+      expect(store.getState().pendingDuplicateUploads).toHaveLength(0);
+    });
+  });
+
   describe("removeArtworkFromChecklist", () => {
     it("removes checklist membership and any artwork wallObjects, but leaves the library record intact", async () => {
       await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
