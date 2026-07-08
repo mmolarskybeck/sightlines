@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
@@ -6,6 +6,7 @@ import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { FileArrowUpIcon } from "@phosphor-icons/react/dist/csr/FileArrowUp";
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
+import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { useFileImageUrls } from "../hooks/useFileImageUrls";
 import { createArtworkImportPlan } from "../../domain/import/importPlan";
 import type {
@@ -48,6 +49,7 @@ const NO_IMAGE = "__none";
 
 const SPREADSHEET_NAME_PATTERN = /\.(csv|tsv|xlsx|xls)$/i;
 const IMAGE_MIME_PATTERN = /^image\/(jpeg|png|webp)$/i;
+const IMAGE_NAME_PATTERN = /\.(jpe?g|png|webp)$/i;
 
 const FIELD_LABELS: Record<ImportField, string> = {
   artist: "Artist",
@@ -82,16 +84,18 @@ export default function ImportWizard({
   projectUnit,
   intakeState,
   onOpenChange,
-  onImportDrafts
+  onImportDrafts,
+  onImportImages
 }: {
   open: boolean;
   projectUnit: DisplayUnit;
   intakeState: "idle" | "processing";
   onOpenChange: (open: boolean) => void;
   onImportDrafts: (drafts: ArtworkImportDraft[]) => Promise<void>;
+  onImportImages: (files: File[]) => Promise<void>;
 }) {
-  const spreadsheetInputRef = useRef<HTMLInputElement>(null);
-  const imageInputRef = useRef<HTMLInputElement>(null);
+  const spreadsheetInputId = "import-spreadsheet-input";
+  const imageInputId = "import-image-input";
   const [step, setStep] = useState<Step>("upload");
   const [workbook, setWorkbook] = useState<ImportWorkbookPreview | null>(null);
   const [spreadsheetFile, setSpreadsheetFile] = useState<File | null>(null);
@@ -236,14 +240,48 @@ export default function ImportWizard({
     }
   }
 
-  function dropSpreadsheet(files: FileList) {
+  function handleSpreadsheetFiles(files: FileList | File[]) {
     const file = Array.from(files).find((candidate) => SPREADSHEET_NAME_PATTERN.test(candidate.name));
     if (file) void readSpreadsheet(file);
   }
 
-  function dropImages(files: FileList) {
-    const matched = Array.from(files).filter((candidate) => IMAGE_MIME_PATTERN.test(candidate.type));
-    if (matched.length > 0) setImageFiles(matched);
+  function isImportImageFile(file: File) {
+    return IMAGE_MIME_PATTERN.test(file.type) || IMAGE_NAME_PATTERN.test(file.name);
+  }
+
+  function handleImageFiles(files: FileList | File[]) {
+    const matched = Array.from(files).filter(isImportImageFile);
+    if (matched.length > 0) {
+      setImageFiles((current) => [...current, ...matched]);
+    }
+  }
+
+  function activateUploadLabel(event: KeyboardEvent<HTMLLabelElement>) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    event.currentTarget.click();
+  }
+
+  function clearSpreadsheet() {
+    setWorkbook(null);
+    setSpreadsheetFile(null);
+    setSelectedSheet(null);
+    setHeaderRowIndex(undefined);
+    setMapping({});
+    setSelectedDraftIds(new Set());
+    setImageChoiceByDraftId({});
+    setSampleRowIndex(0);
+    setError(null);
+  }
+
+  function removeImageFile(indexToRemove: number) {
+    setImageFiles((current) => current.filter((_, index) => index !== indexToRemove));
+  }
+
+  async function importImagesOnly() {
+    if (imageFiles.length === 0 || intakeState === "processing") return;
+    await onImportImages(imageFiles);
+    onOpenChange(false);
   }
 
   async function commit() {
@@ -303,89 +341,177 @@ export default function ImportWizard({
 
         {error ? <p className="import-error">{error}</p> : null}
 
-        <div className="import-body">
+        <div className="import-body" data-step={step}>
           {step === "upload" ? (
             <div className="import-upload-grid">
               <input
-                ref={spreadsheetInputRef}
+                id={spreadsheetInputId}
                 accept=".csv,.tsv,.xlsx,.xls"
                 className="visually-hidden"
                 type="file"
                 onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void readSpreadsheet(file);
+                  handleSpreadsheetFiles(event.target.files ?? []);
                   event.target.value = "";
                 }}
               />
               <input
-                ref={imageInputRef}
+                id={imageInputId}
                 accept="image/jpeg,image/png,image/webp"
                 className="visually-hidden"
                 multiple
                 type="file"
                 onChange={(event) => {
-                  setImageFiles(Array.from(event.target.files ?? []));
+                  handleImageFiles(event.target.files ?? []);
                   event.target.value = "";
                 }}
               />
-              <button
-                type="button"
-                className="import-upload-tile"
-                data-dragover={dragTarget === "spreadsheet" ? "" : undefined}
-                data-filled={spreadsheetFile ? "" : undefined}
-                onClick={() => spreadsheetInputRef.current?.click()}
-                onDragLeave={() =>
-                  setDragTarget((current) => (current === "spreadsheet" ? null : current))
-                }
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  setDragTarget("spreadsheet");
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  setDragTarget(null);
-                  dropSpreadsheet(event.dataTransfer.files);
-                }}
-              >
-                <div aria-hidden="true" className="import-upload-icon">
-                  <FileArrowUpIcon size={20} />
+              {spreadsheetFile ? (
+                <div
+                  className="import-upload-tile import-upload-tile-filled"
+                  data-dragover={dragTarget === "spreadsheet" ? "" : undefined}
+                  data-filled=""
+                  onDragLeave={() =>
+                    setDragTarget((current) => (current === "spreadsheet" ? null : current))
+                  }
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setDragTarget("spreadsheet");
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    setDragTarget(null);
+                    handleSpreadsheetFiles(event.dataTransfer.files);
+                  }}
+                >
+                  <div className="import-upload-file-head">
+                    <div aria-hidden="true" className="import-upload-icon">
+                      <FileArrowUpIcon size={20} />
+                    </div>
+                    <div className="import-upload-file-copy">
+                      <strong>{spreadsheetFile.name}</strong>
+                      {uploadMeta ? (
+                        <span
+                          className="import-upload-meta"
+                          data-caution={uploadMeta.caution ? "" : undefined}
+                        >
+                          {uploadMeta.text}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="import-upload-actions">
+                    <Button asChild size="sm" variant="outline">
+                      <label htmlFor={spreadsheetInputId}>Replace</label>
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={clearSpreadsheet}>
+                      Clear
+                    </Button>
+                  </div>
                 </div>
-                <strong>{spreadsheetFile?.name ?? "Spreadsheet"}</strong>
-                {spreadsheetFile && uploadMeta ? (
-                  <span
-                    className="import-upload-meta"
-                    data-caution={uploadMeta.caution ? "" : undefined}
-                  >
-                    {uploadMeta.text}
-                  </span>
-                ) : null}
-                <span>{spreadsheetFile ? "Click to replace" : "CSV or Excel"}</span>
-              </button>
-              <button
-                type="button"
-                className="import-upload-tile"
-                data-dragover={dragTarget === "images" ? "" : undefined}
-                data-filled={imageFiles.length > 0 ? "" : undefined}
-                onClick={() => imageInputRef.current?.click()}
-                onDragLeave={() => setDragTarget((current) => (current === "images" ? null : current))}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  setDragTarget("images");
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  setDragTarget(null);
-                  dropImages(event.dataTransfer.files);
-                }}
-              >
-                <div aria-hidden="true" className="import-upload-icon">
-                  <ImageSquareIcon size={20} />
+              ) : (
+                <label
+                  className="import-upload-tile"
+                  data-dragover={dragTarget === "spreadsheet" ? "" : undefined}
+                  htmlFor={spreadsheetInputId}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={activateUploadLabel}
+                  onDragLeave={() =>
+                    setDragTarget((current) => (current === "spreadsheet" ? null : current))
+                  }
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setDragTarget("spreadsheet");
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    setDragTarget(null);
+                    handleSpreadsheetFiles(event.dataTransfer.files);
+                  }}
+                >
+                  <div aria-hidden="true" className="import-upload-icon">
+                    <FileArrowUpIcon size={20} />
+                  </div>
+                  <strong>Spreadsheet</strong>
+                  <span>Optional CSV or Excel metadata</span>
+                </label>
+              )}
+              {imageFiles.length > 0 ? (
+                <div
+                  className="import-upload-tile import-upload-tile-filled"
+                  data-dragover={dragTarget === "images" ? "" : undefined}
+                  data-filled=""
+                  onDragLeave={() => setDragTarget((current) => (current === "images" ? null : current))}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setDragTarget("images");
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    setDragTarget(null);
+                    handleImageFiles(event.dataTransfer.files);
+                  }}
+                >
+                  <div className="import-upload-file-head">
+                    <div aria-hidden="true" className="import-upload-icon">
+                      <ImageSquareIcon size={20} />
+                    </div>
+                    <div className="import-upload-file-copy">
+                      <strong>{imageFiles.length} images</strong>
+                      <span>Add more or remove individual files before matching.</span>
+                    </div>
+                  </div>
+                  <ul className="import-upload-file-list" aria-label="Selected image files">
+                    {imageFiles.map((file, index) => (
+                      <li key={`${file.name}-${file.lastModified}-${index}`} className="import-upload-file-row">
+                        <ImageSquareIcon aria-hidden="true" size={14} />
+                        <span>{file.name}</span>
+                        <button
+                          type="button"
+                          aria-label={`Remove ${file.name}`}
+                          className="import-upload-file-remove"
+                          onClick={() => removeImageFile(index)}
+                        >
+                          <XIcon aria-hidden="true" size={13} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="import-upload-actions">
+                    <Button asChild size="sm" variant="outline">
+                      <label htmlFor={imageInputId}>Add more</label>
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setImageFiles([])}>
+                      Clear all
+                    </Button>
+                  </div>
                 </div>
-                <strong>{imageFiles.length === 0 ? "Images" : `${imageFiles.length} files`}</strong>
-                <span>
-                  {imageFiles.length === 0 ? "Optional — JPG, PNG, or WebP" : "Click to replace"}
-                </span>
-              </button>
+              ) : (
+                <label
+                  className="import-upload-tile"
+                  data-dragover={dragTarget === "images" ? "" : undefined}
+                  htmlFor={imageInputId}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={activateUploadLabel}
+                  onDragLeave={() => setDragTarget((current) => (current === "images" ? null : current))}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setDragTarget("images");
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    setDragTarget(null);
+                    handleImageFiles(event.dataTransfer.files);
+                  }}
+                >
+                  <div aria-hidden="true" className="import-upload-icon">
+                    <ImageSquareIcon size={20} />
+                  </div>
+                  <strong>Images</strong>
+                  <span>JPG, PNG, or WebP</span>
+                </label>
+              )}
             </div>
           ) : null}
 
@@ -526,11 +652,24 @@ export default function ImportWizard({
           </Button>
           {step === "upload" ? (
             <Button
-              disabled={!table || table.rows.length === 0}
+              disabled={
+                (!table || table.rows.length === 0) &&
+                (imageFiles.length === 0 || intakeState === "processing")
+              }
               variant="primary"
-              onClick={() => setStep("map")}
+              onClick={() => {
+                if (table && table.rows.length > 0) {
+                  setStep("map");
+                  return;
+                }
+                void importImagesOnly();
+              }}
             >
-              Continue
+              {table && table.rows.length > 0
+                ? "Continue"
+                : intakeState === "processing"
+                  ? "Importing"
+                  : "Import images"}
             </Button>
           ) : null}
           {step === "map" ? (

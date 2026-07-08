@@ -146,10 +146,6 @@ textarea {
   font: inherit;
 }
 
-button {
-  color: inherit;
-}
-
 button:focus-visible,
 input:focus-visible {
   outline: 2px solid var(--focus);
@@ -1584,33 +1580,10 @@ body.panels-resizing * {
   margin-top: 14px;
 }
 
-.checklist-add-images {
-  min-height: 40px;
-}
-
-/* The app's one solid primary CTA (exactly one solid petrol per screen). */
+.checklist-add-images,
 .checklist-add {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
   width: 100%;
   min-height: 40px;
-  border: 1px solid var(--primary);
-  border-radius: var(--radius-sm);
-  background: var(--primary);
-  color: var(--bg);
-  cursor: pointer;
-  font-size: var(--type-sm);
-  font-weight: var(--weight-semibold);
-  transition:
-    background-color 150ms ease-out,
-    border-color 150ms ease-out;
-}
-
-.checklist-add:hover {
-  background: var(--primary-strong);
-  border-color: var(--primary-strong);
 }
 
 .import-dialog {
@@ -1639,11 +1612,19 @@ body.panels-resizing * {
   cursor: pointer;
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
-  transition: background-color 150ms ease-out;
+  transition:
+    background-color 150ms ease-out,
+    box-shadow 150ms ease-out,
+    color 150ms ease-out;
 }
 
 .import-step:hover:not(:disabled) {
   background: var(--surface);
+  color: var(--ink);
+}
+
+.import-step:active:not(:disabled) {
+  background: var(--surface-strong);
 }
 
 .import-step:focus-visible {
@@ -1672,7 +1653,7 @@ body.panels-resizing * {
 
 .import-step[data-state="active"] .import-step-chip {
   background: var(--primary);
-  color: white;
+  color: var(--primary-foreground);
 }
 
 .import-step[data-state="active"] .import-step-label {
@@ -1683,6 +1664,7 @@ body.panels-resizing * {
 .import-step[data-state="complete"] .import-step-chip {
   background: var(--primary-soft);
   color: var(--primary-strong);
+  box-shadow: inset 0 0 0 1px var(--primary-line);
 }
 
 .import-step-caret {
@@ -1705,6 +1687,10 @@ body.panels-resizing * {
   min-height: 420px;
   overflow: auto;
   padding: 12px 24px 24px;
+}
+
+.import-body[data-step="upload"] {
+  min-height: 0;
 }
 
 .import-upload-grid {
@@ -1730,6 +1716,7 @@ body.panels-resizing * {
   transition:
     background-color 150ms ease-out,
     border-color 150ms ease-out,
+    box-shadow 150ms ease-out,
     color 150ms ease-out;
 }
 
@@ -1740,9 +1727,106 @@ body.panels-resizing * {
   color: var(--primary-strong);
 }
 
+.import-upload-tile:active {
+  background: var(--primary-soft);
+  box-shadow: inset 0 0 0 1px var(--primary-line);
+}
+
+.import-upload-tile:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--focus);
+}
+
 .import-upload-tile[data-filled] {
   border-style: solid;
   border-color: var(--primary-line);
+}
+
+.import-upload-tile-filled {
+  align-items: stretch;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.import-upload-file-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.import-upload-file-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.import-upload-file-copy strong,
+.import-upload-file-copy span {
+  min-width: 0;
+}
+
+.import-upload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.import-upload-file-list {
+  display: grid;
+  gap: 2px;
+  min-height: 0;
+  max-height: 118px;
+  overflow: auto;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.import-upload-file-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  font-size: var(--type-xs);
+}
+
+.import-upload-file-row svg {
+  color: var(--subtle);
+}
+
+.import-upload-file-row span {
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-upload-file-remove {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.import-upload-file-remove:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.import-upload-file-remove:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus);
 }
 
 .import-upload-icon {
@@ -1764,7 +1848,17 @@ body.panels-resizing * {
   color: var(--primary-strong);
 }
 
-.import-upload-tile strong {
+.import-upload-tile:hover > span,
+.import-upload-tile[data-dragover] > span,
+.import-upload-tile:hover .import-upload-file-copy > span,
+.import-upload-tile[data-dragover] .import-upload-file-copy > span,
+.import-upload-tile:hover .import-upload-meta,
+.import-upload-tile[data-dragover] .import-upload-meta {
+  color: var(--primary-strong);
+}
+
+.import-upload-tile > strong,
+.import-upload-file-copy strong {
   max-width: 100%;
   overflow: hidden;
   color: var(--ink);
@@ -1775,7 +1869,8 @@ body.panels-resizing * {
   white-space: nowrap;
 }
 
-.import-upload-tile span {
+.import-upload-tile > span,
+.import-upload-file-copy > span {
   color: var(--muted);
   font-size: var(--type-xs);
   font-weight: var(--weight-regular);

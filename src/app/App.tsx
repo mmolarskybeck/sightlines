@@ -1260,6 +1260,7 @@ export function App() {
           open={importWizardOpen}
           projectUnit={project.unit}
           onImportDrafts={importArtworkDrafts}
+          onImportImages={addArtworksFromFiles}
           onOpenChange={setImportWizardOpen}
         />
       </Suspense>

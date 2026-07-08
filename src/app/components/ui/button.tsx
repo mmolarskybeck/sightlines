@@ -4,34 +4,34 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "./utils";
 
 export const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-sm text-[var(--type-sm)] font-[var(--weight-semibold)] leading-none transition-[background-color,border-color,color,box-shadow] duration-150 ease-out outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-sm text-[var(--type-sm)] font-[var(--weight-semibold)] leading-none transition-[background-color,border-color,color,box-shadow,filter] duration-150 ease-out outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {
         default:
-          "border border-border bg-background text-foreground hover:bg-surface hover:text-foreground",
+          "border border-border bg-background text-foreground hover:border-input hover:bg-surface hover:text-foreground active:bg-surface-strong",
         primary:
-          "border border-transparent bg-primary text-primary-foreground hover:bg-petrol-strong",
+          "border border-primary bg-primary text-primary-foreground shadow-[var(--shadow-tight)] hover:border-petrol-strong hover:bg-petrol-strong hover:text-primary-foreground active:border-petrol-strong active:bg-petrol-strong active:text-primary-foreground active:brightness-90",
         ghost:
-          "border border-transparent bg-transparent text-muted-foreground hover:bg-surface hover:text-foreground",
+          "border border-transparent bg-transparent text-muted-foreground hover:bg-surface hover:text-foreground active:bg-surface-strong active:text-foreground",
         subtle:
-          "border border-transparent bg-surface text-foreground hover:bg-surface-strong",
+          "border border-transparent bg-surface text-foreground hover:bg-surface-strong active:bg-surface-strong active:brightness-95",
         outline:
-          "border border-border bg-background text-foreground hover:bg-surface",
+          "border border-border bg-background text-foreground hover:border-input hover:bg-surface active:bg-surface-strong",
         destructive:
-          "border border-destructive bg-destructive text-destructive-foreground hover:brightness-95",
+          "border border-destructive bg-destructive text-destructive-foreground hover:text-destructive-foreground hover:brightness-95 active:brightness-90",
         rail:
-          "border border-transparent bg-transparent text-muted-foreground hover:bg-surface hover:text-foreground data-[active=true]:bg-petrol-soft data-[active=true]:text-petrol-strong",
+          "border border-transparent bg-transparent text-muted-foreground hover:bg-surface hover:text-foreground active:bg-surface-strong data-[active=true]:bg-petrol-soft data-[active=true]:text-petrol-strong",
         tab:
-          "rounded-none border-0 bg-transparent px-2.5 text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:shadow-[inset_0_-2px_0_var(--primary)]",
+          "rounded-none border-0 bg-transparent px-2.5 text-muted-foreground hover:text-foreground active:text-foreground data-[state=active]:text-foreground data-[state=active]:shadow-[inset_0_-2px_0_var(--primary)]",
         inspector:
-          "border border-border bg-surface text-foreground hover:bg-surface-strong",
+          "border border-border bg-surface text-foreground hover:border-input hover:bg-surface-strong active:bg-surface-strong active:brightness-95",
         // Quiet destructive: reads danger (ink + hairline) without the solid
         // red fill of `destructive`. For one-click, undo-covered removals that
         // should still telegraph what they do. Danger-tinted focus ring so the
         // destructive intent survives keyboard focus.
         "destructive-ghost":
-          "border border-[var(--danger-line)] bg-surface text-[var(--danger)] hover:bg-[var(--danger-soft)] focus-visible:ring-[var(--danger)]"
+          "border border-[var(--danger-line)] bg-surface text-[var(--danger)] hover:bg-[var(--danger-soft)] active:bg-[var(--danger-soft)] active:brightness-95 focus-visible:ring-[var(--danger)]"
       },
       size: {
         default: "h-9 px-3",
