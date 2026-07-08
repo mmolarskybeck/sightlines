@@ -55,21 +55,17 @@ import {
   getMinorGridIntervalMm
 } from "../../domain/units/precision";
 import {
-  clampZoom,
   FIT_VIEWPORT,
   getEffectiveZoom,
   getViewBox2D,
-  panBy,
-  pinchZoomPan,
   PLAN_ZOOM_LIMITS,
-  WHEEL_ZOOM_SENSITIVITY,
   ZOOM_STEP,
-  zoomAtPoint,
   type Viewport2D
 } from "../../domain/viewport/viewport2d";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { useContainerSize } from "../hooks/useContainerSize";
+import { useSvgViewportGestures } from "../hooks/useSvgViewportGestures";
 import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
 import { GridOverlay } from "./GridOverlay";
 import { ArtworkTooltipContent, OpeningTooltipContent } from "./PlacementTooltip";
@@ -91,10 +87,6 @@ const MIN_WALL_OBJECT_DEPTH_PX = 9;
 // Every plan object gets an invisible hit pad at least this big on both axes
 // so small objects (esp. thin wall objects) stay clickable at any zoom.
 const MIN_OBJECT_HIT_PX = 20;
-// A touch gesture (one-finger pan or two-finger pinch) that moves less than
-// this many client px on release is treated as a stationary tap — the trailing
-// click still selects/places/clears; beyond it, the click is suppressed.
-const TOUCH_TAP_SLOP_PX = 8;
 
 // Stable module-level reference so a caller that doesn't pass `getBlob`
 // doesn't retrigger useAssetImageUrls' effect on every render (same idiom as
@@ -346,46 +338,6 @@ export function PlanView({
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
   const marqueeRef = useRef<MarqueeState | null>(null);
 
-  // Space-drag / middle-mouse pan. `isSpaceDown` drives the container cursor
-  // (grab), `panning` drives it while a pan drag is live (grabbing).
-  // `isSpaceDown` is mirrored into `spaceHeldRef` so the capture-phase
-  // pointerdown and the window-level pan move handlers read a fresh value
-  // without resubscribing.
-  const [isSpaceDown, setIsSpaceDown] = useState(false);
-  const spaceHeldRef = useRef(false);
-  const [panning, setPanning] = useState(false);
-  // Last pointer client position of the in-flight pan, for incremental deltas.
-  const panLastRef = useRef<{ x: number; y: number } | null>(null);
-  // Fresh viewport for gesture handlers that were subscribed once (pan moves,
-  // wheel) and must not close over a stale prop — same ref-mirror discipline
-  // the drag gestures use for their transient state.
-  const viewportRef = useRef(viewport);
-  viewportRef.current = viewport;
-
-  // Touch (tablet) gestures: one-finger canvas pan and two-finger pinch-zoom,
-  // layered over the existing mouse/space gestures. A small explicit state
-  // machine keyed off the number of tracked touch pointers:
-  //   • touchPointsRef  — every live touch pointer's latest client position.
-  //   • touchModeRef    — which gesture currently owns the viewport.
-  //   • touchPanLastRef — last client position of a one-finger pan (deltas).
-  //   • touchPinchRef   — the two pinch pointer ids + previous midpoint/spread.
-  //   • touchMovedPxRef — total client-px travelled this gesture (tap vs pan).
-  // `touchTracking` (state) keys the window move/up effect on/off, mirroring
-  // how `panning` gates the mouse-pan effect. An object drag started by a
-  // single finger owns itself (its own handlers) — touchMode stays "idle" and
-  // these handlers stay out of its way.
-  const touchPointsRef = useRef(new Map<number, { x: number; y: number }>());
-  const touchModeRef = useRef<"idle" | "pan" | "pinch">("idle");
-  const touchPanLastRef = useRef<{ x: number; y: number } | null>(null);
-  const touchPinchRef = useRef<{
-    idA: number;
-    idB: number;
-    prevMid: { x: number; y: number };
-    prevDist: number;
-  } | null>(null);
-  const touchMovedPxRef = useRef(0);
-  const [touchTracking, setTouchTracking] = useState(false);
-
   // Transient UI state, not store/view-prefs: which palette tool is armed,
   // its live ghost, and the hysteresis id threaded across pointer moves (the
   // same discipline as the wall-resize drag's previousSnapTargetId, just
@@ -483,343 +435,50 @@ export function PlanView({
       }
     : resizePreviewProject;
 
-  // Shared by the wall-resize drag effect below and the palette-tool pointer
-  // handlers — both need the same client-px → viewBox-mm conversion.
-  function toSvgMm(clientX: number, clientY: number): Vector2 | null {
-    const svg = svgRef.current;
-    if (!svg) return null;
+  // The shared 2D viewport gesture engine (pan / zoom / pinch / wheel /
+  // keyboard), formerly a ~350-line copy inline here and in ElevationView. It
+  // works EXCLUSIVELY in SVG userspace (y-down) — plan floor coordinates are
+  // already y-down, so there is no flip anywhere. A single finger's pan-start is
+  // delegated back to this view's bubble-phase background handler (beginMarquee
+  // → beginTouchPan), and the post-gesture trailing-click suppression stays
+  // view-owned (armSuppressNextToolClick), reproduced via onGestureEnd.
+  const gestures = useSvgViewportGestures({
+    svgRef,
+    viewport,
+    onViewportChange,
+    contentBounds,
+    containerSize,
+    zoomLimits: PLAN_ZOOM_LIMITS,
+    // A 2nd finger landing over ANY in-flight single-finger edit (wall resize,
+    // room move, or object/group move) blocks rather than starting a pinch —
+    // defer to that edit (preserves the old capture guard).
+    isPinchBlocked: () =>
+      Boolean(dragRef.current || roomDragRef.current || objectDragRef.current),
+    onGestureEnd: (info) => {
+      // A space/middle mouse-pan always fires a trailing `click` on the svg; a
+      // real touch pan/pinch (moved past slop, so !isTap) does too. Both must
+      // arm the suppression so that click can't clear the selection or place a
+      // tool. A stationary touch tap (isTap) leaves the flag be, so its native
+      // click still selects/places/clears exactly as today.
+      if (info.kind === "mouse-pan" || !info.isTap) armSuppressNextToolClick();
+    }
+  });
+  const { isSpaceDown, panning, zoomAtCenter, canZoomIn, canZoomOut, beginTouchPan } = gestures;
+  // The hook's toSvgPoint is byte-identical to the old local toSvgMm; alias it
+  // so every existing call site stays untouched.
+  const toSvgMm = gestures.toSvgPoint;
 
-    const point = svg.createSVGPoint();
-    point.x = clientX;
-    point.y = clientY;
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return null;
-
-    const transformed = point.matrixTransform(ctm.inverse());
-    return { xMm: transformed.x, yMm: transformed.y };
+  // The arm+auto-reset idiom for the trailing-click suppression flag: a real
+  // pan/pinch/marquee release fires a trailing `click` on the svg, and this
+  // marks the very next handleSvgClick to be swallowed. The setTimeout(0) is
+  // the safety net for a release that lands where no click follows (pointer
+  // left the svg mid-gesture).
+  function armSuppressNextToolClick() {
+    suppressNextToolClickRef.current = true;
+    window.setTimeout(() => {
+      suppressNextToolClickRef.current = false;
+    }, 0);
   }
-
-  // Zoom the current viewBox about its own center — the [+]/[−] buttons' target
-  // point, since there's no cursor to anchor on for a button press.
-  function zoomAtCenter(factor: number) {
-    onViewportChange(
-      zoomAtPoint(
-        viewport,
-        { xMm: viewBoxBounds.x + viewBoxBounds.width / 2, yMm: viewBoxBounds.y + viewBoxBounds.height / 2 },
-        factor,
-        contentBounds,
-        containerSize,
-        PLAN_ZOOM_LIMITS
-      )
-    );
-  }
-
-  // Wheel = zoom (ctrl/⌘ or trackpad pinch) or pan (plain / shift-horizontal).
-  // Reassigned every render so it always sees the latest viewport/bounds;
-  // registered once as a NON-passive native listener (React's onWheel can be
-  // passive, which would make preventDefault a no-op) in the effect below.
-  const wheelHandlerRef = useRef<(e: WheelEvent) => void>(() => {});
-  wheelHandlerRef.current = (e: WheelEvent) => {
-    e.preventDefault();
-    // Line-mode wheels (deltaMode 1) report in lines, not pixels — scale up so
-    // one detent moves a comparable amount to a pixel-mode wheel.
-    const norm = (d: number) => (e.deltaMode === 1 ? d * 16 : d);
-    if (e.ctrlKey || e.metaKey) {
-      // ctrlKey===true is also how a trackpad pinch arrives in Chrome/Firefox/
-      // Safari — same code path, anchored on the cursor's world point.
-      const point = toSvgMm(e.clientX, e.clientY);
-      if (!point) return;
-      const factor = Math.min(2, Math.max(0.5, Math.exp(-norm(e.deltaY) * WHEEL_ZOOM_SENSITIVITY)));
-      onViewportChange(
-        zoomAtPoint(viewportRef.current, point, factor, contentBounds, containerSize, PLAN_ZOOM_LIMITS)
-      );
-    } else {
-      // Plain wheel pans; shift+wheel pans horizontally on Windows (macOS
-      // already flips deltaX for a shifted wheel, so only synthesize when the
-      // browser left deltaX at 0).
-      const dx = e.shiftKey && e.deltaX === 0 ? norm(e.deltaY) : norm(e.deltaX);
-      const dy = e.shiftKey && e.deltaX === 0 ? 0 : norm(e.deltaY);
-      onViewportChange(panBy(viewportRef.current, { x: dx, y: dy }, contentBounds, containerSize));
-    }
-  };
-
-  useEffect(() => {
-    const el = svgRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => wheelHandlerRef.current(e);
-    // Safari's non-standard pinch events would otherwise page-zoom the app.
-    const onGesture = (e: Event) => e.preventDefault();
-    el.addEventListener("wheel", onWheel, { passive: false });
-    el.addEventListener("gesturestart", onGesture);
-    el.addEventListener("gesturechange", onGesture);
-    el.addEventListener("gestureend", onGesture);
-    return () => {
-      el.removeEventListener("wheel", onWheel);
-      el.removeEventListener("gesturestart", onGesture);
-      el.removeEventListener("gesturechange", onGesture);
-      el.removeEventListener("gestureend", onGesture);
-    };
-  }, []);
-
-  // Track Space (for the grab cursor + capture-phase pan intercept) and handle
-  // ⌘0 / Ctrl+0 = reset to fit. Window-scoped, mirroring PlanView's other
-  // window listeners; skips edit fields so typing a literal "0" or space in an
-  // input is never hijacked.
-  useEffect(() => {
-    function isEditable(target: EventTarget | null): boolean {
-      const el = target as HTMLElement | null;
-      if (!el) return false;
-      const tag = el.tagName;
-      return (
-        tag === "INPUT" ||
-        tag === "TEXTAREA" ||
-        tag === "SELECT" ||
-        el.isContentEditable === true
-      );
-    }
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (isEditable(event.target)) return;
-      if ((event.metaKey || event.ctrlKey) && event.key === "0") {
-        // Also blocks the browser's own zoom-reset.
-        event.preventDefault();
-        onViewportChange(FIT_VIEWPORT);
-        return;
-      }
-      if (event.code === "Space" || event.key === " ") {
-        // A Tab-focused button/link must still activate on Space — only
-        // hijack the key when it isn't targeting an interactive control.
-        if ((event.target as HTMLElement)?.closest?.('button, a, [role="button"]')) {
-          return;
-        }
-        if (!spaceHeldRef.current) {
-          spaceHeldRef.current = true;
-          setIsSpaceDown(true);
-        }
-        // Stops the page from scrolling while space engages pan. e.repeat is
-        // ignored for the flag (already set) but still prevented so
-        // held-space never scrolls.
-        event.preventDefault();
-      }
-    }
-
-    function onKeyUp(event: KeyboardEvent) {
-      if (event.code === "Space" || event.key === " ") {
-        spaceHeldRef.current = false;
-        setIsSpaceDown(false);
-      }
-    }
-
-    function onBlur() {
-      // ⌘Tab away while holding space would otherwise leave the flag stuck.
-      spaceHeldRef.current = false;
-      setIsSpaceDown(false);
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
-    window.addEventListener("blur", onBlur);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-      window.removeEventListener("blur", onBlur);
-    };
-  }, [onViewportChange]);
-
-  // Space/middle-mouse pan drag. Subscribed once per gesture (keyed on
-  // `panning`), reading the live viewport via viewportRef and applying the
-  // negated incremental pointer delta so the drawing tracks the pointer.
-  // contentBounds/containerSize are captured by closure — they can't change
-  // mid-gesture (no commit, no resize while a button is held).
-  useEffect(() => {
-    if (!panning) return;
-
-    function onPointerMove(event: PointerEvent) {
-      const last = panLastRef.current;
-      if (!last) return;
-      onViewportChange(
-        panBy(
-          viewportRef.current,
-          { x: -(event.clientX - last.x), y: -(event.clientY - last.y) },
-          contentBounds,
-          containerSize
-        )
-      );
-      panLastRef.current = { x: event.clientX, y: event.clientY };
-    }
-
-    function endPan() {
-      panLastRef.current = null;
-      setPanning(false);
-      // A left-button (space) pan fires a trailing `click` on the svg just like
-      // a marquee does; without this, handleSvgClick's no-tool branch would
-      // read it as a background click and clear the selection. Same suppress
-      // flag + setTimeout safety net the marquee uses. (Middle-button pan fires
-      // auxclick, not click, so this is harmless there.)
-      suppressNextToolClickRef.current = true;
-      window.setTimeout(() => {
-        suppressNextToolClickRef.current = false;
-      }, 0);
-    }
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", endPan);
-    window.addEventListener("pointercancel", endPan);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", endPan);
-      window.removeEventListener("pointercancel", endPan);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panning, onViewportChange]);
-
-  // Begin a two-finger pinch from the two currently tracked touch pointers.
-  // Ends any in-flight one-finger pan (pinch owns the gesture from here).
-  function beginPinch() {
-    const entries = [...touchPointsRef.current.entries()];
-    if (entries.length < 2) return;
-    const [idA, a] = entries[0];
-    const [idB, b] = entries[1];
-    touchModeRef.current = "pinch";
-    touchPanLastRef.current = null;
-    touchPinchRef.current = {
-      idA,
-      idB,
-      prevMid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
-      prevDist: Math.max(Math.hypot(a.x - b.x, a.y - b.y), 0)
-    };
-  }
-
-  // Begin a one-finger canvas pan (touch only). Called from the svg's
-  // bubble-phase pointerdown, which only fires for a press on true background
-  // (an object's pointerdown stopPropagation keeps it from reaching here — that
-  // touch stays an object drag instead).
-  function beginTouchPan(clientX: number, clientY: number) {
-    touchModeRef.current = "pan";
-    touchPanLastRef.current = { x: clientX, y: clientY };
-  }
-
-  // Touch move/up/cancel/blur, subscribed once while ≥1 touch is tracked
-  // (keyed on `touchTracking`), reading live state via the touch refs — the
-  // same discipline the mouse-pan effect uses. viewport is read fresh via
-  // viewportRef; contentBounds/containerSize are captured by closure and can't
-  // change mid-gesture (no commit, no resize while fingers are down).
-  useEffect(() => {
-    if (!touchTracking) return;
-
-    function onPointerMove(event: PointerEvent) {
-      if (event.pointerType !== "touch") return;
-      const points = touchPointsRef.current;
-      if (!points.has(event.pointerId)) return;
-      points.set(event.pointerId, { x: event.clientX, y: event.clientY });
-
-      if (touchModeRef.current === "pan") {
-        const last = touchPanLastRef.current;
-        if (!last) return;
-        const dx = event.clientX - last.x;
-        const dy = event.clientY - last.y;
-        touchMovedPxRef.current += Math.hypot(dx, dy);
-        onViewportChange(
-          panBy(viewportRef.current, { x: -dx, y: -dy }, contentBounds, containerSize)
-        );
-        touchPanLastRef.current = { x: event.clientX, y: event.clientY };
-        return;
-      }
-
-      if (touchModeRef.current === "pinch") {
-        const pinch = touchPinchRef.current;
-        if (!pinch) return;
-        const a = points.get(pinch.idA);
-        const b = points.get(pinch.idB);
-        if (!a || !b) return;
-        const nextMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-        const nextDist = Math.hypot(a.x - b.x, a.y - b.y);
-        const midDelta = { x: nextMid.x - pinch.prevMid.x, y: nextMid.y - pinch.prevMid.y };
-        if (pinch.prevDist > 0 && nextDist > 0) {
-          const factor = nextDist / pinch.prevDist;
-          // World point under the PREVIOUS midpoint, via the live CTM (same
-          // anchor discipline the wheel-zoom handler uses).
-          const prevMidWorld = toSvgMm(pinch.prevMid.x, pinch.prevMid.y);
-          if (prevMidWorld) {
-            touchMovedPxRef.current +=
-              Math.hypot(midDelta.x, midDelta.y) + Math.abs(nextDist - pinch.prevDist);
-            onViewportChange(
-              pinchZoomPan(
-                viewportRef.current,
-                prevMidWorld,
-                factor,
-                midDelta,
-                contentBounds,
-                containerSize,
-                PLAN_ZOOM_LIMITS
-              )
-            );
-          }
-        }
-        pinch.prevMid = nextMid;
-        pinch.prevDist = nextDist;
-      }
-    }
-
-    function onPointerUp(event: PointerEvent) {
-      if (event.pointerType !== "touch") return;
-      const points = touchPointsRef.current;
-      if (!points.has(event.pointerId)) return;
-      points.delete(event.pointerId);
-
-      if (touchModeRef.current === "pinch") {
-        const pinch = touchPinchRef.current;
-        // Only a lift of one of the two pinch fingers ends the pinch; a 3rd
-        // finger lifting leaves it running. A 2→1 lift never hands off to a new
-        // pan — the lone remaining finger idles until a fresh touch-down.
-        if (pinch && (event.pointerId === pinch.idA || event.pointerId === pinch.idB)) {
-          touchModeRef.current = "idle";
-          touchPinchRef.current = null;
-        }
-      } else if (touchModeRef.current === "pan") {
-        touchModeRef.current = "idle";
-        touchPanLastRef.current = null;
-      }
-
-      if (points.size === 0) {
-        // Whole gesture over. A real pan/pinch arms the same trailing-click
-        // suppression the space-pan and marquee paths use so the click doesn't
-        // clear the selection or place a tool; a stationary tap leaves it be so
-        // the native click still selects/places/clears exactly as today.
-        if (touchMovedPxRef.current > TOUCH_TAP_SLOP_PX) {
-          suppressNextToolClickRef.current = true;
-          window.setTimeout(() => {
-            suppressNextToolClickRef.current = false;
-          }, 0);
-        }
-        touchMovedPxRef.current = 0;
-        setTouchTracking(false);
-      }
-    }
-
-    function onBlur() {
-      // Losing the window (⌘Tab, notification) mid-gesture would otherwise
-      // strand tracked pointers — reset everything.
-      touchPointsRef.current.clear();
-      touchModeRef.current = "idle";
-      touchPanLastRef.current = null;
-      touchPinchRef.current = null;
-      touchMovedPxRef.current = 0;
-      setTouchTracking(false);
-    }
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerUp);
-    window.addEventListener("blur", onBlur);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
-      window.removeEventListener("blur", onBlur);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [touchTracking, onViewportChange]);
 
   // Only the committed project's walls matter for tool placement — a tool
   // can't be armed mid wall-resize-drag anyway (see the drag guard in the
@@ -908,48 +567,14 @@ export function PlanView({
   // and skip placing, without needing RoomResizeHandles/PlanObject to know
   // anything about the plan-view tool.
   function handleSvgPointerDownCapture(event: ReactPointerEvent<SVGSVGElement>) {
-    // Touch pointers feed the pinch/pan state machine. This capture-phase
-    // handler always fires first (before any object's own pointerdown), so
-    // every touch is recorded here regardless of what it lands on. The 2nd
-    // finger claims the gesture as a pinch (unless an object drag is already in
-    // flight, in which case we defer to that edit and just block the finger),
-    // stopping propagation so no object under it starts its own drag.
-    if (event.pointerType === "touch") {
-      const points = touchPointsRef.current;
-      const isFirst = points.size === 0;
-      points.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      if (isFirst) touchMovedPxRef.current = 0;
-      setTouchTracking(true);
-      if (points.size === 2) {
-        event.preventDefault();
-        event.stopPropagation();
-        // Defer to ANY in-flight single-finger edit (wall resize, room move, or
-        // object/group move) — don't pinch over it, just block the 2nd finger.
-        if (!dragRef.current && !roomDragRef.current && !objectDragRef.current) {
-          beginPinch();
-        }
-        return;
-      }
-      if (points.size >= 3) return; // ignore 3rd+ touches
-      // A single touch: fall through so a press on an object still arms
-      // suppressNextToolClickRef (the object-tap path), exactly like a mouse
-      // press. Whether it becomes a pan is decided in beginMarquee (bubble).
-    }
-
-    // Space-held (left button) or middle-mouse press = pan, intercepted in the
-    // capture phase BEFORE any gesture (marquee, room/object/handle drag,
-    // click-to-place) can claim it. Guarded on `spaceHeldRef || button === 1`
-    // so an ordinary left press with space up flows through untouched — every
-    // existing gesture behaves exactly as before. Right-click (button 2) is
-    // never intercepted. stopPropagation/preventDefault keep the marquee's own
-    // pointerdown from also firing and kill middle-click autoscroll.
-    if (spaceHeldRef.current || event.button === 1) {
-      event.preventDefault();
-      event.stopPropagation();
-      panLastRef.current = { x: event.clientX, y: event.clientY };
-      setPanning(true);
-      return;
-    }
+    // The touch pinch/pan bookkeeping and the space/middle-mouse pan claim now
+    // live in the hook. It returns true ONLY when it CONSUMED the event (a pinch
+    // claim — including the blocked-pinch case — or a space/middle pan claim),
+    // in which case the view's own capture-tail below must not run. On false (a
+    // 1st touch, a 3rd+ touch, or an ordinary left press) the tail still runs,
+    // so a press on an object still arms suppressNextToolClickRef exactly as a
+    // mouse press did.
+    if (gestures.handlePointerDownCapture(event)) return;
 
     const target = event.target as Element | null;
     // The ghost itself carries the `.plan-object` class too (so it shares
@@ -1539,15 +1164,14 @@ export function PlanView({
   }, [marquee]);
 
   function beginMarquee(event: ReactPointerEvent<SVGSVGElement>) {
-    // Touch: a single finger on true background pans the canvas instead of
-    // marqueeing (the marquee is a mouse-only gesture on tablets). Only the
-    // sole tracked touch starts a pan — a pinch's touches were already claimed
-    // in the capture handler. Returns unconditionally for touch so a finger
-    // never falls through into the marquee path below.
+    // Touch: a finger on true background pans the canvas instead of marqueeing
+    // (the marquee is a mouse-only gesture on tablets). A pinch's 2nd finger was
+    // already claimed (stopPropagation) in the capture handler, so it never
+    // reaches here; beginTouchPan self-guards (exactly one pointer, no live
+    // pinch), and the hook decides tap-vs-pan on release. Returns unconditionally
+    // for touch so a finger never falls through into the marquee path below.
     if (event.pointerType === "touch") {
-      if (touchPointsRef.current.size === 1 && touchModeRef.current !== "pinch") {
-        beginTouchPan(event.clientX, event.clientY);
-      }
+      beginTouchPan(event.clientX, event.clientY);
       return;
     }
 
@@ -1779,14 +1403,8 @@ export function PlanView({
       <ViewportZoomControls
         zoom={getEffectiveZoom(viewport)}
         isFit={viewport.mode === "fit"}
-        canZoomIn={
-          clampZoom(getEffectiveZoom(viewport) * ZOOM_STEP, contentBounds, containerSize, PLAN_ZOOM_LIMITS) !==
-          getEffectiveZoom(viewport)
-        }
-        canZoomOut={
-          clampZoom(getEffectiveZoom(viewport) / ZOOM_STEP, contentBounds, containerSize, PLAN_ZOOM_LIMITS) !==
-          getEffectiveZoom(viewport)
-        }
+        canZoomIn={canZoomIn}
+        canZoomOut={canZoomOut}
         onZoomIn={() => zoomAtCenter(ZOOM_STEP)}
         onZoomOut={() => zoomAtCenter(1 / ZOOM_STEP)}
         onFit={() => onViewportChange(FIT_VIEWPORT)}
