@@ -9,7 +9,10 @@ import {
 import {
   clampZoom,
   FIT_VIEWPORT,
+  panBy,
   PLAN_ZOOM_LIMITS,
+  WHEEL_ZOOM_SENSITIVITY,
+  zoomAtPoint,
   type Size,
   type ViewBox,
   type Viewport2D,
@@ -421,5 +424,107 @@ describe("useSvgViewportGestures — toSvgPoint", () => {
     const { holder } = renderGestures({ viewport: FIT_VIEWPORT });
     mockCtm(holder.svg!, { x: -5, y: -7 });
     expect(holder.api!.toSvgPoint(100, 50)).toEqual({ xMm: 95, yMm: 43 });
+  });
+});
+
+describe("useSvgViewportGestures — wheel handler math", () => {
+  function dispatchWheel(svg: SVGSVGElement, props: WheelEventInit) {
+    const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, ...props });
+    act(() => {
+      svg.dispatchEvent(event);
+    });
+    return event;
+  }
+
+  it("plain wheel pans by the raw pixel deltas", () => {
+    const onViewportChange = vi.fn();
+    const { holder } = renderGestures({ viewport: FIT_VIEWPORT, onViewportChange });
+    dispatchWheel(holder.svg!, { deltaX: 30, deltaY: 50 });
+    expect(onViewportChange).toHaveBeenCalledWith(
+      panBy(FIT_VIEWPORT, { x: 30, y: 50 }, DEFAULT_BOUNDS, DEFAULT_SIZE)
+    );
+  });
+
+  it("shift+wheel with deltaX 0 pans horizontally by deltaY (Windows shift-scroll)", () => {
+    const onViewportChange = vi.fn();
+    const { holder } = renderGestures({ viewport: FIT_VIEWPORT, onViewportChange });
+    dispatchWheel(holder.svg!, { shiftKey: true, deltaX: 0, deltaY: 40 });
+    expect(onViewportChange).toHaveBeenCalledWith(
+      panBy(FIT_VIEWPORT, { x: 40, y: 0 }, DEFAULT_BOUNDS, DEFAULT_SIZE)
+    );
+  });
+
+  it("shift+wheel with a real deltaX keeps both axes (macOS already flips)", () => {
+    const onViewportChange = vi.fn();
+    const { holder } = renderGestures({ viewport: FIT_VIEWPORT, onViewportChange });
+    dispatchWheel(holder.svg!, { shiftKey: true, deltaX: 25, deltaY: 5 });
+    expect(onViewportChange).toHaveBeenCalledWith(
+      panBy(FIT_VIEWPORT, { x: 25, y: 5 }, DEFAULT_BOUNDS, DEFAULT_SIZE)
+    );
+  });
+
+  it("line-mode deltas (deltaMode 1) scale by 16 to comparable pixels", () => {
+    const onViewportChange = vi.fn();
+    const { holder } = renderGestures({ viewport: FIT_VIEWPORT, onViewportChange });
+    dispatchWheel(holder.svg!, { deltaY: 3, deltaMode: 1 });
+    expect(onViewportChange).toHaveBeenCalledWith(
+      panBy(FIT_VIEWPORT, { x: 0, y: 48 }, DEFAULT_BOUNDS, DEFAULT_SIZE)
+    );
+  });
+
+  it("ctrl+wheel zooms at the pointer with factor exp(-deltaY * sensitivity)", () => {
+    const onViewportChange = vi.fn();
+    const { holder } = renderGestures({ viewport: FIT_VIEWPORT, onViewportChange });
+    // Identity CTM: mockCtm's matrixTransform ignores its argument and maps
+    // point.{x,y} (set to clientX/clientY by toSvgPoint) plus a translate —
+    // {x:0,y:0} makes it the identity map, so xMm/yMm equal clientX/clientY.
+    mockCtm(holder.svg!, { x: 0, y: 0 });
+    dispatchWheel(holder.svg!, { ctrlKey: true, clientX: 100, clientY: 80, deltaY: 50 });
+    const factor = Math.exp(-50 * WHEEL_ZOOM_SENSITIVITY);
+    expect(onViewportChange).toHaveBeenCalledWith(
+      zoomAtPoint(FIT_VIEWPORT, { xMm: 100, yMm: 80 }, factor, DEFAULT_BOUNDS, DEFAULT_SIZE, PLAN_ZOOM_LIMITS)
+    );
+  });
+
+  it("per-event zoom factor clamps to [0.5, 2]", () => {
+    const onViewportChange = vi.fn();
+    const { holder } = renderGestures({ viewport: FIT_VIEWPORT, onViewportChange });
+    mockCtm(holder.svg!, { x: 0, y: 0 });
+    dispatchWheel(holder.svg!, { ctrlKey: true, clientX: 0, clientY: 0, deltaY: -500 }); // exp(5) → clamps to 2
+    dispatchWheel(holder.svg!, { ctrlKey: true, clientX: 0, clientY: 0, deltaY: 500 }); // exp(-5) → clamps to 0.5
+    expect(onViewportChange).toHaveBeenNthCalledWith(
+      1,
+      zoomAtPoint(FIT_VIEWPORT, { xMm: 0, yMm: 0 }, 2, DEFAULT_BOUNDS, DEFAULT_SIZE, PLAN_ZOOM_LIMITS)
+    );
+    expect(onViewportChange).toHaveBeenNthCalledWith(
+      2,
+      zoomAtPoint(FIT_VIEWPORT, { xMm: 0, yMm: 0 }, 0.5, DEFAULT_BOUNDS, DEFAULT_SIZE, PLAN_ZOOM_LIMITS)
+    );
+  });
+
+  it("ctrl+wheel before first layout (no getScreenCTM) is a no-op, not a crash", () => {
+    // jsdom implements neither createSVGPoint nor getScreenCTM at all (both
+    // are `undefined`, so calling the truly-bare element throws "not a
+    // function" rather than characterizing anything about the hook). A real
+    // SVGSVGElement always has createSVGPoint, but getScreenCTM legitimately
+    // returns null before the element's first layout — that's the actual
+    // "no CTM yet" case toSvgPoint's null guard exists for, so stub only
+    // createSVGPoint (to stand in for the always-present real API) and leave
+    // getScreenCTM returning null.
+    const onViewportChange = vi.fn();
+    const { holder } = renderGestures({ viewport: FIT_VIEWPORT, onViewportChange });
+    const svg = holder.svg!;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (svg as any).createSVGPoint = () => ({ x: 0, y: 0, matrixTransform: () => ({ x: 0, y: 0 }) });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (svg as any).getScreenCTM = () => null;
+    dispatchWheel(svg, { ctrlKey: true, deltaY: 50 });
+    expect(onViewportChange).not.toHaveBeenCalled();
+  });
+
+  it("wheel events are preventDefault-ed (non-passive listener)", () => {
+    const { holder } = renderGestures({ viewport: FIT_VIEWPORT });
+    const event = dispatchWheel(holder.svg!, { deltaY: 10 });
+    expect(event.defaultPrevented).toBe(true);
   });
 });
