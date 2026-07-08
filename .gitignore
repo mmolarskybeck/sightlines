@@ -11,11 +11,20 @@ dist/
 build/
 .next/
 .astro/
+coverage/
 
 # Local environment files
 .env
 .env.*
 !.env.example
+
+# Local agent/editor tooling
+.codex/
+.claude/
+.agents/
+agent/skills/
+.impeccable/
+skills-lock.json
 
 # Logs
 *.log
