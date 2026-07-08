@@ -38,6 +38,8 @@ import {
   type RoomPlacement,
   type WallObject
 } from "../../domain/project";
+import { isSimplePolygon, segmentsIntersect, type Point } from "../../domain/geometry/polygon";
+import { formatLength } from "../../domain/units/length";
 import { getGridSnapTargets } from "../../domain/snapping/gridSnapTargets";
 import {
   resolvePlanPlacement,
@@ -86,6 +88,13 @@ const MIN_WALL_OBJECT_DEPTH_PX = 9;
 // Every plan object gets an invisible hit pad at least this big on both axes
 // so small objects (esp. thin wall objects) stay clickable at any zoom.
 const MIN_OBJECT_HIT_PX = 20;
+// Click within this many screen px of the polygon's first vertex closes the
+// loop (needs ≥3 points); mirrors the wall-object capture radius feel.
+const CLOSE_HANDLE_PX = 12;
+// Consecutive draw points closer than this (floor mm) collapse to a
+// zero-length wall — ignore the click, same floor the constructor rejects at.
+const MIN_DRAW_SPACING_MM = 10;
+const DRAW_EPS = 1e-6;
 
 // Stable module-level reference so a caller that doesn't pass `getBlob`
 // doesn't retrigger useAssetImageUrls' effect on every render (same idiom as
@@ -195,6 +204,23 @@ type DropGhostState = {
   activeGuides: Guide[];
 };
 
+// The in-progress polygon-room draw gesture, transient until close/cancel and
+// deliberately NOT in the store (same reasoning as the drag/marquee states):
+// no store write happens until the loop closes, so undo removes the whole room
+// in one step and Escape mid-draw costs nothing. `points` are floor-space mm.
+type DrawState = {
+  points: Vector2[];
+  // The snapped rubber-band endpoint following the cursor (null before the
+  // pointer has moved over the surface).
+  cursorMm: Vector2 | null;
+  // The current segment (last point → cursor) would self-intersect, or a close
+  // attempt failed its simple-polygon test — render the danger token.
+  invalid: boolean;
+  // Cursor is within the close radius of the first vertex (≥3 points), so the
+  // preview shows the closing segment instead of a rubber band.
+  closing: boolean;
+};
+
 // A pending marquee (rubber-band) selection on the plan background — tracked
 // as two floor-mm pointer samples (start + current). Mirrors ElevationView's
 // MarqueeState, but plan floor coordinates are plain SVG coordinates (y-down,
@@ -234,6 +260,9 @@ function roomPolygonPoints(placement: RoomPlacement): string {
 
 export function PlanView({
   activeTool,
+  drawRoomActive = false,
+  onDrawRoomChange,
+  onAddPolygonRoom,
   artworksById,
   draggingArtworkId = null,
   getBlob,
@@ -271,6 +300,14 @@ export function PlanView({
   // to, but this component now owns the ghost preview and click-to-place
   // commit that arming enables.
   activeTool: OpeningKind | null;
+  // Polygon-room draw mode — armed alongside activeTool in App's toolbar and
+  // mutually exclusive with it. The armed flag is lifted (App owns the toolbar
+  // toggle); the transient point list, preview, and snapping live here.
+  drawRoomActive?: boolean;
+  // Reports a draw arm/disarm up to App (Escape/Enter-close disarm from here).
+  onDrawRoomChange?: (active: boolean) => void;
+  // Commits the closed polygon in ONE store edit; App wires it to addPolygonRoom.
+  onAddPolygonRoom?: (pointsFloorMm: Point[]) => void;
   artworksById?: Map<string, Artwork>;
   // Which artwork the checklist is mid-drag, so a plan dragover can size its
   // ghost — HTML5 dragover can't read the payload, so App threads this the
@@ -380,6 +417,15 @@ export function PlanView({
   // even when the underlying pointerdown/up were consumed elsewhere) doesn't
   // also commit a placement underneath it.
   const suppressNextToolClickRef = useRef(false);
+
+  // Polygon-room draw state. Latest value mirrored into a ref so the scoped
+  // keyboard handler (Enter/Backspace/Escape) reads live points without
+  // resubscribing on every appended vertex — same discipline as the drags.
+  const [draw, setDraw] = useState<DrawState | null>(null);
+  const drawRef = useRef<DrawState | null>(null);
+  useEffect(() => {
+    drawRef.current = draw;
+  }, [draw]);
 
   const bounds = getFloorBounds(project.floor);
   const padding = getPlanViewPaddingMm(bounds);
@@ -573,6 +619,183 @@ export function PlanView({
 
   function handleToolPointerLeave() {
     setToolGhost(null);
+  }
+
+  // Arming/disarming draw mode starts a fresh gesture or discards the pending
+  // one — no store write ever happens for the discarded points (see DrawState).
+  useEffect(() => {
+    setDraw(
+      drawRoomActive ? { points: [], cursorMm: null, invalid: false, closing: false } : null
+    );
+  }, [drawRoomActive]);
+
+  // Enter closes (≥3 points), Backspace pops the last point, Escape cancels the
+  // whole draw. Scoped to while draw mode is armed so it never competes with
+  // App's global handlers; reads live points via drawRef.
+  useEffect(() => {
+    if (!drawRoomActive) return;
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onDrawRoomChange?.(false);
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        attemptCloseDraw();
+        return;
+      }
+      if (event.key === "Backspace") {
+        event.preventDefault();
+        setDraw((state) =>
+          state
+            ? { ...state, points: state.points.slice(0, -1), invalid: false, closing: false }
+            : state
+        );
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // Subscribed once per arm (keyed on drawRoomActive), reading live points
+    // via drawRef — same discipline as the drag effects, so the handler set is
+    // deliberately not resubscribed on every appended vertex.
+  }, [drawRoomActive]);
+
+  // Snap a draw point: grid + axis-lock to the previous point's x/y (so
+  // consecutive walls line up), with Shift forcing an exact H/V segment.
+  function snapDrawPoint(pointerMm: Vector2, prev: Vector2 | null, shiftKey: boolean): Vector2 {
+    let result: Vector2 = pointerMm;
+    if (snapToGrid) {
+      const targets: SnapTarget[] = [...gridSnapTargets];
+      if (prev) {
+        targets.push(
+          { id: "draw-prev-x", kind: "grid", axis: "x", point: { xMm: prev.xMm, yMm: 0 } },
+          { id: "draw-prev-y", kind: "grid", axis: "y", point: { xMm: 0, yMm: prev.yMm } }
+        );
+      }
+      result = resolveSnap(pointerMm, targets, { thresholdMm: snapThresholdMm }).point;
+    }
+    if (shiftKey && prev) {
+      const dx = Math.abs(pointerMm.xMm - prev.xMm);
+      const dy = Math.abs(pointerMm.yMm - prev.yMm);
+      // Lock the minor axis to the previous point, keep the (snapped) major one.
+      result =
+        dx >= dy ? { xMm: result.xMm, yMm: prev.yMm } : { xMm: prev.xMm, yMm: result.yMm };
+    }
+    return result;
+  }
+
+  // Would the new segment (last point → candidate) cross the placed path? The
+  // segment adjacent to it legitimately shares the last vertex, so only a
+  // collinear backtrack over that one counts; every earlier segment uses the
+  // full intersection test.
+  function drawSegmentInvalid(points: Vector2[], candidate: Vector2): boolean {
+    const n = points.length;
+    if (n === 0) return false;
+    const last = points[n - 1];
+    for (let i = 0; i < n - 1; i += 1) {
+      const s1 = points[i];
+      const s2 = points[i + 1];
+      if (i === n - 2) {
+        const crossV =
+          (s1.xMm - last.xMm) * (candidate.yMm - last.yMm) -
+          (s1.yMm - last.yMm) * (candidate.xMm - last.xMm);
+        const dot =
+          (s1.xMm - last.xMm) * (candidate.xMm - last.xMm) +
+          (s1.yMm - last.yMm) * (candidate.yMm - last.yMm);
+        if (Math.abs(crossV) <= DRAW_EPS && dot > DRAW_EPS) return true;
+      } else if (segmentsIntersect(last, candidate, s1, s2)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function closeRadiusMm(): number {
+    return pixelsPerMm > 0 ? CLOSE_HANDLE_PX / pixelsPerMm : 0;
+  }
+
+  function isWithinClose(points: Vector2[], pointerMm: Vector2): boolean {
+    if (points.length < 3) return false;
+    return (
+      Math.hypot(pointerMm.xMm - points[0].xMm, pointerMm.yMm - points[0].yMm) <=
+      closeRadiusMm()
+    );
+  }
+
+  function attemptCloseDraw() {
+    const current = drawRef.current;
+    if (!current || current.points.length < 3) return;
+    if (!isSimplePolygon(current.points)) {
+      setDraw((state) => (state ? { ...state, invalid: true } : state));
+      return;
+    }
+    onAddPolygonRoom?.(current.points.map((point) => ({ xMm: point.xMm, yMm: point.yMm })));
+    onDrawRoomChange?.(false);
+  }
+
+  function handleDrawPointerMove(event: ReactPointerEvent<SVGRectElement>) {
+    const current = drawRef.current;
+    if (!current) return;
+    const pointerMm = toSvgMm(event.clientX, event.clientY);
+    if (!pointerMm) return;
+
+    if (isWithinClose(current.points, pointerMm)) {
+      setDraw((state) =>
+        state
+          ? { ...state, cursorMm: state.points[0], invalid: false, closing: true }
+          : state
+      );
+      return;
+    }
+
+    const prev = current.points.at(-1) ?? null;
+    const candidate = snapDrawPoint(pointerMm, prev, event.shiftKey);
+    const invalid = drawSegmentInvalid(current.points, candidate);
+    setDraw((state) =>
+      state ? { ...state, cursorMm: candidate, invalid, closing: false } : state
+    );
+  }
+
+  function handleDrawClick(event: ReactMouseEvent<SVGRectElement>) {
+    // Own the click entirely so the svg's handleSvgClick (background clear /
+    // tool place) never also runs while drawing.
+    event.stopPropagation();
+    // A space/middle-mouse pan fires a trailing click on this capture rect;
+    // swallow it so a pan never drops a spurious vertex (same flag the svg
+    // click handler consumes for placement clicks).
+    if (suppressNextToolClickRef.current) {
+      suppressNextToolClickRef.current = false;
+      return;
+    }
+    const current = drawRef.current;
+    if (!current) return;
+    const pointerMm = toSvgMm(event.clientX, event.clientY);
+    if (!pointerMm) return;
+
+    if (isWithinClose(current.points, pointerMm)) {
+      attemptCloseDraw();
+      return;
+    }
+
+    const prev = current.points.at(-1) ?? null;
+    const candidate = snapDrawPoint(pointerMm, prev, event.shiftKey);
+    if (
+      prev &&
+      Math.hypot(candidate.xMm - prev.xMm, candidate.yMm - prev.yMm) < MIN_DRAW_SPACING_MM
+    ) {
+      return;
+    }
+    if (drawSegmentInvalid(current.points, candidate)) {
+      setDraw((state) => (state ? { ...state, invalid: true } : state));
+      return;
+    }
+    setDraw((state) =>
+      state
+        ? { points: [...state.points, candidate], cursorMm: candidate, invalid: false, closing: false }
+        : state
+    );
   }
 
   // A resize handle's pointerdown stops its own propagation (so it doesn't
@@ -1199,8 +1422,9 @@ export function PlanView({
     //
     // Bail when a tool is armed: a marquee drag would fight click-to-place.
     // Stay inert until App wires the multi-select handlers (same gate as
-    // elevation). Never start over an in-flight gesture.
-    if (activeTool) return;
+    // elevation). Never start over an in-flight gesture. Draw mode owns the
+    // whole surface via its capture overlay, so a marquee must not start there.
+    if (activeTool || drawRoomActive) return;
     if (!onMarqueeSelect && !onClearSelection) return;
     if (drag || objectDrag || dropGhost || roomDrag) return;
 
@@ -1426,7 +1650,7 @@ export function PlanView({
         onFit={() => onViewportChange(FIT_VIEWPORT)}
       />
       <svg
-        className={activeTool ? "plan-svg tool-armed" : "plan-svg"}
+        className={activeTool || drawRoomActive ? "plan-svg tool-armed" : "plan-svg"}
         ref={svgRef}
         viewBox={viewBox}
         role="img"
@@ -1578,7 +1802,7 @@ export function PlanView({
           // of the very geometry the user is trying to read while dragging,
           // resizing, or aiming an armed placement tool.
           const tooltipsDisabled = Boolean(
-            drag || objectDrag || dropGhost || activeTool || roomDrag
+            drag || objectDrag || dropGhost || activeTool || roomDrag || drawRoomActive
           );
           const artworkTooltip = (
             artworkId: string,
@@ -1827,6 +2051,100 @@ export function PlanView({
             </g>
           );
         })()}
+        {/* Polygon-room draw overlay: a full-viewBox transparent capture rect
+            owns every pointer event while drawing (so underlying walls/objects
+            never interfere), with the preview painted on top at
+            pointer-events:none so events fall through to the rect. Placed,
+            valid rubber-band, and invalid rubber-band each use existing plan
+            tokens (ink walls, petrol selection, danger). */}
+        {drawRoomActive && draw
+          ? (() => {
+              const last = draw.points.at(-1) ?? null;
+              const rubberEnd = draw.cursorMm;
+              const committedPoints = draw.points
+                .map((point) => `${point.xMm},${point.yMm}`)
+                .join(" ");
+              const segmentLengthMm =
+                last && rubberEnd && !draw.closing
+                  ? Math.hypot(rubberEnd.xMm - last.xMm, rubberEnd.yMm - last.yMm)
+                  : null;
+              const vertexSizeMm = handleSizeMm > 0 ? handleSizeMm : 0;
+
+              return (
+                <g className="draw-room-layer">
+                  <rect
+                    x={viewBoxBounds.x}
+                    y={viewBoxBounds.y}
+                    width={viewBoxBounds.width}
+                    height={viewBoxBounds.height}
+                    fill="transparent"
+                    onClick={handleDrawClick}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onPointerMove={handleDrawPointerMove}
+                  />
+                  {draw.points.length >= 2 ? (
+                    <polyline
+                      points={committedPoints}
+                      fill="none"
+                      stroke="var(--ink)"
+                      strokeWidth={5}
+                      strokeLinecap="square"
+                      vectorEffect="non-scaling-stroke"
+                      style={{ pointerEvents: "none" }}
+                    />
+                  ) : null}
+                  {last && rubberEnd ? (
+                    <line
+                      x1={last.xMm}
+                      y1={last.yMm}
+                      x2={rubberEnd.xMm}
+                      y2={rubberEnd.yMm}
+                      stroke={draw.invalid ? "var(--danger)" : "var(--selection)"}
+                      strokeWidth={4}
+                      strokeDasharray="6 5"
+                      vectorEffect="non-scaling-stroke"
+                      style={{ pointerEvents: "none" }}
+                    />
+                  ) : null}
+                  {vertexSizeMm > 0
+                    ? draw.points.map((point, index) => {
+                        const size =
+                          index === 0 && draw.closing ? vertexSizeMm * 1.5 : vertexSizeMm;
+                        return (
+                          <rect
+                            key={index}
+                            className="resize-handle"
+                            x={point.xMm - size / 2}
+                            y={point.yMm - size / 2}
+                            width={size}
+                            height={size}
+                            vectorEffect="non-scaling-stroke"
+                            style={{ pointerEvents: "none" }}
+                          />
+                        );
+                      })
+                    : null}
+                  {segmentLengthMm != null && rubberEnd && vertexSizeMm > 0 ? (
+                    <text
+                      className="resize-handle-label"
+                      x={rubberEnd.xMm + vertexSizeMm}
+                      y={rubberEnd.yMm - vertexSizeMm}
+                      style={{
+                        // SVG user units (mm), sized off handleSizeMm so the
+                        // readout stays a constant on-screen size at any zoom —
+                        // the same trick RoomResizeHandles' label uses.
+                        fontSize: vertexSizeMm * 1.6,
+                        strokeWidth: vertexSizeMm * 0.5,
+                        pointerEvents: "none"
+                      }}
+                    >
+                      {formatLength(segmentLengthMm, { unit: wallUnit })}
+                    </text>
+                  ) : null}
+                </g>
+              );
+            })()
+          : null}
         {toolGhost ? (
           <PlanObject
             isGhost

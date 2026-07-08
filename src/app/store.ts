@@ -2,7 +2,8 @@ import { create } from "zustand";
 import { z } from "zod";
 import { createBrowserImageProcessor } from "../domain/assets/browserImageProcessor";
 import { titleFromFilename, validateImageFile, type ImageProcessor } from "../domain/assets/imageIntake";
-import { createNextRectangleRoom } from "../domain/geometry/createRoom";
+import { createNextPolygonRoom, createNextRectangleRoom } from "../domain/geometry/createRoom";
+import type { Point } from "../domain/geometry/polygon";
 import { resizeWallPreservingAngles, type ResizeAnchor } from "../domain/geometry/editRoom";
 import type { WallWithGeometry } from "../domain/geometry/walls";
 import { getFloorWalls } from "../domain/geometry/planObjects";
@@ -148,6 +149,7 @@ export type AppState = ArrangeSliceState &
   deleteRoom: (roomId: string) => Promise<void>;
   setUnit: (unit: DisplayUnit) => Promise<void>;
   addRectangleRoom: () => Promise<void>;
+  addPolygonRoom: (pointsFloorMm: Point[]) => Promise<void>;
   resizeRoomHeight: (roomId: string, heightMm: number) => Promise<void>;
   resizeWall: (wallId: string, lengthMm: number, anchor?: ResizeAnchor) => Promise<void>;
   resizeSelectedWall: (lengthMm: number) => Promise<void>;
@@ -701,6 +703,46 @@ export function createAppStore(deps: AppStoreDeps) {
             viewMode: "plan"
           }
         );
+      },
+
+      async addPolygonRoom(pointsFloorMm) {
+        const project = get().project;
+        if (!project) return;
+
+        // The draw tool already blocks self-intersection and coincident points,
+        // but the constructor is the defense-in-depth boundary — a bad polygon
+        // fails calmly here rather than corrupting the document.
+        let roomPlacement;
+        try {
+          roomPlacement = createNextPolygonRoom(
+            project.floor,
+            project.defaultWallHeightMm,
+            pointsFloorMm
+          );
+        } catch (error) {
+          set({
+            error: `Could not add that room (${
+              error instanceof Error ? error.message : "invalid outline."
+            }).`
+          });
+          return;
+        }
+
+        const nextProject: Project = {
+          ...project,
+          floor: { rooms: [...project.floor.rooms, roomPlacement] }
+        };
+
+        await applyEdit(`Add room`, () => nextProject, {
+          // Select the new room and move the sidebar wall context to its first
+          // wall, so plan handles and the elevation switcher both land on it.
+          ...selectionWrite(
+            nextProject,
+            { kind: "room", roomId: roomPlacement.roomId },
+            roomPlacement.room.walls[0]?.id ?? null
+          ),
+          viewMode: "plan"
+        });
       },
 
       async resizeRoomHeight(roomId, heightMm) {

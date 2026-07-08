@@ -273,6 +273,50 @@ describe("app store", () => {
     expect(store.getState().project).toBe(before);
   });
 
+  it("addPolygonRoom adds an L-shaped room in one undo step and selects it", async () => {
+    const lShape = [
+      { xMm: 10_000, yMm: 0 },
+      { xMm: 10_000, yMm: 3_000 },
+      { xMm: 12_000, yMm: 3_000 },
+      { xMm: 12_000, yMm: 1_000 },
+      { xMm: 14_000, yMm: 1_000 },
+      { xMm: 14_000, yMm: 0 }
+    ];
+
+    await store.getState().addPolygonRoom(lShape);
+
+    const state = store.getState();
+    expect(state.project!.floor.rooms).toHaveLength(2);
+    const added = state.project!.floor.rooms[1];
+    expect(added.roomId).toBe("room-2");
+    expect(added.room.walls).toHaveLength(6);
+    expect(state.undoStack).toHaveLength(1);
+    expect(state.undoStack.at(-1)?.label).toBe("Add room");
+    // Room is selected, and the sidebar wall context is its first wall.
+    expect(roomIdOf(state.selection)).toBe("room-2");
+    expect(state.wallContextId).toBe("room-2-wall-0");
+    expect(state.viewMode).toBe("plan");
+
+    await store.getState().undo();
+    expect(store.getState().project!.floor.rooms).toHaveLength(1);
+  });
+
+  it("addPolygonRoom rejects a self-intersecting outline without committing", async () => {
+    const before = store.getState().project!;
+
+    await store.getState().addPolygonRoom([
+      { xMm: 0, yMm: 0 },
+      { xMm: 1_000, yMm: 1_000 },
+      { xMm: 1_000, yMm: 0 },
+      { xMm: 0, yMm: 1_000 }
+    ]);
+
+    const state = store.getState();
+    expect(state.project).toBe(before);
+    expect(state.undoStack).toHaveLength(0);
+    expect(state.error).toBeTruthy();
+  });
+
   it("skips a resize that does not change any wall", async () => {
     const state = store.getState();
     const currentLength = getSelectedWall(
