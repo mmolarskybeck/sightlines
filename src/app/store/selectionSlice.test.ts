@@ -94,24 +94,18 @@ describe("selection helpers", () => {
     expect(getSelectedOpeningId(project, { kind: "libraryArtwork", artworkId: "lib-1" })).toBeNull();
   });
 
-  it("selectionWrite mirrors every legacy field", () => {
+  it("selectionWrite returns just the union and wall context", () => {
     const fields = selectionWrite(project, { kind: "objects", ids: [artworkPlacement.id] }, "wall-1");
     expect(fields).toEqual({
       selection: { kind: "objects", ids: [artworkPlacement.id] },
-      wallContextId: "wall-1",
-      selectedWallId: "wall-1",
-      selectedArtworkId: artworkPlacement.artworkId,
-      selectedOpeningId: null,
-      selectedObjectIds: [artworkPlacement.id],
-      selectedRoomId: null
+      wallContextId: "wall-1"
     });
   });
 
   it("selectionWrite normalizes an empty objects selection to none", () => {
     const fields = selectionWrite(project, { kind: "objects", ids: [] }, "wall-1");
     expect(fields.selection).toEqual(NO_SELECTION);
-    expect(fields.selectedObjectIds).toEqual([]);
-    expect(fields.selectedWallId).toBe("wall-1");
+    expect(fields.wallContextId).toBe("wall-1");
   });
 });
 
@@ -183,8 +177,8 @@ describe("selection transitions through the store", () => {
 
     const state = store.getState();
     expect(state.selection).toEqual({ kind: "objects", ids: [placementId] });
-    expect(state.selectedObjectIds).toEqual([placementId]);
-    expect(state.selectedArtworkId).toBe(artworkId);
+    expect(objectIdsOf(state.selection)).toEqual([placementId]);
+    expect(getSelectedArtworkId(state.project, state.selection)).toBe(artworkId);
   });
 
   it("selectArtwork with an unplaced checklist artwork selects libraryArtwork", async () => {
@@ -194,9 +188,9 @@ describe("selection transitions through the store", () => {
 
     const state = store.getState();
     expect(state.selection).toEqual({ kind: "libraryArtwork", artworkId });
-    expect(state.selectedObjectIds).toEqual([]);
-    expect(state.selectedArtworkId).toBe(artworkId);
-    expect(state.selectedOpeningId).toBeNull();
+    expect(objectIdsOf(state.selection)).toEqual([]);
+    expect(getSelectedArtworkId(state.project, state.selection)).toBe(artworkId);
+    expect(getSelectedOpeningId(state.project, state.selection)).toBeNull();
   });
 
   it("selectOpening lands in objects; dead id is a no-op", async () => {
@@ -206,7 +200,9 @@ describe("selection transitions through the store", () => {
     store.getState().selectOpening(openingId);
 
     expect(store.getState().selection).toEqual({ kind: "objects", ids: [openingId] });
-    expect(store.getState().selectedOpeningId).toBe(openingId);
+    expect(
+      getSelectedOpeningId(store.getState().project, store.getState().selection)
+    ).toBe(openingId);
 
     const before = store.getState().selection;
     store.getState().selectOpening("dead-id");
@@ -223,8 +219,7 @@ describe("selection transitions through the store", () => {
     const state = store.getState();
     expect(state.selection).toEqual(NO_SELECTION);
     expect(state.wallContextId).toBe("wall-east");
-    expect(state.selectedWallId).toBe("wall-east");
-    expect(state.selectedObjectIds).toEqual([]);
+    expect(objectIdsOf(state.selection)).toEqual([]);
   });
 
   it("selectRoom drops wall context; selectWall drops room", () => {
@@ -232,12 +227,12 @@ describe("selection transitions through the store", () => {
     let state = store.getState();
     expect(state.selection).toEqual({ kind: "room", roomId: "room-main" });
     expect(state.wallContextId).toBeNull();
-    expect(state.selectedRoomId).toBe("room-main");
+    expect(roomIdOf(state.selection)).toBe("room-main");
 
     store.getState().selectWall("wall-east");
     state = store.getState();
     expect(state.selection).toEqual(NO_SELECTION);
-    expect(state.selectedRoomId).toBeNull();
+    expect(roomIdOf(state.selection)).toBeNull();
     expect(state.wallContextId).toBe("wall-east");
   });
 
@@ -246,47 +241,125 @@ describe("selection transitions through the store", () => {
     const b = await placeOnWall("b.jpg", 1500);
 
     store.getState().selectObject(a.placementId);
-    expect(store.getState().selectedObjectIds).toEqual([a.placementId]);
+    expect(objectIdsOf(store.getState().selection)).toEqual([a.placementId]);
 
     store.getState().selectObject(b.placementId, { additive: true });
-    expect([...store.getState().selectedObjectIds].sort()).toEqual(
+    expect([...objectIdsOf(store.getState().selection)].sort()).toEqual(
       [a.placementId, b.placementId].sort()
     );
 
     store.getState().selectObject(b.placementId, { additive: true });
-    expect(store.getState().selectedObjectIds).toEqual([a.placementId]);
+    expect(objectIdsOf(store.getState().selection)).toEqual([a.placementId]);
 
     store.getState().selectObject(a.placementId, { additive: true });
     expect(store.getState().selection).toEqual(NO_SELECTION);
-    expect(store.getState().selectedObjectIds).toEqual([]);
+    expect(objectIdsOf(store.getState().selection)).toEqual([]);
   });
 
-  it("mirrors never drift from the union after every action", async () => {
+  it("every selection action lands the union and its derivations on the intended value", async () => {
     const a = await placeOnWall("drift-a.jpg", 500);
     const b = await placeOnWall("drift-b.jpg", 1500);
     const openingId = await addDoor();
     const unplaced = await addChecklistArtwork("drift-unplaced.jpg");
 
-    const actions: Array<() => void> = [
-      () => store.getState().selectWall("wall-east"),
-      () => store.getState().selectArtwork(a.artworkId),
-      () => store.getState().selectArtwork(unplaced),
-      () => store.getState().selectOpening(openingId),
-      () => store.getState().selectObject(b.placementId),
-      () => store.getState().selectObject(a.placementId, { additive: true }),
-      () => store.getState().selectRoom("room-main"),
-      () => store.getState().clearObjectSelection()
+    // The mirror fields are gone; the union is the only selection state. This
+    // sweep locks the same behaviors the old mirror-drift invariant did — that
+    // each action produces the right selection — by asserting the union
+    // directly and checking the pure helpers derive the intended values from
+    // it, action by action.
+    type Expectation = {
+      act: () => void;
+      selection: Selection;
+      wallContextId: string | null;
+      artworkId: string | null;
+      openingId: string | null;
+      objectIds: string[];
+      roomId: string | null;
+    };
+    const cases: Expectation[] = [
+      {
+        act: () => store.getState().selectWall("wall-east"),
+        selection: NO_SELECTION,
+        wallContextId: "wall-east",
+        artworkId: null,
+        openingId: null,
+        objectIds: [],
+        roomId: null
+      },
+      {
+        act: () => store.getState().selectArtwork(a.artworkId),
+        selection: { kind: "objects", ids: [a.placementId] },
+        wallContextId: "wall-east",
+        artworkId: a.artworkId,
+        openingId: null,
+        objectIds: [a.placementId],
+        roomId: null
+      },
+      {
+        act: () => store.getState().selectArtwork(unplaced),
+        selection: { kind: "libraryArtwork", artworkId: unplaced },
+        wallContextId: "wall-east",
+        artworkId: unplaced,
+        openingId: null,
+        objectIds: [],
+        roomId: null
+      },
+      {
+        act: () => store.getState().selectOpening(openingId),
+        selection: { kind: "objects", ids: [openingId] },
+        wallContextId: "wall-east",
+        artworkId: null,
+        openingId,
+        objectIds: [openingId],
+        roomId: null
+      },
+      {
+        act: () => store.getState().selectObject(b.placementId),
+        selection: { kind: "objects", ids: [b.placementId] },
+        wallContextId: "wall-east",
+        artworkId: b.artworkId,
+        openingId: null,
+        objectIds: [b.placementId],
+        roomId: null
+      },
+      {
+        act: () => store.getState().selectObject(a.placementId, { additive: true }),
+        selection: { kind: "objects", ids: [b.placementId, a.placementId] },
+        wallContextId: "wall-east",
+        artworkId: null, // multi-select resolves to no single artwork
+        openingId: null,
+        objectIds: [b.placementId, a.placementId],
+        roomId: null
+      },
+      {
+        act: () => store.getState().selectRoom("room-main"),
+        selection: { kind: "room", roomId: "room-main" },
+        wallContextId: null,
+        artworkId: null,
+        openingId: null,
+        objectIds: [],
+        roomId: "room-main"
+      },
+      {
+        act: () => store.getState().clearObjectSelection(),
+        selection: NO_SELECTION,
+        wallContextId: null,
+        artworkId: null,
+        openingId: null,
+        objectIds: [],
+        roomId: null
+      }
     ];
 
-    for (const act of actions) {
-      act();
+    for (const expected of cases) {
+      expected.act();
       const state = store.getState();
-      // Every mirror is exactly what the pure derivation says it should be.
-      expect(state.selectedObjectIds).toBe(objectIdsOf(state.selection));
-      expect(state.selectedRoomId).toBe(roomIdOf(state.selection));
-      expect(state.selectedArtworkId).toBe(getSelectedArtworkId(state.project, state.selection));
-      expect(state.selectedOpeningId).toBe(getSelectedOpeningId(state.project, state.selection));
-      expect(state.selectedWallId).toBe(state.wallContextId);
+      expect(state.selection).toEqual(expected.selection);
+      expect(state.wallContextId).toBe(expected.wallContextId);
+      expect(objectIdsOf(state.selection)).toEqual(expected.objectIds);
+      expect(roomIdOf(state.selection)).toBe(expected.roomId);
+      expect(getSelectedArtworkId(state.project, state.selection)).toBe(expected.artworkId);
+      expect(getSelectedOpeningId(state.project, state.selection)).toBe(expected.openingId);
     }
   });
 
@@ -308,8 +381,8 @@ describe("selection transitions through the store", () => {
 
     let state = store.getState();
     expect(state.selection).toEqual(NO_SELECTION);
-    expect(state.selectedOpeningId).toBeNull();
-    expect(state.selectedObjectIds).toEqual([]);
+    expect(getSelectedOpeningId(state.project, state.selection)).toBeNull();
+    expect(objectIdsOf(state.selection)).toEqual([]);
 
     // A multi-select on the doomed room is left exactly as it was — dangling.
     await store.getState().undo(); // resurrect room-2 (and its door)
@@ -330,7 +403,7 @@ describe("selection transitions through the store", () => {
       )
     ).toBe(false);
     expect(state.selection).toEqual({ kind: "objects", ids: [aPlacement, bPlacement] });
-    expect(state.selectedObjectIds).toEqual([aPlacement, bPlacement]);
+    expect(objectIdsOf(state.selection)).toEqual([aPlacement, bPlacement]);
   });
 
   it("a selection change auto-accepts a live arrange session that moved", async () => {

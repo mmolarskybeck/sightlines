@@ -8,6 +8,7 @@ import {
 import type { Project } from "../../domain/project";
 import { getProjectWalls } from "../projectWalls";
 import type { AppState } from "../store";
+import { objectIdsOf } from "./selectionSlice";
 
 // A transient, NON-undoable arrange interaction (precedent: selectedObjectIds
 // is view state, not on the undo stack). While a session is live, panel edits,
@@ -216,7 +217,7 @@ export function createArrangeSlice(
       // Guards identical to arrangeSelectedOnWall (2+ wall members, no floor
       // members, all on one wall) — but a silent no-op on failure, since the
       // panel only offers a begin when the selection already qualifies.
-      const selectedIds = get().selectedObjectIds;
+      const selectedIds = objectIdsOf(get().selection);
       const hasFloorMember = selectedIds.some((id) =>
         project.floorObjects.some((floorObject) => floorObject.id === id)
       );

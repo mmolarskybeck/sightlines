@@ -23,7 +23,15 @@ import {
   makeImageFile
 } from "../test/inMemoryRepositories";
 import type { AppStoreDeps } from "./store";
-import { createAppStore, exportProjectJson, getSelectedWall } from "./store";
+import {
+  createAppStore,
+  exportProjectJson,
+  getSelectedArtworkId,
+  getSelectedOpeningId,
+  getSelectedWall,
+  objectIdsOf,
+  roomIdOf
+} from "./store";
 
 describe("app store", () => {
   let repository: InMemoryProjectRepository;
@@ -57,14 +65,14 @@ describe("app store", () => {
     expect(state.project?.title).toBe("Untitled Exhibition");
     expect(state.saveState).toBe("saved");
     expect(repository.projects.size).toBe(1);
-    expect(state.selectedWallId).toBe("wall-north");
+    expect(state.wallContextId).toBe("wall-north");
   });
 
   it("resize creates one undo entry and undo/redo round-trips the document", async () => {
     const state = store.getState();
     const originalLength = getSelectedWall(
       state.project!,
-      state.selectedWallId
+      state.wallContextId
     )!.lengthMm;
 
     await state.resizeSelectedWall(10_000);
@@ -94,7 +102,7 @@ describe("app store", () => {
     expect(
       getSelectedWall(store.getState().project!, "wall-east")!.lengthMm
     ).toBeCloseTo(6_000);
-    expect(store.getState().selectedWallId).toBe("wall-north");
+    expect(store.getState().wallContextId).toBe("wall-north");
     expect(store.getState().undoStack).toHaveLength(1);
   });
 
@@ -223,8 +231,10 @@ describe("app store", () => {
 
     expect(store.getState().project!.floor.rooms).toHaveLength(2);
     expect(store.getState().project!.wallObjects).toHaveLength(1);
-    expect(store.getState().selectedWallId).toBe("room-2-wall-north");
-    expect(store.getState().selectedOpeningId).toBeDefined();
+    expect(store.getState().wallContextId).toBe("room-2-wall-north");
+    expect(
+      getSelectedOpeningId(store.getState().project, store.getState().selection)
+    ).toBeDefined();
 
     await store.getState().deleteRoom("room-2");
 
@@ -233,8 +243,8 @@ describe("app store", () => {
       "room-main"
     ]);
     expect(state.project!.wallObjects).toEqual([]);
-    expect(state.selectedWallId).toBe("wall-north");
-    expect(state.selectedOpeningId).toBeNull();
+    expect(state.wallContextId).toBe("wall-north");
+    expect(getSelectedOpeningId(state.project, state.selection)).toBeNull();
     expect(state.viewMode).toBe("plan");
     expect(state.undoStack.at(-1)?.label).toBe("Delete Gallery 2");
     expect(repository.projects.get(state.project!.id)!.floor.rooms).toHaveLength(1);
@@ -262,7 +272,7 @@ describe("app store", () => {
     const state = store.getState();
     const currentLength = getSelectedWall(
       state.project!,
-      state.selectedWallId
+      state.wallContextId
     )!.lengthMm;
 
     await state.resizeSelectedWall(currentLength);
@@ -440,7 +450,7 @@ describe("app store", () => {
     expect(state.project?.title).toBe("Winter Show");
     expect(state.project?.id).not.toBe(originalId);
     expect(state.project?.floor.rooms).toEqual([]);
-    expect(state.selectedWallId).toBeNull();
+    expect(state.wallContextId).toBeNull();
     expect(state.undoStack).toHaveLength(0);
 
     const summaries = await state.listProjectSummaries();
@@ -458,7 +468,7 @@ describe("app store", () => {
 
     const state = store.getState();
     expect(state.project?.id).toBe(original.id);
-    expect(state.selectedWallId).toBe("wall-north");
+    expect(state.wallContextId).toBe("wall-north");
     expect(state.undoStack).toHaveLength(0);
   });
 
@@ -686,7 +696,7 @@ describe("app store", () => {
       const artworkId = store.getState().project!.checklistArtworkIds[0];
       const wallId = getSelectedWall(
         store.getState().project!,
-        store.getState().selectedWallId
+        store.getState().wallContextId
       )!.id;
 
       await store.getState().placeArtwork(artworkId, wallId, 1000, 1450);
@@ -726,7 +736,7 @@ describe("app store", () => {
       const artworkId = store.getState().project!.checklistArtworkIds[0];
       const wallId = getSelectedWall(
         store.getState().project!,
-        store.getState().selectedWallId
+        store.getState().wallContextId
       )!.id;
       await store.getState().placeArtwork(artworkId, wallId, 1000, 1450);
       const placementId = store.getState().project!.wallObjects[0].id;
@@ -806,7 +816,7 @@ describe("app store", () => {
       });
       const wallId = getSelectedWall(
         store.getState().project!,
-        store.getState().selectedWallId
+        store.getState().wallContextId
       )!.id;
 
       await store.getState().placeArtwork(artworkId, wallId, 1200, 1450);
@@ -820,7 +830,7 @@ describe("app store", () => {
       expect(placement.yMm).toBe(1450);
       expect(placement.widthMm).toBe(500);
       expect(placement.heightMm).toBe(400);
-      expect(state.selectedArtworkId).toBe(artworkId);
+      expect(getSelectedArtworkId(state.project, state.selection)).toBe(artworkId);
     });
 
     it("falls back to placeholder dimensions for an artwork with unknown dims", async () => {
@@ -828,7 +838,7 @@ describe("app store", () => {
       const artworkId = store.getState().project!.checklistArtworkIds[0];
       const wallId = getSelectedWall(
         store.getState().project!,
-        store.getState().selectedWallId
+        store.getState().wallContextId
       )!.id;
 
       await store.getState().placeArtwork(artworkId, wallId, 0, 1450);
@@ -843,7 +853,7 @@ describe("app store", () => {
       const artworkId = store.getState().project!.checklistArtworkIds[0];
       const wallId = getSelectedWall(
         store.getState().project!,
-        store.getState().selectedWallId
+        store.getState().wallContextId
       )!.id;
 
       await store.getState().placeArtwork(artworkId, wallId, -5_000, 1450);
@@ -861,7 +871,7 @@ describe("app store", () => {
       const artworkId = store.getState().project!.checklistArtworkIds[0];
       const wallId = getSelectedWall(
         store.getState().project!,
-        store.getState().selectedWallId
+        store.getState().wallContextId
       )!.id;
       await store.getState().placeArtwork(artworkId, wallId, 1000, 1450);
       const placementId = store.getState().project!.wallObjects[0].id;
@@ -887,7 +897,7 @@ describe("app store", () => {
       const artworkId = store.getState().project!.checklistArtworkIds[0];
       const wallId = getSelectedWall(
         store.getState().project!,
-        store.getState().selectedWallId
+        store.getState().wallContextId
       )!.id;
       await store.getState().placeArtwork(artworkId, wallId, 1000, 1450);
       const placementId = store.getState().project!.wallObjects[0].id;
@@ -905,7 +915,7 @@ describe("app store", () => {
       const artworkId = store.getState().project!.checklistArtworkIds[0];
       const wallId = getSelectedWall(
         store.getState().project!,
-        store.getState().selectedWallId
+        store.getState().wallContextId
       )!.id;
       await store.getState().placeArtwork(artworkId, wallId, 1000, 1450);
       const placementId = store.getState().project!.wallObjects[0].id;
@@ -924,7 +934,7 @@ describe("app store", () => {
     await store.getState().updateArtwork(artworkId, {
       dimensions: { widthMm: 500, heightMm: 400, status: "known" }
     });
-    const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+    const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
 
     // Comfortably inside today's wall length, near the far end.
     await store.getState().placeArtwork(artworkId, wall.id, wall.lengthMm - 300, 1450);
@@ -939,7 +949,7 @@ describe("app store", () => {
 
   describe("addOpening", () => {
     it("adds a door centered on the wall, reaching the floor, in one undo entry", async () => {
-      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
 
       await store.getState().addOpening(wall.id, "door");
 
@@ -951,11 +961,11 @@ describe("app store", () => {
       expect(opening.xMm).toBeCloseTo(wall.lengthMm / 2);
       expect(opening.yMm - opening.heightMm / 2).toBeCloseTo(0);
       expect((opening as { blocksPlacement: true }).blocksPlacement).toBe(true);
-      expect(state.selectedOpeningId).toBe(opening.id);
+      expect(getSelectedOpeningId(state.project, state.selection)).toBe(opening.id);
     });
 
     it("adds a window centered on the wall's centerline height", async () => {
-      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
 
       await store.getState().addOpening(wall.id, "window");
 
@@ -966,7 +976,7 @@ describe("app store", () => {
     });
 
     it("adds a blocked zone", async () => {
-      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
 
       await store.getState().addOpening(wall.id, "blocked-zone");
 
@@ -985,7 +995,7 @@ describe("app store", () => {
 
   describe("moveOpening", () => {
     it("commits one undo entry and undo restores the previous position", async () => {
-      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
       await store.getState().addOpening(wall.id, "window");
       const openingId = store.getState().project!.wallObjects[0].id;
       const undoStackBefore = store.getState().undoStack.length;
@@ -1006,7 +1016,7 @@ describe("app store", () => {
     });
 
     it("is a no-op when the position is unchanged", async () => {
-      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
       await store.getState().addOpening(wall.id, "window");
       const opening = store.getState().project!.wallObjects[0];
       const undoStackBefore = store.getState().undoStack.length;
@@ -1019,7 +1029,7 @@ describe("app store", () => {
 
   describe("resizeOpening", () => {
     it("resizes an opening about its own center and is undoable", async () => {
-      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
       await store.getState().addOpening(wall.id, "window");
       const openingId = store.getState().project!.wallObjects[0].id;
       const undoStackBefore = store.getState().undoStack.length;
@@ -1041,7 +1051,7 @@ describe("app store", () => {
 
   describe("removePlacement for an opening", () => {
     it("deletes the opening (the same generic action used for artwork)", async () => {
-      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
       await store.getState().addOpening(wall.id, "door");
       const openingId = store.getState().project!.wallObjects[0].id;
 
@@ -1058,7 +1068,7 @@ describe("app store", () => {
       await store.getState().updateArtwork(artworkId, {
         dimensions: { widthMm: 500, heightMm: 400, status: "known" }
       });
-      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
 
       await store.getState().addOpening(wall.id, "door");
       const door = store.getState().project!.wallObjects[0];
@@ -1075,7 +1085,7 @@ describe("app store", () => {
     it("rejects moving a door onto an existing artwork by default", async () => {
       await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
       const artworkId = store.getState().project!.checklistArtworkIds[0];
-      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
       await store.getState().placeArtwork(artworkId, wall.id, 1000, 1450, true);
       const artwork = store.getState().project!.wallObjects[0];
 
@@ -1099,7 +1109,7 @@ describe("app store", () => {
       await store.getState().updateArtwork(artworkId, {
         dimensions: { widthMm: 500, heightMm: 400, status: "known" }
       });
-      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
 
       await store.getState().addOpening(wall.id, "door");
       const doorId = store.getState().project!.wallObjects[0].id;
@@ -1131,44 +1141,60 @@ describe("app store", () => {
 
     it("selectWall clears any selected artwork", () => {
       store.getState().selectArtwork("some-artwork");
-      expect(store.getState().selectedArtworkId).toBe("some-artwork");
+      expect(
+        getSelectedArtworkId(store.getState().project, store.getState().selection)
+      ).toBe("some-artwork");
 
       store.getState().selectWall("wall-east");
 
-      expect(store.getState().selectedWallId).toBe("wall-east");
-      expect(store.getState().selectedArtworkId).toBeNull();
+      expect(store.getState().wallContextId).toBe("wall-east");
+      expect(
+        getSelectedArtworkId(store.getState().project, store.getState().selection)
+      ).toBeNull();
     });
 
     it("selectArtwork sets the selected artwork without touching the selected wall", () => {
-      const wallId = store.getState().selectedWallId;
+      const wallId = store.getState().wallContextId;
 
       store.getState().selectArtwork("artwork-x");
 
-      expect(store.getState().selectedArtworkId).toBe("artwork-x");
-      expect(store.getState().selectedWallId).toBe(wallId);
+      expect(
+        getSelectedArtworkId(store.getState().project, store.getState().selection)
+      ).toBe("artwork-x");
+      expect(store.getState().wallContextId).toBe(wallId);
     });
 
     it("selectOpening clears the selected artwork but not the selected wall", async () => {
       const openingId = await addRealOpening();
-      const wallId = store.getState().selectedWallId;
+      const wallId = store.getState().wallContextId;
       store.getState().selectArtwork("some-artwork");
-      expect(store.getState().selectedArtworkId).toBe("some-artwork");
+      expect(
+        getSelectedArtworkId(store.getState().project, store.getState().selection)
+      ).toBe("some-artwork");
 
       store.getState().selectOpening(openingId);
 
-      expect(store.getState().selectedOpeningId).toBe(openingId);
-      expect(store.getState().selectedArtworkId).toBeNull();
-      expect(store.getState().selectedWallId).toBe(wallId);
+      expect(
+        getSelectedOpeningId(store.getState().project, store.getState().selection)
+      ).toBe(openingId);
+      expect(
+        getSelectedArtworkId(store.getState().project, store.getState().selection)
+      ).toBeNull();
+      expect(store.getState().wallContextId).toBe(wallId);
     });
 
     it("selectWall clears the selected opening", async () => {
       const openingId = await addRealOpening();
       store.getState().selectOpening(openingId);
-      expect(store.getState().selectedOpeningId).toBe(openingId);
+      expect(
+        getSelectedOpeningId(store.getState().project, store.getState().selection)
+      ).toBe(openingId);
 
       store.getState().selectWall("wall-east");
 
-      expect(store.getState().selectedOpeningId).toBeNull();
+      expect(
+        getSelectedOpeningId(store.getState().project, store.getState().selection)
+      ).toBeNull();
     });
 
     it("selectArtwork clears the selected opening", async () => {
@@ -1177,7 +1203,9 @@ describe("app store", () => {
 
       store.getState().selectArtwork("some-artwork");
 
-      expect(store.getState().selectedOpeningId).toBeNull();
+      expect(
+        getSelectedOpeningId(store.getState().project, store.getState().selection)
+      ).toBeNull();
     });
 
     it("selectRoom clears the selected wall, artwork, opening, and multi-select", async () => {
@@ -1187,11 +1215,11 @@ describe("app store", () => {
       store.getState().selectRoom("room-main");
 
       const state = store.getState();
-      expect(state.selectedRoomId).toBe("room-main");
-      expect(state.selectedWallId).toBeNull();
-      expect(state.selectedArtworkId).toBeNull();
-      expect(state.selectedOpeningId).toBeNull();
-      expect(state.selectedObjectIds).toEqual([]);
+      expect(roomIdOf(state.selection)).toBe("room-main");
+      expect(state.wallContextId).toBeNull();
+      expect(getSelectedArtworkId(state.project, state.selection)).toBeNull();
+      expect(getSelectedOpeningId(state.project, state.selection)).toBeNull();
+      expect(objectIdsOf(state.selection)).toEqual([]);
     });
 
     it("selectWall clears the selected room", () => {
@@ -1199,7 +1227,7 @@ describe("app store", () => {
 
       store.getState().selectWall("wall-east");
 
-      expect(store.getState().selectedRoomId).toBeNull();
+      expect(roomIdOf(store.getState().selection)).toBeNull();
     });
 
     it("selectArtwork clears the selected room", () => {
@@ -1207,7 +1235,7 @@ describe("app store", () => {
 
       store.getState().selectArtwork("some-artwork");
 
-      expect(store.getState().selectedRoomId).toBeNull();
+      expect(roomIdOf(store.getState().selection)).toBeNull();
     });
 
     it("selectOpening clears the selected room", async () => {
@@ -1216,7 +1244,7 @@ describe("app store", () => {
 
       store.getState().selectOpening(openingId);
 
-      expect(store.getState().selectedRoomId).toBeNull();
+      expect(roomIdOf(store.getState().selection)).toBeNull();
     });
 
     it("clearObjectSelection clears the selected room even with no objects selected", () => {
@@ -1224,13 +1252,13 @@ describe("app store", () => {
 
       store.getState().clearObjectSelection();
 
-      expect(store.getState().selectedRoomId).toBeNull();
+      expect(roomIdOf(store.getState().selection)).toBeNull();
     });
   });
 
   describe("placeOpeningFromPlan", () => {
     it("places a wall opening at the plan-chosen xMm with addOpening's defaults", async () => {
-      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
 
       await store.getState().placeOpeningFromPlan("door", {
         anchor: "wall",
@@ -1246,7 +1274,7 @@ describe("app store", () => {
       expect(opening.xMm).toBe(1234);
       // Same defaults addOpening uses: a door reaches the floor.
       expect(opening.yMm - opening.heightMm / 2).toBeCloseTo(0);
-      expect(state.selectedOpeningId).toBe(opening.id);
+      expect(getSelectedOpeningId(state.project, state.selection)).toBe(opening.id);
       expect(state.project!.floorObjects).toHaveLength(0);
     });
 
@@ -1269,7 +1297,7 @@ describe("app store", () => {
       expect(floorObject.depthMm).toBe(DEFAULT_FLOOR_OBJECT_DEPTH_MM);
       expect(floorObject.rotationDeg).toBe(0);
       expect(floorObject.wallYMm).toBeCloseTo(centerline);
-      expect(state.selectedOpeningId).toBe(floorObject.id);
+      expect(getSelectedOpeningId(state.project, state.selection)).toBe(floorObject.id);
     });
 
     it("rejects placing a door on the floor", async () => {
@@ -1310,7 +1338,7 @@ describe("app store", () => {
       expect(floorObject.depthMm).toBe(120);
       expect(floorObject.rotationDeg).toBe(0);
       expect(floorObject.wallYMm).toBeCloseTo(centerline);
-      expect(state.selectedArtworkId).toBe(artworkId);
+      expect(getSelectedArtworkId(state.project, state.selection)).toBe(artworkId);
     });
 
     it("falls back to the default depth when the artwork's depth is unknown", async () => {
@@ -1330,7 +1358,7 @@ describe("app store", () => {
     async function placeArtworkOnWall(xMm = 1000, yMm = 1450) {
       await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
       const artworkId = store.getState().project!.checklistArtworkIds[0];
-      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
       await store.getState().placeArtwork(artworkId, wall.id, xMm, yMm);
       return {
         artworkId,
@@ -1411,7 +1439,7 @@ describe("app store", () => {
       const artworkId = store.getState().project!.checklistArtworkIds[0];
       await store.getState().placeArtworkOnFloor(artworkId, 4000, 4000);
       const floorObject = store.getState().project!.floorObjects[0];
-      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
 
       await store.getState().commitPlanMove(floorObject.id, {
         anchor: "wall",
@@ -1443,7 +1471,7 @@ describe("app store", () => {
     });
 
     it("rejects moving a door onto the floor", async () => {
-      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
       await store.getState().addOpening(wall.id, "door");
       const doorId = store.getState().project!.wallObjects[0].id;
 
@@ -1498,7 +1526,7 @@ describe("app store", () => {
           dimensions: { widthMm, heightMm: 400, status: "known" }
         });
       }
-      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
       await store.getState().placeArtwork(artworkId, wall.id, xMm, yMm, true);
       const placement = store.getState().project!.wallObjects.at(-1)!;
       return { artworkId, wall, placementId: placement.id };
@@ -1510,10 +1538,10 @@ describe("app store", () => {
         const b = await placeArtworkOnWall(1500, 1450);
 
         store.getState().selectObject(a.placementId);
-        expect(store.getState().selectedObjectIds).toEqual([a.placementId]);
+        expect(objectIdsOf(store.getState().selection)).toEqual([a.placementId]);
 
         store.getState().selectObject(b.placementId);
-        expect(store.getState().selectedObjectIds).toEqual([b.placementId]);
+        expect(objectIdsOf(store.getState().selection)).toEqual([b.placementId]);
       });
 
       it("additive toggles membership on and off", async () => {
@@ -1522,12 +1550,12 @@ describe("app store", () => {
 
         store.getState().selectObject(a.placementId);
         store.getState().selectObject(b.placementId, { additive: true });
-        expect(store.getState().selectedObjectIds.sort()).toEqual(
+        expect(objectIdsOf(store.getState().selection).sort()).toEqual(
           [a.placementId, b.placementId].sort()
         );
 
         store.getState().selectObject(a.placementId, { additive: true });
-        expect(store.getState().selectedObjectIds).toEqual([b.placementId]);
+        expect(objectIdsOf(store.getState().selection)).toEqual([b.placementId]);
       });
 
       it("selecting exactly one artwork placement syncs selectedArtworkId to its artworkId", async () => {
@@ -1535,8 +1563,12 @@ describe("app store", () => {
 
         store.getState().selectObject(a.placementId);
 
-        expect(store.getState().selectedArtworkId).toBe(a.artworkId);
-        expect(store.getState().selectedOpeningId).toBeNull();
+        expect(
+          getSelectedArtworkId(store.getState().project, store.getState().selection)
+        ).toBe(a.artworkId);
+        expect(
+          getSelectedOpeningId(store.getState().project, store.getState().selection)
+        ).toBeNull();
       });
 
       it("selecting two placements clears both legacy slots", async () => {
@@ -1546,16 +1578,20 @@ describe("app store", () => {
         store.getState().selectObject(a.placementId);
         store.getState().selectObject(b.placementId, { additive: true });
 
-        expect(store.getState().selectedArtworkId).toBeNull();
-        expect(store.getState().selectedOpeningId).toBeNull();
+        expect(
+        getSelectedArtworkId(store.getState().project, store.getState().selection)
+      ).toBeNull();
+        expect(
+        getSelectedOpeningId(store.getState().project, store.getState().selection)
+      ).toBeNull();
       });
 
       it("is a no-op for an id that isn't a live placement", async () => {
-        const before = store.getState().selectedObjectIds;
+        const before = objectIdsOf(store.getState().selection);
 
         store.getState().selectObject("no-such-placement");
 
-        expect(store.getState().selectedObjectIds).toBe(before);
+        expect(objectIdsOf(store.getState().selection)).toBe(before);
       });
     });
 
@@ -1566,7 +1602,7 @@ describe("app store", () => {
 
         store.getState().selectWall("wall-east");
 
-        expect(store.getState().selectedObjectIds).toEqual([]);
+        expect(objectIdsOf(store.getState().selection)).toEqual([]);
       });
 
       it("selectArtwork clears selectedObjectIds", async () => {
@@ -1575,7 +1611,7 @@ describe("app store", () => {
 
         store.getState().selectArtwork("some-artwork");
 
-        expect(store.getState().selectedObjectIds).toEqual([]);
+        expect(objectIdsOf(store.getState().selection)).toEqual([]);
       });
 
       it("selectOpening replaces selectedObjectIds with the opening (openings fold into objects)", async () => {
@@ -1590,7 +1626,7 @@ describe("app store", () => {
 
         // selectOpening is an objects selection now — it replaces the prior
         // selection with the single opening placement rather than clearing it.
-        expect(store.getState().selectedObjectIds).toEqual([openingId]);
+        expect(objectIdsOf(store.getState().selection)).toEqual([openingId]);
       });
 
       it("setDocument (via importProjectJson) clears selectedObjectIds", async () => {
@@ -1600,7 +1636,7 @@ describe("app store", () => {
         const imported = { ...createSampleProject(), id: "imported-2", title: "Imported 2" };
         await store.getState().importProjectJson(JSON.stringify(imported));
 
-        expect(store.getState().selectedObjectIds).toEqual([]);
+        expect(objectIdsOf(store.getState().selection)).toEqual([]);
       });
 
       it("setDocument (via openProject) clears selectedObjectIds", async () => {
@@ -1612,7 +1648,7 @@ describe("app store", () => {
         // Re-select back onto the original project (a fresh document swap).
         await store.getState().openProject(original.id);
 
-        expect(store.getState().selectedObjectIds).toEqual([]);
+        expect(objectIdsOf(store.getState().selection)).toEqual([]);
       });
     });
 
@@ -1796,7 +1832,7 @@ describe("app store", () => {
 
     describe("arrangeSelectedOnWall", () => {
       it("the canonical example: 2540mm wall, three 508mm works, insetMm 254", async () => {
-        const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+        const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
         await store.getState().resizeWall(wall.id, 2540);
 
         const a = await placeArtworkOnWall(200, 1450, 508);
@@ -1888,7 +1924,7 @@ describe("app store", () => {
         expect(state.undoStack.at(-1)?.label).toBe("Remove 2 objects");
         expect(state.project!.wallObjects.some((o) => o.id === a.placementId)).toBe(false);
         expect(state.project!.floorObjects.some((o) => o.id === floorObjectId)).toBe(false);
-        expect(state.selectedObjectIds).toEqual([]);
+        expect(objectIdsOf(state.selection)).toEqual([]);
       });
     });
 
@@ -1896,7 +1932,7 @@ describe("app store", () => {
       // Canonical setup: a 2540mm wall with three 508mm works, matching the
       // arrangeSelectedOnWall example. Returns the three placement ids.
       async function threeWorksOnWall() {
-        const wallId = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!.id;
+        const wallId = getSelectedWall(store.getState().project!, store.getState().wallContextId)!.id;
         await store.getState().resizeWall(wallId, 2540);
         const a = await placeArtworkOnWall(200, 1450, 508);
         const b = await placeArtworkOnWall(1000, 1450, 508);
@@ -2064,7 +2100,7 @@ describe("app store", () => {
         const { wall } = await threeWorksOnWall();
         const projectBefore = store.getState().project!;
         const undoBefore = store.getState().undoStack.length;
-        const selectedIds = store.getState().selectedObjectIds;
+        const selectedIds = objectIdsOf(store.getState().selection);
         const members = projectBefore.wallObjects.filter((o) => selectedIds.includes(o.id));
         expect(members).toHaveLength(3);
 
@@ -2235,7 +2271,7 @@ describe("app store", () => {
           expect(xById(id)).toBeCloseTo(preview[id].xMm);
         }
         // The click collapsed the group to a single selection.
-        expect(state.selectedObjectIds).toEqual([a.placementId]);
+        expect(objectIdsOf(state.selection)).toEqual([a.placementId]);
       });
 
       it("clearObjectSelection mid-session auto-accepts the pending arrangement", async () => {
@@ -2251,7 +2287,7 @@ describe("app store", () => {
         expect(state.arrangeSession).toBeNull();
         expect(state.undoStack).toHaveLength(undoBefore + 1);
         expect(xById(a.placementId)).toBeCloseTo(preview[a.placementId].xMm);
-        expect(state.selectedObjectIds).toEqual([]);
+        expect(objectIdsOf(state.selection)).toEqual([]);
       });
 
       it("a foreign edit cancels the session (preview discarded)", async () => {
@@ -2333,7 +2369,7 @@ describe("app store", () => {
         // delta in opposite directions — NOT teleport the pair to wall center.
         const wallId = getSelectedWall(
           store.getState().project!,
-          store.getState().selectedWallId
+          store.getState().wallContextId
         )!.id;
         await store.getState().resizeWall(wallId, 4724.4); // ~15'6"
         await placeArtworkOnWall(800, 1450, 400);
@@ -2391,7 +2427,7 @@ describe("app store", () => {
         async function boundedScenario() {
           const wallId = getSelectedWall(
             store.getState().project!,
-            store.getState().selectedWallId
+            store.getState().wallContextId
           )!.id;
           await store.getState().resizeWall(wallId, 3000);
           const neighbor = await placeArtworkOnWall(400, 1450, 800);
@@ -2602,7 +2638,7 @@ describe("app store", () => {
       await store.getState().addArtworksFromFiles([makeImageFile("overlap-b.jpg")]);
       const artworkBId = store.getState().project!.checklistArtworkIds.at(-1)!;
 
-      const wall = getSelectedWall(store.getState().project!, store.getState().selectedWallId)!;
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
       await store.getState().placeArtwork(artworkAId, wall.id, 500, 1450, true);
       const a = store.getState().project!.wallObjects.at(-1)!;
       await store.getState().placeArtwork(artworkBId, wall.id, 1500, 1450, true);
@@ -2639,7 +2675,7 @@ async function applyPlacementDirectly(
   artworkId: string
 ): Promise<void> {
   const project = store.getState().project!;
-  const wallId = getSelectedWall(project, store.getState().selectedWallId)?.id;
+  const wallId = getSelectedWall(project, store.getState().wallContextId)?.id;
   if (!wallId) throw new Error("Test setup requires a wall to place the artwork on.");
 
   const updated: Project = {

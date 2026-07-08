@@ -53,33 +53,18 @@ export function getSelectedOpeningId(project: Project | null, selection: Selecti
   return placement && placement.kind !== "artwork" ? selection.ids[0] : null;
 }
 
-export type SelectionWriteFields = {
-  selection: Selection;
-  wallContextId: string | null;
-  selectedWallId: string | null;
-  selectedArtworkId: string | null;
-  selectedOpeningId: string | null;
-  selectedObjectIds: string[];
-  selectedRoomId: string | null;
-};
-
-// MIGRATION BRIDGE (delete with the mirror fields): the one place the legacy
-// five slots are written. Every selection change in the store flows through
-// here so the mirrors can never drift from the union.
+// The single place selection state is written. Normalizes an empty objects
+// selection to none, then returns the union + wall context as one bundle so an
+// edit can't set the selection without its context (and vice versa). The
+// project param is retained so this stays the one hook if selection ever needs
+// project-aware normalization again — the pure helpers above already take a
+// project for exactly that reason.
 export function selectionWrite(
-  project: Project | null,
+  _project: Project | null,
   selection: Selection,
   wallContextId: string | null
-): SelectionWriteFields {
+): { selection: Selection; wallContextId: string | null } {
   const normalized: Selection =
     selection.kind === "objects" && selection.ids.length === 0 ? NO_SELECTION : selection;
-  return {
-    selection: normalized,
-    wallContextId,
-    selectedWallId: wallContextId,
-    selectedArtworkId: getSelectedArtworkId(project, normalized),
-    selectedOpeningId: getSelectedOpeningId(project, normalized),
-    selectedObjectIds: objectIdsOf(normalized),
-    selectedRoomId: roomIdOf(normalized)
-  };
+  return { selection: normalized, wallContextId };
 }

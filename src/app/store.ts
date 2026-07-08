@@ -64,8 +64,7 @@ import {
   NO_SELECTION,
   objectIdsOf,
   selectionWrite,
-  type Selection,
-  type SelectionWriteFields
+  type Selection
 } from "./store/selectionSlice";
 export {
   NO_SELECTION,
@@ -112,21 +111,14 @@ type UpdateArtworkChanges = Partial<
 export type AppState = ArrangeSliceState &
   ArrangeSliceActions & {
   project: Project | null;
-  // The store's source of truth for selection: one discriminated union value
-  // (see selectionSlice.ts). Written only via selectionWrite, which also keeps
-  // the five legacy mirror fields below in lockstep until consumers migrate.
+  // The store's ONLY selection state: one discriminated union value (see
+  // selectionSlice.ts). Written only via selectionWrite. Consumers derive
+  // everything they need from it through the pure helpers (objectIdsOf,
+  // roomIdOf, getSelectedArtworkId, getSelectedOpeningId).
   selection: Selection;
-  // Persistent sidebar wall context — was selectedWallId. Survives object
-  // selection; dropped only by room selection and full clears. NOT part of the
-  // selection union.
+  // Persistent sidebar wall context. Survives object selection; dropped only by
+  // room selection and full clears. NOT part of the selection union.
   wallContextId: string | null;
-  // MIRRORS of `selection`/`wallContextId` (Task 5 bridge) — written only via
-  // selectionWrite; consumers migrate off them, then they die.
-  selectedWallId: string | null;
-  selectedArtworkId: string | null;
-  selectedOpeningId: string | null;
-  selectedObjectIds: string[];
-  selectedRoomId: string | null;
   viewMode: ViewMode;
   saveState: "idle" | "saving" | "saved" | "error";
   error: string | null;
@@ -240,16 +232,20 @@ export function createAppStore(deps: AppStoreDeps) {
       }
     }
 
-    // Selection now rides along as a whole SelectionWriteFields bundle (spread
-    // from selectionWrite), never as individual legacy slots — so an edit that
-    // changes selection can't set one mirror without the others.
+    // Selection rides along as the whole {selection, wallContextId} bundle
+    // (spread from selectionWrite), never as loose fields — so an edit that
+    // changes selection can't set the union without its wall context.
     type EditExtras = Partial<
       Pick<
         AppState,
-        "placementWarnings" | "lastGeometryEdit" | "arrangeSession" | "viewMode"
+        | "placementWarnings"
+        | "lastGeometryEdit"
+        | "arrangeSession"
+        | "viewMode"
+        | "selection"
+        | "wallContextId"
       >
-    > &
-      Partial<SelectionWriteFields>;
+    >;
 
     // Pushes one entry onto the undo stack and applies whichever half(s) it
     // carries to state — project-only, artwork-only, or both (see EditEntry
@@ -395,11 +391,6 @@ export function createAppStore(deps: AppStoreDeps) {
       project: null,
       selection: NO_SELECTION,
       wallContextId: null,
-      selectedWallId: null,
-      selectedArtworkId: null,
-      selectedOpeningId: null,
-      selectedObjectIds: [],
-      selectedRoomId: null,
       ...ARRANGE_SLICE_INITIAL,
       viewMode: "plan",
       saveState: "idle",
