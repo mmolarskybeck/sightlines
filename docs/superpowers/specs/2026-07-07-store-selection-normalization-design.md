@@ -1,7 +1,7 @@
-# Store selection normalization + arrange slice extraction — design
+# Store selection normalization, arrange slice extraction & duplicate prevention — design
 
 **Date:** 2026-07-07
-**Status:** approved (brainstorm complete)
+**Status:** approved (brainstorm complete; duplicate-prevention scope added at spec review)
 **Baseline:** main @ 5e45133, 733/733 tests, build clean
 
 ## Goal
@@ -16,6 +16,13 @@ One refactor slice with two parts:
    selection slots into one discriminated union, and extract the arrange-session state
    into its own zustand slice. **Not** strictly behavior-preserving: the recorded
    selection warts get fixed (see Behavior changes).
+3. **Duplicate prevention** (feature work, added at spec review):
+   - An artwork can be placed at most once per project — dragging an
+     already-placed checklist entry onto a wall (or floor) is blocked outright.
+     Trying multiple layout versions is what project duplication is for.
+   - Uploading an image whose content already exists in the checklist warns and
+     asks for confirmation (it may be intentional), instead of silently adding
+     a twin.
 
 ## Current state (the problem)
 
@@ -99,6 +106,49 @@ Slices compose into one store, so the arrange slice's settle helper is invoked f
 selection actions through `get()` — no event bus, no circular imports. The existing
 settle-table comment moves to `arrangeSlice.ts` as its contract.
 
+## Duplicate prevention
+
+### Placement uniqueness (blocked, no confirm)
+
+Invariant: a library artwork has at most one placement per project (wall or
+floor), enforced on **new placements only** — existing projects that already
+contain duplicates keep them, editable as ever, with no migration or pruning.
+Because legacy duplicates can exist, the selection design's first-placement
+resolution stays as a defensive fallback; for projects created under the rule
+it is exact ("the placement").
+
+Enforcement, two layers:
+
+- **Store guard (the authority):** `placeArtwork` and `placeArtworkOnFloor`
+  reject when the artworkId already has a placement in `wallObjects` or
+  `floorObjects`, setting a friendly `error` (same surface as
+  `OVERLAP_BLOCKED_MESSAGE`), e.g. "This artwork is already placed. To try
+  another arrangement, duplicate the project."
+- **Checklist UX (the prevention):** a placed row is not draggable —
+  ChecklistPanel already computes `isPlaced`, so the drag affordance disables
+  (with a tooltip/visual cue) rather than letting a drop fail at the wall.
+
+Moving stays untouched: `moveArtworkPlacement` operates on the existing
+placement id and never trips the guard.
+
+### Upload duplicate detection (warn + confirm)
+
+Every asset record already stores a `sha256` computed at intake, so detection
+is an exact-hash comparison — no backfill, no perceptual hashing:
+
+- During `addArtworksFromFiles`, after processing each file, compare its
+  `sha256` against the asset hashes of the current library artworks (and
+  against earlier files in the same batch, so selecting the same file twice in
+  one dialog is also caught).
+- Non-duplicates intake exactly as today. Duplicates are **held, not added**:
+  a transient store field (e.g.
+  `pendingDuplicateUploads: { file, existingArtworkTitle }[]`) drives a
+  confirmation UI listing each duplicate against the checklist entry it
+  matches ("Looks identical to 'Untitled 3' — add anyway?").
+- Confirming intakes the held files (skipping the duplicate check); dismissing
+  drops them. The pending list is view state: not undoable, not persisted,
+  cleared on project switch.
+
 ## Behavior changes (all deliberate, all disclosed)
 
 1. **Wart fix:** checklist-selecting a *placed* artwork now selects its (first)
@@ -114,7 +164,12 @@ settle-table comment moves to `arrangeSlice.ts` as its contract.
    Escape (previously the legacy slot left Fit-selected disabled and Escape
    ignored it). Delete already worked via `selectedOpeningId`; it keeps working
    via the normal placement path.
-4. Everything else is behavior-preserving, including undo semantics: selection is
+4. Placing an already-placed artwork is now blocked (store guard + disabled
+   checklist drag) instead of silently duplicating; existing duplicates in old
+   projects are untouched.
+5. Uploading an image whose sha256 matches an existing checklist asset now asks
+   for confirmation instead of silently adding a twin.
+6. Everything else is behavior-preserving, including undo semantics: selection is
    view state, never on the undo stack; arrange accept still produces one
    "Arrange on wall" entry.
 
@@ -137,6 +192,12 @@ settle-table comment moves to `arrangeSlice.ts` as its contract.
    into a few review-sized tasks (e.g. App.tsx; 2D views; 3D + panels + hooks).
 5. **Delete the bridges** — type system proves nothing still reads them; migrate
    remaining `store.test.ts` assertions off legacy fields in this same step.
+6. **Duplicate prevention** (feature work, after the refactor so it lands on the
+   normalized store):
+   a. Placement-uniqueness guard in `placeArtwork`/`placeArtworkOnFloor` +
+      disabled drag on placed checklist rows.
+   b. Upload duplicate detection: sha256 comparison in `addArtworksFromFiles`,
+      `pendingDuplicateUploads` state, confirm/dismiss UI and actions.
 
 ## Error handling / invariants
 
@@ -161,11 +222,19 @@ settle-table comment moves to `arrangeSlice.ts` as its contract.
   - Checklist resolution: placed → objects, unplaced → libraryArtwork,
     dangling id → no-op.
   - Wheel-math tests (follow-up 1b).
+  - Placement uniqueness: second placement of same artwork rejected (wall and
+    floor, and cross: wall-placed artwork can't be floor-placed), legacy
+    duplicate projects still load and edit, move never trips the guard.
+  - Upload duplicates: matching sha256 held not added, batch-internal twin
+    caught, confirm intakes, dismiss drops, non-duplicates in a mixed batch
+    intake normally.
 - Chunk-graph assertion runs on every build.
 - Browser verification (main session, real clicks) after consumer migration:
   checklist click enables Fit-selected (headline check), canvas multi-select +
   arrange session + Escape/Delete, room handles, 3D checklist→highlight flight,
-  elevation selection.
+  elevation selection. After step 6: placed checklist row won't drag, second
+  placement attempt blocked with message, duplicate upload shows confirm and
+  both paths (add anyway / dismiss) behave.
 
 ## Process
 
