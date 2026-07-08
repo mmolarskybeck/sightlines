@@ -99,6 +99,12 @@ const UNDO_STACK_LIMIT = 100;
 const OVERLAP_BLOCKED_MESSAGE =
   'Can’t place it there — it would overlap another object on this wall. Turn on "Allow overlap" in view options to allow it.';
 
+// One placement per artwork per project — trying layout variants is what
+// project duplication is for (spec 2026-07-07). Enforced only on NEW
+// placements; legacy projects that already contain duplicates keep them.
+const ALREADY_PLACED_MESSAGE =
+  "This artwork is already placed. To try another arrangement, duplicate the project and experiment there.";
+
 type GeometryEditInfo = {
   anchorVertexId: string;
   changedWallIds: string[];
@@ -1137,6 +1143,14 @@ export function createAppStore(deps: AppStoreDeps) {
         if (!artwork) return;
         if (!getProjectWalls(project).some((wall) => wall.id === wallId)) return;
 
+        const alreadyPlaced =
+          project.wallObjects.some((o) => o.kind === "artwork" && o.artworkId === artworkId) ||
+          project.floorObjects.some((o) => o.kind === "artwork" && o.artworkId === artworkId);
+        if (alreadyPlaced) {
+          set({ error: ALREADY_PLACED_MESSAGE });
+          return;
+        }
+
         const placement = createArtworkPlacement(artwork, wallId, xMm, yMm);
         const nextWallObjects = [...project.wallObjects, placement];
         const placementWarnings = validateWallObjectPlacements(
@@ -1384,6 +1398,14 @@ export function createAppStore(deps: AppStoreDeps) {
 
         const artwork = get().libraryArtworks.find((candidate) => candidate.id === artworkId);
         if (!artwork) return;
+
+        const alreadyPlaced =
+          project.wallObjects.some((o) => o.kind === "artwork" && o.artworkId === artworkId) ||
+          project.floorObjects.some((o) => o.kind === "artwork" && o.artworkId === artworkId);
+        if (alreadyPlaced) {
+          set({ error: ALREADY_PLACED_MESSAGE });
+          return;
+        }
 
         const { widthMm, heightMm } = getEffectivePlacementSizeMm(artwork.dimensions);
         const floorObject: ArtworkFloorObject = {

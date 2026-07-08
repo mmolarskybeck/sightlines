@@ -439,7 +439,10 @@ function ChecklistRow({
   // A degraded stub (library record deleted out from under the project, see
   // the module comment above) has nothing to place on a wall, so it isn't a
   // valid drag source even though it still shows up and can be selected.
-  const isDraggable = artwork !== null;
+  // A placed artwork can't be dragged out again — one placement per artwork
+  // per project (spec 2026-07-07). The store guard is the authority; disabling
+  // the drag here keeps the checklist from offering a move that would be rejected.
+  const isDraggable = artwork !== null && !isPlaced;
 
   // Store image dimensions for creating a properly-sized drag preview with
   // correct aspect ratio (task: fix squished drag thumbnail).
@@ -494,6 +497,11 @@ function ChecklistRow({
       aria-pressed={isSelected}
       className={isSelected ? "checklist-row selected" : "checklist-row"}
       draggable={isDraggable}
+      title={
+        isPlaced
+          ? "Already placed — drag is disabled. Duplicate the project to try another arrangement."
+          : undefined
+      }
       role="button"
       tabIndex={0}
       onClick={onSelect}

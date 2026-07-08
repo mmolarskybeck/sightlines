@@ -1354,6 +1354,76 @@ describe("app store", () => {
     });
   });
 
+  describe("placement uniqueness", () => {
+    it("placeArtwork rejects an artwork that already has a wall placement", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const wallId = getSelectedWall(
+        store.getState().project!,
+        store.getState().wallContextId
+      )!.id;
+
+      await store.getState().placeArtwork(artworkId, wallId, 4000, 1500);
+      const placementsBefore = store.getState().project!.wallObjects.length;
+
+      await store.getState().placeArtwork(artworkId, wallId, 6000, 1500);
+
+      expect(store.getState().project!.wallObjects.length).toBe(placementsBefore);
+      expect(store.getState().error).toMatch(/already placed/i);
+    });
+
+    it("placeArtworkOnFloor rejects an artwork already placed on a wall (and vice versa)", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const wallId = getSelectedWall(
+        store.getState().project!,
+        store.getState().wallContextId
+      )!.id;
+
+      await store.getState().placeArtwork(artworkId, wallId, 4000, 1500);
+      await store.getState().placeArtworkOnFloor(artworkId, 1000, 1000);
+
+      expect(store.getState().project!.floorObjects).toHaveLength(0);
+      expect(store.getState().error).toMatch(/already placed/i);
+    });
+
+    it("a legacy project with duplicate placements still loads and its members still move", async () => {
+      // Place once through the store to get a schema-valid wall object, then
+      // clone it (fresh id, same artworkId) so the imported project already
+      // contains a duplicate the guard would otherwise forbid.
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const wallId = getSelectedWall(
+        store.getState().project!,
+        store.getState().wallContextId
+      )!.id;
+      await store.getState().placeArtwork(artworkId, wallId, 4000, 1500);
+
+      const seeded = store.getState().project!;
+      const original = seeded.wallObjects[0];
+      const duplicate = { ...original, id: "legacy-duplicate", xMm: 6000 };
+      const legacyProject: Project = {
+        ...seeded,
+        id: "legacy-dup-project",
+        title: "Legacy Duplicates",
+        wallObjects: [original, duplicate]
+      };
+
+      await store.getState().importProjectJson(exportProjectJson(legacyProject));
+
+      expect(store.getState().error).toBeNull();
+      expect(store.getState().project!.wallObjects).toHaveLength(2);
+
+      await store.getState().moveArtworkPlacement("legacy-duplicate", 7000, 1500);
+
+      const moved = store
+        .getState()
+        .project!.wallObjects.find((o) => o.id === "legacy-duplicate")!;
+      expect(moved.xMm).toBe(7000);
+      expect(store.getState().error).toBeNull();
+    });
+  });
+
   describe("commitPlanMove", () => {
     async function placeArtworkOnWall(xMm = 1000, yMm = 1450) {
       await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
