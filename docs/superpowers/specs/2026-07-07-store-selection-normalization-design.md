@@ -148,6 +148,11 @@ is an exact-hash comparison — no backfill, no perceptual hashing:
 - Confirming intakes the held files (skipping the duplicate check); dismissing
   drops them. The pending list is view state: not undoable, not persisted,
   cleared on project switch.
+- A confirmed duplicate upload creates its own independent checklist entry,
+  independently placeable under the placement-uniqueness guard — this is
+  deliberate, not a gap: editions and diptychs printed from one file are a
+  real case, and placement uniqueness is enforced per checklist entry, not
+  per source asset.
 
 ## Behavior changes (all deliberate, all disclosed)
 
@@ -172,6 +177,15 @@ is an exact-hash comparison — no backfill, no perceptual hashing:
 6. Everything else is behavior-preserving, including undo semantics: selection is
    view state, never on the undo stack; arrange accept still produces one
    "Arrange on wall" entry.
+7. **Escape now clears any selection kind, including room focus** (sanctioned at
+   final review): previously `selectedRoomId` was truly exclusive and not
+   Escape-clearable; under the union, room focus is just another `Selection`
+   value and Escape resets it to `{kind:"none"}` like every other kind.
+8. Deriving the legacy fields instead of mirroring them means an undo that
+   removes a placement now empties the inspector (the dangling placement id
+   in `selection` derives a null artwork/opening) instead of leaving a stale
+   artwork inspector behind, e.g. undoing "Place artwork" clears the inspector
+   rather than continuing to show the just-unplaced artwork.
 
 ## Migration order (each step lands green)
 

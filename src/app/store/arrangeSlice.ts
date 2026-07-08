@@ -7,7 +7,7 @@ import {
 } from "../../domain/placement/arrangeOnWall";
 import type { Project } from "../../domain/project";
 import { getProjectWalls } from "../projectWalls";
-import type { AppState } from "../store";
+import type { AppState, EditExtras } from "../store";
 import { objectIdsOf } from "./selectionSlice";
 
 // A transient, NON-undoable arrange interaction (precedent: selectedObjectIds
@@ -96,7 +96,7 @@ export type ArrangeSliceInternals = {
     moves: { id: string; xMm: number; yMm: number }[],
     label: string | ((movedCount: number) => string),
     allowOverlap: boolean,
-    extras?: Record<string, unknown>
+    extras?: EditExtras
   ) => { status: "committed"; project: Project } | { status: "no-op" } | { status: "blocked" };
   persist: (project: Project) => Promise<void>;
 };

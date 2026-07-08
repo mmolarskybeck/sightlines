@@ -60,6 +60,9 @@ export function getSelectedOpeningId(project: Project | null, selection: Selecti
 // project-aware normalization again — the pure helpers above already take a
 // project for exactly that reason.
 export function selectionWrite(
+  // Convention: callers pass the AFTER-project (the edit's post-state), not
+  // the pre-edit one — selection is normalized against what the document
+  // looks like once the edit lands, not what it looked like before.
   _project: Project | null,
   selection: Selection,
   wallContextId: string | null

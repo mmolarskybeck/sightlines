@@ -67,13 +67,11 @@ import {
   type Selection
 } from "./store/selectionSlice";
 export {
-  NO_SELECTION,
   objectIdsOf,
   roomIdOf,
   getSelectedArtworkId,
   getSelectedOpeningId
 } from "./store/selectionSlice";
-export type { Selection } from "./store/selectionSlice";
 
 export type ViewMode = "plan" | "elevation" | "data" | "3d";
 
@@ -221,6 +219,21 @@ export type AppState = ArrangeSliceState &
   removeSelectedPlacements: () => Promise<void>;
 };
 
+// Selection rides along as the whole {selection, wallContextId} bundle
+// (spread from selectionWrite), never as loose fields — so an edit that
+// changes selection can't set the union without its wall context.
+export type EditExtras = Partial<
+  Pick<
+    AppState,
+    | "placementWarnings"
+    | "lastGeometryEdit"
+    | "arrangeSession"
+    | "viewMode"
+    | "selection"
+    | "wallContextId"
+  >
+>;
+
 export type AppStoreDeps = {
   projectRepository: ProjectRepository;
   artworkLibraryRepository: ArtworkLibraryRepository;
@@ -243,21 +256,6 @@ export function createAppStore(deps: AppStoreDeps) {
         });
       }
     }
-
-    // Selection rides along as the whole {selection, wallContextId} bundle
-    // (spread from selectionWrite), never as loose fields — so an edit that
-    // changes selection can't set the union without its wall context.
-    type EditExtras = Partial<
-      Pick<
-        AppState,
-        | "placementWarnings"
-        | "lastGeometryEdit"
-        | "arrangeSession"
-        | "viewMode"
-        | "selection"
-        | "wallContextId"
-      >
-    >;
 
     // Pushes one entry onto the undo stack and applies whichever half(s) it
     // carries to state — project-only, artwork-only, or both (see EditEntry
@@ -647,17 +645,19 @@ export function createAppStore(deps: AppStoreDeps) {
             ? NO_SELECTION
             : current;
 
+        const nextProject: Project = {
+          ...project,
+          floor: { rooms: nextRooms },
+          wallObjects: project.wallObjects.filter(
+            (wallObject) => !deletedWallIds.has(wallObject.wallId)
+          )
+        };
+
         await applyEdit(
           `Delete ${roomPlacement.room.name}`,
-          (current) => ({
-            ...current,
-            floor: { rooms: nextRooms },
-            wallObjects: current.wallObjects.filter(
-              (wallObject) => !deletedWallIds.has(wallObject.wallId)
-            )
-          }),
+          () => nextProject,
           {
-            ...selectionWrite(project, nextSelection, nextWallContextId),
+            ...selectionWrite(nextProject, nextSelection, nextWallContextId),
             viewMode: "plan"
           }
         );
@@ -948,14 +948,18 @@ export function createAppStore(deps: AppStoreDeps) {
         const failures: string[] = [];
 
         // Duplicate screen: exact content-hash match against the current
-        // library's assets (and earlier files in this batch). Legacy assets
-        // without a sha256 never match. Held files are surfaced for
-        // confirmation instead of intaken — re-uploading the same image is
-        // usually a mistake, occasionally deliberate.
+        // checklist's assets (and earlier files in this batch), not the
+        // whole cross-project library — a work removed from the checklist,
+        // or only ever used in another project, must not trigger a hold.
+        // Legacy assets without a sha256 never match. Held files are
+        // surfaced for confirmation instead of intaken — re-uploading the
+        // same image is usually a mistake, occasionally deliberate.
         const skipDuplicateCheck = opts.skipDuplicateCheck === true;
         const titleBySha = new Map<string, string>();
         if (!skipDuplicateCheck) {
+          const checklistIds = new Set(project.checklistArtworkIds);
           for (const libraryArtwork of get().libraryArtworks) {
+            if (!checklistIds.has(libraryArtwork.id)) continue;
             if (!libraryArtwork.assetId) continue;
             try {
               const asset = await deps.assetRepository.getAsset(libraryArtwork.assetId);
@@ -1874,8 +1878,10 @@ export function createAppStore(deps: AppStoreDeps) {
           project.floorObjects.filter((floorObject) => idSet.has(floorObject.id)).length;
         if (removedCount === 0) return;
 
+        const label = removedCount === 1 ? "Remove 1 object" : `Remove ${removedCount} objects`;
+
         await applyEdit(
-          `Remove ${removedCount} objects`,
+          label,
           (current) => ({
             ...current,
             wallObjects: current.wallObjects.filter((wallObject) => !idSet.has(wallObject.id)),

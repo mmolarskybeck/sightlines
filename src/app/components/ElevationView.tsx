@@ -822,27 +822,10 @@ export function ElevationView({
   // selected artwork/opening ON THIS WALL, drag preview applied (harmless
   // no-op when no drag is live — the button can't be clicked mid-drag
   // anyway, since the pointer is captured). null when nothing on this wall
-  // is selected, which also disables the chip's button. When
-  // selectedObjectIds is empty, falls back to the legacy single-selection
-  // props (selectedArtworkId / selectedOpeningId) so an object selected from
-  // the checklist — highlighted on the wall via those props, but never added
-  // to selectedObjectIds — still enables and frames via this button.
-  const legacyFitSelectionMembers: WallObjectBase[] =
-    selectedObjectIds.length === 0
-      ? [
-          ...placements.filter(
-            (placement) => selectedArtworkId !== null && placement.artworkId === selectedArtworkId
-          ),
-          ...openings.filter(
-            (opening) => selectedOpeningId !== null && opening.id === selectedOpeningId
-          )
-        ].map(applyDragPreview)
-      : [];
-  const fitSelectionMembers =
-    selectedObjectIds.length > 0 ? effectiveOutlineMembers : legacyFitSelectionMembers;
+  // is selected, which also disables the chip's button.
   const selectedSvgBounds = getFitSelectionBoundsSvg(
     wallHeightMm,
-    fitSelectionMembers.map((wallObject) => ({
+    effectiveOutlineMembers.map((wallObject) => ({
       center: { xMm: wallObject.xMm, yMm: wallObject.yMm },
       size: { widthMm: wallObject.widthMm, heightMm: wallObject.heightMm }
     }))

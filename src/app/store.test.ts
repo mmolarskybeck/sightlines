@@ -742,6 +742,23 @@ describe("app store", () => {
       expect(state.libraryArtworks).toHaveLength(countAfterFirst + 1);
     });
 
+    it("does not hold a re-upload of a work removed from the checklist: the screen compares against the checklist, not the whole library", async () => {
+      await useSharedHash(["piece.jpg", "piece-again.jpg"], "shared-sha");
+
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const countAfterFirst = store.getState().libraryArtworks.length;
+
+      await store.getState().removeArtworkFromChecklist(artworkId);
+
+      await store.getState().addArtworksFromFiles([makeImageFile("piece-again.jpg")]);
+
+      const state = store.getState();
+      expect(state.pendingDuplicateUploads).toHaveLength(0);
+      expect(state.libraryArtworks).toHaveLength(countAfterFirst + 1);
+      expect(state.project!.checklistArtworkIds).toHaveLength(1);
+    });
+
     it("clears pending holds when the project is replaced", async () => {
       await useSharedHash(["twin-a.jpg", "twin-b.jpg"], "shared-sha");
 
@@ -1762,7 +1779,7 @@ describe("app store", () => {
         ).toBeNull();
       });
 
-      it("selecting two placements clears both legacy slots", async () => {
+      it("selecting two placements derives no single-select artwork/opening", async () => {
         const a = await placeArtworkOnWall(500, 1450);
         const b = await placeArtworkOnWall(1500, 1450);
 
@@ -1770,11 +1787,11 @@ describe("app store", () => {
         store.getState().selectObject(b.placementId, { additive: true });
 
         expect(
-        getSelectedArtworkId(store.getState().project, store.getState().selection)
-      ).toBeNull();
+          getSelectedArtworkId(store.getState().project, store.getState().selection)
+        ).toBeNull();
         expect(
-        getSelectedOpeningId(store.getState().project, store.getState().selection)
-      ).toBeNull();
+          getSelectedOpeningId(store.getState().project, store.getState().selection)
+        ).toBeNull();
       });
 
       it("is a no-op for an id that isn't a live placement", async () => {
