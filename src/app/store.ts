@@ -60,6 +60,21 @@ import {
   type ArrangeSliceState
 } from "./store/arrangeSlice";
 export type { ArrangeSession } from "./store/arrangeSlice";
+import {
+  NO_SELECTION,
+  objectIdsOf,
+  selectionWrite,
+  type Selection,
+  type SelectionWriteFields
+} from "./store/selectionSlice";
+export {
+  NO_SELECTION,
+  objectIdsOf,
+  roomIdOf,
+  getSelectedArtworkId,
+  getSelectedOpeningId
+} from "./store/selectionSlice";
+export type { Selection } from "./store/selectionSlice";
 
 export type ViewMode = "plan" | "elevation" | "data" | "3d";
 
@@ -97,24 +112,20 @@ type UpdateArtworkChanges = Partial<
 export type AppState = ArrangeSliceState &
   ArrangeSliceActions & {
   project: Project | null;
+  // The store's source of truth for selection: one discriminated union value
+  // (see selectionSlice.ts). Written only via selectionWrite, which also keeps
+  // the five legacy mirror fields below in lockstep until consumers migrate.
+  selection: Selection;
+  // Persistent sidebar wall context — was selectedWallId. Survives object
+  // selection; dropped only by room selection and full clears. NOT part of the
+  // selection union.
+  wallContextId: string | null;
+  // MIRRORS of `selection`/`wallContextId` (Task 5 bridge) — written only via
+  // selectionWrite; consumers migrate off them, then they die.
   selectedWallId: string | null;
   selectedArtworkId: string | null;
   selectedOpeningId: string | null;
-  // Multi-select for group operations (move/arrange/delete). These are
-  // PLACEMENT ids — wallObjects/floorObjects entries — never artwork library
-  // ids, and never anything else on the undo stack (docs/plan.md §7 scopes
-  // undo to the document; what's currently selected is view state, same as
-  // selectedWallId). See legacySelectionSlots for how this array keeps the
-  // pre-existing single-select inspectors (selectedArtworkId/selectedOpeningId)
-  // in sync.
   selectedObjectIds: string[];
-  // Which room shows its selection-scoped resize/move affordances in plan
-  // view — view state, not undoable, not persisted, same as selectedWallId.
-  // Mutually exclusive with every other selection slot: selecting a room
-  // clears them all (selectRoom), and selecting any of them clears the room
-  // (see selectWall/selectArtwork/selectOpening/selectObject/
-  // setObjectSelection) — unlike selectedWallId, which persists as sidebar
-  // context across artwork/opening selection.
   selectedRoomId: string | null;
   viewMode: ViewMode;
   saveState: "idle" | "saving" | "saved" | "error";
@@ -229,20 +240,16 @@ export function createAppStore(deps: AppStoreDeps) {
       }
     }
 
+    // Selection now rides along as a whole SelectionWriteFields bundle (spread
+    // from selectionWrite), never as individual legacy slots — so an edit that
+    // changes selection can't set one mirror without the others.
     type EditExtras = Partial<
       Pick<
         AppState,
-        | "placementWarnings"
-        | "lastGeometryEdit"
-        | "selectedWallId"
-        | "selectedArtworkId"
-        | "selectedOpeningId"
-        | "selectedObjectIds"
-        | "selectedRoomId"
-        | "arrangeSession"
-        | "viewMode"
+        "placementWarnings" | "lastGeometryEdit" | "arrangeSession" | "viewMode"
       >
-    >;
+    > &
+      Partial<SelectionWriteFields>;
 
     // Pushes one entry onto the undo stack and applies whichever half(s) it
     // carries to state — project-only, artwork-only, or both (see EditEntry
@@ -305,11 +312,7 @@ export function createAppStore(deps: AppStoreDeps) {
     function setDocument(project: Project, extras: Partial<AppState> = {}) {
       set({
         project,
-        selectedWallId: getFirstWall(project)?.id ?? null,
-        selectedArtworkId: null,
-        selectedOpeningId: null,
-        selectedObjectIds: [],
-        selectedRoomId: null,
+        ...selectionWrite(project, NO_SELECTION, getFirstWall(project)?.id ?? null),
         arrangeSession: null,
         placementWarnings: [],
         lastGeometryEdit: null,
@@ -390,6 +393,8 @@ export function createAppStore(deps: AppStoreDeps) {
 
     return {
       project: null,
+      selection: NO_SELECTION,
+      wallContextId: null,
       selectedWallId: null,
       selectedArtworkId: null,
       selectedOpeningId: null,
@@ -455,53 +460,56 @@ export function createAppStore(deps: AppStoreDeps) {
 
       selectWall(wallId) {
         autoAcceptArrangeSession();
-        // Wall focus replaces artwork/opening focus in the inspector — the
-        // three selections are mutually exclusive, not independent. It also
-        // drops any multi-select — a wall click is a fresh focus gesture, not
-        // an addition to a group of placements. Also drops room focus (a
-        // selected room's handles are a different, exclusive canvas mode).
-        set({
-          selectedWallId: wallId,
-          selectedArtworkId: null,
-          selectedOpeningId: null,
-          selectedObjectIds: [],
-          selectedRoomId: null
-        });
+        // Wall focus clears the selection but keeps the wall as sidebar
+        // context — a wall click is a fresh focus gesture, not an addition to
+        // a group of placements, and it drops room focus (a selected room's
+        // handles are a different, exclusive canvas mode).
+        set(selectionWrite(get().project, NO_SELECTION, wallId));
       },
 
       selectArtwork(artworkId) {
         autoAcceptArrangeSession();
-        set({
-          selectedArtworkId: artworkId,
-          selectedOpeningId: null,
-          selectedObjectIds: [],
-          selectedRoomId: null
-        });
+        const project = get().project;
+        // Wart fix: a checklist click on a PLACED artwork selects its (first)
+        // placement — wallObjects before floorObjects, the same resolution the
+        // Delete handler uses — so Fit-selected, arrange, delete and highlight
+        // all read one selection. An unplaced pick is inspector-only.
+        const placement =
+          project?.wallObjects.find(
+            (object) => object.kind === "artwork" && object.artworkId === artworkId
+          ) ??
+          project?.floorObjects.find(
+            (object) => object.kind === "artwork" && object.artworkId === artworkId
+          );
+        const selection: Selection = placement
+          ? { kind: "objects", ids: [placement.id] }
+          : { kind: "libraryArtwork", artworkId };
+        set(selectionWrite(project, selection, get().wallContextId));
       },
 
       selectOpening(wallObjectId) {
         autoAcceptArrangeSession();
-        set({
-          selectedOpeningId: wallObjectId,
-          selectedArtworkId: null,
-          selectedObjectIds: [],
-          selectedRoomId: null
-        });
+        const project = get().project;
+        if (!project) return;
+        // Openings are placements now — an opening selection is an objects
+        // selection. Validate the id against the live project (same tolerance
+        // as selectObject); a dead id is an inert no-op, not a clear.
+        const exists =
+          project.wallObjects.some((object) => object.id === wallObjectId) ||
+          project.floorObjects.some((object) => object.id === wallObjectId);
+        if (!exists) return;
+        set(
+          selectionWrite(project, { kind: "objects", ids: [wallObjectId] }, get().wallContextId)
+        );
       },
 
       // Room focus for plan view's selection-scoped handles/wash — mutually
-      // exclusive with every other selection slot (see selectedRoomId), so
-      // this is the one action, besides clearObjectSelection, that also
-      // drops the wall focus other selects leave untouched.
+      // exclusive with every other selection (see the union's "room" kind), so
+      // this is the one action, besides clearObjectSelection, that also drops
+      // the wall context other selects leave untouched.
       selectRoom(roomId) {
         autoAcceptArrangeSession();
-        set({
-          selectedRoomId: roomId,
-          selectedWallId: null,
-          selectedArtworkId: null,
-          selectedOpeningId: null,
-          selectedObjectIds: []
-        });
+        set(selectionWrite(get().project, { kind: "room", roomId }, null));
       },
 
       // Placement multi-select: id must be a live wallObject/floorObject id,
@@ -523,18 +531,14 @@ export function createAppStore(deps: AppStoreDeps) {
           project.floorObjects.some((object) => object.id === id);
         if (!exists) return;
 
-        const current = get().selectedObjectIds;
+        const current = objectIdsOf(get().selection);
         const next = opts.additive
           ? current.includes(id)
             ? current.filter((existingId) => existingId !== id)
             : [...current, id]
           : [id];
 
-        set({
-          selectedObjectIds: next,
-          selectedRoomId: null,
-          ...legacySelectionSlots(project, next)
-        });
+        set(selectionWrite(project, { kind: "objects", ids: next }, get().wallContextId));
       },
 
       // Bulk replace (e.g. a marquee-drag selection from the plan view).
@@ -552,30 +556,15 @@ export function createAppStore(deps: AppStoreDeps) {
             project.floorObjects.some((object) => object.id === id)
         );
 
-        set({
-          selectedObjectIds: next,
-          selectedRoomId: null,
-          ...legacySelectionSlots(project, next)
-        });
+        set(selectionWrite(project, { kind: "objects", ids: next }, get().wallContextId));
       },
 
       clearObjectSelection() {
         autoAcceptArrangeSession();
-        const state = get();
-        if (
-          state.selectedObjectIds.length === 0 &&
-          state.selectedArtworkId === null &&
-          state.selectedOpeningId === null &&
-          state.selectedRoomId === null
-        ) {
-          return;
-        }
-        set({
-          selectedObjectIds: [],
-          selectedArtworkId: null,
-          selectedOpeningId: null,
-          selectedRoomId: null
-        });
+        // Already-empty selection is a no-op — but wall context (which persists
+        // across clears) is left exactly as it was.
+        if (get().selection.kind === "none") return;
+        set(selectionWrite(get().project, NO_SELECTION, get().wallContextId));
       },
 
       async renameProject(title) {
@@ -623,19 +612,32 @@ export function createAppStore(deps: AppStoreDeps) {
         const nextRooms = project.floor.rooms.filter(
           (placement) => placement.roomId !== roomId
         );
-        const selectedWallId = get().selectedWallId;
-        const selectedOpeningId = get().selectedOpeningId;
-        const nextSelectedWallId = selectedWallId && deletedWallIds.has(selectedWallId)
+        // Wall context falls back to a surviving wall when the deleted room
+        // owned it; otherwise it persists untouched.
+        const wallContextId = get().wallContextId;
+        const nextWallContextId = wallContextId && deletedWallIds.has(wallContextId)
           ? (nextRooms[0]?.room.walls[0]?.id ?? null)
-          : selectedWallId;
-        const nextSelectedOpeningId = selectedOpeningId && project.wallObjects.some(
-          (wallObject) =>
-            wallObject.id === selectedOpeningId && deletedWallIds.has(wallObject.wallId)
-        )
-          ? null
-          : selectedOpeningId;
-        const nextSelectedRoomId =
-          get().selectedRoomId === roomId ? null : get().selectedRoomId;
+          : wallContextId;
+
+        // The room's wall objects go with it — prune any of them out of the
+        // live selection (stale-id hygiene), and drop room focus if this was
+        // the focused room.
+        const deletedObjectIds = new Set(
+          project.wallObjects
+            .filter((wallObject) => deletedWallIds.has(wallObject.wallId))
+            .map((wallObject) => wallObject.id)
+        );
+        const current = get().selection;
+        let nextSelection: Selection;
+        if (current.kind === "room") {
+          nextSelection = current.roomId === roomId ? NO_SELECTION : current;
+        } else if (current.kind === "objects") {
+          const survivingIds = current.ids.filter((id) => !deletedObjectIds.has(id));
+          nextSelection =
+            survivingIds.length > 0 ? { kind: "objects", ids: survivingIds } : NO_SELECTION;
+        } else {
+          nextSelection = current;
+        }
 
         await applyEdit(
           `Delete ${roomPlacement.room.name}`,
@@ -647,9 +649,7 @@ export function createAppStore(deps: AppStoreDeps) {
             )
           }),
           {
-            selectedWallId: nextSelectedWallId,
-            selectedOpeningId: nextSelectedOpeningId,
-            selectedRoomId: nextSelectedRoomId,
+            ...selectionWrite(project, nextSelection, nextWallContextId),
             viewMode: "plan"
           }
         );
@@ -681,7 +681,13 @@ export function createAppStore(deps: AppStoreDeps) {
             floor: { rooms: [...current.floor.rooms, roomPlacement] }
           }),
           {
-            selectedWallId: roomPlacement.room.walls[0]?.id ?? null,
+            // Move the sidebar context to the new room's first wall; the
+            // current selection (if any) is left as-is.
+            ...selectionWrite(
+              project,
+              get().selection,
+              roomPlacement.room.walls[0]?.id ?? null
+            ),
             viewMode: "plan"
           }
         );
@@ -758,10 +764,10 @@ export function createAppStore(deps: AppStoreDeps) {
       },
 
       async resizeSelectedWall(lengthMm) {
-        const selectedWallId = get().selectedWallId;
-        if (!selectedWallId) return;
+        const wallContextId = get().wallContextId;
+        if (!wallContextId) return;
 
-        await get().resizeWall(selectedWallId, lengthMm);
+        await get().resizeWall(wallContextId, lengthMm);
       },
 
       async moveRoom(roomId, offsetXMm, offsetYMm) {
@@ -1152,10 +1158,16 @@ export function createAppStore(deps: AppStoreDeps) {
         await applyEdit(
           "Place artwork",
           (current) => ({ ...current, wallObjects: nextWallObjects }),
-          // Selecting the placed artwork must also clear any opening
-          // selection — the two are mutually exclusive everywhere else
-          // (selectArtwork/selectOpening/addOpening all clear the other).
-          { placementWarnings, selectedArtworkId: artworkId, selectedOpeningId: null }
+          // Placing selects the new placement (wart-fix umbrella: previously it
+          // set only the inspector slot and left any multi-select intact).
+          {
+            placementWarnings,
+            ...selectionWrite(
+              { ...project, wallObjects: nextWallObjects },
+              { kind: "objects", ids: [placement.id] },
+              get().wallContextId
+            )
+          }
         );
       },
 
@@ -1234,8 +1246,13 @@ export function createAppStore(deps: AppStoreDeps) {
               { ...project, wallObjects: nextWallObjects },
               [placement.id]
             ),
-            selectedOpeningId: placement.id,
-            selectedArtworkId: null
+            // Selecting a placement is an objects selection now (openings fold
+            // into the union) — the freshly-added opening becomes the selection.
+            ...selectionWrite(
+              { ...project, wallObjects: nextWallObjects },
+              { kind: "objects", ids: [placement.id] },
+              get().wallContextId
+            )
           }
         );
       },
@@ -1331,7 +1348,13 @@ export function createAppStore(deps: AppStoreDeps) {
           await applyEdit(
             `Add ${openingNoun(kind)}`,
             (current) => ({ ...current, floorObjects: [...current.floorObjects, floorObject] }),
-            { selectedOpeningId: floorObject.id, selectedArtworkId: null }
+            {
+              ...selectionWrite(
+                { ...project, floorObjects: [...project.floorObjects, floorObject] },
+                { kind: "objects", ids: [floorObject.id] },
+                get().wallContextId
+              )
+            }
           );
           return;
         }
@@ -1352,8 +1375,11 @@ export function createAppStore(deps: AppStoreDeps) {
               { ...project, wallObjects: nextWallObjects },
               [opening.id]
             ),
-            selectedOpeningId: opening.id,
-            selectedArtworkId: null
+            ...selectionWrite(
+              { ...project, wallObjects: nextWallObjects },
+              { kind: "objects", ids: [opening.id] },
+              get().wallContextId
+            )
           }
         );
       },
@@ -1387,7 +1413,14 @@ export function createAppStore(deps: AppStoreDeps) {
         await applyEdit(
           "Place artwork",
           (current) => ({ ...current, floorObjects: [...current.floorObjects, floorObject] }),
-          { selectedArtworkId: artworkId, selectedOpeningId: null }
+          // Placing selects the new floor placement (wart-fix umbrella).
+          {
+            ...selectionWrite(
+              { ...project, floorObjects: [...project.floorObjects, floorObject] },
+              { kind: "objects", ids: [floorObject.id] },
+              get().wallContextId
+            )
+          }
         );
       },
 
@@ -1686,7 +1719,7 @@ export function createAppStore(deps: AppStoreDeps) {
         const cannotArrangeMessage =
           "Select at least two works on the same wall to arrange them.";
 
-        const selectedIds = get().selectedObjectIds;
+        const selectedIds = objectIdsOf(get().selection);
         const hasFloorMember = selectedIds.some((id) =>
           project.floorObjects.some((floorObject) => floorObject.id === id)
         );
@@ -1759,7 +1792,7 @@ export function createAppStore(deps: AppStoreDeps) {
 
       async removeSelectedPlacements() {
         const project = get().project;
-        const selectedIds = get().selectedObjectIds;
+        const selectedIds = objectIdsOf(get().selection);
         if (!project || selectedIds.length === 0) return;
 
         const idSet = new Set(selectedIds);
@@ -1777,7 +1810,7 @@ export function createAppStore(deps: AppStoreDeps) {
               (floorObject) => !idSet.has(floorObject.id)
             )
           }),
-          { selectedObjectIds: [], selectedArtworkId: null, selectedOpeningId: null }
+          selectionWrite(project, NO_SELECTION, get().wallContextId)
         );
       }
     };
@@ -1796,35 +1829,6 @@ function openingNoun(kind: OpeningKind): string {
 // whether the object is wall-anchored or floor-placed.
 function moveObjectNoun(kind: WallObject["kind"]): string {
   return kind === "artwork" ? "artwork" : openingNoun(kind);
-}
-
-// The only place placement ids (selectedObjectIds) and library ids
-// (selectedArtworkId) meet. With exactly one placement selected, resolve it
-// against the live project and mirror it into the legacy single-select
-// slots the existing artwork/opening inspectors read — selectedArtworkId
-// holds a *library* artworkId (App.tsx's inspector resolves it further),
-// while selectedObjectIds holds *placement* ids throughout. Any other count
-// (0, or 2+ for a group) clears both — there's no single object left for
-// them to describe.
-function legacySelectionSlots(
-  project: Project,
-  ids: string[]
-): { selectedArtworkId: string | null; selectedOpeningId: string | null } {
-  if (ids.length !== 1) {
-    return { selectedArtworkId: null, selectedOpeningId: null };
-  }
-
-  const [id] = ids;
-  const placement =
-    project.wallObjects.find((wallObject) => wallObject.id === id) ??
-    project.floorObjects.find((floorObject) => floorObject.id === id);
-  if (!placement) {
-    return { selectedArtworkId: null, selectedOpeningId: null };
-  }
-
-  return placement.kind === "artwork"
-    ? { selectedArtworkId: placement.artworkId, selectedOpeningId: null }
-    : { selectedArtworkId: null, selectedOpeningId: id };
 }
 
 // Shared by addOpening (centers on the wall) and placeOpeningFromPlan (places

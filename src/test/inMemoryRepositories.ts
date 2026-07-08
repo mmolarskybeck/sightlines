@@ -1,0 +1,125 @@
+import type { ImageProcessor, ProcessedImage } from "../domain/assets/imageIntake";
+import type { Artwork, Asset, Project, ProjectSummary } from "../domain/project";
+import type { ArtworkLibraryRepository } from "../domain/repositories/artworkLibraryRepository";
+import type { AssetRepository } from "../domain/repositories/assetRepository";
+import type { ProjectRepository } from "../domain/repositories/projectRepository";
+import { parseArtwork, parseAsset } from "../domain/schema/artworkSchema";
+import { parseProject } from "../domain/schema/projectSchema";
+
+export class InMemoryProjectRepository implements ProjectRepository {
+  projects = new Map<string, Project>();
+
+  async load(id: string): Promise<Project> {
+    const project = this.projects.get(id);
+    if (!project) throw new Error(`Project not found: ${id}`);
+    return project;
+  }
+
+  async save(project: Project): Promise<void> {
+    parseProject(project);
+    this.projects.set(project.id, project);
+  }
+
+  async list(): Promise<ProjectSummary[]> {
+    return [...this.projects.values()]
+      .map(({ id, title, updatedAt }) => ({ id, title, updatedAt }))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  async delete(id: string): Promise<void> {
+    this.projects.delete(id);
+  }
+}
+
+// Validates on save the same way IndexedDbArtworkLibraryRepository does
+// (parseArtwork), so a store bug that writes a malformed record fails the
+// test the same way it would fail against the real repository.
+export class InMemoryArtworkLibraryRepository implements ArtworkLibraryRepository {
+  artworks = new Map<string, Artwork>();
+
+  async list(): Promise<Artwork[]> {
+    return [...this.artworks.values()];
+  }
+
+  async get(id: string): Promise<Artwork> {
+    const artwork = this.artworks.get(id);
+    if (!artwork) throw new Error(`Artwork not found: ${id}`);
+    return artwork;
+  }
+
+  async save(artwork: Artwork): Promise<void> {
+    parseArtwork(artwork);
+    this.artworks.set(artwork.id, artwork);
+  }
+
+  async delete(id: string): Promise<void> {
+    this.artworks.delete(id);
+  }
+}
+
+// Same validate-on-save shape as IndexedDbAssetRepository, backed by plain
+// maps instead of IndexedDB — real Blob instances flow through unchanged so
+// tests can assert on their content.
+export class InMemoryAssetRepository implements AssetRepository {
+  assets = new Map<string, Asset>();
+  blobs = new Map<string, Blob>();
+
+  async saveAsset(
+    asset: Asset,
+    blobs: { original: Blob; display: Blob; thumbnail: Blob }
+  ): Promise<void> {
+    parseAsset(asset);
+    this.assets.set(asset.id, asset);
+    this.blobs.set(asset.originalKey, blobs.original);
+    this.blobs.set(asset.displayKey, blobs.display);
+    this.blobs.set(asset.thumbnailKey, blobs.thumbnail);
+  }
+
+  async getAsset(id: string): Promise<Asset> {
+    const asset = this.assets.get(id);
+    if (!asset) throw new Error(`Asset not found: ${id}`);
+    return asset;
+  }
+
+  async getBlob(key: string): Promise<Blob> {
+    const blob = this.blobs.get(key);
+    if (!blob) throw new Error(`Asset blob not found: ${key}`);
+    return blob;
+  }
+
+  async delete(id: string): Promise<void> {
+    this.assets.delete(id);
+  }
+}
+
+// A fake processor that skips real image decoding entirely (jsdom has no
+// Canvas/ImageBitmap support) — it returns tiny deterministic blobs and
+// metadata instead, and can be told to throw for specific filenames to
+// exercise the store's per-file failure containment.
+export class FakeImageProcessor implements ImageProcessor {
+  processedFilenames: string[] = [];
+
+  constructor(private readonly failingFilenames: ReadonlySet<string> = new Set()) {}
+
+  async process(file: File): Promise<ProcessedImage> {
+    this.processedFilenames.push(file.name);
+
+    if (this.failingFilenames.has(file.name)) {
+      throw new Error(`${file.name} could not be read as an image.`);
+    }
+
+    return {
+      widthPx: 100,
+      heightPx: 100,
+      sha256: `sha256-${file.name}`,
+      byteSize: file.size,
+      original: new Blob([`original:${file.name}`]),
+      display: new Blob([`display:${file.name}`]),
+      thumbnail: new Blob([`thumbnail:${file.name}`])
+    };
+  }
+}
+
+export function makeImageFile(name: string, type = "image/jpeg"): File {
+  return new File([new Uint8Array([1, 2, 3, 4])], name, { type });
+}
