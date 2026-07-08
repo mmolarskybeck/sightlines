@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { FileArrowUpIcon } from "@phosphor-icons/react/dist/csr/FileArrowUp";
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
+import { useFileImageUrls } from "../hooks/useFileImageUrls";
 import { createArtworkImportPlan } from "../../domain/import/importPlan";
 import type {
   ArtworkImportDraft,
@@ -103,6 +105,13 @@ export default function ImportWizard({
   // Which upload tile a drag is currently hovering, so the drop-target style
   // can light up before the drop event fires.
   const [dragTarget, setDragTarget] = useState<"spreadsheet" | "images" | null>(null);
+  // Which draft the Map step's sample card is showing. Reset on table
+  // identity (a new sheet/header row genuinely changes what's being
+  // previewed) but deliberately NOT on mapping edits — watching one row
+  // respond live as fields get (un)mapped is the point of the card.
+  const [sampleRowIndex, setSampleRowIndex] = useState(0);
+
+  const imageUrls = useFileImageUrls(imageFiles);
 
   const currentStepIndex = STEP_ORDER.indexOf(step);
   function stepState(target: Step): StepState {
@@ -164,6 +173,7 @@ export default function ImportWizard({
   }, [planSignature]);
 
   useEffect(() => {
+    setSampleRowIndex(0);
     if (!table) return;
     const nextPlan = createArtworkImportPlan({
       table,
@@ -181,6 +191,34 @@ export default function ImportWizard({
       .length ?? 0;
   const warningCount = plan?.drafts.reduce((total, draft) => total + draft.warnings.length, 0) ?? 0;
 
+  const sampleDrafts = plan?.drafts ?? [];
+  // Clamp rather than trust the stored index directly — the stored value can
+  // point past the end after a mapping/sheet change shrinks the draft list.
+  const clampedSampleIndex =
+    sampleDrafts.length > 0 ? Math.min(sampleRowIndex, sampleDrafts.length - 1) : 0;
+  const sampleDraft = sampleDrafts[clampedSampleIndex];
+  // Honors the user's Review choices, not just the auto-match: a draft the
+  // user has already reassigned on Review shows that choice here too.
+  const sampleImageFile = sampleDraft ? resolvedImageFile(sampleDraft, imageChoiceByDraftId) : undefined;
+  const sampleImageUrl = sampleImageFile ? imageUrls.get(sampleImageFile.name) : undefined;
+
+  function stepSample(delta: number) {
+    if (sampleDrafts.length === 0) return;
+    setSampleRowIndex((current) => {
+      const clamped = Math.min(current, sampleDrafts.length - 1);
+      return Math.max(0, Math.min(sampleDrafts.length - 1, clamped + delta));
+    });
+  }
+
+  const uploadRowCount = table?.rows.length ?? 0;
+  const uploadMeta = !workbook
+    ? null
+    : uploadRowCount === 0
+      ? { caution: true, text: "No data rows found" }
+      : workbook.sheets.length > 1
+        ? { caution: false, text: `${workbook.sheets.length} sheets · ${uploadRowCount} rows in ${selectedSheet}` }
+        : { caution: false, text: `${uploadRowCount} rows detected` };
+
   async function readSpreadsheet(file: File) {
     setError(null);
     try {
@@ -193,7 +231,6 @@ export default function ImportWizard({
       setWorkbook(parsed);
       setSelectedSheet(parsed.sheets[0].name);
       setHeaderRowIndex(undefined);
-      setStep("map");
     } catch (error) {
       setError(error instanceof Error ? error.message : "Could not read that spreadsheet.");
     }
@@ -231,6 +268,7 @@ export default function ImportWizard({
     setSelectedDraftIds(new Set());
     setImageChoiceByDraftId({});
     setError(null);
+    setSampleRowIndex(0);
   }
 
   return (
@@ -313,6 +351,14 @@ export default function ImportWizard({
                   <FileArrowUpIcon size={20} />
                 </div>
                 <strong>{spreadsheetFile?.name ?? "Spreadsheet"}</strong>
+                {spreadsheetFile && uploadMeta ? (
+                  <span
+                    className="import-upload-meta"
+                    data-caution={uploadMeta.caution ? "" : undefined}
+                  >
+                    {uploadMeta.text}
+                  </span>
+                ) : null}
                 <span>{spreadsheetFile ? "Click to replace" : "CSV or Excel"}</span>
               </button>
               <button
@@ -387,41 +433,51 @@ export default function ImportWizard({
                 </label>
               </div>
 
-              <div className="import-mapping-list">
-                {MAPPABLE_FIELDS.map((field) => {
-                  const guess = plan?.guesses.find((candidate) => candidate.field === field);
-                  return (
-                    <label key={field} className="import-mapping-row">
-                      <span>
-                        {FIELD_LABELS[field]}
-                        {guess ? <small>{guess.confidence}</small> : null}
-                      </span>
-                      <Select
-                        value={
-                          mapping[field] === undefined ? NO_COLUMN : String(mapping[field])
-                        }
-                        onValueChange={(value) =>
-                          setMapping((current) => ({
-                            ...current,
-                            [field]: value === NO_COLUMN ? undefined : Number(value)
-                          }))
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={NO_COLUMN}>Not imported</SelectItem>
-                          {table.columns.map((column) => (
-                            <SelectItem key={column.index} value={String(column.index)}>
-                              {column.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </label>
-                  );
-                })}
+              <div className="import-map-grid">
+                <div className="import-mapping-list">
+                  {MAPPABLE_FIELDS.map((field) => {
+                    const guess = plan?.guesses.find((candidate) => candidate.field === field);
+                    return (
+                      <label key={field} className="import-mapping-row">
+                        <span>
+                          {FIELD_LABELS[field]}
+                          {guess ? <small>{guess.confidence}</small> : null}
+                        </span>
+                        <Select
+                          value={
+                            mapping[field] === undefined ? NO_COLUMN : String(mapping[field])
+                          }
+                          onValueChange={(value) =>
+                            setMapping((current) => ({
+                              ...current,
+                              [field]: value === NO_COLUMN ? undefined : Number(value)
+                            }))
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={NO_COLUMN}>Not imported</SelectItem>
+                            {table.columns.map((column) => (
+                              <SelectItem key={column.index} value={String(column.index)}>
+                                {column.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </label>
+                    );
+                  })}
+                </div>
+                <SampleCard
+                  draft={sampleDraft}
+                  imageUrl={sampleImageUrl}
+                  index={clampedSampleIndex}
+                  projectUnit={projectUnit}
+                  total={sampleDrafts.length}
+                  onStep={stepSample}
+                />
               </div>
             </div>
           ) : null}
@@ -435,26 +491,30 @@ export default function ImportWizard({
                 <SummaryStat label="Warnings" value={String(warningCount)} />
               </div>
               <div className="import-review-list">
-                {plan.drafts.map((draft) => (
-                  <ReviewRow
-                    key={draft.id}
-                    draft={draft}
-                    imageChoice={imageChoiceByDraftId[draft.id] ?? NO_IMAGE}
-                    projectUnit={projectUnit}
-                    selected={selectedDraftIds.has(draft.id)}
-                    onImageChoice={(value) =>
-                      setImageChoiceByDraftId((current) => ({ ...current, [draft.id]: value }))
-                    }
-                    onSelectedChange={(selected) =>
-                      setSelectedDraftIds((current) => {
-                        const next = new Set(current);
-                        if (selected) next.add(draft.id);
-                        else next.delete(draft.id);
-                        return next;
-                      })
-                    }
-                  />
-                ))}
+                {plan.drafts.map((draft) => {
+                  const imageFile = resolvedImageFile(draft, imageChoiceByDraftId);
+                  return (
+                    <ReviewRow
+                      key={draft.id}
+                      draft={draft}
+                      imageChoice={imageChoiceByDraftId[draft.id] ?? NO_IMAGE}
+                      projectUnit={projectUnit}
+                      selected={selectedDraftIds.has(draft.id)}
+                      thumbnailUrl={imageFile ? imageUrls.get(imageFile.name) : undefined}
+                      onImageChoice={(value) =>
+                        setImageChoiceByDraftId((current) => ({ ...current, [draft.id]: value }))
+                      }
+                      onSelectedChange={(selected) =>
+                        setSelectedDraftIds((current) => {
+                          const next = new Set(current);
+                          if (selected) next.add(draft.id);
+                          else next.delete(draft.id);
+                          return next;
+                        })
+                      }
+                    />
+                  );
+                })}
               </div>
             </div>
           ) : null}
@@ -465,7 +525,11 @@ export default function ImportWizard({
             Cancel
           </Button>
           {step === "upload" ? (
-            <Button disabled={!table} variant="primary" onClick={() => setStep("map")}>
+            <Button
+              disabled={!table || table.rows.length === 0}
+              variant="primary"
+              onClick={() => setStep("map")}
+            >
               Continue
             </Button>
           ) : null}
@@ -476,7 +540,9 @@ export default function ImportWizard({
           ) : null}
           {step === "review" ? (
             <Button
-              disabled={!plan || selectedCount === 0 || intakeState === "processing"}
+              disabled={
+                !plan || plan.drafts.length === 0 || selectedCount === 0 || intakeState === "processing"
+              }
               variant="primary"
               onClick={() => void commit()}
             >
@@ -527,11 +593,68 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+// Shared by the Review row list and the Map step's sample card, so both
+// surfaces render the same dimension text for the same draft.
+function formatDraftDimensions(draft: ArtworkImportDraft, projectUnit: DisplayUnit): string {
+  const artworkUnit = getScopeUnits(unitSystemFromDisplayUnit(projectUnit), "artwork").displayUnit;
+  const dimensions = draft.artwork.dimensions;
+  return dimensions.widthMm && dimensions.heightMm
+    ? `${formatLength(dimensions.heightMm, { unit: artworkUnit })} x ${formatLength(
+        dimensions.widthMm,
+        { unit: artworkUnit }
+      )}`
+    : "No dimensions";
+}
+
+// Title/artist, date · dimensions, warnings-vs-Ready — the draft summary
+// content shared by Review rows and the Map sample card. Reuses the
+// .import-review-* classes rather than forking a parallel set for the
+// sample card. `metaExtra` lets a caller append to the meta line (Review's
+// "Row N", which stays specific to that context rather than living here)
+// without a second copy of the meta div.
+function DraftSummary({
+  draft,
+  metaExtra,
+  projectUnit
+}: {
+  draft: ArtworkImportDraft;
+  metaExtra?: ReactNode;
+  projectUnit: DisplayUnit;
+}) {
+  const dimensionText = formatDraftDimensions(draft, projectUnit);
+
+  return (
+    <>
+      <div className="import-review-title">
+        <strong>{draft.artwork.title ?? "Untitled"}</strong>
+        <span>{draft.artwork.artist ?? "No artist"}</span>
+      </div>
+      <div className="import-review-meta">
+        <span>{draft.artwork.date ?? "No date"}</span>
+        <span>{dimensionText}</span>
+        {metaExtra}
+      </div>
+      {draft.warnings.length > 0 ? (
+        <div className="import-review-warnings">
+          <WarningIcon aria-hidden="true" size={14} />
+          <span>{draft.warnings.map((warning) => warning.message).join(" ")}</span>
+        </div>
+      ) : (
+        <div className="import-review-ok">
+          <CheckCircleIcon aria-hidden="true" size={14} />
+          <span>Ready</span>
+        </div>
+      )}
+    </>
+  );
+}
+
 function ReviewRow({
   draft,
   imageChoice,
   projectUnit,
   selected,
+  thumbnailUrl,
   onImageChoice,
   onSelectedChange
 }: {
@@ -539,18 +662,10 @@ function ReviewRow({
   imageChoice: string;
   projectUnit: DisplayUnit;
   selected: boolean;
+  thumbnailUrl: string | undefined;
   onImageChoice: (value: string) => void;
   onSelectedChange: (selected: boolean) => void;
 }) {
-  const artworkUnit = getScopeUnits(unitSystemFromDisplayUnit(projectUnit), "artwork").displayUnit;
-  const dimensions = draft.artwork.dimensions;
-  const dimensionText =
-    dimensions.widthMm && dimensions.heightMm
-      ? `${formatLength(dimensions.heightMm, { unit: artworkUnit })} x ${formatLength(
-          dimensions.widthMm,
-          { unit: artworkUnit }
-        )}`
-      : "No dimensions";
   const candidates = imageCandidates(draft);
   const imageLabel =
     resolvedImageFile(draft, { [draft.id]: imageChoice })?.name ??
@@ -565,27 +680,17 @@ function ReviewRow({
         type="checkbox"
         onChange={(event) => onSelectedChange(event.target.checked)}
       />
+      {thumbnailUrl ? (
+        <img alt="" className="import-review-thumb" src={thumbnailUrl} />
+      ) : (
+        <div aria-hidden="true" className="import-review-thumb placeholder" />
+      )}
       <div className="import-review-main">
-        <div className="import-review-title">
-          <strong>{draft.artwork.title ?? "Untitled"}</strong>
-          <span>{draft.artwork.artist ?? "No artist"}</span>
-        </div>
-        <div className="import-review-meta">
-          <span>{draft.artwork.date ?? "No date"}</span>
-          <span>{dimensionText}</span>
-          <span>Row {draft.row.sourceRowIndex}</span>
-        </div>
-        {draft.warnings.length > 0 ? (
-          <div className="import-review-warnings">
-            <WarningIcon aria-hidden="true" size={14} />
-            <span>{draft.warnings.map((warning) => warning.message).join(" ")}</span>
-          </div>
-        ) : (
-          <div className="import-review-ok">
-            <CheckCircleIcon aria-hidden="true" size={14} />
-            <span>Ready</span>
-          </div>
-        )}
+        <DraftSummary
+          draft={draft}
+          metaExtra={<span>Row {draft.row.sourceRowIndex}</span>}
+          projectUnit={projectUnit}
+        />
       </div>
       <div className="import-review-image">
         {candidates.length > 0 ? (
@@ -607,6 +712,81 @@ function ReviewRow({
         )}
       </div>
     </article>
+  );
+}
+
+// Browsable preview of how one row will import under the current mapping —
+// the Map step's only feedback that field choices actually did something.
+// Styled as a surface wash (DESIGN.md: no nested cards), not a bordered
+// card, with a fixed min-height so paging through rows never resizes the
+// dialog around it.
+function SampleCard({
+  draft,
+  imageUrl,
+  index,
+  projectUnit,
+  total,
+  onStep
+}: {
+  draft: ArtworkImportDraft | undefined;
+  imageUrl: string | undefined;
+  index: number;
+  projectUnit: DisplayUnit;
+  total: number;
+  onStep: (delta: number) => void;
+}) {
+  if (!draft) {
+    return (
+      <div className="import-sample-card">
+        <p className="import-sample-empty">
+          No data rows in this sheet — check the header row setting.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="import-sample-card">
+      {total > 1 ? (
+        <div className="import-sample-pager">
+          <span>Sample · row {draft.row.sourceRowIndex}</span>
+          <div className="import-sample-pager-controls">
+            <Button
+              aria-label="Previous row"
+              disabled={index === 0}
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => onStep(-1)}
+            >
+              <CaretLeftIcon aria-hidden="true" size={14} />
+            </Button>
+            <span aria-live="polite">
+              {index + 1} of {total}
+            </span>
+            <Button
+              aria-label="Next row"
+              disabled={index === total - 1}
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => onStep(1)}
+            >
+              <CaretRightIcon aria-hidden="true" size={14} />
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      <div className="import-sample-body">
+        <div className="import-sample-thumb-row">
+          {imageUrl ? (
+            <img alt="" className="import-sample-thumb" src={imageUrl} />
+          ) : (
+            <div aria-hidden="true" className="import-sample-thumb placeholder" />
+          )}
+          {!imageUrl ? <span className="import-sample-caption">No image</span> : null}
+        </div>
+        <DraftSummary draft={draft} projectUnit={projectUnit} />
+      </div>
+    </div>
   );
 }
 

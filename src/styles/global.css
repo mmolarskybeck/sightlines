@@ -1765,16 +1765,33 @@ body.panels-resizing * {
 }
 
 .import-upload-tile strong {
+  max-width: 100%;
+  overflow: hidden;
   color: var(--ink);
   font-size: var(--type-lg);
   font-weight: var(--weight-semibold);
   line-height: var(--leading-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .import-upload-tile span {
   color: var(--muted);
   font-size: var(--type-xs);
   font-weight: var(--weight-regular);
+}
+
+/* Parsed-sheet counts under the filename — tabular so a row count doesn't
+   jitter the tile width as the digits change. */
+.import-upload-meta {
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.import-upload-meta[data-caution] {
+  color: var(--caution);
 }
 
 .import-map {
@@ -1802,6 +1819,15 @@ body.panels-resizing * {
   line-height: var(--leading-ui);
 }
 
+/* Two-region Map layout: mapping fields left, browsable sample card right —
+   the card is what tells the user their choices actually did something. */
+.import-map-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  gap: 20px;
+  align-items: start;
+}
+
 .import-mapping-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1820,6 +1846,96 @@ body.panels-resizing * {
   font-weight: var(--weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+/* Surface wash, not a bordered card — DESIGN.md's no-nested-cards rule.
+   Fixed min-height so flipping through sample rows never resizes the
+   dialog around it. */
+.import-sample-card {
+  display: flex;
+  min-height: 220px;
+  flex-direction: column;
+  gap: 12px;
+  border-radius: var(--radius-fill);
+  background: var(--surface);
+  padding: 14px;
+}
+
+.import-sample-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-xs);
+}
+
+.import-sample-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--type-2xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.import-sample-pager-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.import-sample-body {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.import-sample-thumb-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Same square-slot vocabulary as .checklist-thumb — white bg, hairline
+   border, uncropped — sized for a prominent single sample rather than a
+   dense list row. */
+.import-sample-thumb {
+  flex: 0 0 auto;
+  width: 72px;
+  height: 72px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg);
+  object-fit: contain;
+}
+
+.import-sample-thumb.placeholder {
+  border: 1px solid var(--line);
+}
+
+.import-sample-caption {
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-regular);
+}
+
+/* The sample card is a single prominent row rather than a dense list, so
+   long titles and warning text wrap to two lines instead of the single-line
+   ellipsis .import-review-title/.import-review-warnings use everywhere
+   else. */
+.import-sample-card .import-review-title strong,
+.import-sample-card .import-review-warnings span {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .import-review {
@@ -1863,7 +1979,7 @@ body.panels-resizing * {
 
 .import-review-row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) minmax(180px, 260px);
+  grid-template-columns: 24px 48px minmax(0, 1fr) minmax(180px, 260px);
   gap: 12px;
   align-items: center;
   min-height: 82px;
@@ -1881,6 +1997,23 @@ body.panels-resizing * {
   height: 16px;
   margin: 0;
   accent-color: var(--primary);
+}
+
+/* Same 48px slot numbers as .checklist-thumb — always rendered (placeholder
+   when there's no resolved image) so rows never reflow as thumbnails
+   resolve or the user changes an image choice. */
+.import-review-thumb {
+  flex: 0 0 auto;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg);
+  object-fit: contain;
+}
+
+.import-review-thumb.placeholder {
+  border: 1px solid var(--line);
 }
 
 .import-review-main {
@@ -1961,7 +2094,8 @@ body.panels-resizing * {
 
   .import-upload-grid,
   .import-map-toolbar,
-  .import-mapping-list {
+  .import-mapping-list,
+  .import-map-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -1969,12 +2103,26 @@ body.panels-resizing * {
     min-height: 180px;
   }
 
+  /* Sample card leads the stacked Map layout and stays in view while the
+     mapping fields below it scroll — .import-body is the scroll container,
+     and the card's opaque surface fill makes an overlapping sticky header
+     read cleanly. If sticky ever misbehaves under a Radix select portal,
+     drop to the plain `order: -1` (remove the position/top pair) — the
+     card still leads, it just won't pin. */
+  .import-sample-card {
+    order: -1;
+    position: sticky;
+    top: 0;
+    min-height: 0;
+    z-index: 1;
+  }
+
   .import-review-row {
-    grid-template-columns: 24px minmax(0, 1fr);
+    grid-template-columns: 24px 48px 1fr;
   }
 
   .import-review-image {
-    grid-column: 2;
+    grid-column: 1 / -1;
   }
 }
 
