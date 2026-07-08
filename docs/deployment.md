@@ -64,7 +64,7 @@ Local commands:
 
 - `assets.not_found_handling = "single-page-application"` serves `index.html` for navigation paths that do not match a built asset.
 - `public/_headers` is copied into `dist/_headers` during `npm run build` and is interpreted by Cloudflare Workers static assets. It sets baseline security headers, a conservative CSP, and long-lived caching for hashed `assets/*` files. The CSP keeps `style-src 'unsafe-inline'` because the React app uses measured inline styles for parts of the editor UI.
-- `public/robots.txt`, `public/sitemap.xml`, `public/site.webmanifest`, `public/favicon.svg`, and `public/llms.txt` are lightweight trust/crawler signals for the production domain.
+- `public/robots.txt`, `public/sitemap.xml`, `public/site.webmanifest`, `public/favicon.svg`, `public/llms.txt`, `public/.well-known/security.txt`, and the static trust pages (`about.html`, `privacy.html`, `security.html`, `it.html`) are lightweight trust/crawler signals for the production domain.
 - Custom Domains on Workers match an exact hostname. Add `www.sightlines.art` separately or create a redirect rule if the `www` hostname should work.
 - Keep account IDs, API tokens, and secrets out of the repo. Use `wrangler login` locally or Cloudflare dashboard secrets/tokens in CI.
 - Runtime secrets and variables belong in the Worker settings, not in Workers Builds build variables.

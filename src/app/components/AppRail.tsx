@@ -21,6 +21,7 @@ export function AppRail({
   onToggleInspector,
   isDataView,
   onOpenDataView,
+  onOpenHelp,
   issueCount,
   onSelectFirstIssue
 }: {
@@ -35,6 +36,7 @@ export function AppRail({
   onToggleInspector: () => void;
   isDataView: boolean;
   onOpenDataView: () => void;
+  onOpenHelp: () => void;
   issueCount: number;
   onSelectFirstIssue: () => void;
 }) {
@@ -110,9 +112,9 @@ export function AppRail({
           label="Settings — coming soon"
         />
         <RailButton
-          disabled
           icon={<QuestionIcon aria-hidden="true" size={22} />}
-          label="Help — coming soon"
+          label="Help and product info"
+          onClick={onOpenHelp}
         />
       </div>
     </nav>

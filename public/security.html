@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="index,follow" />
+    <meta
+      name="description"
+      content="Sightlines security notes for IT reviewers and vulnerability reporters."
+    />
+    <link rel="canonical" href="https://sightlines.art/security.html" />
+    <title>Sightlines Security</title>
+    <link rel="stylesheet" href="/trust.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Sightlines Security</h1>
+      <p>
+        Sightlines is currently a static, browser-based React application deployed on Cloudflare
+        Workers static assets. The v1 app has no server-side application database, no user accounts,
+        and no hosted artwork image storage.
+      </p>
+
+      <h2>Security Posture</h2>
+      <ul>
+        <li>Production is served over HTTPS.</li>
+        <li>Security headers are configured through Cloudflare static asset headers.</li>
+        <li>Project data and uploaded artwork images are stored locally in browser storage in v1.</li>
+        <li>No executable installer or desktop binary is distributed from this domain.</li>
+        <li>No third-party tracking scripts are included in the current app shell.</li>
+      </ul>
+
+      <h2>Reporting</h2>
+      <p>
+        Security contact information is published at
+        <a href="/.well-known/security.txt">/.well-known/security.txt</a>. If email routing is not
+        yet available for the domain, use the contact URL listed there.
+      </p>
+
+      <nav aria-label="Trust documents">
+        <a href="/about.html">About</a> | <a href="/privacy.html">Privacy</a> |
+        <a href="/it.html">IT access notes</a> | <a href="/">Open the app</a>
+      </nav>
+    </main>
+  </body>
+</html>

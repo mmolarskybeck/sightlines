@@ -169,7 +169,9 @@ input:focus-visible {
 .app-shell {
   display: grid;
   grid-template-columns: 80px 1fr;
+  height: 100vh;
   min-height: 100vh;
+  overflow: hidden;
 }
 
 /* The 80px module: the rail is one module wide, its brand cell one module
@@ -180,6 +182,7 @@ input:focus-visible {
   display: flex;
   flex-direction: column;
   align-items: center;
+  min-height: 0;
   background: var(--bg);
   border-right: 1px solid var(--line);
 }
@@ -199,6 +202,7 @@ input:focus-visible {
 .app-main {
   display: flex;
   height: 100vh;
+  min-height: 0;
   min-width: 0;
   flex-direction: column;
 }
@@ -278,6 +282,107 @@ input:focus-visible {
   font-weight: var(--weight-strong);
   line-height: 15px;
   text-align: center;
+}
+
+.help-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in oklch, var(--foreground) 24%, transparent);
+}
+
+.help-dialog {
+  width: min(480px, 100%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-fill);
+  background: var(--bg);
+  box-shadow: var(--shadow-panel);
+}
+
+.help-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.help-dialog-kicker {
+  margin: 0 0 5px;
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: 0.08em;
+  line-height: var(--leading-tight);
+  text-transform: uppercase;
+}
+
+.help-dialog h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--type-project);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-ui);
+}
+
+.help-dialog-body {
+  padding: 16px 18px 4px;
+}
+
+.help-dialog-body p {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--type-md);
+  line-height: var(--leading-copy);
+}
+
+.help-dialog-list {
+  margin: 14px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: var(--type-sm);
+  line-height: var(--leading-copy);
+}
+
+.help-link-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 16px 18px 18px;
+}
+
+.help-link {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+  color: var(--primary-strong);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    color 150ms ease-out,
+    box-shadow 150ms ease-out;
+}
+
+.help-link:hover {
+  background: var(--surface);
+  border-color: var(--input);
+}
+
+.help-link:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 .topbar {
@@ -3135,11 +3240,10 @@ body.panels-resizing * {
     height: 18px;
   }
 
-  /* The full-height fixed shell relaxes on mobile so the stacked panels grow
-     the page instead of clipping inside a 100vh column. */
+  /* Keep the rail viewport-bound even when the workspace stacks; individual
+     panes own overflow rather than stretching the whole document. */
   .app-main {
-    height: auto;
-    min-height: 100vh;
+    height: 100vh;
   }
 
   .topbar {

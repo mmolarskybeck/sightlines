@@ -7,6 +7,13 @@ Sightlines is built for curators, exhibition planners, preparators, artists, and
 Primary URL: https://sightlines.art/
 Canonical category: professional productivity software for exhibition, gallery, museum, and art-installation planning.
 
+Reference pages:
+
+- About: https://sightlines.art/about.html
+- Privacy: https://sightlines.art/privacy.html
+- Security: https://sightlines.art/security.html
+- IT access notes: https://sightlines.art/it.html
+
 Security and privacy notes:
 
 - HTTPS-only production deployment.

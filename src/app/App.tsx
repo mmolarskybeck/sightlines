@@ -15,6 +15,7 @@ import { SquareIcon } from "@phosphor-icons/react/dist/csr/Square";
 import { StackIcon } from "@phosphor-icons/react/dist/csr/Stack";
 import { UploadSimpleIcon } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
+import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import {
   getPlacedRoomBounds,
   getRectangleRoomDimensions,
@@ -206,6 +207,7 @@ export function App() {
   const selectedOpeningId = getSelectedOpeningId(project, selection);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
   // Which insertion tool (door/window/blocked-zone) is armed on the plan
   // canvas — transient UI state, deliberately NOT in the store: same
   // reasoning as PlanView's other drag/marquee state (see the comment near
@@ -271,6 +273,13 @@ export function App() {
   // undo/redo effect above.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      if (isHelpOpen) {
+        if (event.key === "Escape") {
+          setIsHelpOpen(false);
+        }
+        return;
+      }
+
       // Escape now clears ANY selection kind — objects, an unplaced checklist
       // pick, or a room focus (previously only the multi-object slot cleared
       // here; clearing a room selection was reachable only via other paths,
@@ -309,6 +318,7 @@ export function App() {
     selection,
     selectedObjectIds,
     draggingArtworkId,
+    isHelpOpen,
     removeSelectedPlacements,
     clearObjectSelection,
     arrangeSession,
@@ -626,6 +636,7 @@ export function App() {
         onToggleInspector={toggleInspectorCollapsed}
         isDataView={viewMode === "data"}
         onOpenDataView={() => setViewMode("data")}
+        onOpenHelp={() => setIsHelpOpen(true)}
         issueCount={placementWarnings.length}
         onSelectFirstIssue={selectFirstWarningObject}
       />
@@ -1238,8 +1249,67 @@ export function App() {
           <FontLab />
         </Suspense>
       ) : null}
+      {isHelpOpen ? <HelpDialog onClose={() => setIsHelpOpen(false)} /> : null}
     </main>
     </TooltipProvider>
+  );
+}
+
+function HelpDialog({ onClose }: { onClose: () => void }) {
+  const links = [
+    { href: "/about.html", label: "About" },
+    { href: "/privacy.html", label: "Privacy" },
+    { href: "/security.html", label: "Security" },
+    { href: "/it.html", label: "IT access notes" }
+  ];
+
+  return (
+    <div className="help-dialog-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        aria-labelledby="help-dialog-title"
+        aria-modal="true"
+        className="help-dialog"
+        role="dialog"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="help-dialog-header">
+          <div>
+            <p className="help-dialog-kicker">Sightlines</p>
+            <h2 id="help-dialog-title">Help and product info</h2>
+          </div>
+          <Button
+            aria-label="Close help"
+            className="icon-button"
+            size="icon"
+            title="Close help"
+            variant="ghost"
+            onClick={onClose}
+          >
+            <XIcon aria-hidden="true" size={18} />
+          </Button>
+        </div>
+
+        <div className="help-dialog-body">
+          <p>
+            Sightlines is a private-by-design exhibition planning tool for scaled room layouts,
+            wall elevations, artwork placement, and simple 3D preview.
+          </p>
+          <ul className="help-dialog-list">
+            <li>No account required in v1.</li>
+            <li>Project data and artwork images stay on this device.</li>
+            <li>No executable downloads or hosted artwork storage.</li>
+          </ul>
+        </div>
+
+        <div className="help-link-grid" aria-label="More information">
+          {links.map((link) => (
+            <a className="help-link" href={link.href} key={link.href} rel="noreferrer" target="_blank">
+              {link.label}
+            </a>
+          ))}
+        </div>
+      </section>
+    </div>
   );
 }
 
