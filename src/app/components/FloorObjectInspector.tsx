@@ -9,7 +9,6 @@ import {
 } from "../../domain/units/unitSystem";
 import { LengthField } from "./LengthField";
 import { Button } from "./ui/button";
-import { Input } from "./ui/input";
 
 // The floor-space position (X/Y) and editable footprint (Width/Depth) shared
 // by FloorObjectInspector (a floor blocked zone) and ArtworkInspector's
@@ -38,7 +37,7 @@ export function FloorPlacementFields({
 
   return (
     <>
-      <div className="artwork-dimensions-grid">
+      <div className="field-pair-grid">
         <LengthField
           compact
           label="X (floor)"
@@ -59,7 +58,7 @@ export function FloorPlacementFields({
         />
       </div>
 
-      <div className="artwork-dimensions-grid">
+      <div className="field-pair-grid">
         <LengthField
           compact
           positiveOnly
@@ -106,11 +105,8 @@ export function FloorObjectInspector({
 
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
-      <label className="field-row">
-        <span>Kind</span>
-        <Input readOnly value={kindLabel} />
-      </label>
-
+      {/* No "Kind" row: the panel's subject header directly above already
+          names it (e.g. "Blocked zone / Floor object"). */}
       <FloorPlacementFields
         floorObject={floorObject}
         onCommitPosition={onCommitPosition}
@@ -119,7 +115,7 @@ export function FloorObjectInspector({
       />
 
       <div className="inspector-placement">
-        <Button className="inspector-action" variant="inspector" onClick={onDelete}>
+        <Button className="inspector-action inspector-danger" variant="destructive-ghost" onClick={onDelete}>
           <TrashIcon aria-hidden="true" size={15} />
           Delete {kindLabel.toLowerCase()}
         </Button>

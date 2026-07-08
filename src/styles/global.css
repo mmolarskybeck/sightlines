@@ -2475,6 +2475,18 @@ body.panels-resizing * {
   border-color: var(--ring);
 }
 
+/* Invalid state — LengthField sets aria-invalid="true" on a parse/validation
+   error. A danger border that survives hover and focus (declared after the
+   hover/focus rules so it wins the equal-specificity tie), plus a soft danger
+   ring on focus so keyboard users see the error. Valid inputs are untouched. */
+.field-row input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.field-row input[aria-invalid="true"]:focus {
+  box-shadow: 0 0 0 2px var(--danger-soft);
+}
+
 .field-row input[readonly] {
   background: var(--surface);
   color: var(--muted);
@@ -2595,34 +2607,33 @@ body.panels-resizing * {
 
 .artwork-dimensions-grid {
   display: grid;
-  /* Width | lock toggle | Height | Depth — the lock column is a fixed slim
-     track so Width/Height/Depth stay evenly sized whether or not the toggle
-     renders (see artwork-dimensions-lock, always present as button or
-     spacer). */
-  grid-template-columns: 1fr auto 1fr 1fr;
+  /* Width | Height | Depth, evenly sized. The ratio lock lives in the
+     Dimensions heading row, not between the fields. minmax(0) so labels and
+     placeholders shrink inside the track instead of blowing it out. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: end;
   gap: 8px;
 }
 
+/* Two equal side-by-side compact fields: the Opening/Floor X·Y and
+   Width·Height/Depth rows. Deliberately not .artwork-dimensions-grid, which
+   is the artwork Width | Height | Depth trio. minmax(0) so long labels and
+   placeholders wrap/shrink inside the track instead of blowing it out. */
+.field-pair-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: 8px;
+}
+
+/* The ratio lock rides the right edge of the Dimensions heading row; the
+   Toggle primitive supplies its ghost hover and pressed-petrol states. */
 .artwork-dimensions-lock {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 28px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.artwork-dimensions-lock:hover {
-  color: var(--foreground);
-}
-
-.artwork-dimensions-lock[aria-pressed="true"] {
-  color: var(--foreground);
+  margin-left: auto;
+  height: 24px;
+  gap: 4px;
+  padding-inline: 6px;
+  font-size: var(--type-xs);
 }
 
 /* Artwork inspector header: an aspect-true thumbnail beside the identity
@@ -2743,132 +2754,6 @@ body.panels-resizing * {
   gap: 8px;
 }
 
-/* "Measured from" anchor picker: a deliberately quieter sibling of the mode
-   tabs — text-only, single line, smaller type — so it reads as a sub-choice
-   inside "From wall edges", not a peer of the three modes above it. */
-.arrange-anchor-group {
-  display: grid;
-  gap: 5px;
-}
-
-.arrange-anchor-caption {
-  color: var(--muted);
-  font-size: var(--type-xs);
-  font-weight: var(--weight-semibold);
-}
-
-.arrange-anchor {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  /* Override the ui/toggle-group wrapper's inline-flex items-center gap-1 so
-     the three options sit flush in equal thirds behind one hairline box. */
-  align-items: stretch;
-  gap: 0;
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.arrange-anchor .arrange-anchor-item {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
-  /* h-8 from the toggle base is fine for one line; keep it explicit so the
-     row height doesn't drift with the font. */
-  height: 30px;
-  padding: 0 6px;
-  border: 0;
-  border-left: 1px solid var(--line);
-  border-radius: 0;
-  background: var(--bg);
-  color: var(--muted);
-  cursor: pointer;
-  font-size: var(--type-2xs);
-  font-weight: var(--weight-medium);
-  line-height: 1.1;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.arrange-anchor .arrange-anchor-item:first-child {
-  border-left: 0;
-}
-
-.arrange-anchor .arrange-anchor-item:hover {
-  background: var(--surface);
-  color: var(--ink);
-}
-
-.arrange-anchor .arrange-anchor-item[data-state="on"] {
-  background: var(--primary-soft);
-  color: var(--primary-strong);
-  font-weight: var(--weight-strong);
-}
-
-/* "Space within" zone picker: the twin of the "Measured from" anchor row, but
-   inside "Space evenly" — same quiet, text-only, single-line treatment, just
-   two options (Whole wall / Open space) instead of three. */
-.arrange-zone-group {
-  display: grid;
-  gap: 5px;
-}
-
-.arrange-zone-caption {
-  color: var(--muted);
-  font-size: var(--type-xs);
-  font-weight: var(--weight-semibold);
-}
-
-.arrange-zone {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  /* Override the ui/toggle-group wrapper's inline-flex items-center gap-1 so
-     the two options sit flush in equal halves behind one hairline box. */
-  align-items: stretch;
-  gap: 0;
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.arrange-zone .arrange-zone-item {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
-  height: 30px;
-  padding: 0 6px;
-  border: 0;
-  border-left: 1px solid var(--line);
-  border-radius: 0;
-  background: var(--bg);
-  color: var(--muted);
-  cursor: pointer;
-  font-size: var(--type-2xs);
-  font-weight: var(--weight-medium);
-  line-height: 1.1;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.arrange-zone .arrange-zone-item:first-child {
-  border-left: 0;
-}
-
-.arrange-zone .arrange-zone-item:hover {
-  background: var(--surface);
-  color: var(--ink);
-}
-
-.arrange-zone .arrange-zone-item[data-state="on"] {
-  background: var(--primary-soft);
-  color: var(--primary-strong);
-  font-weight: var(--weight-strong);
-}
-
 /* One locked two-line readout everywhere: a small muted label on line 1, the
    value (semibold, larger) with the "Calculated" tag inline right after it on
    line 2. Kept as one block so a screen reader reads them together. */
@@ -2951,17 +2836,26 @@ body.panels-resizing * {
   color: var(--ink);
 }
 
-/* Remove all is destructive: danger ink + hairline, filling with the danger
-   wash on hover. The two-step confirm keeps the same danger vocabulary. */
-.inspector-action.inspector-remove-all {
+/* The one destructive vocabulary shared by every object-removing inspector
+   button: danger ink + hairline, filling with the danger wash on hover, and a
+   danger-tinted focus outline so keyboard users see the intent. Single-object
+   removals are one-click (covered by global undo); only Remove all layers the
+   two-step confirm on top, which keeps this same danger vocabulary.
+   Chained with .inspector-action so it wins the equal-specificity tie against
+   the later base rule. */
+.inspector-action.inspector-danger {
   border-color: var(--danger-line);
   background: transparent;
   color: var(--danger);
 }
 
-.inspector-action.inspector-remove-all:hover {
+.inspector-action.inspector-danger:hover {
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+.inspector-action.inspector-danger:focus-visible {
+  outline-color: var(--danger);
 }
 
 .remove-all-confirm {

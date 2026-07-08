@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { LinkBreakIcon } from "@phosphor-icons/react/dist/csr/LinkBreak";
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/csr/LockSimple";
 import { LockSimpleOpenIcon } from "@phosphor-icons/react/dist/csr/LockSimpleOpen";
@@ -19,6 +19,7 @@ import { LengthField } from "./LengthField";
 import { UncertaintyIndicator } from "./UncertaintyIndicator";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { Toggle } from "./ui/toggle";
 import {
   Select,
   SelectContent,
@@ -141,8 +142,8 @@ export function ArtworkInspector({
       <div className="inspector-placement">
         {isPlaced ? (
           <Button
-            className="inspector-action"
-            variant="inspector"
+            className="inspector-action inspector-danger"
+            variant="destructive-ghost"
             onClick={onRemovePlacement}
           >
             <LinkBreakIcon aria-hidden="true" size={15} />
@@ -230,72 +231,63 @@ function DimensionsSection({
       <div className="artwork-dimensions-heading">
         <h3>Dimensions</h3>
         <UncertaintyIndicator status={dimensions.status} />
+        {ratio !== undefined ? (
+          // Visible text is the accessible name; aria-pressed carries the
+          // locked/unlocked state, so the label stays constant.
+          <Toggle
+            className="artwork-dimensions-lock"
+            pressed={locked}
+            size="sm"
+            variant="ghost"
+            onPressedChange={(pressed) =>
+              onCommitDimensions({ ...dimensions, aspectLocked: pressed })
+            }
+          >
+            {locked ? (
+              <LockSimpleIcon aria-hidden="true" size={13} />
+            ) : (
+              <LockSimpleOpenIcon aria-hidden="true" size={13} />
+            )}
+            Lock ratio
+          </Toggle>
+        ) : null}
       </div>
 
       <div className="artwork-dimensions-grid">
         {DIMENSION_FIELDS.map((field) => (
-          <Fragment key={field.key}>
-            <LengthField
-              compact
-              clearable
-              positiveOnly
-              label={field.label}
-              valueMm={dimensions[field.key]}
-              displayUnit={displayUnit}
-              parseUnit={parseUnit}
-              placeholder={placeholder}
-              // An axis can be legitimately unmeasured even while others are
-              // known — clearing the field commits that axis as undefined.
-              onClear={() =>
-                onCommitDimensions({ ...dimensions, [field.key]: undefined })
-              }
-              // Note: committing a dimension value never touches `status` —
-              // status is the curator's own claim about how trustworthy these
-              // numbers are, not something derived from whether fields happen to
-              // be filled in.
-              //
-              // Committing width or height also auto-fills the other 2D face dim
-              // from the image's aspect ratio when the pair is locked (see
-              // applyAspectFill for the rule). Depth carries no ratio, so it
-              // commits alone. The derived value is a plain committed number —
-              // fully editable afterwards, just like a typed one.
-              onCommit={(valueMm) =>
-                onCommitDimensions(
-                  field.key === "depthMm"
-                    ? { ...dimensions, depthMm: valueMm }
-                    : applyAspectFill(dimensions, field.key, valueMm, aspect)
-                )
-              }
-            />
-            {field.key === "widthMm" ? (
-              ratio !== undefined ? (
-                <button
-                  aria-label={
-                    locked
-                      ? "Proportions locked to image — click to unlock"
-                      : "Proportions unlocked — click to lock to image"
-                  }
-                  aria-pressed={locked}
-                  className="artwork-dimensions-lock"
-                  type="button"
-                  onClick={() =>
-                    onCommitDimensions({ ...dimensions, aspectLocked: !locked })
-                  }
-                >
-                  {locked ? (
-                    <LockSimpleIcon aria-hidden="true" size={14} />
-                  ) : (
-                    <LockSimpleOpenIcon aria-hidden="true" size={14} />
-                  )}
-                </button>
-              ) : (
-                // Keeps the grid's middle column a fixed width whether or not
-                // an image ratio is available, so Height/Depth stay aligned
-                // across artworks with and without a lock toggle.
-                <span aria-hidden="true" className="artwork-dimensions-lock" />
+          <LengthField
+            key={field.key}
+            compact
+            clearable
+            positiveOnly
+            label={field.label}
+            valueMm={dimensions[field.key]}
+            displayUnit={displayUnit}
+            parseUnit={parseUnit}
+            placeholder={placeholder}
+            // An axis can be legitimately unmeasured even while others are
+            // known — clearing the field commits that axis as undefined.
+            onClear={() =>
+              onCommitDimensions({ ...dimensions, [field.key]: undefined })
+            }
+            // Note: committing a dimension value never touches `status` —
+            // status is the curator's own claim about how trustworthy these
+            // numbers are, not something derived from whether fields happen to
+            // be filled in.
+            //
+            // Committing width or height also auto-fills the other 2D face dim
+            // from the image's aspect ratio when the pair is locked (see
+            // applyAspectFill for the rule). Depth carries no ratio, so it
+            // commits alone. The derived value is a plain committed number —
+            // fully editable afterwards, just like a typed one.
+            onCommit={(valueMm) =>
+              onCommitDimensions(
+                field.key === "depthMm"
+                  ? { ...dimensions, depthMm: valueMm }
+                  : applyAspectFill(dimensions, field.key, valueMm, aspect)
               )
-            ) : null}
-          </Fragment>
+            }
+          />
         ))}
       </div>
 

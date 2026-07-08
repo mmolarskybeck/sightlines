@@ -25,7 +25,13 @@ export const buttonVariants = cva(
         tab:
           "rounded-none border-0 bg-transparent px-2.5 text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:shadow-[inset_0_-2px_0_var(--primary)]",
         inspector:
-          "border border-border bg-surface text-foreground hover:bg-surface-strong"
+          "border border-border bg-surface text-foreground hover:bg-surface-strong",
+        // Quiet destructive: reads danger (ink + hairline) without the solid
+        // red fill of `destructive`. For one-click, undo-covered removals that
+        // should still telegraph what they do. Danger-tinted focus ring so the
+        // destructive intent survives keyboard focus.
+        "destructive-ghost":
+          "border border-[var(--danger-line)] bg-surface text-[var(--danger)] hover:bg-[var(--danger-soft)] focus-visible:ring-[var(--danger)]"
       },
       size: {
         default: "h-9 px-3",

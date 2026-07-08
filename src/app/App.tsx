@@ -1017,9 +1017,12 @@ export function App() {
                   <h3>Placement needs review</h3>
                   <ul>
                     {labeledPlacementWarnings.map((warning) => (
+                      // Subject leads so a list of warnings scans by object
+                      // name; without the separator it fuses into the message
+                      // ("…on this wall.Door").
                       <li key={warning.id}>
+                        {warning.subject ? <span>{warning.subject} · </span> : null}
                         {warning.message}
-                        {warning.subject ? <span>{warning.subject}</span> : null}
                       </li>
                     ))}
                   </ul>

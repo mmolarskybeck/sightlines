@@ -171,6 +171,57 @@ describe("LengthField", () => {
     });
   });
 
+  describe("Escape-to-revert", () => {
+    it("restores the committed text and clears the error on a dirty field", () => {
+      const { input } = renderField({ valueMm: 304.8 });
+
+      fireEvent.change(input, { target: { value: "nonsense" } });
+      fireEvent.blur(input);
+      // The bad edit is showing an error and the invalid state.
+      expect(screen.getByText(/measurement/i)).toBeInTheDocument();
+      expect(input).toHaveAttribute("aria-invalid", "true");
+
+      fireEvent.keyDown(input, { key: "Escape" });
+
+      expect(input.value).toBe('12"');
+      expect(input).toHaveAttribute("aria-invalid", "false");
+      expect(screen.queryByText(/measurement/i)).not.toBeInTheDocument();
+    });
+
+    it("stops propagation on a dirty field so a global Escape handler can't fire", () => {
+      const { input } = renderField({ valueMm: 304.8 });
+      fireEvent.change(input, { target: { value: "99" } });
+
+      const event = new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true
+      });
+      const stopPropagation = vi.spyOn(event, "stopPropagation");
+      input.dispatchEvent(event);
+
+      // The value-restore itself is covered above; here we only assert the
+      // event is contained so a future global deselect-on-Escape can't fire.
+      expect(stopPropagation).toHaveBeenCalled();
+    });
+
+    it("does not stop propagation on a clean field (lets a global Escape through)", () => {
+      const { input } = renderField({ valueMm: 304.8 });
+
+      const event = new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true
+      });
+      const stopPropagation = vi.spyOn(event, "stopPropagation");
+      input.dispatchEvent(event);
+
+      expect(stopPropagation).not.toHaveBeenCalled();
+      // Untouched: the committed value stays put.
+      expect(input.value).toBe('12"');
+    });
+  });
+
   describe("onEnterWhenClean", () => {
     it("fires onEnterWhenClean (not onCommit) on Enter when the value is unchanged", () => {
       const onCommit = vi.fn();

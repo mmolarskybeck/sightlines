@@ -183,6 +183,18 @@ export function LengthField({
           return;
         }
 
+        if (event.key === "Escape") {
+          // Abandon a bad or pending edit: restore the last committed value
+          // (same expression the resync effect uses) and clear the error.
+          // stopPropagation so a future global deselect-on-Escape never eats a
+          // field revert. A clean, error-free field passes Escape through.
+          if (isInputClean() && !error) return;
+          event.stopPropagation();
+          setInput(valueMm === undefined ? "" : formatLength(valueMm, { unit: displayUnit }));
+          setError(null);
+          return;
+        }
+
         if (event.key !== "Enter") return;
         event.preventDefault();
 

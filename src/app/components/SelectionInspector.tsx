@@ -15,6 +15,13 @@ import {
 import { LengthField } from "./LengthField";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import { Button } from "./ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "./ui/select";
 
 // Wall-length nudge per stepper press / ArrowUp-Down: a clean ¼″ for imperial,
 // a round 10mm for metric — the same "smallest sensible hand adjustment" the
@@ -179,38 +186,26 @@ export function SelectionInspector({
 
             {arrange.mode === "equal" ? (
               <div className="arrange-mode-body">
-                <div className="arrange-zone-group">
-                  <span className="arrange-zone-caption" id="arrange-zone-caption">
-                    Space within
-                  </span>
-                  <ToggleGroup
-                    aria-labelledby="arrange-zone-caption"
-                    className="arrange-zone"
-                    // A quieter, text-only sub-choice inside "Space evenly", the
-                    // twin of the inset mode's "Measured from" anchor row.
-                    orientation="horizontal"
-                    type="single"
+                {/* A collapsed select rather than a segmented row: the zone is
+                    a refinement of "Space evenly", not a peer decision, so the
+                    enabled panel shows one value instead of two live options.
+                    Radix Select never fires the ""-deselect the old toggle
+                    needed a re-click guard for. */}
+                <label className="field-row compact">
+                  <span>Space within</span>
+                  <Select
                     value={arrange.evenZone}
-                    onValueChange={(value) => {
-                      // Same re-click guard as the mode/anchor toggles: a single
-                      // ToggleGroup fires "" when the active item is clicked
-                      // again, so re-apply the current zone instead of clearing
-                      // to a no-zone state.
-                      if (value === "wall" || value === "open") {
-                        onSetEvenZone(value);
-                      } else {
-                        onSetEvenZone(arrange.evenZone);
-                      }
-                    }}
+                    onValueChange={(value) => onSetEvenZone(value as EvenZone)}
                   >
-                    <ToggleGroupItem className="arrange-zone-item" value="wall">
-                      Whole wall
-                    </ToggleGroupItem>
-                    <ToggleGroupItem className="arrange-zone-item" value="open">
-                      Open space
-                    </ToggleGroupItem>
-                  </ToggleGroup>
-                </div>
+                    <SelectTrigger aria-label="Space within">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="wall">Whole wall</SelectItem>
+                      <SelectItem value="open">Open space</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </label>
                 <div className="arrange-readout">
                   <span className="arrange-readout-label">Equal distance</span>
                   <span className="arrange-readout-value-row">
@@ -227,41 +222,27 @@ export function SelectionInspector({
               </div>
             ) : arrange.mode === "inset" ? (
               <div className="arrange-mode-body">
-                <div className="arrange-anchor-group">
-                  <span className="arrange-anchor-caption" id="arrange-anchor-caption">
-                    Measured from
-                  </span>
-                  <ToggleGroup
-                    aria-labelledby="arrange-anchor-caption"
-                    className="arrange-anchor"
-                    // A quieter, text-only sibling of the mode tabs — Radix
-                    // roving tabindex gives arrow-key nav for free.
-                    orientation="horizontal"
-                    type="single"
+                {/* A collapsed select rather than a segmented row: the anchor
+                    is a refinement of "From wall edges", not a peer decision,
+                    so the enabled panel shows one value instead of three live
+                    options. Radix Select never fires the ""-deselect the old
+                    toggle needed a re-click guard for. */}
+                <label className="field-row compact">
+                  <span>Measured from</span>
+                  <Select
                     value={arrange.insetAnchor}
-                    onValueChange={(value) => {
-                      // Same re-click guard as the mode toggle: a single
-                      // ToggleGroup fires "" when the active item is clicked
-                      // again, so re-apply the current anchor instead of
-                      // clearing to a no-anchor state.
-                      if (value === "left" || value === "both" || value === "right") {
-                        onSetAnchor(value);
-                      } else {
-                        onSetAnchor(arrange.insetAnchor);
-                      }
-                    }}
+                    onValueChange={(value) => onSetAnchor(value as InsetAnchor)}
                   >
-                    <ToggleGroupItem className="arrange-anchor-item" value="left">
-                      Left wall
-                    </ToggleGroupItem>
-                    <ToggleGroupItem className="arrange-anchor-item" value="both">
-                      Both walls
-                    </ToggleGroupItem>
-                    <ToggleGroupItem className="arrange-anchor-item" value="right">
-                      Right wall
-                    </ToggleGroupItem>
-                  </ToggleGroup>
-                </div>
+                    <SelectTrigger aria-label="Measured from">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="left">Left wall</SelectItem>
+                      <SelectItem value="both">Both walls</SelectItem>
+                      <SelectItem value="right">Right wall</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </label>
 
                 {arrange.insetAnchor === "both" ? (
                   <>
@@ -281,7 +262,10 @@ export function SelectionInspector({
                       value={arrange.gapIsMixed ? "Mixed" : formatValue(arrange.gapMm)}
                       isMixed={arrange.gapIsMixed}
                     />
-                    <p className="field-hint">The group stays centered.</p>
+                    <p className="field-hint">
+                      The group stays centered — the spacing between works
+                      follows.
+                    </p>
                   </>
                 ) : arrange.insetAnchor === "left" ? (
                   <>
@@ -343,7 +327,9 @@ export function SelectionInspector({
                   value={arrange.insetIsMixed ? "Mixed" : formatValue(arrange.insetMm)}
                   isMixed={arrange.insetIsMixed}
                 />
-                <p className="field-hint">The group stays where it is.</p>
+                <p className="field-hint">
+                  The group stays where it is — the wall-edge distances follow.
+                </p>
               </div>
             )}
 
@@ -401,8 +387,8 @@ export function SelectionInspector({
           </div>
         ) : (
           <Button
-            className="inspector-action inspector-remove-all"
-            variant="destructive"
+            className="inspector-action inspector-danger"
+            variant="destructive-ghost"
             onClick={() => setConfirmingRemove(true)}
           >
             <TrashIcon aria-hidden="true" size={15} />
