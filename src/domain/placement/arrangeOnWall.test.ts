@@ -3,12 +3,15 @@ import type { WallObjectBase } from "../project";
 import {
   arrangeOnWall,
   arrangeOnWallInZone,
+  arrangeOnWallInZoneWithInset,
+  detectBoundary,
   gapForInset,
   getArrangeReadoutDetailed,
   getNeighborAwareSegments,
   getOpenSpaceBounds,
   getSpacingSegments,
   insetForGap,
+  slideGroupToBoundaryInset,
   slideGroupToEdgeInset,
   solveEqualArrangement,
   solveEqualArrangementInZone,
@@ -981,5 +984,129 @@ describe("getArrangeReadoutDetailed", () => {
 
     const { insetIsMixed } = getArrangeReadoutDetailed(members, 2540);
     expect(insetIsMixed).toBe(false);
+  });
+});
+
+describe("detectBoundary", () => {
+  it("falls back to the wall edge on each side with no others", () => {
+    const members = [makeMember({ id: "a", widthMm: 300, xMm: 500 })];
+    expect(detectBoundary("left", members, [], 2000)).toEqual({ type: "wall", edgeMm: 0 });
+    expect(detectBoundary("right", members, [], 2000)).toEqual({ type: "wall", edgeMm: 2000 });
+  });
+
+  it("detects a same-band neighbour's edge as the boundary, naming its id", () => {
+    // artwork center 500, width 300 -> edges [350, 650]
+    const members = [makeMember({ id: "a", widthMm: 300, xMm: 500 })];
+    // window center 1000, width 200 -> edges [900, 1100]; same y-band
+    const others = [makeMember({ id: "w", widthMm: 200, xMm: 1000 })];
+
+    expect(detectBoundary("left", members, others, 2000)).toEqual({ type: "wall", edgeMm: 0 });
+    expect(detectBoundary("right", members, others, 2000)).toEqual({
+      type: "object",
+      edgeMm: 900,
+      objectId: "w"
+    });
+  });
+
+  it("ignores a neighbour outside the selection's vertical band", () => {
+    const members = [makeMember({ id: "a", widthMm: 300, xMm: 500 })];
+    const others = [
+      makeMember({ id: "low", widthMm: 200, xMm: 1000, yMm: -1000, heightMm: 400 })
+    ];
+
+    expect(detectBoundary("right", members, others, 2000)).toEqual({ type: "wall", edgeMm: 2000 });
+  });
+
+  it("agrees with getOpenSpaceBounds on both sides", () => {
+    const members = [
+      makeMember({ id: "a", widthMm: 200, xMm: 300 }),
+      makeMember({ id: "b", widthMm: 200, xMm: 900 })
+    ];
+    const others = [
+      makeMember({ id: "n", widthMm: 200, xMm: -400 }),
+      makeMember({ id: "w", widthMm: 200, xMm: 1400 })
+    ];
+
+    const left = detectBoundary("left", members, others, 2000);
+    const right = detectBoundary("right", members, others, 2000);
+    const bounds = getOpenSpaceBounds(members, others, 2000);
+
+    expect(left.edgeMm).toBe(bounds.startMm);
+    expect(right.edgeMm).toBe(bounds.endMm);
+  });
+});
+
+describe("slideGroupToBoundaryInset", () => {
+  it("returns empty array for fewer than 2 members", () => {
+    expect(slideGroupToBoundaryInset([], "left", 0, 100)).toEqual([]);
+    expect(slideGroupToBoundaryInset([makeMember()], "left", 0, 100)).toEqual([]);
+  });
+
+  it("with boundaryEdgeMm 0/wallLengthMm, reproduces slideGroupToEdgeInset exactly", () => {
+    const members = [
+      makeMember({ id: "a", widthMm: 300, xMm: 250 }),
+      makeMember({ id: "b", widthMm: 400, xMm: 800 })
+    ];
+    expect(slideGroupToBoundaryInset(members, "left", 0, 500)).toEqual(
+      slideGroupToEdgeInset(members, 2000, "left", 500)
+    );
+    expect(slideGroupToBoundaryInset(members, "right", 2000, 300)).toEqual(
+      slideGroupToEdgeInset(members, 2000, "right", 300)
+    );
+  });
+
+  it("left: slides the group so its leftmost edge lands insetMm right of a neighbour's edge", () => {
+    // a: width 300, center 250 -> edges [100, 400]
+    // b: width 400, center 800 -> edges [600, 1000] (leftmost edge = 100)
+    const members = [
+      makeMember({ id: "a", widthMm: 300, xMm: 250 }),
+      makeMember({ id: "b", widthMm: 400, xMm: 800 })
+    ];
+    // Neighbour's right edge at 50; target leftmost edge = 50 + 80 = 130.
+    const result = slideGroupToBoundaryInset(members, "left", 50, 80);
+    const newLeftEdge = Math.min(...result.map((r, i) => r.xMm - members[i].widthMm / 2));
+    expect(newLeftEdge).toBeCloseTo(130);
+  });
+
+  it("right: slides the group so its rightmost edge lands insetMm left of a neighbour's edge", () => {
+    const members = [
+      makeMember({ id: "a", widthMm: 300, xMm: 250 }),
+      makeMember({ id: "b", widthMm: 400, xMm: 800 })
+    ];
+    // Neighbour's left edge at 1500; target rightmost edge = 1500 - 80 = 1420.
+    const result = slideGroupToBoundaryInset(members, "right", 1500, 80);
+    const newRightEdge = Math.max(...result.map((r, i) => r.xMm + members[i].widthMm / 2));
+    expect(newRightEdge).toBeCloseTo(1420);
+  });
+});
+
+describe("arrangeOnWallInZoneWithInset", () => {
+  it("returns [] for fewer than 2 members", () => {
+    expect(arrangeOnWallInZoneWithInset([], 0, 2000, 100)).toEqual([]);
+    expect(arrangeOnWallInZoneWithInset([makeMember()], 0, 2000, 100)).toEqual([]);
+  });
+
+  it("with zone [0, wallLength], reproduces arrangeOnWall exactly", () => {
+    const members = [
+      makeMember({ id: "a", widthMm: 508, xMm: 100 }),
+      makeMember({ id: "b", widthMm: 508, xMm: 1000 }),
+      makeMember({ id: "c", widthMm: 508, xMm: 2000 })
+    ];
+    expect(arrangeOnWallInZoneWithInset(members, 0, 2540, 254)).toEqual(
+      arrangeOnWall(members, 2540, { insetMm: 254 })
+    );
+  });
+
+  it("centres the group within an arbitrary zone at the given inset from each zone edge", () => {
+    // 2 works of 300mm in the zone [500, 2000] (length 1500)
+    // gap = 1500 - 2*100 - 600 = 700
+    const members = [
+      makeMember({ id: "a", widthMm: 300, xMm: 700 }),
+      makeMember({ id: "b", widthMm: 300, xMm: 1800 })
+    ];
+    const result = arrangeOnWallInZoneWithInset(members, 500, 2000, 100);
+
+    expect(result[0].xMm - 300 / 2).toBeCloseTo(600); // zoneStart + inset
+    expect(result[1].xMm + 300 / 2).toBeCloseTo(1900); // zoneEnd - inset
   });
 });

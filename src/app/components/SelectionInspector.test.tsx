@@ -15,6 +15,8 @@ const baseArrange: ArrangeProp = {
   gapMm: 800,
   leftEdgeDistanceMm: 500,
   rightEdgeDistanceMm: 500,
+  leftBoundary: { type: "wall" },
+  rightBoundary: { type: "wall" },
   insetIsMixed: false,
   gapIsMixed: false,
   equalSpacingMm: 650,
@@ -42,31 +44,73 @@ function renderPanel(
 }
 
 describe("SelectionInspector arrange body", () => {
-  it("inset mode: anchor select, editable inset field, calculated gap readout", () => {
+  it("inset/both, wall boundaries: anchor tabs, editable edge field, calculated gap readout", () => {
     renderPanel();
 
-    // The anchor sub-choice is a collapsed select, not a segmented row.
-    expect(screen.getByRole("combobox", { name: "Measured from" })).toBeTruthy();
+    // The anchor sub-choice is underline tabs (a radiogroup), not a select.
+    expect(screen.getByRole("radiogroup", { name: "Measured from" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Left" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Both", checked: true })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Right" })).toBeTruthy();
     expect(
-      screen.getByRole("textbox", { name: "Distance from each wall edge" })
+      screen.getByRole("textbox", { name: "Distance from each edge" })
     ).toBeTruthy();
-    // The companion value reads as calculated output, and the hint names the
-    // derived relationship.
+    // The companion value reads as calculated output, and the caption names
+    // what both sides measure against.
     expect(screen.getByText("Distance between works")).toBeTruthy();
     expect(screen.getByText("Calculated")).toBeTruthy();
-    expect(
-      screen.getByText(/The group stays centered — the spacing between works/)
-    ).toBeTruthy();
+    expect(screen.getByText("Measuring to each wall edge.")).toBeTruthy();
+    // No "Neighbor" tag when both detected boundaries are the wall.
+    expect(screen.queryByText("Neighbor")).toBeNull();
     // A live session surfaces Apply/Cancel.
     expect(screen.getByRole("button", { name: "Apply" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
   });
 
-  it("equal mode: zone select and equal-distance readout, no anchor select", () => {
+  it("inset/left, a neighbouring artwork: field label, Neighbor tag, and caption name the artwork", () => {
+    renderPanel({
+      arrange: {
+        ...baseArrange,
+        insetAnchor: "left",
+        leftBoundary: { type: "object", kind: "artwork", name: "Portrait Study" },
+        rightBoundary: { type: "wall" }
+      }
+    });
+
+    expect(
+      screen.getByRole("textbox", { name: "Distance from Portrait Study on the left" })
+    ).toBeTruthy();
+    expect(screen.getByText("Neighbor")).toBeTruthy();
+    expect(screen.getByText("Distance from right wall edge")).toBeTruthy();
+    expect(
+      screen.getByText("Measuring to nearest artwork on the left.")
+    ).toBeTruthy();
+  });
+
+  it("inset/right, a neighbouring door: field label and caption name the door", () => {
+    renderPanel({
+      arrange: {
+        ...baseArrange,
+        insetAnchor: "right",
+        leftBoundary: { type: "wall" },
+        rightBoundary: { type: "object", kind: "door", name: "Door" }
+      }
+    });
+
+    expect(
+      screen.getByRole("textbox", { name: "Distance from Door on the right" })
+    ).toBeTruthy();
+    expect(screen.getByText("Neighbor")).toBeTruthy();
+    expect(
+      screen.getByText("Measuring to nearest door on the right.")
+    ).toBeTruthy();
+  });
+
+  it("equal mode: zone select and equal-distance readout, no anchor tabs", () => {
     renderPanel({ arrange: { ...baseArrange, mode: "equal" } });
 
     expect(screen.getByRole("combobox", { name: "Space within" })).toBeTruthy();
-    expect(screen.queryByRole("combobox", { name: "Measured from" })).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "Measured from" })).toBeNull();
     expect(screen.getByText("Equal distance")).toBeTruthy();
   });
 

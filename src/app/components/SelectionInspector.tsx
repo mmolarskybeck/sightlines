@@ -5,13 +5,14 @@ import { ArrowsOutLineHorizontalIcon } from "@phosphor-icons/react/dist/csr/Arro
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
-import type { DisplayUnit } from "../../domain/project";
+import type { DisplayUnit, WallObject } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
 import {
   getPlaceholderForScope,
   getScopeUnits,
   unitSystemFromDisplayUnit
 } from "../../domain/units/unitSystem";
+import type { ArrangeBoundary } from "../hooks/arrangeReadout";
 import { LengthField } from "./LengthField";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import { Button } from "./ui/button";
@@ -33,6 +34,68 @@ const METRIC_STEP_MM = 10;
 type ArrangeMode = "equal" | "inset" | "gap";
 type InsetAnchor = "left" | "both" | "right";
 type EvenZone = "wall" | "open";
+
+// "From edges" is deliberately agnostic about what it measures to — a wall
+// has an edge, a neighbouring artwork or opening has an edge, and the panel
+// never asks the curator to choose which; it states whatever detectBoundary
+// found. These turn one ArrangeBoundary into the three copy surfaces that
+// need it: the editable field's own label, its "on the {side}" phrasing, and
+// the one-line caption confirming the target for anyone not watching the
+// canvas closely.
+function nearestNounFor(kind: WallObject["kind"]): string {
+  switch (kind) {
+    case "artwork":
+      return "artwork";
+    case "door":
+      return "door";
+    case "window":
+      return "window";
+    case "blocked-zone":
+      return "blocked zone";
+  }
+}
+
+function edgeFieldLabel(side: "left" | "right", boundary: ArrangeBoundary): string {
+  return boundary.type === "wall"
+    ? `Distance from ${side} wall edge`
+    : `Distance from ${boundary.name} on the ${side}`;
+}
+
+function edgeCaption(side: "left" | "right", boundary: ArrangeBoundary): string {
+  return boundary.type === "wall"
+    ? `Measuring to ${side} wall edge.`
+    : `Measuring to nearest ${nearestNounFor(boundary.kind)} on the ${side}.`;
+}
+
+function bothEdgeCaption(left: ArrangeBoundary, right: ArrangeBoundary): string {
+  if (left.type === "wall" && right.type === "wall") return "Measuring to each wall edge.";
+  const leftPhrase =
+    left.type === "wall" ? "left wall edge" : `nearest ${nearestNounFor(left.kind)} on the left`;
+  const rightPhrase =
+    right.type === "wall"
+      ? "right wall edge"
+      : `nearest ${nearestNounFor(right.kind)} on the right`;
+  return `Measuring to ${leftPhrase} and ${rightPhrase}.`;
+}
+
+// The same quiet gray pill "Calculated" already uses, reused verbatim per the
+// panel's one-tag visual grammar — a curator can tell at a glance that a
+// number moves if that neighbour moves, without reading the caption.
+//
+// `decorative` hides it from the accessible name: a labelBadge sits inside
+// the LengthField's own <label>, and a browser folds ALL of a label's text
+// content into the input's accessible name — without this the field would
+// announce as e.g. "Distance from Portrait Study on the leftNeighbor". The
+// label text already names the neighbour, so hiding the tag there loses
+// nothing; the ArrangeCalculatedReadout usage isn't inside a <label> at all,
+// so it stays announced normally.
+function NeighborTag({ decorative = false }: { decorative?: boolean } = {}) {
+  return (
+    <span aria-hidden={decorative || undefined} className="arrange-tag">
+      Neighbor
+    </span>
+  );
+}
 
 // Right-inspector panel for a multi-object selection (2+ placements picked in
 // the plan/elevation view). Props-driven, same discipline as
@@ -76,19 +139,25 @@ export function SelectionInspector({
   // value can be trusted.
   arrange: {
     mode: ArrangeMode;
-    // Which wall edge the "From wall edges" mode measures from. Only affects
-    // the inset-mode body; "both" is the centred default.
+    // Which side the "From edges" mode measures from. Only affects the
+    // inset-mode body; "both" is the centred default.
     insetAnchor: InsetAnchor;
     // Which span "Space evenly" distributes across. Only affects the equal-mode
     // body; "wall" is the whole-wall default.
     evenZone: EvenZone;
     insetMm: number;
     gapMm: number;
-    // Distance from the wall's left edge to the group's leftmost edge, and
-    // from the group's rightmost edge to the wall's right edge — the two
-    // single-sided measurements the left/right anchors edit and read back.
+    // Distance from the group's leftmost/rightmost edge to whatever
+    // leftBoundary/rightBoundary detected on that side — the two single-
+    // sided measurements the left/right/both anchors edit and read back.
     leftEdgeDistanceMm: number;
     rightEdgeDistanceMm: number;
+    // What "From edges" measures against on each side: the wall, or the
+    // nearest unselected neighbour beside the group (auto-detected — there is
+    // no manual wall-vs-neighbour toggle). Drives the field label, the
+    // "Neighbor" tag, and the caption.
+    leftBoundary: ArrangeBoundary;
+    rightBoundary: ArrangeBoundary;
     insetIsMixed: boolean;
     gapIsMixed: boolean;
     equalSpacingMm: number;
@@ -176,7 +245,7 @@ export function SelectionInspector({
               </ToggleGroupItem>
               <ToggleGroupItem className="arrange-mode" value="inset">
                 <ArrowsInLineHorizontalIcon aria-hidden="true" size={16} />
-                <span>From wall edges</span>
+                <span>From edges</span>
               </ToggleGroupItem>
               <ToggleGroupItem className="arrange-mode" value="gap">
                 <ArrowsHorizontalIcon aria-hidden="true" size={16} />
@@ -222,34 +291,66 @@ export function SelectionInspector({
               </div>
             ) : arrange.mode === "inset" ? (
               <div className="arrange-mode-body">
-                {/* A collapsed select rather than a segmented row: the anchor
-                    is a refinement of "From wall edges", not a peer decision,
-                    so the enabled panel shows one value instead of three live
-                    options. Radix Select never fires the ""-deselect the old
-                    toggle needed a re-click guard for. */}
-                <label className="field-row compact">
-                  <span>Measured from</span>
-                  <Select
+                {/* Underline tabs, not a segmented row: the anchor is a
+                    refinement of "From edges", not a peer decision — a plain
+                    side choice now that the target on either side is
+                    auto-detected (wall or nearest neighbour), never picked
+                    manually. No re-click deselect guard needed: unlike the
+                    mode toggle, re-choosing the active anchor is a no-op
+                    (onSetAnchor never moves anything on its own). */}
+                <div className="arrange-anchor-row">
+                  <span className="arrange-anchor-label">Measured from</span>
+                  <ToggleGroup
+                    aria-label="Measured from"
+                    className="arrange-anchor-tabs"
+                    orientation="horizontal"
+                    type="single"
                     value={arrange.insetAnchor}
-                    onValueChange={(value) => onSetAnchor(value as InsetAnchor)}
+                    onValueChange={(value) => {
+                      if (value === "left" || value === "both" || value === "right") {
+                        onSetAnchor(value);
+                      }
+                    }}
                   >
-                    <SelectTrigger aria-label="Measured from">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="left">Left wall</SelectItem>
-                      <SelectItem value="both">Both walls</SelectItem>
-                      <SelectItem value="right">Right wall</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </label>
+                    <ToggleGroupItem
+                      className="arrange-anchor-tab"
+                      value="left"
+                      variant="tab"
+                      size="sm"
+                    >
+                      Left
+                    </ToggleGroupItem>
+                    <ToggleGroupItem
+                      className="arrange-anchor-tab"
+                      value="both"
+                      variant="tab"
+                      size="sm"
+                    >
+                      Both
+                    </ToggleGroupItem>
+                    <ToggleGroupItem
+                      className="arrange-anchor-tab"
+                      value="right"
+                      variant="tab"
+                      size="sm"
+                    >
+                      Right
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
 
                 {arrange.insetAnchor === "both" ? (
                   <>
                     <LengthField
                       compact
-                      label="Distance from each wall edge"
-                      valueMm={arrange.insetMm}
+                      label="Distance from each edge"
+                      labelBadge={
+                        arrange.leftBoundary.type === "object" ||
+                        arrange.rightBoundary.type === "object"
+                          ? <NeighborTag decorative />
+                          : null
+                      }
+                      valueMm={arrange.leftEdgeDistanceMm}
                       displayUnit={displayUnit}
                       parseUnit={parseUnit}
                       placeholder={placeholder}
@@ -263,15 +364,17 @@ export function SelectionInspector({
                       isMixed={arrange.gapIsMixed}
                     />
                     <p className="field-hint">
-                      The group stays centered — the spacing between works
-                      follows.
+                      {bothEdgeCaption(arrange.leftBoundary, arrange.rightBoundary)}
                     </p>
                   </>
                 ) : arrange.insetAnchor === "left" ? (
                   <>
                     <LengthField
                       compact
-                      label="Distance from left wall edge"
+                      label={edgeFieldLabel("left", arrange.leftBoundary)}
+                      labelBadge={
+                        arrange.leftBoundary.type === "object" ? <NeighborTag decorative /> : null
+                      }
                       valueMm={arrange.leftEdgeDistanceMm}
                       displayUnit={displayUnit}
                       parseUnit={parseUnit}
@@ -281,17 +384,21 @@ export function SelectionInspector({
                       onEnterWhenClean={onAcceptArrange}
                     />
                     <ArrangeCalculatedReadout
-                      label="Distance from right wall edge"
+                      label={edgeFieldLabel("right", arrange.rightBoundary)}
                       value={formatValue(arrange.rightEdgeDistanceMm)}
                       isMixed={false}
+                      isNeighbor={arrange.rightBoundary.type === "object"}
                     />
-                    <p className="field-hint">Spacing between works stays the same.</p>
+                    <p className="field-hint">{edgeCaption("left", arrange.leftBoundary)}</p>
                   </>
                 ) : (
                   <>
                     <LengthField
                       compact
-                      label="Distance from right wall edge"
+                      label={edgeFieldLabel("right", arrange.rightBoundary)}
+                      labelBadge={
+                        arrange.rightBoundary.type === "object" ? <NeighborTag decorative /> : null
+                      }
                       valueMm={arrange.rightEdgeDistanceMm}
                       displayUnit={displayUnit}
                       parseUnit={parseUnit}
@@ -301,11 +408,12 @@ export function SelectionInspector({
                       onEnterWhenClean={onAcceptArrange}
                     />
                     <ArrangeCalculatedReadout
-                      label="Distance from left wall edge"
+                      label={edgeFieldLabel("left", arrange.leftBoundary)}
                       value={formatValue(arrange.leftEdgeDistanceMm)}
                       isMixed={false}
+                      isNeighbor={arrange.leftBoundary.type === "object"}
                     />
-                    <p className="field-hint">Spacing between works stays the same.</p>
+                    <p className="field-hint">{edgeCaption("right", arrange.rightBoundary)}</p>
                   </>
                 )}
               </div>
@@ -400,25 +508,29 @@ export function SelectionInspector({
   );
 }
 
-// The one calculated companion readout: a small muted label on line 1, then the
-// value (semibold, larger) on line 2 with the "Calculated" tag inline right
-// after it. A "Mixed" value shows no tag — a mixed layout isn't a single
-// calculated value.
+// The calculated companion readout: a small muted label on line 1, then the
+// value (semibold, larger) on line 2 with its tag(s) inline right after it —
+// "Calculated" (a "Mixed" value shows none, since a mixed layout isn't a
+// single calculated value) and, when the value is measured against a
+// neighbour rather than a wall, "Neighbor" alongside it.
 function ArrangeCalculatedReadout({
   label,
   value,
-  isMixed
+  isMixed,
+  isNeighbor = false
 }: {
   label: string;
   value: string;
   isMixed: boolean;
+  isNeighbor?: boolean;
 }) {
   return (
     <div className="arrange-readout">
       <span className="arrange-readout-label">{label}</span>
       <span className="arrange-readout-value-row">
         <span className="arrange-readout-value">{value}</span>
-        {isMixed ? null : <span className="arrange-calculated">Calculated</span>}
+        {isMixed ? null : <span className="arrange-tag">Calculated</span>}
+        {isNeighbor ? <NeighborTag /> : null}
       </span>
     </div>
   );

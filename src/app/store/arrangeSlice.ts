@@ -1,9 +1,11 @@
 import {
-  arrangeOnWall,
   arrangeOnWallInZone,
+  arrangeOnWallInZoneWithInset,
+  detectBoundary,
   getOpenSpaceBounds,
-  slideGroupToEdgeInset,
-  spaceGroupAboutCenter
+  slideGroupToBoundaryInset,
+  spaceGroupAboutCenter,
+  type BoundaryDetection
 } from "../../domain/placement/arrangeOnWall";
 import type { Project } from "../../domain/project";
 import { getProjectWalls } from "../projectWalls";
@@ -24,13 +26,21 @@ export type ArrangeSession = {
   originalById: Record<string, { xMm: number; yMm: number }>;
   previewById: Record<string, { xMm: number; yMm: number }>;
   mode: "equal" | "inset" | "gap";
-  // Which wall edge the "From wall edges" (inset) mode measures from. "both"
-  // keeps the group centred (the original symmetric solve); "left"/"right"
-  // slide the group as a rigid unit so the named outer edge sits a given
-  // distance from that wall edge, preserving interior spacing. Only meaningful
-  // while mode === "inset", but carried on the session so switching mode and
-  // back remembers it. See lastInsetAnchor for the idle default.
+  // Which side the "From edges" (inset) mode measures from. "both"
+  // keeps the group centred (the original symmetric solve, now zone-aware —
+  // see insetBoundary); "left"/"right" slide the group as a rigid unit so the
+  // named outer edge sits a given distance from its detected boundary,
+  // preserving interior spacing. Only meaningful while mode === "inset", but
+  // carried on the session so switching mode and back remembers it. See
+  // lastInsetAnchor for the idle default.
   insetAnchor: "left" | "both" | "right";
+  // What each side of the "From edges" mode measures against — the wall edge,
+  // or the nearest unselected neighbour beside the group (see detectBoundary)
+  // — computed ONCE at session begin from the members' ORIGINAL positions, so
+  // the target stays fixed while previews move the members around (the same
+  // freeze openZoneBoundsMm applies to "Space evenly"). Only meaningful while
+  // mode === "inset".
+  insetBoundary: { left: BoundaryDetection; right: BoundaryDetection };
   // Which span the "Space evenly" mode distributes across: the whole wall, or
   // just the "open space" beside the group (bounded by the nearest unselected
   // neighbours — see openZoneBoundsMm). Only meaningful while mode === "equal",
@@ -270,6 +280,13 @@ export function createArrangeSlice(
         openZoneBoundsMm.startMm > 0 || openZoneBoundsMm.endMm < wall.lengthMm;
       const evenZone = get().lastEvenZone ?? (isBounded ? "open" : "wall");
 
+      // What "From edges" measures against on each side — same detector, same
+      // "others", frozen the same way as openZoneBoundsMm.
+      const insetBoundary = {
+        left: detectBoundary("left", members, others, wall.lengthMm),
+        right: detectBoundary("right", members, others, wall.lengthMm)
+      };
+
       const originalById: Record<string, { xMm: number; yMm: number }> = {};
       const previewById: Record<string, { xMm: number; yMm: number }> = {};
       for (const member of members) {
@@ -287,6 +304,7 @@ export function createArrangeSlice(
           // A fresh session opens on the remembered anchor; switching mode
           // and back keeps whatever the session already carried.
           insetAnchor: get().lastInsetAnchor,
+          insetBoundary,
           evenZone,
           openZoneBoundsMm
         },
@@ -356,11 +374,13 @@ export function createArrangeSlice(
         });
 
       // An inset edit resolves against the anchor the field was measured
-      // from — "both" re-solves the symmetric centred arrangement, while
-      // "left"/"right" slide the group rigidly so the named outer edge lands
-      // at the typed distance, interior spacing untouched. The anchor rides
-      // in with the value (the field knows which edge it's showing) and
-      // falls back to whatever the session already carried.
+      // from — "both" re-solves the symmetric centred arrangement (within the
+      // zone bounded by insetBoundary, wall edges when both sides detected
+      // "wall"), while "left"/"right" slide the group rigidly so the named
+      // outer edge lands at the typed distance from its detected boundary,
+      // interior spacing untouched. The anchor rides in with the value (the
+      // field knows which edge it's showing) and falls back to whatever the
+      // session already carried.
       const insetAnchor: ArrangeSession["insetAnchor"] =
         "insetMm" in params ? (params.anchor ?? session.insetAnchor) : session.insetAnchor;
 
@@ -368,11 +388,16 @@ export function createArrangeSlice(
       if ("insetMm" in params) {
         moves =
           insetAnchor === "both"
-            ? arrangeOnWall(previewMembers, wall.lengthMm, { insetMm: params.insetMm })
-            : slideGroupToEdgeInset(
+            ? arrangeOnWallInZoneWithInset(
                 previewMembers,
-                wall.lengthMm,
+                session.insetBoundary.left.edgeMm,
+                session.insetBoundary.right.edgeMm,
+                params.insetMm
+              )
+            : slideGroupToBoundaryInset(
+                previewMembers,
                 insetAnchor,
+                session.insetBoundary[insetAnchor].edgeMm,
                 params.insetMm
               );
       } else if ("gapMm" in params) {

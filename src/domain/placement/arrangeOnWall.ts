@@ -116,17 +116,42 @@ export function arrangeOnWallInZone(
   }));
 }
 
+// Like arrangeOnWallInZone, but the caller supplies the (equal) inset
+// directly instead of solving for it — the "From edges → Both" case once its
+// boundary is a detected zone rather than the whole wall: the group is
+// centred within [zoneStartMm, zoneEndMm] with insetMm from each zone edge,
+// same equation arrangeOnWall solves against the whole wall. A zone of
+// [0, wallLengthMm] reproduces arrangeOnWall(members, wallLengthMm, {
+// insetMm }) exactly, so this is the drop-in generalisation once a per-side
+// boundary (wall or neighbour, see detectBoundary) replaces the wall edges.
+export function arrangeOnWallInZoneWithInset(
+  members: WallObjectBase[],
+  zoneStartMm: number,
+  zoneEndMm: number,
+  insetMm: number
+): { id: string; xMm: number }[] {
+  if (members.length < 2) return [];
+
+  const zoneLengthMm = zoneEndMm - zoneStartMm;
+  return arrangeOnWall(members, zoneLengthMm, { insetMm }).map((move) => ({
+    id: move.id,
+    xMm: move.xMm + zoneStartMm
+  }));
+}
+
 // Slides the whole group as a RIGID unit so one of its outer edges lands a
-// given distance from a wall edge, preserving every interior gap (x-only, a
-// single shared translation applied to every member). Unlike arrangeOnWall,
-// which re-solves the interior spacing to centre the group, this keeps the
-// hang exactly as it is and only moves it sideways.
+// given distance from an arbitrary boundary edge (a wall start/end, or a
+// neighbouring object's edge — see detectBoundary), preserving every interior
+// gap (x-only, a single shared translation applied to every member). Unlike
+// arrangeOnWall, which re-solves the interior spacing to centre the group,
+// this keeps the hang exactly as it is and only moves it sideways.
 //
-//   side "left"  → the group's leftmost edge lands at insetMm from the wall
-//                  start:  delta = insetMm − (current leftmost left edge)
-//   side "right" → the group's rightmost edge lands at insetMm from the wall
-//                  end:    delta = (wallLengthMm − insetMm) − (current
-//                          rightmost right edge)
+//   side "left"  → the group's leftmost edge lands at (boundaryEdgeMm +
+//                  insetMm): delta = boundaryEdgeMm + insetMm − (current
+//                  leftmost left edge)
+//   side "right" → the group's rightmost edge lands at (boundaryEdgeMm −
+//                  insetMm): delta = (boundaryEdgeMm − insetMm) − (current
+//                  rightmost right edge)
 //
 // The semantics are ABSOLUTE, not cumulative: calling twice with the same
 // insetMm produces no additional movement (the second delta is 0), because
@@ -134,10 +159,10 @@ export function arrangeOnWallInZone(
 // overflowing distance is allowed and the commit-time collision gate is what
 // catches any resulting overlap, same convention as arrangeOnWall. Returns new
 // CENTER xMm per member; yMm is untouched. Returns [] for fewer than 2 members.
-export function slideGroupToEdgeInset(
+export function slideGroupToBoundaryInset(
   members: WallObjectBase[],
-  wallLengthMm: number,
   side: "left" | "right",
+  boundaryEdgeMm: number,
   insetMm: number
 ): { id: string; xMm: number }[] {
   if (members.length < 2) return [];
@@ -151,10 +176,29 @@ export function slideGroupToEdgeInset(
 
   const deltaMm =
     side === "left"
-      ? insetMm - leftEdgeMm
-      : wallLengthMm - insetMm - rightEdgeMm;
+      ? boundaryEdgeMm + insetMm - leftEdgeMm
+      : boundaryEdgeMm - insetMm - rightEdgeMm;
 
   return members.map((member) => ({ id: member.id, xMm: member.xMm + deltaMm }));
+}
+
+// The wall-edge-only case of slideGroupToBoundaryInset — the boundary is
+// always the wall start (side "left") or wall end (side "right"). Kept as a
+// thin wrapper so call sites that never deal in neighbour boundaries (and the
+// tests documenting this exact behaviour) don't need to know the general
+// form exists.
+export function slideGroupToEdgeInset(
+  members: WallObjectBase[],
+  wallLengthMm: number,
+  side: "left" | "right",
+  insetMm: number
+): { id: string; xMm: number }[] {
+  return slideGroupToBoundaryInset(
+    members,
+    side,
+    side === "left" ? 0 : wallLengthMm,
+    insetMm
+  );
 }
 
 // Re-spaces the group in place: every interior edge-to-edge gap is set to
@@ -231,47 +275,13 @@ export function getSpacingSegments(
   return segments;
 }
 
-// Like getSpacingSegments, but the two OUTER segments stop at the nearest
-// UNSELECTED neighbour on that side instead of always running to the wall edge
-// — so an idle selection's dimension lines describe the space actually beside
-// the works (up to the next window/door/work) rather than sailing through it to
-// the far wall. Interior gaps between members are unchanged (member edge ↔
-// member edge, same as getSpacingSegments).
-//
-// A boundary object counts only when its vertical extent overlaps the
-// selection's union y-band — a low pedestal zone or a high transom window sits
-// outside the works' band and is not "beside" them, so it never bounds a
-// segment. On each side the boundary is the nearest qualifying neighbour edge:
-//   left  → the greatest right-edge of a y-overlapping object whose right edge
-//           lies left of the selection's right edge (a fully-left neighbour, or
-//           one overlapping the selection from the left), else the wall start;
-//   right → the least left-edge of a y-overlapping object whose left edge lies
-//           right of the selection's left edge, else the wall end.
-// An overlapping neighbour puts the boundary INSIDE the selection's span, which
-// yields a negative outer segment — returned as-is unclamped, the same
-// convention getSpacingSegments follows. With no qualifying others on a side the
-// boundary falls back to the wall edge, so a members-only call reproduces
-// getSpacingSegments exactly.
-//
-// `others` is the caller's responsibility: the unselected wall objects on the
-// SAME wall as the members (the caller filters by wall and by selection).
-// The free span a selection sits in: the wall-local [startMm, endMm] bounded on
-// each side by the nearest qualifying UNSELECTED neighbour beside the works,
-// falling back to the wall edge when there's nothing beside them on that side.
-// This is exactly the outer-boundary rule getNeighborAwareSegments uses for its
-// two outer segments, lifted out so the "Space evenly → Open space" arrange can
-// distribute the works within just this span (see arrangeOnWallInZone).
-//
-// A neighbour counts only when its vertical extent overlaps the selection's
-// union y-band — a low pedestal or a high transom sits outside the works' band
-// and is not "beside" them. On each side the boundary is the nearest qualifying
-// neighbour edge (left → the greatest right-edge lying left of the selection's
-// right edge; right → the least left-edge lying right of the selection's left
-// edge). An overlapping neighbour puts a boundary INSIDE the selection's span,
-// which yields startMm > endMm or an outer segment that reads backwards —
-// returned unclamped, the same convention getNeighborAwareSegments follows.
-// With no qualifying others on a side the boundary is the wall edge, so a
-// members-only call returns { startMm: 0, endMm: wallLengthMm }.
+// The free span a selection sits in: the wall-local [startMm, endMm] bounded
+// on each side by detectBoundary — the nearest qualifying UNSELECTED
+// neighbour beside the works, falling back to the wall edge when there's
+// nothing beside them on that side. Powers "Space evenly → Open space" (the
+// works distribute within just this span, see arrangeOnWallInZone) and is
+// exactly the outer-boundary rule getNeighborAwareSegments uses for its two
+// outer segments.
 //
 // `others` is the caller's responsibility: the unselected wall objects on the
 // SAME wall as the members (the caller filters by wall and by selection).
@@ -282,6 +292,34 @@ export function getOpenSpaceBounds(
 ): { startMm: number; endMm: number } {
   if (members.length === 0) return { startMm: 0, endMm: wallLengthMm };
 
+  const left = detectBoundary("left", members, others, wallLengthMm);
+  const right = detectBoundary("right", members, others, wallLengthMm);
+  return { startMm: left.edgeMm, endMm: right.edgeMm };
+}
+
+// What a selection's edge measures against on one side: the wall itself, or
+// the nearest qualifying UNSELECTED neighbour beside it (see the y-band and
+// "nearest qualifying" rules on getOpenSpaceBounds/getNeighborAwareSegments —
+// this is that same detector, pulled out so a second consumer (the "From
+// edges" panel's per-side field) can ask the identical question getOpenSpace-
+// Bounds asks for "Space evenly → Open space", rather than re-implementing
+// wall-vs-neighbour detection. No manual override: whichever the detector
+// finds IS the target, which is the whole point — see arrangeSlice's
+// insetBoundary.
+//
+// `others` is the caller's responsibility: the unselected wall objects on the
+// SAME wall as `members` (assumed non-empty — callers with zero members, e.g.
+// an idle empty selection, short-circuit before reaching here).
+export type BoundaryDetection =
+  | { type: "wall"; edgeMm: number }
+  | { type: "object"; edgeMm: number; objectId: string };
+
+export function detectBoundary(
+  side: "left" | "right",
+  members: WallObjectBase[],
+  others: WallObjectBase[],
+  wallLengthMm: number
+): BoundaryDetection {
   const sorted = [...members].sort((a, b) => a.xMm - b.xMm);
   const leftEdgeMm = sorted[0].xMm - sorted[0].widthMm / 2;
   const rightmost = sorted[sorted.length - 1];
@@ -295,31 +333,51 @@ export function getOpenSpaceBounds(
     object.yMm - object.heightMm / 2 < bandTopMm;
   const bandOthers = others.filter(overlapsBand);
 
-  // Left boundary: nearest right-edge that lies left of the selection's right
-  // edge (fully-left neighbour, or one overlapping from the left). Wall start
-  // when there's nothing beside the works on the left.
-  let startMm = 0;
-  for (const object of bandOthers) {
-    const objectRightMm = object.xMm + object.widthMm / 2;
-    if (objectRightMm < rightEdgeMm && objectRightMm > startMm) {
-      startMm = objectRightMm;
+  if (side === "left") {
+    // Nearest right-edge that lies left of the selection's right edge
+    // (fully-left neighbour, or one overlapping from the left). Wall start
+    // when there's nothing beside the works on the left.
+    let edgeMm = 0;
+    let objectId: string | undefined;
+    for (const object of bandOthers) {
+      const objectRightMm = object.xMm + object.widthMm / 2;
+      if (objectRightMm < rightEdgeMm && objectRightMm > edgeMm) {
+        edgeMm = objectRightMm;
+        objectId = object.id;
+      }
     }
+    return objectId ? { type: "object", edgeMm, objectId } : { type: "wall", edgeMm };
   }
 
-  // Right boundary: nearest left-edge that lies right of the selection's left
-  // edge (fully-right neighbour, or one overlapping from the right). Wall end
+  // Nearest left-edge that lies right of the selection's left edge
+  // (fully-right neighbour, or one overlapping from the right). Wall end
   // when there's nothing beside the works on the right.
-  let endMm = wallLengthMm;
+  let edgeMm = wallLengthMm;
+  let objectId: string | undefined;
   for (const object of bandOthers) {
     const objectLeftMm = object.xMm - object.widthMm / 2;
-    if (objectLeftMm > leftEdgeMm && objectLeftMm < endMm) {
-      endMm = objectLeftMm;
+    if (objectLeftMm > leftEdgeMm && objectLeftMm < edgeMm) {
+      edgeMm = objectLeftMm;
+      objectId = object.id;
     }
   }
-
-  return { startMm, endMm };
+  return objectId ? { type: "object", edgeMm, objectId } : { type: "wall", edgeMm };
 }
 
+// Like getSpacingSegments, but the two OUTER segments stop at the boundary
+// detectBoundary finds on that side (the nearest UNSELECTED neighbour, else
+// the wall edge) instead of always running to the wall edge — so an idle
+// selection's dimension lines describe the space actually beside the works
+// (up to the next window/door/work) rather than sailing through it to the far
+// wall. Interior gaps between members are unchanged (member edge ↔ member
+// edge, same as getSpacingSegments). An overlapping neighbour puts the
+// boundary INSIDE the selection's span, which yields a negative outer segment
+// — returned as-is unclamped, the same convention getSpacingSegments follows.
+// With no qualifying others on a side the boundary falls back to the wall
+// edge, so a members-only call reproduces getSpacingSegments exactly.
+//
+// `others` is the caller's responsibility: the unselected wall objects on the
+// SAME wall as the members (the caller filters by wall and by selection).
 export function getNeighborAwareSegments(
   members: WallObjectBase[],
   others: WallObjectBase[],

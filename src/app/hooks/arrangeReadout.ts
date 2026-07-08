@@ -1,13 +1,24 @@
-import type { Project, WallObject } from "../../domain/project";
+import type { Artwork, Project, WallObject } from "../../domain/project";
 import type { WallWithGeometry } from "../../domain/geometry/walls";
+import { getOpeningKindLabel } from "../../domain/placement/createOpening";
 import {
+  detectBoundary,
   getArrangeReadoutDetailed,
   getOpenSpaceBounds,
-  getSpacingSegments,
   solveEqualArrangement,
-  solveEqualArrangementInZone
+  solveEqualArrangementInZone,
+  type BoundaryDetection
 } from "../../domain/placement/arrangeOnWall";
 import type { ArrangeSession } from "../store";
+
+// What one side of the "From edges" mode measures against, resolved to
+// something the panel can render directly — a plain "wall" tag, or an
+// "object" tag carrying the neighbour's display name (an artwork's title, or
+// an opening's kind label) and kind, so the panel/caption can say "nearest
+// artwork" vs "nearest door" without reaching back into the project itself.
+export type ArrangeBoundary =
+  | { type: "wall" }
+  | { type: "object"; name: string; kind: WallObject["kind"] };
 
 export type ArrangeReadout = {
   mode: "equal" | "inset" | "gap";
@@ -17,6 +28,8 @@ export type ArrangeReadout = {
   gapMm: number;
   leftEdgeDistanceMm: number;
   rightEdgeDistanceMm: number;
+  leftBoundary: ArrangeBoundary;
+  rightBoundary: ArrangeBoundary;
   insetIsMixed: boolean;
   gapIsMixed: boolean;
   equalSpacingMm: number;
@@ -30,10 +43,32 @@ export type UseArrangeReadoutParams = {
   selectedArtworkMembers: WallObject[];
   wallObjects: Project["wallObjects"];
   selectedObjectIds: string[];
+  artworksById: Map<string, Artwork>;
   lastInsetAnchor: ArrangeSession["insetAnchor"];
   lastArrangeMode: ArrangeSession["mode"];
   lastEvenZone: ArrangeSession["evenZone"] | null;
 };
+
+// Resolves a raw wall-vs-neighbour detection to display-ready info — pure
+// project lookups, kept out of the domain layer (which knows nothing of
+// artwork titles or opening-kind copy).
+function resolveBoundary(
+  detection: BoundaryDetection,
+  wallObjects: Project["wallObjects"],
+  artworksById: Map<string, Artwork>
+): ArrangeBoundary {
+  if (detection.type === "wall") return { type: "wall" };
+  const object = wallObjects.find((wallObject) => wallObject.id === detection.objectId);
+  if (!object) return { type: "wall" };
+  if (object.kind === "artwork") {
+    return {
+      type: "object",
+      kind: "artwork",
+      name: artworksById.get(object.artworkId)?.title || "Untitled artwork"
+    };
+  }
+  return { type: "object", kind: object.kind, name: getOpeningKindLabel(object.kind) };
+}
 
 // The arrange panel's live readout — spacing mode, zone, and the equal-solve
 // matching that decides whether the idle layout already reads as "Space
@@ -49,6 +84,7 @@ export function deriveArrangeReadout({
   selectedArtworkMembers,
   wallObjects,
   selectedObjectIds,
+  artworksById,
   lastInsetAnchor,
   lastArrangeMode,
   lastEvenZone
@@ -57,34 +93,46 @@ export function deriveArrangeReadout({
 
   const detailed = getArrangeReadoutDetailed(arrangeMembers, arrangeWall.lengthMm);
   const equal = solveEqualArrangement(arrangeMembers, arrangeWall.lengthMm);
+  // The unselected same-wall objects — every "beside the group" computation
+  // below (the open-space zone, and each side's From-edges boundary) is
+  // detectBoundary asking this same question, so it's filtered once here.
+  const others = wallObjects.filter(
+    (wallObject) =>
+      wallObject.wallId === arrangeWall.id && !selectedObjectIds.includes(wallObject.id)
+  );
   // The open-space span the "Open space" zone spreads within. Live, use
   // the session's fixed bounds so previews don't move it; idle, derive it
-  // from the committed members and the unselected same-wall objects (the
-  // same "others" filter the session uses at begin).
+  // from the committed members and `others`.
   const openBounds = activeArrangeSession
     ? activeArrangeSession.openZoneBoundsMm
-    : getOpenSpaceBounds(
-        selectedArtworkMembers,
-        wallObjects.filter(
-          (wallObject) =>
-            wallObject.wallId === arrangeWall.id &&
-            !selectedObjectIds.includes(wallObject.id)
-        ),
-        arrangeWall.lengthMm
-      );
+    : getOpenSpaceBounds(selectedArtworkMembers, others, arrangeWall.lengthMm);
   const equalOpen = solveEqualArrangementInZone(
     arrangeMembers,
     openBounds.startMm,
     openBounds.endMm
   );
-  // The two single-sided distances the left/right anchors edit and read
-  // back: getSpacingSegments returns n+1 segments with segment[0] the
-  // left-edge distance and the last the right-edge distance — reuse it
-  // rather than re-deriving edges here.
-  const segments = getSpacingSegments(arrangeMembers, arrangeWall.lengthMm);
-  const leftEdgeDistanceMm = segments[0].toMm - segments[0].fromMm;
-  const lastSegment = segments[segments.length - 1];
-  const rightEdgeDistanceMm = lastSegment.toMm - lastSegment.fromMm;
+  // What "From edges" measures against on each side — the session's frozen
+  // detection while live (so the target doesn't hop as the group moves),
+  // else the same detector run fresh against the committed layout.
+  const leftBoundaryDetection = activeArrangeSession
+    ? activeArrangeSession.insetBoundary.left
+    : detectBoundary("left", selectedArtworkMembers, others, arrangeWall.lengthMm);
+  const rightBoundaryDetection = activeArrangeSession
+    ? activeArrangeSession.insetBoundary.right
+    : detectBoundary("right", selectedArtworkMembers, others, arrangeWall.lengthMm);
+  const leftBoundary = resolveBoundary(leftBoundaryDetection, wallObjects, artworksById);
+  const rightBoundary = resolveBoundary(rightBoundaryDetection, wallObjects, artworksById);
+  // The two single-sided distances the left/right (and "both") anchors edit
+  // and read back — measured from each side's DETECTED boundary rather than
+  // always the wall edge, so the field shows what it's actually driving.
+  const memberLeftEdgeMm = Math.min(
+    ...arrangeMembers.map((member) => member.xMm - member.widthMm / 2)
+  );
+  const memberRightEdgeMm = Math.max(
+    ...arrangeMembers.map((member) => member.xMm + member.widthMm / 2)
+  );
+  const leftEdgeDistanceMm = memberLeftEdgeMm - leftBoundaryDetection.edgeMm;
+  const rightEdgeDistanceMm = rightBoundaryDetection.edgeMm - memberRightEdgeMm;
   // The anchor follows the session when one is open, else the remembered
   // default — the mirror of how `mode` resolves just below.
   const insetAnchor = activeArrangeSession
@@ -142,6 +190,8 @@ export function deriveArrangeReadout({
     gapMm: detailed.gapMm,
     leftEdgeDistanceMm,
     rightEdgeDistanceMm,
+    leftBoundary,
+    rightBoundary,
     insetIsMixed: detailed.insetIsMixed,
     gapIsMixed: detailed.gapIsMixed,
     // The "Equal distance" readout reflects the displayed zone.

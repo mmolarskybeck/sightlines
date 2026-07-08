@@ -2418,6 +2418,49 @@ describe("app store", () => {
         }
       });
 
+      it("insetBoundary detects a same-wall neighbour instead of the wall edge, and the left-anchor field measures against it", async () => {
+        const wallId = getSelectedWall(
+          store.getState().project!,
+          store.getState().wallContextId
+        )!.id;
+        await store.getState().resizeWall(wallId, 3000);
+        const a = await placeArtworkOnWall(1000, 1450, 400);
+        const b = await placeArtworkOnWall(1500, 1450, 400);
+        await store.getState().addOpening(wallId, "door");
+        const door = store.getState().project!.wallObjects.find((o) => o.kind === "door")!;
+        // Slide the door well left of the group, clear of the wall start, so
+        // it — not the wall edge — is the nearest thing beside the group.
+        await store.getState().moveOpening(door.id, 200, door.yMm, true);
+
+        store.getState().setObjectSelection([a.placementId, b.placementId]);
+        store.getState().beginArrangeSession("inset");
+        store.getState().setArrangeAnchor("left");
+
+        const session = store.getState().arrangeSession!;
+        const doorRightEdgeMm = 200 + door.widthMm / 2;
+        expect(session.insetBoundary.left).toEqual({
+          type: "object",
+          edgeMm: doorRightEdgeMm,
+          objectId: door.id
+        });
+        expect(session.insetBoundary.right).toEqual({ type: "wall", edgeMm: 3000 });
+
+        // Editing the left-anchor field now measures from the door's right
+        // edge, not the wall start.
+        store.getState().updateArrangeSession({ insetMm: 100, anchor: "left" });
+        const preview = store.getState().arrangeSession!.previewById;
+        const groupLeftEdgeMm = preview[a.placementId].xMm - 400 / 2;
+        expect(groupLeftEdgeMm).toBeCloseTo(doorRightEdgeMm + 100);
+
+        // Committing moves only the artworks — the door (the boundary itself)
+        // stays exactly where it was slid to.
+        store.getState().commitArrangeSession(true);
+        const doorAfter = store
+          .getState()
+          .project!.wallObjects.find((o) => o.id === door.id)!;
+        expect(doorAfter.xMm).toBe(200);
+      });
+
       it("commitArrangeSession applies the preview as exactly one 'Arrange on wall' entry and clears the session", async () => {
         const { wall, a, b, c } = await threeWorksOnWall();
         const undoBefore = store.getState().undoStack.length;

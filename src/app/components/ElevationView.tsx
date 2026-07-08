@@ -175,7 +175,7 @@ export function ElevationView({
   selectedArtworkId = null,
   selectedOpeningId = null,
   previewPositionsById,
-  arrangeSessionActive = false,
+  arrangeSessionMode = null,
   selectedObjectIds = [],
   snapToGrid = false,
   unit,
@@ -213,11 +213,14 @@ export function ElevationView({
   // see the preview as if it were committed. The in-flight drag preview
   // (previewCenterById) then stacks on top of this layer.
   previewPositionsById?: Record<string, { xMm: number; yMm: number }>;
-  // True while an arrange session is live. It switches the dimension lines from
-  // neighbour-aware outer segments (idle) to wall-edge outer segments — the
-  // arrange modes solve against the wall edges, so during a session the lines
-  // must show the values being edited rather than the space beside the works.
-  arrangeSessionActive?: boolean;
+  // The live arrange session's mode, null when no session is open (mirrors
+  // ArrangeSession["mode"]). Idle, and during an "inset" ("From edges")
+  // session, dimension lines stay neighbour-aware — the panel's fields now
+  // measure to the same detected boundary (wall or nearest neighbour), so the
+  // lines match. During "equal"/"gap" sessions the lines switch to wall-edge
+  // outer segments instead, since those modes' Calculated readouts are still
+  // wall-only.
+  arrangeSessionMode?: "equal" | "inset" | "gap" | null;
   artworksById?: Map<string, Artwork>;
   selectedArtworkId?: string | null;
   selectedOpeningId?: string | null;
@@ -866,11 +869,15 @@ export function ElevationView({
   const dimensionOthers: WallObjectBase[] = wallObjectsOnThisWall
     .filter((wallObject) => !dimensionMemberIds.has(wallObject.id))
     .map(applyDragPreview);
-  // Idle → neighbour-aware (stop at the nearest window/door/work). Active
-  // arrange session → wall-edge segments, matching the values the panel edits.
-  const dimensionSegments = arrangeSessionActive
-    ? getSpacingSegments(effectiveDimensionMembers, wallLengthMm)
-    : getNeighborAwareSegments(effectiveDimensionMembers, dimensionOthers, wallLengthMm);
+  // Idle, or an active "From edges" session → neighbour-aware (stop at the
+  // nearest window/door/work — "From edges" measures to that same detected
+  // boundary, see detectBoundary, so the lines match its fields). An active
+  // "Space evenly"/"Between works" session → wall-edge segments, matching
+  // those modes' still wall-only Calculated readouts.
+  const dimensionSegments =
+    arrangeSessionMode === "equal" || arrangeSessionMode === "gap"
+      ? getSpacingSegments(effectiveDimensionMembers, wallLengthMm)
+      : getNeighborAwareSegments(effectiveDimensionMembers, dimensionOthers, wallLengthMm);
 
   // Wall switcher wiring for the chip. Prev/next cycle through every wall in
   // room order (wrapping), and the Select lists them all — grouped by room

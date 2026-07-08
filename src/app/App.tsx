@@ -515,6 +515,7 @@ export function App() {
     selectedArtworkMembers,
     wallObjects: project.wallObjects,
     selectedObjectIds,
+    artworksById,
     lastInsetAnchor,
     lastArrangeMode,
     lastEvenZone
@@ -934,7 +935,7 @@ export function App() {
                   viewport={elevationViewport}
                   onViewportChange={setElevationViewport}
                   previewPositionsById={arrangeSession?.previewById}
-                  arrangeSessionActive={arrangeSession !== null}
+                  arrangeSessionMode={arrangeSession?.mode ?? null}
                   onMoveOpening={(wallObjectId, xMm, yMm) => {
                     // A move of a session member (alt-drag of one work in the
                     // group) stays inside the live preview — the session's

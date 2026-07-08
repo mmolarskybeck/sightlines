@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CaretUpIcon } from "@phosphor-icons/react/dist/csr/CaretUp";
 import type { DisplayUnit } from "../../domain/project";
@@ -19,6 +19,7 @@ const CLEAN_EPSILON_MM = 0.001;
 // feet-and-inches). See src/domain/units/unitSystem.ts.
 export function LengthField({
   label,
+  labelBadge,
   valueMm,
   displayUnit,
   parseUnit,
@@ -34,6 +35,9 @@ export function LengthField({
   onEnterWhenClean
 }: {
   label: string;
+  /** Optional tag rendered inline after the label text (e.g. a "Neighbor"
+   * pill when the value is measured against another object, not a wall). */
+  labelBadge?: ReactNode;
   valueMm: number | undefined;
   displayUnit: DisplayUnit;
   parseUnit: DisplayUnit;
@@ -210,7 +214,10 @@ export function LengthField({
 
   return (
     <label className={compact ? "field-row compact" : "field-row"}>
-      <span>{label}</span>
+      <span>
+        {label}
+        {labelBadge}
+      </span>
       {stepMm !== undefined ? (
         <div className="length-field-input-wrap">
           {inputElement}

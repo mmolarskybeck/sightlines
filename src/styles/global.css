@@ -2433,7 +2433,15 @@ body.panels-resizing * {
   gap: 6px;
 }
 
+/* Flex, not the bare inline text a plain label needs, so an optional
+   labelBadge (LengthField's "Neighbor" tag) sits inline right after the
+   label text instead of wrapping under it — a single-text label still lays
+   out exactly as before. */
 .field-row > span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   color: var(--muted);
   font-size: var(--type-xs);
   font-weight: var(--weight-semibold);
@@ -2754,9 +2762,41 @@ body.panels-resizing * {
   gap: 8px;
 }
 
+/* "Measured from" — From-edges' side sub-choice: underline tabs, not a
+   segmented control, since it's a plain side pick (left/both/right), not a
+   peer decision to the mode row above it. Reuses the app's shared tab
+   variant/underline grammar (ToggleGroupItem variant="tab", same recipe the
+   checklist filters use); only sizing is overridden here. */
+.arrange-anchor-row {
+  display: grid;
+  gap: 6px;
+}
+
+.arrange-anchor-label {
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.arrange-anchor-tabs {
+  display: flex;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.arrange-anchor-tab {
+  padding: 2px 0 8px;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+}
+
+.arrange-anchor-tab[data-state="on"] {
+  font-weight: var(--weight-semibold);
+}
+
 /* One locked two-line readout everywhere: a small muted label on line 1, the
-   value (semibold, larger) with the "Calculated" tag inline right after it on
-   line 2. Kept as one block so a screen reader reads them together. */
+   value (semibold, larger) with its tag(s) inline right after it on line 2.
+   Kept as one block so a screen reader reads them together. */
 .arrange-readout {
   display: grid;
   gap: 2px;
@@ -2772,6 +2812,7 @@ body.panels-resizing * {
 .arrange-readout-value-row {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -2782,10 +2823,14 @@ body.panels-resizing * {
   font-weight: var(--weight-strong);
 }
 
-/* A single small hairline tag (deliberately the only one in this panel) with
-   the controls' 6px radius, in a muted ink that clears AA at this size
-   against the surface wash. Sits inline right after the value. */
-.arrange-calculated {
+/* The panel's one small hairline tag style — a 6px-radius chip in a muted
+   ink that clears AA at this size against the surface wash. Reused for both
+   "Calculated" (a value derived from the others) and "Neighbor" (a value
+   measured against another object, not a wall); the two can appear together
+   on one readout, so they share this exact visual grammar rather than each
+   inventing its own. Sits inline right after the value, or right after a
+   LengthField's own label. */
+.arrange-tag {
   padding: 1px 6px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -2795,6 +2840,7 @@ body.panels-resizing * {
   font-weight: var(--weight-semibold);
   letter-spacing: 0.02em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .arrange-actions {
