@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
+import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { FileArrowUpIcon } from "@phosphor-icons/react/dist/csr/FileArrowUp";
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
@@ -35,9 +37,15 @@ import {
 } from "./ui/select";
 
 type Step = "upload" | "map" | "review";
+type StepState = "complete" | "active" | "upcoming";
+
+const STEP_ORDER: Step[] = ["upload", "map", "review"];
 
 const NO_COLUMN = "__none";
 const NO_IMAGE = "__none";
+
+const SPREADSHEET_NAME_PATTERN = /\.(csv|tsv|xlsx|xls)$/i;
+const IMAGE_MIME_PATTERN = /^image\/(jpeg|png|webp)$/i;
 
 const FIELD_LABELS: Record<ImportField, string> = {
   artist: "Artist",
@@ -92,6 +100,16 @@ export default function ImportWizard({
   const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(new Set());
   const [imageChoiceByDraftId, setImageChoiceByDraftId] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  // Which upload tile a drag is currently hovering, so the drop-target style
+  // can light up before the drop event fires.
+  const [dragTarget, setDragTarget] = useState<"spreadsheet" | "images" | null>(null);
+
+  const currentStepIndex = STEP_ORDER.indexOf(step);
+  function stepState(target: Step): StepState {
+    const targetIndex = STEP_ORDER.indexOf(target);
+    if (targetIndex === currentStepIndex) return "active";
+    return targetIndex < currentStepIndex ? "complete" : "upcoming";
+  }
 
   useEffect(() => {
     if (!open) reset();
@@ -181,6 +199,16 @@ export default function ImportWizard({
     }
   }
 
+  function dropSpreadsheet(files: FileList) {
+    const file = Array.from(files).find((candidate) => SPREADSHEET_NAME_PATTERN.test(candidate.name));
+    if (file) void readSpreadsheet(file);
+  }
+
+  function dropImages(files: FileList) {
+    const matched = Array.from(files).filter((candidate) => IMAGE_MIME_PATTERN.test(candidate.type));
+    if (matched.length > 0) setImageFiles(matched);
+  }
+
   async function commit() {
     if (!plan) return;
     const drafts = plan.drafts.map((draft) => ({
@@ -216,17 +244,21 @@ export default function ImportWizard({
         </DialogHeader>
 
         <div className="import-steps" aria-label="Import steps">
-          <StepButton active={step === "upload"} label="Upload" onClick={() => setStep("upload")} />
+          <StepButton index={1} label="Upload" state={stepState("upload")} onClick={() => setStep("upload")} />
+          <CaretRightIcon aria-hidden="true" className="import-step-caret" size={12} />
           <StepButton
-            active={step === "map"}
             disabled={!table}
+            index={2}
             label="Map"
+            state={stepState("map")}
             onClick={() => setStep("map")}
           />
+          <CaretRightIcon aria-hidden="true" className="import-step-caret" size={12} />
           <StepButton
-            active={step === "review"}
             disabled={!plan}
+            index={3}
             label="Review"
+            state={stepState("review")}
             onClick={() => setStep("review")}
           />
         </div>
@@ -261,20 +293,52 @@ export default function ImportWizard({
               <button
                 type="button"
                 className="import-upload-tile"
+                data-dragover={dragTarget === "spreadsheet" ? "" : undefined}
+                data-filled={spreadsheetFile ? "" : undefined}
                 onClick={() => spreadsheetInputRef.current?.click()}
+                onDragLeave={() =>
+                  setDragTarget((current) => (current === "spreadsheet" ? null : current))
+                }
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setDragTarget("spreadsheet");
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setDragTarget(null);
+                  dropSpreadsheet(event.dataTransfer.files);
+                }}
               >
-                <FileArrowUpIcon aria-hidden="true" size={22} />
-                <span>Spreadsheet</span>
-                <strong>{spreadsheetFile?.name ?? "CSV or Excel"}</strong>
+                <div aria-hidden="true" className="import-upload-icon">
+                  <FileArrowUpIcon size={20} />
+                </div>
+                <strong>{spreadsheetFile?.name ?? "Spreadsheet"}</strong>
+                <span>{spreadsheetFile ? "Click to replace" : "CSV or Excel"}</span>
               </button>
               <button
                 type="button"
                 className="import-upload-tile"
+                data-dragover={dragTarget === "images" ? "" : undefined}
+                data-filled={imageFiles.length > 0 ? "" : undefined}
                 onClick={() => imageInputRef.current?.click()}
+                onDragLeave={() => setDragTarget((current) => (current === "images" ? null : current))}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setDragTarget("images");
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setDragTarget(null);
+                  dropImages(event.dataTransfer.files);
+                }}
               >
-                <ImageSquareIcon aria-hidden="true" size={22} />
-                <span>Images</span>
-                <strong>{imageFiles.length === 0 ? "Optional" : `${imageFiles.length} files`}</strong>
+                <div aria-hidden="true" className="import-upload-icon">
+                  <ImageSquareIcon size={20} />
+                </div>
+                <strong>{imageFiles.length === 0 ? "Images" : `${imageFiles.length} files`}</strong>
+                <span>
+                  {imageFiles.length === 0 ? "Optional — JPG, PNG, or WebP" : "Click to replace"}
+                </span>
               </button>
             </div>
           ) : null}
@@ -426,25 +490,30 @@ export default function ImportWizard({
 }
 
 function StepButton({
-  active,
   disabled,
+  index,
   label,
+  state,
   onClick
 }: {
-  active: boolean;
   disabled?: boolean;
+  index: number;
   label: string;
+  state: StepState;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
       className="import-step"
-      data-active={active ? "" : undefined}
+      data-state={state}
       disabled={disabled}
       onClick={onClick}
     >
-      {label}
+      <span aria-hidden="true" className="import-step-chip">
+        {state === "complete" ? <CheckIcon size={12} weight="bold" /> : index}
+      </span>
+      <span className="import-step-label">{label}</span>
     </button>
   );
 }

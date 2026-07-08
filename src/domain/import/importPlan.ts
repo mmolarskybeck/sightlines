@@ -5,7 +5,8 @@ import {
 } from "../project";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../units/unitSystem";
 import { guessColumnMapping } from "./columnMapping";
-import { dimensionsFromColumns, parseImportedDimensions } from "./dimensions";
+import { detectUnitFromLabel, dimensionsFromColumns, parseImportedDimensions } from "./dimensions";
+import type { ImportDimensionUnit } from "./dimensions";
 import { flagImageConflicts, filterImportImageFiles, matchImageFile } from "./imageMatching";
 import type {
   ArtworkImportDraft,
@@ -90,12 +91,24 @@ function createDraft({
     const index = mapping[field];
     return index === undefined ? undefined : row.values[index]?.trim() || undefined;
   };
+  // A mapped column's own header (e.g. "height_cm") tells us its unit more
+  // reliably than the project's default artwork unit — a metric column
+  // shouldn't be misread as imperial just because the project is imperial.
+  const unitHint = (field: ImportField): ImportDimensionUnit | undefined => {
+    const index = mapping[field];
+    if (index === undefined) return undefined;
+    const column = table.columns.find((candidate) => candidate.index === index);
+    return column ? detectUnitFromLabel(column.label) : undefined;
+  };
   const warnings: ImportWarning[] = [];
   const dimensionResult =
     dimensionsFromColumns({
       width: value("width"),
       height: value("height"),
       depth: value("depth"),
+      widthUnitHint: unitHint("width"),
+      heightUnitHint: unitHint("height"),
+      depthUnitHint: unitHint("depth"),
       defaultUnit: defaultArtworkUnit
     }) ??
     (value("dimensions")

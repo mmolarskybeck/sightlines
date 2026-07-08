@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
 import { DotsSixVerticalIcon } from "@phosphor-icons/react/dist/csr/DotsSixVertical";
+import { FileArrowUpIcon } from "@phosphor-icons/react/dist/csr/FileArrowUp";
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { ACCEPTED_IMAGE_MIME_TYPES } from "../../domain/assets/imageIntake";
@@ -381,7 +382,7 @@ export function ChecklistPanel({
           <span>Add images</span>
         </Button>
         <Button className="checklist-add" variant="primary" onClick={onOpenImportWizard}>
-          <ImageSquareIcon aria-hidden="true" size={16} />
+          <FileArrowUpIcon aria-hidden="true" size={16} />
           <span>Import</span>
         </Button>
       </div>
@@ -521,22 +522,19 @@ function ChecklistRow({
     }
   }, [thumbnailUrl]);
 
-  const metaParts: string[] = [];
-  if (artwork?.artist) metaParts.push(artwork.artist);
+  let dimensionsText: string | undefined;
   if (
     artwork &&
     artwork.dimensions.widthMm !== undefined &&
     artwork.dimensions.heightMm !== undefined
   ) {
-    metaParts.push(
-      `${formatLength(artwork.dimensions.widthMm, { unit })} × ${formatLength(
-        artwork.dimensions.heightMm,
-        { unit }
-      )}`
-    );
+    dimensionsText = `${formatLength(artwork.dimensions.widthMm, { unit })} × ${formatLength(
+      artwork.dimensions.heightMm,
+      { unit }
+    )}`;
   }
   const showUncertainty = artwork !== null && artwork.dimensions.status !== "known";
-  const hasMeta = metaParts.length > 0 || showUncertainty;
+  const hasMeta = dimensionsText !== undefined || showUncertainty;
   const tagLabel = isPlaced ? wallName ?? "Placed" : "Unplaced";
 
   return (
@@ -607,13 +605,16 @@ function ChecklistRow({
           <span className={artwork ? "checklist-title" : "checklist-title missing"}>
             {title}
           </span>
+        </span>
+        <span className="checklist-artist-line">
+          {artwork?.artist ? <span className="checklist-artist">{artwork.artist}</span> : <span />}
           <span className={isPlaced ? "checklist-tag placed" : "checklist-tag"}>
             {tagLabel}
           </span>
         </span>
         {hasMeta ? (
           <span className="checklist-meta">
-            {metaParts.length > 0 ? <span>{metaParts.join(" · ")}</span> : null}
+            {dimensionsText ? <span>{dimensionsText}</span> : null}
             {showUncertainty ? (
               <UncertaintyIndicator compact status={artwork.dimensions.status} />
             ) : null}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { inchesToMm } from "../units/length";
-import { dimensionsFromColumns, parseImportedDimensions } from "./dimensions";
+import { detectUnitFromLabel, dimensionsFromColumns, parseImportedDimensions } from "./dimensions";
 
 describe("parseImportedDimensions", () => {
   it("prefers framed dimensions over image dimensions", () => {
@@ -35,5 +35,62 @@ describe("dimensionsFromColumns", () => {
     expect(parsed?.dimensions.heightMm).toBeCloseTo(770);
     expect(parsed?.dimensions.widthMm).toBeCloseTo(530);
     expect(parsed?.dimensions.status).toBe("known");
+  });
+
+  it("uses a cm column hint instead of an imperial project default (Mona Lisa regression)", () => {
+    const parsed = dimensionsFromColumns({
+      height: "77",
+      width: "53",
+      heightUnitHint: "cm",
+      widthUnitHint: "cm",
+      defaultUnit: "in"
+    });
+
+    expect(parsed?.dimensions.heightMm).toBeCloseTo(770);
+    expect(parsed?.dimensions.widthMm).toBeCloseTo(530);
+    expect(parsed?.dimensions.displayUnit).toBe("cm");
+  });
+
+  it("lets an inline unit in the cell text win over a conflicting column hint", () => {
+    const parsed = dimensionsFromColumns({
+      height: "30 in",
+      heightUnitHint: "cm",
+      defaultUnit: "cm"
+    });
+
+    expect(parsed?.dimensions.heightMm).toBeCloseTo(inchesToMm(30));
+  });
+
+  it("maps an mm hint to a cm displayUnit", () => {
+    const parsed = dimensionsFromColumns({
+      height: "770",
+      heightUnitHint: "mm",
+      defaultUnit: "cm"
+    });
+
+    expect(parsed?.dimensions.displayUnit).toBe("cm");
+  });
+
+  it("falls back to the project default with a warning and medium confidence when no hints exist", () => {
+    const parsed = dimensionsFromColumns({
+      height: "24",
+      width: "30",
+      defaultUnit: "in"
+    });
+
+    expect(parsed?.dimensions.heightMm).toBeCloseTo(inchesToMm(24));
+    expect(parsed?.dimensions.widthMm).toBeCloseTo(inchesToMm(30));
+    expect(parsed?.warnings.some((warning) => /No unit found/.test(warning))).toBe(true);
+    expect(parsed?.confidence).toBe("medium");
+  });
+});
+
+describe("detectUnitFromLabel", () => {
+  it("finds a unit in an underscored header where a raw \\b regex would miss it", () => {
+    expect(detectUnitFromLabel("height_cm")).toBe("cm");
+  });
+
+  it("returns undefined when the label has no unit", () => {
+    expect(detectUnitFromLabel("Height")).toBeUndefined();
   });
 });

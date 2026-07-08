@@ -115,8 +115,12 @@
      rather than a boxed outline. Structural containers (panels, dividers)
      stay square; selection fills get a touch more radius than inputs. */
   --radius-fill: 8px;
+  /* Overlays (dialogs, wizards, popovers) are the rounded exception to the
+     square workspace panels — see DESIGN.md's overlay grammar. */
+  --radius-overlay: 12px;
   --shadow-tight: 0 1px 2px oklch(0 0 0 / 0.08);
   --shadow-panel: 0 8px 24px oklch(0 0 0 / 0.12);
+  --shadow-overlay: 0 16px 48px oklch(0 0 0 / 0.14), 0 4px 12px oklch(0 0 0 / 0.06);
 }
 
 * {
@@ -768,10 +772,10 @@ input:focus-visible {
   flex-direction: column;
   transform: translate(-50%, -50%);
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-panel);
+  border: 1px solid color-mix(in oklch, var(--line) 70%, transparent);
+  border-radius: var(--radius-overlay);
   background: var(--bg);
-  box-shadow: var(--shadow-panel);
+  box-shadow: var(--shadow-overlay);
 }
 
 .dialog-close {
@@ -797,8 +801,7 @@ input:focus-visible {
 .dialog-header {
   display: grid;
   gap: 4px;
-  padding: 22px 56px 18px 22px;
-  border-bottom: 1px solid var(--line);
+  padding: 24px 56px 4px 24px;
 }
 
 .dialog-title {
@@ -819,7 +822,7 @@ input:focus-visible {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 14px 18px;
+  padding: 14px 24px;
   border-top: 1px solid var(--line);
 }
 
@@ -1438,9 +1441,8 @@ body.panels-resizing * {
   gap: 2px;
 }
 
-/* Title and placement tag share one line — the tag lives inside the main
-   column rather than as a sibling flex item, so at narrow panel widths the
-   title truncates instead of collapsing to zero behind fixed-width tags. */
+/* Title now has the full line to itself — nothing else competes for width,
+   so it only truncates once it genuinely runs out of row to fill. */
 .checklist-title-line {
   display: flex;
   min-width: 0;
@@ -1449,13 +1451,39 @@ body.panels-resizing * {
   gap: 8px;
 }
 
-/* When the remove button is revealed it overlays the row's right edge —
-   give the title line room so it never sits on top of the placement tag.
+/* Artist and the placement tag share this line — the tag lives inside the
+   main column rather than as a sibling flex item, so at narrow panel widths
+   the artist name truncates instead of the tag collapsing to zero. When
+   there's no artist an empty span still holds the first slot so
+   space-between keeps pinning the tag to the right edge. */
+.checklist-artist-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--type-xs);
+  color: var(--muted);
+}
+
+.checklist-artist {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* When the remove button is revealed it overlays the row's right edge. The
+   button is centered on the whole row (position: absolute; top: 50%), and
+   with three text lines stacked in .checklist-row-main that column is now
+   taller than the 48px thumb, so the row's vertical center — and the
+   button — lands on the middle line rather than the top one. Give that line
+   (the one holding the placement tag) the clearance instead of the title.
    (Coarse pointers keep the button in flow, so no shift is needed there.) */
 @media (pointer: fine) {
-  .checklist-row:hover .checklist-title-line,
-  .checklist-row:focus-within .checklist-title-line,
-  .checklist-row.selected .checklist-title-line {
+  .checklist-row:hover .checklist-artist-line,
+  .checklist-row:focus-within .checklist-artist-line,
+  .checklist-row.selected .checklist-artist-line {
     padding-right: 36px;
   }
 }
@@ -1589,36 +1617,38 @@ body.panels-resizing * {
   width: min(calc(100vw - 32px), 1040px);
 }
 
+/* Compact inline stepper (DESIGN.md overlay grammar) — a left-aligned row of
+   borderless chip+label buttons separated by caret glyphs, replacing the old
+   full-width bordered tab grid. */
 .import-steps {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 24px 12px;
 }
 
 .import-step {
-  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
   border: 0;
-  border-right: 1px solid var(--line);
-  background: var(--bg);
+  border-radius: var(--radius-fill);
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
+  transition: background-color 150ms ease-out;
 }
 
-.import-step:last-child {
-  border-right: 0;
-}
-
-.import-step:hover:not(:disabled),
-.import-step[data-active] {
+.import-step:hover:not(:disabled) {
   background: var(--surface);
-  color: var(--ink);
 }
 
-.import-step[data-active] {
-  box-shadow: inset 0 -2px 0 var(--primary);
-  font-weight: var(--weight-semibold);
+.import-step:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus);
 }
 
 .import-step:disabled {
@@ -1626,10 +1656,46 @@ body.panels-resizing * {
   opacity: 0.45;
 }
 
+.import-step-chip {
+  display: grid;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--type-2xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+}
+
+.import-step[data-state="active"] .import-step-chip {
+  background: var(--primary);
+  color: white;
+}
+
+.import-step[data-state="active"] .import-step-label {
+  color: var(--ink);
+  font-weight: var(--weight-semibold);
+}
+
+.import-step[data-state="complete"] .import-step-chip {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.import-step-caret {
+  flex: 0 0 auto;
+  color: var(--muted);
+  opacity: 0.6;
+}
+
 .import-error {
-  margin: 0;
-  padding: 10px 18px;
-  border-bottom: 1px solid var(--danger-line);
+  margin: 0 24px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger-line);
+  border-radius: var(--radius-fill);
   background: var(--danger-soft);
   color: var(--danger);
   font-size: var(--type-sm);
@@ -1638,48 +1704,64 @@ body.panels-resizing * {
 .import-body {
   min-height: 420px;
   overflow: auto;
-  padding: 18px;
+  padding: 12px 24px 24px;
 }
 
 .import-upload-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  min-height: 360px;
 }
 
 .import-upload-tile {
   display: flex;
-  min-height: 220px;
+  min-height: 260px;
   flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-end;
-  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   padding: 18px;
   border: 1px dashed var(--line);
-  border-radius: 0;
+  border-radius: var(--radius-overlay);
   background: var(--bg);
   color: var(--muted);
   cursor: pointer;
-  text-align: left;
+  text-align: center;
   transition:
     background-color 150ms ease-out,
     border-color 150ms ease-out,
     color 150ms ease-out;
 }
 
-.import-upload-tile:hover {
+.import-upload-tile:hover,
+.import-upload-tile[data-dragover] {
   border-color: var(--primary-line);
   background: var(--primary-soft);
   color: var(--primary-strong);
 }
 
-.import-upload-tile span {
+.import-upload-tile[data-filled] {
+  border-style: solid;
+  border-color: var(--primary-line);
+}
+
+.import-upload-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--surface);
   color: var(--muted);
-  font-size: var(--type-xs);
-  font-weight: var(--weight-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  transition:
+    background-color 150ms ease-out,
+    color 150ms ease-out;
+}
+
+.import-upload-tile:hover .import-upload-icon,
+.import-upload-tile[data-dragover] .import-upload-icon {
+  background: var(--bg);
+  color: var(--primary-strong);
 }
 
 .import-upload-tile strong {
@@ -1687,6 +1769,12 @@ body.panels-resizing * {
   font-size: var(--type-lg);
   font-weight: var(--weight-semibold);
   line-height: var(--leading-ui);
+}
+
+.import-upload-tile span {
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-regular);
 }
 
 .import-map {
@@ -1717,14 +1805,12 @@ body.panels-resizing * {
 .import-mapping-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 12px;
+  gap: 14px 20px;
 }
 
 .import-mapping-row {
   align-content: start;
-  padding: 10px;
-  border: 1px solid var(--line);
-  background: var(--bg);
+  padding: 0;
 }
 
 .import-mapping-row small {
@@ -1742,20 +1828,18 @@ body.panels-resizing * {
 }
 
 .import-summary {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  border: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  border-radius: var(--radius-fill);
+  background: var(--surface);
+  padding: 10px 14px;
 }
 
 .import-stat {
-  display: grid;
-  gap: 4px;
-  padding: 12px;
-  border-right: 1px solid var(--line);
-}
-
-.import-stat:last-child {
-  border-right: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
 }
 
 .import-stat span {
@@ -1765,8 +1849,10 @@ body.panels-resizing * {
 }
 
 .import-stat strong {
-  font-size: var(--type-xl);
-  font-weight: var(--weight-strong);
+  color: var(--ink);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
   line-height: 1;
 }
 
@@ -1875,26 +1961,12 @@ body.panels-resizing * {
 
   .import-upload-grid,
   .import-map-toolbar,
-  .import-mapping-list,
-  .import-summary {
+  .import-mapping-list {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .import-upload-grid {
-    min-height: 0;
-  }
-
   .import-upload-tile {
-    min-height: 150px;
-  }
-
-  .import-stat {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .import-stat:last-child {
-    border-bottom: 0;
+    min-height: 180px;
   }
 
   .import-review-row {

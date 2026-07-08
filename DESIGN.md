@@ -27,6 +27,7 @@ radii:
   control: "6px"
   fill: "8px"
   panel: "0"
+  overlay: "12px"
 ---
 
 # Design System: Sightlines
@@ -34,6 +35,8 @@ radii:
 ## North Star
 
 Sightlines should feel like a crisp museum planning instrument: quiet, exact, and professional, with a white workspace, thin architectural borders, compact controls, and restrained petrol accents. It is not a CAD tool, a SaaS dashboard, or a marketing surface. The app should keep its current bones: left rail, topbar, central canvas, left checklist/rooms pane, and right inspector.
+
+The workspace chrome is square and drafting-like, but surfaces that float above it — dialogs, wizards, menus, popovers — are deliberately softer: rounded, spacious, closer to a document tool like Notion than to the drafting canvas beneath. Heavyweight tasks (importing a checklist, mapping columns) should feel calm and approachable, not like filling in a form inside a spreadsheet.
 
 ## Implementation Baseline
 
@@ -62,11 +65,13 @@ Avoid decorative color. The UI should not become teal-themed; petrol is an inter
 
 ## Shape And Elevation
 
-Sightlines is rectangular before rounded.
+Sightlines mixes square workspace structure with softer floating surfaces: rectangular where the app is a drafting instrument, rounded where it floats above the work.
 
 - Major panes and layout divisions stay square and separated by 1px borders.
 - Inputs, buttons, selects, and compact toolbar controls use a 6px radius.
 - Borderless selected fills, rail buttons, and menu rows may use an 8px radius.
+- Overlays — dialogs, wizards, popovers, dropdown menus — use a 12px radius (`--radius-overlay`) with a soft, diffuse shadow and at most a whisper of border.
+- Inside overlays, structure content with spacing and alignment rather than full-bleed hairline rules. Edge-to-edge bordered grids (tab strips, stat cells, per-field border boxes) read as spreadsheet chrome — the harsh look we are moving away from.
 - Shadows are reserved for real overlays and canvas chips, not normal panels.
 
 ## Typography
@@ -98,8 +103,9 @@ Use the primitive variants first. Add bespoke CSS only when the component is can
 - Use underline tabs for view modes and checklist filters.
 - Use Radix Select for option sets.
 - Use Radix Switch only when the binary state benefits from a switch; the unit selector is intentionally a two-label segmented switch.
-- Use petrol-filled primary buttons sparingly. `Add Artwork` is currently the main solid CTA in the workspace.
+- Use petrol-filled primary buttons sparingly. `Import` is currently the main solid CTA in the workspace.
 - Every interactive control needs hover, pressed/active, disabled, and focus-visible states.
+- Dialogs and wizards follow the overlay grammar: rounded 12px shell, soft shadow, a compact inline stepper or breadcrumb for multi-step flows (never a full-width bordered tab grid), centered rounded drop targets for uploads, and a single subtle top rule grounding the footer actions. Section structure inside the body comes from spacing, not rules.
 
 ## Canvas Grid
 

@@ -46,4 +46,44 @@ describe("createArtworkImportPlan", () => {
     expect(plan.drafts[0].imageMatch.status).toBe("matched");
     expect(plan.drafts[0].imageFile?.name).toBe("mona-lisa.jpg");
   });
+
+  it("reads cm-labeled height/width columns as centimeters even on an imperial project (Mona Lisa regression)", () => {
+    const table: ImportTable = {
+      sourceFilename: "metadata.csv",
+      sheetName: "Sheet1",
+      headerRowIndex: 0,
+      columns: [
+        { index: 0, label: "title" },
+        { index: 1, label: "artist_name" },
+        { index: 2, label: "year" },
+        { index: 3, label: "height_cm" },
+        { index: 4, label: "width_cm" },
+        { index: 5, label: "image_path" }
+      ],
+      rows: [
+        {
+          sourceRowIndex: 2,
+          values: [
+            "Mona Lisa",
+            "Leonardo da Vinci",
+            "c. 1503-1506",
+            "77",
+            "53",
+            "images/mona-lisa.jpg"
+          ]
+        }
+      ]
+    };
+
+    // "ft" is an imperial project unit — before the fix, the bare "77" in the
+    // height_cm column would've been parsed as 77 feet/inches instead of 77cm.
+    const plan = createArtworkImportPlan({
+      table,
+      imageFiles: [],
+      projectUnit: "ft"
+    });
+
+    expect(plan.drafts[0].artwork.dimensions.heightMm).toBeCloseTo(770);
+    expect(plan.drafts[0].artwork.dimensions.displayUnit).toBe("cm");
+  });
 });

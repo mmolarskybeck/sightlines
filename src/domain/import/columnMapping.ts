@@ -43,43 +43,72 @@ const FIELD_ORDER: ImportField[] = [
   "medium"
 ];
 
+const FIELD_ORDER_INDEX = new Map<ImportField, number>(FIELD_ORDER.map((field, index) => [field, index]));
+
+// Score floor below which a (field, column) pairing is noise, not a guess.
+const MIN_SCORE = 8;
+
 export function guessColumnMapping(table: ImportTable): {
   mapping: ColumnMapping;
   guesses: ColumnGuess[];
 } {
-  const guesses: ColumnGuess[] = [];
-  const usedColumns = new Set<number>();
+  const candidates: { field: ImportField; columnIndex: number; score: number; reason: string }[] = [];
 
   for (const field of FIELD_ORDER) {
-    const scored = table.columns
-      .map((column) => {
-        const headerScore = scoreHeader(field, column.label);
-        const valueScore = scoreValues(field, table.rows.map((row) => row.values[column.index] ?? ""));
-        const score = headerScore.score + valueScore.score;
-        return {
-          field,
-          columnIndex: column.index,
-          score,
-          reason: headerScore.reason ?? valueScore.reason ?? "column values look related"
-        };
-      })
-      .filter((guess) => guess.score > 0)
-      .sort((a, b) => b.score - a.score);
+    for (const column of table.columns) {
+      // Disqualifying tokens zero the whole pair up front — a column named
+      // "byte_size" can't be resurrected for "dimensions" just because its
+      // header also happens to include the "size" alias.
+      if (isDisqualified(field, column.label)) continue;
 
-    const winner = scored.find((guess) => !usedColumns.has(guess.columnIndex));
-    if (!winner) continue;
+      const headerScore = scoreHeader(field, column.label);
+      const valueScore = scoreValues(field, table.rows.map((row) => row.values[column.index] ?? ""));
+      const score = headerScore.score + valueScore.score;
+      if (score < MIN_SCORE) continue;
 
-    const confidence = confidenceForScore(winner.score);
-    if (confidence === "low" && winner.score < 8) continue;
+      candidates.push({
+        field,
+        columnIndex: column.index,
+        score,
+        reason: headerScore.reason ?? valueScore.reason ?? "column values look related"
+      });
+    }
+  }
 
-    usedColumns.add(winner.columnIndex);
+  // Explicit total order (score desc, then FIELD_ORDER position, then column
+  // index) rather than relying on Array.prototype.sort's stability alone —
+  // this is what makes the walk below deterministic across runs/engines.
+  candidates.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    const fieldDelta = FIELD_ORDER_INDEX.get(a.field)! - FIELD_ORDER_INDEX.get(b.field)!;
+    if (fieldDelta !== 0) return fieldDelta;
+    return a.columnIndex - b.columnIndex;
+  });
+
+  // Greedy-by-score assignment, not a Hungarian/optimal one: each pass claims
+  // the best remaining (field, column) pair. That's deliberate — it's
+  // deterministic, gives an explainable per-column reason, and is good enough
+  // for real-world spreadsheets where field-vs-column conflicts are rare.
+  const usedFields = new Set<ImportField>();
+  const usedColumns = new Set<number>();
+  const guesses: ColumnGuess[] = [];
+
+  for (const candidate of candidates) {
+    if (usedFields.has(candidate.field) || usedColumns.has(candidate.columnIndex)) continue;
+
+    usedFields.add(candidate.field);
+    usedColumns.add(candidate.columnIndex);
     guesses.push({
-      field,
-      columnIndex: winner.columnIndex,
-      confidence,
-      reason: winner.reason
+      field: candidate.field,
+      columnIndex: candidate.columnIndex,
+      confidence: confidenceForScore(candidate.score),
+      reason: candidate.reason
     });
   }
+
+  // Restore FIELD_ORDER order so downstream UI sees stable array ordering,
+  // independent of the score-first order used for the assignment walk.
+  guesses.sort((a, b) => FIELD_ORDER_INDEX.get(a.field)! - FIELD_ORDER_INDEX.get(b.field)!);
 
   return {
     mapping: Object.fromEntries(guesses.map((guess) => [guess.field, guess.columnIndex])),
@@ -97,21 +126,129 @@ export function normalizeImportText(value: string): string {
     .trim();
 }
 
+function tokensOf(text: string): Set<string> {
+  return new Set(normalizeImportText(text).split(" ").filter(Boolean));
+}
+
+function isSubsetOf(small: Set<string>, big: Set<string>): boolean {
+  for (const token of small) {
+    if (!big.has(token)) return false;
+  }
+  return true;
+}
+
+function tokenSetsEqual(a: Set<string>, b: Set<string>): boolean {
+  return a.size === b.size && isSubsetOf(a, b);
+}
+
+// Word-boundary-aware unit tokens (post-normalization, so "height_cm" and
+// "Height (cm)" both reduce to a "cm" token rather than needing a raw regex).
+const UNIT_TOKENS = new Set(["cm", "mm", "in", "inch", "inches", "ft", "feet", "m", "meter", "meters"]);
+
+// Per-axis fields where a unit in the header disambiguates the column's
+// scale enough to be worth a bonus. "dimensions" is a free-text field (e.g.
+// "24 x 30 in") so a bare unit token in ITS header isn't the same signal.
+const UNIT_BONUS_FIELDS = new Set<ImportField>(["height", "width", "depth"]);
+
 function scoreHeader(field: ImportField, label: string): { score: number; reason?: string } {
-  const normalized = normalizeImportText(label);
-  if (!normalized) return { score: 0 };
+  const labelTokens = tokensOf(label);
+  if (labelTokens.size === 0) return { score: 0 };
+
+  let best: { score: number; reason?: string } = { score: 0 };
 
   for (const alias of FIELD_ALIASES[field]) {
-    const normalizedAlias = normalizeImportText(alias);
-    if (normalized === normalizedAlias) {
-      return { score: 60, reason: `header matches "${alias}"` };
+    const aliasTokens = tokensOf(alias);
+    if (aliasTokens.size === 0) continue;
+
+    let score = 0;
+    if (tokenSetsEqual(labelTokens, aliasTokens)) {
+      score = 60;
+    } else if (isSubsetOf(aliasTokens, labelTokens)) {
+      const [onlyAliasToken] = aliasTokens;
+      const isSingleCharAlias = aliasTokens.size === 1 && onlyAliasToken.length === 1;
+      if (isSingleCharAlias) {
+        // "h"/"w"/"d" are too short to trust alone — only count the match
+        // when every leftover label token is itself a unit ("H (cm)" should
+        // match height, but "h res" must not).
+        const leftover = [...labelTokens].filter((token) => !aliasTokens.has(token));
+        if (leftover.length > 0 && leftover.every((token) => UNIT_TOKENS.has(token))) {
+          score = 42;
+        }
+      } else {
+        score = 42;
+      }
     }
-    if (normalizedAlias.length > 1 && normalized.includes(normalizedAlias)) {
-      return { score: 42, reason: `header includes "${alias}"` };
+
+    if (score === 0) continue;
+
+    // Bonus only stacks on top of an existing alias match — it's never a
+    // score of its own — and only for the per-axis fields.
+    if (UNIT_BONUS_FIELDS.has(field) && [...labelTokens].some((token) => UNIT_TOKENS.has(token))) {
+      score += 8;
+    }
+
+    if (score > best.score) {
+      best = { score, reason: `header ${score >= 60 ? "matches" : "includes"} "${alias}"` };
     }
   }
 
-  return { score: 0 };
+  return best;
+}
+
+// Tokens that disqualify a column for every field — these describe pixel
+// geometry, file integrity, or MIME metadata, never a mappable artwork field.
+const UNIVERSAL_DISQUALIFIER_TOKENS = new Set([
+  "px",
+  "pixel",
+  "pixels",
+  "byte",
+  "bytes",
+  "kb",
+  "mb",
+  "gb",
+  "mime",
+  "sha",
+  "sha1",
+  "sha256",
+  "md5",
+  "hash",
+  "checksum",
+  "dpi",
+  "ppi"
+]);
+
+// Extra disqualifiers for fields where a stray substring match would
+// otherwise be plausible: an image/download URL column is noise for every
+// field it might coincidentally resemble, not just imageFilename — imports
+// match against local image FILES, so URL columns map nowhere, deliberately.
+const URL_LIKE_DISQUALIFIER_FIELDS = new Set<ImportField>([
+  "height",
+  "width",
+  "depth",
+  "dimensions",
+  "imageFilename"
+]);
+const URL_LIKE_DISQUALIFIER_TOKENS = new Set(["url", "link", "resolution", "id"]);
+
+// "file" would break the "file name"/"image file" aliases for imageFilename,
+// so it only disqualifies the physical-dimension fields.
+const FILE_DISQUALIFIED_FIELDS = new Set<ImportField>(["height", "width", "depth", "dimensions"]);
+
+function disqualifierTokensFor(field: ImportField): Set<string> {
+  const tokens = new Set(UNIVERSAL_DISQUALIFIER_TOKENS);
+  if (URL_LIKE_DISQUALIFIER_FIELDS.has(field)) {
+    for (const token of URL_LIKE_DISQUALIFIER_TOKENS) tokens.add(token);
+  }
+  if (FILE_DISQUALIFIED_FIELDS.has(field)) tokens.add("file");
+  return tokens;
+}
+
+function isDisqualified(field: ImportField, label: string): boolean {
+  const disqualifiers = disqualifierTokensFor(field);
+  for (const token of tokensOf(label)) {
+    if (disqualifiers.has(token)) return true;
+  }
+  return false;
 }
 
 function scoreValues(field: ImportField, values: string[]): { score: number; reason?: string } {
@@ -139,13 +276,25 @@ function scoreValues(field: ImportField, values: string[]): { score: number; rea
   }
 
   if (field === "accessionNumber") {
-    const accessionRatio = ratio((value) =>
-      /[a-z./_-]/i.test(value.trim()) && /^[a-z]*\s*\d+[a-z0-9./_-]*$/i.test(value.trim())
-    );
+    const accessionRatio = ratio((value) => looksLikeAccessionValue(value));
     if (accessionRatio >= 0.45) return { score: 18, reason: "values look like object numbers" };
   }
 
   return { score: 0 };
+}
+
+// Bare numbers ("73.7") read identically to a plain measurement, so they can
+// never earn accessionNumber points from values alone — only letter-prefixed
+// ("P.123", "INV 2003.4") or multi-segment ("1979.620.1") shapes count. An
+// all-numeric accession column can still map, but only via a header alias
+// (see the "Numeric accessions via header only" test).
+function looksLikeAccessionValue(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (/^\d+(\.\d+)?$/.test(trimmed)) return false;
+  if (/^[a-z]+[.\s]*\d/i.test(trimmed)) return true;
+  const dotCount = (trimmed.match(/\./g) ?? []).length;
+  return dotCount >= 2 && /^\d/.test(trimmed);
 }
 
 function confidenceForScore(score: number): ImportConfidence {
