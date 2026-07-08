@@ -5,6 +5,11 @@ import { titleFromFilename, validateImageFile, type ImageProcessor } from "../do
 import { createNextPolygonRoom, createNextRectangleRoom } from "../domain/geometry/createRoom";
 import type { Point } from "../domain/geometry/polygon";
 import { resizeWallPreservingAngles, type ResizeAnchor } from "../domain/geometry/editRoom";
+import {
+  deleteRoomVertex as deleteRoomVertexEdit,
+  moveRoomVertex as moveRoomVertexEdit,
+  splitWall as splitWallEdit
+} from "../domain/geometry/reshapeRoom";
 import type { WallWithGeometry } from "../domain/geometry/walls";
 import { getFloorWalls } from "../domain/geometry/planObjects";
 import type { PlanPlacement } from "../domain/snapping/planSnapTargets";
@@ -153,6 +158,9 @@ export type AppState = ArrangeSliceState &
   resizeRoomHeight: (roomId: string, heightMm: number) => Promise<void>;
   resizeWall: (wallId: string, lengthMm: number, anchor?: ResizeAnchor) => Promise<void>;
   resizeSelectedWall: (lengthMm: number) => Promise<void>;
+  moveRoomVertex: (roomId: string, vertexId: string, nextLocalMm: Point) => Promise<void>;
+  splitWall: (wallId: string, xAlongMm: number) => Promise<void>;
+  deleteRoomVertex: (roomId: string, vertexId: string) => Promise<void>;
   moveRoom: (roomId: string, offsetXMm: number, offsetYMm: number) => Promise<void>;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
@@ -820,6 +828,115 @@ export function createAppStore(deps: AppStoreDeps) {
         if (!wallContextId) return;
 
         await get().resizeWall(wallContextId, lengthMm);
+      },
+
+      async moveRoomVertex(roomId, vertexId, nextLocalMm) {
+        const project = get().project;
+        if (!project) return;
+
+        // PlanView already gates the drag on canMoveRoomVertex before ever
+        // calling this (pointer-up on an invalid position never commits), so
+        // a throw here means something else changed the project out from
+        // under the drag — surface it rather than silently no-op.
+        let result;
+        try {
+          result = moveRoomVertexEdit(project, roomId, vertexId, nextLocalMm);
+        } catch (error) {
+          set({
+            error: `Could not move that corner (${
+              error instanceof Error ? error.message : "invalid position."
+            }).`
+          });
+          return;
+        }
+        if (result.changedWallIds.length === 0) return;
+
+        const placementWarnings = validateChangedWallPlacements(
+          result.project,
+          result.changedWallIds
+        );
+
+        await applyEdit("Move room corner", () => result.project, {
+          placementWarnings,
+          lastGeometryEdit: {
+            anchorVertexId: result.anchorVertexId,
+            changedWallIds: result.changedWallIds
+          }
+        });
+      },
+
+      async splitWall(wallId, xAlongMm) {
+        const project = get().project;
+        if (!project) return;
+
+        let result;
+        try {
+          result = splitWallEdit(project, wallId, xAlongMm);
+        } catch (error) {
+          set({
+            error: `Could not split that wall (${
+              error instanceof Error ? error.message : "invalid split point."
+            }).`
+          });
+          return;
+        }
+
+        const placementWarnings = validateChangedWallPlacements(
+          result.project,
+          result.changedWallIds
+        );
+
+        await applyEdit("Split wall", () => result.project, {
+          placementWarnings,
+          lastGeometryEdit: {
+            anchorVertexId: result.anchorVertexId,
+            changedWallIds: result.changedWallIds
+          }
+        });
+      },
+
+      async deleteRoomVertex(roomId, vertexId) {
+        const project = get().project;
+        if (!project) return;
+
+        let result;
+        try {
+          result = deleteRoomVertexEdit(project, roomId, vertexId);
+        } catch (error) {
+          set({
+            error: `Could not remove that corner (${
+              error instanceof Error ? error.message : "invalid removal."
+            }).`
+          });
+          return;
+        }
+
+        const placementWarnings = validateChangedWallPlacements(
+          result.project,
+          result.changedWallIds
+        );
+        // The merge deletes one of the two walls it joins — if the sidebar's
+        // wall context was pointed at it, fall back to the surviving merged
+        // wall, same idiom as deleteRoom's wallContextId fallback.
+        const wallContextId = get().wallContextId;
+        const survivingWallIds = new Set(
+          result.project.floor.rooms.flatMap((placement) =>
+            placement.room.walls.map((wall) => wall.id)
+          )
+        );
+        const nextWallContextId =
+          wallContextId && !survivingWallIds.has(wallContextId)
+            ? (result.changedWallIds[0] ?? wallContextId)
+            : wallContextId;
+
+        await applyEdit("Delete room corner", () => result.project, {
+          placementWarnings,
+          lastGeometryEdit: {
+            anchorVertexId: result.anchorVertexId,
+            changedWallIds: result.changedWallIds
+          },
+          ...selectionWrite(result.project, get().selection, nextWallContextId)
+        });
       },
 
       async moveRoom(roomId, offsetXMm, offsetYMm) {

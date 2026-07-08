@@ -165,6 +165,9 @@ export function App() {
     resizeSelectedWall,
     resizeRoomHeight,
     resizeWall,
+    moveRoomVertex,
+    splitWall,
+    deleteRoomVertex,
     moveRoom,
     undo,
     redo,
@@ -225,14 +228,35 @@ export function App() {
   // the other. PlanView owns the in-progress points/preview; this only holds
   // whether the mode is on.
   const [drawRoomActive, setDrawRoomActive] = useState(false);
+  // Reshape mode (slice 2): which room's vertex/split handles PlanView shows,
+  // armed by RoomInspector's "Edit shape" button (or a plan double-click).
+  // Same transient-mode family as activeTool/drawRoomActive — never in the
+  // store, mutually exclusive with the other two.
+  const [reshapeRoomId, setReshapeRoomId] = useState<string | null>(null);
   const armOpeningTool = (tool: OpeningKind | null) => {
     setActiveTool(tool);
-    if (tool) setDrawRoomActive(false);
+    if (tool) {
+      setDrawRoomActive(false);
+      setReshapeRoomId(null);
+    }
   };
   const toggleDrawRoom = () => {
     setDrawRoomActive((active) => {
       const next = !active;
-      if (next) setActiveTool(null);
+      if (next) {
+        setActiveTool(null);
+        setReshapeRoomId(null);
+      }
+      return next;
+    });
+  };
+  const toggleReshapeRoom = (roomId: string | null) => {
+    setReshapeRoomId((current) => {
+      const next = current === roomId ? null : roomId;
+      if (next) {
+        setActiveTool(null);
+        setDrawRoomActive(false);
+      }
       return next;
     });
   };
@@ -282,8 +306,18 @@ export function App() {
     if (viewMode !== "plan") {
       setActiveTool(null);
       setDrawRoomActive(false);
+      setReshapeRoomId(null);
     }
   }, [viewMode]);
+
+  // Reshape mode tracks a specific room id — if selection moves away from
+  // that room (another room, an object, or nothing), the handles would be
+  // showing for a room that's no longer the focus, so drop it.
+  useEffect(() => {
+    if (reshapeRoomId && reshapeRoomId !== selectedRoomId) {
+      setReshapeRoomId(null);
+    }
+  }, [selectedRoomId, reshapeRoomId]);
 
   useUndoRedoShortcuts({ undo, redo });
 
@@ -907,6 +941,11 @@ export function App() {
                 drawRoomActive={drawRoomActive}
                 onDrawRoomChange={setDrawRoomActive}
                 onAddPolygonRoom={(points) => void addPolygonRoom(points)}
+                reshapeRoomId={reshapeRoomId}
+                onReshapeRoomChange={toggleReshapeRoom}
+                onMoveRoomVertex={moveRoomVertex}
+                onSplitWall={splitWall}
+                onDeleteRoomVertex={deleteRoomVertex}
                 artworksById={artworksById}
                 draggingArtworkId={draggingArtworkId}
                 getBlob={getAssetBlob}
@@ -1224,6 +1263,7 @@ export function App() {
               artworkCount={selectedRoomArtworkCount}
               objectCount={selectedRoomObjectCount}
               rectangleDimensions={selectedRoomDimensions}
+              reshapeActive={reshapeRoomId === selectedRoomPlacement.roomId}
               roomHeightMm={selectedRoomPlacement.room.heightMm}
               roomName={selectedRoomPlacement.room.name}
               unit={project.unit}
@@ -1241,6 +1281,7 @@ export function App() {
               onCommitHeight={(heightMm) =>
                 resizeRoomHeight(selectedRoomPlacement.roomId, heightMm)
               }
+              onToggleReshape={() => toggleReshapeRoom(selectedRoomPlacement.roomId)}
             />
           ) : selectedWall ? (
             <WallInspector

@@ -21,6 +21,7 @@ import {
   getFloorWalls,
   getWallObjectPlanRect,
   planRectIntersectsRect,
+  projectPointToWall,
   WALL_OBJECT_PLAN_DEPTH_MM,
   type PlanRect
 } from "../../domain/geometry/planObjects";
@@ -39,6 +40,7 @@ import {
   type WallObject
 } from "../../domain/project";
 import { isSimplePolygon, segmentsIntersect, type Point } from "../../domain/geometry/polygon";
+import { canMoveRoomVertex } from "../../domain/geometry/reshapeRoom";
 import { formatLength } from "../../domain/units/length";
 import { getGridSnapTargets } from "../../domain/snapping/gridSnapTargets";
 import {
@@ -73,6 +75,7 @@ import { GridOverlay } from "./GridOverlay";
 import { ArtworkTooltipContent, OpeningTooltipContent } from "./PlacementTooltip";
 import { PlanObject } from "./PlanObject";
 import { RoomResizeHandles, type ResizeHandleTarget } from "./RoomResizeHandles";
+import { RoomReshapeHandles } from "./RoomReshapeHandles";
 import { ViewportZoomControls } from "./ViewportZoomControls";
 
 // On-screen size of a selected room's wall-midpoint resize handles — small
@@ -221,6 +224,23 @@ type DrawState = {
   closing: boolean;
 };
 
+// Reshape mode's vertex drag, transient until release — mirrors RoomDragState's
+// discipline exactly (ref-mirrored state, one commit on pointer-up), with one
+// addition: `valid` tracks whether the CURRENT preview position keeps the
+// room a simple polygon (canMoveRoomVertex, the same predicate moveRoomVertex
+// commits against), so the render layer can paint the danger token live and
+// pointer-up can revert instead of committing when the drag ends invalid.
+type VertexDragState = {
+  roomId: string;
+  vertexId: string;
+  startPointerMm: Vector2;
+  startLocalMm: Vector2;
+  previewLocalMm: Vector2;
+  valid: boolean;
+  previousSnapTargetIds?: SnapTargetIds;
+  activeGuides: Guide[];
+};
+
 // A pending marquee (rubber-band) selection on the plan background — tracked
 // as two floor-mm pointer samples (start + current). Mirrors ElevationView's
 // MarqueeState, but plan floor coordinates are plain SVG coordinates (y-down,
@@ -263,6 +283,11 @@ export function PlanView({
   drawRoomActive = false,
   onDrawRoomChange,
   onAddPolygonRoom,
+  reshapeRoomId = null,
+  onReshapeRoomChange,
+  onMoveRoomVertex,
+  onSplitWall,
+  onDeleteRoomVertex,
   artworksById,
   draggingArtworkId = null,
   getBlob,
@@ -308,6 +333,22 @@ export function PlanView({
   onDrawRoomChange?: (active: boolean) => void;
   // Commits the closed polygon in ONE store edit; App wires it to addPolygonRoom.
   onAddPolygonRoom?: (pointsFloorMm: Point[]) => void;
+  // Slice 2 (reshape): which room's vertex/split handles show, lifted the
+  // same way as drawRoomActive — armed by RoomInspector's "Edit shape"
+  // button, mutually exclusive with activeTool/drawRoomActive in App.
+  reshapeRoomId?: string | null;
+  // Reports an arm/toggle/exit up to App (Escape and the double-click
+  // shortcut both call this from here).
+  onReshapeRoomChange?: (roomId: string | null) => void;
+  // Commits one vertex move on pointer-up; App wires it to the store's
+  // moveRoomVertex. Never called for an invalid final position — the drag
+  // reverts locally instead (see the pointer-up handler below).
+  onMoveRoomVertex?: (roomId: string, vertexId: string, nextLocalMm: Point) => Promise<void>;
+  // Commits a wall split at the clicked point along the wall.
+  onSplitWall?: (wallId: string, xAlongMm: number) => Promise<void>;
+  // Commits a vertex removal (merges its two walls). Absent/inert if the
+  // stretch goal wasn't wired — the Delete/Backspace handler below no-ops.
+  onDeleteRoomVertex?: (roomId: string, vertexId: string) => Promise<void>;
   artworksById?: Map<string, Artwork>;
   // Which artwork the checklist is mid-drag, so a plan dragover can size its
   // ghost — HTML5 dragover can't read the payload, so App threads this the
@@ -427,6 +468,24 @@ export function PlanView({
     drawRef.current = draw;
   }, [draw]);
 
+  // Reshape mode's vertex drag — same ref-mirrored discipline as every other
+  // drag here. `selectedVertexId` is separate: a plain click (no movement)
+  // still "selects" a vertex for the Delete/Backspace merge shortcut, whether
+  // or not this gesture also turns into a drag.
+  const [vertexDrag, setVertexDrag] = useState<VertexDragState | null>(null);
+  const vertexDragRef = useRef<VertexDragState | null>(null);
+  useEffect(() => {
+    vertexDragRef.current = vertexDrag;
+  }, [vertexDrag]);
+  const [selectedVertexId, setSelectedVertexId] = useState<string | null>(null);
+  const selectedVertexIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedVertexIdRef.current = selectedVertexId;
+  }, [selectedVertexId]);
+  useEffect(() => {
+    setSelectedVertexId(null);
+  }, [reshapeRoomId]);
+
   const bounds = getFloorBounds(project.floor);
   const padding = getPlanViewPaddingMm(bounds);
   // The fit extent every gesture measures against: the padded floor bounds.
@@ -478,7 +537,7 @@ export function PlanView({
   // helper needed (unlike the wall resize above, a translation doesn't touch
   // any other room's geometry) — layered on top of the resize preview so the
   // two gestures never fight, even though only one can be in flight at once.
-  const displayedProject = roomDrag
+  const roomDragPreviewProject = roomDrag
     ? {
         ...resizePreviewProject,
         floor: {
@@ -494,6 +553,38 @@ export function PlanView({
         }
       }
     : resizePreviewProject;
+  // A reshape-mode vertex drag overrides just that one vertex's room-local
+  // position — layered last so it composes with (mutually exclusive with, in
+  // practice) the wall-resize/room-move previews above. Rendered regardless
+  // of validity: an invalid in-flight position still needs to be SEEN (in the
+  // danger token) so the curator knows to pull back; canMoveRoomVertex (not
+  // this splice) is what actually gates the commit on pointer-up.
+  const displayedProject = vertexDrag
+    ? {
+        ...roomDragPreviewProject,
+        floor: {
+          rooms: roomDragPreviewProject.floor.rooms.map((placement) =>
+            placement.roomId === vertexDrag.roomId
+              ? {
+                  ...placement,
+                  room: {
+                    ...placement.room,
+                    vertices: placement.room.vertices.map((vertex) =>
+                      vertex.id === vertexDrag.vertexId
+                        ? {
+                            ...vertex,
+                            xMm: vertexDrag.previewLocalMm.xMm,
+                            yMm: vertexDrag.previewLocalMm.yMm
+                          }
+                        : vertex
+                    )
+                  }
+                }
+              : placement
+          )
+        }
+      }
+    : roomDragPreviewProject;
 
   // The shared 2D viewport gesture engine (pan / zoom / pinch / wheel /
   // keyboard), formerly a ~350-line copy inline here and in ElevationView. It
@@ -513,7 +604,9 @@ export function PlanView({
     // room move, or object/group move) blocks rather than starting a pinch —
     // defer to that edit (preserves the old capture guard).
     isPinchBlocked: () =>
-      Boolean(dragRef.current || roomDragRef.current || objectDragRef.current),
+      Boolean(
+        dragRef.current || roomDragRef.current || objectDragRef.current || vertexDragRef.current
+      ),
     onGestureEnd: (info) => {
       // A space/middle mouse-pan always fires a trailing `click` on the svg; a
       // real touch pan/pinch (moved past slop, so !isTap) does too. Both must
@@ -661,6 +754,32 @@ export function PlanView({
     // via drawRef — same discipline as the drag effects, so the handler set is
     // deliberately not resubscribed on every appended vertex.
   }, [drawRoomActive]);
+
+  // Escape exits reshape mode; Delete/Backspace removes the selected vertex
+  // (merges its two walls) if the stretch goal is wired. Scoped to while
+  // reshape is armed, same idiom as the draw-mode handler above — reads the
+  // live selection via selectedVertexIdRef so it isn't resubscribed on every
+  // vertex click.
+  useEffect(() => {
+    if (!reshapeRoomId) return;
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onReshapeRoomChange?.(null);
+        return;
+      }
+      if (event.key === "Delete" || event.key === "Backspace") {
+        const vertexId = selectedVertexIdRef.current;
+        if (!vertexId || !onDeleteRoomVertex || !reshapeRoomId) return;
+        event.preventDefault();
+        setSelectedVertexId(null);
+        void onDeleteRoomVertex(reshapeRoomId, vertexId);
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [reshapeRoomId, onReshapeRoomChange, onDeleteRoomVertex]);
 
   // Snap a draw point: grid + axis-lock to the previous point's x/y (so
   // consecutive walls line up), with Shift forcing an exact H/V segment.
@@ -1122,6 +1241,144 @@ export function PlanView({
       activeGuides: []
     });
   }
+
+  function beginVertexDrag(
+    roomId: string,
+    vertexId: string,
+    event: ReactPointerEvent<SVGRectElement>
+  ) {
+    event.stopPropagation();
+    const placement = project.floor.rooms.find((candidate) => candidate.roomId === roomId);
+    const vertex = placement?.room.vertices.find((candidate) => candidate.id === vertexId);
+    if (!placement || !vertex) return;
+
+    const startPointerMm = toSvgMm(event.clientX, event.clientY);
+    if (!startPointerMm) return;
+
+    // A plain click (no drag) still "selects" the vertex, for the
+    // Delete/Backspace merge shortcut below.
+    setSelectedVertexId(vertexId);
+    setVertexDrag({
+      roomId,
+      vertexId,
+      startPointerMm,
+      startLocalMm: { xMm: vertex.xMm, yMm: vertex.yMm },
+      previewLocalMm: { xMm: vertex.xMm, yMm: vertex.yMm },
+      valid: true,
+      previousSnapTargetIds: undefined,
+      activeGuides: []
+    });
+  }
+
+  // Splits at the CLICKED point along the wall (projected/clamped onto it),
+  // not always the midpoint the "+" handle visually sits on — per the spec,
+  // clicked position is preferred when it differs from the handle's own
+  // position. Uses the committed project's wall geometry (floorWallsForTool):
+  // a split is a single click, never in flight during a vertex drag.
+  function handleSplitWallClick(wallId: string, event: ReactMouseEvent<SVGElement>) {
+    if (!onSplitWall) return;
+    const wall = floorWallsForTool.find((candidate) => candidate.id === wallId);
+    const pointerMm = toSvgMm(event.clientX, event.clientY);
+    if (!wall || !pointerMm) return;
+
+    const projection = projectPointToWall(pointerMm, wall);
+    void onSplitWall(wallId, projection.xAlongMm);
+  }
+
+  useEffect(() => {
+    if (!vertexDrag) return;
+
+    function onPointerMove(event: PointerEvent) {
+      const current = vertexDragRef.current;
+      if (!current) return;
+
+      const pointerMm = toSvgMm(event.clientX, event.clientY);
+      if (!pointerMm) return;
+
+      const placement = project.floor.rooms.find(
+        (candidate) => candidate.roomId === current.roomId
+      );
+      if (!placement) return;
+
+      const deltaMm: Vector2 = {
+        xMm: pointerMm.xMm - current.startPointerMm.xMm,
+        yMm: pointerMm.yMm - current.startPointerMm.yMm
+      };
+      const proposedLocalMm: Vector2 = {
+        xMm: current.startLocalMm.xMm + deltaMm.xMm,
+        yMm: current.startLocalMm.yMm + deltaMm.yMm
+      };
+
+      let snappedLocalMm = proposedLocalMm;
+      let snapTargetIds = current.previousSnapTargetIds;
+      let activeGuides: Guide[] = [];
+      if (snapToGrid) {
+        // gridSnapTargets are in floor space; add the room's placement offset
+        // before snapping, then subtract it back off — the same grab-offset
+        // convention roomDrag's corner snap uses.
+        const proposedFloorMm: Vector2 = {
+          xMm: proposedLocalMm.xMm + placement.offsetXMm,
+          yMm: proposedLocalMm.yMm + placement.offsetYMm
+        };
+        const snap = resolveSnap(proposedFloorMm, gridSnapTargets, {
+          thresholdMm: snapThresholdMm,
+          previousSnapTargetIds: current.previousSnapTargetIds
+        });
+        snappedLocalMm = {
+          xMm: snap.point.xMm - placement.offsetXMm,
+          yMm: snap.point.yMm - placement.offsetYMm
+        };
+        snapTargetIds = snap.snapTargetIds;
+        activeGuides = snap.activeGuides;
+      }
+
+      const valid = canMoveRoomVertex(placement.room, current.vertexId, snappedLocalMm);
+
+      setVertexDrag((state) =>
+        state
+          ? {
+              ...state,
+              previewLocalMm: snappedLocalMm,
+              valid,
+              previousSnapTargetIds: snapTargetIds,
+              activeGuides
+            }
+          : state
+      );
+    }
+
+    function onPointerUp() {
+      const current = vertexDragRef.current;
+      setVertexDrag(null);
+      if (!current) return;
+
+      const movedMm = Math.hypot(
+        current.previewLocalMm.xMm - current.startLocalMm.xMm,
+        current.previewLocalMm.yMm - current.startLocalMm.yMm
+      );
+      // Sub-threshold release is a click (already handled by selecting the
+      // vertex on pointerdown), not a move — no commit. An invalid final
+      // position REVERTS: displayedProject falls back to the committed
+      // project the instant vertexDrag goes null above, so "revert" costs
+      // nothing extra here — just don't call onMoveRoomVertex.
+      if (movedMm < 0.5 || !current.valid) return;
+
+      void onMoveRoomVertex?.(current.roomId, current.vertexId, current.previewLocalMm);
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+    // Same ref-based discipline as every other drag effect in this file:
+    // subscribed once per gesture, project/gridSnapTargets/snapToGrid/
+    // snapThresholdMm captured by closure (the committed project can't change
+    // mid-drag since nothing commits until release).
+  }, [vertexDrag !== null, onMoveRoomVertex]);
 
   useEffect(() => {
     if (!objectDrag) return;
@@ -1786,6 +2043,15 @@ export function PlanView({
                 }
                 onSelectRoom?.(placement.roomId);
               }}
+              onDoubleClick={(event) => {
+                // Shortcut for RoomInspector's "Edit shape" button — selects
+                // the room (if it wasn't already) and arms reshape mode on it
+                // in one gesture.
+                if (activeTool || drawRoomActive) return;
+                event.stopPropagation();
+                onSelectRoom?.(placement.roomId);
+                onReshapeRoomChange?.(placement.roomId);
+              }}
             />
           );
         })}
@@ -1802,7 +2068,7 @@ export function PlanView({
           // of the very geometry the user is trying to read while dragging,
           // resizing, or aiming an armed placement tool.
           const tooltipsDisabled = Boolean(
-            drag || objectDrag || dropGhost || activeTool || roomDrag || drawRoomActive
+            drag || objectDrag || dropGhost || activeTool || roomDrag || drawRoomActive || vertexDrag
           );
           const artworkTooltip = (
             artworkId: string,
@@ -2022,6 +2288,10 @@ export function PlanView({
           );
           if (!selectedPlacement || handleSizeMm <= 0) return null;
 
+          const isReshaping = reshapeRoomId === selectedPlacement.roomId;
+          const vertexDragInvalid =
+            isReshaping && vertexDrag?.roomId === selectedPlacement.roomId && !vertexDrag.valid;
+
           return (
             <g>
               <polygon
@@ -2032,22 +2302,41 @@ export function PlanView({
                 className="room-selection-outline"
                 points={roomPolygonPoints(selectedPlacement)}
                 vectorEffect="non-scaling-stroke"
+                style={vertexDragInvalid ? { stroke: "var(--danger)" } : undefined}
               />
-              <RoomResizeHandles
-                activeDrag={
-                  drag && drag.roomId === selectedPlacement.roomId
-                    ? {
-                        targetWallId: drag.targetWallId,
-                        anchor: drag.anchor,
-                        previewLengthMm: drag.previewLengthMm
-                      }
-                    : null
-                }
-                handleSizeMm={handleSizeMm}
-                placement={selectedPlacement}
-                unit={wallUnit}
-                onBeginDrag={beginDrag}
-              />
+              {/* Reshape mode replaces the rectangle-only resize handles with
+                  vertex/split handles for whichever room is armed — the two
+                  never render together, so there's no risk of them colliding
+                  visually (both would sit at wall midpoints on a rectangle). */}
+              {isReshaping ? (
+                <RoomReshapeHandles
+                  activeVertexId={vertexDrag?.roomId === selectedPlacement.roomId ? vertexDrag.vertexId : null}
+                  handleSizeMm={handleSizeMm}
+                  invalid={vertexDragInvalid}
+                  placement={selectedPlacement}
+                  selectedVertexId={selectedVertexId}
+                  onBeginVertexDrag={(vertexId, event) =>
+                    beginVertexDrag(selectedPlacement.roomId, vertexId, event)
+                  }
+                  onSplitWallClick={handleSplitWallClick}
+                />
+              ) : (
+                <RoomResizeHandles
+                  activeDrag={
+                    drag && drag.roomId === selectedPlacement.roomId
+                      ? {
+                          targetWallId: drag.targetWallId,
+                          anchor: drag.anchor,
+                          previewLengthMm: drag.previewLengthMm
+                        }
+                      : null
+                  }
+                  handleSizeMm={handleSizeMm}
+                  placement={selectedPlacement}
+                  unit={wallUnit}
+                  onBeginDrag={beginDrag}
+                />
+              )}
             </g>
           );
         })()}

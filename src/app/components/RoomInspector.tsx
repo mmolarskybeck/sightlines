@@ -1,3 +1,4 @@
+import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import type { DisplayUnit } from "../../domain/project";
 import type { RectangleRoomDimensions } from "../../domain/geometry/walls";
 import {
@@ -7,22 +8,28 @@ import {
 } from "../../domain/units/unitSystem";
 import { LengthField } from "./LengthField";
 import { RoomDimensionFields } from "./RoomDimensionFields";
+import { Button } from "./ui/button";
 
 export function RoomInspector({
   artworkCount,
   objectCount,
   rectangleDimensions,
+  reshapeActive,
   roomHeightMm,
   roomName,
   unit,
   wallCount,
   onCommitDepth,
   onCommitHeight,
-  onCommitWidth
+  onCommitWidth,
+  onToggleReshape
 }: {
   artworkCount: number;
   objectCount: number;
   rectangleDimensions: RectangleRoomDimensions | null;
+  // Whether this room is currently the one in vertex/wall-split reshape
+  // mode (PlanView renders the handles; this button just arms/disarms it).
+  reshapeActive: boolean;
   roomHeightMm: number;
   roomName: string;
   unit: DisplayUnit;
@@ -30,6 +37,7 @@ export function RoomInspector({
   onCommitDepth: (lengthMm: number) => Promise<void>;
   onCommitHeight: (heightMm: number) => Promise<void>;
   onCommitWidth: (lengthMm: number) => Promise<void>;
+  onToggleReshape: () => void;
 }) {
   const system = unitSystemFromDisplayUnit(unit);
   const { displayUnit, parseUnit } = getScopeUnits(system, "wall");
@@ -37,6 +45,23 @@ export function RoomInspector({
 
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
+      <div className="inspector-placement">
+        <Button
+          aria-pressed={reshapeActive}
+          className="inspector-action"
+          variant={reshapeActive ? "primary" : "inspector"}
+          onClick={onToggleReshape}
+        >
+          <PencilSimpleIcon aria-hidden="true" size={15} />
+          {reshapeActive ? "Done editing shape" : "Edit shape"}
+        </Button>
+        <p className="field-hint">
+          {reshapeActive
+            ? "Drag a corner to reshape the room, or click a wall's + to split it. Escape to finish."
+            : "Drag corners, split walls, or remove a corner to change this room's outline."}
+        </p>
+      </div>
+
       {rectangleDimensions ? (
         <div className="artwork-dimensions">
           <div className="artwork-dimensions-heading">
