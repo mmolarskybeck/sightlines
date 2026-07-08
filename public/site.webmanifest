@@ -1,0 +1,18 @@
+{
+  "name": "Sightlines",
+  "short_name": "Sightlines",
+  "description": "A private-by-design exhibition planning tool for scaled room layouts, wall elevations, artwork placement, and simple 3D preview.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8f7f2",
+  "theme_color": "#f8f7f2",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
