@@ -290,6 +290,49 @@ describe("selection transitions through the store", () => {
     }
   });
 
+  it("deleteRoom clears a selected dying opening but preserves dangling multi-select ids", async () => {
+    // Faithful port of the pre-union pruning: the legacy code nulled
+    // selectedOpeningId when its opening sat on a deleted wall, but never
+    // touched selectedObjectIds — dangling ids stay dangling (undo can
+    // create them too, and consumers tolerate them).
+    await store.getState().addRectangleRoom();
+
+    // A selected opening on the doomed room clears to none.
+    await store.getState().addOpening("room-2-wall-north", "door");
+    const openingId = store.getState().project!.wallObjects.find(
+      (object) => object.kind === "door"
+    )!.id;
+    store.getState().selectOpening(openingId);
+
+    await store.getState().deleteRoom("room-2");
+
+    let state = store.getState();
+    expect(state.selection).toEqual(NO_SELECTION);
+    expect(state.selectedOpeningId).toBeNull();
+    expect(state.selectedObjectIds).toEqual([]);
+
+    // A multi-select on the doomed room is left exactly as it was — dangling.
+    await store.getState().undo(); // resurrect room-2 (and its door)
+    const a = await addChecklistArtwork("dying-a.jpg");
+    const b = await addChecklistArtwork("dying-b.jpg");
+    await store.getState().placeArtwork(a, "room-2-wall-north", 500, 1450, true);
+    const aPlacement = store.getState().project!.wallObjects.at(-1)!.id;
+    await store.getState().placeArtwork(b, "room-2-wall-north", 1500, 1450, true);
+    const bPlacement = store.getState().project!.wallObjects.at(-1)!.id;
+    store.getState().setObjectSelection([aPlacement, bPlacement]);
+
+    await store.getState().deleteRoom("room-2");
+
+    state = store.getState();
+    expect(
+      state.project!.wallObjects.some(
+        (object) => object.id === aPlacement || object.id === bPlacement
+      )
+    ).toBe(false);
+    expect(state.selection).toEqual({ kind: "objects", ids: [aPlacement, bPlacement] });
+    expect(state.selectedObjectIds).toEqual([aPlacement, bPlacement]);
+  });
+
   it("a selection change auto-accepts a live arrange session that moved", async () => {
     await threeWorksOnWall();
     store.getState().beginArrangeSession("equal");

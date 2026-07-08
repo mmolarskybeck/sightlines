@@ -619,25 +619,28 @@ export function createAppStore(deps: AppStoreDeps) {
           ? (nextRooms[0]?.room.walls[0]?.id ?? null)
           : wallContextId;
 
-        // The room's wall objects go with it — prune any of them out of the
-        // live selection (stale-id hygiene), and drop room focus if this was
-        // the focused room.
-        const deletedObjectIds = new Set(
-          project.wallObjects
-            .filter((wallObject) => deletedWallIds.has(wallObject.wallId))
-            .map((wallObject) => wallObject.id)
-        );
+        // Faithful port of the pre-union pruning, no more: the legacy code
+        // nulled selectedOpeningId when that opening sat on a deleted wall
+        // (under the union: a single-opening objects-selection clears to
+        // none), and dropped room focus if this was the focused room. It
+        // never touched selectedObjectIds — dangling artwork/multi-select
+        // ids stay dangling here too (consumers tolerate them; undo can
+        // create them as well). Broader stale-id pruning is a follow-up
+        // pending explicit sanction.
         const current = get().selection;
-        let nextSelection: Selection;
-        if (current.kind === "room") {
-          nextSelection = current.roomId === roomId ? NO_SELECTION : current;
-        } else if (current.kind === "objects") {
-          const survivingIds = current.ids.filter((id) => !deletedObjectIds.has(id));
-          nextSelection =
-            survivingIds.length > 0 ? { kind: "objects", ids: survivingIds } : NO_SELECTION;
-        } else {
-          nextSelection = current;
-        }
+        const isDyingOpeningSelection =
+          current.kind === "objects" &&
+          current.ids.length === 1 &&
+          project.wallObjects.some(
+            (wallObject) =>
+              wallObject.id === current.ids[0] &&
+              wallObject.kind !== "artwork" &&
+              deletedWallIds.has(wallObject.wallId)
+          );
+        const nextSelection: Selection =
+          (current.kind === "room" && current.roomId === roomId) || isDyingOpeningSelection
+            ? NO_SELECTION
+            : current;
 
         await applyEdit(
           `Delete ${roomPlacement.room.name}`,
