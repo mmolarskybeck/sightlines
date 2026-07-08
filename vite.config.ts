@@ -5,6 +5,10 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
+    // The three chunk is intentionally large; it loads only via the lazy
+    // ThreeDView import (enforced by scripts/assert-chunk-graph.mjs). Warn
+    // only if it grows well past its current ~830 kB.
+    chunkSizeWarningLimit: 900,
     rollupOptions: {
       output: {
         manualChunks(id) {
