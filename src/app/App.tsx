@@ -87,7 +87,11 @@ import { deriveArrangeReadout } from "./hooks/arrangeReadout";
 import {
   exportProjectJson,
   getProjectWalls,
+  getSelectedArtworkId,
+  getSelectedOpeningId,
   getSelectedWall,
+  objectIdsOf,
+  roomIdOf,
   useAppStore
 } from "./store";
 
@@ -121,11 +125,8 @@ function getAssetBlob(key: string): Promise<Blob> {
 export function App() {
   const {
     project,
-    selectedWallId,
-    selectedArtworkId,
-    selectedOpeningId,
-    selectedObjectIds,
-    selectedRoomId,
+    selection,
+    wallContextId,
     arrangeSession,
     lastArrangeMode,
     lastInsetAnchor,
@@ -188,6 +189,15 @@ export function App() {
     commitArrangeSession,
     cancelArrangeSession
   } = useAppStore();
+  // Derived once per render from the selection union (source of truth) —
+  // objectIdsOf/roomIdOf are pure lookups; getSelectedArtworkId/
+  // getSelectedOpeningId additionally resolve against the live project (both
+  // accept a null project for the pre-boot render). Kept under their old
+  // mirror-field names so every read site and child prop below is unchanged.
+  const selectedObjectIds = objectIdsOf(selection);
+  const selectedRoomId = roomIdOf(selection);
+  const selectedArtworkId = getSelectedArtworkId(project, selection);
+  const selectedOpeningId = getSelectedOpeningId(project, selection);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
   const {
@@ -212,10 +222,10 @@ export function App() {
   // One plan viewport per active project — resets to fit on project switch.
   const [planViewport, setPlanViewport] = useViewport2D(project?.id ?? "none");
   // The wall actually rendered by ElevationView — falls back to the floor's
-  // first wall when selectedWallId is null/stale, so the viewport key below
-  // must use ITS id (not the raw selectedWallId) or explicitly selecting that
+  // first wall when wallContextId is null/stale, so the viewport key below
+  // must use ITS id (not the raw wallContextId) or explicitly selecting that
   // same fallback wall would look like a wall switch and spuriously reset pan/zoom.
-  const selectedWall = project ? getSelectedWall(project, selectedWallId) : null;
+  const selectedWall = project ? getSelectedWall(project, wallContextId) : null;
   // One elevation viewport, keyed on project id + resolved wall id so it
   // resets to fit on either a project switch OR a genuine wall switch (no
   // other reset code needed) — independent of planViewport, so switching
@@ -230,20 +240,20 @@ export function App() {
 
   useUndoRedoShortcuts({ undo, redo });
 
+  // Escape reverts a live arrange session first (leaving the selection intact
+  // so a second Escape can then clear it), else clears whatever is selected.
   // Delete/Backspace removes whichever placement is currently selected — a
-  // wall opening, a floor blocked zone (both live in the selectedOpeningId
-  // slot, and removePlacement is generic over wall/floor ids so one call
-  // covers either), or a placed artwork (selectedArtworkId resolved against
-  // wallObjects/floorObjects). An unplaced checklist selection is left
-  // alone — there's no placement id to remove. Guarded against editable
-  // targets (LengthFields use Backspace for text editing) and an in-flight
-  // checklist drag, the same idiom as the undo/redo effect above.
+  // placed anything (artwork, opening, blocked zone, single or multi) is an
+  // objects-selection now, so one branch covers all of it in a single undo
+  // entry. Both guarded against editable targets (LengthFields use Backspace
+  // for text editing) and an in-flight checklist drag, the same idiom as the
+  // undo/redo effect above.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      // Escape first reverts a live arrange session (leaving the selection
-      // intact so a second Escape can then clear it), then clears the multi-
-      // selection (the single-selection slots have no clear-on-Escape
-      // convention to preserve). PlanView's own Escape listener disarms an
+      // Escape now clears ANY selection kind — objects, an unplaced checklist
+      // pick, or a room focus (previously only the multi-object slot cleared
+      // here; clearing a room selection was reachable only via other paths,
+      // e.g. selecting a wall). PlanView's own Escape listener disarms an
       // armed placement tool; both firing together is harmless.
       if (event.key === "Escape") {
         if (isEditableTarget(event.target)) return;
@@ -251,7 +261,7 @@ export function App() {
           cancelArrangeSession();
           return;
         }
-        if (selectedObjectIds.length > 0) clearObjectSelection();
+        if (selection.kind !== "none") clearObjectSelection();
         return;
       }
 
@@ -260,34 +270,14 @@ export function App() {
       if (draggingArtworkId) return;
       if (!project) return;
 
-      // A multi-selection takes precedence over the legacy single slots —
-      // one keypress removes every selected placement in one undo entry.
+      // A placed selection (artwork, opening, blocked zone) is always an
+      // objects-selection, so this one branch removes it — single or multi —
+      // in one undo entry. An unplaced checklist pick
+      // (selection.kind === "libraryArtwork") is deliberately ignored: there's
+      // no placement id to remove.
       if (selectedObjectIds.length > 0) {
         event.preventDefault();
         void removeSelectedPlacements();
-        return;
-      }
-
-      if (selectedOpeningId) {
-        event.preventDefault();
-        void removePlacement(selectedOpeningId);
-        return;
-      }
-
-      if (selectedArtworkId) {
-        const placement =
-          project.wallObjects.find(
-            (wallObject): wallObject is ArtworkWallObject =>
-              wallObject.kind === "artwork" && wallObject.artworkId === selectedArtworkId
-          ) ??
-          project.floorObjects.find(
-            (floorObject): floorObject is ArtworkFloorObject =>
-              floorObject.kind === "artwork" && floorObject.artworkId === selectedArtworkId
-          );
-        if (!placement) return;
-
-        event.preventDefault();
-        void removePlacement(placement.id);
       }
     }
 
@@ -295,11 +285,9 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     project,
-    selectedArtworkId,
-    selectedOpeningId,
+    selection,
     selectedObjectIds,
     draggingArtworkId,
-    removePlacement,
     removeSelectedPlacements,
     clearObjectSelection,
     arrangeSession,
@@ -549,8 +537,10 @@ export function App() {
   });
 
   // The rail's Issues button jumps to the first warning's wall object so the
-  // inspector reveals it — an artwork placement selects its artwork, any
-  // other kind (door/window/blocked zone) selects the opening.
+  // inspector reveals it — an artwork placement selects the placement itself
+  // (not just the library artwork, so a stale multi-selection resolves back
+  // to this one work), any other kind (door/window/blocked zone) selects the
+  // opening.
   const selectFirstWarningObject = () => {
     const first = placementWarnings[0];
     if (!first) return;
@@ -561,7 +551,7 @@ export function App() {
     if (!wallObject) return;
 
     if (wallObject.kind === "artwork") {
-      selectArtwork(wallObject.artworkId);
+      selectObject(wallObject.id);
     } else {
       selectOpening(wallObject.id);
     }
