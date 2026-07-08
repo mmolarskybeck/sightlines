@@ -87,6 +87,7 @@ import {
   INSPECTOR_MAX_WIDTH
 } from "./hooks/useViewPreferences";
 import { useViewport2D } from "./hooks/useViewport2D";
+import { isEditableTarget } from "./hooks/isEditableTarget";
 import { useUndoRedoShortcuts } from "./hooks/useUndoRedoShortcuts";
 import { useArrangeNudgeShortcuts } from "./hooks/useArrangeNudgeShortcuts";
 import {
@@ -1346,16 +1347,6 @@ function ProjectTitleInput({
         event.currentTarget.blur();
       }}
     />
-  );
-}
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-
-  return (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target.isContentEditable
   );
 }
 

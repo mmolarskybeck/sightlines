@@ -7,11 +7,12 @@ import {
 } from "../../domain/snapping/cleanIncrement";
 import type { Project } from "../../domain/project";
 import { unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
-import { getProjectWalls, type ArrangeSession } from "../store";
+import { getProjectWalls, type ArrangeSession, type ViewMode } from "../store";
+import { isEditableTarget } from "./isEditableTarget";
 
 export type UseArrangeNudgeShortcutsParams = {
   project: Project | null;
-  viewMode: "plan" | "elevation" | "data" | "3d";
+  viewMode: ViewMode;
   selectedObjectIds: string[];
   draggingArtworkId: string | null;
   arrangeSession: ArrangeSession | null;
@@ -243,14 +244,4 @@ export function useArrangeNudgeShortcuts({
     moveArtworkPlacement,
     moveOpening
   ]);
-}
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-
-  return (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target.isContentEditable
-  );
 }

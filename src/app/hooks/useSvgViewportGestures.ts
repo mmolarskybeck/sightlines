@@ -21,6 +21,7 @@ import {
   type Viewport2D,
   type ZoomLimits
 } from "../../domain/viewport/viewport2d";
+import { isEditableTarget } from "./isEditableTarget";
 
 // A touch gesture (one-finger pan or two-finger pinch) that moves less than
 // this many client px on release is treated as a stationary tap — beyond it,
@@ -245,20 +246,8 @@ export function useSvgViewportGestures(options: {
   // never both mounted at once (viewMode gates which one App renders), so
   // there's no risk of two of these double-firing on the same keystroke.
   useEffect(() => {
-    function isEditable(target: EventTarget | null): boolean {
-      const el = target as HTMLElement | null;
-      if (!el) return false;
-      const tag = el.tagName;
-      return (
-        tag === "INPUT" ||
-        tag === "TEXTAREA" ||
-        tag === "SELECT" ||
-        el.isContentEditable === true
-      );
-    }
-
     function onKeyDown(event: KeyboardEvent) {
-      if (isEditable(event.target)) return;
+      if (isEditableTarget(event.target)) return;
       if ((event.metaKey || event.ctrlKey) && event.key === "0") {
         // Also blocks the browser's own zoom-reset.
         event.preventDefault();

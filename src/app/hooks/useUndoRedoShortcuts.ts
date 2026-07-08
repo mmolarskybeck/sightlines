@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 
+import { isEditableTarget } from "./isEditableTarget";
+
 export type UseUndoRedoShortcutsParams = {
   undo: () => Promise<void>;
   redo: () => Promise<void>;
@@ -27,14 +29,4 @@ export function useUndoRedoShortcuts({ undo, redo }: UseUndoRedoShortcutsParams)
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [undo, redo]);
-}
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-
-  return (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target.isContentEditable
-  );
 }
