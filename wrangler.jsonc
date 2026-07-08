@@ -6,6 +6,10 @@
     {
       "pattern": "sightlines.art",
       "custom_domain": true
+    },
+    {
+      "pattern": "www.sightlines.art",
+      "custom_domain": true
     }
   ],
   "assets": {
