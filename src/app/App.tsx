@@ -1256,11 +1256,25 @@ export function App() {
 }
 
 function HelpDialog({ onClose }: { onClose: () => void }) {
+  const isMac =
+    typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+  const mod = isMac ? "⌘" : "Ctrl";
+
+  const shortcuts: Array<{ action: string; keys: string[] }> = [
+    { action: "Undo / redo", keys: [`${mod} Z`, isMac ? "⇧ ⌘ Z" : `${mod} Y`] },
+    { action: "Nudge selected artwork", keys: ["←", "↑", "↓", "→"] },
+    { action: "Nudge in larger steps", keys: ["⇧ arrow"] },
+    { action: "Pan the canvas", keys: ["Space + drag"] },
+    { action: "Zoom to fit", keys: [`${mod} 0`] },
+    { action: "Delete selection", keys: [isMac ? "⌫" : "Del"] },
+    { action: "Deselect / close", keys: ["Esc"] }
+  ];
+
   const links = [
     { href: "/about.html", label: "About" },
     { href: "/privacy.html", label: "Privacy" },
     { href: "/security.html", label: "Security" },
-    { href: "/it.html", label: "IT access notes" }
+    { href: "/it.html", label: "For IT teams" }
   ];
 
   return (
@@ -1275,7 +1289,7 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
         <div className="help-dialog-header">
           <div>
             <p className="help-dialog-kicker">Sightlines</p>
-            <h2 id="help-dialog-title">Help and product info</h2>
+            <h2 id="help-dialog-title">Help</h2>
           </div>
           <Button
             aria-label="Close help"
@@ -1291,23 +1305,39 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
 
         <div className="help-dialog-body">
           <p>
-            Sightlines is a private-by-design exhibition planning tool for scaled room layouts,
-            wall elevations, artwork placement, and simple 3D preview.
+            Plan exhibitions to scale: draw rooms in Plan, hang works on each wall in Elevation,
+            and check the result in 3D. Drag artworks from the checklist straight onto a wall.
           </p>
-          <ul className="help-dialog-list">
-            <li>No account required in v1.</li>
-            <li>Project data and artwork images stay on this device.</li>
-            <li>No executable downloads or hosted artwork storage.</li>
-          </ul>
         </div>
 
-        <div className="help-link-grid" aria-label="More information">
+        <div className="help-shortcuts">
+          <h3 className="help-section-title">Keyboard shortcuts</h3>
+          <dl className="help-shortcut-list">
+            {shortcuts.map((shortcut) => (
+              <div className="help-shortcut-row" key={shortcut.action}>
+                <dt>{shortcut.action}</dt>
+                <dd>
+                  {shortcut.keys.map((key) => (
+                    <kbd key={key}>{key}</kbd>
+                  ))}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+
+        <p className="help-privacy-note">
+          Projects and artwork images stay on this device: no account, no uploads. Use
+          <strong> Export</strong> to save a backup file you can share or move between machines.
+        </p>
+
+        <nav className="help-link-row" aria-label="More information">
           {links.map((link) => (
             <a className="help-link" href={link.href} key={link.href} rel="noreferrer" target="_blank">
               {link.label}
             </a>
           ))}
-        </div>
+        </nav>
       </section>
     </div>
   );

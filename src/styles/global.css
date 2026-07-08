@@ -331,7 +331,7 @@ input:focus-visible {
 }
 
 .help-dialog-body {
-  padding: 16px 18px 4px;
+  padding: 16px 18px;
 }
 
 .help-dialog-body p {
@@ -341,43 +341,96 @@ input:focus-visible {
   line-height: var(--leading-copy);
 }
 
-.help-dialog-list {
-  margin: 14px 0 0;
-  padding-left: 18px;
+.help-shortcuts {
+  padding: 14px 18px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.help-section-title {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: 0.08em;
+  line-height: var(--leading-tight);
+  text-transform: uppercase;
+}
+
+.help-shortcut-list {
+  display: grid;
+  margin: 0;
+  row-gap: 7px;
+}
+
+.help-shortcut-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.help-shortcut-row dt {
+  color: var(--ink);
+  font-size: var(--type-sm);
+  line-height: var(--leading-ui);
+}
+
+.help-shortcut-row dd {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  margin: 0;
+}
+
+.help-shortcut-row kbd {
+  display: inline-flex;
+  align-items: center;
+  min-width: 22px;
+  justify-content: center;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: var(--type-2xs);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-ui);
+  white-space: nowrap;
+}
+
+.help-privacy-note {
+  margin: 0;
+  padding: 13px 18px;
+  border-top: 1px solid var(--line);
   color: var(--muted);
   font-size: var(--type-sm);
   line-height: var(--leading-copy);
 }
 
-.help-link-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  padding: 16px 18px 18px;
+.help-privacy-note strong {
+  color: var(--ink);
+  font-weight: var(--weight-semibold);
+}
+
+.help-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  padding: 12px 18px 14px;
+  border-top: 1px solid var(--line);
 }
 
 .help-link {
-  display: flex;
-  min-height: 38px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  background: var(--bg);
   color: var(--primary-strong);
   font-size: var(--type-sm);
   font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
   text-decoration: none;
-  transition:
-    background-color 150ms ease-out,
-    border-color 150ms ease-out,
-    color 150ms ease-out,
-    box-shadow 150ms ease-out;
 }
 
 .help-link:hover {
-  background: var(--surface);
-  border-color: var(--input);
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
 }
 
 .help-link:focus-visible {

@@ -6,44 +6,97 @@
     <meta name="robots" content="index,follow" />
     <meta
       name="description"
-      content="About Sightlines, a private-by-design exhibition planning tool for galleries, museums, artists, and installation teams."
+      content="Sightlines is a private-by-design exhibition planning tool for scaled room layouts, wall elevations, artwork placement, and 3D preview. Built for curators, galleries, museums, and installation teams."
     />
     <link rel="canonical" href="https://sightlines.art/about.html" />
-    <title>About Sightlines</title>
+    <title>About — Sightlines</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/trust.css" />
   </head>
   <body>
+    <div class="site-header-rule">
+      <header class="site-header">
+        <a class="brand" href="/">
+          <span class="brand-monogram" aria-hidden="true">S</span>
+          <span class="brand-wordmark">Sightlines</span>
+        </a>
+        <nav class="site-nav" aria-label="Site">
+          <a href="/about.html" aria-current="page">About</a>
+          <a href="/privacy.html">Privacy</a>
+          <a href="/security.html">Security</a>
+          <a href="/it.html">For IT teams</a>
+          <a class="open-app" href="/">Open the app</a>
+        </nav>
+      </header>
+    </div>
+
     <main>
-      <h1>About Sightlines</h1>
-      <p>
-        Sightlines is a professional exhibition planning tool for scaled room layouts, wall
-        elevations, artwork placement, and simple 3D preview.
-      </p>
-      <p>
-        It is built for curators, exhibition planners, preparators, artists, and small gallery or
-        museum teams who need to move between checklist thinking and spatial thinking without giving
-        up privacy, precision, or speed.
+      <p class="kicker">About</p>
+      <h1>Exhibition planning, drawn to scale</h1>
+      <p class="lede">
+        Sightlines is a planning tool for people who hang exhibitions. Draw a gallery to scale,
+        place artworks on its walls at their real dimensions, check spacing and eye lines, and walk
+        the result in a simple 3D preview. It all runs in the browser, with nothing to install.
       </p>
 
-      <h2>Current Product Shape</h2>
+      <h2>Who it's for</h2>
+      <p>
+        Sightlines is built for curators, exhibition planners, registrars, preparators, artists,
+        and small gallery or museum teams. Exhibition work is non-linear: sometimes the checklist
+        comes first, sometimes the room does. Sightlines is designed so you can start from either
+        end and move between checklist thinking and spatial thinking without losing precision.
+      </p>
+
+      <h2>What you can do with it</h2>
       <ul>
-        <li>Browser-first and local-first.</li>
-        <li>No account required in v1.</li>
-        <li>No hosted project data or artwork image storage in v1.</li>
-        <li>Project data and uploaded artwork images stay on the user's device.</li>
-        <li>No executable downloads.</li>
+        <li><strong>Plan view:</strong> draw rooms and walls to scale on a drafting-style grid.</li>
+        <li>
+          <strong>Wall elevations:</strong> see each wall face-on and place works at exact heights,
+          with snapping, centerlines, and measured spacing.
+        </li>
+        <li>
+          <strong>Artwork checklist:</strong> keep works, dimensions, and images together, and drag
+          works from the list straight onto a wall.
+        </li>
+        <li><strong>3D preview:</strong> check sightlines and proportions from a visitor's point of view.</li>
+        <li>
+          <strong>Portable projects:</strong> export a project as a file to back it up, move it
+          between machines, or hand it to a colleague.
+        </li>
       </ul>
 
-      <h2>Deployment</h2>
+      <h2>Private by design</h2>
       <p>
-        Sightlines is a static Vite React application deployed on Cloudflare Workers static assets at
-        <a href="https://sightlines.art/">https://sightlines.art/</a>.
+        Sightlines doesn't ask you to create an account or upload your exhibition to anyone's
+        server. Your project (layouts, artwork details, and images) is stored locally in your own
+        browser, and sharing happens through files you export deliberately. Unreleased exhibition
+        plans and artwork images are sensitive material; keeping them on your device is the point.
+        The details are on the <a href="/privacy.html">privacy page</a>.
       </p>
 
-      <nav aria-label="Trust documents">
-        <a href="/privacy.html">Privacy</a> | <a href="/security.html">Security</a> |
-        <a href="/it.html">IT access notes</a> | <a href="/">Open the app</a>
-      </nav>
+      <h2>How it's built</h2>
+      <p>
+        Sightlines is a static web application served over HTTPS from
+        <a href="https://sightlines.art/">sightlines.art</a> on Cloudflare's edge network. There is
+        no software to download or install, which also makes it practical on managed institutional
+        machines. Technical notes for reviewers are on the <a href="/security.html">security
+        page</a> and the <a href="/it.html">IT access page</a>.
+      </p>
+
+      <h2>Contact</h2>
+      <p>
+        Sightlines is an independent project. For security matters, see the
+        <a href="/security.html">security page</a>; the machine-readable contact record is at
+        <a href="/.well-known/security.txt">/.well-known/security.txt</a>.
+      </p>
     </main>
+
+    <footer class="site-footer">
+      <a href="/about.html">About</a>
+      <a href="/privacy.html">Privacy</a>
+      <a href="/security.html">Security</a>
+      <a href="/it.html">For IT teams</a>
+      <span class="footer-copy">© 2026 Sightlines · sightlines.art</span>
+    </footer>
   </body>
 </html>
