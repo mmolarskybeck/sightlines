@@ -1380,12 +1380,21 @@ body.panels-resizing * {
   min-width: 0;
   flex-direction: column;
   overflow: hidden;
+  /* Container for the view-toolbar's compact mode below. Safe here: this
+     column's width always comes from the workspace grid track (minmax(0,1fr),
+     or 1fr in the stacked narrow-viewport layout), never from its content,
+     so inline-size containment changes nothing about the layout itself. */
+  container-type: inline-size;
 }
 
 /* A thin utility strip (~44px total) so it reads as subordinate to the mode
-   tabs in the 80px topbar above it, rather than competing with them. */
+   tabs in the 80px topbar above it, rather than competing with them. Two
+   zones split across it now: insert-tools on the left (document-insertion,
+   plan-only), view-options on the right (display prefs, most surfaces) — so
+   the row reads left-to-right as "things you add" then "how you're looking
+   at it" instead of one undifferentiated cluster. */
 .view-toolbar {
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 12px;
   padding: 8px 12px;
   background: var(--bg);
@@ -1397,12 +1406,116 @@ body.panels-resizing * {
   gap: 6px;
 }
 
+/* Left zone of .view-toolbar: the Insert segmented control — a
+   non-interactive "Insert" caption plus three icon-only toggle segments
+   (door/window/blocked-zone, see PlanView's activeTool prop) joined under
+   one shared border with 1px internal dividers. Same joined-segment
+   language as .unit-switch, not three floating chips; control radius per
+   the app's rectangular-before-rounded rule. flex:none because a rigid
+   segmented control must never be squeezed by the flexing right zone —
+   compactness comes from the container queries below instead. */
+.insert-tools {
+  display: inline-flex;
+  align-items: stretch;
+  flex: none;
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  /* Clips the segments' square corners and petrol fill to the group radius. */
+  overflow: hidden;
+}
+
+.insert-tools-label {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+}
+
+.insert-tool-segment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background-color 150ms ease-out, color 150ms ease-out;
+}
+
+.insert-tool-segment:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.insert-tool-segment:focus-visible {
+  /* Inset so the ring survives the group's overflow:hidden corner clip. */
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+/* The armed segment: same pressed petrol treatment as the Toggle
+   primitive's data-state=on (and the old floating palette before it). */
+.insert-tool-segment[aria-pressed="true"] {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.insert-tool-segment:disabled {
+  cursor: not-allowed;
+}
+
+/* Whole-control disabled dim (elevation/3D/data views) — the same 0.45 the
+   Toggle primitive and .unit-switch use, applied to the group so the
+   caption and dividers fade with the segments instead of staying crisp. */
+.insert-tools:has(.insert-tool-segment:disabled) {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .view-options {
   /* Four controls (Grid, Snap, Precision, Units) can now exceed a narrow
      toolbar's width — wrap rather than overflow or scroll. */
   flex-wrap: wrap;
   justify-content: flex-end;
   row-gap: 8px;
+}
+
+/* Compact toolbar, keyed on the CANVAS COLUMN's width (container query, see
+   .canvas-column's container-type) rather than the viewport's — both side
+   panels eat into the column, so a 1440px window with checklist + inspector
+   open leaves only ~740px here. Arithmetic: insert control ~140px + Grid
+   ~74 + Snap ~78 + Overlap ~92 + precision select ~136 + unit switch ~163
+   + gaps and padding ≈ 735px worst case (elevation, with Overlap), so 750px
+   leaves margin. Below it the ViewOptionButton labels drop to icon-only —
+   their title tooltips and aria-labels carry the meaning; Precision and
+   Units keep their text (value controls, an icon can't carry a value).
+   The goal: one row at realistic widths, with .view-options' internal wrap
+   as the last resort far below these breakpoints. */
+@container (max-width: 750px) {
+  .view-toolbar .view-option-label {
+    display: none;
+  }
+}
+
+/* Tighter still: the "Insert" caption goes too, leaving just the three
+   icon segments (aria-label/title already name them; the caption was
+   aria-hidden anyway, so nothing is lost from the accessibility tree). */
+@container (max-width: 600px) {
+  .view-toolbar .insert-tools-label {
+    display: none;
+  }
+
+  /* The hidden caption owned the group's left edge — without this, the
+     first segment's internal divider would double up on the outer border. */
+  .view-toolbar .insert-tools-label + .insert-tool-segment {
+    border-left: 0;
+  }
 }
 
 /* Underline tabs — the shared idiom for the top mode tabs (Plan/Elevation)
@@ -1785,9 +1898,9 @@ body.panels-resizing * {
   touch-action: none;
 }
 
-/* An armed PlanToolbar tool: the crosshair signals "click to place" the way
-   a drawing tool would, distinct from the plain pointer used for selecting
-   and dragging existing geometry. */
+/* An armed insert-tools button (App's view-toolbar strip): the crosshair
+   signals "click to place" the way a drawing tool would, distinct from the
+   plain pointer used for selecting and dragging existing geometry. */
 .plan-svg.tool-armed {
   cursor: crosshair;
 }
@@ -2042,21 +2155,9 @@ body.panels-resizing * {
   cursor: pointer;
 }
 
-/* PlanToolbar: the palette for click-to-place insertion, anchored to the
-   opposite corner from .surface-label (there is none in plan view today,
-   but this keeps the door open) so a future chip never collides with it. */
-.plan-toolbar {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  display: flex;
-  gap: 6px;
-  z-index: 1;
-}
-
-/* 3D preview surface + its camera-preset cluster (ThreeDView.tsx). Same
-   floating-chip language as .plan-toolbar, anchored bottom-left per the 3D
-   spec so it never collides with the shared top-right view options. */
+/* 3D preview surface + its camera-preset cluster (ThreeDView.tsx). Floating-
+   chip language, anchored bottom-left per the 3D spec so it never collides
+   with the shared top-right view options. */
 .three-view {
   position: relative;
   height: 100%;
@@ -2072,13 +2173,18 @@ body.panels-resizing * {
   z-index: 1;
 }
 
+/* Shared chip-button gap for the floating toolbar clusters — .three-toolbar's
+   camera presets and .viewport-zoom's Fit/Fit selected below. Named for the
+   now-removed PlanToolbar palette that originated it, but it outlived that
+   component as a plain "inspector-variant button, comfortable icon/label
+   gap" utility. */
 .plan-toolbar-button {
   gap: 6px;
 }
 
 /* Zoom cluster (ViewportZoomControls) — floating chip anchored bottom-right
-   inside the 2D drawing surface, opposite the top-right PlanToolbar. Square
-   corners, white ground, no accent stripes, matching the app's chip language. */
+   inside the 2D drawing surface. Square corners, white ground, no accent
+   stripes, matching the app's chip language. */
 .viewport-zoom {
   position: absolute;
   right: 14px;
@@ -2126,12 +2232,6 @@ body.panels-resizing * {
 .viewport-zoom-value:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
-}
-
-.plan-toolbar-button[aria-pressed="true"] {
-  border-color: var(--primary);
-  background: var(--primary-soft);
-  color: var(--primary-strong);
 }
 
 .surface-label-select:hover {

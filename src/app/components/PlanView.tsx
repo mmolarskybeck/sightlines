@@ -24,7 +24,7 @@ import {
   WALL_OBJECT_PLAN_DEPTH_MM,
   type PlanRect
 } from "../../domain/geometry/planObjects";
-import { getDefaultOpeningSizeMm } from "../../domain/placement/createOpening";
+import { getDefaultOpeningSizeMm, type OpeningKind } from "../../domain/placement/createOpening";
 import {
   getEffectivePlacementSizeMm,
   PLACEHOLDER_ARTWORK_HEIGHT_MM,
@@ -70,7 +70,6 @@ import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
 import { GridOverlay } from "./GridOverlay";
 import { ArtworkTooltipContent, OpeningTooltipContent } from "./PlacementTooltip";
 import { PlanObject } from "./PlanObject";
-import { PlanToolbar, type PlanTool } from "./PlanToolbar";
 import { RoomResizeHandles, type ResizeHandleTarget } from "./RoomResizeHandles";
 import { ViewportZoomControls } from "./ViewportZoomControls";
 
@@ -234,6 +233,7 @@ function roomPolygonPoints(placement: RoomPlacement): string {
 }
 
 export function PlanView({
+  activeTool,
   artworksById,
   draggingArtworkId = null,
   getBlob,
@@ -253,6 +253,7 @@ export function PlanView({
   onMarqueeSelect,
   onSelectRoom,
   onSelectWall,
+  onToolChange,
   project,
   selectedArtworkId,
   selectedOpeningId,
@@ -263,6 +264,13 @@ export function PlanView({
   viewport,
   onViewportChange
 }: {
+  // Which insertion tool (door/window/blocked-zone) is armed — lifted up
+  // into App's view-toolbar strip (the old floating PlanToolbar palette is
+  // gone), so PlanView is a controlled component here: it reads the armed
+  // kind and reports intent via onToolChange, exactly like PlanToolbar used
+  // to, but this component now owns the ghost preview and click-to-place
+  // commit that arming enables.
+  activeTool: OpeningKind | null;
   artworksById?: Map<string, Artwork>;
   // Which artwork the checklist is mid-drag, so a plan dragover can size its
   // ghost — HTML5 dragover can't read the payload, so App threads this the
@@ -287,7 +295,7 @@ export function PlanView({
   onMoveRoom?: (roomId: string, offsetXMm: number, offsetYMm: number) => Promise<void>;
   onPlaceArtwork?: (artworkId: string, wallId: string, xMm: number, yMm: number) => void;
   onPlaceArtworkOnFloor?: (artworkId: string, xMm: number, yMm: number) => void;
-  onPlaceOpeningFromPlan?: (kind: PlanTool, placement: PlanPlacement) => Promise<void>;
+  onPlaceOpeningFromPlan?: (kind: OpeningKind, placement: PlanPlacement) => Promise<void>;
   onSelectArtwork?: (artworkId: string) => void;
   onSelectOpening?: (wallObjectId: string) => void;
   // Multi-select entry points. Selection ids are PLACEMENT ids (wall/floor
@@ -308,6 +316,10 @@ export function PlanView({
   // onSelectWall: optional/inert until App wires it, so the wall stays
   // unclickable (today's behavior) when this prop is absent.
   onSelectWall?: (wallId: string) => void;
+  // Reports an arm/disarm/toggle of the insertion tool up to App, which owns
+  // activeTool now — not optional/inert like the selection props above,
+  // since App's toolbar buttons need a live callback to toggle against.
+  onToolChange: (tool: OpeningKind | null) => void;
   project: Project;
   selectedArtworkId?: string | null;
   selectedOpeningId?: string | null;
@@ -338,12 +350,14 @@ export function PlanView({
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
   const marqueeRef = useRef<MarqueeState | null>(null);
 
-  // Transient UI state, not store/view-prefs: which palette tool is armed,
-  // its live ghost, and the hysteresis id threaded across pointer moves (the
-  // same discipline as the wall-resize drag's previousSnapTargetId, just
-  // keyed on hover instead of a pointer-capture gesture). Reset whenever the
-  // tool disarms so re-arming starts clean.
-  const [activeTool, setActiveTool] = useState<PlanTool | null>(null);
+  // Which tool is armed lives in App now (activeTool prop, lifted alongside
+  // the toolbar buttons that toggle it) — deliberately NOT in the store, same
+  // reasoning as the drag/marquee state above: it's transient UI, not
+  // something undo history or persistence should ever see. What stays local
+  // here is the live ghost and the hysteresis id threaded across pointer
+  // moves (the same discipline as the wall-resize drag's previousSnapTargetId,
+  // just keyed on hover instead of a pointer-capture gesture) — both reset
+  // whenever activeTool changes so a re-arm (or disarm) starts clean.
 
   // Thumbnails for placed-artwork tooltips (thumbnail tier — the plan rect is
   // too small to justify display-tier blobs the way elevation does).
@@ -500,16 +514,19 @@ export function PlanView({
   const objectHitMinMm = pixelsPerMm > 0 ? MIN_OBJECT_HIT_PX / pixelsPerMm : 0;
 
   function disarmTool() {
-    setActiveTool(null);
-    setToolGhost(null);
-    toolSnapTargetIdsRef.current = undefined;
+    onToolChange(null);
   }
 
-  function handleToolChange(tool: PlanTool | null) {
-    setActiveTool(tool);
+  // Whenever the armed tool changes — App toggling a toolbar button, the
+  // Escape handler below disarming it, or the single-shot disarm after a
+  // placement commits — drop the stale ghost/hysteresis so the next arm (or
+  // a re-arm of a different kind) starts clean. This lived inline in a
+  // combined setActiveTool+reset call before activeTool was lifted into App;
+  // syncing off the prop here is the controlled-component equivalent.
+  useEffect(() => {
     setToolGhost(null);
     toolSnapTargetIdsRef.current = undefined;
-  }
+  }, [activeTool]);
 
   useEffect(() => {
     if (!activeTool) return;
@@ -1399,7 +1416,6 @@ export function PlanView({
       onDragOver={handleArtworkDragOver}
       onDrop={handleArtworkDrop}
     >
-      <PlanToolbar activeTool={activeTool} onToolChange={handleToolChange} />
       <ViewportZoomControls
         zoom={getEffectiveZoom(viewport)}
         isFit={viewport.mode === "fit"}

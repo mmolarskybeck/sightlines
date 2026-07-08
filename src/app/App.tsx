@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
+import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { GridFourIcon } from "@phosphor-icons/react/dist/csr/GridFour";
@@ -9,6 +10,8 @@ import { MagnetIcon } from "@phosphor-icons/react/dist/csr/Magnet";
 import { MapTrifoldIcon } from "@phosphor-icons/react/dist/csr/MapTrifold";
 import { PresentationIcon } from "@phosphor-icons/react/dist/csr/Presentation";
 import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
+import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
+import { SquareIcon } from "@phosphor-icons/react/dist/csr/Square";
 import { StackIcon } from "@phosphor-icons/react/dist/csr/Stack";
 import { UploadSimpleIcon } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
@@ -18,7 +21,7 @@ import {
   getWallsWithGeometry,
   getOrthogonalQuadWallPair,
 } from "../domain/geometry/walls";
-import { getOpeningKindLabel } from "../domain/placement/createOpening";
+import { getOpeningKindLabel, type OpeningKind } from "../domain/placement/createOpening";
 import type {
   Artwork,
   ArtworkFloorObject,
@@ -203,6 +206,13 @@ export function App() {
   const selectedOpeningId = getSelectedOpeningId(project, selection);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
+  // Which insertion tool (door/window/blocked-zone) is armed on the plan
+  // canvas — transient UI state, deliberately NOT in the store: same
+  // reasoning as PlanView's other drag/marquee state (see the comment near
+  // its former activeTool declaration), it must never enter undo history or
+  // get persisted. Lives here (not in PlanView) now that the toolbar buttons
+  // that arm it live in this component's view-toolbar strip.
+  const [activeTool, setActiveTool] = useState<OpeningKind | null>(null);
   const {
     showGrid,
     snapToGrid,
@@ -240,6 +250,14 @@ export function App() {
   useEffect(() => {
     void boot();
   }, [boot]);
+
+  // The insert-tools group only makes sense over the plan canvas — disarm
+  // whenever the workspace tab (or the data-view rail button) steers away
+  // from "plan", so a tool never stays armed-but-invisible on a surface that
+  // can't place anything.
+  useEffect(() => {
+    if (viewMode !== "plan") setActiveTool(null);
+  }, [viewMode]);
 
   useUndoRedoShortcuts({ undo, redo });
 
@@ -779,6 +797,18 @@ export function App() {
 
         <section className="canvas-column">
           <div className="view-toolbar">
+            {/* Left zone: document-insertion tools. Lives in the same strip
+                as the right zone's view options now instead of a floating
+                palette over the plan canvas — arming one of these still only
+                does anything on the plan surface, so the whole control
+                disables outside viewMode "plan" (App.tsx's own useEffect
+                above also disarms activeTool the moment the tab steers
+                away). */}
+            <InsertToolPicker
+              activeTool={activeTool}
+              disabled={viewMode !== "plan"}
+              onToolChange={setActiveTool}
+            />
             <div className="view-options" aria-label="View options">
               <ViewOptionButton
                 active={showGrid}
@@ -829,6 +859,7 @@ export function App() {
               <PlanEmptyState onAddRoom={() => void addRectangleRoom()} />
             ) : (
               <PlanView
+                activeTool={activeTool}
                 artworksById={artworksById}
                 draggingArtworkId={draggingArtworkId}
                 getBlob={getAssetBlob}
@@ -858,6 +889,7 @@ export function App() {
                 onSelectOpening={selectOpening}
                 onSelectRoom={selectRoom}
                 onSelectWall={selectWall}
+                onToolChange={setActiveTool}
                 selectedObjectIds={selectedObjectIds}
                 onSelectObject={selectObject}
                 onClearSelection={clearObjectSelection}
@@ -1251,6 +1283,64 @@ function ProjectTitleInput({
   );
 }
 
+// The view-toolbar's left zone: one bordered segmented control reading
+// `[ Insert | door | window | zone ]` — a non-interactive "Insert" caption
+// followed by three icon-only toggle segments sharing the outer border with
+// 1px internal dividers (the same joined-segment feel as .unit-switch, not
+// three floating chips). Toggle semantics match the old floating palette:
+// the armed segment reads pressed in petrol, clicking it again disarms, and
+// PlanView's own Escape/click-to-place handling disarms via onToolChange.
+// The caption is aria-hidden (the group's aria-label already says "Insert",
+// so announcing the text too would double up); each segment carries its own
+// aria-label AND title — with no visible per-tool text, the title is the
+// only sighted-hover name these have, so it matters here.
+function InsertToolPicker({
+  activeTool,
+  disabled,
+  onToolChange
+}: {
+  activeTool: OpeningKind | null;
+  disabled: boolean;
+  onToolChange: (tool: OpeningKind | null) => void;
+}) {
+  const tools: { kind: OpeningKind; label: string; icon: React.ReactNode }[] = [
+    { kind: "door", label: "Door", icon: <DoorIcon aria-hidden="true" size={16} /> },
+    { kind: "window", label: "Window", icon: <SquareIcon aria-hidden="true" size={16} /> },
+    {
+      kind: "blocked-zone",
+      label: "Blocked zone",
+      icon: <RectangleDashedIcon aria-hidden="true" size={16} />
+    }
+  ];
+
+  const picker = (
+    <div className="insert-tools" role="group" aria-label="Insert">
+      <span className="insert-tools-label" aria-hidden="true">
+        Insert
+      </span>
+      {tools.map((tool) => (
+        <button
+          aria-label={tool.label}
+          aria-pressed={activeTool === tool.kind}
+          className="insert-tool-segment"
+          disabled={disabled}
+          key={tool.kind}
+          title={disabled ? undefined : tool.label}
+          type="button"
+          onClick={() => onToolChange(activeTool === tool.kind ? null : tool.kind)}
+        >
+          {tool.icon}
+        </button>
+      ))}
+    </div>
+  );
+
+  // Same wrapper-span trick as ViewOptionButton below: hovering a disabled
+  // control must still explain WHY it's disabled, and per-segment titles are
+  // dropped above so this one wrapper title wins everywhere over the control.
+  return disabled ? <span title="Switch to plan view to insert">{picker}</span> : picker;
+}
+
 function ViewOptionButton({
   active,
   disabled,
@@ -1266,20 +1356,31 @@ function ViewOptionButton({
   title: string;
   onClick: () => void;
 }) {
-  return (
+  const toggle = (
     <Toggle
+      // Kept the same string as the visible label below: on a narrow canvas
+      // column the container query in global.css hides .view-option-label
+      // and the button goes icon-only, so the accessible name must not
+      // depend on the span's visibility (and must never diverge from it).
       aria-label={label}
       className="view-option-button"
       disabled={disabled}
       pressed={active}
-      title={title}
+      title={disabled ? undefined : title}
       variant="default"
       onPressedChange={onClick}
     >
       {icon}
-      <span>{label}</span>
+      <span className="view-option-label">{label}</span>
     </Toggle>
   );
+
+  // toggleVariants applies `disabled:pointer-events-none`, so a disabled
+  // Toggle never receives the hover that would trigger its own `title`
+  // tooltip (e.g. the insert-tools row's "Switch to plan view to insert").
+  // A wrapping span keeps receiving pointer events, so the disabled-state
+  // title stays reachable on hover instead of silently going dark.
+  return disabled ? <span title={title}>{toggle}</span> : toggle;
 }
 
 function UnitSystemToggle({

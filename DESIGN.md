@@ -84,7 +84,7 @@ The product grammar is stable:
 
 - Left rail chooses the left-side work context: checklist, rooms, issues, or data.
 - Topbar owns project identity, view mode, persistence state, and import/export.
-- Canvas toolbar owns view options: grid, snap, precision, overlap, and units.
+- Canvas toolbar has two zones: insertion tools on the left (a segmented Insert control — door, window, blocked zone — enabled in plan, visible-disabled elsewhere), view options on the right (grid, snap, precision, overlap, units). It stays a single row: the canvas column is a CSS container, and toggle labels drop to icon-only (then the Insert caption hides) as it narrows.
 - Left pane is task inventory.
 - Right pane is inspection and numeric editing.
 

@@ -3,7 +3,7 @@ import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { Button } from "./ui/button";
 
 // Floating zoom cluster for the 2D drawing surfaces — anchored bottom-right
-// inside the canvas (opposite the top-right PlanToolbar). Reads
+// inside the canvas. Reads
 // `[Fit] [−] 82% [+]`, plus a `[Fit selected]` before `Fit` when a selection-
 // framing callback is provided (elevation, a later task). The percentage is
 // the effective zoom relative to fit and doubles as a reset-to-fit button.
