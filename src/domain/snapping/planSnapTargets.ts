@@ -6,6 +6,7 @@ import {
   type FloorWall,
   type PlanRect
 } from "../geometry/planObjects";
+import { clamp } from "../geometry/scalar";
 import { getNeighborXSnapTargets } from "./artworkSnapTargets";
 import {
   resolveSnap,
@@ -222,8 +223,4 @@ function resolveOnFloor(
     // so they're correct to draw over the plan.
     activeGuides: resolved.activeGuides
   };
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }
