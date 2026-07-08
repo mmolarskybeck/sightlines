@@ -38,10 +38,11 @@ export type UseArrangeReadoutParams = {
 // The arrange panel's live readout — spacing mode, zone, and the equal-solve
 // matching that decides whether the idle layout already reads as "Space
 // evenly". null when the selection isn't arrangeable (see arrangeWall in
-// App.tsx). A plain function re-run on every call, same as the inline IIFE
-// this was extracted from — not memoized, so it always reflects the latest
-// (possibly preview-overridden) member positions and session state.
-export function useArrangeReadout({
+// App.tsx). A pure per-render derivation (not a hook — calls no React hooks),
+// re-run on every call same as the inline IIFE this was extracted from —
+// not memoized, so it always reflects the latest (possibly preview-overridden)
+// member positions and session state.
+export function deriveArrangeReadout({
   arrangeWall,
   arrangeMembers,
   activeArrangeSession,

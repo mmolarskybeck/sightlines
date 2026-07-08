@@ -83,7 +83,7 @@ import { useViewport2D } from "./hooks/useViewport2D";
 import { isEditableTarget } from "./hooks/isEditableTarget";
 import { useUndoRedoShortcuts } from "./hooks/useUndoRedoShortcuts";
 import { useArrangeNudgeShortcuts } from "./hooks/useArrangeNudgeShortcuts";
-import { useArrangeReadout } from "./hooks/useArrangeReadout";
+import { deriveArrangeReadout } from "./hooks/arrangeReadout";
 import {
   exportProjectJson,
   getProjectWalls,
@@ -499,7 +499,7 @@ export function App() {
         return preview ? { ...member, xMm: preview.xMm, yMm: preview.yMm } : member;
       })
     : selectedArtworkMembers;
-  const arrangeReadout = useArrangeReadout({
+  const arrangeReadout = deriveArrangeReadout({
     arrangeWall,
     arrangeMembers,
     activeArrangeSession,
