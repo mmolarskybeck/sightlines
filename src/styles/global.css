@@ -1418,7 +1418,10 @@ body.panels-resizing * {
   display: inline-flex;
   align-items: stretch;
   flex: none;
-  min-height: 32px;
+  /* Matches the row's other controls (.unit-select, .unit-switch,
+     .view-option-button all sit at 30px) so the segmented control doesn't
+     stand 2px proud of its neighbors. */
+  min-height: 30px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   /* Clips the segments' square corners and petrol fill to the group radius. */
@@ -1634,6 +1637,12 @@ body.panels-resizing * {
 }
 
 .precision-select-trigger {
+  /* SelectTrigger's own base class carries Tailwind's h-9 (36px), which
+     would otherwise force .unit-select taller than every other 30px
+     control in the row (Grid/Snap, Overlap, Units). Override the height
+     directly rather than min-width/padding alone, since a min-height on
+     the wrapper can't shrink a child's explicit height. */
+  height: 30px;
   min-width: 54px;
   padding: 0;
 }
