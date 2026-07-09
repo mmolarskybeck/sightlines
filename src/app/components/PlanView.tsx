@@ -15,7 +15,12 @@ import {
   type Vector2
 } from "../../domain/geometry/dragResize";
 import { resizeWallPreservingAngles, type ResizeAnchor } from "../../domain/geometry/editRoom";
-import { getFloorBounds, getRoomBounds, getWallGeometry } from "../../domain/geometry/walls";
+import {
+  getFloorBounds,
+  getRoomBounds,
+  getWallGeometry,
+  isRectangleRoom
+} from "../../domain/geometry/walls";
 import {
   getFloorObjectPlanRect,
   getFloorWalls,
@@ -623,8 +628,12 @@ export function PlanView({
     selectedVertexIdRef.current = selectedVertexId;
   }, [selectedVertexId]);
   useEffect(() => {
+    // Also keyed on selectedRoomId: with implicit reshape on non-rectangles,
+    // switching rooms swaps the live reshape target without reshapeRoomId
+    // changing, and a stale vertex from the previous room must not be the
+    // target of a Delete keypress.
     setSelectedVertexId(null);
-  }, [reshapeRoomId]);
+  }, [reshapeRoomId, selectedRoomId]);
 
   const bounds = getFloorBounds(project.floor);
   const padding = getPlanViewPaddingMm(bounds);
@@ -928,31 +937,45 @@ export function PlanView({
     // deliberately not resubscribed on every appended vertex.
   }, [drawRoomActive]);
 
-  // Escape exits reshape mode; Delete/Backspace removes the selected vertex
-  // (merges its two walls) if the stretch goal is wired. Scoped to while
-  // reshape is armed, same idiom as the draw-mode handler above — reads the
-  // live selection via selectedVertexIdRef so it isn't resubscribed on every
-  // vertex click.
+  // A non-rectangular room is in reshape whenever it's selected — its handles
+  // are the only editing affordance the shape has, so they show without the
+  // explicit "Edit shape" arm. reshapeRoomId (the armed mode) remains the way
+  // a RECTANGLE swaps its resize handles for reshape handles.
+  const selectedRoomPlacement = selectedRoomId
+    ? project.floor.rooms.find((placement) => placement.roomId === selectedRoomId)
+    : undefined;
+  const effectiveReshapeRoomId =
+    reshapeRoomId ??
+    (selectedRoomPlacement && !isRectangleRoom(selectedRoomPlacement.room)
+      ? selectedRoomPlacement.roomId
+      : null);
+
+  // Escape exits an ARMED reshape mode (implicit reshape on a non-rectangle
+  // has no mode to exit — Escape falls through to the global clear-selection,
+  // which hides the handles with the selection); Delete/Backspace removes the
+  // selected vertex (merges its two walls). Scoped to while reshape is live,
+  // same idiom as the draw-mode handler above — reads the live selection via
+  // selectedVertexIdRef so it isn't resubscribed on every vertex click.
   useEffect(() => {
-    if (!reshapeRoomId) return;
+    if (!effectiveReshapeRoomId) return;
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        onReshapeRoomChange?.(null);
+        if (reshapeRoomId) onReshapeRoomChange?.(null);
         return;
       }
       if (event.key === "Delete" || event.key === "Backspace") {
         const vertexId = selectedVertexIdRef.current;
-        if (!vertexId || !onDeleteRoomVertex || !reshapeRoomId) return;
+        if (!vertexId || !onDeleteRoomVertex || !effectiveReshapeRoomId) return;
         event.preventDefault();
         setSelectedVertexId(null);
-        void onDeleteRoomVertex(reshapeRoomId, vertexId);
+        void onDeleteRoomVertex(effectiveReshapeRoomId, vertexId);
       }
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [reshapeRoomId, onReshapeRoomChange, onDeleteRoomVertex]);
+  }, [effectiveReshapeRoomId, reshapeRoomId, onReshapeRoomChange, onDeleteRoomVertex]);
 
   // Escape disarms the partition tool (mirrors the draw-mode handler), scoped
   // to while it's armed so it never competes with App's global handlers.
@@ -2799,7 +2822,7 @@ export function PlanView({
           );
           if (!selectedPlacement || handleSizeMm <= 0) return null;
 
-          const isReshaping = reshapeRoomId === selectedPlacement.roomId;
+          const isReshaping = effectiveReshapeRoomId === selectedPlacement.roomId;
           const vertexDragInvalid =
             isReshaping && vertexDrag?.roomId === selectedPlacement.roomId && !vertexDrag.valid;
           const wallDragInvalid =

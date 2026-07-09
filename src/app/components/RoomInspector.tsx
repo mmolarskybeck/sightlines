@@ -46,20 +46,32 @@ export function RoomInspector({
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
       <div className="inspector-placement">
-        <Button
-          aria-pressed={reshapeActive}
-          className="inspector-action"
-          variant={reshapeActive ? "primary" : "inspector"}
-          onClick={onToggleReshape}
-        >
-          <PencilSimpleIcon aria-hidden="true" size={15} />
-          {reshapeActive ? "Done editing shape" : "Edit shape"}
-        </Button>
-        <p className="field-hint">
-          {reshapeActive
-            ? "Drag a corner to reshape the room, or click a wall's + to split it. Escape to finish."
-            : "Drag corners, split walls, or remove a corner to change this room's outline."}
-        </p>
+        {/* Non-rectangular rooms show their reshape handles whenever they're
+            selected, so the arm/disarm button only exists for rectangles
+            (where it swaps the width/depth resize handles for reshape ones). */}
+        {rectangleDimensions ? (
+          <>
+            <Button
+              aria-pressed={reshapeActive}
+              className="inspector-action"
+              variant={reshapeActive ? "primary" : "inspector"}
+              onClick={onToggleReshape}
+            >
+              <PencilSimpleIcon aria-hidden="true" size={15} />
+              {reshapeActive ? "Done editing shape" : "Edit shape"}
+            </Button>
+            <p className="field-hint">
+              {reshapeActive
+                ? "Drag a corner or a wall to reshape the room, or click a wall's + to split it. Escape to finish."
+                : "Drag corners, split walls, or remove a corner to change this room's outline."}
+            </p>
+          </>
+        ) : (
+          <p className="field-hint">
+            Drag a corner or a wall to reshape the room, click a wall's + to
+            split it, or select a corner and press Delete to remove it.
+          </p>
+        )}
       </div>
 
       {rectangleDimensions ? (
