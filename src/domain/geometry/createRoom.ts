@@ -1,7 +1,7 @@
 import type { Floor, RoomPlacement, RoomVertex, Wall } from "../project";
 import { feetToMm } from "../units/length";
 import { getFloorBounds } from "./walls";
-import { isSimplePolygon, type Point } from "./polygon";
+import { isSimplePolygon, signedAreaMm2, type Point } from "./polygon";
 
 // Consecutive draw points closer than this collapse to a zero-length wall, so
 // the constructor rejects them (the draw tool guards against this too).
@@ -92,18 +92,6 @@ type CreatePolygonRoomInput = {
   // creation; the stored vertices are room-local (bbox-min origin).
   pointsFloorMm: Point[];
 };
-
-// Twice the signed area — sign is the winding: > 0 is counter-clockwise in the
-// signed-area convention `deriveScene3d` uses (scene3d.ts `signedAreaMm2`).
-function signedAreaMm2(points: Point[]): number {
-  let sum = 0;
-  for (let i = 0; i < points.length; i += 1) {
-    const a = points[i];
-    const b = points[(i + 1) % points.length];
-    sum += a.xMm * b.yMm - b.xMm * a.yMm;
-  }
-  return sum / 2;
-}
 
 // A drawn vertex sitting mid-straight-run rather than at a genuine corner —
 // e.g. the user clicked several points along one wall while drawing. It's

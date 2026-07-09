@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isPointInPolygon, isSimplePolygon, segmentsIntersect } from "./polygon";
+import {
+  isPointInPolygon,
+  isSimplePolygon,
+  segmentsIntersect,
+  signedAreaMm2
+} from "./polygon";
 
 const at = (xMm: number, yMm: number) => ({ xMm, yMm });
 
@@ -82,6 +87,26 @@ describe("isSimplePolygon", () => {
     expect(
       isSimplePolygon([at(0, 0), at(10, 0), at(20, 0), at(10, 0)])
     ).toBe(false);
+  });
+});
+
+describe("signedAreaMm2", () => {
+  it("is positive for a counter-clockwise square, equal to its area", () => {
+    const ccwSquare = [at(0, 0), at(10, 0), at(10, 10), at(0, 10)];
+    expect(signedAreaMm2(ccwSquare)).toBe(100);
+  });
+
+  it("is negative (same magnitude) for the same square wound clockwise", () => {
+    const cwSquare = [at(0, 0), at(0, 10), at(10, 10), at(10, 0)];
+    expect(signedAreaMm2(cwSquare)).toBe(-100);
+  });
+
+  it("is zero for collinear points", () => {
+    expect(signedAreaMm2([at(0, 0), at(5, 0), at(10, 0)])).toBe(0);
+  });
+
+  it("is zero for duplicate/coincident points", () => {
+    expect(signedAreaMm2([at(3, 3), at(3, 3), at(3, 3)])).toBe(0);
   });
 });
 

@@ -6,6 +6,7 @@ import type {
   WallObject
 } from "../project";
 import { getFreestandingFaces } from "./freestandingWalls";
+import { signedAreaMm2 } from "./polygon";
 import { getWallsWithGeometry } from "./walls";
 
 // Pure derivation: Project -> a serializable 3D scene description. NO three.js
@@ -347,13 +348,3 @@ function transformPoint(point: Vec2, placement: RoomPlacement): Vec2 {
   };
 }
 
-// Twice-signed-area sign tells winding: > 0 is counter-clockwise in math y-up.
-function signedAreaMm2(polygon: Vec2[]): number {
-  let sum = 0;
-  for (let i = 0; i < polygon.length; i += 1) {
-    const a = polygon[i];
-    const b = polygon[(i + 1) % polygon.length];
-    sum += a.xMm * b.yMm - b.xMm * a.yMm;
-  }
-  return sum / 2;
-}

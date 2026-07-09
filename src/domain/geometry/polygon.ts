@@ -119,6 +119,19 @@ export function isSimplePolygon(points: Point[]): boolean {
   return true;
 }
 
+// Twice the signed area — sign is the winding: > 0 is counter-clockwise in
+// math y-up (the signed-area convention `deriveScene3d` and the polygon-room
+// constructor both key off of).
+export function signedAreaMm2(points: Point[]): number {
+  let sum = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    sum += a.xMm * b.yMm - b.xMm * a.yMm;
+  }
+  return sum / 2;
+}
+
 // Ray-casting point-in-polygon. Boundary cases are intentionally left
 // unspecified (a point exactly on an edge may read either way); callers that
 // need boundary tolerance own it.

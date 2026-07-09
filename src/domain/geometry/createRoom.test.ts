@@ -9,17 +9,7 @@ import {
   createRectangularRoomPlacement
 } from "./createRoom";
 import { getFloorBounds, getWallsWithGeometry } from "./walls";
-
-// Twice the signed area — > 0 is CCW in deriveScene3d's convention.
-function signedAreaMm2(points: { xMm: number; yMm: number }[]): number {
-  let sum = 0;
-  for (let i = 0; i < points.length; i += 1) {
-    const a = points[i];
-    const b = points[(i + 1) % points.length];
-    sum += a.xMm * b.yMm - b.xMm * a.yMm;
-  }
-  return sum / 2;
-}
+import { signedAreaMm2 } from "./polygon";
 
 // A clockwise (signed area < 0) L-shape in floor space — the constructor
 // should reverse it to CCW at creation.
