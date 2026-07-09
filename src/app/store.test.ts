@@ -5,7 +5,7 @@ import {
   DEFAULT_FLOOR_OBJECT_DEPTH_MM
 } from "../domain/project";
 import type { Project } from "../domain/project";
-import type { ArtworkImportDraft } from "../domain/import/types";
+import type { ArtworkImportDraft } from "../domain/spreadsheetImport/types";
 import {
   PLACEHOLDER_ARTWORK_HEIGHT_MM,
   PLACEHOLDER_ARTWORK_WIDTH_MM

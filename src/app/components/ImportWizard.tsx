@@ -8,7 +8,7 @@ import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { useFileImageUrls } from "../hooks/useFileImageUrls";
-import { createArtworkImportPlan } from "../../domain/import/importPlan";
+import { createArtworkImportPlan } from "../../domain/spreadsheetImport/importPlan";
 import type {
   ArtworkImportDraft,
   ColumnMapping,
@@ -17,8 +17,8 @@ import type {
   ImportTable,
   ImportWorkbookPreview,
   ImageMatchCandidate
-} from "../../domain/import/types";
-import { createImportTable, parseImportWorkbook } from "../../domain/import/workbook";
+} from "../../domain/spreadsheetImport/types";
+import { createImportTable, parseImportWorkbook } from "../../domain/spreadsheetImport/workbook";
 import type { DisplayUnit } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";

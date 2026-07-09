@@ -45,7 +45,7 @@ import {
   validateChangedWallPlacements,
   validateWallObjectPlacements
 } from "../domain/placement/validatePlacement";
-import type { ArtworkImportDraft } from "../domain/import/types";
+import type { ArtworkImportDraft } from "../domain/spreadsheetImport/types";
 import {
   CURRENT_ARTWORK_SCHEMA_VERSION,
   CURRENT_ASSET_SCHEMA_VERSION,
