@@ -10,8 +10,8 @@ The next best major slice is room shape tools before deeper doorway connections:
 
 ## Near-Term Order
 
-1. Room shape tools: polygon room drawing, then polygon reshape/vertex dragging.
-2. Multi-room flow: additional room placement, paired door connections, and 3D sightlines through aligned doorways.
+1. Room shape tools: polygon room drawing, then polygon reshape/vertex dragging — specced in `docs/room-shapes-spec.md` (slices 1–2).
+2. Multi-room flow: free-standing partition walls, paired door/window connections, and 3D sightlines through aligned openings — specced in `docs/room-shapes-spec.md` (slices 3–5).
 3. MVP package/export work: `.sightlines` import/export, backup flow, PNG/PDF exports (incl. the deferred 3D screenshot), and readiness reporting.
 
 ## Known Follow-Ups From the 3D Slice

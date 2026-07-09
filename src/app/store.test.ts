@@ -273,6 +273,50 @@ describe("app store", () => {
     expect(store.getState().project).toBe(before);
   });
 
+  it("addPolygonRoom adds an L-shaped room in one undo step and selects it", async () => {
+    const lShape = [
+      { xMm: 10_000, yMm: 0 },
+      { xMm: 10_000, yMm: 3_000 },
+      { xMm: 12_000, yMm: 3_000 },
+      { xMm: 12_000, yMm: 1_000 },
+      { xMm: 14_000, yMm: 1_000 },
+      { xMm: 14_000, yMm: 0 }
+    ];
+
+    await store.getState().addPolygonRoom(lShape);
+
+    const state = store.getState();
+    expect(state.project!.floor.rooms).toHaveLength(2);
+    const added = state.project!.floor.rooms[1];
+    expect(added.roomId).toBe("room-2");
+    expect(added.room.walls).toHaveLength(6);
+    expect(state.undoStack).toHaveLength(1);
+    expect(state.undoStack.at(-1)?.label).toBe("Add room");
+    // Room is selected, and the sidebar wall context is its first wall.
+    expect(roomIdOf(state.selection)).toBe("room-2");
+    expect(state.wallContextId).toBe("room-2-wall-0");
+    expect(state.viewMode).toBe("plan");
+
+    await store.getState().undo();
+    expect(store.getState().project!.floor.rooms).toHaveLength(1);
+  });
+
+  it("addPolygonRoom rejects a self-intersecting outline without committing", async () => {
+    const before = store.getState().project!;
+
+    await store.getState().addPolygonRoom([
+      { xMm: 0, yMm: 0 },
+      { xMm: 1_000, yMm: 1_000 },
+      { xMm: 1_000, yMm: 0 },
+      { xMm: 0, yMm: 1_000 }
+    ]);
+
+    const state = store.getState();
+    expect(state.project).toBe(before);
+    expect(state.undoStack).toHaveLength(0);
+    expect(state.error).toBeTruthy();
+  });
+
   it("skips a resize that does not change any wall", async () => {
     const state = store.getState();
     const currentLength = getSelectedWall(
@@ -283,6 +327,139 @@ describe("app store", () => {
     await state.resizeSelectedWall(currentLength);
 
     expect(store.getState().undoStack).toHaveLength(0);
+  });
+
+  describe("moveRoomVertex", () => {
+    it("commits one undo entry and surfaces bounds warnings for objects on changed walls", async () => {
+      const project = store.getState().project!;
+      store.setState({
+        project: {
+          ...project,
+          wallObjects: [
+            {
+              id: "art-1",
+              wallId: "wall-north",
+              kind: "artwork",
+              artworkId: "artwork-1",
+              xMm: feetToMm(20),
+              yMm: feetToMm(5),
+              widthMm: 600,
+              heightMm: 800
+            }
+          ]
+        }
+      });
+
+      await store.getState().moveRoomVertex("room-main", "v-ne", {
+        xMm: feetToMm(10),
+        yMm: feetToMm(4)
+      });
+
+      const state = store.getState();
+      expect(state.undoStack.at(-1)?.label).toBe("Move room corner");
+      expect(state.lastGeometryEdit?.anchorVertexId).toBe("v-ne");
+      expect(state.lastGeometryEdit?.changedWallIds.sort()).toEqual(
+        ["wall-east", "wall-north"].sort()
+      );
+      // The north wall shrank from 28ft to hypot(10ft,4ft), well short of the
+      // artwork's original xMm — a bounds warning, not a silent move.
+      expect(state.placementWarnings.some((warning) => warning.wallObjectId === "art-1")).toBe(
+        true
+      );
+      expect(
+        state.project!.wallObjects.find((object) => object.id === "art-1")?.xMm
+      ).toBe(feetToMm(20));
+    });
+
+    it("rejects a self-intersecting drag without committing", async () => {
+      const before = store.getState().project!;
+
+      await store.getState().moveRoomVertex("room-main", "v-ne", {
+        xMm: feetToMm(10),
+        yMm: feetToMm(28)
+      });
+
+      const state = store.getState();
+      expect(state.project).toBe(before);
+      expect(state.undoStack).toHaveLength(0);
+      expect(state.error).toBeTruthy();
+    });
+  });
+
+  describe("splitWall", () => {
+    it("splits a wall in one undo entry, keeping the original id on the first segment", async () => {
+      await store.getState().splitWall("wall-north", 3000);
+
+      const state = store.getState();
+      expect(state.undoStack.at(-1)?.label).toBe("Split wall");
+      const room = state.project!.floor.rooms[0].room;
+      expect(room.walls).toHaveLength(5);
+      const firstWall = room.walls.find((wall) => wall.id === "wall-north")!;
+      expect(firstWall.startVertexId).toBe("v-nw");
+      const secondWall = room.walls.find(
+        (wall) => wall.startVertexId === firstWall.endVertexId
+      )!;
+      expect(secondWall.endVertexId).toBe("v-ne");
+      expect(state.lastGeometryEdit?.changedWallIds).toContain("wall-north");
+    });
+
+    it("rejects a split too close to the wall's end without committing", async () => {
+      const before = store.getState().project!;
+
+      await store.getState().splitWall("wall-north", 2);
+
+      const state = store.getState();
+      expect(state.project).toBe(before);
+      expect(state.undoStack).toHaveLength(0);
+      expect(state.error).toBeTruthy();
+    });
+  });
+
+  describe("deleteRoomVertex", () => {
+    it("merges the two walls, moving a dangling wallContext to the merged wall", async () => {
+      store.getState().selectWall("wall-east");
+      expect(store.getState().wallContextId).toBe("wall-east");
+
+      await store.getState().deleteRoomVertex("room-main", "v-ne");
+
+      const state = store.getState();
+      expect(state.undoStack.at(-1)?.label).toBe("Delete room corner");
+      const room = state.project!.floor.rooms[0].room;
+      expect(room.vertices).toHaveLength(3);
+      expect(room.walls.some((wall) => wall.id === "wall-east")).toBe(false);
+      // wall-east is gone; the sidebar context falls back to the merged wall.
+      expect(state.wallContextId).toBe("wall-north");
+    });
+
+    it("rejects removing a vertex that would leave fewer than three corners", async () => {
+      const project = store.getState().project!;
+      const room = project.floor.rooms[0].room;
+      store.setState({
+        project: {
+          ...project,
+          floor: {
+            rooms: [
+              {
+                ...project.floor.rooms[0],
+                room: {
+                  ...room,
+                  vertices: room.vertices.filter((vertex) => vertex.id !== "v-sw"),
+                  walls: [room.walls[0], room.walls[1], { ...room.walls[2], endVertexId: "v-nw" }]
+                }
+              }
+            ]
+          }
+        }
+      });
+      const before = store.getState().project!;
+
+      await store.getState().deleteRoomVertex("room-main", "v-ne");
+
+      const state = store.getState();
+      expect(state.project).toBe(before);
+      expect(state.undoStack).toHaveLength(0);
+      expect(state.error).toBeTruthy();
+    });
   });
 
   describe("moveRoom", () => {

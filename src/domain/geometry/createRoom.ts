@@ -1,6 +1,11 @@
-import type { Floor, RoomPlacement } from "../project";
+import type { Floor, RoomPlacement, RoomVertex, Wall } from "../project";
 import { feetToMm } from "../units/length";
 import { getFloorBounds } from "./walls";
+import { isSimplePolygon, type Point } from "./polygon";
+
+// Consecutive draw points closer than this collapse to a zero-length wall, so
+// the constructor rejects them (the draw tool guards against this too).
+const MIN_VERTEX_SPACING_MM = 10;
 
 type CreateRectangularRoomInput = {
   depthMm: number;
@@ -76,6 +81,111 @@ export function createRectangularRoomPlacement({
       ]
     }
   };
+}
+
+type CreatePolygonRoomInput = {
+  roomId: string;
+  name: string;
+  heightMm: number;
+  // Absolute floor-space points in draw order. Winding is normalised at
+  // creation; the stored vertices are room-local (bbox-min origin).
+  pointsFloorMm: Point[];
+};
+
+// Twice the signed area — sign is the winding: > 0 is counter-clockwise in the
+// signed-area convention `deriveScene3d` uses (scene3d.ts `signedAreaMm2`).
+function signedAreaMm2(points: Point[]): number {
+  let sum = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    sum += a.xMm * b.yMm - b.xMm * a.yMm;
+  }
+  return sum / 2;
+}
+
+export function createPolygonRoomPlacement({
+  roomId,
+  name,
+  heightMm,
+  pointsFloorMm
+}: CreatePolygonRoomInput): RoomPlacement {
+  if (heightMm <= 0) {
+    throw new Error("Room height must be greater than zero.");
+  }
+  const n = pointsFloorMm.length;
+  if (n < 3) {
+    throw new Error("A room needs at least three points.");
+  }
+  for (let i = 0; i < n; i += 1) {
+    const a = pointsFloorMm[i];
+    const b = pointsFloorMm[(i + 1) % n];
+    if (Math.hypot(b.xMm - a.xMm, b.yMm - a.yMm) < MIN_VERTEX_SPACING_MM) {
+      throw new Error("Room points are too close together.");
+    }
+  }
+  if (!isSimplePolygon(pointsFloorMm)) {
+    throw new Error("Room outline can’t cross itself.");
+  }
+
+  // Placement offset = polygon bbox min, so vertices store room-local like the
+  // rectangle constructor. Winding is invariant under this translation.
+  const offsetXMm = Math.min(...pointsFloorMm.map((point) => point.xMm));
+  const offsetYMm = Math.min(...pointsFloorMm.map((point) => point.yMm));
+
+  let local: Point[] = pointsFloorMm.map((point) => ({
+    xMm: point.xMm - offsetXMm,
+    yMm: point.yMm - offsetYMm
+  }));
+  // Normalise to CCW ONCE, at creation only — after this, wall objects' xMm
+  // depends on each wall's start/end identity, so the loop is never reversed
+  // again (reshape blocks the self-intersection that could flip it).
+  if (signedAreaMm2(local) <= 0) {
+    local = local.slice().reverse();
+  }
+
+  const vertices: RoomVertex[] = local.map((point, index) => ({
+    id: `${roomId}-v-${index}`,
+    xMm: point.xMm,
+    yMm: point.yMm
+  }));
+  const walls: Wall[] = vertices.map((vertex, index) => ({
+    id: `${roomId}-wall-${index}`,
+    roomId,
+    name: `Wall ${index + 1}`,
+    startVertexId: vertex.id,
+    endVertexId: vertices[(index + 1) % vertices.length].id,
+    heightMm
+  }));
+
+  return {
+    roomId,
+    offsetXMm,
+    offsetYMm,
+    rotationDeg: 0,
+    room: {
+      id: roomId,
+      name,
+      heightMm,
+      vertices,
+      walls
+    }
+  };
+}
+
+export function createNextPolygonRoom(
+  floor: Floor,
+  heightMm: number,
+  pointsFloorMm: Point[]
+): RoomPlacement {
+  const roomNumber = getNextRoomNumber(floor);
+
+  return createPolygonRoomPlacement({
+    roomId: `room-${roomNumber}`,
+    name: `Gallery ${roomNumber}`,
+    heightMm,
+    pointsFloorMm
+  });
 }
 
 export function createNextRectangleRoom(

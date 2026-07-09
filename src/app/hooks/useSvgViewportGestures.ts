@@ -88,6 +88,7 @@ export function useSvgViewportGestures(options: {
   // without resubscribing.
   const [isSpaceDown, setIsSpaceDown] = useState(false);
   const spaceHeldRef = useRef(false);
+  const pointerInsideSvgRef = useRef(false);
   const [panning, setPanning] = useState(false);
   // Last pointer client position of the in-flight pan, for incremental deltas.
   const panLastRef = useRef<{ x: number; y: number } | null>(null);
@@ -228,11 +229,26 @@ export function useSvgViewportGestures(options: {
     const onWheel = (e: WheelEvent) => wheelHandlerRef.current(e);
     // Safari's non-standard pinch events would otherwise page-zoom the app.
     const onGesture = (e: Event) => e.preventDefault();
+    const onPointerEnter = () => {
+      pointerInsideSvgRef.current = true;
+    };
+    const onPointerLeave = () => {
+      pointerInsideSvgRef.current = false;
+    };
+    const onPointerCancel = () => {
+      pointerInsideSvgRef.current = false;
+    };
+    el.addEventListener("pointerenter", onPointerEnter);
+    el.addEventListener("pointerleave", onPointerLeave);
+    el.addEventListener("pointercancel", onPointerCancel);
     el.addEventListener("wheel", onWheel, { passive: false });
     el.addEventListener("gesturestart", onGesture);
     el.addEventListener("gesturechange", onGesture);
     el.addEventListener("gestureend", onGesture);
     return () => {
+      el.removeEventListener("pointerenter", onPointerEnter);
+      el.removeEventListener("pointerleave", onPointerLeave);
+      el.removeEventListener("pointercancel", onPointerCancel);
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("gesturestart", onGesture);
       el.removeEventListener("gesturechange", onGesture);
@@ -255,9 +271,12 @@ export function useSvgViewportGestures(options: {
         return;
       }
       if (event.code === "Space" || event.key === " ") {
-        // A Tab-focused button/link must still activate on Space — only
-        // hijack the key when it isn't targeting an interactive control.
-        if ((event.target as HTMLElement)?.closest?.('button, a, [role="button"]')) {
+        const interactiveTarget = (event.target as HTMLElement)?.closest?.('button, a, [role="button"]');
+        // A Tab-focused button/link must still activate on Space. The one
+        // exception is pointer-led viewport work: focus may still sit on a
+        // topbar control while the pointer is over the SVG, and in that case
+        // Space should arm pan instead of clicking the stale focused control.
+        if (interactiveTarget && !pointerInsideSvgRef.current) {
           return;
         }
         if (!spaceHeldRef.current) {
@@ -281,6 +300,7 @@ export function useSvgViewportGestures(options: {
     function onBlur() {
       // ⌘Tab away while holding space would otherwise leave the flag stuck.
       spaceHeldRef.current = false;
+      pointerInsideSvgRef.current = false;
       setIsSpaceDown(false);
     }
 

@@ -8,6 +8,7 @@ import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { GridFourIcon } from "@phosphor-icons/react/dist/csr/GridFour";
 import { MagnetIcon } from "@phosphor-icons/react/dist/csr/Magnet";
 import { MapTrifoldIcon } from "@phosphor-icons/react/dist/csr/MapTrifold";
+import { PolygonIcon } from "@phosphor-icons/react/dist/csr/Polygon";
 import { PresentationIcon } from "@phosphor-icons/react/dist/csr/Presentation";
 import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
@@ -156,6 +157,7 @@ export function App() {
     setObjectSelection,
     clearObjectSelection,
     addRectangleRoom,
+    addPolygonRoom,
     renameProject,
     renameRoom,
     deleteRoom,
@@ -163,6 +165,9 @@ export function App() {
     resizeSelectedWall,
     resizeRoomHeight,
     resizeWall,
+    moveRoomVertex,
+    splitWall,
+    deleteRoomVertex,
     moveRoom,
     undo,
     redo,
@@ -218,6 +223,43 @@ export function App() {
   // get persisted. Lives here (not in PlanView) now that the toolbar buttons
   // that arm it live in this component's view-toolbar strip.
   const [activeTool, setActiveTool] = useState<OpeningKind | null>(null);
+  // Polygon-room draw mode — same transient armed-tool family as activeTool
+  // (never in the store), and mutually exclusive with it: arming one disarms
+  // the other. PlanView owns the in-progress points/preview; this only holds
+  // whether the mode is on.
+  const [drawRoomActive, setDrawRoomActive] = useState(false);
+  // Reshape mode (slice 2): which room's vertex/split handles PlanView shows,
+  // armed by RoomInspector's "Edit shape" button (or a plan double-click).
+  // Same transient-mode family as activeTool/drawRoomActive — never in the
+  // store, mutually exclusive with the other two.
+  const [reshapeRoomId, setReshapeRoomId] = useState<string | null>(null);
+  const armOpeningTool = (tool: OpeningKind | null) => {
+    setActiveTool(tool);
+    if (tool) {
+      setDrawRoomActive(false);
+      setReshapeRoomId(null);
+    }
+  };
+  const toggleDrawRoom = () => {
+    setDrawRoomActive((active) => {
+      const next = !active;
+      if (next) {
+        setActiveTool(null);
+        setReshapeRoomId(null);
+      }
+      return next;
+    });
+  };
+  const toggleReshapeRoom = (roomId: string | null) => {
+    setReshapeRoomId((current) => {
+      const next = current === roomId ? null : roomId;
+      if (next) {
+        setActiveTool(null);
+        setDrawRoomActive(false);
+      }
+      return next;
+    });
+  };
   const {
     showGrid,
     snapToGrid,
@@ -261,8 +303,21 @@ export function App() {
   // from "plan", so a tool never stays armed-but-invisible on a surface that
   // can't place anything.
   useEffect(() => {
-    if (viewMode !== "plan") setActiveTool(null);
+    if (viewMode !== "plan") {
+      setActiveTool(null);
+      setDrawRoomActive(false);
+      setReshapeRoomId(null);
+    }
   }, [viewMode]);
+
+  // Reshape mode tracks a specific room id — if selection moves away from
+  // that room (another room, an object, or nothing), the handles would be
+  // showing for a room that's no longer the focus, so drop it.
+  useEffect(() => {
+    if (reshapeRoomId && reshapeRoomId !== selectedRoomId) {
+      setReshapeRoomId(null);
+    }
+  }, [selectedRoomId, reshapeRoomId]);
 
   useUndoRedoShortcuts({ undo, redo });
 
@@ -820,11 +875,18 @@ export function App() {
                 disables outside viewMode "plan" (App.tsx's own useEffect
                 above also disarms activeTool the moment the tab steers
                 away). */}
-            <InsertToolPicker
-              activeTool={activeTool}
-              disabled={viewMode !== "plan"}
-              onToolChange={setActiveTool}
-            />
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <InsertToolPicker
+                activeTool={activeTool}
+                disabled={viewMode !== "plan"}
+                onToolChange={armOpeningTool}
+              />
+              <DrawRoomButton
+                active={drawRoomActive}
+                disabled={viewMode !== "plan"}
+                onToggle={toggleDrawRoom}
+              />
+            </div>
             <div className="view-options" aria-label="View options">
               <ViewOptionButton
                 active={showGrid}
@@ -871,11 +933,19 @@ export function App() {
           </div>
 
           {viewMode === "plan" ? (
-            project.floor.rooms.length === 0 ? (
+            project.floor.rooms.length === 0 && !drawRoomActive ? (
               <PlanEmptyState onAddRoom={() => void addRectangleRoom()} />
             ) : (
               <PlanView
                 activeTool={activeTool}
+                drawRoomActive={drawRoomActive}
+                onDrawRoomChange={setDrawRoomActive}
+                onAddPolygonRoom={(points) => void addPolygonRoom(points)}
+                reshapeRoomId={reshapeRoomId}
+                onReshapeRoomChange={toggleReshapeRoom}
+                onMoveRoomVertex={moveRoomVertex}
+                onSplitWall={splitWall}
+                onDeleteRoomVertex={deleteRoomVertex}
                 artworksById={artworksById}
                 draggingArtworkId={draggingArtworkId}
                 getBlob={getAssetBlob}
@@ -905,7 +975,7 @@ export function App() {
                 onSelectOpening={selectOpening}
                 onSelectRoom={selectRoom}
                 onSelectWall={selectWall}
-                onToolChange={setActiveTool}
+                onToolChange={armOpeningTool}
                 selectedObjectIds={selectedObjectIds}
                 onSelectObject={selectObject}
                 onClearSelection={clearObjectSelection}
@@ -1193,6 +1263,7 @@ export function App() {
               artworkCount={selectedRoomArtworkCount}
               objectCount={selectedRoomObjectCount}
               rectangleDimensions={selectedRoomDimensions}
+              reshapeActive={reshapeRoomId === selectedRoomPlacement.roomId}
               roomHeightMm={selectedRoomPlacement.room.heightMm}
               roomName={selectedRoomPlacement.room.name}
               unit={project.unit}
@@ -1210,6 +1281,7 @@ export function App() {
               onCommitHeight={(heightMm) =>
                 resizeRoomHeight(selectedRoomPlacement.roomId, heightMm)
               }
+              onToggleReshape={() => toggleReshapeRoom(selectedRoomPlacement.roomId)}
             />
           ) : selectedWall ? (
             <WallInspector
@@ -1457,6 +1529,39 @@ function InsertToolPicker({
   // control must still explain WHY it's disabled, and per-segment titles are
   // dropped above so this one wrapper title wins everywhere over the control.
   return disabled ? <span title="Switch to plan view to insert">{picker}</span> : picker;
+}
+
+// The polygon-room draw toggle, sat beside the Insert segmented control in the
+// view-toolbar's left zone. Same armed-tool conventions as the insert tools:
+// pressed reads in petrol, clicking again disarms, disabled off the plan
+// surface (with the wrapper-span title trick so the disabled reason still
+// shows on hover). A labeled Toggle rather than an icon-only segment, so the
+// mode reads plainly next to the icon-only insert row.
+function DrawRoomButton({
+  active,
+  disabled,
+  onToggle
+}: {
+  active: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+}) {
+  const toggle = (
+    <Toggle
+      aria-label="Draw room"
+      className="view-option-button"
+      disabled={disabled}
+      pressed={active}
+      title={disabled ? undefined : "Draw a room outline"}
+      variant="default"
+      onPressedChange={onToggle}
+    >
+      <PolygonIcon aria-hidden="true" size={16} />
+      <span className="view-option-label">Draw room</span>
+    </Toggle>
+  );
+
+  return disabled ? <span title="Switch to plan view to draw a room">{toggle}</span> : toggle;
 }
 
 function ViewOptionButton({
