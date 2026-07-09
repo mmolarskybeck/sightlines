@@ -4,7 +4,11 @@ import { createBrowserImageProcessor } from "../domain/assets/browserImageProces
 import { titleFromFilename, validateImageFile, type ImageProcessor } from "../domain/assets/imageIntake";
 import { createNextPolygonRoom, createNextRectangleRoom } from "../domain/geometry/createRoom";
 import type { Point } from "../domain/geometry/polygon";
-import { resizeWallPreservingAngles, type ResizeAnchor } from "../domain/geometry/editRoom";
+import {
+  resizeWallPreservingAngles,
+  type GeometryEditResult,
+  type ResizeAnchor
+} from "../domain/geometry/editRoom";
 import {
   createFreestandingWall,
   faceWallIdsOf,
@@ -486,6 +490,45 @@ export function createAppStore(deps: AppStoreDeps) {
       return { status: "committed", project: after };
     }
 
+    // Shared commit path for the six freestanding-wall (partition) edits
+    // below: load the project, run the caller's domain edit, validate the
+    // changed walls' placements (unless the caller opts out), then commit via
+    // applyEdit. Every domain throw now routes into `error` state the same
+    // way — previously move/rotate had no catch at all (an unhandled
+    // rejection) while the other four each hand-rolled the same try/catch.
+    async function runPartitionEdit(args: {
+      label: string;
+      errorFallback: string;
+      compute: (project: Project) => GeometryEditResult;
+      validate?: boolean;
+    }): Promise<void> {
+      const project = get().project;
+      if (!project) return;
+
+      let result: GeometryEditResult;
+      try {
+        result = args.compute(project);
+      } catch (error) {
+        set({
+          error: `${args.errorFallback} (${
+            error instanceof Error ? error.message : "invalid input."
+          }).`
+        });
+        return;
+      }
+
+      const extras: EditExtras =
+        args.validate === false
+          ? {}
+          : {
+              placementWarnings: validateChangedWallPlacements(
+                result.project,
+                result.changedWallIds
+              )
+            };
+      await applyEdit(args.label, () => result.project, extras);
+    }
+
     const arrange = createArrangeSlice(set, get, { commitWallObjectMoves, persist });
     const { settleArrangeSession, autoAcceptArrangeSession } = arrange;
 
@@ -895,112 +938,54 @@ export function createAppStore(deps: AppStoreDeps) {
       },
 
       async moveFreestandingWall(wallId, deltaFloorMm) {
-        const project = get().project;
-        if (!project) return;
         if (deltaFloorMm.xMm === 0 && deltaFloorMm.yMm === 0) return;
 
-        const result = moveFreestandingWallEdit(project, wallId, deltaFloorMm);
-        const placementWarnings = validateChangedWallPlacements(
-          result.project,
-          result.changedWallIds
-        );
-        await applyEdit("Move partition", () => result.project, { placementWarnings });
+        await runPartitionEdit({
+          label: "Move partition",
+          errorFallback: "Could not move that partition",
+          compute: (project) => moveFreestandingWallEdit(project, wallId, deltaFloorMm)
+        });
       },
 
       async moveFreestandingWallEndpoint(wallId, end, nextFloorMm) {
-        const project = get().project;
-        if (!project) return;
-
-        let result;
-        try {
-          result = moveFreestandingEndpointEdit(project, wallId, end, nextFloorMm);
-        } catch (error) {
-          set({
-            error: `Could not reshape that partition (${
-              error instanceof Error ? error.message : "invalid endpoint."
-            }).`
-          });
-          return;
-        }
-        const placementWarnings = validateChangedWallPlacements(
-          result.project,
-          result.changedWallIds
-        );
-        await applyEdit("Reshape partition", () => result.project, { placementWarnings });
+        await runPartitionEdit({
+          label: "Reshape partition",
+          errorFallback: "Could not reshape that partition",
+          compute: (project) => moveFreestandingEndpointEdit(project, wallId, end, nextFloorMm)
+        });
       },
 
       async rotateFreestandingWall(wallId, angleDeg) {
-        const project = get().project;
-        if (!project) return;
-
-        const result = rotateFreestandingWallEdit(project, wallId, angleDeg);
-        const placementWarnings = validateChangedWallPlacements(
-          result.project,
-          result.changedWallIds
-        );
-        await applyEdit("Rotate partition", () => result.project, { placementWarnings });
+        await runPartitionEdit({
+          label: "Rotate partition",
+          errorFallback: "Could not rotate that partition",
+          compute: (project) => rotateFreestandingWallEdit(project, wallId, angleDeg)
+        });
       },
 
       async setFreestandingWallThickness(wallId, thicknessMm) {
-        const project = get().project;
-        if (!project) return;
-
-        let result;
-        try {
-          result = setFreestandingThickness(project, wallId, thicknessMm);
-        } catch (error) {
-          set({
-            error: `Could not resize that partition (${
-              error instanceof Error ? error.message : "invalid thickness."
-            }).`
-          });
-          return;
-        }
-        await applyEdit("Resize partition", () => result.project);
+        await runPartitionEdit({
+          label: "Resize partition",
+          errorFallback: "Could not resize that partition",
+          compute: (project) => setFreestandingThickness(project, wallId, thicknessMm),
+          validate: false
+        });
       },
 
       async setFreestandingWallLength(wallId, lengthMm, anchor = "start") {
-        const project = get().project;
-        if (!project) return;
-
-        let result;
-        try {
-          result = setFreestandingLength(project, wallId, lengthMm, anchor);
-        } catch (error) {
-          set({
-            error: `Could not resize that partition (${
-              error instanceof Error ? error.message : "invalid length."
-            }).`
-          });
-          return;
-        }
-        const placementWarnings = validateChangedWallPlacements(
-          result.project,
-          result.changedWallIds
-        );
-        await applyEdit("Resize partition", () => result.project, { placementWarnings });
+        await runPartitionEdit({
+          label: "Resize partition",
+          errorFallback: "Could not resize that partition",
+          compute: (project) => setFreestandingLength(project, wallId, lengthMm, anchor)
+        });
       },
 
       async setFreestandingWallHeight(wallId, heightMm) {
-        const project = get().project;
-        if (!project) return;
-
-        let result;
-        try {
-          result = setFreestandingHeight(project, wallId, heightMm);
-        } catch (error) {
-          set({
-            error: `Could not resize that partition (${
-              error instanceof Error ? error.message : "invalid height."
-            }).`
-          });
-          return;
-        }
-        const placementWarnings = validateChangedWallPlacements(
-          result.project,
-          result.changedWallIds
-        );
-        await applyEdit("Resize partition", () => result.project, { placementWarnings });
+        await runPartitionEdit({
+          label: "Resize partition",
+          errorFallback: "Could not resize that partition",
+          compute: (project) => setFreestandingHeight(project, wallId, heightMm)
+        });
       },
 
       async deleteFreestandingWall(wallId) {
