@@ -10,6 +10,17 @@ Room-shape slices 1-3 have shipped: the fast rectangle path remains, polygon roo
 
 The import surface is also beyond one-off image upload now: the Import wizard supports images-only, spreadsheet metadata, and combined image + metadata intake with map/review steps and image matching. Static public info/trust pages now live under `public/` (`about.html`, `privacy.html`, `security.html`, `it.html`, plus crawler/security metadata) and are linked from the left-rail Help surface.
 
+## Consolidation Pass (shipped 2026-07-09)
+
+Post-irregular-rooms refactor: 20 commits, all phases green (1065 tests, up from 957). Highlights:
+
+- **New domain modules**: `vector.ts`, `wallLoop.ts`, `placeableWalls.ts` (the doorway feature's wall-enumeration seam), `roomCascade.ts` (single room-deletion cascade), `openingPairs.ts` (where doorway-pairing writers land), `planPreview.ts` (drag-preview composition out of PlanView), `signedAreaMm2` into `polygon.ts`.
+- **Bug fixed**: wall-slide chips pointed the wrong way on concave rooms (centroid heuristic); one canonical `outwardWallNormal` now.
+- **Landmines defused**: `removePlacement`/`removeSelectedPlacements` now clear opening partner refs (matters once `connectsToObjectId` gets writers).
+- **View layer**: all ten drag machines in PlanView/ElevationView share `useDragGesture`; PlanView −450 lines net.
+- **App/store**: `usePlanMode` union (doorway pairing adds a `pairOpenings` variant there, one place), `commitWallObjectEdit`/`runPartitionEdit` pipelines, `commitPlanMove` split into four named cases.
+- **Deliberately deferred**: rectangle↔polygon edit-pipeline merge is an explicit decision gate behind the "rectangle resize characterization (pipeline-merge gate)" suites in `editRoom.test.ts`/`store.test.ts` — evaluate delegating into `moveRoomWall` only against those pinned promises. Also deferred to the doorway slice: PlanView single-`mode` prop, room-qualified hover ids, and schema v4 tightening (`MIN_ENDPOINT_SPACING_MM`, `wallId` cross-check — bundle with the pairing migration).
+
 ## Near-Term Order
 
 1. Paired door/window connections: add writers for `connectsToObjectId`, derived aligned/misaligned status, inspector UI, and deletion/cleanup flows — slices 4-5 of `docs/room-shapes-spec.md`.
