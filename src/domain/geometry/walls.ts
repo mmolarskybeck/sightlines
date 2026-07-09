@@ -1,5 +1,6 @@
 import type { Floor, Room, RoomPlacement, RoomVertex, Wall } from "../project";
 import { isPointInPolygon } from "./polygon";
+import { findVertex } from "./wallLoop";
 
 export type WallWithGeometry = Wall & {
   start: RoomVertex;
@@ -213,17 +214,11 @@ export function getFloorBounds(floor: Floor) {
   };
 }
 
-function findVertex(room: Room, vertexId: string): RoomVertex {
-  const vertex = room.vertices.find((candidate) => candidate.id === vertexId);
-
-  if (!vertex) {
-    throw new Error(`Wall references missing vertex: ${vertexId}`);
-  }
-
-  return vertex;
-}
-
-function hasLoopingWallOrder(room: Room, wallIndex: number): boolean {
+// Whether `wallIndex`'s wall connects to its neighbours in a proper closed
+// loop (each wall's end is the next wall's start, going both directions) —
+// shared with editRoom.ts, whose orthogonal-resize gate needs exactly this
+// check layered on top of isRectangleRoom.
+export function hasLoopingWallOrder(room: Room, wallIndex: number): boolean {
   const wall = room.walls[wallIndex];
   const nextWall = room.walls[(wallIndex + 1) % room.walls.length];
   const previousWall =

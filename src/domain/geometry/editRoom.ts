@@ -1,5 +1,6 @@
 import type { Project, Room, RoomVertex } from "../project";
-import { getWallGeometry, getWallsWithGeometry, isRectangleRoom } from "./walls";
+import { getWallGeometry, hasLoopingWallOrder, isRectangleRoom } from "./walls";
+import { changedWallLengthIdsForProject, findVertex } from "./wallLoop";
 
 type Vector = {
   xMm: number;
@@ -93,7 +94,7 @@ export function resizeWallPreservingAngles(
 
   return {
     project: nextProject,
-    changedWallIds: getChangedWallIdsByLength(project, nextProject),
+    changedWallIds: changedWallLengthIdsForProject(project, nextProject),
     anchorVertexId
   };
 }
@@ -102,18 +103,10 @@ function canResizeAsOrthogonalQuad(room: Room, wallIndex: number): boolean {
   // resizeOrthogonalQuad rebuilds the quad from the wall axis and averaged
   // side lengths — run on anything but a true rectangle it silently squares
   // the shape (a trapezoid becomes a rectangle), so the right-angle check is
-  // load-bearing, not just UI gating.
-  if (!isRectangleRoom(room)) return false;
-
-  const wall = room.walls[wallIndex];
-  const nextWall = room.walls[(wallIndex + 1) % room.walls.length];
-  const previousWall =
-    room.walls[(wallIndex - 1 + room.walls.length) % room.walls.length];
-
-  return (
-    nextWall.startVertexId === wall.endVertexId &&
-    previousWall.endVertexId === wall.startVertexId
-  );
+  // load-bearing, not just UI gating. hasLoopingWallOrder is walls.ts's own
+  // closed-loop connectivity check; this gate is just that layered on top of
+  // "is this room even a rectangle."
+  return isRectangleRoom(room) && hasLoopingWallOrder(room, wallIndex);
 }
 
 function resizeOrthogonalQuad(
@@ -167,35 +160,6 @@ function resizeOrthogonalQuad(
     ...room,
     vertices: room.vertices.map((vertex) => replacementById.get(vertex.id) ?? vertex)
   };
-}
-
-function findVertex(room: Room, vertexId: string): RoomVertex {
-  const vertex = room.vertices.find((candidate) => candidate.id === vertexId);
-
-  if (!vertex) {
-    throw new Error(`Wall references missing vertex: ${vertexId}`);
-  }
-
-  return vertex;
-}
-
-function getChangedWallIdsByLength(
-  previousProject: Project,
-  nextProject: Project
-): string[] {
-  const previousLengthsById = new Map(
-    previousProject.floor.rooms.flatMap((placement) =>
-      getWallsWithGeometry(placement.room).map((wall) => [wall.id, wall.lengthMm])
-    )
-  );
-
-  return nextProject.floor.rooms
-    .flatMap((placement) => getWallsWithGeometry(placement.room))
-    .filter((wall) => {
-      const previousLength = previousLengthsById.get(wall.id);
-      return previousLength === undefined || Math.abs(previousLength - wall.lengthMm) > 0.5;
-    })
-    .map((wall) => wall.id);
 }
 
 function chooseSideDirection(axis: Vector, sideVector: Vector): Vector {

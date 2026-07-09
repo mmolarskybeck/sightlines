@@ -7,6 +7,7 @@ import type { Floor, Project, Room, RoomPlacement, RoomVertex, Wall, WallObject 
 import type { GeometryEditResult } from "./editRoom";
 import { getFloorWalls, projectPointToWall } from "./planObjects";
 import { isSimplePolygon, type Point } from "./polygon";
+import { findVertex } from "./wallLoop";
 import { getWallGeometry } from "./walls";
 
 // Same floor as createRoom.ts's MIN_VERTEX_SPACING_MM — a vertex landing
@@ -30,14 +31,6 @@ function findRoomPlacementByWallId(project: Project, wallId: string): RoomPlacem
     throw new Error(`Wall not found: ${wallId}`);
   }
   return placement;
-}
-
-function findVertex(room: Room, vertexId: string): RoomVertex {
-  const vertex = room.vertices.find((candidate) => candidate.id === vertexId);
-  if (!vertex) {
-    throw new Error(`Vertex not found: ${vertexId}`);
-  }
-  return vertex;
 }
 
 // Local Vector idiom, same shape/style as editRoom.ts's (not exported there,
