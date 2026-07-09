@@ -82,6 +82,7 @@ import { ArtworkTooltipContent, OpeningTooltipContent } from "./PlacementTooltip
 import { PlanObject } from "./PlanObject";
 import { RoomResizeHandles, type ResizeHandleTarget } from "./RoomResizeHandles";
 import { RoomReshapeHandles } from "./RoomReshapeHandles";
+import { WallSlideHandles } from "./WallSlideHandles";
 import { ViewportZoomControls } from "./ViewportZoomControls";
 
 // On-screen size of a selected room's wall-midpoint resize handles — small
@@ -599,12 +600,18 @@ export function PlanView({
   useEffect(() => {
     vertexDragRef.current = vertexDrag;
   }, [vertexDrag]);
-  // Reshape mode's whole-wall body drag — same ref-mirrored discipline.
+  // A selected non-rectangle's wall slide (WallSlideHandles chips → moveRoomWall)
+  // — same ref-mirrored discipline.
   const [wallDrag, setWallDrag] = useState<WallDragState | null>(null);
   const wallDragRef = useRef<WallDragState | null>(null);
   useEffect(() => {
     wallDragRef.current = wallDrag;
   }, [wallDrag]);
+  // The wall edge the pointer is hovering, when it belongs to the selected
+  // non-rectangle room — teaches the wall→chip link (the wall lights up and its
+  // WallSlideHandles chip gets the stronger treatment). Cheap: only set while
+  // hovering an eligible edge, cleared on leave.
+  const [hoveredWallId, setHoveredWallId] = useState<string | null>(null);
   // Partition create-drag and edit-drag — same ref-mirrored discipline as the
   // other drag gestures (subscribed once per gesture; committed project can't
   // change mid-drag since nothing commits until release).
@@ -628,12 +635,10 @@ export function PlanView({
     selectedVertexIdRef.current = selectedVertexId;
   }, [selectedVertexId]);
   useEffect(() => {
-    // Also keyed on selectedRoomId: with implicit reshape on non-rectangles,
-    // switching rooms swaps the live reshape target without reshapeRoomId
-    // changing, and a stale vertex from the previous room must not be the
-    // target of a Delete keypress.
+    // Disarming (or re-arming on a different room) clears any vertex selection,
+    // so a stale vertex can't be the target of a later Delete keypress.
     setSelectedVertexId(null);
-  }, [reshapeRoomId, selectedRoomId]);
+  }, [reshapeRoomId]);
 
   const bounds = getFloorBounds(project.floor);
   const padding = getPlanViewPaddingMm(bounds);
@@ -937,45 +942,32 @@ export function PlanView({
     // deliberately not resubscribed on every appended vertex.
   }, [drawRoomActive]);
 
-  // A non-rectangular room is in reshape whenever it's selected — its handles
-  // are the only editing affordance the shape has, so they show without the
-  // explicit "Edit shape" arm. reshapeRoomId (the armed mode) remains the way
-  // a RECTANGLE swaps its resize handles for reshape handles.
-  const selectedRoomPlacement = selectedRoomId
-    ? project.floor.rooms.find((placement) => placement.roomId === selectedRoomId)
-    : undefined;
-  const effectiveReshapeRoomId =
-    reshapeRoomId ??
-    (selectedRoomPlacement && !isRectangleRoom(selectedRoomPlacement.room)
-      ? selectedRoomPlacement.roomId
-      : null);
-
-  // Escape exits an ARMED reshape mode (implicit reshape on a non-rectangle
-  // has no mode to exit — Escape falls through to the global clear-selection,
-  // which hides the handles with the selection); Delete/Backspace removes the
-  // selected vertex (merges its two walls). Scoped to while reshape is live,
-  // same idiom as the draw-mode handler above — reads the live selection via
-  // selectedVertexIdRef so it isn't resubscribed on every vertex click.
+  // Edit-shape mode is armed explicitly for every room (RoomInspector's "Edit
+  // shape" button / a plan double-click set reshapeRoomId). Escape disarms it;
+  // Delete/Backspace removes the selected vertex (merges its two walls). Scoped
+  // to while it's armed, same idiom as the draw-mode handler above — reads the
+  // live selection via selectedVertexIdRef so it isn't resubscribed on every
+  // vertex click.
   useEffect(() => {
-    if (!effectiveReshapeRoomId) return;
+    if (!reshapeRoomId) return;
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        if (reshapeRoomId) onReshapeRoomChange?.(null);
+        onReshapeRoomChange?.(null);
         return;
       }
       if (event.key === "Delete" || event.key === "Backspace") {
         const vertexId = selectedVertexIdRef.current;
-        if (!vertexId || !onDeleteRoomVertex || !effectiveReshapeRoomId) return;
+        if (!vertexId || !onDeleteRoomVertex || !reshapeRoomId) return;
         event.preventDefault();
         setSelectedVertexId(null);
-        void onDeleteRoomVertex(effectiveReshapeRoomId, vertexId);
+        void onDeleteRoomVertex(reshapeRoomId, vertexId);
       }
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [effectiveReshapeRoomId, reshapeRoomId, onReshapeRoomChange, onDeleteRoomVertex]);
+  }, [reshapeRoomId, onReshapeRoomChange, onDeleteRoomVertex]);
 
   // Escape disarms the partition tool (mirrors the draw-mode handler), scoped
   // to while it's armed so it never competes with App's global handlers.
@@ -1591,7 +1583,7 @@ export function PlanView({
     // mid-drag since nothing commits until release).
   }, [vertexDrag !== null, onMoveRoomVertex]);
 
-  function beginWallDrag(roomId: string, wallId: string, event: ReactPointerEvent<SVGLineElement>) {
+  function beginWallDrag(roomId: string, wallId: string, event: ReactPointerEvent<SVGElement>) {
     event.stopPropagation();
     const placement = project.floor.rooms.find((candidate) => candidate.roomId === roomId);
     const wall = placement?.room.walls.find((candidate) => candidate.id === wallId);
@@ -2445,11 +2437,22 @@ export function PlanView({
               const x2 = end.xMm + placement.offsetXMm;
               const y2 = end.yMm + placement.offsetYMm;
 
+              // Teach the wall→chip link for a selected non-rectangle: hovering
+              // this edge lights the wall and its WallSlideHandles chip. Only
+              // eligible when the room is selected, not armed for edit-shape,
+              // and non-rectangular (rectangles use resize chips, not slides).
+              const slideHoverEligible =
+                placement.roomId === selectedRoomId &&
+                reshapeRoomId !== placement.roomId &&
+                !isRectangleRoom(placement.room);
+              const isHovered = slideHoverEligible && hoveredWallId === wall.id;
               return (
                 <Fragment key={wall.id}>
                   <line
                     className={
-                      wall.id === selectedWallId ? "wall-line active" : "wall-line"
+                      wall.id === selectedWallId || isHovered
+                        ? "wall-line active"
+                        : "wall-line"
                     }
                     x1={x1}
                     y1={y1}
@@ -2461,7 +2464,9 @@ export function PlanView({
                       line so it owns the click — wall-anchored doors/windows
                       render in a later section of this svg, so they still
                       paint above this and keep winning clicks by paint order
-                      alone, no z-ordering code needed. */}
+                      alone, no z-ordering code needed. Hover here only teaches
+                      the chip link; the edge stays click-to-select, never
+                      draggable. */}
                   <line
                     className="wall-hit"
                     x1={x1}
@@ -2469,6 +2474,14 @@ export function PlanView({
                     x2={x2}
                     y2={y2}
                     vectorEffect="non-scaling-stroke"
+                    onPointerEnter={
+                      slideHoverEligible ? () => setHoveredWallId(wall.id) : undefined
+                    }
+                    onPointerLeave={
+                      slideHoverEligible
+                        ? () => setHoveredWallId((current) => (current === wall.id ? null : current))
+                        : undefined
+                    }
                     onClick={(event) => {
                       // TRAP 1 — armed placement tool: doors/windows are
                       // click-placed ON walls via handleSvgClick's tool
@@ -2822,11 +2835,15 @@ export function PlanView({
           );
           if (!selectedPlacement || handleSizeMm <= 0) return null;
 
-          const isReshaping = effectiveReshapeRoomId === selectedPlacement.roomId;
+          const isReshaping = reshapeRoomId === selectedPlacement.roomId;
           const vertexDragInvalid =
             isReshaping && vertexDrag?.roomId === selectedPlacement.roomId && !vertexDrag.valid;
+          // A wall slide only happens in the selected-default mode (not while
+          // armed for edit-shape), so its invalid tint is independent of
+          // isReshaping — the outline reads danger whenever the live slide is
+          // invalid for this room.
           const wallDragInvalid =
-            isReshaping && wallDrag?.roomId === selectedPlacement.roomId && !wallDrag.valid;
+            wallDrag?.roomId === selectedPlacement.roomId && !wallDrag.valid;
 
           return (
             <g>
@@ -2840,10 +2857,10 @@ export function PlanView({
                 vectorEffect="non-scaling-stroke"
                 style={vertexDragInvalid || wallDragInvalid ? { stroke: "var(--danger)" } : undefined}
               />
-              {/* Reshape mode replaces the rectangle-only resize handles with
-                  vertex/split handles for whichever room is armed — the two
-                  never render together, so there's no risk of them colliding
-                  visually (both would sit at wall midpoints on a rectangle). */}
+              {/* Three-way handle fork, mutually exclusive per the invariant:
+                  edit-shape armed → corner/split handles only; else a rectangle
+                  keeps its resize chips; else a non-rectangle gets wall-slide
+                  chips. Exactly one control set ever renders for a room. */}
               {isReshaping ? (
                 <RoomReshapeHandles
                   activeVertexId={vertexDrag?.roomId === selectedPlacement.roomId ? vertexDrag.vertexId : null}
@@ -2854,12 +2871,9 @@ export function PlanView({
                   onBeginVertexDrag={(vertexId, event) =>
                     beginVertexDrag(selectedPlacement.roomId, vertexId, event)
                   }
-                  onBeginWallDrag={(wallId, event) =>
-                    beginWallDrag(selectedPlacement.roomId, wallId, event)
-                  }
                   onSplitWallClick={handleSplitWallClick}
                 />
-              ) : (
+              ) : isRectangleRoom(selectedPlacement.room) ? (
                 <RoomResizeHandles
                   activeDrag={
                     drag && drag.roomId === selectedPlacement.roomId
@@ -2874,6 +2888,25 @@ export function PlanView({
                   placement={selectedPlacement}
                   unit={wallUnit}
                   onBeginDrag={beginDrag}
+                />
+              ) : (
+                <WallSlideHandles
+                  activeDrag={
+                    wallDrag?.roomId === selectedPlacement.roomId
+                      ? {
+                          wallId: wallDrag.wallId,
+                          offsetMm: wallDrag.previewOffsetMm,
+                          valid: wallDrag.valid
+                        }
+                      : null
+                  }
+                  handleSizeMm={handleSizeMm}
+                  highlightedWallId={hoveredWallId}
+                  placement={selectedPlacement}
+                  unit={wallUnit}
+                  onBeginWallDrag={(wallId, event) =>
+                    beginWallDrag(selectedPlacement.roomId, wallId, event)
+                  }
                 />
               )}
             </g>

@@ -46,32 +46,23 @@ export function RoomInspector({
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
       <div className="inspector-placement">
-        {/* Non-rectangular rooms show their reshape handles whenever they're
-            selected, so the arm/disarm button only exists for rectangles
-            (where it swaps the width/depth resize handles for reshape ones). */}
-        {rectangleDimensions ? (
-          <>
-            <Button
-              aria-pressed={reshapeActive}
-              className="inspector-action"
-              variant={reshapeActive ? "primary" : "inspector"}
-              onClick={onToggleReshape}
-            >
-              <PencilSimpleIcon aria-hidden="true" size={15} />
-              {reshapeActive ? "Done editing shape" : "Edit shape"}
-            </Button>
-            <p className="field-hint">
-              {reshapeActive
-                ? "Drag a corner or a wall to reshape the room, or click a wall's + to split it. Escape to finish."
-                : "Drag corners, split walls, or remove a corner to change this room's outline."}
-            </p>
-          </>
-        ) : (
-          <p className="field-hint">
-            Drag a corner or a wall to reshape the room, click a wall's + to
-            split it, or select a corner and press Delete to remove it.
-          </p>
-        )}
+        {/* Edit shape arms corner/split editing for every room. Not armed, a
+            selected room shows wall-slide chips (rectangles show resize chips
+            instead); the button swaps those for vertex/split handles. */}
+        <Button
+          aria-pressed={reshapeActive}
+          className="inspector-action"
+          variant={reshapeActive ? "primary" : "inspector"}
+          onClick={onToggleReshape}
+        >
+          <PencilSimpleIcon aria-hidden="true" size={15} />
+          {reshapeActive ? "Done editing shape" : "Edit shape"}
+        </Button>
+        <p className="field-hint">
+          {reshapeActive
+            ? "Drag corners to reshape. Use + to split a wall. Select a corner and press Delete to remove it. Escape to finish."
+            : "Drag a wall's handle to move that wall. Edit shape to move corners or split walls."}
+        </p>
       </div>
 
       {rectangleDimensions ? (
