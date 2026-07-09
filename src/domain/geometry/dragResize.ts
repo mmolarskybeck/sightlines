@@ -1,11 +1,9 @@
 import type { Project } from "../project";
 import type { ResizeAnchor } from "./editRoom";
+import type { Vector2 } from "./vector";
 import { getWallGeometry } from "./walls";
 
-export type Vector2 = {
-  xMm: number;
-  yMm: number;
-};
+export type { Vector2 } from "./vector";
 
 // A sane floor during interactive drag so a fast pointer movement can't
 // collapse a room to a degenerate near-zero size mid-gesture. The final
