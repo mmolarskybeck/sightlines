@@ -129,8 +129,6 @@ export function useArrangeNudgeShortcuts({
       const dyMm =
         event.key === "ArrowUp" ? stepMm : event.key === "ArrowDown" ? -stepMm : 0;
 
-      event.preventDefault();
-
       // A single selected placement nudges directly, one store commit per press
       // (per-press undo entries — deliberately NOT an arrange session: its
       // guards need 2+ artwork members, and an invisible single-work session
@@ -138,6 +136,8 @@ export function useArrangeNudgeShortcuts({
       // moveArtworkPlacement, openings via moveOpening, matching the single-
       // object pointer-drag split — a lone opening still nudges here.
       if (selectedWallObjects.length === 1) {
+        event.preventDefault();
+        event.stopPropagation();
         const member = selectedWallObjects[0];
         let nextXMm = member.xMm + dxMm;
         let nextYMm = member.yMm + dyMm;
@@ -177,6 +177,9 @@ export function useArrangeNudgeShortcuts({
       if (members.length < 2) return;
       const sameWall = members.every((member) => member.wallId === members[0].wallId);
       if (!sameWall) return;
+
+      event.preventDefault();
+      event.stopPropagation();
 
       // Nudge from the current preview if a session is already open, else from
       // the committed layout. beginArrangeSession is a synchronous set(), so
@@ -227,8 +230,12 @@ export function useArrangeNudgeShortcuts({
       setArrangeSessionPreview(moves);
     }
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    // Capture phase lets workspace nudges win over focused topbar/menu widgets
+    // that implement their own arrow-key roving focus. We only stop propagation
+    // after proving a nudge will happen, so real focused controls still keep
+    // their keys.
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [
     project,
     viewMode,
