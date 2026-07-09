@@ -45,6 +45,7 @@ import {
 } from "../../domain/viewport/viewport2d";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { useContainerSize } from "../hooks/useContainerSize";
+import { useDragGesture } from "../hooks/useDragGesture";
 import { useSvgViewportGestures } from "../hooks/useSvgViewportGestures";
 import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
 import { ElevationArtwork } from "./ElevationArtwork";
@@ -252,11 +253,7 @@ export function ElevationView({
 }) {
   const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
-  const [moveDrag, setMoveDrag] = useState<MoveDragState | null>(null);
-  const moveDragRef = useRef<MoveDragState | null>(null);
   const [dropGhost, setDropGhost] = useState<DropGhostState | null>(null);
-  const [marquee, setMarquee] = useState<MarqueeState | null>(null);
-  const marqueeRef = useRef<MarqueeState | null>(null);
 
   // Pad the viewBox so the wall reads as a figure on the canvas field
   // rather than bleeding edge-to-edge, and so boundary strokes (centered on
@@ -285,6 +282,122 @@ export function ElevationView({
   const majorGridMm = getMajorGridIntervalMm(unit, minorGridMm);
   const centerlineSvgY = wallLocalYToSvgY(wallHeightMm, centerlineMm);
   const snapThresholdMm = pixelsPerMm > 0 ? SNAP_THRESHOLD_PX / pixelsPerMm : 0;
+
+  // The moveDrag state machine: pointer-drag move of an existing placement,
+  // transient until release (docs/plan.md §7: live preview, exactly one store
+  // commit on release). Collapsed via useDragGesture from the extracted copies
+  // in PlanView and ElevationView.
+  const { drag: moveDrag, dragRef: moveDragRef, beginDrag: beginMoveDragGesture, isDragging: isMoveDragging } = useDragGesture<MoveDragState>({
+    onMove: (current, event) => {
+      const pointerMm = toWallLocalMm(event.clientX, event.clientY);
+      if (!pointerMm) return null;
+
+      const proposedCenterMm: Vector2 = {
+        xMm: current.startCenterMm.xMm + (pointerMm.xMm - current.startPointerMm.xMm),
+        yMm: current.startCenterMm.yMm + (pointerMm.yMm - current.startPointerMm.yMm)
+      };
+
+      // For a group drag exclude every member from the neighbor pool (the group
+      // must never snap to its own members); for a single drag just the one.
+      const memberIds = current.members
+        ? new Set(current.members.map((member) => member.id))
+        : null;
+      const neighbors = wallObjectsOnThisWall.filter((wallObject) =>
+        memberIds ? !memberIds.has(wallObject.id) : wallObject.id !== current.wallObjectId
+      );
+
+      // ⌘/Ctrl held mid-drag → momentary precision bypass (fully free move,
+      // Figma convention). Read live off each pointer event so it can toggle
+      // during the drag. Alt is untouched (alt-drag = solo-move a group member).
+      const precisionBypass = event.metaKey || event.ctrlKey;
+
+      const snapResult = resolveElevationPlacement(
+        proposedCenterMm,
+        // For a group, sizeMm is the union box and the whole thing resolves as
+        // one virtual artwork (no per-kind floor tier — a mixed group has no
+        // single kind); a single object keeps its own size and kind-gated floor.
+        current.sizeMm,
+        neighbors,
+        current.members ? "artwork" : current.kind,
+        current.previousSnapTargetIds,
+        precisionBypass
+      );
+
+      return {
+        ...current,
+        previewCenterMm: snapResult.point,
+        previousSnapTargetIds: snapResult.snapTargetIds,
+        activeGuides: snapResult.activeGuides
+      };
+    },
+    onRelease: (current, event) => {
+      // Sub-threshold release is a no-op — a click-without-real-movement
+      // must not produce a phantom undo entry (docs/plan.md §7).
+      const movedMm = Math.hypot(
+        current.previewCenterMm.xMm - current.startCenterMm.xMm,
+        current.previewCenterMm.yMm - current.startCenterMm.yMm
+      );
+      if (movedMm < 0.5) return;
+
+      // Group drag: one commit carrying every member's final center (both kinds
+      // through the single onMoveWallObjects prop). Member center = the snapped
+      // group center plus that member's stored offset.
+      if (current.members) {
+        // Whether or not the commit survives the collision gate, the trailing
+        // click must not collapse the multi-selection (see suppressNextSelect).
+        suppressNextSelect();
+        const moves = current.members.map((member) => ({
+          id: member.id,
+          xMm: current.previewCenterMm.xMm + member.offsetFromGroupCenterMm.xMm,
+          yMm: current.previewCenterMm.yMm + member.offsetFromGroupCenterMm.yMm
+        }));
+        onMoveWallObjects?.(moves);
+        return;
+      }
+
+      // Alt-drag of one group member: same single-object commit below, but the
+      // trailing click must not collapse the multi-selection it came from.
+      if (current.preserveSelection) suppressNextSelect();
+
+      // A drag released with an additive-select modifier still down (⌘/Ctrl
+      // precision drag, or Shift held) ends with the browser's trailing click,
+      // which would otherwise read as an additive toggle and deselect the
+      // object that was just moved.
+      if (event.metaKey || event.ctrlKey || event.shiftKey) suppressNextSelect();
+
+      if (current.kind === "artwork") {
+        onMovePlacement?.(current.wallObjectId, current.previewCenterMm.xMm, current.previewCenterMm.yMm);
+      } else {
+        onMoveOpening?.(current.wallObjectId, current.previewCenterMm.xMm, current.previewCenterMm.yMm);
+      }
+    }
+  });
+
+  // The marquee state machine: a pending rubber-band (marquee) selection on the
+  // elevation background, tracked as two wall-local-mm pointer samples (start +
+  // current). Collapsed via useDragGesture from the extracted copies in PlanView
+  // and ElevationView.
+  const { drag: marquee, dragRef: marqueeRef, beginDrag: beginMarqueeGesture, isDragging: isMarqueeragging } = useDragGesture<MarqueeState>({
+    onMove: (current, event) => {
+      const pointerMm = toWallLocalMm(event.clientX, event.clientY);
+      if (!pointerMm) return null;
+
+      return { ...current, currentMm: pointerMm };
+    },
+    onRelease: (current, event) => {
+      const rect = marqueeRectMm(current);
+      // A sub-threshold rect is a plain background click, not a drag: clear the
+      // selection rather than marquee-select an empty band. The threshold is
+      // the same pointer slop the snap plumbing uses (SNAP_THRESHOLD_PX in mm).
+      const draggedMm = Math.hypot(rect.maxXMm - rect.minXMm, rect.maxYMm - rect.minYMm);
+      if (draggedMm < snapThresholdMm) {
+        onClearSelection?.();
+        return;
+      }
+
+      onMarqueeSelect?.(getIdsIntersectingRect(wallObjectsOnThisWall, rect), event.shiftKey);
+    }
+  });
 
   // The shared 2D viewport gesture engine (pan / zoom / pinch / wheel /
   // keyboard), formerly a ~350-line copy inline here and in PlanView. It works
@@ -436,128 +549,6 @@ export function ElevationView({
     };
   }
 
-  useEffect(() => {
-    if (!moveDrag) return;
-
-    function onPointerMove(event: PointerEvent) {
-      const current = moveDragRef.current;
-      if (!current) return;
-
-      const pointerMm = toWallLocalMm(event.clientX, event.clientY);
-      if (!pointerMm) return;
-
-      const proposedCenterMm: Vector2 = {
-        xMm: current.startCenterMm.xMm + (pointerMm.xMm - current.startPointerMm.xMm),
-        yMm: current.startCenterMm.yMm + (pointerMm.yMm - current.startPointerMm.yMm)
-      };
-
-      // For a group drag exclude every member from the neighbor pool (the group
-      // must never snap to its own members); for a single drag just the one.
-      const memberIds = current.members
-        ? new Set(current.members.map((member) => member.id))
-        : null;
-      const neighbors = wallObjectsOnThisWall.filter((wallObject) =>
-        memberIds ? !memberIds.has(wallObject.id) : wallObject.id !== current.wallObjectId
-      );
-
-      // ⌘/Ctrl held mid-drag → momentary precision bypass (fully free move,
-      // Figma convention). Read live off each pointer event so it can toggle
-      // during the drag. Alt is untouched (alt-drag = solo-move a group member).
-      const precisionBypass = event.metaKey || event.ctrlKey;
-
-      const snapResult = resolveElevationPlacement(
-        proposedCenterMm,
-        // For a group, sizeMm is the union box and the whole thing resolves as
-        // one virtual artwork (no per-kind floor tier — a mixed group has no
-        // single kind); a single object keeps its own size and kind-gated floor.
-        current.sizeMm,
-        neighbors,
-        current.members ? "artwork" : current.kind,
-        current.previousSnapTargetIds,
-        precisionBypass
-      );
-
-      setMoveDrag((state) =>
-        state
-          ? {
-              ...state,
-              previewCenterMm: snapResult.point,
-              previousSnapTargetIds: snapResult.snapTargetIds,
-              activeGuides: snapResult.activeGuides
-            }
-          : state
-      );
-    }
-
-    function onPointerUp(event: PointerEvent) {
-      const current = moveDragRef.current;
-      setMoveDrag(null);
-      if (!current) return;
-
-      // Sub-threshold release is a no-op — a click-without-real-movement
-      // must not produce a phantom undo entry (docs/plan.md §7).
-      const movedMm = Math.hypot(
-        current.previewCenterMm.xMm - current.startCenterMm.xMm,
-        current.previewCenterMm.yMm - current.startCenterMm.yMm
-      );
-      if (movedMm < 0.5) return;
-
-      // Group drag: one commit carrying every member's final center (both kinds
-      // through the single onMoveWallObjects prop). Member center = the snapped
-      // group center plus that member's stored offset.
-      if (current.members) {
-        // Whether or not the commit survives the collision gate, the trailing
-        // click must not collapse the multi-selection (see suppressNextSelect).
-        suppressNextSelect();
-        const moves = current.members.map((member) => ({
-          id: member.id,
-          xMm: current.previewCenterMm.xMm + member.offsetFromGroupCenterMm.xMm,
-          yMm: current.previewCenterMm.yMm + member.offsetFromGroupCenterMm.yMm
-        }));
-        onMoveWallObjects?.(moves);
-        return;
-      }
-
-      // Alt-drag of one group member: same single-object commit below, but the
-      // trailing click must not collapse the multi-selection it came from.
-      if (current.preserveSelection) suppressNextSelect();
-
-      // A drag released with an additive-select modifier still down (⌘/Ctrl
-      // precision drag, or Shift held) ends with the browser's trailing click,
-      // which would otherwise read as an additive toggle and deselect the
-      // object that was just moved.
-      if (event.metaKey || event.ctrlKey || event.shiftKey) suppressNextSelect();
-
-      if (current.kind === "artwork") {
-        onMovePlacement?.(current.wallObjectId, current.previewCenterMm.xMm, current.previewCenterMm.yMm);
-      } else {
-        onMoveOpening?.(current.wallObjectId, current.previewCenterMm.xMm, current.previewCenterMm.yMm);
-      }
-    }
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerUp);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
-    };
-    // Same shape as PlanView's drag effect: subscribed once per gesture,
-    // reading live state via moveDragRef rather than closing over `moveDrag`.
-    // wallLengthMm/wallHeightMm/centerlineMm/minorGridMm/snapToGrid/
-    // snapThresholdMm/wallObjectsOnThisWall all derive from the committed
-    // project (plus the arrange-session preview layer) and current viewport,
-    // none of which can change mid-drag: the transient drag preview never
-    // rewrites them, panel edits are impossible while a pointer is captured
-    // (the pointer is on the canvas, not the inspector), and the session
-    // preview only changes from this very drag's own commits — so they're
-    // intentionally left out of the deps.
-  }, [moveDrag !== null, onMovePlacement, onMoveOpening, onMoveWallObjects]);
-
-  useEffect(() => {
-    moveDragRef.current = moveDrag;
-  }, [moveDrag]);
 
   // The browser fires a `click` on the grabbed element right after a drag's
   // pointerup. For a single object that click merely re-selects it (today's
@@ -579,54 +570,6 @@ export function ElevationView({
     return suppressed;
   }
 
-  useEffect(() => {
-    if (!marquee) return;
-
-    function onPointerMove(event: PointerEvent) {
-      const current = marqueeRef.current;
-      if (!current) return;
-
-      const pointerMm = toWallLocalMm(event.clientX, event.clientY);
-      if (!pointerMm) return;
-
-      setMarquee((state) => (state ? { ...state, currentMm: pointerMm } : state));
-    }
-
-    function onPointerUp(event: PointerEvent) {
-      const current = marqueeRef.current;
-      setMarquee(null);
-      if (!current) return;
-
-      const rect = marqueeRectMm(current);
-      // A sub-threshold rect is a plain background click, not a drag: clear the
-      // selection rather than marquee-select an empty band. The threshold is
-      // the same pointer slop the snap plumbing uses (SNAP_THRESHOLD_PX in mm).
-      const draggedMm = Math.hypot(rect.maxXMm - rect.minXMm, rect.maxYMm - rect.minYMm);
-      if (draggedMm < snapThresholdMm) {
-        onClearSelection?.();
-        return;
-      }
-
-      onMarqueeSelect?.(getIdsIntersectingRect(wallObjectsOnThisWall, rect), event.shiftKey);
-    }
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerUp);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
-    };
-    // Same ref-based discipline as the move-drag effect: subscribed once per
-    // gesture, reading the live rect via marqueeRef. snapThresholdMm and
-    // wallObjectsOnThisWall derive from the committed project/viewport and
-    // can't change mid-gesture, so they're intentionally out of the deps.
-  }, [marquee !== null, onClearSelection, onMarqueeSelect]);
-
-  useEffect(() => {
-    marqueeRef.current = marquee;
-  }, [marquee]);
 
   function beginMarquee(event: ReactPointerEvent<SVGSVGElement>) {
     // Touch: a finger on true background pans the canvas instead of marqueeing
@@ -656,7 +599,7 @@ export function ElevationView({
     // stale selection becomes a native drag of the selected text — Chrome
     // then fires pointercancel and kills the gesture mid-flight.
     event.preventDefault();
-    setMarquee({ startMm, currentMm: startMm });
+    beginMarqueeGesture({ startMm, currentMm: startMm });
   }
 
   function handleSvgPointerDownCapture(event: ReactPointerEvent<SVGSVGElement>) {
@@ -689,7 +632,7 @@ export function ElevationView({
       if (groupMembers.length > 1) {
         const box = getGroupBounds(groupMembers);
         const groupCenterMm: Vector2 = { xMm: box.centerXMm, yMm: box.centerYMm };
-        setMoveDrag({
+        beginMoveDragGesture({
           wallObjectId: wallObject.id,
           kind: wallObject.kind,
           sizeMm: { widthMm: box.widthMm, heightMm: box.heightMm },
@@ -713,7 +656,7 @@ export function ElevationView({
       }
     }
 
-    setMoveDrag({
+    beginMoveDragGesture({
       wallObjectId: wallObject.id,
       kind: wallObject.kind,
       sizeMm: { widthMm: wallObject.widthMm, heightMm: wallObject.heightMm },
