@@ -48,6 +48,7 @@ import { AppRail } from "./components/AppRail";
 import { ArtworkInspector } from "./components/ArtworkInspector";
 import { PanelResizeHandle } from "./components/PanelResizeHandle";
 import { ChecklistPanel } from "./components/ChecklistPanel";
+import { DeleteRoomDialog } from "./components/DeleteRoomDialog";
 import { ElevationEmptyState } from "./components/ElevationEmptyState";
 import { FloorObjectInspector, FloorPlacementFields } from "./components/FloorObjectInspector";
 import { FreestandingWallInspector } from "./components/FreestandingWallInspector";
@@ -92,6 +93,7 @@ import { isEditableTarget } from "./hooks/isEditableTarget";
 import { useUndoRedoShortcuts } from "./hooks/useUndoRedoShortcuts";
 import { useArrangeNudgeShortcuts } from "./hooks/useArrangeNudgeShortcuts";
 import { deriveArrangeReadout } from "./hooks/arrangeReadout";
+import { shouldDeleteRoomOnKey, summarizeRoomContents } from "./roomDeletion";
 import {
   exportProjectJson,
   freestandingWallIdOf,
@@ -232,6 +234,10 @@ export function App() {
   const [importWizardOpen, setImportWizardOpen] = useState(false);
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  // The occupied room the Delete shortcut is asking to confirm about —
+  // transient UI state like the armed tools (never in the store/undo). Empty
+  // rooms skip this and delete immediately.
+  const [confirmDeleteRoomId, setConfirmDeleteRoomId] = useState<string | null>(null);
   // Which insertion tool (door/window/blocked-zone) is armed on the plan
   // canvas — transient UI state, deliberately NOT in the store: same
   // reasoning as PlanView's other drag/marquee state (see the comment near
@@ -372,6 +378,12 @@ export function App() {
         return;
       }
 
+      // The delete-room confirm dialog owns the keyboard while open: Radix
+      // itself closes on Escape (this handler must not ALSO clear the
+      // selection), and Delete must not re-trigger the branch below while
+      // the question is already on screen.
+      if (confirmDeleteRoomId) return;
+
       // Escape now clears ANY selection kind — objects, an unplaced checklist
       // pick, or a room focus (previously only the multi-object slot cleared
       // here; clearing a room selection was reachable only via other paths,
@@ -408,6 +420,31 @@ export function App() {
       if (selectedFreestandingWallId) {
         event.preventDefault();
         void deleteFreestandingWall(selectedFreestandingWallId);
+        return;
+      }
+
+      // Last in the chain: a whole-room selection (selection kind "room" —
+      // never a wall focus, which selectWall writes as NO_SELECTION + wall
+      // context). shouldDeleteRoomOnKey also stands down while edit-shape is
+      // armed (vertex removal owns the key there, via PlanView). Empty rooms
+      // delete immediately (one undo entry, cascade handled by deleteRoom);
+      // occupied rooms confirm through the dialog first.
+      const roomIdToDelete = shouldDeleteRoomOnKey({
+        eventTarget: event.target,
+        reshapeRoomId,
+        selection
+      });
+      if (roomIdToDelete) {
+        const placement = project.floor.rooms.find(
+          (candidate) => candidate.roomId === roomIdToDelete
+        );
+        if (!placement) return;
+        event.preventDefault();
+        if (summarizeRoomContents(project, placement).isEmpty) {
+          void deleteRoom(roomIdToDelete);
+        } else {
+          setConfirmDeleteRoomId(roomIdToDelete);
+        }
       }
     }
 
@@ -419,6 +456,9 @@ export function App() {
     selectedObjectIds,
     selectedFreestandingWallId,
     deleteFreestandingWall,
+    deleteRoom,
+    reshapeRoomId,
+    confirmDeleteRoomId,
     draggingArtworkId,
     isHelpOpen,
     removeSelectedPlacements,
@@ -499,6 +539,17 @@ export function App() {
     : null;
   const selectedRoomDimensions = selectedRoomPlacement
     ? getRectangleRoomDimensions(selectedRoomPlacement.room)
+    : null;
+  // The room the delete-confirm dialog is asking about, resolved against the
+  // live project — a stale id (undo/redo or deletion elsewhere) resolves to
+  // null and the dialog simply closes.
+  const confirmDeleteRoomPlacement = confirmDeleteRoomId
+    ? (project.floor.rooms.find(
+        (placement) => placement.roomId === confirmDeleteRoomId
+      ) ?? null)
+    : null;
+  const confirmDeleteRoomSummary = confirmDeleteRoomPlacement
+    ? summarizeRoomContents(project, confirmDeleteRoomPlacement)
     : null;
   const selectedRoomWallIds = new Set(
     selectedRoomPlacement?.room.walls.map((wall) => wall.id) ?? []
@@ -1433,6 +1484,18 @@ export function App() {
           onOpenChange={setImportWizardOpen}
         />
       </Suspense>
+      <DeleteRoomDialog
+        roomName={confirmDeleteRoomPlacement?.room.name ?? ""}
+        summary={confirmDeleteRoomSummary}
+        onConfirm={() => {
+          const roomId = confirmDeleteRoomId;
+          setConfirmDeleteRoomId(null);
+          if (roomId) void deleteRoom(roomId);
+        }}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDeleteRoomId(null);
+        }}
+      />
     </main>
     </TooltipProvider>
   );
