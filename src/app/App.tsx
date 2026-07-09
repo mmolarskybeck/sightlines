@@ -1836,7 +1836,7 @@ function StatusBadge({ state }: { state: "idle" | "saving" | "saved" | "error" }
   return (
     <span className={`status-badge ${state}`}>
       <span className="status-dot" aria-hidden="true" />
-      {label}
+      <span className="status-badge-label">{label}</span>
     </span>
   );
 }

@@ -7,6 +7,7 @@
 
 import { DISPLAY_MAX_PX, THUMBNAIL_MAX_PX, WEBP_QUALITY, fitWithin } from "./imageIntake";
 import type { ImageProcessor, ProcessedImage } from "./imageIntake";
+import { sha256Hex } from "./sha256";
 
 type EncodableCanvas = OffscreenCanvas | HTMLCanvasElement;
 
@@ -39,14 +40,6 @@ export function createBrowserImageProcessor(): ImageProcessor {
       }
     }
   };
-}
-
-async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 async function decodeBitmap(file: File): Promise<ImageBitmap> {

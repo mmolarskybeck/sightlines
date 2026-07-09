@@ -1984,7 +1984,9 @@ export function PlanView({
   }
 
   function handleArtworkDragOver(event: ReactDragEvent<HTMLDivElement>) {
-    if (!event.dataTransfer.types.includes(ARTWORK_DRAG_MIME)) return;
+    // iPadOS Safari hides custom MIME types during dragover/drop, so fall back
+    // to the app-level drag state (draggingArtworkId) rather than trusting dataTransfer.
+    if (!event.dataTransfer.types.includes(ARTWORK_DRAG_MIME) && !draggingArtworkId) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
 
@@ -2009,7 +2011,7 @@ export function PlanView({
   }
 
   function handleArtworkDrop(event: ReactDragEvent<HTMLDivElement>) {
-    const artworkId = event.dataTransfer.getData(ARTWORK_DRAG_MIME);
+    const artworkId = event.dataTransfer.getData(ARTWORK_DRAG_MIME) || draggingArtworkId;
     setDropGhost(null);
     dropSnapTargetIdsRef.current = undefined;
     if (!artworkId) return;

@@ -4057,6 +4057,41 @@ body.panels-resizing * {
   .checklist-grip {
     display: none;
   }
+
+  /* iPad portrait widths (768-834px) can't fit the topbar's three groups on
+     one line at full width. Rather than let it wrap to two lines, go
+     icon-only: tab labels, the Export label, and the save-badge label all
+     collapse to visually-hidden text so the accessible name survives while
+     the visible row stays a single line. */
+  .topbar {
+    gap: 12px;
+    padding: 10px 14px;
+  }
+
+  .tab-button span,
+  .topbar-button span,
+  .status-badge-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .tab-button {
+    padding: 0 10px;
+  }
+
+  .topbar-button {
+    width: 36px;
+    padding: 0;
+    justify-content: center;
+    gap: 0;
+  }
 }
 
 @media (max-width: 760px) {

@@ -636,7 +636,9 @@ export function ElevationView({
   }
 
   function handleDragOver(event: ReactDragEvent<HTMLDivElement>) {
-    if (!wallId || !event.dataTransfer.types.includes(ARTWORK_DRAG_MIME)) return;
+    // iPadOS Safari hides custom MIME types during dragover/drop, so fall back
+    // to the app-level drag state (draggingArtworkId) rather than trusting dataTransfer.
+    if (!wallId || (!event.dataTransfer.types.includes(ARTWORK_DRAG_MIME) && !draggingArtworkId)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
 
@@ -672,7 +674,7 @@ export function ElevationView({
   }
 
   function handleDrop(event: ReactDragEvent<HTMLDivElement>) {
-    const artworkId = event.dataTransfer.getData(ARTWORK_DRAG_MIME);
+    const artworkId = event.dataTransfer.getData(ARTWORK_DRAG_MIME) || draggingArtworkId;
     setDropGhost(null);
     if (!artworkId || !wallId) return;
     event.preventDefault();
