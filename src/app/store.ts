@@ -372,6 +372,62 @@ export function createAppStore(deps: AppStoreDeps) {
       });
     }
 
+    // Shared gate behind every placement commit (place/move/resize a wall
+    // object): validates the touched ids against the candidate wallObjects
+    // and, unless the caller has opted into overlap, blocks on any collision
+    // by setting the shared OVERLAP_BLOCKED_MESSAGE. Returns null when
+    // blocked (caller must not commit), else the warnings to carry through.
+    function gatePlacementWarnings(
+      project: Project,
+      candidateWallObjects: WallObject[],
+      validateIds: string[],
+      allowOverlap: boolean
+    ): PlacementWarning[] | null {
+      const placementWarnings = validateWallObjectPlacements(
+        { ...project, wallObjects: candidateWallObjects },
+        validateIds
+      );
+
+      if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
+        set({ error: OVERLAP_BLOCKED_MESSAGE });
+        return null;
+      }
+      return placementWarnings;
+    }
+
+    // Shared commit path for a single placement edit (add/move/resize a wall
+    // object, optionally alongside a floorObjects change): runs the same
+    // collision gate as commitWallObjectMoves, then applies via applyEdit
+    // (which persists) with placementWarnings plus any caller extras. Returns
+    // whether the edit committed, for callers that branch on it.
+    async function commitWallObjectEdit(
+      label: string,
+      project: Project,
+      nextWallObjects: WallObject[],
+      validateIds: string[],
+      allowOverlap: boolean,
+      options: { nextFloorObjects?: FloorObject[]; extras?: EditExtras } = {}
+    ): Promise<boolean> {
+      const placementWarnings = gatePlacementWarnings(
+        project,
+        nextWallObjects,
+        validateIds,
+        allowOverlap
+      );
+      if (placementWarnings === null) return false;
+
+      await applyEdit(
+        label,
+        (current) => ({
+          ...current,
+          wallObjects: nextWallObjects,
+          ...(options.nextFloorObjects ? { floorObjects: options.nextFloorObjects } : {})
+        }),
+        { placementWarnings, ...options.extras }
+      );
+      return true;
+    }
+
     // Shared commit path for a batch of wall-object x/y moves: all-or-nothing
     // collision gate (a single overlap blocks the whole batch), then one undo
     // entry. Extracted from moveWallObjectsGroup so the arrange session can
@@ -414,15 +470,8 @@ export function createAppStore(deps: AppStoreDeps) {
 
       // One batch is one commit: either every member's move lands together, or
       // a single collision anywhere blocks the whole thing.
-      const placementWarnings = validateWallObjectPlacements(
-        { ...project, wallObjects: nextWallObjects },
-        movedIds
-      );
-
-      if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
-        set({ error: OVERLAP_BLOCKED_MESSAGE });
-        return { status: "blocked" };
-      }
+      const placementWarnings = gatePlacementWarnings(project, nextWallObjects, movedIds, allowOverlap);
+      if (placementWarnings === null) return { status: "blocked" };
 
       const after = {
         ...project,
@@ -1773,24 +1822,17 @@ export function createAppStore(deps: AppStoreDeps) {
 
         const placement = createArtworkPlacement(artwork, wallId, xMm, yMm);
         const nextWallObjects = [...project.wallObjects, placement];
-        const placementWarnings = validateWallObjectPlacements(
-          { ...project, wallObjects: nextWallObjects },
-          [placement.id]
-        );
 
-        if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
-          set({ error: OVERLAP_BLOCKED_MESSAGE });
-          return;
-        }
-
-        await applyEdit(
+        await commitWallObjectEdit(
           "Place artwork",
-          (current) => ({ ...current, wallObjects: nextWallObjects }),
-          // Placing selects the new placement (wart-fix umbrella: previously it
-          // set only the inspector slot and left any multi-select intact).
+          project,
+          nextWallObjects,
+          [placement.id],
+          allowOverlap,
           {
-            placementWarnings,
-            ...selectionWrite(
+            // Placing selects the new placement (wart-fix umbrella: previously
+            // it set only the inspector slot and left any multi-select intact).
+            extras: selectionWrite(
               { ...project, wallObjects: nextWallObjects },
               { kind: "objects", ids: [placement.id] },
               get().wallContextId
@@ -1809,23 +1851,16 @@ export function createAppStore(deps: AppStoreDeps) {
         const nextWallObjects = project.wallObjects.map((wallObject) =>
           wallObject.id === wallObjectId ? { ...wallObject, xMm, yMm } : wallObject
         );
-        const placementWarnings = validateWallObjectPlacements(
-          { ...project, wallObjects: nextWallObjects },
-          [wallObjectId]
-        );
-
-        if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
-          set({ error: OVERLAP_BLOCKED_MESSAGE });
-          return;
-        }
 
         // The UI previews the drag locally and calls this exactly once on
         // release (docs/plan.md §7) — one call here is already one undo
         // entry, nothing extra to batch.
-        await applyEdit(
+        await commitWallObjectEdit(
           "Move artwork",
-          (current) => ({ ...current, wallObjects: nextWallObjects }),
-          { placementWarnings }
+          project,
+          nextWallObjects,
+          [wallObjectId],
+          allowOverlap
         );
       },
 
@@ -1882,17 +1917,19 @@ export function createAppStore(deps: AppStoreDeps) {
         const placement = buildOpeningOnWall(project, wall, kind, wall.lengthMm / 2);
         const nextWallObjects = [...project.wallObjects, placement];
 
-        await applyEdit(
+        // Adding an opening is never blocked by a collision (there's no
+        // allowOverlap knob for it) — allowOverlap: true skips the gate while
+        // still surfacing the warning via placementWarnings.
+        await commitWallObjectEdit(
           `Add ${openingNoun(kind)}`,
-          (current) => ({ ...current, wallObjects: nextWallObjects }),
+          project,
+          nextWallObjects,
+          [placement.id],
+          true,
           {
-            placementWarnings: validateWallObjectPlacements(
-              { ...project, wallObjects: nextWallObjects },
-              [placement.id]
-            ),
             // Selecting a placement is an objects selection now (openings fold
             // into the union) — the freshly-added opening becomes the selection.
-            ...selectionWrite(
+            extras: selectionWrite(
               { ...project, wallObjects: nextWallObjects },
               { kind: "objects", ids: [placement.id] },
               get().wallContextId
@@ -1912,22 +1949,15 @@ export function createAppStore(deps: AppStoreDeps) {
         const nextWallObjects = project.wallObjects.map((wallObject) =>
           wallObject.id === wallObjectId ? { ...wallObject, xMm, yMm } : wallObject
         );
-        const placementWarnings = validateWallObjectPlacements(
-          { ...project, wallObjects: nextWallObjects },
-          [wallObjectId]
-        );
-
-        if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
-          set({ error: OVERLAP_BLOCKED_MESSAGE });
-          return;
-        }
 
         // Same shape as moveArtworkPlacement: the UI previews the drag
         // locally and calls this exactly once on release.
-        await applyEdit(
+        await commitWallObjectEdit(
           `Move ${openingNoun(target.kind)}`,
-          (current) => ({ ...current, wallObjects: nextWallObjects }),
-          { placementWarnings }
+          project,
+          nextWallObjects,
+          [wallObjectId],
+          allowOverlap
         );
       },
 
@@ -1942,20 +1972,13 @@ export function createAppStore(deps: AppStoreDeps) {
         const nextWallObjects = project.wallObjects.map((wallObject) =>
           wallObject.id === wallObjectId ? { ...wallObject, widthMm, heightMm } : wallObject
         );
-        const placementWarnings = validateWallObjectPlacements(
-          { ...project, wallObjects: nextWallObjects },
-          [wallObjectId]
-        );
 
-        if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
-          set({ error: OVERLAP_BLOCKED_MESSAGE });
-          return;
-        }
-
-        await applyEdit(
+        await commitWallObjectEdit(
           `Resize ${openingNoun(target.kind)}`,
-          (current) => ({ ...current, wallObjects: nextWallObjects }),
-          { placementWarnings }
+          project,
+          nextWallObjects,
+          [wallObjectId],
+          allowOverlap
         );
       },
 
@@ -1989,11 +2012,18 @@ export function createAppStore(deps: AppStoreDeps) {
             wallYMm: getDefaultOpeningCenterYMm(kind, heightMm, project.defaultCenterlineHeightMm)
           };
 
-          await applyEdit(
+          // No wallObjects change here, so an empty validate-ids list is a
+          // trivial no-collision pass (see gatePlacementWarnings) — this just
+          // rides the shared commit path for the floorObjects append + select.
+          await commitWallObjectEdit(
             `Add ${openingNoun(kind)}`,
-            (current) => ({ ...current, floorObjects: [...current.floorObjects, floorObject] }),
+            project,
+            project.wallObjects,
+            [],
+            true,
             {
-              ...selectionWrite(
+              nextFloorObjects: [...project.floorObjects, floorObject],
+              extras: selectionWrite(
                 { ...project, floorObjects: [...project.floorObjects, floorObject] },
                 { kind: "objects", ids: [floorObject.id] },
                 get().wallContextId
@@ -2017,15 +2047,15 @@ export function createAppStore(deps: AppStoreDeps) {
         const opening = buildOpeningOnWall(project, wall, kind, placement.xMm);
         const nextWallObjects = [...project.wallObjects, opening];
 
-        await applyEdit(
+        // Same as addOpening: never blocked by a collision.
+        await commitWallObjectEdit(
           `Add ${openingNoun(kind)}`,
-          (current) => ({ ...current, wallObjects: nextWallObjects }),
+          project,
+          nextWallObjects,
+          [opening.id],
+          true,
           {
-            placementWarnings: validateWallObjectPlacements(
-              { ...project, wallObjects: nextWallObjects },
-              [opening.id]
-            ),
-            ...selectionWrite(
+            extras: selectionWrite(
               { ...project, wallObjects: nextWallObjects },
               { kind: "objects", ids: [opening.id] },
               get().wallContextId
@@ -2067,13 +2097,18 @@ export function createAppStore(deps: AppStoreDeps) {
         };
 
         // Floor objects get no bounds/collision validation in v1 (no wall
-        // bounds; 2-D footprint collision is a v2 candidate).
-        await applyEdit(
+        // bounds; 2-D footprint collision is a v2 candidate) — an empty
+        // validate-ids list keeps the shared gate a no-op here.
+        await commitWallObjectEdit(
           "Place artwork",
-          (current) => ({ ...current, floorObjects: [...current.floorObjects, floorObject] }),
-          // Placing selects the new floor placement (wart-fix umbrella).
+          project,
+          project.wallObjects,
+          [],
+          true,
           {
-            ...selectionWrite(
+            nextFloorObjects: [...project.floorObjects, floorObject],
+            // Placing selects the new floor placement (wart-fix umbrella).
+            extras: selectionWrite(
               { ...project, floorObjects: [...project.floorObjects, floorObject] },
               { kind: "objects", ids: [floorObject.id] },
               get().wallContextId
@@ -2338,24 +2373,13 @@ export function createAppStore(deps: AppStoreDeps) {
 
         // Floor objects get no bounds/collision validation in v1 (see
         // placeArtworkOnFloor) — only the wall-anchored members are checked.
-        const placementWarnings = validateWallObjectPlacements(
-          { ...project, wallObjects: nextWallObjects },
-          movedWallIds
-        );
-
-        if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
-          set({ error: OVERLAP_BLOCKED_MESSAGE });
-          return;
-        }
-
-        await applyEdit(
+        await commitWallObjectEdit(
           `Move ${movedWallIds.length + movedFloorIds.length} objects`,
-          (current) => ({
-            ...current,
-            wallObjects: nextWallObjects,
-            floorObjects: nextFloorObjects
-          }),
-          { placementWarnings }
+          project,
+          nextWallObjects,
+          movedWallIds,
+          allowOverlap,
+          { nextFloorObjects }
         );
       },
 
