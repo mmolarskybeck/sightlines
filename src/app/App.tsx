@@ -89,6 +89,7 @@ import {
   INSPECTOR_MAX_WIDTH
 } from "./hooks/useViewPreferences";
 import { useViewport2D } from "./hooks/useViewport2D";
+import { usePlanMode } from "./hooks/usePlanMode";
 import { isEditableTarget } from "./hooks/isEditableTarget";
 import { useUndoRedoShortcuts } from "./hooks/useUndoRedoShortcuts";
 import { useArrangeNudgeShortcuts } from "./hooks/useArrangeNudgeShortcuts";
@@ -238,66 +239,52 @@ export function App() {
   // transient UI state like the armed tools (never in the store/undo). Empty
   // rooms skip this and delete immediately.
   const [confirmDeleteRoomId, setConfirmDeleteRoomId] = useState<string | null>(null);
-  // Which insertion tool (door/window/blocked-zone) is armed on the plan
-  // canvas — transient UI state, deliberately NOT in the store: same
+  // The plan canvas's single armed-tool mode (door/window/blocked-zone
+  // placement, polygon-room draw, room reshape, or partition draw) — a
+  // discriminated union so the four are structurally mutually exclusive
+  // instead of four separate useStates that each had to hand-disarm the
+  // other three. Transient UI state, deliberately NOT in the store: same
   // reasoning as PlanView's other drag/marquee state (see the comment near
   // its former activeTool declaration), it must never enter undo history or
   // get persisted. Lives here (not in PlanView) now that the toolbar buttons
-  // that arm it live in this component's view-toolbar strip.
-  const [activeTool, setActiveTool] = useState<OpeningKind | null>(null);
-  // Polygon-room draw mode — same transient armed-tool family as activeTool
-  // (never in the store), and mutually exclusive with it: arming one disarms
-  // the other. PlanView owns the in-progress points/preview; this only holds
-  // whether the mode is on.
-  const [drawRoomActive, setDrawRoomActive] = useState(false);
-  // Reshape mode (slice 2): which room's vertex/split handles PlanView shows,
-  // armed by RoomInspector's "Edit shape" button (or a plan double-click).
-  // Same transient-mode family as activeTool/drawRoomActive — never in the
-  // store, mutually exclusive with the other two.
-  const [reshapeRoomId, setReshapeRoomId] = useState<string | null>(null);
-  // Partition (free-standing wall) draw mode — same transient armed-tool family
-  // as the others, mutually exclusive with all of them.
-  const [partitionToolActive, setPartitionToolActive] = useState(false);
-  const armOpeningTool = (tool: OpeningKind | null) => {
-    setActiveTool(tool);
-    if (tool) {
-      setDrawRoomActive(false);
-      setReshapeRoomId(null);
-      setPartitionToolActive(false);
+  // that arm it live in this component's view-toolbar strip. See
+  // usePlanMode's own doc comment for how a future mode (doorway pairing)
+  // slots into the union.
+  const {
+    mode: planMode,
+    armOpeningTool,
+    toggleDrawRoom,
+    toggleReshapeRoom,
+    togglePartitionTool,
+    disarm: disarmPlanMode
+  } = usePlanMode(viewMode, selectedRoomId);
+  // Legacy field names — every existing read site and child prop below
+  // (PlanView, the view-toolbar buttons, RoomInspector's "Edit shape") keeps
+  // reading these exact shapes, derived fresh each render from planMode.
+  const activeTool = planMode.kind === "placeOpening" ? planMode.tool : null;
+  const drawRoomActive = planMode.kind === "drawRoom";
+  const reshapeRoomId = planMode.kind === "reshapeRoom" ? planMode.roomId : null;
+  const partitionToolActive = planMode.kind === "drawPartition";
+  // PlanView's onDrawRoomChange/onPartitionToolChange props are raw boolean
+  // setters (unlike the toggle handlers above, which flip regardless of
+  // argument) — PlanView only ever calls them with `false`, to disarm its
+  // own mode once a draw/placement completes or Escape is pressed. These
+  // route that back to "idle" directly, and (for completeness, though never
+  // observed) arm the mode via the same toggle used by the view-toolbar
+  // button when called with `true` while it isn't already active.
+  const setDrawRoomActive = (active: boolean) => {
+    if (!active) {
+      if (planMode.kind === "drawRoom") disarmPlanMode();
+    } else if (planMode.kind !== "drawRoom") {
+      toggleDrawRoom();
     }
   };
-  const toggleDrawRoom = () => {
-    setDrawRoomActive((active) => {
-      const next = !active;
-      if (next) {
-        setActiveTool(null);
-        setReshapeRoomId(null);
-        setPartitionToolActive(false);
-      }
-      return next;
-    });
-  };
-  const toggleReshapeRoom = (roomId: string | null) => {
-    setReshapeRoomId((current) => {
-      const next = current === roomId ? null : roomId;
-      if (next) {
-        setActiveTool(null);
-        setDrawRoomActive(false);
-        setPartitionToolActive(false);
-      }
-      return next;
-    });
-  };
-  const togglePartitionTool = () => {
-    setPartitionToolActive((active) => {
-      const next = !active;
-      if (next) {
-        setActiveTool(null);
-        setDrawRoomActive(false);
-        setReshapeRoomId(null);
-      }
-      return next;
-    });
+  const setPartitionToolActive = (active: boolean) => {
+    if (!active) {
+      if (planMode.kind === "drawPartition") disarmPlanMode();
+    } else if (planMode.kind !== "drawPartition") {
+      togglePartitionTool();
+    }
   };
   const {
     showGrid,
@@ -337,27 +324,9 @@ export function App() {
     void boot();
   }, [boot]);
 
-  // The insert-tools group only makes sense over the plan canvas — disarm
-  // whenever the workspace tab (or the data-view rail button) steers away
-  // from "plan", so a tool never stays armed-but-invisible on a surface that
-  // can't place anything.
-  useEffect(() => {
-    if (viewMode !== "plan") {
-      setActiveTool(null);
-      setDrawRoomActive(false);
-      setReshapeRoomId(null);
-      setPartitionToolActive(false);
-    }
-  }, [viewMode]);
-
-  // Reshape mode tracks a specific room id — if selection moves away from
-  // that room (another room, an object, or nothing), the handles would be
-  // showing for a room that's no longer the focus, so drop it.
-  useEffect(() => {
-    if (reshapeRoomId && reshapeRoomId !== selectedRoomId) {
-      setReshapeRoomId(null);
-    }
-  }, [selectedRoomId, reshapeRoomId]);
+  // The insert-tools-disarm-on-view-change and reshape-follows-selection
+  // effects that used to live here now live in usePlanMode itself (it takes
+  // viewMode and selectedRoomId as arguments above).
 
   useUndoRedoShortcuts({ undo, redo });
 
