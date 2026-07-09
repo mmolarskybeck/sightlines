@@ -31,11 +31,36 @@ export function getWallsWithGeometry(room: Room): WallWithGeometry[] {
   return room.walls.map((wall) => getWallGeometry(room, wall));
 }
 
+// Unit-direction dot tolerance for "these walls meet at 90°". Grid-snapped
+// drawing produces exact right angles; this only needs to absorb float noise
+// from reshape intersections, so anything visibly skewed stays excluded.
+const PERPENDICULAR_DOT_EPSILON = 1e-6;
+
+// A 4-wall loop is only a rectangle if every corner is a right angle. The
+// count checks alone were written when rectangles were the only possible
+// 4-wall room; polygon drawing can now produce trapezoids and other quads,
+// which must never see rectangle-only UI or the orthogonal resize rebuild.
+export function isRectangleRoom(room: Room): boolean {
+  if (room.walls.length !== 4 || room.vertices.length !== 4) return false;
+  if (!hasLoopingWallOrder(room, 0)) return false;
+
+  const walls = getWallsWithGeometry(room);
+  return walls.every((wall, index) => {
+    const next = walls[(index + 1) % walls.length];
+    if (wall.lengthMm === 0 || next.lengthMm === 0) return false;
+    const dot =
+      ((wall.end.xMm - wall.start.xMm) * (next.end.xMm - next.start.xMm) +
+        (wall.end.yMm - wall.start.yMm) * (next.end.yMm - next.start.yMm)) /
+      (wall.lengthMm * next.lengthMm);
+    return Math.abs(dot) < PERPENDICULAR_DOT_EPSILON;
+  });
+}
+
 export function getOrthogonalQuadWallPair(
   room: Room,
   wallId: string
 ): OrthogonalQuadWallPair | null {
-  if (room.walls.length !== 4 || room.vertices.length !== 4) return null;
+  if (!isRectangleRoom(room)) return null;
 
   const wallIndex = room.walls.findIndex((wall) => wall.id === wallId);
   if (wallIndex === -1 || !hasLoopingWallOrder(room, wallIndex)) return null;
@@ -63,8 +88,7 @@ export type RectangleRoomDimensions = {
 // and the other as "depth" — this is what lets the sidebar show one width
 // and one depth field instead of four independent wall rows.
 export function getRectangleRoomDimensions(room: Room): RectangleRoomDimensions | null {
-  if (room.walls.length !== 4 || room.vertices.length !== 4) return null;
-  if (!hasLoopingWallOrder(room, 0)) return null;
+  if (!isRectangleRoom(room)) return null;
 
   const walls = getWallsWithGeometry(room);
 

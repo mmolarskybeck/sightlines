@@ -52,10 +52,10 @@ describe("moveRoomVertex", () => {
 
     expect(result.changedWallIds.sort()).toEqual(["wall-east", "wall-north"].sort());
     expect(result.anchorVertexId).toBe("v-ne");
-    // getRectangleRoomDimensions only gates on wall/vertex COUNT and loop
-    // order (§9's "rectangle fast path untouched" — this file doesn't touch
-    // that function), so a skewed-but-still-4-gon room keeps its dimension
-    // fields; the north wall's reported length reflects the new corner.
+    // Once skewed, the room stops being a rectangle: getRectangleRoomDimensions
+    // goes null (isRectangleRoom checks corner angles, not just counts), the
+    // rectangle-only UI disappears, and reshape handles take over. The north
+    // wall's reported length reflects the new corner.
     const walls = getWallsWithGeometry(result.project.floor.rooms[0].room);
     expect(walls.find((wall) => wall.id === "wall-north")?.lengthMm).toBeCloseTo(
       Math.hypot(feetToMm(10), feetToMm(4))

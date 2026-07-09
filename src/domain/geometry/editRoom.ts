@@ -1,5 +1,5 @@
 import type { Project, Room, RoomVertex } from "../project";
-import { getWallGeometry, getWallsWithGeometry } from "./walls";
+import { getWallGeometry, getWallsWithGeometry, isRectangleRoom } from "./walls";
 
 type Vector = {
   xMm: number;
@@ -99,7 +99,11 @@ export function resizeWallPreservingAngles(
 }
 
 function canResizeAsOrthogonalQuad(room: Room, wallIndex: number): boolean {
-  if (room.walls.length !== 4 || room.vertices.length !== 4) return false;
+  // resizeOrthogonalQuad rebuilds the quad from the wall axis and averaged
+  // side lengths — run on anything but a true rectangle it silently squares
+  // the shape (a trapezoid becomes a rectangle), so the right-angle check is
+  // load-bearing, not just UI gating.
+  if (!isRectangleRoom(room)) return false;
 
   const wall = room.walls[wallIndex];
   const nextWall = room.walls[(wallIndex + 1) % room.walls.length];

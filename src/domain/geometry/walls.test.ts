@@ -1,11 +1,30 @@
 import { describe, expect, it } from "vitest";
 import { createSampleProject } from "../sample/sampleProject";
 import { feetToMm } from "../units/length";
+import { createPolygonRoomPlacement } from "./createRoom";
 import {
   getFloorBounds,
   getOrthogonalQuadWallPair,
-  getRectangleRoomDimensions
+  getRectangleRoomDimensions,
+  isRectangleRoom
 } from "./walls";
+
+// A drawn quadrilateral with four walls and a valid loop, but slanted sides —
+// exactly the shape that used to slip past the counts-only rectangle gates
+// and get squared into a rectangle by resizeOrthogonalQuad.
+function trapezoidRoom() {
+  return createPolygonRoomPlacement({
+    roomId: "room-trapezoid",
+    name: "Trapezoid",
+    heightMm: 3000,
+    pointsFloorMm: [
+      { xMm: 0, yMm: 0 },
+      { xMm: 9000, yMm: 0 },
+      { xMm: 7000, yMm: 5000 },
+      { xMm: 2000, yMm: 5000 }
+    ]
+  }).room;
+}
 
 describe("getOrthogonalQuadWallPair", () => {
   it("returns the opposing wall for a four-wall rectangle", () => {
@@ -33,6 +52,23 @@ describe("getOrthogonalQuadWallPair", () => {
     };
 
     expect(getOrthogonalQuadWallPair(room, "wall-north")).toBeNull();
+  });
+
+  it("returns null for a four-wall trapezoid — corners must be right angles", () => {
+    const room = trapezoidRoom();
+
+    for (const wall of room.walls) {
+      expect(getOrthogonalQuadWallPair(room, wall.id)).toBeNull();
+    }
+  });
+});
+
+describe("isRectangleRoom", () => {
+  it("accepts the sample rectangle and rejects a trapezoid", () => {
+    const project = createSampleProject();
+
+    expect(isRectangleRoom(project.floor.rooms[0].room)).toBe(true);
+    expect(isRectangleRoom(trapezoidRoom())).toBe(false);
   });
 });
 
@@ -69,6 +105,10 @@ describe("getRectangleRoomDimensions", () => {
     };
 
     expect(getRectangleRoomDimensions(room)).toBeNull();
+  });
+
+  it("returns null for a four-wall trapezoid, so rectangle-only UI never appears on it", () => {
+    expect(getRectangleRoomDimensions(trapezoidRoom())).toBeNull();
   });
 });
 

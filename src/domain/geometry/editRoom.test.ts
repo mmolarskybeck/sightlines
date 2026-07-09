@@ -25,27 +25,20 @@ describe("resizeWallPreservingAngles", () => {
     expect(dot(northWall!, eastWall!)).toBeCloseTo(0);
   });
 
-  it("can rectify a skewed four-wall room on the next numeric edit", () => {
+  it("refuses a skewed four-wall room instead of silently squaring it", () => {
+    // This used to "rectify" the skew — reasonable when a skewed quad could
+    // only mean drift or corruption, wrong now that polygon drawing makes
+    // non-rectangular quads deliberate geometry. resizeOrthogonalQuad would
+    // rebuild this as a rectangle, so it must never run on one.
     const project = createSampleProject();
     project.floor.rooms[0].room.vertices = project.floor.rooms[0].room.vertices.map(
       (vertex) =>
         vertex.id === "v-se" ? { ...vertex, xMm: feetToMm(29) } : vertex
     );
-    const result = resizeWallPreservingAngles(
-      project,
-      "wall-north",
-      feetToMm(30)
-    );
-    const walls = getWallsWithGeometry(result.project.floor.rooms[0].room);
-    const northWall = walls.find((wall) => wall.id === "wall-north");
-    const eastWall = walls.find((wall) => wall.id === "wall-east");
-    const southWall = walls.find((wall) => wall.id === "wall-south");
-    const westWall = walls.find((wall) => wall.id === "wall-west");
 
-    expect(northWall?.lengthMm).toBeCloseTo(feetToMm(30));
-    expect(southWall?.lengthMm).toBeCloseTo(feetToMm(30));
-    expect(dot(northWall!, eastWall!)).toBeCloseTo(0);
-    expect(dot(southWall!, westWall!)).toBeCloseTo(0);
+    expect(() =>
+      resizeWallPreservingAngles(project, "wall-north", feetToMm(30))
+    ).toThrow(/isn't a simple rectangle/);
   });
 
   it("keeps the original project immutable", () => {
