@@ -9,6 +9,8 @@ import { getFloorWalls, projectPointToWall } from "./planObjects";
 import { isSimplePolygon, type Point } from "./polygon";
 import { findVertex } from "./wallLoop";
 import { getWallGeometry } from "./walls";
+import type { Vector2 } from "./vector";
+import { add, normalize as normalizeVec, scale, vectorLength } from "./vector";
 
 // Same floor as createRoom.ts's MIN_VERTEX_SPACING_MM — a vertex landing
 // this close to a neighbour collapses a wall to (near) zero length, which
@@ -33,32 +35,6 @@ function findRoomPlacementByWallId(project: Project, wallId: string): RoomPlacem
   return placement;
 }
 
-// Local Vector idiom, same shape/style as editRoom.ts's (not exported there,
-// so reproduced rather than imported).
-type Vector = {
-  xMm: number;
-  yMm: number;
-};
-
-function vectorLength(vector: Vector): number {
-  return Math.hypot(vector.xMm, vector.yMm);
-}
-
-function normalize(vector: Vector): Vector {
-  const length = vectorLength(vector);
-  if (length === 0) {
-    throw new Error("Cannot move a zero-length wall.");
-  }
-  return { xMm: vector.xMm / length, yMm: vector.yMm / length };
-}
-
-function scale(vector: Vector, scalar: number): Vector {
-  return { xMm: vector.xMm * scalar, yMm: vector.yMm * scalar };
-}
-
-function translate(point: Point, vector: Vector): Point {
-  return { xMm: point.xMm + vector.xMm, yMm: point.yMm + vector.yMm };
-}
 
 // Sine of the angle between two UNIT direction vectors (d1, d2 must already
 // be normalized) — 1e-3 is about 0.057°, tight enough to only reject
@@ -71,13 +47,13 @@ const LINE_PARALLEL_EPS = 1e-3;
 // direction vector. Returns null when the lines are parallel (or close enough
 // to it that the intersection is ill-conditioned) rather than a huge,
 // meaningless point.
-function intersectLines(p1: Point, d1: Vector, p2: Point, d2: Vector): Point | null {
+function intersectLines(p1: Point, d1: Vector2, p2: Point, d2: Vector2): Point | null {
   const cross = d1.xMm * d2.yMm - d1.yMm * d2.xMm;
   if (Math.abs(cross) < LINE_PARALLEL_EPS) return null;
 
-  const diff: Vector = { xMm: p2.xMm - p1.xMm, yMm: p2.yMm - p1.yMm };
+  const diff: Vector2 = { xMm: p2.xMm - p1.xMm, yMm: p2.yMm - p1.yMm };
   const t = (diff.xMm * d2.yMm - diff.yMm * d2.xMm) / cross;
-  return translate(p1, scale(d1, t));
+  return add(p1, scale(d1, t));
 }
 
 // CAD "offset/re-intersect" whole-wall drag (Sims-style): translate the
@@ -111,21 +87,33 @@ export function moveRoomWall(
   const previousGeom = getWallGeometry(room, previousWall);
   const nextGeom = getWallGeometry(room, nextWall);
 
-  const axis = normalize({
-    xMm: wallGeom.end.xMm - wallGeom.start.xMm,
-    yMm: wallGeom.end.yMm - wallGeom.start.yMm
-  });
-  const normal: Vector = { xMm: -axis.yMm, yMm: axis.xMm };
-  const previousAxis = normalize({
-    xMm: previousGeom.end.xMm - previousGeom.start.xMm,
-    yMm: previousGeom.end.yMm - previousGeom.start.yMm
-  });
-  const nextAxis = normalize({
-    xMm: nextGeom.end.xMm - nextGeom.start.xMm,
-    yMm: nextGeom.end.yMm - nextGeom.start.yMm
-  });
+  try {
+    var axis = normalizeVec({
+      xMm: wallGeom.end.xMm - wallGeom.start.xMm,
+      yMm: wallGeom.end.yMm - wallGeom.start.yMm
+    });
+  } catch {
+    throw new Error("Cannot move a zero-length wall.");
+  }
+  const normal: Vector2 = { xMm: -axis.yMm, yMm: axis.xMm };
+  try {
+    var previousAxis = normalizeVec({
+      xMm: previousGeom.end.xMm - previousGeom.start.xMm,
+      yMm: previousGeom.end.yMm - previousGeom.start.yMm
+    });
+  } catch {
+    throw new Error("Cannot move a zero-length wall.");
+  }
+  try {
+    var nextAxis = normalizeVec({
+      xMm: nextGeom.end.xMm - nextGeom.start.xMm,
+      yMm: nextGeom.end.yMm - nextGeom.start.yMm
+    });
+  } catch {
+    throw new Error("Cannot move a zero-length wall.");
+  }
 
-  const translatedPointMm = translate(wallGeom.start, scale(normal, offsetMm));
+  const translatedPointMm = add(wallGeom.start, scale(normal, offsetMm));
 
   const newStart = intersectLines(previousGeom.start, previousAxis, translatedPointMm, axis);
   if (!newStart) {

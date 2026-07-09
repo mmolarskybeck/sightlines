@@ -1,11 +1,8 @@
 import type { Project, Room, RoomVertex } from "../project";
 import { getWallGeometry, hasLoopingWallOrder, isRectangleRoom } from "./walls";
 import { changedWallLengthIdsForProject, findVertex } from "./wallLoop";
-
-type Vector = {
-  xMm: number;
-  yMm: number;
-};
+import type { Vector2 } from "./vector";
+import { add, dot, normalize as normalizeVec, scale, vectorLength } from "./vector";
 
 // Which end of the wall stays fixed in WORLD space during a resize. The local
 // resize always anchors the start vertex in room-local coordinates (see
@@ -67,14 +64,18 @@ export function resizeWallPreservingAngles(
     // axis in room-local space. Cancelling that on the placement offset pins
     // the end vertex in world space and lets the start side move instead.
     const { lengthMm: previousLengthMm, start, end } = getWallGeometry(placement.room, wall);
-    const axis = normalize({ xMm: end.xMm - start.xMm, yMm: end.yMm - start.yMm });
-    const shift = scale(axis, nextLengthMm - previousLengthMm);
-    return {
-      ...placement,
-      offsetXMm: placement.offsetXMm - shift.xMm,
-      offsetYMm: placement.offsetYMm - shift.yMm,
-      room: resizedRoom
-    };
+    try {
+      const axis = normalizeVec({ xMm: end.xMm - start.xMm, yMm: end.yMm - start.yMm });
+      const shift = scale(axis, nextLengthMm - previousLengthMm);
+      return {
+        ...placement,
+        offsetXMm: placement.offsetXMm - shift.xMm,
+        offsetYMm: placement.offsetYMm - shift.yMm,
+        room: resizedRoom
+      };
+    } catch (err) {
+      throw new Error("Cannot resize a zero-length wall.");
+    }
   });
 
   if (!didUpdate) {
@@ -123,7 +124,7 @@ function resizeOrthogonalQuad(
   const end = findVertex(room, wall.endVertexId);
   const nextCorner = findVertex(room, nextWall.endVertexId);
   const previousCorner = findVertex(room, previousWall.startVertexId);
-  const axis = normalize({
+  const axis = normalizeVec({
     xMm: end.xMm - start.xMm,
     yMm: end.yMm - start.yMm
   });
@@ -143,9 +144,9 @@ function resizeOrthogonalQuad(
     2;
 
   const nextStart = start;
-  const nextEnd = translate(nextStart, scale(axis, nextLengthMm));
-  const nextNextCorner = translate(nextEnd, scale(sideDirection, sideLengthMm));
-  const nextPreviousCorner = translate(
+  const nextEnd = add(nextStart, scale(axis, nextLengthMm));
+  const nextNextCorner = add(nextEnd, scale(sideDirection, sideLengthMm));
+  const nextPreviousCorner = add(
     nextStart,
     scale(sideDirection, sideLengthMm)
   );
@@ -162,7 +163,7 @@ function resizeOrthogonalQuad(
   };
 }
 
-function chooseSideDirection(axis: Vector, sideVector: Vector): Vector {
+function chooseSideDirection(axis: Vector2, sideVector: Vector2): Vector2 {
   const normal = { xMm: -axis.yMm, yMm: axis.xMm };
 
   if (dot(normal, sideVector) >= 0) {
@@ -170,42 +171,4 @@ function chooseSideDirection(axis: Vector, sideVector: Vector): Vector {
   }
 
   return scale(normal, -1);
-}
-
-function normalize(vector: Vector): Vector {
-  const length = vectorLength(vector);
-
-  if (length === 0) {
-    throw new Error("Cannot resize a zero-length wall.");
-  }
-
-  return {
-    xMm: vector.xMm / length,
-    yMm: vector.yMm / length
-  };
-}
-
-function vectorLength(vector: Vector): number {
-  return Math.hypot(vector.xMm, vector.yMm);
-}
-
-function dot(a: Vector, b: Vector): number {
-  return a.xMm * b.xMm + a.yMm * b.yMm;
-}
-
-function scale(vector: Vector, scalar: number): Vector {
-  return {
-    xMm: vector.xMm * scalar,
-    yMm: vector.yMm * scalar
-  };
-}
-
-function translate(
-  point: Pick<RoomVertex, "xMm" | "yMm">,
-  vector: Vector
-): Pick<RoomVertex, "xMm" | "yMm"> {
-  return {
-    xMm: point.xMm + vector.xMm,
-    yMm: point.yMm + vector.yMm
-  };
 }

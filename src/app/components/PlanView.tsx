@@ -14,6 +14,7 @@ import {
   proposeMovingEdgePointMm,
   type Vector2
 } from "../../domain/geometry/dragResize";
+import { unitLeftNormal, unitLeftNormalOrZero } from "../../domain/geometry/vector";
 import { resizeWallPreservingAngles, type ResizeAnchor } from "../../domain/geometry/editRoom";
 import {
   changedWallLengthIds,
@@ -1558,14 +1559,11 @@ export function PlanView({
     if (!startPointerMm) return;
 
     const geometry = getWallGeometry(placement.room, wall);
-    const dx = geometry.end.xMm - geometry.start.xMm;
-    const dy = geometry.end.yMm - geometry.start.yMm;
-    const lengthMm = Math.hypot(dx, dy);
-    if (lengthMm === 0) return;
+    if (geometry.lengthMm === 0) return;
     // Left-normal of the wall's start→end axis — the exact convention
     // moveRoomWall itself uses, so a positive previewOffsetMm here previews
     // precisely the direction the domain op will commit.
-    const normal: Vector2 = { xMm: -dy / lengthMm, yMm: dx / lengthMm };
+    const normal: Vector2 = unitLeftNormal(geometry.start, geometry.end);
 
     setWallDrag({
       roomId,
@@ -2910,11 +2908,7 @@ export function PlanView({
               const isDragging = partitionDrag?.wallId === partition.wallId;
               const startMm = isDragging ? partitionDrag.previewStartFloorMm : partition.startMm;
               const endMm = isDragging ? partitionDrag.previewEndFloorMm : partition.endMm;
-              const dx = endMm.xMm - startMm.xMm;
-              const dy = endMm.yMm - startMm.yMm;
-              const len = Math.hypot(dx, dy) || 1;
-              const nx = -dy / len;
-              const ny = dx / len;
+              const { xMm: nx, yMm: ny } = unitLeftNormalOrZero(startMm, endMm);
               const midX = (startMm.xMm + endMm.xMm) / 2;
               const midY = (startMm.yMm + endMm.yMm) / 2;
               const labelOffsetMm = partition.thicknessMm / 2 + handleSizeMm * 1.6;

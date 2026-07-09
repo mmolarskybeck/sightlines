@@ -8,6 +8,7 @@ import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { parseFaceWallId } from "../../../domain/geometry/freestandingWalls";
 import {
   deriveScene3d,
+  wallInwardNormal,
   type Room3d,
   type Scene3d,
   type WallPanel3d
@@ -125,12 +126,7 @@ function eyeLevelPose(
 ): CameraPose {
   const centerXMm = (wall.start.xMm + wall.end.xMm) / 2;
   const centerYMm = (wall.start.yMm + wall.end.yMm) / 2;
-  const dxMm = wall.end.xMm - wall.start.xMm;
-  const dyMm = wall.end.yMm - wall.start.yMm;
-  const lengthMm = Math.hypot(dxMm, dyMm) || 1;
-  // Inward normal: left normal of start -> end (scene3d.ts convention).
-  const normalX = -dyMm / lengthMm;
-  const normalY = dxMm / lengthMm;
+  const { xMm: normalX, yMm: normalY } = wallInwardNormal(wall);
 
   // Room depth behind this wall: the farthest floor vertex measured along the
   // inward normal, across the room that owns the wall. For a partition face,

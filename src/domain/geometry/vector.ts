@@ -74,3 +74,14 @@ export function unitLeftNormal(from: Vector2, to: Vector2): Vector2 {
   }
   return { xMm: -axis.yMm / length, yMm: axis.xMm / length };
 }
+
+// Non-throwing variant for renderers and derivations that must tolerate
+// degenerate segments (schema-invalid but possible mid-gesture or in
+// hand-edited data): coincident points yield the zero vector, matching the
+// `|| 1` / conditional guards the call sites used before consolidation.
+export function unitLeftNormalOrZero(from: Vector2, to: Vector2): Vector2 {
+  const axis = subtract(to, from);
+  const length = vectorLength(axis);
+  if (length === 0) return { xMm: 0, yMm: 0 };
+  return { xMm: -axis.yMm / length, yMm: axis.xMm / length };
+}

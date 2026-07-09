@@ -7,6 +7,7 @@ import type {
 } from "../project";
 import { getFreestandingFaces } from "./freestandingWalls";
 import { signedAreaMm2 } from "./polygon";
+import { unitLeftNormalOrZero } from "./vector";
 import { getWallsWithGeometry } from "./walls";
 
 // Pure derivation: Project -> a serializable 3D scene description. NO three.js
@@ -161,11 +162,7 @@ export function deriveScene3d(
 // relies on (WallPanel derives its yaw from the same start->end convention);
 // asserted directly in tests via point-in-polygon probes.
 export function wallInwardNormal(panel: WallPanel3d): Vec2 {
-  const dx = panel.end.xMm - panel.start.xMm;
-  const dy = panel.end.yMm - panel.start.yMm;
-  const length = Math.hypot(dx, dy);
-  if (length === 0) return { xMm: 0, yMm: 0 };
-  return { xMm: -dy / length, yMm: dx / length };
+  return unitLeftNormalOrZero(panel.start, panel.end);
 }
 
 function deriveRoom(

@@ -9,6 +9,7 @@ import {
   scale,
   subtract,
   unitLeftNormal,
+  unitLeftNormalOrZero,
   vectorLength,
   type Vector2
 } from "./vector";
@@ -129,5 +130,17 @@ describe("unitLeftNormal", () => {
     expect(() => unitLeftNormal(p(3, 3), p(3, 3))).toThrow(
       "Cannot compute a normal for a zero-length segment."
     );
+  });
+});
+
+describe("unitLeftNormalOrZero", () => {
+  it("matches unitLeftNormal for non-degenerate segments", () => {
+    const result = unitLeftNormalOrZero(p(0, 0), p(2, 0));
+    expect(result.xMm).toBeCloseTo(0);
+    expect(result.yMm).toBeCloseTo(1);
+  });
+
+  it("returns the zero vector for coincident points", () => {
+    expect(unitLeftNormalOrZero(p(3, 3), p(3, 3))).toEqual(p(0, 0));
   });
 });

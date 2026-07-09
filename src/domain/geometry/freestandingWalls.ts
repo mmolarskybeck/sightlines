@@ -12,6 +12,7 @@ import type {
 } from "../project";
 import type { GeometryEditResult } from "./editRoom";
 import { isPointInPolygon, type Point } from "./polygon";
+import { unitLeftNormalOrZero } from "./vector";
 import type { WallWithGeometry } from "./walls";
 
 export const DEFAULT_FREESTANDING_THICKNESS_MM = 100;
@@ -59,14 +60,14 @@ export function faceWallIdsOf(freestandingWallId: string): [string, string] {
 // normal from the centerline; length equals the centerline length.
 export function getFreestandingFaces(room: Room): FreestandingFace[] {
   return room.freestandingWalls.flatMap((wall) => {
-    const dx = wall.endXMm - wall.startXMm;
-    const dy = wall.endYMm - wall.startYMm;
-    const lengthMm = Math.hypot(dx, dy);
+    const lengthMm = Math.hypot(wall.endXMm - wall.startXMm, wall.endYMm - wall.startYMm);
     const half = wall.thicknessMm / 2;
-    // Unit left normal of start→end. length 0 shouldn't happen (schema rejects
-    // coincident endpoints) but guard so we never divide by zero.
-    const nx = lengthMm === 0 ? 0 : -dy / lengthMm;
-    const ny = lengthMm === 0 ? 0 : dx / lengthMm;
+    // length 0 shouldn't happen (schema rejects coincident endpoints); the
+    // OrZero variant preserves the never-divide-by-zero guard.
+    const { xMm: nx, yMm: ny } = unitLeftNormalOrZero(
+      { xMm: wall.startXMm, yMm: wall.startYMm },
+      { xMm: wall.endXMm, yMm: wall.endYMm }
+    );
 
     // Face A: viewer on the left of start→end; offset +normal, runs start→end.
     const faceA = buildFace(wall, "a", lengthMm, {
