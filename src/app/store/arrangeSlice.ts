@@ -10,6 +10,7 @@ import {
 import type { Project } from "../../domain/project";
 import { getProjectWalls } from "../projectWalls";
 import type { AppState, EditExtras } from "../store";
+import { getArrangeEligibility } from "./arrangeEligibility";
 import { objectIdsOf } from "./selectionSlice";
 
 // A transient, NON-undoable arrange interaction (precedent: selectedObjectIds
@@ -228,22 +229,14 @@ export function createArrangeSlice(
       // members, all on one wall) — but a silent no-op on failure, since the
       // panel only offers a begin when the selection already qualifies.
       const selectedIds = objectIdsOf(get().selection);
-      const hasFloorMember = selectedIds.some((id) =>
-        project.floorObjects.some((floorObject) => floorObject.id === id)
-      );
-      if (hasFloorMember) return;
+      const eligibility = getArrangeEligibility(project, selectedIds);
+      if (!eligibility.eligible) return;
 
       // Members are ARTWORKS only — a selected opening is architecture, never
       // arranged (see arrangeSelectedOnWall). It doesn't move on arrange and
       // doesn't count toward the 2-member minimum, but it also doesn't block
       // eligibility.
-      const members = project.wallObjects.filter(
-        (wallObject) => wallObject.kind === "artwork" && selectedIds.includes(wallObject.id)
-      );
-      if (members.length < 2) return;
-
-      const wallIds = new Set(members.map((member) => member.wallId));
-      if (wallIds.size > 1) return;
+      const members = eligibility.members;
 
       const memberIds = members.map((member) => member.id);
 

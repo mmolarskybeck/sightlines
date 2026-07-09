@@ -107,6 +107,7 @@ import {
   roomIdOf,
   useAppStore
 } from "./store";
+import { getArrangeEligibility } from "./store/arrangeEligibility";
 
 const DataView = lazy(() =>
   import("./components/DataView").then((module) => ({ default: module.DataView }))
@@ -534,19 +535,15 @@ export function App() {
     (wallObject) =>
       wallObject.kind === "artwork" && selectedObjectIds.includes(wallObject.id)
   );
-  const selectionHasFloorMember = project.floorObjects.some((floorObject) =>
-    selectedObjectIds.includes(floorObject.id)
-  );
-  const arrangeWall =
-    !selectionHasFloorMember &&
-    selectedArtworkMembers.length >= 2 &&
-    selectedArtworkMembers.every(
-      (member) => member.wallId === selectedArtworkMembers[0]?.wallId
-    )
-      ? (getProjectWalls(project).find(
-          (wall) => wall.id === selectedArtworkMembers[0]?.wallId
-        ) ?? null)
-      : null;
+  // Single source of truth for the "can this selection be arranged" facts —
+  // see arrangeEligibility.ts. beginArrangeSession enforces the same guard;
+  // this is only the derived-state side (readout + disabled-reason copy).
+  const arrangeEligibility = getArrangeEligibility(project, selectedObjectIds);
+  const arrangeWall = arrangeEligibility.eligible
+    ? (getProjectWalls(project).find(
+        (wall) => wall.id === arrangeEligibility.wallId
+      ) ?? null)
+    : null;
   // A live session ties itself to the current selection (the store auto-
   // accepts on any selection/view change), so its previewById describes these
   // very members — override their committed positions with it before reading
@@ -576,16 +573,20 @@ export function App() {
 
   // Why the arrange panel is disabled, named specifically — the static "select
   // two objects" line read as nonsense to a user who already had three objects
-  // selected but only one work among them. Branch order mirrors the arrangeWall
-  // guard above (floor members block first, then the works count, then the
-  // single-wall rule) so the hint always names the actual blocker.
-  const arrangeDisabledReason = selectionHasFloorMember
-    ? "Arranging is for works hung on a wall — this selection includes floor-placed objects."
-    : selectedArtworkMembers.length === 0
-      ? "Arranging is for works only — doors, windows, and blocked zones stay where they are."
-      : selectedArtworkMembers.length === 1
-        ? "Arranging is for works only — select at least two works on the same wall to arrange them."
-        : "Select works on a single wall to arrange them — this selection spans more than one wall.";
+  // selected but only one work among them. Branch order mirrors the
+  // arrangeEligibility guard above (floor members block first, then the works
+  // count, then the single-wall rule) so the hint always names the actual
+  // blocker. The strings themselves are UI copy, so they stay here rather
+  // than in arrangeEligibility.ts.
+  const arrangeDisabledReason = arrangeEligibility.eligible
+    ? ""
+    : arrangeEligibility.reason === "floorMember"
+      ? "Arranging is for works hung on a wall — this selection includes floor-placed objects."
+      : arrangeEligibility.reason === "noArtworks"
+        ? "Arranging is for works only — doors, windows, and blocked zones stay where they are."
+        : arrangeEligibility.reason === "singleArtwork"
+          ? "Arranging is for works only — select at least two works on the same wall to arrange them."
+          : "Select works on a single wall to arrange them — this selection spans more than one wall.";
   // When the selection IS arrangeable but also contains openings, arranging
   // silently ignores them (see selectedArtworkMembers above) — surface that
   // explicitly rather than let the curator wonder why a door didn't move.
@@ -630,6 +631,33 @@ export function App() {
     } else {
       selectOpening(wallObject.id);
     }
+  };
+
+  // Routes an elevation-view move into the live arrange session's preview
+  // instead of committing it directly, when applicable — returns whether it
+  // routed, so callers fall through to their normal commit action otherwise.
+  // Two call shapes:
+  // - a single-object drag (alt-drag of one opening/artwork) passes one move
+  //   and requires membership: an unselected neighbour dragged past a live
+  //   session still commits directly, only a session MEMBER's drag joins the
+  //   preview.
+  // - a group drag (onMoveWallObjects) passes the whole batch and does NOT
+  //   require membership: a group drag only ever moves the current
+  //   selection, which is exactly the session's members whenever one is
+  //   open, so a live session alone is enough to route it.
+  const routeMoveThroughSession = (
+    moves: { id: string; xMm: number; yMm: number }[],
+    { requireMembership }: { requireMembership: boolean }
+  ): boolean => {
+    if (!arrangeSession) return false;
+    if (
+      requireMembership &&
+      !moves.every((move) => arrangeSession.memberIds.includes(move.id))
+    ) {
+      return false;
+    }
+    setArrangeSessionPreview(moves);
+    return true;
   };
 
   // Rail toggle semantic: clicking the active panel's icon collapses the
@@ -1031,15 +1059,21 @@ export function App() {
                     // group) stays inside the live preview — the session's
                     // single commit will carry it; everything else commits
                     // directly as before.
-                    if (arrangeSession?.memberIds.includes(wallObjectId)) {
-                      setArrangeSessionPreview([{ id: wallObjectId, xMm, yMm }]);
+                    if (
+                      routeMoveThroughSession([{ id: wallObjectId, xMm, yMm }], {
+                        requireMembership: true
+                      })
+                    ) {
                       return;
                     }
                     void moveOpening(wallObjectId, xMm, yMm, allowOverlappingPlacement);
                   }}
                   onMovePlacement={(wallObjectId, xMm, yMm) => {
-                    if (arrangeSession?.memberIds.includes(wallObjectId)) {
-                      setArrangeSessionPreview([{ id: wallObjectId, xMm, yMm }]);
+                    if (
+                      routeMoveThroughSession([{ id: wallObjectId, xMm, yMm }], {
+                        requireMembership: true
+                      })
+                    ) {
                       return;
                     }
                     void moveArtworkPlacement(wallObjectId, xMm, yMm, allowOverlappingPlacement);
@@ -1056,8 +1090,7 @@ export function App() {
                     // With a session open, a group drag becomes more live
                     // preview (one undo entry on session commit); without one
                     // it keeps committing directly as "Move N objects".
-                    if (arrangeSession) {
-                      setArrangeSessionPreview(moves);
+                    if (routeMoveThroughSession(moves, { requireMembership: false })) {
                       return;
                     }
                     void moveWallObjectsGroup(moves, allowOverlappingPlacement);
