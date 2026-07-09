@@ -24,6 +24,10 @@ import {
   splitWall as splitWallEdit
 } from "../domain/geometry/reshapeRoom";
 import type { WallWithGeometry } from "../domain/geometry/walls";
+import {
+  deleteRoomFromProject,
+  getRoomCascadeScope
+} from "../domain/geometry/roomCascade";
 import { getFloorWalls } from "../domain/geometry/planObjects";
 import type { PlanPlacement } from "../domain/snapping/planSnapTargets";
 import { createBlankProject } from "../domain/newProject";
@@ -34,6 +38,7 @@ import {
   getOpeningKindLabel,
   type OpeningKind
 } from "../domain/placement/createOpening";
+import { clearOpeningPartners } from "../domain/placement/openingPairs";
 import { createArtworkPlacement, getEffectivePlacementSizeMm } from "../domain/placement/placeArtwork";
 import type { PlacementWarning } from "../domain/placement/validatePlacement";
 import {
@@ -675,19 +680,15 @@ export function createAppStore(deps: AppStoreDeps) {
         );
         if (!project || !roomPlacement) return;
 
-        const deletedWallIds = new Set(
-          roomPlacement.room.walls.map((wall) => wall.id)
-        );
-        // Objects also hang on the room's partition faces — those ids join the
-        // deleted set so the cascade prunes them too (spec §6.5).
-        const deletedFaceIds = new Set(
-          roomPlacement.room.freestandingWalls.flatMap((partition) =>
-            faceWallIdsOf(partition.id)
-          )
-        );
-        const nextRooms = project.floor.rooms.filter(
-          (placement) => placement.roomId !== roomId
-        );
+        // The whole cascade (prune room, drop its wallObjects, clear dangling
+        // partner refs; floorObjects untouched) lives in the domain now.
+        const { project: nextProject } = deleteRoomFromProject(project, roomId);
+        const nextRooms = nextProject.floor.rooms;
+        // Perimeter wall ids only — the selection/wallContext bookkeeping below
+        // keys off the room's own walls (NOT its partition faces), matching the
+        // pre-refactor behavior exactly.
+        const { wallIds: deletedWallIds } = getRoomCascadeScope(project, roomId);
+
         // Wall context falls back to a surviving wall when the deleted room
         // owned it; otherwise it persists untouched.
         const wallContextId = get().wallContextId;
@@ -717,26 +718,6 @@ export function createAppStore(deps: AppStoreDeps) {
           (current.kind === "room" && current.roomId === roomId) || isDyingOpeningSelection
             ? NO_SELECTION
             : current;
-
-        const survivingWallObjects = project.wallObjects.filter(
-          (wallObject) =>
-            !deletedWallIds.has(wallObject.wallId) && !deletedFaceIds.has(wallObject.wallId)
-        );
-        const removedObjectIds = new Set(
-          project.wallObjects
-            .filter(
-              (wallObject) =>
-                deletedWallIds.has(wallObject.wallId) || deletedFaceIds.has(wallObject.wallId)
-            )
-            .map((wallObject) => wallObject.id)
-        );
-        const nextProject: Project = {
-          ...project,
-          floor: { rooms: nextRooms },
-          // Clear any surviving partner's connectsToObjectId that pointed at a
-          // removed opening, so no dangling pairing ref persists.
-          wallObjects: clearOpeningPartners(survivingWallObjects, removedObjectIds)
-        };
 
         await applyEdit(
           `Delete ${roomPlacement.room.name}`,
@@ -2443,29 +2424,6 @@ function buildOpeningOnWall(
 ): OpeningWallObject {
   const centerlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
   return createOpeningPlacement(kind, wall.id, xMm, centerlineYMm);
-}
-
-// After openings are deleted (directly or via a wall/room/partition cascade),
-// clear any surviving door/window's connectsToObjectId that pointed at one of
-// them, so no dangling pairing ref ever persists (spec §5.5). No writers set
-// connectsToObjectId until slice 4, so today this is a no-op in practice — but
-// the cascade is here so the invariant holds the moment pairing ships.
-function clearOpeningPartners(
-  wallObjects: WallObject[],
-  deletedIds: Set<string>
-): WallObject[] {
-  if (deletedIds.size === 0) return wallObjects;
-  return wallObjects.map((wallObject) => {
-    if (
-      (wallObject.kind === "door" || wallObject.kind === "window") &&
-      wallObject.connectsToObjectId !== undefined &&
-      deletedIds.has(wallObject.connectsToObjectId)
-    ) {
-      const { connectsToObjectId: _cleared, ...rest } = wallObject;
-      return rest;
-    }
-    return wallObject;
-  });
 }
 
 function formatZodIssue(error: z.ZodError): string {

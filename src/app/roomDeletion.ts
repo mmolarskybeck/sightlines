@@ -1,4 +1,4 @@
-import { faceWallIdsOf } from "../domain/geometry/freestandingWalls";
+import { getRoomCascadeScope } from "../domain/geometry/roomCascade";
 import { getPlacedRoomBounds } from "../domain/geometry/walls";
 import type { Project, RoomPlacement } from "../domain/project";
 import { isEditableTarget } from "./hooks/isEditableTarget";
@@ -33,10 +33,13 @@ export function shouldDeleteRoomOnKey({
 }
 
 // What deleting this room would cascade away, bucketed for the confirm
-// dialog's copy. Mirrors deleteRoom's own cascade scope: objects on the room's
-// perimeter walls AND on its partitions' faces (faceWallIdsOf), floor objects
-// within the placed bounds (the same derivation App uses for RoomInspector's
-// counts), plus the partitions themselves.
+// dialog's copy. The wall/face-object scope comes from getRoomCascadeScope —
+// the same domain rule the actual delete uses — so the dialog can't drift from
+// what deleteRoom removes. Floor objects within the placed bounds are counted
+// here for the copy ONLY: the delete action deliberately does NOT remove floor
+// objects, so this count overstates what actually disappears. That discrepancy
+// is intentional dialog copy (the same derivation App uses for RoomInspector's
+// counts) and is left as-is. Partitions are counted from the room itself.
 export type RoomContentsSummary = {
   artworks: number;
   doors: number;
@@ -50,10 +53,7 @@ export function summarizeRoomContents(
   project: Project,
   placement: RoomPlacement
 ): RoomContentsSummary {
-  const roomWallIds = new Set(placement.room.walls.map((wall) => wall.id));
-  for (const partition of placement.room.freestandingWalls) {
-    for (const faceId of faceWallIdsOf(partition.id)) roomWallIds.add(faceId);
-  }
+  const { cascadedWallObjectIds } = getRoomCascadeScope(project, placement.roomId);
   const bounds = getPlacedRoomBounds(placement);
 
   let artworks = 0;
@@ -62,7 +62,7 @@ export function summarizeRoomContents(
   let blockedZones = 0;
 
   for (const wallObject of project.wallObjects) {
-    if (!roomWallIds.has(wallObject.wallId)) continue;
+    if (!cascadedWallObjectIds.has(wallObject.id)) continue;
     if (wallObject.kind === "artwork") artworks += 1;
     else if (wallObject.kind === "door") doors += 1;
     else if (wallObject.kind === "window") windows += 1;
