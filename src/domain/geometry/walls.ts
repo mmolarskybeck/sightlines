@@ -1,4 +1,5 @@
 import type { Floor, Room, RoomPlacement, RoomVertex, Wall } from "../project";
+import { isPointInPolygon } from "./polygon";
 
 export type WallWithGeometry = Wall & {
   start: RoomVertex;
@@ -29,6 +30,32 @@ export function getWallGeometry(room: Room, wall: Wall): WallWithGeometry {
 
 export function getWallsWithGeometry(room: Room): WallWithGeometry[] {
   return room.walls.map((wall) => getWallGeometry(room, wall));
+}
+
+// The single canonical "which perpendicular points OUT of the room" for a
+// wall: a 1mm probe along the left normal against the room polygon finds
+// which side the interior is on. Exact for concave shapes (an L's inner
+// walls), where a centroid heuristic can pick the wrong side, and immune to
+// winding assumptions. Room-local coordinates throughout — normals are
+// placement-invariant since rooms never rotate (rotationDeg is
+// schema-pinned to 0), so callers may pass either room-local or
+// world-translated wall geometry.
+export function outwardWallNormal(
+  room: Room,
+  wall: WallWithGeometry
+): { xMm: number; yMm: number } {
+  const dxMm = wall.end.xMm - wall.start.xMm;
+  const dyMm = wall.end.yMm - wall.start.yMm;
+  const lengthMm = Math.hypot(dxMm, dyMm) || 1;
+  const left = { xMm: -dyMm / lengthMm, yMm: dxMm / lengthMm };
+
+  const probe = {
+    xMm: (wall.start.xMm + wall.end.xMm) / 2 + left.xMm,
+    yMm: (wall.start.yMm + wall.end.yMm) / 2 + left.yMm
+  };
+  return isPointInPolygon(probe, room.vertices)
+    ? { xMm: -left.xMm, yMm: -left.yMm }
+    : left;
 }
 
 // Unit-direction dot tolerance for "these walls meet at 90°". Grid-snapped

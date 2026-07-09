@@ -9,7 +9,9 @@ import {
   getFloorBounds,
   getOrthogonalQuadWallPair,
   getRectangleRoomDimensions,
-  isRectangleRoom
+  getWallsWithGeometry,
+  isRectangleRoom,
+  outwardWallNormal
 } from "./walls";
 
 // A drawn quadrilateral with four walls and a valid loop, but slanted sides —
@@ -28,6 +30,54 @@ function trapezoidRoom() {
     ]
   }).room;
 }
+
+// A concave L: the six-vertex loop bites a rectangular notch out of the
+// bottom-right corner, so two of its walls (the notch's inner horizontal and
+// vertical faces) meet at a reflex angle. This is exactly the shape a
+// centroid-based heuristic mis-signs — the bbox center sits inside the
+// rectangle the notch was cut from, on the wrong side of both inner walls.
+function lShapeRoom(): Room {
+  return createPolygonRoomPlacement({
+    roomId: "room-l",
+    name: "L Room",
+    heightMm: 3000,
+    pointsFloorMm: [
+      { xMm: 0, yMm: 0 },
+      { xMm: 6000, yMm: 0 },
+      { xMm: 6000, yMm: 3000 },
+      { xMm: 3000, yMm: 3000 },
+      { xMm: 3000, yMm: 6000 },
+      { xMm: 0, yMm: 6000 }
+    ]
+  }).room;
+}
+
+describe("outwardWallNormal", () => {
+  it("points away from the interior for every wall of a concave L, including the two inner-corner walls", () => {
+    const room = lShapeRoom();
+    const walls = getWallsWithGeometry(room);
+
+    // Expected outward unit normal per wall, indexed to the pointsFloorMm
+    // above (wall i runs vertex i -> vertex i+1). Walls 2 and 3 are the
+    // notch's inner walls: a bbox-centroid heuristic (center at (3000,3000))
+    // scores both with a zero-or-wrong-sign dot product and picks the side
+    // that faces INTO the room instead of out of it.
+    const expected: Record<number, { xMm: number; yMm: number }> = {
+      0: { xMm: 0, yMm: -1 }, // bottom edge (0,0)->(6000,0)
+      1: { xMm: 1, yMm: 0 }, // right edge (6000,0)->(6000,3000)
+      2: { xMm: 0, yMm: 1 }, // inner horizontal wall (6000,3000)->(3000,3000)
+      3: { xMm: 1, yMm: 0 }, // inner vertical wall (3000,3000)->(3000,6000)
+      4: { xMm: 0, yMm: 1 }, // top edge (3000,6000)->(0,6000)
+      5: { xMm: -1, yMm: 0 } // left edge (0,6000)->(0,0)
+    };
+
+    walls.forEach((wall, index) => {
+      const normal = outwardWallNormal(room, wall);
+      expect(normal.xMm).toBeCloseTo(expected[index].xMm);
+      expect(normal.yMm).toBeCloseTo(expected[index].yMm);
+    });
+  });
+});
 
 describe("getOrthogonalQuadWallPair", () => {
   it("returns the opposing wall for a four-wall rectangle", () => {

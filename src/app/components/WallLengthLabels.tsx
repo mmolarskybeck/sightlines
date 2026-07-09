@@ -1,6 +1,5 @@
-import { isPointInPolygon } from "../../domain/geometry/polygon";
-import { getWallsWithGeometry, type WallWithGeometry } from "../../domain/geometry/walls";
-import type { DisplayUnit, Room, RoomPlacement } from "../../domain/project";
+import { getWallsWithGeometry, outwardWallNormal } from "../../domain/geometry/walls";
+import type { DisplayUnit, RoomPlacement } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
 
 // Live length readouts during a room drag, one rule for every gesture: a
@@ -38,7 +37,7 @@ export function WallLengthLabels({
       {walls.map((wall) => {
         const midXMm = (wall.start.xMm + wall.end.xMm) / 2;
         const midYMm = (wall.start.yMm + wall.end.yMm) / 2;
-        const outward = outwardUnitNormal(wall, placement.room);
+        const outward = outwardWallNormal(placement.room, wall);
         const xMm = midXMm + outward.xMm * labelOffsetMm + placement.offsetXMm;
         const yMm = midYMm + outward.yMm * labelOffsetMm + placement.offsetYMm;
 
@@ -68,28 +67,4 @@ export function WallLengthLabels({
       })}
     </g>
   );
-}
-
-// Of the wall's two perpendiculars, the one pointing OUT of the room: a 1mm
-// probe along the left normal against the room polygon finds which side the
-// interior is on. Exact for concave shapes (an L's inner walls), where a
-// centroid heuristic can pick the wrong side, and immune to winding
-// assumptions. Room-local coordinates throughout (vertices are room-local;
-// the caller adds the placement offset).
-function outwardUnitNormal(
-  wall: WallWithGeometry,
-  room: Room
-): { xMm: number; yMm: number } {
-  const dxMm = wall.end.xMm - wall.start.xMm;
-  const dyMm = wall.end.yMm - wall.start.yMm;
-  const lengthMm = Math.hypot(dxMm, dyMm) || 1;
-  const left = { xMm: -dyMm / lengthMm, yMm: dxMm / lengthMm };
-
-  const probe = {
-    xMm: (wall.start.xMm + wall.end.xMm) / 2 + left.xMm,
-    yMm: (wall.start.yMm + wall.end.yMm) / 2 + left.yMm
-  };
-  return isPointInPolygon(probe, room.vertices)
-    ? { xMm: -left.xMm, yMm: -left.yMm }
-    : left;
 }

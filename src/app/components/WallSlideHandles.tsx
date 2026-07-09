@@ -1,8 +1,8 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Vector2 } from "../../domain/geometry/dragResize";
 import {
-  getRoomBounds,
   getWallsWithGeometry,
+  outwardWallNormal,
   type WallWithGeometry
 } from "../../domain/geometry/walls";
 import type { RoomPlacement } from "../../domain/project";
@@ -44,7 +44,6 @@ export function WallSlideHandles({
   if (handleSizeMm <= 0) return null;
 
   const walls = getWallsWithGeometry(placement.room);
-  const centroidMm = roomCentroidWorldMm(placement);
 
   // A generous hit target (~2.8x the visible square) keeps the chip easy to
   // grab, matching RoomResizeHandles. Walls too short to host that cleanly hide
@@ -60,7 +59,6 @@ export function WallSlideHandles({
         return (
           <WallSlideHandle
             activeDrag={activeDrag}
-            centroidMm={centroidMm}
             handleSizeMm={handleSizeMm}
             highlighted={highlightedWallId === wall.id}
             key={wall.id}
@@ -77,7 +75,6 @@ export function WallSlideHandles({
 
 function WallSlideHandle({
   activeDrag,
-  centroidMm,
   handleSizeMm,
   highlighted,
   paddedSizeMm,
@@ -86,7 +83,6 @@ function WallSlideHandle({
   onBeginWallDrag
 }: {
   activeDrag: ActiveWallSlideDrag | null;
-  centroidMm: Vector2;
   handleSizeMm: number;
   highlighted: boolean;
   paddedSizeMm: number;
@@ -96,7 +92,7 @@ function WallSlideHandle({
 }) {
   const centerXMm = (wall.start.xMm + wall.end.xMm) / 2 + placement.offsetXMm;
   const centerYMm = (wall.start.yMm + wall.end.yMm) / 2 + placement.offsetYMm;
-  const normal = outwardNormal(wall, placement, centroidMm);
+  const normal = outwardWallNormal(placement.room, wall);
 
   const isDragging = activeDrag?.wallId === wall.id;
   const invalid = isDragging ? !activeDrag.valid : false;
@@ -139,41 +135,6 @@ function WallSlideHandle({
       />
     </g>
   );
-}
-
-function roomCentroidWorldMm(placement: RoomPlacement): Vector2 {
-  const bounds = getRoomBounds(placement.room);
-  return {
-    xMm: (bounds.minX + bounds.maxX) / 2 + placement.offsetXMm,
-    yMm: (bounds.minY + bounds.maxY) / 2 + placement.offsetYMm
-  };
-}
-
-// Of a wall's two perpendiculars, the one pointing away from the room's
-// centroid (world space) — so the label sits outside the room regardless of
-// vertex winding. Mirrors RoomResizeHandles' outwardNormal.
-function outwardNormal(
-  wall: WallWithGeometry,
-  placement: RoomPlacement,
-  centroidMm: Vector2
-): Vector2 {
-  const axis = axisOf(wall);
-  const candidate: Vector2 = { xMm: -axis.yMm, yMm: axis.xMm };
-
-  const midXMm = (wall.start.xMm + wall.end.xMm) / 2 + placement.offsetXMm;
-  const midYMm = (wall.start.yMm + wall.end.yMm) / 2 + placement.offsetYMm;
-  const towardMidMm: Vector2 = { xMm: midXMm - centroidMm.xMm, yMm: midYMm - centroidMm.yMm };
-
-  const dot = candidate.xMm * towardMidMm.xMm + candidate.yMm * towardMidMm.yMm;
-  return dot < 0 ? { xMm: -candidate.xMm, yMm: -candidate.yMm } : candidate;
-}
-
-function axisOf(wall: WallWithGeometry): Vector2 {
-  const dxMm = wall.end.xMm - wall.start.xMm;
-  const dyMm = wall.end.yMm - wall.start.yMm;
-  const lengthMm = Math.hypot(dxMm, dyMm) || 1;
-
-  return { xMm: dxMm / lengthMm, yMm: dyMm / lengthMm };
 }
 
 // Bucket the chip's travel direction (the wall's perpendicular) into the four
