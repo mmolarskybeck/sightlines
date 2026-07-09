@@ -1873,11 +1873,20 @@ export function createAppStore(deps: AppStoreDeps) {
         // object kind, so this same action deletes an opening or a
         // floor-placed object too (ids are unique across both arrays) —
         // there's no checklist-membership concept to preserve for those.
-        await applyEdit("Remove from wall", (current) => ({
-          ...current,
-          wallObjects: current.wallObjects.filter((wallObject) => wallObject.id !== wallObjectId),
-          floorObjects: current.floorObjects.filter((floorObject) => floorObject.id !== wallObjectId)
-        }));
+        //
+        // clearOpeningPartners clears any surviving partner's
+        // connectsToObjectId that pointed at this removed opening, so no
+        // dangling pairing ref persists.
+        const nextProject: Project = {
+          ...project,
+          wallObjects: clearOpeningPartners(
+            project.wallObjects.filter((wallObject) => wallObject.id !== wallObjectId),
+            new Set([wallObjectId])
+          ),
+          floorObjects: project.floorObjects.filter((floorObject) => floorObject.id !== wallObjectId)
+        };
+
+        await applyEdit("Remove from wall", () => nextProject);
       },
 
       async addOpening(wallId, kind) {
@@ -2480,15 +2489,23 @@ export function createAppStore(deps: AppStoreDeps) {
 
         const label = removedCount === 1 ? "Remove 1 object" : `Remove ${removedCount} objects`;
 
+        // clearOpeningPartners clears any surviving partner's
+        // connectsToObjectId that pointed at one of the removed openings, so
+        // no dangling pairing ref persists.
+        const nextProject: Project = {
+          ...project,
+          wallObjects: clearOpeningPartners(
+            project.wallObjects.filter((wallObject) => !idSet.has(wallObject.id)),
+            idSet
+          ),
+          floorObjects: project.floorObjects.filter(
+            (floorObject) => !idSet.has(floorObject.id)
+          )
+        };
+
         await applyEdit(
           label,
-          (current) => ({
-            ...current,
-            wallObjects: current.wallObjects.filter((wallObject) => !idSet.has(wallObject.id)),
-            floorObjects: current.floorObjects.filter(
-              (floorObject) => !idSet.has(floorObject.id)
-            )
-          }),
+          () => nextProject,
           selectionWrite(project, NO_SELECTION, get().wallContextId)
         );
       }

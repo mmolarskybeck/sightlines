@@ -1640,6 +1640,38 @@ describe("app store", () => {
 
       expect(store.getState().project!.wallObjects).toHaveLength(0);
     });
+
+    it("clears a surviving partner's connectsToObjectId when its paired door is removed", async () => {
+      // No store action pairs openings yet (a later milestone) — hand-construct
+      // the symmetric pair directly, matching the schema's invariant (spec
+      // §5.5), to prove the removal cascade already clears dangling refs.
+      await store.getState().addOpening("wall-north", "door");
+      const doorA = store.getState().project!.wallObjects[0];
+      await store.getState().addOpening("wall-south", "door");
+      const doorB = store
+        .getState()
+        .project!.wallObjects.find((wallObject) => wallObject.id !== doorA.id)!;
+
+      const pairedProject: Project = {
+        ...store.getState().project!,
+        wallObjects: store.getState().project!.wallObjects.map((wallObject) => {
+          if (wallObject.id === doorA.id) return { ...wallObject, connectsToObjectId: doorB.id };
+          if (wallObject.id === doorB.id) return { ...wallObject, connectsToObjectId: doorA.id };
+          return wallObject;
+        })
+      };
+      await repository.save(pairedProject);
+      store.setState({ project: pairedProject });
+
+      await store.getState().removePlacement(doorB.id);
+
+      const survivingDoorA = store
+        .getState()
+        .project!.wallObjects.find((wallObject) => wallObject.id === doorA.id)!;
+      expect(
+        (survivingDoorA as { connectsToObjectId?: string }).connectsToObjectId
+      ).toBeUndefined();
+    });
   });
 
   describe("collision between artwork and openings", () => {
@@ -2576,6 +2608,38 @@ describe("app store", () => {
         expect(state.project!.wallObjects.some((o) => o.id === a.placementId)).toBe(false);
         expect(state.project!.floorObjects.some((o) => o.id === floorObjectId)).toBe(false);
         expect(objectIdsOf(state.selection)).toEqual([]);
+      });
+
+      it("clears a surviving partner's connectsToObjectId when its paired door is removed via selection", async () => {
+        // Same hand-constructed symmetric pair as the removePlacement case
+        // above, routed through the selection-based removal path instead.
+        await store.getState().addOpening("wall-north", "door");
+        const doorA = store.getState().project!.wallObjects[0];
+        await store.getState().addOpening("wall-south", "door");
+        const doorB = store
+          .getState()
+          .project!.wallObjects.find((wallObject) => wallObject.id !== doorA.id)!;
+
+        const pairedProject: Project = {
+          ...store.getState().project!,
+          wallObjects: store.getState().project!.wallObjects.map((wallObject) => {
+            if (wallObject.id === doorA.id) return { ...wallObject, connectsToObjectId: doorB.id };
+            if (wallObject.id === doorB.id) return { ...wallObject, connectsToObjectId: doorA.id };
+            return wallObject;
+          })
+        };
+        await repository.save(pairedProject);
+        store.setState({ project: pairedProject });
+
+        store.getState().setObjectSelection([doorB.id]);
+        await store.getState().removeSelectedPlacements();
+
+        const survivingDoorA = store
+          .getState()
+          .project!.wallObjects.find((wallObject) => wallObject.id === doorA.id)!;
+        expect(
+          (survivingDoorA as { connectsToObjectId?: string }).connectsToObjectId
+        ).toBeUndefined();
       });
     });
 
