@@ -78,15 +78,22 @@ describe("WallSlideHandles", () => {
     expect(chipCount(container)).toBe(5);
   });
 
-  it("shows a signed offset label near the chip during an active drag", () => {
+  it("labels an active drag with the outward-signed offset, not the raw left-normal one", () => {
+    // The fixture's input winding has positive signed area, so creation keeps
+    // it: wall[0] runs (0,0)→(6000,0) with the room below it (+y). Its left
+    // normal (+y) points INTO the room, so moveRoomWall's raw +500 is a
+    // shrink — the label must re-sign it: inward reads "-", outward "+".
     const draggedWallId = lShape.room.walls[0].id;
-    const { container } = renderHandles({
+    const shrink = renderHandles({
       activeDrag: { wallId: draggedWallId, offsetMm: 500, valid: true }
     });
-    const label = container.querySelector(".resize-handle-label");
-    expect(label).not.toBeNull();
-    // Positive offset takes a "+" prefix; 500mm reads as 50 cm.
-    expect(label?.textContent).toBe("+50 cm");
+    expect(shrink.container.querySelector(".resize-handle-label")?.textContent).toBe("-50 cm");
+    cleanup();
+
+    const grow = renderHandles({
+      activeDrag: { wallId: draggedWallId, offsetMm: -500, valid: true }
+    });
+    expect(grow.container.querySelector(".resize-handle-label")?.textContent).toBe("+50 cm");
   });
 
   it("tints the dragged chip with the danger token while the slide is invalid", () => {

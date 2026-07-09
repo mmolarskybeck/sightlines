@@ -1,11 +1,12 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Vector2 } from "../../domain/geometry/dragResize";
+import { isPointInPolygon } from "../../domain/geometry/polygon";
 import {
   getRoomBounds,
   getWallsWithGeometry,
   type WallWithGeometry
 } from "../../domain/geometry/walls";
-import type { DisplayUnit, RoomPlacement } from "../../domain/project";
+import type { DisplayUnit, Room, RoomPlacement } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
 
 // The in-flight wall slide, mirrored down from PlanView's wallDrag state. The
@@ -165,7 +166,10 @@ function WallSlideHandle({
             strokeWidth: handleSizeMm * 0.5
           }}
         >
-          {formatSignedOffset(activeDrag.offsetMm, unit)}
+          {formatSignedOffset(
+            outwardDisplayOffsetMm(wall, placement.room, activeDrag.offsetMm),
+            unit
+          )}
         </text>
       ) : null}
     </g>
@@ -173,11 +177,30 @@ function WallSlideHandle({
 }
 
 // Signed slide distance: formatLength renders the magnitude; the sign prefix
-// tells which way along the normal the wall moved ("+" for the positive
-// left-normal direction PlanView's offsetMm tracks).
+// tells which way the wall moved — "+" outward (room grew), "-" inward.
 function formatSignedOffset(offsetMm: number, unit: DisplayUnit): string {
   const magnitude = formatLength(Math.abs(offsetMm), { unit });
   return offsetMm < 0 ? `-${magnitude}` : `+${magnitude}`;
+}
+
+// moveRoomWall signs its offset along the wall's LEFT normal (start→end
+// rotated 90° CCW — reshapeRoom.ts), and for this app's CCW-wound rooms that
+// points INTO the room, so the raw value reads shrink-positive. The label
+// re-signs it to what the user can see: positive = outward, room grew. A 1mm
+// probe along the left normal against the room polygon finds which side the
+// interior is on — exact for concave shapes (an L's inner walls) where a
+// centroid test can pick the wrong side, and immune to winding assumptions.
+function outwardDisplayOffsetMm(
+  wall: WallWithGeometry,
+  room: Room,
+  offsetMm: number
+): number {
+  const axis = axisOf(wall);
+  const probe = {
+    xMm: (wall.start.xMm + wall.end.xMm) / 2 - axis.yMm,
+    yMm: (wall.start.yMm + wall.end.yMm) / 2 + axis.xMm
+  };
+  return isPointInPolygon(probe, room.vertices) ? -offsetMm : offsetMm;
 }
 
 function roomCentroidWorldMm(placement: RoomPlacement): Vector2 {
