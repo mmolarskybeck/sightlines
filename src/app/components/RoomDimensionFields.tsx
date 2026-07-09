@@ -1,9 +1,5 @@
 import type { DisplayUnit } from "../../domain/project";
-import {
-  getPlaceholderForScope,
-  getScopeUnits,
-  unitSystemFromDisplayUnit
-} from "../../domain/units/unitSystem";
+import { getScopedUnitContext } from "./scopedUnits";
 import { LengthField } from "./LengthField";
 
 export function RoomDimensionFields({
@@ -19,9 +15,7 @@ export function RoomDimensionFields({
   unit: DisplayUnit;
   widthMm: number;
 }) {
-  const system = unitSystemFromDisplayUnit(unit);
-  const { displayUnit, parseUnit } = getScopeUnits(system, "wall");
-  const placeholder = getPlaceholderForScope(system, "wall");
+  const { displayUnit, parseUnit, placeholder } = getScopedUnitContext(unit, "wall");
 
   return (
     <div className="room-dimensions">

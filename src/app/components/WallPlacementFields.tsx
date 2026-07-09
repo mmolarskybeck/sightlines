@@ -1,16 +1,6 @@
 import type { ArtworkWallObject, DisplayUnit } from "../../domain/project";
-import {
-  getPlaceholderForScope,
-  getScopeUnits,
-  unitSystemFromDisplayUnit
-} from "../../domain/units/unitSystem";
 import { LengthField } from "./LengthField";
-
-// Nudge per stepper press / ArrowUp-Down: ½″ imperial, 1cm metric — the same
-// "smallest sensible hand adjustment" the arrange fields and the keyboard
-// nudges use, matched to each system so a value lands on tidy numbers.
-const IMPERIAL_STEP_MM = 12.7;
-const METRIC_STEP_MM = 10;
+import { getScopedUnitContext } from "./scopedUnits";
 
 // Props-driven "Position on wall" editor for a single wall-placed artwork —
 // the numeric twin of dragging the work along its wall in the elevation view.
@@ -48,13 +38,10 @@ export function WallPlacementFields({
   onCommit: (xMm: number, yMm: number) => void;
   unit: DisplayUnit;
 }) {
-  const system = unitSystemFromDisplayUnit(unit);
   // A hang distance along the wall is the same natural unit as an opening's X
   // position (docs/plan.md's openingPosition scope) — it's an offset along the
   // wall, matching the arrange panel's inset/gap fields.
-  const { displayUnit, parseUnit } = getScopeUnits(system, "openingPosition");
-  const placeholder = getPlaceholderForScope(system, "openingPosition");
-  const stepMm = system === "metric" ? METRIC_STEP_MM : IMPERIAL_STEP_MM;
+  const { displayUnit, parseUnit, placeholder, stepMm } = getScopedUnitContext(unit, "openingPosition");
 
   const halfWidthMm = placement.widthMm / 2;
   const leftEdgeMm = placement.xMm - halfWidthMm;

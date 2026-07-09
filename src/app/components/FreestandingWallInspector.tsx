@@ -5,11 +5,7 @@ import {
   getFreestandingAngleDeg,
   getFreestandingLengthMm
 } from "../../domain/geometry/freestandingWalls";
-import {
-  getPlaceholderForScope,
-  getScopeUnits,
-  unitSystemFromDisplayUnit
-} from "../../domain/units/unitSystem";
+import { getScopedUnitContext } from "./scopedUnits";
 import { LengthField } from "./LengthField";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -37,9 +33,9 @@ export function FreestandingWallInspector({
   onViewFace: (face: "a" | "b") => void;
   onDelete: () => void;
 }) {
-  const system = unitSystemFromDisplayUnit(unit);
-  const wallScope = getScopeUnits(system, "wall");
-  const wallPlaceholder = getPlaceholderForScope(system, "wall");
+  const { displayUnit, parseUnit, placeholder } = getScopedUnitContext(unit, "wall");
+  const wallScope = { displayUnit, parseUnit };
+  const wallPlaceholder = placeholder;
 
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>

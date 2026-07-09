@@ -7,11 +7,6 @@ import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import type { DisplayUnit, WallObject } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
-import {
-  getPlaceholderForScope,
-  getScopeUnits,
-  unitSystemFromDisplayUnit
-} from "../../domain/units/unitSystem";
 import type { ArrangeBoundary } from "../hooks/arrangeReadout";
 import { LengthField } from "./LengthField";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
@@ -23,13 +18,12 @@ import {
   SelectTrigger,
   SelectValue
 } from "./ui/select";
+import { getScopedUnitContext } from "./scopedUnits";
 
 // Wall-length nudge per stepper press / ArrowUp-Down: a clean ¼″ for imperial,
 // a round 10mm for metric — the same "smallest sensible hand adjustment" the
 // arrow-key nudges use, matched to each system so the value lands on tidy
 // numbers instead of a converted fraction.
-const IMPERIAL_STEP_MM = 12.7;
-const METRIC_STEP_MM = 10;
 
 type ArrangeMode = "equal" | "inset" | "gap";
 type InsetAnchor = "left" | "both" | "right";
@@ -178,13 +172,10 @@ export function SelectionInspector({
   onCancelArrange: () => void;
   onRemoveAll: () => void;
 }) {
-  const system = unitSystemFromDisplayUnit(unit);
   // Margin/spacing are wall-length measurements, same natural unit as an
   // opening's X position (docs/plan.md's openingPosition scope) — inset and
   // gap are just two more offsets along the wall.
-  const { displayUnit, parseUnit } = getScopeUnits(system, "openingPosition");
-  const placeholder = getPlaceholderForScope(system, "openingPosition");
-  const stepMm = system === "metric" ? METRIC_STEP_MM : IMPERIAL_STEP_MM;
+  const { displayUnit, parseUnit, placeholder, stepMm } = getScopedUnitContext(unit, "openingPosition");
 
   const formatValue = (valueMm: number) => formatLength(valueMm, { unit: displayUnit });
 

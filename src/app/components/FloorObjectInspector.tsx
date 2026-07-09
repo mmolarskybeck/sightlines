@@ -1,12 +1,7 @@
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { getOpeningKindLabel } from "../../domain/placement/createOpening";
 import type { BlockedZoneFloorObject, DisplayUnit, FloorObject } from "../../domain/project";
-import type { MeasurementScope } from "../../domain/units/unitSystem";
-import {
-  getPlaceholderForScope,
-  getScopeUnits,
-  unitSystemFromDisplayUnit
-} from "../../domain/units/unitSystem";
+import { getScopedUnitContext } from "./scopedUnits";
 import { LengthField } from "./LengthField";
 import { Button } from "./ui/button";
 
@@ -27,13 +22,8 @@ export function FloorPlacementFields({
   onCommitSize: (widthMm: number, depthMm: number) => void;
   unit: DisplayUnit;
 }) {
-  const system = unitSystemFromDisplayUnit(unit);
-  const scoped = (scope: MeasurementScope) => {
-    const { displayUnit, parseUnit } = getScopeUnits(system, scope);
-    return { displayUnit, parseUnit, placeholder: getPlaceholderForScope(system, scope) };
-  };
-  const position = scoped("openingPosition");
-  const size = scoped("openingSize");
+  const position = getScopedUnitContext(unit, "openingPosition");
+  const size = getScopedUnitContext(unit, "openingSize");
 
   return (
     <>

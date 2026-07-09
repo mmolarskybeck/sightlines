@@ -1,11 +1,7 @@
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import type { DisplayUnit } from "../../domain/project";
 import type { RectangleRoomDimensions } from "../../domain/geometry/walls";
-import {
-  getPlaceholderForScope,
-  getScopeUnits,
-  unitSystemFromDisplayUnit
-} from "../../domain/units/unitSystem";
+import { getScopedUnitContext } from "./scopedUnits";
 import { LengthField } from "./LengthField";
 import { RoomDimensionFields } from "./RoomDimensionFields";
 import { Button } from "./ui/button";
@@ -39,9 +35,7 @@ export function RoomInspector({
   onCommitWidth: (lengthMm: number) => Promise<void>;
   onToggleReshape: () => void;
 }) {
-  const system = unitSystemFromDisplayUnit(unit);
-  const { displayUnit, parseUnit } = getScopeUnits(system, "wall");
-  const placeholder = getPlaceholderForScope(system, "wall");
+  const { displayUnit, parseUnit, placeholder } = getScopedUnitContext(unit, "wall");
 
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>

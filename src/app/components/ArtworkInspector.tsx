@@ -9,11 +9,7 @@ import {
   isAspectLocked,
   type PixelAspect
 } from "../../domain/units/aspectFill";
-import {
-  getPlaceholderForScope,
-  getScopeUnits,
-  unitSystemFromDisplayUnit
-} from "../../domain/units/unitSystem";
+import { getScopedUnitContext } from "./scopedUnits";
 import { useArtworkAsset } from "../hooks/useArtworkAsset";
 import { LengthField } from "./LengthField";
 import { UncertaintyIndicator } from "./UncertaintyIndicator";
@@ -216,9 +212,7 @@ function DimensionsSection({
   onCommitDimensions: (dimensions: Dimensions) => void;
   unit: DisplayUnit;
 }) {
-  const system = unitSystemFromDisplayUnit(unit);
-  const { displayUnit, parseUnit } = getScopeUnits(system, "artwork");
-  const placeholder = getPlaceholderForScope(system, "artwork");
+  const { displayUnit, parseUnit, placeholder } = getScopedUnitContext(unit, "artwork");
 
   // The lock toggle only makes sense when there's an image ratio to lock
   // to — with no linked image (or a legacy asset missing pixel dims),

@@ -6,10 +6,10 @@ import type { OpeningKind } from "../../domain/placement/createOpening";
 import type { DisplayUnit } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
 import {
-  getPlaceholderForScope,
   getScopeUnits,
   unitSystemFromDisplayUnit
 } from "../../domain/units/unitSystem";
+import { getScopedUnitContext } from "./scopedUnits";
 import { LengthField } from "./LengthField";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
@@ -49,14 +49,15 @@ export function WallInspector({
   wallLengthMm: number;
   wallName: string;
 }) {
-  const system = unitSystemFromDisplayUnit(unit);
+  const wall = getScopedUnitContext(unit, "wall");
+  const system = wall.system;
   const otherSystem = system === "imperial" ? "metric" : "imperial";
-  const wallScope = getScopeUnits(system, "wall");
-  const wallPlaceholder = getPlaceholderForScope(system, "wall");
+  const wallScope = { displayUnit: wall.displayUnit, parseUnit: wall.parseUnit };
+  const wallPlaceholder = wall.placeholder;
   // Centerline reads best in the natural size unit for each system, with the
   // opposite system's unit as a secondary gloss: imperial shows ft (cm),
   // metric shows cm (ft-in).
-  const centerlinePrimary = getScopeUnits(system, "openingSize").displayUnit;
+  const centerlinePrimary = getScopedUnitContext(unit, "openingSize").displayUnit;
   const centerlineSecondary = getScopeUnits(otherSystem, "openingSize").displayUnit;
 
   return (
