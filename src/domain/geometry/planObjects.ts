@@ -1,7 +1,7 @@
 import type { Floor, FloorObject, WallObjectBase } from "../project";
 import type { Point } from "../snapping/resolveSnap";
-import { getFreestandingFaces } from "./freestandingWalls";
-import { getWallsWithGeometry, type WallWithGeometry } from "./walls";
+import { getRoomPlaceableWalls } from "./placeableWalls";
+import type { WallWithGeometry } from "./walls";
 
 // Doors/windows render as zero-thickness lines in plan view, so their rects
 // need a nominal frame/leaf depth to be visible/clickable — fixed (not
@@ -22,19 +22,17 @@ export function getFloorWalls(floor: Floor): FloorWall[] {
   // with no side-of-line logic — resolvePlanPlacement/findNearestWall are
   // untouched.
   return floor.rooms.flatMap((placement) =>
-    [...getWallsWithGeometry(placement.room), ...getFreestandingFaces(placement.room)].map(
-      (wall) => ({
-        ...wall,
-        startFloorMm: {
-          xMm: wall.start.xMm + placement.offsetXMm,
-          yMm: wall.start.yMm + placement.offsetYMm
-        },
-        endFloorMm: {
-          xMm: wall.end.xMm + placement.offsetXMm,
-          yMm: wall.end.yMm + placement.offsetYMm
-        }
-      })
-    )
+    getRoomPlaceableWalls(placement.room).map((wall) => ({
+      ...wall,
+      startFloorMm: {
+        xMm: wall.start.xMm + placement.offsetXMm,
+        yMm: wall.start.yMm + placement.offsetYMm
+      },
+      endFloorMm: {
+        xMm: wall.end.xMm + placement.offsetXMm,
+        yMm: wall.end.yMm + placement.offsetYMm
+      }
+    }))
   );
 }
 

@@ -1,5 +1,5 @@
-import { getFreestandingFaces } from "../geometry/freestandingWalls";
-import { getWallsWithGeometry, type WallWithGeometry } from "../geometry/walls";
+import { getRoomPlaceableWalls } from "../geometry/placeableWalls";
+import type { WallWithGeometry } from "../geometry/walls";
 import type { Project, WallObject } from "../project";
 import { doWallObjectsOverlap } from "./collision";
 
@@ -63,9 +63,7 @@ function validateWallObjects(project: Project, wallObjects: WallObject[]): Place
   // collide with each other (back-to-back hangs are physically fine).
   const wallGeometryById = new Map<string, WallWithGeometry>(
     project.floor.rooms.flatMap((placement) =>
-      [...getWallsWithGeometry(placement.room), ...getFreestandingFaces(placement.room)].map(
-        (wall) => [wall.id, wall]
-      )
+      getRoomPlaceableWalls(placement.room).map((wall) => [wall.id, wall])
     )
   );
 
