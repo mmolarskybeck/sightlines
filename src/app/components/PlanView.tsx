@@ -15,7 +15,8 @@ import {
   type Vector2
 } from "../../domain/geometry/dragResize";
 import { unitLeftNormal, unitLeftNormalOrZero } from "../../domain/geometry/vector";
-import { resizeWallPreservingAngles, type ResizeAnchor } from "../../domain/geometry/editRoom";
+import type { ResizeAnchor } from "../../domain/geometry/editRoom";
+import { applyPlanPreview, type PlanPreview } from "../../domain/geometry/planPreview";
 import {
   changedWallLengthIds,
   getFloorBounds,
@@ -1139,84 +1140,40 @@ export function PlanView({
     maxYMm: viewBoxBounds.y + viewBoxBounds.height
   });
 
-  const resizePreviewProject =
-    drag !== null
-      ? resizeWallPreservingAngles(project, drag.targetWallId, drag.previewLengthMm, drag.anchor)
-          .project
-      : project;
-  // A room-move drag overrides its placement's offset directly — no domain
-  // helper needed (unlike the wall resize above, a translation doesn't touch
-  // any other room's geometry) — layered on top of the resize preview so the
-  // two gestures never fight, even though only one can be in flight at once.
-  const roomDragPreviewProject = roomDrag
-    ? {
-        ...resizePreviewProject,
-        floor: {
-          rooms: resizePreviewProject.floor.rooms.map((candidate) =>
-            candidate.roomId === roomDrag.roomId
-              ? {
-                  ...candidate,
-                  offsetXMm: roomDrag.previewOffsetMm.xMm,
-                  offsetYMm: roomDrag.previewOffsetMm.yMm
-                }
-              : candidate
-          )
-        }
-      }
-    : resizePreviewProject;
-  // A reshape-mode vertex drag overrides just that one vertex's room-local
-  // position — layered last so it composes with (mutually exclusive with, in
-  // practice) the wall-resize/room-move previews above. Rendered regardless
-  // of validity: an invalid in-flight position still needs to be SEEN (in the
-  // danger token) so the curator knows to pull back; canMoveRoomVertex (not
-  // this splice) is what actually gates the commit on pointer-up.
-  const vertexDragPreviewProject = vertexDrag
-    ? {
-        ...roomDragPreviewProject,
-        floor: {
-          rooms: roomDragPreviewProject.floor.rooms.map((placement) =>
-            placement.roomId === vertexDrag.roomId
-              ? {
-                  ...placement,
-                  room: {
-                    ...placement.room,
-                    vertices: placement.room.vertices.map((vertex) =>
-                      vertex.id === vertexDrag.vertexId
-                        ? {
-                            ...vertex,
-                            xMm: vertexDrag.previewLocalMm.xMm,
-                            yMm: vertexDrag.previewLocalMm.yMm
-                          }
-                        : vertex
-                    )
-                  }
-                }
-              : placement
-          )
-        }
-      }
-    : roomDragPreviewProject;
-  // A reshape-mode wall-BODY drag re-runs the actual domain op against the
-  // committed-so-far preview so the two changed vertices (and the two
-  // neighbours' new lengths) render exactly as moveRoomWall would commit
-  // them — mutually exclusive with vertexDrag in practice, so layering last
-  // here never actually composes with it. An invalid in-flight offset falls
-  // back to the pre-drag project (the outline still renders at its last
-  // valid position while the danger token shows via wallDragInvalid below).
-  const displayedProject = wallDrag
-    ? (() => {
-        try {
-          return moveRoomWall(
-            vertexDragPreviewProject,
-            wallDrag.roomId,
-            wallDrag.wallId,
-            wallDrag.previewOffsetMm
-          ).project;
-        } catch {
-          return vertexDragPreviewProject;
-        }
-      })()
-    : vertexDragPreviewProject;
+  // The project to render during a drag — one PlanPreview layer per live
+  // gesture (wall resize, room move, reshape-mode vertex drag, reshape-mode
+  // wall slide), composed by the domain layer in the same order this view
+  // used to hand-splice them. See planPreview.ts for the fallback/validity
+  // semantics of each layer. useMemo (keyed on the committed project plus
+  // every drag state, all of which are null/reference-stable when their
+  // gesture isn't live) preserves the pre-refactor guarantee that rendering
+  // with nothing in flight yields the exact `project` reference, not a copy.
+  const displayedProject = useMemo(() => {
+    const preview: PlanPreview = {
+      wallResize: drag
+        ? { wallId: drag.targetWallId, lengthMm: drag.previewLengthMm, anchor: drag.anchor }
+        : undefined,
+      roomMove: roomDrag
+        ? {
+            roomId: roomDrag.roomId,
+            offsetXMm: roomDrag.previewOffsetMm.xMm,
+            offsetYMm: roomDrag.previewOffsetMm.yMm
+          }
+        : undefined,
+      vertexMove: vertexDrag
+        ? {
+            roomId: vertexDrag.roomId,
+            vertexId: vertexDrag.vertexId,
+            xMm: vertexDrag.previewLocalMm.xMm,
+            yMm: vertexDrag.previewLocalMm.yMm
+          }
+        : undefined,
+      wallSlide: wallDrag
+        ? { roomId: wallDrag.roomId, wallId: wallDrag.wallId, offsetMm: wallDrag.previewOffsetMm }
+        : undefined
+    };
+    return applyPlanPreview(project, preview);
+  }, [project, drag, roomDrag, vertexDrag, wallDrag]);
 
   // The shared 2D viewport gesture engine (pan / zoom / pinch / wheel /
   // keyboard), formerly a ~350-line copy inline here and in ElevationView. It
