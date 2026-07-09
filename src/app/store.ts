@@ -45,6 +45,7 @@ import {
 } from "../domain/placement/createOpening";
 import { clearOpeningPartners } from "../domain/placement/openingPairs";
 import { createArtworkPlacement, getEffectivePlacementSizeMm } from "../domain/placement/placeArtwork";
+import type { PixelAspect } from "../domain/units/aspectFill";
 import type { PlacementWarning } from "../domain/placement/validatePlacement";
 import {
   validateChangedWallPlacements,
@@ -357,6 +358,20 @@ export function createAppStore(deps: AppStoreDeps) {
           saveState: "error",
           error: error instanceof Error ? error.message : "Could not save the artwork library."
         });
+      }
+    }
+
+    // Best-effort image aspect for an artwork's linked asset, feeding
+    // getEffectivePlacementSizeMm so partial/unknown dims still bake a placement
+    // at the image's true proportions. A missing assetId or a failed load
+    // degrades to "no ratio" (placeholder behavior), never throws.
+    async function loadArtworkAspect(artwork: Artwork): Promise<PixelAspect | undefined> {
+      if (!artwork.assetId) return undefined;
+      try {
+        const asset = await deps.assetRepository.getAsset(artwork.assetId);
+        return { widthPx: asset.widthPx, heightPx: asset.heightPx };
+      } catch {
+        return undefined;
       }
     }
 
@@ -1940,6 +1955,13 @@ export function createAppStore(deps: AppStoreDeps) {
         let placementWarnings: PlacementWarning[] = [];
 
         if (project) {
+          // A derived axis needs the image ratio; skip the asset fetch on the
+          // common both-known path (no axis to derive) so a plain dimension
+          // edit stays synchronous-cheap.
+          const needsAspect =
+            parsed.dimensions.widthMm === undefined || parsed.dimensions.heightMm === undefined;
+          const aspect = needsAspect ? await loadArtworkAspect(parsed) : undefined;
+
           const affectedIds: string[] = [];
           const nextWallObjects = project.wallObjects.map((wallObject) => {
             if (
@@ -1950,7 +1972,7 @@ export function createAppStore(deps: AppStoreDeps) {
               return wallObject;
             }
 
-            const size = getEffectivePlacementSizeMm(parsed.dimensions);
+            const size = getEffectivePlacementSizeMm(parsed.dimensions, aspect);
             if (size.widthMm === wallObject.widthMm && size.heightMm === wallObject.heightMm) {
               return wallObject;
             }
@@ -1999,7 +2021,8 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
-        const placement = createArtworkPlacement(artwork, wallId, xMm, yMm);
+        const aspect = await loadArtworkAspect(artwork);
+        const placement = createArtworkPlacement(artwork, wallId, xMm, yMm, aspect);
         const nextWallObjects = [...project.wallObjects, placement];
 
         await commitWallObjectEdit(
@@ -2258,7 +2281,8 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
-        const { widthMm, heightMm } = getEffectivePlacementSizeMm(artwork.dimensions);
+        const aspect = await loadArtworkAspect(artwork);
+        const { widthMm, heightMm } = getEffectivePlacementSizeMm(artwork.dimensions, aspect);
         const floorObject: ArtworkFloorObject = {
           id: newId(),
           kind: "artwork",

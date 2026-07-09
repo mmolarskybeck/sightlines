@@ -1347,8 +1347,10 @@ describe("app store", () => {
       await store.getState().undo();
       state = store.getState();
       placement = state.project!.wallObjects.find((w) => w.id === placementId)!;
+      // The imported asset is a square 100×100 (FakeImageProcessor), so unknown
+      // dims re-derive to a 610×610 square contained in the placeholder box.
       expect(placement.widthMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
-      expect(placement.heightMm).toBe(PLACEHOLDER_ARTWORK_HEIGHT_MM);
+      expect(placement.heightMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
       expect(
         state.libraryArtworks.find((a) => a.id === artworkId)?.dimensions.widthMm
       ).toBeUndefined();
@@ -1391,8 +1393,10 @@ describe("app store", () => {
       const placement = store
         .getState()
         .project!.wallObjects.find((wallObject) => wallObject.id === placementId)!;
+      // Unchanged from placement time (the override blocks the resize): the
+      // square 100×100 asset contains to 610×610 in the placeholder box.
       expect(placement.widthMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
-      expect(placement.heightMm).toBe(PLACEHOLDER_ARTWORK_HEIGHT_MM);
+      expect(placement.heightMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
     });
 
     it("errors calmly on an invalid change: nothing persists, no undo entry", async () => {
@@ -1456,7 +1460,7 @@ describe("app store", () => {
       expect(getSelectedArtworkId(state.project, state.selection)).toBe(artworkId);
     });
 
-    it("falls back to placeholder dimensions for an artwork with unknown dims", async () => {
+    it("sizes an unknown-dims artwork from its image within the placeholder box", async () => {
       await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
       const artworkId = store.getState().project!.checklistArtworkIds[0];
       const wallId = getSelectedWall(
@@ -1467,8 +1471,9 @@ describe("app store", () => {
       await store.getState().placeArtwork(artworkId, wallId, 0, 1450);
 
       const placement = store.getState().project!.wallObjects[0];
+      // Square 100×100 asset (FakeImageProcessor) contains to 610×610.
       expect(placement.widthMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
-      expect(placement.heightMm).toBe(PLACEHOLDER_ARTWORK_HEIGHT_MM);
+      expect(placement.heightMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
     });
 
     it("flags but still places an out-of-bounds placement", async () => {
@@ -2003,8 +2008,10 @@ describe("app store", () => {
       await store.getState().placeArtworkOnFloor(artworkId, 0, 0);
 
       const floorObject = store.getState().project!.floorObjects[0];
+      // Square 100×100 asset (FakeImageProcessor) contains to 610×610; only
+      // depth still falls back to its default.
       expect(floorObject.widthMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
-      expect(floorObject.heightMm).toBe(PLACEHOLDER_ARTWORK_HEIGHT_MM);
+      expect(floorObject.heightMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
       expect(floorObject.depthMm).toBe(DEFAULT_FLOOR_OBJECT_DEPTH_MM);
     });
   });

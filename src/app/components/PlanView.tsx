@@ -82,6 +82,7 @@ import {
   type Viewport2D
 } from "../../domain/viewport/viewport2d";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
+import { useArtworkAspect } from "../hooks/useArtworkAspect";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { useContainerSize } from "../hooks/useContainerSize";
 import { useDragGesture } from "../hooks/useDragGesture";
@@ -1947,6 +1948,14 @@ export function PlanView({
     });
   }
 
+  // The dragged artwork's image aspect, so a partial/unknown-dimension work's
+  // drop preview is sized at its true proportions (matching what placeArtwork
+  // bakes) instead of the raw placeholder box. Only the currently-dragged
+  // artwork is loaded, keyed off draggingArtworkId's asset.
+  const draggingArtworkAspect = useArtworkAspect(
+    draggingArtworkId ? artworksById?.get(draggingArtworkId)?.assetId : undefined
+  );
+
   // The effective footprint of an artwork being dragged from the checklist:
   // its real size if we know which one (draggingArtworkId), otherwise the same
   // placeholder placement itself falls back to. depthMm feeds a floor-drop
@@ -1958,7 +1967,9 @@ export function PlanView({
   } {
     const artwork = artworkId ? artworksById?.get(artworkId) : undefined;
     if (artwork) {
-      const { widthMm, heightMm } = getEffectivePlacementSizeMm(artwork.dimensions);
+      // The aspect only applies to the artwork we actually loaded it for.
+      const aspect = artworkId === draggingArtworkId ? draggingArtworkAspect : undefined;
+      const { widthMm, heightMm } = getEffectivePlacementSizeMm(artwork.dimensions, aspect);
       return {
         widthMm,
         heightMm,

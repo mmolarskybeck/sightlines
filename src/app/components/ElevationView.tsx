@@ -43,6 +43,7 @@ import {
   ZOOM_STEP,
   type Viewport2D
 } from "../../domain/viewport/viewport2d";
+import { useArtworkAspect } from "../hooks/useArtworkAspect";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { useContainerSize } from "../hooks/useContainerSize";
 import { useDragGesture } from "../hooks/useDragGesture";
@@ -438,6 +439,14 @@ export function ElevationView({
   const assetIds = placements.map((placement) => artworksById?.get(placement.artworkId)?.assetId);
   const imageUrlsByAssetId = useAssetImageUrls(assetIds, getBlob ?? NO_OP_GET_BLOB, "display");
 
+  // The dragged artwork's image aspect, so a partial/unknown-dimension work's
+  // drop ghost is sized at its true proportions (matching what placeArtwork
+  // bakes) instead of the raw placeholder box. Only the currently-dragged
+  // artwork is loaded, keyed off draggingArtworkId's asset.
+  const draggingArtworkAspect = useArtworkAspect(
+    draggingArtworkId ? artworksById?.get(draggingArtworkId)?.assetId : undefined
+  );
+
   // The size to show for a not-yet-placed drop ghost: the real artwork's
   // effective size if the checklist told us which one is being dragged
   // (draggingArtworkId), otherwise the same placeholder size placement
@@ -445,7 +454,11 @@ export function ElevationView({
   // known).
   function effectiveSizeForArtworkId(artworkId: string | null): { widthMm: number; heightMm: number } {
     const artwork = artworkId ? artworksById?.get(artworkId) : undefined;
-    if (artwork) return getEffectivePlacementSizeMm(artwork.dimensions);
+    if (artwork) {
+      // The aspect only applies to the artwork we actually loaded it for.
+      const aspect = artworkId === draggingArtworkId ? draggingArtworkAspect : undefined;
+      return getEffectivePlacementSizeMm(artwork.dimensions, aspect);
+    }
     return { widthMm: PLACEHOLDER_ARTWORK_WIDTH_MM, heightMm: PLACEHOLDER_ARTWORK_HEIGHT_MM };
   }
 
