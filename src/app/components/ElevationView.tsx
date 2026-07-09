@@ -659,6 +659,13 @@ export function ElevationView({
     setMarquee({ startMm, currentMm: startMm });
   }
 
+  function handleSvgPointerDownCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    if (event.pointerType !== "touch") {
+      event.currentTarget.focus({ preventScroll: true });
+    }
+    handlePointerDownCapture(event);
+  }
+
   function beginMoveDrag(wallObject: WallObject, event: ReactPointerEvent<SVGGElement>) {
     event.stopPropagation();
     const startPointerMm = toWallLocalMm(event.clientX, event.clientY);
@@ -983,8 +990,9 @@ export function ElevationView({
         ref={svgRef}
         viewBox={viewBox}
         role="img"
+        tabIndex={0}
         onPointerDown={beginMarquee}
-        onPointerDownCapture={handlePointerDownCapture}
+        onPointerDownCapture={handleSvgPointerDownCapture}
       >
         <title>{wallName} elevation</title>
         <rect

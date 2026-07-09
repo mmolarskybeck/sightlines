@@ -160,6 +160,44 @@ describe("useSvgViewportGestures — Space / ⌘0 keyboard", () => {
     expect(holder.api!.isSpaceDown).toBe(false);
   });
 
+  it("Space arms pan from a focused button when the pointer is over the viewport", () => {
+    const { holder } = renderGestures({ viewport: FIT_VIEWPORT });
+    const button = document.createElement("button");
+    document.body.appendChild(button);
+
+    act(() => {
+      holder.svg!.dispatchEvent(pointerEvent("pointerenter", { pointerType: "mouse" }));
+    });
+    const event = new KeyboardEvent("keydown", {
+      code: "Space",
+      key: " ",
+      bubbles: true,
+      cancelable: true
+    });
+    act(() => {
+      button.dispatchEvent(event);
+    });
+    expect(holder.api!.isSpaceDown).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("Space returns to button activation after the pointer leaves the viewport", () => {
+    const { holder } = renderGestures({ viewport: FIT_VIEWPORT });
+    const button = document.createElement("button");
+    document.body.appendChild(button);
+
+    act(() => {
+      holder.svg!.dispatchEvent(pointerEvent("pointerenter", { pointerType: "mouse" }));
+      holder.svg!.dispatchEvent(pointerEvent("pointerleave", { pointerType: "mouse" }));
+    });
+    act(() => {
+      button.dispatchEvent(
+        new KeyboardEvent("keydown", { code: "Space", key: " ", bubbles: true, cancelable: true })
+      );
+    });
+    expect(holder.api!.isSpaceDown).toBe(false);
+  });
+
   it("⌘0 resets to fit and prevents default", () => {
     const onViewportChange = vi.fn();
     renderGestures({ viewport: { mode: "manual", centerXMm: 5, centerYMm: 5, zoom: 4 }, onViewportChange });

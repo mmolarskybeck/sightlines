@@ -926,6 +926,10 @@ export function PlanView({
   // and skip placing, without needing RoomResizeHandles/PlanObject to know
   // anything about the plan-view tool.
   function handleSvgPointerDownCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    if (event.pointerType !== "touch") {
+      event.currentTarget.focus({ preventScroll: true });
+    }
+
     // The touch pinch/pan bookkeeping and the space/middle-mouse pan claim now
     // live in the hook. It returns true ONLY when it CONSUMED the event (a pinch
     // claim — including the blocked-pinch case — or a space/middle pan claim),
@@ -1911,6 +1915,7 @@ export function PlanView({
         ref={svgRef}
         viewBox={viewBox}
         role="img"
+        tabIndex={0}
         onClick={handleSvgClick}
         onPointerDown={beginMarquee}
         onPointerDownCapture={handleSvgPointerDownCapture}
