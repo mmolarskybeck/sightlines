@@ -2847,6 +2847,12 @@ body.panels-resizing * {
   touch-action: none;
 }
 
+.plan-svg:focus-visible,
+.elevation-svg:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
 /* An armed insert-tools button (App's view-toolbar strip): the crosshair
    signals "click to place" the way a drawing tool would, distinct from the
    plain pointer used for selecting and dragging existing geometry. */
