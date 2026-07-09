@@ -200,6 +200,7 @@ One addition at the call sites: the door/window armed tools capture "the nearest
 - **Winding normalized to CCW at creation** (matching `deriveScene3d`'s signed-area test), and **only** at creation — never re-reverse a wall list post-creation, because wall objects' `xMm` depends on start/end identity. After creation, winding can only flip via self-intersection, which reshape blocks, so create-time normalization suffices.
 - IDs `${roomId}-v-${n}` / `${roomId}-wall-${n}` (next index derived from existing IDs, like `getNextRoomNumber`); names "Wall 1..N".
 - Rejects: <3 points; near-coincident consecutive points (<~10 mm); self-intersecting input (defense in depth behind the draw tool).
+- **Collinear merge at close** (added 2026-07-08 after user testing): interior vertices whose adjacent segments are collinear and same-direction are dropped — including the wrap-around seam at the first point — so a straight run drawn in several strokes becomes one wall. Draw-time only; reshape keeps explicit vertex delete and never auto-merges.
 
 New shared predicates in `src/domain/geometry/polygon.ts`: `segmentsIntersect`, `isSimplePolygon`, `isPointInPolygon` (the last also serves partition room-assignment and future camera containment).
 
@@ -226,7 +227,10 @@ Live segment-length readout follows the cursor (reuse `PlacementTooltip` + units
 export function moveRoomVertex(project, roomId, vertexId, nextLocalMm: Point): GeometryEditResult;
 export function splitWall(project, wallId, xAlongMm: number): GeometryEditResult & { newWallId: string };
 export function deleteRoomVertex(project, roomId, vertexId): GeometryEditResult;  // stretch
+export function moveRoomWall(project, roomId, wallId, offsetMm: number): GeometryEditResult;  // added 2026-07-08
 ```
+
+- `moveRoomWall` (whole-wall drag, added after user testing — the Sims-style "shorten one arm of the L" gesture): the wall's line translates `offsetMm` along its left normal; the two neighboring walls **stay on their existing lines** and the moved wall's vertices land at the re-intersections, so neighbors keep their angles and only lengthen/shorten (user-confirmed over the rigid-translate alternative; identical for right-angle rooms). Rejections mirror `moveRoomVertex`: near-parallel neighbor (no stable intersection), non-simple result, vertices or wall length collapsing <10 mm. Objects keep `xMm` from the moved start vertex — advisory warnings, never auto-move. `changedWallIds` = the three walls.
 
 - `moveRoomVertex` moves one vertex; both adjoining walls change length/angle. Returns `changedWallIds`; the store runs the existing `validateChangedWallPlacements` → advisory bounds warnings. **Never auto-clamp or auto-move objects** — this deliberately reuses `resizeWallPreservingAngles`' policy: objects keep `xMm` from start, overhang is flagged, the curator resolves it.
 - **Self-intersection is block-commit, not warn.** During drag the tool tests `isSimplePolygon` with the candidate position; invalid positions render the outline in the danger token, and pointer-up **reverts to the last valid position**. Warn-and-allow is not viable — a non-simple polygon breaks signed area, winding, floor triangulation, and containment. Dragging a vertex onto a neighbor (<~10 mm) is likewise blocked; that's what delete/merge is for.

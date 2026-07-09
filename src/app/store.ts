@@ -20,6 +20,7 @@ import {
 import {
   deleteRoomVertex as deleteRoomVertexEdit,
   moveRoomVertex as moveRoomVertexEdit,
+  moveRoomWall as moveRoomWallEdit,
   splitWall as splitWallEdit
 } from "../domain/geometry/reshapeRoom";
 import type { WallWithGeometry } from "../domain/geometry/walls";
@@ -191,6 +192,7 @@ export type AppState = ArrangeSliceState &
   resizeWall: (wallId: string, lengthMm: number, anchor?: ResizeAnchor) => Promise<void>;
   resizeSelectedWall: (lengthMm: number) => Promise<void>;
   moveRoomVertex: (roomId: string, vertexId: string, nextLocalMm: Point) => Promise<void>;
+  moveRoomWall: (roomId: string, wallId: string, offsetMm: number) => Promise<void>;
   splitWall: (wallId: string, xAlongMm: number) => Promise<void>;
   deleteRoomVertex: (roomId: string, vertexId: string) => Promise<void>;
   moveRoom: (roomId: string, offsetXMm: number, offsetYMm: number) => Promise<void>;
@@ -1156,6 +1158,41 @@ export function createAppStore(deps: AppStoreDeps) {
         );
 
         await applyEdit("Move room corner", () => result.project, {
+          placementWarnings,
+          lastGeometryEdit: {
+            anchorVertexId: result.anchorVertexId,
+            changedWallIds: result.changedWallIds
+          }
+        });
+      },
+
+      async moveRoomWall(roomId, wallId, offsetMm) {
+        const project = get().project;
+        if (!project) return;
+
+        // PlanView's wall-body drag preview already gates the commit against
+        // this same domain call (an invalid in-flight position never reaches
+        // pointer-up), so a throw here means the project changed out from
+        // under the drag — surface it rather than silently no-op.
+        let result;
+        try {
+          result = moveRoomWallEdit(project, roomId, wallId, offsetMm);
+        } catch (error) {
+          set({
+            error: `Could not move that wall (${
+              error instanceof Error ? error.message : "invalid position."
+            }).`
+          });
+          return;
+        }
+        if (result.changedWallIds.length === 0) return;
+
+        const placementWarnings = validateChangedWallPlacements(
+          result.project,
+          result.changedWallIds
+        );
+
+        await applyEdit("Move wall", () => result.project, {
           placementWarnings,
           lastGeometryEdit: {
             anchorVertexId: result.anchorVertexId,

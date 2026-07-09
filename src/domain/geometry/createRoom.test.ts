@@ -187,6 +187,91 @@ describe("createPolygonRoomPlacement", () => {
       })
     ).toThrow(/cross itself/);
   });
+
+  it("collapses an extra point clicked mid-edge into a single wall", () => {
+    const rectangle = createPolygonRoomPlacement({
+      roomId: "room-2",
+      name: "Gallery 2",
+      heightMm: feetToMm(12),
+      pointsFloorMm: [
+        { xMm: 0, yMm: 0 },
+        { xMm: 4000, yMm: 0 },
+        { xMm: 4000, yMm: 3000 },
+        { xMm: 0, yMm: 3000 }
+      ]
+    });
+    // Same rectangle, but with an extra point half way along the north edge
+    // (and another a third of the way along it) — as if the user clicked
+    // twice while drawing one straight wall.
+    const withExtraPoints = createPolygonRoomPlacement({
+      roomId: "room-2",
+      name: "Gallery 2",
+      heightMm: feetToMm(12),
+      pointsFloorMm: [
+        { xMm: 0, yMm: 0 },
+        { xMm: 1500, yMm: 0 },
+        { xMm: 2000, yMm: 0 },
+        { xMm: 4000, yMm: 0 },
+        { xMm: 4000, yMm: 3000 },
+        { xMm: 0, yMm: 3000 }
+      ]
+    });
+
+    expect(withExtraPoints.room.vertices).toHaveLength(4);
+    expect(withExtraPoints.room.walls).toHaveLength(4);
+    expect(withExtraPoints.room.vertices).toEqual(rectangle.room.vertices);
+  });
+
+  it("collapses a collinear point at the wrap-around seam", () => {
+    // The seam between the last point and the first is where the collinear
+    // point lives — as if the user started drawing mid-way along the west
+    // wall, closing the loop back onto that same wall.
+    const placement = createPolygonRoomPlacement({
+      roomId: "room-2",
+      name: "Gallery 2",
+      heightMm: feetToMm(12),
+      pointsFloorMm: [
+        { xMm: 0, yMm: 1500 }, // mid west edge — collinear with the last and next points
+        { xMm: 0, yMm: 3000 },
+        { xMm: 4000, yMm: 3000 },
+        { xMm: 4000, yMm: 0 },
+        { xMm: 0, yMm: 0 }
+      ]
+    });
+
+    expect(placement.room.vertices).toHaveLength(4);
+    expect(placement.room.walls).toHaveLength(4);
+  });
+
+  it("keeps a genuine corner", () => {
+    const placement = createPolygonRoomPlacement({
+      roomId: "room-2",
+      name: "Gallery 2",
+      heightMm: feetToMm(12),
+      pointsFloorMm: L_SHAPE
+    });
+
+    // The L-shape's six vertices are all real corners — none should be
+    // dropped by the collinear merge.
+    expect(placement.room.vertices).toHaveLength(6);
+  });
+
+  it("still rejects a point that backtracks over the previous segment", () => {
+    expect(() =>
+      createPolygonRoomPlacement({
+        roomId: "room-2",
+        name: "Gallery 2",
+        heightMm: feetToMm(12),
+        pointsFloorMm: [
+          { xMm: 0, yMm: 0 },
+          { xMm: 4000, yMm: 0 },
+          { xMm: 2000, yMm: 0 }, // doubles back over the wall just drawn
+          { xMm: 4000, yMm: 3000 },
+          { xMm: 0, yMm: 3000 }
+        ]
+      })
+    ).toThrow(/cross itself/);
+  });
 });
 
 describe("createNextPolygonRoom", () => {

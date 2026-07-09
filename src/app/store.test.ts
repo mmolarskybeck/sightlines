@@ -531,6 +531,60 @@ describe("app store", () => {
     });
   });
 
+  describe("moveRoomWall", () => {
+    it("commits one undo entry and surfaces bounds warnings for objects on changed walls", async () => {
+      const project = store.getState().project!;
+      store.setState({
+        project: {
+          ...project,
+          wallObjects: [
+            {
+              id: "art-1",
+              wallId: "wall-east",
+              kind: "artwork",
+              artworkId: "artwork-1",
+              xMm: feetToMm(17.5),
+              yMm: feetToMm(5),
+              widthMm: 600,
+              heightMm: 800
+            }
+          ]
+        }
+      });
+
+      // wall-north's neighbours are wall-west and wall-east; sliding it
+      // 1000mm south shrinks both by 1000mm, well short of the artwork's
+      // xMm on wall-east — a bounds warning, not a silent move.
+      await store.getState().moveRoomWall("room-main", "wall-north", 1000);
+
+      const state = store.getState();
+      expect(state.undoStack.at(-1)?.label).toBe("Move wall");
+      expect(state.lastGeometryEdit?.changedWallIds.sort()).toEqual(
+        ["wall-east", "wall-north", "wall-west"].sort()
+      );
+      expect(state.placementWarnings.some((warning) => warning.wallObjectId === "art-1")).toBe(
+        true
+      );
+      expect(
+        state.project!.wallObjects.find((object) => object.id === "art-1")?.xMm
+      ).toBe(feetToMm(17.5));
+    });
+
+    it("rejects an offset that collapses the wall without committing", async () => {
+      const before = store.getState().project!;
+
+      // Sliding wall-north down by exactly the room's depth (feetToMm(18))
+      // lands its new corners exactly on top of wall-south's — well under
+      // the 10mm minimum spacing guard.
+      await store.getState().moveRoomWall("room-main", "wall-north", feetToMm(18));
+
+      const state = store.getState();
+      expect(state.project).toBe(before);
+      expect(state.undoStack).toHaveLength(0);
+      expect(state.error).toBeTruthy();
+    });
+  });
+
   describe("splitWall", () => {
     it("splits a wall in one undo entry, keeping the original id on the first segment", async () => {
       await store.getState().splitWall("wall-north", 3000);

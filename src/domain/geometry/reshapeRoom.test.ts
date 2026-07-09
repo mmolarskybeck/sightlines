@@ -3,10 +3,16 @@ import { parseProject } from "../schema/projectSchema";
 import { createSampleProject } from "../sample/sampleProject";
 import { createBlankProject } from "../newProject";
 import { feetToMm } from "../units/length";
-import type { Project } from "../project";
+import type { Project, RoomPlacement, RoomVertex, Wall } from "../project";
 import { createPolygonRoomPlacement } from "./createRoom";
-import { getWallsWithGeometry } from "./walls";
-import { canMoveRoomVertex, deleteRoomVertex, moveRoomVertex, splitWall } from "./reshapeRoom";
+import { getWallsWithGeometry, type WallWithGeometry } from "./walls";
+import {
+  canMoveRoomVertex,
+  deleteRoomVertex,
+  moveRoomVertex,
+  moveRoomWall,
+  splitWall
+} from "./reshapeRoom";
 
 // Same L-shape as createRoom.test.ts. It's clockwise as drawn, so the
 // constructor reverses it to CCW at creation (see createRoom.test.ts's
@@ -126,6 +132,175 @@ describe("canMoveRoomVertex", () => {
     const room = createSampleProject().floor.rooms[0].room;
     expect(canMoveRoomVertex(room, "v-ne", { xMm: feetToMm(10), yMm: feetToMm(4) })).toBe(true);
     expect(canMoveRoomVertex(room, "v-ne", { xMm: feetToMm(10), yMm: feetToMm(28) })).toBe(false);
+  });
+});
+
+function directionOf(wall: WallWithGeometry): { xMm: number; yMm: number } {
+  const dx = wall.end.xMm - wall.start.xMm;
+  const dy = wall.end.yMm - wall.start.yMm;
+  const len = Math.hypot(dx, dy);
+  return { xMm: dx / len, yMm: dy / len };
+}
+
+// An asymmetric trapezoid (all four edges distinct lengths, so a wall can be
+// found back by its length alone): A(0,0) B(4000,0) C(3500,2000) D(500,2500).
+// AB is the axis-aligned top edge; BC and DA are both genuinely slanted.
+function trapezoidRoomProject(): Project {
+  const base = createBlankProject("Trapezoid test");
+  const placement = createPolygonRoomPlacement({
+    roomId: "room-trap",
+    name: "Trapezoid Room",
+    heightMm: feetToMm(12),
+    pointsFloorMm: [
+      { xMm: 0, yMm: 0 },
+      { xMm: 4000, yMm: 0 },
+      { xMm: 3500, yMm: 2000 },
+      { xMm: 500, yMm: 2500 }
+    ]
+  });
+  return { ...base, floor: { rooms: [placement] } };
+}
+
+// A pentagon with an extra vertex (v1) sitting exactly mid-straight along the
+// top edge — built by hand rather than via createPolygonRoomPlacement, whose
+// constructor merges any straight-through vertex on construction (see
+// createRoom.ts's dropStraightThroughVertices). wall0 (v0->v1) and wall1
+// (v1->v2) are collinear/parallel by construction, and adjacent — the only
+// geometry where two ADJACENT walls can be parallel without being the same
+// wall (adjacent segments that are parallel must, by definition, be
+// collinear).
+function collinearNeighbourProject(): Project {
+  const base = createBlankProject("Collinear neighbour test");
+  const roomId = "room-col";
+  const heightMm = feetToMm(10);
+  const vertices: RoomVertex[] = [
+    { id: "v0", xMm: 0, yMm: 0 },
+    { id: "v1", xMm: 2000, yMm: 0 },
+    { id: "v2", xMm: 4000, yMm: 0 },
+    { id: "v3", xMm: 4000, yMm: 2000 },
+    { id: "v4", xMm: 0, yMm: 2000 }
+  ];
+  const walls: Wall[] = [
+    { id: "wall0", roomId, name: "Wall 1", startVertexId: "v0", endVertexId: "v1", heightMm },
+    { id: "wall1", roomId, name: "Wall 2", startVertexId: "v1", endVertexId: "v2", heightMm },
+    { id: "wall2", roomId, name: "Wall 3", startVertexId: "v2", endVertexId: "v3", heightMm },
+    { id: "wall3", roomId, name: "Wall 4", startVertexId: "v3", endVertexId: "v4", heightMm },
+    { id: "wall4", roomId, name: "Wall 5", startVertexId: "v4", endVertexId: "v0", heightMm }
+  ];
+  const placement: RoomPlacement = {
+    roomId,
+    offsetXMm: 0,
+    offsetYMm: 0,
+    rotationDeg: 0,
+    room: { id: roomId, name: "Collinear room", heightMm, freestandingWalls: [], vertices, walls }
+  };
+  return { ...base, floor: { rooms: [placement] } };
+}
+
+describe("moveRoomWall", () => {
+  it("slides an orthogonal wall along its perpendicular — only its two neighbours change length, everything else is untouched", () => {
+    const project = createSampleProject();
+    const before = project.floor.rooms[0].room;
+    const originalSw = before.vertices.find((vertex) => vertex.id === "v-sw")!;
+    const originalSe = before.vertices.find((vertex) => vertex.id === "v-se")!;
+
+    const result = moveRoomWall(project, "room-main", "wall-north", 1000);
+
+    expect(result.changedWallIds.sort()).toEqual(["wall-east", "wall-north", "wall-west"].sort());
+    expect(result.anchorVertexId).toBe("v-nw");
+
+    const room = result.project.floor.rooms[0].room;
+    const walls = getWallsWithGeometry(room);
+    expect(walls.find((wall) => wall.id === "wall-north")!.lengthMm).toBeCloseTo(feetToMm(28));
+    expect(walls.find((wall) => wall.id === "wall-west")!.lengthMm).toBeCloseTo(feetToMm(18) - 1000);
+    expect(walls.find((wall) => wall.id === "wall-east")!.lengthMm).toBeCloseTo(feetToMm(18) - 1000);
+
+    // v-se and v-sw belong to wall-south, which never touches the dragged
+    // wall — byte-identical to the original project.
+    expect(room.vertices.find((vertex) => vertex.id === "v-sw")).toEqual(originalSw);
+    expect(room.vertices.find((vertex) => vertex.id === "v-se")).toEqual(originalSe);
+
+    const nw = room.vertices.find((vertex) => vertex.id === "v-nw")!;
+    const ne = room.vertices.find((vertex) => vertex.id === "v-ne")!;
+    expect(nw.yMm).toBeCloseTo(1000);
+    expect(ne.yMm).toBeCloseTo(1000);
+    expect(() => parseProject(result.project)).not.toThrow();
+  });
+
+  it("keeps a slanted neighbour on its original line (direction unchanged, length changes) and changes the dragged wall's own length too", () => {
+    const project = trapezoidRoomProject();
+    const walls = getWallsWithGeometry(project.floor.rooms[0].room);
+    const dragged = walls.find((wall) => Math.abs(wall.lengthMm - 4000) < 1)!;
+    const idx = walls.findIndex((wall) => wall.id === dragged.id);
+    const n = walls.length;
+    const previous = walls[(idx - 1 + n) % n];
+    const next = walls[(idx + 1) % n];
+    const previousDirBefore = directionOf(previous);
+    const nextDirBefore = directionOf(next);
+
+    const result = moveRoomWall(project, "room-trap", dragged.id, 300);
+
+    const afterWalls = getWallsWithGeometry(result.project.floor.rooms[0].room);
+    const previousAfter = afterWalls.find((wall) => wall.id === previous.id)!;
+    const nextAfter = afterWalls.find((wall) => wall.id === next.id)!;
+    const draggedAfter = afterWalls.find((wall) => wall.id === dragged.id)!;
+
+    const previousDirAfter = directionOf(previousAfter);
+    expect(previousDirAfter.xMm).toBeCloseTo(previousDirBefore.xMm, 5);
+    expect(previousDirAfter.yMm).toBeCloseTo(previousDirBefore.yMm, 5);
+    expect(Math.abs(previousAfter.lengthMm - previous.lengthMm)).toBeGreaterThan(1);
+
+    const nextDirAfter = directionOf(nextAfter);
+    expect(nextDirAfter.xMm).toBeCloseTo(nextDirBefore.xMm, 5);
+    expect(nextDirAfter.yMm).toBeCloseTo(nextDirBefore.yMm, 5);
+    expect(Math.abs(nextAfter.lengthMm - next.lengthMm)).toBeGreaterThan(1);
+
+    expect(Math.abs(draggedAfter.lengthMm - dragged.lengthMm)).toBeGreaterThan(1);
+    expect(() => parseProject(result.project)).not.toThrow();
+  });
+
+  it("rejects a drag whose adjacent wall runs parallel to it", () => {
+    const project = collinearNeighbourProject();
+    expect(() => moveRoomWall(project, "room-col", "wall1", 500)).toThrow();
+  });
+
+  it("rejects an offset that makes the re-intersected loop self-crossing", () => {
+    const project = polygonRoomProject();
+    const room = project.floor.rooms[0].room;
+    const wallId = room.walls[1].id; // v1->v2, the L's inner horizontal leg
+
+    expect(() => moveRoomWall(project, "room-l", wallId, 2000)).toThrow();
+  });
+
+  it("never touches wall objects — an overhanging object is left for the store's bounds warning", () => {
+    const project = createSampleProject();
+    const withObject: Project = {
+      ...project,
+      wallObjects: [
+        {
+          id: "art-1",
+          wallId: "wall-east",
+          kind: "artwork",
+          artworkId: "artwork-1",
+          xMm: 5400,
+          yMm: feetToMm(5),
+          widthMm: 600,
+          heightMm: 800
+        }
+      ]
+    };
+
+    const result = moveRoomWall(withObject, "room-main", "wall-north", 1000);
+
+    const artwork = result.project.wallObjects[0];
+    expect(artwork.xMm).toBe(5400);
+    expect(artwork.wallId).toBe("wall-east");
+  });
+
+  it("throws for an unknown room or wall", () => {
+    const project = createSampleProject();
+    expect(() => moveRoomWall(project, "no-such-room", "wall-north", 500)).toThrow();
+    expect(() => moveRoomWall(project, "room-main", "no-such-wall", 500)).toThrow();
   });
 });
 

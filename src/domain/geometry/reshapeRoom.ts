@@ -40,6 +40,143 @@ function findVertex(room: Room, vertexId: string): RoomVertex {
   return vertex;
 }
 
+// Local Vector idiom, same shape/style as editRoom.ts's (not exported there,
+// so reproduced rather than imported).
+type Vector = {
+  xMm: number;
+  yMm: number;
+};
+
+function vectorLength(vector: Vector): number {
+  return Math.hypot(vector.xMm, vector.yMm);
+}
+
+function normalize(vector: Vector): Vector {
+  const length = vectorLength(vector);
+  if (length === 0) {
+    throw new Error("Cannot move a zero-length wall.");
+  }
+  return { xMm: vector.xMm / length, yMm: vector.yMm / length };
+}
+
+function scale(vector: Vector, scalar: number): Vector {
+  return { xMm: vector.xMm * scalar, yMm: vector.yMm * scalar };
+}
+
+function translate(point: Point, vector: Vector): Point {
+  return { xMm: point.xMm + vector.xMm, yMm: point.yMm + vector.yMm };
+}
+
+// Sine of the angle between two UNIT direction vectors (d1, d2 must already
+// be normalized) — 1e-3 is about 0.057°, tight enough to only reject
+// genuinely (near-)parallel adjacent walls (which would otherwise produce an
+// ill-conditioned, arbitrarily-far-off intersection point) while leaving any
+// everyday corner angle untouched.
+const LINE_PARALLEL_EPS = 1e-3;
+
+// Intersection of two infinite lines, each given as a point plus a UNIT
+// direction vector. Returns null when the lines are parallel (or close enough
+// to it that the intersection is ill-conditioned) rather than a huge,
+// meaningless point.
+function intersectLines(p1: Point, d1: Vector, p2: Point, d2: Vector): Point | null {
+  const cross = d1.xMm * d2.yMm - d1.yMm * d2.xMm;
+  if (Math.abs(cross) < LINE_PARALLEL_EPS) return null;
+
+  const diff: Vector = { xMm: p2.xMm - p1.xMm, yMm: p2.yMm - p1.yMm };
+  const t = (diff.xMm * d2.yMm - diff.yMm * d2.xMm) / cross;
+  return translate(p1, scale(d1, t));
+}
+
+// CAD "offset/re-intersect" whole-wall drag (Sims-style): translate the
+// dragged wall's infinite line by offsetMm along its own LEFT-normal (rotate
+// its start→end axis 90° CCW — same convention as editRoom.ts's
+// chooseSideDirection; a positive offsetMm is never sign-flipped). The
+// previous and next walls stay on their existing infinite lines; only the
+// dragged wall's start/end vertices move, to wherever those two lines now
+// cross the translated line. Every other vertex in the room is untouched, and
+// wall objects are never moved/clamped — an overhanging object becomes an
+// advisory bounds warning the store surfaces, same policy as every op above.
+export function moveRoomWall(
+  project: Project,
+  roomId: string,
+  wallId: string,
+  offsetMm: number
+): GeometryEditResult {
+  const placement = findRoomPlacementByRoomId(project, roomId);
+  const room = placement.room;
+  const wallIndex = room.walls.findIndex((candidate) => candidate.id === wallId);
+  const wall = room.walls[wallIndex];
+  if (!wall) {
+    throw new Error(`Wall not found: ${wallId}`);
+  }
+
+  const n = room.walls.length;
+  const previousWall = room.walls[(wallIndex - 1 + n) % n];
+  const nextWall = room.walls[(wallIndex + 1) % n];
+
+  const wallGeom = getWallGeometry(room, wall);
+  const previousGeom = getWallGeometry(room, previousWall);
+  const nextGeom = getWallGeometry(room, nextWall);
+
+  const axis = normalize({
+    xMm: wallGeom.end.xMm - wallGeom.start.xMm,
+    yMm: wallGeom.end.yMm - wallGeom.start.yMm
+  });
+  const normal: Vector = { xMm: -axis.yMm, yMm: axis.xMm };
+  const previousAxis = normalize({
+    xMm: previousGeom.end.xMm - previousGeom.start.xMm,
+    yMm: previousGeom.end.yMm - previousGeom.start.yMm
+  });
+  const nextAxis = normalize({
+    xMm: nextGeom.end.xMm - nextGeom.start.xMm,
+    yMm: nextGeom.end.yMm - nextGeom.start.yMm
+  });
+
+  const translatedPointMm = translate(wallGeom.start, scale(normal, offsetMm));
+
+  const newStart = intersectLines(previousGeom.start, previousAxis, translatedPointMm, axis);
+  if (!newStart) {
+    throw new Error("That wall isn’t allowed to move that way — its previous wall runs parallel to it.");
+  }
+  const newEnd = intersectLines(translatedPointMm, axis, nextGeom.start, nextAxis);
+  if (!newEnd) {
+    throw new Error("That wall isn’t allowed to move that way — its next wall runs parallel to it.");
+  }
+
+  if (
+    vectorLength({
+      xMm: newStart.xMm - previousGeom.start.xMm,
+      yMm: newStart.yMm - previousGeom.start.yMm
+    }) < MIN_VERTEX_SPACING_MM ||
+    vectorLength({ xMm: newEnd.xMm - nextGeom.end.xMm, yMm: newEnd.yMm - nextGeom.end.yMm }) <
+      MIN_VERTEX_SPACING_MM ||
+    vectorLength({ xMm: newEnd.xMm - newStart.xMm, yMm: newEnd.yMm - newStart.yMm }) <
+      MIN_VERTEX_SPACING_MM
+  ) {
+    throw new Error(
+      "That wall isn’t allowed to move that far — it would collapse a corner too close to a neighbouring vertex."
+    );
+  }
+
+  const nextVertices = room.vertices.map((vertex) => {
+    if (vertex.id === wall.startVertexId) return { ...vertex, xMm: newStart.xMm, yMm: newStart.yMm };
+    if (vertex.id === wall.endVertexId) return { ...vertex, xMm: newEnd.xMm, yMm: newEnd.yMm };
+    return vertex;
+  });
+
+  if (!isSimplePolygon(nextVertices.map((vertex) => ({ xMm: vertex.xMm, yMm: vertex.yMm })))) {
+    throw new Error("That wall isn’t allowed to move there — it would cross another wall.");
+  }
+
+  const nextRoom: Room = { ...room, vertices: nextVertices };
+
+  return {
+    project: replaceRoom(project, roomId, nextRoom),
+    changedWallIds: [previousWall.id, wallId, nextWall.id],
+    anchorVertexId: wall.startVertexId
+  };
+}
+
 function replaceRoom(project: Project, roomId: string, nextRoom: Room): Project {
   return {
     ...project,

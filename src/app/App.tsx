@@ -180,6 +180,7 @@ export function App() {
     resizeRoomHeight,
     resizeWall,
     moveRoomVertex,
+    moveRoomWall,
     splitWall,
     deleteRoomVertex,
     moveRoom,
@@ -1000,6 +1001,7 @@ export function App() {
                 reshapeRoomId={reshapeRoomId}
                 onReshapeRoomChange={toggleReshapeRoom}
                 onMoveRoomVertex={moveRoomVertex}
+                onMoveRoomWall={moveRoomWall}
                 onSplitWall={splitWall}
                 onDeleteRoomVertex={deleteRoomVertex}
                 partitionToolActive={partitionToolActive}

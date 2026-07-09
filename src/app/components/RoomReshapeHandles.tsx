@@ -15,6 +15,7 @@ export function RoomReshapeHandles({
   placement,
   selectedVertexId,
   onBeginVertexDrag,
+  onBeginWallDrag,
   onSplitWallClick
 }: {
   // The vertex currently being dragged (if any) — rendered larger, same idea
@@ -30,6 +31,9 @@ export function RoomReshapeHandles({
   // merge shortcut — rendered with the same "active" treatment.
   selectedVertexId: string | null;
   onBeginVertexDrag: (vertexId: string, event: ReactPointerEvent<SVGRectElement>) => void;
+  // Dragging the wall's own body (not a vertex, not the split "+") slides the
+  // whole wall along its perpendicular — see PlanView's beginWallDrag.
+  onBeginWallDrag: (wallId: string, event: ReactPointerEvent<SVGLineElement>) => void;
   onSplitWallClick: (wallId: string, event: ReactMouseEvent<SVGElement>) => void;
 }) {
   if (handleSizeMm <= 0) return null;
@@ -40,6 +44,28 @@ export function RoomReshapeHandles({
 
   return (
     <g className="room-reshape-layer">
+      {/* Wall-body hit targets paint FIRST (bottom of this layer) so the split
+          "+" handles and vertex handles below, both rendered after, always
+          win a click in their own (larger, padded) hit zones. A wide
+          transparent stroke along the wall's own centerline is a simpler hit
+          target than a rotated rect and works identically at any angle. */}
+      {walls.map((wall) => (
+        <line
+          key={`wall-body-${wall.id}`}
+          className="room-reshape-wall-hit"
+          x1={wall.start.xMm + placement.offsetXMm}
+          y1={wall.start.yMm + placement.offsetYMm}
+          x2={wall.end.xMm + placement.offsetXMm}
+          y2={wall.end.yMm + placement.offsetYMm}
+          style={{
+            cursor: "move",
+            stroke: "transparent",
+            strokeWidth: handleSizeMm * 2.2,
+            pointerEvents: "stroke"
+          }}
+          onPointerDown={(event) => onBeginWallDrag(wall.id, event)}
+        />
+      ))}
       {walls.map((wall) => {
         const midXMm = (wall.start.xMm + wall.end.xMm) / 2 + placement.offsetXMm;
         const midYMm = (wall.start.yMm + wall.end.yMm) / 2 + placement.offsetYMm;

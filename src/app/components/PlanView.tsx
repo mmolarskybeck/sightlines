@@ -15,7 +15,7 @@ import {
   type Vector2
 } from "../../domain/geometry/dragResize";
 import { resizeWallPreservingAngles, type ResizeAnchor } from "../../domain/geometry/editRoom";
-import { getFloorBounds, getRoomBounds } from "../../domain/geometry/walls";
+import { getFloorBounds, getRoomBounds, getWallGeometry } from "../../domain/geometry/walls";
 import {
   getFloorObjectPlanRect,
   getFloorWalls,
@@ -41,7 +41,7 @@ import {
 } from "../../domain/project";
 import { parseFaceWallId } from "../../domain/geometry/freestandingWalls";
 import { isPointInPolygon, isSimplePolygon, segmentsIntersect, type Point } from "../../domain/geometry/polygon";
-import { canMoveRoomVertex } from "../../domain/geometry/reshapeRoom";
+import { canMoveRoomVertex, moveRoomWall } from "../../domain/geometry/reshapeRoom";
 import { formatLength } from "../../domain/units/length";
 import { getGridSnapTargets } from "../../domain/snapping/gridSnapTargets";
 import {
@@ -103,6 +103,10 @@ const DRAW_EPS = 1e-6;
 // click, not a drawn wall — the create drag ignores it (same floor the
 // constructor rejects at).
 const PARTITION_MIN_LENGTH_MM = 100;
+// Fit view never frames a window smaller than this on either axis — an empty
+// or near-empty floor (or a single tiny room) would otherwise fit-zoom to a
+// window a couple meters wide, reading as absurdly zoomed-in. ~30ft.
+const MIN_PLAN_FIT_EXTENT_MM = 9144;
 
 // Stable module-level reference so a caller that doesn't pass `getBlob`
 // doesn't retrigger useAssetImageUrls' effect on every render (same idiom as
@@ -246,6 +250,23 @@ type VertexDragState = {
   activeGuides: Guide[];
 };
 
+// Reshape mode's whole-wall body drag — CAD "offset/re-intersect" (Sims-
+// style): slide the wall along its own perpendicular. Same discipline as
+// VertexDragState (ref-mirrored state, one commit on pointer-up, `valid`
+// tracks whether the CURRENT preview offset keeps moveRoomWall from
+// throwing, so the outline can paint the danger token live and pointer-up can
+// revert instead of commit). Unlike a vertex drag, the axis is fixed at drag
+// start (the wall's own left-normal, captured once) rather than free 2D
+// movement — every pointer delta gets projected onto it.
+type WallDragState = {
+  roomId: string;
+  wallId: string;
+  startPointerMm: Vector2;
+  normal: Vector2;
+  previewOffsetMm: number;
+  valid: boolean;
+};
+
 // A pending marquee (rubber-band) selection on the plan background — tracked
 // as two floor-mm pointer samples (start + current). Mirrors ElevationView's
 // MarqueeState, but plan floor coordinates are plain SVG coordinates (y-down,
@@ -355,6 +376,7 @@ export function PlanView({
   reshapeRoomId = null,
   onReshapeRoomChange,
   onMoveRoomVertex,
+  onMoveRoomWall,
   onSplitWall,
   onDeleteRoomVertex,
   partitionToolActive = false,
@@ -420,6 +442,10 @@ export function PlanView({
   // moveRoomVertex. Never called for an invalid final position — the drag
   // reverts locally instead (see the pointer-up handler below).
   onMoveRoomVertex?: (roomId: string, vertexId: string, nextLocalMm: Point) => Promise<void>;
+  // Commits one whole-wall slide on pointer-up (a body drag, not a vertex
+  // drag). Never called for an invalid final offset — same revert-locally
+  // discipline as onMoveRoomVertex.
+  onMoveRoomWall?: (roomId: string, wallId: string, offsetMm: number) => Promise<void>;
   // Commits a wall split at the clicked point along the wall.
   onSplitWall?: (wallId: string, xAlongMm: number) => Promise<void>;
   // Commits a vertex removal (merges its two walls). Absent/inert if the
@@ -568,6 +594,12 @@ export function PlanView({
   useEffect(() => {
     vertexDragRef.current = vertexDrag;
   }, [vertexDrag]);
+  // Reshape mode's whole-wall body drag — same ref-mirrored discipline.
+  const [wallDrag, setWallDrag] = useState<WallDragState | null>(null);
+  const wallDragRef = useRef<WallDragState | null>(null);
+  useEffect(() => {
+    wallDragRef.current = wallDrag;
+  }, [wallDrag]);
   // Partition create-drag and edit-drag — same ref-mirrored discipline as the
   // other drag gestures (subscribed once per gesture; committed project can't
   // change mid-drag since nothing commits until release).
@@ -596,17 +628,14 @@ export function PlanView({
 
   const bounds = getFloorBounds(project.floor);
   const padding = getPlanViewPaddingMm(bounds);
-  // The fit extent every gesture measures against: the padded floor bounds.
+  // The fit extent every gesture measures against: the padded floor bounds,
+  // clamped to a sane minimum window (see clampFitExtent) so an empty floor
+  // or a lone tiny room doesn't fit-zoom in absurdly tight.
   // getViewBox2D turns the current viewport (fit or manual pan/zoom) into the
   // concrete viewBox rect + its exact pixels-per-mm, so `viewBoxBounds` below
   // is the ZOOMED window — every downstream consumer (grid, snap targets,
   // px→mm constants, guide extents) inherits the zoom automatically.
-  const contentBounds = {
-    x: bounds.minX - padding,
-    y: bounds.minY - padding,
-    width: bounds.width + padding * 2,
-    height: bounds.height + padding * 2
-  };
+  const contentBounds = clampFitExtent(bounds, padding);
   const { viewBox: viewBoxBounds, pixelsPerMm } = getViewBox2D(
     viewport,
     contentBounds,
@@ -667,7 +696,7 @@ export function PlanView({
   // of validity: an invalid in-flight position still needs to be SEEN (in the
   // danger token) so the curator knows to pull back; canMoveRoomVertex (not
   // this splice) is what actually gates the commit on pointer-up.
-  const displayedProject = vertexDrag
+  const vertexDragPreviewProject = vertexDrag
     ? {
         ...roomDragPreviewProject,
         floor: {
@@ -693,6 +722,27 @@ export function PlanView({
         }
       }
     : roomDragPreviewProject;
+  // A reshape-mode wall-BODY drag re-runs the actual domain op against the
+  // committed-so-far preview so the two changed vertices (and the two
+  // neighbours' new lengths) render exactly as moveRoomWall would commit
+  // them — mutually exclusive with vertexDrag in practice, so layering last
+  // here never actually composes with it. An invalid in-flight offset falls
+  // back to the pre-drag project (the outline still renders at its last
+  // valid position while the danger token shows via wallDragInvalid below).
+  const displayedProject = wallDrag
+    ? (() => {
+        try {
+          return moveRoomWall(
+            vertexDragPreviewProject,
+            wallDrag.roomId,
+            wallDrag.wallId,
+            wallDrag.previewOffsetMm
+          ).project;
+        } catch {
+          return vertexDragPreviewProject;
+        }
+      })()
+    : vertexDragPreviewProject;
 
   // The shared 2D viewport gesture engine (pan / zoom / pinch / wheel /
   // keyboard), formerly a ~350-line copy inline here and in ElevationView. It
@@ -713,7 +763,11 @@ export function PlanView({
     // defer to that edit (preserves the old capture guard).
     isPinchBlocked: () =>
       Boolean(
-        dragRef.current || roomDragRef.current || objectDragRef.current || vertexDragRef.current
+        dragRef.current ||
+          roomDragRef.current ||
+          objectDragRef.current ||
+          vertexDragRef.current ||
+          wallDragRef.current
       ),
     onGestureEnd: (info) => {
       // A space/middle mouse-pan always fires a trailing `click` on the svg; a
@@ -1509,6 +1563,95 @@ export function PlanView({
     // snapThresholdMm captured by closure (the committed project can't change
     // mid-drag since nothing commits until release).
   }, [vertexDrag !== null, onMoveRoomVertex]);
+
+  function beginWallDrag(roomId: string, wallId: string, event: ReactPointerEvent<SVGLineElement>) {
+    event.stopPropagation();
+    const placement = project.floor.rooms.find((candidate) => candidate.roomId === roomId);
+    const wall = placement?.room.walls.find((candidate) => candidate.id === wallId);
+    if (!placement || !wall) return;
+
+    const startPointerMm = toSvgMm(event.clientX, event.clientY);
+    if (!startPointerMm) return;
+
+    const geometry = getWallGeometry(placement.room, wall);
+    const dx = geometry.end.xMm - geometry.start.xMm;
+    const dy = geometry.end.yMm - geometry.start.yMm;
+    const lengthMm = Math.hypot(dx, dy);
+    if (lengthMm === 0) return;
+    // Left-normal of the wall's start→end axis — the exact convention
+    // moveRoomWall itself uses, so a positive previewOffsetMm here previews
+    // precisely the direction the domain op will commit.
+    const normal: Vector2 = { xMm: -dy / lengthMm, yMm: dx / lengthMm };
+
+    setWallDrag({
+      roomId,
+      wallId,
+      startPointerMm,
+      normal,
+      previewOffsetMm: 0,
+      valid: true
+    });
+  }
+
+  useEffect(() => {
+    if (!wallDrag) return;
+
+    function onPointerMove(event: PointerEvent) {
+      const current = wallDragRef.current;
+      if (!current) return;
+
+      const pointerMm = toSvgMm(event.clientX, event.clientY);
+      if (!pointerMm) return;
+
+      const deltaMm: Vector2 = {
+        xMm: pointerMm.xMm - current.startPointerMm.xMm,
+        yMm: pointerMm.yMm - current.startPointerMm.yMm
+      };
+      // Constrain the pointer delta to the wall's own perpendicular — project
+      // it onto the unit normal captured at drag start, so a diagonal mouse
+      // movement only ever drives the wall along its normal, never sideways.
+      const offsetMm = deltaMm.xMm * current.normal.xMm + deltaMm.yMm * current.normal.yMm;
+
+      // Live preview validity: run the actual domain op against the
+      // committed project (not the store) purely to see whether it throws —
+      // same idiom as canMoveRoomVertex gating the vertex-drag preview.
+      let valid = true;
+      try {
+        moveRoomWall(project, current.roomId, current.wallId, offsetMm);
+      } catch {
+        valid = false;
+      }
+
+      setWallDrag((state) => (state ? { ...state, previewOffsetMm: offsetMm, valid } : state));
+    }
+
+    function onPointerUp() {
+      const current = wallDragRef.current;
+      setWallDrag(null);
+      if (!current) return;
+
+      // Sub-threshold release is a click, not a move — no commit. An invalid
+      // final offset REVERTS: displayedProject falls back to the pre-drag
+      // project the instant wallDrag goes null above, so "revert" costs
+      // nothing extra here — just don't call onMoveRoomWall.
+      if (Math.abs(current.previewOffsetMm) < 0.5 || !current.valid) return;
+
+      void onMoveRoomWall?.(current.roomId, current.wallId, current.previewOffsetMm);
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+    // Same ref-based discipline as every other drag effect in this file:
+    // subscribed once per gesture, `project` captured by closure (the
+    // committed project can't change mid-drag since nothing commits until
+    // release).
+  }, [wallDrag !== null, onMoveRoomWall]);
 
   // Is a floor-space point inside any room's polygon? Drives the partition
   // draw's live validity (its midpoint must land in a room — the store refuses
@@ -2654,6 +2797,8 @@ export function PlanView({
           const isReshaping = reshapeRoomId === selectedPlacement.roomId;
           const vertexDragInvalid =
             isReshaping && vertexDrag?.roomId === selectedPlacement.roomId && !vertexDrag.valid;
+          const wallDragInvalid =
+            isReshaping && wallDrag?.roomId === selectedPlacement.roomId && !wallDrag.valid;
 
           return (
             <g>
@@ -2665,7 +2810,7 @@ export function PlanView({
                 className="room-selection-outline"
                 points={roomPolygonPoints(selectedPlacement)}
                 vectorEffect="non-scaling-stroke"
-                style={vertexDragInvalid ? { stroke: "var(--danger)" } : undefined}
+                style={vertexDragInvalid || wallDragInvalid ? { stroke: "var(--danger)" } : undefined}
               />
               {/* Reshape mode replaces the rectangle-only resize handles with
                   vertex/split handles for whichever room is armed — the two
@@ -2680,6 +2825,9 @@ export function PlanView({
                   selectedVertexId={selectedVertexId}
                   onBeginVertexDrag={(vertexId, event) =>
                     beginVertexDrag(selectedPlacement.roomId, vertexId, event)
+                  }
+                  onBeginWallDrag={(wallId, event) =>
+                    beginWallDrag(selectedPlacement.roomId, wallId, event)
                   }
                   onSplitWallClick={handleSplitWallClick}
                 />
@@ -2984,4 +3132,27 @@ function getPlanViewPaddingMm(bounds: { width: number; height: number }): number
   const largestDimensionMm = Math.max(bounds.width, bounds.height);
 
   return Math.max(900, largestDimensionMm * 0.14);
+}
+
+// The padded floor bounds, expanded (never shrunk) so neither axis is
+// narrower than MIN_PLAN_FIT_EXTENT_MM — grown symmetrically around the
+// floor bounds' own center, which is the origin for an empty floor (see
+// getFloorBounds). Exported only for unit testing; not a shared utility.
+export function clampFitExtent(
+  bounds: { minX: number; minY: number; width: number; height: number },
+  padding: number
+): { x: number; y: number; width: number; height: number } {
+  const rawWidth = bounds.width + padding * 2;
+  const rawHeight = bounds.height + padding * 2;
+  const width = Math.max(MIN_PLAN_FIT_EXTENT_MM, rawWidth);
+  const height = Math.max(MIN_PLAN_FIT_EXTENT_MM, rawHeight);
+  const centerX = bounds.minX + bounds.width / 2;
+  const centerY = bounds.minY + bounds.height / 2;
+
+  return {
+    x: centerX - width / 2,
+    y: centerY - height / 2,
+    width,
+    height
+  };
 }

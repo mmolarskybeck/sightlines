@@ -105,6 +105,43 @@ function signedAreaMm2(points: Point[]): number {
   return sum / 2;
 }
 
+// A drawn vertex sitting mid-straight-run rather than at a genuine corner —
+// e.g. the user clicked several points along one wall while drawing. It's
+// "straight" when its perpendicular deviation from the prev→next line is
+// under 1mm, and "through" (not a backtrack/spike) when the walk prev→vertex
+// and vertex→next continue in the same direction.
+const COLLINEAR_DEVIATION_MM = 1;
+
+function isStraightThroughVertex(prev: Point, vertex: Point, next: Point): boolean {
+  const runLengthMm = Math.hypot(next.xMm - prev.xMm, next.yMm - prev.yMm);
+  if (runLengthMm === 0) return false; // prev/next coincide — not this check's job
+
+  const crossZ =
+    (next.xMm - prev.xMm) * (vertex.yMm - prev.yMm) -
+    (next.yMm - prev.yMm) * (vertex.xMm - prev.xMm);
+  const deviationMm = Math.abs(crossZ) / runLengthMm;
+  if (deviationMm >= COLLINEAR_DEVIATION_MM) return false;
+
+  const dot =
+    (vertex.xMm - prev.xMm) * (next.xMm - vertex.xMm) +
+    (vertex.yMm - prev.yMm) * (next.yMm - vertex.yMm);
+  return dot > 0;
+}
+
+// Drop every vertex that's a straight-through point relative to its ORIGINAL
+// neighbours (wrap-around included, so a seam where drawing started mid-wall
+// collapses too). A single pass keyed off the original array is sufficient:
+// several extra points strung along one straight edge each compare against
+// neighbours still on that same line, so every one of them drops out.
+function dropStraightThroughVertices(points: Point[]): Point[] {
+  const n = points.length;
+  return points.filter((vertex, index) => {
+    const prev = points[(index - 1 + n) % n];
+    const next = points[(index + 1) % n];
+    return !isStraightThroughVertex(prev, vertex, next);
+  });
+}
+
 export function createPolygonRoomPlacement({
   roomId,
   name,
@@ -138,6 +175,14 @@ export function createPolygonRoomPlacement({
     xMm: point.xMm - offsetXMm,
     yMm: point.yMm - offsetYMm
   }));
+
+  // Merge draw-time collinear points (extra clicks along one straight wall,
+  // including a seam where drawing started mid-wall) into their corners.
+  local = dropStraightThroughVertices(local);
+  if (local.length < 3) {
+    throw new Error("A room needs at least three points.");
+  }
+
   // Normalise to CCW ONCE, at creation only — after this, wall objects' xMm
   // depends on each wall's start/end identity, so the loop is never reversed
   // again (reshape blocks the self-intersection that could flip it).
