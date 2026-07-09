@@ -46,11 +46,13 @@ import {
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { useContainerSize } from "../hooks/useContainerSize";
 import { useDragGesture } from "../hooks/useDragGesture";
+import { useSelectSuppression } from "../hooks/useSelectSuppression";
 import { useSvgViewportGestures } from "../hooks/useSvgViewportGestures";
 import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
 import { ElevationArtwork } from "./ElevationArtwork";
 import { ElevationOpening } from "./ElevationOpening";
 import { ArtworkTooltipContent, OpeningTooltipContent } from "./PlacementTooltip";
+import { marqueeRectMm, type MarqueeState } from "./marqueeRect";
 import { getFitSelectionBoundsSvg, isArtworkOutOfWallBounds, wallLocalYToSvgY } from "./elevationArtworkGeometry";
 import { GridOverlay } from "./GridOverlay";
 import { GroupDimensionLines } from "./GroupDimensionLines";
@@ -118,32 +120,6 @@ type MoveDragState = {
   preserveSelection?: boolean;
 };
 
-// A pending marquee (rubber-band) selection on the elevation background —
-// tracked as two wall-local-mm pointer samples (start + current). toWallLocalMm
-// returns y-UP coordinates, matching placements' yMm centers, so the min/max
-// rect built from these two samples is already in the space getIdsIntersecting-
-// Rect expects. Same ref-based effect discipline as MoveDragState so the
-// gesture never resubscribes mid-drag.
-type MarqueeState = {
-  startMm: Vector2;
-  currentMm: Vector2;
-};
-
-// Min/max wall-local rect from a marquee's two pointer samples — the shape
-// getIdsIntersectingRect consumes. Both samples are already y-up, so no flip.
-function marqueeRectMm(marquee: MarqueeState): {
-  minXMm: number;
-  maxXMm: number;
-  minYMm: number;
-  maxYMm: number;
-} {
-  return {
-    minXMm: Math.min(marquee.startMm.xMm, marquee.currentMm.xMm),
-    maxXMm: Math.max(marquee.startMm.xMm, marquee.currentMm.xMm),
-    minYMm: Math.min(marquee.startMm.yMm, marquee.currentMm.yMm),
-    maxYMm: Math.max(marquee.startMm.yMm, marquee.currentMm.yMm)
-  };
-}
 
 // The HTML5-drop preview for a not-yet-placed artwork being dragged in from
 // the checklist. Separate from MoveDragState because it has no existing
@@ -554,21 +530,11 @@ export function ElevationView({
   // pointerup. For a single object that click merely re-selects it (today's
   // behavior, harmless); after a real GROUP drag the same click would call
   // onSelectObject non-additively and collapse the whole multi-selection to
-  // the one grabbed member — so the release marks the very next select to be
-  // swallowed. Cleared on a timeout too, in case the release lands where no
-  // click follows (pointer left the element mid-drag).
-  const suppressNextSelectRef = useRef(false);
-  function suppressNextSelect() {
-    suppressNextSelectRef.current = true;
-    window.setTimeout(() => {
-      suppressNextSelectRef.current = false;
-    }, 0);
-  }
-  function consumeSelectSuppression(): boolean {
-    const suppressed = suppressNextSelectRef.current;
-    suppressNextSelectRef.current = false;
-    return suppressed;
-  }
+  // Select suppression: when a pointer release triggers a trailing click that
+  // must not collapse a multi-selection (group drags, etc.), mark it here so
+  // the click handler can skip the selection.
+  const { suppressNextSelect, consumeSelectSuppression, suppressNextSelectRef } =
+    useSelectSuppression();
 
 
   function beginMarquee(event: ReactPointerEvent<SVGSVGElement>) {

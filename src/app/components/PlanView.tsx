@@ -51,6 +51,7 @@ import {
 import {
   getFloorPartitions,
   parseFaceWallId,
+  roomIdContainingPoint,
   type FloorPartition
 } from "../../domain/geometry/freestandingWalls";
 import { isPointInPolygon, isSimplePolygon, segmentsIntersect, type Point } from "../../domain/geometry/polygon";
@@ -84,10 +85,12 @@ import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/uni
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { useContainerSize } from "../hooks/useContainerSize";
 import { useDragGesture } from "../hooks/useDragGesture";
+import { useSelectSuppression } from "../hooks/useSelectSuppression";
 import { useSvgViewportGestures } from "../hooks/useSvgViewportGestures";
 import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
 import { GridOverlay } from "./GridOverlay";
 import { ArtworkTooltipContent, OpeningTooltipContent } from "./PlacementTooltip";
+import { marqueeRectMm, type MarqueeState } from "./marqueeRect";
 import { PlanObject } from "./PlanObject";
 import { RoomResizeHandles, type ResizeHandleTarget } from "./RoomResizeHandles";
 import { RoomReshapeHandles } from "./RoomReshapeHandles";
@@ -283,33 +286,6 @@ type WallDragState = {
   valid: boolean;
 };
 
-// A pending marquee (rubber-band) selection on the plan background — tracked
-// as two floor-mm pointer samples (start + current). Mirrors ElevationView's
-// MarqueeState, but plan floor coordinates are plain SVG coordinates (y-down,
-// no y-flip anywhere), so the min/max rect built from the two samples is valid
-// regardless of drag direction. Same ref-based effect discipline as the drag
-// states so the gesture never resubscribes mid-drag.
-type MarqueeState = {
-  startMm: Vector2;
-  currentMm: Vector2;
-};
-
-// Min/max floor-mm rect from a marquee's two pointer samples — the shape both
-// planRectIntersectsRect and the rendered <rect> consume. No y-flip: plan is
-// already y-down, so the smaller sample is always the top-left.
-function marqueeRectMm(marquee: MarqueeState): {
-  minXMm: number;
-  maxXMm: number;
-  minYMm: number;
-  maxYMm: number;
-} {
-  return {
-    minXMm: Math.min(marquee.startMm.xMm, marquee.currentMm.xMm),
-    maxXMm: Math.max(marquee.startMm.xMm, marquee.currentMm.xMm),
-    minYMm: Math.min(marquee.startMm.yMm, marquee.currentMm.yMm),
-    maxYMm: Math.max(marquee.startMm.yMm, marquee.currentMm.yMm)
-  };
-}
 
 // The in-progress partition (free-standing wall) draw — a single centerline
 // segment dragged inside a room, transient until release (no store write until
@@ -1741,21 +1717,6 @@ export function PlanView({
     });
   }
 
-  // Is a floor-space point inside any room's polygon? Drives the partition
-  // draw's live validity (its midpoint must land in a room — the store refuses
-  // an off-room partition, spec §6.4) and turns the preview red when it won't.
-  function pointInAnyRoom(pointMm: Vector2): boolean {
-    return project.floor.rooms.some((placement) =>
-      isPointInPolygon(
-        pointMm,
-        placement.room.vertices.map((vertex) => ({
-          xMm: vertex.xMm + placement.offsetXMm,
-          yMm: vertex.yMm + placement.offsetYMm
-        }))
-      )
-    );
-  }
-
   function partitionDrawInvalid(startMm: Vector2, endMm: Vector2): boolean {
     const lengthMm = Math.hypot(endMm.xMm - startMm.xMm, endMm.yMm - startMm.yMm);
     if (lengthMm < PARTITION_MIN_LENGTH_MM) return true;
@@ -1763,7 +1724,7 @@ export function PlanView({
       xMm: (startMm.xMm + endMm.xMm) / 2,
       yMm: (startMm.yMm + endMm.yMm) / 2
     };
-    return !pointInAnyRoom(midpoint);
+    return roomIdContainingPoint(project, midpoint) === null;
   }
 
   // Begin a partition centerline drag from the capture overlay (armed tool).
@@ -1804,21 +1765,11 @@ export function PlanView({
   // pointerup. For a single object that click merely re-selects it (today's
   // behavior, harmless); after a real GROUP drag the same click would call
   // onSelectObject non-additively and collapse the whole multi-selection to
-  // the one grabbed member — so the release marks the very next select to be
-  // swallowed. Cleared on a timeout too, in case the release lands where no
-  // click follows. Same idiom as ElevationView's.
-  const suppressNextSelectRef = useRef(false);
-  function suppressNextSelect() {
-    suppressNextSelectRef.current = true;
-    window.setTimeout(() => {
-      suppressNextSelectRef.current = false;
-    }, 0);
-  }
-  function consumeSelectSuppression(): boolean {
-    const suppressed = suppressNextSelectRef.current;
-    suppressNextSelectRef.current = false;
-    return suppressed;
-  }
+  // Select suppression: when a pointer release triggers a trailing click that
+  // must not collapse a multi-selection (group drags, marquee selection, etc.),
+  // mark it here so the click handler can skip the selection.
+  const { suppressNextSelect, consumeSelectSuppression, suppressNextSelectRef } =
+    useSelectSuppression();
 
   // Placement ids whose (possibly rotated) plan rects intersect the marquee.
   // The committed project is correct here — no drag can be in flight during a
