@@ -124,6 +124,12 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 - [x] Added static public information and trust surfaces in `public/`: About, Privacy, Security, IT, `security.txt`, sitemap, robots, web manifest, `llms.txt`, shared `trust.css`, and Cloudflare headers.
 - [x] Wired the left-rail Help affordance to lightweight in-app product info with links out to the static pages, and kept the app shell viewport-bound so the rail stays fixed while editor panes own overflow.
 
+**2026-07-09:**
+- [x] Touch drag-and-drop for artwork placement: long-press checklist row (300ms, 10px slop), floating thumbnail preview, snap ghost shared with HTML5 drag, one-action release/place. New `artworkDragSession.ts` module-level pub/sub, PlanView/ElevationView subscribers. Desktop HTML5 DnD hardened: standard `text/plain` payload, session fallback, artwork-id validation, ⌘/Ctrl snap-bypass honored. Verified on-device (iOS) and via CDP.
+- [x] Insecure-context (plain-http LAN) support: `crypto.subtle.digest` and `crypto.randomUUID` are secure-context-only. New `src/domain/assets/sha256.ts` (WebCrypto when available, pure FIPS 180-4 fallback producing bit-identical digests for duplicate detection) and `src/domain/id.ts` (`newId()` with UUID v4 fallback, replacing nine call sites). Production HTTPS uses fast paths; fallbacks dead code.
+- [x] Intake error surface hardening: `addArtworksFromFiles` and `importArtworkDrafts` no longer fail silently; both catch exceptions and surface in error banner.
+- [x] Topbar fits iPad portrait: single-line icon-only layout at ≤1040px (tab/action labels and save-badge text → visually-hidden spans; accessible names preserved, colored save dot stays). Tests: 1065 → 1087.
+
 ## In Progress / Immediate Next
 
 - [ ] Paired door/window connections (`connectsToObjectId` writers + alignment status) and 3D see-through openings.
