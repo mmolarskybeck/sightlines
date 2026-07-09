@@ -1,12 +1,30 @@
-import type { ArtworkWallObject, DisplayUnit } from "../../domain/project";
+import { AlignCenterHorizontalSimpleIcon } from "@phosphor-icons/react/dist/csr/AlignCenterHorizontalSimple";
+import type { ArtworkWallObject, DisplayUnit, WallObject } from "../../domain/project";
+import {
+  centerMemberBetweenBoundaries,
+  detectBoundary,
+  type BoundaryDetection
+} from "../../domain/placement/arrangeOnWall";
 import { LengthField } from "./LengthField";
+import { Button } from "./ui/button";
 import { getScopedUnitContext } from "./scopedUnits";
+
+// The "Center" button's phrasing, keyed by what getWallPlacementCenterTarget
+// found on the two detected boundaries — the button never says "works" when
+// a boundary is actually a door/window/blocked zone (see that function's
+// comment for the exact classification rule).
+const CENTER_BUTTON_LABEL: Record<WallPlacementCenterBoundaryKind, string> = {
+  wall: "Center on wall",
+  works: "Center between works",
+  open: "Center in open space"
+};
 
 // Props-driven "Position on wall" editor for a single wall-placed artwork —
 // the numeric twin of dragging the work along its wall in the elevation view.
-// Everything arrives as props (App derives the wall length, wall name, and the
-// nearest-neighbour edges from the store), so this stays purely presentational
-// in the same spirit as FloorPlacementFields / ArtworkInspector.
+// Everything arrives as props (App derives the wall length, wall name, the
+// nearest-neighbour edges, and the Center button's target from the store), so
+// this stays purely presentational in the same spirit as FloorPlacementFields
+// / ArtworkInspector.
 //
 // The curator's physical framing throughout: a work sits some distance from
 // each wall edge, and (when it has neighbours) some gap from the work beside
@@ -19,6 +37,8 @@ export function WallPlacementFields({
   wallName,
   leftNeighborRightEdgeMm,
   rightNeighborLeftEdgeMm,
+  centerTargetXMm,
+  centerBoundaryKind,
   onCommit,
   unit
 }: {
@@ -33,6 +53,12 @@ export function WallPlacementFields({
   leftNeighborRightEdgeMm?: number;
   // Left edge of the nearest other artwork whose center is right of this work.
   rightNeighborLeftEdgeMm?: number;
+  // Where the Center button sends the work — see getWallPlacementCenterTarget.
+  // Unlike leftNeighborRightEdgeMm/rightNeighborLeftEdgeMm above (artworks
+  // only), the detection behind this counts every wall object beside the
+  // work, openings included, matching the arrange panel's own boundary rule.
+  centerTargetXMm: number;
+  centerBoundaryKind: WallPlacementCenterBoundaryKind;
   // Every commit is a direct move (one undo entry), same as the other
   // inspector fields — App wires this to moveArtworkPlacement.
   onCommit: (xMm: number, yMm: number) => void;
@@ -105,6 +131,18 @@ export function WallPlacementFields({
         />
       ) : null}
 
+      {/* Horizontal-only, so it sits with the horizontal fields above rather
+          than after "Center height" below. Always enabled: there is always a
+          wall (worst case, its edges) to center against. */}
+      <Button
+        className="inspector-action"
+        variant="inspector"
+        onClick={() => onCommit(centerTargetXMm, placement.yMm)}
+      >
+        <AlignCenterHorizontalSimpleIcon aria-hidden="true" size={15} />
+        {CENTER_BUTTON_LABEL[centerBoundaryKind]}
+      </Button>
+
       <LengthField
         compact
         label="Center height"
@@ -151,4 +189,50 @@ export function getWallPlacementNeighborEdges(
   }
 
   return { leftNeighborRightEdgeMm, rightNeighborLeftEdgeMm };
+}
+
+// What the Center button's label should call the thing it's centering
+// against: "wall" when neither detected boundary is an object, "works" when
+// every object boundary is an artwork (so "between works" is literally true),
+// "open" once EITHER boundary is a door/window/blocked zone — "works" would
+// misname that side, and the arrange panel has no single-object noun that
+// reads well in a two-word button, so "open space" covers every non-wall,
+// non-artwork case uniformly.
+export type WallPlacementCenterBoundaryKind = "wall" | "works" | "open";
+
+// The Center button's target (see centerMemberBetweenBoundaries) plus the
+// classification CENTER_BUTTON_LABEL turns into copy. Deliberately NOT
+// getWallPlacementNeighborEdges' `others` (artworks only): centering treats
+// every same-wall object as something to center beside, doors and windows
+// included, matching detectBoundary/the arrange panel's own rule that a work
+// centers in whatever open space it actually has, not just the space between
+// other art.
+export function getWallPlacementCenterTarget(
+  self: ArtworkWallObject,
+  wallObjects: WallObject[],
+  wallLengthMm: number
+): { xMm: number; boundaryKind: WallPlacementCenterBoundaryKind } {
+  const others = wallObjects.filter(
+    (wallObject) => wallObject.id !== self.id && wallObject.wallId === self.wallId
+  );
+
+  const xMm = centerMemberBetweenBoundaries(self, others, wallLengthMm);
+
+  const kindOf = (detection: BoundaryDetection): WallObject["kind"] | "wall" =>
+    detection.type === "wall"
+      ? "wall"
+      : (others.find((object) => object.id === detection.objectId)?.kind ?? "wall");
+
+  const leftKind = kindOf(detectBoundary("left", [self], others, wallLengthMm));
+  const rightKind = kindOf(detectBoundary("right", [self], others, wallLengthMm));
+  const isOpeningKind = (kind: WallObject["kind"] | "wall") => kind !== "wall" && kind !== "artwork";
+
+  const boundaryKind: WallPlacementCenterBoundaryKind =
+    leftKind === "wall" && rightKind === "wall"
+      ? "wall"
+      : isOpeningKind(leftKind) || isOpeningKind(rightKind)
+        ? "open"
+        : "works";
+
+  return { xMm, boundaryKind };
 }

@@ -364,6 +364,32 @@ export function detectBoundary(
   return objectId ? { type: "object", edgeMm, objectId } : { type: "wall", edgeMm };
 }
 
+// The "Center" move for a SINGLE work: the x that puts its center exactly
+// midway between whatever detectBoundary finds on its left and right — the
+// nearest UNSELECTED wall object beside it (openings/blocked zones count,
+// same as every other detector here), else the wall edge on that side. This
+// is the one-member reduction of the same curatorial idea arrangeOnWall*
+// solves for groups (equal margins either side), but a lone work has no
+// interior gaps to re-solve — centering it is just the midpoint of
+// [leftBoundary.edgeMm, rightBoundary.edgeMm], so this calls detectBoundary
+// directly rather than routing through the zone helpers built for 2+ members.
+// x-only (yMm is not this function's concern), unclamped — a work wider than
+// the resulting span still centers on that midpoint; the commit-time
+// collision gate is what catches the overlap, not this, same convention as
+// every other solver in this file.
+//
+// `others` is the caller's responsibility: the unselected wall objects on the
+// SAME wall as `member` (same convention as detectBoundary/getOpenSpaceBounds).
+export function centerMemberBetweenBoundaries(
+  member: WallObjectBase,
+  others: WallObjectBase[],
+  wallLengthMm: number
+): number {
+  const left = detectBoundary("left", [member], others, wallLengthMm);
+  const right = detectBoundary("right", [member], others, wallLengthMm);
+  return (left.edgeMm + right.edgeMm) / 2;
+}
+
 // Like getSpacingSegments, but the two OUTER segments stop at the boundary
 // detectBoundary finds on that side (the nearest UNSELECTED neighbour, else
 // the wall edge) instead of always running to the wall edge — so an idle

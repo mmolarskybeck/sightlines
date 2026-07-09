@@ -62,6 +62,7 @@ import { RoomsPanel } from "./components/RoomsPanel";
 import { SelectionInspector } from "./components/SelectionInspector";
 import {
   WallPlacementFields,
+  getWallPlacementCenterTarget,
   getWallPlacementNeighborEdges
 } from "./components/WallPlacementFields";
 import { WallInspector, type WallDimensionLink } from "./components/WallInspector";
@@ -500,6 +501,17 @@ export function App() {
         )
       )
     : { leftNeighborRightEdgeMm: undefined, rightNeighborLeftEdgeMm: undefined };
+  // The Center button's target + label classification — unlike
+  // wallPlacementNeighbors above, every wall object counts (openings
+  // included), matching detectBoundary's own rule.
+  const wallPlacementCenterTarget =
+    placedWallObject && placedWallObjectWall
+      ? getWallPlacementCenterTarget(
+          placedWallObject,
+          project.wallObjects,
+          placedWallObjectWall.lengthMm
+        )
+      : { xMm: 0, boundaryKind: "wall" as const };
 
   // A dangling selectedOpeningId (the opening was just deleted) resolves to
   // nothing here too, the same fallback shape as selectedArtwork above.
@@ -1226,29 +1238,19 @@ export function App() {
                 onRemoveAll={() => void removeSelectedPlacements()}
               />
             ) : selectedArtwork ? (
-              <>
-                <ArtworkInspector
-                  artwork={selectedArtwork}
-                  isPlaced={isArtworkPlaced}
-                  unit={project.unit}
-                  onCommitDimensions={(dimensions) =>
-                    void updateArtwork(selectedArtwork.id, { dimensions })
-                  }
-                  onCommitField={(changes) => void updateArtwork(selectedArtwork.id, changes)}
-                  onRemovePlacement={
-                    artworkPlacementId
-                      ? () => void removePlacement(artworkPlacementId)
-                      : undefined
-                  }
-                />
-                {placedWallObject && placedWallObjectWall ? (
-                  <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
+              <ArtworkInspector
+                artwork={selectedArtwork}
+                isPlaced={isArtworkPlaced}
+                placementSection={
+                  placedWallObject && placedWallObjectWall ? (
                     <WallPlacementFields
                       placement={placedWallObject}
                       wallLengthMm={placedWallObjectWall.lengthMm}
                       wallName={placedWallObjectWall.name}
                       leftNeighborRightEdgeMm={wallPlacementNeighbors.leftNeighborRightEdgeMm}
                       rightNeighborLeftEdgeMm={wallPlacementNeighbors.rightNeighborLeftEdgeMm}
+                      centerTargetXMm={wallPlacementCenterTarget.xMm}
+                      centerBoundaryKind={wallPlacementCenterTarget.boundaryKind}
                       unit={project.unit}
                       onCommit={(xMm, yMm) =>
                         void moveArtworkPlacement(
@@ -1259,24 +1261,33 @@ export function App() {
                         )
                       }
                     />
-                  </form>
-                ) : null}
-                {placedFloorArtwork ? (
-                  <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
-                    <p className="field-hint">Floor-placed in plan view.</p>
-                    <FloorPlacementFields
-                      floorObject={placedFloorArtwork}
-                      unit={project.unit}
-                      onCommitPosition={(xMm, yMm) =>
-                        void updateFloorObject(placedFloorArtwork.id, { xMm, yMm })
-                      }
-                      onCommitSize={(widthMm, depthMm) =>
-                        void updateFloorObject(placedFloorArtwork.id, { widthMm, depthMm })
-                      }
-                    />
-                  </form>
-                ) : null}
-              </>
+                  ) : placedFloorArtwork ? (
+                    <>
+                      <p className="field-hint">Floor-placed in plan view.</p>
+                      <FloorPlacementFields
+                        floorObject={placedFloorArtwork}
+                        unit={project.unit}
+                        onCommitPosition={(xMm, yMm) =>
+                          void updateFloorObject(placedFloorArtwork.id, { xMm, yMm })
+                        }
+                        onCommitSize={(widthMm, depthMm) =>
+                          void updateFloorObject(placedFloorArtwork.id, { widthMm, depthMm })
+                        }
+                      />
+                    </>
+                  ) : null
+                }
+                unit={project.unit}
+                onCommitDimensions={(dimensions) =>
+                  void updateArtwork(selectedArtwork.id, { dimensions })
+                }
+                onCommitField={(changes) => void updateArtwork(selectedArtwork.id, changes)}
+                onRemovePlacement={
+                  artworkPlacementId
+                    ? () => void removePlacement(artworkPlacementId)
+                    : undefined
+                }
+              />
           ) : selectedFloorBlockedZone ? (
             <FloorObjectInspector
               floorObject={selectedFloorBlockedZone}

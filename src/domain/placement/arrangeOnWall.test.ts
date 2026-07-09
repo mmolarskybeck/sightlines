@@ -4,6 +4,7 @@ import {
   arrangeOnWall,
   arrangeOnWallInZone,
   arrangeOnWallInZoneWithInset,
+  centerMemberBetweenBoundaries,
   detectBoundary,
   gapForInset,
   getArrangeReadoutDetailed,
@@ -1033,6 +1034,67 @@ describe("detectBoundary", () => {
 
     expect(left.edgeMm).toBe(bounds.startMm);
     expect(right.edgeMm).toBe(bounds.endMm);
+  });
+});
+
+describe("centerMemberBetweenBoundaries", () => {
+  it("falls back to the wall edges with no others: midpoint of the whole wall", () => {
+    const member = makeMember({ widthMm: 300, xMm: 250 });
+    expect(centerMemberBetweenBoundaries(member, [], 2000)).toBe(1000);
+  });
+
+  it("centers between a neighbour on the left and the wall edge on the right", () => {
+    // neighbour: width 200, center 200 -> right edge 300
+    const member = makeMember({ widthMm: 300, xMm: 900 });
+    const others = [makeMember({ id: "n", widthMm: 200, xMm: 200 })];
+    // left boundary = 300 (neighbour's right edge), right boundary = 2000 (wall end)
+    expect(centerMemberBetweenBoundaries(member, others, 2000)).toBe((300 + 2000) / 2);
+  });
+
+  it("centers between the wall edge on the left and a neighbour on the right", () => {
+    // neighbour: width 200, center 1800 -> left edge 1700
+    const member = makeMember({ widthMm: 300, xMm: 900 });
+    const others = [makeMember({ id: "n", widthMm: 200, xMm: 1800 })];
+    // left boundary = 0 (wall start), right boundary = 1700 (neighbour's left edge)
+    expect(centerMemberBetweenBoundaries(member, others, 2000)).toBe((0 + 1700) / 2);
+  });
+
+  it("centers between neighbours on both sides", () => {
+    // left neighbour: width 200, center 200 -> right edge 300
+    // right neighbour: width 200, center 1800 -> left edge 1700
+    const member = makeMember({ widthMm: 300, xMm: 900 });
+    const others = [
+      makeMember({ id: "left", widthMm: 200, xMm: 200 }),
+      makeMember({ id: "right", widthMm: 200, xMm: 1800 })
+    ];
+    expect(centerMemberBetweenBoundaries(member, others, 2000)).toBe((300 + 1700) / 2);
+  });
+
+  it("treats a same-band opening as a boundary, same as any other wall object", () => {
+    // door: width 200, center 1000 -> left edge 900; same y-band as the work
+    const member = makeMember({ widthMm: 300, xMm: 400 });
+    const others = [makeMember({ id: "door", widthMm: 200, xMm: 1000 })];
+    // left boundary = 0 (wall start, no left neighbour), right boundary = 900 (door's left edge)
+    expect(centerMemberBetweenBoundaries(member, others, 2000)).toBe((0 + 900) / 2);
+  });
+
+  it("is unclamped: a work wider than the open span still centers on the midpoint", () => {
+    // Span between neighbours is only 200mm wide (300 to 500), work is 400mm wide.
+    const member = makeMember({ widthMm: 400, xMm: 400 });
+    const others = [
+      makeMember({ id: "left", widthMm: 200, xMm: 200 }), // right edge 300
+      makeMember({ id: "right", widthMm: 200, xMm: 600 }) // left edge 500
+    ];
+    expect(centerMemberBetweenBoundaries(member, others, 2000)).toBe((300 + 500) / 2);
+  });
+
+  it("ignores a neighbour outside the member's vertical band", () => {
+    const member = makeMember({ widthMm: 300, xMm: 500 });
+    const others = [
+      makeMember({ id: "low", widthMm: 200, xMm: 1000, yMm: -1000, heightMm: 400 })
+    ];
+    // Out-of-band neighbour is ignored, so both boundaries fall back to the wall edges.
+    expect(centerMemberBetweenBoundaries(member, others, 2000)).toBe(1000);
   });
 });
 

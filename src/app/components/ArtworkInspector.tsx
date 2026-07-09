@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { LinkBreakIcon } from "@phosphor-icons/react/dist/csr/LinkBreak";
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/csr/LockSimple";
 import { LockSimpleOpenIcon } from "@phosphor-icons/react/dist/csr/LockSimpleOpen";
@@ -28,10 +28,11 @@ type ArtworkTextFieldKey = "title" | "artist" | "date" | "accessionNumber" | "lo
 
 // Grouped into two rhythm clusters (see .field-group in global.css): identity
 // (what the work is) reads at the top beside the thumbnail, and registrar
-// (where its record/loan lives — provenance) sinks to the bottom of the panel,
-// below the dimensions, since it's reference data a curator consults less often
-// than the physical measurements. Each cluster reads as one unit, separated
-// from the other by the more generous gap on .inspector-form itself.
+// (where its record/loan lives — provenance) sinks toward the bottom of the
+// panel, below both the dimensions AND the placement slot, since it's
+// reference data a curator consults less often than the physical measurements
+// or day-to-day arranging. Each cluster reads as one unit, separated from the
+// other by the more generous gap on .inspector-form itself.
 const IDENTITY_FIELDS: { key: ArtworkTextFieldKey; label: string }[] = [
   { key: "title", label: "Title" },
   { key: "artist", label: "Artist" },
@@ -58,6 +59,7 @@ const DIMENSION_FIELDS: { key: DimensionAxisKey; label: string }[] = [
 export function ArtworkInspector({
   artwork,
   isPlaced,
+  placementSection,
   onCommitDimensions,
   onCommitField,
   onRemovePlacement,
@@ -65,6 +67,14 @@ export function ArtworkInspector({
 }: {
   artwork: Artwork;
   isPlaced: boolean;
+  // The wall- or floor-position form (WallPlacementFields / FloorPlacementFields)
+  // for a placed artwork, null/undefined when unplaced — see the reading-order
+  // comment above IDENTITY_FIELDS. App supplies this rather than the form
+  // rendering itself here, same discipline as everything else in this
+  // component: no store access, props only. It renders as a plain child of
+  // this component's own <form> (never wrapped in its own nested <form> —
+  // that's invalid HTML; the outer form's onSubmit already preventDefaults).
+  placementSection?: ReactNode;
   onCommitDimensions: (dimensions: Dimensions) => void;
   onCommitField: (
     changes: Partial<Pick<Artwork, ArtworkTextFieldKey>>
@@ -121,6 +131,12 @@ export function ArtworkInspector({
         onCommitDimensions={onCommitDimensions}
         unit={unit}
       />
+
+      {/* Daily-use arranging outranks registrar metadata (see IDENTITY_FIELDS),
+          so the placement form rides right below Dimensions — before
+          Accession no./Location, not after. Nothing renders when the artwork
+          isn't placed anywhere. */}
+      {placementSection}
 
       {/* Provenance / registrar data sits at the bottom (see IDENTITY_FIELDS). */}
       <div className="field-group">

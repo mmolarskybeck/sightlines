@@ -3404,16 +3404,6 @@ body.panels-resizing * {
   gap: 20px;
 }
 
-/* An artwork selection can stack up to three independent forms — its own
-   inspector-form, then (when placed) a wall- or floor-position form beneath
-   it — as siblings rather than one form (see ArtworkInspector.tsx / App.tsx).
-   .inspector-zone has no gap of its own, so without this the second form's
-   content would butt directly against the first with ~4px at most; this
-   restores the same 20px section rhythm .inspector-form uses internally. */
-.inspector-form + .inspector-form {
-  margin-top: 20px;
-}
-
 /* Groups related fields into one tight cluster (identity, registrar, etc.)
    within the more generous 20px rhythm of .inspector-form. */
 .field-group {
