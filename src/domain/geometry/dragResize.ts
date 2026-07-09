@@ -11,7 +11,7 @@ export type Vector2 = {
 // collapse a room to a degenerate near-zero size mid-gesture. The final
 // committed value still goes through resizeWallPreservingAngles's own
 // >0 check on release.
-export const MIN_DRAG_LENGTH_MM = 152.4; // 6 inches
+const MIN_DRAG_LENGTH_MM = 152.4; // 6 inches
 
 // resizeOrthogonalQuad (editRoom.ts) always anchors a resized wall's
 // startVertexId and moves its endVertexId along the wall's own axis — so
@@ -57,7 +57,7 @@ export function proposeMovingEdgePointMm(
   };
 }
 
-export function projectDeltaOntoAxis(deltaMm: Vector2, axis: Vector2): number {
+function projectDeltaOntoAxis(deltaMm: Vector2, axis: Vector2): number {
   return deltaMm.xMm * axis.xMm + deltaMm.yMm * axis.yMm;
 }
 

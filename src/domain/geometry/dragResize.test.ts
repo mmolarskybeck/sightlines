@@ -7,42 +7,11 @@ import {
   computeDraggedLengthMm,
   computeEdgeSnappedLengthMm,
   getMovingWallEdgeWorldPointMm,
-  MIN_DRAG_LENGTH_MM,
-  projectDeltaOntoAxis,
   proposeMovingEdgePointMm,
   type Vector2
 } from "./dragResize";
 import { resizeWallPreservingAngles } from "./editRoom";
 import { getWallsWithGeometry } from "./walls";
-
-describe("projectDeltaOntoAxis", () => {
-  it("returns the full delta magnitude when the drag is parallel to the axis", () => {
-    expect(
-      projectDeltaOntoAxis({ xMm: 400, yMm: 0 }, { xMm: 1, yMm: 0 })
-    ).toBeCloseTo(400);
-  });
-
-  it("returns zero when the drag is perpendicular to the axis", () => {
-    expect(
-      projectDeltaOntoAxis({ xMm: 0, yMm: 400 }, { xMm: 1, yMm: 0 })
-    ).toBeCloseTo(0);
-  });
-
-  it("only counts the component of a diagonal drag along the axis", () => {
-    expect(
-      projectDeltaOntoAxis({ xMm: 300, yMm: 400 }, { xMm: 1, yMm: 0 })
-    ).toBeCloseTo(300);
-    expect(
-      projectDeltaOntoAxis({ xMm: 300, yMm: 400 }, { xMm: 0, yMm: 1 })
-    ).toBeCloseTo(400);
-  });
-
-  it("goes negative when the drag runs opposite the axis direction", () => {
-    expect(
-      projectDeltaOntoAxis({ xMm: -150, yMm: 0 }, { xMm: 1, yMm: 0 })
-    ).toBeCloseTo(-150);
-  });
-});
 
 describe("computeDraggedLengthMm", () => {
   it("adds the axis-projected delta to the starting length", () => {
@@ -72,7 +41,7 @@ describe("computeDraggedLengthMm", () => {
       { xMm: 1, yMm: 0 }
     );
 
-    expect(result).toBe(MIN_DRAG_LENGTH_MM);
+    expect(result).toBe(152.4);
   });
 
   it("flips sign for an end-anchored resize: moving with the axis shortens the wall", () => {
@@ -107,7 +76,7 @@ describe("computeDraggedLengthMm", () => {
       "end"
     );
 
-    expect(result).toBe(MIN_DRAG_LENGTH_MM);
+    expect(result).toBe(152.4);
   });
 });
 

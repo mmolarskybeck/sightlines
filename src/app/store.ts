@@ -35,11 +35,6 @@ import {
   type OpeningKind
 } from "../domain/placement/createOpening";
 import { createArtworkPlacement, getEffectivePlacementSizeMm } from "../domain/placement/placeArtwork";
-import {
-  arrangeOnWall,
-  insetForGap,
-  solveEqualArrangement
-} from "../domain/placement/arrangeOnWall";
 import type { PlacementWarning } from "../domain/placement/validatePlacement";
 import {
   validateChangedWallPlacements,
@@ -256,10 +251,6 @@ export type AppState = ArrangeSliceState &
   ) => Promise<void>;
   movePlanObjectsGroup: (
     moves: { id: string; xMm: number; yMm?: number }[],
-    allowOverlap?: boolean
-  ) => Promise<void>;
-  arrangeSelectedOnWall: (
-    params: { insetMm: number } | { gapMm: number } | { equal: true },
     allowOverlap?: boolean
   ) => Promise<void>;
   removeSelectedPlacements: () => Promise<void>;
@@ -2383,93 +2374,6 @@ export function createAppStore(deps: AppStoreDeps) {
             wallObjects: nextWallObjects,
             floorObjects: nextFloorObjects
           }),
-          { placementWarnings }
-        );
-      },
-
-      // Direct, one-shot arrange (still used by tests). The inspector panel now
-      // drives arrangement through the ephemeral session actions below
-      // (beginArrangeSession/updateArrangeSession/commit...) so panel edits are
-      // a live preview that commits as a single undo entry; this action remains
-      // the immediate-commit path.
-      async arrangeSelectedOnWall(params, allowOverlap = false) {
-        const project = get().project;
-        if (!project) return;
-
-        // Friendly, single message for every way the selection can't be
-        // arranged. The inspector's disabled-state copy is richer — App.tsx
-        // derives a cause-specific arrangeDisabledReason (floor members / too
-        // few works / multiple walls) — but this immediate-commit path keeps
-        // one generic line: it only fires when an action races a selection
-        // change, not while a user is reading the panel.
-        const cannotArrangeMessage =
-          "Select at least two works on the same wall to arrange them.";
-
-        const selectedIds = objectIdsOf(get().selection);
-        const hasFloorMember = selectedIds.some((id) =>
-          project.floorObjects.some((floorObject) => floorObject.id === id)
-        );
-        if (hasFloorMember) {
-          set({ error: cannotArrangeMessage });
-          return;
-        }
-
-        // Arranging operates on ARTWORKS only — openings (doors/windows/blocked
-        // zones) are architecture, not part of the hang. A selected opening is
-        // simply not a member: it neither moves on arrange nor counts toward the
-        // 2-member minimum.
-        const members = project.wallObjects.filter(
-          (wallObject) => wallObject.kind === "artwork" && selectedIds.includes(wallObject.id)
-        );
-        if (members.length < 2) {
-          set({ error: cannotArrangeMessage });
-          return;
-        }
-
-        const wallIds = new Set(members.map((member) => member.wallId));
-        if (wallIds.size > 1) {
-          set({ error: cannotArrangeMessage });
-          return;
-        }
-
-        const wall = getProjectWalls(project).find(
-          (candidate) => candidate.id === members[0].wallId
-        );
-        if (!wall) return;
-
-        const insetMm =
-          "insetMm" in params
-            ? params.insetMm
-            : "gapMm" in params
-              ? insetForGap(members, wall.lengthMm, params.gapMm)
-              : solveEqualArrangement(members, wall.lengthMm).insetMm;
-
-        const moves = arrangeOnWall(members, wall.lengthMm, { insetMm });
-        if (moves.length === 0) return;
-
-        const moveById = new Map(moves.map((move) => [move.id, move]));
-        const movedIds: string[] = [];
-        const nextWallObjects = project.wallObjects.map((wallObject) => {
-          const move = moveById.get(wallObject.id);
-          if (!move || wallObject.xMm === move.xMm) return wallObject;
-          movedIds.push(wallObject.id);
-          return { ...wallObject, xMm: move.xMm };
-        });
-        if (movedIds.length === 0) return;
-
-        const placementWarnings = validateWallObjectPlacements(
-          { ...project, wallObjects: nextWallObjects },
-          movedIds
-        );
-
-        if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
-          set({ error: OVERLAP_BLOCKED_MESSAGE });
-          return;
-        }
-
-        await applyEdit(
-          "Arrange on wall",
-          (current) => ({ ...current, wallObjects: nextWallObjects }),
           { placementWarnings }
         );
       },

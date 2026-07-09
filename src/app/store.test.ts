@@ -2513,82 +2513,6 @@ describe("app store", () => {
       });
     });
 
-    describe("arrangeSelectedOnWall", () => {
-      it("the canonical example: 2540mm wall, three 508mm works, insetMm 254", async () => {
-        const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
-        await store.getState().resizeWall(wall.id, 2540);
-
-        const a = await placeArtworkOnWall(200, 1450, 508);
-        const b = await placeArtworkOnWall(1000, 1450, 508);
-        const c = await placeArtworkOnWall(2000, 1450, 508);
-        store.getState().setObjectSelection([a.placementId, b.placementId, c.placementId]);
-        const undoStackBefore = store.getState().undoStack.length;
-
-        await store.getState().arrangeSelectedOnWall({ insetMm: 254 });
-
-        const state = store.getState();
-        expect(state.undoStack).toHaveLength(undoStackBefore + 1);
-        expect(state.undoStack.at(-1)?.label).toBe("Arrange on wall");
-
-        const placementA = state.project!.wallObjects.find((o) => o.id === a.placementId)!;
-        const placementB = state.project!.wallObjects.find((o) => o.id === b.placementId)!;
-        const placementC = state.project!.wallObjects.find((o) => o.id === c.placementId)!;
-
-        expect(placementA.xMm - placementA.widthMm / 2).toBeCloseTo(254);
-        expect(placementC.xMm + placementC.widthMm / 2).toBeCloseTo(2540 - 254);
-        // Equal 254mm edge-to-edge gaps between the three works.
-        expect(placementB.xMm - placementB.widthMm / 2 - (placementA.xMm + placementA.widthMm / 2)).toBeCloseTo(
-          254
-        );
-        expect(placementC.xMm - placementC.widthMm / 2 - (placementB.xMm + placementB.widthMm / 2)).toBeCloseTo(
-          254
-        );
-      });
-
-      it("errors without an edit when fewer than two members are selected", async () => {
-        const a = await placeArtworkOnWall(500, 1450);
-        store.getState().setObjectSelection([a.placementId]);
-        const undoStackBefore = store.getState().undoStack.length;
-
-        await store.getState().arrangeSelectedOnWall({ insetMm: 100 });
-
-        expect(store.getState().undoStack).toHaveLength(undoStackBefore);
-        expect(store.getState().error).toBeTruthy();
-      });
-
-      it("errors without an edit when the selection spans two different walls", async () => {
-        const a = await placeArtworkOnWall(500, 1450);
-        await store.getState().addArtworksFromFiles([makeImageFile("other-wall.jpg")]);
-        const otherArtworkId = store.getState().project!.checklistArtworkIds.at(-1)!;
-        await store.getState().placeArtwork(otherArtworkId, "wall-east", 500, 1450, true);
-        const b = store.getState().project!.wallObjects.find(
-          (o) => o.kind === "artwork" && (o as { artworkId: string }).artworkId === otherArtworkId
-        )!;
-        store.getState().setObjectSelection([a.placementId, b.id]);
-        const undoStackBefore = store.getState().undoStack.length;
-
-        await store.getState().arrangeSelectedOnWall({ insetMm: 100 });
-
-        expect(store.getState().undoStack).toHaveLength(undoStackBefore);
-        expect(store.getState().error).toBeTruthy();
-      });
-
-      it("errors without an edit when the selection includes a floor object", async () => {
-        const a = await placeArtworkOnWall(500, 1450);
-        await store.getState().addArtworksFromFiles([makeImageFile("floor-piece.jpg")]);
-        const floorArtworkId = store.getState().project!.checklistArtworkIds.at(-1)!;
-        await store.getState().placeArtworkOnFloor(floorArtworkId, 1000, 1000);
-        const floorObjectId = store.getState().project!.floorObjects[0].id;
-        store.getState().setObjectSelection([a.placementId, floorObjectId]);
-        const undoStackBefore = store.getState().undoStack.length;
-
-        await store.getState().arrangeSelectedOnWall({ insetMm: 100 });
-
-        expect(store.getState().undoStack).toHaveLength(undoStackBefore);
-        expect(store.getState().error).toBeTruthy();
-      });
-    });
-
     describe("removeSelectedPlacements", () => {
       it("removes a wall placement and a floor placement in one undo entry, and clears selection", async () => {
         const a = await placeArtworkOnWall(500, 1450);
@@ -2803,11 +2727,6 @@ describe("app store", () => {
 
           store.getState().beginArrangeSession("equal");
           expect(store.getState().arrangeSession).toBeNull();
-
-          const undoBefore = store.getState().undoStack.length;
-          await store.getState().arrangeSelectedOnWall({ insetMm: 100 });
-          expect(store.getState().undoStack).toHaveLength(undoBefore);
-          expect(store.getState().error).toBeTruthy();
         });
       });
 
