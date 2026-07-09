@@ -112,6 +112,48 @@ describe("app store", () => {
     expect(store.getState().undoStack).toHaveLength(1);
   });
 
+  // Numeric-path counterpart to editRoom.test.ts's "rectangle resize
+  // characterization (pipeline-merge gate)" block — a future change may fold
+  // this store action's geometry call into the general polygon wall-move
+  // core (reshapeRoom.moveRoomWall). Geometry invariants (orthogonality,
+  // paired dimensions, anchor semantics, non-rectangle rejection) are pinned
+  // there; this pins what's specific to the store action itself. One undo
+  // entry and cross-selection editing are already covered by the test above;
+  // placement revalidation on a shortened wall is already covered by
+  // "revalidates a placed artwork's bounds when its wall is later resized
+  // shorter" further below.
+  describe("resizeWall (rectangle resize characterization – pipeline-merge gate)", () => {
+    it('commits with the exact label "Resize wall" and populates lastGeometryEdit for a width-wall resize', async () => {
+      await store.getState().resizeWall("wall-north", feetToMm(30));
+
+      const state = store.getState();
+      expect(state.undoStack.at(-1)?.label).toBe("Resize wall");
+      expect(state.lastGeometryEdit?.anchorVertexId).toBe("v-nw");
+      expect(state.lastGeometryEdit?.changedWallIds.slice().sort()).toEqual(
+        ["wall-north", "wall-south"].sort()
+      );
+    });
+
+    it("reports the depth walls' ids in lastGeometryEdit for a depth-wall resize", async () => {
+      await store.getState().resizeWall("wall-east", feetToMm(10));
+
+      const state = store.getState();
+      expect(state.lastGeometryEdit?.changedWallIds.slice().sort()).toEqual(
+        ["wall-east", "wall-west"].sort()
+      );
+    });
+
+    it("undo restores the exact previous room geometry, not just the resized wall's length", async () => {
+      const before = store.getState().project!.floor.rooms[0].room;
+
+      await store.getState().resizeWall("wall-north", feetToMm(30));
+      await store.getState().undo();
+
+      const after = store.getState().project!.floor.rooms[0].room;
+      expect(after).toEqual(before);
+    });
+  });
+
   it("resizeRoomHeight updates the room and every wall in that room", async () => {
     const nextHeightMm = feetToMm(10);
 

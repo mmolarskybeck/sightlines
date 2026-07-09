@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createSampleProject } from "../sample/sampleProject";
 import { feetToMm } from "../units/length";
-import { getWallsWithGeometry } from "./walls";
+import { getWallsWithGeometry, isRectangleRoom } from "./walls";
 import { resizeWallPreservingAngles } from "./editRoom";
 
 describe("resizeWallPreservingAngles", () => {
@@ -151,6 +151,51 @@ describe("resizeWallPreservingAngles", () => {
     expect(() => resizeWallPreservingAngles(project, "wall-north", feetToMm(30))).toThrow(
       /only supports rectangular rooms/
     );
+  });
+});
+
+// Characterization tests for the rectangle-only numeric resize pipeline
+// (RoomResizeHandles -> dragResize -> resizeWallPreservingAngles ->
+// resizeOrthogonalQuad). A future change may fold this dedicated path into
+// the general polygon wall-move core (reshapeRoom.moveRoomWall, which
+// already carries a comment cross-referencing this function). These tests
+// pin the exact behavior that merge must preserve. Anchor semantics (which
+// vertex is held fixed in world space for "start" vs "end"), non-rectangle
+// rejection, and a width-wall resize's changedWallIds are already covered
+// by the tests above; this block fills in what wasn't: full-quad
+// orthogonality (all four corners, not just one adjacent pair) and the
+// depth-wall (perpendicular-dimension) counterpart of the paired-dimension
+// and changed-wall-ids promises.
+describe("rectangle resize characterization (pipeline-merge gate)", () => {
+  it("resizing the width wall keeps the whole quad rectangular, not just the one adjacent corner already checked above", () => {
+    const project = createSampleProject();
+    const result = resizeWallPreservingAngles(project, "wall-north", feetToMm(30));
+
+    expect(isRectangleRoom(result.project.floor.rooms[0].room)).toBe(true);
+  });
+
+  it("resizing a depth wall (east) changes exactly the two depth walls' lengths, leaves the width walls' lengths unchanged, and keeps all four corners square", () => {
+    const project = createSampleProject();
+    const result = resizeWallPreservingAngles(project, "wall-east", feetToMm(10));
+
+    expect(result.changedWallIds.slice().sort()).toEqual(
+      ["wall-east", "wall-west"].sort()
+    );
+    expect(isRectangleRoom(result.project.floor.rooms[0].room)).toBe(true);
+
+    const walls = getWallsWithGeometry(result.project.floor.rooms[0].room);
+    const north = walls.find((wall) => wall.id === "wall-north");
+    const east = walls.find((wall) => wall.id === "wall-east");
+    const south = walls.find((wall) => wall.id === "wall-south");
+    const west = walls.find((wall) => wall.id === "wall-west");
+
+    // The resized wall and its opposite (parallel) wall both land on the
+    // new length — a rectangle's opposite sides must match.
+    expect(east?.lengthMm).toBeCloseTo(feetToMm(10));
+    expect(west?.lengthMm).toBeCloseTo(feetToMm(10));
+    // The perpendicular dimension (width) is untouched.
+    expect(north?.lengthMm).toBeCloseTo(feetToMm(28));
+    expect(south?.lengthMm).toBeCloseTo(feetToMm(28));
   });
 });
 
