@@ -1,20 +1,20 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Vector2 } from "../../domain/geometry/dragResize";
-import { isPointInPolygon } from "../../domain/geometry/polygon";
 import {
   getRoomBounds,
   getWallsWithGeometry,
   type WallWithGeometry
 } from "../../domain/geometry/walls";
-import type { DisplayUnit, Room, RoomPlacement } from "../../domain/project";
-import { formatLength } from "../../domain/units/length";
+import type { RoomPlacement } from "../../domain/project";
 
 // The in-flight wall slide, mirrored down from PlanView's wallDrag state. The
-// chip for `wallId` shows the signed offset label and tints to the danger token
-// while `valid` is false — same idiom as RoomReshapeHandles' invalid vertices.
+// chip for `wallId` renders with the "active" treatment and tints to the
+// danger token while `valid` is false — same idiom as RoomReshapeHandles'
+// invalid vertices. The chip shows no numbers: the walls whose lengths the
+// slide changes carry their own live labels (WallLengthLabels, composed by
+// PlanView).
 export type ActiveWallSlideDrag = {
   wallId: string;
-  offsetMm: number;
   valid: boolean;
 };
 
@@ -30,7 +30,6 @@ export function WallSlideHandles({
   handleSizeMm,
   highlightedWallId,
   placement,
-  unit,
   onBeginWallDrag
 }: {
   activeDrag: ActiveWallSlideDrag | null;
@@ -40,7 +39,6 @@ export function WallSlideHandles({
   // and its chip point at each other.
   highlightedWallId: string | null;
   placement: RoomPlacement;
-  unit: DisplayUnit;
   onBeginWallDrag: (wallId: string, event: ReactPointerEvent<SVGRectElement>) => void;
 }) {
   if (handleSizeMm <= 0) return null;
@@ -68,7 +66,6 @@ export function WallSlideHandles({
             key={wall.id}
             paddedSizeMm={paddedSizeMm}
             placement={placement}
-            unit={unit}
             wall={wall}
             onBeginWallDrag={onBeginWallDrag}
           />
@@ -85,7 +82,6 @@ function WallSlideHandle({
   highlighted,
   paddedSizeMm,
   placement,
-  unit,
   wall,
   onBeginWallDrag
 }: {
@@ -95,7 +91,6 @@ function WallSlideHandle({
   highlighted: boolean;
   paddedSizeMm: number;
   placement: RoomPlacement;
-  unit: DisplayUnit;
   wall: WallWithGeometry;
   onBeginWallDrag: (wallId: string, event: ReactPointerEvent<SVGRectElement>) => void;
 }) {
@@ -114,13 +109,6 @@ function WallSlideHandle({
   // cursor communicates the normal's direction (not the wall's). Generalizes
   // RoomResizeHandles' axis test to all four diagonal buckets.
   const cursor = perpendicularCursor(normal);
-
-  // The label reads outside the room, along the wall's outward normal, far
-  // enough out to clear the wall stroke and the chip itself — same offset idiom
-  // as RoomResizeHandles' dimension label.
-  const labelOffsetMm = handleSizeMm * 4.5;
-  const labelXMm = centerXMm + normal.xMm * labelOffsetMm;
-  const labelYMm = centerYMm + normal.yMm * labelOffsetMm;
 
   const baseClassName = isActive ? "resize-handle active" : "resize-handle";
   const dangerStyle = invalid ? { fill: "var(--danger)", stroke: "var(--danger)" } : {};
@@ -149,58 +137,8 @@ function WallSlideHandle({
         style={{ cursor, ...dangerStyle }}
         onPointerDown={handlePointerDown}
       />
-      {isDragging ? (
-        <text
-          className="resize-handle-label"
-          dominantBaseline="middle"
-          textAnchor="middle"
-          x={labelXMm}
-          y={labelYMm}
-          style={{
-            // font-size/stroke-width are in SVG user units (mm), not CSS px,
-            // since this SVG's viewBox already scales content to fit — sizing
-            // off handleSizeMm (itself screen-px-per-mm-derived) keeps the
-            // label a constant on-screen size at any room scale, the same
-            // trick RoomResizeHandles' label uses.
-            fontSize: handleSizeMm * 1.8,
-            strokeWidth: handleSizeMm * 0.5
-          }}
-        >
-          {formatSignedOffset(
-            outwardDisplayOffsetMm(wall, placement.room, activeDrag.offsetMm),
-            unit
-          )}
-        </text>
-      ) : null}
     </g>
   );
-}
-
-// Signed slide distance: formatLength renders the magnitude; the sign prefix
-// tells which way the wall moved — "+" outward (room grew), "-" inward.
-function formatSignedOffset(offsetMm: number, unit: DisplayUnit): string {
-  const magnitude = formatLength(Math.abs(offsetMm), { unit });
-  return offsetMm < 0 ? `-${magnitude}` : `+${magnitude}`;
-}
-
-// moveRoomWall signs its offset along the wall's LEFT normal (start→end
-// rotated 90° CCW — reshapeRoom.ts), and for this app's CCW-wound rooms that
-// points INTO the room, so the raw value reads shrink-positive. The label
-// re-signs it to what the user can see: positive = outward, room grew. A 1mm
-// probe along the left normal against the room polygon finds which side the
-// interior is on — exact for concave shapes (an L's inner walls) where a
-// centroid test can pick the wrong side, and immune to winding assumptions.
-function outwardDisplayOffsetMm(
-  wall: WallWithGeometry,
-  room: Room,
-  offsetMm: number
-): number {
-  const axis = axisOf(wall);
-  const probe = {
-    xMm: (wall.start.xMm + wall.end.xMm) / 2 - axis.yMm,
-    yMm: (wall.start.yMm + wall.end.yMm) / 2 + axis.xMm
-  };
-  return isPointInPolygon(probe, room.vertices) ? -offsetMm : offsetMm;
 }
 
 function roomCentroidWorldMm(placement: RoomPlacement): Vector2 {

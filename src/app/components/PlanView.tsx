@@ -16,6 +16,7 @@ import {
 } from "../../domain/geometry/dragResize";
 import { resizeWallPreservingAngles, type ResizeAnchor } from "../../domain/geometry/editRoom";
 import {
+  changedWallLengthIds,
   getFloorBounds,
   getRoomBounds,
   getWallGeometry,
@@ -83,6 +84,7 @@ import { PlanObject } from "./PlanObject";
 import { RoomResizeHandles, type ResizeHandleTarget } from "./RoomResizeHandles";
 import { RoomReshapeHandles } from "./RoomReshapeHandles";
 import { WallSlideHandles } from "./WallSlideHandles";
+import { WallLengthLabels } from "./WallLengthLabels";
 import { ViewportZoomControls } from "./ViewportZoomControls";
 
 // On-screen size of a selected room's wall-midpoint resize handles — small
@@ -2845,6 +2847,27 @@ export function PlanView({
           const wallDragInvalid =
             wallDrag?.roomId === selectedPlacement.roomId && !wallDrag.valid;
 
+          // "A number sits on the wall it measures": during any reshape
+          // gesture on this room (chip resize, wall slide, vertex drag), diff
+          // the drag preview (selectedPlacement, from displayedProject)
+          // against the committed room — every wall whose length is changing
+          // labels itself. One derivation covers all three gestures,
+          // including a slide between non-parallel neighbours changing the
+          // dragged wall's own length. A whole-room move translates without
+          // reshaping, so it's excluded rather than diffed to nothing.
+          const reshapeDragActive =
+            drag?.roomId === selectedPlacement.roomId ||
+            wallDrag?.roomId === selectedPlacement.roomId ||
+            vertexDrag?.roomId === selectedPlacement.roomId;
+          const baselinePlacement = reshapeDragActive
+            ? project.floor.rooms.find(
+                (placement) => placement.roomId === selectedPlacement.roomId
+              )
+            : undefined;
+          const changedWallIds = baselinePlacement
+            ? changedWallLengthIds(baselinePlacement.room, selectedPlacement.room)
+            : [];
+
           return (
             <g>
               <polygon
@@ -2877,38 +2900,38 @@ export function PlanView({
                 <RoomResizeHandles
                   activeDrag={
                     drag && drag.roomId === selectedPlacement.roomId
-                      ? {
-                          targetWallId: drag.targetWallId,
-                          anchor: drag.anchor,
-                          previewLengthMm: drag.previewLengthMm
-                        }
+                      ? { targetWallId: drag.targetWallId, anchor: drag.anchor }
                       : null
                   }
                   handleSizeMm={handleSizeMm}
                   placement={selectedPlacement}
-                  unit={wallUnit}
                   onBeginDrag={beginDrag}
                 />
               ) : (
                 <WallSlideHandles
                   activeDrag={
                     wallDrag?.roomId === selectedPlacement.roomId
-                      ? {
-                          wallId: wallDrag.wallId,
-                          offsetMm: wallDrag.previewOffsetMm,
-                          valid: wallDrag.valid
-                        }
+                      ? { wallId: wallDrag.wallId, valid: wallDrag.valid }
                       : null
                   }
                   handleSizeMm={handleSizeMm}
                   highlightedWallId={hoveredWallId}
                   placement={selectedPlacement}
-                  unit={wallUnit}
                   onBeginWallDrag={(wallId, event) =>
                     beginWallDrag(selectedPlacement.roomId, wallId, event)
                   }
                 />
               )}
+              {/* Live length labels compose as a sibling layer over whichever
+                  handle set is active — the handle components never label
+                  anything themselves. */}
+              <WallLengthLabels
+                changedWallIds={changedWallIds}
+                handleSizeMm={handleSizeMm}
+                invalid={vertexDragInvalid || wallDragInvalid}
+                placement={selectedPlacement}
+                unit={wallUnit}
+              />
             </g>
           );
         })()}

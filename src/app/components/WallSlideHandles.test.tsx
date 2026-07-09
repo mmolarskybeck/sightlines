@@ -47,7 +47,6 @@ function renderHandles(overrides: Partial<ComponentProps<typeof WallSlideHandles
     handleSizeMm: 100,
     highlightedWallId: null,
     placement: lShape,
-    unit: "cm",
     onBeginWallDrag: vi.fn(),
     ...overrides
   };
@@ -78,28 +77,18 @@ describe("WallSlideHandles", () => {
     expect(chipCount(container)).toBe(5);
   });
 
-  it("labels an active drag with the outward-signed offset, not the raw left-normal one", () => {
-    // The fixture's input winding has positive signed area, so creation keeps
-    // it: wall[0] runs (0,0)→(6000,0) with the room below it (+y). Its left
-    // normal (+y) points INTO the room, so moveRoomWall's raw +500 is a
-    // shrink — the label must re-sign it: inward reads "-", outward "+".
+  it("renders no label at the handle during a drag — WallLengthLabels owns the numbers", () => {
     const draggedWallId = lShape.room.walls[0].id;
-    const shrink = renderHandles({
-      activeDrag: { wallId: draggedWallId, offsetMm: 500, valid: true }
+    const { container } = renderHandles({
+      activeDrag: { wallId: draggedWallId, valid: true }
     });
-    expect(shrink.container.querySelector(".resize-handle-label")?.textContent).toBe("-50 cm");
-    cleanup();
-
-    const grow = renderHandles({
-      activeDrag: { wallId: draggedWallId, offsetMm: -500, valid: true }
-    });
-    expect(grow.container.querySelector(".resize-handle-label")?.textContent).toBe("+50 cm");
+    expect(container.querySelector(".resize-handle-label")).toBeNull();
   });
 
   it("tints the dragged chip with the danger token while the slide is invalid", () => {
     const draggedWallId = lShape.room.walls[0].id;
     const { container } = renderHandles({
-      activeDrag: { wallId: draggedWallId, offsetMm: 500, valid: false }
+      activeDrag: { wallId: draggedWallId, valid: false }
     });
     const tinted = Array.from(container.querySelectorAll<SVGRectElement>(".resize-handle")).filter(
       (rect) => rect.style.fill === "var(--danger)"

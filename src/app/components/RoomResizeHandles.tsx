@@ -3,12 +3,10 @@ import type { ResizeAnchor } from "../../domain/geometry/editRoom";
 import type { Vector2 } from "../../domain/geometry/dragResize";
 import {
   getRectangleRoomDimensions,
-  getRoomBounds,
   getWallsWithGeometry,
   type WallWithGeometry
 } from "../../domain/geometry/walls";
-import type { DisplayUnit, RoomPlacement } from "../../domain/project";
-import { formatLength } from "../../domain/units/length";
+import type { RoomPlacement } from "../../domain/project";
 
 export type ResizeHandleTarget = {
   targetWallId: string;
@@ -20,7 +18,6 @@ export type ResizeHandleTarget = {
 export type ActiveResizeDrag = {
   targetWallId: string;
   anchor: ResizeAnchor;
-  previewLengthMm: number;
 };
 
 // Rendered only for the selected room (PlanView gates this on
@@ -32,6 +29,10 @@ export type ActiveResizeDrag = {
 // own wall's midpoint (no outward offset — the room's selection outline
 // already marks the boundary, so the handle doubles as a point on it).
 //
+// The chips show no numbers: during a drag, every wall whose length is
+// changing carries its own live length label (WallLengthLabels, composed by
+// PlanView) — a number sits on the wall it measures, never on the handle.
+//
 // Per docs/plan.md §2, dragging and typing a dimension must land in the same
 // place: resizeWallPreservingAngles anchor "start" moves wall[i+1]'s
 // vertices when resizing wall[i]; anchor "end" moves wall[i+3]'s (== wall
@@ -42,8 +43,7 @@ export function RoomResizeHandles({
   activeDrag,
   handleSizeMm,
   onBeginDrag,
-  placement,
-  unit
+  placement
 }: {
   activeDrag: ActiveResizeDrag | null;
   handleSizeMm: number;
@@ -53,7 +53,6 @@ export function RoomResizeHandles({
     event: ReactPointerEvent<SVGRectElement>
   ) => void;
   placement: RoomPlacement;
-  unit: DisplayUnit;
 }) {
   const dimensions = getRectangleRoomDimensions(placement.room);
   if (!dimensions) return null;
@@ -63,7 +62,6 @@ export function RoomResizeHandles({
   const depthWallIndex = walls.findIndex((wall) => wall.id === dimensions.depthWallId);
   if (widthWallIndex === -1 || depthWallIndex === -1) return null;
 
-  const centroidMm = roomCentroidWorldMm(placement);
   const widthAxis = axisOf(walls[widthWallIndex]);
   const depthAxis = axisOf(walls[depthWallIndex]);
 
@@ -115,12 +113,6 @@ export function RoomResizeHandles({
         <ResizeHandle
           anchor={spec.anchor}
           axis={spec.axis}
-          centroidMm={centroidMm}
-          displayLengthMm={
-            activeDrag?.targetWallId === spec.targetWallId && activeDrag.anchor === spec.anchor
-              ? activeDrag.previewLengthMm
-              : spec.startLengthMm
-          }
           handleSizeMm={handleSizeMm}
           isActive={
             activeDrag?.targetWallId === spec.targetWallId && activeDrag.anchor === spec.anchor
@@ -129,7 +121,6 @@ export function RoomResizeHandles({
           placement={placement}
           startLengthMm={spec.startLengthMm}
           targetWallId={spec.targetWallId}
-          unit={unit}
           wall={spec.wall}
           onBeginDrag={onBeginDrag}
         />
@@ -141,27 +132,21 @@ export function RoomResizeHandles({
 function ResizeHandle({
   anchor,
   axis,
-  centroidMm,
-  displayLengthMm,
   handleSizeMm,
   isActive,
   placement,
   startLengthMm,
   targetWallId,
-  unit,
   wall,
   onBeginDrag
 }: {
   anchor: ResizeAnchor;
   axis: Vector2;
-  centroidMm: Vector2;
-  displayLengthMm: number;
   handleSizeMm: number;
   isActive: boolean;
   placement: RoomPlacement;
   startLengthMm: number;
   targetWallId: string;
-  unit: DisplayUnit;
   wall: WallWithGeometry;
   onBeginDrag: (
     roomId: string,
@@ -171,9 +156,6 @@ function ResizeHandle({
 }) {
   const centerXMm = (wall.start.xMm + wall.end.xMm) / 2 + placement.offsetXMm;
   const centerYMm = (wall.start.yMm + wall.end.yMm) / 2 + placement.offsetYMm;
-  // Only needed for the label's placement below — the handle itself now sits
-  // directly on the wall it targets, no outward offset.
-  const normal = outwardNormal(wall, placement, centroidMm);
 
   // The handle only ever moves along its TARGET wall's own axis
   // (computeDraggedLengthMm projects the pointer delta onto it) — for a
@@ -181,14 +163,6 @@ function ResizeHandle({
   // sits on, so it's the same direction the handle was offset along. The
   // cursor communicates that constrained direction rather than free drag.
   const cursor = Math.abs(axis.xMm) >= Math.abs(axis.yMm) ? "ew-resize" : "ns-resize";
-
-  // The label reads outside the room, along the wall's outward normal, far
-  // enough out to clear both the wall stroke and the handle itself (the
-  // handle sits ON the wall now, so this single offset stands in for what
-  // used to be the handle's own outward offset plus its label's).
-  const labelOffsetMm = handleSizeMm * 4.5;
-  const labelXMm = centerXMm + normal.xMm * labelOffsetMm;
-  const labelYMm = centerYMm + normal.yMm * labelOffsetMm;
 
   // A generous hit target (~2.8x the visible square) keeps the handle easy to
   // grab even though the visible chip itself is small and sits flush on the
@@ -220,56 +194,8 @@ function ResizeHandle({
         y={centerYMm - handleSizeMm / 2}
         onPointerDown={handlePointerDown}
       />
-      {isActive ? (
-        <text
-          className="resize-handle-label"
-          dominantBaseline="middle"
-          textAnchor="middle"
-          x={labelXMm}
-          y={labelYMm}
-          style={{
-            // font-size/stroke-width are in SVG user units (mm), not CSS
-            // px, since this SVG's viewBox already scales content to fit —
-            // sizing off handleSizeMm (itself screen-px-per-mm-derived)
-            // keeps the label a constant on-screen size at any room scale,
-            // the same trick vector-effect="non-scaling-stroke" does for
-            // wall strokes.
-            fontSize: handleSizeMm * 1.8,
-            strokeWidth: handleSizeMm * 0.5
-          }}
-        >
-          {formatLength(displayLengthMm, { unit })}
-        </text>
-      ) : null}
     </g>
   );
-}
-
-function roomCentroidWorldMm(placement: RoomPlacement): Vector2 {
-  const bounds = getRoomBounds(placement.room);
-  return {
-    xMm: (bounds.minX + bounds.maxX) / 2 + placement.offsetXMm,
-    yMm: (bounds.minY + bounds.maxY) / 2 + placement.offsetYMm
-  };
-}
-
-// Of a wall's two possible perpendiculars, the one pointing away from the
-// room's centroid (in world space) — so the label sits outside the room
-// regardless of the rectangle's vertex winding order.
-function outwardNormal(
-  wall: WallWithGeometry,
-  placement: RoomPlacement,
-  centroidMm: Vector2
-): Vector2 {
-  const axis = axisOf(wall);
-  const candidate: Vector2 = { xMm: -axis.yMm, yMm: axis.xMm };
-
-  const midXMm = (wall.start.xMm + wall.end.xMm) / 2 + placement.offsetXMm;
-  const midYMm = (wall.start.yMm + wall.end.yMm) / 2 + placement.offsetYMm;
-  const towardMidMm: Vector2 = { xMm: midXMm - centroidMm.xMm, yMm: midYMm - centroidMm.yMm };
-
-  const dot = candidate.xMm * towardMidMm.xMm + candidate.yMm * towardMidMm.yMm;
-  return dot < 0 ? { xMm: -candidate.xMm, yMm: -candidate.yMm } : candidate;
 }
 
 function axisOf(wall: WallWithGeometry): Vector2 {

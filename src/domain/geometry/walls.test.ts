@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
+import type { Project, Room, RoomPlacement } from "../project";
 import { createSampleProject } from "../sample/sampleProject";
 import { feetToMm } from "../units/length";
-import { createPolygonRoomPlacement } from "./createRoom";
+import { createPolygonRoomPlacement, createRectangularRoomPlacement } from "./createRoom";
+import { moveRoomWall } from "./reshapeRoom";
 import {
+  changedWallLengthIds,
   getFloorBounds,
   getOrthogonalQuadWallPair,
   getRectangleRoomDimensions,
@@ -152,5 +155,107 @@ describe("getFloorBounds", () => {
       width: 0,
       height: 0
     });
+  });
+});
+
+// The drag-preview diff behind PlanView's live length labels: whatever the
+// gesture, the walls it reports are exactly the ones whose lengths moved.
+describe("changedWallLengthIds", () => {
+  function wrapInProject(placement: RoomPlacement): Project {
+    return {
+      id: "p",
+      schemaVersion: 3,
+      title: "t",
+      unit: "m",
+      defaultWallHeightMm: 3000,
+      defaultCenterlineHeightMm: 1450,
+      checklistArtworkIds: [],
+      wallObjects: [],
+      floorObjects: [],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      floor: { rooms: [placement] }
+    };
+  }
+
+  function rectangle(): RoomPlacement {
+    return createRectangularRoomPlacement({
+      roomId: "room-1",
+      name: "Rect",
+      widthMm: 6000,
+      depthMm: 4000,
+      heightMm: 3000,
+      offsetXMm: 0,
+      offsetYMm: 0
+    });
+  }
+
+  function moveVertices(room: Room, vertexIds: string[], dxMm: number, dyMm: number): Room {
+    const moving = new Set(vertexIds);
+    return {
+      ...room,
+      vertices: room.vertices.map((vertex) =>
+        moving.has(vertex.id)
+          ? { ...vertex, xMm: vertex.xMm + dxMm, yMm: vertex.yMm + dyMm }
+          : vertex
+      )
+    };
+  }
+
+  it("identical rooms diff to nothing", () => {
+    const room = rectangle().room;
+    expect(changedWallLengthIds(room, room)).toEqual([]);
+  });
+
+  it("a rectangle wall translation reports the two NEIGHBOURS, not the dragged wall", () => {
+    const baseline = rectangle().room;
+    // Slide the north wall up 500mm: its own length is constant; east and
+    // west stretch.
+    const preview = moveVertices(baseline, ["room-1-v-nw", "room-1-v-ne"], 0, -500);
+
+    expect(changedWallLengthIds(baseline, preview)).toEqual([
+      "room-1-wall-east",
+      "room-1-wall-west"
+    ]);
+  });
+
+  it("sliding a trapezoid wall between non-parallel neighbours reports the dragged wall too", () => {
+    const baseline = createPolygonRoomPlacement({
+      roomId: "room-trap",
+      name: "Trapezoid",
+      heightMm: 3000,
+      pointsFloorMm: [
+        { xMm: 0, yMm: 0 },
+        { xMm: 9000, yMm: 0 },
+        { xMm: 7000, yMm: 5000 },
+        { xMm: 2000, yMm: 5000 }
+      ]
+    });
+    const bottomWall = baseline.room.walls[0];
+    const preview = moveRoomWall(wrapInProject(baseline), "room-trap", bottomWall.id, 500)
+      .project.floor.rooms[0].room;
+
+    const changed = changedWallLengthIds(baseline.room, preview);
+    // The slanted neighbours trim/extend AND re-intersect the dragged wall's
+    // endpoints, so all three lengths move; the far parallel wall doesn't.
+    expect(changed).toContain(bottomWall.id);
+    expect(changed).toHaveLength(3);
+  });
+
+  it("a vertex move reports the two incident walls", () => {
+    const baseline = rectangle().room;
+    const preview = moveVertices(baseline, ["room-1-v-se"], 300, 400);
+
+    expect(changedWallLengthIds(baseline, preview)).toEqual([
+      "room-1-wall-east",
+      "room-1-wall-south"
+    ]);
+  });
+
+  it("absorbs sub-epsilon float noise", () => {
+    const baseline = rectangle().room;
+    const preview = moveVertices(baseline, ["room-1-v-se"], 0.0003, 0.0002);
+
+    expect(changedWallLengthIds(baseline, preview)).toEqual([]);
   });
 });

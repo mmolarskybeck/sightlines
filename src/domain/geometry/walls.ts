@@ -100,6 +100,33 @@ export function getRectangleRoomDimensions(room: Room): RectangleRoomDimensions 
   };
 }
 
+// Which walls' lengths differ between two revisions of the same room — the
+// walls a live drag preview is actually changing, whatever the gesture
+// (chip resize, wall slide, vertex drag). Matched by wall id (stable across
+// every drag preview); walls that exist in only one revision are ignored (no
+// mid-drag topology change produces those today). The epsilon absorbs float
+// noise from intersection math, not real edits — a sub-half-millimetre
+// "change" is nothing a curator can act on.
+export function changedWallLengthIds(
+  baseline: Room,
+  preview: Room,
+  epsilonMm = 0.5
+): string[] {
+  const baselineLengths = new Map(
+    getWallsWithGeometry(baseline).map((wall) => [wall.id, wall.lengthMm])
+  );
+
+  return getWallsWithGeometry(preview)
+    .filter((wall) => {
+      const baselineLengthMm = baselineLengths.get(wall.id);
+      return (
+        baselineLengthMm !== undefined &&
+        Math.abs(wall.lengthMm - baselineLengthMm) > epsilonMm
+      );
+    })
+    .map((wall) => wall.id);
+}
+
 export function getRoomBounds(room: Room) {
   const xs = room.vertices.map((vertex) => vertex.xMm);
   const ys = room.vertices.map((vertex) => vertex.yMm);
