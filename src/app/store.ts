@@ -432,6 +432,184 @@ export function createAppStore(deps: AppStoreDeps) {
       return true;
     }
 
+    // --- commitPlanMove case handlers ----------------------------------------
+    // The four outcomes of a plan drag, split out of commitPlanMove so the
+    // action stays a thin dispatcher. Each is self-contained (runs its own
+    // applyEdit/commit) and returns void; observable behavior is byte-identical
+    // to the pre-extraction inline branches.
+
+    // wall → wall: same wall (x only) or re-anchor to another wall. Either way
+    // the hang height (yMm) and size carry over unchanged — an artwork keeps
+    // its height across a wall change. No-op if nothing moved. Runs the shared
+    // collision gate via commitWallObjectEdit (identical warnings/label/error).
+    async function planMoveWithinWalls(
+      project: Project,
+      wallObject: WallObject,
+      placement: Extract<PlanPlacement, { anchor: "wall" }>,
+      allowOverlap: boolean
+    ): Promise<void> {
+      if (wallObject.wallId === placement.wallId && wallObject.xMm === placement.xMm) {
+        return;
+      }
+
+      const nextWallObjects = project.wallObjects.map((object) =>
+        object.id === wallObject.id
+          ? { ...object, wallId: placement.wallId, xMm: placement.xMm }
+          : object
+      );
+
+      await commitWallObjectEdit(
+        `Move ${moveObjectNoun(wallObject.kind)}`,
+        project,
+        nextWallObjects,
+        [wallObject.id],
+        allowOverlap
+      );
+    }
+
+    // wall → floor conversion. Doors/windows must never leave a wall (throws).
+    // No collision gate: floor objects get no bounds/collision validation in v1
+    // (see placeArtworkOnFloor), so this keeps its own gate-free applyEdit.
+    async function planMoveWallToFloor(
+      project: Project,
+      wallObject: WallObject,
+      placement: Extract<PlanPlacement, { anchor: "floor" }>
+    ): Promise<void> {
+      if (wallObject.kind !== "artwork" && wallObject.kind !== "blocked-zone") {
+        throw new Error(
+          `A ${wallObject.kind} cannot be moved onto the floor — it must stay on a wall.`
+        );
+      }
+
+      // Preserve the wall's floor-space angle so the freed object keeps
+      // its orientation at the moment of release (0 if the wall vanished).
+      const sourceWall = getFloorWalls(project.floor).find(
+        (candidate) => candidate.id === wallObject.wallId
+      );
+      const rotationDeg = sourceWall ? (sourceWall.angleRad * 180) / Math.PI : 0;
+
+      const base = {
+        id: wallObject.id,
+        xMm: placement.xMm,
+        yMm: placement.yMm,
+        widthMm: wallObject.widthMm,
+        rotationDeg,
+        heightMm: wallObject.heightMm,
+        // Remember the hang height so a later floor→wall conversion can
+        // restore it.
+        wallYMm: wallObject.yMm
+      };
+
+      let newFloorObject: FloorObject;
+      if (wallObject.kind === "artwork") {
+        const artwork = get().libraryArtworks.find(
+          (candidate) => candidate.id === wallObject.artworkId
+        );
+        newFloorObject = {
+          ...base,
+          kind: "artwork",
+          artworkId: wallObject.artworkId,
+          depthMm:
+            wallObject.displayDimensionsOverride?.depthMm ??
+            artwork?.dimensions.depthMm ??
+            DEFAULT_FLOOR_OBJECT_DEPTH_MM,
+          ...(wallObject.displayDimensionsOverride
+            ? { displayDimensionsOverride: wallObject.displayDimensionsOverride }
+            : {})
+        };
+      } else {
+        newFloorObject = {
+          ...base,
+          kind: "blocked-zone",
+          depthMm: DEFAULT_FLOOR_OBJECT_DEPTH_MM
+        };
+      }
+
+      // Selection survives for free: the id is preserved, and the
+      // selection slots store the id (openings) / artworkId (artworks),
+      // neither of which changes here.
+      await applyEdit(
+        `Move ${moveObjectNoun(wallObject.kind)}`,
+        (current) => ({
+          ...current,
+          wallObjects: current.wallObjects.filter((object) => object.id !== wallObject.id),
+          floorObjects: [...current.floorObjects, newFloorObject]
+        })
+      );
+    }
+
+    // floor → floor slide. No-op if nothing moved. No collision gate (floor
+    // objects are unvalidated in v1), so it keeps its own applyEdit.
+    async function planMoveFloorToFloor(
+      project: Project,
+      floorObject: FloorObject,
+      placement: Extract<PlanPlacement, { anchor: "floor" }>
+    ): Promise<void> {
+      if (floorObject.xMm === placement.xMm && floorObject.yMm === placement.yMm) {
+        return;
+      }
+
+      const nextFloorObjects = project.floorObjects.map((object) =>
+        object.id === floorObject.id
+          ? { ...object, xMm: placement.xMm, yMm: placement.yMm }
+          : object
+      );
+
+      await applyEdit(`Move ${moveObjectNoun(floorObject.kind)}`, (current) => ({
+        ...current,
+        floorObjects: nextFloorObjects
+      }));
+    }
+
+    // floor → wall conversion: restore the remembered hang height and
+    // elevation height, reconstruct the kind-specific wall fields, then run the
+    // shared collision gate via commitWallObjectEdit (identical to the old
+    // inline validate+gate+applyEdit — `current === project` at commit time, so
+    // the precomputed nextFloorObjects filter matches the old current-based one).
+    async function planMoveFloorToWall(
+      project: Project,
+      floorObject: FloorObject,
+      placement: Extract<PlanPlacement, { anchor: "wall" }>,
+      allowOverlap: boolean
+    ): Promise<void> {
+      const base = {
+        id: floorObject.id,
+        wallId: placement.wallId,
+        xMm: placement.xMm,
+        yMm: floorObject.wallYMm,
+        widthMm: floorObject.widthMm,
+        heightMm: floorObject.heightMm
+      };
+
+      let newWallObject: WallObject;
+      if (floorObject.kind === "artwork") {
+        newWallObject = {
+          ...base,
+          kind: "artwork",
+          artworkId: floorObject.artworkId,
+          ...(floorObject.displayDimensionsOverride
+            ? { displayDimensionsOverride: floorObject.displayDimensionsOverride }
+            : {})
+        };
+      } else {
+        newWallObject = { ...base, kind: "blocked-zone", blocksPlacement: true };
+      }
+
+      const nextWallObjects = [...project.wallObjects, newWallObject];
+      const nextFloorObjects = project.floorObjects.filter(
+        (object) => object.id !== floorObject.id
+      );
+
+      await commitWallObjectEdit(
+        `Move ${moveObjectNoun(floorObject.kind)}`,
+        project,
+        nextWallObjects,
+        [floorObject.id],
+        allowOverlap,
+        { nextFloorObjects }
+      );
+    }
+
     // Shared commit path for a batch of wall-object x/y moves: all-or-nothing
     // collision gate (a single overlap blocks the whole batch), then one undo
     // entry. Extracted from moveWallObjectsGroup so the arrange session can
@@ -2110,102 +2288,16 @@ export function createAppStore(deps: AppStoreDeps) {
         const floorObject = project.floorObjects.find((object) => object.id === objectId);
         if (!wallObject && !floorObject) return;
 
+        // Classify the drag by source (wall/floor object) × target
+        // (placement.anchor) and delegate to the matching case handler.
+
         // --- Source: wall object -------------------------------------------
         if (wallObject) {
           if (placement.anchor === "wall") {
-            // Same wall (x only) or re-anchor to another wall: either way the
-            // hang height (yMm) and size are carried over unchanged — the
-            // requirement is that an artwork keeps its height across a wall
-            // change. No-op if nothing moved.
-            if (wallObject.wallId === placement.wallId && wallObject.xMm === placement.xMm) {
-              return;
-            }
-
-            const nextWallObjects = project.wallObjects.map((object) =>
-              object.id === objectId
-                ? { ...object, wallId: placement.wallId, xMm: placement.xMm }
-                : object
-            );
-            const placementWarnings = validateWallObjectPlacements(
-              { ...project, wallObjects: nextWallObjects },
-              [objectId]
-            );
-
-            if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
-              set({ error: OVERLAP_BLOCKED_MESSAGE });
-              return;
-            }
-
-            await applyEdit(
-              `Move ${moveObjectNoun(wallObject.kind)}`,
-              (current) => ({ ...current, wallObjects: nextWallObjects }),
-              { placementWarnings }
-            );
+            await planMoveWithinWalls(project, wallObject, placement, allowOverlap);
             return;
           }
-
-          // wall → floor conversion. Doors/windows must never leave a wall.
-          if (wallObject.kind !== "artwork" && wallObject.kind !== "blocked-zone") {
-            throw new Error(
-              `A ${wallObject.kind} cannot be moved onto the floor — it must stay on a wall.`
-            );
-          }
-
-          // Preserve the wall's floor-space angle so the freed object keeps
-          // its orientation at the moment of release (0 if the wall vanished).
-          const sourceWall = getFloorWalls(project.floor).find(
-            (candidate) => candidate.id === wallObject.wallId
-          );
-          const rotationDeg = sourceWall ? (sourceWall.angleRad * 180) / Math.PI : 0;
-
-          const base = {
-            id: objectId,
-            xMm: placement.xMm,
-            yMm: placement.yMm,
-            widthMm: wallObject.widthMm,
-            rotationDeg,
-            heightMm: wallObject.heightMm,
-            // Remember the hang height so a later floor→wall conversion can
-            // restore it.
-            wallYMm: wallObject.yMm
-          };
-
-          let newFloorObject: FloorObject;
-          if (wallObject.kind === "artwork") {
-            const artwork = get().libraryArtworks.find(
-              (candidate) => candidate.id === wallObject.artworkId
-            );
-            newFloorObject = {
-              ...base,
-              kind: "artwork",
-              artworkId: wallObject.artworkId,
-              depthMm:
-                wallObject.displayDimensionsOverride?.depthMm ??
-                artwork?.dimensions.depthMm ??
-                DEFAULT_FLOOR_OBJECT_DEPTH_MM,
-              ...(wallObject.displayDimensionsOverride
-                ? { displayDimensionsOverride: wallObject.displayDimensionsOverride }
-                : {})
-            };
-          } else {
-            newFloorObject = {
-              ...base,
-              kind: "blocked-zone",
-              depthMm: DEFAULT_FLOOR_OBJECT_DEPTH_MM
-            };
-          }
-
-          // Selection survives for free: the id is preserved, and the
-          // selection slots store the id (openings) / artworkId (artworks),
-          // neither of which changes here.
-          await applyEdit(
-            `Move ${moveObjectNoun(wallObject.kind)}`,
-            (current) => ({
-              ...current,
-              wallObjects: current.wallObjects.filter((object) => object.id !== objectId),
-              floorObjects: [...current.floorObjects, newFloorObject]
-            })
-          );
+          await planMoveWallToFloor(project, wallObject, placement);
           return;
         }
 
@@ -2213,68 +2305,11 @@ export function createAppStore(deps: AppStoreDeps) {
         if (!floorObject) return; // unreachable — narrows the type below.
 
         if (placement.anchor === "floor") {
-          if (floorObject.xMm === placement.xMm && floorObject.yMm === placement.yMm) {
-            return;
-          }
-
-          const nextFloorObjects = project.floorObjects.map((object) =>
-            object.id === objectId
-              ? { ...object, xMm: placement.xMm, yMm: placement.yMm }
-              : object
-          );
-
-          await applyEdit(`Move ${moveObjectNoun(floorObject.kind)}`, (current) => ({
-            ...current,
-            floorObjects: nextFloorObjects
-          }));
+          await planMoveFloorToFloor(project, floorObject, placement);
           return;
         }
 
-        // floor → wall conversion: restore the remembered hang height and
-        // elevation height, reconstruct the kind-specific wall fields.
-        const base = {
-          id: objectId,
-          wallId: placement.wallId,
-          xMm: placement.xMm,
-          yMm: floorObject.wallYMm,
-          widthMm: floorObject.widthMm,
-          heightMm: floorObject.heightMm
-        };
-
-        let newWallObject: WallObject;
-        if (floorObject.kind === "artwork") {
-          newWallObject = {
-            ...base,
-            kind: "artwork",
-            artworkId: floorObject.artworkId,
-            ...(floorObject.displayDimensionsOverride
-              ? { displayDimensionsOverride: floorObject.displayDimensionsOverride }
-              : {})
-          };
-        } else {
-          newWallObject = { ...base, kind: "blocked-zone", blocksPlacement: true };
-        }
-
-        const nextWallObjects = [...project.wallObjects, newWallObject];
-        const placementWarnings = validateWallObjectPlacements(
-          { ...project, wallObjects: nextWallObjects },
-          [objectId]
-        );
-
-        if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
-          set({ error: OVERLAP_BLOCKED_MESSAGE });
-          return;
-        }
-
-        await applyEdit(
-          `Move ${moveObjectNoun(floorObject.kind)}`,
-          (current) => ({
-            ...current,
-            floorObjects: current.floorObjects.filter((object) => object.id !== objectId),
-            wallObjects: nextWallObjects
-          }),
-          { placementWarnings }
-        );
+        await planMoveFloorToWall(project, floorObject, placement, allowOverlap);
       },
 
       async updateFloorObject(objectId, changes) {
