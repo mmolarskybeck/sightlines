@@ -1571,6 +1571,53 @@ body.panels-resizing * {
     pointer-events: auto;
     transform: none;
   }
+
+  /* A row is the source of a long-press drag on touch. Without these iOS pops
+     its own text-selection handles and the callout menu over the row the
+     instant the press is held, fighting our drag. */
+  .checklist-row {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+}
+
+/* The pressed/lifted look while a touch drag is armed — the same petrol-soft
+   selection wash the row already uses when selected, so a dragging row reads as
+   "active" in the app's existing language. */
+.checklist-row.touch-dragging {
+  background: var(--primary-soft);
+  box-shadow: inset 0 0 0 1px var(--primary-line);
+}
+
+/* The floating thumbnail that follows the finger during a touch drag (rendered
+   to <body> via a portal). Fixed and pointer-events:none so it can't intercept
+   the drag it previews; positioned by an inline transform from the latest
+   pointer coordinates. Small radius — it's transient chrome, not a panel. */
+.artwork-drag-preview {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  pointer-events: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+  overflow: hidden;
+}
+
+.artwork-drag-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.artwork-drag-preview-placeholder {
+  width: 100%;
+  height: 100%;
+  background: var(--surface);
 }
 
 .checklist-actions {

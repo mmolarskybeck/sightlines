@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
 import { DotsSixVerticalIcon } from "@phosphor-icons/react/dist/csr/DotsSixVertical";
 import { FileArrowUpIcon } from "@phosphor-icons/react/dist/csr/FileArrowUp";
@@ -9,6 +10,11 @@ import type { Artwork, DisplayUnit, Project } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
+import {
+  beginArtworkDragSession,
+  emitArtworkTouchDrag,
+  endArtworkDragSession
+} from "./artworkDragSession";
 import { UncertaintyIndicator } from "./UncertaintyIndicator";
 import { Button } from "./ui/button";
 import {
@@ -25,6 +31,19 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 // wires the elevation view's drop target to read this same constant, so the
 // drag source and drop target can't drift out of sync on the string value.
 export const ARTWORK_DRAG_MIME = "application/x-sightlines-artwork";
+
+// Coarse pointers (touch) run our long-press drag instead of HTML5 DnD; on
+// those devices native `draggable` would race our long-press (iPadOS has its
+// own long-press drag), so we suppress it entirely and drive touch/pen drags
+// through the pointer-event path below. Evaluated once — the input type of a
+// device doesn't change mid-session.
+const COARSE_POINTER =
+  typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
+
+// Long-press timing and slop for arming a touch drag: hold ~300ms without
+// straying past 10px (that's a scroll, not a press-to-drag).
+const LONG_PRESS_MS = 300;
+const TOUCH_DRAG_SLOP_PX = 10;
 
 type ChecklistFilter = "all" | "placed" | "unplaced";
 export type ChecklistSort = "project" | "title" | "artist" | "status";
@@ -522,6 +541,87 @@ function ChecklistRow({
     }
   }, [thumbnailUrl]);
 
+  // --- Touch/pen long-press drag ------------------------------------------
+  //
+  // The HTML5 drag path above is the mouse path. Touch and pen pointers can't
+  // use it (iPhone Safari has no HTML5 DnD; iPadOS won't reliably fire drop),
+  // so they drive a parallel pointer-event drag: hold ~300ms to arm, then the
+  // finger drags a floating preview while emitArtworkTouchDrag feeds the drop
+  // target's ghost. A short move before arming is a scroll and is left native.
+  const rowRef = useRef<HTMLLIElement>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const touchDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    armed: boolean;
+  } | null>(null);
+  // Adding/removing the SAME function reference matters, and it must block
+  // touchmove non-passively — pointer capture alone does not stop iOS from
+  // scrolling the list under the finger. Held in a ref so the reference is
+  // stable across renders. The initializer runs once.
+  const blockTouchScrollRef = useRef((event: TouchEvent) => {
+    event.preventDefault();
+  });
+  const [isTouchDragging, setIsTouchDragging] = useState(false);
+  const [touchPreviewPos, setTouchPreviewPos] = useState<{ x: number; y: number } | null>(null);
+
+  function cancelPendingLongPress() {
+    if (longPressTimerRef.current !== undefined) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = undefined;
+    }
+    touchDragRef.current = null;
+  }
+
+  function teardownTouchDrag() {
+    if (longPressTimerRef.current !== undefined) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = undefined;
+    }
+    const state = touchDragRef.current;
+    const row = rowRef.current;
+    if (state && row) {
+      if (state.armed) {
+        row.removeEventListener("touchmove", blockTouchScrollRef.current);
+      }
+      if (row.hasPointerCapture(state.pointerId)) {
+        row.releasePointerCapture(state.pointerId);
+      }
+    }
+    touchDragRef.current = null;
+    setIsTouchDragging(false);
+    setTouchPreviewPos(null);
+  }
+
+  function armTouchDrag() {
+    const state = touchDragRef.current;
+    const row = rowRef.current;
+    if (!state || !row) return;
+    state.armed = true;
+    try {
+      // Route every subsequent pointer event to the row even if the finger
+      // strays off it, so the drag can't be stolen by a neighbouring row.
+      row.setPointerCapture(state.pointerId);
+    } catch {
+      // The pointer may already be gone (lifted between timer schedule and
+      // fire) — harmless; the ensuing pointercancel/up tears things down.
+    }
+    row.addEventListener("touchmove", blockTouchScrollRef.current, { passive: false });
+    setIsTouchDragging(true);
+    // Show the preview immediately under the finger, before the first move.
+    setTouchPreviewPos({ x: state.startX, y: state.startY });
+  }
+
+  // Unmount safety: a row can scroll out (list re-sort/filter) mid-press.
+  useEffect(() => {
+    const blocker = blockTouchScrollRef.current;
+    return () => {
+      if (longPressTimerRef.current !== undefined) clearTimeout(longPressTimerRef.current);
+      rowRef.current?.removeEventListener("touchmove", blocker);
+    };
+  }, []);
+
   let dimensionsText: string | undefined;
   if (
     artwork &&
@@ -537,11 +637,23 @@ function ChecklistRow({
   const hasMeta = dimensionsText !== undefined || showUncertainty;
   const tagLabel = isPlaced ? wallName ?? "Placed" : "Unplaced";
 
+  const rowClassName = [
+    "checklist-row",
+    isSelected ? "selected" : "",
+    isTouchDragging ? "touch-dragging" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
+    <>
     <li
+      ref={rowRef}
       aria-pressed={isSelected}
-      className={isSelected ? "checklist-row selected" : "checklist-row"}
-      draggable={isDraggable}
+      className={rowClassName}
+      // Coarse pointers use our long-press drag (below); native draggable would
+      // race iPadOS's own long-press, so it's suppressed there.
+      draggable={isDraggable && !COARSE_POINTER}
       title={
         isPlaced
           ? "Already placed — drag is disabled. Duplicate the project to try another arrangement."
@@ -550,10 +662,105 @@ function ChecklistRow({
       role="button"
       tabIndex={0}
       onClick={onSelect}
+      onPointerDown={
+        isDraggable
+          ? (event) => {
+              // Mouse keeps the HTML5 path; only touch/pen arm a long-press.
+              if (event.pointerType === "mouse" || !event.isPrimary) return;
+              // Don't preventDefault: a tap must still select and a vertical
+              // swipe must still scroll the list until the press arms.
+              touchDragRef.current = {
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+                armed: false
+              };
+              if (longPressTimerRef.current !== undefined) {
+                clearTimeout(longPressTimerRef.current);
+              }
+              longPressTimerRef.current = setTimeout(armTouchDrag, LONG_PRESS_MS);
+            }
+          : undefined
+      }
+      onPointerMove={
+        isDraggable
+          ? (event) => {
+              const state = touchDragRef.current;
+              if (!state || state.pointerId !== event.pointerId) return;
+              if (!state.armed) {
+                // Straying past the slop before arming means the user is
+                // scrolling — abandon the press and let the list scroll.
+                const dx = event.clientX - state.startX;
+                const dy = event.clientY - state.startY;
+                if (dx * dx + dy * dy > TOUCH_DRAG_SLOP_PX * TOUCH_DRAG_SLOP_PX) {
+                  cancelPendingLongPress();
+                }
+                return;
+              }
+              setTouchPreviewPos({ x: event.clientX, y: event.clientY });
+              emitArtworkTouchDrag({
+                type: "move",
+                artworkId,
+                clientX: event.clientX,
+                clientY: event.clientY
+              });
+            }
+          : undefined
+      }
+      onPointerUp={
+        isDraggable
+          ? (event) => {
+              const state = touchDragRef.current;
+              if (!state || state.pointerId !== event.pointerId) return;
+              if (state.armed) {
+                emitArtworkTouchDrag({
+                  type: "drop",
+                  artworkId,
+                  clientX: event.clientX,
+                  clientY: event.clientY
+                });
+                teardownTouchDrag();
+              } else {
+                // Never armed → this was a tap; onClick selects.
+                cancelPendingLongPress();
+              }
+            }
+          : undefined
+      }
+      onPointerCancel={
+        isDraggable
+          ? (event) => {
+              const state = touchDragRef.current;
+              if (!state || state.pointerId !== event.pointerId) return;
+              if (state.armed) emitArtworkTouchDrag({ type: "cancel", artworkId });
+              teardownTouchDrag();
+            }
+          : undefined
+      }
+      onPointerLeave={
+        isDraggable
+          ? (event) => {
+              const state = touchDragRef.current;
+              if (!state || state.pointerId !== event.pointerId) return;
+              // Once armed the pointer is captured, so leave won't fire; before
+              // arming, leaving the row abandons the pending press.
+              if (!state.armed) cancelPendingLongPress();
+            }
+          : undefined
+      }
       onDragStart={
         isDraggable
           ? (event) => {
+              // A touch long-press may still fire native dragstart on hybrid
+              // devices (Chrome on a touch laptop) — our pointer drag owns it.
+              if (touchDragRef.current?.armed) {
+                event.preventDefault();
+                return;
+              }
               event.dataTransfer.setData(ARTWORK_DRAG_MIME, artworkId);
+              // iPadOS may cancel drops whose only payload is an unrecognized
+              // custom type, so carry a standard one too.
+              event.dataTransfer.setData("text/plain", artworkId);
               event.dataTransfer.effectAllowed = "copy";
 
               // Create a properly-sized drag image that preserves aspect ratio
@@ -579,10 +786,18 @@ function ChecklistRow({
               }
 
               onDragStateChange?.(artworkId);
+              beginArtworkDragSession(artworkId);
             }
           : undefined
       }
-      onDragEnd={isDraggable ? () => onDragStateChange?.(null) : undefined}
+      onDragEnd={
+        isDraggable
+          ? () => {
+              onDragStateChange?.(null);
+              endArtworkDragSession();
+            }
+          : undefined
+      }
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
@@ -635,5 +850,60 @@ function ChecklistRow({
         <XIcon aria-hidden="true" size={14} />
       </Button>
     </li>
+    {isTouchDragging && touchPreviewPos
+      ? createPortal(
+          <ArtworkDragPreview
+            imageDimensions={imageDimensions}
+            thumbnailUrl={thumbnailUrl}
+            x={touchPreviewPos.x}
+            y={touchPreviewPos.y}
+          />,
+          document.body
+        )
+      : null}
+    </>
+  );
+}
+
+// The floating thumbnail that follows the finger during a touch drag — the
+// pointer-event equivalent of the HTML5 setDragImage canvas. Fixed-position and
+// pointer-events:none so it can't intercept the drag it's a preview of;
+// centered on the finger; honours the artwork's aspect when known (~96px on the
+// longest edge), else a neutral square.
+function ArtworkDragPreview({
+  imageDimensions,
+  thumbnailUrl,
+  x,
+  y
+}: {
+  imageDimensions: { width: number; height: number } | null;
+  thumbnailUrl: string | undefined;
+  x: number;
+  y: number;
+}) {
+  const MAX_EDGE = 96;
+  let width = MAX_EDGE;
+  let height = MAX_EDGE;
+  if (imageDimensions && imageDimensions.width > 0 && imageDimensions.height > 0) {
+    const scale = Math.min(MAX_EDGE / imageDimensions.width, MAX_EDGE / imageDimensions.height);
+    width = Math.round(imageDimensions.width * scale);
+    height = Math.round(imageDimensions.height * scale);
+  }
+  return (
+    <div
+      aria-hidden="true"
+      className="artwork-drag-preview"
+      style={{
+        width: `${width}px`,
+        height: `${height}px`,
+        transform: `translate(${x}px, ${y}px) translate(-50%, -50%)`
+      }}
+    >
+      {thumbnailUrl ? (
+        <img alt="" src={thumbnailUrl} />
+      ) : (
+        <div className="artwork-drag-preview-placeholder" />
+      )}
+    </div>
   );
 }

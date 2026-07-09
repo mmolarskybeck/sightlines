@@ -1,4 +1,5 @@
 import type { Artwork, ArtworkWallObject, Dimensions } from "../project";
+import { newId } from "../id";
 
 // A plausible mid-size framed work (24in x 30in) — used whenever an axis is
 // missing at placement time (docs/plan.md §1.5 point 4: place before real
@@ -37,7 +38,7 @@ export function createArtworkPlacement(
   const { widthMm, heightMm } = getEffectivePlacementSizeMm(artwork.dimensions);
 
   return {
-    id: crypto.randomUUID(),
+    id: newId(),
     kind: "artwork",
     artworkId: artwork.id,
     wallId,

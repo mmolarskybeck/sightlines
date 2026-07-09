@@ -1,4 +1,5 @@
 import { CURRENT_SCHEMA_VERSION, type Project } from "./project";
+import { newId } from "./id";
 import { feetToMm, inchesToMm } from "./units/length";
 
 // A brand-new project starts with an empty floor, not a pre-populated
@@ -9,7 +10,7 @@ export function createBlankProject(title: string): Project {
   const now = new Date().toISOString();
 
   return {
-    id: crypto.randomUUID(),
+    id: newId(),
     schemaVersion: CURRENT_SCHEMA_VERSION,
     title,
     unit: "ft",

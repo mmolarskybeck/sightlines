@@ -88,6 +88,11 @@ import { useDragGesture } from "../hooks/useDragGesture";
 import { useSelectSuppression } from "../hooks/useSelectSuppression";
 import { useSvgViewportGestures } from "../hooks/useSvgViewportGestures";
 import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
+import {
+  consumeArtworkDragSession,
+  peekArtworkDragSession,
+  subscribeArtworkTouchDrag
+} from "./artworkDragSession";
 import { GridOverlay } from "./GridOverlay";
 import { ArtworkTooltipContent, OpeningTooltipContent } from "./PlacementTooltip";
 import { marqueeRectMm, type MarqueeState } from "./marqueeRect";
@@ -1967,7 +1972,15 @@ export function PlanView({
     };
   }
 
-  function resolveArtworkDrop(pointerMm: Vector2, dims: ReturnType<typeof effectiveArtworkDims>) {
+  function resolveArtworkDrop(
+    pointerMm: Vector2,
+    dims: ReturnType<typeof effectiveArtworkDims>,
+    // ⌘/Ctrl (mouse) or an explicit request bypasses snapping/quantization:
+    // kill the grid tier and drop the neighbor threshold to zero so the point
+    // lands exactly under the pointer. Touch drags pass false — they have no
+    // modifier and read best fully snapped.
+    bypassSnap: boolean
+  ) {
     return resolvePlanPlacement(pointerMm, {
       walls: floorWallsForTool,
       wallObjects: project.wallObjects,
@@ -1977,23 +1990,26 @@ export function PlanView({
       currentAnchorWallId: null,
       captureDistanceMm,
       gridTargets: gridSnapTargets,
-      snapToGrid,
-      thresholdMm: snapThresholdMm,
+      snapToGrid: bypassSnap ? false : snapToGrid,
+      thresholdMm: bypassSnap ? 0 : snapThresholdMm,
       previousSnapTargetIds: dropSnapTargetIdsRef.current
     });
   }
 
-  function handleArtworkDragOver(event: ReactDragEvent<HTMLDivElement>) {
-    // iPadOS Safari hides custom MIME types during dragover/drop, so fall back
-    // to the app-level drag state (draggingArtworkId) rather than trusting dataTransfer.
-    if (!event.dataTransfer.types.includes(ARTWORK_DRAG_MIME) && !draggingArtworkId) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-
-    const pointerMm = toSvgMm(event.clientX, event.clientY);
+  // Shared by the HTML5 dragover handler and the touch-drag subscription: given
+  // client coordinates and the artwork being dragged, resolve the placement and
+  // paint the drop ghost. Assumes the caller has already gated on an active
+  // drag; it always draws (the drop target is known to be under the pointer).
+  function updateArtworkDropGhost(
+    clientX: number,
+    clientY: number,
+    artworkId: string | null,
+    bypassSnap: boolean
+  ) {
+    const pointerMm = toSvgMm(clientX, clientY);
     if (!pointerMm) return;
 
-    const result = resolveArtworkDrop(pointerMm, effectiveArtworkDims(draggingArtworkId));
+    const result = resolveArtworkDrop(pointerMm, effectiveArtworkDims(artworkId), bypassSnap);
     dropSnapTargetIdsRef.current = result.snapTargetIds;
     setDropGhost({
       planRect: result.planRect,
@@ -2002,25 +2018,27 @@ export function PlanView({
     });
   }
 
-  function handleArtworkDragLeave(event: ReactDragEvent<HTMLDivElement>) {
-    // Only clear when the pointer actually leaves the surface, not when it
-    // crosses between child elements (which also fire dragleave).
-    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+  function clearArtworkDropGhost() {
     setDropGhost(null);
     dropSnapTargetIdsRef.current = undefined;
   }
 
-  function handleArtworkDrop(event: ReactDragEvent<HTMLDivElement>) {
-    const artworkId = event.dataTransfer.getData(ARTWORK_DRAG_MIME) || draggingArtworkId;
-    setDropGhost(null);
-    dropSnapTargetIdsRef.current = undefined;
-    if (!artworkId) return;
-    event.preventDefault();
-
-    const pointerMm = toSvgMm(event.clientX, event.clientY);
+  // Shared by the HTML5 drop handler and the touch-drag subscription: commit
+  // the placement. Caller has already resolved and validated the artworkId.
+  function completeArtworkDrop(
+    clientX: number,
+    clientY: number,
+    artworkId: string,
+    bypassSnap: boolean
+  ) {
+    const pointerMm = toSvgMm(clientX, clientY);
     if (!pointerMm) return;
 
-    const placement = resolveArtworkDrop(pointerMm, effectiveArtworkDims(artworkId)).placement;
+    const placement = resolveArtworkDrop(
+      pointerMm,
+      effectiveArtworkDims(artworkId),
+      bypassSnap
+    ).placement;
     if (placement.anchor === "wall") {
       const wall = floorWallsForTool.find((candidate) => candidate.id === placement.wallId);
       // A wall-dropped artwork hangs at the wall's centerline (its own default,
@@ -2031,6 +2049,94 @@ export function PlanView({
       onPlaceArtworkOnFloor?.(artworkId, placement.xMm, placement.yMm);
     }
   }
+
+  function handleArtworkDragOver(event: ReactDragEvent<HTMLDivElement>) {
+    // iPadOS Safari hides custom MIME types during dragover/drop, so fall back
+    // to the app-level drag state (draggingArtworkId), and further to the
+    // module-level drag session for when WebKit's event ordering leaves that
+    // state already cleared by the time dragover/drop fires.
+    if (
+      !event.dataTransfer.types.includes(ARTWORK_DRAG_MIME) &&
+      !draggingArtworkId &&
+      !peekArtworkDragSession()
+    )
+      return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    updateArtworkDropGhost(
+      event.clientX,
+      event.clientY,
+      draggingArtworkId,
+      event.metaKey || event.ctrlKey
+    );
+  }
+
+  function handleArtworkDragLeave(event: ReactDragEvent<HTMLDivElement>) {
+    // Only clear when the pointer actually leaves the surface, not when it
+    // crosses between child elements (which also fire dragleave).
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    clearArtworkDropGhost();
+  }
+
+  function handleArtworkDrop(event: ReactDragEvent<HTMLDivElement>) {
+    const artworkId =
+      event.dataTransfer.getData(ARTWORK_DRAG_MIME) || draggingArtworkId || peekArtworkDragSession();
+    consumeArtworkDragSession();
+    clearArtworkDropGhost();
+    if (!artworkId) return;
+    if (!artworksById?.get(artworkId)) return;
+    event.preventDefault();
+    completeArtworkDrop(event.clientX, event.clientY, artworkId, event.metaKey || event.ctrlKey);
+  }
+
+  // The touch/pen drag path (iOS/iPadOS, where HTML5 DnD is unavailable/
+  // unreliable) reaches the drop target through the module-level session rather
+  // than DOM drag events. The handlers close over live state/props, so route
+  // them through a ref refreshed each render and subscribe once — re-running the
+  // subscription on every render would churn the shared listener Set.
+  const touchDropRef = useRef({
+    updateGhost: updateArtworkDropGhost,
+    complete: completeArtworkDrop,
+    clearGhost: clearArtworkDropGhost,
+    isValidArtwork: (id: string) => Boolean(artworksById?.get(id))
+  });
+  touchDropRef.current = {
+    updateGhost: updateArtworkDropGhost,
+    complete: completeArtworkDrop,
+    clearGhost: clearArtworkDropGhost,
+    isValidArtwork: (id: string) => Boolean(artworksById?.get(id))
+  };
+
+  useEffect(() => {
+    return subscribeArtworkTouchDrag((dragEvent) => {
+      const container = containerRef.current;
+      const handlers = touchDropRef.current;
+      if (!container) return;
+      if (dragEvent.type === "cancel") {
+        handlers.clearGhost();
+        return;
+      }
+      const rect = container.getBoundingClientRect();
+      const inside =
+        dragEvent.clientX >= rect.left &&
+        dragEvent.clientX <= rect.right &&
+        dragEvent.clientY >= rect.top &&
+        dragEvent.clientY <= rect.bottom;
+      if (dragEvent.type === "move") {
+        // Touch has no modifier keys, so never bypass snapping.
+        if (inside) handlers.updateGhost(dragEvent.clientX, dragEvent.clientY, dragEvent.artworkId, false);
+        else handlers.clearGhost();
+        return;
+      }
+      // drop: always clear the ghost; place only if it landed inside and the id
+      // still resolves to a known artwork (mirrors the HTML5 drop guard).
+      handlers.clearGhost();
+      if (inside && handlers.isValidArtwork(dragEvent.artworkId)) {
+        handlers.complete(dragEvent.clientX, dragEvent.clientY, dragEvent.artworkId, false);
+      }
+    });
+    // containerRef is stable; the effect subscribes once for the component's life.
+  }, [containerRef]);
 
   // Pan cursor affordance: grabbing while a pan drag is live, grab while space
   // is merely held ready. Otherwise the surface keeps its default/tool cursor.

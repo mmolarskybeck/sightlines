@@ -49,6 +49,11 @@ import { useDragGesture } from "../hooks/useDragGesture";
 import { useSelectSuppression } from "../hooks/useSelectSuppression";
 import { useSvgViewportGestures } from "../hooks/useSvgViewportGestures";
 import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
+import {
+  consumeArtworkDragSession,
+  peekArtworkDragSession,
+  subscribeArtworkTouchDrag
+} from "./artworkDragSession";
 import { ElevationArtwork } from "./ElevationArtwork";
 import { ElevationOpening } from "./ElevationOpening";
 import { ArtworkTooltipContent, OpeningTooltipContent } from "./PlacementTooltip";
@@ -635,17 +640,21 @@ export function ElevationView({
     });
   }
 
-  function handleDragOver(event: ReactDragEvent<HTMLDivElement>) {
-    // iPadOS Safari hides custom MIME types during dragover/drop, so fall back
-    // to the app-level drag state (draggingArtworkId) rather than trusting dataTransfer.
-    if (!wallId || (!event.dataTransfer.types.includes(ARTWORK_DRAG_MIME) && !draggingArtworkId)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-
-    const pointerMm = toWallLocalMm(event.clientX, event.clientY);
+  // Shared by the HTML5 dragover handler and the touch-drag subscription: given
+  // client coordinates and the dragged artwork, resolve the placement and paint
+  // the drop ghost. No-ops with no wall selected. Caller has gated on an active
+  // drag; bypassSnap comes from ⌘/Ctrl on the mouse path, false on touch.
+  function updateArtworkDropGhost(
+    clientX: number,
+    clientY: number,
+    artworkId: string | null,
+    bypassSnap: boolean
+  ) {
+    if (!wallId) return;
+    const pointerMm = toWallLocalMm(clientX, clientY);
     if (!pointerMm) return;
 
-    const sizeMm = effectiveSizeForArtworkId(draggingArtworkId);
+    const sizeMm = effectiveSizeForArtworkId(artworkId);
     // A checklist drag-in is always an artwork: eyeline first, floor just below
     // it (see getArtworkSnapTargets' kind-dependent floor rank). ⌘/Ctrl held
     // over the surface bypasses snapping/quantization, same as a move-drag.
@@ -655,7 +664,7 @@ export function ElevationView({
       wallObjectsOnThisWall,
       "artwork",
       dropGhost?.previousSnapTargetIds,
-      event.metaKey || event.ctrlKey
+      bypassSnap
     );
 
     setDropGhost({
@@ -666,20 +675,17 @@ export function ElevationView({
     });
   }
 
-  function handleDragLeave(event: ReactDragEvent<HTMLDivElement>) {
-    // Only clear when the pointer actually leaves the surface, not when it
-    // moves between child elements within it (those also fire dragleave).
-    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-    setDropGhost(null);
-  }
-
-  function handleDrop(event: ReactDragEvent<HTMLDivElement>) {
-    const artworkId = event.dataTransfer.getData(ARTWORK_DRAG_MIME) || draggingArtworkId;
-    setDropGhost(null);
-    if (!artworkId || !wallId) return;
-    event.preventDefault();
-
-    const pointerMm = toWallLocalMm(event.clientX, event.clientY);
+  // Shared by the HTML5 drop handler and the touch-drag subscription: commit the
+  // placement. Guards wallId (this view needs it to place); the caller has
+  // already validated the artworkId resolves to a known artwork.
+  function completeArtworkDrop(
+    clientX: number,
+    clientY: number,
+    artworkId: string,
+    bypassSnap: boolean
+  ) {
+    if (!wallId) return;
+    const pointerMm = toWallLocalMm(clientX, clientY);
     if (!pointerMm) return;
 
     const sizeMm = effectiveSizeForArtworkId(artworkId);
@@ -690,11 +696,97 @@ export function ElevationView({
       wallObjectsOnThisWall,
       "artwork",
       undefined,
-      event.metaKey || event.ctrlKey
+      bypassSnap
     );
 
     onPlaceArtwork?.(artworkId, wallId, snapResult.point.xMm, snapResult.point.yMm);
   }
+
+  function handleDragOver(event: ReactDragEvent<HTMLDivElement>) {
+    // iPadOS Safari hides custom MIME types during dragover/drop, so fall back
+    // to the app-level drag state (draggingArtworkId), and further to the
+    // module-level drag session for when WebKit's event ordering leaves that
+    // state already cleared by the time dragover/drop fires.
+    if (
+      !wallId ||
+      (!event.dataTransfer.types.includes(ARTWORK_DRAG_MIME) &&
+        !draggingArtworkId &&
+        !peekArtworkDragSession())
+    )
+      return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    updateArtworkDropGhost(
+      event.clientX,
+      event.clientY,
+      draggingArtworkId,
+      event.metaKey || event.ctrlKey
+    );
+  }
+
+  function handleDragLeave(event: ReactDragEvent<HTMLDivElement>) {
+    // Only clear when the pointer actually leaves the surface, not when it
+    // moves between child elements within it (those also fire dragleave).
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    setDropGhost(null);
+  }
+
+  function handleDrop(event: ReactDragEvent<HTMLDivElement>) {
+    const artworkId =
+      event.dataTransfer.getData(ARTWORK_DRAG_MIME) || draggingArtworkId || peekArtworkDragSession();
+    consumeArtworkDragSession();
+    setDropGhost(null);
+    if (!artworkId || !wallId) return;
+    if (!artworksById?.get(artworkId)) return;
+    event.preventDefault();
+    completeArtworkDrop(event.clientX, event.clientY, artworkId, event.metaKey || event.ctrlKey);
+  }
+
+  // The touch/pen drag path (iOS/iPadOS, where HTML5 DnD is unavailable/
+  // unreliable) reaches this drop target through the module-level session rather
+  // than DOM drag events. The handlers close over live state/props, so route
+  // them through a ref refreshed each render and subscribe once.
+  const touchDropRef = useRef({
+    updateGhost: updateArtworkDropGhost,
+    complete: completeArtworkDrop,
+    isValidArtwork: (id: string) => Boolean(artworksById?.get(id))
+  });
+  touchDropRef.current = {
+    updateGhost: updateArtworkDropGhost,
+    complete: completeArtworkDrop,
+    isValidArtwork: (id: string) => Boolean(artworksById?.get(id))
+  };
+
+  useEffect(() => {
+    return subscribeArtworkTouchDrag((dragEvent) => {
+      const container = containerRef.current;
+      const handlers = touchDropRef.current;
+      if (!container) return;
+      if (dragEvent.type === "cancel") {
+        setDropGhost(null);
+        return;
+      }
+      const rect = container.getBoundingClientRect();
+      const inside =
+        dragEvent.clientX >= rect.left &&
+        dragEvent.clientX <= rect.right &&
+        dragEvent.clientY >= rect.top &&
+        dragEvent.clientY <= rect.bottom;
+      if (dragEvent.type === "move") {
+        // Touch has no modifier keys, so never bypass snapping.
+        if (inside) handlers.updateGhost(dragEvent.clientX, dragEvent.clientY, dragEvent.artworkId, false);
+        else setDropGhost(null);
+        return;
+      }
+      // drop: always clear the ghost; place only if it landed inside and the id
+      // still resolves to a known artwork (mirrors the HTML5 drop guard).
+      setDropGhost(null);
+      if (inside && handlers.isValidArtwork(dragEvent.artworkId)) {
+        handlers.complete(dragEvent.clientX, dragEvent.clientY, dragEvent.artworkId, false);
+      }
+    });
+    // containerRef is stable; the effect subscribes once for the component's life.
+  }, [containerRef]);
 
   const activeGuides = moveDrag?.activeGuides ?? dropGhost?.activeGuides ?? [];
 

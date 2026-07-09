@@ -1,4 +1,5 @@
 import type { OpeningWallObject } from "../project";
+import { newId } from "../id";
 
 export type OpeningKind = OpeningWallObject["kind"];
 
@@ -68,7 +69,7 @@ export function createOpeningPlacement(
   // is optional and absent at creation); the runtime `kind` variable is what the
   // discriminated union can't statically narrow, so cast once here.
   return {
-    id: crypto.randomUUID(),
+    id: newId(),
     kind,
     blocksPlacement: true,
     wallId,

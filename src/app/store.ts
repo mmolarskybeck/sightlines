@@ -35,6 +35,7 @@ import {
 import { getFloorWalls } from "../domain/geometry/planObjects";
 import type { PlanPlacement } from "../domain/snapping/planSnapTargets";
 import { createBlankProject } from "../domain/newProject";
+import { newId } from "../domain/id";
 import {
   createOpeningPlacement,
   getDefaultOpeningCenterYMm,
@@ -1679,7 +1680,7 @@ export function createAppStore(deps: AppStoreDeps) {
               titleBySha.set(processed.sha256, titleFromFilename(file.name)); // batch-internal twins
             }
 
-            const assetId = crypto.randomUUID();
+            const assetId = newId();
             const asset: Asset = {
               id: assetId,
               schemaVersion: CURRENT_ASSET_SCHEMA_VERSION,
@@ -1695,7 +1696,7 @@ export function createAppStore(deps: AppStoreDeps) {
             };
 
             const artwork: Artwork = {
-              id: crypto.randomUUID(),
+              id: newId(),
               schemaVersion: CURRENT_ARTWORK_SCHEMA_VERSION,
               title: titleFromFilename(file.name),
               dimensions: { status: "unknown" },
@@ -1748,6 +1749,16 @@ export function createAppStore(deps: AppStoreDeps) {
               } could not be added: ${failures.join(" ")}`
             });
           }
+        } catch (error) {
+          // Anything unexpected here (not the per-file try/catches above,
+          // which already funnel into `failures`) must still surface in the
+          // error banner rather than escape as a silent unhandled rejection.
+          set({
+            error:
+              error instanceof Error
+                ? `Images could not be added: ${error.message}`
+                : "Images could not be added."
+          });
         } finally {
           set({ intakeState: "idle" });
         }
@@ -1774,7 +1785,7 @@ export function createAppStore(deps: AppStoreDeps) {
               } else {
                 try {
                   const processed = await deps.imageProcessor.process(draft.imageFile);
-                  const assetId = crypto.randomUUID();
+                  const assetId = newId();
                   const asset: Asset = {
                     id: assetId,
                     schemaVersion: CURRENT_ASSET_SCHEMA_VERSION,
@@ -1838,6 +1849,11 @@ export function createAppStore(deps: AppStoreDeps) {
               }: ${failures.join(" ")}`
             });
           }
+        } catch (error) {
+          set({
+            error:
+              error instanceof Error ? `Import failed: ${error.message}` : "Import failed."
+          });
         } finally {
           set({ intakeState: "idle" });
         }
@@ -2162,7 +2178,7 @@ export function createAppStore(deps: AppStoreDeps) {
 
           const { widthMm, heightMm } = getDefaultOpeningSizeMm(kind);
           const floorObject: BlockedZoneFloorObject = {
-            id: crypto.randomUUID(),
+            id: newId(),
             kind: "blocked-zone",
             xMm: placement.xMm,
             yMm: placement.yMm,
@@ -2244,7 +2260,7 @@ export function createAppStore(deps: AppStoreDeps) {
 
         const { widthMm, heightMm } = getEffectivePlacementSizeMm(artwork.dimensions);
         const floorObject: ArtworkFloorObject = {
-          id: crypto.randomUUID(),
+          id: newId(),
           kind: "artwork",
           artworkId,
           xMm,

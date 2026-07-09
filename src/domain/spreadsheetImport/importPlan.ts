@@ -3,6 +3,7 @@ import {
   type Artwork,
   type DisplayUnit
 } from "../project";
+import { newId } from "../id";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../units/unitSystem";
 import { guessColumnMapping } from "./columnMapping";
 import { detectUnitFromLabel, dimensionsFromColumns, parseImportedDimensions } from "./dimensions";
@@ -129,7 +130,7 @@ function createDraft({
   if (dimensionResult?.role) extraMetadata.dimensionRole = dimensionResult.role;
 
   const artwork: Artwork = {
-    id: crypto.randomUUID(),
+    id: newId(),
     schemaVersion: CURRENT_ARTWORK_SCHEMA_VERSION,
     artist: value("artist"),
     title: value("title") ?? "Untitled",
