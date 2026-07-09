@@ -3,7 +3,6 @@ Here is where I gather small, actionable tasks and scraps for future implementat
 
 ## Open Scraps
 
-* we need to prevent adding the same artwork multiple times to an exhibition!!!! this should NOT be allowed. if an image is uploaded that has already been uploaded, we should warn about this (this may sometimes be intentional and we can offer a way to confirm this is intended.) but we should NOT allow dragging the same checklist entry more than once onto the wall! if a user wants to try out multiple versions of a layout, they can just duplicate the project and play around there.
 * add eyeline toggle on/off in elevation mode
 
 * another snap case to consider - if we have a group of works in between 2 groups of works (rather than in between 1 group and 1 wall) - we do allow for granular adjustment of the space between those 2 works (with the between works tab) - but what about granularly adjusting the spacing on left and right between that group and the other 2 neighboring groups? space evenly > open space just evenly distributes them across that space, but often we want to essentially do a version of from wall edges but treat the artwork groups to left and right as the targets. 
