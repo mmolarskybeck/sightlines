@@ -1587,30 +1587,35 @@ body.panels-resizing * {
 }
 
 .import-dialog {
-  width: min(calc(100vw - 32px), 1040px);
+  width: min(calc(100vw - 32px), 1060px);
 }
 
-/* Compact inline stepper (DESIGN.md overlay grammar) — a left-aligned row of
-   borderless chip+label buttons separated by caret glyphs, replacing the old
-   full-width bordered tab grid. */
+.import-dialog-header {
+  padding: 24px 64px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Import is a three-step workflow, so the progress indicator gets the modal's
+   top visual priority while the per-step task copy moves below it. */
 .import-steps {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 8px 24px 12px;
+  justify-content: center;
+  gap: 8px;
 }
 
 .import-step {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  gap: 10px;
+  min-height: 40px;
+  padding: 8px 12px;
   border: 0;
   border-radius: var(--radius-fill);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  font-size: var(--type-sm);
+  font-size: var(--type-md);
   font-weight: var(--weight-medium);
   transition:
     background-color 150ms ease-out,
@@ -1634,19 +1639,19 @@ body.panels-resizing * {
 
 .import-step:disabled {
   cursor: not-allowed;
-  opacity: 0.45;
+  opacity: 0.4;
 }
 
 .import-step-chip {
   display: grid;
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   place-items: center;
   border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--muted);
-  font-size: var(--type-2xs);
+  font-size: var(--type-xs);
   font-weight: var(--weight-semibold);
   line-height: 1;
 }
@@ -1670,11 +1675,11 @@ body.panels-resizing * {
 .import-step-caret {
   flex: 0 0 auto;
   color: var(--muted);
-  opacity: 0.6;
+  opacity: 0.5;
 }
 
 .import-error {
-  margin: 0 24px;
+  margin: 16px 28px 0;
   padding: 10px 12px;
   border: 1px solid var(--danger-line);
   border-radius: var(--radius-fill);
@@ -1684,29 +1689,55 @@ body.panels-resizing * {
 }
 
 .import-body {
+  display: grid;
+  gap: 18px;
   min-height: 420px;
   overflow: auto;
-  padding: 12px 24px 24px;
+  padding: 22px 28px 28px;
 }
 
 .import-body[data-step="upload"] {
   min-height: 0;
 }
 
+.import-screen-header {
+  display: grid;
+  max-width: 680px;
+  gap: 6px;
+}
+
+.import-screen-header h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--type-project);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
+  text-wrap: balance;
+}
+
+.import-screen-header p {
+  max-width: 65ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-sm);
+  line-height: var(--leading-copy);
+  text-wrap: pretty;
+}
+
 .import-upload-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 16px;
 }
 
 .import-upload-tile {
   display: flex;
-  min-height: 260px;
+  min-height: 232px;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 18px;
+  gap: 8px;
+  padding: 24px;
   border: 1px dashed var(--line);
   border-radius: var(--radius-overlay);
   background: var(--bg);
@@ -1771,16 +1802,16 @@ body.panels-resizing * {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: auto;
+  margin-top: 16px;
 }
 
 .import-upload-file-list {
   display: grid;
   gap: 2px;
   min-height: 0;
-  max-height: 118px;
+  max-height: 104px;
   overflow: auto;
-  margin: 4px 0 0;
+  margin: 8px 0 0;
   padding: 0;
 }
 
@@ -1891,13 +1922,13 @@ body.panels-resizing * {
 
 .import-map {
   display: grid;
-  gap: 16px;
+  gap: 18px;
 }
 
 .import-map-toolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 160px;
-  gap: 10px;
+  gap: 12px;
 }
 
 .import-field,
@@ -1926,7 +1957,7 @@ body.panels-resizing * {
 .import-mapping-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 20px;
+  gap: 16px 20px;
 }
 
 .import-mapping-row {
@@ -2035,7 +2066,7 @@ body.panels-resizing * {
 
 .import-review {
   display: grid;
-  gap: 14px;
+  gap: 16px;
 }
 
 .import-summary {
@@ -2182,9 +2213,40 @@ body.panels-resizing * {
     padding: 18px 52px 14px 16px;
   }
 
+  .import-dialog-header {
+    padding: 18px 44px 14px 16px;
+  }
+
+  .import-steps {
+    justify-content: flex-start;
+    gap: 2px;
+  }
+
+  .import-step {
+    min-height: 36px;
+    gap: 7px;
+    padding: 6px 7px;
+    font-size: var(--type-sm);
+  }
+
+  .import-step-chip {
+    width: 22px;
+    height: 22px;
+    font-size: var(--type-2xs);
+  }
+
+  .import-step-caret {
+    width: 10px;
+  }
+
   .import-body {
     min-height: 0;
-    padding: 12px;
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .import-screen-header {
+    gap: 4px;
   }
 
   .import-upload-grid,
@@ -2195,7 +2257,8 @@ body.panels-resizing * {
   }
 
   .import-upload-tile {
-    min-height: 180px;
+    min-height: 172px;
+    padding: 20px;
   }
 
   /* Sample card leads the stacked Map layout and stays in view while the

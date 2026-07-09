@@ -43,6 +43,23 @@ type Step = "upload" | "map" | "review";
 type StepState = "complete" | "active" | "upcoming";
 
 const STEP_ORDER: Step[] = ["upload", "map", "review"];
+const STEP_COPY: Record<Step, { title: string; description: string }> = {
+  upload: {
+    title: "Choose source files",
+    description:
+      "Add a spreadsheet for metadata, images for artwork files, or both. You can clear either well before continuing."
+  },
+  map: {
+    title: "Map spreadsheet columns",
+    description:
+      "Confirm how each column becomes artwork data. The sample preview updates as you adjust the mapping."
+  },
+  review: {
+    title: "Review imported works",
+    description:
+      "Check warnings, image matches, and selected rows before adding the works to the project."
+  }
+};
 
 const NO_COLUMN = "__none";
 const NO_IMAGE = "__none";
@@ -116,6 +133,7 @@ export default function ImportWizard({
   const [sampleRowIndex, setSampleRowIndex] = useState(0);
 
   const imageUrls = useFileImageUrls(imageFiles);
+  const stepCopy = STEP_COPY[step];
 
   const currentStepIndex = STEP_ORDER.indexOf(step);
   function stepState(target: Step): StepState {
@@ -312,36 +330,37 @@ export default function ImportWizard({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="import-dialog">
-        <DialogHeader>
-          <DialogTitle>Import checklist</DialogTitle>
-          <DialogDescription>
-            Match spreadsheet rows to images, then add the reviewed works to this project.
-          </DialogDescription>
+        <DialogHeader className="import-dialog-header">
+          <DialogTitle className="visually-hidden">Import checklist</DialogTitle>
+          <DialogDescription className="visually-hidden">{stepCopy.description}</DialogDescription>
+          <div className="import-steps" aria-label="Import steps">
+            <StepButton index={1} label="Upload" state={stepState("upload")} onClick={() => setStep("upload")} />
+            <CaretRightIcon aria-hidden="true" className="import-step-caret" size={14} />
+            <StepButton
+              disabled={!table}
+              index={2}
+              label="Map"
+              state={stepState("map")}
+              onClick={() => setStep("map")}
+            />
+            <CaretRightIcon aria-hidden="true" className="import-step-caret" size={14} />
+            <StepButton
+              disabled={!plan}
+              index={3}
+              label="Review"
+              state={stepState("review")}
+              onClick={() => setStep("review")}
+            />
+          </div>
         </DialogHeader>
-
-        <div className="import-steps" aria-label="Import steps">
-          <StepButton index={1} label="Upload" state={stepState("upload")} onClick={() => setStep("upload")} />
-          <CaretRightIcon aria-hidden="true" className="import-step-caret" size={12} />
-          <StepButton
-            disabled={!table}
-            index={2}
-            label="Map"
-            state={stepState("map")}
-            onClick={() => setStep("map")}
-          />
-          <CaretRightIcon aria-hidden="true" className="import-step-caret" size={12} />
-          <StepButton
-            disabled={!plan}
-            index={3}
-            label="Review"
-            state={stepState("review")}
-            onClick={() => setStep("review")}
-          />
-        </div>
 
         {error ? <p className="import-error">{error}</p> : null}
 
         <div className="import-body" data-step={step}>
+          <div className="import-screen-header">
+            <h2>{stepCopy.title}</h2>
+            <p>{stepCopy.description}</p>
+          </div>
           {step === "upload" ? (
             <div className="import-upload-grid">
               <input
@@ -713,6 +732,7 @@ function StepButton({
       className="import-step"
       data-state={state}
       disabled={disabled}
+      aria-current={state === "active" ? "step" : undefined}
       onClick={onClick}
     >
       <span aria-hidden="true" className="import-step-chip">
