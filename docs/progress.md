@@ -114,15 +114,27 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 - [x] Grid density and snap thresholds stay screen-correct at any zoom; grid rect = viewBox; regression pins for snap-target volume and pattern anchoring.
 - [x] Tooltips and a11y audit for zoom controls (title attributes with shortcuts, aria-label on zoom-level readout); CSS confirms `touch-action: none` on SVG, `overscroll-behavior: contain` on surfaces, `cursor: grab`/`grabbing` during pan.
 
+**2026-07-08:**
+- [x] Room shape tools shipped through `docs/room-shapes-spec.md` slices 1-3: polygon room drawing, vertex reshape, wall split/delete, wall-slide reshaping, and free-standing partition walls with derived double-sided faces on schema v3.
+- [x] Reshape UX hardening from user testing: draw-time collinear merge, whole-wall drag for Sims-style L-room adjustment, live wall-length labels for the walls a drag changes, outward-positive wall-slide labels, and rectangle gating that checks actual corner angles instead of wall count alone.
+- [x] Schema v3 migration chain: v1 documents walk through v2 to v3, rooms gain `freestandingWalls: []`, and the never-written `connectsToWallId` shape was replaced by opening-level `connectsToObjectId`.
+- [x] Delete key removes the selected room, with confirmation when the room contains placements/partitions.
+- [x] Focus and keyboard ownership fixes: shared focused-widget guard for window shortcuts, SVG workspace focus handling, and resize-handle key protection so inputs/selects/separators keep their native keys.
+- [x] Import wizard now supports images-only import, spreadsheet metadata import, and combined image + metadata matching with map/review steps, image-choice overrides, warnings, and selected-row import.
+- [x] Added static public information and trust surfaces in `public/`: About, Privacy, Security, IT, `security.txt`, sitemap, robots, web manifest, `llms.txt`, shared `trust.css`, and Cloudflare headers.
+- [x] Wired the left-rail Help affordance to lightweight in-app product info with links out to the static pages, and kept the app shell viewport-bound so the rail stays fixed while editor panes own overflow.
+
 ## In Progress / Immediate Next
 
-- [ ] Room shape tools: polygon room drawing, then polygon reshape/vertex dragging.
+- [ ] Paired door/window connections (`connectsToObjectId` writers + alignment status) and 3D see-through openings.
+- [ ] MVP package/export work: `.sightlines` import/export, backup flow, PNG/PDF exports, and readiness reporting.
 
-## MVP 1A Remaining
+## Architecture Follow-Ups
 
-- [ ] Finish the geometry spine from `docs/plan.md` section 9:
-  - [ ] Migration function chain (`v1→v2`, ...) when a schema v2 first ships — the parse → validate → migrate → validate pipeline shape already exists in `migrateProject`.
-- [ ] Keep transient drag state out of `applyEdit`/persist when tactile handles arrive — already true for the new wall-resize drag (live preview is computed locally in `PlanView` via the pure `resizeWallPreservingAngles`, never through `applyEdit`, until the single commit on release).
+- [x] Migration function chain (`v1→v2→v3`) now exists for project schema changes.
+- [x] Transient drag state stays out of `applyEdit`/persist for wall resize, placement drag, group drag, polygon draw, and room reshape; commits happen once on release/close.
+- [ ] Opening-pair writers and derived alignment status remain to complete room-shape slices 4-5.
+- [ ] `.sightlines` package import/export needs the full untrusted-file safety pipeline before it becomes the backup/sharing path.
 
 ## MVP 1C / Later
 
@@ -135,13 +147,14 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 
 ## MVP 2 / Later
 
-- [ ] Room shape tools:
-  - [ ] Keep the current quick rectangle room path.
-  - [ ] Add polygon room drawing in Plan view as a dedicated mode: click vertices line by line, preview the active segment, close via first point or Enter.
-  - [ ] Add polygon reshape mode after polygon creation exists: drag existing vertices, preserve closed rooms/wall identity, revalidate changed-wall placements, one undo entry per drag.
+- [x] Room shape tools:
+  - [x] Keep the current quick rectangle room path.
+  - [x] Add polygon room drawing in Plan view as a dedicated mode: click vertices line by line, preview the active segment, close via first point or Enter.
+  - [x] Add polygon reshape mode after polygon creation exists: drag existing vertices, split/delete vertices, slide walls, preserve closed rooms/wall identity, revalidate changed-wall placements, one undo entry per drag.
+  - [x] Add free-standing partition walls with room-owned geometry and double-sided faces.
 - [ ] Multi-room flow:
   - [ ] Place additional rooms in the shared floor coordinate space.
-  - [ ] Connect paired doors between rooms (`connectsToWallId`) once room shape semantics are clear.
+  - [ ] Connect paired doors/windows between rooms (`connectsToObjectId`) now that room shape semantics are clear.
   - [ ] Let 3D sightlines pass through aligned connected doorways.
 
 ## MVP 3 / Later

@@ -25,16 +25,18 @@ Cloud accounts, hosted collaboration, public snapshot links, subscriptions, and 
 Sightlines should let a user:
 
 * Start from a room layout or from an artwork checklist.
-* Draw or define simple gallery rooms.
+* Draw rectangular or irregular polygon gallery rooms.
 * Work with real wall dimensions and wall heights.
+* Add free-standing partition walls as double-sided placement surfaces.
 * Upload artwork images and enter dimensions later.
+* Import image batches, spreadsheet metadata, or both through a reviewable import wizard.
 * Mark dimensions as known, approximate, or unknown.
 * Drag artworks onto scaled wall elevations.
 * Snap works to a configurable centerline.
 * Add doors, windows, and blocked wall zones.
 * See warnings when works overlap architectural constraints or fall outside wall bounds.
 * Edit measurements either tactically by dragging or precisely through numeric fields.
-* Move between plan view, elevation view, checklist, and eventually 3D preview without losing context.
+* Move between plan view, elevation view, checklist, and simple 3D preview without losing context.
 * Export portable project files for backup or manual sharing.
 * Save/sync using services like Dropbox, Drive, OneDrive, etc. (stretch goal)
 
@@ -46,8 +48,8 @@ A user can:
 
 1. Create a project.
 2. Add a room first, or skip straight to the checklist.
-3. Upload artwork images at any time.
-4. Add metadata and dimensions as they become available.
+3. Draw a rectangle quickly, or switch into polygon drawing/reshape for an irregular room.
+4. Upload artwork images at any time, with or without spreadsheet metadata.
 5. Place works on wall elevations, even with approximate or placeholder dimensions.
 6. Refine wall dimensions, artwork placement, openings, and constraints.
 7. Review the installation spatially.
@@ -102,6 +104,7 @@ Current persistence:
 * IndexedDB for project documents, metadata, artwork records, and thumbnails.
 * Browser storage messaging that reminds users to export backups.
 * JSON import/export for early development and debugging.
+* Static public info pages and trust/security metadata served from `public/`.
 
 Planned persistence/export:
 
@@ -148,6 +151,8 @@ Implemented or substantially underway:
 * Project-level undo/redo.
 * Plan view and wall elevation view.
 * Rectangle room creation and wall navigation.
+* Irregular polygon room drawing, vertex reshape, wall split/delete, and wall-slide reshaping.
+* Free-standing partition walls with double-sided faces.
 * Numeric wall and room dimension editing.
 * Tactile rectangle resize handles.
 * Shared units parser and formatter.
@@ -157,6 +162,7 @@ Implemented or substantially underway:
 * Artwork library and project checklist membership.
 * Image intake with thumbnail and display derivatives.
 * Artwork metadata and dimensions editing.
+* Import wizard for images-only, spreadsheet-only metadata, or matched image + metadata import.
 * Known / approximate / unknown dimension status.
 * Drag artwork from checklist to wall elevation.
 * Centerline, neighbor, floor, and grid snapping for wall objects.
@@ -168,6 +174,9 @@ Implemented or substantially underway:
 * Checklist filtering and sorting.
 * Stable measurement-field conversion hints.
 * More legible plan-view placement markers.
+* Read-only derived 3D preview with artwork textures, door/window cutouts, partition slabs, and camera presets.
+* Focus-aware keyboard guards so text fields, selects, SVG workspace focus, and panel resize handles keep their own shortcuts.
+* Static About, Privacy, Security, IT, `security.txt`, sitemap, robots, manifest, and `llms.txt` trust surfaces.
 * JSON import/export for development backup.
 
 ## Deployment
@@ -178,31 +187,31 @@ Sightlines is prepared for Cloudflare Workers static-assets deployment with Wran
 
 ### MVP 1C — Professional layout behaviors
 
-Next major slice:
-
-* Simple derived 3D preview
-
-Recently completed:
+Shipped:
 
 * Multi-select
 * Grouping and group drag
 * Equal distribution spacing
 * Checklist filtering/sorting and 2D workflow confidence fixes
+* Simple derived 3D preview
 
 ### MVP 2 — Room shape and multi-room flow
 
-Planned soon after simple 3D preview:
+Shipped:
 
-* Keep the quick rectangle room path.
+* Quick rectangle room path retained.
 * Polygon room drawing in Plan view.
-* Polygon reshape mode with vertex dragging.
-* Multi-room placement in the shared floor coordinate space.
-* Door connections between rooms.
-* 3D sightlines through aligned connected doorways.
+* Polygon reshape mode with vertex dragging, wall splitting/deleting, and wall-slide reshaping.
+* Free-standing partition walls with double-sided faces.
+
+Next:
+
+* Paired door/window connections between rooms.
+* 3D sightlines through aligned connected openings.
 
 ### MVP 3 — Project packages and export
 
-Planned after 3D preview and room-shape tools:
+Next substantial product-infrastructure slice:
 
 * `.sightlines` package export/import
 * Self-contained project packages with project data and relevant artwork assets
@@ -219,7 +228,6 @@ Planned after the core desktop workflow is stable:
 * iPad-adapted layout and touch interaction
 * Touch-sized handles and bottom-sheet panels
 * Dropbox-folder sync
-* Spreadsheet metadata import
 * Richer checklist sorting and custom ordering
 * Command palette
 * Context menus
@@ -251,7 +259,7 @@ Current direction:
 * **Storage:** IndexedDB now; OPFS planned for larger image blobs
 * **UI:** Radix / shadcn-style primitives, Tailwind-compatible styling
 * **2D editor:** React-rendered editor surfaces backed by plain project data
-* **3D preview:** React Three Fiber / three.js planned
+* **3D preview:** React Three Fiber / three.js
 * **Exports:** Client-side image/PDF generation planned
 * **Project package:** `.sightlines` zip package planned
 

@@ -1,6 +1,6 @@
 # Complex Room Shapes — Spec
 
-Status: approved for implementation · Written: 2026-07-08
+Status: slices 1-3 shipped; slices 4-5 pending · Written: 2026-07-08 · Refreshed: 2026-07-09
 Decisions confirmed with Marina: free-standing walls are **double-sided** placement surfaces · free-standing walls are **room-owned** · **polygons only**, no curved walls · **both doors and windows** can pair across rooms for 3D see-through.
 
 ## 1. Goal
@@ -33,7 +33,7 @@ This follows the architecture rules of `docs/plan.md` §1/§2 and the prescripti
 | Door/window/blocked-zone openings, armed placement tools | `createOpening.ts`, store, `PlanView.tsx` `activeTool` | Done |
 | Single placement entry point + wall capture + hysteresis | `resolvePlanPlacement` (`planSnapTargets.ts`), `findNearestWall` (`planObjects.ts`) | Done — reused unchanged (§6.1) |
 | Validation (bounds advisory / opening collision blocking / overlap advisory) | `validatePlacement.ts` | Done — extended only via the wall-geometry map (§6.2) |
-| `connectsToWallId` on openings | `project.ts:121`, schema | **Field exists, zero writers** — replaced in v3 (§5.5) |
+| `connectsToObjectId` on connectable openings | `src/domain/project.ts`, schema | v3 field exists and validates symmetric pairs; writers/UI pending slices 4-5 (§5.5) |
 | Rectangle fast path (dimension fields, resize handles) | `walls.ts` `getRectangleRoomDimensions`, `RoomResizeHandles.tsx` | Done — stays gated exactly as-is |
 
 The hard blocker: the schema's closed-loop superRefine (`walls[i].endVertexId === walls[i+1].startVertexId`, wrapping) makes a lone unconnected wall unrepresentable as a `Wall`. Free-standing walls are therefore a **new entity**, not a relaxation of the loop invariant (§5.2).
@@ -49,7 +49,7 @@ The hard blocker: the schema's closed-loop superRefine (`walls[i].endVertexId ==
 
 ### 5.1 Relationship to `plan.md` §4.2
 
-This spec implements §4.2's prescriptions as written — polygon draw as a dedicated mode, vertex drag moving referencing walls, vertex insert splitting one wall into two, rectangle fast path preserved, structural invariants validated at the schema boundary — with **one deliberate revision**: doorway pairing moves from `connectsToWallId` (wall-level) to `connectsToObjectId` (opening-level). A wall can carry several openings, so a wall-level pointer cannot identify the counterpart hole, its extent, or its kind. The old field has zero writers (only the type, the schema, and one schema test), so replacing it costs nothing. `plan.md` §4.2 should be annotated to point here when this ships.
+This spec implements §4.2's prescriptions as written — polygon draw as a dedicated mode, vertex drag moving referencing walls, vertex insert splitting one wall into two, rectangle fast path preserved, structural invariants validated at the schema boundary — with **one deliberate revision**: doorway/window pairing moved from `connectsToWallId` (wall-level) to `connectsToObjectId` (opening-level). A wall can carry several openings, so a wall-level pointer cannot identify the counterpart hole, its extent, or its kind. The old field had zero writers, so replacing it in schema v3 was a clean migration. `docs/plan.md` §4.2 now points to this object-level pairing shape.
 
 ### 5.2 `FreestandingWall` — new entity on `Room`, inline endpoints
 
@@ -175,7 +175,7 @@ Existing consumers that treat all three kinds uniformly (validation, plan/elevat
 
 - `roomSchema` gains `freestandingWalls: z.array(freestandingWallSchema).default([])`, with superRefine: unique IDs; `roomId` matches the room; endpoints not coincident (length > 0); no `#` in IDs (the `#` ban also lands on wall/vertex IDs).
 - `openingWallObjectSchema`: drop `connectsToWallId`, add `connectsToObjectId`; add the pairing superRefine at project level.
-- **Migration requires a pipeline refactor, not just a new step.** Today's `migrateProject` (`src/domain/schema/projectSchema.ts:229-275`) handles exactly one case: `schemaVersion === 1` gets the v2 patch in a single hardcoded block, anything else old throws, and the result is validated against `CURRENT_SCHEMA_VERSION`. Bumping to 3 without restructuring would break both old versions: a v1 document would be stamped `schemaVersion: 2` and then fail v3 validation, and a v2 document would hit the `schemaVersion !== 1` throw ("can no longer open"). Refactor into stepwise migrations applied in a loop — e.g. `const MIGRATIONS: Record<number, (doc: Record<string, unknown>) => Record<string, unknown>>` keyed by *from*-version, applied while `version < CURRENT_SCHEMA_VERSION` — so a v1 document walks 1→2→3. The v2→v3 step: add `freestandingWalls: []` to every `floor.rooms[].room`; strip any `connectsToWallId` keys (never written by the app; discarding is safe); bump version. Add migration tests that open a v1 fixture and a v2 fixture and land both at v3.
+- **Migration now uses a stepwise chain.** `migrateProject` applies versioned migrations in a loop, so a v1 document walks 1→2→3 instead of relying on a single hardcoded legacy case. The v2→v3 step adds `freestandingWalls: []` to every `floor.rooms[].room`, strips any old `connectsToWallId` keys (never written by the app; discarding is safe), and bumps the document to schema v3. Migration tests cover both v1→v3 and v2→v3.
 - `wallObjects[].wallId` is deliberately still not cross-checked in schema (dangling walls remain a runtime advisory); face IDs inherit that policy for consistency.
 
 ## 6. Domain behavior

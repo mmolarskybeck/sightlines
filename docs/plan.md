@@ -34,8 +34,8 @@ This is the experiential shape every architecture decision below should serve. I
 
 These are the things that broke last time, plus one added during planning that local-first apps need and cloud apps get for free.
 
-**Canvas renders the layout; canvas does not own the layout.**
-Konva nodes, R3F objects, and React components are disposable projections of plain project data. Project data → 2D plan renderer → wall elevation renderer → 3D preview renderer → export renderer. Never the reverse.
+**View layers render the layout; view layers do not own the layout.**
+SVG elements, R3F objects, and React components are disposable projections of plain project data. Project data → 2D plan renderer → wall elevation renderer → 3D preview renderer → export renderer. Never the reverse.
 
 **Persistence sits behind a repository interface from day one**, even though there's only one local implementation right now.
 ```ts
@@ -75,6 +75,8 @@ Migration alone assumes the input is at least structurally sound — not a safe 
 
 **Undo/redo is global across views, not scoped to whichever view triggered the change.** Since the intended workflow bounces constantly between 3D, plan, elevation, and checklist, a single command stack lives at the project level — undoing a metadata edit made in the checklist works the same whether the user is currently looking at the 3D preview or not.
 
+**Window-level keyboard shortcuts stand down for focused widgets.** The workspace has global commands (undo/redo, Delete, Escape, nudging, zoom/pan gestures), but fields, native selects, editable surfaces, SVG focus states, and panel resize handles own their own keys while focused. Keep this as one shared guard rather than copy/pasted checks so a future shortcut does not steal Backspace from a length field, arrows from a separator, or a browser-native edit command from a text input.
+
 ---
 
 ## 3. Tech Stack (v1, browser-first, local-first)
@@ -83,10 +85,10 @@ Migration alone assumes the input is at least structurally sound — not a safe 
 |---|---|---|
 | App framework | Vite + React + TypeScript | No Next.js — no server, so no reason to pay its complexity tax. Revisit only if Cloud happens. |
 | UI | shadcn/ui + Radix + Tailwind | Tailwind's responsive utilities double as the basis for the tablet/phone layout — see §3.5. |
-| 2D rendering | Konva / react-konva | Native touch event support — no new dependency needed for tablet. |
+| 2D rendering | React-rendered SVG surfaces | Plan and elevation are disposable projections of project data; pointer/touch gesture handling lives in app hooks and pure geometry helpers. |
 | 3D rendering | React Three Fiber + three.js | `OrbitControls` handles touch orbit/pinch/pan natively — see §3.5. |
 | State | Zustand | Drop the TanStack Store hedge — Zustand fits this. |
-| Local storage | IndexedDB (project docs, artwork library, metadata, thumbnails) + OPFS (larger image blobs) | localStorage only for trivial prefs (theme, last-opened project, default unit). |
+| Local storage | IndexedDB (project docs, artwork library, metadata, thumbnails, asset blobs) | localStorage only for trivial prefs (theme, last-opened project, default unit). OPFS remains a future optimization seam for larger image blobs, not the current storage backend. |
 | Project package format | `.sightlines` (zip: `project.json` + `assets/`) | Export/import/backup format; also the eventual desktop save format. The whole sharing mechanism — see §6. |
 | Sync | Dropbox API, OAuth 2.0 + PKCE, no backend | See §6 — confirmed viable without a server. |
 | Exports | Client-side: canvas→PNG, pdf-lib/jsPDF | No server, no function timeouts, no compute cost. |
@@ -222,7 +224,9 @@ type Wall = {
 
 **Walls reference vertex IDs, not point indices.** An earlier draft used `startPointIndex`/`endPointIndex` into the room's points array — fragile, because inserting, deleting, or reordering a vertex silently shifts every index after it, breaking wall identity without any error. Giving each vertex a stable ID and having walls reference those IDs means index churn can't corrupt wall identity. It also defines a clear behavior for editing: dragging an existing vertex moves it in place (walls referencing it just follow); inserting a new vertex on an existing wall segment splits that one wall into two new walls, each still tracing back to real vertex IDs.
 
-**Room shape tools are a dedicated floorplan mode, not an extension of ordinary selection.** The fast rectangle path stays because most rooms are rectangles and should remain easy. Irregular galleries are created through a polygon-drawing mode: click corner by corner in Plan view, preview the next segment as the pointer moves, then close by clicking the first point or pressing Enter. Vertex-level dragging/reshaping comes after polygon creation exists, so reshape is designed around real non-rectangular rooms rather than bolted onto the rectangle resize handles. Outside room-shape mode, clicks keep their current meanings: select walls, select placements, or use an armed placement tool.
+**Room shape tools are a dedicated floorplan mode, not an extension of ordinary selection.** The fast rectangle path stays because most rooms are rectangles and should remain easy. Irregular galleries are created through a polygon-drawing mode: click corner by corner in Plan view, preview the next segment as the pointer moves, then close by clicking the first point or pressing Enter. Reshape is designed around real non-rectangular rooms rather than bolted onto the rectangle resize handles: drag vertices, split/delete vertices, and slide whole walls while preserving neighboring wall lines where possible. Outside room-shape mode, clicks keep their current meanings: select walls, select placements, or use an armed placement tool.
+
+**Free-standing partition walls are room-owned, double-sided placement surfaces.** They are not stored as extra loop walls because they do not participate in the closed perimeter invariant. A partition stores inline room-local endpoints, height, and thickness; the app derives two stable face wall IDs from that centerline so existing placement, elevation, validation, and 3D code can treat each side as a wall-like surface without duplicating geometry. See `docs/room-shapes-spec.md` for the detailed schema v3 contract.
 
 **Validate the structural invariants at the boundary, not deep in geometry math.** The geometry code assumes a room's walls form a closed loop in vertex order (`wall[i].endVertexId === wall[i+1].startVertexId`), and the model carries two redundant identity fields (`RoomPlacement.roomId` vs `placement.room.id`, `Wall.roomId` vs containment in `room.walls`). The schema should assert loop closure and identity agreement, so a hand-edited or corrupted file fails at import with a clear message instead of producing a wall-not-found error three function calls into a resize.
 
@@ -248,15 +252,15 @@ type ArtworkWallObject = WallObjectBase & {
 type OpeningWallObject = WallObjectBase & {
   kind: "door" | "window" | "blocked-zone"
   blocksPlacement: true
-  connectsToWallId?: string   // present only for doors that connect two rooms
+  connectsToObjectId?: string // v3: present only for paired doors/windows
 }
 ```
 
 **Placement can override display dimensions without touching the library record.** A curator might need a framed size, a mat size, or a placeholder mockup size specific to one layout — without permanently editing the canonical `Artwork`, which may be shared across other projects or tour stops (§4.3). `displayDimensionsOverride` on the placement handles this; absent, the placement just uses the library artwork's own `dimensions`.
 
-When two doors reference each other across rooms and their positions geometrically align within the shared floor coordinate space, the 3D renderer can treat the doorway as a true opening rather than a capped wall — letting a camera view actually see through it into the next room. This isn't a v1 feature, but the `Floor`/`RoomPlacement` structure needs to exist from the start, because retrofitting "rooms have positions relative to each other" after rooms have been isolated polygons for two MVP cycles is a real rewrite. Build single-room projects first; the data model just shouldn't assume there's only ever one room.
+When two connectable openings reference each other across rooms and their positions geometrically align within the shared floor coordinate space, the 3D renderer can treat the door/window as a true opening rather than a capped wall — letting a camera view actually see through it into the next room. This pairing now lives on opening objects (`connectsToObjectId`) rather than walls because a single wall can carry several openings. This isn't implemented as a writer yet, but the `Floor`/`RoomPlacement` structure and schema v3 field are in place, because retrofitting "rooms have positions relative to each other" after rooms have been isolated polygons for two MVP cycles would be a real rewrite.
 
-**Performance note:** your own estimate — a few rooms typically, a large show topping out around 10 rooms / 200 works — is comfortably within what Konva/R3F can handle, especially once display-tier images are used for canvas/3D rendering (full-resolution originals only touch export, and only when explicitly requested — see §4.5). The one thing worth deferring deliberately is *simultaneously* rendering every connected room's full 3D geometry at once; a reasonable default is to render the current room plus any rooms visible through an open sightline from the active camera, not the entire floor at all times. That's a renderer-level optimization to design for later, not a data-model concern now.
+**Performance note:** your own estimate — a few rooms typically, a large show topping out around 10 rooms / 200 works — is comfortably within what React/SVG and R3F can handle, especially once display-tier images are used for 2D/3D rendering (full-resolution originals only touch export, and only when explicitly requested — see §4.5). The one thing worth deferring deliberately is *simultaneously* rendering every connected room's full 3D geometry at once; a reasonable default is to render the current room plus any rooms visible through an open sightline from the active camera, not the entire floor at all times. That's a renderer-level optimization to design for later, not a data-model concern now.
 
 ### 4.3 Touring / multi-venue exhibitions (planned for, not built yet)
 
@@ -403,7 +407,7 @@ Because layout is one serializable document mutated through defined actions, thi
 - **Toggleable visual grids in plan and elevation views.** Grid display is a view-layer alignment aid, not project geometry. It should be available in both bird's-eye plan and wall elevation views, share the same precision vocabulary as snap/nudge increments (§5.5), and be easy to turn on/off independently from snap-to-grid without changing persisted layout data.
 - **Scale-accurate printed export:** a distinct export mode from PNG/PDF screenshots — true scale ratio (1:50, 1:25), correct paper size, tiling across multiple pages for walls longer than one sheet. Needed for anyone using a printed elevation with a tape measure on installation day.
 - **One shared "approximate/unknown" indicator component, reused everywhere.** Plan view, wall elevation, 3D preview, and the checklist row all need to show dimension uncertainty — easy to implement inconsistently if each view treats it as a local concern. Build one visual language (badge/icon/outline treatment) and reuse it across all four surfaces.
-- **Metadata intake assists, layered in over time:** auto-fill from embedded EXIF/IPTC on upload where present (cheap, real win — some museum scans already carry artist/title); later, bulk metadata import from a spreadsheet matched by filename. The extensible `metadata` bag (§4.4) absorbs whatever custom columns an institution's spreadsheet happens to have without forcing a schema change.
+- **Metadata intake assists:** spreadsheet bulk metadata import matched by filename is now part of the import wizard, including review-time image matching and row selection. Auto-fill from embedded EXIF/IPTC on upload remains a future assist where present (cheap, real win — some museum scans already carry artist/title). The extensible `metadata` bag (§4.4) absorbs whatever custom columns an institution's spreadsheet happens to have without forcing a schema change.
 - **Room templates (maybe, later):** if curators reuse the same gallery across shows, saving a room as a reusable template avoids redrawing it. Not urgent; the `Floor`/`Room` split in §4.2 doesn't block adding this later.
 - **Library-wide export, not just per-project.** Since artwork now lives in a global library shared across projects (§4.1), a single project's `.sightlines` export doesn't capture an artwork sitting in the library but not yet added to any project's checklist. Add `exportAll()`/`importAll()` to the repository interface (§2) alongside the per-project versions — cheap to design in now, painful to retrofit once real libraries exist.
 - **PWA update mechanics.** No server to migrate everyone centrally — a browser tab can keep running stale cached app code via its service worker after a schema change ships. Plan an explicit "a new version is available — reload to update" prompt rather than silently swapping code under an open tab, and think through what happens if a migration runs while an old app version is still loaded.
@@ -416,20 +420,20 @@ Because layout is one serializable document mutated through defined actions, thi
 ### MVP 1 — Spatial editor + checklist core
 *No auth, no cloud, no export beyond project JSON.*
 
-MVP1 bundles a lot — geometry, artwork/checklist, snapping/collision/undo, and 3D. Sequencing it as three internal sub-phases keeps the "boring" data layer (schema, units, wall identity, import/export semantics) stable *before* Konva drag behavior gets layered on top, rather than debugging both at once:
+MVP1 bundles a lot — geometry, artwork/checklist, snapping/collision/undo, and 3D. Sequencing it as three internal sub-phases keeps the "boring" data layer (schema, units, wall identity, import/export semantics) stable *before* 2D drag behavior gets layered on top, rather than debugging both at once:
 
 **1A — Geometry spine.** Units parser/formatter (§5) · versioned project schema + Zod validation (§2) · repository interface (§2) · single-room footprint editing with vertex-ID-based wall identity (§4.2) · wall elevation view (empty, no artwork yet) · toggleable plan/elevation visual grid (§5.5/§8) · local save/load, JSON export/import. No images, no 3D yet — this phase is about the domain model and geometry transforms being correct and boring.
 
 **1B — Artwork placement.** Artwork library + project checklist membership (§4.1) · image intake + thumbnail/display tier generation (§4.5) · drag artwork onto wall, centerline auto-snap and optional grid snap (`resolveSnap`, §2/§5.5) · manual numeric placement · dimension-uncertainty indicator, consistent across views (§8) · undo/redo for placement actions, transaction-bounded (§7) · pointer-agnostic input from the start (§3.5), even before tablet visual polish exists.
 
-**1C — Professional layout behaviors.** Doors/windows/blocked zones + `validatePlacement` collision (§2) · multi-select, grouping, group drag, group-centerline snap · equal-distribution spacing · floor objects (plan view only) · simple derived 3D preview, orbit camera · checklist panel: thumbnail, core fields, sort.
+**1C — Professional layout behaviors.** Doors/windows/blocked zones + `validatePlacement` collision (§2) · multi-select, grouping, group drag, group-centerline snap · equal-distribution spacing · floor objects (plan view only) · simple derived 3D preview, orbit camera · checklist panel: thumbnail, core fields, sort. **Shipped.**
 
 ### MVP 2 — Room shape tools + multi-room flow
-- Polygon room drawing in Plan view: dedicated draw mode, click-to-place vertices, live segment preview, Enter/click-first-point to close
-- Polygon reshape mode: drag existing vertices, preserve closed rooms and wall identity, revalidate placements on changed walls, one undo entry per drag
-- Multi-room UI: place additional rooms in the shared floor coordinate space
-- Doorway connections between rooms (`connectsToWallId`) once irregular room creation/reshape semantics are clear
-- 3D camera sightlines through aligned doorways; render current room plus visible connected rooms before attempting whole-floor 3D rendering
+- **Shipped:** polygon room drawing in Plan view; polygon reshape with vertex drag, wall split/delete, wall-slide reshaping, closed-room validation, and one undo entry per committed gesture.
+- **Shipped:** free-standing partition walls as room-owned, double-sided placement surfaces, with schema v3 migration and 3D slab projection.
+- Multi-room UI polish: place and manage additional rooms in the shared floor coordinate space.
+- Paired door/window connections between rooms (`connectsToObjectId` on the opening objects; schema field exists, writers still pending).
+- 3D camera sightlines through aligned paired openings; render current room plus visible connected rooms before attempting whole-floor 3D rendering.
 
 ### MVP 3 — Project packages, sharing, polish
 - `.sightlines` export/import as a self-contained `SightlinesPackage` (§6) — embeds the artwork snapshot the project actually needs, not just references into the local library — including library-wide `exportAll()`/`importAll()` alongside per-project export (§8)
@@ -443,7 +447,7 @@ MVP1 bundles a lot — geometry, artwork/checklist, snapping/collision/undo, and
 ### MVP 4 — Tablet + professional workflow depth
 - **Responsive/touch-adapted layout for iPad** (§3.5): touch-sized handles, gesture disambiguation, bottom-sheet panels, on-screen shortcut equivalents, 3D validated on real tablet hardware
 - Dropbox-folder sync (PKCE + offline access, app-folder-scoped — §6)
-- EXIF/IPTC metadata auto-fill on upload; spreadsheet bulk metadata import matched by filename
+- EXIF/IPTC metadata auto-fill on upload
 - Full checklist metadata editing, all sort modes, drag-reorder in custom mode
 - Scale-accurate PDF wall elevation + floor plan export (true ratio, tiling)
 - Project packet export (cover page + checklist + plans + elevations + 3D views)
