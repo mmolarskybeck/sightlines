@@ -64,6 +64,9 @@ export function createOpeningPlacement(
 ): OpeningWallObject {
   const { widthMm, heightMm } = getDefaultOpeningSizeMm(kind);
 
+  // The object is structurally valid for either union member (connectsToObjectId
+  // is optional and absent at creation); the runtime `kind` variable is what the
+  // discriminated union can't statically narrow, so cast once here.
   return {
     id: crypto.randomUUID(),
     kind,
@@ -73,5 +76,5 @@ export function createOpeningPlacement(
     yMm: getDefaultOpeningCenterYMm(kind, heightMm, centerlineYMm),
     widthMm,
     heightMm
-  };
+  } as OpeningWallObject;
 }

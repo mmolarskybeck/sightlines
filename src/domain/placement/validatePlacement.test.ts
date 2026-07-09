@@ -32,6 +32,98 @@ describe("validateChangedWallPlacements", () => {
   });
 });
 
+describe("partition faces", () => {
+  function withPartition(project: Project): Project {
+    const placement = project.floor.rooms[0];
+    return {
+      ...project,
+      floor: {
+        rooms: [
+          {
+            ...placement,
+            room: {
+              ...placement.room,
+              freestandingWalls: [
+                {
+                  id: "room-main-partition-1",
+                  roomId: placement.room.id,
+                  name: "Partition 1",
+                  startXMm: feetToMm(5),
+                  startYMm: feetToMm(5),
+                  endXMm: feetToMm(15),
+                  endYMm: feetToMm(5),
+                  heightMm: feetToMm(12),
+                  thicknessMm: 100
+                }
+              ]
+            }
+          }
+        ]
+      }
+    };
+  }
+
+  it("validates bounds per face and never flags cross-face collision (back-to-back is fine)", () => {
+    const base = withPartition(createSampleProject());
+    const project: Project = {
+      ...base,
+      wallObjects: [
+        {
+          id: "art-a",
+          kind: "artwork",
+          artworkId: "art-a",
+          wallId: "room-main-partition-1#a",
+          xMm: feetToMm(5),
+          yMm: inchesToMm(57),
+          widthMm: feetToMm(2),
+          heightMm: feetToMm(2)
+        },
+        {
+          id: "art-b",
+          kind: "artwork",
+          artworkId: "art-b",
+          wallId: "room-main-partition-1#b",
+          xMm: feetToMm(5), // same x as art-a, opposite face
+          yMm: inchesToMm(57),
+          widthMm: feetToMm(2),
+          heightMm: feetToMm(2)
+        }
+      ]
+    };
+
+    const warnings = validateWallObjectPlacements(project, ["art-a", "art-b"]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("flags a face placement that runs off the partition's length", () => {
+    const base = withPartition(createSampleProject());
+    const project: Project = {
+      ...base,
+      wallObjects: [
+        {
+          id: "art-off",
+          kind: "artwork",
+          artworkId: "art-off",
+          wallId: "room-main-partition-1#a",
+          xMm: feetToMm(20), // partition is only ~10 ft long
+          yMm: inchesToMm(57),
+          widthMm: feetToMm(2),
+          heightMm: feetToMm(2)
+        }
+      ]
+    };
+
+    const warnings = validateWallObjectPlacements(project, ["art-off"]);
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        wallObjectId: "art-off",
+        wallId: "room-main-partition-1#a",
+        message: "Placement extends beyond the wall's length."
+      })
+    ]);
+  });
+});
+
 describe("validateWallObjectPlacements", () => {
   it("flags a specific wall object that is out of its wall's bounds", () => {
     const project = withSouthWallArtwork(createSampleProject());

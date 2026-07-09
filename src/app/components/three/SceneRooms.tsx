@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import type { Scene3d } from "../../../domain/geometry/scene3d";
 import { FloorObjectBox } from "./FloorObjectBox";
 import { FloorSurface } from "./FloorSurface";
+import { PartitionSlab } from "./PartitionSlab";
 import { useArtworkTextures } from "./useArtworkTextures";
 import { WallPanel } from "./WallPanel";
 
@@ -31,9 +32,12 @@ export function SceneRooms({
 }) {
   const assetIds = useMemo(
     () =>
-      scene.rooms.flatMap((room) =>
-        room.walls.flatMap((wall) => wall.artworks.map((artwork) => artwork.assetId))
-      ),
+      scene.rooms.flatMap((room) => [
+        ...room.walls.flatMap((wall) => wall.artworks.map((artwork) => artwork.assetId)),
+        ...room.freestandingWalls.flatMap((partition) =>
+          partition.faces.flatMap((face) => face.artworks.map((artwork) => artwork.assetId))
+        )
+      ]),
     [scene]
   );
   const texturesByAssetId = useArtworkTextures(assetIds, getBlob);
@@ -60,6 +64,18 @@ export function SceneRooms({
               isSelected={wall.wallId === selectedWallId}
               selectedObjectIds={selectedObjectIds}
               selectedArtworkId={selectedArtworkId}
+              onSelectWall={onSelectWall}
+              onSelectObject={onSelectObject}
+            />
+          ))}
+          {room.freestandingWalls.map((partition) => (
+            <PartitionSlab
+              key={partition.freestandingWallId}
+              partition={partition}
+              texturesByAssetId={texturesByAssetId}
+              selectedObjectIds={selectedObjectIds}
+              selectedArtworkId={selectedArtworkId}
+              selectedWallId={selectedWallId}
               onSelectWall={onSelectWall}
               onSelectObject={onSelectObject}
             />

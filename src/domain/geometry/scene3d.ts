@@ -5,6 +5,7 @@ import type {
   RoomPlacement,
   WallObject
 } from "../project";
+import { getFreestandingFaces } from "./freestandingWalls";
 import { getWallsWithGeometry } from "./walls";
 
 // Pure derivation: Project -> a serializable 3D scene description. NO three.js
@@ -88,10 +89,20 @@ export type WallPanel3d = {
   blockedZones: Rect3d[];
 };
 
+// A partition slab (spec §7.1): two single-sided face panels (reusing
+// WallPanel3d, so the render layer needs no new mesh logic) plus a cap outline
+// the render layer thickens into top + 2 end caps so the slab reads solid.
+export type FreestandingWall3d = {
+  freestandingWallId: string;
+  faces: [WallPanel3d, WallPanel3d];
+  capOutline: { start: Vec2; end: Vec2; thicknessMm: number; heightMm: number };
+};
+
 export type Room3d = {
   roomId: string;
   floorPolygon: Vec2[]; // floor-space, wound counter-clockwise
   walls: WallPanel3d[];
+  freestandingWalls: FreestandingWall3d[];
 };
 
 export type Scene3d = {
@@ -186,82 +197,142 @@ function deriveRoom(
     const toPanelLocalX = (xMm: number) =>
       isCounterClockwise ? xMm : lengthMm - xMm;
 
-    const objects = wallObjectsByWallId.get(wall.id) ?? [];
-    const artworks: WallArtwork3d[] = [];
-    const blockedZones: Rect3d[] = [];
-    const holes: Hole3d[] = [];
-    for (const object of objects) {
-      if (object.kind === "artwork") {
-        const artwork = artworksById.get(object.artworkId);
-        artworks.push({
-          objectId: object.id,
-          artworkId: object.artworkId,
-          assetId: artwork?.assetId,
-          status: artwork?.dimensions.status,
-          xMm: toPanelLocalX(object.xMm),
-          yMm: object.yMm,
-          widthMm: object.widthMm,
-          heightMm: object.heightMm
-        });
-      } else if (object.kind === "blocked-zone") {
-        const centerX = toPanelLocalX(object.xMm);
-        blockedZones.push({
-          xMinMm: centerX - object.widthMm / 2,
-          xMaxMm: centerX + object.widthMm / 2,
-          yMinMm: object.yMm - object.heightMm / 2,
-          yMaxMm: object.yMm + object.heightMm / 2
-        });
-      } else {
-        // Door/window -> cutout. Doors run floor-to-top regardless of the
-        // stored center (spec §5.1); windows keep their floating extent. The
-        // render layer punches these through the wall verbatim — this is the
-        // one place hole coordinate math lives.
-        const centerX = toPanelLocalX(object.xMm);
-        const rawXMin = centerX - object.widthMm / 2;
-        const rawXMax = centerX + object.widthMm / 2;
-        const rawYMin = object.kind === "door" ? 0 : object.yMm - object.heightMm / 2;
-        const rawYMax = object.yMm + object.heightMm / 2;
-
-        const xMinMm = Math.max(rawXMin, 0);
-        const xMaxMm = Math.min(rawXMax, lengthMm);
-        const yMinMm = Math.max(rawYMin, 0);
-        const yMaxMm = Math.min(rawYMax, wall.heightMm);
-
-        // A hole clamped to nothing (entirely off the wall) would be a
-        // degenerate Shape hole — drop it rather than break triangulation.
-        if (xMinMm >= xMaxMm || yMinMm >= yMaxMm) continue;
-
-        holes.push({
-          kind: object.kind,
-          xMinMm,
-          xMaxMm,
-          yMinMm,
-          yMaxMm,
-          clamped:
-            xMinMm !== rawXMin ||
-            xMaxMm !== rawXMax ||
-            yMinMm !== rawYMin ||
-            yMaxMm !== rawYMax
-        });
-      }
-    }
+    const contents = derivePanelContents(
+      wallObjectsByWallId.get(wall.id) ?? [],
+      lengthMm,
+      wall.heightMm,
+      toPanelLocalX,
+      artworksById,
+      true
+    );
 
     return {
       wallId: wall.id,
       start: oriented.start,
       end: oriented.end,
       heightMm: wall.heightMm,
-      holes,
-      artworks,
-      blockedZones
+      ...contents
+    };
+  });
+
+  // Partition faces (spec §7.1). Each face keeps its DERIVED start→end (its
+  // outward normal already points away from the slab, independent of room
+  // winding), so no isCounterClockwise swap and panel-local x = object.xMm.
+  // No holes in v1 (openings on partitions are disallowed, §2); blocked zones
+  // and artworks are allowed. The centerline (unoffset) drives the cap outline.
+  const faceById = new Map(getFreestandingFaces(room).map((face) => [face.id, face]));
+  const freestandingWalls: FreestandingWall3d[] = room.freestandingWalls.map((partition) => {
+    const faces = (["a", "b"] as const).map((side) => {
+      const face = faceById.get(`${partition.id}#${side}`)!;
+      const start = transformPoint(face.start, placement);
+      const end = transformPoint(face.end, placement);
+      const lengthMm = Math.hypot(end.xMm - start.xMm, end.yMm - start.yMm);
+      const contents = derivePanelContents(
+        wallObjectsByWallId.get(face.id) ?? [],
+        lengthMm,
+        face.heightMm,
+        (xMm) => xMm,
+        artworksById,
+        false
+      );
+      return {
+        wallId: face.id,
+        start,
+        end,
+        heightMm: face.heightMm,
+        ...contents
+      };
+    }) as [WallPanel3d, WallPanel3d];
+
+    return {
+      freestandingWallId: partition.id,
+      faces,
+      capOutline: {
+        start: transformPoint({ xMm: partition.startXMm, yMm: partition.startYMm }, placement),
+        end: transformPoint({ xMm: partition.endXMm, yMm: partition.endYMm }, placement),
+        thicknessMm: partition.thicknessMm,
+        heightMm: partition.heightMm
+      }
     };
   });
 
   return {
     roomId: placement.roomId,
     floorPolygon,
-    walls
+    walls,
+    freestandingWalls
   };
+}
+
+// The wall-local artworks/blockedZones/holes for one panel. Shared by perimeter
+// walls (which may punch door/window holes) and partition faces (allowHoles
+// false — openings on partitions are disallowed in v1, spec §2).
+function derivePanelContents(
+  objects: WallObject[],
+  lengthMm: number,
+  heightMm: number,
+  toLocalX: (xMm: number) => number,
+  artworksById: ReadonlyMap<string, Artwork>,
+  allowHoles: boolean
+): { holes: Hole3d[]; artworks: WallArtwork3d[]; blockedZones: Rect3d[] } {
+  const artworks: WallArtwork3d[] = [];
+  const blockedZones: Rect3d[] = [];
+  const holes: Hole3d[] = [];
+  for (const object of objects) {
+    if (object.kind === "artwork") {
+      const artwork = artworksById.get(object.artworkId);
+      artworks.push({
+        objectId: object.id,
+        artworkId: object.artworkId,
+        assetId: artwork?.assetId,
+        status: artwork?.dimensions.status,
+        xMm: toLocalX(object.xMm),
+        yMm: object.yMm,
+        widthMm: object.widthMm,
+        heightMm: object.heightMm
+      });
+    } else if (object.kind === "blocked-zone") {
+      const centerX = toLocalX(object.xMm);
+      blockedZones.push({
+        xMinMm: centerX - object.widthMm / 2,
+        xMaxMm: centerX + object.widthMm / 2,
+        yMinMm: object.yMm - object.heightMm / 2,
+        yMaxMm: object.yMm + object.heightMm / 2
+      });
+    } else if (allowHoles) {
+      // Door/window -> cutout. Doors run floor-to-top regardless of the stored
+      // center (spec §5.1); windows keep their floating extent. The render layer
+      // punches these through the wall verbatim.
+      const centerX = toLocalX(object.xMm);
+      const rawXMin = centerX - object.widthMm / 2;
+      const rawXMax = centerX + object.widthMm / 2;
+      const rawYMin = object.kind === "door" ? 0 : object.yMm - object.heightMm / 2;
+      const rawYMax = object.yMm + object.heightMm / 2;
+
+      const xMinMm = Math.max(rawXMin, 0);
+      const xMaxMm = Math.min(rawXMax, lengthMm);
+      const yMinMm = Math.max(rawYMin, 0);
+      const yMaxMm = Math.min(rawYMax, heightMm);
+
+      // A hole clamped to nothing (entirely off the wall) would be a degenerate
+      // Shape hole — drop it rather than break triangulation.
+      if (xMinMm >= xMaxMm || yMinMm >= yMaxMm) continue;
+
+      holes.push({
+        kind: object.kind,
+        xMinMm,
+        xMaxMm,
+        yMinMm,
+        yMaxMm,
+        clamped:
+          xMinMm !== rawXMin ||
+          xMaxMm !== rawXMax ||
+          yMinMm !== rawYMin ||
+          yMaxMm !== rawYMax
+      });
+    }
+  }
+  return { holes, artworks, blockedZones };
 }
 
 // Room-local (x, y) -> floor-space (x, y): rotate about the room origin by

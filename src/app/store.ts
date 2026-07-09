@@ -6,6 +6,18 @@ import { createNextPolygonRoom, createNextRectangleRoom } from "../domain/geomet
 import type { Point } from "../domain/geometry/polygon";
 import { resizeWallPreservingAngles, type ResizeAnchor } from "../domain/geometry/editRoom";
 import {
+  createFreestandingWall,
+  faceWallIdsOf,
+  parseFaceWallId,
+  moveFreestandingEndpoint as moveFreestandingEndpointEdit,
+  moveFreestandingWall as moveFreestandingWallEdit,
+  roomIdContainingPoint,
+  rotateFreestandingWall as rotateFreestandingWallEdit,
+  setFreestandingHeight,
+  setFreestandingLength,
+  setFreestandingThickness
+} from "../domain/geometry/freestandingWalls";
+import {
   deleteRoomVertex as deleteRoomVertexEdit,
   moveRoomVertex as moveRoomVertexEdit,
   splitWall as splitWallEdit
@@ -68,6 +80,7 @@ import {
 } from "./store/arrangeSlice";
 export type { ArrangeSession } from "./store/arrangeSlice";
 import {
+  freestandingWallIdOf,
   NO_SELECTION,
   objectIdsOf,
   selectionWrite,
@@ -76,6 +89,7 @@ import {
 export {
   objectIdsOf,
   roomIdOf,
+  freestandingWallIdOf,
   getSelectedArtworkId,
   getSelectedOpeningId
 } from "./store/selectionSlice";
@@ -146,6 +160,8 @@ export type AppState = ArrangeSliceState &
   selectArtwork: (artworkId: string) => void;
   selectOpening: (wallObjectId: string) => void;
   selectRoom: (roomId: string) => void;
+  selectFreestandingWall: (wallId: string) => void;
+  viewFreestandingFace: (faceWallId: string) => void;
   selectObject: (id: string, opts?: { additive?: boolean }) => void;
   setObjectSelection: (ids: string[]) => void;
   clearObjectSelection: () => void;
@@ -155,6 +171,22 @@ export type AppState = ArrangeSliceState &
   setUnit: (unit: DisplayUnit) => Promise<void>;
   addRectangleRoom: () => Promise<void>;
   addPolygonRoom: (pointsFloorMm: Point[]) => Promise<void>;
+  addFreestandingWall: (startFloorMm: Point, endFloorMm: Point) => Promise<void>;
+  moveFreestandingWall: (wallId: string, deltaFloorMm: Point) => Promise<void>;
+  moveFreestandingWallEndpoint: (
+    wallId: string,
+    end: "start" | "end",
+    nextFloorMm: Point
+  ) => Promise<void>;
+  rotateFreestandingWall: (wallId: string, angleDeg: number) => Promise<void>;
+  setFreestandingWallThickness: (wallId: string, thicknessMm: number) => Promise<void>;
+  setFreestandingWallLength: (
+    wallId: string,
+    lengthMm: number,
+    anchor?: "start" | "end"
+  ) => Promise<void>;
+  setFreestandingWallHeight: (wallId: string, heightMm: number) => Promise<void>;
+  deleteFreestandingWall: (wallId: string) => Promise<void>;
   resizeRoomHeight: (roomId: string, heightMm: number) => Promise<void>;
   resizeWall: (wallId: string, lengthMm: number, anchor?: ResizeAnchor) => Promise<void>;
   resizeSelectedWall: (lengthMm: number) => Promise<void>;
@@ -527,6 +559,35 @@ export function createAppStore(deps: AppStoreDeps) {
         set(selectionWrite(get().project, { kind: "room", roomId }, null));
       },
 
+      // Selecting a partition (by its CENTERLINE id) drives the partition
+      // inspector's move/rotate/resize. Wall context persists so the Side A/B
+      // buttons (viewFreestandingFace) can hand a face to the elevation.
+      selectFreestandingWall(wallId) {
+        autoAcceptArrangeSession();
+        const project = get().project;
+        if (!project) return;
+        const exists = project.floor.rooms.some((placement) =>
+          placement.room.freestandingWalls.some((wall) => wall.id === wallId)
+        );
+        if (!exists) return;
+        set(
+          selectionWrite(project, { kind: "freestandingWall", wallId }, get().wallContextId)
+        );
+      },
+
+      // "View side A / side B": point the sidebar/elevation at a partition face
+      // (spec §6.5). Keeps the partition selected so its inspector stays up, and
+      // jumps to elevation so the chosen face is what's shown.
+      viewFreestandingFace(faceWallId) {
+        autoAcceptArrangeSession();
+        const project = get().project;
+        if (!project) return;
+        set({
+          ...selectionWrite(project, get().selection, faceWallId),
+          viewMode: "elevation"
+        });
+      },
+
       // Placement multi-select: id must be a live wallObject/floorObject id,
       // else the click is a no-op rather than selecting nothing (docs/
       // plan.md's plan/elevation views only ever call this with an id they
@@ -624,6 +685,13 @@ export function createAppStore(deps: AppStoreDeps) {
         const deletedWallIds = new Set(
           roomPlacement.room.walls.map((wall) => wall.id)
         );
+        // Objects also hang on the room's partition faces — those ids join the
+        // deleted set so the cascade prunes them too (spec §6.5).
+        const deletedFaceIds = new Set(
+          roomPlacement.room.freestandingWalls.flatMap((partition) =>
+            faceWallIdsOf(partition.id)
+          )
+        );
         const nextRooms = project.floor.rooms.filter(
           (placement) => placement.roomId !== roomId
         );
@@ -657,12 +725,24 @@ export function createAppStore(deps: AppStoreDeps) {
             ? NO_SELECTION
             : current;
 
+        const survivingWallObjects = project.wallObjects.filter(
+          (wallObject) =>
+            !deletedWallIds.has(wallObject.wallId) && !deletedFaceIds.has(wallObject.wallId)
+        );
+        const removedObjectIds = new Set(
+          project.wallObjects
+            .filter(
+              (wallObject) =>
+                deletedWallIds.has(wallObject.wallId) || deletedFaceIds.has(wallObject.wallId)
+            )
+            .map((wallObject) => wallObject.id)
+        );
         const nextProject: Project = {
           ...project,
           floor: { rooms: nextRooms },
-          wallObjects: project.wallObjects.filter(
-            (wallObject) => !deletedWallIds.has(wallObject.wallId)
-          )
+          // Clear any surviving partner's connectsToObjectId that pointed at a
+          // removed opening, so no dangling pairing ref persists.
+          wallObjects: clearOpeningPartners(survivingWallObjects, removedObjectIds)
         };
 
         await applyEdit(
@@ -753,6 +833,213 @@ export function createAppStore(deps: AppStoreDeps) {
         });
       },
 
+      async addFreestandingWall(startFloorMm, endFloorMm) {
+        const project = get().project;
+        if (!project) return;
+
+        // Room assignment by the segment midpoint (spec §6.4). Off-room drags
+        // (no containing room) are refused calmly rather than corrupting state.
+        const midpoint = {
+          xMm: (startFloorMm.xMm + endFloorMm.xMm) / 2,
+          yMm: (startFloorMm.yMm + endFloorMm.yMm) / 2
+        };
+        const roomId = roomIdContainingPoint(project, midpoint);
+        if (!roomId) {
+          set({ error: "Draw a partition inside a room." });
+          return;
+        }
+
+        let result;
+        try {
+          result = createFreestandingWall(project, roomId, startFloorMm, endFloorMm);
+        } catch (error) {
+          set({
+            error: `Could not add that partition (${
+              error instanceof Error ? error.message : "invalid endpoints."
+            }).`
+          });
+          return;
+        }
+
+        await applyEdit("Add partition", () => result.project, {
+          ...selectionWrite(
+            result.project,
+            { kind: "freestandingWall", wallId: result.wallId },
+            get().wallContextId
+          ),
+          viewMode: "plan"
+        });
+      },
+
+      async moveFreestandingWall(wallId, deltaFloorMm) {
+        const project = get().project;
+        if (!project) return;
+        if (deltaFloorMm.xMm === 0 && deltaFloorMm.yMm === 0) return;
+
+        const result = moveFreestandingWallEdit(project, wallId, deltaFloorMm);
+        const placementWarnings = validateChangedWallPlacements(
+          result.project,
+          result.changedWallIds
+        );
+        await applyEdit("Move partition", () => result.project, { placementWarnings });
+      },
+
+      async moveFreestandingWallEndpoint(wallId, end, nextFloorMm) {
+        const project = get().project;
+        if (!project) return;
+
+        let result;
+        try {
+          result = moveFreestandingEndpointEdit(project, wallId, end, nextFloorMm);
+        } catch (error) {
+          set({
+            error: `Could not reshape that partition (${
+              error instanceof Error ? error.message : "invalid endpoint."
+            }).`
+          });
+          return;
+        }
+        const placementWarnings = validateChangedWallPlacements(
+          result.project,
+          result.changedWallIds
+        );
+        await applyEdit("Reshape partition", () => result.project, { placementWarnings });
+      },
+
+      async rotateFreestandingWall(wallId, angleDeg) {
+        const project = get().project;
+        if (!project) return;
+
+        const result = rotateFreestandingWallEdit(project, wallId, angleDeg);
+        const placementWarnings = validateChangedWallPlacements(
+          result.project,
+          result.changedWallIds
+        );
+        await applyEdit("Rotate partition", () => result.project, { placementWarnings });
+      },
+
+      async setFreestandingWallThickness(wallId, thicknessMm) {
+        const project = get().project;
+        if (!project) return;
+
+        let result;
+        try {
+          result = setFreestandingThickness(project, wallId, thicknessMm);
+        } catch (error) {
+          set({
+            error: `Could not resize that partition (${
+              error instanceof Error ? error.message : "invalid thickness."
+            }).`
+          });
+          return;
+        }
+        await applyEdit("Resize partition", () => result.project);
+      },
+
+      async setFreestandingWallLength(wallId, lengthMm, anchor = "start") {
+        const project = get().project;
+        if (!project) return;
+
+        let result;
+        try {
+          result = setFreestandingLength(project, wallId, lengthMm, anchor);
+        } catch (error) {
+          set({
+            error: `Could not resize that partition (${
+              error instanceof Error ? error.message : "invalid length."
+            }).`
+          });
+          return;
+        }
+        const placementWarnings = validateChangedWallPlacements(
+          result.project,
+          result.changedWallIds
+        );
+        await applyEdit("Resize partition", () => result.project, { placementWarnings });
+      },
+
+      async setFreestandingWallHeight(wallId, heightMm) {
+        const project = get().project;
+        if (!project) return;
+
+        let result;
+        try {
+          result = setFreestandingHeight(project, wallId, heightMm);
+        } catch (error) {
+          set({
+            error: `Could not resize that partition (${
+              error instanceof Error ? error.message : "invalid height."
+            }).`
+          });
+          return;
+        }
+        const placementWarnings = validateChangedWallPlacements(
+          result.project,
+          result.changedWallIds
+        );
+        await applyEdit("Resize partition", () => result.project, { placementWarnings });
+      },
+
+      async deleteFreestandingWall(wallId) {
+        const project = get().project;
+        if (!project) return;
+
+        const placement = project.floor.rooms.find((candidate) =>
+          candidate.room.freestandingWalls.some((wall) => wall.id === wallId)
+        );
+        if (!placement) return;
+
+        // Cascade (spec §6.5): drop both faces' wall objects, then clear any
+        // surviving partner's connectsToObjectId pointing at a deleted opening,
+        // all in one commit so no dangling ref ever persists.
+        const faceIds = new Set(faceWallIdsOf(wallId));
+        const deletedObjectIds = new Set(
+          project.wallObjects.filter((object) => faceIds.has(object.wallId)).map((o) => o.id)
+        );
+        const nextWallObjects = clearOpeningPartners(
+          project.wallObjects.filter((object) => !deletedObjectIds.has(object.id)),
+          deletedObjectIds
+        );
+
+        const nextProject: Project = {
+          ...project,
+          floor: {
+            rooms: project.floor.rooms.map((candidate) =>
+              candidate.roomId === placement.roomId
+                ? {
+                    ...candidate,
+                    room: {
+                      ...candidate.room,
+                      freestandingWalls: candidate.room.freestandingWalls.filter(
+                        (wall) => wall.id !== wallId
+                      )
+                    }
+                  }
+                : candidate
+            )
+          },
+          wallObjects: nextWallObjects
+        };
+
+        // Clear selection if it pointed at the deleted partition.
+        const current = get().selection;
+        const nextSelection: Selection =
+          current.kind === "freestandingWall" && current.wallId === wallId
+            ? NO_SELECTION
+            : current;
+        // If the wall context pointed at a face of the deleted partition, drop
+        // it to a surviving wall.
+        const wallContextId = get().wallContextId;
+        const nextWallContextId =
+          wallContextId && faceIds.has(wallContextId)
+            ? (getFirstWall(nextProject)?.id ?? null)
+            : wallContextId;
+
+        await applyEdit("Delete partition", () => nextProject, {
+          ...selectionWrite(nextProject, nextSelection, nextWallContextId)
+        });
+      },
+
       async resizeRoomHeight(roomId, heightMm) {
         const project = get().project;
         if (!project) return;
@@ -771,7 +1058,18 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
-        const changedWallIds = roomPlacement.room.walls.map((wall) => wall.id);
+        // Partitions get FOLLOW-THE-DEFAULT semantics (spec §5.2): a partition
+        // still at the previous room height is an untouched default and follows
+        // the room; one deliberately built shorter keeps its own height. Their
+        // affected face ids join changedWallIds so placements revalidate.
+        const previousRoomHeightMm = roomPlacement.room.heightMm;
+        const changedWallIds = [...roomPlacement.room.walls.map((wall) => wall.id)];
+        const nextFreestandingWalls = roomPlacement.room.freestandingWalls.map((partition) => {
+          if (partition.heightMm !== previousRoomHeightMm) return partition;
+          changedWallIds.push(...faceWallIdsOf(partition.id));
+          return { ...partition, heightMm };
+        });
+
         const nextProject: Project = {
           ...project,
           floor: {
@@ -785,7 +1083,8 @@ export function createAppStore(deps: AppStoreDeps) {
                       walls: placement.room.walls.map((wall) => ({
                         ...wall,
                         heightMm
-                      }))
+                      })),
+                      freestandingWalls: nextFreestandingWalls
                     }
                   }
                 : placement
@@ -1551,6 +1850,13 @@ export function createAppStore(deps: AppStoreDeps) {
         const wall = getProjectWalls(project).find((candidate) => candidate.id === wallId);
         if (!wall) return;
 
+        // Doors/windows can't be placed on a partition face in v1 (spec §2/§6.1);
+        // blocked zones can. This guard backs up the plan tool's candidate filter.
+        if (kind !== "blocked-zone" && parseFaceWallId(wallId) !== null) {
+          set({ error: "Doors and windows can't be placed on a partition." });
+          return;
+        }
+
         // Centered on the wall by default — the curator adjusts from there,
         // same "place first, refine after" spirit as artwork placement.
         // buildOpeningOnWall is shared with placeOpeningFromPlan, whose only
@@ -1683,6 +1989,12 @@ export function createAppStore(deps: AppStoreDeps) {
         // rather than the wall center.
         const wall = getProjectWalls(project).find((candidate) => candidate.id === placement.wallId);
         if (!wall) return;
+
+        // Doors/windows can't land on a partition face in v1 (spec §2/§6.1).
+        if (kind !== "blocked-zone" && parseFaceWallId(placement.wallId) !== null) {
+          set({ error: "Doors and windows can't be placed on a partition." });
+          return;
+        }
 
         const opening = buildOpeningOnWall(project, wall, kind, placement.xMm);
         const nextWallObjects = [...project.wallObjects, opening];
@@ -2173,6 +2485,29 @@ function buildOpeningOnWall(
 ): OpeningWallObject {
   const centerlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
   return createOpeningPlacement(kind, wall.id, xMm, centerlineYMm);
+}
+
+// After openings are deleted (directly or via a wall/room/partition cascade),
+// clear any surviving door/window's connectsToObjectId that pointed at one of
+// them, so no dangling pairing ref ever persists (spec §5.5). No writers set
+// connectsToObjectId until slice 4, so today this is a no-op in practice — but
+// the cascade is here so the invariant holds the moment pairing ships.
+function clearOpeningPartners(
+  wallObjects: WallObject[],
+  deletedIds: Set<string>
+): WallObject[] {
+  if (deletedIds.size === 0) return wallObjects;
+  return wallObjects.map((wallObject) => {
+    if (
+      (wallObject.kind === "door" || wallObject.kind === "window") &&
+      wallObject.connectsToObjectId !== undefined &&
+      deletedIds.has(wallObject.connectsToObjectId)
+    ) {
+      const { connectsToObjectId: _cleared, ...rest } = wallObject;
+      return rest;
+    }
+    return wallObject;
+  });
 }
 
 function formatZodIssue(error: z.ZodError): string {

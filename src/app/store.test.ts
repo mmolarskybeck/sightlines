@@ -31,6 +31,7 @@ import type { AppStoreDeps } from "./store";
 import {
   createAppStore,
   exportProjectJson,
+  freestandingWallIdOf,
   getSelectedArtworkId,
   getSelectedOpeningId,
   getSelectedWall,
@@ -122,6 +123,150 @@ describe("app store", () => {
       room.walls.map(() => nextHeightMm)
     );
     expect(store.getState().undoStack.at(-1)?.label).toBe("Resize room height");
+  });
+
+  it("addFreestandingWall assigns the room by midpoint and selects the partition", async () => {
+    await store
+      .getState()
+      .addFreestandingWall({ xMm: 3000, yMm: 2700 }, { xMm: 5000, yMm: 2700 });
+
+    const state = store.getState();
+    const partitions = state.project!.floor.rooms[0].room.freestandingWalls;
+    expect(partitions).toHaveLength(1);
+    expect(partitions[0].roomId).toBe("room-main");
+    expect(freestandingWallIdOf(state.selection)).toBe(partitions[0].id);
+    expect(state.undoStack.at(-1)?.label).toBe("Add partition");
+
+    await store.getState().undo();
+    expect(store.getState().project!.floor.rooms[0].room.freestandingWalls).toHaveLength(0);
+  });
+
+  it("addFreestandingWall refuses a partition drawn outside every room", async () => {
+    await store
+      .getState()
+      .addFreestandingWall({ xMm: 90_000, yMm: 90_000 }, { xMm: 92_000, yMm: 90_000 });
+    expect(store.getState().project!.floor.rooms[0].room.freestandingWalls).toHaveLength(0);
+    expect(store.getState().error).toMatch(/inside a room/i);
+  });
+
+  it("deleteFreestandingWall removes both faces' objects in one undo step", async () => {
+    await store
+      .getState()
+      .addFreestandingWall({ xMm: 3000, yMm: 2700 }, { xMm: 5000, yMm: 2700 });
+    const partitionId = store.getState().project!.floor.rooms[0].room.freestandingWalls[0].id;
+
+    // Hang a work on each face at the same x — different face ids, so no warning.
+    const project = store.getState().project!;
+    store.setState({
+      project: {
+        ...project,
+        wallObjects: [
+          {
+            id: "art-a",
+            kind: "artwork",
+            artworkId: "art-a",
+            wallId: `${partitionId}#a`,
+            xMm: 500,
+            yMm: 1450,
+            widthMm: 600,
+            heightMm: 800
+          },
+          {
+            id: "art-b",
+            kind: "artwork",
+            artworkId: "art-b",
+            wallId: `${partitionId}#b`,
+            xMm: 500,
+            yMm: 1450,
+            widthMm: 600,
+            heightMm: 800
+          }
+        ]
+      }
+    });
+
+    const undoBefore = store.getState().undoStack.length;
+    await store.getState().deleteFreestandingWall(partitionId);
+
+    expect(store.getState().project!.wallObjects).toHaveLength(0);
+    expect(store.getState().project!.floor.rooms[0].room.freestandingWalls).toHaveLength(0);
+    expect(store.getState().undoStack.length).toBe(undoBefore + 1);
+
+    await store.getState().undo();
+    expect(store.getState().project!.wallObjects).toHaveLength(2);
+    expect(store.getState().project!.floor.rooms[0].room.freestandingWalls).toHaveLength(1);
+  });
+
+  it("deleteRoom cascades to a partition's face objects", async () => {
+    await store
+      .getState()
+      .addFreestandingWall({ xMm: 3000, yMm: 2700 }, { xMm: 5000, yMm: 2700 });
+    const partitionId = store.getState().project!.floor.rooms[0].room.freestandingWalls[0].id;
+    const project = store.getState().project!;
+    store.setState({
+      project: {
+        ...project,
+        wallObjects: [
+          {
+            id: "art-a",
+            kind: "artwork",
+            artworkId: "art-a",
+            wallId: `${partitionId}#a`,
+            xMm: 500,
+            yMm: 1450,
+            widthMm: 600,
+            heightMm: 800
+          }
+        ]
+      }
+    });
+
+    await store.getState().deleteRoom("room-main");
+    expect(store.getState().project!.floor.rooms).toHaveLength(0);
+    expect(store.getState().project!.wallObjects).toHaveLength(0);
+  });
+
+  it("refuses a door on a partition face but allows a blocked zone", async () => {
+    await store
+      .getState()
+      .addFreestandingWall({ xMm: 3000, yMm: 2700 }, { xMm: 5000, yMm: 2700 });
+    const partitionId = store.getState().project!.floor.rooms[0].room.freestandingWalls[0].id;
+    const faceId = `${partitionId}#a`;
+
+    await store.getState().addOpening(faceId, "door");
+    expect(store.getState().project!.wallObjects).toHaveLength(0);
+    expect(store.getState().error).toMatch(/can't be placed on a partition/i);
+
+    await store.getState().addOpening(faceId, "blocked-zone");
+    const objects = store.getState().project!.wallObjects;
+    expect(objects).toHaveLength(1);
+    expect(objects[0].kind).toBe("blocked-zone");
+    expect(objects[0].wallId).toBe(faceId);
+  });
+
+  it("resizeRoomHeight carries a default-height partition but leaves an overridden one alone", async () => {
+    await store
+      .getState()
+      .addFreestandingWall({ xMm: 3000, yMm: 2700 }, { xMm: 5000, yMm: 2700 });
+    await store
+      .getState()
+      .addFreestandingWall({ xMm: 3000, yMm: 3500 }, { xMm: 5000, yMm: 3500 });
+    const room = () => store.getState().project!.floor.rooms[0].room;
+    const [defaultPartition, overriddenPartition] = room().freestandingWalls;
+    const previousRoomHeightMm = room().heightMm;
+
+    // Override the second partition's height to something shorter than ceiling.
+    await store.getState().setFreestandingWallHeight(overriddenPartition.id, 2000);
+    expect(defaultPartition.heightMm).toBe(previousRoomHeightMm);
+
+    const nextHeightMm = feetToMm(10);
+    await store.getState().resizeRoomHeight("room-main", nextHeightMm);
+
+    const partitions = room().freestandingWalls;
+    const followed = partitions.find((p) => p.id === defaultPartition.id)!;
+    const overridden = partitions.find((p) => p.id === overriddenPartition.id)!;
+    expect(followed.heightMm).toBeCloseTo(nextHeightMm); // followed the room
+    expect(overridden.heightMm).toBe(2000); // kept its explicit height
   });
 
   it("resizeRoomHeight surfaces placement warnings for objects above the new height", async () => {

@@ -39,7 +39,8 @@ import {
   type RoomPlacement,
   type WallObject
 } from "../../domain/project";
-import { isSimplePolygon, segmentsIntersect, type Point } from "../../domain/geometry/polygon";
+import { parseFaceWallId } from "../../domain/geometry/freestandingWalls";
+import { isPointInPolygon, isSimplePolygon, segmentsIntersect, type Point } from "../../domain/geometry/polygon";
 import { canMoveRoomVertex } from "../../domain/geometry/reshapeRoom";
 import { formatLength } from "../../domain/units/length";
 import { getGridSnapTargets } from "../../domain/snapping/gridSnapTargets";
@@ -98,6 +99,10 @@ const CLOSE_HANDLE_PX = 12;
 // zero-length wall — ignore the click, same floor the constructor rejects at.
 const MIN_DRAW_SPACING_MM = 10;
 const DRAW_EPS = 1e-6;
+// A partition centerline shorter than this (floor mm) reads as an accidental
+// click, not a drawn wall — the create drag ignores it (same floor the
+// constructor rejects at).
+const PARTITION_MIN_LENGTH_MM = 100;
 
 // Stable module-level reference so a caller that doesn't pass `getBlob`
 // doesn't retrigger useAssetImageUrls' effect on every render (same idiom as
@@ -269,6 +274,70 @@ function marqueeRectMm(marquee: MarqueeState): {
   };
 }
 
+// The in-progress partition (free-standing wall) draw — a single centerline
+// segment dragged inside a room, transient until release (no store write until
+// then, so undo removes the partition in one step). Floor-space mm.
+type PartitionDrawState = {
+  startMm: Vector2;
+  endMm: Vector2 | null;
+  invalid: boolean;
+};
+
+// A partition edit drag: a whole-body translation, or one endpoint re-drag
+// (resize/re-angle). Ref-mirrored, one commit on release, same discipline as
+// the vertex drag.
+type PartitionDragState = {
+  wallId: string;
+  mode: "move" | "start" | "end";
+  startPointerMm: Vector2;
+  startFloorMm: Vector2;
+  endFloorMm: Vector2;
+  previewStartFloorMm: Vector2;
+  previewEndFloorMm: Vector2;
+};
+
+// A partition's floor-space centerline (offset applied) plus the fields the
+// plan slab rect and labels need.
+type FloorPartition = {
+  wallId: string;
+  roomId: string;
+  startMm: Vector2;
+  endMm: Vector2;
+  thicknessMm: number;
+  name: string;
+};
+
+function getFloorPartitions(project: Project): FloorPartition[] {
+  return project.floor.rooms.flatMap((placement) =>
+    placement.room.freestandingWalls.map((wall) => ({
+      wallId: wall.id,
+      roomId: placement.roomId,
+      startMm: {
+        xMm: wall.startXMm + placement.offsetXMm,
+        yMm: wall.startYMm + placement.offsetYMm
+      },
+      endMm: { xMm: wall.endXMm + placement.offsetXMm, yMm: wall.endYMm + placement.offsetYMm },
+      thicknessMm: wall.thicknessMm,
+      name: wall.name
+    }))
+  );
+}
+
+// A partition's slab as a rotated plan rect (center + length × thickness +
+// angle), ready for an SVG <rect> with a rotate transform — same shape as
+// getWallObjectPlanRect.
+function partitionSlabRect(startMm: Vector2, endMm: Vector2, thicknessMm: number): PlanRect {
+  const dx = endMm.xMm - startMm.xMm;
+  const dy = endMm.yMm - startMm.yMm;
+  return {
+    centerXMm: (startMm.xMm + endMm.xMm) / 2,
+    centerYMm: (startMm.yMm + endMm.yMm) / 2,
+    widthMm: Math.hypot(dx, dy),
+    depthMm: thicknessMm,
+    angleDeg: (Math.atan2(dy, dx) * 180) / Math.PI
+  };
+}
+
 // World-space (offset-applied) vertex loop for a room's polygon — shared by
 // the floor fill, the floor hit target, and the selected-room outline/wash,
 // so all four always trace the exact same boundary.
@@ -288,6 +357,13 @@ export function PlanView({
   onMoveRoomVertex,
   onSplitWall,
   onDeleteRoomVertex,
+  partitionToolActive = false,
+  onPartitionToolChange,
+  onAddFreestandingWall,
+  selectedFreestandingWallId = null,
+  onSelectFreestandingWall,
+  onMoveFreestandingWall,
+  onMoveFreestandingWallEndpoint,
   artworksById,
   draggingArtworkId = null,
   getBlob,
@@ -349,6 +425,21 @@ export function PlanView({
   // Commits a vertex removal (merges its two walls). Absent/inert if the
   // stretch goal wasn't wired — the Delete/Backspace handler below no-ops.
   onDeleteRoomVertex?: (roomId: string, vertexId: string) => Promise<void>;
+  // Partition (free-standing wall) tool — armed alongside the other tools in
+  // App's toolbar, mutually exclusive with them. Drag draws the centerline;
+  // release commits via onAddFreestandingWall. Editing (select/move/re-angle)
+  // is always available, independent of the armed tool.
+  partitionToolActive?: boolean;
+  onPartitionToolChange?: (active: boolean) => void;
+  onAddFreestandingWall?: (startFloorMm: Point, endFloorMm: Point) => void;
+  selectedFreestandingWallId?: string | null;
+  onSelectFreestandingWall?: (wallId: string) => void;
+  onMoveFreestandingWall?: (wallId: string, deltaFloorMm: Point) => void;
+  onMoveFreestandingWallEndpoint?: (
+    wallId: string,
+    end: "start" | "end",
+    nextFloorMm: Point
+  ) => void;
   artworksById?: Map<string, Artwork>;
   // Which artwork the checklist is mid-drag, so a plan dragover can size its
   // ghost — HTML5 dragover can't read the payload, so App threads this the
@@ -477,6 +568,23 @@ export function PlanView({
   useEffect(() => {
     vertexDragRef.current = vertexDrag;
   }, [vertexDrag]);
+  // Partition create-drag and edit-drag — same ref-mirrored discipline as the
+  // other drag gestures (subscribed once per gesture; committed project can't
+  // change mid-drag since nothing commits until release).
+  const [partitionDraw, setPartitionDraw] = useState<PartitionDrawState | null>(null);
+  const partitionDrawRef = useRef<PartitionDrawState | null>(null);
+  useEffect(() => {
+    partitionDrawRef.current = partitionDraw;
+  }, [partitionDraw]);
+  const [partitionDrag, setPartitionDrag] = useState<PartitionDragState | null>(null);
+  const partitionDragRef = useRef<PartitionDragState | null>(null);
+  useEffect(() => {
+    partitionDragRef.current = partitionDrag;
+  }, [partitionDrag]);
+  useEffect(() => {
+    if (!partitionToolActive) setPartitionDraw(null);
+  }, [partitionToolActive]);
+
   const [selectedVertexId, setSelectedVertexId] = useState<string | null>(null);
   const selectedVertexIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -638,6 +746,17 @@ export function PlanView({
   // pointer/click handlers below), so there's no live-preview geometry to
   // reconcile here the way displayedProject does for rendering.
   const floorWallsForTool = useMemo(() => getFloorWalls(project.floor), [project.floor]);
+  // The door/window armed tools capture the nearest wall at any distance, so
+  // their candidate set excludes partition faces — openings on partitions are
+  // disallowed in v1 (spec §6.1). Blocked zones ARE allowed on faces, so they
+  // keep the full set. Object drags/group moves keep faces regardless.
+  const openingToolWalls = useMemo(
+    () =>
+      activeTool === "blocked-zone"
+        ? floorWallsForTool
+        : floorWallsForTool.filter((wall) => parseFaceWallId(wall.id) === null),
+    [floorWallsForTool, activeTool]
+  );
 
   const movingSize = useMemo(() => {
     if (!activeTool) return null;
@@ -689,7 +808,7 @@ export function PlanView({
     if (!pointerMm) return;
 
     const result = resolvePlanPlacement(pointerMm, {
-      walls: floorWallsForTool,
+      walls: openingToolWalls,
       wallObjects: project.wallObjects,
       movingSize,
       movingKind: activeTool,
@@ -780,6 +899,17 @@ export function PlanView({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [reshapeRoomId, onReshapeRoomChange, onDeleteRoomVertex]);
+
+  // Escape disarms the partition tool (mirrors the draw-mode handler), scoped
+  // to while it's armed so it never competes with App's global handlers.
+  useEffect(() => {
+    if (!partitionToolActive) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onPartitionToolChange?.(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [partitionToolActive, onPartitionToolChange]);
 
   // Snap a draw point: grid + axis-lock to the previous point's x/y (so
   // consecutive walls line up), with Shift forcing an exact H/V segment.
@@ -982,7 +1112,7 @@ export function PlanView({
     if (!pointerMm) return;
 
     const result = resolvePlanPlacement(pointerMm, {
-      walls: floorWallsForTool,
+      walls: openingToolWalls,
       wallObjects: project.wallObjects,
       movingSize,
       movingKind: activeTool,
@@ -1380,6 +1510,194 @@ export function PlanView({
     // mid-drag since nothing commits until release).
   }, [vertexDrag !== null, onMoveRoomVertex]);
 
+  // Is a floor-space point inside any room's polygon? Drives the partition
+  // draw's live validity (its midpoint must land in a room — the store refuses
+  // an off-room partition, spec §6.4) and turns the preview red when it won't.
+  function pointInAnyRoom(pointMm: Vector2): boolean {
+    return project.floor.rooms.some((placement) =>
+      isPointInPolygon(
+        pointMm,
+        placement.room.vertices.map((vertex) => ({
+          xMm: vertex.xMm + placement.offsetXMm,
+          yMm: vertex.yMm + placement.offsetYMm
+        }))
+      )
+    );
+  }
+
+  function partitionDrawInvalid(startMm: Vector2, endMm: Vector2): boolean {
+    const lengthMm = Math.hypot(endMm.xMm - startMm.xMm, endMm.yMm - startMm.yMm);
+    if (lengthMm < PARTITION_MIN_LENGTH_MM) return true;
+    const midpoint = {
+      xMm: (startMm.xMm + endMm.xMm) / 2,
+      yMm: (startMm.yMm + endMm.yMm) / 2
+    };
+    return !pointInAnyRoom(midpoint);
+  }
+
+  // Begin a partition centerline drag from the capture overlay (armed tool).
+  function beginPartitionDraw(event: ReactPointerEvent<SVGRectElement>) {
+    event.stopPropagation();
+    if (suppressNextToolClickRef.current) {
+      suppressNextToolClickRef.current = false;
+      return;
+    }
+    const startMm = toSvgMm(event.clientX, event.clientY);
+    if (!startMm) return;
+    const snapped = snapDrawPoint(startMm, null, event.shiftKey);
+    setPartitionDraw({ startMm: snapped, endMm: null, invalid: true });
+  }
+
+  useEffect(() => {
+    if (!partitionDraw) return;
+
+    function onPointerMove(event: PointerEvent) {
+      const current = partitionDrawRef.current;
+      if (!current) return;
+      const pointerMm = toSvgMm(event.clientX, event.clientY);
+      if (!pointerMm) return;
+      const endMm = snapDrawPoint(pointerMm, current.startMm, event.shiftKey);
+      setPartitionDraw((state) =>
+        state
+          ? { ...state, endMm, invalid: partitionDrawInvalid(state.startMm, endMm) }
+          : state
+      );
+    }
+
+    function onPointerUp() {
+      const current = partitionDrawRef.current;
+      setPartitionDraw(null);
+      onPartitionToolChange?.(false);
+      if (!current || !current.endMm || current.invalid) return;
+      onAddFreestandingWall?.(current.startMm, current.endMm);
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+  }, [partitionDraw !== null, onAddFreestandingWall, onPartitionToolChange]);
+
+  // Begin a partition edit drag: whole-body move, or one endpoint re-drag.
+  function beginPartitionDrag(
+    partition: FloorPartition,
+    mode: "move" | "start" | "end",
+    event: ReactPointerEvent<SVGElement>
+  ) {
+    event.stopPropagation();
+    const startPointerMm = toSvgMm(event.clientX, event.clientY);
+    if (!startPointerMm) return;
+    onSelectFreestandingWall?.(partition.wallId);
+    setPartitionDrag({
+      wallId: partition.wallId,
+      mode,
+      startPointerMm,
+      startFloorMm: partition.startMm,
+      endFloorMm: partition.endMm,
+      previewStartFloorMm: partition.startMm,
+      previewEndFloorMm: partition.endMm
+    });
+  }
+
+  useEffect(() => {
+    if (!partitionDrag) return;
+
+    function onPointerMove(event: PointerEvent) {
+      const current = partitionDragRef.current;
+      if (!current) return;
+      const pointerMm = toSvgMm(event.clientX, event.clientY);
+      if (!pointerMm) return;
+      const deltaMm = {
+        xMm: pointerMm.xMm - current.startPointerMm.xMm,
+        yMm: pointerMm.yMm - current.startPointerMm.yMm
+      };
+
+      if (current.mode === "move") {
+        const rawStart = {
+          xMm: current.startFloorMm.xMm + deltaMm.xMm,
+          yMm: current.startFloorMm.yMm + deltaMm.yMm
+        };
+        let snappedStart = rawStart;
+        if (snapToGrid) {
+          snappedStart = resolveSnap(rawStart, gridSnapTargets, {
+            thresholdMm: snapThresholdMm
+          }).point;
+        }
+        const appliedDelta = {
+          xMm: snappedStart.xMm - current.startFloorMm.xMm,
+          yMm: snappedStart.yMm - current.startFloorMm.yMm
+        };
+        setPartitionDrag((state) =>
+          state
+            ? {
+                ...state,
+                previewStartFloorMm: {
+                  xMm: state.startFloorMm.xMm + appliedDelta.xMm,
+                  yMm: state.startFloorMm.yMm + appliedDelta.yMm
+                },
+                previewEndFloorMm: {
+                  xMm: state.endFloorMm.xMm + appliedDelta.xMm,
+                  yMm: state.endFloorMm.yMm + appliedDelta.yMm
+                }
+              }
+            : state
+        );
+        return;
+      }
+
+      // Endpoint drag: the anchored end stays; the dragged end snaps (grid +
+      // axis-lock to the anchor, Shift forces H/V — same as the draw tool).
+      const anchor =
+        current.mode === "start" ? current.endFloorMm : current.startFloorMm;
+      const moved = snapDrawPoint(
+        { xMm: pointerMm.xMm, yMm: pointerMm.yMm },
+        anchor,
+        event.shiftKey
+      );
+      setPartitionDrag((state) =>
+        state
+          ? current.mode === "start"
+            ? { ...state, previewStartFloorMm: moved }
+            : { ...state, previewEndFloorMm: moved }
+          : state
+      );
+    }
+
+    function onPointerUp() {
+      const current = partitionDragRef.current;
+      setPartitionDrag(null);
+      if (!current) return;
+
+      if (current.mode === "move") {
+        const delta = {
+          xMm: current.previewStartFloorMm.xMm - current.startFloorMm.xMm,
+          yMm: current.previewStartFloorMm.yMm - current.startFloorMm.yMm
+        };
+        if (Math.hypot(delta.xMm, delta.yMm) < 0.5) return;
+        onMoveFreestandingWall?.(current.wallId, delta);
+        return;
+      }
+      const next =
+        current.mode === "start" ? current.previewStartFloorMm : current.previewEndFloorMm;
+      const original = current.mode === "start" ? current.startFloorMm : current.endFloorMm;
+      if (Math.hypot(next.xMm - original.xMm, next.yMm - original.yMm) < 0.5) return;
+      onMoveFreestandingWallEndpoint?.(current.wallId, current.mode, next);
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+  }, [partitionDrag !== null, onMoveFreestandingWall, onMoveFreestandingWallEndpoint]);
+
   useEffect(() => {
     if (!objectDrag) return;
 
@@ -1681,7 +1999,7 @@ export function PlanView({
     // Stay inert until App wires the multi-select handlers (same gate as
     // elevation). Never start over an in-flight gesture. Draw mode owns the
     // whole surface via its capture overlay, so a marquee must not start there.
-    if (activeTool || drawRoomActive) return;
+    if (activeTool || drawRoomActive || partitionToolActive) return;
     if (!onMarqueeSelect && !onClearSelection) return;
     if (drag || objectDrag || dropGhost || roomDrag) return;
 
@@ -1907,7 +2225,9 @@ export function PlanView({
         onFit={() => onViewportChange(FIT_VIEWPORT)}
       />
       <svg
-        className={activeTool || drawRoomActive ? "plan-svg tool-armed" : "plan-svg"}
+        className={
+          activeTool || drawRoomActive || partitionToolActive ? "plan-svg tool-armed" : "plan-svg"
+        }
         ref={svgRef}
         viewBox={viewBox}
         role="img"
@@ -2051,6 +2371,49 @@ export function PlanView({
                 event.stopPropagation();
                 onSelectRoom?.(placement.roomId);
                 onReshapeRoomChange?.(placement.roomId);
+              }}
+            />
+          );
+        })}
+        {/* Partition slabs — filled rects for each free-standing wall, painted
+            above the room-hit polygon so a slab click selects the PARTITION
+            (its centerline id), not the room. Rendered below placed objects so
+            art on the faces sits on top. The dragged slab shows its live
+            preview endpoints. */}
+        {getFloorPartitions(displayedProject).map((partition) => {
+          const isDragging = partitionDrag?.wallId === partition.wallId;
+          const startMm = isDragging ? partitionDrag.previewStartFloorMm : partition.startMm;
+          const endMm = isDragging ? partitionDrag.previewEndFloorMm : partition.endMm;
+          const rect = partitionSlabRect(startMm, endMm, partition.thicknessMm);
+          const isSelected = partition.wallId === selectedFreestandingWallId;
+          return (
+            <rect
+              key={partition.wallId}
+              x={rect.centerXMm - rect.widthMm / 2}
+              y={rect.centerYMm - rect.depthMm / 2}
+              width={rect.widthMm}
+              height={rect.depthMm}
+              transform={`rotate(${rect.angleDeg} ${rect.centerXMm} ${rect.centerYMm})`}
+              style={{
+                fill: "var(--ink)",
+                fillOpacity: isSelected ? 0.9 : 0.72,
+                stroke: isSelected ? "var(--selection)" : "transparent",
+                strokeWidth: 2,
+                cursor: partitionToolActive ? "crosshair" : "move",
+                vectorEffect: "non-scaling-stroke"
+              }}
+              onPointerDown={(event) => {
+                if (activeTool || drawRoomActive || partitionToolActive || reshapeRoomId) return;
+                beginPartitionDrag(partition, "move", event);
+              }}
+              onClick={(event) => {
+                if (activeTool || partitionToolActive) return;
+                event.stopPropagation();
+                if (suppressNextToolClickRef.current) {
+                  suppressNextToolClickRef.current = false;
+                  return;
+                }
+                onSelectFreestandingWall?.(partition.wallId);
               }}
             />
           );
@@ -2340,6 +2703,79 @@ export function PlanView({
             </g>
           );
         })()}
+        {/* Selected partition: A/B face labels and the two endpoint handles
+            (resize/re-angle), painted above placed objects so they stay
+            grabbable. The body itself is the move affordance (slab rect above). */}
+        {selectedFreestandingWallId && handleSizeMm > 0
+          ? (() => {
+              const partition = getFloorPartitions(displayedProject).find(
+                (candidate) => candidate.wallId === selectedFreestandingWallId
+              );
+              if (!partition) return null;
+              const isDragging = partitionDrag?.wallId === partition.wallId;
+              const startMm = isDragging ? partitionDrag.previewStartFloorMm : partition.startMm;
+              const endMm = isDragging ? partitionDrag.previewEndFloorMm : partition.endMm;
+              const dx = endMm.xMm - startMm.xMm;
+              const dy = endMm.yMm - startMm.yMm;
+              const len = Math.hypot(dx, dy) || 1;
+              const nx = -dy / len;
+              const ny = dx / len;
+              const midX = (startMm.xMm + endMm.xMm) / 2;
+              const midY = (startMm.yMm + endMm.yMm) / 2;
+              const labelOffsetMm = partition.thicknessMm / 2 + handleSizeMm * 1.6;
+              const handle = handleSizeMm;
+              const endpoints: { end: "start" | "end"; xMm: number; yMm: number }[] = [
+                { end: "start", xMm: startMm.xMm, yMm: startMm.yMm },
+                { end: "end", xMm: endMm.xMm, yMm: endMm.yMm }
+              ];
+              return (
+                <g className="partition-selected-layer">
+                  {[
+                    { label: "A", ox: nx, oy: ny },
+                    { label: "B", ox: -nx, oy: -ny }
+                  ].map(({ label, ox, oy }) => (
+                    <text
+                      key={label}
+                      x={midX + ox * labelOffsetMm}
+                      y={midY + oy * labelOffsetMm}
+                      dominantBaseline="middle"
+                      textAnchor="middle"
+                      style={{
+                        fontSize: handle * 1.6,
+                        fill: "var(--selection)",
+                        fontWeight: 600,
+                        pointerEvents: "none",
+                        userSelect: "none"
+                      }}
+                    >
+                      {label}
+                    </text>
+                  ))}
+                  {endpoints.map(({ end, xMm, yMm }) => (
+                    <g key={end}>
+                      <rect
+                        className="resize-handle handle-hit"
+                        x={xMm - handle * 1.4}
+                        y={yMm - handle * 1.4}
+                        width={handle * 2.8}
+                        height={handle * 2.8}
+                        style={{ cursor: "move" }}
+                        onPointerDown={(event) => beginPartitionDrag(partition, end, event)}
+                      />
+                      <rect
+                        className="resize-handle active"
+                        x={xMm - handle / 2}
+                        y={yMm - handle / 2}
+                        width={handle}
+                        height={handle}
+                        style={{ cursor: "move", pointerEvents: "none" }}
+                      />
+                    </g>
+                  ))}
+                </g>
+              );
+            })()
+          : null}
         {/* Polygon-room draw overlay: a full-viewBox transparent capture rect
             owns every pointer event while drawing (so underlying walls/objects
             never interfere), with the preview painted on top at
@@ -2434,6 +2870,45 @@ export function PlanView({
               );
             })()
           : null}
+        {/* Partition tool: a full-viewBox capture rect owns the press-drag
+            that draws the centerline; the live preview slab paints on top at
+            pointer-events:none. Release commits via onAddFreestandingWall. */}
+        {partitionToolActive ? (
+          <g className="partition-draw-layer">
+            <rect
+              x={viewBoxBounds.x}
+              y={viewBoxBounds.y}
+              width={viewBoxBounds.width}
+              height={viewBoxBounds.height}
+              fill="transparent"
+              style={{ cursor: "crosshair" }}
+              onPointerDown={beginPartitionDraw}
+            />
+            {partitionDraw && partitionDraw.endMm
+              ? (() => {
+                  const rect = partitionSlabRect(
+                    partitionDraw.startMm,
+                    partitionDraw.endMm,
+                    100
+                  );
+                  const color = partitionDraw.invalid ? "var(--danger)" : "var(--selection)";
+                  return (
+                    <g style={{ pointerEvents: "none" }}>
+                      <rect
+                        x={rect.centerXMm - rect.widthMm / 2}
+                        y={rect.centerYMm - rect.depthMm / 2}
+                        width={rect.widthMm}
+                        height={rect.depthMm}
+                        transform={`rotate(${rect.angleDeg} ${rect.centerXMm} ${rect.centerYMm})`}
+                        style={{ fill: color, fillOpacity: 0.4, stroke: color, strokeWidth: 2 }}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </g>
+                  );
+                })()
+              : null}
+          </g>
+        ) : null}
         {toolGhost ? (
           <PlanObject
             isGhost

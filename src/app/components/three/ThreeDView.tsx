@@ -5,8 +5,10 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import { Box3, MathUtils, PerspectiveCamera, Vector3 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
+import { parseFaceWallId } from "../../../domain/geometry/freestandingWalls";
 import {
   deriveScene3d,
+  type Room3d,
   type Scene3d,
   type WallPanel3d
 } from "../../../domain/geometry/scene3d";
@@ -37,6 +39,12 @@ const CLICK_DRAG_TOLERANCE_PX = 6;
 
 type CameraPose = { position: Vector3; target: Vector3 };
 
+// Every selectable wall surface in a room: perimeter walls plus partition
+// faces (spec §7.1). Eye-level lookup and camera framing both scan this.
+function roomWallPanels(room: Room3d): WallPanel3d[] {
+  return [...room.walls, ...room.freestandingWalls.flatMap((partition) => partition.faces)];
+}
+
 type CameraRigApi = {
   overview: () => void;
   eyeLevel: (wall: WallPanel3d, eyeHeightMm: number) => void;
@@ -65,6 +73,21 @@ function sceneBounds(scene: Scene3d): Box3 | null {
         )
       );
       hasPoint = true;
+    }
+
+    // A partition can be taller than the room's walls, and its endpoints can
+    // sit outside the room polygon (advisory, spec §6.4) — so frame by its cap
+    // outline and heightMm explicitly, or the fit derived from floors alone
+    // could clip it.
+    for (const partition of room.freestandingWalls) {
+      const { start, end, heightMm } = partition.capOutline;
+      for (const point of [start, end]) {
+        box.expandByPoint(new Vector3(point.xMm * MM_TO_WORLD, 0, point.yMm * MM_TO_WORLD));
+        box.expandByPoint(
+          new Vector3(point.xMm * MM_TO_WORLD, heightMm * MM_TO_WORLD, point.yMm * MM_TO_WORLD)
+        );
+        hasPoint = true;
+      }
     }
   }
 
@@ -110,10 +133,18 @@ function eyeLevelPose(
   const normalY = dxMm / lengthMm;
 
   // Room depth behind this wall: the farthest floor vertex measured along the
-  // inward normal, across the room that owns the wall.
-  const room = scene.rooms.find((candidate) =>
-    candidate.walls.some((w) => w.wallId === wall.wallId)
-  );
+  // inward normal, across the room that owns the wall. For a partition face,
+  // find the owning room via its centerline id — the face's outward normal
+  // still points into the room on that side, so the depth probe holds; the
+  // Math.max clamp below covers the advisory outside-the-polygon case.
+  const faceRef = parseFaceWallId(wall.wallId);
+  const room = faceRef
+    ? scene.rooms.find((candidate) =>
+        candidate.freestandingWalls.some(
+          (partition) => partition.freestandingWallId === faceRef.freestandingWallId
+        )
+      )
+    : scene.rooms.find((candidate) => candidate.walls.some((w) => w.wallId === wall.wallId));
   let depthMm = EYE_MIN_STANDOFF_MM;
   for (const point of room?.floorPolygon ?? []) {
     const along =
@@ -248,7 +279,7 @@ function pickEyeLevelWall(
   selectedObjectIds: string[],
   selectedArtworkId: string | null
 ): WallPanel3d | null {
-  const walls = scene.rooms.flatMap((room) => room.walls);
+  const walls = scene.rooms.flatMap(roomWallPanels);
   if (walls.length === 0) return null;
 
   if (selectedWallId) {

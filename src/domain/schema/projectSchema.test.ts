@@ -9,7 +9,9 @@ import {
   parseProject
 } from "./projectSchema";
 
-function makeOpening(overrides: Partial<OpeningWallObject> = {}): OpeningWallObject {
+function makeOpening(
+  overrides: Partial<OpeningWallObject & { connectsToObjectId?: string }> = {}
+): OpeningWallObject {
   return {
     id: "opening-1",
     kind: "door",
@@ -20,7 +22,7 @@ function makeOpening(overrides: Partial<OpeningWallObject> = {}): OpeningWallObj
     widthMm: feetToMm(3),
     heightMm: inchesToMm(80),
     ...overrides
-  };
+  } as OpeningWallObject;
 }
 
 describe("projectSchema", () => {
@@ -89,12 +91,26 @@ describe("projectSchema", () => {
       ]);
     });
 
-    it("accepts an optional connectsToWallId (schema field only, no UI yet)", () => {
+    it("accepts a symmetric door↔door pairing via connectsToObjectId", () => {
       const project = createSampleProject();
-      project.wallObjects = [makeOpening({ connectsToWallId: "wall-south" })];
+      project.wallObjects = [
+        makeOpening({ id: "door-a", kind: "door", wallId: "wall-north", connectsToObjectId: "door-b" }),
+        makeOpening({ id: "door-b", kind: "door", wallId: "wall-south", connectsToObjectId: "door-a" })
+      ];
 
       const parsed = parseProject(project);
-      expect((parsed.wallObjects[0] as OpeningWallObject).connectsToWallId).toBe("wall-south");
+      const doorA = parsed.wallObjects.find((object) => object.id === "door-a");
+      expect(doorA?.kind === "door" ? doorA.connectsToObjectId : null).toBe("door-b");
+    });
+
+    it("rejects an asymmetric (one-sided) pairing", () => {
+      const project = createSampleProject();
+      project.wallObjects = [
+        makeOpening({ id: "door-a", kind: "door", wallId: "wall-north", connectsToObjectId: "door-b" }),
+        makeOpening({ id: "door-b", kind: "door", wallId: "wall-south" })
+      ];
+
+      expect(() => parseProject(project)).toThrow(/not symmetric/i);
     });
 
     it("rejects an opening kind outside door/window/blocked-zone", () => {
@@ -178,14 +194,62 @@ describe("migrateProject", () => {
     expect(migrateProject(olderProject).wallObjects).toEqual([]);
   });
 
-  it("migrates a real v1 document to v2, adding an empty floorObjects array", () => {
+  it("walks a real v1 document 1→2→3, landing at v3 and parsing", () => {
+    // A genuine v1 doc predates BOTH floorObjects (v2) and freestandingWalls
+    // (v3), so strip them from the current-shape sample before stamping v1.
     const { floorObjects: _floorObjects, ...currentShape } = createSampleProject();
-    const v1Document = { ...currentShape, schemaVersion: 1 };
+    const v1Document = {
+      ...currentShape,
+      schemaVersion: 1,
+      floor: {
+        rooms: currentShape.floor.rooms.map((placement) => {
+          const { freestandingWalls: _drop, ...room } = placement.room;
+          return { ...placement, room };
+        })
+      }
+    };
 
     const migrated = migrateProject(v1Document);
 
-    expect(migrated.schemaVersion).toBe(2);
+    expect(migrated.schemaVersion).toBe(3);
     expect(migrated.floorObjects).toEqual([]);
+    expect(migrated.floor.rooms[0].room.freestandingWalls).toEqual([]);
+  });
+
+  it("migrates a v2 document to v3, adding freestandingWalls and dropping connectsToWallId", () => {
+    const sample = createSampleProject();
+    const v2Document = {
+      ...sample,
+      schemaVersion: 2,
+      floor: {
+        rooms: sample.floor.rooms.map((placement) => {
+          const { freestandingWalls: _drop, ...room } = placement.room;
+          return { ...placement, room };
+        })
+      },
+      // A never-written legacy field the migration must discard.
+      wallObjects: [
+        {
+          id: "door-legacy",
+          kind: "door",
+          blocksPlacement: true,
+          wallId: "wall-north",
+          xMm: 1000,
+          yMm: 1000,
+          widthMm: 900,
+          heightMm: 2000,
+          connectsToWallId: "wall-south"
+        }
+      ]
+    };
+
+    const migrated = migrateProject(v2Document);
+
+    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.floor.rooms[0].room.freestandingWalls).toEqual([]);
+    expect(
+      (migrated.wallObjects[0] as Record<string, unknown>).connectsToWallId
+    ).toBeUndefined();
   });
 
   it("round-trips a v2 document that already has floor objects", () => {
@@ -208,8 +272,8 @@ describe("migrateProject", () => {
     expect(migrateProject(project)).toEqual(project);
   });
 
-  it("rejects a document from schema version 3 (newer than this app supports)", () => {
-    const fromTheFuture = { ...createSampleProject(), schemaVersion: 3 };
+  it("rejects a document from a newer schema version than this app supports", () => {
+    const fromTheFuture = { ...createSampleProject(), schemaVersion: 4 };
 
     expect(() => migrateProject(fromTheFuture)).toThrow(/newer version of Sightlines/);
   });

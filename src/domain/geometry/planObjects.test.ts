@@ -17,6 +17,7 @@ function angledRoom(): Room {
     id: "room-angled",
     name: "Angled Room",
     heightMm: feetToMm(12),
+    freestandingWalls: [],
     vertices: [
       { id: "v-a", xMm: 0, yMm: 0 },
       { id: "v-b", xMm: 300, yMm: 400 } // 3-4-5 triangle: length 500

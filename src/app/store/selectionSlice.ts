@@ -14,7 +14,11 @@ export type Selection =
   | { kind: "none" }
   | { kind: "objects"; ids: string[] }
   | { kind: "libraryArtwork"; artworkId: string }
-  | { kind: "room"; roomId: string };
+  | { kind: "room"; roomId: string }
+  // A free-standing partition, selected by its CENTERLINE id (never a face id).
+  // Its inspector drives move/rotate/thickness/length/height; the Side A/B
+  // buttons set wallContextId to a face id for elevation (spec §6.5).
+  | { kind: "freestandingWall"; wallId: string };
 
 export const NO_SELECTION: Selection = { kind: "none" };
 
@@ -26,6 +30,10 @@ export function objectIdsOf(selection: Selection): string[] {
 
 export function roomIdOf(selection: Selection): string | null {
   return selection.kind === "room" ? selection.roomId : null;
+}
+
+export function freestandingWallIdOf(selection: Selection): string | null {
+  return selection.kind === "freestandingWall" ? selection.wallId : null;
 }
 
 function findPlacement(project: Project, id: string) {

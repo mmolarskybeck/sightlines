@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 export const CURRENT_ARTWORK_SCHEMA_VERSION = 1;
 export const CURRENT_ASSET_SCHEMA_VERSION = 1;
 
@@ -86,6 +86,11 @@ export type Room = {
   heightMm: number;
   vertices: RoomVertex[];
   walls: Wall[];
+  // Free-standing partitions inside the room (spec §5.2). Room-owned so they
+  // move with RoomPlacement.offset and cascade on deleteRoom; endpoints are
+  // inline room-local mm (deliberately NOT entries in `vertices`). Defaults to
+  // [] via the schema so v2 fixtures need no churn.
+  freestandingWalls: FreestandingWall[];
 };
 
 export type Wall = {
@@ -95,6 +100,23 @@ export type Wall = {
   startVertexId: string;
   endVertexId: string;
   heightMm: number;
+  defaultCenterlineHeightMm?: number;
+};
+
+// A partition: a straight room-owned segment connected to nothing, with real
+// thickness, exposing two derived placeable faces (spec §5.2/§5.3). Endpoints
+// are inline room-local mm (same coordinate space as RoomVertex). Faces are
+// DERIVED (see domain/geometry/freestandingWalls.ts), never stored.
+export type FreestandingWall = {
+  id: string;
+  roomId: string;
+  name: string;
+  startXMm: number;
+  startYMm: number;
+  endXMm: number;
+  endYMm: number;
+  heightMm: number;
+  thicknessMm: number;
   defaultCenterlineHeightMm?: number;
 };
 
@@ -115,11 +137,21 @@ export type ArtworkWallObject = WallObjectBase & {
   displayDimensionsOverride?: Dimensions;
 };
 
-export type OpeningWallObject = WallObjectBase & {
-  kind: "door" | "window" | "blocked-zone";
+// The opening union is split (spec §5.5) so an illegal blocked-zone pairing is
+// unrepresentable in TS, not just rejected at runtime: only doors and windows
+// carry connectsToObjectId (opening→opening pairing; no writers until slice 4).
+export type ConnectableOpeningWallObject = WallObjectBase & {
+  kind: "door" | "window";
   blocksPlacement: true;
-  connectsToWallId?: string;
+  connectsToObjectId?: string; // v3; replaces the never-written connectsToWallId
 };
+
+export type BlockedZoneWallObject = WallObjectBase & {
+  kind: "blocked-zone";
+  blocksPlacement: true;
+};
+
+export type OpeningWallObject = ConnectableOpeningWallObject | BlockedZoneWallObject;
 
 export type WallObject = ArtworkWallObject | OpeningWallObject;
 

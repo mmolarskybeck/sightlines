@@ -39,7 +39,7 @@ function makeRoom(
     };
   });
 
-  return { id, name: id, heightMm, vertices: ring, walls };
+  return { id, name: id, heightMm, freestandingWalls: [], vertices: ring, walls };
 }
 
 function makePlacement(
@@ -618,6 +618,114 @@ describe("deriveScene3d — floor objects (M2)", () => {
       makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))])
     );
     expect(scene.floorObjects).toEqual([]);
+  });
+});
+
+describe("deriveScene3d — partitions", () => {
+  function roomWithPartition(): Room {
+    const base = makeRoom("room-a", CCW_RECT, 2500);
+    return {
+      ...base,
+      freestandingWalls: [
+        {
+          id: "room-a-partition-1",
+          roomId: "room-a",
+          name: "Partition 1",
+          startXMm: 1000,
+          startYMm: 1500,
+          endXMm: 3000,
+          endYMm: 1500,
+          heightMm: 2800, // taller than the 2500 room walls
+          thicknessMm: 100
+        }
+      ]
+    };
+  }
+
+  it("emits one FreestandingWall3d with two face panels and a cap outline", () => {
+    const scene = deriveScene3d(makeProject([makePlacement(roomWithPartition())]));
+    const partition = scene.rooms[0].freestandingWalls[0];
+
+    expect(partition.freestandingWallId).toBe("room-a-partition-1");
+    expect(partition.faces).toHaveLength(2);
+    expect(partition.faces[0].wallId).toBe("room-a-partition-1#a");
+    expect(partition.faces[1].wallId).toBe("room-a-partition-1#b");
+    expect(partition.capOutline).toEqual({
+      start: { xMm: 1000, yMm: 1500 },
+      end: { xMm: 3000, yMm: 1500 },
+      thicknessMm: 100,
+      heightMm: 2800
+    });
+    // Faces have no holes in v1.
+    expect(partition.faces[0].holes).toEqual([]);
+    expect(partition.faces[1].holes).toEqual([]);
+  });
+
+  it("faces the two panels in opposite outward directions (point-probe)", () => {
+    const scene = deriveScene3d(makeProject([makePlacement(roomWithPartition())]));
+    const [faceA, faceB] = scene.rooms[0].freestandingWalls[0].faces;
+    const normalA = wallInwardNormal(faceA);
+    const normalB = wallInwardNormal(faceB);
+
+    // Horizontal partition: face A looks toward +y, face B toward -y.
+    expect(normalA.yMm).toBeCloseTo(1);
+    expect(normalB.yMm).toBeCloseTo(-1);
+    // Opposite directions.
+    expect(normalA.xMm * normalB.xMm + normalA.yMm * normalB.yMm).toBeCloseTo(-1);
+  });
+
+  it("places mirrored panel-local x on both faces at the same floor point", () => {
+    const scene = deriveScene3d(
+      makeProject([makePlacement(roomWithPartition())], {
+        wallObjects: [
+          {
+            id: "art-a",
+            kind: "artwork",
+            artworkId: "art-a",
+            wallId: "room-a-partition-1#a",
+            xMm: 500,
+            yMm: 1450,
+            widthMm: 600,
+            heightMm: 800
+          },
+          {
+            id: "art-b",
+            kind: "artwork",
+            artworkId: "art-b",
+            wallId: "room-a-partition-1#b",
+            xMm: 1500, // length 2000; mirror of 500
+            yMm: 1450,
+            widthMm: 600,
+            heightMm: 800
+          }
+        ]
+      })
+    );
+    const [faceA, faceB] = scene.rooms[0].freestandingWalls[0].faces;
+    const artA = faceA.artworks[0];
+    const artB = faceB.artworks[0];
+    // Panel-local x passes through unchanged for faces.
+    expect(artA.xMm).toBe(500);
+    expect(artB.xMm).toBe(1500);
+
+    const floorOf = (panel: WallPanel3d, xMm: number): Vec2 => {
+      const length = Math.hypot(panel.end.xMm - panel.start.xMm, panel.end.yMm - panel.start.yMm);
+      const t = xMm / length;
+      return {
+        xMm: panel.start.xMm + (panel.end.xMm - panel.start.xMm) * t,
+        yMm: panel.start.yMm + (panel.end.yMm - panel.start.yMm) * t
+      };
+    };
+    const posA = floorOf(faceA, artA.xMm);
+    const posB = floorOf(faceB, artB.xMm);
+    // Same centerline x (both 1500), each on its own side of the slab.
+    expect(posA.xMm).toBeCloseTo(1500);
+    expect(posB.xMm).toBeCloseTo(1500);
+  });
+
+  it("keeps blocked zones but drops nothing when there are no partitions", () => {
+    const scene = deriveScene3d(makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))]));
+    expect(scene.rooms[0].freestandingWalls).toEqual([]);
   });
 });
 

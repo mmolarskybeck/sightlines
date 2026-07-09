@@ -1,5 +1,6 @@
 import type { Floor, FloorObject, WallObjectBase } from "../project";
 import type { Point } from "../snapping/resolveSnap";
+import { getFreestandingFaces } from "./freestandingWalls";
 import { getWallsWithGeometry, type WallWithGeometry } from "./walls";
 
 // Doors/windows render as zero-thickness lines in plan view, so their rects
@@ -16,18 +17,24 @@ export type FloorWall = WallWithGeometry & {
 };
 
 export function getFloorWalls(floor: Floor): FloorWall[] {
+  // Perimeter walls plus partition faces (spec §5.3/§6.1). Faces are physically
+  // offset ±t/2, so nearest-face capture falls out of the plain distance test
+  // with no side-of-line logic — resolvePlanPlacement/findNearestWall are
+  // untouched.
   return floor.rooms.flatMap((placement) =>
-    getWallsWithGeometry(placement.room).map((wall) => ({
-      ...wall,
-      startFloorMm: {
-        xMm: wall.start.xMm + placement.offsetXMm,
-        yMm: wall.start.yMm + placement.offsetYMm
-      },
-      endFloorMm: {
-        xMm: wall.end.xMm + placement.offsetXMm,
-        yMm: wall.end.yMm + placement.offsetYMm
-      }
-    }))
+    [...getWallsWithGeometry(placement.room), ...getFreestandingFaces(placement.room)].map(
+      (wall) => ({
+        ...wall,
+        startFloorMm: {
+          xMm: wall.start.xMm + placement.offsetXMm,
+          yMm: wall.start.yMm + placement.offsetYMm
+        },
+        endFloorMm: {
+          xMm: wall.end.xMm + placement.offsetXMm,
+          yMm: wall.end.yMm + placement.offsetYMm
+        }
+      })
+    )
   );
 }
 

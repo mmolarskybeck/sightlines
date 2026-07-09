@@ -28,6 +28,7 @@ export function createSampleProject(): Project {
             id: roomId,
             name: "Main Gallery",
             heightMm: feetToMm(12),
+            freestandingWalls: [],
             vertices: [
               { id: "v-nw", xMm: 0, yMm: 0 },
               { id: "v-ne", xMm: feetToMm(28), yMm: 0 },

@@ -1,10 +1,15 @@
+import { getFreestandingFaces } from "../domain/geometry/freestandingWalls";
 import { getWallsWithGeometry } from "../domain/geometry/walls";
 import type { Project, Wall } from "../domain/project";
 
+// Perimeter walls plus each partition's two derived faces (spec §5.3). Faces
+// carry display names "Partition 1 — side A/B" (from getFreestandingFaces) and
+// stable face ids, so the sidebar/elevation wall list treats them as walls.
 export function getProjectWalls(project: Project) {
-  return project.floor.rooms.flatMap((placement) =>
-    getWallsWithGeometry(placement.room)
-  );
+  return project.floor.rooms.flatMap((placement) => [
+    ...getWallsWithGeometry(placement.room),
+    ...getFreestandingFaces(placement.room)
+  ]);
 }
 
 export function getSelectedWall(project: Project, selectedWallId: string | null) {

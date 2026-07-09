@@ -4,6 +4,7 @@ import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
+import { getFreestandingFaces } from "../../domain/geometry/freestandingWalls";
 import {
   getRectangleRoomDimensions,
   getWallsWithGeometry
@@ -227,6 +228,21 @@ export function RoomsPanel({
                   >
                     <span>{wall.name}</span>
                     <strong>{formatLength(wall.lengthMm, { unit: wallUnit })}</strong>
+                  </Button>
+                ))}
+                {/* Partition faces are just walls to getProjectWalls, so each
+                    face row navigates to its elevation via onSelectWall — the
+                    same contract as a perimeter wall row. */}
+                {getFreestandingFaces(placement.room).map((face) => (
+                  <Button
+                    className={face.id === selectedWallId ? "wall-row active" : "wall-row"}
+                    data-active={face.id === selectedWallId ? "true" : undefined}
+                    key={face.id}
+                    variant="ghost"
+                    onClick={() => onSelectWall(face.id)}
+                  >
+                    <span>{face.name}</span>
+                    <strong>{formatLength(face.lengthMm, { unit: wallUnit })}</strong>
                   </Button>
                 ))}
               </div>

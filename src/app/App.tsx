@@ -30,9 +30,11 @@ import type {
   ArtworkWallObject,
   BlockedZoneFloorObject,
   DisplayUnit,
+  FreestandingWall,
   OpeningWallObject,
   Project
 } from "../domain/project";
+import { faceWallId } from "../domain/geometry/freestandingWalls";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import { formatLength } from "../domain/units/length";
 import { getGridPrecisionFloorOptionsMm } from "../domain/units/precision";
@@ -48,6 +50,7 @@ import { PanelResizeHandle } from "./components/PanelResizeHandle";
 import { ChecklistPanel } from "./components/ChecklistPanel";
 import { ElevationEmptyState } from "./components/ElevationEmptyState";
 import { FloorObjectInspector, FloorPlacementFields } from "./components/FloorObjectInspector";
+import { FreestandingWallInspector } from "./components/FreestandingWallInspector";
 import { OpeningInspector } from "./components/OpeningInspector";
 import { PlanEmptyState } from "./components/PlanEmptyState";
 import { PlanView } from "./components/PlanView";
@@ -91,6 +94,7 @@ import { useArrangeNudgeShortcuts } from "./hooks/useArrangeNudgeShortcuts";
 import { deriveArrangeReadout } from "./hooks/arrangeReadout";
 import {
   exportProjectJson,
+  freestandingWallIdOf,
   getProjectWalls,
   getSelectedArtworkId,
   getSelectedOpeningId,
@@ -153,11 +157,21 @@ export function App() {
     selectArtwork,
     selectOpening,
     selectRoom,
+    selectFreestandingWall,
+    viewFreestandingFace,
     selectObject,
     setObjectSelection,
     clearObjectSelection,
     addRectangleRoom,
     addPolygonRoom,
+    addFreestandingWall,
+    moveFreestandingWall,
+    moveFreestandingWallEndpoint,
+    rotateFreestandingWall,
+    setFreestandingWallThickness,
+    setFreestandingWallLength,
+    setFreestandingWallHeight,
+    deleteFreestandingWall,
     renameProject,
     renameRoom,
     deleteRoom,
@@ -210,6 +224,7 @@ export function App() {
   // mirror-field names so every read site and child prop below is unchanged.
   const selectedObjectIds = objectIdsOf(selection);
   const selectedRoomId = roomIdOf(selection);
+  const selectedFreestandingWallId = freestandingWallIdOf(selection);
   const selectedArtworkId = getSelectedArtworkId(project, selection);
   const selectedOpeningId = getSelectedOpeningId(project, selection);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -233,11 +248,15 @@ export function App() {
   // Same transient-mode family as activeTool/drawRoomActive — never in the
   // store, mutually exclusive with the other two.
   const [reshapeRoomId, setReshapeRoomId] = useState<string | null>(null);
+  // Partition (free-standing wall) draw mode — same transient armed-tool family
+  // as the others, mutually exclusive with all of them.
+  const [partitionToolActive, setPartitionToolActive] = useState(false);
   const armOpeningTool = (tool: OpeningKind | null) => {
     setActiveTool(tool);
     if (tool) {
       setDrawRoomActive(false);
       setReshapeRoomId(null);
+      setPartitionToolActive(false);
     }
   };
   const toggleDrawRoom = () => {
@@ -246,6 +265,7 @@ export function App() {
       if (next) {
         setActiveTool(null);
         setReshapeRoomId(null);
+        setPartitionToolActive(false);
       }
       return next;
     });
@@ -256,6 +276,18 @@ export function App() {
       if (next) {
         setActiveTool(null);
         setDrawRoomActive(false);
+        setPartitionToolActive(false);
+      }
+      return next;
+    });
+  };
+  const togglePartitionTool = () => {
+    setPartitionToolActive((active) => {
+      const next = !active;
+      if (next) {
+        setActiveTool(null);
+        setDrawRoomActive(false);
+        setReshapeRoomId(null);
       }
       return next;
     });
@@ -307,6 +339,7 @@ export function App() {
       setActiveTool(null);
       setDrawRoomActive(false);
       setReshapeRoomId(null);
+      setPartitionToolActive(false);
     }
   }, [viewMode]);
 
@@ -366,6 +399,14 @@ export function App() {
       if (selectedObjectIds.length > 0) {
         event.preventDefault();
         void removeSelectedPlacements();
+        return;
+      }
+
+      // A selected partition deletes with its cascade (both faces' objects) in
+      // one undo entry.
+      if (selectedFreestandingWallId) {
+        event.preventDefault();
+        void deleteFreestandingWall(selectedFreestandingWallId);
       }
     }
 
@@ -375,6 +416,8 @@ export function App() {
     project,
     selection,
     selectedObjectIds,
+    selectedFreestandingWallId,
+    deleteFreestandingWall,
     draggingArtworkId,
     isHelpOpen,
     removeSelectedPlacements,
@@ -445,6 +488,13 @@ export function App() {
   const wallUnit = getScopeUnits(unitSystem, "wall").displayUnit;
   const selectedRoomPlacement = selectedRoomId
     ? (project.floor.rooms.find((placement) => placement.roomId === selectedRoomId) ?? null)
+    : null;
+  // The selected partition, resolved against the live project — a stale id
+  // (undo/redo can orphan it) drops to null and the inspector falls through.
+  const selectedFreestandingWall: FreestandingWall | null = selectedFreestandingWallId
+    ? (project.floor.rooms
+        .flatMap((placement) => placement.room.freestandingWalls)
+        .find((wall) => wall.id === selectedFreestandingWallId) ?? null)
     : null;
   const selectedRoomDimensions = selectedRoomPlacement
     ? getRectangleRoomDimensions(selectedRoomPlacement.room)
@@ -663,6 +713,7 @@ export function App() {
     selectedOpening !== null ||
     selectedFloorBlockedZone !== null ||
     selectedRoomPlacement !== null ||
+    selectedFreestandingWall !== null ||
     selectedWall !== null ||
     labeledPlacementWarnings.length > 0;
 
@@ -886,6 +937,11 @@ export function App() {
                 disabled={viewMode !== "plan"}
                 onToggle={toggleDrawRoom}
               />
+              <PartitionButton
+                active={partitionToolActive}
+                disabled={viewMode !== "plan"}
+                onToggle={togglePartitionTool}
+              />
             </div>
             <div className="view-options" aria-label="View options">
               <ViewOptionButton
@@ -946,6 +1002,19 @@ export function App() {
                 onMoveRoomVertex={moveRoomVertex}
                 onSplitWall={splitWall}
                 onDeleteRoomVertex={deleteRoomVertex}
+                partitionToolActive={partitionToolActive}
+                onPartitionToolChange={setPartitionToolActive}
+                onAddFreestandingWall={(start, end) =>
+                  void addFreestandingWall(start, end)
+                }
+                selectedFreestandingWallId={selectedFreestandingWallId}
+                onSelectFreestandingWall={selectFreestandingWall}
+                onMoveFreestandingWall={(wallId, delta) =>
+                  void moveFreestandingWall(wallId, delta)
+                }
+                onMoveFreestandingWallEndpoint={(wallId, end, next) =>
+                  void moveFreestandingWallEndpoint(wallId, end, next)
+                }
                 artworksById={artworksById}
                 draggingArtworkId={draggingArtworkId}
                 getBlob={getAssetBlob}
@@ -1121,6 +1190,7 @@ export function App() {
               selectedOpening ||
               selectedFloorBlockedZone ||
               selectedRoomPlacement ||
+              selectedFreestandingWall ||
               selectedWall) ? (
               <div className="panel-heading inspector-subject">
                 <h2>
@@ -1132,7 +1202,9 @@ export function App() {
                         ? getOpeningKindLabel(selectedFloorBlockedZone.kind)
                         : selectedRoomPlacement
                           ? selectedRoomPlacement.room.name
-                          : selectedWall?.name}
+                          : selectedFreestandingWall
+                            ? selectedFreestandingWall.name
+                            : selectedWall?.name}
                 </h2>
                 <span>
                   {selectedArtwork
@@ -1143,7 +1215,9 @@ export function App() {
                         ? "Floor object"
                         : selectedRoomPlacement
                           ? "Room"
-                          : "Wall"}
+                          : selectedFreestandingWall
+                            ? "Partition"
+                            : "Wall"}
                 </span>
               </div>
             ) : null}
@@ -1282,6 +1356,27 @@ export function App() {
                 resizeRoomHeight(selectedRoomPlacement.roomId, heightMm)
               }
               onToggleReshape={() => toggleReshapeRoom(selectedRoomPlacement.roomId)}
+            />
+          ) : selectedFreestandingWall ? (
+            <FreestandingWallInspector
+              wall={selectedFreestandingWall}
+              unit={project.unit}
+              onCommitLength={(lengthMm) =>
+                setFreestandingWallLength(selectedFreestandingWall.id, lengthMm)
+              }
+              onCommitAngle={(angleDeg) =>
+                rotateFreestandingWall(selectedFreestandingWall.id, angleDeg)
+              }
+              onCommitThickness={(thicknessMm) =>
+                setFreestandingWallThickness(selectedFreestandingWall.id, thicknessMm)
+              }
+              onCommitHeight={(heightMm) =>
+                setFreestandingWallHeight(selectedFreestandingWall.id, heightMm)
+              }
+              onViewFace={(face) =>
+                viewFreestandingFace(faceWallId(selectedFreestandingWall.id, face))
+              }
+              onDelete={() => void deleteFreestandingWall(selectedFreestandingWall.id)}
             />
           ) : selectedWall ? (
             <WallInspector
@@ -1562,6 +1657,35 @@ function DrawRoomButton({
   );
 
   return disabled ? <span title="Switch to plan view to draw a room">{toggle}</span> : toggle;
+}
+
+// The partition (free-standing wall) draw toggle, beside Draw room. Same
+// armed-tool conventions: drag a centerline inside a room to place it.
+function PartitionButton({
+  active,
+  disabled,
+  onToggle
+}: {
+  active: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+}) {
+  const toggle = (
+    <Toggle
+      aria-label="Partition"
+      className="view-option-button"
+      disabled={disabled}
+      pressed={active}
+      title={disabled ? undefined : "Draw a free-standing partition inside a room"}
+      variant="default"
+      onPressedChange={onToggle}
+    >
+      <RectangleDashedIcon aria-hidden="true" size={16} />
+      <span className="view-option-label">Partition</span>
+    </Toggle>
+  );
+
+  return disabled ? <span title="Switch to plan view to draw a partition">{toggle}</span> : toggle;
 }
 
 function ViewOptionButton({

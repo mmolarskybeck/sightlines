@@ -39,6 +39,7 @@ export function createRectangularRoomPlacement({
       id: roomId,
       name,
       heightMm,
+      freestandingWalls: [],
       vertices: [
         { id: `${roomId}-v-nw`, xMm: 0, yMm: 0 },
         { id: `${roomId}-v-ne`, xMm: widthMm, yMm: 0 },
@@ -167,6 +168,7 @@ export function createPolygonRoomPlacement({
       id: roomId,
       name,
       heightMm,
+      freestandingWalls: [],
       vertices,
       walls
     }

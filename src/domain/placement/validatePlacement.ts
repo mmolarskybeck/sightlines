@@ -1,3 +1,4 @@
+import { getFreestandingFaces } from "../geometry/freestandingWalls";
 import { getWallsWithGeometry, type WallWithGeometry } from "../geometry/walls";
 import type { Project, WallObject } from "../project";
 import { doWallObjectsOverlap } from "./collision";
@@ -57,9 +58,14 @@ export function validateWallObjectPlacements(
 function validateWallObjects(project: Project, wallObjects: WallObject[]): PlacementWarning[] {
   if (wallObjects.length === 0) return [];
 
+  // Keyed by wall id, including partition faces (spec §6.2) — bounds/collision
+  // per face. Objects on face A vs face B have different ids so they never
+  // collide with each other (back-to-back hangs are physically fine).
   const wallGeometryById = new Map<string, WallWithGeometry>(
     project.floor.rooms.flatMap((placement) =>
-      getWallsWithGeometry(placement.room).map((wall) => [wall.id, wall])
+      [...getWallsWithGeometry(placement.room), ...getFreestandingFaces(placement.room)].map(
+        (wall) => [wall.id, wall]
+      )
     )
   );
 
