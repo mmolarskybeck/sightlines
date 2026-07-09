@@ -46,6 +46,22 @@ export type PlanRect = {
   angleDeg: number;
 };
 
+// Floor-space rectangle for a straight centerline segment (e.g. a
+// free-standing partition slab): center + length (derived from the two
+// endpoints) × depth, with angle via atan2 — a generalized twin of
+// getWallObjectPlanRect for segments that aren't a room wall reference.
+export function segmentPlanRect(startMm: Point, endMm: Point, depthMm: number): PlanRect {
+  const dx = endMm.xMm - startMm.xMm;
+  const dy = endMm.yMm - startMm.yMm;
+  return {
+    centerXMm: (startMm.xMm + endMm.xMm) / 2,
+    centerYMm: (startMm.yMm + endMm.yMm) / 2,
+    widthMm: Math.hypot(dx, dy),
+    depthMm,
+    angleDeg: (Math.atan2(dy, dx) * 180) / Math.PI
+  };
+}
+
 // Wall objects (doors/windows/blocked-zones anchored to a wall) render
 // centered ON the wall line — object.xMm is the distance of the object's
 // center along the wall from its start, matching elevation view's convention.

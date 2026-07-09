@@ -28,6 +28,7 @@ import {
   getWallObjectPlanRect,
   planRectIntersectsRect,
   projectPointToWall,
+  segmentPlanRect,
   WALL_OBJECT_PLAN_DEPTH_MM,
   type PlanRect
 } from "../../domain/geometry/planObjects";
@@ -45,7 +46,11 @@ import {
   type RoomPlacement,
   type WallObject
 } from "../../domain/project";
-import { parseFaceWallId } from "../../domain/geometry/freestandingWalls";
+import {
+  getFloorPartitions,
+  parseFaceWallId,
+  type FloorPartition
+} from "../../domain/geometry/freestandingWalls";
 import { isPointInPolygon, isSimplePolygon, segmentsIntersect, type Point } from "../../domain/geometry/polygon";
 import { canMoveRoomVertex, moveRoomWall } from "../../domain/geometry/reshapeRoom";
 import { formatLength } from "../../domain/units/length";
@@ -324,48 +329,6 @@ type PartitionDragState = {
   previewStartFloorMm: Vector2;
   previewEndFloorMm: Vector2;
 };
-
-// A partition's floor-space centerline (offset applied) plus the fields the
-// plan slab rect and labels need.
-type FloorPartition = {
-  wallId: string;
-  roomId: string;
-  startMm: Vector2;
-  endMm: Vector2;
-  thicknessMm: number;
-  name: string;
-};
-
-function getFloorPartitions(project: Project): FloorPartition[] {
-  return project.floor.rooms.flatMap((placement) =>
-    placement.room.freestandingWalls.map((wall) => ({
-      wallId: wall.id,
-      roomId: placement.roomId,
-      startMm: {
-        xMm: wall.startXMm + placement.offsetXMm,
-        yMm: wall.startYMm + placement.offsetYMm
-      },
-      endMm: { xMm: wall.endXMm + placement.offsetXMm, yMm: wall.endYMm + placement.offsetYMm },
-      thicknessMm: wall.thicknessMm,
-      name: wall.name
-    }))
-  );
-}
-
-// A partition's slab as a rotated plan rect (center + length × thickness +
-// angle), ready for an SVG <rect> with a rotate transform — same shape as
-// getWallObjectPlanRect.
-function partitionSlabRect(startMm: Vector2, endMm: Vector2, thicknessMm: number): PlanRect {
-  const dx = endMm.xMm - startMm.xMm;
-  const dy = endMm.yMm - startMm.yMm;
-  return {
-    centerXMm: (startMm.xMm + endMm.xMm) / 2,
-    centerYMm: (startMm.yMm + endMm.yMm) / 2,
-    widthMm: Math.hypot(dx, dy),
-    depthMm: thicknessMm,
-    angleDeg: (Math.atan2(dy, dx) * 180) / Math.PI
-  };
-}
 
 // World-space (offset-applied) vertex loop for a room's polygon — shared by
 // the floor fill, the floor hit target, and the selected-room outline/wash,
@@ -2570,7 +2533,7 @@ export function PlanView({
           const isDragging = partitionDrag?.wallId === partition.wallId;
           const startMm = isDragging ? partitionDrag.previewStartFloorMm : partition.startMm;
           const endMm = isDragging ? partitionDrag.previewEndFloorMm : partition.endMm;
-          const rect = partitionSlabRect(startMm, endMm, partition.thicknessMm);
+          const rect = segmentPlanRect(startMm, endMm, partition.thicknessMm);
           const isSelected = partition.wallId === selectedFreestandingWallId;
           return (
             <rect
@@ -3118,7 +3081,7 @@ export function PlanView({
             />
             {partitionDraw && partitionDraw.endMm
               ? (() => {
-                  const rect = partitionSlabRect(
+                  const rect = segmentPlanRect(
                     partitionDraw.startMm,
                     partitionDraw.endMm,
                     100

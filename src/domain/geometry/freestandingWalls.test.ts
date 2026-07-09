@@ -4,6 +4,7 @@ import {
   createFreestandingWall,
   faceWallId,
   faceWallIdsOf,
+  getFloorPartitions,
   getFreestandingFaces,
   getFreestandingLengthMm,
   moveFreestandingEndpoint,
@@ -140,6 +141,98 @@ describe("getFreestandingFaces", () => {
     expect(projectOntoA).toBeCloseTo(500);
     // Mirror: xB = length - xA.
     expect(projectOntoA + projectOntoB).toBeCloseTo(2000);
+  });
+});
+
+describe("getFloorPartitions", () => {
+  it("lifts each room's partitions into floor space by its placement offset, preserving ids", () => {
+    const placementA = createRectangularRoomPlacement({
+      roomId: "room-a",
+      name: "Room A",
+      widthMm: 4000,
+      depthMm: 3000,
+      heightMm: 3000,
+      offsetXMm: 1000,
+      offsetYMm: 500
+    });
+    const roomA: Room = {
+      ...placementA.room,
+      freestandingWalls: [
+        {
+          id: "room-a-partition-1",
+          roomId: "room-a",
+          name: "Partition A1",
+          startXMm: 100,
+          startYMm: 200,
+          endXMm: 900,
+          endYMm: 200,
+          heightMm: 3000,
+          thicknessMm: 100
+        }
+      ]
+    };
+
+    const placementB = createRectangularRoomPlacement({
+      roomId: "room-b",
+      name: "Room B",
+      widthMm: 4000,
+      depthMm: 3000,
+      heightMm: 3000,
+      offsetXMm: -2000,
+      offsetYMm: 4000
+    });
+    const roomB: Room = {
+      ...placementB.room,
+      freestandingWalls: [
+        {
+          id: "room-b-partition-1",
+          roomId: "room-b",
+          name: "Partition B1",
+          startXMm: 300,
+          startYMm: 300,
+          endXMm: 300,
+          endYMm: 1300,
+          heightMm: 3000,
+          thicknessMm: 120
+        }
+      ]
+    };
+
+    const project: Project = {
+      id: "p",
+      schemaVersion: 3,
+      title: "t",
+      unit: "m",
+      defaultWallHeightMm: 3000,
+      defaultCenterlineHeightMm: 1450,
+      checklistArtworkIds: [],
+      wallObjects: [],
+      floorObjects: [],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      floor: {
+        rooms: [
+          { ...placementA, room: roomA },
+          { ...placementB, room: roomB }
+        ]
+      }
+    };
+
+    const partitions = getFloorPartitions(project);
+    expect(partitions).toHaveLength(2);
+
+    const partitionA = partitions.find((p) => p.wallId === "room-a-partition-1")!;
+    expect(partitionA.roomId).toBe("room-a");
+    expect(partitionA.startMm).toEqual({ xMm: 1100, yMm: 700 });
+    expect(partitionA.endMm).toEqual({ xMm: 1900, yMm: 700 });
+    expect(partitionA.thicknessMm).toBe(100);
+    expect(partitionA.name).toBe("Partition A1");
+
+    const partitionB = partitions.find((p) => p.wallId === "room-b-partition-1")!;
+    expect(partitionB.roomId).toBe("room-b");
+    expect(partitionB.startMm).toEqual({ xMm: -1700, yMm: 4300 });
+    expect(partitionB.endMm).toEqual({ xMm: -1700, yMm: 5300 });
+    expect(partitionB.thicknessMm).toBe(120);
   });
 });
 

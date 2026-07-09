@@ -87,6 +87,35 @@ export function getFreestandingFaces(room: Room): FreestandingFace[] {
   });
 }
 
+// A partition's floor-space centerline (offset applied) plus the fields the
+// plan slab rect and labels need — the free-standing-wall counterpart of
+// getFloorWalls (planObjects.ts), lifting per-room partitions by the
+// placement offset into floor space.
+export type FloorPartition = {
+  wallId: string;
+  roomId: string;
+  startMm: Point;
+  endMm: Point;
+  thicknessMm: number;
+  name: string;
+};
+
+export function getFloorPartitions(project: Project): FloorPartition[] {
+  return project.floor.rooms.flatMap((placement) =>
+    placement.room.freestandingWalls.map((wall) => ({
+      wallId: wall.id,
+      roomId: placement.roomId,
+      startMm: {
+        xMm: wall.startXMm + placement.offsetXMm,
+        yMm: wall.startYMm + placement.offsetYMm
+      },
+      endMm: { xMm: wall.endXMm + placement.offsetXMm, yMm: wall.endYMm + placement.offsetYMm },
+      thicknessMm: wall.thicknessMm,
+      name: wall.name
+    }))
+  );
+}
+
 function buildFace(
   wall: FreestandingWall,
   face: "a" | "b",

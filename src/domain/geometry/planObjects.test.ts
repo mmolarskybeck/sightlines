@@ -9,7 +9,8 @@ import {
   getFloorWalls,
   getWallObjectPlanRect,
   planRectIntersectsRect,
-  projectPointToWall
+  projectPointToWall,
+  segmentPlanRect
 } from "./planObjects";
 
 function angledRoom(): Room {
@@ -255,6 +256,38 @@ describe("getWallObjectPlanRect", () => {
 
     expect(defaulted.depthMm).toBe(WALL_OBJECT_PLAN_DEPTH_MM);
     expect(overridden.depthMm).toBe(250);
+  });
+});
+
+describe("segmentPlanRect", () => {
+  it("builds a rect centered on a horizontal segment, angle 0", () => {
+    const rect = segmentPlanRect({ xMm: 1000, yMm: 500 }, { xMm: 3000, yMm: 500 }, 100);
+
+    expect(rect.centerXMm).toBeCloseTo(2000);
+    expect(rect.centerYMm).toBeCloseTo(500);
+    expect(rect.widthMm).toBeCloseTo(2000);
+    expect(rect.depthMm).toBe(100);
+    expect(rect.angleDeg).toBeCloseTo(0);
+  });
+
+  it("builds a rect centered on a vertical segment, angle 90", () => {
+    const rect = segmentPlanRect({ xMm: 500, yMm: 0 }, { xMm: 500, yMm: 1000 }, 120);
+
+    expect(rect.centerXMm).toBeCloseTo(500);
+    expect(rect.centerYMm).toBeCloseTo(500);
+    expect(rect.widthMm).toBeCloseTo(1000);
+    expect(rect.depthMm).toBe(120);
+    expect(rect.angleDeg).toBeCloseTo(90);
+  });
+
+  it("builds a rect for a diagonal (3-4-5) segment", () => {
+    const rect = segmentPlanRect({ xMm: 0, yMm: 0 }, { xMm: 300, yMm: 400 }, 50);
+
+    expect(rect.centerXMm).toBeCloseTo(150);
+    expect(rect.centerYMm).toBeCloseTo(200);
+    expect(rect.widthMm).toBeCloseTo(500);
+    expect(rect.depthMm).toBe(50);
+    expect(rect.angleDeg).toBeCloseTo((Math.atan2(400, 300) * 180) / Math.PI);
   });
 });
 
