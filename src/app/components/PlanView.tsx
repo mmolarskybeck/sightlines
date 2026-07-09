@@ -82,6 +82,7 @@ import {
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { useContainerSize } from "../hooks/useContainerSize";
+import { useDragGesture } from "../hooks/useDragGesture";
 import { useSvgViewportGestures } from "../hooks/useSvgViewportGestures";
 import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
 import { GridOverlay } from "./GridOverlay";
@@ -503,19 +504,311 @@ export function PlanView({
 }) {
   const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
-  const [drag, setDrag] = useState<DragState | null>(null);
-  const dragRef = useRef<DragState | null>(null);
-  const [roomDrag, setRoomDrag] = useState<RoomDragState | null>(null);
-  const roomDragRef = useRef<RoomDragState | null>(null);
-  // A move of an existing placed object, and the HTML5 drop preview for a
-  // checklist artwork. Both flow through resolvePlanPlacement, so preview and
-  // commit can never disagree.
-  const [objectDrag, setObjectDrag] = useState<ObjectDragState | null>(null);
-  const objectDragRef = useRef<ObjectDragState | null>(null);
+  // Wall-resize drag (a rectangle room's RoomResizeHandles). onMove/onRelease
+  // close over toSvgMm/gridSnapTargets/snapThresholdMm/snapToGrid/project,
+  // all declared further down this component body — safe, since these
+  // closures only ever run later, from a window pointer event, by which time
+  // every one of those consts has already been initialized for this render.
+  const {
+    drag,
+    dragRef,
+    beginDrag: startDrag
+  } = useDragGesture<DragState>({
+    onMove: (current, event) => {
+      const pointerMm = toSvgMm(event.clientX, event.clientY);
+      if (!pointerMm) return null;
+
+      // Snap the wall's moving edge, not the raw pointer — the handle can be
+      // grabbed anywhere within its 16px hit target, and that grab offset
+      // must not leak into the committed length even when the pointer lands
+      // exactly on a grid line.
+      const proposedEdgeMm = proposeMovingEdgePointMm(
+        current.edgeStartMm,
+        current.startPointerMm,
+        pointerMm
+      );
+
+      // A handle only ever moves along its target wall's own axis, so only
+      // grid lines perpendicular to that axis are relevant — snapping the
+      // other coordinate would be meaningless for this drag and could
+      // trigger on incidental hand-tremor alignment.
+      let snappedEdgeMm = proposedEdgeMm;
+      let snapTargetId: string | undefined;
+      let activeGuides: Guide[] = [];
+
+      if (snapToGrid) {
+        const isXAxis = Math.abs(current.axis.xMm) >= Math.abs(current.axis.yMm);
+        const dragAxis = isXAxis ? "x" : "y";
+        const relevantTargets: SnapTarget[] = gridSnapTargets.filter(
+          (target) => target.axis === dragAxis
+        );
+        const snapResult = resolveSnap(proposedEdgeMm, relevantTargets, {
+          thresholdMm: snapThresholdMm,
+          // Single-axis drag: the remembered id lives in the drag axis's
+          // slot of the per-axis hysteresis map.
+          previousSnapTargetIds:
+            dragAxis === "x"
+              ? { x: current.previousSnapTargetId }
+              : { y: current.previousSnapTargetId }
+        });
+
+        snappedEdgeMm = snapResult.point;
+        snapTargetId = snapResult.snapTargetIds[dragAxis];
+        activeGuides = snapResult.activeGuides;
+      }
+
+      const previewLengthMm = computeEdgeSnappedLengthMm(
+        current.startLengthMm,
+        current.edgeStartMm,
+        snappedEdgeMm,
+        current.axis,
+        current.anchor
+      );
+
+      return { ...current, previewLengthMm, previousSnapTargetId: snapTargetId, activeGuides };
+    },
+    onRelease: (current) => {
+      if (Math.abs(current.previewLengthMm - current.startLengthMm) < 0.5) return;
+      void onCommitWallLength(current.targetWallId, current.previewLengthMm, current.anchor);
+    }
+  });
+  // Whole-room move drag (the selected room's floor polygon as move
+  // affordance). Same deferred-closure note as `drag` above: onMove/onRelease
+  // reference gridSnapTargets/snapThresholdMm/snapToGrid/onMoveRoom, all
+  // declared further down this component body.
+  const {
+    drag: roomDrag,
+    dragRef: roomDragRef,
+    beginDrag: startRoomDrag
+  } = useDragGesture<RoomDragState>({
+    onMove: (current, event) => {
+      const pointerMm = toSvgMm(event.clientX, event.clientY);
+      if (!pointerMm) return null;
+
+      const deltaMm: Vector2 = {
+        xMm: pointerMm.xMm - current.startPointerMm.xMm,
+        yMm: pointerMm.yMm - current.startPointerMm.yMm
+      };
+      const proposedMinCornerMm: Vector2 = {
+        xMm: current.startMinCornerMm.xMm + deltaMm.xMm,
+        yMm: current.startMinCornerMm.yMm + deltaMm.yMm
+      };
+
+      let snappedMinCornerMm = proposedMinCornerMm;
+      let snapTargetIds = current.previousSnapTargetIds;
+      let activeGuides: Guide[] = [];
+      if (snapToGrid) {
+        // gridSnapTargets are already all kind:"grid" — resolveSnap resolves
+        // both axes independently against them in one call, the same idiom
+        // objectDrag's group-drag branch uses for its box-center snap.
+        const snap = resolveSnap(proposedMinCornerMm, gridSnapTargets, {
+          thresholdMm: snapThresholdMm,
+          previousSnapTargetIds: current.previousSnapTargetIds
+        });
+        snappedMinCornerMm = snap.point;
+        snapTargetIds = snap.snapTargetIds;
+        activeGuides = snap.activeGuides;
+      }
+
+      const cornerDeltaMm: Vector2 = {
+        xMm: snappedMinCornerMm.xMm - current.startMinCornerMm.xMm,
+        yMm: snappedMinCornerMm.yMm - current.startMinCornerMm.yMm
+      };
+
+      return {
+        ...current,
+        previewOffsetMm: {
+          xMm: current.startOffsetMm.xMm + cornerDeltaMm.xMm,
+          yMm: current.startOffsetMm.yMm + cornerDeltaMm.yMm
+        },
+        previousSnapTargetIds: snapTargetIds,
+        activeGuides
+      };
+    },
+    onRelease: (current) => {
+      // Sub-threshold release is a click, not a move — must not commit (and
+      // so land a phantom undo entry), same guard as the object/group drags.
+      const movedMm = Math.hypot(
+        current.previewOffsetMm.xMm - current.startOffsetMm.xMm,
+        current.previewOffsetMm.yMm - current.startOffsetMm.yMm
+      );
+      if (movedMm < 0.5) return;
+
+      void onMoveRoom?.(current.roomId, current.previewOffsetMm.xMm, current.previewOffsetMm.yMm);
+    }
+  });
+  // A move of an existing placed object (single or group), and the HTML5 drop
+  // preview for a checklist artwork. Both flow through resolvePlanPlacement,
+  // so preview and commit can never disagree. Same deferred-closure note as
+  // `drag`/`roomDrag` above: onMove/onRelease reference floorWallsForTool/
+  // project/gridSnapTargets/snapThresholdMm/snapToGrid/captureDistanceMm/
+  // onCommitPlanMove/onCommitPlanMoveGroup/suppressNextSelect, all declared
+  // further down this component body.
+  const {
+    drag: objectDrag,
+    dragRef: objectDragRef,
+    beginDrag: startObjectDrag
+  } = useDragGesture<ObjectDragState>({
+    onMove: (current, event) => {
+      const pointerMm = toSvgMm(event.clientX, event.clientY);
+      if (!pointerMm) return null;
+
+      // Group drag: rigid translation, no per-object re-anchoring. Snap the
+      // whole group's box center to the grid (grid tier only), then apply the
+      // snapped delta to every member — wall members reproject onto their own
+      // wall, floor members translate.
+      if (current.members && current.startGroupCenterMm) {
+        const rawDeltaMm: Vector2 = {
+          xMm: pointerMm.xMm - current.startPointerMm.xMm,
+          yMm: pointerMm.yMm - current.startPointerMm.yMm
+        };
+        const proposedGroupCenterMm: Vector2 = {
+          xMm: current.startGroupCenterMm.xMm + rawDeltaMm.xMm,
+          yMm: current.startGroupCenterMm.yMm + rawDeltaMm.yMm
+        };
+
+        let snappedGroupCenterMm = proposedGroupCenterMm;
+        let snapTargetIds = current.previousSnapTargetIds;
+        let activeGuides: Guide[] = [];
+        if (snapToGrid) {
+          // gridSnapTargets are already all kind:"grid" — no filtering needed.
+          const snap = resolveSnap(proposedGroupCenterMm, gridSnapTargets, {
+            thresholdMm: snapThresholdMm,
+            previousSnapTargetIds: current.previousSnapTargetIds
+          });
+          snappedGroupCenterMm = snap.point;
+          snapTargetIds = snap.snapTargetIds;
+          activeGuides = snap.activeGuides;
+        }
+
+        const deltaMm: Vector2 = {
+          xMm: snappedGroupCenterMm.xMm - current.startGroupCenterMm.xMm,
+          yMm: snappedGroupCenterMm.yMm - current.startGroupCenterMm.yMm
+        };
+        const previewRectById = new Map<string, PlanRect>(
+          current.members.map((member) => [
+            member.id,
+            resolvePlanGroupMemberMove(member, deltaMm).rect
+          ])
+        );
+
+        return {
+          ...current,
+          previewGroupCenterMm: snappedGroupCenterMm,
+          previewRectById,
+          previousSnapTargetIds: snapTargetIds,
+          activeGuides
+        };
+      }
+
+      // Move the object's own center by the pointer delta, not the raw pointer
+      // — wherever inside the object the user grabbed must not leak into the
+      // committed center.
+      const proposedCenterMm: Vector2 = {
+        xMm: current.startCenterMm.xMm + (pointerMm.xMm - current.startPointerMm.xMm),
+        yMm: current.startCenterMm.yMm + (pointerMm.yMm - current.startPointerMm.yMm)
+      };
+
+      const result = resolvePlanPlacement(proposedCenterMm, {
+        walls: floorWallsForTool,
+        // Exclude the moving object so it never snaps to its own old position.
+        wallObjects: project.wallObjects.filter((object) => object.id !== current.objectId),
+        movingSize: current.movingSize,
+        movingKind: current.kind,
+        canFloat: current.canFloat,
+        // Live preview's current wall, so hysteresis tracks the drag.
+        currentAnchorWallId: current.currentAnchorWallId,
+        captureDistanceMm,
+        gridTargets: gridSnapTargets,
+        snapToGrid,
+        thresholdMm: snapThresholdMm,
+        previousSnapTargetIds: current.previousSnapTargetIds,
+        rotationDeg: current.rotationDeg
+      });
+
+      return {
+        ...current,
+        previewPlanRect: result.planRect,
+        previewPlacement: result.placement,
+        currentAnchorWallId:
+          result.placement.anchor === "wall" ? result.placement.wallId : null,
+        previousSnapTargetIds: result.snapTargetIds,
+        activeGuides: result.activeGuides
+      };
+    },
+    onRelease: (current) => {
+      // Group drag: sub-threshold release is a click (no commit, no phantom
+      // undo); else one commit carrying every member's translated result.
+      if (current.members && current.startGroupCenterMm && current.previewGroupCenterMm) {
+        const deltaMm: Vector2 = {
+          xMm: current.previewGroupCenterMm.xMm - current.startGroupCenterMm.xMm,
+          yMm: current.previewGroupCenterMm.yMm - current.startGroupCenterMm.yMm
+        };
+        if (Math.hypot(deltaMm.xMm, deltaMm.yMm) < 0.5) return;
+
+        // Whether or not the commit survives the collision gate, the click
+        // that trails the release must not collapse the multi-selection to
+        // the one grabbed member (see suppressNextSelect).
+        suppressNextSelect();
+        const moves = current.members.map(
+          (member) => resolvePlanGroupMemberMove(member, deltaMm).commit
+        );
+        onCommitPlanMoveGroup?.(moves);
+        return;
+      }
+
+      // Sub-threshold release is a click, not a move — it must not commit (and
+      // so land a phantom undo entry); the object's onClick still selects it.
+      const movedMm = Math.hypot(
+        current.previewPlanRect.centerXMm - current.startCenterMm.xMm,
+        current.previewPlanRect.centerYMm - current.startCenterMm.yMm
+      );
+      if (movedMm < 0.5) return;
+
+      onCommitPlanMove?.(current.objectId, current.previewPlacement);
+    }
+  });
   const [dropGhost, setDropGhost] = useState<DropGhostState | null>(null);
   const dropSnapTargetIdsRef = useRef<SnapTargetIds | undefined>(undefined);
-  const [marquee, setMarquee] = useState<MarqueeState | null>(null);
-  const marqueeRef = useRef<MarqueeState | null>(null);
+  // Rubber-band marquee selection on the plan background. Same deferred-
+  // closure note as the machines above: onMove references toSvgMm, onRelease
+  // references snapThresholdMm/idsIntersectingMarquee/onMarqueeSelect/
+  // suppressNextToolClickRef, all declared further down this component body.
+  const {
+    drag: marquee,
+    dragRef: marqueeRef,
+    beginDrag: startMarquee
+  } = useDragGesture<MarqueeState>({
+    onMove: (current, event) => {
+      const pointerMm = toSvgMm(event.clientX, event.clientY);
+      if (!pointerMm) return null;
+      return { ...current, currentMm: pointerMm };
+    },
+    onRelease: (current, event) => {
+      const rect = marqueeRectMm(current);
+      // A sub-threshold rect is a plain background click, not a drag. Unlike
+      // elevation (which clears the selection here), PlanView must do NOTHING:
+      // the browser fires a `click` on the svg right after this pointerup, and
+      // handleSvgClick's no-tool branch already calls onClearSelection for that
+      // background click — clearing here too would be redundant.
+      const draggedMm = Math.hypot(rect.maxXMm - rect.minXMm, rect.maxYMm - rect.minYMm);
+      if (draggedMm < snapThresholdMm) return;
+
+      // A real marquee. CRITICALLY suppress the trailing background click: the
+      // browser fires `click` on the svg right after pointerup, and handleSvg-
+      // Click's no-tool branch calls onClearSelection — which would instantly
+      // wipe the selection this marquee just made. suppressNextToolClickRef is
+      // the same flag handleSvgClick already consumes for placement clicks; the
+      // window.setTimeout(..., 0) is the safety net for a release that lands
+      // where no click follows (pointer left the svg mid-drag), same idiom as
+      // suppressNextSelect.
+      suppressNextToolClickRef.current = true;
+      window.setTimeout(() => {
+        suppressNextToolClickRef.current = false;
+      }, 0);
+      onMarqueeSelect?.(idsIntersectingMarquee(rect), event.shiftKey);
+    }
+  });
 
   // Which tool is armed lives in App now (activeTool prop, lifted alongside
   // the toolbar buttons that toggle it) — deliberately NOT in the store, same
@@ -557,43 +850,244 @@ export function PlanView({
     drawRef.current = draw;
   }, [draw]);
 
-  // Reshape mode's vertex drag — same ref-mirrored discipline as every other
-  // drag here. `selectedVertexId` is separate: a plain click (no movement)
-  // still "selects" a vertex for the Delete/Backspace merge shortcut, whether
-  // or not this gesture also turns into a drag.
-  const [vertexDrag, setVertexDrag] = useState<VertexDragState | null>(null);
-  const vertexDragRef = useRef<VertexDragState | null>(null);
-  useEffect(() => {
-    vertexDragRef.current = vertexDrag;
-  }, [vertexDrag]);
-  // A selected non-rectangle's wall slide (WallSlideHandles chips → moveRoomWall)
-  // — same ref-mirrored discipline.
-  const [wallDrag, setWallDrag] = useState<WallDragState | null>(null);
-  const wallDragRef = useRef<WallDragState | null>(null);
-  useEffect(() => {
-    wallDragRef.current = wallDrag;
-  }, [wallDrag]);
+  // Reshape mode's vertex drag. `selectedVertexId` is separate: a plain click
+  // (no movement) still "selects" a vertex for the Delete/Backspace merge
+  // shortcut, whether or not this gesture also turns into a drag. Same
+  // deferred-closure note as `drag` above: onMove/onRelease reference
+  // project/gridSnapTargets/snapThresholdMm/snapToGrid/onMoveRoomVertex, all
+  // declared further down this component body.
+  const {
+    drag: vertexDrag,
+    dragRef: vertexDragRef,
+    beginDrag: startVertexDrag
+  } = useDragGesture<VertexDragState>({
+    onMove: (current, event) => {
+      const pointerMm = toSvgMm(event.clientX, event.clientY);
+      if (!pointerMm) return null;
+
+      const placement = project.floor.rooms.find(
+        (candidate) => candidate.roomId === current.roomId
+      );
+      if (!placement) return null;
+
+      const deltaMm: Vector2 = {
+        xMm: pointerMm.xMm - current.startPointerMm.xMm,
+        yMm: pointerMm.yMm - current.startPointerMm.yMm
+      };
+      const proposedLocalMm: Vector2 = {
+        xMm: current.startLocalMm.xMm + deltaMm.xMm,
+        yMm: current.startLocalMm.yMm + deltaMm.yMm
+      };
+
+      let snappedLocalMm = proposedLocalMm;
+      let snapTargetIds = current.previousSnapTargetIds;
+      let activeGuides: Guide[] = [];
+      if (snapToGrid) {
+        // gridSnapTargets are in floor space; add the room's placement offset
+        // before snapping, then subtract it back off — the same grab-offset
+        // convention roomDrag's corner snap uses.
+        const proposedFloorMm: Vector2 = {
+          xMm: proposedLocalMm.xMm + placement.offsetXMm,
+          yMm: proposedLocalMm.yMm + placement.offsetYMm
+        };
+        const snap = resolveSnap(proposedFloorMm, gridSnapTargets, {
+          thresholdMm: snapThresholdMm,
+          previousSnapTargetIds: current.previousSnapTargetIds
+        });
+        snappedLocalMm = {
+          xMm: snap.point.xMm - placement.offsetXMm,
+          yMm: snap.point.yMm - placement.offsetYMm
+        };
+        snapTargetIds = snap.snapTargetIds;
+        activeGuides = snap.activeGuides;
+      }
+
+      const valid = canMoveRoomVertex(placement.room, current.vertexId, snappedLocalMm);
+
+      return {
+        ...current,
+        previewLocalMm: snappedLocalMm,
+        valid,
+        previousSnapTargetIds: snapTargetIds,
+        activeGuides
+      };
+    },
+    onRelease: (current) => {
+      const movedMm = Math.hypot(
+        current.previewLocalMm.xMm - current.startLocalMm.xMm,
+        current.previewLocalMm.yMm - current.startLocalMm.yMm
+      );
+      // Sub-threshold release is a click (already handled by selecting the
+      // vertex on pointerdown), not a move — no commit. An invalid final
+      // position REVERTS: displayedProject falls back to the committed
+      // project the instant vertexDrag goes null above, so "revert" costs
+      // nothing extra here — just don't call onMoveRoomVertex.
+      if (movedMm < 0.5 || !current.valid) return;
+
+      void onMoveRoomVertex?.(current.roomId, current.vertexId, current.previewLocalMm);
+    }
+  });
+  // A selected non-rectangle's wall slide (WallSlideHandles chips →
+  // moveRoomWall). Same deferred-closure note as `drag` above: onMove
+  // references `project` and `toSvgMm`, declared further down this component
+  // body — safe, since onMove only ever runs later, from a window pointer
+  // event.
+  const {
+    drag: wallDrag,
+    dragRef: wallDragRef,
+    beginDrag: startWallDrag
+  } = useDragGesture<WallDragState>({
+    onMove: (current, event) => {
+      const pointerMm = toSvgMm(event.clientX, event.clientY);
+      if (!pointerMm) return null;
+
+      const deltaMm: Vector2 = {
+        xMm: pointerMm.xMm - current.startPointerMm.xMm,
+        yMm: pointerMm.yMm - current.startPointerMm.yMm
+      };
+      // Constrain the pointer delta to the wall's own perpendicular — project
+      // it onto the unit normal captured at drag start, so a diagonal mouse
+      // movement only ever drives the wall along its normal, never sideways.
+      const offsetMm = deltaMm.xMm * current.normal.xMm + deltaMm.yMm * current.normal.yMm;
+
+      // Live preview validity: run the actual domain op against the
+      // committed project (not the store) purely to see whether it throws —
+      // same idiom as canMoveRoomVertex gating the vertex-drag preview.
+      let valid = true;
+      try {
+        moveRoomWall(project, current.roomId, current.wallId, offsetMm);
+      } catch {
+        valid = false;
+      }
+
+      return { ...current, previewOffsetMm: offsetMm, valid };
+    },
+    onRelease: (current) => {
+      // Sub-threshold release is a click, not a move — no commit. An invalid
+      // final offset REVERTS: displayedProject falls back to the pre-drag
+      // project the instant wallDrag goes null above, so "revert" costs
+      // nothing extra here — just don't call onMoveRoomWall.
+      if (Math.abs(current.previewOffsetMm) < 0.5 || !current.valid) return;
+
+      void onMoveRoomWall?.(current.roomId, current.wallId, current.previewOffsetMm);
+    }
+  });
   // The wall edge the pointer is hovering, when it belongs to the selected
   // non-rectangle room — teaches the wall→chip link (the wall lights up and its
   // WallSlideHandles chip gets the stronger treatment). Cheap: only set while
   // hovering an eligible edge, cleared on leave.
   const [hoveredWallId, setHoveredWallId] = useState<string | null>(null);
-  // Partition create-drag and edit-drag — same ref-mirrored discipline as the
-  // other drag gestures (subscribed once per gesture; committed project can't
-  // change mid-drag since nothing commits until release).
-  const [partitionDraw, setPartitionDraw] = useState<PartitionDrawState | null>(null);
-  const partitionDrawRef = useRef<PartitionDrawState | null>(null);
-  useEffect(() => {
-    partitionDrawRef.current = partitionDraw;
-  }, [partitionDraw]);
-  const [partitionDrag, setPartitionDrag] = useState<PartitionDragState | null>(null);
-  const partitionDragRef = useRef<PartitionDragState | null>(null);
-  useEffect(() => {
-    partitionDragRef.current = partitionDrag;
-  }, [partitionDrag]);
-  useEffect(() => {
-    if (!partitionToolActive) setPartitionDraw(null);
-  }, [partitionToolActive]);
+  // Partition create-drag — same deferred-closure note as `drag` above:
+  // onMove references toSvgMm/snapDrawPoint/partitionDrawInvalid, and
+  // onRelease references onAddFreestandingWall/onPartitionToolChange, all
+  // declared further down this component body.
+  //
+  // Escape disarms the partition tool mid-draw (see the keydown handler
+  // below, which calls onPartitionToolChange?.(false)); the old hand-rolled
+  // version cancelled the gesture outright by nulling this state directly,
+  // which tore the window listeners down on the spot. useDragGesture has no
+  // such imperative cancel, so cancellation is expressed as a commit-time
+  // gate instead: onRelease reads the live `partitionToolActive` prop (fresh
+  // every render, same as every other closure here) and skips the commit —
+  // and skips it silently, since RENDER already hides the whole preview layer
+  // behind `{partitionToolActive ? ... : null}` the instant Escape fires, so
+  // there is nothing left on screen for the lingering listeners to animate.
+  // The one observable difference from the original: the window listeners
+  // stay subscribed until the pointer actually lifts (instead of tearing
+  // down at the keypress) — inert, since nothing renders and nothing commits
+  // in that window.
+  const {
+    drag: partitionDraw,
+    dragRef: partitionDrawRef,
+    beginDrag: startPartitionDraw
+  } = useDragGesture<PartitionDrawState>({
+    onMove: (current, event) => {
+      const pointerMm = toSvgMm(event.clientX, event.clientY);
+      if (!pointerMm) return null;
+      const endMm = snapDrawPoint(pointerMm, current.startMm, event.shiftKey);
+      return { ...current, endMm, invalid: partitionDrawInvalid(current.startMm, endMm) };
+    },
+    onRelease: (current) => {
+      onPartitionToolChange?.(false);
+      if (!current.endMm || current.invalid || !partitionToolActive) return;
+      onAddFreestandingWall?.(current.startMm, current.endMm);
+    }
+  });
+  // Partition edit-drag (whole-body move, or one endpoint re-drag) — same
+  // deferred-closure note as the machines above: onMove references
+  // gridSnapTargets/snapThresholdMm/snapToGrid/snapDrawPoint, onRelease
+  // references onMoveFreestandingWall/onMoveFreestandingWallEndpoint, all
+  // declared further down this component body.
+  const {
+    drag: partitionDrag,
+    dragRef: partitionDragRef,
+    beginDrag: startPartitionDrag
+  } = useDragGesture<PartitionDragState>({
+    onMove: (current, event) => {
+      const pointerMm = toSvgMm(event.clientX, event.clientY);
+      if (!pointerMm) return null;
+      const deltaMm = {
+        xMm: pointerMm.xMm - current.startPointerMm.xMm,
+        yMm: pointerMm.yMm - current.startPointerMm.yMm
+      };
+
+      if (current.mode === "move") {
+        const rawStart = {
+          xMm: current.startFloorMm.xMm + deltaMm.xMm,
+          yMm: current.startFloorMm.yMm + deltaMm.yMm
+        };
+        let snappedStart = rawStart;
+        if (snapToGrid) {
+          snappedStart = resolveSnap(rawStart, gridSnapTargets, {
+            thresholdMm: snapThresholdMm
+          }).point;
+        }
+        const appliedDelta = {
+          xMm: snappedStart.xMm - current.startFloorMm.xMm,
+          yMm: snappedStart.yMm - current.startFloorMm.yMm
+        };
+        return {
+          ...current,
+          previewStartFloorMm: {
+            xMm: current.startFloorMm.xMm + appliedDelta.xMm,
+            yMm: current.startFloorMm.yMm + appliedDelta.yMm
+          },
+          previewEndFloorMm: {
+            xMm: current.endFloorMm.xMm + appliedDelta.xMm,
+            yMm: current.endFloorMm.yMm + appliedDelta.yMm
+          }
+        };
+      }
+
+      // Endpoint drag: the anchored end stays; the dragged end snaps (grid +
+      // axis-lock to the anchor, Shift forces H/V — same as the draw tool).
+      const anchor = current.mode === "start" ? current.endFloorMm : current.startFloorMm;
+      const moved = snapDrawPoint(
+        { xMm: pointerMm.xMm, yMm: pointerMm.yMm },
+        anchor,
+        event.shiftKey
+      );
+      return current.mode === "start"
+        ? { ...current, previewStartFloorMm: moved }
+        : { ...current, previewEndFloorMm: moved };
+    },
+    onRelease: (current) => {
+      if (current.mode === "move") {
+        const delta = {
+          xMm: current.previewStartFloorMm.xMm - current.startFloorMm.xMm,
+          yMm: current.previewStartFloorMm.yMm - current.startFloorMm.yMm
+        };
+        if (Math.hypot(delta.xMm, delta.yMm) < 0.5) return;
+        onMoveFreestandingWall?.(current.wallId, delta);
+        return;
+      }
+      const next =
+        current.mode === "start" ? current.previewStartFloorMm : current.previewEndFloorMm;
+      const original = current.mode === "start" ? current.startFloorMm : current.endFloorMm;
+      if (Math.hypot(next.xMm - original.xMm, next.yMm - original.yMm) < 0.5) return;
+      onMoveFreestandingWallEndpoint?.(current.wallId, current.mode, next);
+    }
+  });
 
   const [selectedVertexId, setSelectedVertexId] = useState<string | null>(null);
   const selectedVertexIdRef = useRef<string | null>(null);
@@ -1172,220 +1666,30 @@ export function PlanView({
     void onPlaceOpeningFromPlan(kind, result.placement);
   }
 
-  useEffect(() => {
-    if (!drag) return;
-
-    function onPointerMove(event: PointerEvent) {
-      const current = dragRef.current;
-      if (!current) return;
-
-      const pointerMm = toSvgMm(event.clientX, event.clientY);
-      if (!pointerMm) return;
-
-      // Snap the wall's moving edge, not the raw pointer — the handle can be
-      // grabbed anywhere within its 16px hit target, and that grab offset
-      // must not leak into the committed length even when the pointer lands
-      // exactly on a grid line.
-      const proposedEdgeMm = proposeMovingEdgePointMm(
-        current.edgeStartMm,
-        current.startPointerMm,
-        pointerMm
-      );
-
-      // A handle only ever moves along its target wall's own axis, so only
-      // grid lines perpendicular to that axis are relevant — snapping the
-      // other coordinate would be meaningless for this drag and could
-      // trigger on incidental hand-tremor alignment.
-      let snappedEdgeMm = proposedEdgeMm;
-      let snapTargetId: string | undefined;
-      let activeGuides: Guide[] = [];
-
-      if (snapToGrid) {
-        const isXAxis = Math.abs(current.axis.xMm) >= Math.abs(current.axis.yMm);
-        const dragAxis = isXAxis ? "x" : "y";
-        const relevantTargets: SnapTarget[] = gridSnapTargets.filter(
-          (target) => target.axis === dragAxis
-        );
-        const snapResult = resolveSnap(proposedEdgeMm, relevantTargets, {
-          thresholdMm: snapThresholdMm,
-          // Single-axis drag: the remembered id lives in the drag axis's
-          // slot of the per-axis hysteresis map.
-          previousSnapTargetIds:
-            dragAxis === "x"
-              ? { x: current.previousSnapTargetId }
-              : { y: current.previousSnapTargetId }
-        });
-
-        snappedEdgeMm = snapResult.point;
-        snapTargetId = snapResult.snapTargetIds[dragAxis];
-        activeGuides = snapResult.activeGuides;
-      }
-
-      const previewLengthMm = computeEdgeSnappedLengthMm(
-        current.startLengthMm,
-        current.edgeStartMm,
-        snappedEdgeMm,
-        current.axis,
-        current.anchor
-      );
-
-      setDrag((state) =>
-        state
-          ? { ...state, previewLengthMm, previousSnapTargetId: snapTargetId, activeGuides }
-          : state
-      );
-    }
-
-    function onPointerUp() {
-      const current = dragRef.current;
-      setDrag(null);
-      if (!current) return;
-
-      if (Math.abs(current.previewLengthMm - current.startLengthMm) < 0.5) return;
-      void onCommitWallLength(current.targetWallId, current.previewLengthMm, current.anchor);
-    }
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerUp);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
-    };
-    // Subscribed once per drag gesture (keyed on whether a drag is active,
-    // not on every in-flight preview update) — onPointerMove/onPointerUp
-    // read the latest state via dragRef rather than closing over `drag`.
-    // gridSnapTargets/snapToGrid/snapThresholdMm are captured by closure
-    // here too: they derive from the committed project's bounds and grid
-    // interval, which can't change mid-drag (the live preview never
-    // rewrites viewBoxBounds), so they're safe to leave out of the deps
-    // rather than resubscribing on every render.
-  }, [drag !== null, onCommitWallLength]);
-
-  useEffect(() => {
-    dragRef.current = drag;
-  }, [drag]);
-
   function beginDrag(
     roomId: string,
     target: ResizeHandleTarget,
     event: ReactPointerEvent<SVGRectElement>
   ) {
-    const svg = svgRef.current;
-    if (!svg) return;
+    // toSvgMm is byte-identical to the old inline createSVGPoint/getScreenCTM/
+    // matrixTransform(inverse()) sequence — both are SVG-userspace mm, and
+    // both bail (here: silently return) when the svg has no CTM yet.
+    const startPointerMm = toSvgMm(event.clientX, event.clientY);
+    if (!startPointerMm) return;
 
-    const point = svg.createSVGPoint();
-    point.x = event.clientX;
-    point.y = event.clientY;
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return;
-
-    const startPointerMm = point.matrixTransform(ctm.inverse());
-
-    setDrag({
+    startDrag({
       roomId,
       targetWallId: target.targetWallId,
       axis: target.axis,
       anchor: target.anchor,
       startLengthMm: target.startLengthMm,
-      startPointerMm: { xMm: startPointerMm.x, yMm: startPointerMm.y },
+      startPointerMm,
       edgeStartMm: getMovingWallEdgeWorldPointMm(project, target.targetWallId, target.anchor),
       previewLengthMm: target.startLengthMm,
       previousSnapTargetId: undefined,
       activeGuides: []
     });
   }
-
-  useEffect(() => {
-    if (!roomDrag) return;
-
-    function onPointerMove(event: PointerEvent) {
-      const current = roomDragRef.current;
-      if (!current) return;
-
-      const pointerMm = toSvgMm(event.clientX, event.clientY);
-      if (!pointerMm) return;
-
-      const deltaMm: Vector2 = {
-        xMm: pointerMm.xMm - current.startPointerMm.xMm,
-        yMm: pointerMm.yMm - current.startPointerMm.yMm
-      };
-      const proposedMinCornerMm: Vector2 = {
-        xMm: current.startMinCornerMm.xMm + deltaMm.xMm,
-        yMm: current.startMinCornerMm.yMm + deltaMm.yMm
-      };
-
-      let snappedMinCornerMm = proposedMinCornerMm;
-      let snapTargetIds = current.previousSnapTargetIds;
-      let activeGuides: Guide[] = [];
-      if (snapToGrid) {
-        // gridSnapTargets are already all kind:"grid" — resolveSnap resolves
-        // both axes independently against them in one call, the same idiom
-        // objectDrag's group-drag branch uses for its box-center snap.
-        const snap = resolveSnap(proposedMinCornerMm, gridSnapTargets, {
-          thresholdMm: snapThresholdMm,
-          previousSnapTargetIds: current.previousSnapTargetIds
-        });
-        snappedMinCornerMm = snap.point;
-        snapTargetIds = snap.snapTargetIds;
-        activeGuides = snap.activeGuides;
-      }
-
-      const cornerDeltaMm: Vector2 = {
-        xMm: snappedMinCornerMm.xMm - current.startMinCornerMm.xMm,
-        yMm: snappedMinCornerMm.yMm - current.startMinCornerMm.yMm
-      };
-
-      setRoomDrag((state) =>
-        state
-          ? {
-              ...state,
-              previewOffsetMm: {
-                xMm: current.startOffsetMm.xMm + cornerDeltaMm.xMm,
-                yMm: current.startOffsetMm.yMm + cornerDeltaMm.yMm
-              },
-              previousSnapTargetIds: snapTargetIds,
-              activeGuides
-            }
-          : state
-      );
-    }
-
-    function onPointerUp() {
-      const current = roomDragRef.current;
-      setRoomDrag(null);
-      if (!current) return;
-
-      // Sub-threshold release is a click, not a move — must not commit (and
-      // so land a phantom undo entry), same guard as the object/group drags.
-      const movedMm = Math.hypot(
-        current.previewOffsetMm.xMm - current.startOffsetMm.xMm,
-        current.previewOffsetMm.yMm - current.startOffsetMm.yMm
-      );
-      if (movedMm < 0.5) return;
-
-      void onMoveRoom?.(current.roomId, current.previewOffsetMm.xMm, current.previewOffsetMm.yMm);
-    }
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerUp);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
-    };
-    // Same ref-based discipline as the wall-resize drag effect above:
-    // subscribed once per gesture, reading live state via roomDragRef rather
-    // than closing over `roomDrag`. gridSnapTargets/snapToGrid/snapThresholdMm
-    // derive from the committed project/viewport and can't change mid-drag,
-    // so they're intentionally left out of the deps.
-  }, [roomDrag !== null, onMoveRoom]);
-
-  useEffect(() => {
-    roomDragRef.current = roomDrag;
-  }, [roomDrag]);
 
   function beginRoomDrag(roomId: string, event: ReactPointerEvent<SVGPolygonElement>) {
     const placement = project.floor.rooms.find((candidate) => candidate.roomId === roomId);
@@ -1397,7 +1701,7 @@ export function PlanView({
     const bounds = getRoomBounds(placement.room);
     const startOffsetMm: Vector2 = { xMm: placement.offsetXMm, yMm: placement.offsetYMm };
 
-    setRoomDrag({
+    startRoomDrag({
       roomId,
       startPointerMm,
       startOffsetMm,
@@ -1427,7 +1731,7 @@ export function PlanView({
     // A plain click (no drag) still "selects" the vertex, for the
     // Delete/Backspace merge shortcut below.
     setSelectedVertexId(vertexId);
-    setVertexDrag({
+    startVertexDrag({
       roomId,
       vertexId,
       startPointerMm,
@@ -1454,101 +1758,6 @@ export function PlanView({
     void onSplitWall(wallId, projection.xAlongMm);
   }
 
-  useEffect(() => {
-    if (!vertexDrag) return;
-
-    function onPointerMove(event: PointerEvent) {
-      const current = vertexDragRef.current;
-      if (!current) return;
-
-      const pointerMm = toSvgMm(event.clientX, event.clientY);
-      if (!pointerMm) return;
-
-      const placement = project.floor.rooms.find(
-        (candidate) => candidate.roomId === current.roomId
-      );
-      if (!placement) return;
-
-      const deltaMm: Vector2 = {
-        xMm: pointerMm.xMm - current.startPointerMm.xMm,
-        yMm: pointerMm.yMm - current.startPointerMm.yMm
-      };
-      const proposedLocalMm: Vector2 = {
-        xMm: current.startLocalMm.xMm + deltaMm.xMm,
-        yMm: current.startLocalMm.yMm + deltaMm.yMm
-      };
-
-      let snappedLocalMm = proposedLocalMm;
-      let snapTargetIds = current.previousSnapTargetIds;
-      let activeGuides: Guide[] = [];
-      if (snapToGrid) {
-        // gridSnapTargets are in floor space; add the room's placement offset
-        // before snapping, then subtract it back off — the same grab-offset
-        // convention roomDrag's corner snap uses.
-        const proposedFloorMm: Vector2 = {
-          xMm: proposedLocalMm.xMm + placement.offsetXMm,
-          yMm: proposedLocalMm.yMm + placement.offsetYMm
-        };
-        const snap = resolveSnap(proposedFloorMm, gridSnapTargets, {
-          thresholdMm: snapThresholdMm,
-          previousSnapTargetIds: current.previousSnapTargetIds
-        });
-        snappedLocalMm = {
-          xMm: snap.point.xMm - placement.offsetXMm,
-          yMm: snap.point.yMm - placement.offsetYMm
-        };
-        snapTargetIds = snap.snapTargetIds;
-        activeGuides = snap.activeGuides;
-      }
-
-      const valid = canMoveRoomVertex(placement.room, current.vertexId, snappedLocalMm);
-
-      setVertexDrag((state) =>
-        state
-          ? {
-              ...state,
-              previewLocalMm: snappedLocalMm,
-              valid,
-              previousSnapTargetIds: snapTargetIds,
-              activeGuides
-            }
-          : state
-      );
-    }
-
-    function onPointerUp() {
-      const current = vertexDragRef.current;
-      setVertexDrag(null);
-      if (!current) return;
-
-      const movedMm = Math.hypot(
-        current.previewLocalMm.xMm - current.startLocalMm.xMm,
-        current.previewLocalMm.yMm - current.startLocalMm.yMm
-      );
-      // Sub-threshold release is a click (already handled by selecting the
-      // vertex on pointerdown), not a move — no commit. An invalid final
-      // position REVERTS: displayedProject falls back to the committed
-      // project the instant vertexDrag goes null above, so "revert" costs
-      // nothing extra here — just don't call onMoveRoomVertex.
-      if (movedMm < 0.5 || !current.valid) return;
-
-      void onMoveRoomVertex?.(current.roomId, current.vertexId, current.previewLocalMm);
-    }
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerUp);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
-    };
-    // Same ref-based discipline as every other drag effect in this file:
-    // subscribed once per gesture, project/gridSnapTargets/snapToGrid/
-    // snapThresholdMm captured by closure (the committed project can't change
-    // mid-drag since nothing commits until release).
-  }, [vertexDrag !== null, onMoveRoomVertex]);
-
   function beginWallDrag(roomId: string, wallId: string, event: ReactPointerEvent<SVGElement>) {
     event.stopPropagation();
     const placement = project.floor.rooms.find((candidate) => candidate.roomId === roomId);
@@ -1565,7 +1774,7 @@ export function PlanView({
     // precisely the direction the domain op will commit.
     const normal: Vector2 = unitLeftNormal(geometry.start, geometry.end);
 
-    setWallDrag({
+    startWallDrag({
       roomId,
       wallId,
       startPointerMm,
@@ -1574,66 +1783,6 @@ export function PlanView({
       valid: true
     });
   }
-
-  useEffect(() => {
-    if (!wallDrag) return;
-
-    function onPointerMove(event: PointerEvent) {
-      const current = wallDragRef.current;
-      if (!current) return;
-
-      const pointerMm = toSvgMm(event.clientX, event.clientY);
-      if (!pointerMm) return;
-
-      const deltaMm: Vector2 = {
-        xMm: pointerMm.xMm - current.startPointerMm.xMm,
-        yMm: pointerMm.yMm - current.startPointerMm.yMm
-      };
-      // Constrain the pointer delta to the wall's own perpendicular — project
-      // it onto the unit normal captured at drag start, so a diagonal mouse
-      // movement only ever drives the wall along its normal, never sideways.
-      const offsetMm = deltaMm.xMm * current.normal.xMm + deltaMm.yMm * current.normal.yMm;
-
-      // Live preview validity: run the actual domain op against the
-      // committed project (not the store) purely to see whether it throws —
-      // same idiom as canMoveRoomVertex gating the vertex-drag preview.
-      let valid = true;
-      try {
-        moveRoomWall(project, current.roomId, current.wallId, offsetMm);
-      } catch {
-        valid = false;
-      }
-
-      setWallDrag((state) => (state ? { ...state, previewOffsetMm: offsetMm, valid } : state));
-    }
-
-    function onPointerUp() {
-      const current = wallDragRef.current;
-      setWallDrag(null);
-      if (!current) return;
-
-      // Sub-threshold release is a click, not a move — no commit. An invalid
-      // final offset REVERTS: displayedProject falls back to the pre-drag
-      // project the instant wallDrag goes null above, so "revert" costs
-      // nothing extra here — just don't call onMoveRoomWall.
-      if (Math.abs(current.previewOffsetMm) < 0.5 || !current.valid) return;
-
-      void onMoveRoomWall?.(current.roomId, current.wallId, current.previewOffsetMm);
-    }
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerUp);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
-    };
-    // Same ref-based discipline as every other drag effect in this file:
-    // subscribed once per gesture, `project` captured by closure (the
-    // committed project can't change mid-drag since nothing commits until
-    // release).
-  }, [wallDrag !== null, onMoveRoomWall]);
 
   // Is a floor-space point inside any room's polygon? Drives the partition
   // draw's live validity (its midpoint must land in a room — the store refuses
@@ -1670,42 +1819,8 @@ export function PlanView({
     const startMm = toSvgMm(event.clientX, event.clientY);
     if (!startMm) return;
     const snapped = snapDrawPoint(startMm, null, event.shiftKey);
-    setPartitionDraw({ startMm: snapped, endMm: null, invalid: true });
+    startPartitionDraw({ startMm: snapped, endMm: null, invalid: true });
   }
-
-  useEffect(() => {
-    if (!partitionDraw) return;
-
-    function onPointerMove(event: PointerEvent) {
-      const current = partitionDrawRef.current;
-      if (!current) return;
-      const pointerMm = toSvgMm(event.clientX, event.clientY);
-      if (!pointerMm) return;
-      const endMm = snapDrawPoint(pointerMm, current.startMm, event.shiftKey);
-      setPartitionDraw((state) =>
-        state
-          ? { ...state, endMm, invalid: partitionDrawInvalid(state.startMm, endMm) }
-          : state
-      );
-    }
-
-    function onPointerUp() {
-      const current = partitionDrawRef.current;
-      setPartitionDraw(null);
-      onPartitionToolChange?.(false);
-      if (!current || !current.endMm || current.invalid) return;
-      onAddFreestandingWall?.(current.startMm, current.endMm);
-    }
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerUp);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
-    };
-  }, [partitionDraw !== null, onAddFreestandingWall, onPartitionToolChange]);
 
   // Begin a partition edit drag: whole-body move, or one endpoint re-drag.
   function beginPartitionDrag(
@@ -1717,7 +1832,7 @@ export function PlanView({
     const startPointerMm = toSvgMm(event.clientX, event.clientY);
     if (!startPointerMm) return;
     onSelectFreestandingWall?.(partition.wallId);
-    setPartitionDrag({
+    startPartitionDrag({
       wallId: partition.wallId,
       mode,
       startPointerMm,
@@ -1727,261 +1842,6 @@ export function PlanView({
       previewEndFloorMm: partition.endMm
     });
   }
-
-  useEffect(() => {
-    if (!partitionDrag) return;
-
-    function onPointerMove(event: PointerEvent) {
-      const current = partitionDragRef.current;
-      if (!current) return;
-      const pointerMm = toSvgMm(event.clientX, event.clientY);
-      if (!pointerMm) return;
-      const deltaMm = {
-        xMm: pointerMm.xMm - current.startPointerMm.xMm,
-        yMm: pointerMm.yMm - current.startPointerMm.yMm
-      };
-
-      if (current.mode === "move") {
-        const rawStart = {
-          xMm: current.startFloorMm.xMm + deltaMm.xMm,
-          yMm: current.startFloorMm.yMm + deltaMm.yMm
-        };
-        let snappedStart = rawStart;
-        if (snapToGrid) {
-          snappedStart = resolveSnap(rawStart, gridSnapTargets, {
-            thresholdMm: snapThresholdMm
-          }).point;
-        }
-        const appliedDelta = {
-          xMm: snappedStart.xMm - current.startFloorMm.xMm,
-          yMm: snappedStart.yMm - current.startFloorMm.yMm
-        };
-        setPartitionDrag((state) =>
-          state
-            ? {
-                ...state,
-                previewStartFloorMm: {
-                  xMm: state.startFloorMm.xMm + appliedDelta.xMm,
-                  yMm: state.startFloorMm.yMm + appliedDelta.yMm
-                },
-                previewEndFloorMm: {
-                  xMm: state.endFloorMm.xMm + appliedDelta.xMm,
-                  yMm: state.endFloorMm.yMm + appliedDelta.yMm
-                }
-              }
-            : state
-        );
-        return;
-      }
-
-      // Endpoint drag: the anchored end stays; the dragged end snaps (grid +
-      // axis-lock to the anchor, Shift forces H/V — same as the draw tool).
-      const anchor =
-        current.mode === "start" ? current.endFloorMm : current.startFloorMm;
-      const moved = snapDrawPoint(
-        { xMm: pointerMm.xMm, yMm: pointerMm.yMm },
-        anchor,
-        event.shiftKey
-      );
-      setPartitionDrag((state) =>
-        state
-          ? current.mode === "start"
-            ? { ...state, previewStartFloorMm: moved }
-            : { ...state, previewEndFloorMm: moved }
-          : state
-      );
-    }
-
-    function onPointerUp() {
-      const current = partitionDragRef.current;
-      setPartitionDrag(null);
-      if (!current) return;
-
-      if (current.mode === "move") {
-        const delta = {
-          xMm: current.previewStartFloorMm.xMm - current.startFloorMm.xMm,
-          yMm: current.previewStartFloorMm.yMm - current.startFloorMm.yMm
-        };
-        if (Math.hypot(delta.xMm, delta.yMm) < 0.5) return;
-        onMoveFreestandingWall?.(current.wallId, delta);
-        return;
-      }
-      const next =
-        current.mode === "start" ? current.previewStartFloorMm : current.previewEndFloorMm;
-      const original = current.mode === "start" ? current.startFloorMm : current.endFloorMm;
-      if (Math.hypot(next.xMm - original.xMm, next.yMm - original.yMm) < 0.5) return;
-      onMoveFreestandingWallEndpoint?.(current.wallId, current.mode, next);
-    }
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerUp);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
-    };
-  }, [partitionDrag !== null, onMoveFreestandingWall, onMoveFreestandingWallEndpoint]);
-
-  useEffect(() => {
-    if (!objectDrag) return;
-
-    function onPointerMove(event: PointerEvent) {
-      const current = objectDragRef.current;
-      if (!current) return;
-
-      const pointerMm = toSvgMm(event.clientX, event.clientY);
-      if (!pointerMm) return;
-
-      // Group drag: rigid translation, no per-object re-anchoring. Snap the
-      // whole group's box center to the grid (grid tier only), then apply the
-      // snapped delta to every member — wall members reproject onto their own
-      // wall, floor members translate.
-      if (current.members && current.startGroupCenterMm) {
-        const rawDeltaMm: Vector2 = {
-          xMm: pointerMm.xMm - current.startPointerMm.xMm,
-          yMm: pointerMm.yMm - current.startPointerMm.yMm
-        };
-        const proposedGroupCenterMm: Vector2 = {
-          xMm: current.startGroupCenterMm.xMm + rawDeltaMm.xMm,
-          yMm: current.startGroupCenterMm.yMm + rawDeltaMm.yMm
-        };
-
-        let snappedGroupCenterMm = proposedGroupCenterMm;
-        let snapTargetIds = current.previousSnapTargetIds;
-        let activeGuides: Guide[] = [];
-        if (snapToGrid) {
-          // gridSnapTargets are already all kind:"grid" — no filtering needed.
-          const snap = resolveSnap(proposedGroupCenterMm, gridSnapTargets, {
-            thresholdMm: snapThresholdMm,
-            previousSnapTargetIds: current.previousSnapTargetIds
-          });
-          snappedGroupCenterMm = snap.point;
-          snapTargetIds = snap.snapTargetIds;
-          activeGuides = snap.activeGuides;
-        }
-
-        const deltaMm: Vector2 = {
-          xMm: snappedGroupCenterMm.xMm - current.startGroupCenterMm.xMm,
-          yMm: snappedGroupCenterMm.yMm - current.startGroupCenterMm.yMm
-        };
-        const previewRectById = new Map<string, PlanRect>(
-          current.members.map((member) => [
-            member.id,
-            resolvePlanGroupMemberMove(member, deltaMm).rect
-          ])
-        );
-
-        setObjectDrag((state) =>
-          state
-            ? {
-                ...state,
-                previewGroupCenterMm: snappedGroupCenterMm,
-                previewRectById,
-                previousSnapTargetIds: snapTargetIds,
-                activeGuides
-              }
-            : state
-        );
-        return;
-      }
-
-      // Move the object's own center by the pointer delta, not the raw pointer
-      // — wherever inside the object the user grabbed must not leak into the
-      // committed center.
-      const proposedCenterMm: Vector2 = {
-        xMm: current.startCenterMm.xMm + (pointerMm.xMm - current.startPointerMm.xMm),
-        yMm: current.startCenterMm.yMm + (pointerMm.yMm - current.startPointerMm.yMm)
-      };
-
-      const result = resolvePlanPlacement(proposedCenterMm, {
-        walls: floorWallsForTool,
-        // Exclude the moving object so it never snaps to its own old position.
-        wallObjects: project.wallObjects.filter((object) => object.id !== current.objectId),
-        movingSize: current.movingSize,
-        movingKind: current.kind,
-        canFloat: current.canFloat,
-        // Live preview's current wall, so hysteresis tracks the drag.
-        currentAnchorWallId: current.currentAnchorWallId,
-        captureDistanceMm,
-        gridTargets: gridSnapTargets,
-        snapToGrid,
-        thresholdMm: snapThresholdMm,
-        previousSnapTargetIds: current.previousSnapTargetIds,
-        rotationDeg: current.rotationDeg
-      });
-
-      setObjectDrag((state) =>
-        state
-          ? {
-              ...state,
-              previewPlanRect: result.planRect,
-              previewPlacement: result.placement,
-              currentAnchorWallId:
-                result.placement.anchor === "wall" ? result.placement.wallId : null,
-              previousSnapTargetIds: result.snapTargetIds,
-              activeGuides: result.activeGuides
-            }
-          : state
-      );
-    }
-
-    function onPointerUp() {
-      const current = objectDragRef.current;
-      setObjectDrag(null);
-      if (!current) return;
-
-      // Group drag: sub-threshold release is a click (no commit, no phantom
-      // undo); else one commit carrying every member's translated result.
-      if (current.members && current.startGroupCenterMm && current.previewGroupCenterMm) {
-        const deltaMm: Vector2 = {
-          xMm: current.previewGroupCenterMm.xMm - current.startGroupCenterMm.xMm,
-          yMm: current.previewGroupCenterMm.yMm - current.startGroupCenterMm.yMm
-        };
-        if (Math.hypot(deltaMm.xMm, deltaMm.yMm) < 0.5) return;
-
-        // Whether or not the commit survives the collision gate, the click
-        // that trails the release must not collapse the multi-selection to
-        // the one grabbed member (see suppressNextSelect).
-        suppressNextSelect();
-        const moves = current.members.map(
-          (member) => resolvePlanGroupMemberMove(member, deltaMm).commit
-        );
-        onCommitPlanMoveGroup?.(moves);
-        return;
-      }
-
-      // Sub-threshold release is a click, not a move — it must not commit (and
-      // so land a phantom undo entry); the object's onClick still selects it.
-      const movedMm = Math.hypot(
-        current.previewPlanRect.centerXMm - current.startCenterMm.xMm,
-        current.previewPlanRect.centerYMm - current.startCenterMm.yMm
-      );
-      if (movedMm < 0.5) return;
-
-      onCommitPlanMove?.(current.objectId, current.previewPlacement);
-    }
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerUp);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
-    };
-    // Subscribed once per gesture (keyed on whether a drag is active), reading
-    // live state via objectDragRef rather than closing over `objectDrag` —
-    // same discipline as the wall-resize drag effect above.
-    // floorWallsForTool/project.wallObjects/gridSnapTargets/snapToGrid/
-    // snapThresholdMm/captureDistanceMm derive from the committed project and
-    // viewport, which can't change mid-drag (nothing commits until release),
-    // so they're intentionally left out of the deps.
-  }, [objectDrag !== null, onCommitPlanMove, onCommitPlanMoveGroup]);
-
-  useEffect(() => {
-    objectDragRef.current = objectDrag;
-  }, [objectDrag]);
 
   // The browser fires a `click` on the grabbed element right after a drag's
   // pointerup. For a single object that click merely re-selects it (today's
@@ -2042,67 +1902,6 @@ export function PlanView({
     return ids;
   }
 
-  useEffect(() => {
-    if (!marquee) return;
-
-    function onPointerMove(event: PointerEvent) {
-      const current = marqueeRef.current;
-      if (!current) return;
-
-      const pointerMm = toSvgMm(event.clientX, event.clientY);
-      if (!pointerMm) return;
-
-      setMarquee((state) => (state ? { ...state, currentMm: pointerMm } : state));
-    }
-
-    function onPointerUp(event: PointerEvent) {
-      const current = marqueeRef.current;
-      setMarquee(null);
-      if (!current) return;
-
-      const rect = marqueeRectMm(current);
-      // A sub-threshold rect is a plain background click, not a drag. Unlike
-      // elevation (which clears the selection here), PlanView must do NOTHING:
-      // the browser fires a `click` on the svg right after this pointerup, and
-      // handleSvgClick's no-tool branch already calls onClearSelection for that
-      // background click — clearing here too would be redundant.
-      const draggedMm = Math.hypot(rect.maxXMm - rect.minXMm, rect.maxYMm - rect.minYMm);
-      if (draggedMm < snapThresholdMm) return;
-
-      // A real marquee. CRITICALLY suppress the trailing background click: the
-      // browser fires `click` on the svg right after pointerup, and handleSvg-
-      // Click's no-tool branch calls onClearSelection — which would instantly
-      // wipe the selection this marquee just made. suppressNextToolClickRef is
-      // the same flag handleSvgClick already consumes for placement clicks; the
-      // window.setTimeout(..., 0) is the safety net for a release that lands
-      // where no click follows (pointer left the svg mid-drag), same idiom as
-      // suppressNextSelect.
-      suppressNextToolClickRef.current = true;
-      window.setTimeout(() => {
-        suppressNextToolClickRef.current = false;
-      }, 0);
-      onMarqueeSelect?.(idsIntersectingMarquee(rect), event.shiftKey);
-    }
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerUp);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
-    };
-    // Same ref-based discipline as the drag effects above: subscribed once per
-    // gesture, reading the live rect via marqueeRef. snapThresholdMm and the
-    // committed project geometry idsIntersectingMarquee reads derive from the
-    // committed project/viewport and can't change mid-gesture, so they're
-    // intentionally out of the deps.
-  }, [marquee !== null, onMarqueeSelect]);
-
-  useEffect(() => {
-    marqueeRef.current = marquee;
-  }, [marquee]);
-
   function beginMarquee(event: ReactPointerEvent<SVGSVGElement>) {
     // Touch: a finger on true background pans the canvas instead of marqueeing
     // (the marquee is a mouse-only gesture on tablets). A pinch's 2nd finger was
@@ -2137,7 +1936,7 @@ export function PlanView({
     // becomes a native drag of the selected text — Chrome then fires
     // pointercancel and kills the gesture mid-flight.
     event.preventDefault();
-    setMarquee({ startMm, currentMm: startMm });
+    startMarquee({ startMm, currentMm: startMm });
   }
 
   function beginObjectDrag(
@@ -2196,7 +1995,7 @@ export function PlanView({
             resolvePlanGroupMemberMove(member, { xMm: 0, yMm: 0 }).rect
           ])
         );
-        setObjectDrag({
+        startObjectDrag({
           objectId: params.objectId,
           kind: params.kind,
           canFloat: params.kind === "artwork" || params.kind === "blocked-zone",
@@ -2218,7 +2017,7 @@ export function PlanView({
       }
     }
 
-    setObjectDrag({
+    startObjectDrag({
       objectId: params.objectId,
       kind: params.kind,
       canFloat: params.kind === "artwork" || params.kind === "blocked-zone",
