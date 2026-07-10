@@ -18,7 +18,18 @@ npm run preview  # serve the built site
 
 Adding a new markdown page: drop `something.md` into `src/content/pages/` with the same frontmatter fields and it becomes `/something` automatically (add it to `NAV_LINKS` in `src/consts.ts` if it belongs in the nav).
 
+## Deployment
+
+This site deploys as its own assets-only Cloudflare Worker (`sightlines-landing`, see `wrangler.jsonc`) bound to `sightlines.art` and `www.sightlines.art`. The application deploys separately from the repo root to `app.sightlines.art`.
+
+```sh
+npm run build
+npx wrangler deploy
+```
+
+`public/` carries the origin-level files for the apex: `_headers` (HSTS, same-origin CSP, etc. — keep in sync with the app's `public/_headers` so the security page's claims stay true), `robots.txt`, `sitemap.xml`, `llms.txt`, and `.well-known/security.txt`.
+
 ## Notes
 
-- Builds with `format: "file"` (`/about` → `about.html`), matching how the current trust pages are served and how Cloudflare's static hosting resolves extensionless URLs.
+- Builds with `format: "file"` (`/about` → `about.html`); Cloudflare serves these extensionless and redirects `.html` URLs, so pre-split links like `/about.html` keep working.
 - Design language mirrors the app and existing trust pages: white ground, square corners, hairlines, petrol accent, Figtree (display) + Geist (body).

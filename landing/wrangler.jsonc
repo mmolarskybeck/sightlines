@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "sightlines-landing",
+  "compatibility_date": "2026-07-10",
+  "routes": [
+    {
+      "pattern": "sightlines.art",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.sightlines.art",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "./dist/",
+    "not_found_handling": "404-page"
+  }
+}

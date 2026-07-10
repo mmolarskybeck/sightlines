@@ -1,7 +1,7 @@
 // Site-wide constants. Edit here, not in individual pages.
 
 /** Where the "Open the app" buttons point. */
-export const APP_URL = "https://sightlines.art/";
+export const APP_URL = "https://app.sightlines.art/";
 
 export const SITE_NAME = "Sightlines";
 

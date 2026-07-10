@@ -7,7 +7,7 @@ lede: "Sightlines keeps its attack surface deliberately small: a static web appl
 
 ## Architecture
 
-The production site at [sightlines.art](https://sightlines.art/) is a static React application served from Cloudflare's edge network. There is no application server processing user input, no server-side session state, and no hosted storage of user projects or images. Project data is held in the browser's local storage and leaves the device only when the user explicitly exports a file.
+The application at [app.sightlines.art](https://app.sightlines.art/) is a static React application served from Cloudflare's edge network. This page and the rest of sightlines.art are a separate static informational site, with no client-side JavaScript at all. Neither origin runs an application server processing user input, maintains server-side session state, or hosts user projects or images. Project data is held in the browser's local storage and leaves the device only when the user explicitly exports a file.
 
 ## Transport and headers
 
@@ -15,10 +15,11 @@ The production site at [sightlines.art](https://sightlines.art/) is a static Rea
 - A restrictive `Content-Security-Policy` limits scripts, styles, fonts, images, and network connections to the site's own origin. No third-party scripts load at all.
 - `X-Frame-Options: DENY` and `frame-ancestors 'none'` prevent the app from being embedded in other sites.
 - `X-Content-Type-Options`, `Referrer-Policy`, a locked-down `Permissions-Policy`, and `Cross-Origin-Opener-Policy` are also set on every response.
+- These headers are applied on every response from both sightlines.art and app.sightlines.art.
 
 ## What is not here
 
-- No executable installers or desktop binaries are distributed from this domain.
+- No executable installers or desktop binaries are distributed from either domain.
 - No third-party analytics, advertising, or tracking scripts.
 - No password handling: there are no accounts to compromise.
 - No payment processing.

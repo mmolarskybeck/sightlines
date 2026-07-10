@@ -4,11 +4,7 @@
   "compatibility_date": "2026-07-07",
   "routes": [
     {
-      "pattern": "sightlines.art",
-      "custom_domain": true
-    },
-    {
-      "pattern": "www.sightlines.art",
+      "pattern": "app.sightlines.art",
       "custom_domain": true
     }
   ],

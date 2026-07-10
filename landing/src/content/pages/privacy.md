@@ -21,7 +21,7 @@ Because your data lives in the browser, clearing the browser's site data will er
 
 ## What the site actually loads
 
-When you open [sightlines.art](https://sightlines.art/), your browser downloads the application itself — HTML, JavaScript, stylesheets, and fonts — over HTTPS from our domain. After that, editing happens in your browser. The app does not send your project content back over the network. Cloudflare, which serves the site, may process standard web-server request logs (such as IP addresses) as part of delivering any website; that traffic never includes your project data.
+When you open the app at [app.sightlines.art](https://app.sightlines.art/), your browser downloads the application itself — HTML, JavaScript, stylesheets, and fonts — over HTTPS from that domain. After that, editing happens in your browser. The app does not send your project content back over the network. This site, at sightlines.art, serves only static pages like this one. Cloudflare, which serves both, may process standard web-server request logs (such as IP addresses) as part of delivering any website; that traffic never includes your project data.
 
 ## If this ever changes
 

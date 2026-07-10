@@ -23,7 +23,7 @@ Sightlines doesn't ask you to create an account or upload your exhibition to any
 
 ## How it's built
 
-Sightlines is a static web application served over HTTPS from [sightlines.art](https://sightlines.art/) on Cloudflare's edge network. There's no software to download or install, which also makes it practical on managed institutional machines. Technical notes for reviewers are on the [security page](/security) and the [IT access page](/it).
+Sightlines is a static web application served over HTTPS from [app.sightlines.art](https://app.sightlines.art/) on Cloudflare's edge network. This informational site lives at sightlines.art. There's no software to download or install, which also makes it practical on managed institutional machines. Technical notes for reviewers are on the [security page](/security) and the [IT access page](/it).
 
 ## Contact
 

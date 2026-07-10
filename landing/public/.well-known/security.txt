@@ -1,5 +1,5 @@
 Contact: https://sightlines.art/security
 Expires: 2027-07-08T00:00:00Z
 Preferred-Languages: en
-Canonical: https://app.sightlines.art/.well-known/security.txt
+Canonical: https://sightlines.art/.well-known/security.txt
 Policy: https://sightlines.art/security

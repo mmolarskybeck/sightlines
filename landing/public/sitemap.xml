@@ -6,22 +6,22 @@
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://sightlines.art/about.html</loc>
+    <loc>https://sightlines.art/about</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>https://sightlines.art/privacy.html</loc>
+    <loc>https://sightlines.art/privacy</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>https://sightlines.art/security.html</loc>
+    <loc>https://sightlines.art/security</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>https://sightlines.art/it.html</loc>
+    <loc>https://sightlines.art/it</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
