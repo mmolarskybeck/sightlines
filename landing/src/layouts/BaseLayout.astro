@@ -1,0 +1,65 @@
+---
+import "../styles/global.css";
+import { APP_URL, SITE_NAME, DEFAULT_DESCRIPTION, NAV_LINKS } from "../consts";
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const { title, description = DEFAULT_DESCRIPTION } = Astro.props;
+const pageTitle = title ? `${title} — ${SITE_NAME}` : SITE_NAME;
+const canonical = new URL(Astro.url.pathname, Astro.site);
+const currentPath = Astro.url.pathname.replace(/\/$/, "") || "/";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="index,follow" />
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <title>{pageTitle}</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta property="og:site_name" content={SITE_NAME} />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonical} />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={pageTitle} />
+    <meta name="twitter:description" content={description} />
+  </head>
+  <body>
+    <div class="site-header-rule">
+      <header class="site-header">
+        <a class="brand" href="/">
+          <span class="brand-monogram" aria-hidden="true">S</span>
+          <span class="brand-wordmark">{SITE_NAME}</span>
+        </a>
+        <nav class="site-nav" aria-label="Site">
+          {
+            NAV_LINKS.map((link) => (
+              <a
+                href={link.href}
+                aria-current={currentPath === link.href ? "page" : undefined}
+              >
+                {link.label}
+              </a>
+            ))
+          }
+          <a class="open-app" href={APP_URL}>Open the app</a>
+        </nav>
+      </header>
+    </div>
+
+    <slot />
+
+    <footer class="site-footer">
+      {NAV_LINKS.map((link) => <a href={link.href}>{link.label}</a>)}
+      <span class="footer-copy">© 2026 Sightlines · sightlines.art</span>
+    </footer>
+  </body>
+</html>

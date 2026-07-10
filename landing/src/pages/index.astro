@@ -1,0 +1,720 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { APP_URL } from "../consts";
+
+const description =
+  "Sightlines is a private-by-design exhibition planning tool. Draw a gallery to scale, place artworks at real dimensions, check spacing and eye lines, and preview the room in 3D — in the browser, nothing to install, no account.";
+
+const features = [
+  {
+    name: "Plan view",
+    body:
+      "Draw rooms and walls to scale on a drafting grid. Snapping keeps corners square and walls aligned as you sketch the space, and openings connect between adjoining rooms.",
+  },
+  {
+    name: "Wall elevations",
+    body:
+      "See each wall face-on and place works at exact heights. Centerlines, snapping, and measured spacing help you hang to a consistent eye line across a run.",
+  },
+  {
+    name: "Artwork checklist",
+    body:
+      "Keep works, dimensions, and images together in one list. Drag a work straight from the checklist onto a wall, and the placement carries its real measurements.",
+  },
+  {
+    name: "3D preview",
+    body:
+      "Step into the room from a visitor's point of view to check sightlines and proportion before anything is hung, then walk back to the plan to adjust.",
+  },
+  {
+    name: "Portable projects",
+    body:
+      "Export a project as a single file to back it up, move it between machines, or hand it to a colleague. The file is the project — there is no server holding a copy.",
+  },
+];
+---
+
+<BaseLayout description={description}>
+  <main class="landing">
+    <!-- ================= HERO ================= -->
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="kicker rise" style="--i: 0">Exhibition planning, drawn to scale</p>
+        <h1 class="hero-title rise" style="--i: 1">
+          Lay out an exhibition to scale, before anything touches the wall.
+        </h1>
+        <p class="hero-sub rise" style="--i: 2">
+          Sightlines is a planning tool for people who hang exhibitions. Draw a
+          gallery to scale, place artworks at their real dimensions, check
+          spacing and eye lines, and preview the room in 3D. It runs entirely in
+          your browser — nothing to install, and no account.
+        </p>
+        <div class="hero-actions rise" style="--i: 3">
+          <a class="btn btn-primary" href={APP_URL}>Open the app</a>
+          <a class="btn btn-quiet" href="/privacy">How your data stays private</a>
+        </div>
+        <p class="hero-note rise" style="--i: 4">
+          Free to use · no sign-up · your projects stay on your device
+        </p>
+      </div>
+
+      <div class="hero-figure rise" style="--i: 2" aria-hidden="true">
+        <!-- Wall elevation: three framed works hung to a shared eye line,
+             with dimension lines and a centerline. Decorative. -->
+        <svg
+          class="elevation"
+          viewBox="0 0 660 452"
+          role="img"
+          preserveAspectRatio="xMidYMid meet"
+        >
+          <defs>
+            <pattern
+              id="grid"
+              width="24"
+              height="24"
+              patternUnits="userSpaceOnUse"
+            >
+              <path
+                d="M24 0H0V24"
+                fill="none"
+                stroke="var(--line-soft)"
+                stroke-width="1"
+                vector-effect="non-scaling-stroke"
+              />
+            </pattern>
+          </defs>
+
+          <!-- subtle grid ground -->
+          <rect x="40" y="24" width="580" height="360" fill="url(#grid)" />
+
+          <!-- floor -->
+          <line
+            class="ink"
+            x1="40"
+            y1="384"
+            x2="620"
+            y2="384"
+            stroke-width="1.6"
+          />
+
+          <!-- eye-line / centerline -->
+          <line
+            class="accent-line"
+            x1="40"
+            y1="200"
+            x2="620"
+            y2="200"
+            stroke-dasharray="5 5"
+          />
+
+          <!-- vertical dimension: floor -> eye line -->
+          <g class="dim">
+            <line x1="64" y1="200" x2="64" y2="384" />
+            <line x1="59" y1="200" x2="69" y2="200" />
+            <line x1="59" y1="384" x2="69" y2="384" />
+          </g>
+          <text class="dim-label" x="52" y="296" transform="rotate(-90 52 296)">
+            1450 mm
+          </text>
+
+          <!-- Frame 1 -->
+          <g class="frame">
+            <rect x="112" y="136" width="96" height="128" />
+            <rect class="mat" x="120" y="144" width="80" height="112" />
+            <circle class="hang" cx="160" cy="200" r="3" />
+          </g>
+
+          <!-- Frame 2 (petrol-washed accent) -->
+          <g class="frame">
+            <rect x="266" y="153" width="70" height="94" />
+            <rect class="mat mat-accent" x="274" y="161" width="54" height="78" />
+            <circle class="hang" cx="301" cy="200" r="3" />
+          </g>
+
+          <!-- Frame 3 -->
+          <g class="frame">
+            <rect x="394" y="158" width="124" height="84" />
+            <rect class="mat" x="402" y="166" width="108" height="68" />
+            <circle class="hang" cx="456" cy="200" r="3" />
+          </g>
+
+          <!-- horizontal dimension: gap between frame 1 and frame 2 edges -->
+          <g class="dim">
+            <line x1="208" y1="296" x2="266" y2="296" />
+            <line x1="208" y1="289" x2="208" y2="303" />
+            <line x1="266" y1="289" x2="266" y2="303" />
+          </g>
+          <text class="dim-label" x="237" y="318" text-anchor="middle">460 mm</text>
+
+          <!-- horizontal dimension: frame 3 edge to end of wall -->
+          <g class="dim">
+            <line x1="518" y1="296" x2="620" y2="296" />
+            <line x1="518" y1="289" x2="518" y2="303" />
+            <line x1="620" y1="289" x2="620" y2="303" />
+          </g>
+          <text class="dim-label" x="569" y="318" text-anchor="middle">800 mm</text>
+
+          <!-- full wall length, below the floor line -->
+          <g class="dim">
+            <line x1="40" y1="410" x2="620" y2="410" />
+            <line x1="40" y1="403" x2="40" y2="417" />
+            <line x1="620" y1="403" x2="620" y2="417" />
+          </g>
+          <text class="dim-label" x="330" y="432" text-anchor="middle">4570 mm</text>
+        </svg>
+      </div>
+    </section>
+
+    <!-- ================= FEATURES ================= -->
+    <section class="features" aria-labelledby="features-h">
+      <h2 id="features-h" class="section-title">
+        Two ways of thinking, one project
+      </h2>
+      <p class="section-lede">
+        Exhibition work is non-linear. Sometimes the checklist comes first,
+        sometimes the room does. Sightlines lets you move between spatial and
+        checklist thinking without losing precision.
+      </p>
+
+      <ol class="feature-list">
+        {
+          features.map((f, i) => (
+            <li class="feature">
+              <div class="feature-figure" aria-hidden="true">
+                <svg viewBox="0 0 96 72" preserveAspectRatio="xMidYMid meet">
+                  {i === 0 && (
+                    <g class="glyph">
+                      <rect x="14" y="12" width="68" height="48" />
+                      <line x1="14" y1="30" x2="46" y2="30" />
+                      <line x1="46" y1="12" x2="46" y2="60" />
+                      <path class="gap" d="M46 40v14" />
+                    </g>
+                  )}
+                  {i === 1 && (
+                    <g class="glyph">
+                      <line x1="12" y1="58" x2="84" y2="58" />
+                      <line class="dash" x1="12" y1="32" x2="84" y2="32" />
+                      <rect x="30" y="18" width="26" height="28" />
+                      <circle class="dot" cx="43" cy="32" r="2.4" />
+                      <rect x="62" y="24" width="18" height="16" />
+                    </g>
+                  )}
+                  {i === 2 && (
+                    <g class="glyph">
+                      <rect x="16" y="14" width="14" height="14" />
+                      <line x1="38" y1="18" x2="80" y2="18" />
+                      <line x1="38" y1="25" x2="66" y2="25" />
+                      <rect x="16" y="44" width="14" height="14" />
+                      <line x1="38" y1="48" x2="80" y2="48" />
+                      <line x1="38" y1="55" x2="66" y2="55" />
+                    </g>
+                  )}
+                  {i === 3 && (
+                    <g class="glyph">
+                      <path d="M20 26 48 14l28 12v22L48 60 20 48Z" />
+                      <path class="dash" d="M20 26 48 38l28-12M48 38v22" />
+                    </g>
+                  )}
+                  {i === 4 && (
+                    <g class="glyph">
+                      <path d="M30 14h24l12 12v32H30Z" />
+                      <path class="dash" d="M54 14v12h12" />
+                      <path class="arc" d="M40 40h20m0 0-6-6m6 6-6 6" />
+                    </g>
+                  )}
+                </svg>
+              </div>
+              <div class="feature-text">
+                <h3>{f.name}</h3>
+                <p>{f.body}</p>
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </section>
+
+    <!-- ================= PRIVATE BY DESIGN ================= -->
+    <section class="privacy-strip" aria-labelledby="privacy-h">
+      <div class="privacy-inner">
+        <div class="privacy-lead">
+          <h2 id="privacy-h">Private by design</h2>
+          <p>
+            No accounts, no uploads. Your room layouts, artwork details, and
+            images are stored in your own browser and leave your device only in
+            the files you export yourself. Unreleased plans and artwork images
+            are sensitive material — keeping them on your machine is the point.
+          </p>
+          <p class="privacy-links">
+            <a href="/privacy">Read the privacy page</a>
+            <span aria-hidden="true">·</span>
+            <a href="/security">Review the security notes</a>
+          </p>
+        </div>
+        <ul class="privacy-points">
+          <li>No account, sign-up, or login</li>
+          <li>No analytics, advertising, or tracking</li>
+          <li>No hosted storage of projects or images</li>
+          <li>Served over HTTPS with a restrictive content policy</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ================= WHO IT'S FOR ================= -->
+    <section class="audience" aria-labelledby="audience-h">
+      <h2 id="audience-h" class="section-title">Who it's for</h2>
+      <p class="audience-copy">
+        Built for <strong>curators</strong>, <strong>registrars</strong>,
+        <strong>preparators</strong>, <strong>artists</strong>,
+        <strong>gallerists</strong>, and <strong>small museum teams</strong> —
+        anyone who moves between a checklist and a floor plan, and needs the
+        measurements to be trustworthy. It works on managed institutional
+        machines too, because there is nothing to install.
+      </p>
+    </section>
+
+    <!-- ================= CLOSING CTA ================= -->
+    <section class="closing">
+      <h2 class="closing-title">Open Sightlines and draw your first room.</h2>
+      <p class="closing-sub">
+        No sign-up. The app opens straight to an empty plan.
+      </p>
+      <a class="btn btn-primary btn-lg" href={APP_URL}>Open the app</a>
+    </section>
+  </main>
+</BaseLayout>
+
+<style>
+  .landing {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* ---- Shared building blocks ------------------------------------- */
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 11px 20px;
+    font-family: var(--font-ui);
+    font-size: 0.9375rem;
+    font-weight: 520;
+    text-decoration: none;
+    border: 1px solid transparent;
+    transition:
+      background 140ms ease,
+      color 140ms ease,
+      border-color 140ms ease;
+  }
+
+  .btn-primary {
+    background: var(--primary);
+    color: oklch(1 0 0);
+  }
+
+  .btn-primary:hover {
+    background: var(--primary-strong);
+  }
+
+  .btn-quiet {
+    color: var(--primary-strong);
+    border-color: var(--line);
+    background: oklch(1 0 0);
+  }
+
+  .btn-quiet:hover {
+    border-color: var(--primary);
+    background: var(--primary-wash);
+  }
+
+  .btn-lg {
+    padding: 14px 26px;
+    font-size: 1rem;
+  }
+
+  .section-title {
+    margin: 0 0 14px;
+    font-family: var(--font-brand);
+    font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2rem);
+    font-weight: 640;
+    line-height: 1.12;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+
+  .section-lede {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.0625rem;
+    line-height: 1.6;
+    text-wrap: pretty;
+  }
+
+  /* ---- Hero -------------------------------------------------------- */
+
+  .hero {
+    display: grid;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: clamp(32px, 5vw, 72px);
+    align-items: center;
+    padding: clamp(48px, 8vw, 96px) 0 clamp(40px, 6vw, 72px);
+  }
+
+  .kicker {
+    margin: 0 0 18px;
+    color: var(--faint);
+    font-size: 0.75rem;
+    font-weight: 560;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .hero-title {
+    margin: 0 0 20px;
+    font-family: var(--font-brand);
+    font-size: clamp(2.1rem, 1.3rem + 3.4vw, 3.4rem);
+    font-weight: 660;
+    line-height: 1.05;
+    letter-spacing: -0.022em;
+    text-wrap: balance;
+  }
+
+  .hero-sub {
+    max-width: 54ch;
+    margin: 0 0 28px;
+    color: var(--muted);
+    font-size: 1.0625rem;
+    line-height: 1.62;
+    text-wrap: pretty;
+  }
+
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 22px;
+  }
+
+  .hero-note {
+    margin: 0;
+    color: var(--faint);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+  }
+
+  .hero-figure {
+    min-width: 0;
+  }
+
+  .elevation {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    padding: 8px;
+  }
+
+  /* SVG elevation styling */
+  .elevation .ink {
+    stroke: var(--foreground);
+  }
+  .elevation .accent-line {
+    stroke: var(--primary);
+    stroke-width: 1.3;
+    vector-effect: non-scaling-stroke;
+  }
+  .elevation .frame rect {
+    fill: oklch(1 0 0);
+    stroke: var(--foreground);
+    stroke-width: 1.3;
+    vector-effect: non-scaling-stroke;
+  }
+  .elevation .frame .mat {
+    fill: var(--surface);
+    stroke: var(--line);
+    stroke-width: 1;
+  }
+  .elevation .frame .mat-accent {
+    fill: var(--primary-wash);
+    stroke: var(--primary);
+  }
+  .elevation .hang {
+    fill: var(--primary);
+    stroke: none;
+  }
+  .elevation .dim line {
+    stroke: var(--faint);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+  .elevation .dim-label {
+    fill: var(--faint);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    letter-spacing: 0.02em;
+  }
+  .elevation .tick {
+    fill: none;
+    stroke: var(--faint);
+    stroke-width: 1.4;
+    vector-effect: non-scaling-stroke;
+  }
+
+  /* ---- Features ---------------------------------------------------- */
+
+  .features {
+    padding: clamp(40px, 6vw, 72px) 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .feature-list {
+    list-style: none;
+    margin: 40px 0 0;
+    padding: 0;
+    display: grid;
+    gap: 0;
+  }
+
+  .feature {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    gap: clamp(20px, 4vw, 40px);
+    align-items: start;
+    padding: 28px 0;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .feature:first-child {
+    border-top: none;
+  }
+
+  .feature-figure {
+    width: 96px;
+    aspect-ratio: 96 / 72;
+    border: 1px solid var(--line);
+    background: oklch(1 0 0);
+    display: flex;
+  }
+
+  .feature-figure svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  .glyph line,
+  .glyph rect,
+  .glyph path,
+  .glyph circle {
+    fill: none;
+    stroke: var(--foreground);
+    stroke-width: 1.3;
+    vector-effect: non-scaling-stroke;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .glyph .dash {
+    stroke-dasharray: 4 4;
+    stroke: var(--faint);
+  }
+  .glyph .gap {
+    stroke: oklch(1 0 0);
+    stroke-width: 3;
+  }
+  .glyph .arc,
+  .glyph .dot {
+    stroke: var(--primary);
+  }
+  .glyph .dot {
+    fill: var(--primary);
+  }
+
+  .feature-text h3 {
+    margin: 2px 0 8px;
+    font-family: var(--font-brand);
+    font-size: 1.1875rem;
+    font-weight: 620;
+    line-height: 1.2;
+  }
+
+  .feature-text p {
+    max-width: 64ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9688rem;
+    line-height: 1.66;
+    text-wrap: pretty;
+  }
+
+  /* ---- Private by design ------------------------------------------ */
+
+  .privacy-strip {
+    margin: 0 -24px;
+    padding: clamp(44px, 6vw, 72px) 24px;
+    background: var(--primary-wash);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .privacy-inner {
+    max-width: 1040px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1.3fr 1fr;
+    gap: clamp(28px, 5vw, 64px);
+    align-items: start;
+  }
+
+  .privacy-lead h2 {
+    margin: 0 0 14px;
+    font-family: var(--font-brand);
+    font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2rem);
+    font-weight: 640;
+    line-height: 1.12;
+    letter-spacing: -0.015em;
+  }
+
+  .privacy-lead p {
+    max-width: 58ch;
+    margin: 0 0 14px;
+    color: var(--foreground);
+    font-size: 1rem;
+    line-height: 1.64;
+    text-wrap: pretty;
+  }
+
+  .privacy-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    align-items: baseline;
+    font-size: 0.9375rem;
+  }
+
+  .privacy-links span {
+    color: var(--faint);
+  }
+
+  .privacy-points {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
+    display: grid;
+    gap: 0;
+    border: 1px solid var(--line);
+    background: oklch(1 0 0);
+  }
+
+  .privacy-points li {
+    padding: 13px 16px;
+    border-top: 1px solid var(--line-soft);
+    font-size: 0.9063rem;
+    line-height: 1.4;
+    color: var(--foreground);
+  }
+
+  .privacy-points li:first-child {
+    border-top: none;
+  }
+
+  /* ---- Audience ---------------------------------------------------- */
+
+  .audience {
+    padding: clamp(44px, 6vw, 72px) 0;
+  }
+
+  .audience-copy {
+    max-width: 68ch;
+    margin: 14px 0 0;
+    font-size: 1.125rem;
+    line-height: 1.62;
+    color: var(--foreground);
+    text-wrap: pretty;
+  }
+
+  .audience-copy strong {
+    font-weight: 560;
+  }
+
+  /* ---- Closing CTA ------------------------------------------------- */
+
+  .closing {
+    text-align: center;
+    padding: clamp(56px, 8vw, 104px) 0 clamp(64px, 9vw, 112px);
+    border-top: 1px solid var(--line);
+  }
+
+  .closing-title {
+    max-width: 20ch;
+    margin: 0 auto 12px;
+    font-family: var(--font-brand);
+    font-size: clamp(1.6rem, 1.1rem + 2.2vw, 2.4rem);
+    font-weight: 650;
+    line-height: 1.1;
+    letter-spacing: -0.018em;
+    text-wrap: balance;
+  }
+
+  .closing-sub {
+    margin: 0 0 26px;
+    color: var(--muted);
+    font-size: 1rem;
+  }
+
+  /* ---- Entrance motion -------------------------------------------- */
+
+  .rise {
+    animation: rise 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation-delay: calc(var(--i, 0) * 80ms);
+  }
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rise {
+      animation: none;
+    }
+  }
+
+  /* ---- Responsive -------------------------------------------------- */
+
+  @media (max-width: 860px) {
+    .hero {
+      grid-template-columns: 1fr;
+      gap: 36px;
+      padding-top: clamp(36px, 8vw, 64px);
+    }
+
+    .hero-figure {
+      order: -1;
+    }
+
+    .privacy-inner {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 520px) {
+    .feature {
+      grid-template-columns: 1fr;
+      gap: 16px;
+      padding: 24px 0;
+    }
+
+    .hero-actions .btn {
+      flex: 1 1 auto;
+    }
+  }
+</style>

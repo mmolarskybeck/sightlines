@@ -1,0 +1,28 @@
+---
+title: "A small, static surface"
+description: "Sightlines security overview: static architecture, HTTPS with strict security headers, local-only data storage, and how to report a vulnerability."
+kicker: "Security"
+lede: "Sightlines keeps its attack surface deliberately small: a static web application with no server-side database, no user accounts, and no hosted user content. The most sensitive data in the system — your exhibition plans and artwork images — never leaves your device."
+---
+
+## Architecture
+
+The production site at [sightlines.art](https://sightlines.art/) is a static React application served from Cloudflare's edge network. There is no application server processing user input, no server-side session state, and no hosted storage of user projects or images. Project data is held in the browser's local storage and leaves the device only when the user explicitly exports a file.
+
+## Transport and headers
+
+- All traffic is served over HTTPS, with `Strict-Transport-Security` enforcing it for a year.
+- A restrictive `Content-Security-Policy` limits scripts, styles, fonts, images, and network connections to the site's own origin. No third-party scripts load at all.
+- `X-Frame-Options: DENY` and `frame-ancestors 'none'` prevent the app from being embedded in other sites.
+- `X-Content-Type-Options`, `Referrer-Policy`, a locked-down `Permissions-Policy`, and `Cross-Origin-Opener-Policy` are also set on every response.
+
+## What is not here
+
+- No executable installers or desktop binaries are distributed from this domain.
+- No third-party analytics, advertising, or tracking scripts.
+- No password handling: there are no accounts to compromise.
+- No payment processing.
+
+## Reporting a vulnerability
+
+If you believe you've found a security issue in Sightlines, we want to hear about it. Current contact details are published in the machine-readable record at [/.well-known/security.txt](/.well-known/security.txt), following RFC 9116. Please report issues privately and allow reasonable time for a fix before public disclosure. We appreciate good-faith research and will credit reporters who want credit.
