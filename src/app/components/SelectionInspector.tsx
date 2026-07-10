@@ -422,12 +422,22 @@ export function SelectionInspector({
                   onEnterWhenClean={onAcceptArrange}
                 />
                 <ArrangeCalculatedReadout
-                  label="Distance from each wall edge"
-                  value={arrange.insetIsMixed ? "Mixed" : formatValue(arrange.insetMm)}
-                  isMixed={arrange.insetIsMixed}
+                  label={edgeFieldLabel("left", arrange.leftBoundary)}
+                  value={formatValue(arrange.leftEdgeDistanceMm)}
+                  isMixed={false}
+                  isNeighbor={arrange.leftBoundary.type === "object"}
+                />
+                <ArrangeCalculatedReadout
+                  label={edgeFieldLabel("right", arrange.rightBoundary)}
+                  value={formatValue(arrange.rightEdgeDistanceMm)}
+                  isMixed={false}
+                  isNeighbor={arrange.rightBoundary.type === "object"}
                 />
                 <p className="field-hint">
-                  The group stays where it is — the wall-edge distances follow.
+                  The group stays where it is — the side distances follow.
+                </p>
+                <p className="field-hint">
+                  {bothEdgeCaption(arrange.leftBoundary, arrange.rightBoundary)}
                 </p>
               </div>
             )}

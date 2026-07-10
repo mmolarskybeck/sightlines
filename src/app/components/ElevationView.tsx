@@ -1088,13 +1088,16 @@ export function ElevationView({
   const dimensionOthers: WallObjectBase[] = wallObjectsOnThisWall
     .filter((wallObject) => !dimensionMemberIds.has(wallObject.id))
     .map(applyDragPreview);
-  // Idle, or an active "From edges" session → neighbour-aware (stop at the
-  // nearest window/door/work — "From edges" measures to that same detected
-  // boundary, see detectBoundary, so the lines match its fields). An active
-  // "Space evenly"/"Between works" session → wall-edge segments, matching
-  // those modes' still wall-only Calculated readouts.
+  // Idle, or an active "From edges"/"Between works" session → neighbour-aware
+  // (stop at the nearest window/door/work — "From edges" measures to that same
+  // detected boundary, and "Between works" re-spaces about a fixed centre so
+  // its outer edges close on the neighbours; either way the lines should show
+  // the space actually beside the works, per-side falling back to the wall
+  // edge when nothing is there — see getNeighborAwareSegments). Only an active
+  // "Space evenly" session → wall-edge segments, matching that mode's still
+  // wall-only Calculated readout (it solves the whole-wall/open-zone spread).
   const dimensionSegments =
-    arrangeSessionMode === "equal" || arrangeSessionMode === "gap"
+    arrangeSessionMode === "equal"
       ? getSpacingSegments(effectiveDimensionMembers, wallLengthMm)
       : getNeighborAwareSegments(effectiveDimensionMembers, dimensionOthers, wallLengthMm);
 
