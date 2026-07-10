@@ -1,6 +1,6 @@
 # Sightlines Status Snapshot
 
-Last refreshed: 2026-07-09
+Last refreshed: 2026-07-10
 
 ## Current Read
 
@@ -19,6 +19,7 @@ Post-irregular-rooms refactor: 20 commits, all phases green (1065 tests, up from
 - **Landmines defused**: `removePlacement`/`removeSelectedPlacements` now clear opening partner refs (matters once `connectsToObjectId` gets writers).
 - **View layer**: all ten drag machines in PlanView/ElevationView share `useDragGesture`; PlanView −450 lines net.
 - **App/store**: `usePlanMode` union (doorway pairing adds a `pairOpenings` variant there, one place), `commitWallObjectEdit`/`runPartitionEdit` pipelines, `commitPlanMove` split into four named cases.
+- **3D loading**: Three.js and the React Three Fiber stack are isolated behind the lazy `ThreeDView` route. The eager vendor chunk is 148.87 kB gzip; the 223.14 kB gzip 3D chunk is fetched only when 3D opens, with a build-time eager-graph assertion protecting the boundary.
 - **Deliberately deferred**: rectangle↔polygon edit-pipeline merge is an explicit decision gate behind the "rectangle resize characterization (pipeline-merge gate)" suites in `editRoom.test.ts`/`store.test.ts` — evaluate delegating into `moveRoomWall` only against those pinned promises. Also deferred to the doorway slice: PlanView single-`mode` prop, room-qualified hover ids, and schema v4 tightening (`MIN_ENDPOINT_SPACING_MM`, `wallId` cross-check — bundle with the pairing migration).
 
 ## iPad/touch support pass (shipped 2026-07-09)
@@ -38,7 +39,6 @@ Touch drag-and-drop for artwork placement, insecure-context support for LAN dev 
 
 ## Known Follow-Ups
 
-- three.js currently ships in the eager `vendor` chunk (`vite.config.ts` `manualChunks` routes all of `node_modules` there), so ~350 kB gzip downloads even for users who never open 3D. Worth a dedicated code-splitting pass.
 - Overlapping door/window holes on one wall triangulate with minor artifacts (see `docs/3d-preview-spec.md` §10); the domain already flags overlapping placements for review.
 - Eye height uses `project.defaultCenterlineHeightMm` as a proxy; add a per-project `eyeHeightMm` if users trip on it.
 - `.sightlines` package import/export still needs the untrusted-file safety pipeline before becoming the main backup/share surface.
