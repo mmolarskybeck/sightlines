@@ -68,6 +68,7 @@ import {
   type DrawRoomSnap
 } from "../../domain/geometry/drawSnapping";
 import { canMoveRoomVertex, moveRoomWall } from "../../domain/geometry/reshapeRoom";
+import { getArtworkOuterDimensionsMm } from "../../domain/framing";
 import { formatLength } from "../../domain/units/length";
 import { getGridSnapTargets } from "../../domain/snapping/gridSnapTargets";
 import {
@@ -2671,12 +2672,24 @@ export function PlanView({
                 // identically to the rest rect AND any live single/group drag
                 // preview — the offset never disagrees between mid-drag and
                 // on-release, so nothing jumps.
+                // Mat/frame widen the along-wall extent (docs/quick-todos.md:
+                // plan mode is a simple dim change). The off-wall depth is left
+                // as-is — a schematic frame's face width, not its projection.
+                const framedWidthMm =
+                  wallObject.kind === "artwork"
+                    ? getArtworkOuterDimensionsMm(
+                        planRect.widthMm,
+                        planRect.widthMm,
+                        artworksById?.get(wallObject.artworkId)?.matWidthMm,
+                        artworksById?.get(wallObject.artworkId)?.frame
+                      ).widthMm
+                    : planRect.widthMm;
                 const renderedPlanRect =
                   isFloorPlaced || isInvalid
                     ? planRect
                     : {
                         ...(wallObject.kind === "artwork"
-                          ? offsetPlanRectToViewerSide(planRect)
+                          ? offsetPlanRectToViewerSide({ ...planRect, widthMm: framedWidthMm })
                           : planRect),
                         depthMm: Math.max(planRect.depthMm, wallObjectMinDepthMm)
                       };

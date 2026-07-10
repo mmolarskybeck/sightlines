@@ -34,7 +34,6 @@ const CENTER_BUTTON_LABEL: Record<WallPlacementCenterBoundaryKind, string> = {
 export function WallPlacementFields({
   placement,
   wallLengthMm,
-  wallName,
   leftNeighborRightEdgeMm,
   rightNeighborLeftEdgeMm,
   centerTargetXMm,
@@ -44,9 +43,6 @@ export function WallPlacementFields({
 }: {
   placement: Pick<ArtworkWallObject, "xMm" | "yMm" | "widthMm" | "heightMm">;
   wallLengthMm: number;
-  // The wall the work hangs on, for the section header; null falls back to the
-  // generic "Position on wall".
-  wallName: string | null;
   // Right edge of the nearest other artwork whose CENTER is left of this work
   // (undefined when there is none) — the "To work on left" field is hidden
   // entirely rather than disabled when absent.
@@ -73,12 +69,11 @@ export function WallPlacementFields({
   const leftEdgeMm = placement.xMm - halfWidthMm;
   const rightEdgeMm = placement.xMm + halfWidthMm;
 
+  // Bare fields, no wrapper or heading — the caller supplies the section
+  // chrome (ArtworkInspector wraps these in an InspectorSection whose title
+  // App builds from the wall name, e.g. "Position on North wall").
   return (
-    <div className="artwork-dimensions">
-      <div className="artwork-dimensions-heading">
-        <h3>Position on {wallName ?? "wall"}</h3>
-      </div>
-
+    <>
       <LengthField
         compact
         label="From left edge"
@@ -153,7 +148,7 @@ export function WallPlacementFields({
         stepMm={stepMm}
         onCommit={(v) => onCommit(placement.xMm, v)}
       />
-    </div>
+    </>
   );
 }
 

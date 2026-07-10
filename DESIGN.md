@@ -47,6 +47,7 @@ The local wrappers in `src/app/components/ui` are the preferred surface for new 
 - `Button` supports `default`, `primary`, `ghost`, `subtle`, `outline`, `destructive`, `rail`, `tab`, and `inspector` variants.
 - `Toggle` and `ToggleGroupItem` support pressed petrol states and underline-tab states.
 - `Tabs`, `Select`, `DropdownMenu`, and `Switch` keep Radix semantics while carrying Sightlines visual defaults.
+- `Collapsible` is a bare-behavior Radix wrapper (no baked-in look); `InspectorSection` composes it into the hairline-separated, summary-bearing disclosure rows the artwork inspector uses.
 - `cn()` uses `clsx` and `tailwind-merge`; compose variants there rather than concatenating ad hoc class strings.
 
 ## Color

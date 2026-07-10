@@ -160,6 +160,8 @@ type UpdateArtworkChanges = Partial<
     | "locationOrLender"
     | "dimensions"
     | "placementForm"
+    | "matWidthMm"
+    | "frame"
   >
 >;
 

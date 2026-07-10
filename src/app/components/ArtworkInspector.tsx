@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { LinkBreakIcon } from "@phosphor-icons/react/dist/csr/LinkBreak";
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/csr/LockSimple";
 import { LockSimpleOpenIcon } from "@phosphor-icons/react/dist/csr/LockSimpleOpen";
-import type { Artwork, Dimensions, DisplayUnit } from "../../domain/project";
+import type { Artwork, ArtworkFrame, Dimensions, DisplayUnit } from "../../domain/project";
 import {
   effectivePlacementForm,
   type PlacementForm
@@ -13,8 +13,20 @@ import {
   isAspectLocked,
   type PixelAspect
 } from "../../domain/units/aspectFill";
+import {
+  FRAME_FINISHES,
+  deriveFrameWidthFromOverallMm,
+  getArtworkOuterDimensionsMm
+} from "../../domain/framing";
+import { formatLength } from "../../domain/units/length";
 import { getScopedUnitContext } from "./scopedUnits";
 import { useArtworkAsset } from "../hooks/useArtworkAsset";
+import {
+  formatDetailsSummary,
+  formatDimensionsSummary,
+  formatFramingSummary
+} from "./artworkInspectorSummaries";
+import { InspectorSection } from "./InspectorSection";
 import { LengthField } from "./LengthField";
 import { UncertaintyIndicator } from "./UncertaintyIndicator";
 import { Button } from "./ui/button";
@@ -31,20 +43,18 @@ import {
 
 type ArtworkTextFieldKey = "title" | "artist" | "date" | "accessionNumber" | "locationOrLender";
 
-// Grouped into two rhythm clusters (see .field-group in global.css): identity
-// (what the work is) reads at the top beside the thumbnail, and registrar
-// (where its record/loan lives — provenance) sinks toward the bottom of the
-// panel, below both the dimensions AND the placement slot, since it's
-// reference data a curator consults less often than the physical measurements
-// or day-to-day arranging. Each cluster reads as one unit, separated from the
-// other by the more generous gap on .inspector-form itself.
+// Identity (what the work is) reads at the top beside the thumbnail and is
+// never collapsible — it anchors the panel. Registrar data (where its
+// record/loan lives — provenance) sinks to the bottom as the collapsed-by-
+// default "Details" section, since it's reference data a curator consults
+// less often than the physical measurements or day-to-day arranging.
 const IDENTITY_FIELDS: { key: ArtworkTextFieldKey; label: string }[] = [
   { key: "title", label: "Title" },
   { key: "artist", label: "Artist" },
   { key: "date", label: "Date" }
 ];
 
-const REGISTRAR_FIELDS: { key: ArtworkTextFieldKey; label: string }[] = [
+const DETAILS_FIELDS: { key: ArtworkTextFieldKey; label: string }[] = [
   { key: "accessionNumber", label: "Accession no." },
   { key: "locationOrLender", label: "Location / lender" }
 ];
@@ -58,29 +68,40 @@ const DIMENSION_FIELDS: { key: DimensionAxisKey; label: string }[] = [
 ];
 
 // Props-driven editor for the right inspector panel when an artwork is
-// selected (docs/plan.md §4.1, §5). App wires this in behind selection state
-// in a later task — everything here comes in as props, nothing reaches into
-// the store.
+// selected (docs/plan.md §4.1, §5). Everything here comes in as props,
+// nothing reaches into the store — including the collapsible sections'
+// open state, which App persists via useViewPreferences so it survives
+// selection changes and reloads.
 export function ArtworkInspector({
   artwork,
   isPlaced,
   placementSection,
+  placementTitle,
+  sectionsOpen,
   onCommitDimensions,
   onCommitField,
   onChangePlacementForm,
+  onCommitFraming,
   onRemovePlacement,
+  onSectionOpenChange,
   unit
 }: {
   artwork: Artwork;
   isPlaced: boolean;
-  // The wall- or floor-position form (WallPlacementFields / FloorPlacementFields)
-  // for a placed artwork, null/undefined when unplaced — see the reading-order
-  // comment above IDENTITY_FIELDS. App supplies this rather than the form
-  // rendering itself here, same discipline as everything else in this
-  // component: no store access, props only. It renders as a plain child of
-  // this component's own <form> (never wrapped in its own nested <form> —
-  // that's invalid HTML; the outer form's onSubmit already preventDefaults).
+  // The wall- or floor-position FIELDS (WallPlacementFields /
+  // FloorPlacementFields) for a placed artwork, null/undefined when unplaced.
+  // App supplies the bare fields and the section title separately
+  // (placementTitle, e.g. "Position on North wall") so this component can
+  // wrap them in the same InspectorSection grammar as its own sections.
+  // Renders as a plain child of this component's own <form> (never wrapped
+  // in a nested <form> — that's invalid HTML; the outer form's onSubmit
+  // already preventDefaults).
   placementSection?: ReactNode;
+  placementTitle?: string;
+  // Per-section open flags keyed by section id ("dimensions" | "framing" |
+  // "placement" | "details") — App reads/writes them through
+  // useViewPreferences' inspectorSections record.
+  sectionsOpen: Record<string, boolean>;
   onCommitDimensions: (dimensions: Dimensions) => void;
   onCommitField: (
     changes: Partial<Pick<Artwork, ArtworkTextFieldKey>>
@@ -89,7 +110,9 @@ export function ArtworkInspector({
   // onCommitField's metadata edits: this is a single-purpose commit ("Change
   // placement type") the segmented control fires on change.
   onChangePlacementForm: (form: PlacementForm) => void;
+  onCommitFraming: (changes: Partial<Pick<Artwork, "matWidthMm" | "frame">>) => void;
   onRemovePlacement?: () => void;
+  onSectionOpenChange: (sectionId: string, open: boolean) => void;
   unit: DisplayUnit;
 }) {
   const { asset, thumbnailUrl } = useArtworkAsset(artwork.assetId);
@@ -97,6 +120,48 @@ export function ArtworkInspector({
     widthPx: asset?.widthPx,
     heightPx: asset?.heightPx
   };
+
+  // Collapsed-summary strings quote lengths in the artwork measurement scope
+  // (inches / cm), matching what the fields inside would show.
+  const { displayUnit: summaryUnit } = getScopedUnitContext(unit, "artwork");
+
+  // The lock toggle only makes sense when there's an image ratio to lock
+  // to — with no linked image (or a legacy asset missing pixel dims),
+  // width/height are just independent numbers. It lives in the Dimensions
+  // section HEADER (next to the uncertainty dot) and is passed through
+  // InspectorSection's extras slot, which hides it while collapsed — a
+  // hidden section shouldn't offer a live toggle.
+  const ratio = imageAspectRatio(aspect);
+  const locked = ratio !== undefined && isAspectLocked(artwork.dimensions, aspect);
+  // The lock toggle is the only header CONTROL (extras hide while collapsed);
+  // the uncertainty badge is pure status, so it rides inside the trigger as a
+  // titleAdornment instead — visible even collapsed, and it yields width
+  // before the title does (the "Dimensions" → "Dimension" clip at narrow
+  // panel widths came from badge + lock crowding the extras row).
+  const dimensionsExtras =
+    ratio !== undefined ? (
+      // Visible text is the accessible name; aria-pressed carries the
+      // locked/unlocked state, so the label stays constant.
+      <Toggle
+        className="artwork-dimensions-lock"
+        pressed={locked}
+        size="sm"
+        variant="ghost"
+        onPressedChange={(pressed) =>
+          onCommitDimensions({ ...artwork.dimensions, aspectLocked: pressed })
+        }
+      >
+        {locked ? (
+          <LockSimpleIcon aria-hidden="true" size={13} />
+        ) : (
+          <LockSimpleOpenIcon aria-hidden="true" size={13} />
+        )}
+        Lock ratio
+      </Toggle>
+    ) : undefined;
+
+  const isOpen = (sectionId: string, fallback: boolean) =>
+    sectionsOpen[sectionId] ?? fallback;
 
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
@@ -134,33 +199,77 @@ export function ArtworkInspector({
         </div>
       </div>
 
-      {/* Dimensions ride high — the measurement a curator reaches for most. */}
-      <DimensionsSection
-        aspect={aspect}
-        dimensions={artwork.dimensions}
-        placementForm={effectivePlacementForm(artwork)}
-        onCommitDimensions={onCommitDimensions}
-        onChangePlacementForm={onChangePlacementForm}
-        unit={unit}
-      />
-
-      {/* Daily-use arranging outranks registrar metadata (see IDENTITY_FIELDS),
-          so the placement form rides right below Dimensions — before
-          Accession no./Location, not after. Nothing renders when the artwork
-          isn't placed anywhere. */}
-      {placementSection}
-
-      {/* Provenance / registrar data sits at the bottom (see IDENTITY_FIELDS). */}
-      <div className="field-group">
-        {REGISTRAR_FIELDS.map((field) => (
-          <TextField
-            key={field.key}
-            fieldKey={field.key}
-            label={field.label}
-            value={artwork[field.key]}
-            onCommitField={onCommitField}
+      {/* The collapsible middle of the panel: hairline-separated rows with
+          zero extra gap so collapsed sections stack as a tight, scannable
+          list (spacing inside each section comes from the section itself). */}
+      <div className="inspector-sections">
+        {/* Dimensions ride high — the measurement a curator reaches for most. */}
+        <InspectorSection
+          headerExtras={dimensionsExtras}
+          open={isOpen("dimensions", true)}
+          summary={formatDimensionsSummary(artwork.dimensions, summaryUnit)}
+          title="Dimensions"
+          titleAdornment={<UncertaintyIndicator status={artwork.dimensions.status} />}
+          onOpenChange={(open) => onSectionOpenChange("dimensions", open)}
+        >
+          <DimensionsSection
+            aspect={aspect}
+            dimensions={artwork.dimensions}
+            placementForm={effectivePlacementForm(artwork)}
+            onCommitDimensions={onCommitDimensions}
+            onChangePlacementForm={onChangePlacementForm}
+            unit={unit}
           />
-        ))}
+        </InspectorSection>
+
+        {/* Mat + frame ride right below dimensions — they change the physical
+            size a work occupies on the wall. */}
+        <InspectorSection
+          open={isOpen("framing", true)}
+          summary={formatFramingSummary(artwork.matWidthMm, artwork.frame, summaryUnit)}
+          title="Mat & frame"
+          onOpenChange={(open) => onSectionOpenChange("framing", open)}
+        >
+          <FramingSection
+            dimensions={artwork.dimensions}
+            frame={artwork.frame}
+            matWidthMm={artwork.matWidthMm}
+            onCommitFraming={onCommitFraming}
+            unit={unit}
+          />
+        </InspectorSection>
+
+        {/* Daily-use arranging outranks registrar metadata, so placement
+            rides above Details. Nothing renders when the artwork isn't
+            placed anywhere. */}
+        {placementSection ? (
+          <InspectorSection
+            open={isOpen("placement", true)}
+            title={placementTitle ?? "Placement"}
+            onOpenChange={(open) => onSectionOpenChange("placement", open)}
+          >
+            {placementSection}
+          </InspectorSection>
+        ) : null}
+
+        {/* Provenance / registrar data, collapsed by default (see
+            IDENTITY_FIELDS comment). */}
+        <InspectorSection
+          open={isOpen("details", false)}
+          summary={formatDetailsSummary(artwork.accessionNumber, artwork.locationOrLender)}
+          title="Details"
+          onOpenChange={(open) => onSectionOpenChange("details", open)}
+        >
+          {DETAILS_FIELDS.map((field) => (
+            <TextField
+              key={field.key}
+              fieldKey={field.key}
+              label={field.label}
+              value={artwork[field.key]}
+              onCommitField={onCommitField}
+            />
+          ))}
+        </InspectorSection>
       </div>
 
       <div className="inspector-placement">
@@ -229,6 +338,8 @@ function TextField({
   );
 }
 
+// Section BODY only — the heading, uncertainty dot, and lock toggle live in
+// the InspectorSection header row (see dimensionsExtras above).
 function DimensionsSection({
   aspect,
   dimensions,
@@ -248,39 +359,8 @@ function DimensionsSection({
 }) {
   const { displayUnit, parseUnit, placeholder } = getScopedUnitContext(unit, "artwork");
 
-  // The lock toggle only makes sense when there's an image ratio to lock
-  // to — with no linked image (or a legacy asset missing pixel dims),
-  // width/height are just independent numbers.
-  const ratio = imageAspectRatio(aspect);
-  const locked = ratio !== undefined && isAspectLocked(dimensions, aspect);
-
   return (
-    <div className="artwork-dimensions">
-      <div className="artwork-dimensions-heading">
-        <h3>Dimensions</h3>
-        <UncertaintyIndicator status={dimensions.status} />
-        {ratio !== undefined ? (
-          // Visible text is the accessible name; aria-pressed carries the
-          // locked/unlocked state, so the label stays constant.
-          <Toggle
-            className="artwork-dimensions-lock"
-            pressed={locked}
-            size="sm"
-            variant="ghost"
-            onPressedChange={(pressed) =>
-              onCommitDimensions({ ...dimensions, aspectLocked: pressed })
-            }
-          >
-            {locked ? (
-              <LockSimpleIcon aria-hidden="true" size={13} />
-            ) : (
-              <LockSimpleOpenIcon aria-hidden="true" size={13} />
-            )}
-            Lock ratio
-          </Toggle>
-        ) : null}
-      </div>
-
+    <>
       <div className="artwork-dimensions-grid">
         {DIMENSION_FIELDS.map((field) => (
           <LengthField
@@ -363,6 +443,160 @@ function DimensionsSection({
           </SelectContent>
         </Select>
       </label>
-    </div>
+    </>
+  );
+}
+
+// Sensible default frame face width (~1 in) when a curator picks a finish
+// before typing a width — the frame is only ever created with a real width.
+const DEFAULT_FRAME_WIDTH_MM = 25.4;
+
+// Section BODY only — the "Mat & frame" heading lives in InspectorSection.
+// Two thoughts, separated by a touch of extra air (.framing-overall): what
+// you enter (band widths + finish), then what results (the Overall pair).
+function FramingSection({
+  dimensions,
+  frame,
+  matWidthMm,
+  onCommitFraming,
+  unit
+}: {
+  dimensions: Dimensions;
+  frame?: ArtworkFrame;
+  matWidthMm?: number;
+  onCommitFraming: (changes: Partial<Pick<Artwork, "matWidthMm" | "frame">>) => void;
+  unit: DisplayUnit;
+}) {
+  const { displayUnit, parseUnit, placeholder, system } = getScopedUnitContext(unit, "artwork");
+
+  // Band-width examples, not conversions — these fields take the width of the
+  // mat/frame BAND, not the framed size of the work, and a concrete small
+  // example (3in mat, 1in frame) is the fastest way to say so.
+  const matPlaceholder = system === "imperial" ? 'e.g. 3"' : "e.g. 75 mm";
+  const framePlaceholder = system === "imperial" ? 'e.g. 1"' : "e.g. 25 mm";
+
+  // Overall footprint only reads when both image faces are measured — a
+  // half-known work has no meaningful outer size to quote or edit.
+  const overall =
+    dimensions.widthMm !== undefined && dimensions.heightMm !== undefined
+      ? getArtworkOuterDimensionsMm(dimensions.widthMm, dimensions.heightMm, matWidthMm, frame)
+      : undefined;
+
+  // Editing an overall dim solves for the FRAME band only (mat stays as
+  // entered); bands are uniform, so committing either axis updates both —
+  // same spirit as the image dims' aspect-ratio autofill. A too-small entry
+  // throws, which LengthField surfaces in its reserved message slot without
+  // committing; an entry exactly equal to image + 2·mat clears the frame.
+  const commitOverall = (imageMm: number) => (overallMm: number) => {
+    const derivation = deriveFrameWidthFromOverallMm(overallMm, imageMm, matWidthMm);
+
+    if (!derivation.ok) {
+      throw new Error(
+        `Overall must be at least ${formatLength(derivation.minOverallMm, {
+          unit: displayUnit
+        })} (image plus mat).`
+      );
+    }
+
+    onCommitFraming({
+      frame:
+        derivation.frameWidthMm === undefined
+          ? undefined
+          : { widthMm: derivation.frameWidthMm, finish: frame?.finish ?? "black" }
+    });
+  };
+
+  return (
+    <>
+      <div className="field-pair-grid">
+        <LengthField
+          compact
+          clearable
+          positiveOnly
+          label="Mat"
+          valueMm={matWidthMm}
+          displayUnit={displayUnit}
+          parseUnit={parseUnit}
+          placeholder={matPlaceholder}
+          onClear={() => onCommitFraming({ matWidthMm: undefined })}
+          onCommit={(valueMm) => onCommitFraming({ matWidthMm: valueMm })}
+        />
+        <LengthField
+          compact
+          clearable
+          positiveOnly
+          label="Frame"
+          valueMm={frame?.widthMm}
+          displayUnit={displayUnit}
+          parseUnit={parseUnit}
+          placeholder={framePlaceholder}
+          // Clearing the frame width removes the frame entirely; setting it
+          // keeps (or defaults) the finish.
+          onClear={() => onCommitFraming({ frame: undefined })}
+          onCommit={(valueMm) =>
+            onCommitFraming({
+              frame: { widthMm: valueMm, finish: frame?.finish ?? "black" }
+            })
+          }
+        />
+      </div>
+
+      <label className="field-row compact">
+        <span>Finish</span>
+        <Select
+          value={frame?.finish ?? "black"}
+          onValueChange={(value) =>
+            onCommitFraming({
+              frame: {
+                widthMm: frame?.widthMm ?? DEFAULT_FRAME_WIDTH_MM,
+                finish: value as ArtworkFrame["finish"]
+              }
+            })
+          }
+        >
+          <SelectTrigger aria-label="Frame finish">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {FRAME_FINISHES.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </label>
+
+      {overall && dimensions.widthMm !== undefined && dimensions.heightMm !== undefined ? (
+        // Editable overall footprint (image + mat + frame per side, W × H):
+        // shows the current effective outer dims at rest; committing either
+        // one re-derives the frame band (see commitOverall above).
+        <div className="framing-overall">
+          <div className="field-pair-grid">
+            <LengthField
+              compact
+              positiveOnly
+              label="Overall W"
+              valueMm={overall.widthMm}
+              displayUnit={displayUnit}
+              parseUnit={parseUnit}
+              placeholder={placeholder}
+              onCommit={commitOverall(dimensions.widthMm)}
+            />
+            <LengthField
+              compact
+              positiveOnly
+              label="Overall H"
+              valueMm={overall.heightMm}
+              displayUnit={displayUnit}
+              parseUnit={parseUnit}
+              placeholder={placeholder}
+              onCommit={commitOverall(dimensions.heightMm)}
+            />
+          </div>
+          <p className="field-hint">Framed size — editing either derives the frame width.</p>
+        </div>
+      ) : null}
+    </>
   );
 }
