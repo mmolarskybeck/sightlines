@@ -3404,6 +3404,34 @@ body.panels-resizing * {
   gap: 20px;
 }
 
+.opening-connection-section {
+  display: grid;
+  gap: 10px;
+}
+
+.opening-connection-section .select-trigger {
+  width: 100%;
+}
+
+.opening-connection-status {
+  margin: 0;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
+}
+
+.opening-connection-status.aligned {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.opening-connection-status.misaligned {
+  background: var(--caution-soft);
+  color: var(--caution);
+}
+
 /* Groups related fields into one tight cluster (identity, registrar, etc.)
    within the more generous 20px rhythm of .inspector-form. */
 .field-group {
@@ -4383,6 +4411,34 @@ body.panels-resizing * {
   fill-opacity: 0.4;
   stroke: var(--selection);
   stroke-dasharray: 6 5;
+}
+
+/* A paired opening's shared 2D status: one restrained connector behind the
+   objects, driven by the same domain evaluation as the inspector and 3D. */
+.opening-connection-glyph {
+  pointer-events: none;
+}
+
+.opening-connection-glyph line {
+  stroke: var(--selection);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.opening-connection-glyph circle {
+  fill: var(--primary-soft);
+  stroke: var(--selection);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.opening-connection-glyph.misaligned line {
+  stroke: var(--caution);
+}
+
+.opening-connection-glyph.misaligned circle {
+  fill: var(--caution-soft);
+  stroke: var(--caution);
 }
 
 /* WallInspector's "Add to this wall" row — three equal-width chips (icon

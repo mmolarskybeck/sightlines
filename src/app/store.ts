@@ -60,6 +60,7 @@ import {
   type ArtworkFloorObject,
   type Asset,
   type BlockedZoneFloorObject,
+  type ConnectableOpeningWallObject,
   type DisplayUnit,
   type FloorObject,
   type FloorObjectBase,
@@ -245,6 +246,8 @@ export type AppState = ArrangeSliceState &
     heightMm: number,
     allowOverlap?: boolean
   ) => Promise<void>;
+  connectOpenings: (aId: string, bId: string) => Promise<void>;
+  disconnectOpening: (id: string) => Promise<void>;
   placeOpeningFromPlan: (kind: OpeningKind, placement: PlanPlacement) => Promise<void>;
   placeArtworkOnFloor: (artworkId: string, xMm: number, yMm: number) => Promise<void>;
   commitPlanMove: (
@@ -2182,6 +2185,95 @@ export function createAppStore(deps: AppStoreDeps) {
           [wallObjectId],
           allowOverlap
         );
+      },
+
+      async connectOpenings(aId, bId) {
+        const project = get().project;
+        if (!project || aId === bId) return;
+
+        const a = project.wallObjects.find((object) => object.id === aId);
+        const b = project.wallObjects.find((object) => object.id === bId);
+        const isConnectable = (
+          object: WallObject | undefined
+        ): object is ConnectableOpeningWallObject =>
+          object?.kind === "door" || object?.kind === "window";
+
+        if (!isConnectable(a) || !isConnectable(b)) {
+          set({ error: "Only doors and windows can be connected." });
+          return;
+        }
+        if (a.kind !== b.kind) {
+          set({ error: "Connected openings must be the same kind." });
+          return;
+        }
+        if (
+          a.wallId === b.wallId ||
+          parseFaceWallId(a.wallId) !== null ||
+          parseFaceWallId(b.wallId) !== null
+        ) {
+          set({ error: "Connected openings must be on different perimeter walls." });
+          return;
+        }
+        if (a.connectsToObjectId === b.id && b.connectsToObjectId === a.id) return;
+
+        // Re-pairing is atomic: clear any previous relationships touching
+        // either endpoint, then write the new symmetric double-pointer in the
+        // same project revision. This preserves the schema invariant at every
+        // persisted/undoable state.
+        const displacedIds = new Set(
+          [a.connectsToObjectId, b.connectsToObjectId].filter(
+            (id): id is string => id !== undefined
+          )
+        );
+        const nextWallObjects = project.wallObjects.map((object) => {
+          if (object.id === a.id) return { ...a, connectsToObjectId: b.id };
+          if (object.id === b.id) return { ...b, connectsToObjectId: a.id };
+          if (
+            (object.kind === "door" || object.kind === "window") &&
+            (displacedIds.has(object.id) ||
+              object.connectsToObjectId === a.id ||
+              object.connectsToObjectId === b.id)
+          ) {
+            const { connectsToObjectId: _cleared, ...rest } = object;
+            return rest;
+          }
+          return object;
+        });
+
+        await applyEdit(`Connect ${openingNoun(a.kind)}s`, (current) => ({
+          ...current,
+          wallObjects: nextWallObjects
+        }));
+      },
+
+      async disconnectOpening(id) {
+        const project = get().project;
+        if (!project) return;
+        const opening = project.wallObjects.find((object) => object.id === id);
+        if (
+          !opening ||
+          (opening.kind !== "door" && opening.kind !== "window") ||
+          opening.connectsToObjectId === undefined
+        ) {
+          return;
+        }
+
+        const partnerId = opening.connectsToObjectId;
+        const nextWallObjects = project.wallObjects.map((object) => {
+          if (
+            (object.id === opening.id || object.id === partnerId) &&
+            (object.kind === "door" || object.kind === "window")
+          ) {
+            const { connectsToObjectId: _cleared, ...rest } = object;
+            return rest;
+          }
+          return object;
+        });
+
+        await applyEdit(`Disconnect ${openingNoun(opening.kind)}`, (current) => ({
+          ...current,
+          wallObjects: nextWallObjects
+        }));
       },
 
       async placeOpeningFromPlan(kind, placement) {

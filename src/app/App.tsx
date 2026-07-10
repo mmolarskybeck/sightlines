@@ -23,6 +23,7 @@ import {
   getWallsWithGeometry,
   getOrthogonalQuadWallPair,
 } from "../domain/geometry/walls";
+import { evaluateOpeningPair } from "../domain/geometry/openingConnections";
 import { getOpeningKindLabel, type OpeningKind } from "../domain/placement/createOpening";
 import type {
   Artwork,
@@ -34,7 +35,7 @@ import type {
   OpeningWallObject,
   Project
 } from "../domain/project";
-import { faceWallId } from "../domain/geometry/freestandingWalls";
+import { faceWallId, parseFaceWallId } from "../domain/geometry/freestandingWalls";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import { formatLength } from "../domain/units/length";
 import { getGridPrecisionFloorOptionsMm } from "../domain/units/precision";
@@ -52,7 +53,10 @@ import { DeleteRoomDialog } from "./components/DeleteRoomDialog";
 import { ElevationEmptyState } from "./components/ElevationEmptyState";
 import { FloorObjectInspector, FloorPlacementFields } from "./components/FloorObjectInspector";
 import { FreestandingWallInspector } from "./components/FreestandingWallInspector";
-import { OpeningInspector } from "./components/OpeningInspector";
+import {
+  OpeningInspector,
+  type OpeningConnectionCandidate
+} from "./components/OpeningInspector";
 import { PlanEmptyState } from "./components/PlanEmptyState";
 import { PlanView } from "./components/PlanView";
 import { TooltipProvider } from "./components/ui/tooltip";
@@ -209,6 +213,8 @@ export function App() {
     addOpening,
     moveOpening,
     resizeOpening,
+    connectOpenings,
+    disconnectOpening,
     placeOpeningFromPlan,
     placeArtworkOnFloor,
     commitPlanMove,
@@ -521,6 +527,41 @@ export function App() {
           wallObject.kind !== "artwork" && wallObject.id === selectedOpeningId
       ) ?? null)
     : null;
+  const openingConnectionCandidates: OpeningConnectionCandidate[] =
+    selectedOpening && (selectedOpening.kind === "door" || selectedOpening.kind === "window")
+      ? project.wallObjects
+          .filter(
+            (candidate) =>
+              candidate.id !== selectedOpening.id &&
+              candidate.kind === selectedOpening.kind &&
+              candidate.wallId !== selectedOpening.wallId &&
+              parseFaceWallId(candidate.wallId) === null
+          )
+          .map((candidate) => {
+            const alignment = evaluateOpeningPair(project, selectedOpening.id, candidate.id);
+            const owner = project.floor.rooms.find((placement) =>
+              placement.room.walls.some((wall) => wall.id === candidate.wallId)
+            );
+            const wallName = owner?.room.walls.find((wall) => wall.id === candidate.wallId)?.name;
+            return {
+              id: candidate.id,
+              label: owner
+                ? `${owner.room.name} — ${wallName ?? "Wall"}`
+                : wallName ?? "Unknown wall",
+              alignment
+            };
+          })
+          // New candidates must at least sit on nearby, facing wall lines.
+          // Keep an existing partner visible even after a room move makes it
+          // fail angle/gap so the inspector can explain and disconnect it.
+          .filter(
+            (candidate) =>
+              candidate.id === selectedOpening.connectsToObjectId ||
+              candidate.alignment.status === "aligned" ||
+              (candidate.alignment.reason !== "angle" && candidate.alignment.reason !== "gap")
+          )
+          .sort((a, b) => a.label.localeCompare(b.label))
+      : [];
   // selectedOpeningId doubles as the slot for a floor-placed blocked zone
   // (no separate selection slot — ids are unique across both arrays), so a
   // selection that isn't a wall opening may resolve to a floor blocked zone.
@@ -1304,6 +1345,9 @@ export function App() {
             <OpeningInspector
               opening={selectedOpening}
               unit={project.unit}
+              connectionCandidates={openingConnectionCandidates}
+              onConnect={(partnerId) => void connectOpenings(selectedOpening.id, partnerId)}
+              onDisconnect={() => void disconnectOpening(selectedOpening.id)}
               onCommitPosition={(xMm, yMm) =>
                 void moveOpening(selectedOpening.id, xMm, yMm, allowOverlappingPlacement)
               }

@@ -1,9 +1,37 @@
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
+import type { OpeningAlignment } from "../../domain/geometry/openingConnections";
 import { getOpeningKindLabel } from "../../domain/placement/createOpening";
 import type { OpeningWallObject, DisplayUnit } from "../../domain/project";
 import { getScopedUnitContext } from "./scopedUnits";
 import { LengthField } from "./LengthField";
 import { Button } from "./ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "./ui/select";
+
+export type OpeningConnectionCandidate = {
+  id: string;
+  label: string;
+  alignment: OpeningAlignment;
+};
+
+function alignmentLabel(alignment: OpeningAlignment): string {
+  if (alignment.status === "aligned") return "Aligned";
+  switch (alignment.reason) {
+    case "angle":
+      return "Misaligned: walls are not parallel";
+    case "gap":
+      return "Misaligned: walls are too far apart";
+    case "no-overlap":
+      return "Misaligned: openings do not overlap enough";
+    case "height":
+      return "Misaligned: heights do not overlap";
+  }
+}
 
 // Numeric position/size fields for a selected door/window/blocked zone,
 // mirroring WallInspector's commit-on-blur/Enter pattern exactly — the
@@ -11,13 +39,19 @@ import { Button } from "./ui/button";
 export function OpeningInspector({
   onCommitPosition,
   onCommitSize,
+  onConnect,
+  onDisconnect,
   onDelete,
+  connectionCandidates,
   opening,
   unit
 }: {
   onCommitPosition: (xMm: number, yMm: number) => void;
   onCommitSize: (widthMm: number, heightMm: number) => void;
+  onConnect: (partnerId: string) => void;
+  onDisconnect: () => void;
   onDelete: () => void;
+  connectionCandidates: OpeningConnectionCandidate[];
   opening: OpeningWallObject;
   unit: DisplayUnit;
 }) {
@@ -71,6 +105,57 @@ export function OpeningInspector({
           onCommit={(heightMm) => onCommitSize(opening.widthMm, heightMm)}
         />
       </div>
+
+      {opening.kind === "door" || opening.kind === "window" ? (
+        <div className="opening-connection-section">
+          <div className="artwork-dimensions-heading">
+            <h3>Connects to</h3>
+            {opening.connectsToObjectId ? (
+              <Button size="sm" variant="ghost" onClick={onDisconnect}>
+                Disconnect
+              </Button>
+            ) : null}
+          </div>
+          {connectionCandidates.length > 0 ? (
+            <Select
+              value={opening.connectsToObjectId ?? ""}
+              onValueChange={(partnerId) => onConnect(partnerId)}
+            >
+              <SelectTrigger aria-label={`Connect ${opening.kind} to`}>
+                <SelectValue placeholder={`Choose another ${opening.kind}`} />
+              </SelectTrigger>
+              <SelectContent>
+                {connectionCandidates.map((candidate) => (
+                  <SelectItem key={candidate.id} value={candidate.id}>
+                    {candidate.label} — {alignmentLabel(candidate.alignment)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <p className="field-hint">
+              No nearby {opening.kind}s on a facing wall.
+            </p>
+          )}
+          {opening.connectsToObjectId ? (() => {
+            const connected = connectionCandidates.find(
+              (candidate) => candidate.id === opening.connectsToObjectId
+            );
+            return connected ? (
+              <p
+                className={`opening-connection-status ${connected.alignment.status}`}
+                role="status"
+              >
+                {alignmentLabel(connected.alignment)}
+              </p>
+            ) : (
+              <p className="opening-connection-status misaligned" role="status">
+                Connected opening is unavailable
+              </p>
+            );
+          })() : null}
+        </div>
+      ) : null}
 
       <div className="inspector-placement">
         <Button className="inspector-action inspector-danger" variant="destructive-ghost" onClick={onDelete}>

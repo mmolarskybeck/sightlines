@@ -6,7 +6,7 @@ Last refreshed: 2026-07-10
 
 MVP 1A and 1B are effectively complete, and MVP 1C has shipped its 2D planning behaviors **and the simple derived 3D preview**. The 3D mode shipped per `docs/3d-preview-spec.md`: a read-only projection (pure `scene3d.ts` derivation → R3F dollhouse room shell, textured artwork planes, door/window cutouts, floor boxes, blocked zones, partition slabs, shared uncertainty language), click-to-select synced with the shared store, and animated Overview / Eye-level camera presets. No 3D editing — the inspector remains the numeric editing surface in 3D mode.
 
-Room-shape slices 1-3 have shipped: the fast rectangle path remains, polygon room drawing/reshape is live, wall split/delete and wall-slide reshaping are in place, and free-standing partition walls are schema v3 room-owned objects with derived double-sided faces. Recent follow-up fixes hardened focus ownership for SVG/workspace interactions and global shortcuts, so focused inputs, selects, and resize handles keep their own keys.
+Room-shape slices 1-5 have shipped: the fast rectangle path remains, polygon room drawing/reshape is live, wall split/delete and wall-slide reshaping are in place, and free-standing partition walls are schema v3 room-owned objects with derived double-sided faces. Doors and windows can now be paired through reciprocal opening IDs; the inspector and Plan share one advisory angle/gap/overlap/height evaluation, aligned pairs create a true shared clear opening in 3D, and every unpaired or misaligned opening gets a recessed cap so coplanar backface culling cannot create a false portal.
 
 The import surface is also beyond one-off image upload now: the Import wizard supports images-only, spreadsheet metadata, and combined image + metadata intake with map/review steps and image matching. Static public info/trust pages now live under `public/` (`about.html`, `privacy.html`, `security.html`, `it.html`, plus crawler/security metadata) and are linked from the left-rail Help surface.
 
@@ -16,7 +16,7 @@ Post-irregular-rooms refactor: 20 commits, all phases green (1065 tests, up from
 
 - **New domain modules**: `vector.ts`, `wallLoop.ts`, `placeableWalls.ts` (the doorway feature's wall-enumeration seam), `roomCascade.ts` (single room-deletion cascade), `openingPairs.ts` (where doorway-pairing writers land), `planPreview.ts` (drag-preview composition out of PlanView), `signedAreaMm2` into `polygon.ts`.
 - **Bug fixed**: wall-slide chips pointed the wrong way on concave rooms (centroid heuristic); one canonical `outwardWallNormal` now.
-- **Landmines defused**: `removePlacement`/`removeSelectedPlacements` now clear opening partner refs (matters once `connectsToObjectId` gets writers).
+- **Landmines defused**: `removePlacement`/`removeSelectedPlacements` clear opening partner refs, and the shipped connection writers preserve the same reciprocal invariant during connect, re-pair, disconnect, and undo.
 - **View layer**: all ten drag machines in PlanView/ElevationView share `useDragGesture`; PlanView −450 lines net.
 - **App/store**: `usePlanMode` union (doorway pairing adds a `pairOpenings` variant there, one place), `commitWallObjectEdit`/`runPartitionEdit` pipelines, `commitPlanMove` split into four named cases.
 - **3D loading**: Three.js and the React Three Fiber stack are isolated behind the lazy `ThreeDView` route. The eager vendor chunk is 148.87 kB gzip; the 223.14 kB gzip 3D chunk is fetched only when 3D opens, with a build-time eager-graph assertion protecting the boundary.
@@ -33,9 +33,9 @@ Touch drag-and-drop for artwork placement, insecure-context support for LAN dev 
 
 ## Near-Term Order
 
-1. Paired door/window connections: add writers for `connectsToObjectId`, derived aligned/misaligned status, inspector UI, and deletion/cleanup flows — slices 4-5 of `docs/room-shapes-spec.md`.
-2. 3D see-through openings for aligned paired doors/windows; keep the current-room-plus-visible-connected-rooms rendering strategy before attempting whole-floor 3D.
-3. MVP package/export work: `.sightlines` import/export, backup flow, PNG/PDF exports (including the deferred 3D screenshot), and readiness reporting.
+1. MVP package/export work: `.sightlines` import/export, backup flow, PNG/PDF exports (including the deferred 3D screenshot), and readiness reporting.
+2. Multi-room placement and management polish around the shared floor coordinate space.
+3. Defer current-room-plus-visible-connected-rooms rendering until real whole-floor 3D project sizes justify that optimization.
 
 ## Known Follow-Ups
 

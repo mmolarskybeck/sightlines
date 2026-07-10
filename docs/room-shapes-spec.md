@@ -1,6 +1,6 @@
 # Complex Room Shapes — Spec
 
-Status: slices 1-3 shipped; slices 4-5 pending · Written: 2026-07-08 · Refreshed: 2026-07-09
+Status: slices 1-5 shipped · Written: 2026-07-08 · Refreshed: 2026-07-10
 Decisions confirmed with Marina: free-standing walls are **double-sided** placement surfaces · free-standing walls are **room-owned** · **polygons only**, no curved walls · **both doors and windows** can pair across rooms for 3D see-through.
 
 ## 1. Goal

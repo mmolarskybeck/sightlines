@@ -472,7 +472,8 @@ describe("deriveScene3d — door/window holes (M3)", () => {
         xMaxMm: 1450,
         yMinMm: 0,
         yMaxMm: 2000,
-        clamped: false
+        clamped: false,
+        treatment: "capped"
       }
     ]);
   });
@@ -488,7 +489,8 @@ describe("deriveScene3d — door/window holes (M3)", () => {
         xMaxMm: 1600,
         yMinMm: 1000,
         yMaxMm: 2000,
-        clamped: false
+        clamped: false,
+        treatment: "capped"
       }
     ]);
   });
@@ -506,7 +508,8 @@ describe("deriveScene3d — door/window holes (M3)", () => {
         xMaxMm: 600,
         yMinMm: 1900,
         yMaxMm: 2500,
-        clamped: true
+        clamped: true,
+        treatment: "capped"
       }
     ]);
   });
@@ -532,9 +535,87 @@ describe("deriveScene3d — door/window holes (M3)", () => {
         xMaxMm: 2400,
         yMinMm: 0,
         yMaxMm: 2000,
-        clamped: false
+        clamped: false,
+        treatment: "capped"
       }
     ]);
+  });
+
+  it("emits the mirrored clear intersection as open on both sides of an aligned pair", () => {
+    const roomA = makePlacement(makeRoom("room-a", CCW_RECT, 2500));
+    const roomB = makePlacement(makeRoom("room-b", CCW_RECT, 2500), {
+      offsetXMm: 4000
+    });
+    const a = makeOpening("door", {
+      id: "door-a",
+      wallId: "room-a-wall-1",
+      xMm: 1200,
+      widthMm: 1000,
+      yMm: 1050,
+      heightMm: 2100,
+      connectsToObjectId: "door-b"
+    });
+    const b = makeOpening("door", {
+      id: "door-b",
+      wallId: "room-b-wall-3",
+      xMm: 1700,
+      widthMm: 600,
+      yMm: 900,
+      heightMm: 1800,
+      connectsToObjectId: "door-a"
+    });
+
+    const scene = deriveScene3d(
+      makeProject([roomA, roomB], { wallObjects: [a, b] })
+    );
+    const holeA = scene.rooms[0].walls.find((wall) => wall.wallId === a.wallId)!.holes[0];
+    const holeB = scene.rooms[1].walls.find((wall) => wall.wallId === b.wallId)!.holes[0];
+
+    expect(holeA).toEqual({
+      kind: "door",
+      xMinMm: 1000,
+      xMaxMm: 1600,
+      yMinMm: 0,
+      yMaxMm: 1800,
+      clamped: false,
+      treatment: "open",
+      connectedRoomId: "room-b"
+    });
+    expect(holeB).toEqual({
+      kind: "door",
+      xMinMm: 1400,
+      xMaxMm: 2000,
+      yMinMm: 0,
+      yMaxMm: 1800,
+      clamped: false,
+      treatment: "open",
+      connectedRoomId: "room-a"
+    });
+  });
+
+  it("keeps both sides capped when a stored pair is geometrically misaligned", () => {
+    const roomA = makePlacement(makeRoom("room-a", CCW_RECT, 2500));
+    const roomB = makePlacement(makeRoom("room-b", CCW_RECT, 2500), {
+      offsetXMm: 4300
+    });
+    const a = makeOpening("window", {
+      id: "window-a",
+      wallId: "room-a-wall-1",
+      connectsToObjectId: "window-b"
+    });
+    const b = makeOpening("window", {
+      id: "window-b",
+      wallId: "room-b-wall-3",
+      connectsToObjectId: "window-a"
+    });
+
+    const scene = deriveScene3d(
+      makeProject([roomA, roomB], { wallObjects: [a, b] })
+    );
+    const treatments = scene.rooms.flatMap((room) =>
+      room.walls.flatMap((wall) => wall.holes.map((hole) => hole.treatment))
+    );
+    expect(treatments).toEqual(["capped", "capped"]);
   });
 });
 

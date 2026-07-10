@@ -6,6 +6,7 @@ import type {
   WallObject
 } from "../project";
 import { getFreestandingFaces } from "./freestandingWalls";
+import { evaluateOpeningPair } from "./openingConnections";
 import { signedAreaMm2 } from "./polygon";
 import { unitLeftNormalOrZero } from "./vector";
 import { getWallsWithGeometry } from "./walls";
@@ -33,6 +34,8 @@ export type Hole3d = {
   yMinMm: number;
   yMaxMm: number;
   clamped: boolean; // true if the source object overflowed wall bounds
+  treatment: "open" | "capped";
+  connectedRoomId?: string;
 };
 
 // Wall-local axis-aligned rectangle (blocked zones); x along wall, y up.
@@ -114,6 +117,12 @@ export type Scene3d = {
 
 const EMPTY_ARTWORKS: ReadonlyMap<string, Artwork> = new Map();
 
+type OpenConnection3d = {
+  clearX: { xMinMm: number; xMaxMm: number };
+  clearY: { yMinMm: number; yMaxMm: number };
+  connectedRoomId?: string;
+};
+
 export function deriveScene3d(
   project: Project,
   artworksById: ReadonlyMap<string, Artwork> = EMPTY_ARTWORKS
@@ -128,9 +137,52 @@ export function deriveScene3d(
     }
   }
 
+  const roomIdByWallId = new Map(
+    project.floor.rooms.flatMap((placement) =>
+      placement.room.walls.map((wall) => [wall.id, placement.roomId] as const)
+    )
+  );
+  const openConnectionsByObjectId = new Map<string, OpenConnection3d>();
+  for (const a of project.wallObjects) {
+    if (
+      (a.kind !== "door" && a.kind !== "window") ||
+      !a.connectsToObjectId ||
+      a.id > a.connectsToObjectId
+    ) {
+      continue;
+    }
+    const b = project.wallObjects.find((candidate) => candidate.id === a.connectsToObjectId);
+    if (
+      !b ||
+      (b.kind !== "door" && b.kind !== "window") ||
+      b.connectsToObjectId !== a.id
+    ) {
+      continue;
+    }
+    const alignment = evaluateOpeningPair(project, a.id, b.id);
+    if (alignment.status !== "aligned") continue;
+
+    const verticalA = openingVerticalExtent(a);
+    const verticalB = openingVerticalExtent(b);
+    const clearY = {
+      yMinMm: Math.max(verticalA.yMinMm, verticalB.yMinMm),
+      yMaxMm: Math.min(verticalA.yMaxMm, verticalB.yMaxMm)
+    };
+    openConnectionsByObjectId.set(a.id, {
+      clearX: alignment.clearA,
+      clearY,
+      connectedRoomId: roomIdByWallId.get(b.wallId)
+    });
+    openConnectionsByObjectId.set(b.id, {
+      clearX: alignment.clearB,
+      clearY,
+      connectedRoomId: roomIdByWallId.get(a.wallId)
+    });
+  }
+
   return {
     rooms: project.floor.rooms.map((placement) =>
-      deriveRoom(placement, wallObjectsByWallId, artworksById)
+      deriveRoom(placement, wallObjectsByWallId, artworksById, openConnectionsByObjectId)
     ),
     floorObjects: project.floorObjects.map((object) => {
       const artwork =
@@ -168,7 +220,8 @@ export function wallInwardNormal(panel: WallPanel3d): Vec2 {
 function deriveRoom(
   placement: RoomPlacement,
   wallObjectsByWallId: ReadonlyMap<string, WallObject[]>,
-  artworksById: ReadonlyMap<string, Artwork>
+  artworksById: ReadonlyMap<string, Artwork>,
+  openConnectionsByObjectId: ReadonlyMap<string, OpenConnection3d>
 ): Room3d {
   const { room } = placement;
 
@@ -201,7 +254,8 @@ function deriveRoom(
       wall.heightMm,
       toPanelLocalX,
       artworksById,
-      true
+      true,
+      openConnectionsByObjectId
     );
 
     return {
@@ -231,7 +285,8 @@ function deriveRoom(
         face.heightMm,
         (xMm) => xMm,
         artworksById,
-        false
+        false,
+        openConnectionsByObjectId
       );
       return {
         wallId: face.id,
@@ -271,7 +326,8 @@ function derivePanelContents(
   heightMm: number,
   toLocalX: (xMm: number) => number,
   artworksById: ReadonlyMap<string, Artwork>,
-  allowHoles: boolean
+  allowHoles: boolean,
+  openConnectionsByObjectId: ReadonlyMap<string, OpenConnection3d>
 ): { holes: Hole3d[]; artworks: WallArtwork3d[]; blockedZones: Rect3d[] } {
   const artworks: WallArtwork3d[] = [];
   const blockedZones: Rect3d[] = [];
@@ -301,11 +357,16 @@ function derivePanelContents(
       // Door/window -> cutout. Doors run floor-to-top regardless of the stored
       // center (spec §5.1); windows keep their floating extent. The render layer
       // punches these through the wall verbatim.
-      const centerX = toLocalX(object.xMm);
-      const rawXMin = centerX - object.widthMm / 2;
-      const rawXMax = centerX + object.widthMm / 2;
-      const rawYMin = object.kind === "door" ? 0 : object.yMm - object.heightMm / 2;
-      const rawYMax = object.yMm + object.heightMm / 2;
+      const openConnection = openConnectionsByObjectId.get(object.id);
+      const ownVertical = openingVerticalExtent(object);
+      const rawAuthoredXMin = openConnection?.clearX.xMinMm ?? object.xMm - object.widthMm / 2;
+      const rawAuthoredXMax = openConnection?.clearX.xMaxMm ?? object.xMm + object.widthMm / 2;
+      const panelX1 = toLocalX(rawAuthoredXMin);
+      const panelX2 = toLocalX(rawAuthoredXMax);
+      const rawXMin = Math.min(panelX1, panelX2);
+      const rawXMax = Math.max(panelX1, panelX2);
+      const rawYMin = openConnection?.clearY.yMinMm ?? ownVertical.yMinMm;
+      const rawYMax = openConnection?.clearY.yMaxMm ?? ownVertical.yMaxMm;
 
       const xMinMm = Math.max(rawXMin, 0);
       const xMaxMm = Math.min(rawXMax, lengthMm);
@@ -326,11 +387,24 @@ function derivePanelContents(
           xMinMm !== rawXMin ||
           xMaxMm !== rawXMax ||
           yMinMm !== rawYMin ||
-          yMaxMm !== rawYMax
+          yMaxMm !== rawYMax,
+        treatment: openConnection ? "open" : "capped",
+        ...(openConnection?.connectedRoomId
+          ? { connectedRoomId: openConnection.connectedRoomId }
+          : {})
       });
     }
   }
   return { holes, artworks, blockedZones };
+}
+
+function openingVerticalExtent(
+  opening: Extract<WallObject, { kind: "door" | "window" }>
+): { yMinMm: number; yMaxMm: number } {
+  return {
+    yMinMm: opening.kind === "door" ? 0 : opening.yMm - opening.heightMm / 2,
+    yMaxMm: opening.yMm + opening.heightMm / 2
+  };
 }
 
 // Room-local (x, y) -> floor-space (x, y): rotate about the room origin by
@@ -344,4 +418,3 @@ function transformPoint(point: Vec2, placement: RoomPlacement): Vec2 {
     yMm: point.xMm * sin + point.yMm * cos + placement.offsetYMm
   };
 }
-

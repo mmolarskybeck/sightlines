@@ -1677,6 +1677,76 @@ describe("app store", () => {
     });
   });
 
+  describe("opening connections", () => {
+    it("connects and disconnects a same-kind pair symmetrically in one undoable edit", async () => {
+      await store.getState().addOpening("wall-north", "door");
+      const doorA = store.getState().project!.wallObjects[0];
+      await store.getState().addOpening("wall-south", "door");
+      const doorB = store
+        .getState()
+        .project!.wallObjects.find((object) => object.id !== doorA.id)!;
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().connectOpenings(doorA.id, doorB.id);
+
+      let project = store.getState().project!;
+      expect(store.getState().undoStack).toHaveLength(undoStackBefore + 1);
+      expect(store.getState().undoStack.at(-1)?.label).toBe("Connect doors");
+      const pairedA = project.wallObjects.find((object) => object.id === doorA.id)!;
+      const pairedB = project.wallObjects.find((object) => object.id === doorB.id)!;
+      expect(pairedA.kind === "door" ? pairedA.connectsToObjectId : undefined).toBe(doorB.id);
+      expect(pairedB.kind === "door" ? pairedB.connectsToObjectId : undefined).toBe(doorA.id);
+
+      await store.getState().disconnectOpening(doorA.id);
+      project = store.getState().project!;
+      expect(
+        project.wallObjects.some(
+          (object) =>
+            (object.kind === "door" || object.kind === "window") &&
+            object.connectsToObjectId !== undefined
+        )
+      ).toBe(false);
+
+      await store.getState().undo();
+      project = store.getState().project!;
+      const restoredA = project.wallObjects.find((object) => object.id === doorA.id)!;
+      expect(restoredA.kind === "door" ? restoredA.connectsToObjectId : undefined).toBe(doorB.id);
+    });
+
+    it("atomically clears displaced partners when re-pairing", async () => {
+      await store.getState().addOpening("wall-north", "window");
+      await store.getState().addOpening("wall-east", "window");
+      await store.getState().addOpening("wall-south", "window");
+      const [a, b, c] = store.getState().project!.wallObjects;
+
+      await store.getState().connectOpenings(a.id, b.id);
+      await store.getState().connectOpenings(a.id, c.id);
+
+      const objects = store.getState().project!.wallObjects;
+      const nextA = objects.find((object) => object.id === a.id)!;
+      const nextB = objects.find((object) => object.id === b.id)!;
+      const nextC = objects.find((object) => object.id === c.id)!;
+      expect(nextA.kind === "window" ? nextA.connectsToObjectId : undefined).toBe(c.id);
+      expect(nextB.kind === "window" ? nextB.connectsToObjectId : undefined).toBeUndefined();
+      expect(nextC.kind === "window" ? nextC.connectsToObjectId : undefined).toBe(a.id);
+    });
+
+    it("rejects cross-kind and blocked-zone connections without committing", async () => {
+      await store.getState().addOpening("wall-north", "door");
+      await store.getState().addOpening("wall-south", "window");
+      await store.getState().addOpening("wall-east", "blocked-zone");
+      const [door, window, blocked] = store.getState().project!.wallObjects;
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().connectOpenings(door.id, window.id);
+      await store.getState().connectOpenings(door.id, blocked.id);
+
+      expect(store.getState().undoStack).toHaveLength(undoStackBefore);
+      expect(store.getState().project!.wallObjects).toEqual([door, window, blocked]);
+      expect(store.getState().error).toMatch(/only doors and windows/i);
+    });
+  });
+
   describe("removePlacement for an opening", () => {
     it("deletes the opening (the same generic action used for artwork)", async () => {
       const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;

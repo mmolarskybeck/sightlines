@@ -203,11 +203,13 @@ Shipped:
 * Polygon room drawing in Plan view.
 * Polygon reshape mode with vertex dragging, wall splitting/deleting, and wall-slide reshaping.
 * Free-standing partition walls with double-sided faces.
+* Paired door/window connections with live alignment status in Plan and the inspector.
+* True 3D sightlines through aligned pairs; unpaired and misaligned openings are visibly capped.
 
 Next:
 
-* Paired door/window connections between rooms.
-* 3D sightlines through aligned connected openings.
+* Multi-room placement and management polish.
+* `.sightlines` package export/import and backup workflows.
 
 ### MVP 3 — Project packages and export
 

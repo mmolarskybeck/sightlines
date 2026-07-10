@@ -130,16 +130,19 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 - [x] Intake error surface hardening: `addArtworksFromFiles` and `importArtworkDrafts` no longer fail silently; both catch exceptions and surface in error banner.
 - [x] Topbar fits iPad portrait: single-line icon-only layout at ≤1040px (tab/action labels and save-badge text → visually-hidden spans; accessible names preserved, colored save dot stays). Tests: 1065 → 1087.
 
+**2026-07-10:**
+- [x] Room-shape slices 4-5 shipped: reciprocal `connectsToObjectId` writers with atomic re-pair/disconnect/delete cleanup; pure angle/gap/overlap/height alignment status; inspector connection controls and a shared plan glyph; and 3D opening treatments where aligned pairs use the mirrored clear intersection while unpaired/misaligned doors and windows render with recessed caps instead of false portals. Tests: 1117 passing; browser-verified misaligned→aligned status changes and capped→see-through eye-level 3D behavior.
+
 ## In Progress / Immediate Next
 
-- [ ] Paired door/window connections (`connectsToObjectId` writers + alignment status) and 3D see-through openings.
+- [x] Paired door/window connections (`connectsToObjectId` writers + alignment status) and 3D see-through openings.
 - [ ] MVP package/export work: `.sightlines` import/export, backup flow, PNG/PDF exports, and readiness reporting.
 
 ## Architecture Follow-Ups
 
 - [x] Migration function chain (`v1→v2→v3`) now exists for project schema changes.
 - [x] Transient drag state stays out of `applyEdit`/persist for wall resize, placement drag, group drag, polygon draw, and room reshape; commits happen once on release/close.
-- [ ] Opening-pair writers and derived alignment status remain to complete room-shape slices 4-5.
+- [x] Opening-pair writers, derived alignment status, and honest open/capped 3D treatment complete room-shape slices 4-5.
 - [ ] `.sightlines` package import/export needs the full untrusted-file safety pipeline before it becomes the backup/sharing path.
 
 ## MVP 1C / Later
@@ -160,8 +163,8 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
   - [x] Add free-standing partition walls with room-owned geometry and double-sided faces.
 - [ ] Multi-room flow:
   - [ ] Place additional rooms in the shared floor coordinate space.
-  - [ ] Connect paired doors/windows between rooms (`connectsToObjectId`) now that room shape semantics are clear.
-  - [ ] Let 3D sightlines pass through aligned connected doorways.
+  - [x] Connect paired doors/windows between rooms (`connectsToObjectId`) with advisory alignment status.
+  - [x] Let 3D sightlines pass through aligned connected door/window pairs, with caps for every unpaired or misaligned opening.
 
 ## MVP 3 / Later
 

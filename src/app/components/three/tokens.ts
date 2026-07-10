@@ -14,6 +14,12 @@ export const WALL_COLOR = "#f4f2ef";
 // whisper of the selection petrol.
 export const WALL_SELECTED_COLOR = "#e4edee";
 
+// Recessed backing for an opening that is not a geometrically aligned pair.
+// Door caps stay neutral; window caps use a quiet cool tint so the aperture
+// reads as glazing/blocked sightline rather than a portal.
+export const OPENING_CAP_COLOR = "#d8d4ce";
+export const WINDOW_CAP_COLOR = "#b9d5d8";
+
 // ============================================================================
 // Floor surfaces
 // ============================================================================

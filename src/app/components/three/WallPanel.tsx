@@ -4,7 +4,13 @@ import { Path, Shape, ShapeGeometry, type Texture } from "three";
 import type { WallPanel3d } from "../../../domain/geometry/scene3d";
 import { ArtworkPlane } from "./ArtworkPlane";
 import { mmToWorld, MM_TO_WORLD } from "./coordinates";
-import { BLOCKED_ZONE_COLOR, WALL_COLOR, WALL_SELECTED_COLOR } from "./tokens";
+import {
+  BLOCKED_ZONE_COLOR,
+  OPENING_CAP_COLOR,
+  WALL_COLOR,
+  WALL_SELECTED_COLOR,
+  WINDOW_CAP_COLOR
+} from "./tokens";
 
 // Wall blocked zones are planning annotations, not physical (spec §5.3): a
 // translucent wash in the same subdued grey family as the 2D hatch, flush to
@@ -12,6 +18,8 @@ import { BLOCKED_ZONE_COLOR, WALL_COLOR, WALL_SELECTED_COLOR } from "./tokens";
 // so a zone never reads as covering a work).
 const BLOCKED_ZONE_OPACITY = 0.15;
 const BLOCKED_ZONE_OFFSET_MM = 6;
+const OPENING_CAP_RECESS_MM = -30;
+const WINDOW_CAP_OPACITY = 0.48;
 
 // One zero-thickness, single-sided wall and everything placed on it. The group
 // maps wall-local coordinates to the world: local +x runs start -> end, +y up
@@ -100,6 +108,31 @@ export function WallPanel({
       <mesh geometry={geometry} onClick={handleWallClick}>
         <meshLambertMaterial color={isSelected ? WALL_SELECTED_COLOR : WALL_COLOR} />
       </mesh>
+      {wall.holes
+        .filter((hole) => hole.treatment === "capped")
+        .map((hole, index) => (
+          <mesh
+            key={`cap-${index}`}
+            onClick={handleWallClick}
+            position={[
+              mmToWorld((hole.xMinMm + hole.xMaxMm) / 2),
+              mmToWorld((hole.yMinMm + hole.yMaxMm) / 2),
+              mmToWorld(OPENING_CAP_RECESS_MM)
+            ]}
+          >
+            <planeGeometry
+              args={[
+                mmToWorld(hole.xMaxMm - hole.xMinMm),
+                mmToWorld(hole.yMaxMm - hole.yMinMm)
+              ]}
+            />
+            <meshLambertMaterial
+              color={hole.kind === "window" ? WINDOW_CAP_COLOR : OPENING_CAP_COLOR}
+              transparent={hole.kind === "window"}
+              opacity={hole.kind === "window" ? WINDOW_CAP_OPACITY : 1}
+            />
+          </mesh>
+        ))}
       {wall.blockedZones.map((zone, index) => (
         <mesh
           key={index}

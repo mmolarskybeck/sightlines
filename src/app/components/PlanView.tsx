@@ -15,6 +15,7 @@ import {
   type Vector2
 } from "../../domain/geometry/dragResize";
 import { unitLeftNormal, unitLeftNormalOrZero } from "../../domain/geometry/vector";
+import { evaluateOpeningPair } from "../../domain/geometry/openingConnections";
 import type { ResizeAnchor } from "../../domain/geometry/editRoom";
 import { applyPlanPreview, type PlanPreview } from "../../domain/geometry/planPreview";
 import {
@@ -2423,9 +2424,63 @@ export function PlanView({
               />
             );
           };
+          const openingConnectionGlyphs = displayedProject.wallObjects.flatMap((opening) => {
+            if (
+              (opening.kind !== "door" && opening.kind !== "window") ||
+              !opening.connectsToObjectId ||
+              opening.id > opening.connectsToObjectId
+            ) {
+              return [];
+            }
+            const partner = displayedProject.wallObjects.find(
+              (candidate) => candidate.id === opening.connectsToObjectId
+            );
+            const wallA = floorWallsById.get(opening.wallId);
+            const wallB = partner ? floorWallsById.get(partner.wallId) : undefined;
+            if (
+              !partner ||
+              (partner.kind !== "door" && partner.kind !== "window") ||
+              !wallA ||
+              !wallB
+            ) {
+              return [];
+            }
+            const a = getWallObjectPlanRect(wallA, opening);
+            const b = getWallObjectPlanRect(wallB, partner);
+            const alignment = evaluateOpeningPair(displayedProject, opening.id, partner.id);
+            return [
+              {
+                id: `${opening.id}:${partner.id}`,
+                a,
+                b,
+                status: alignment.status
+              }
+            ];
+          });
 
           return (
             <>
+              {openingConnectionGlyphs.map((connection) => {
+                const midX = (connection.a.centerXMm + connection.b.centerXMm) / 2;
+                const midY = (connection.a.centerYMm + connection.b.centerYMm) / 2;
+                return (
+                  <g
+                    aria-label={`Connected openings: ${connection.status}`}
+                    className={`opening-connection-glyph ${connection.status}`}
+                    key={connection.id}
+                    role="img"
+                  >
+                    <line
+                      x1={connection.a.centerXMm}
+                      y1={connection.a.centerYMm}
+                      x2={connection.b.centerXMm}
+                      y2={connection.b.centerYMm}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                    <circle cx={midX} cy={midY} r={pixelsPerMm > 0 ? 5 / pixelsPerMm : 0} />
+                  </g>
+                );
+              })}
               {displayedProject.wallObjects.map((wallObject) => {
                 const wall = floorWallsById.get(wallObject.wallId);
                 if (!wall) return null;

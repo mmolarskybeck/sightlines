@@ -258,7 +258,7 @@ type OpeningWallObject = WallObjectBase & {
 
 **Placement can override display dimensions without touching the library record.** A curator might need a framed size, a mat size, or a placeholder mockup size specific to one layout — without permanently editing the canonical `Artwork`, which may be shared across other projects or tour stops (§4.3). `displayDimensionsOverride` on the placement handles this; absent, the placement just uses the library artwork's own `dimensions`.
 
-When two connectable openings reference each other across rooms and their positions geometrically align within the shared floor coordinate space, the 3D renderer can treat the door/window as a true opening rather than a capped wall — letting a camera view actually see through it into the next room. This pairing now lives on opening objects (`connectsToObjectId`) rather than walls because a single wall can carry several openings. This isn't implemented as a writer yet, but the `Floor`/`RoomPlacement` structure and schema v3 field are in place, because retrofitting "rooms have positions relative to each other" after rooms have been isolated polygons for two MVP cycles would be a real rewrite.
+When two connectable openings reference each other across rooms and their positions geometrically align within the shared floor coordinate space, the 3D renderer treats the shared clear intersection as a true opening rather than a capped wall — letting a camera view actually see through it into the next room. This pairing lives on opening objects (`connectsToObjectId`) rather than walls because a single wall can carry several openings. Reciprocal writers, advisory angle/gap/overlap/height status, plan/inspector feedback, and open-vs-capped 3D treatment shipped with room-shape slices 4-5; the `Floor`/`RoomPlacement` structure remains the shared coordinate spine.
 
 **Performance note:** your own estimate — a few rooms typically, a large show topping out around 10 rooms / 200 works — is comfortably within what React/SVG and R3F can handle, especially once display-tier images are used for 2D/3D rendering (full-resolution originals only touch export, and only when explicitly requested — see §4.5). The one thing worth deferring deliberately is *simultaneously* rendering every connected room's full 3D geometry at once; a reasonable default is to render the current room plus any rooms visible through an open sightline from the active camera, not the entire floor at all times. That's a renderer-level optimization to design for later, not a data-model concern now.
 
@@ -431,9 +431,9 @@ MVP1 bundles a lot — geometry, artwork/checklist, snapping/collision/undo, and
 ### MVP 2 — Room shape tools + multi-room flow
 - **Shipped:** polygon room drawing in Plan view; polygon reshape with vertex drag, wall split/delete, wall-slide reshaping, closed-room validation, and one undo entry per committed gesture.
 - **Shipped:** free-standing partition walls as room-owned, double-sided placement surfaces, with schema v3 migration and 3D slab projection.
+- **Shipped:** paired door/window connections with reciprocal opening IDs, advisory alignment status, plan/inspector feedback, and honest 3D see-through/capped treatment.
 - Multi-room UI polish: place and manage additional rooms in the shared floor coordinate space.
-- Paired door/window connections between rooms (`connectsToObjectId` on the opening objects; schema field exists, writers still pending).
-- 3D camera sightlines through aligned paired openings; render current room plus visible connected rooms before attempting whole-floor 3D rendering.
+- Renderer scalability polish: render current room plus visible connected rooms before attempting whole-floor 3D rendering when real project sizes require it.
 
 ### MVP 3 — Project packages, sharing, polish
 - `.sightlines` export/import as a self-contained `SightlinesPackage` (§6) — embeds the artwork snapshot the project actually needs, not just references into the local library — including library-wide `exportAll()`/`importAll()` alongside per-project export (§8)
