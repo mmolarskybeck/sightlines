@@ -3,8 +3,6 @@ Here is where I gather small, actionable tasks and scraps for future implementat
 
 ## Open Scraps
 
-* add eyeline toggle on/off in elevation mode
-
 * another snap case to consider - if we have a group of works in between 2 groups of works (rather than in between 1 group and 1 wall) - we do allow for granular adjustment of the space between those 2 works (with the between works tab) - but what about granularly adjusting the spacing on left and right between that group and the other 2 neighboring groups? space evenly > open space just evenly distributes them across that space, but often we want to essentially do a version of from wall edges but treat the artwork groups to left and right as the targets. 
   * if nothing else, we want to be able to see the dim lines showing space from left-neighbor group/artwork and space from right-neighbor group/artwork. currently, in between works tab, we just see the dim lines for space to left and right walls.
 * we need some sort of way to resolve/handle when dims don't perfectly match the aspect ratio of the image
@@ -15,6 +13,7 @@ Here is where I gather small, actionable tasks and scraps for future implementat
 
 ## Done / Folded Back Into Progress
 
+* Added an eyeline (centerline) show/hide toggle in elevation mode, mirroring the grid toggle's state, storage, and UI pattern; centerline alignment snapping stays active while hidden, matching how grid snap stays independent of grid visibility.
 * Fixed dims input UI/UX: length fields now reserve a stable message slot for conversion previews/errors.
 * Added plan-wall click selection without conflicting with object selection or armed placement tools.
 * Moved plan-mode door/window/blocked-zone placement into the top-bar insert workflow.
