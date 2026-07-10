@@ -220,29 +220,61 @@ describe("collision validation against openings", () => {
     expect(validateWallObjectPlacements(movedAway, ["door-1"])).toEqual([]);
   });
 
-  it("does not flag two openings overlapping each other — out of scope for this slice", () => {
+  it("flags an artwork/opening collision as overridable (Allow-overlap can rescue it)", () => {
+    const project = withSouthWallArtworkAndDoor({ artworkXMm: feetToMm(10), doorXMm: feetToMm(10) });
+
+    const warnings = validateWallObjectPlacements(project, ["placement-south-far"]);
+
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        wallObjectId: "placement-south-far",
+        type: "collision",
+        overridable: true
+      })
+    ]);
+  });
+
+  it("flags a door overlapping a window as a FORBIDDEN (non-overridable) collision, both directions", () => {
     const project = withSouthWallArtworkAndDoor({ artworkXMm: feetToMm(2), doorXMm: feetToMm(10) });
-    const blockedZone: OpeningWallObject = {
-      id: "zone-1",
-      kind: "blocked-zone",
+    const window_: OpeningWallObject = {
+      id: "window-1",
+      kind: "window",
       blocksPlacement: true,
       wallId: "wall-south",
       xMm: feetToMm(10),
       yMm: inchesToMm(57),
-      widthMm: feetToMm(1),
-      heightMm: feetToMm(1)
+      widthMm: feetToMm(4),
+      heightMm: feetToMm(4)
     };
     const withOverlappingOpenings: Project = {
       ...project,
-      wallObjects: [...project.wallObjects, blockedZone]
+      wallObjects: [...project.wallObjects, window_]
     };
 
-    expect(validateWallObjectPlacements(withOverlappingOpenings, ["door-1", "zone-1"])).toEqual([]);
+    const doorWarnings = validateWallObjectPlacements(withOverlappingOpenings, ["door-1"]);
+    expect(doorWarnings).toEqual([
+      expect.objectContaining({
+        wallObjectId: "door-1",
+        message: "Doors, windows and blocked zones can't overlap.",
+        type: "collision",
+        overridable: false
+      })
+    ]);
+
+    const windowWarnings = validateWallObjectPlacements(withOverlappingOpenings, ["window-1"]);
+    expect(windowWarnings).toEqual([
+      expect.objectContaining({
+        wallObjectId: "window-1",
+        message: "Doors, windows and blocked zones can't overlap.",
+        type: "collision",
+        overridable: false
+      })
+    ]);
   });
 });
 
-describe("overlap validation between artworks", () => {
-  it("flags two overlapping artworks on the same wall as non-blocking overlaps", () => {
+describe("collision validation between artworks", () => {
+  it("flags two overlapping artworks as an overridable collision — never an advisory 'overlap' warning", () => {
     const project = withSouthWallTwoArtworks({ firstXMm: feetToMm(10), secondXMm: feetToMm(10) });
 
     const warnings = validateWallObjectPlacements(project, ["artwork-placement-1"]);
@@ -252,9 +284,12 @@ describe("overlap validation between artworks", () => {
         wallObjectId: "artwork-placement-1",
         wallId: "wall-south",
         message: "Artworks overlap on this wall.",
-        type: "overlap"
+        type: "collision",
+        overridable: true
       })
     ]);
+    // The retired "overlap" advisory is never emitted anymore.
+    expect(warnings.some((warning) => warning.type === "overlap")).toBe(false);
   });
 
   it("symmetrically flags the other artwork when it is the one revalidated", () => {
@@ -267,7 +302,8 @@ describe("overlap validation between artworks", () => {
         wallObjectId: "artwork-placement-2",
         wallId: "wall-south",
         message: "Artworks overlap on this wall.",
-        type: "overlap"
+        type: "collision",
+        overridable: true
       })
     ]);
   });
@@ -279,7 +315,7 @@ describe("overlap validation between artworks", () => {
     expect(validateWallObjectPlacements(project, ["artwork-placement-2"])).toEqual([]);
   });
 
-  it("still flags an artwork/obstacle pair as a blocking collision, unaffected by overlap detection", () => {
+  it("still flags an artwork/obstacle pair as an overridable collision", () => {
     const project = withSouthWallArtworkAndDoor({ artworkXMm: feetToMm(10), doorXMm: feetToMm(10) });
 
     const warnings = validateWallObjectPlacements(project, ["placement-south-far"]);
@@ -289,7 +325,8 @@ describe("overlap validation between artworks", () => {
         wallObjectId: "placement-south-far",
         wallId: "wall-south",
         message: "Placement overlaps another object on this wall.",
-        type: "collision"
+        type: "collision",
+        overridable: true
       })
     ]);
   });

@@ -12,7 +12,17 @@ import {
   getNeighborAwareSegments,
   getSpacingSegments
 } from "../../domain/placement/arrangeOnWall";
+import {
+  getWallObjectBoundsMm,
+  type RectBoundsMm
+} from "../../domain/placement/collision";
+import {
+  resolveDragBarriers,
+  WALL_BARRIER_EDGE_IDS,
+  type BarrierObstacle
+} from "../../domain/placement/dragBarriers";
 import { getGroupBounds, getIdsIntersectingRect } from "../../domain/placement/groupBounds";
+import { getOverlapRule } from "../../domain/placement/overlapPolicy";
 import {
   getEffectivePlacementSizeMm,
   PLACEHOLDER_ARTWORK_HEIGHT_MM,
@@ -81,6 +91,14 @@ export { wallLocalYToSvgY };
 
 const SNAP_THRESHOLD_PX = 10;
 
+// The macOS-window "shove past a barrier" distance, in screen pixels. Set at
+// ~5× the snap threshold so the two gestures read as different intents: a snap
+// is a nudge into alignment, a barrier break is a deliberate push. Kept in
+// screen px (converted to mm per current zoom, like snapThresholdMm) so the
+// feel is zoom-independent — the same finger-travel pops a barrier whether
+// zoomed way in or fit to the whole wall.
+const BARRIER_BREAK_PX = 48;
+
 // Stable module-level reference so a caller that doesn't pass `getBlob`
 // (the pre-wiring default) doesn't retrigger useAssetImageUrls's fetch
 // effect on every render — the hook depends on its getBlob argument's
@@ -124,22 +142,34 @@ type MoveDragState = {
   // (the same suppressNextSelect mechanism group drags use) so the browser's
   // post-drag click can't collapse the multi-selection to that one member.
   preserveSelection?: boolean;
+  // Drag-barrier hysteresis (see dragBarriers.ts): the set of obstacle / wall-
+  // edge ids this drag has already "popped" past (or started overlapping).
+  // Carried frame-to-frame so a broken barrier stays broken until the object
+  // separates from it, and re-arms once it does.
+  brokenBarrierIds?: string[];
 };
 
 
 // The HTML5-drop preview for a not-yet-placed artwork being dragged in from
 // the checklist. Separate from MoveDragState because it has no existing
 // wallObjectId/startCenterMm — it's a brand-new placement, not a move — but
-// it flows through the exact same resolveArtworkSnap call so a drop can
-// never land somewhere the ghost didn't just show.
+// it flows through the exact same resolveElevationPlacement call (snap →
+// quantize → drag barriers) so a drop can never land somewhere the ghost didn't
+// just show: same resolver, same broken-barrier set threaded frame-to-frame,
+// same final point handed to the commit.
 type DropGhostState = {
   centerMm: Vector2;
   sizeMm: { widthMm: number; heightMm: number };
   previousSnapTargetIds?: SnapTargetIds;
   activeGuides: Guide[];
+  // Drag-barrier hysteresis, mirroring MoveDragState.brokenBarrierIds. A fresh
+  // ghost starts with an empty set; each dragover frame carries the resolver's
+  // returned set back in.
+  brokenBarrierIds?: string[];
 };
 
 export function ElevationView({
+  allowOverlappingPlacement = false,
   artworksById,
   draggingArtworkId = null,
   centerlineMm,
@@ -209,6 +239,13 @@ export function ElevationView({
   selectedOpeningId?: string | null;
   getBlob?: (key: string) => Promise<Blob>;
   snapToGrid?: boolean;
+  // The curator's "Allow overlap" preference. Governs drag-barrier hardness for
+  // any pair that involves an artwork (getOverlapRule → "blockable"): OFF makes
+  // those barriers HARD (the drag clamps flush, matching the commit gate that
+  // would reject the overlap); ON makes them YIELDING (a deliberate shove pops
+  // through, and the commit accepts it). Opening×opening pairs are "forbidden"
+  // and stay hard regardless. Defaults false so pre-wiring behaves as the gate.
+  allowOverlappingPlacement?: boolean;
   draggingArtworkId?: string | null;
   onPlaceArtwork?: (artworkId: string, wallId: string, xMm: number, yMm: number) => void;
   onMovePlacement?: (wallObjectId: string, xMm: number, yMm: number) => void;
@@ -264,6 +301,7 @@ export function ElevationView({
   const majorGridMm = getMajorGridIntervalMm(unit, minorGridMm);
   const centerlineSvgY = wallLocalYToSvgY(wallHeightMm, centerlineMm);
   const snapThresholdMm = pixelsPerMm > 0 ? SNAP_THRESHOLD_PX / pixelsPerMm : 0;
+  const barrierBreakMm = pixelsPerMm > 0 ? BARRIER_BREAK_PX / pixelsPerMm : 0;
 
   // The moveDrag state machine: pointer-drag move of an existing placement,
   // transient until release (docs/plan.md §7: live preview, exactly one store
@@ -293,6 +331,14 @@ export function ElevationView({
       // during the drag. Alt is untouched (alt-drag = solo-move a group member).
       const precisionBypass = event.metaKey || event.ctrlKey;
 
+      // Barriers need the REAL moving kinds (a group carrying an opening must
+      // get that opening's stricter barriers); the SNAP call still passes
+      // "artwork" for a group per the size rationale above. Member entries carry
+      // their own kind, so no store lookup is needed here.
+      const movingKinds: WallObject["kind"][] = current.members
+        ? current.members.map((member) => member.kind)
+        : [current.kind];
+
       const snapResult = resolveElevationPlacement(
         proposedCenterMm,
         // For a group, sizeMm is the union box and the whole thing resolves as
@@ -301,15 +347,24 @@ export function ElevationView({
         current.sizeMm,
         neighbors,
         current.members ? "artwork" : current.kind,
+        movingKinds,
         current.previousSnapTargetIds,
-        precisionBypass
+        precisionBypass,
+        new Set(current.brokenBarrierIds)
       );
+
+      // A hard barrier that couldn't be resolved from here (wedged between two,
+      // or clamping off one shoved the rect into another) → hold the preview at
+      // the last legal position rather than commit an illegal one. Everything
+      // else (including the freshly re-armed broken set) stays put too.
+      if (snapResult.blocked) return { ...current };
 
       return {
         ...current,
         previewCenterMm: snapResult.point,
         previousSnapTargetIds: snapResult.snapTargetIds,
-        activeGuides: snapResult.activeGuides
+        activeGuides: snapResult.activeGuides,
+        brokenBarrierIds: snapResult.brokenBarrierIds
       };
     },
     onRelease: (current, event) => {
@@ -476,25 +531,89 @@ export function ElevationView({
     return { xMm: svgPoint.xMm, yMm: wallLocalYToSvgY(wallHeightMm, svgPoint.yMm) };
   }
 
+  // Per-neighbor barrier hardness for a moving object/group. The barrier is only
+  // as soft as the STRICTEST rule allows across every moving kind vs this
+  // neighbor's kind (a mixed group's union box uses the harshest member — the
+  // union-box over-approximation is accepted; per-member resolution is a
+  // non-goal): any "forbidden" pair (opening×opening) is always HARD; a
+  // "blockable" pair (anything involving an artwork) is HARD when overlap isn't
+  // allowed and YIELDING when it is. That keeps the drag feel in lockstep with
+  // the commit gate — a barrier is hard exactly when a release there would be
+  // rejected.
+  function barrierHardnessFor(
+    movingKinds: WallObject["kind"][],
+    neighborKind: WallObject["kind"]
+  ): BarrierObstacle["hardness"] {
+    let hard = false;
+    for (const movingKind of movingKinds) {
+      const rule = getOverlapRule(movingKind, neighborKind);
+      if (rule === "forbidden") return "hard";
+      if (rule === "blockable" && !allowOverlappingPlacement) hard = true;
+    }
+    return hard ? "hard" : "yielding";
+  }
+
   // The elevation placement pipeline shared by the move-drag preview and the
-  // checklist drop-ghost: alignment snaps (floor/centerline/neighbor) keep
-  // priority, then any axis a snap target did NOT capture is quantized to a
-  // clean measurement instead of left free. Grid targets are deliberately
-  // excluded here (snapToGrid: false to resolveArtworkSnap) — center-on-grid
-  // snapping re-creates the 1/16" edge problem, so the quantizer is the new
-  // lowest tier. The whole quantization pass is gated on the real snapToGrid
-  // preference (OFF = today's alignment-only, free-otherwise behavior), and a
-  // held ⌘/Ctrl (precisionBypass) skips ALL snapping for fully free movement.
+  // checklist drop-ghost. Three composed passes (docs: dragBarriers.ts):
+  //   1. alignment snaps (floor/centerline/neighbor) keep priority;
+  //   2. any axis a snap target did NOT capture is quantized to a clean
+  //      measurement instead of left free — grid targets are deliberately
+  //      excluded (snapToGrid: false to resolveArtworkSnap) since center-on-grid
+  //      snapping re-creates the 1/16" edge problem, so the quantizer is the new
+  //      lowest tier, gated on the real snapToGrid preference; then
+  //   3. drag barriers clamp the snapped/quantized point flush against
+  //      obstacles and the wall edges (macOS-window feel), popping soft barriers
+  //      only on a deliberate shove past barrierBreakMm.
+  // A held ⌘/Ctrl (precisionBypass) skips snapping AND quantization for a fully
+  // free move — but still runs the barrier pass with includeYielding:false, so
+  // HARD barriers survive the precision drag (otherwise a ⌘-drag would sail into
+  // a forbidden overlap and simply die at the commit gate on release).
   function resolveElevationPlacement(
     proposed: Vector2,
     sizeMm: { widthMm: number; heightMm: number },
     neighbors: WallObject[],
+    // The kind fed to resolveArtworkSnap: a group passes "artwork" (one virtual
+    // object, no per-kind floor tier — see the onMove call site).
     movingKind: WallObject["kind"],
+    // The REAL moving kinds, for barrier hardness only: a singleton for a solo
+    // drag, every member's kind for a group (so a group carrying an opening gets
+    // that opening's stricter barriers even though it snaps as "artwork").
+    movingKinds: WallObject["kind"][],
     previousSnapTargetIds: SnapTargetIds | undefined,
-    precisionBypass: boolean
-  ): { point: Vector2; activeGuides: Guide[]; snapTargetIds: SnapTargetIds } {
+    precisionBypass: boolean,
+    brokenBarrierIds: ReadonlySet<string>
+  ): {
+    point: Vector2;
+    activeGuides: Guide[];
+    snapTargetIds: SnapTargetIds;
+    brokenBarrierIds: string[];
+    blocked: boolean;
+  } {
+    const obstacles: BarrierObstacle[] = neighbors.map((neighbor) => ({
+      id: neighbor.id,
+      boundsMm: getWallObjectBoundsMm(neighbor),
+      hardness: barrierHardnessFor(movingKinds, neighbor.kind)
+    }));
+
     if (precisionBypass) {
-      return { point: proposed, activeGuides: [], snapTargetIds: {} };
+      // Free move, but hard barriers still apply (yielding + wall container are
+      // skipped by includeYielding:false). No guides / snap ids under precision.
+      const barriers = resolveDragBarriers({
+        proposedCenterMm: proposed,
+        movingSizeMm: sizeMm,
+        obstacles,
+        wallSizeMm: { lengthMm: wallLengthMm, heightMm: wallHeightMm },
+        breakThresholdMm: barrierBreakMm,
+        brokenBarrierIds,
+        includeYielding: false
+      });
+      return {
+        point: barriers.point,
+        activeGuides: [],
+        snapTargetIds: {},
+        brokenBarrierIds: barriers.brokenBarrierIds,
+        blocked: barriers.blocked
+      };
     }
 
     const snapResult = resolveArtworkSnap(proposed, {
@@ -511,36 +630,81 @@ export function ElevationView({
       previousSnapTargetIds
     });
 
-    // snapToGrid OFF reproduces today's behavior exactly: alignment snaps only,
-    // no quantization.
-    if (!snapToGrid) return snapResult;
-
-    const incrementMm = gridPrecisionFloorMm ?? minorGridMm;
+    // snapToGrid OFF reproduces the pre-quantizer behavior: alignment snaps
+    // only. Either way `point` then feeds the barrier pass below.
     const point: Vector2 = { ...snapResult.point };
-    // Quantize y first so the (band-filtered) x pass reads the object's settled
-    // vertical position; an axis a snap captured is left exactly as snapped.
-    if (snapResult.snapTargetIds.y === undefined) {
-      point.yMm = quantizeYToCleanIncrement(
-        { xMm: proposed.xMm, yMm: proposed.yMm },
-        sizeMm,
-        incrementMm
-      );
+    if (snapToGrid) {
+      const incrementMm = gridPrecisionFloorMm ?? minorGridMm;
+      // Quantize y first so the (band-filtered) x pass reads the object's settled
+      // vertical position; an axis a snap captured is left exactly as snapped.
+      if (snapResult.snapTargetIds.y === undefined) {
+        point.yMm = quantizeYToCleanIncrement(
+          { xMm: proposed.xMm, yMm: proposed.yMm },
+          sizeMm,
+          incrementMm
+        );
+      }
+      if (snapResult.snapTargetIds.x === undefined) {
+        point.xMm = quantizeXToCleanIncrement(
+          { xMm: proposed.xMm, yMm: point.yMm },
+          sizeMm,
+          incrementMm,
+          wallLengthMm,
+          neighbors
+        );
+      }
     }
-    if (snapResult.snapTargetIds.x === undefined) {
-      point.xMm = quantizeXToCleanIncrement(
-        { xMm: proposed.xMm, yMm: point.yMm },
-        sizeMm,
-        incrementMm,
-        wallLengthMm,
-        neighbors
-      );
-    }
+
+    // Final pass: settle flush against obstacles / wall edges. Yielding barriers
+    // are in play (includeYielding) so a normal drag can pop a soft one with a
+    // deliberate shove; the wall container keeps the object on-wall.
+    const barriers = resolveDragBarriers({
+      proposedCenterMm: point,
+      movingSizeMm: sizeMm,
+      obstacles,
+      wallSizeMm: { lengthMm: wallLengthMm, heightMm: wallHeightMm },
+      breakThresholdMm: barrierBreakMm,
+      brokenBarrierIds,
+      includeYielding: true
+    });
 
     return {
-      point,
+      point: barriers.point,
       activeGuides: snapResult.activeGuides,
-      snapTargetIds: snapResult.snapTargetIds
+      snapTargetIds: snapResult.snapTargetIds,
+      brokenBarrierIds: barriers.brokenBarrierIds,
+      blocked: barriers.blocked
     };
+  }
+
+  // Pre-seed the broken-barrier set at grab time with every neighbor the moving
+  // object/group already overlaps and every wall edge it already overhangs. This
+  // is the legacy-data escape hatch: an object stored overlapping (or hanging
+  // off the wall) can be dragged out smoothly instead of being yanked flush the
+  // instant resolution runs, and each barrier re-arms the moment the object
+  // clears it (dragBarriers.ts step 4). The tests here mirror that rebuild
+  // exactly — STRICT overlap (edge-touch doesn't count) and the same edge ids.
+  function seedBrokenBarrierIds(
+    boxBoundsMm: RectBoundsMm,
+    neighbors: WallObject[]
+  ): string[] {
+    const ids: string[] = [];
+    for (const neighbor of neighbors) {
+      const nb = getWallObjectBoundsMm(neighbor);
+      if (
+        boxBoundsMm.leftMm < nb.rightMm &&
+        boxBoundsMm.rightMm > nb.leftMm &&
+        boxBoundsMm.bottomMm < nb.topMm &&
+        boxBoundsMm.topMm > nb.bottomMm
+      ) {
+        ids.push(neighbor.id);
+      }
+    }
+    if (boxBoundsMm.leftMm < 0) ids.push(WALL_BARRIER_EDGE_IDS.left);
+    if (boxBoundsMm.rightMm > wallLengthMm) ids.push(WALL_BARRIER_EDGE_IDS.right);
+    if (boxBoundsMm.bottomMm < 0) ids.push(WALL_BARRIER_EDGE_IDS.bottom);
+    if (boxBoundsMm.topMm > wallHeightMm) ids.push(WALL_BARRIER_EDGE_IDS.top);
+    return ids;
   }
 
 
@@ -616,6 +780,11 @@ export function ElevationView({
       if (groupMembers.length > 1) {
         const box = getGroupBounds(groupMembers);
         const groupCenterMm: Vector2 = { xMm: box.centerXMm, yMm: box.centerYMm };
+        // Seed against the union box vs every non-member neighbor.
+        const memberIds = new Set(groupMembers.map((member) => member.id));
+        const groupNeighbors = wallObjectsOnThisWall.filter(
+          (object) => !memberIds.has(object.id)
+        );
         beginMoveDragGesture({
           wallObjectId: wallObject.id,
           kind: wallObject.kind,
@@ -625,6 +794,15 @@ export function ElevationView({
           previewCenterMm: groupCenterMm,
           previousSnapTargetIds: undefined,
           activeGuides: [],
+          brokenBarrierIds: seedBrokenBarrierIds(
+            {
+              leftMm: box.centerXMm - box.widthMm / 2,
+              rightMm: box.centerXMm + box.widthMm / 2,
+              bottomMm: box.centerYMm - box.heightMm / 2,
+              topMm: box.centerYMm + box.heightMm / 2
+            },
+            groupNeighbors
+          ),
           members: groupMembers.map((member) => ({
             id: member.id,
             kind: member.kind,
@@ -649,7 +827,11 @@ export function ElevationView({
       previewCenterMm: { xMm: wallObject.xMm, yMm: wallObject.yMm },
       previousSnapTargetIds: undefined,
       activeGuides: [],
-      preserveSelection: altSoloDrag
+      preserveSelection: altSoloDrag,
+      brokenBarrierIds: seedBrokenBarrierIds(
+        getWallObjectBoundsMm(wallObject),
+        wallObjectsOnThisWall.filter((object) => object.id !== wallObject.id)
+      )
     });
   }
 
@@ -670,21 +852,29 @@ export function ElevationView({
     const sizeMm = effectiveSizeForArtworkId(artworkId);
     // A checklist drag-in is always an artwork: eyeline first, floor just below
     // it (see getArtworkSnapTargets' kind-dependent floor rank). ⌘/Ctrl held
-    // over the surface bypasses snapping/quantization, same as a move-drag.
+    // over the surface bypasses snapping/quantization, same as a move-drag. The
+    // broken-barrier set carries frame-to-frame like a move-drag's (a fresh
+    // ghost starts empty), and neighbors are every object on the wall.
     const snapResult = resolveElevationPlacement(
       pointerMm,
       sizeMm,
       wallObjectsOnThisWall,
       "artwork",
+      ["artwork"],
       dropGhost?.previousSnapTargetIds,
-      bypassSnap
+      bypassSnap,
+      new Set(dropGhost?.brokenBarrierIds)
     );
 
+    // A blocked resolve (dropped-into an unresolvable hard overlap) still paints
+    // the best-effort ghost — unlike a move it has no "last legal" preview to
+    // hold, and the commit gate is the final backstop on drop.
     setDropGhost({
       centerMm: snapResult.point,
       sizeMm,
       previousSnapTargetIds: snapResult.snapTargetIds,
-      activeGuides: snapResult.activeGuides
+      activeGuides: snapResult.activeGuides,
+      brokenBarrierIds: snapResult.brokenBarrierIds
     });
   }
 
@@ -702,14 +892,20 @@ export function ElevationView({
     if (!pointerMm) return;
 
     const sizeMm = effectiveSizeForArtworkId(artworkId);
-    // Must land exactly where the ghost showed — same resolver, same bypass.
+    // Must land exactly where the ghost showed — same resolver, same bypass, and
+    // the SAME broken-barrier set the ghost last carried (read off the closed-
+    // over dropGhost, still the last rendered value here even though handleDrop
+    // has queued setDropGhost(null)). Without threading it, the final resolve
+    // could re-arm a barrier the ghost had already popped and snap the drop back.
     const snapResult = resolveElevationPlacement(
       pointerMm,
       sizeMm,
       wallObjectsOnThisWall,
       "artwork",
+      ["artwork"],
       undefined,
-      bypassSnap
+      bypassSnap,
+      new Set(dropGhost?.brokenBarrierIds)
     );
 
     onPlaceArtwork?.(artworkId, wallId, snapResult.point.xMm, snapResult.point.yMm);

@@ -2,21 +2,27 @@ import { getRoomPlaceableWalls } from "../geometry/placeableWalls";
 import type { WallWithGeometry } from "../geometry/walls";
 import type { Project, WallObject } from "../project";
 import { doWallObjectsOverlap } from "./collision";
+import { getOverlapRule } from "./overlapPolicy";
 
 export type PlacementWarning = {
   id: string;
   wallObjectId: string;
   wallId: string;
   message: string;
-  // "collision" warnings are the ones a caller can choose to block on (an
-  // artwork/opening overlap, by default disallowed — see store.ts's
-  // allowOverlappingPlacement). "bounds" warnings (off the wall's edges, or
-  // a dangling wall reference) stay advisory only; there's no "override" for
-  // a placement that isn't on the wall at all. "overlap" (two artworks
-  // sharing space on the same wall) is advisory-only too — it's a real
-  // layout concern worth surfacing, but never blocks a commit the way an
-  // artwork/opening "collision" does.
+  // "collision" warnings are the ones a caller can choose to block on — every
+  // overlapping same-wall pair now emits one (see validateWallObjectCollisions).
+  // "bounds" warnings (off the wall's edges, or a dangling wall reference) stay
+  // advisory only; there's no "override" for a placement that isn't on the wall
+  // at all. "overlap" is retired — it's kept in the union purely for
+  // back-compat with persisted PlacementWarnings that predate the policy change
+  // (older projects may still carry a stored "overlap" warning); nothing writes
+  // it anymore.
   type: "bounds" | "collision" | "overlap";
+  // Only meaningful on "collision" warnings. Whether the curator's "Allow
+  // overlap" preference can override this overlap at commit time. Mirrors
+  // getOverlapRule: false for opening×opening (physically forbidden), true for
+  // any pair involving an artwork. Absent on non-collision warnings.
+  overridable?: boolean;
 };
 
 export function validateChangedWallPlacements(
@@ -122,18 +128,24 @@ function validateWallObjectBounds(
   return warnings;
 }
 
-// Flags an artwork that overlaps a door/window/blocked-zone on the same
-// wall, and symmetrically flags an opening that overlaps an artwork —
-// whichever side was actually moved gets the warning attached to it. This is
-// detection only: the store decides what to do with a "collision" warning
-// (by default, reject the edit — see allowOverlappingPlacement in store.ts).
-// Two openings overlapping each other (e.g. a door inside a blocked zone)
-// isn't checked — out of scope for this slice, which is about protecting
-// artwork placements from real obstacles.
+// Flags EVERY overlapping same-wall pair as a "collision", attaching the
+// warning to whichever side was actually revalidated (moved/placed). This is
+// detection only — the store decides what to do with a "collision" (see
+// gatePlacementWarnings). What differs per pair is `overridable`, derived from
+// getOverlapRule (the single source of truth shared with the drag barriers):
 //
-// Two artworks overlapping each other on the same wall is a separate,
-// non-blocking concern — flagged below as an "overlap" warning so a curator
-// notices, but never rejected the way an artwork/obstacle "collision" is.
+//   opening × opening  → overridable: false — doors/windows/blocked zones can
+//                        never share space, no matter the "Allow overlap"
+//                        preference.
+//   artwork × artwork  → overridable: true  — two works stacked on a wall is a
+//                        deliberate-if-unusual arrangement the curator can opt
+//                        into. (Behavior change: this used to be a non-blocking
+//                        "overlap" advisory that always committed.)
+//   artwork × opening  → overridable: true  — an artwork over an obstacle,
+//                        rejected by default but opt-in via "Allow overlap".
+//
+// The message is tailored per pair so the inspector reads naturally, but the
+// commit/override decision comes from `overridable`, not the wording.
 function validateWallObjectCollisions(
   wallObject: WallObject,
   allWallObjects: WallObject[]
@@ -142,35 +154,29 @@ function validateWallObjectCollisions(
     (other) => other.id !== wallObject.id && other.wallId === wallObject.wallId
   );
 
-  const collisions: PlacementWarning[] = sameWallOthers
-    .filter((other) => isBlockingPair(wallObject, other) && doWallObjectsOverlap(wallObject, other))
-    .map((other) => ({
-      id: `${wallObject.id}:collision:${other.id}`,
-      wallObjectId: wallObject.id,
-      wallId: wallObject.wallId,
-      message: "Placement overlaps another object on this wall.",
-      type: "collision" as const
-    }));
-
-  const overlaps: PlacementWarning[] =
-    wallObject.kind === "artwork"
-      ? sameWallOthers
-          .filter((other) => other.kind === "artwork" && doWallObjectsOverlap(wallObject, other))
-          .map((other) => ({
-            id: `${wallObject.id}:overlap:${other.id}`,
-            wallObjectId: wallObject.id,
-            wallId: wallObject.wallId,
-            message: "Artworks overlap on this wall.",
-            type: "overlap" as const
-          }))
-      : [];
-
-  return [...collisions, ...overlaps];
+  return sameWallOthers
+    .filter((other) => doWallObjectsOverlap(wallObject, other))
+    .map((other) => {
+      const overridable = getOverlapRule(wallObject.kind, other.kind) === "blockable";
+      return {
+        id: `${wallObject.id}:collision:${other.id}`,
+        wallObjectId: wallObject.id,
+        wallId: wallObject.wallId,
+        message: collisionMessage(wallObject, other),
+        type: "collision" as const,
+        overridable
+      };
+    });
 }
 
-// Only an artwork/obstacle pair is a real (blocking) conflict — an obstacle
-// is never blocked by another obstacle. Two artworks overlapping is handled
-// separately above as a non-blocking "overlap" warning, not a "collision".
-function isBlockingPair(a: WallObject, b: WallObject): boolean {
-  return (a.kind === "artwork") !== (b.kind === "artwork");
+function collisionMessage(a: WallObject, b: WallObject): string {
+  const aIsArtwork = a.kind === "artwork";
+  const bIsArtwork = b.kind === "artwork";
+  if (!aIsArtwork && !bIsArtwork) {
+    return "Doors, windows and blocked zones can't overlap.";
+  }
+  if (aIsArtwork && bIsArtwork) {
+    return "Artworks overlap on this wall.";
+  }
+  return "Placement overlaps another object on this wall.";
 }

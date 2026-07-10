@@ -31,11 +31,13 @@ import type { AppStoreDeps } from "./store";
 import {
   createAppStore,
   exportProjectJson,
+  FORBIDDEN_OVERLAP_MESSAGE,
   freestandingWallIdOf,
   getSelectedArtworkId,
   getSelectedOpeningId,
   getSelectedWall,
   objectIdsOf,
+  OVERLAP_BLOCKED_MESSAGE,
   roomIdOf
 } from "./store";
 
@@ -3423,12 +3425,12 @@ describe("app store", () => {
     });
   });
 
-  // Kept as its own describe block, separate from the "arrange session"
-  // tests above — artwork/artwork overlap is a non-blocking "overlap"
-  // warning (see validatePlacement.ts), unlike the artwork/opening
-  // "collision" warnings the gates above reject.
-  describe("artwork/artwork overlap (non-blocking)", () => {
-    it("commitArrangeSession succeeds when two artworks land on top of each other, surfacing a non-blocking 'overlap' warning instead of blocking", async () => {
+  // Artwork/artwork overlap is now a BLOCKABLE "collision" (overlapPolicy.ts):
+  // rejected by default, opt-in via "Allow overlap". This replaces the old
+  // always-commits "overlap" advisory. Kept in its own describe block, separate
+  // from the artwork/opening "arrange session" tests above.
+  describe("artwork/artwork overlap (blockable)", () => {
+    async function placeTwoArtworks() {
       await store.getState().addArtworksFromFiles([makeImageFile("overlap-a.jpg")]);
       const artworkAId = store.getState().project!.checklistArtworkIds.at(-1)!;
       await store.getState().addArtworksFromFiles([makeImageFile("overlap-b.jpg")]);
@@ -3439,7 +3441,11 @@ describe("app store", () => {
       const a = store.getState().project!.wallObjects.at(-1)!;
       await store.getState().placeArtwork(artworkBId, wall.id, 1500, 1450, true);
       const b = store.getState().project!.wallObjects.at(-1)!;
+      return { a, b };
+    }
 
+    it("blocks stacking two artworks when Allow overlap is off", async () => {
+      const { a, b } = await placeTwoArtworks();
       store.getState().setObjectSelection([a.id, b.id]);
       const undoBefore = store.getState().undoStack.length;
 
@@ -3448,15 +3454,122 @@ describe("app store", () => {
         { id: a.id, xMm: 1000, yMm: 1450 },
         { id: b.id, xMm: 1000, yMm: 1450 }
       ]);
-      store.getState().commitArrangeSession();
+      store.getState().commitArrangeSession(false);
+
+      const state = store.getState();
+      expect(state.error).toBe(OVERLAP_BLOCKED_MESSAGE);
+      expect(state.undoStack).toHaveLength(undoBefore);
+    });
+
+    it("commits stacked artworks when Allow overlap is on, surfacing a collision (not 'overlap') warning", async () => {
+      const { a, b } = await placeTwoArtworks();
+      store.getState().setObjectSelection([a.id, b.id]);
+      const undoBefore = store.getState().undoStack.length;
+
+      store.getState().beginArrangeSession("gap");
+      store.getState().setArrangeSessionPreview([
+        { id: a.id, xMm: 1000, yMm: 1450 },
+        { id: b.id, xMm: 1000, yMm: 1450 }
+      ]);
+      store.getState().commitArrangeSession(true);
 
       const state = store.getState();
       expect(state.error).toBeNull();
       expect(state.arrangeSession).toBeNull();
       expect(state.undoStack).toHaveLength(undoBefore + 1);
       expect(state.undoStack.at(-1)?.label).toBe("Arrange on wall");
-      expect(state.placementWarnings.some((warning) => warning.type === "overlap")).toBe(true);
-      expect(state.placementWarnings.every((warning) => warning.type !== "collision")).toBe(true);
+      expect(state.placementWarnings.some((warning) => warning.type === "collision")).toBe(true);
+      // The retired advisory is never emitted anymore.
+      expect(state.placementWarnings.every((warning) => warning.type !== "overlap")).toBe(true);
+    });
+  });
+
+  // Opening×opening overlap is FORBIDDEN — never committable, whatever the
+  // "Allow overlap" preference says (overlapPolicy.ts). Covers the commit gate
+  // (moveOpening) and the creation paths (addOpening) that must never author one.
+  describe("opening/opening overlap (forbidden)", () => {
+    async function addTwoOpenings() {
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+      await store.getState().addOpening(wall.id, "door");
+      const door = store.getState().project!.wallObjects.at(-1)!;
+      await store.getState().addOpening(wall.id, "window");
+      const window_ = store.getState().project!.wallObjects.at(-1)!;
+      return { wall, door, window_ };
+    }
+
+    it("addOpening twice lands the second opening beside the first — never overlapping", async () => {
+      const { door, window_ } = await addTwoOpenings();
+
+      expect(store.getState().project!.wallObjects).toHaveLength(2);
+      expect(store.getState().error).toBeNull();
+
+      // Their x-intervals must not strictly overlap (edge-touch is legal).
+      const doorRight = door.xMm + door.widthMm / 2;
+      const windowLeft = window_.xMm - window_.widthMm / 2;
+      const doorLeft = door.xMm - door.widthMm / 2;
+      const windowRight = window_.xMm + window_.widthMm / 2;
+      const overlap = doorLeft < windowRight && doorRight > windowLeft;
+      expect(overlap).toBe(false);
+    });
+
+    it("moveOpening onto another opening is blocked even with Allow overlap on", async () => {
+      const { door, window_ } = await addTwoOpenings();
+      const undoBefore = store.getState().undoStack.length;
+
+      // Drop the window right onto the door — a forbidden pair.
+      await store.getState().moveOpening(window_.id, door.xMm, door.yMm, true);
+
+      const state = store.getState();
+      expect(state.error).toBe(FORBIDDEN_OVERLAP_MESSAGE);
+      expect(state.undoStack).toHaveLength(undoBefore);
+      // The window did not move.
+      const stillThere = state.project!.wallObjects.find((o) => o.id === window_.id)!;
+      expect(stillThere.xMm).toBe(window_.xMm);
+    });
+
+    it("moving a legacy already-overlapping opening OUT of the overlap commits fine", async () => {
+      // Store actions can't author an opening×opening overlap, so inject one
+      // directly to model legacy/persisted data that predates this policy.
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+      const project = store.getState().project!;
+      const overlapping: Project = {
+        ...project,
+        wallObjects: [
+          {
+            id: "door-legacy",
+            kind: "door",
+            blocksPlacement: true,
+            wallId: wall.id,
+            xMm: 2000,
+            yMm: 1015,
+            widthMm: 915,
+            heightMm: 2030
+          },
+          {
+            id: "window-legacy",
+            kind: "window",
+            blocksPlacement: true,
+            wallId: wall.id,
+            xMm: 2000,
+            yMm: 1450,
+            widthMm: 1200,
+            heightMm: 1200
+          }
+        ]
+      };
+      store.setState({ project: overlapping });
+      const undoBefore = store.getState().undoStack.length;
+
+      // Slide the window well clear of the door — the resulting state is
+      // overlap-free, so the gate must accept it (it validates the destination,
+      // not the origin).
+      await store.getState().moveOpening("window-legacy", 6000, 1450, false);
+
+      const state = store.getState();
+      expect(state.error).toBeNull();
+      expect(state.undoStack).toHaveLength(undoBefore + 1);
+      const moved = state.project!.wallObjects.find((o) => o.id === "window-legacy")!;
+      expect(moved.xMm).toBe(6000);
     });
   });
 });

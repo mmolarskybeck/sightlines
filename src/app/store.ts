@@ -38,6 +38,7 @@ import { createBlankProject } from "../domain/newProject";
 import { newId } from "../domain/id";
 import {
   createOpeningPlacement,
+  findFreeOpeningCenterXMm,
   getDefaultOpeningCenterYMm,
   getDefaultOpeningSizeMm,
   getOpeningKindLabel,
@@ -123,8 +124,14 @@ const UNDO_STACK_LIMIT = 100;
 // caller opts in per-call via allowOverlap, sourced from the workspace's
 // "Allow overlap" view option, so a curator who genuinely wants to stack
 // pieces over an obstacle for now isn't blocked outright.
-const OVERLAP_BLOCKED_MESSAGE =
+export const OVERLAP_BLOCKED_MESSAGE =
   'Can’t place it there — it would overlap another object on this wall. Turn on "Allow overlap" in view options to allow it.';
+
+// A door/window/blocked-zone pair overlapping each other is forbidden outright
+// (see overlapPolicy.ts) — there's no "Allow overlap" that rescues it, so this
+// message deliberately omits the toggle advice OVERLAP_BLOCKED_MESSAGE gives.
+export const FORBIDDEN_OVERLAP_MESSAGE =
+  "Can’t place it there — doors, windows and blocked zones can’t overlap each other.";
 
 // One placement per artwork per project — trying layout variants is what
 // project duplication is for (spec 2026-07-07). Enforced only on NEW
@@ -396,10 +403,14 @@ export function createAppStore(deps: AppStoreDeps) {
     }
 
     // Shared gate behind every placement commit (place/move/resize a wall
-    // object): validates the touched ids against the candidate wallObjects
-    // and, unless the caller has opted into overlap, blocks on any collision
-    // by setting the shared OVERLAP_BLOCKED_MESSAGE. Returns null when
-    // blocked (caller must not commit), else the warnings to carry through.
+    // object): validates the touched ids against the candidate wallObjects and
+    // decides whether the edit may commit. A "collision" blocks when it's
+    // forbidden (overridable === false — an opening/opening overlap, never
+    // permitted) OR when the curator hasn't opted into overlap. A forbidden
+    // collision anywhere in the batch wins the error wording (its "Allow
+    // overlap" advice would be wrong), otherwise the toggle-advising message.
+    // Returns null when blocked (caller must not commit), else the warnings to
+    // carry through.
     function gatePlacementWarnings(
       project: Project,
       candidateWallObjects: WallObject[],
@@ -411,8 +422,13 @@ export function createAppStore(deps: AppStoreDeps) {
         validateIds
       );
 
-      if (!allowOverlap && placementWarnings.some((warning) => warning.type === "collision")) {
-        set({ error: OVERLAP_BLOCKED_MESSAGE });
+      const blocking = placementWarnings.filter(
+        (warning) =>
+          warning.type === "collision" && (warning.overridable === false || !allowOverlap)
+      );
+      if (blocking.length > 0) {
+        const hasForbidden = blocking.some((warning) => warning.overridable === false);
+        set({ error: hasForbidden ? FORBIDDEN_OVERLAP_MESSAGE : OVERLAP_BLOCKED_MESSAGE });
         return null;
       }
       return placementWarnings;
@@ -2116,10 +2132,21 @@ export function createAppStore(deps: AppStoreDeps) {
         }
 
         // Centered on the wall by default — the curator adjusts from there,
-        // same "place first, refine after" spirit as artwork placement.
+        // same "place first, refine after" spirit as artwork placement. But an
+        // opening may never be created overlapping another opening (that's a
+        // forbidden pair — see overlapPolicy.ts — with no "Allow overlap"
+        // escape), so slide off the center to the nearest free slot; if the
+        // wall is already full of openings, refuse rather than commit an
+        // overlap the curator can't undo by toggling a preference.
+        const xMm = resolveFreeOpeningXMm(project, wall, kind, wall.lengthMm / 2);
+        if (xMm === null) {
+          set({ error: "There isn’t room for another opening on this wall." });
+          return;
+        }
+
         // buildOpeningOnWall is shared with placeOpeningFromPlan, whose only
         // difference is the chosen xMm (the plan drop point vs. wall center).
-        const placement = buildOpeningOnWall(project, wall, kind, wall.lengthMm / 2);
+        const placement = buildOpeningOnWall(project, wall, kind, xMm);
         const nextWallObjects = [...project.wallObjects, placement];
 
         // Adding an opening is never blocked by a collision (there's no
@@ -2338,7 +2365,16 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
-        const opening = buildOpeningOnWall(project, wall, kind, placement.xMm);
+        // As in addOpening: slide off the drop point to the nearest free slot so
+        // we never commit a forbidden opening×opening overlap, and refuse if the
+        // wall has no room.
+        const xMm = resolveFreeOpeningXMm(project, wall, kind, placement.xMm);
+        if (xMm === null) {
+          set({ error: "There isn’t room for another opening on this wall." });
+          return;
+        }
+
+        const opening = buildOpeningOnWall(project, wall, kind, xMm);
         const nextWallObjects = [...project.wallObjects, opening];
 
         // Same as addOpening: never blocked by a collision.
@@ -2600,6 +2636,36 @@ function buildOpeningOnWall(
 ): OpeningWallObject {
   const centerlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
   return createOpeningPlacement(kind, wall.id, xMm, centerlineYMm);
+}
+
+// Resolves a collision-free x-center for a new opening on `wall`, sliding it
+// off `preferredXMm` to the nearest free slot when it would overlap an existing
+// opening — because an opening×opening overlap is forbidden (overlapPolicy.ts)
+// and can't be rescued after commit by toggling "Allow overlap". Mirrors
+// buildOpeningOnWall's size/centerline math so the free-slot search uses the
+// exact geometry the opening will be created with. Only same-wall openings
+// count as blockers: an opening added over an artwork is a blockable collision
+// the curator resolves later, not a creation-time hard stop. Returns null when
+// the wall has no free slot.
+function resolveFreeOpeningXMm(
+  project: Project,
+  wall: WallWithGeometry,
+  kind: OpeningKind,
+  preferredXMm: number
+): number | null {
+  const { widthMm, heightMm } = getDefaultOpeningSizeMm(kind);
+  const centerlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
+  const centerYMm = getDefaultOpeningCenterYMm(kind, heightMm, centerlineYMm);
+  const sameWallOpenings = project.wallObjects.filter(
+    (object) => object.wallId === wall.id && object.kind !== "artwork"
+  );
+  return findFreeOpeningCenterXMm({
+    preferredXMm,
+    sizeMm: { widthMm, heightMm },
+    centerYMm,
+    wallLengthMm: wall.lengthMm,
+    sameWallOpenings
+  });
 }
 
 function formatZodIssue(error: z.ZodError): string {

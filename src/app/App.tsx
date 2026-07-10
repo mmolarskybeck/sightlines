@@ -1083,6 +1083,7 @@ export function App() {
             selectedWall ? (
               <Suspense fallback={<div className="skeleton-panel" />}>
                 <ElevationView
+                  allowOverlappingPlacement={allowOverlappingPlacement}
                   artworksById={artworksById}
                   centerlineMm={
                     selectedWall.defaultCenterlineHeightMm ??
