@@ -4,6 +4,7 @@ import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowC
 import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
 import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
+import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { GridFourIcon } from "@phosphor-icons/react/dist/csr/GridFour";
 import { MagnetIcon } from "@phosphor-icons/react/dist/csr/Magnet";
@@ -297,6 +298,7 @@ export function App() {
   const {
     showGrid,
     snapToGrid,
+    showCenterline,
     gridPrecisionFloorMm,
     allowOverlappingPlacement,
     leftPanel,
@@ -309,6 +311,7 @@ export function App() {
     toggleInspectorCollapsed,
     toggleShowGrid,
     toggleSnapToGrid,
+    toggleShowCenterline,
     setGridPrecisionFloorMm,
     toggleAllowOverlappingPlacement
   } = useViewPreferences();
@@ -983,6 +986,16 @@ export function App() {
               />
               {viewMode === "elevation" ? (
                 <ViewOptionButton
+                  active={showCenterline}
+                  disabled={false}
+                  icon={<EyeIcon aria-hidden="true" size={16} />}
+                  label="Eyeline"
+                  title={showCenterline ? "Hide eyeline" : "Show eyeline"}
+                  onClick={toggleShowCenterline}
+                />
+              ) : null}
+              {viewMode === "elevation" ? (
+                <ViewOptionButton
                   active={allowOverlappingPlacement}
                   disabled={false}
                   icon={<StackIcon aria-hidden="true" size={16} />}
@@ -1085,6 +1098,7 @@ export function App() {
                     selectedWall.defaultCenterlineHeightMm ??
                     project.defaultCenterlineHeightMm
                   }
+                  centerlineVisible={showCenterline}
                   draggingArtworkId={draggingArtworkId}
                   getBlob={getAssetBlob}
                   gridPrecisionFloorMm={gridPrecisionFloorMm}

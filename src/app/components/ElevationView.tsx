@@ -173,6 +173,7 @@ export function ElevationView({
   artworksById,
   draggingArtworkId = null,
   centerlineMm,
+  centerlineVisible = true,
   getBlob,
   gridPrecisionFloorMm,
   gridVisible,
@@ -208,6 +209,13 @@ export function ElevationView({
   wallLengthMm: number;
   wallHeightMm: number;
   centerlineMm: number;
+  // Elevation-only "eyeline" visibility toggle (mirrors gridVisible). Purely
+  // visual — the centerline alignment SNAP in resolveElevationPlacement stays
+  // unconditional regardless of this flag, matching how snapToGrid stays
+  // independent of gridVisible. Defaults true so every existing call site
+  // (including tests) that doesn't pass it keeps rendering the line exactly
+  // as before this toggle existed.
+  centerlineVisible?: boolean;
   unit: DisplayUnit;
   // The manual/fit viewport for this surface (owned by App via useViewport2D,
   // keyed on project id + wall id so a wall switch resets to fit), and the
@@ -1231,14 +1239,16 @@ export function ElevationView({
             y={0}
           />
         ) : null}
-        <line
-          className="centerline"
-          x1="0"
-          y1={centerlineSvgY}
-          x2={wallLengthMm}
-          y2={centerlineSvgY}
-          vectorEffect="non-scaling-stroke"
-        />
+        {centerlineVisible ? (
+          <line
+            className="centerline"
+            x1="0"
+            y1={centerlineSvgY}
+            x2={wallLengthMm}
+            y2={centerlineSvgY}
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : null}
         <line
           className="floor-line"
           x1="0"

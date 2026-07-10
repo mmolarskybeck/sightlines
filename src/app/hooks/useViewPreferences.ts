@@ -18,6 +18,12 @@ export const INSPECTOR_DEFAULT_WIDTH = 300;
 type ViewPreferences = {
   showGrid: boolean;
   snapToGrid: boolean;
+  // Elevation-only: shows/hides the centerline (a.k.a. eyeline) at the wall's
+  // default hang height. Independent of centerline SNAPPING the same way
+  // showGrid is independent of snapToGrid below — the alignment snap to
+  // centerlineMm in resolveElevationPlacement is unconditional either way, so
+  // hiding the line only removes the visual reference, never the magnetism.
+  showCenterline: boolean;
   // The user's chosen precision floor in mm, or null for "auto" (no floor —
   // the grid keeps stepping down with zoom per docs/plan.md §5.5). Stored
   // in mm regardless of display unit so a floor picked under one unit
@@ -53,6 +59,10 @@ const DEFAULT_PREFERENCES: ViewPreferences = {
   // Still a workspace preference — turning it off sticks.
   showGrid: true,
   snapToGrid: true,
+  // On by default: matches the pre-toggle behavior where the centerline was
+  // always rendered in elevation mode, so an existing user sees no change
+  // the first time this ships.
+  showCenterline: true,
   gridPrecisionFloorMm: null,
   allowOverlappingPlacement: false,
   leftPanel: "checklist",
@@ -74,6 +84,10 @@ function readStoredPreferences(): ViewPreferences {
         typeof parsed.snapToGrid === "boolean"
           ? parsed.snapToGrid
           : DEFAULT_PREFERENCES.snapToGrid,
+      showCenterline:
+        typeof parsed.showCenterline === "boolean"
+          ? parsed.showCenterline
+          : DEFAULT_PREFERENCES.showCenterline,
       gridPrecisionFloorMm:
         typeof parsed.gridPrecisionFloorMm === "number" &&
         Number.isFinite(parsed.gridPrecisionFloorMm) &&
@@ -129,6 +143,7 @@ export function useViewPreferences() {
   return {
     showGrid: preferences.showGrid,
     snapToGrid: preferences.snapToGrid,
+    showCenterline: preferences.showCenterline,
     gridPrecisionFloorMm: preferences.gridPrecisionFloorMm,
     allowOverlappingPlacement: preferences.allowOverlappingPlacement,
     leftPanel: preferences.leftPanel,
@@ -156,6 +171,8 @@ export function useViewPreferences() {
       setPreferences((current) => ({ ...current, showGrid: !current.showGrid })),
     toggleSnapToGrid: () =>
       setPreferences((current) => ({ ...current, snapToGrid: !current.snapToGrid })),
+    toggleShowCenterline: () =>
+      setPreferences((current) => ({ ...current, showCenterline: !current.showCenterline })),
     setGridPrecisionFloorMm: (gridPrecisionFloorMm: number | null) =>
       setPreferences((current) => ({ ...current, gridPrecisionFloorMm })),
     toggleAllowOverlappingPlacement: () =>

@@ -29,6 +29,9 @@ describe("useViewPreferences", () => {
     // stays on as before.
     expect(result.current.showGrid).toBe(true);
     expect(result.current.snapToGrid).toBe(true);
+    // The eyeline was always rendered before this toggle existed, so it
+    // defaults on too — no visual change for an existing user.
+    expect(result.current.showCenterline).toBe(true);
     // The checklist is the left anchor of the workspace on first open.
     expect(result.current.leftPanel).toBe("checklist");
   });
@@ -104,6 +107,39 @@ describe("useViewPreferences", () => {
     expect(result.current.snapToGrid).toBe(false);
   });
 
+  it("reads a previously persisted showCenterline back on mount", () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ showCenterline: false }));
+
+    expect(renderHook(() => useViewPreferences()).result.current.showCenterline).toBe(false);
+  });
+
+  it("falls back to the showCenterline default for a malformed stored value", () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ showCenterline: "nope" }));
+
+    expect(renderHook(() => useViewPreferences()).result.current.showCenterline).toBe(true);
+  });
+
+  it("toggles and persists showCenterline independently of showGrid", () => {
+    const { result } = renderHook(() => useViewPreferences());
+
+    act(() => {
+      result.current.toggleShowCenterline();
+    });
+
+    expect(result.current.showCenterline).toBe(false);
+    // showGrid is untouched by the eyeline toggle, mirroring how showGrid and
+    // snapToGrid are independent of each other.
+    expect(result.current.showGrid).toBe(true);
+    expect(
+      JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}").showCenterline
+    ).toBe(false);
+
+    act(() => {
+      result.current.toggleShowCenterline();
+    });
+    expect(result.current.showCenterline).toBe(true);
+  });
+
   it("falls back to null for a non-positive, non-finite, or malformed stored floor", () => {
     window.localStorage.setItem(
       STORAGE_KEY,
@@ -126,6 +162,7 @@ describe("useViewPreferences", () => {
     expect(result.current.gridPrecisionFloorMm).toBeNull();
     expect(result.current.showGrid).toBe(true);
     expect(result.current.snapToGrid).toBe(true);
+    expect(result.current.showCenterline).toBe(true);
   });
 
   it("defaults the panel widths and inspector-collapsed state on first open", () => {
