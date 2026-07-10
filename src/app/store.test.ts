@@ -1318,6 +1318,31 @@ describe("app store", () => {
       );
     });
 
+    it("writes an explicit placementForm override in one undoable commit", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      // No depth and no override → effective form is "wall" by inference.
+      expect(
+        store.getState().libraryArtworks.find((a) => a.id === artworkId)?.placementForm
+      ).toBeUndefined();
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().updateArtwork(artworkId, { placementForm: "floor" });
+
+      let state = store.getState();
+      expect(state.error).toBeNull();
+      expect(state.libraryArtworks.find((a) => a.id === artworkId)?.placementForm).toBe("floor");
+      expect(artworkLibraryRepository.artworks.get(artworkId)?.placementForm).toBe("floor");
+      // One commit for the gesture.
+      expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+
+      await store.getState().undo();
+      state = store.getState();
+      expect(
+        state.libraryArtworks.find((a) => a.id === artworkId)?.placementForm
+      ).toBeUndefined();
+    });
+
     it("syncs a placed artwork's placement size on a dimension edit, and one undo reverts both", async () => {
       await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
       const artworkId = store.getState().project!.checklistArtworkIds[0];

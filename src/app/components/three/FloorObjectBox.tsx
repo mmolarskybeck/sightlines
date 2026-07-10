@@ -2,6 +2,7 @@ import { useCursor } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
 import { useState } from "react";
 import { MathUtils } from "three";
+import type { Texture } from "three";
 import type { FloorObject3d } from "../../../domain/geometry/scene3d";
 import { mmToWorld } from "./coordinates";
 import {
@@ -24,17 +25,21 @@ function planRotationToYaw(rotationDeg: number): number {
   return -MathUtils.degToRad(rotationDeg);
 }
 
-// One floor-placed object: artwork pedestal-boxes as neutral volumes with the
-// shared uncertainty edge treatment, blocked zones as flat translucent quads.
-// Artwork boxes are click-to-select (spec §4.3) and consume their clicks so
-// the floor beneath doesn't clear the selection; blocked zones stay inert and
-// let the click fall through.
+// One floor-placed object: artwork boxes carry the work's image on every
+// visible face (four sides + top) with the shared uncertainty edge treatment,
+// blocked zones as flat translucent quads. When the artwork record or its asset
+// is missing the box falls back to the neutral BOX_COLOR volume (texture
+// undefined), never a broken image. Artwork boxes are click-to-select
+// (spec §4.3) and consume their clicks so the floor beneath doesn't clear the
+// selection; blocked zones stay inert and let the click fall through.
 export function FloorObjectBox({
   object,
+  texture,
   isSelected,
   onSelect
 }: {
   object: FloorObject3d;
+  texture: Texture | undefined;
   isSelected: boolean;
   onSelect: (objectId: string, opts: { additive: boolean }) => void;
 }) {
@@ -80,7 +85,15 @@ export function FloorObjectBox({
         <boxGeometry
           args={[mmToWorld(object.widthMm), height, mmToWorld(object.depthMm)]}
         />
-        <meshLambertMaterial color={BOX_COLOR} />
+        {/* Box default UVs map the full image onto each face (plain stretch per
+            face, no aspect correction — acceptable for v1). Lambert lets the
+            single light shade the faces so the box still reads as volume, same
+            convention as the floor/walls. */}
+        {texture ? (
+          <meshLambertMaterial map={texture} />
+        ) : (
+          <meshLambertMaterial color={BOX_COLOR} />
+        )}
       </mesh>
       {isUncertain(object.status) ? (
         <DashedBoxOutline

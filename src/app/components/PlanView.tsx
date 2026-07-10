@@ -38,6 +38,11 @@ import {
 } from "../../domain/geometry/planObjects";
 import { getDefaultOpeningSizeMm, type OpeningKind } from "../../domain/placement/createOpening";
 import {
+  effectiveFloorDepthMm,
+  effectivePlacementForm,
+  type PlacementForm
+} from "../../domain/placement/artworkForm";
+import {
   getEffectivePlacementSizeMm,
   PLACEHOLDER_ARTWORK_HEIGHT_MM,
   PLACEHOLDER_ARTWORK_WIDTH_MM
@@ -375,6 +380,7 @@ export function PlanView({
   onCommitWallLength,
   onMoveRoom,
   onPlaceArtwork,
+  onPlaceArtworkOnFloor,
   onPlaceOpeningFromPlan,
   onSelectArtwork,
   onSelectOpening,
@@ -467,6 +473,10 @@ export function PlanView({
   // still drags and previews live either way, it just never commits.
   onMoveRoom?: (roomId: string, offsetXMm: number, offsetYMm: number) => Promise<void>;
   onPlaceArtwork?: (artworkId: string, wallId: string, xMm: number, yMm: number) => void;
+  // Floor works (effective form "floor") land here instead of onPlaceArtwork:
+  // the plan drop resolves a floor center, and this commits via the store's
+  // placeArtworkOnFloor. Optional/inert until App wires it.
+  onPlaceArtworkOnFloor?: (artworkId: string, xMm: number, yMm: number) => void;
   onPlaceOpeningFromPlan?: (kind: OpeningKind, placement: PlanPlacement) => Promise<void>;
   onSelectArtwork?: (artworkId: string) => void;
   onSelectOpening?: (wallObjectId: string) => void;
@@ -1951,6 +1961,20 @@ export function PlanView({
     startMarquee({ startMm, currentMm: startMm });
   }
 
+  // The float policy for a moving placed object. For every kind but artwork it's
+  // kind-only; an artwork's depends on its effective form (a floor work moves
+  // floor-only, a wall work rejects off the wall), so we resolve the object's
+  // artworkId (wall or floor object) and read the form. An unresolved artwork
+  // falls back to the wall-only default (floatPolicyForKind's own fallback).
+  function floatPolicyForMovingObject(kind: WallObject["kind"], objectId: string): FloatPolicy {
+    if (kind !== "artwork") return floatPolicyForKind(kind);
+    const placed =
+      project.wallObjects.find((object) => object.id === objectId) ??
+      project.floorObjects.find((object) => object.id === objectId);
+    const artworkId = placed?.kind === "artwork" ? placed.artworkId : null;
+    return floatPolicyForKind("artwork", artworkFormFor(artworkId));
+  }
+
   function beginObjectDrag(
     params: {
       objectId: string;
@@ -2010,7 +2034,7 @@ export function PlanView({
         startObjectDrag({
           objectId: params.objectId,
           kind: params.kind,
-          floatPolicy: floatPolicyForKind(params.kind),
+          floatPolicy: floatPolicyForMovingObject(params.kind, params.objectId),
           movingSize: params.movingSize,
           rotationDeg: params.rotationDeg,
           startPointerMm,
@@ -2032,7 +2056,7 @@ export function PlanView({
     startObjectDrag({
       objectId: params.objectId,
       kind: params.kind,
-      floatPolicy: floatPolicyForKind(params.kind),
+      floatPolicy: floatPolicyForMovingObject(params.kind, params.objectId),
       movingSize: params.movingSize,
       rotationDeg: params.rotationDeg,
       startPointerMm,
@@ -2071,7 +2095,9 @@ export function PlanView({
       return {
         widthMm,
         heightMm,
-        depthMm: artwork.dimensions.depthMm ?? DEFAULT_FLOOR_OBJECT_DEPTH_MM
+        // Floor footprint depth for a floor-work drop — shared with the store
+        // commit and 3D via effectiveFloorDepthMm; ignored for a wall drop.
+        depthMm: effectiveFloorDepthMm(artwork.dimensions)
       };
     }
     return {
@@ -2081,6 +2107,15 @@ export function PlanView({
     };
   }
 
+  // The effective placement form of the artwork under a drag — governs whether
+  // the drop captures a wall (wall work) or lands on the floor (floor work). An
+  // unresolved id (placeholder drag before the payload is known) reads as a wall
+  // work, the conservative default (matches floatPolicyForKind's own fallback).
+  function artworkFormFor(artworkId: string | null): PlacementForm {
+    const artwork = artworkId ? artworksById?.get(artworkId) : undefined;
+    return artwork ? effectivePlacementForm(artwork) : "wall";
+  }
+
   function resolveArtworkDrop(
     pointerMm: Vector2,
     dims: ReturnType<typeof effectiveArtworkDims>,
@@ -2088,16 +2123,18 @@ export function PlanView({
     // kill the grid tier and drop the neighbor threshold to zero so the point
     // lands exactly under the pointer. Touch drags pass false — they have no
     // modifier and read best fully snapped.
-    bypassSnap: boolean
+    bypassSnap: boolean,
+    // The dragged work's effective form: a wall work rejects off every wall
+    // (resolves to `{ anchor: "none" }`), a floor work goes straight to the
+    // floor stage and never captures a wall (floor-only).
+    form: PlacementForm
   ) {
     return resolvePlanPlacement(pointerMm, {
       walls: floorWallsForTool,
       wallObjects: project.wallObjects,
       movingSize: dims,
       movingKind: "artwork",
-      // Artwork is wall-only: a drop that doesn't capture a wall is rejected
-      // (resolves to `{ anchor: "none" }`), never floor-placed.
-      floatPolicy: "reject",
+      floatPolicy: floatPolicyForKind("artwork", form),
       currentAnchorWallId: null,
       captureDistanceMm,
       gridTargets: gridSnapTargets,
@@ -2120,7 +2157,12 @@ export function PlanView({
     const pointerMm = toSvgMm(clientX, clientY);
     if (!pointerMm) return;
 
-    const result = resolveArtworkDrop(pointerMm, effectiveArtworkDims(artworkId), bypassSnap);
+    const result = resolveArtworkDrop(
+      pointerMm,
+      effectiveArtworkDims(artworkId),
+      bypassSnap,
+      artworkFormFor(artworkId)
+    );
     dropSnapTargetIdsRef.current = result.snapTargetIds;
     setDropGhost({
       planRect: result.planRect,
@@ -2148,11 +2190,18 @@ export function PlanView({
     const placement = resolveArtworkDrop(
       pointerMm,
       effectiveArtworkDims(artworkId),
-      bypassSnap
+      bypassSnap,
+      artworkFormFor(artworkId)
     ).placement;
-    // Artwork is wall-only: only a wall capture commits. `anchor: "none"` (no
-    // wall in range) is a rejected drop — a no-op, matching the danger ghost the
-    // user saw. "floor" is unreachable under the "reject" policy.
+    // A floor work lands on the floor (floor-only policy always resolves a floor
+    // center) via the store's placeArtworkOnFloor path.
+    if (placement.anchor === "floor") {
+      onPlaceArtworkOnFloor?.(artworkId, placement.xMm, placement.yMm);
+      return;
+    }
+    // A wall work is wall-only: only a wall capture commits. `anchor: "none"`
+    // (no wall in range) is a rejected drop — a no-op, matching the danger ghost
+    // the user saw.
     if (placement.anchor !== "wall") return;
     const wall = floorWallsForTool.find((candidate) => candidate.id === placement.wallId);
     // A wall-dropped artwork hangs at the wall's centerline (its own default,

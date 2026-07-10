@@ -208,6 +208,7 @@ export function App() {
     removeArtworkFromChecklist,
     updateArtwork,
     placeArtwork,
+    placeArtworkOnFloor,
     moveArtworkPlacement,
     removePlacement,
     addOpening,
@@ -1052,6 +1053,9 @@ export function App() {
                 onPlaceArtwork={(artworkId, wallId, xMm, yMm) =>
                   void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement)
                 }
+                onPlaceArtworkOnFloor={(artworkId, xMm, yMm) =>
+                  void placeArtworkOnFloor(artworkId, xMm, yMm)
+                }
                 onPlaceOpeningFromPlan={placeOpeningFromPlan}
                 onSelectArtwork={selectArtwork}
                 onSelectOpening={selectOpening}
@@ -1320,6 +1324,9 @@ export function App() {
                   void updateArtwork(selectedArtwork.id, { dimensions })
                 }
                 onCommitField={(changes) => void updateArtwork(selectedArtwork.id, changes)}
+                onChangePlacementForm={(placementForm) =>
+                  void updateArtwork(selectedArtwork.id, { placementForm })
+                }
                 onRemovePlacement={
                   artworkPlacementId
                     ? () => void removePlacement(artworkPlacementId)

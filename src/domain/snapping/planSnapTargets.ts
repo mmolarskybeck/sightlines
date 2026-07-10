@@ -1,4 +1,5 @@
 import type { WallObject, WallObjectBase } from "../project";
+import type { PlacementForm } from "../placement/artworkForm";
 import {
   getWallObjectPlanRect,
   projectPointToWall,
@@ -43,17 +44,27 @@ export type PlanPlacement =
 // cursor; release is a no-op.
 export type ResolvedPlacement = PlanPlacement | { anchor: "none" };
 
-// How a placement behaves when no wall captures. `float` resolves a free
-// floor-space center (blocked zones); `capture-any` never floats and grabs the
-// globally nearest wall at any distance (doors/windows); `reject` refuses the
-// drop (2D artwork — wall-only). See floatPolicyForKind.
-export type FloatPolicy = "float" | "capture-any" | "reject";
+// How a placement behaves relative to walls. `float` resolves a free
+// floor-space center when no wall captures (blocked zones); `capture-any` never
+// floats and grabs the globally nearest wall at any distance (doors/windows);
+// `reject` refuses the drop (a WALL artwork off every wall — wall-only);
+// `floor-only` never even attempts a wall capture — it goes straight to the
+// floor stage (a FLOOR artwork, which sits on the floor and never hangs). See
+// floatPolicyForKind.
+export type FloatPolicy = "float" | "capture-any" | "reject" | "floor-only";
 
-// The single per-kind policy that used to be spread across callers as
-// `canFloat: kind === ...`. Artwork is wall-only (reject), blocked zones float,
-// doors/windows capture at any distance.
-export function floatPolicyForKind(kind: WallObject["kind"]): FloatPolicy {
-  if (kind === "artwork") return "reject";
+// The per-kind policy that used to be spread across callers as
+// `canFloat: kind === ...`. Blocked zones float, doors/windows capture at any
+// distance. Artwork is the one kind that depends on the artwork RECORD, not the
+// kind alone: a wall work is wall-only (reject), a floor work is floor-only.
+// The effective form is passed in (see effectivePlacementForm); it defaults to
+// the wall-only behavior when a caller has no form to hand (e.g. a placeholder
+// drag whose artwork hasn't resolved yet).
+export function floatPolicyForKind(
+  kind: WallObject["kind"],
+  artworkForm?: PlacementForm
+): FloatPolicy {
+  if (kind === "artwork") return artworkForm === "floor" ? "floor-only" : "reject";
   if (kind === "blocked-zone") return "float";
   return "capture-any"; // door | window
 }
@@ -109,13 +120,19 @@ export function resolvePlanPlacement(
     rotationDeg?: number;
   }
 ): PlanPlacementResult {
-  const capturedWall = captureWall(
-    proposedCenterFloorMm,
-    args.walls,
-    args.captureDistanceMm,
-    args.floatPolicy === "capture-any",
-    args.currentAnchorWallId
-  );
+  // A floor work never hangs (USER DECISION): skip wall capture entirely and
+  // resolve on the floor stage below — the wall an off-form drag happens to
+  // pass over must never grab it.
+  const capturedWall =
+    args.floatPolicy === "floor-only"
+      ? null
+      : captureWall(
+          proposedCenterFloorMm,
+          args.walls,
+          args.captureDistanceMm,
+          args.floatPolicy === "capture-any",
+          args.currentAnchorWallId
+        );
 
   if (capturedWall) {
     return resolveOnWall(proposedCenterFloorMm, capturedWall, args);
@@ -128,9 +145,10 @@ export function resolvePlanPlacement(
     return resolveRejected(proposedCenterFloorMm, args);
   }
 
-  // Floor stage. Reached when nothing captured: either the object floats
-  // (blocked zone far from every wall) or (invariant break, e.g. a room with no
-  // walls) there was no wall to capture at all. In the latter case we fall back
+  // Floor stage. Reached when nothing captured: the object floats (blocked zone
+  // far from every wall), it's floor-only (a floor artwork, which never even
+  // attempted a capture above), or (invariant break, e.g. a room with no walls)
+  // there was no wall to capture at all. In the last case we fall back
   // to a floor placement even for doors/windows rather than crash — rooms always
   // have walls in practice, so a "capture-any" kind reaching here only ever
   // means "no walls exist."

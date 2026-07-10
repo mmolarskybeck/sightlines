@@ -16,6 +16,9 @@ export const artworkSchema = z.object({
   accessionNumber: z.string().optional(),
   locationOrLender: z.string().optional(),
   dimensions: dimensionsSchema,
+  // Optional placement-form override (wall vs floor). Additive: absent on every
+  // pre-existing document, which still validates — no schema version bump.
+  placementForm: z.enum(["wall", "floor"]).optional(),
   assetId: z.string().min(1).optional(),
   metadata: z.record(z.union([z.string(), z.number(), z.boolean()]))
 });

@@ -28,6 +28,7 @@ import {
   PLACEHOLDER_ARTWORK_HEIGHT_MM,
   PLACEHOLDER_ARTWORK_WIDTH_MM
 } from "../../domain/placement/placeArtwork";
+import { effectivePlacementForm } from "../../domain/placement/artworkForm";
 import type {
   Artwork,
   ArtworkWallObject,
@@ -839,6 +840,17 @@ export function ElevationView({
   // client coordinates and the dragged artwork, resolve the placement and paint
   // the drop ghost. No-ops with no wall selected. Caller has gated on an active
   // drag; bypassSnap comes from ⌘/Ctrl on the mouse path, false on touch.
+  // A floor work never hangs on a wall (USER DECISION), so it's not droppable in
+  // elevation at all. Elevation has no danger-ghost vocabulary for a drop (a
+  // wall artwork always resolves somewhere), so the closest existing affordance
+  // is to refuse the drop outright: paint no ghost and commit nothing (the
+  // dragover handler also flips the cursor to no-drop). An unresolved id reads
+  // as a wall work, matching the plan-view default.
+  function isFloorWork(artworkId: string | null): boolean {
+    const artwork = artworkId ? artworksById?.get(artworkId) : undefined;
+    return artwork ? effectivePlacementForm(artwork) === "floor" : false;
+  }
+
   function updateArtworkDropGhost(
     clientX: number,
     clientY: number,
@@ -846,6 +858,11 @@ export function ElevationView({
     bypassSnap: boolean
   ) {
     if (!wallId) return;
+    // A floor work can't hang here — refuse it (no ghost).
+    if (isFloorWork(artworkId)) {
+      setDropGhost(null);
+      return;
+    }
     const pointerMm = toWallLocalMm(clientX, clientY);
     if (!pointerMm) return;
 
@@ -888,6 +905,9 @@ export function ElevationView({
     bypassSnap: boolean
   ) {
     if (!wallId) return;
+    // A floor work is not droppable on a wall — refuse the commit (see
+    // isFloorWork). The ghost was already suppressed, so this is a no-op release.
+    if (isFloorWork(artworkId)) return;
     const pointerMm = toWallLocalMm(clientX, clientY);
     if (!pointerMm) return;
 
@@ -924,7 +944,9 @@ export function ElevationView({
     )
       return;
     event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
+    // A floor work can't hang here: show the no-drop cursor instead of "copy",
+    // the closest existing affordance to a rejected elevation drop.
+    event.dataTransfer.dropEffect = isFloorWork(draggingArtworkId) ? "none" : "copy";
     updateArtworkDropGhost(
       event.clientX,
       event.clientY,

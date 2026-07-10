@@ -67,6 +67,24 @@ describe("artworkSchema", () => {
     expect(() => parseArtwork(artwork)).toThrow();
   });
 
+  it("round-trips an explicit placementForm override", () => {
+    for (const form of ["wall", "floor"] as const) {
+      const artwork = { ...createSampleArtwork(), placementForm: form };
+      expect(parseArtwork(artwork).placementForm).toBe(form);
+    }
+  });
+
+  it("accepts an artwork with no placementForm (additive field — old documents unchanged)", () => {
+    const artwork = createSampleArtwork();
+    expect("placementForm" in artwork).toBe(false);
+    expect(parseArtwork(artwork).placementForm).toBeUndefined();
+  });
+
+  it("rejects an invalid placementForm value", () => {
+    const artwork = { ...createSampleArtwork(), placementForm: "ceiling" as never };
+    expect(() => parseArtwork(artwork)).toThrow();
+  });
+
   it("preserves unknown metadata keys", () => {
     const artwork = createSampleArtwork();
     artwork.metadata = { luxLimit: 50, onLoan: true, notes: "handle with care" };

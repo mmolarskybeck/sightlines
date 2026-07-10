@@ -346,7 +346,10 @@ describe("resolvePlanPlacement — artwork reject policy (wall-only)", () => {
   const rejectArgs = { ...baseArgs, floatPolicy: floatPolicyForKind("artwork") };
 
   it("floatPolicyForKind maps kinds to their policy", () => {
+    // Artwork with no form (or an unresolved artwork) reads as wall-only.
     expect(floatPolicyForKind("artwork")).toBe("reject");
+    expect(floatPolicyForKind("artwork", "wall")).toBe("reject");
+    expect(floatPolicyForKind("artwork", "floor")).toBe("floor-only");
     expect(floatPolicyForKind("blocked-zone")).toBe("float");
     expect(floatPolicyForKind("door")).toBe("capture-any");
     expect(floatPolicyForKind("window")).toBe("capture-any");
@@ -386,6 +389,51 @@ describe("resolvePlanPlacement — artwork reject policy (wall-only)", () => {
       }
     );
     expect(result.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 2000 });
+  });
+});
+
+describe("resolvePlanPlacement — floor-only policy (floor artwork)", () => {
+  const floorOnlyArgs = {
+    ...baseArgs,
+    movingKind: "artwork" as const,
+    floatPolicy: floatPolicyForKind("artwork", "floor")
+  };
+
+  it("never captures a wall even when dropped directly on one", () => {
+    // yMm: 30 is well inside the 50mm capture radius — a wall work would grab
+    // wall-1 here (see the reject-policy 'still captures' test), but a floor
+    // work must land on the floor at the drop point instead.
+    const result = resolvePlanPlacement({ xMm: 2000, yMm: 30 }, floorOnlyArgs);
+    expect(result.placement).toEqual({ anchor: "floor", xMm: 2000, yMm: 30 });
+  });
+
+  it("lands on the floor far from every wall (no reject)", () => {
+    const result = resolvePlanPlacement({ xMm: 2000, yMm: 80 }, floorOnlyArgs);
+    expect(result.placement).toEqual({ anchor: "floor", xMm: 2000, yMm: 80 });
+  });
+
+  it("grid-snaps on the floor stage like any floated placement", () => {
+    const gridTargets = getGridSnapTargets(1000, {
+      minXMm: 0,
+      maxXMm: 4000,
+      minYMm: -1000,
+      maxYMm: 1000
+    });
+    const result = resolvePlanPlacement(
+      { xMm: 1990, yMm: 10 },
+      { ...floorOnlyArgs, gridTargets, snapToGrid: true }
+    );
+    // Snaps to the 2000/0 grid intersection rather than capturing the wall the
+    // drop sits right on (yMm 10 is inside the 50mm wall-capture radius).
+    expect(result.placement).toEqual({ anchor: "floor", xMm: 2000, yMm: 0 });
+  });
+
+  it("leaves the wall work's reject policy unchanged (regression guard)", () => {
+    const wallWork = resolvePlanPlacement(
+      { xMm: 2000, yMm: 30 },
+      { ...baseArgs, floatPolicy: floatPolicyForKind("artwork", "wall") }
+    );
+    expect(wallWork.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 2000 });
   });
 });
 

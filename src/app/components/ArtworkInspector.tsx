@@ -4,6 +4,10 @@ import { LockSimpleIcon } from "@phosphor-icons/react/dist/csr/LockSimple";
 import { LockSimpleOpenIcon } from "@phosphor-icons/react/dist/csr/LockSimpleOpen";
 import type { Artwork, Dimensions, DisplayUnit } from "../../domain/project";
 import {
+  effectivePlacementForm,
+  type PlacementForm
+} from "../../domain/placement/artworkForm";
+import {
   applyAspectFill,
   imageAspectRatio,
   isAspectLocked,
@@ -16,6 +20,7 @@ import { UncertaintyIndicator } from "./UncertaintyIndicator";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Toggle } from "./ui/toggle";
+import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import {
   Select,
   SelectContent,
@@ -62,6 +67,7 @@ export function ArtworkInspector({
   placementSection,
   onCommitDimensions,
   onCommitField,
+  onChangePlacementForm,
   onRemovePlacement,
   unit
 }: {
@@ -79,6 +85,10 @@ export function ArtworkInspector({
   onCommitField: (
     changes: Partial<Pick<Artwork, ArtworkTextFieldKey>>
   ) => void;
+  // Writes the explicit placementForm override (wall vs floor). Distinct from
+  // onCommitField's metadata edits: this is a single-purpose commit ("Change
+  // placement type") the segmented control fires on change.
+  onChangePlacementForm: (form: PlacementForm) => void;
   onRemovePlacement?: () => void;
   unit: DisplayUnit;
 }) {
@@ -128,7 +138,9 @@ export function ArtworkInspector({
       <DimensionsSection
         aspect={aspect}
         dimensions={artwork.dimensions}
+        placementForm={effectivePlacementForm(artwork)}
         onCommitDimensions={onCommitDimensions}
+        onChangePlacementForm={onChangePlacementForm}
         unit={unit}
       />
 
@@ -220,12 +232,18 @@ function TextField({
 function DimensionsSection({
   aspect,
   dimensions,
+  placementForm,
   onCommitDimensions,
+  onChangePlacementForm,
   unit
 }: {
   aspect: PixelAspect;
   dimensions: Dimensions;
+  // The EFFECTIVE form (override or inferred) — the segmented control shows it;
+  // a change writes the explicit override upstream.
+  placementForm: PlacementForm;
   onCommitDimensions: (dimensions: Dimensions) => void;
+  onChangePlacementForm: (form: PlacementForm) => void;
   unit: DisplayUnit;
 }) {
   const { displayUnit, parseUnit, placeholder } = getScopedUnitContext(unit, "artwork");
@@ -300,6 +318,29 @@ function DimensionsSection({
           />
         ))}
       </div>
+
+      {/* Wall vs floor: a two-segment switch matching the arrange-mode
+          vocabulary (crisp squares, petrol wash on the active segment, never a
+          pill). It DISPLAYS the effective form; a change writes the explicit
+          override in one commit. A Radix single toggle-group fires "" when the
+          active segment is re-clicked (deselect) — ignore that and keep the
+          current form, since there's no "back to auto" affordance in v1. */}
+      <ToggleGroup
+        aria-label="Placement type"
+        className="placement-form-toggle"
+        type="single"
+        value={placementForm}
+        onValueChange={(value) => {
+          if (value === "wall" || value === "floor") onChangePlacementForm(value);
+        }}
+      >
+        <ToggleGroupItem className="placement-form-option" value="wall">
+          Hangs on wall
+        </ToggleGroupItem>
+        <ToggleGroupItem className="placement-form-option" value="floor">
+          Sits on floor
+        </ToggleGroupItem>
+      </ToggleGroup>
 
       <label className="field-row compact">
         <span>Status</span>

@@ -51,6 +51,7 @@ import {
 } from "../domain/placement/createOpening";
 import { clearOpeningPartners } from "../domain/placement/openingPairs";
 import { createArtworkPlacement, getEffectivePlacementSizeMm } from "../domain/placement/placeArtwork";
+import { effectiveFloorDepthMm } from "../domain/placement/artworkForm";
 import type { PixelAspect } from "../domain/units/aspectFill";
 import type { PlacementWarning } from "../domain/placement/validatePlacement";
 import {
@@ -150,7 +151,16 @@ type GeometryEditInfo = {
 };
 
 type UpdateArtworkChanges = Partial<
-  Pick<Artwork, "title" | "artist" | "date" | "accessionNumber" | "locationOrLender" | "dimensions">
+  Pick<
+    Artwork,
+    | "title"
+    | "artist"
+    | "date"
+    | "accessionNumber"
+    | "locationOrLender"
+    | "dimensions"
+    | "placementForm"
+  >
 >;
 
 export type AppState = ArrangeSliceState &
@@ -2481,9 +2491,10 @@ export function createAppStore(deps: AppStoreDeps) {
           xMm,
           yMm,
           widthMm,
-          // A floor-standing sculpture's real depth if known, else the editable
-          // default footprint depth.
-          depthMm: artwork.dimensions.depthMm ?? DEFAULT_FLOOR_OBJECT_DEPTH_MM,
+          // A floor-standing work's real depth if known, else a squarish
+          // footprint off its width, else the editable default (see
+          // effectiveFloorDepthMm — shared with plan/3D rendering).
+          depthMm: effectiveFloorDepthMm(artwork.dimensions),
           rotationDeg: 0,
           heightMm,
           // Remembered hang-height center for a later floor→wall conversion.

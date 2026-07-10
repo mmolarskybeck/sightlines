@@ -3792,6 +3792,61 @@ body.panels-resizing * {
   gap: 8px;
 }
 
+/* Wall-vs-floor placement switch in the artwork inspector: two equal segments
+   in one hairline-bordered box, hairline divider between, active segment filled
+   with the petrol wash. Same square-cornered, instrument-quiet vocabulary as
+   .arrange-modes (label-only, no icons — the two words carry it). */
+.placement-form-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  /* Override the ui/toggle-group wrapper's inline-flex items-center gap-1 so
+     the segments sit flush as one drawn control, not two floating buttons. */
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.placement-form-toggle .placement-form-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  /* Beat the ui/toggle variant's fixed h-8 without !important. */
+  height: auto;
+  padding: 8px 6px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  line-height: 1.2;
+  text-align: center;
+  white-space: normal;
+}
+
+.placement-form-option:first-child {
+  border-left: 0;
+}
+
+.placement-form-option:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* Active segment: petrol wash + weight shift, so the state survives without
+   relying on color alone (matches .arrange-mode[data-state="on"]). */
+.placement-form-option[data-state="on"] {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-weight: var(--weight-strong);
+}
+
 /* "Measured from" — From-edges' side sub-choice: underline tabs, not a
    segmented control, since it's a plain side pick (left/both/right), not a
    peer decision to the mode row above it. Reuses the app's shared tab

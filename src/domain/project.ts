@@ -26,6 +26,11 @@ export type Artwork = {
   accessionNumber?: string;
   locationOrLender?: string;
   dimensions: Dimensions;
+  // Whether this work hangs on a wall or sits on the floor, as an explicit
+  // curator override. Absent by default — the effective form is then DERIVED
+  // from dimensions.depthMm (see domain/placement/artworkForm.ts). Additive and
+  // optional, so pre-existing artwork documents validate unchanged.
+  placementForm?: "wall" | "floor";
   assetId?: string;
   metadata: Record<string, string | number | boolean>;
 };

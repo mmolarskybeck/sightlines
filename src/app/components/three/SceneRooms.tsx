@@ -10,7 +10,8 @@ import { WallPanel } from "./WallPanel";
 // Dumb mapper from the derived scene to meshes: one floor + one panel per wall
 // per room, plus floor objects. No coordinate math lives here — it's all in
 // scene3d.ts. Owns the texture lifecycle for every artwork visible in the
-// scene (wall planes only — floor boxes are deliberately untextured, §5.3).
+// scene — wall planes and floor-placed artwork boxes share one texture per
+// assetId.
 export function SceneRooms({
   scene,
   getBlob,
@@ -31,13 +32,15 @@ export function SceneRooms({
   onClearSelection: () => void;
 }) {
   const assetIds = useMemo(
-    () =>
-      scene.rooms.flatMap((room) => [
+    () => [
+      ...scene.rooms.flatMap((room) => [
         ...room.walls.flatMap((wall) => wall.artworks.map((artwork) => artwork.assetId)),
         ...room.freestandingWalls.flatMap((partition) =>
           partition.faces.flatMap((face) => face.artworks.map((artwork) => artwork.assetId))
         )
       ]),
+      ...scene.floorObjects.map((object) => object.assetId)
+    ],
     [scene]
   );
   const texturesByAssetId = useArtworkTextures(assetIds, getBlob);
@@ -86,6 +89,9 @@ export function SceneRooms({
         <FloorObjectBox
           key={object.objectId}
           object={object}
+          texture={
+            object.assetId ? texturesByAssetId.get(object.assetId) : undefined
+          }
           isSelected={
             selectedObjectIds.includes(object.objectId) ||
             (object.artworkId !== undefined && object.artworkId === selectedArtworkId)

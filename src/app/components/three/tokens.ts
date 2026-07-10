@@ -31,8 +31,9 @@ export const FLOOR_COLOR = "#e8e4de";
 // Floor objects (artwork pedestals, blocked zones)
 // ============================================================================
 
-// Neutral matte volume — deliberately not textured (spec §5.3): draping an
-// image over a pedestal box misleads more than it informs.
+// Neutral matte volume — the fallback for a floor-placed artwork box whose
+// image is missing (no asset / unresolved record), so it never renders as a
+// broken texture. A resolved box carries the work's image on every face.
 export const BOX_COLOR = "#dbd8d2";
 
 // Neutral placeholder for artworks whose image is missing or still loading —
