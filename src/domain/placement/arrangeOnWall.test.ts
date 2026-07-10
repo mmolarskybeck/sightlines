@@ -610,6 +610,34 @@ describe("getNeighborAwareSegments", () => {
     expect(segments[1].toMm).toBeLessThan(segments[1].fromMm);
   });
 
+  it("a group flanked by a neighbour group on each side bounds both outer segments to the nearest neighbour edge", () => {
+    // The "between two groups" case: the selected pair sits between a left
+    // group and a right group. Each outer segment must stop at the nearest
+    // edge of the flanking group, not sail to the far wall.
+    // selected a: center 900, width 200 -> edges [800, 1000]
+    // selected b: center 1200, width 200 -> edges [1100, 1300]
+    const members = [
+      makeMember({ id: "a", widthMm: 200, xMm: 900 }),
+      makeMember({ id: "b", widthMm: 200, xMm: 1200 })
+    ];
+    // left group: two works, nearest right edge at 600
+    // right group: two works, nearest left edge at 1600
+    const others = [
+      makeMember({ id: "l1", widthMm: 200, xMm: 300 }), // edges [200, 400]
+      makeMember({ id: "l2", widthMm: 200, xMm: 500 }), // edges [400, 600] (nearest left)
+      makeMember({ id: "r1", widthMm: 200, xMm: 1700 }), // edges [1600, 1800] (nearest right)
+      makeMember({ id: "r2", widthMm: 200, xMm: 1900 }) // edges [1800, 2000]
+    ];
+
+    const segments = getNeighborAwareSegments(members, others, 2000);
+
+    expect(segments).toEqual([
+      { fromMm: 600, toMm: 800 }, // left group right edge -> a left edge
+      { fromMm: 1000, toMm: 1100 }, // a right edge -> b left edge (interior, unchanged)
+      { fromMm: 1300, toMm: 1600 } // b right edge -> right group left edge
+    ]);
+  });
+
   it("keeps interior member gaps unchanged while bounding the outer segments", () => {
     // two works with a real interior gap, a window to the right of both
     // a: center 300, width 200 -> edges [200, 400]

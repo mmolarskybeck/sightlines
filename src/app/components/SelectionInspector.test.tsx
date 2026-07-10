@@ -114,15 +114,42 @@ describe("SelectionInspector arrange body", () => {
     expect(screen.getByText("Equal distance")).toBeTruthy();
   });
 
-  it("gap mode: editable gap field and calculated wall-edge readout", () => {
+  it("gap mode, wall boundaries: editable gap field and per-side wall-edge readouts", () => {
     renderPanel({ arrange: { ...baseArrange, mode: "gap" } });
 
     expect(
       screen.getByRole("textbox", { name: "Distance between works" })
     ).toBeTruthy();
-    expect(screen.getByText("Distance from each wall edge")).toBeTruthy();
+    // Outer distances are now neighbour-aware, per-side — with no neighbour
+    // they name the wall edge on each side.
+    expect(screen.getByText("Distance from left wall edge")).toBeTruthy();
+    expect(screen.getByText("Distance from right wall edge")).toBeTruthy();
+    expect(screen.getByText("Measuring to each wall edge.")).toBeTruthy();
     expect(
-      screen.getByText(/The group stays where it is — the wall-edge distances/)
+      screen.getByText(/The group stays where it is — the side distances follow/)
+    ).toBeTruthy();
+    // No "Neighbor" tag when both detected boundaries are the wall.
+    expect(screen.queryByText("Neighbor")).toBeNull();
+  });
+
+  it("gap mode, neighbouring groups: per-side readouts name the neighbours with a tag", () => {
+    renderPanel({
+      arrange: {
+        ...baseArrange,
+        mode: "gap",
+        leftBoundary: { type: "object", kind: "artwork", name: "Portrait Study" },
+        rightBoundary: { type: "object", kind: "artwork", name: "Still Life" }
+      }
+    });
+
+    expect(screen.getByText("Distance from Portrait Study on the left")).toBeTruthy();
+    expect(screen.getByText("Distance from Still Life on the right")).toBeTruthy();
+    // Both outer readouts carry the Neighbor tag.
+    expect(screen.getAllByText("Neighbor")).toHaveLength(2);
+    expect(
+      screen.getByText(
+        "Measuring to nearest artwork on the left and nearest artwork on the right."
+      )
     ).toBeTruthy();
   });
 
