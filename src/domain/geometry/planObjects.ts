@@ -36,6 +36,17 @@ export function getFloorWalls(floor: Floor): FloorWall[] {
   );
 }
 
+// A floor wall's unit direction start→end. Degenerate (zero-length) walls
+// have no direction and yield the zero vector — the same tolerance policy as
+// unitLeftNormalOrZero; callers that care should filter on lengthMm first.
+export function floorWallDirection(wall: FloorWall): Point {
+  if (wall.lengthMm <= 0) return { xMm: 0, yMm: 0 };
+  return {
+    xMm: (wall.endFloorMm.xMm - wall.startFloorMm.xMm) / wall.lengthMm,
+    yMm: (wall.endFloorMm.yMm - wall.startFloorMm.yMm) / wall.lengthMm
+  };
+}
+
 // Floor-space rectangle for plan rendering: center + size + rotation, ready
 // for an SVG <rect> with transform={`rotate(${angleDeg} ${centerXMm} ${centerYMm})`}.
 export type PlanRect = {
@@ -65,22 +76,55 @@ export function segmentPlanRect(startMm: Point, endMm: Point, depthMm: number): 
 // Wall objects (doors/windows/blocked-zones anchored to a wall) render
 // centered ON the wall line — object.xMm is the distance of the object's
 // center along the wall from its start, matching elevation view's convention.
+// ARTWORK is the one exception (spec §5.3): pass offsetToViewerSide to shift
+// the rect off the line onto the room's/viewer's side instead, so back-to-back
+// artwork on the two faces of a shared wall or partition don't overlap. Doors/
+// windows/blocked-zones must keep the default (false) — they pass through the
+// wall, so they stay centered.
 export function getWallObjectPlanRect(
   wall: FloorWall,
   object: Pick<WallObjectBase, "xMm" | "widthMm">,
-  depthMm: number = WALL_OBJECT_PLAN_DEPTH_MM
+  depthMm: number = WALL_OBJECT_PLAN_DEPTH_MM,
+  offsetToViewerSide: boolean = false
 ): PlanRect {
   const dx = wall.endFloorMm.xMm - wall.startFloorMm.xMm;
   const dy = wall.endFloorMm.yMm - wall.startFloorMm.yMm;
   const angleRad = Math.atan2(dy, dx);
   const t = wall.lengthMm === 0 ? 0 : object.xMm / wall.lengthMm;
 
-  return {
+  const rect: PlanRect = {
     centerXMm: wall.startFloorMm.xMm + dx * t,
     centerYMm: wall.startFloorMm.yMm + dy * t,
     widthMm: object.widthMm,
     depthMm,
     angleDeg: (angleRad * 180) / Math.PI
+  };
+
+  return offsetToViewerSide ? offsetPlanRectToViewerSide(rect) : rect;
+}
+
+// Shifts a wall-anchored plan rect off the wall centerline onto the viewer's/
+// room's side — the LEFT of the wall's start→end direction (spec §5.3), same
+// convention as wallInwardNormal/unitLeftNormalOrZero in scene3d.ts: for a
+// direction (cos,sin) the left normal is (-sin,cos). The shift is exactly
+// depthMm/2, so the rect's long edge lands ON the wall line with its body
+// on the interior side, instead of straddling the line centered on it.
+//
+// Deliberately keyed on the rect's OWN angleDeg rather than re-deriving the
+// normal from a FloorWall: partition faces (getFloorWalls) are already the
+// offset face segments obeying the same left-side convention, so this needs
+// no special-casing for them, and a live drag preview that has re-anchored
+// onto a different wall mid-gesture still offsets correctly off whatever
+// wall its rect's angleDeg actually reflects — never off a stale one.
+export function offsetPlanRectToViewerSide(rect: PlanRect): PlanRect {
+  const angleRad = (rect.angleDeg * Math.PI) / 180;
+  const normal = { xMm: -Math.sin(angleRad), yMm: Math.cos(angleRad) };
+  const halfDepthMm = rect.depthMm / 2;
+
+  return {
+    ...rect,
+    centerXMm: rect.centerXMm + normal.xMm * halfDepthMm,
+    centerYMm: rect.centerYMm + normal.yMm * halfDepthMm
   };
 }
 

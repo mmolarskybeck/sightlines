@@ -3043,6 +3043,25 @@ body.panels-resizing * {
   pointer-events: none;
 }
 
+/* Draw-mode room snapping (§6.3): the cursor is latched onto an existing
+   room's perimeter. A filled petrol square (vs the hollow .resize-handle
+   vertices) marks the exact snapped point — same square language, no pills or
+   circles — and the shared wall segment lights up in the same selection token
+   so the coincident-wall relationship reads at a glance. */
+.draw-snap-marker {
+  fill: var(--selection);
+  stroke: var(--selection);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.draw-snap-wall {
+  stroke: var(--selection);
+  stroke-width: 3;
+  pointer-events: none;
+}
+
 /* Persistent identity for an arrange-eligible multi-selection: a pale teal
    "selection zone" — the marquee metaphor kept alive after release (dashed
    petrol hairline + faint fill wash over the group's union bounds). Slightly
@@ -4411,6 +4430,21 @@ body.panels-resizing * {
   fill-opacity: 0.4;
   stroke: var(--selection);
   stroke-dasharray: 6 5;
+}
+
+/* Refused placement: a wall-only artwork dragged or dropped off every wall.
+   Danger stroke/wash overrides the ghost and selection looks above (same
+   specificity, declared later) so the "you can't drop here" reads whether the
+   object is a live drop ghost or a placed object mid-drag. */
+.plan-object.is-invalid .plan-object-outline {
+  fill: var(--danger-soft);
+  fill-opacity: 0.5;
+  stroke: var(--danger);
+}
+
+.plan-object.is-invalid .plan-object-mark {
+  stroke: var(--danger);
+  opacity: 1;
 }
 
 /* A paired opening's shared 2D status: one restrained connector behind the

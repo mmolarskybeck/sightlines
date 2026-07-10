@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { OpeningWallObject, WallObjectBase } from "../project";
 import { WALL_OBJECT_PLAN_DEPTH_MM, type FloorWall } from "../geometry/planObjects";
+import { unitLeftNormal } from "../geometry/vector";
 import { getGridSnapTargets } from "./gridSnapTargets";
-import { resolvePlanPlacement, WALL_CAPTURE_PX } from "./planSnapTargets";
+import { floatPolicyForKind, resolvePlanPlacement, WALL_CAPTURE_PX } from "./planSnapTargets";
 
 // Build a FloorWall from floor-space endpoints. The room offset is already
 // baked into start/end here (offset 0), so startFloorMm === start etc.; the
@@ -52,7 +53,10 @@ const baseArgs = {
   wallObjects: [] as WallObjectBase[],
   movingSize: { widthMm: 300, heightMm: 400, depthMm: 400 },
   movingKind: "artwork" as const,
-  canFloat: true,
+  // The float-mechanics tests below exercise the floor stage generically, so
+  // baseArgs opts into "float" explicitly; the artwork-specific "reject" policy
+  // (floatPolicyForKind("artwork")) has its own describe block.
+  floatPolicy: "float" as const,
   currentAnchorWallId: null,
   captureDistanceMm: 50,
   gridTargets: [],
@@ -120,7 +124,7 @@ describe("resolvePlanPlacement — doors/windows never float", () => {
   const doorArgs = {
     ...baseArgs,
     movingKind: "door" as const,
-    canFloat: false,
+    floatPolicy: "capture-any" as const,
     movingSize: { widthMm: 900, heightMm: 2100, depthMm: 100 }
   };
 
@@ -282,6 +286,106 @@ describe("resolvePlanPlacement — clamping", () => {
 
     // width 300 > length 200 → no valid range → centered at length/2 = 100.
     expect(result.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 100 });
+  });
+});
+
+describe("resolvePlanPlacement — side-aware capture on coincident twin walls", () => {
+  // Two coincident anti-parallel faces of one shared wall (spec §5.5), one wall
+  // record per abutting room. wallB points +x, so by unitLeftNormal's (-dy, dx)
+  // convention its interior is the +y side; wallA points -x, so its interior is
+  // the -y side. Both project to EXACTLY the same distance for any cursor, so the
+  // side-aware tie-break is what decides — not a hair of distance, not iteration
+  // order.
+  const wallB = makeWall("wall-B", { xMm: 0, yMm: 1000 }, { xMm: 4000, yMm: 1000 });
+  const wallA = makeWall("wall-A", { xMm: 4000, yMm: 1000 }, { xMm: 0, yMm: 1000 });
+  const twinWalls = [wallA, wallB];
+
+  it("captures the wall whose unitLeftNormal (interior/left) side holds the cursor", () => {
+    // Step along wallB's OWN left normal from a point on the shared line: by
+    // definition that lands on wallB's interior side, pinning the sign convention
+    // to unitLeftNormal rather than a guess.
+    const leftB = unitLeftNormal(wallB.startFloorMm, wallB.endFloorMm); // (0, +1)
+    const onWall = { xMm: 2000, yMm: 1000 };
+
+    const cursorInB = { xMm: onWall.xMm + leftB.xMm * 30, yMm: onWall.yMm + leftB.yMm * 30 };
+    const resultB = resolvePlanPlacement(cursorInB, { ...baseArgs, walls: twinWalls });
+    expect(resultB.placement.anchor).toBe("wall");
+    if (resultB.placement.anchor === "wall") expect(resultB.placement.wallId).toBe("wall-B");
+
+    // The opposite step lands on wallA's interior → captures wallA.
+    const cursorInA = { xMm: onWall.xMm - leftB.xMm * 30, yMm: onWall.yMm - leftB.yMm * 30 };
+    const resultA = resolvePlanPlacement(cursorInA, { ...baseArgs, walls: twinWalls });
+    expect(resultA.placement.anchor).toBe("wall");
+    if (resultA.placement.anchor === "wall") expect(resultA.placement.wallId).toBe("wall-A");
+  });
+
+  it("lets the interior side win even when the other wall is closer within the tie epsilon", () => {
+    // wallB at y=1000 (interior +y), wallHigh at y=1000.5 pointing -x (interior
+    // -y, i.e. below 1000.5). Cursor at y=1000.8 is 0.8 from wallB and 0.3 from
+    // wallHigh — wallHigh is 0.5mm closer, but that's inside DISTANCE_TIE_EPSILON,
+    // and only wallB's interior holds the cursor, so wallB wins.
+    const wallHigh = makeWall("wall-high", { xMm: 4000, yMm: 1000.5 }, { xMm: 0, yMm: 1000.5 });
+    const result = resolvePlanPlacement(
+      { xMm: 2000, yMm: 1000.8 },
+      { ...baseArgs, walls: [wallHigh, wallB] }
+    );
+    expect(result.placement.anchor).toBe("wall");
+    if (result.placement.anchor === "wall") expect(result.placement.wallId).toBe("wall-B");
+  });
+
+  it("falls back to deterministic wallId order when the cursor is on the line (no side)", () => {
+    // Exactly on the shared line: distance 0 to both, cross product 0 for both →
+    // neither interior → the id order breaks the tie (wall-A < wall-B).
+    const result = resolvePlanPlacement({ xMm: 2000, yMm: 1000 }, { ...baseArgs, walls: twinWalls });
+    expect(result.placement.anchor).toBe("wall");
+    if (result.placement.anchor === "wall") expect(result.placement.wallId).toBe("wall-A");
+  });
+});
+
+describe("resolvePlanPlacement — artwork reject policy (wall-only)", () => {
+  const rejectArgs = { ...baseArgs, floatPolicy: floatPolicyForKind("artwork") };
+
+  it("floatPolicyForKind maps kinds to their policy", () => {
+    expect(floatPolicyForKind("artwork")).toBe("reject");
+    expect(floatPolicyForKind("blocked-zone")).toBe("float");
+    expect(floatPolicyForKind("door")).toBe("capture-any");
+    expect(floatPolicyForKind("window")).toBe("capture-any");
+  });
+
+  it("rejects (anchor 'none') when no wall captures, with a cursor-tracking rect and no guides", () => {
+    const result = resolvePlanPlacement({ xMm: 2000, yMm: 80 }, rejectArgs);
+    expect(result.placement).toEqual({ anchor: "none" });
+    // The danger ghost still needs geometry under the cursor.
+    expect(result.planRect.centerXMm).toBeCloseTo(2000);
+    expect(result.planRect.centerYMm).toBeCloseTo(80);
+    // No alignment guides for a placement that won't commit.
+    expect(result.activeGuides).toEqual([]);
+  });
+
+  it("still captures a wall in range — reject only bites when nothing captures", () => {
+    const result = resolvePlanPlacement({ xMm: 2000, yMm: 30 }, rejectArgs);
+    expect(result.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 2000 });
+  });
+
+  it("a blocked-zone still floats where an artwork would reject", () => {
+    const result = resolvePlanPlacement(
+      { xMm: 2000, yMm: 80 },
+      { ...baseArgs, movingKind: "blocked-zone", floatPolicy: floatPolicyForKind("blocked-zone") }
+    );
+    expect(result.placement).toEqual({ anchor: "floor", xMm: 2000, yMm: 80 });
+  });
+
+  it("a door still captures at any distance where an artwork would reject", () => {
+    const result = resolvePlanPlacement(
+      { xMm: 2000, yMm: 100000 },
+      {
+        ...baseArgs,
+        movingKind: "door",
+        floatPolicy: floatPolicyForKind("door"),
+        movingSize: { widthMm: 900, heightMm: 2100, depthMm: 100 }
+      }
+    );
+    expect(result.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 2000 });
   });
 });
 

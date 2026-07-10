@@ -8,6 +8,7 @@ import {
   getFloorObjectPlanRect,
   getFloorWalls,
   getWallObjectPlanRect,
+  offsetPlanRectToViewerSide,
   planRectIntersectsRect,
   projectPointToWall,
   segmentPlanRect
@@ -256,6 +257,118 @@ describe("getWallObjectPlanRect", () => {
 
     expect(defaulted.depthMm).toBe(WALL_OBJECT_PLAN_DEPTH_MM);
     expect(overridden.depthMm).toBe(250);
+  });
+
+  it("stays centered on the wall line when offsetToViewerSide is omitted (default unchanged)", () => {
+    const project = createSampleProject();
+    const [wall] = getFloorWalls(project.floor).filter((w) => w.id === "wall-north");
+
+    const rect = getWallObjectPlanRect(wall, { xMm: feetToMm(10), widthMm: 900 });
+
+    expect(rect.centerXMm).toBeCloseTo(feetToMm(10));
+    expect(rect.centerYMm).toBeCloseTo(0);
+  });
+
+  it("offsetToViewerSide=false is an explicit no-op, identical to the default", () => {
+    const project = createSampleProject();
+    const [wall] = getFloorWalls(project.floor).filter((w) => w.id === "wall-north");
+
+    const rect = getWallObjectPlanRect(wall, { xMm: feetToMm(10), widthMm: 900 }, WALL_OBJECT_PLAN_DEPTH_MM, false);
+
+    expect(rect.centerXMm).toBeCloseTo(feetToMm(10));
+    expect(rect.centerYMm).toBeCloseTo(0);
+  });
+
+  it("offsetToViewerSide shifts a horizontal wall's (+x direction) rect toward +y, the left of start→end", () => {
+    // wall-north runs west→east (nw→ne), i.e. +x direction. Left normal of
+    // (dx,dy)=(+,0) is (-dy,dx)/len = (0,+1) — into the room, which sits south
+    // (increasing y) of this wall in the sample project's screen-space layout.
+    const project = createSampleProject();
+    const [wall] = getFloorWalls(project.floor).filter((w) => w.id === "wall-north");
+
+    const centered = getWallObjectPlanRect(wall, { xMm: feetToMm(10), widthMm: 900 });
+    const offset = getWallObjectPlanRect(
+      wall,
+      { xMm: feetToMm(10), widthMm: 900 },
+      WALL_OBJECT_PLAN_DEPTH_MM,
+      true
+    );
+
+    expect(offset.centerXMm).toBeCloseTo(centered.centerXMm);
+    expect(offset.centerYMm).toBeCloseTo(centered.centerYMm + WALL_OBJECT_PLAN_DEPTH_MM / 2);
+    // Width/depth/angle are untouched by the shift — only the center moves.
+    expect(offset.widthMm).toBe(centered.widthMm);
+    expect(offset.depthMm).toBe(centered.depthMm);
+    expect(offset.angleDeg).toBeCloseTo(centered.angleDeg);
+  });
+
+  it("offsetToViewerSide shifts a vertical wall's (+y direction) rect toward -x, the left of start→end", () => {
+    // wall-east runs north→south (ne→se), i.e. +y direction. Left normal of
+    // (dx,dy)=(0,+) is (-dy,dx)/len = (-1,0) — into the room, which sits west
+    // (decreasing x) of this wall.
+    const project = createSampleProject();
+    const [wall] = getFloorWalls(project.floor).filter((w) => w.id === "wall-east");
+
+    const centered = getWallObjectPlanRect(wall, { xMm: feetToMm(9), widthMm: 900 });
+    const offset = getWallObjectPlanRect(
+      wall,
+      { xMm: feetToMm(9), widthMm: 900 },
+      WALL_OBJECT_PLAN_DEPTH_MM,
+      true
+    );
+
+    expect(offset.centerXMm).toBeCloseTo(centered.centerXMm - WALL_OBJECT_PLAN_DEPTH_MM / 2);
+    expect(offset.centerYMm).toBeCloseTo(centered.centerYMm);
+  });
+
+  it("offsets by exactly depthMm/2, so the rect's near edge lands ON the wall line", () => {
+    const project = createSampleProject();
+    const [wall] = getFloorWalls(project.floor).filter((w) => w.id === "wall-north");
+
+    const centered = getWallObjectPlanRect(wall, { xMm: feetToMm(10), widthMm: 900 }, 250);
+    const offset = getWallObjectPlanRect(wall, { xMm: feetToMm(10), widthMm: 900 }, 250, true);
+
+    const shiftMm = Math.hypot(
+      offset.centerXMm - centered.centerXMm,
+      offset.centerYMm - centered.centerYMm
+    );
+    expect(shiftMm).toBeCloseTo(125); // 250/2 — respects a custom depthMm too
+  });
+});
+
+describe("offsetPlanRectToViewerSide", () => {
+  it("shifts a rect's center by depthMm/2 along the left normal of its own angleDeg, leaving other fields untouched", () => {
+    const rect = {
+      centerXMm: 1000,
+      centerYMm: 500,
+      widthMm: 900,
+      depthMm: 150,
+      angleDeg: 0
+    };
+
+    const offset = offsetPlanRectToViewerSide(rect);
+
+    // angleDeg 0 → direction (1,0) → left normal (0,1).
+    expect(offset.centerXMm).toBeCloseTo(1000);
+    expect(offset.centerYMm).toBeCloseTo(500 + 75);
+    expect(offset.widthMm).toBe(900);
+    expect(offset.depthMm).toBe(150);
+    expect(offset.angleDeg).toBe(0);
+  });
+
+  it("matches getWallObjectPlanRect's offsetToViewerSide=true for an angled (3-4-5) wall", () => {
+    const room = angledRoom();
+    const floor: Floor = {
+      rooms: [{ roomId: room.id, offsetXMm: 0, offsetYMm: 0, rotationDeg: 0, room }]
+    };
+    const [wall] = getFloorWalls(floor);
+
+    const viaFlag = getWallObjectPlanRect(wall, { xMm: 250, widthMm: 100 }, 80, true);
+    const centered = getWallObjectPlanRect(wall, { xMm: 250, widthMm: 100 }, 80);
+    const viaHelper = offsetPlanRectToViewerSide(centered);
+
+    expect(viaFlag.centerXMm).toBeCloseTo(viaHelper.centerXMm);
+    expect(viaFlag.centerYMm).toBeCloseTo(viaHelper.centerYMm);
   });
 });
 

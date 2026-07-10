@@ -1,6 +1,8 @@
 import type { ConnectableOpeningWallObject, Project } from "../project";
 import { parseFaceWallId } from "./freestandingWalls";
-import { getFloorWalls, type FloorWall } from "./planObjects";
+import { floorWallDirection, getFloorWalls, type FloorWall } from "./planObjects";
+import { clamp } from "./scalar";
+import { dot, pointAlong, pointToLineDistance, projectScalar } from "./vector";
 
 // Starting tolerances from room-shapes-spec.md §7.2. They are named and
 // exported because both candidate filtering and the inspector copy need to
@@ -57,11 +59,7 @@ export function evaluateOpeningPair(
   // Abutting room loops run in opposite directions along their shared edge.
   // Measure deviation from an exact anti-parallel dot (-1); same-direction
   // walls are not a connection between the two room interiors (spec §2/§10).
-  const directionDot = clamp(
-    a.direction.xMm * b.direction.xMm + a.direction.yMm * b.direction.yMm,
-    -1,
-    1
-  );
+  const directionDot = clamp(dot(a.direction, b.direction), -1, 1);
   const angleDeg = (Math.acos(-directionDot) * 180) / Math.PI;
   if (angleDeg > OPENING_PAIR_ANGLE_TOLERANCE_DEG) {
     return { status: "misaligned", reason: "angle" };
@@ -124,10 +122,7 @@ function resolveOpening(
   const wall = wallsById.get(object.wallId);
   if (!wall || wall.lengthMm <= 0) return null;
 
-  const direction = {
-    xMm: (wall.endFloorMm.xMm - wall.startFloorMm.xMm) / wall.lengthMm,
-    yMm: (wall.endFloorMm.yMm - wall.startFloorMm.yMm) / wall.lengthMm
-  };
+  const direction = floorWallDirection(wall);
   return {
     opening: object,
     wall,
@@ -173,27 +168,3 @@ function localInterval(
   return { xMinMm: Math.min(startMm, endMm), xMaxMm: Math.max(startMm, endMm) };
 }
 
-function pointAlong(origin: Point, direction: UnitDirection, distanceMm: number): Point {
-  return {
-    xMm: origin.xMm + direction.xMm * distanceMm,
-    yMm: origin.yMm + direction.yMm * distanceMm
-  };
-}
-
-function projectScalar(point: Point, origin: Point, axis: UnitDirection): number {
-  return (point.xMm - origin.xMm) * axis.xMm + (point.yMm - origin.yMm) * axis.yMm;
-}
-
-function pointToLineDistance(
-  point: Point,
-  lineOrigin: Point,
-  lineDirection: UnitDirection
-): number {
-  const dxMm = point.xMm - lineOrigin.xMm;
-  const dyMm = point.yMm - lineOrigin.yMm;
-  return Math.abs(dxMm * lineDirection.yMm - dyMm * lineDirection.xMm);
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}

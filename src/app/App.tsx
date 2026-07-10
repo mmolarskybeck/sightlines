@@ -216,7 +216,6 @@ export function App() {
     connectOpenings,
     disconnectOpening,
     placeOpeningFromPlan,
-    placeArtworkOnFloor,
     commitPlanMove,
     updateFloorObject,
     moveWallObjectsGroup,
@@ -1052,9 +1051,6 @@ export function App() {
                 onMoveRoom={moveRoom}
                 onPlaceArtwork={(artworkId, wallId, xMm, yMm) =>
                   void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement)
-                }
-                onPlaceArtworkOnFloor={(artworkId, xMm, yMm) =>
-                  void placeArtworkOnFloor(artworkId, xMm, yMm)
                 }
                 onPlaceOpeningFromPlan={placeOpeningFromPlan}
                 onSelectArtwork={selectArtwork}

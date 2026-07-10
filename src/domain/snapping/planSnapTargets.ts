@@ -7,6 +7,7 @@ import {
   type PlanRect
 } from "../geometry/planObjects";
 import { clamp } from "../geometry/scalar";
+import { cross, subtract } from "../geometry/vector";
 import { getNeighborXSnapTargets } from "./artworkSnapTargets";
 import {
   resolveSnap,
@@ -34,8 +35,31 @@ export type PlanPlacement =
   | { anchor: "wall"; wallId: string; xMm: number }
   | { anchor: "floor"; xMm: number; yMm: number };
 
+// A drag that cannot commit anywhere: a 2D artwork (wall-only, USER DECISION)
+// dragged with no wall in capture range. It is deliberately NOT a PlanPlacement
+// — nothing gets persisted — so the `anchor: "none"` variant forces every caller
+// to handle the rejected case rather than silently floor-placing. The result
+// still carries a planRect so the caller can paint the danger ghost under the
+// cursor; release is a no-op.
+export type ResolvedPlacement = PlanPlacement | { anchor: "none" };
+
+// How a placement behaves when no wall captures. `float` resolves a free
+// floor-space center (blocked zones); `capture-any` never floats and grabs the
+// globally nearest wall at any distance (doors/windows); `reject` refuses the
+// drop (2D artwork — wall-only). See floatPolicyForKind.
+export type FloatPolicy = "float" | "capture-any" | "reject";
+
+// The single per-kind policy that used to be spread across callers as
+// `canFloat: kind === ...`. Artwork is wall-only (reject), blocked zones float,
+// doors/windows capture at any distance.
+export function floatPolicyForKind(kind: WallObject["kind"]): FloatPolicy {
+  if (kind === "artwork") return "reject";
+  if (kind === "blocked-zone") return "float";
+  return "capture-any"; // door | window
+}
+
 export type PlanPlacementResult = {
-  placement: PlanPlacement;
+  placement: ResolvedPlacement;
   // Ready-to-render preview geometry, so preview and commit agree.
   planRect: PlanRect;
   // Hysteresis state the caller threads back in via previousSnapTargetIds.
@@ -54,8 +78,9 @@ export type PlanMovingSize = {
 // click-to-place ghost, artwork drop ghost — so the preview a user sees and
 // the value that gets committed can never disagree, the same discipline as
 // resolveArtworkSnap. Two stages: try to capture onto a wall (with per-object
-// cross-boundary hysteresis); if nothing captures and the object can float,
-// resolve a free floor-space center against the grid.
+// cross-boundary hysteresis); if nothing captures, the floatPolicy decides
+// whether to float onto the floor, reject the drop, or (doors/windows) there
+// was simply no wall to capture at all.
 export function resolvePlanPlacement(
   proposedCenterFloorMm: Point,
   args: {
@@ -65,8 +90,9 @@ export function resolvePlanPlacement(
     wallObjects: WallObjectBase[];
     movingSize: PlanMovingSize;
     movingKind: WallObject["kind"];
-    // artwork | blocked-zone → true; door | window → false.
-    canFloat: boolean;
+    // Per-kind behavior when no wall captures — see FloatPolicy /
+    // floatPolicyForKind.
+    floatPolicy: FloatPolicy;
     // The wall the object is currently anchored to, for the wider break-free
     // capture radius; null when it isn't currently on any wall.
     currentAnchorWallId: string | null;
@@ -87,7 +113,7 @@ export function resolvePlanPlacement(
     proposedCenterFloorMm,
     args.walls,
     args.captureDistanceMm,
-    args.canFloat,
+    args.floatPolicy === "capture-any",
     args.currentAnchorWallId
   );
 
@@ -95,50 +121,98 @@ export function resolvePlanPlacement(
     return resolveOnWall(proposedCenterFloorMm, capturedWall, args);
   }
 
-  // Floor stage. Reached when nothing captured: either the object can float
-  // and is far from every wall, or (invariant break, e.g. a room with no
-  // walls) there was no wall to capture at all. In the latter case we fall
-  // back to a floor placement even for doors/windows rather than crash —
-  // rooms always have walls in practice, so canFloat === false here only ever
+  // Nothing captured. Artwork is wall-only (USER DECISION): reject the drop so
+  // the caller paints the danger ghost and release is a no-op — a 2D artwork can
+  // never land mid-room as a floor object.
+  if (args.floatPolicy === "reject") {
+    return resolveRejected(proposedCenterFloorMm, args);
+  }
+
+  // Floor stage. Reached when nothing captured: either the object floats
+  // (blocked zone far from every wall) or (invariant break, e.g. a room with no
+  // walls) there was no wall to capture at all. In the latter case we fall back
+  // to a floor placement even for doors/windows rather than crash — rooms always
+  // have walls in practice, so a "capture-any" kind reaching here only ever
   // means "no walls exist."
   return resolveOnFloor(proposedCenterFloorMm, args);
 }
 
+// Small distance window (mm — a window, not exact equality, because these are
+// floats) inside which two walls count as tied for capture. Coincident twin
+// walls (spec §5.5: one wall record per abutting room, geometrically identical)
+// tie at EXACTLY the same distance for any cursor position, so capturePrefers
+// must decide which room's wall wins by side rather than by a hair of distance.
+const DISTANCE_TIE_EPSILON_MM = 1;
+
 // Nearest wall the object should capture onto, or null to fall through to the
-// floor stage. Each wall carries its own effective radius: the current anchor
-// wall gets the wider break-free radius (so it stays sticky), every other wall
-// gets the base radius (so re-anchoring only happens once a wall is genuinely
-// close). Doors/windows (canFloat false) capture the globally nearest wall at
-// any distance — they never float.
+// floor/reject stage. Each wall carries its own effective radius: the current
+// anchor wall gets the wider break-free radius (so it stays sticky), every other
+// wall gets the base radius (so re-anchoring only happens once a wall is
+// genuinely close). Doors/windows (capturesAtAnyDistance) capture the globally
+// nearest wall at any distance — they never float.
 function captureWall(
   pointMm: Point,
   walls: FloorWall[],
   captureDistanceMm: number,
-  canFloat: boolean,
+  capturesAtAnyDistance: boolean,
   currentAnchorWallId: string | null
 ) {
   let best: { wall: FloorWall; xAlongMm: number; distanceMm: number } | null = null;
 
   for (const wall of walls) {
     const projection = projectPointToWall(pointMm, wall);
-    const radius = canFloat
-      ? wall.id === currentAnchorWallId
+    const radius = capturesAtAnyDistance
+      ? Infinity
+      : wall.id === currentAnchorWallId
         ? captureDistanceMm * WALL_BREAK_FREE_MULTIPLIER
-        : captureDistanceMm
-      : Infinity;
+        : captureDistanceMm;
 
     if (projection.distanceMm > radius) continue;
 
-    if (
-      !best ||
-      projection.distanceMm < best.distanceMm ||
-      (projection.distanceMm === best.distanceMm && wall.id.localeCompare(best.wall.id) < 0)
-    ) {
-      best = { wall, xAlongMm: projection.xAlongMm, distanceMm: projection.distanceMm };
+    const candidate = { wall, xAlongMm: projection.xAlongMm, distanceMm: projection.distanceMm };
+    if (!best || capturePrefers(candidate, best, pointMm)) {
+      best = candidate;
     }
   }
 
   return best;
+}
+
+// Should `candidate` replace the current `best`? Strictly closer (beyond the tie
+// window) wins outright. Within DISTANCE_TIE_EPSILON_MM it's a tie — the case
+// two coincident twin walls hit for EVERY cursor position — broken side-aware:
+// prefer the wall whose interior (the LEFT of its start→end direction, spec
+// §5.3) contains the cursor, so a drag inside room B captures room B's face of a
+// shared wall instead of room A's. Only when the side can't discriminate (cursor
+// on the wall line, or the same interior answer for both — e.g. two offset
+// partition faces that don't actually coincide) does it fall back to the
+// deterministic wallId order the code used before.
+function capturePrefers(
+  candidate: { wall: FloorWall; distanceMm: number },
+  best: { wall: FloorWall; distanceMm: number },
+  pointMm: Point
+): boolean {
+  if (candidate.distanceMm < best.distanceMm - DISTANCE_TIE_EPSILON_MM) return true;
+  if (candidate.distanceMm > best.distanceMm + DISTANCE_TIE_EPSILON_MM) return false;
+
+  const candidateInterior = cursorOnInteriorSide(candidate.wall, pointMm);
+  const bestInterior = cursorOnInteriorSide(best.wall, pointMm);
+  if (candidateInterior !== bestInterior) return candidateInterior;
+
+  return candidate.wall.id.localeCompare(best.wall.id) < 0;
+}
+
+// Is the cursor on a wall's interior side — the LEFT of start→end? The sign of
+// the cross product (end−start) × (point−start) is > 0 exactly when the point is
+// to the left, which is the codebase's standing interior convention (matches
+// unitLeftNormal's (-dy, dx) and scene3d's wallInwardNormal). Exactly 0 (point
+// on the line) reads as "not interior", so it falls through to the id tie-break
+// rather than arbitrarily claiming a side. Verified against unitLeftNormal in
+// planSnapTargets.test.ts.
+function cursorOnInteriorSide(wall: FloorWall, pointMm: Point): boolean {
+  return (
+    cross(subtract(wall.endFloorMm, wall.startFloorMm), subtract(pointMm, wall.startFloorMm)) > 0
+  );
 }
 
 function resolveOnWall(
@@ -223,4 +297,25 @@ function resolveOnFloor(
     // so they're correct to draw over the plan.
     activeGuides: resolved.activeGuides
   };
+}
+
+// A rejected drop (floatPolicy "reject", nothing captured). Nothing commits —
+// the placement is `{ anchor: "none" }` — but we still hand back a planRect at
+// the cursor (reusing the floor resolve so the ghost tracks the pointer exactly
+// like a floor preview would) so the caller can paint the danger ghost right
+// where the release was refused. Alignment guides are suppressed: there is no
+// placement to align, so drawing them would imply a commit that never happens.
+function resolveRejected(
+  proposedCenterFloorMm: Point,
+  args: {
+    movingSize: PlanMovingSize;
+    gridTargets: SnapTarget[];
+    snapToGrid: boolean;
+    thresholdMm: number;
+    previousSnapTargetIds?: SnapTargetIds;
+    rotationDeg?: number;
+  }
+): PlanPlacementResult {
+  const floor = resolveOnFloor(proposedCenterFloorMm, args);
+  return { ...floor, placement: { anchor: "none" }, activeGuides: [] };
 }

@@ -17,6 +17,8 @@ import {
   solveEqualArrangement,
   solveEqualArrangementInZone
 } from "../domain/placement/arrangeOnWall";
+import { createRectangularRoomPlacement } from "../domain/geometry/createRoom";
+import { evaluateOpeningPair } from "../domain/geometry/openingConnections";
 import { createSampleProject } from "../domain/sample/sampleProject";
 import { MAX_IMPORT_JSON_LENGTH } from "../domain/schema/projectSchema";
 import { feetToMm } from "../domain/units/length";
@@ -1760,36 +1762,241 @@ describe("app store", () => {
       expect(store.getState().project!.wallObjects).toHaveLength(0);
     });
 
-    it("clears a surviving partner's connectsToObjectId when its paired door is removed", async () => {
-      // No store action pairs openings yet (a later milestone) — hand-construct
-      // the symmetric pair directly, matching the schema's invariant (spec
-      // §5.5), to prove the removal cascade already clears dangling refs.
+    it("full-syncs a paired deletion: removing one paired door removes its twin in one undo step", async () => {
+      // Removing a shared-wall door/window removes its twin too, so the two
+      // rooms never diverge (spec §5.5). The pair is symmetric, so it doesn't
+      // matter which side is deleted — both vanish, in a single undoable commit.
       await store.getState().addOpening("wall-north", "door");
       const doorA = store.getState().project!.wallObjects[0];
       await store.getState().addOpening("wall-south", "door");
       const doorB = store
         .getState()
         .project!.wallObjects.find((wallObject) => wallObject.id !== doorA.id)!;
-
-      const pairedProject: Project = {
-        ...store.getState().project!,
-        wallObjects: store.getState().project!.wallObjects.map((wallObject) => {
-          if (wallObject.id === doorA.id) return { ...wallObject, connectsToObjectId: doorB.id };
-          if (wallObject.id === doorB.id) return { ...wallObject, connectsToObjectId: doorA.id };
-          return wallObject;
-        })
-      };
-      await repository.save(pairedProject);
-      store.setState({ project: pairedProject });
+      await store.getState().connectOpenings(doorA.id, doorB.id);
+      const undoStackBefore = store.getState().undoStack.length;
 
       await store.getState().removePlacement(doorB.id);
 
-      const survivingDoorA = store
-        .getState()
-        .project!.wallObjects.find((wallObject) => wallObject.id === doorA.id)!;
+      expect(store.getState().project!.wallObjects).toHaveLength(0);
+      expect(store.getState().undoStack).toHaveLength(undoStackBefore + 1);
+
+      // Undo restores both openings with the pairing intact.
+      await store.getState().undo();
+      const restored = store.getState().project!.wallObjects;
+      expect(restored).toHaveLength(2);
+      const restoredA = restored.find((object) => object.id === doorA.id)!;
+      const restoredB = restored.find((object) => object.id === doorB.id)!;
+      expect(restoredA.kind === "door" ? restoredA.connectsToObjectId : undefined).toBe(doorB.id);
+      expect(restoredB.kind === "door" ? restoredB.connectsToObjectId : undefined).toBe(doorA.id);
+    });
+  });
+
+  describe("shared wall opening mirroring", () => {
+    // Two rooms flush along room-a's east / room-b's west edge (offset 4000 =
+    // room-a's width): a coincident twin wall pair. Both walls are 3000 mm long
+    // and anti-parallel, so an opening at x mirrors to (3000 − x) on the twin.
+    const A_EAST = "room-a-wall-east";
+    const B_WEST = "room-b-wall-west";
+    const DOOR_Y_MM = 1015; // door center = height/2 (2030/2), the placement default.
+
+    function setupSharedWallRooms(): void {
+      const base = store.getState().project!;
+      const shared: Project = {
+        ...base,
+        wallObjects: [],
+        floorObjects: [],
+        floor: {
+          rooms: [
+            createRectangularRoomPlacement({
+              roomId: "room-a",
+              name: "Room A",
+              widthMm: 4000,
+              depthMm: 3000,
+              heightMm: 2500,
+              offsetXMm: 0,
+              offsetYMm: 0
+            }),
+            createRectangularRoomPlacement({
+              roomId: "room-b",
+              name: "Room B",
+              widthMm: 4000,
+              depthMm: 3000,
+              heightMm: 2500,
+              offsetXMm: 4000,
+              offsetYMm: 0
+            })
+          ]
+        }
+      };
+      store.setState({ project: shared });
+    }
+
+    const onWall = (wallId: string) =>
+      store.getState().project!.wallObjects.find((object) => object.wallId === wallId)!;
+    const partnerOf = (object: { id: string; connectsToObjectId?: string }) =>
+      object.connectsToObjectId;
+
+    it("creates a twin with symmetric pointers in one undo step, selecting only the primary", async () => {
+      setupSharedWallRooms();
+      const undoBefore = store.getState().undoStack.length;
+
+      await store.getState().addOpening(A_EAST, "door");
+
+      const objects = store.getState().project!.wallObjects;
+      expect(objects).toHaveLength(2);
+      const primary = onWall(A_EAST);
+      const twin = onWall(B_WEST);
+      expect(primary.kind).toBe("door");
+      expect(twin.kind).toBe("door");
+      expect(partnerOf(primary)).toBe(twin.id);
+      expect(partnerOf(twin)).toBe(primary.id);
+      // The twin mirrors the centered primary (both 1500 on a 3000 mm wall).
+      expect(twin.xMm).toBeCloseTo(1500);
+      // One commit, one undo step; only the primary is selected.
+      expect(store.getState().undoStack).toHaveLength(undoBefore + 1);
       expect(
-        (survivingDoorA as { connectsToObjectId?: string }).connectsToObjectId
-      ).toBeUndefined();
+        getSelectedOpeningId(store.getState().project, store.getState().selection)
+      ).toBe(primary.id);
+
+      await store.getState().undo();
+      expect(store.getState().project!.wallObjects).toHaveLength(0);
+    });
+
+    it("connects to an existing alignable opening on the twin wall instead of duplicating", async () => {
+      setupSharedWallRooms();
+      // An unpaired door already sits on the twin wall at the mirrored position.
+      const base = store.getState().project!;
+      store.setState({
+        project: {
+          ...base,
+          wallObjects: [
+            {
+              id: "existing-door",
+              kind: "door",
+              blocksPlacement: true,
+              wallId: B_WEST,
+              xMm: 1500,
+              yMm: DOOR_Y_MM,
+              widthMm: 915,
+              heightMm: 2030
+            }
+          ]
+        }
+      });
+
+      await store.getState().addOpening(A_EAST, "door");
+
+      const objects = store.getState().project!.wallObjects;
+      // No duplicate twin — the primary connects to the existing opening.
+      expect(objects).toHaveLength(2);
+      const primary = onWall(A_EAST);
+      const existing = objects.find((object) => object.id === "existing-door")!;
+      expect(partnerOf(primary)).toBe("existing-door");
+      expect(partnerOf(existing)).toBe(primary.id);
+    });
+
+    it("drags the twin on a move so the pair stays aligned, in one undo step", async () => {
+      setupSharedWallRooms();
+      await store.getState().addOpening(A_EAST, "door");
+      const primary = onWall(A_EAST);
+      const twin = onWall(B_WEST);
+      const undoBefore = store.getState().undoStack.length;
+
+      await store.getState().moveOpening(primary.id, 800, primary.yMm);
+
+      const movedPrimary = store
+        .getState()
+        .project!.wallObjects.find((object) => object.id === primary.id)!;
+      const movedTwin = store
+        .getState()
+        .project!.wallObjects.find((object) => object.id === twin.id)!;
+      expect(movedPrimary.xMm).toBe(800);
+      // Twin mirrors the new position (3000 − 800) and tracks the primary's y.
+      expect(movedTwin.xMm).toBeCloseTo(2200);
+      expect(movedTwin.yMm).toBe(primary.yMm);
+      expect(store.getState().undoStack).toHaveLength(undoBefore + 1);
+      expect(
+        evaluateOpeningPair(store.getState().project!, movedPrimary.id, movedTwin.id).status
+      ).toBe("aligned");
+    });
+
+    it("leaves the twin put when a move's mirrored slot would collide (pair goes misaligned)", async () => {
+      setupSharedWallRooms();
+      await store.getState().addOpening(A_EAST, "door");
+      const primary = onWall(A_EAST);
+      const twin = onWall(B_WEST);
+
+      // A blocker on the twin wall sits where the twin would land after the move
+      // (mirrored x = 3000 − 2200 = 800). Narrow, so it doesn't overlap the twin
+      // at its current x = 1500.
+      const base = store.getState().project!;
+      store.setState({
+        project: {
+          ...base,
+          wallObjects: [
+            ...base.wallObjects,
+            {
+              id: "blocker",
+              kind: "door",
+              blocksPlacement: true,
+              wallId: B_WEST,
+              xMm: 800,
+              yMm: DOOR_Y_MM,
+              widthMm: 300,
+              heightMm: 2030
+            }
+          ]
+        }
+      });
+
+      await store.getState().moveOpening(primary.id, 2200, primary.yMm);
+
+      const movedPrimary = store
+        .getState()
+        .project!.wallObjects.find((object) => object.id === primary.id)!;
+      const unmovedTwin = store
+        .getState()
+        .project!.wallObjects.find((object) => object.id === twin.id)!;
+      expect(movedPrimary.xMm).toBe(2200);
+      // The twin stayed put; the pair now reads misaligned via the advisory.
+      expect(unmovedTwin.xMm).toBeCloseTo(1500);
+      expect(
+        evaluateOpeningPair(store.getState().project!, movedPrimary.id, unmovedTwin.id).status
+      ).toBe("misaligned");
+    });
+
+    it("mirrors a resize onto the twin in one undo step", async () => {
+      setupSharedWallRooms();
+      await store.getState().addOpening(A_EAST, "door");
+      const primary = onWall(A_EAST);
+      const twin = onWall(B_WEST);
+      const undoBefore = store.getState().undoStack.length;
+
+      await store.getState().resizeOpening(primary.id, 1000, 1800);
+
+      const resizedTwin = store
+        .getState()
+        .project!.wallObjects.find((object) => object.id === twin.id)!;
+      expect(resizedTwin.widthMm).toBe(1000);
+      expect(resizedTwin.heightMm).toBe(1800);
+      expect(store.getState().undoStack).toHaveLength(undoBefore + 1);
+    });
+
+    it("removing a room only disconnects the neighbor's opening, never deletes it", async () => {
+      setupSharedWallRooms();
+      await store.getState().addOpening(A_EAST, "door");
+      const primary = onWall(A_EAST);
+
+      await store.getState().deleteRoom("room-b");
+
+      const objects = store.getState().project!.wallObjects;
+      // room-b's twin is gone with its room, but room-a's opening survives,
+      // merely disconnected (its dangling pointer cleared).
+      expect(objects).toHaveLength(1);
+      const survivor = objects[0];
+      expect(survivor.id).toBe(primary.id);
+      expect(survivor.wallId).toBe(A_EAST);
+      expect(partnerOf(survivor)).toBeUndefined();
     });
   });
 

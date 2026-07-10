@@ -29,6 +29,7 @@ import {
   getFloorObjectPlanRect,
   getFloorWalls,
   getWallObjectPlanRect,
+  offsetPlanRectToViewerSide,
   planRectIntersectsRect,
   projectPointToWall,
   segmentPlanRect,
@@ -56,13 +57,21 @@ import {
   type FloorPartition
 } from "../../domain/geometry/freestandingWalls";
 import { isPointInPolygon, isSimplePolygon, segmentsIntersect, type Point } from "../../domain/geometry/polygon";
+import {
+  canCloseOnWall,
+  snapDrawPointToRooms,
+  type DrawRoomSnap
+} from "../../domain/geometry/drawSnapping";
 import { canMoveRoomVertex, moveRoomWall } from "../../domain/geometry/reshapeRoom";
 import { formatLength } from "../../domain/units/length";
 import { getGridSnapTargets } from "../../domain/snapping/gridSnapTargets";
 import {
+  floatPolicyForKind,
   resolvePlanPlacement,
   WALL_CAPTURE_PX,
-  type PlanPlacement
+  type FloatPolicy,
+  type PlanPlacement,
+  type ResolvedPlacement
 } from "../../domain/snapping/planSnapTargets";
 import {
   getPlanGroupCenterMm,
@@ -188,7 +197,10 @@ type RoomDragState = {
 // this follows plain pointer hover over the plan SVG and commits on click.
 type ToolGhostState = {
   planRect: PlanRect;
-  placement: PlanPlacement;
+  // Door/window/blocked-zone tools never reject (they float or capture at any
+  // distance), but the resolver's result is a ResolvedPlacement, so the field
+  // carries the wider type; the "none" case is simply never reached here.
+  placement: ResolvedPlacement;
   activeGuides: Guide[];
 };
 
@@ -201,8 +213,9 @@ type ToolGhostState = {
 type ObjectDragState = {
   objectId: string;
   kind: WallObject["kind"];
-  // artwork | blocked-zone → true; door | window → false (never float).
-  canFloat: boolean;
+  // Per-kind fall-through behavior when no wall captures (floatPolicyForKind):
+  // artwork rejects (wall-only), blocked-zone floats, door/window capture-any.
+  floatPolicy: FloatPolicy;
   movingSize: { widthMm: number; heightMm: number; depthMm: number };
   // The rotation to preview a floated result at: the wall's floor-space angle
   // for a wall object (so a wall→floor preview keeps its orientation, matching
@@ -215,7 +228,9 @@ type ObjectDragState = {
   // tracks the drag rather than the object's committed wall.
   currentAnchorWallId: string | null;
   previewPlanRect: PlanRect;
-  previewPlacement: PlanPlacement;
+  // May be `{ anchor: "none" }` for an artwork dragged off all walls: the live
+  // preview shows the danger token and release is a no-op.
+  previewPlacement: ResolvedPlacement;
   previousSnapTargetIds?: SnapTargetIds;
   activeGuides: Guide[];
   // Group drag: a rigid, translation-only move of a multi-selection.
@@ -238,7 +253,9 @@ type ObjectDragState = {
 // ghost didn't just show.
 type DropGhostState = {
   planRect: PlanRect;
-  placement: PlanPlacement;
+  // `{ anchor: "none" }` when the artwork isn't over a wall — the ghost paints
+  // in the danger style and the drop is refused (artwork is wall-only).
+  placement: ResolvedPlacement;
   activeGuides: Guide[];
 };
 
@@ -255,8 +272,13 @@ type DrawState = {
   // attempt failed its simple-polygon test — render the danger token.
   invalid: boolean;
   // Cursor is within the close radius of the first vertex (≥3 points), so the
-  // preview shows the closing segment instead of a rubber band.
+  // preview shows the closing segment instead of a rubber band. Also set when
+  // the cursor is room-snapped onto a wall that would close the loop (§6.3),
+  // so the same affordance reads for both close paths.
   closing: boolean;
+  // The cursor is latched onto an existing room's perimeter geometry (§6.3) —
+  // drives the snap indicator. Transient, never written to the store.
+  snap: DrawRoomSnap | null;
 };
 
 // Reshape mode's vertex drag, transient until release — mirrors RoomDragState's
@@ -353,7 +375,6 @@ export function PlanView({
   onCommitWallLength,
   onMoveRoom,
   onPlaceArtwork,
-  onPlaceArtworkOnFloor,
   onPlaceOpeningFromPlan,
   onSelectArtwork,
   onSelectOpening,
@@ -446,7 +467,6 @@ export function PlanView({
   // still drags and previews live either way, it just never commits.
   onMoveRoom?: (roomId: string, offsetXMm: number, offsetYMm: number) => Promise<void>;
   onPlaceArtwork?: (artworkId: string, wallId: string, xMm: number, yMm: number) => void;
-  onPlaceArtworkOnFloor?: (artworkId: string, xMm: number, yMm: number) => void;
   onPlaceOpeningFromPlan?: (kind: OpeningKind, placement: PlanPlacement) => Promise<void>;
   onSelectArtwork?: (artworkId: string) => void;
   onSelectOpening?: (wallObjectId: string) => void;
@@ -699,7 +719,7 @@ export function PlanView({
         wallObjects: project.wallObjects.filter((object) => object.id !== current.objectId),
         movingSize: current.movingSize,
         movingKind: current.kind,
-        canFloat: current.canFloat,
+        floatPolicy: current.floatPolicy,
         // Live preview's current wall, so hysteresis tracks the drag.
         currentAnchorWallId: current.currentAnchorWallId,
         captureDistanceMm,
@@ -748,6 +768,11 @@ export function PlanView({
         current.previewPlanRect.centerYMm - current.startCenterMm.yMm
       );
       if (movedMm < 0.5) return;
+
+      // A rejected preview (artwork dragged off every wall — wall-only) commits
+      // nothing: the object stays exactly where it was, on its wall or its old
+      // floor spot. The trailing click still re-selects it via onClick.
+      if (current.previewPlacement.anchor === "none") return;
 
       onCommitPlanMove?.(current.objectId, current.previewPlacement);
     }
@@ -1280,7 +1305,7 @@ export function PlanView({
       wallObjects: project.wallObjects,
       movingSize,
       movingKind: activeTool,
-      canFloat: activeTool === "blocked-zone",
+      floatPolicy: activeTool === "blocked-zone" ? "float" : "capture-any",
       currentAnchorWallId: null,
       captureDistanceMm,
       gridTargets: gridSnapTargets,
@@ -1305,7 +1330,9 @@ export function PlanView({
   // one — no store write ever happens for the discarded points (see DrawState).
   useEffect(() => {
     setDraw(
-      drawRoomActive ? { points: [], cursorMm: null, invalid: false, closing: false } : null
+      drawRoomActive
+        ? { points: [], cursorMm: null, invalid: false, closing: false, snap: null }
+        : null
     );
   }, [drawRoomActive]);
 
@@ -1329,7 +1356,7 @@ export function PlanView({
         event.preventDefault();
         setDraw((state) =>
           state
-            ? { ...state, points: state.points.slice(0, -1), invalid: false, closing: false }
+            ? { ...state, points: state.points.slice(0, -1), invalid: false, closing: false, snap: null }
             : state
         );
       }
@@ -1404,6 +1431,44 @@ export function PlanView({
     return result;
   }
 
+  // The draw candidate: existing-room snapping takes PRECEDENCE over grid +
+  // axis-lock (§6.3), so a new room latches onto a placed room and can share a
+  // wall exactly. When nothing is in range it falls back to snapDrawPoint's
+  // grid + previous-point behavior. Shift's H/V lock still applies afterward —
+  // to whichever base point won — exactly as it applies to the grid-snapped
+  // result. Returns the snap so the indicator and close-on-wall test can use it.
+  function snapDrawCandidate(
+    pointerMm: Vector2,
+    prev: Vector2 | null,
+    shiftKey: boolean
+  ): { point: Vector2; snap: DrawRoomSnap | null } {
+    const snap = snapDrawPointToRooms(pointerMm, floorWallsForTool, snapThresholdMm);
+    if (!snap) {
+      return { point: snapDrawPoint(pointerMm, prev, shiftKey), snap: null };
+    }
+    let point: Vector2 = { xMm: snap.pointMm.xMm, yMm: snap.pointMm.yMm };
+    if (shiftKey && prev) {
+      const dx = Math.abs(pointerMm.xMm - prev.xMm);
+      const dy = Math.abs(pointerMm.yMm - prev.yMm);
+      point =
+        dx >= dy ? { xMm: point.xMm, yMm: prev.yMm } : { xMm: prev.xMm, yMm: point.yMm };
+    }
+    return { point, snap };
+  }
+
+  // Does clicking this room-snapped candidate close the loop onto its wall
+  // (§6.3)? Requires ≥3 points, an edge/vertex snap onto a perimeter wall whose
+  // segment also carries points[0], and the closed polygon staying valid
+  // (no self-intersection). Mirrors attemptCloseDraw's simple-polygon gate.
+  function drawCloseOnWall(points: Vector2[], candidate: Vector2, snap: DrawRoomSnap | null): boolean {
+    if (!snap || points.length < 3) return false;
+    const wall = floorWallsForTool.find((candidateWall) => candidateWall.id === snap.wallId);
+    if (!wall) return false;
+    if (!canCloseOnWall(points, candidate, wall)) return false;
+    if (drawSegmentInvalid(points, candidate)) return false;
+    return isSimplePolygon([...points, candidate]);
+  }
+
   // Would the new segment (last point → candidate) cross the placed path? The
   // segment adjacent to it legitimately shares the last vertex, so only a
   // collinear backtrack over that one counts; every earlier segment uses the
@@ -1462,17 +1527,21 @@ export function PlanView({
     if (isWithinClose(current.points, pointerMm)) {
       setDraw((state) =>
         state
-          ? { ...state, cursorMm: state.points[0], invalid: false, closing: true }
+          ? { ...state, cursorMm: state.points[0], invalid: false, closing: true, snap: null }
           : state
       );
       return;
     }
 
     const prev = current.points.at(-1) ?? null;
-    const candidate = snapDrawPoint(pointerMm, prev, event.shiftKey);
-    const invalid = drawSegmentInvalid(current.points, candidate);
+    const { point: candidate, snap } = snapDrawCandidate(pointerMm, prev, event.shiftKey);
+    // A room-snapped candidate on a wall carrying points[0] previews as a
+    // close, not a rubber-band vertex — same `closing` affordance as the
+    // near-first-vertex path so the user sees the click will finish the room.
+    const willClose = drawCloseOnWall(current.points, candidate, snap);
+    const invalid = !willClose && drawSegmentInvalid(current.points, candidate);
     setDraw((state) =>
-      state ? { ...state, cursorMm: candidate, invalid, closing: false } : state
+      state ? { ...state, cursorMm: candidate, invalid, closing: willClose, snap } : state
     );
   }
 
@@ -1498,7 +1567,17 @@ export function PlanView({
     }
 
     const prev = current.points.at(-1) ?? null;
-    const candidate = snapDrawPoint(pointerMm, prev, event.shiftKey);
+    const { point: candidate, snap } = snapDrawCandidate(pointerMm, prev, event.shiftKey);
+    // Closing onto an existing wall (§6.3): append the on-wall candidate and
+    // commit in one shot — same path as attemptCloseDraw — so the shared wall
+    // emerges as coincident geometry. Checked before the min-spacing guard so a
+    // close that lands near the previous vertex still completes.
+    if (drawCloseOnWall(current.points, candidate, snap)) {
+      const closedPoints = [...current.points, candidate];
+      onAddPolygonRoom?.(closedPoints.map((point) => ({ xMm: point.xMm, yMm: point.yMm })));
+      onDrawRoomChange?.(false);
+      return;
+    }
     if (
       prev &&
       Math.hypot(candidate.xMm - prev.xMm, candidate.yMm - prev.yMm) < MIN_DRAW_SPACING_MM
@@ -1511,7 +1590,13 @@ export function PlanView({
     }
     setDraw((state) =>
       state
-        ? { points: [...state.points, candidate], cursorMm: candidate, invalid: false, closing: false }
+        ? {
+            points: [...state.points, candidate],
+            cursorMm: candidate,
+            invalid: false,
+            closing: false,
+            snap
+          }
         : state
     );
   }
@@ -1589,7 +1674,7 @@ export function PlanView({
       wallObjects: project.wallObjects,
       movingSize,
       movingKind: activeTool,
-      canFloat: activeTool === "blocked-zone",
+      floatPolicy: activeTool === "blocked-zone" ? "float" : "capture-any",
       currentAnchorWallId: null,
       captureDistanceMm,
       gridTargets: gridSnapTargets,
@@ -1597,6 +1682,11 @@ export function PlanView({
       thresholdMm: snapThresholdMm,
       previousSnapTargetIds: toolSnapTargetIdsRef.current
     });
+
+    // Door/window/blocked-zone tools never reject (float or capture-any), so
+    // "none" is unreachable here — this guard just narrows the type for the
+    // store call, which only accepts a committable PlanPlacement.
+    if (result.placement.anchor === "none") return;
 
     const kind = activeTool;
     // Single-shot: disarm immediately so the tool never lingers armed after
@@ -1801,7 +1891,14 @@ export function PlanView({
       if (!wall) continue;
       if (
         planRectIntersectsRect(
-          getWallObjectPlanRect(wall, object, effectiveWallObjectDepthMm),
+          // Artwork renders offset to the viewer's side (spec §5.3); picking
+          // must follow what's on screen, not the wall centerline.
+          getWallObjectPlanRect(
+            wall,
+            object,
+            effectiveWallObjectDepthMm,
+            object.kind === "artwork"
+          ),
           marqueeRect
         )
       ) {
@@ -1913,7 +2010,7 @@ export function PlanView({
         startObjectDrag({
           objectId: params.objectId,
           kind: params.kind,
-          canFloat: params.kind === "artwork" || params.kind === "blocked-zone",
+          floatPolicy: floatPolicyForKind(params.kind),
           movingSize: params.movingSize,
           rotationDeg: params.rotationDeg,
           startPointerMm,
@@ -1935,7 +2032,7 @@ export function PlanView({
     startObjectDrag({
       objectId: params.objectId,
       kind: params.kind,
-      canFloat: params.kind === "artwork" || params.kind === "blocked-zone",
+      floatPolicy: floatPolicyForKind(params.kind),
       movingSize: params.movingSize,
       rotationDeg: params.rotationDeg,
       startPointerMm,
@@ -1998,7 +2095,9 @@ export function PlanView({
       wallObjects: project.wallObjects,
       movingSize: dims,
       movingKind: "artwork",
-      canFloat: true,
+      // Artwork is wall-only: a drop that doesn't capture a wall is rejected
+      // (resolves to `{ anchor: "none" }`), never floor-placed.
+      floatPolicy: "reject",
       currentAnchorWallId: null,
       captureDistanceMm,
       gridTargets: gridSnapTargets,
@@ -2051,15 +2150,15 @@ export function PlanView({
       effectiveArtworkDims(artworkId),
       bypassSnap
     ).placement;
-    if (placement.anchor === "wall") {
-      const wall = floorWallsForTool.find((candidate) => candidate.id === placement.wallId);
-      // A wall-dropped artwork hangs at the wall's centerline (its own default,
-      // or the project default) — plan view chooses no y itself.
-      const yMm = wall?.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
-      onPlaceArtwork?.(artworkId, placement.wallId, placement.xMm, yMm);
-    } else {
-      onPlaceArtworkOnFloor?.(artworkId, placement.xMm, placement.yMm);
-    }
+    // Artwork is wall-only: only a wall capture commits. `anchor: "none"` (no
+    // wall in range) is a rejected drop — a no-op, matching the danger ghost the
+    // user saw. "floor" is unreachable under the "reject" policy.
+    if (placement.anchor !== "wall") return;
+    const wall = floorWallsForTool.find((candidate) => candidate.id === placement.wallId);
+    // A wall-dropped artwork hangs at the wall's centerline (its own default,
+    // or the project default) — plan view chooses no y itself.
+    const yMm = wall?.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
+    onPlaceArtwork?.(artworkId, placement.wallId, placement.xMm, yMm);
   }
 
   function handleArtworkDragOver(event: ReactDragEvent<HTMLDivElement>) {
@@ -2497,30 +2596,47 @@ export function PlanView({
                   (objectDrag && !objectDrag.members && objectDrag.objectId === wallObject.id
                     ? objectDrag.previewPlanRect
                     : restRect);
-                // A single drag reflects whether the live preview left the wall
-                // (dashed floor look); a group drag is translation-only so a
-                // wall member stays on its wall; at rest never floor-placed.
-                const isFloorPlaced =
+                // The live single-drag preview's anchor drives the look: "floor"
+                // → dashed floor object; "none" → danger token (artwork dragged
+                // off every wall — a refused move). A group drag is translation-
+                // only so a wall member stays on its wall; at rest, on the wall.
+                const previewAnchor =
                   objectDrag != null &&
                   !objectDrag.members &&
-                  objectDrag.objectId === wallObject.id &&
-                  objectDrag.previewPlacement.anchor === "floor";
+                  objectDrag.objectId === wallObject.id
+                    ? objectDrag.previewPlacement.anchor
+                    : null;
+                const isFloorPlaced = previewAnchor === "floor";
+                const isInvalid = previewAnchor === "none";
                 const isSelected =
                   (wallObject.kind === "artwork"
                     ? wallObject.artworkId === selectedArtworkId
                     : wallObject.id === selectedOpeningId) ||
                   selectedObjectIds.includes(wallObject.id);
                 // On-screen depth floor so thin doors/windows stay visible when
-                // zoomed out — only while still wall-anchored (a floated preview
-                // already carries its real floor-object depth).
-                const renderedPlanRect = isFloorPlaced
-                  ? planRect
-                  : { ...planRect, depthMm: Math.max(planRect.depthMm, wallObjectMinDepthMm) };
+                // zoomed out — only while still wall-anchored (a floated/rejected
+                // preview already carries its real floor-object depth and sits off
+                // the wall, so it's drawn at its own center, not offset). Artwork
+                // additionally shifts to the viewer's side of the wall line (spec
+                // §5.3) here, at the very last step before rendering, so it applies
+                // identically to the rest rect AND any live single/group drag
+                // preview — the offset never disagrees between mid-drag and
+                // on-release, so nothing jumps.
+                const renderedPlanRect =
+                  isFloorPlaced || isInvalid
+                    ? planRect
+                    : {
+                        ...(wallObject.kind === "artwork"
+                          ? offsetPlanRectToViewerSide(planRect)
+                          : planRect),
+                        depthMm: Math.max(planRect.depthMm, wallObjectMinDepthMm)
+                      };
 
                 return (
                   <PlanObject
                     hitMinSizeMm={objectHitMinMm}
                     isFloorPlaced={isFloorPlaced}
+                    isInvalid={isInvalid}
                     isSelected={isSelected}
                     key={wallObject.id}
                     kind={wallObject.kind}
@@ -2595,11 +2711,15 @@ export function PlanView({
                     : restRect);
                 // A floor object reads floor-placed at rest and under a group
                 // drag (translation-only keeps it on the floor); a single drag
-                // follows the preview (a floor→wall drag drops the dashed look).
-                const isFloorPlaced =
+                // follows the preview — a floor→wall drag drops the dashed look,
+                // and an artwork dragged nowhere ("none") shows the danger token
+                // (the move is refused, it stays at its old floor spot on release).
+                const previewAnchor =
                   objectDrag && !objectDrag.members && objectDrag.objectId === floorObject.id
-                    ? objectDrag.previewPlacement.anchor === "floor"
-                    : true;
+                    ? objectDrag.previewPlacement.anchor
+                    : null;
+                const isFloorPlaced = previewAnchor === null ? true : previewAnchor === "floor";
+                const isInvalid = previewAnchor === "none";
                 const isSelected =
                   (floorObject.kind === "artwork"
                     ? floorObject.artworkId === selectedArtworkId
@@ -2610,6 +2730,7 @@ export function PlanView({
                   <PlanObject
                     hitMinSizeMm={objectHitMinMm}
                     isFloorPlaced={isFloorPlaced}
+                    isInvalid={isInvalid}
                     isSelected={isSelected}
                     key={floorObject.id}
                     kind={floorObject.kind}
@@ -2864,6 +2985,11 @@ export function PlanView({
                   ? Math.hypot(rubberEnd.xMm - last.xMm, rubberEnd.yMm - last.yMm)
                   : null;
               const vertexSizeMm = handleSizeMm > 0 ? handleSizeMm : 0;
+              // The existing room geometry the cursor is latched onto (§6.3),
+              // so the snap indicator can also highlight the shared wall.
+              const snapWall = draw.snap
+                ? floorWallsForTool.find((wall) => wall.id === draw.snap?.wallId) ?? null
+                : null;
 
               return (
                 <g className="draw-room-layer">
@@ -2919,6 +3045,32 @@ export function PlanView({
                         );
                       })
                     : null}
+                  {/* Room-snap indicator (§6.3): a crisp filled petrol square
+                      on the snapped point, with the shared wall segment
+                      highlighted in the same selection token — no pills, no
+                      circles, matching the draw preview's design language. */}
+                  {draw.snap && snapWall ? (
+                    <line
+                      className="draw-snap-wall"
+                      x1={snapWall.startFloorMm.xMm}
+                      y1={snapWall.startFloorMm.yMm}
+                      x2={snapWall.endFloorMm.xMm}
+                      y2={snapWall.endFloorMm.yMm}
+                      vectorEffect="non-scaling-stroke"
+                      style={{ pointerEvents: "none" }}
+                    />
+                  ) : null}
+                  {draw.snap && vertexSizeMm > 0 ? (
+                    <rect
+                      className="draw-snap-marker"
+                      x={draw.snap.pointMm.xMm - vertexSizeMm / 2}
+                      y={draw.snap.pointMm.yMm - vertexSizeMm / 2}
+                      width={vertexSizeMm}
+                      height={vertexSizeMm}
+                      vectorEffect="non-scaling-stroke"
+                      style={{ pointerEvents: "none" }}
+                    />
+                  ) : null}
                   {segmentLengthMm != null && rubberEnd && vertexSizeMm > 0 ? (
                     <text
                       className="resize-handle-label"
@@ -2996,11 +3148,17 @@ export function PlanView({
         {dropGhost ? (
           <PlanObject
             isGhost
+            // No wall captured → wall-only artwork can't land here: paint the
+            // danger token so the refusal reads before release.
+            isInvalid={dropGhost.placement.anchor === "none"}
             kind="artwork"
             planRect={
               dropGhost.placement.anchor === "wall"
                 ? {
-                    ...dropGhost.planRect,
+                    // Always artwork (checklist drag-in) — offset to the
+                    // viewer's side (spec §5.3) so the drop ghost matches
+                    // where the placed glyph will actually render.
+                    ...offsetPlanRectToViewerSide(dropGhost.planRect),
                     depthMm: Math.max(dropGhost.planRect.depthMm, wallObjectMinDepthMm)
                   }
                 : dropGhost.planRect

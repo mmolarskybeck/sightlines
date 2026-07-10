@@ -15,6 +15,7 @@ export function PlanObject({
   hitMinSizeMm = 0,
   isFloorPlaced = false,
   isGhost = false,
+  isInvalid = false,
   isSelected = false,
   kind,
   onBeginDrag,
@@ -30,6 +31,10 @@ export function PlanObject({
   // A click-to-place (or drop) preview: non-interactive, translucent,
   // dashed — same convention as ElevationArtwork's `isGhost`.
   isGhost?: boolean;
+  // The current preview position can't commit (a wall-only artwork dragged/
+  // dropped off every wall): paints the danger token. Overrides selection/ghost
+  // strokes — the refusal must read regardless of the object's other state.
+  isInvalid?: boolean;
   isSelected?: boolean;
   kind: "door" | "window" | "blocked-zone" | "artwork";
   // Starts a pointer-drag move of this object (PlanView owns the live preview
@@ -52,6 +57,7 @@ export function PlanObject({
   if (isFloorPlaced) classNames.push("is-floor");
   if (isSelected) classNames.push("is-selected");
   if (isGhost) classNames.push("is-ghost");
+  if (isInvalid) classNames.push("is-invalid");
 
   const x = planRect.centerXMm - planRect.widthMm / 2;
   const y = planRect.centerYMm - planRect.depthMm / 2;

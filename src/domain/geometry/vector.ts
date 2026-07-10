@@ -85,3 +85,27 @@ export function unitLeftNormalOrZero(from: Vector2, to: Vector2): Vector2 {
   if (length === 0) return { xMm: 0, yMm: 0 };
   return { xMm: -axis.yMm / length, yMm: axis.xMm / length };
 }
+
+// The point `distanceMm` along a UNIT direction from `origin`. Callers own the
+// unit-length contract (directions here come from normalized wall axes);
+// passing an unnormalized direction scales the distance silently.
+export function pointAlong(origin: Vector2, direction: Vector2, distanceMm: number): Vector2 {
+  return add(origin, scale(direction, distanceMm));
+}
+
+// Signed distance of `point` along a UNIT `axis` anchored at `origin` — the
+// scalar projection used to express floor-space points in wall-local x.
+export function projectScalar(point: Vector2, origin: Vector2, axis: Vector2): number {
+  return dot(subtract(point, origin), axis);
+}
+
+// Perpendicular distance from `point` to the infinite line through
+// `lineOrigin` along UNIT `lineDirection` (|cross| of the offset against the
+// direction).
+export function pointToLineDistance(
+  point: Vector2,
+  lineOrigin: Vector2,
+  lineDirection: Vector2
+): number {
+  return Math.abs(cross(lineDirection, subtract(point, lineOrigin)));
+}

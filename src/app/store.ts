@@ -33,6 +33,11 @@ import {
   getRoomCascadeScope
 } from "../domain/geometry/roomCascade";
 import { getFloorWalls } from "../domain/geometry/planObjects";
+import { evaluateOpeningPair } from "../domain/geometry/openingConnections";
+import {
+  findSharedWallCounterpart,
+  mirrorOpeningXMm
+} from "../domain/geometry/sharedWalls";
 import type { PlanPlacement } from "../domain/snapping/planSnapTargets";
 import { createBlankProject } from "../domain/newProject";
 import { newId } from "../domain/id";
@@ -2102,16 +2107,30 @@ export function createAppStore(deps: AppStoreDeps) {
         // floor-placed object too (ids are unique across both arrays) —
         // there's no checklist-membership concept to preserve for those.
         //
-        // clearOpeningPartners clears any surviving partner's
-        // connectsToObjectId that pointed at this removed opening, so no
-        // dangling pairing ref persists.
+        // Shared-wall full-sync delete (spec §5.5): removing a paired
+        // door/window removes its twin in the same commit, so the two rooms
+        // never diverge. (Deleting a whole ROOM only disconnects the neighbor's
+        // opening — that cascade is elsewhere and deliberately unchanged.)
+        // clearOpeningPartners still clears any other surviving partner's
+        // connectsToObjectId that pointed at a removed opening, so no dangling
+        // pairing ref persists.
+        const removed = project.wallObjects.find((wallObject) => wallObject.id === wallObjectId);
+        const removedIds = new Set([wallObjectId]);
+        if (
+          removed &&
+          (removed.kind === "door" || removed.kind === "window") &&
+          removed.connectsToObjectId !== undefined
+        ) {
+          removedIds.add(removed.connectsToObjectId);
+        }
+
         const nextProject: Project = {
           ...project,
           wallObjects: clearOpeningPartners(
-            project.wallObjects.filter((wallObject) => wallObject.id !== wallObjectId),
-            new Set([wallObjectId])
+            project.wallObjects.filter((wallObject) => !removedIds.has(wallObject.id)),
+            removedIds
           ),
-          floorObjects: project.floorObjects.filter((floorObject) => floorObject.id !== wallObjectId)
+          floorObjects: project.floorObjects.filter((floorObject) => !removedIds.has(floorObject.id))
         };
 
         await applyEdit("Remove from wall", () => nextProject);
@@ -2144,10 +2163,16 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
-        // buildOpeningOnWall is shared with placeOpeningFromPlan, whose only
-        // difference is the chosen xMm (the plan drop point vs. wall center).
-        const placement = buildOpeningOnWall(project, wall, kind, xMm);
-        const nextWallObjects = [...project.wallObjects, placement];
+        // buildOpeningWithMirror is shared with placeOpeningFromPlan, whose only
+        // difference is the chosen xMm (the plan drop point vs. wall center). It
+        // also mirrors the opening onto a coincident twin wall in the same array
+        // when the wall is shared between two rooms (spec §5.5).
+        const { nextWallObjects, primaryId, validateIds } = buildOpeningWithMirror(
+          project,
+          wall,
+          kind,
+          xMm
+        );
 
         // Adding an opening is never blocked by a collision (there's no
         // allowOverlap knob for it) — allowOverlap: true skips the gate while
@@ -2156,14 +2181,15 @@ export function createAppStore(deps: AppStoreDeps) {
           `Add ${openingNoun(kind)}`,
           project,
           nextWallObjects,
-          [placement.id],
+          validateIds,
           true,
           {
             // Selecting a placement is an objects selection now (openings fold
             // into the union) — the freshly-added opening becomes the selection.
+            // A mirrored twin is created silently; only the primary is selected.
             extras: selectionWrite(
               { ...project, wallObjects: nextWallObjects },
-              { kind: "objects", ids: [placement.id] },
+              { kind: "objects", ids: [primaryId] },
               get().wallContextId
             )
           }
@@ -2178,9 +2204,24 @@ export function createAppStore(deps: AppStoreDeps) {
         if (!target || target.kind === "artwork") return;
         if (target.xMm === xMm && target.yMm === yMm) return;
 
-        const nextWallObjects = project.wallObjects.map((wallObject) =>
+        let nextWallObjects = project.wallObjects.map((wallObject) =>
           wallObject.id === wallObjectId ? { ...wallObject, xMm, yMm } : wallObject
         );
+        let validateIds = [wallObjectId];
+
+        // Shared-wall sync: a paired door/window drags its twin in the same
+        // commit so the two rooms stay aligned (spec §5.5) — unless the mirrored
+        // slot would collide, in which case only the target moves.
+        if (
+          (target.kind === "door" || target.kind === "window") &&
+          target.connectsToObjectId !== undefined
+        ) {
+          const synced = syncPartnerMove(project, nextWallObjects, target, xMm, yMm);
+          if (synced) {
+            nextWallObjects = synced.nextWallObjects;
+            validateIds = [wallObjectId, synced.partnerId];
+          }
+        }
 
         // Same shape as moveArtworkPlacement: the UI previews the drag
         // locally and calls this exactly once on release.
@@ -2188,7 +2229,7 @@ export function createAppStore(deps: AppStoreDeps) {
           `Move ${openingNoun(target.kind)}`,
           project,
           nextWallObjects,
-          [wallObjectId],
+          validateIds,
           allowOverlap
         );
       },
@@ -2201,15 +2242,30 @@ export function createAppStore(deps: AppStoreDeps) {
         if (!target || target.kind === "artwork") return;
         if (target.widthMm === widthMm && target.heightMm === heightMm) return;
 
-        const nextWallObjects = project.wallObjects.map((wallObject) =>
+        let nextWallObjects = project.wallObjects.map((wallObject) =>
           wallObject.id === wallObjectId ? { ...wallObject, widthMm, heightMm } : wallObject
         );
+        let validateIds = [wallObjectId];
+
+        // Shared-wall sync: mirror the new size onto a paired twin in the same
+        // commit (spec §5.5), skipping the twin when its new footprint would
+        // collide with another opening on its wall.
+        if (
+          (target.kind === "door" || target.kind === "window") &&
+          target.connectsToObjectId !== undefined
+        ) {
+          const synced = syncPartnerResize(project, nextWallObjects, target, widthMm, heightMm);
+          if (synced) {
+            nextWallObjects = synced.nextWallObjects;
+            validateIds = [wallObjectId, synced.partnerId];
+          }
+        }
 
         await commitWallObjectEdit(
           `Resize ${openingNoun(target.kind)}`,
           project,
           nextWallObjects,
-          [wallObjectId],
+          validateIds,
           allowOverlap
         );
       },
@@ -2310,8 +2366,9 @@ export function createAppStore(deps: AppStoreDeps) {
         if (placement.anchor === "floor") {
           // Only blocked zones can float. Doors and windows are excluded from
           // floor placement by the domain (FloorObject has no door/window
-          // kind) and callers gate this on canFloat, so a door/window landing
-          // here is an invariant break, not a user path — fail loudly.
+          // kind) and resolve under the "capture-any" float policy, so a
+          // door/window landing here is an invariant break, not a user path —
+          // fail loudly.
           if (kind !== "blocked-zone") {
             throw new Error(
               `Cannot place a ${kind} on the floor — only blocked zones can be floor-placed.`
@@ -2374,20 +2431,26 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
-        const opening = buildOpeningOnWall(project, wall, kind, xMm);
-        const nextWallObjects = [...project.wallObjects, opening];
+        // Same shared-wall mirroring as addOpening (spec §5.5): a twin wall gets
+        // a paired opening in the same single commit.
+        const { nextWallObjects, primaryId, validateIds } = buildOpeningWithMirror(
+          project,
+          wall,
+          kind,
+          xMm
+        );
 
         // Same as addOpening: never blocked by a collision.
         await commitWallObjectEdit(
           `Add ${openingNoun(kind)}`,
           project,
           nextWallObjects,
-          [opening.id],
+          validateIds,
           true,
           {
             extras: selectionWrite(
               { ...project, wallObjects: nextWallObjects },
-              { kind: "objects", ids: [opening.id] },
+              { kind: "objects", ids: [primaryId] },
               get().wallContextId
             )
           }
@@ -2636,6 +2699,204 @@ function buildOpeningOnWall(
 ): OpeningWallObject {
   const centerlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
   return createOpeningPlacement(kind, wall.id, xMm, centerlineYMm);
+}
+
+// Builds the wallObjects for adding an opening on `wall`, mirroring it onto a
+// coincident twin wall (shared-wall pairing, spec §5.5) when `wall` has one.
+// The primary opening always exists; when a twin is present the result also
+// either connects to an alignable existing opening there or carries a fresh
+// paired twin — all in one array so the caller commits it as a single edit
+// (one undo step). Selection stays on the primary (its id is returned).
+function buildOpeningWithMirror(
+  project: Project,
+  wall: WallWithGeometry,
+  kind: OpeningKind,
+  xMm: number
+): { nextWallObjects: WallObject[]; primaryId: string; validateIds: string[] } {
+  const primary = buildOpeningOnWall(project, wall, kind, xMm);
+  const unpaired = {
+    nextWallObjects: [...project.wallObjects, primary],
+    primaryId: primary.id,
+    validateIds: [primary.id]
+  };
+
+  // Blocked zones never pair (spec §5.5); only doors and windows mirror. This
+  // also narrows `primary` to a connectable opening for the pointer writes.
+  if (primary.kind !== "door" && primary.kind !== "window") return unpaired;
+
+  const counterpart = findSharedWallCounterpart(project, wall.id, xMm, primary.widthMm);
+  if (!counterpart) return unpaired;
+
+  // Prefer connecting to an existing, unpaired, same-kind opening already on
+  // the twin wall when the pair would read as aligned — one shared opening
+  // rather than a duplicate stacked over it.
+  const withPrimary: Project = { ...project, wallObjects: [...project.wallObjects, primary] };
+  const connectable = project.wallObjects
+    .filter(
+      (object): object is ConnectableOpeningWallObject =>
+        (object.kind === "door" || object.kind === "window") &&
+        object.kind === primary.kind &&
+        object.wallId === counterpart.wallId &&
+        object.connectsToObjectId === undefined
+    )
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .find(
+      (object) => evaluateOpeningPair(withPrimary, primary.id, object.id).status === "aligned"
+    );
+
+  if (connectable) {
+    const nextWallObjects = withPrimary.wallObjects.map((object) => {
+      if (object.id === primary.id) return { ...primary, connectsToObjectId: connectable.id };
+      if (object.id === connectable.id) return { ...connectable, connectsToObjectId: primary.id };
+      return object;
+    });
+    return { nextWallObjects, primaryId: primary.id, validateIds: [primary.id] };
+  }
+
+  // Otherwise mirror a fresh twin at the mirrored x — but only when that slot is
+  // clear of a forbidden opening×opening overlap. An occupied slot (or a twin
+  // wall that vanished) falls through to placing the primary alone, exactly as
+  // without a shared wall.
+  const twinWall = getProjectWalls(project).find((candidate) => candidate.id === counterpart.wallId);
+  if (twinWall && isTwinSlotFree(project, twinWall, kind, counterpart.xMm)) {
+    const twin = buildOpeningOnWall(project, twinWall, kind, counterpart.xMm);
+    // buildOpeningOnWall with a door/window kind returns a connectable opening;
+    // the guard narrows the union so the symmetric pointer writes typecheck.
+    if (twin.kind === "door" || twin.kind === "window") {
+      return {
+        nextWallObjects: [
+          ...project.wallObjects,
+          { ...primary, connectsToObjectId: twin.id },
+          { ...twin, connectsToObjectId: primary.id }
+        ],
+        primaryId: primary.id,
+        validateIds: [primary.id, twin.id]
+      };
+    }
+  }
+
+  return unpaired;
+}
+
+// Whether an opening of the given `size` centered at (`xMm`, `centerYMm`) on
+// `wall` would sit clear of a forbidden opening×opening overlap
+// (overlapPolicy.ts). Reuses the creation-time free-slot search: the preferred x
+// is returned unchanged only when it's already free, so an exact-match result
+// means "no overlap here." `ignoreOpeningId` excludes an opening being
+// moved/resized (its own current slot) from the blockers.
+function isOpeningSlotFree(
+  project: Project,
+  wall: WallWithGeometry,
+  size: { widthMm: number; heightMm: number },
+  centerYMm: number,
+  xMm: number,
+  ignoreOpeningId: string | null
+): boolean {
+  const sameWallOpenings = project.wallObjects.filter(
+    (object) =>
+      object.wallId === wall.id &&
+      object.kind !== "artwork" &&
+      object.id !== ignoreOpeningId
+  );
+  const freeXMm = findFreeOpeningCenterXMm({
+    preferredXMm: xMm,
+    sizeMm: size,
+    centerYMm,
+    wallLengthMm: wall.lengthMm,
+    sameWallOpenings
+  });
+  return freeXMm !== null && Math.abs(freeXMm - xMm) < 1;
+}
+
+// The fresh-twin case: a mirrored twin takes the default size/centerline for its
+// kind, so resolve those the same way buildOpeningOnWall/resolveFreeOpeningXMm do
+// before testing the slot.
+function isTwinSlotFree(
+  project: Project,
+  wall: WallWithGeometry,
+  kind: OpeningKind,
+  xMm: number
+): boolean {
+  const { widthMm, heightMm } = getDefaultOpeningSizeMm(kind);
+  const centerlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
+  const centerYMm = getDefaultOpeningCenterYMm(kind, heightMm, centerlineYMm);
+  return isOpeningSlotFree(project, wall, { widthMm, heightMm }, centerYMm, xMm, null);
+}
+
+// Shared-wall move sync: given the wallObjects with the target already moved to
+// (`targetXMm`, `targetYMm`), returns them with the target's paired twin dragged
+// so the pair stays aligned across the two rooms — the twin's x is the target's
+// new floor-space center projected onto the twin's wall, its y tracks the
+// target. Returns null (leave the twin put) when there is no live partner or
+// when the mirrored slot would collide with another opening on the twin's wall
+// (a forbidden opening×opening overlap); the pair then reads "misaligned" via
+// the existing advisory, the deliberate fallback.
+function syncPartnerMove(
+  project: Project,
+  movedWallObjects: WallObject[],
+  target: ConnectableOpeningWallObject,
+  targetXMm: number,
+  targetYMm: number
+): { nextWallObjects: WallObject[]; partnerId: string } | null {
+  const partnerId = target.connectsToObjectId;
+  if (partnerId === undefined) return null;
+  const partner = project.wallObjects.find((object) => object.id === partnerId);
+  if (!partner || (partner.kind !== "door" && partner.kind !== "window")) return null;
+
+  const partnerXMm = mirrorOpeningXMm(project, target.wallId, partner.wallId, targetXMm);
+  if (partnerXMm === null) return null;
+
+  const twinWall = getProjectWalls(project).find((candidate) => candidate.id === partner.wallId);
+  if (!twinWall) return null;
+  if (
+    !isOpeningSlotFree(
+      project,
+      twinWall,
+      { widthMm: partner.widthMm, heightMm: partner.heightMm },
+      targetYMm,
+      partnerXMm,
+      partner.id
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    nextWallObjects: movedWallObjects.map((object) =>
+      object.id === partner.id ? { ...object, xMm: partnerXMm, yMm: targetYMm } : object
+    ),
+    partnerId
+  };
+}
+
+// Shared-wall resize sync: mirrors the target's new width/height onto its paired
+// twin (the twin keeps its own position). Same collision-skip exception as the
+// move: if the twin's new footprint at its current x would overlap another
+// opening, leave the twin unchanged.
+function syncPartnerResize(
+  project: Project,
+  resizedWallObjects: WallObject[],
+  target: ConnectableOpeningWallObject,
+  widthMm: number,
+  heightMm: number
+): { nextWallObjects: WallObject[]; partnerId: string } | null {
+  const partnerId = target.connectsToObjectId;
+  if (partnerId === undefined) return null;
+  const partner = project.wallObjects.find((object) => object.id === partnerId);
+  if (!partner || (partner.kind !== "door" && partner.kind !== "window")) return null;
+
+  const twinWall = getProjectWalls(project).find((candidate) => candidate.id === partner.wallId);
+  if (!twinWall) return null;
+  if (!isOpeningSlotFree(project, twinWall, { widthMm, heightMm }, partner.yMm, partner.xMm, partner.id)) {
+    return null;
+  }
+
+  return {
+    nextWallObjects: resizedWallObjects.map((object) =>
+      object.id === partner.id ? { ...object, widthMm, heightMm } : object
+    ),
+    partnerId
+  };
 }
 
 // Resolves a collision-free x-center for a new opening on `wall`, sliding it
