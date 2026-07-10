@@ -16,6 +16,14 @@ export const artworkSchema = z.object({
   accessionNumber: z.string().optional(),
   locationOrLender: z.string().optional(),
   dimensions: dimensionsSchema,
+  // Optional, additive (no schema-version bump) — absent on legacy records.
+  matWidthMm: z.number().positive().optional(),
+  frame: z
+    .object({
+      widthMm: z.number().positive(),
+      finish: z.enum(["gold", "white", "black", "silver", "wood"])
+    })
+    .optional(),
   assetId: z.string().min(1).optional(),
   metadata: z.record(z.union([z.string(), z.number(), z.boolean()]))
 });

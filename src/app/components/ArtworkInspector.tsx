@@ -2,13 +2,19 @@ import { useEffect, useState, type ReactNode } from "react";
 import { LinkBreakIcon } from "@phosphor-icons/react/dist/csr/LinkBreak";
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/csr/LockSimple";
 import { LockSimpleOpenIcon } from "@phosphor-icons/react/dist/csr/LockSimpleOpen";
-import type { Artwork, Dimensions, DisplayUnit } from "../../domain/project";
+import type { Artwork, ArtworkFrame, Dimensions, DisplayUnit } from "../../domain/project";
 import {
   applyAspectFill,
   imageAspectRatio,
   isAspectLocked,
   type PixelAspect
 } from "../../domain/units/aspectFill";
+import {
+  FRAME_FINISHES,
+  deriveFrameWidthFromOverallMm,
+  getArtworkOuterDimensionsMm
+} from "../../domain/framing";
+import { formatLength } from "../../domain/units/length";
 import { getScopedUnitContext } from "./scopedUnits";
 import { useArtworkAsset } from "../hooks/useArtworkAsset";
 import { LengthField } from "./LengthField";
@@ -62,6 +68,7 @@ export function ArtworkInspector({
   placementSection,
   onCommitDimensions,
   onCommitField,
+  onCommitFraming,
   onRemovePlacement,
   unit
 }: {
@@ -79,6 +86,7 @@ export function ArtworkInspector({
   onCommitField: (
     changes: Partial<Pick<Artwork, ArtworkTextFieldKey>>
   ) => void;
+  onCommitFraming: (changes: Partial<Pick<Artwork, "matWidthMm" | "frame">>) => void;
   onRemovePlacement?: () => void;
   unit: DisplayUnit;
 }) {
@@ -129,6 +137,16 @@ export function ArtworkInspector({
         aspect={aspect}
         dimensions={artwork.dimensions}
         onCommitDimensions={onCommitDimensions}
+        unit={unit}
+      />
+
+      {/* Mat + frame ride right below dimensions — they change the physical
+          size a work occupies on the wall. */}
+      <FramingSection
+        dimensions={artwork.dimensions}
+        frame={artwork.frame}
+        matWidthMm={artwork.matWidthMm}
+        onCommitFraming={onCommitFraming}
         unit={unit}
       />
 
@@ -322,6 +340,158 @@ function DimensionsSection({
           </SelectContent>
         </Select>
       </label>
+    </div>
+  );
+}
+
+// Sensible default frame face width (~1 in) when a curator picks a finish
+// before typing a width — the frame is only ever created with a real width.
+const DEFAULT_FRAME_WIDTH_MM = 25.4;
+
+function FramingSection({
+  dimensions,
+  frame,
+  matWidthMm,
+  onCommitFraming,
+  unit
+}: {
+  dimensions: Dimensions;
+  frame?: ArtworkFrame;
+  matWidthMm?: number;
+  onCommitFraming: (changes: Partial<Pick<Artwork, "matWidthMm" | "frame">>) => void;
+  unit: DisplayUnit;
+}) {
+  const { displayUnit, parseUnit, placeholder, system } = getScopedUnitContext(unit, "artwork");
+
+  // Band-width examples, not conversions — these fields take the width of the
+  // mat/frame BAND, not the framed size of the work, and a concrete small
+  // example (3in mat, 1in frame) is the fastest way to say so.
+  const matPlaceholder = system === "imperial" ? 'e.g. 3"' : "e.g. 75 mm";
+  const framePlaceholder = system === "imperial" ? 'e.g. 1"' : "e.g. 25 mm";
+
+  // Overall footprint only reads when both image faces are measured — a
+  // half-known work has no meaningful outer size to quote or edit.
+  const overall =
+    dimensions.widthMm !== undefined && dimensions.heightMm !== undefined
+      ? getArtworkOuterDimensionsMm(dimensions.widthMm, dimensions.heightMm, matWidthMm, frame)
+      : undefined;
+
+  // Editing an overall dim solves for the FRAME band only (mat stays as
+  // entered); bands are uniform, so committing either axis updates both —
+  // same spirit as the image dims' aspect-ratio autofill. A too-small entry
+  // throws, which LengthField surfaces in its reserved message slot without
+  // committing; an entry exactly equal to image + 2·mat clears the frame.
+  const commitOverall = (imageMm: number) => (overallMm: number) => {
+    const derivation = deriveFrameWidthFromOverallMm(overallMm, imageMm, matWidthMm);
+
+    if (!derivation.ok) {
+      throw new Error(
+        `Overall must be at least ${formatLength(derivation.minOverallMm, {
+          unit: displayUnit
+        })} (image plus mat).`
+      );
+    }
+
+    onCommitFraming({
+      frame:
+        derivation.frameWidthMm === undefined
+          ? undefined
+          : { widthMm: derivation.frameWidthMm, finish: frame?.finish ?? "black" }
+    });
+  };
+
+  return (
+    <div className="artwork-dimensions">
+      <div className="artwork-dimensions-heading">
+        <h3>Mat &amp; frame</h3>
+      </div>
+
+      <div className="artwork-dimensions-grid">
+        <LengthField
+          compact
+          clearable
+          positiveOnly
+          label="Mat"
+          valueMm={matWidthMm}
+          displayUnit={displayUnit}
+          parseUnit={parseUnit}
+          placeholder={matPlaceholder}
+          onClear={() => onCommitFraming({ matWidthMm: undefined })}
+          onCommit={(valueMm) => onCommitFraming({ matWidthMm: valueMm })}
+        />
+        <LengthField
+          compact
+          clearable
+          positiveOnly
+          label="Frame"
+          valueMm={frame?.widthMm}
+          displayUnit={displayUnit}
+          parseUnit={parseUnit}
+          placeholder={framePlaceholder}
+          // Clearing the frame width removes the frame entirely; setting it
+          // keeps (or defaults) the finish.
+          onClear={() => onCommitFraming({ frame: undefined })}
+          onCommit={(valueMm) =>
+            onCommitFraming({
+              frame: { widthMm: valueMm, finish: frame?.finish ?? "black" }
+            })
+          }
+        />
+      </div>
+
+      <label className="field-row compact">
+        <span>Finish</span>
+        <Select
+          value={frame?.finish ?? "black"}
+          onValueChange={(value) =>
+            onCommitFraming({
+              frame: {
+                widthMm: frame?.widthMm ?? DEFAULT_FRAME_WIDTH_MM,
+                finish: value as ArtworkFrame["finish"]
+              }
+            })
+          }
+        >
+          <SelectTrigger aria-label="Frame finish">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {FRAME_FINISHES.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </label>
+
+      {overall && dimensions.widthMm !== undefined && dimensions.heightMm !== undefined ? (
+        // Editable overall footprint (image + mat + frame per side, W × H):
+        // shows the current effective outer dims at rest; committing either
+        // one re-derives the frame band (see commitOverall above).
+        <div className="artwork-dimensions-grid">
+          <LengthField
+            compact
+            positiveOnly
+            label="Overall W"
+            valueMm={overall.widthMm}
+            displayUnit={displayUnit}
+            parseUnit={parseUnit}
+            placeholder={placeholder}
+            onCommit={commitOverall(dimensions.widthMm)}
+          />
+          <LengthField
+            compact
+            positiveOnly
+            label="Overall H"
+            valueMm={overall.heightMm}
+            displayUnit={displayUnit}
+            parseUnit={parseUnit}
+            placeholder={placeholder}
+            onCommit={commitOverall(dimensions.heightMm)}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

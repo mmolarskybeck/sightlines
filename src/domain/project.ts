@@ -17,6 +17,16 @@ export type Dimensions = {
   aspectLocked?: boolean;
 };
 
+// Flat, schematic frame/mat finishes (docs/quick-todos.md) — hex values and
+// labels live in domain/framing.ts so schema, renderer, and inspector agree.
+export type FrameFinish = "gold" | "white" | "black" | "silver" | "wood";
+
+export type ArtworkFrame = {
+  // Face width of the frame band, added outside the mat on every side.
+  widthMm: number;
+  finish: FrameFinish;
+};
+
 export type Artwork = {
   id: string;
   schemaVersion: number;
@@ -26,6 +36,11 @@ export type Artwork = {
   accessionNumber?: string;
   locationOrLender?: string;
   dimensions: Dimensions;
+  // Optional, additive framing (no schema-version bump): a mat band width and
+  // a frame spec. Both absent on legacy records, which then load and render
+  // exactly as before (see getArtworkOuterDimensionsMm).
+  matWidthMm?: number;
+  frame?: ArtworkFrame;
   assetId?: string;
   metadata: Record<string, string | number | boolean>;
 };

@@ -9,11 +9,9 @@ Here is where I gather small, actionable tasks and scraps for future implementat
   * if nothing else, we want to be able to see the dim lines showing space from left-neighbor group/artwork and space from right-neighbor group/artwork. currently, in between works tab, we just see the dim lines for space to left and right walls.
 * we need some sort of way to resolve/handle when dims don't perfectly match the aspect ratio of the image
   * for instance, we could add an option to arrive image aspect ratio w the accurate dims, but we don't want to the resulting image preview to appear squished/distorted
-* add framing + matting previews in elevation mode and plan mode
-  * in plan mode, this is just a simple dim change
-  * in elevation mode, an svg is drawn around the object per input details - for instance, a 3in white mat would add 3in white outline around the image, with perhaps a very thin grey or black border to indicate the edge of the mat. a frame would simply be defined by its width and color, and would be represented by a simple color fill, maybe using a hex code picker ultimately but starting w a dropdown list w: gold, white, black, silver/brushed aluminum, wood) - these will be very very simple mockups, not high resolution attempts to perfectly create complex frames
-
 ## Done / Folded Back Into Progress
+
+* Added framing + matting previews. Optional additive `matWidthMm` + `frame` ({widthMm, finish}) on the artwork record (no schema-version bump). Elevation draws flat frame ring → off-white mat ring → image, with a thin bevel hairline at the mat opening; selection outline wraps the outer rect. Plan widens the artwork's along-wall extent by the outer width ("simple dim change"). Finishes via dropdown (gold/white/black/silver/wood); mat/frame fields carry band-width placeholder examples (3"/1", 75/25 mm); "Overall" W × H are editable LengthFields that solve for the frame band (mat untouched; overall = image + 2·mat clears the frame, smaller errors in the field's message slot). Frame band always reads via thin hairlines at its outer edge and the frame/mat (or frame/image) boundary. Pure `getArtworkOuterDimensionsMm` + `deriveFrameWidthFromOverallMm` helpers in `src/domain/framing.ts`. Deliberate limitation: elevation snapping, dim lines, out-of-bounds, and fit-selected still use the image (wall-object) dims, not the outer framed size; floor-placed artwork in plan is not framed.
 
 * Fixed dims input UI/UX: length fields now reserve a stable message slot for conversion previews/errors.
 * Added plan-wall click selection without conflicting with object selection or armed placement tools.

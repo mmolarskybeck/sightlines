@@ -1260,6 +1260,8 @@ export function ElevationView({
               key={placement.id}
               center={center}
               dimensionStatus={artwork?.dimensions.status}
+              frame={artwork?.frame}
+              matWidthMm={artwork?.matWidthMm}
               imageUrl={artwork?.assetId ? imageUrlsByAssetId.get(artwork.assetId) : undefined}
               isOutOfBounds={isArtworkOutOfWallBounds(wallLengthMm, wallHeightMm, center, size)}
               isSelected={selectedArtworkId === placement.artworkId || selectedObjectIds.includes(placement.id)}

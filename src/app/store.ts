@@ -150,7 +150,17 @@ type GeometryEditInfo = {
 };
 
 type UpdateArtworkChanges = Partial<
-  Pick<Artwork, "title" | "artist" | "date" | "accessionNumber" | "locationOrLender" | "dimensions">
+  Pick<
+    Artwork,
+    | "title"
+    | "artist"
+    | "date"
+    | "accessionNumber"
+    | "locationOrLender"
+    | "dimensions"
+    | "matWidthMm"
+    | "frame"
+  >
 >;
 
 export type AppState = ArrangeSliceState &

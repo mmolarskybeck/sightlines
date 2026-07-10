@@ -1320,6 +1320,7 @@ export function App() {
                   void updateArtwork(selectedArtwork.id, { dimensions })
                 }
                 onCommitField={(changes) => void updateArtwork(selectedArtwork.id, changes)}
+                onCommitFraming={(changes) => void updateArtwork(selectedArtwork.id, changes)}
                 onRemovePlacement={
                   artworkPlacementId
                     ? () => void removePlacement(artworkPlacementId)

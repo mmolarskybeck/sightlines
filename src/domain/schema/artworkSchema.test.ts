@@ -67,6 +67,32 @@ describe("artworkSchema", () => {
     expect(() => parseArtwork(artwork)).toThrow();
   });
 
+  it("round-trips optional mat width and frame fields", () => {
+    const artwork = createSampleArtwork();
+    artwork.matWidthMm = 76.2;
+    artwork.frame = { widthMm: 25.4, finish: "gold" };
+
+    const parsed = parseArtwork(artwork);
+    expect(parsed.matWidthMm).toBe(76.2);
+    expect(parsed.frame).toEqual({ widthMm: 25.4, finish: "gold" });
+    expect(migrateArtwork(artwork)).toEqual(artwork);
+  });
+
+  it("rejects an unknown frame finish", () => {
+    const artwork = createSampleArtwork();
+    // @ts-expect-error deliberately invalid finish value for the test
+    artwork.frame = { widthMm: 25.4, finish: "chrome" };
+
+    expect(() => parseArtwork(artwork)).toThrow();
+  });
+
+  it("rejects a non-positive mat width", () => {
+    const artwork = createSampleArtwork();
+    artwork.matWidthMm = 0;
+
+    expect(() => parseArtwork(artwork)).toThrow();
+  });
+
   it("preserves unknown metadata keys", () => {
     const artwork = createSampleArtwork();
     artwork.metadata = { luxLimit: 50, onLoan: true, notes: "handle with care" };
