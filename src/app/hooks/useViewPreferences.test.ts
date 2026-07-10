@@ -204,4 +204,63 @@ describe("useViewPreferences", () => {
     });
     expect(result.current.inspectorCollapsed).toBe(false);
   });
+
+  it("defaults inspector sections to dimensions/framing/placement open, details closed", () => {
+    const { result } = renderHook(() => useViewPreferences());
+
+    expect(result.current.inspectorSections).toEqual({
+      dimensions: true,
+      framing: true,
+      placement: true,
+      details: false
+    });
+  });
+
+  it("sets and persists a section's open state without touching the others", () => {
+    const { result } = renderHook(() => useViewPreferences());
+
+    act(() => {
+      result.current.setInspectorSectionOpen("framing", false);
+    });
+    expect(result.current.inspectorSections.framing).toBe(false);
+    expect(result.current.inspectorSections.dimensions).toBe(true);
+    expect(
+      JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}").inspectorSections.framing
+    ).toBe(false);
+
+    act(() => {
+      result.current.setInspectorSectionOpen("details", true);
+    });
+    expect(result.current.inspectorSections.details).toBe(true);
+    expect(result.current.inspectorSections.framing).toBe(false);
+  });
+
+  it("honors stored section booleans and drops malformed entries onto defaults", () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ inspectorSections: { dimensions: false, details: "yes", extra: true } })
+    );
+
+    const { result } = renderHook(() => useViewPreferences());
+
+    // Stored boolean honored, malformed value falls back, unknown key kept
+    // (a section id from a newer build must not be dropped on round-trip).
+    expect(result.current.inspectorSections.dimensions).toBe(false);
+    expect(result.current.inspectorSections.details).toBe(false);
+    expect(result.current.inspectorSections.extra).toBe(true);
+    expect(result.current.inspectorSections.framing).toBe(true);
+  });
+
+  it("falls back to default sections for a malformed inspectorSections value", () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ inspectorSections: [true] }));
+
+    const { result } = renderHook(() => useViewPreferences());
+
+    expect(result.current.inspectorSections).toEqual({
+      dimensions: true,
+      framing: true,
+      placement: true,
+      details: false
+    });
+  });
 });

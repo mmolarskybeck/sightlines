@@ -3664,6 +3664,169 @@ body.panels-resizing * {
   gap: 8px;
 }
 
+/* Placeholders are worked examples ("e.g. 3\""), not values — the "e.g."
+   prefix disambiguates, so they can take the full muted ink and clear WCAG
+   4.5:1 against white (the lighter --subtle token measures just under it at
+   this size). opacity: 1 overrides Firefox's default placeholder fade. */
+.field-row input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+/* Collapsible inspector sections (InspectorSection.tsx). The zero-gap
+   container gives every section row its own top hairline and closes the
+   block with a bottom one, so collapsed sections still read as distinct
+   rows in a quiet list — structure via hairlines and spacing, no cards. */
+.inspector-sections {
+  display: grid;
+  border-bottom: 1px solid var(--line);
+}
+
+.inspector-section {
+  padding-block: 5px 7px;
+  border-top: 1px solid var(--line);
+}
+
+.inspector-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The full-width disclosure control. Negative inline margin + matching
+   padding keep the title optically flush with the field labels below while
+   letting the hover wash bleed slightly past them. Focus ring comes from the
+   global button:focus-visible rule. */
+.inspector-section-trigger {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  margin-inline: -6px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.inspector-section-trigger:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* Same voice as the .artwork-dimensions-heading h3 it replaces. Never
+   shrinks — at narrow panel widths the adornment/summary give way first,
+   so "Dimensions" can't clip to "Dimension" beside a wide extras row. */
+.inspector-section-title {
+  flex: 0 0 auto;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-ui);
+}
+
+/* At-rest value readout while collapsed. Muted (≥ 4.5:1 on white; --subtle
+   isn't at this size), tabular so dims don't jitter, ellipsized so a long
+   accession number can never widen the panel. */
+.inspector-section-summary {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-section-chevron {
+  flex: 0 0 auto;
+  color: var(--subtle);
+  transition: transform 180ms ease-out;
+}
+
+.inspector-section-trigger:hover .inspector-section-chevron {
+  color: var(--ink);
+}
+
+.inspector-section-trigger[data-state="open"] .inspector-section-chevron {
+  transform: rotate(90deg);
+}
+
+/* Header extras (uncertainty badge, lock ratio toggle) sit at the row's
+   right edge, outside the trigger — a button can't nest in a button, and a
+   collapsed section hides them entirely (InspectorSection renders them only
+   while open). */
+.inspector-section-extras {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.inspector-section-extras .artwork-dimensions-lock {
+  margin-left: 0;
+}
+
+.inspector-section-body {
+  display: grid;
+  gap: 10px;
+  padding-top: 7px;
+  padding-bottom: 5px;
+}
+
+/* Radix Collapsible open/close: height animates between 0 and the measured
+   --radix-collapsible-content-height (Radix keeps the node mounted until the
+   close animation ends). prefers-reduced-motion collapses both to instant
+   via the global reduced-motion rule. */
+.collapsible-content {
+  overflow: hidden;
+}
+
+.collapsible-content[data-state="open"] {
+  animation: collapsible-open 180ms ease-out;
+}
+
+.collapsible-content[data-state="closed"] {
+  animation: collapsible-close 180ms ease-out;
+}
+
+@keyframes collapsible-open {
+  from {
+    height: 0;
+    opacity: 0;
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+  }
+}
+
+@keyframes collapsible-close {
+  from {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+  }
+  to {
+    height: 0;
+    opacity: 0;
+  }
+}
+
+/* "What results" (the derived Overall pair + its hint) sits a breath below
+   "what you enter" (band widths + finish) — the section body's 10px rhythm
+   plus this nudge reads as two thoughts without opening a new section. */
+.framing-overall {
+  display: grid;
+  gap: 6px;
+  margin-top: 2px;
+}
+
 /* The ratio lock rides the right edge of the Dimensions heading row; the
    Toggle primitive supplies its ghost hover and pressed-petrol states. */
 .artwork-dimensions-lock {

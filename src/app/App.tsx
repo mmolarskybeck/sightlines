@@ -303,6 +303,8 @@ export function App() {
     leftPanelWidth,
     inspectorWidth,
     inspectorCollapsed,
+    inspectorSections,
+    setInspectorSectionOpen,
     setLeftPanel,
     setLeftPanelWidth,
     setInspectorWidth,
@@ -1279,12 +1281,18 @@ export function App() {
               <ArtworkInspector
                 artwork={selectedArtwork}
                 isPlaced={isArtworkPlaced}
+                placementTitle={
+                  placedWallObject && placedWallObjectWall
+                    ? `Position on ${placedWallObjectWall.name}`
+                    : placedFloorArtwork
+                      ? "Position on floor"
+                      : undefined
+                }
                 placementSection={
                   placedWallObject && placedWallObjectWall ? (
                     <WallPlacementFields
                       placement={placedWallObject}
                       wallLengthMm={placedWallObjectWall.lengthMm}
-                      wallName={placedWallObjectWall.name}
                       leftNeighborRightEdgeMm={wallPlacementNeighbors.leftNeighborRightEdgeMm}
                       rightNeighborLeftEdgeMm={wallPlacementNeighbors.rightNeighborLeftEdgeMm}
                       centerTargetXMm={wallPlacementCenterTarget.xMm}
@@ -1315,12 +1323,14 @@ export function App() {
                     </>
                   ) : null
                 }
+                sectionsOpen={inspectorSections}
                 unit={project.unit}
                 onCommitDimensions={(dimensions) =>
                   void updateArtwork(selectedArtwork.id, { dimensions })
                 }
                 onCommitField={(changes) => void updateArtwork(selectedArtwork.id, changes)}
                 onCommitFraming={(changes) => void updateArtwork(selectedArtwork.id, changes)}
+                onSectionOpenChange={setInspectorSectionOpen}
                 onRemovePlacement={
                   artworkPlacementId
                     ? () => void removePlacement(artworkPlacementId)

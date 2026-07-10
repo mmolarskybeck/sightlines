@@ -45,6 +45,23 @@ type ViewPreferences = {
   // open: the inspector is where a selection's editable fields live, so hiding
   // it is a deliberate opt-out.
   inspectorCollapsed: boolean;
+  // Open/closed state per collapsible inspector section (InspectorSection),
+  // keyed by a stable section id. A working-style preference like the panel
+  // widths: it survives selection changes and reloads, and never travels
+  // with an exported project. Unknown ids simply fall back to their
+  // section's own default, so shipping a new section never breaks a stored
+  // record.
+  inspectorSections: Record<string, boolean>;
+};
+
+// Everyday-editing sections start open; registrar reference data starts
+// closed (consulted less often than measurements or arranging — the same
+// reading-order reasoning as ArtworkInspector's field clusters).
+export const DEFAULT_INSPECTOR_SECTIONS: Record<string, boolean> = {
+  dimensions: true,
+  framing: true,
+  placement: true,
+  details: false
 };
 
 const DEFAULT_PREFERENCES: ViewPreferences = {
@@ -58,8 +75,23 @@ const DEFAULT_PREFERENCES: ViewPreferences = {
   leftPanel: "checklist",
   leftPanelWidth: LEFT_PANEL_DEFAULT_WIDTH,
   inspectorWidth: INSPECTOR_DEFAULT_WIDTH,
-  inspectorCollapsed: false
+  inspectorCollapsed: false,
+  inspectorSections: DEFAULT_INSPECTOR_SECTIONS
 };
+
+// Keeps only well-formed `sectionId: boolean` entries from a stored record,
+// layered over the defaults — a hand-edited value or a section id from a
+// newer build can never poison the whole map.
+function sanitizeInspectorSections(value: unknown): Record<string, boolean> {
+  const sections = { ...DEFAULT_INSPECTOR_SECTIONS };
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return sections;
+
+  for (const [key, open] of Object.entries(value)) {
+    if (typeof open === "boolean") sections[key] = open;
+  }
+
+  return sections;
+}
 
 function readStoredPreferences(): ViewPreferences {
   try {
@@ -106,7 +138,8 @@ function readStoredPreferences(): ViewPreferences {
       inspectorCollapsed:
         typeof parsed.inspectorCollapsed === "boolean"
           ? parsed.inspectorCollapsed
-          : DEFAULT_PREFERENCES.inspectorCollapsed
+          : DEFAULT_PREFERENCES.inspectorCollapsed,
+      inspectorSections: sanitizeInspectorSections(parsed.inspectorSections)
     };
   } catch {
     return DEFAULT_PREFERENCES;
@@ -135,6 +168,12 @@ export function useViewPreferences() {
     leftPanelWidth: preferences.leftPanelWidth,
     inspectorWidth: preferences.inspectorWidth,
     inspectorCollapsed: preferences.inspectorCollapsed,
+    inspectorSections: preferences.inspectorSections,
+    setInspectorSectionOpen: (sectionId: string, open: boolean) =>
+      setPreferences((current) => ({
+        ...current,
+        inspectorSections: { ...current.inspectorSections, [sectionId]: open }
+      })),
     setLeftPanel: (leftPanel: ViewPreferences["leftPanel"]) =>
       setPreferences((current) => ({ ...current, leftPanel })),
     setLeftPanelWidth: (leftPanelWidth: number) =>
