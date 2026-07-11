@@ -90,7 +90,7 @@ The product grammar is stable:
 
 - Left rail chooses the left-side work context: checklist, rooms, issues, or data.
 - Topbar owns project identity, view mode, persistence state, and import/export.
-- Canvas toolbar has two zones: insertion tools on the left (a segmented Insert control — door, window, blocked zone — enabled in plan, visible-disabled elsewhere), view options on the right (grid, snap, precision, overlap, units). It stays a single row: the canvas column is a CSS container, and toggle labels drop to icon-only (then the Insert caption hides) as it narrows.
+- Canvas toolbar has two zones: insertion tools on the left (a segmented Insert control — door, window, blocked zone — shared by Plan and Elevation, disabled only when Elevation has no selected wall), view options on the right (grid, snap, precision, overlap, units). It stays a single row at comfortable widths, then becomes two explicit rows in a narrow canvas column rather than relying on accidental wrapping. Toggle labels drop to icon-only, Insert becomes a caret menu (then a plus button at the smallest width), Precision keeps its current value while dropping only the redundant label, and Units becomes a compact two-segment control with the active system filled in petrol. Plan labels the governing scale as `ft / m`; Elevation labels its detail scale as `in / cm`.
 - Left pane is task inventory.
 - Right pane is inspection and numeric editing.
 
