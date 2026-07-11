@@ -3,7 +3,19 @@ Here is where I gather small, actionable tasks and scraps for future implementat
 
 ## Open Scraps
 
+### Mobile issues
+* Drawing room tool - needs better feedback, way to unplace a point or rearrange it maybe? Easy to make mistakes (current behavior on touch/iOS seems to require one gesture to draw line, and a second one to place the point down? This feels a bit weird but idk how to improve it)
+* No backspace so we have a little floating delete button OR maybe better context menu on long press to delete?
+* If we remove scale dropdown or move it up to main nav bar, or somewhere, maybe we have room for whole toolbar
+* Consider making left rail a bit narrower ?
 
+### General todos
+* Project management - make into modal  or expanded popover 
+* We also need to add basic management - delete, edit title, maybe bulk edit? Maybe a quick way to export a project from the project manager without opening it?
+
+* Should we remove the partition tool and instead allow just drawing a single freestanding wall with the draw irregular room tool? But then we need a way to say, this is done (a check/cancel button? Maybe floating) - bc right now the room tool stops drawing when it forms a solid contained shape kind of like the select tool or pen tool in photoshop 
+
+* Blocked zone and partition tool currently have same icon - how to differentiate  ?
 
 ## Done / Folded Back Into Progress
 

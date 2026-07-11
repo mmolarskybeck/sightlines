@@ -163,8 +163,8 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
   - [x] Add polygon room drawing in Plan view as a dedicated mode: click vertices line by line, preview the active segment, close via first point or Enter.
   - [x] Add polygon reshape mode after polygon creation exists: drag existing vertices, split/delete vertices, slide walls, preserve closed rooms/wall identity, revalidate changed-wall placements, one undo entry per drag.
   - [x] Add free-standing partition walls with room-owned geometry and double-sided faces.
-- [ ] Multi-room flow:
-  - [ ] Place additional rooms in the shared floor coordinate space.
+- [x] Multi-room flow:
+  - [x] Place additional rooms in the shared floor coordinate space.
   - [x] Connect paired doors/windows between rooms (`connectsToObjectId`) with advisory alignment status.
   - [x] Let 3D sightlines pass through aligned connected door/window pairs, with caps for every unpaired or misaligned opening.
 
@@ -185,5 +185,4 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 - [ ] Avoid making numeric fields imply false independent degrees of freedom.
 - [ ] Make constraints visible where they affect behavior.
 - [ ] Flag invalid or uncertain state; do not silently fix, hide, clip, or slide user content.
-- [ ] Use `sightlines-old/` only as local reference material unless explicitly asked to migrate specific code or assets.
 - [ ] 2D zoom/pan MVP: deliberately skipped ⌘+/⌘− (conflicts with browser page zoom), double-click-to-fit, pan-distance clamping, viewport persistence across sessions.

@@ -35,7 +35,7 @@ Touch drag-and-drop for artwork placement, insecure-context support for LAN dev 
 
 1. MVP package/export work: `.sightlines` import/export, backup flow, PNG/PDF exports (including the deferred 3D screenshot), and readiness reporting.
 2. Multi-room placement and management polish around the shared floor coordinate space.
-3. Defer current-room-plus-visible-connected-rooms rendering until real whole-floor 3D project sizes justify that optimization.
+3. Run the 10-room / 200-work renderer benchmark fixture on desktop and tablet; defer room-visibility filtering until measurements show a material whole-floor 3D cost. Overview remains whole-floor; any future scope belongs to eye-level rendering and the render layer only.
 
 ## Known Follow-Ups
 

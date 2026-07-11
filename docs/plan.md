@@ -417,7 +417,7 @@ Because layout is one serializable document mutated through defined actions, thi
 
 ## 9. Revised MVP Roadmap
 
-### MVP 1 — Spatial editor + checklist core
+### MVP 1 — Spatial editor + checklist core [SHIPPED]
 *No auth, no cloud, no export beyond project JSON.*
 
 MVP1 bundles a lot — geometry, artwork/checklist, snapping/collision/undo, and 3D. Sequencing it as three internal sub-phases keeps the "boring" data layer (schema, units, wall identity, import/export semantics) stable *before* 2D drag behavior gets layered on top, rather than debugging both at once:
@@ -428,12 +428,12 @@ MVP1 bundles a lot — geometry, artwork/checklist, snapping/collision/undo, and
 
 **1C — Professional layout behaviors.** Doors/windows/blocked zones + `validatePlacement` collision (§2) · multi-select, grouping, group drag, group-centerline snap · equal-distribution spacing · floor objects (plan view only) · simple derived 3D preview, orbit camera · checklist panel: thumbnail, core fields, sort. **Shipped.**
 
-### MVP 2 — Room shape tools + multi-room flow
+### MVP 2 — Room shape tools + multi-room flow [IN PROGRESS]
 - **Shipped:** polygon room drawing in Plan view; polygon reshape with vertex drag, wall split/delete, wall-slide reshaping, closed-room validation, and one undo entry per committed gesture.
 - **Shipped:** free-standing partition walls as room-owned, double-sided placement surfaces, with schema v3 migration and 3D slab projection.
 - **Shipped:** paired door/window connections with reciprocal opening IDs, advisory alignment status, plan/inspector feedback, and honest 3D see-through/capped treatment.
-- Multi-room UI polish: place and manage additional rooms in the shared floor coordinate space.
-- Renderer scalability polish: render current room plus visible connected rooms before attempting whole-floor 3D rendering when real project sizes require it.
+- **Shipped:** Multi-room UI polish: place and manage additional rooms in the shared floor coordinate space.
+- **Deferred, benchmark-triggered renderer scalability:** validate whole-floor 3D with the deterministic 10-room / 200-work fixture in `fixtures/benchmarks/renderer-10-room-200-work.ts` on desktop and tablet. Keep Overview whole-floor; if eye-level navigation or texture pressure becomes material, scope eye-level rendering to the camera's containing room plus one-hop rooms visible through aligned connected openings. Treat this as render-layer filtering only — no project-schema change.
 
 ### MVP 3 — Project packages, sharing, polish
 - `.sightlines` export/import as a self-contained `SightlinesPackage` (§6) — embeds the artwork snapshot the project actually needs, not just references into the local library — including library-wide `exportAll()`/`importAll()` alongside per-project export (§8)
@@ -455,7 +455,7 @@ MVP1 bundles a lot — geometry, artwork/checklist, snapping/collision/undo, and
 
 ### MVP 5 — Phone tier + advanced viewing
 - Phone tier: checklist browsing, plan/elevation/3D viewing, light repositioning (§3.5) — reuses much of the tablet-viewing groundwork
-- Room-visibility-scoped 3D rendering refinements for larger multi-room floors
+- Room-visibility-scoped 3D rendering refinements for larger multi-room floors, only after the benchmark demonstrates a material need
 
 ### Backlog (not scheduled — revisit only on real demand)
 - Accounts, Supabase/RLS, hosted cloud projects, public snapshot links
