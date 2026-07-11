@@ -1,5 +1,3 @@
-import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
-import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import { OrbitControls } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
@@ -14,7 +12,6 @@ import {
   type WallPanel3d
 } from "../../../domain/geometry/scene3d";
 import type { Artwork, Project } from "../../../domain/project";
-import { Button } from "../ui/button";
 import { fitDistance } from "./cameraFit";
 import { MM_TO_WORLD } from "./coordinates";
 import { SceneRooms } from "./SceneRooms";
@@ -49,6 +46,11 @@ function roomWallPanels(room: Room3d): WallPanel3d[] {
 type CameraRigApi = {
   overview: () => void;
   eyeLevel: (wall: WallPanel3d, eyeHeightMm: number) => void;
+};
+
+export type ThreeDViewActions = {
+  overview: () => void;
+  eyeLevel: () => void;
 };
 
 // World-space bounding box of the union of every room's floor + wall heights.
@@ -335,7 +337,8 @@ export function ThreeDView({
   selectedWallId,
   onSelectWall,
   onSelectObject,
-  onClearSelection
+  onClearSelection,
+  actionsRef
 }: {
   project: Project;
   artworksById: ReadonlyMap<string, Artwork>;
@@ -346,6 +349,7 @@ export function ThreeDView({
   onSelectWall: (wallId: string) => void;
   onSelectObject: (objectId: string, opts: { additive: boolean }) => void;
   onClearSelection: () => void;
+  actionsRef?: { current: ThreeDViewActions | null };
 }) {
   const scene = useMemo(
     () => deriveScene3d(project, artworksById),
@@ -355,6 +359,40 @@ export function ThreeDView({
   // Where the pointer went down, to tell a click from an orbit-drag release
   // in onPointerMissed (mesh handlers get the same guard via event.delta).
   const pointerDownAt = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!actionsRef) return;
+    if (scene.rooms.length === 0) {
+      actionsRef.current = null;
+      return;
+    }
+
+    actionsRef.current = {
+      overview: () => rigApi.current?.overview(),
+      eyeLevel: () => {
+        const wall = pickEyeLevelWall(
+          scene,
+          selectedWallId,
+          selectedObjectIds,
+          selectedArtworkId
+        );
+        if (wall) {
+          rigApi.current?.eyeLevel(wall, project.defaultCenterlineHeightMm);
+        }
+      }
+    };
+
+    return () => {
+      actionsRef.current = null;
+    };
+  }, [
+    actionsRef,
+    project.defaultCenterlineHeightMm,
+    scene,
+    selectedArtworkId,
+    selectedObjectIds,
+    selectedWallId
+  ]);
 
   if (scene.rooms.length === 0) {
     return <ThreeDEmptyState />;
@@ -411,37 +449,6 @@ export function ThreeDView({
         <OrbitControls makeDefault enableDamping dampingFactor={0.1} />
         <CameraRig scene={scene} fitKey={project.id} apiRef={rigApi} />
       </Canvas>
-      <div className="three-toolbar" role="toolbar" aria-label="3D Preview camera">
-        <Button
-          className="plan-toolbar-button"
-          variant="inspector"
-          onClick={() => rigApi.current?.overview()}
-        >
-          <CornersOutIcon aria-hidden="true" size={16} />
-          Overview
-        </Button>
-        <Button
-          className="plan-toolbar-button"
-          variant="inspector"
-          onClick={() => {
-            const wall = pickEyeLevelWall(
-              scene,
-              selectedWallId,
-              selectedObjectIds,
-              selectedArtworkId
-            );
-            if (wall) {
-              rigApi.current?.eyeLevel(
-                wall,
-                project.defaultCenterlineHeightMm
-              );
-            }
-          }}
-        >
-          <EyeIcon aria-hidden="true" size={16} />
-          Eye level
-        </Button>
-      </div>
     </div>
   );
 }

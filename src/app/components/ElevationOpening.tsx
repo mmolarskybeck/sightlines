@@ -16,6 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 // mullion cross, a blocked zone gets a diagonal hatch fill.
 export function ElevationOpening({
   center,
+  isGhost = false,
   isOutOfBounds = false,
   isSelected = false,
   kind,
@@ -28,6 +29,7 @@ export function ElevationOpening({
   wallObjectId
 }: {
   center: ArtworkCenterMm;
+  isGhost?: boolean;
   isOutOfBounds?: boolean;
   isSelected?: boolean;
   kind: OpeningWallObject["kind"];
@@ -49,11 +51,16 @@ export function ElevationOpening({
   const rect = getArtworkRectSvg(wallHeightMm, center, size);
 
   const classNames = ["elevation-opening", `elevation-opening-${kind}`];
+  if (isGhost) classNames.push("ghost");
   if (isOutOfBounds) classNames.push("out-of-bounds");
   if (isSelected) classNames.push("selected");
 
   const shape = (
-    <g className={classNames.join(" ")} onClick={onSelect} onPointerDown={onPointerDown}>
+    <g
+      className={classNames.join(" ")}
+      onClick={isGhost ? undefined : onSelect}
+      onPointerDown={isGhost ? undefined : onPointerDown}
+    >
       {kind === "blocked-zone" ? <BlockedZoneHatch rect={rect} wallObjectId={wallObjectId} /> : null}
       <rect
         className="opening-outline"

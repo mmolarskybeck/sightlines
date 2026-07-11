@@ -3,6 +3,7 @@ import {
   useRef,
   useState,
   type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent
 } from "react";
 import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
@@ -28,6 +29,7 @@ import {
   PLACEHOLDER_ARTWORK_HEIGHT_MM,
   PLACEHOLDER_ARTWORK_WIDTH_MM
 } from "../../domain/placement/placeArtwork";
+import { getDefaultOpeningSizeMm, type OpeningKind } from "../../domain/placement/createOpening";
 import { effectivePlacementForm } from "../../domain/placement/artworkForm";
 import type {
   Artwork,
@@ -169,8 +171,15 @@ type DropGhostState = {
   brokenBarrierIds?: string[];
 };
 
+type OpeningToolGhostState = {
+  centerMm: Vector2;
+  sizeMm: { widthMm: number; heightMm: number };
+  activeGuides: Guide[];
+};
+
 export function ElevationView({
   allowOverlappingPlacement = false,
+  activeTool = null,
   artworksById,
   draggingArtworkId = null,
   centerlineMm,
@@ -181,6 +190,8 @@ export function ElevationView({
   onMoveOpening,
   onMovePlacement,
   onMoveWallObjects,
+  onToolChange,
+  onPlaceOpeningOnElevation,
   onPlaceArtwork,
   onSelectArtwork,
   onSelectOpening,
@@ -206,6 +217,7 @@ export function ElevationView({
 }: {
   gridPrecisionFloorMm: number | null;
   gridVisible: boolean;
+  activeTool?: OpeningKind | null;
   wallName: string;
   wallLengthMm: number;
   wallHeightMm: number;
@@ -263,6 +275,13 @@ export function ElevationView({
   // and openings alike (the single-object drag keeps its onMovePlacement/
   // onMoveOpening split; this is the multi-select path only).
   onMoveWallObjects?: (moves: { id: string; xMm: number; yMm: number }[]) => void;
+  onToolChange?: (tool: OpeningKind | null) => void;
+  onPlaceOpeningOnElevation?: (
+    kind: OpeningKind,
+    wallId: string,
+    xMm: number,
+    yMm: number
+  ) => void;
   onSelectArtwork?: (artworkId: string) => void;
   onSelectOpening?: (wallObjectId: string) => void;
   // Multi-select entry points. Selection ids are PLACEMENT ids (wall object
@@ -282,6 +301,8 @@ export function ElevationView({
   const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
   const [dropGhost, setDropGhost] = useState<DropGhostState | null>(null);
+  const [openingToolGhost, setOpeningToolGhost] = useState<OpeningToolGhostState | null>(null);
+  const openingToolSnapTargetIdsRef = useRef<SnapTargetIds | undefined>(undefined);
 
   // Pad the viewBox so the wall reads as a figure on the canvas field
   // rather than bleeding edge-to-edge, and so boundary strokes (centered on
@@ -686,6 +707,74 @@ export function ElevationView({
     };
   }
 
+  const openingToolSize = activeTool ? getDefaultOpeningSizeMm(activeTool) : null;
+
+  // Opening insertion uses the same live snap/barrier resolver as an elevation
+  // move. The only difference is that the preview starts from the pointer and
+  // the committed result creates a new wall object instead of moving one.
+  function resolveOpeningTool(proposed: Vector2) {
+    if (!activeTool || !openingToolSize) return null;
+    const result = resolveElevationPlacement(
+      proposed,
+      openingToolSize,
+      wallObjectsOnThisWall,
+      activeTool,
+      [activeTool],
+      openingToolSnapTargetIdsRef.current,
+      false,
+      new Set()
+    );
+    openingToolSnapTargetIdsRef.current = result.snapTargetIds;
+    return result;
+  }
+
+  function handleOpeningToolPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
+    if (!activeTool || !openingToolSize || moveDrag || marquee || dropGhost) return;
+    const pointerMm = toWallLocalMm(event.clientX, event.clientY);
+    if (!pointerMm) return;
+
+    const result = resolveOpeningTool(pointerMm);
+    if (!result) return;
+    setOpeningToolGhost({
+      centerMm: result.point,
+      sizeMm: openingToolSize,
+      activeGuides: result.activeGuides
+    });
+  }
+
+  function handleOpeningToolPointerLeave() {
+    setOpeningToolGhost(null);
+    openingToolSnapTargetIdsRef.current = undefined;
+  }
+
+  function handleOpeningToolClick(event: ReactMouseEvent<SVGSVGElement>) {
+    if (!activeTool || !openingToolSize || !wallId || !onPlaceOpeningOnElevation) return;
+    if (moveDrag || marquee) return;
+
+    const pointerMm = toWallLocalMm(event.clientX, event.clientY);
+    if (!pointerMm) return;
+    const result = resolveOpeningTool(pointerMm);
+    if (!result || result.blocked) return;
+
+    const kind = activeTool;
+    onToolChange?.(null);
+    void onPlaceOpeningOnElevation(kind, wallId, result.point.xMm, result.point.yMm);
+  }
+
+  useEffect(() => {
+    setOpeningToolGhost(null);
+    openingToolSnapTargetIdsRef.current = undefined;
+  }, [activeTool, wallId]);
+
+  useEffect(() => {
+    if (!activeTool) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onToolChange?.(null);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeTool, onToolChange]);
+
   // Pre-seed the broken-barrier set at grab time with every neighbor the moving
   // object/group already overlaps and every wall edge it already overhangs. This
   // is the legacy-data escape hatch: an object stored overlapping (or hanging
@@ -729,6 +818,7 @@ export function ElevationView({
 
 
   function beginMarquee(event: ReactPointerEvent<SVGSVGElement>) {
+    if (activeTool) return;
     // Touch: a finger on true background pans the canvas instead of marqueeing
     // (the marquee is a mouse-only gesture on tablets). A pinch's 2nd finger was
     // already claimed (stopPropagation) in the capture handler, so it never
@@ -1027,7 +1117,8 @@ export function ElevationView({
     // containerRef is stable; the effect subscribes once for the component's life.
   }, [containerRef]);
 
-  const activeGuides = moveDrag?.activeGuides ?? dropGhost?.activeGuides ?? [];
+  const activeGuides =
+    moveDrag?.activeGuides ?? dropGhost?.activeGuides ?? openingToolGhost?.activeGuides ?? [];
 
   // Preview center per object being moved, id → center. Covers the single
   // dragged object, or every group member (member center = the snapped group
@@ -1231,13 +1322,16 @@ export function ElevationView({
         fitSelectedDisabled={selectedSvgBounds === null}
       />
       <svg
-        className="elevation-svg"
+        className={activeTool ? "elevation-svg tool-armed" : "elevation-svg"}
         ref={svgRef}
         viewBox={viewBox}
         role="img"
         tabIndex={0}
+        onClick={handleOpeningToolClick}
         onPointerDown={beginMarquee}
         onPointerDownCapture={handleSvgPointerDownCapture}
+        onPointerLeave={handleOpeningToolPointerLeave}
+        onPointerMove={handleOpeningToolPointerMove}
       >
         <title>{wallName} elevation</title>
         <rect
@@ -1313,8 +1407,15 @@ export function ElevationView({
               }
               tooltipDisabled={Boolean(moveDrag || dropGhost)}
               wallHeightMm={wallHeightMm}
-              onPointerDown={(event) => beginMoveDrag(placement, event)}
+              onPointerDown={(event) => {
+                if (activeTool) {
+                  event.stopPropagation();
+                  return;
+                }
+                beginMoveDrag(placement, event);
+              }}
               onSelect={(event) => {
+                if (activeTool) return;
                 if (consumeSelectSuppression()) return;
                 if (onSelectObject) {
                   onSelectObject(placement.id, {
@@ -1351,8 +1452,15 @@ export function ElevationView({
               tooltipDisabled={Boolean(moveDrag || dropGhost)}
               wallHeightMm={wallHeightMm}
               wallObjectId={opening.id}
-              onPointerDown={(event) => beginMoveDrag(opening, event)}
+              onPointerDown={(event) => {
+                if (activeTool) {
+                  event.stopPropagation();
+                  return;
+                }
+                beginMoveDrag(opening, event);
+              }}
               onSelect={(event) => {
+                if (activeTool) return;
                 if (consumeSelectSuppression()) return;
                 if (onSelectObject) {
                   onSelectObject(opening.id, {
@@ -1371,6 +1479,16 @@ export function ElevationView({
             isGhost
             size={dropGhost.sizeMm}
             wallHeightMm={wallHeightMm}
+          />
+        ) : null}
+        {openingToolGhost && activeTool ? (
+          <ElevationOpening
+            center={openingToolGhost.centerMm}
+            isGhost
+            kind={activeTool}
+            size={openingToolGhost.sizeMm}
+            wallHeightMm={wallHeightMm}
+            wallObjectId="opening-tool-ghost"
           />
         ) : null}
         {isGroupOutlineEligible && pixelsPerMm > 0

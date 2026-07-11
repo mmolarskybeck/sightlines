@@ -2,15 +2,15 @@ import { useCallback, useEffect, useState } from "react";
 import type { OpeningKind } from "../../domain/placement/createOpening";
 import type { ViewMode } from "../store";
 
-// The plan canvas's armed-tool state, collapsed into one discriminated union
+// The 2D canvas's armed-tool state, collapsed into one discriminated union
 // instead of four mutually-exclusive useStates (activeTool/drawRoomActive/
 // reshapeRoomId/partitionToolActive). Structurally there is now only ever
 // one mode at a time, so arming any one of them naturally excludes the
 // others — no more "disarm the other three" bookkeeping at every call site.
 //
-// When the doorway feature lands, it adds its own arm/disarm family here as
-// `| { kind: "pairOpenings"; ... }` — this union stays the single place that
-// enforces mutual exclusion across all plan-canvas tool modes.
+// Room and partition drawing remain plan-only, while opening placement is
+// shared by the plan and elevation canvases. This union stays the single place
+// that enforces mutual exclusion across those tool modes.
 export type PlanMode =
   | { kind: "idle" }
   | { kind: "placeOpening"; tool: OpeningKind }
@@ -39,7 +39,7 @@ export interface UsePlanModeResult {
 const IDLE: PlanMode = { kind: "idle" };
 
 /**
- * Owns the plan canvas's single armed-tool mode plus the two effects that
+ * Owns the 2D canvas's single armed-tool mode plus the two effects that
  * used to sit beside App's four separate useStates:
  *  - disarm whenever the workspace steers away from plan view
  *  - drop reshape mode when the selection moves away from the room it's
@@ -70,14 +70,15 @@ export function usePlanMode(viewMode: ViewMode, selectedRoomId: string | null): 
 
   const disarm = useCallback(() => setMode(IDLE), []);
 
-  // The insert-tools group only makes sense over the plan canvas — disarm
-  // whenever the workspace tab (or the data-view rail button) steers away
-  // from "plan", so a tool never stays armed-but-invisible on a surface that
-  // can't place anything.
+  // Opening placement works in both 2D views. Disarm only when the workspace
+  // steers to 3D/data, so switching between Plan and Elevation preserves the
+  // selected insert tool instead of silently losing the user's intent.
   useEffect(() => {
-    if (viewMode !== "plan") {
-      setMode(IDLE);
-    }
+    setMode((current) => {
+      if (viewMode === "plan") return current;
+      if (viewMode === "elevation" && current.kind === "placeOpening") return current;
+      return IDLE;
+    });
   }, [viewMode]);
 
   // Reshape mode tracks a specific room id — if selection moves away from

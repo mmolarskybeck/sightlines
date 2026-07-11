@@ -1640,6 +1640,19 @@ describe("app store", () => {
       expect(store.getState().project!.wallObjects[0].kind).toBe("blocked-zone");
     });
 
+    it("adds an elevation-placed opening at the requested wall-local position", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+
+      await store.getState().placeOpeningOnElevation("window", wall.id, 1800, 1650);
+
+      const state = store.getState();
+      const opening = state.project!.wallObjects[0];
+      expect(opening.kind).toBe("window");
+      expect(opening.xMm).toBe(1800);
+      expect(opening.yMm).toBe(1650);
+      expect(state.undoStack.at(-1)?.label).toBe("Add window");
+    });
+
     it("is a no-op for an unknown wall id", async () => {
       const before = store.getState().project;
 

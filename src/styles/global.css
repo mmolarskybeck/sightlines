@@ -460,6 +460,7 @@ input:focus-visible {
 
 .topbar-left {
   display: flex;
+  flex: 1 1 auto;
   min-width: 0;
   align-items: center;
   gap: 12px;
@@ -471,6 +472,7 @@ input:focus-visible {
 
 .topbar-right {
   display: flex;
+  flex: 1 1 auto;
   min-width: 0;
   align-items: center;
   justify-content: flex-end;
@@ -479,6 +481,7 @@ input:focus-visible {
 
 .project-switcher {
   display: flex;
+  flex: 1 1 auto;
   min-width: 0;
   align-items: center;
   gap: 4px;
@@ -2374,23 +2377,44 @@ body.panels-resizing * {
   container-type: inline-size;
 }
 
-/* A thin utility strip (~44px total) so it reads as subordinate to the mode
-   tabs in the 80px topbar above it, rather than competing with them. Two
-   zones split across it now: insert-tools on the left (document-insertion,
-   plan-only), view-options on the right (display prefs, most surfaces) — so
-   the row reads left-to-right as "things you add" then "how you're looking
-   at it" instead of one undifferentiated cluster. */
+/* A single non-wrapping utility rail (~44px total) so it reads as subordinate
+   to the mode tabs in the 80px topbar above it. The insertion and view-option
+   groups remain semantic siblings, but they touch and flow as one rail: at
+   narrow widths labels collapse before controls wrap, and horizontal scrolling
+   is the final fallback instead of creating a second toolbar row. */
 .view-toolbar {
   justify-content: space-between;
   gap: 12px;
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
   padding: 8px 12px;
+  scrollbar-width: none;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
+}
+
+.view-toolbar::-webkit-scrollbar {
+  display: none;
 }
 
 .view-tabs,
 .view-options {
   gap: 6px;
+}
+
+.view-tools-primary,
+.three-camera-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.view-tools-primary {
+  min-width: 0;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
 }
 
 /* Left zone of .view-toolbar: the Insert segmented control — a
@@ -2460,51 +2484,190 @@ body.panels-resizing * {
   cursor: not-allowed;
 }
 
-/* Whole-control disabled dim (elevation/3D/data views) — the same 0.45 the
-   Toggle primitive and .unit-switch use, applied to the group so the
-   caption and dividers fade with the segments instead of staying crisp. */
+/* A disabled insert control means the current 2D surface is missing its
+   required context (currently: Elevation has no selected wall). */
 .insert-tools:has(.insert-tool-segment:disabled) {
   cursor: not-allowed;
   opacity: 0.45;
 }
 
+/* Narrow-mode Insert control. The full segmented picker remains the desktop
+   affordance; this control is intentionally quiet and compact so insertion
+   reads as one action until the user chooses a specific opening. */
+.compact-insert-tools {
+  display: none;
+  flex: none;
+}
+
+.compact-insert-trigger {
+  display: inline-flex;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+}
+
+.compact-insert-trigger:hover:not(:disabled),
+.compact-insert-trigger[data-state="open"] {
+  border-color: var(--input);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.compact-insert-trigger[data-active="true"] {
+  border-color: transparent;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.compact-insert-menu {
+  min-width: 148px;
+}
+
+.compact-insert-item[data-active="true"] {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-weight: var(--weight-semibold);
+}
+
 .view-options {
-  /* Four controls (Grid, Snap, Precision, Units) can now exceed a narrow
-     toolbar's width — wrap rather than overflow or scroll. */
-  flex-wrap: wrap;
+  /* At comfortable widths this keeps the two semantic groups visually
+     distinct. The spacer is intentionally the first thing removed by the
+     narrow container query below. */
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
   justify-content: flex-end;
-  row-gap: 8px;
 }
 
 /* Compact toolbar, keyed on the CANVAS COLUMN's width (container query, see
    .canvas-column's container-type) rather than the viewport's — both side
    panels eat into the column, so a 1440px window with checklist + inspector
-   open leaves only ~740px here. Arithmetic: insert control ~140px + Grid
-   ~74 + Snap ~78 + Overlap ~92 + precision select ~136 + unit switch ~163
-   + gaps and padding ≈ 735px worst case (elevation, with Overlap), so 750px
-   leaves margin. Below it the ViewOptionButton labels drop to icon-only —
-   their title tooltips and aria-labels carry the meaning; Precision and
-   Units keep their text (value controls, an icon can't carry a value).
-   The goal: one row at realistic widths, with .view-options' internal wrap
-   as the last resort far below these breakpoints. */
+   open leaves only ~740px here. Below 750px the ViewOptionButton labels drop
+   to icon-only — their title tooltips and aria-labels carry the meaning —
+   while Precision and Units keep their values. The controls stay at a
+   touchable size and the rail remains one row. */
 @container (max-width: 750px) {
+  .view-toolbar {
+    padding: 6px 8px;
+  }
+
+  .view-toolbar .view-tools-primary,
+  .view-toolbar .view-options {
+    gap: 4px;
+  }
+
+  .view-toolbar .view-option-button {
+    min-width: 40px;
+    min-height: 40px;
+    height: 40px;
+    justify-content: center;
+    padding-inline: 8px;
+  }
+
+  .view-toolbar .insert-tools {
+    min-height: 40px;
+  }
+
+  .view-toolbar .insert-tool-segment {
+    width: 40px;
+  }
+
+  .view-toolbar .compact-insert-trigger {
+    min-width: 40px;
+    height: 40px;
+    min-height: 40px;
+  }
+
+  .view-toolbar .unit-select {
+    min-height: 40px;
+  }
+
+  .view-toolbar .precision-select-trigger {
+    height: 40px;
+  }
+
+  .view-toolbar .unit-switch {
+    min-height: 40px;
+  }
+
+  .view-toolbar .unit-switch-side {
+    min-height: 38px;
+  }
+
   .view-toolbar .view-option-label {
     display: none;
   }
-}
 
-/* Tighter still: the "Insert" caption goes too, leaving just the three
-   icon segments (aria-label/title already name them; the caption was
-   aria-hidden anyway, so nothing is lost from the accessibility tree). */
-@container (max-width: 600px) {
-  .view-toolbar .insert-tools-label {
+  /* Precision keeps its current value visible — "Auto", 1", 1', etc. —
+     while its descriptive label moves into the control's accessible name and
+     title. This is more useful than replacing a value-bearing select with an
+     icon that still needs explanation. */
+  .view-toolbar .unit-select-label {
     display: none;
   }
 
-  /* The hidden caption owned the group's left edge — without this, the
-     first segment's internal divider would double up on the outer border. */
-  .view-toolbar .insert-tools-label + .insert-tool-segment {
-    border-left: 0;
+  .view-toolbar .precision-select-trigger {
+    min-width: 72px;
+    padding: 0 4px;
+  }
+
+  .view-toolbar .unit-select {
+    padding-inline: 6px;
+  }
+
+  .view-toolbar .unit-switch-side {
+    padding-inline: 8px;
+  }
+
+}
+
+/* Once the canvas column is genuinely narrow, swap the full Insert segmented
+   control for its single-action menu. The rest of the toolbar stays in the
+   same row; icon-only controls and the value-bearing controls still fit in the
+   normal mobile rail in the common case. */
+@container (max-width: 620px) {
+  .view-toolbar .insert-tools {
+    display: none;
+  }
+
+  .view-toolbar .compact-insert-tools {
+    display: inline-flex;
+  }
+
+}
+
+/* Keep the compact toolbar's spacer while the two groups still fit in the
+   useful reading width. Only when the canvas becomes genuinely tight do we
+   attach the groups into one continuous rail. */
+@container (max-width: 480px) {
+  .view-toolbar {
+    justify-content: flex-start;
+    gap: 0;
+  }
+
+  .view-toolbar .view-options {
+    flex: 0 0 auto;
+    justify-content: flex-start;
+  }
+
+  .view-toolbar .compact-insert-trigger {
+    width: 40px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .view-toolbar .compact-insert-label,
+  .view-toolbar .compact-insert-caret {
+    display: none;
   }
 }
 
@@ -2553,7 +2716,7 @@ body.panels-resizing * {
   gap: 7px;
   min-height: 30px;
   padding: 0 10px;
-  border: 1px solid transparent;
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
@@ -2567,8 +2730,8 @@ body.panels-resizing * {
 }
 
 .view-option-button:hover:not(:disabled) {
-  border-color: var(--line);
-  background: transparent;
+  border-color: var(--input);
+  background: var(--surface);
   color: var(--ink);
 }
 
@@ -2577,7 +2740,7 @@ body.panels-resizing * {
    changes immediately while the pointer is still over the control. */
 .view-option-button[data-state="on"],
 .view-option-button[data-state="on"]:hover:not(:disabled) {
-  border-color: transparent;
+  border-color: var(--primary-soft);
   background: var(--primary-soft);
   color: var(--primary-strong);
 }
@@ -2709,15 +2872,18 @@ body.panels-resizing * {
 .unit-switch {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 0;
   min-height: 30px;
-  padding: 0 10px;
+  padding: 0;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
+  overflow: hidden;
   color: var(--muted);
-  font-size: var(--type-sm);
+  font-size: var(--type-xs);
   font-weight: var(--weight-medium);
-  transition: border-color 150ms ease-out;
+  transition:
+    border-color 150ms ease-out,
+    background-color 150ms ease-out;
 }
 
 .unit-switch:hover {
@@ -2728,7 +2894,10 @@ body.panels-resizing * {
    the switch is the one accessible control, so the markup keeps these
    aria-hidden and unfocusable. */
 .unit-switch-side {
-  padding: 0;
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 0 9px;
   border: 0;
   background: none;
   color: var(--muted);
@@ -2742,30 +2911,34 @@ body.panels-resizing * {
 }
 
 .unit-switch-side[data-active="true"] {
-  color: var(--ink);
+  background: var(--primary);
+  color: var(--primary-foreground);
   font-weight: var(--weight-strong);
+}
+
+.unit-switch-side[data-active="true"]:hover:not(:disabled) {
+  color: var(--primary-foreground);
 }
 
 .unit-switch-side:disabled {
   cursor: not-allowed;
 }
 
-/* The track: petrol both ways — neither side is an "off" state, so the fill
-   never drops to grey the way a boolean switch's would. */
+/* The Radix switch remains the single accessible toggle. The visible control
+   is the compact two-segment shell above; keeping the real switch in the
+   accessibility tree preserves keyboard and screen-reader semantics without
+   spending toolbar width on a second visual track. */
 .unit-switch-control {
-  position: relative;
-  width: 34px;
-  height: 18px;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  margin: -1px;
   padding: 0;
   border: 0;
-  border-radius: 999px;
-  background: var(--primary);
-  cursor: pointer;
-  transition: background-color 150ms ease-out;
-}
-
-.unit-switch-control:hover:not(:disabled) {
-  background: var(--primary-strong);
+  white-space: nowrap;
 }
 
 .unit-switch-control:disabled {
@@ -2775,6 +2948,15 @@ body.panels-resizing * {
 .unit-switch:has(.unit-switch-control:disabled) {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.unit-switch:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.unit-switch-control .switch-thumb {
+  display: none;
 }
 
 .switch-thumb {
@@ -2903,7 +3085,8 @@ body.panels-resizing * {
 /* An armed insert-tools button (App's view-toolbar strip): the crosshair
    signals "click to place" the way a drawing tool would, distinct from the
    plain pointer used for selecting and dragging existing geometry. */
-.plan-svg.tool-armed {
+.plan-svg.tool-armed,
+.elevation-svg.tool-armed {
   cursor: crosshair;
 }
 
@@ -3176,29 +3359,15 @@ body.panels-resizing * {
   cursor: pointer;
 }
 
-/* 3D preview surface + its camera-preset cluster (ThreeDView.tsx). Floating-
-   chip language, anchored bottom-left per the 3D spec so it never collides
-   with the shared top-right view options. */
+/* 3D preview surface. Camera presets live in the shared view toolbar so the
+   viewport stays visually dedicated to the spatial preview. */
 .three-view {
   position: relative;
   height: 100%;
   background: var(--bg);
 }
 
-.three-toolbar {
-  position: absolute;
-  bottom: 14px;
-  left: 14px;
-  display: flex;
-  gap: 6px;
-  z-index: 1;
-}
-
-/* Shared chip-button gap for the floating toolbar clusters — .three-toolbar's
-   camera presets and .viewport-zoom's Fit/Fit selected below. Named for the
-   now-removed PlanToolbar palette that originated it, but it outlived that
-   component as a plain "inspector-variant button, comfortable icon/label
-   gap" utility. */
+/* Shared chip-button gap for the viewport's floating zoom cluster. */
 .plan-toolbar-button {
   gap: 6px;
 }
@@ -4345,7 +4514,7 @@ body.panels-resizing * {
   }
 }
 
-@media (max-width: 1040px) {
+@media (max-width: 1180px) {
   .workspace {
     grid-template-columns: 240px minmax(0, 1fr) 260px;
   }
@@ -4360,11 +4529,9 @@ body.panels-resizing * {
     display: none;
   }
 
-  /* iPad portrait widths (768-834px) can't fit the topbar's three groups on
-     one line at full width. Rather than let it wrap to two lines, go
-     icon-only: tab labels, the Export label, and the save-badge label all
-     collapse to visually-hidden text so the accessible name survives while
-     the visible row stays a single line. */
+  /* Medium widths get the same visual vocabulary as the narrow toolbar:
+     labels become optional, while the accessible names remain intact. This
+     gives the header room to breathe before the shell needs to stack. */
   .topbar {
     gap: 12px;
     padding: 10px 14px;
@@ -4393,6 +4560,15 @@ body.panels-resizing * {
     padding: 0;
     justify-content: center;
     gap: 0;
+  }
+
+  .topbar-left,
+  .topbar-right {
+    gap: 6px;
+  }
+
+  .project-title {
+    max-width: 220px;
   }
 }
 
@@ -4425,9 +4601,32 @@ body.panels-resizing * {
   }
 
   .topbar {
-    grid-template-columns: 1fr;
-    align-items: stretch;
-    row-gap: 10px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "left right"
+      "center center";
+    align-items: center;
+    row-gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .topbar-left {
+    grid-area: left;
+  }
+
+  .topbar-center {
+    grid-area: center;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .topbar-right {
+    grid-area: right;
+    flex: 0 1 auto;
+  }
+
+  .topbar-center .view-tabs {
+    justify-content: flex-start;
   }
 
   .topbar-center,
@@ -4475,6 +4674,17 @@ body.panels-resizing * {
   }
 }
 
+@media (max-width: 480px) {
+  .app-name,
+  .brand-divider {
+    display: none;
+  }
+
+  .project-title {
+    max-width: 170px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -4497,6 +4707,11 @@ body.panels-resizing * {
   touch-action: none;
 }
 
+.elevation-opening.ghost {
+  pointer-events: none;
+  opacity: 0.75;
+}
+
 .elevation-opening:active {
   cursor: grabbing;
 }
@@ -4510,6 +4725,14 @@ body.panels-resizing * {
      stroke is hit-testable by default — "all" makes the whole rect (down
      to the floor for a door) the drag/click target. */
   pointer-events: all;
+}
+
+.elevation-opening.ghost .opening-outline {
+  pointer-events: none;
+  fill: var(--primary-soft);
+  fill-opacity: 0.4;
+  stroke: var(--selection);
+  stroke-dasharray: 6 5;
 }
 
 .elevation-opening.out-of-bounds .opening-outline {

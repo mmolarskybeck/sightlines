@@ -273,6 +273,12 @@ export type AppState = ArrangeSliceState &
   connectOpenings: (aId: string, bId: string) => Promise<void>;
   disconnectOpening: (id: string) => Promise<void>;
   placeOpeningFromPlan: (kind: OpeningKind, placement: PlanPlacement) => Promise<void>;
+  placeOpeningOnElevation: (
+    kind: OpeningKind,
+    wallId: string,
+    xMm: number,
+    yMm: number
+  ) => Promise<void>;
   placeArtworkOnFloor: (artworkId: string, xMm: number, yMm: number) => Promise<void>;
   commitPlanMove: (
     objectId: string,
@@ -2469,6 +2475,55 @@ export function createAppStore(deps: AppStoreDeps) {
         );
       },
 
+      async placeOpeningOnElevation(kind, wallId, xMm, yMm) {
+        const project = get().project;
+        if (!project) return;
+
+        const wall = getProjectWalls(project).find((candidate) => candidate.id === wallId);
+        if (!wall) return;
+
+        // Doors and windows remain disallowed on partition faces in elevation,
+        // matching the plan insertion rules. Blocked zones are annotations and
+        // can be placed on either face.
+        if (kind !== "blocked-zone" && parseFaceWallId(wallId) !== null) {
+          set({ error: "Doors and windows can't be placed on a partition." });
+          return;
+        }
+
+        // The elevation resolver already keeps the pointer inside the wall,
+        // but preserve the creation-time opening-overlap guard here as well so
+        // imported callers and future surfaces cannot create forbidden opening
+        // pairs by bypassing the canvas.
+        const xCenterMm = resolveFreeOpeningXMm(project, wall, kind, xMm, yMm);
+        if (xCenterMm === null) {
+          set({ error: "There isn’t room for another opening on this wall." });
+          return;
+        }
+
+        const { nextWallObjects, primaryId, validateIds } = buildOpeningWithMirror(
+          project,
+          wall,
+          kind,
+          xCenterMm,
+          yMm
+        );
+
+        await commitWallObjectEdit(
+          `Add ${openingNoun(kind)}`,
+          project,
+          nextWallObjects,
+          validateIds,
+          true,
+          {
+            extras: selectionWrite(
+              { ...project, wallObjects: nextWallObjects },
+              { kind: "objects", ids: [primaryId] },
+              get().wallContextId
+            )
+          }
+        );
+      },
+
       async placeArtworkOnFloor(artworkId, xMm, yMm) {
         const project = get().project;
         if (!project) return;
@@ -2708,10 +2763,12 @@ function buildOpeningOnWall(
   project: Project,
   wall: WallWithGeometry,
   kind: OpeningKind,
-  xMm: number
+  xMm: number,
+  centerYMm?: number
 ): OpeningWallObject {
   const centerlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
-  return createOpeningPlacement(kind, wall.id, xMm, centerlineYMm);
+  const opening = createOpeningPlacement(kind, wall.id, xMm, centerlineYMm);
+  return centerYMm === undefined ? opening : { ...opening, yMm: centerYMm };
 }
 
 // Builds the wallObjects for adding an opening on `wall`, mirroring it onto a
@@ -2724,9 +2781,10 @@ function buildOpeningWithMirror(
   project: Project,
   wall: WallWithGeometry,
   kind: OpeningKind,
-  xMm: number
+  xMm: number,
+  centerYMm?: number
 ): { nextWallObjects: WallObject[]; primaryId: string; validateIds: string[] } {
-  const primary = buildOpeningOnWall(project, wall, kind, xMm);
+  const primary = buildOpeningOnWall(project, wall, kind, xMm, centerYMm);
   const unpaired = {
     nextWallObjects: [...project.wallObjects, primary],
     primaryId: primary.id,
@@ -2771,8 +2829,8 @@ function buildOpeningWithMirror(
   // wall that vanished) falls through to placing the primary alone, exactly as
   // without a shared wall.
   const twinWall = getProjectWalls(project).find((candidate) => candidate.id === counterpart.wallId);
-  if (twinWall && isTwinSlotFree(project, twinWall, kind, counterpart.xMm)) {
-    const twin = buildOpeningOnWall(project, twinWall, kind, counterpart.xMm);
+  if (twinWall && isTwinSlotFree(project, twinWall, kind, counterpart.xMm, centerYMm)) {
+    const twin = buildOpeningOnWall(project, twinWall, kind, counterpart.xMm, centerYMm);
     // buildOpeningOnWall with a door/window kind returns a connectable opening;
     // the guard narrows the union so the symmetric pointer writes typecheck.
     if (twin.kind === "door" || twin.kind === "window") {
@@ -2828,12 +2886,14 @@ function isTwinSlotFree(
   project: Project,
   wall: WallWithGeometry,
   kind: OpeningKind,
-  xMm: number
+  xMm: number,
+  centerYMm?: number
 ): boolean {
   const { widthMm, heightMm } = getDefaultOpeningSizeMm(kind);
-  const centerlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
-  const centerYMm = getDefaultOpeningCenterYMm(kind, heightMm, centerlineYMm);
-  return isOpeningSlotFree(project, wall, { widthMm, heightMm }, centerYMm, xMm, null);
+  const defaultCenterlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
+  const resolvedCenterYMm =
+    centerYMm ?? getDefaultOpeningCenterYMm(kind, heightMm, defaultCenterlineYMm);
+  return isOpeningSlotFree(project, wall, { widthMm, heightMm }, resolvedCenterYMm, xMm, null);
 }
 
 // Shared-wall move sync: given the wallObjects with the target already moved to
@@ -2925,18 +2985,20 @@ function resolveFreeOpeningXMm(
   project: Project,
   wall: WallWithGeometry,
   kind: OpeningKind,
-  preferredXMm: number
+  preferredXMm: number,
+  centerYMm?: number
 ): number | null {
   const { widthMm, heightMm } = getDefaultOpeningSizeMm(kind);
   const centerlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
-  const centerYMm = getDefaultOpeningCenterYMm(kind, heightMm, centerlineYMm);
+  const resolvedCenterYMm =
+    centerYMm ?? getDefaultOpeningCenterYMm(kind, heightMm, centerlineYMm);
   const sameWallOpenings = project.wallObjects.filter(
     (object) => object.wallId === wall.id && object.kind !== "artwork"
   );
   return findFreeOpeningCenterXMm({
     preferredXMm,
     sizeMm: { widthMm, heightMm },
-    centerYMm,
+    centerYMm: resolvedCenterYMm,
     wallLengthMm: wall.lengthMm,
     sameWallOpenings
   });

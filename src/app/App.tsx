@@ -1,7 +1,9 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
+import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
+import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
 import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
@@ -10,6 +12,7 @@ import { GridFourIcon } from "@phosphor-icons/react/dist/csr/GridFour";
 import { MagnetIcon } from "@phosphor-icons/react/dist/csr/Magnet";
 import { MapTrifoldIcon } from "@phosphor-icons/react/dist/csr/MapTrifold";
 import { PolygonIcon } from "@phosphor-icons/react/dist/csr/Polygon";
+import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { PresentationIcon } from "@phosphor-icons/react/dist/csr/Presentation";
 import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
@@ -42,7 +45,6 @@ import { formatLength } from "../domain/units/length";
 import { getGridPrecisionFloorOptionsMm } from "../domain/units/precision";
 import {
   displayUnitForSystem,
-  getScopeUnits,
   unitSystemFromDisplayUnit,
   type UnitSystem
 } from "../domain/units/unitSystem";
@@ -72,6 +74,12 @@ import {
 } from "./components/WallPlacementFields";
 import { WallInspector, type WallDimensionLink } from "./components/WallInspector";
 import { Button } from "./components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from "./components/ui/dropdown-menu";
 import { Input } from "./components/ui/input";
 import {
   Select,
@@ -114,6 +122,7 @@ import {
   useAppStore
 } from "./store";
 import { getArrangeEligibility } from "./store/arrangeEligibility";
+import type { ThreeDViewActions } from "./components/three/ThreeDView";
 
 const DataView = lazy(() =>
   import("./components/DataView").then((module) => ({ default: module.DataView }))
@@ -218,6 +227,7 @@ export function App() {
     connectOpenings,
     disconnectOpening,
     placeOpeningFromPlan,
+    placeOpeningOnElevation,
     commitPlanMove,
     updateFloorObject,
     moveWallObjectsGroup,
@@ -242,6 +252,7 @@ export function App() {
   const selectedArtworkId = getSelectedArtworkId(project, selection);
   const selectedOpeningId = getSelectedOpeningId(project, selection);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const threeDActionsRef = useRef<ThreeDViewActions | null>(null);
   const [importWizardOpen, setImportWizardOpen] = useState(false);
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
@@ -418,11 +429,12 @@ export function App() {
     );
   }
 
-  // Scoped display units for read-only labels: a length reads in the unit
-  // natural to what it measures (walls in ft/m) rather than one global unit.
-  // The inspectors keep receiving project.unit and derive their own scopes.
+  // Keep the toolbar's unit family in sync with the view's governing scale.
+  // Plan is room-scale (ft/m); Elevation is detail-scale (in/cm). The stored
+  // project unit still represents the selected imperial/metric family until
+  // per-view units become a user setting.
   const unitSystem = unitSystemFromDisplayUnit(project.unit);
-  const wallUnit = getScopeUnits(unitSystem, "wall").displayUnit;
+  const elevationUnit: DisplayUnit = unitSystem === "imperial" ? "in" : "cm";
   const selectedRoomPlacement = selectedRoomId
     ? (project.floor.rooms.find((placement) => placement.roomId === selectedRoomId) ?? null)
     : null;
@@ -939,85 +951,100 @@ export function App() {
         ) : null}
 
         <section className="canvas-column">
-          <div className="view-toolbar">
-            {/* Left zone: document-insertion tools. Lives in the same strip
-                as the right zone's view options now instead of a floating
-                palette over the plan canvas — arming one of these still only
-                does anything on the plan surface, so the whole control
-                disables outside viewMode "plan" (App.tsx's own useEffect
-                above also disarms activeTool the moment the tab steers
-                away). */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <InsertToolPicker
-                activeTool={activeTool}
-                disabled={viewMode !== "plan"}
-                onToolChange={armOpeningTool}
-              />
-              <DrawRoomButton
-                active={drawRoomActive}
-                disabled={viewMode !== "plan"}
-                onToggle={toggleDrawRoom}
-              />
-              <PartitionButton
-                active={partitionToolActive}
-                disabled={viewMode !== "plan"}
-                onToggle={togglePartitionTool}
-              />
+          {viewMode !== "data" &&
+          (viewMode !== "3d" || project.floor.rooms.length > 0) ? (
+            <div className="view-toolbar">
+              <div className="view-tools-primary">
+                {viewMode === "plan" || viewMode === "elevation" ? (
+                  <>
+                    <InsertToolPicker
+                      activeTool={activeTool}
+                      disabled={viewMode === "elevation" && !selectedWall}
+                      onToolChange={armOpeningTool}
+                    />
+                    <CompactInsertPicker
+                      activeTool={activeTool}
+                      disabled={viewMode === "elevation" && !selectedWall}
+                      onToolChange={armOpeningTool}
+                    />
+                  </>
+                ) : null}
+                {viewMode === "plan" ? (
+                  <>
+                    <DrawRoomButton active={drawRoomActive} onToggle={toggleDrawRoom} />
+                    <PartitionButton
+                      active={partitionToolActive}
+                      onToggle={togglePartitionTool}
+                    />
+                  </>
+                ) : null}
+              </div>
+              <div className="view-options" aria-label="View options">
+                {viewMode === "3d" ? (
+                  project.floor.rooms.length > 0 ? (
+                    <ThreeDCameraTools actionsRef={threeDActionsRef} />
+                  ) : null
+                ) : (
+                  <>
+                    <ViewOptionButton
+                      active={showGrid}
+                      disabled={false}
+                      icon={<GridFourIcon aria-hidden="true" size={16} />}
+                      label="Grid"
+                      title={showGrid ? "Hide grid" : "Show grid"}
+                      onClick={toggleShowGrid}
+                    />
+                    <ViewOptionButton
+                      active={snapToGrid}
+                      disabled={false}
+                      icon={<MagnetIcon aria-hidden="true" size={16} />}
+                      label="Snap"
+                      title={snapToGrid ? "Disable snap to grid" : "Enable snap to grid"}
+                      onClick={toggleSnapToGrid}
+                    />
+                    <PrecisionSelect
+                      disabled={false}
+                      floorMm={gridPrecisionFloorMm}
+                      unit={viewMode === "elevation" ? elevationUnit : project.unit}
+                      onChange={setGridPrecisionFloorMm}
+                    />
+                    {viewMode === "elevation" ? (
+                      <ViewOptionButton
+                        active={showCenterline}
+                        disabled={false}
+                        icon={<EyeIcon aria-hidden="true" size={16} />}
+                        label="Eyeline"
+                        title={showCenterline ? "Hide eyeline" : "Show eyeline"}
+                        onClick={toggleShowCenterline}
+                      />
+                    ) : null}
+                    <ViewOptionButton
+                      active={allowOverlappingPlacement}
+                      disabled={false}
+                      icon={<StackIcon aria-hidden="true" size={16} />}
+                      label="Overlap"
+                      title={
+                        allowOverlappingPlacement
+                          ? "Prevent overlapping placement"
+                          : "Allow overlapping placement"
+                      }
+                      onClick={toggleAllowOverlappingPlacement}
+                    />
+                    <UnitSystemToggle
+                      disabled={false}
+                      labels={
+                        viewMode === "elevation"
+                          ? { imperial: "in", metric: "cm" }
+                          : { imperial: "ft", metric: "m" }
+                      }
+                      system={unitSystem}
+                      onChange={(system) => setUnit(displayUnitForSystem(system))}
+                    />
+                  </>
+                )}
+              </div>
             </div>
-            <div className="view-options" aria-label="View options">
-              <ViewOptionButton
-                active={showGrid}
-                disabled={viewMode === "data" || viewMode === "3d"}
-                icon={<GridFourIcon aria-hidden="true" size={16} />}
-                label="Grid"
-                title={showGrid ? "Hide grid" : "Show grid"}
-                onClick={toggleShowGrid}
-              />
-              <ViewOptionButton
-                active={snapToGrid}
-                disabled={viewMode === "data" || viewMode === "3d"}
-                icon={<MagnetIcon aria-hidden="true" size={16} />}
-                label="Snap"
-                title={snapToGrid ? "Disable snap to grid" : "Enable snap to grid"}
-                onClick={toggleSnapToGrid}
-              />
-              <PrecisionSelect
-                disabled={viewMode === "data" || viewMode === "3d"}
-                floorMm={gridPrecisionFloorMm}
-                unit={project.unit}
-                onChange={setGridPrecisionFloorMm}
-              />
-              {viewMode === "elevation" ? (
-                <ViewOptionButton
-                  active={showCenterline}
-                  disabled={false}
-                  icon={<EyeIcon aria-hidden="true" size={16} />}
-                  label="Eyeline"
-                  title={showCenterline ? "Hide eyeline" : "Show eyeline"}
-                  onClick={toggleShowCenterline}
-                />
-              ) : null}
-              {viewMode === "elevation" ? (
-                <ViewOptionButton
-                  active={allowOverlappingPlacement}
-                  disabled={false}
-                  icon={<StackIcon aria-hidden="true" size={16} />}
-                  label="Overlap"
-                  title={
-                    allowOverlappingPlacement
-                      ? "Prevent overlapping placement"
-                      : "Allow overlapping placement"
-                  }
-                  onClick={toggleAllowOverlappingPlacement}
-                />
-              ) : null}
-              <UnitSystemToggle
-                disabled={viewMode === "data" || viewMode === "3d"}
-                system={unitSystem}
-                onChange={(system) => setUnit(displayUnitForSystem(system))}
-              />
-            </div>
-          </div>
+          ) : null}
 
           {viewMode === "plan" ? (
             project.floor.rooms.length === 0 && !drawRoomActive ? (
@@ -1109,10 +1136,15 @@ export function App() {
                   getBlob={getAssetBlob}
                   gridPrecisionFloorMm={gridPrecisionFloorMm}
                   gridVisible={showGrid}
+                  activeTool={activeTool}
+                  onToolChange={armOpeningTool}
+                  onPlaceOpeningOnElevation={(kind, wallId, xMm, yMm) =>
+                    void placeOpeningOnElevation(kind, wallId, xMm, yMm)
+                  }
                   selectedArtworkId={selectedArtworkId}
                   selectedOpeningId={selectedOpeningId}
                   snapToGrid={snapToGrid}
-                  unit={wallUnit}
+                  unit={elevationUnit}
                   wallHeightMm={selectedWall.heightMm}
                   wallId={selectedWall.id}
                   wallLengthMm={selectedWall.lengthMm}
@@ -1196,6 +1228,7 @@ export function App() {
                 onSelectWall={selectWall}
                 onSelectObject={selectObject}
                 onClearSelection={clearObjectSelection}
+                actionsRef={threeDActionsRef}
               />
             </Suspense>
           ) : null}
@@ -1633,13 +1666,14 @@ function ProjectTitleInput({
   );
 }
 
-// The view-toolbar's left zone: one bordered segmented control reading
+// The view-toolbar's primary zone: one bordered segmented control reading
 // `[ Insert | door | window | zone ]` — a non-interactive "Insert" caption
 // followed by three icon-only toggle segments sharing the outer border with
 // 1px internal dividers (the same joined-segment feel as .unit-switch, not
 // three floating chips). Toggle semantics match the old floating palette:
 // the armed segment reads pressed in petrol, clicking it again disarms, and
-// PlanView's own Escape/click-to-place handling disarms via onToolChange.
+// PlanView/ElevationView's own Escape/click-to-place handling disarms via
+// onToolChange.
 // The caption is aria-hidden (the group's aria-label already says "Insert",
 // so announcing the text too would double up); each segment carries its own
 // aria-label AND title — with no visible per-tool text, the title is the
@@ -1647,10 +1681,12 @@ function ProjectTitleInput({
 function InsertToolPicker({
   activeTool,
   disabled,
+  disabledReason = "Select a wall to place an opening",
   onToolChange
 }: {
   activeTool: OpeningKind | null;
   disabled: boolean;
+  disabledReason?: string;
   onToolChange: (tool: OpeningKind | null) => void;
 }) {
   const tools: { kind: OpeningKind; label: string; icon: React.ReactNode }[] = [
@@ -1688,31 +1724,90 @@ function InsertToolPicker({
   // Same wrapper-span trick as ViewOptionButton below: hovering a disabled
   // control must still explain WHY it's disabled, and per-segment titles are
   // dropped above so this one wrapper title wins everywhere over the control.
-  return disabled ? <span title="Switch to plan view to insert">{picker}</span> : picker;
+  return disabled ? <span title={disabledReason}>{picker}</span> : picker;
+}
+
+// The compact replacement for the three-segment Insert control. It is shown
+// by the canvas container query below the narrow breakpoint, so the desktop
+// control can keep its direct-manipulation affordance without making the
+// narrow toolbar carry five adjacent icon buttons.
+function CompactInsertPicker({
+  activeTool,
+  disabled,
+  disabledReason = "Select a wall to place an opening",
+  onToolChange
+}: {
+  activeTool: OpeningKind | null;
+  disabled: boolean;
+  disabledReason?: string;
+  onToolChange: (tool: OpeningKind | null) => void;
+}) {
+  const tools: { kind: OpeningKind; label: string; icon: React.ReactNode }[] = [
+    { kind: "door", label: "Door", icon: <DoorIcon aria-hidden="true" size={16} /> },
+    { kind: "window", label: "Window", icon: <SquareIcon aria-hidden="true" size={16} /> },
+    {
+      kind: "blocked-zone",
+      label: "Blocked zone",
+      icon: <RectangleDashedIcon aria-hidden="true" size={16} />
+    }
+  ];
+
+  const menu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label="Insert"
+          className="compact-insert-trigger"
+          data-active={activeTool ? "true" : "false"}
+          disabled={disabled}
+          title={disabled ? undefined : "Insert an opening"}
+          variant="outline"
+        >
+          <PlusIcon aria-hidden="true" size={16} />
+          <span className="compact-insert-label">Insert</span>
+          <CaretDownIcon aria-hidden="true" className="compact-insert-caret" size={14} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="compact-insert-menu">
+        {tools.map((tool) => (
+          <DropdownMenuItem
+            key={tool.kind}
+            aria-checked={activeTool === tool.kind}
+            className="compact-insert-item"
+            data-active={activeTool === tool.kind ? "true" : "false"}
+            role="menuitemradio"
+            onSelect={() => onToolChange(activeTool === tool.kind ? null : tool.kind)}
+          >
+            {tool.icon}
+            <span>{tool.label}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
+  const picker = <span className="compact-insert-tools">{menu}</span>;
+  return disabled ? <span title={disabledReason}>{picker}</span> : picker;
 }
 
 // The polygon-room draw toggle, sat beside the Insert segmented control in the
-// view-toolbar's left zone. Same armed-tool conventions as the insert tools:
-// pressed reads in petrol, clicking again disarms, disabled off the plan
-// surface (with the wrapper-span title trick so the disabled reason still
-// shows on hover). A labeled Toggle rather than an icon-only segment, so the
-// mode reads plainly next to the icon-only insert row.
+// view-toolbar's primary zone. Same armed-tool conventions as the insert
+// tools: pressed reads in petrol and clicking again disarms. It only renders
+// in Plan, where the mode is meaningful. A labeled Toggle rather than an
+// icon-only segment keeps the drawing mode plain at comfortable widths.
 function DrawRoomButton({
   active,
-  disabled,
   onToggle
 }: {
   active: boolean;
-  disabled: boolean;
   onToggle: () => void;
 }) {
   const toggle = (
     <Toggle
       aria-label="Draw room"
       className="view-option-button"
-      disabled={disabled}
       pressed={active}
-      title={disabled ? undefined : "Draw a room outline"}
+      title="Draw a room outline"
       variant="default"
       onPressedChange={onToggle}
     >
@@ -1721,27 +1816,25 @@ function DrawRoomButton({
     </Toggle>
   );
 
-  return disabled ? <span title="Switch to plan view to draw a room">{toggle}</span> : toggle;
+  return toggle;
 }
 
-// The partition (free-standing wall) draw toggle, beside Draw room. Same
-// armed-tool conventions: drag a centerline inside a room to place it.
+// The partition (free-standing wall) draw toggle, beside Draw room. It only
+// renders in Plan; the armed-tool convention remains: drag a centerline inside
+// a room to place it.
 function PartitionButton({
   active,
-  disabled,
   onToggle
 }: {
   active: boolean;
-  disabled: boolean;
   onToggle: () => void;
 }) {
   const toggle = (
     <Toggle
       aria-label="Partition"
       className="view-option-button"
-      disabled={disabled}
       pressed={active}
-      title={disabled ? undefined : "Draw a free-standing partition inside a room"}
+      title="Draw a free-standing partition inside a room"
       variant="default"
       onPressedChange={onToggle}
     >
@@ -1750,7 +1843,7 @@ function PartitionButton({
     </Toggle>
   );
 
-  return disabled ? <span title="Switch to plan view to draw a partition">{toggle}</span> : toggle;
+  return toggle;
 }
 
 function ViewOptionButton({
@@ -1789,18 +1882,52 @@ function ViewOptionButton({
 
   // toggleVariants applies `disabled:pointer-events-none`, so a disabled
   // Toggle never receives the hover that would trigger its own `title`
-  // tooltip (e.g. the insert-tools row's "Switch to plan view to insert").
+  // tooltip (e.g. the elevation insert row's "Select a wall to place an opening").
   // A wrapping span keeps receiving pointer events, so the disabled-state
   // title stays reachable on hover instead of silently going dark.
   return disabled ? <span title={title}>{toggle}</span> : toggle;
 }
 
+function ThreeDCameraTools({
+  actionsRef
+}: {
+  actionsRef: { current: ThreeDViewActions | null };
+}) {
+  return (
+    <div className="three-camera-tools" role="group" aria-label="3D camera">
+      <Button
+        className="view-option-button"
+        title="Frame the whole layout"
+        variant="inspector"
+        onClick={() => actionsRef.current?.overview()}
+      >
+        <CornersOutIcon aria-hidden="true" size={16} />
+        <span className="view-option-label">Overview</span>
+      </Button>
+      <Button
+        className="view-option-button"
+        title="View the selected wall at eye level"
+        variant="inspector"
+        onClick={() => actionsRef.current?.eyeLevel()}
+      >
+        <EyeIcon aria-hidden="true" size={16} />
+        <span className="view-option-label">Eye level</span>
+      </Button>
+    </div>
+  );
+}
+
 function UnitSystemToggle({
   disabled,
+  labels = { imperial: "ft", metric: "m" },
   system,
   onChange
 }: {
   disabled: boolean;
+  labels?: {
+    imperial: string;
+    metric: string;
+  };
   system: UnitSystem;
   onChange: (system: UnitSystem) => void;
 }) {
@@ -1819,7 +1946,11 @@ function UnitSystemToggle({
   // accessible control, so the words stay out of the tab order and the
   // accessibility tree rather than announcing as three separate controls.
   return (
-    <div className="unit-switch" role="group" aria-label="Units">
+    <div
+      className="unit-switch"
+      role="group"
+      aria-label={`Units: ${labels.imperial} / ${labels.metric}`}
+    >
       <button
         aria-hidden="true"
         className="unit-switch-side"
@@ -1829,7 +1960,7 @@ function UnitSystemToggle({
         type="button"
         onClick={() => select("imperial")}
       >
-        Imperial
+        {labels.imperial}
       </button>
       <Switch
         aria-labelledby="unit-system-label unit-system-value"
@@ -1842,7 +1973,7 @@ function UnitSystemToggle({
           Units
         </span>
         <span className="visually-hidden" id="unit-system-value">
-          {system === "metric" ? "Metric" : "Imperial"}
+          {system === "metric" ? `Metric (${labels.metric})` : `Imperial (${labels.imperial})`}
         </span>
       </Switch>
       <button
@@ -1854,7 +1985,7 @@ function UnitSystemToggle({
         type="button"
         onClick={() => select("metric")}
       >
-        Metric
+        {labels.metric}
       </button>
     </div>
   );
@@ -1878,7 +2009,7 @@ function PrecisionSelect({
   // inches for imperial, cm for metric) regardless of the project's current
   // display unit, since the stored value is mm and clamps to the nearest
   // table entry if the project unit later changes.
-  const labelUnit: DisplayUnit = unit === "cm" || unit === "m" ? "cm" : "ft";
+  const labelUnit: DisplayUnit = unit === "in" ? "in" : unit === "ft" ? "ft" : "cm";
   const options = getGridPrecisionFloorOptionsMm(unit);
 
   return (
@@ -1891,7 +2022,11 @@ function PrecisionSelect({
           onChange(value === "auto" ? null : Number(value))
         }
       >
-        <SelectTrigger className="precision-select-trigger" aria-label="Grid precision">
+        <SelectTrigger
+          className="precision-select-trigger"
+          aria-label="Grid precision"
+          title="Grid precision"
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
