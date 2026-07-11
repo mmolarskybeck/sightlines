@@ -76,6 +76,12 @@ import { RoomInspector } from "./components/RoomInspector";
 import { RoomsPanel } from "./components/RoomsPanel";
 import { SelectionInspector } from "./components/SelectionInspector";
 import {
+  chooseToolbarDensity,
+  DEFAULT_TOOLBAR_FIT_BUFFER_PX,
+  TOOLBAR_DENSITIES,
+  type ToolbarDensity
+} from "./toolbarDensity";
+import {
   WallPlacementFields,
   getWallPlacementCenterTarget,
   getWallPlacementNeighborEdges
@@ -160,8 +166,6 @@ const assetRepository = new IndexedDbAssetRepository();
 // of the compact toolbar's one-line budget. Collapse one side pane before the
 // toolbar starts clipping; the CSS workspace breakpoints use the same range.
 const SINGLE_PANE_WORKSPACE_MEDIA_QUERY = "(max-width: 1080px)";
-const TOOLBAR_DENSITIES = ["comfortable", "condensed", "compact", "tight"] as const;
-const TOOLBAR_FIT_BUFFER_PX = 2;
 
 function useResponsiveToolbarDensity(measurementKey: string) {
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -197,16 +201,16 @@ function useResponsiveToolbarDensity(measurementKey: string) {
       );
     };
 
-    const fits = () => {
+    const requiredToolbarWidth = () => {
       const style = window.getComputedStyle(toolbar);
       const groups = Array.from(toolbar.children) as HTMLElement[];
       const gap = Number.parseFloat(style.columnGap) || 0;
-      const requiredWidth =
+      return (
         groups.reduce((total, group) => total + requiredGroupWidth(group), 0) +
         Math.max(0, groups.length - 1) * gap +
         (Number.parseFloat(style.paddingLeft) || 0) +
-        (Number.parseFloat(style.paddingRight) || 0);
-      return requiredWidth <= toolbar.clientWidth - TOOLBAR_FIT_BUFFER_PX;
+        (Number.parseFloat(style.paddingRight) || 0)
+      );
     };
 
     const measure = () => {
@@ -217,14 +221,16 @@ function useResponsiveToolbarDensity(measurementKey: string) {
       // density change forces the browser to evaluate that exact rendered
       // configuration, so panes, labels, fonts, and active view controls all
       // contribute to the breakpoint instead of relying on a guessed width.
-      let nextDensity = TOOLBAR_DENSITIES.at(-1)!;
+      const requiredWidths = {} as Record<ToolbarDensity, number>;
       for (const density of TOOLBAR_DENSITIES) {
         toolbar.dataset.density = density;
-        if (fits()) {
-          nextDensity = density;
-          break;
-        }
+        requiredWidths[density] = requiredToolbarWidth();
       }
+      const nextDensity = chooseToolbarDensity(
+        toolbar.clientWidth,
+        requiredWidths,
+        DEFAULT_TOOLBAR_FIT_BUFFER_PX
+      );
       toolbar.dataset.density = nextDensity;
     };
 
