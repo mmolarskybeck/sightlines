@@ -1,8 +1,19 @@
 # Cloudflare Deployment
 
-Sightlines deploys as a static Vite React single-page app on Cloudflare Workers static assets. There is no Worker script yet; `wrangler.jsonc` only points Cloudflare at the Vite build output and enables the SPA fallback.
+Sightlines deploys as two separate Cloudflare Workers: a static Astro landing site at the apex (`sightlines.art`) and a Vite React single-page app at the app subdomain (`app.sightlines.art`).
+
+## Architecture
+
+| Component | Location | Serves | URL |
+| --- | --- | --- | --- |
+| Landing site | `landing/` (Astro) | Marketing, docs, markdown-based content | `https://sightlines.art/` |
+| App | `app/` (Vite React SPA) | Interactive editor | `https://app.sightlines.art/` |
+
+Each has its own `wrangler.jsonc` configuration and custom domain binding in Cloudflare.
 
 ## One-Time Cloudflare Setup
+
+### Landing Site
 
 1. Log in locally:
 
@@ -10,9 +21,10 @@ Sightlines deploys as a static Vite React single-page app on Cloudflare Workers 
    npm run cf:login
    ```
 
-2. Confirm Wrangler can see the account:
+2. Navigate to the landing directory and confirm Wrangler can see the account:
 
    ```sh
+   cd landing
    npm run cf:whoami
    ```
 
@@ -28,44 +40,106 @@ Sightlines deploys as a static Vite React single-page app on Cloudflare Workers 
    npm run deploy
    ```
 
-The first deploy creates the `sightlines` Worker in the Cloudflare account and publishes the contents of `dist/` to the generated `*.workers.dev` URL. Production is attached to `sightlines.art` and `www.sightlines.art` through the custom domain routes in `wrangler.jsonc`.
+This creates the `sightlines-landing` Worker in Cloudflare and attaches it to `sightlines.art` via custom domain binding.
+
+### App
+
+Repeat the above steps in the `app/` directory:
+
+```sh
+cd app
+npm run deploy
+```
+
+This creates the `sightlines-app` Worker and attaches it to `app.sightlines.art` via custom domain binding.
 
 ## Production and Branch Previews
 
 Cloudflare Workers Builds should be the deployment authority for Sightlines. GitHub Actions, if added later, should run checks only.
 
-Use these values in Cloudflare under `Workers & Pages > sightlines > Settings > Build`:
+### Landing Site
+
+Use these values in Cloudflare under `Workers & Pages > sightlines-landing > Settings > Build`:
 
 | Setting | Value |
 | --- | --- |
 | Production branch | `main` |
 | Builds for non-production branches | Enabled |
-| Root directory | `/` |
+| Root directory | `/landing` |
 | Build command | `npm run build` |
 | Deploy command | `npm run cf:deploy:prod` |
-| Non-production branch deploy command / Version command | `npm run cf:deploy:preview` |
+| Non-production branch deploy command | `npm run cf:deploy:preview` |
+
+### App
+
+Use these values in Cloudflare under `Workers & Pages > sightlines-app > Settings > Build`:
+
+| Setting | Value |
+| --- | --- |
+| Production branch | `main` |
+| Builds for non-production branches | Enabled |
+| Root directory | `/app` |
+| Build command | `npm run build` |
+| Deploy command | `npm run cf:deploy:prod` |
+| Non-production branch deploy command | `npm run cf:deploy:preview` |
 
 What this does:
 
-- Pushes to `main` run `wrangler deploy`, promoting the build to production at `https://sightlines.art/`.
-- Pushes to other branches run `wrangler versions upload --preview-alias <branch>`, creating a preview version without changing production.
-- Branch names are sanitized before becoming aliases. For example, `feature/3d-preview` becomes `feature-3d-preview-sightlines.<workers-subdomain>.workers.dev`.
-- The generated `sightlines.mmolarskybeck.workers.dev` URL can remain available as a fallback Worker URL, but the production user-facing URL is `sightlines.art`.
+- Pushes to `main` run `wrangler deploy` in each worker directory, promoting builds to production.
+- Pushes to other branches run `wrangler versions upload --preview-alias <branch>`, creating preview versions without changing production.
+- Branch names are sanitized before becoming aliases.
 
 ## Manual Commands
 
-Local commands:
+Local commands for the landing site:
 
-- `npm run deploy:dry-run` builds and validates the production Worker upload without publishing.
-- `npm run deploy` builds and deploys production manually.
-- `WORKERS_CI_BRANCH=my-branch npm run cf:deploy:preview` uploads a manual preview version for a branch-style alias.
+```sh
+cd landing
+npm run deploy:dry-run  # Validate production upload without publishing
+npm run deploy          # Deploy production manually
+```
+
+Local commands for the app:
+
+```sh
+cd app
+npm run deploy:dry-run  # Validate production upload without publishing
+npm run deploy          # Deploy production manually
+```
+
+## DNS and Custom Domains
+
+The production domain `sightlines.art` has two custom domain bindings:
+
+- `sightlines.art` → `sightlines-landing` Worker
+- `app.sightlines.art` → `sightlines-app` Worker
+- `www.sightlines.art` → `sightlines-landing` Worker (via Cloudflare Redirect Rule)
+
+The `www` subdomain is redirected to the apex via Cloudflare's dashboard Redirect Rules; all HTTP traffic is redirected to HTTPS.
+
+**Note:** If your network DNS sinkholes `sightlines.art`, you can verify the deployment using DNS-over-HTTPS (DoH) or `curl --resolve`:
+
+```sh
+curl --resolve sightlines.art:443:192.0.2.1 https://sightlines.art/
+```
 
 ## Notes
 
-- `assets.not_found_handling = "single-page-application"` serves `index.html` for navigation paths that do not match a built asset.
-- `public/_headers` is copied into `dist/_headers` during `npm run build` and is interpreted by Cloudflare Workers static assets. It sets baseline security headers, a conservative CSP, and long-lived caching for hashed `assets/*` files. The CSP keeps `style-src 'unsafe-inline'` because the React app uses measured inline styles for parts of the editor UI.
-- `public/robots.txt`, `public/sitemap.xml`, `public/site.webmanifest`, `public/favicon.svg`, `public/llms.txt`, `public/.well-known/security.txt`, and the static trust pages (`about.html`, `privacy.html`, `security.html`, `it.html`) are lightweight trust/crawler signals for the production domain.
-- Custom Domains on Workers match an exact hostname. `wrangler.jsonc` includes both `sightlines.art` and `www.sightlines.art`; add a Cloudflare redirect rule if one hostname should be canonical.
+### Landing Site (Astro)
+
+- `landing/public/_headers` sets baseline security headers, CSP, and caching rules for the landing site.
+- `landing/public/robots.txt`, `sitemap.xml`, `site.webmanifest`, etc., are trust signals for SEO and crawler indexing.
+- Astro outputs static HTML; there is no Worker script, just static asset serving.
+
+### App (Vite React SPA)
+
+- `assets.not_found_handling = "single-page-application"` in `app/wrangler.jsonc` serves `index.html` for navigation paths that do not match a built asset.
+- `app/public/_headers` is copied into `dist/_headers` during build. The CSP keeps `style-src 'unsafe-inline'` because the React app uses measured inline styles for parts of the editor UI.
+- `app/public/robots.txt` and `app/public/.well-known/security.txt` are trust signals.
+
+### General
+
+- Custom Domains on Workers match an exact hostname. Each worker's `wrangler.jsonc` specifies its custom domain.
 - Keep account IDs, API tokens, and secrets out of the repo. Use `wrangler login` locally or Cloudflare dashboard secrets/tokens in CI.
 - Runtime secrets and variables belong in the Worker settings, not in Workers Builds build variables.
-- If Sightlines later adds Cloudflare APIs, D1, R2, KV, or server-side auth, add a Worker entry point and bindings to `wrangler.jsonc`.
+- If either worker needs Cloudflare APIs (D1, R2, KV, etc.), add bindings to the respective `wrangler.jsonc`.
