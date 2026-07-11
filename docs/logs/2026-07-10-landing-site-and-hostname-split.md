@@ -1,6 +1,6 @@
 # Session Log — Landing Site & Hostname Split
 
-Date: 2026-07-10 · Session: Claude Code (Fable 5) with Opus/Sonnet subagents
+Date: 2026-07-10
 Outcome: **Astro landing site built and deployed live to sightlines.art; app moved to app.sightlines.art. Split verified end-to-end in production.**
 
 ## What shipped
