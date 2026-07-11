@@ -53,6 +53,10 @@ export function useDeleteAndEscapeShortcuts({
 }: UseDeleteAndEscapeShortcutsParams) {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      // The help dialog (Radix) closes itself on Escape; setting the same
+      // false here is idempotent. The branch stays because the early return
+      // is what keeps Esc-priority: while help is open, no key may fall
+      // through to the delete/clear-selection handling below.
       if (isHelpOpen) {
         if (event.key === "Escape") {
           setIsHelpOpen(false);

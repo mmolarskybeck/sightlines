@@ -284,36 +284,16 @@ input:focus-visible {
   text-align: center;
 }
 
-.help-dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: color-mix(in oklch, var(--foreground) 24%, transparent);
-}
-
-.help-dialog {
-  width: min(480px, 100%);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-fill);
-  background: var(--bg);
-  box-shadow: var(--shadow-panel);
-}
-
-.help-dialog-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 18px 18px 14px;
-  border-bottom: 1px solid var(--line);
+/* Help overlay — shared .dialog-content chrome (same family as Settings),
+   sized like .settings-dialog. The body scrolls so the tabbed hint groups
+   stay reachable on a phone-height viewport. */
+.help-dialog-content {
+  width: min(calc(100vw - 32px), 560px);
+  max-height: min(760px, calc(100dvh - 32px));
 }
 
 .help-dialog-kicker {
-  margin: 0 0 5px;
+  margin: 0;
   color: var(--muted);
   font-size: var(--type-xs);
   font-weight: var(--weight-strong);
@@ -322,28 +302,41 @@ input:focus-visible {
   text-transform: uppercase;
 }
 
-.help-dialog h2 {
-  margin: 0;
-  color: var(--ink);
-  font-size: var(--type-project);
-  font-weight: var(--weight-strong);
-  line-height: var(--leading-ui);
+.help-body {
+  display: grid;
+  gap: 16px;
+  padding: 14px 24px 20px;
+  overflow-y: auto;
 }
 
-.help-dialog-body {
-  padding: 16px 18px;
-}
-
-.help-dialog-body p {
+.help-blurb {
   margin: 0;
   color: var(--ink);
   font-size: var(--type-md);
   line-height: var(--leading-copy);
 }
 
-.help-shortcuts {
-  padding: 14px 18px 16px;
-  border-top: 1px solid var(--line);
+.help-input-toggle {
+  justify-self: start;
+}
+
+.help-tabs {
+  display: grid;
+  gap: 14px;
+}
+
+.help-tabs-list {
+  border-bottom: 1px solid var(--line);
+}
+
+.help-tab-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.help-group {
+  display: grid;
+  gap: 10px;
 }
 
 .help-section-title {
@@ -377,7 +370,8 @@ input:focus-visible {
 
 .help-shortcut-row dd {
   display: flex;
-  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 4px;
   margin: 0;
 }
@@ -400,7 +394,7 @@ input:focus-visible {
 
 .help-privacy-note {
   margin: 0;
-  padding: 13px 18px;
+  padding-top: 13px;
   border-top: 1px solid var(--line);
   color: var(--muted);
   font-size: var(--type-sm);
@@ -416,7 +410,7 @@ input:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 18px;
-  padding: 12px 18px 14px;
+  padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 

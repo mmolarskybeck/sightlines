@@ -29,7 +29,6 @@ import { SquareIcon } from "@phosphor-icons/react/dist/csr/Square";
 import { StackIcon } from "@phosphor-icons/react/dist/csr/Stack";
 import { UploadSimpleIcon } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
-import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import {
   getPlacedRoomBounds,
   getRectangleRoomDimensions,
@@ -62,6 +61,7 @@ import { ArtworkInspector } from "./components/ArtworkInspector";
 import { PanelResizeHandle } from "./components/PanelResizeHandle";
 import { ChecklistPanel } from "./components/ChecklistPanel";
 import { DeleteRoomDialog } from "./components/DeleteRoomDialog";
+import { HelpDialog } from "./components/HelpDialog";
 import { ElevationEmptyState } from "./components/ElevationEmptyState";
 import { FloorObjectInspector, FloorPlacementFields } from "./components/FloorObjectInspector";
 import { FreestandingWallInspector } from "./components/FreestandingWallInspector";
@@ -1726,7 +1726,7 @@ export function App() {
           <FontLab />
         </Suspense>
       ) : null}
-      {isHelpOpen ? <HelpDialog onClose={() => setIsHelpOpen(false)} /> : null}
+      <HelpDialog open={isHelpOpen} viewMode={viewMode} onOpenChange={setIsHelpOpen} />
       <Suspense fallback={null}>
         <ImportWizard
           intakeState={intakeState}
@@ -1761,94 +1761,6 @@ export function App() {
       />
     </main>
     </TooltipProvider>
-  );
-}
-
-function HelpDialog({ onClose }: { onClose: () => void }) {
-  const isMac =
-    typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
-  const mod = isMac ? "⌘" : "Ctrl";
-
-  const shortcuts: Array<{ action: string; keys: string[] }> = [
-    { action: "Undo / redo", keys: [`${mod} Z`, isMac ? "⇧ ⌘ Z" : `${mod} Y`] },
-    { action: "Nudge selected artwork", keys: ["←", "↑", "↓", "→"] },
-    { action: "Nudge in larger steps", keys: ["⇧ arrow"] },
-    { action: "Pan the canvas", keys: ["Space + drag"] },
-    { action: "Zoom to fit", keys: [`${mod} 0`] },
-    { action: "Delete selection", keys: [isMac ? "⌫" : "Del"] },
-    { action: "Deselect / close", keys: ["Esc"] }
-  ];
-
-  const links = [
-    { href: "/about.html", label: "About" },
-    { href: "/privacy.html", label: "Privacy" },
-    { href: "/security.html", label: "Security" },
-    { href: "/it.html", label: "For IT teams" }
-  ];
-
-  return (
-    <div className="help-dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <section
-        aria-labelledby="help-dialog-title"
-        aria-modal="true"
-        className="help-dialog"
-        role="dialog"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="help-dialog-header">
-          <div>
-            <p className="help-dialog-kicker">Sightlines</p>
-            <h2 id="help-dialog-title">Help</h2>
-          </div>
-          <Button
-            aria-label="Close help"
-            className="icon-button"
-            size="icon"
-            title="Close help"
-            variant="ghost"
-            onClick={onClose}
-          >
-            <XIcon aria-hidden="true" size={18} />
-          </Button>
-        </div>
-
-        <div className="help-dialog-body">
-          <p>
-            Plan exhibitions to scale: draw rooms in Plan, hang works on each wall in Elevation,
-            and check the result in 3D. Drag artworks from the checklist straight onto a wall.
-          </p>
-        </div>
-
-        <div className="help-shortcuts">
-          <h3 className="help-section-title">Keyboard shortcuts</h3>
-          <dl className="help-shortcut-list">
-            {shortcuts.map((shortcut) => (
-              <div className="help-shortcut-row" key={shortcut.action}>
-                <dt>{shortcut.action}</dt>
-                <dd>
-                  {shortcut.keys.map((key) => (
-                    <kbd key={key}>{key}</kbd>
-                  ))}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        </div>
-
-        <p className="help-privacy-note">
-          Projects and artwork images stay on this device: no account, no uploads. Use
-          <strong> Export</strong> to save a backup file you can share or move between machines.
-        </p>
-
-        <nav className="help-link-row" aria-label="More information">
-          {links.map((link) => (
-            <a className="help-link" href={link.href} key={link.href} rel="noreferrer" target="_blank">
-              {link.label}
-            </a>
-          ))}
-        </nav>
-      </section>
-    </div>
   );
 }
 
