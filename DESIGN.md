@@ -48,7 +48,7 @@ The local wrappers in `src/app/components/ui` are the preferred surface for new 
 
 - `Button` supports `default`, `primary`, `ghost`, `subtle`, `outline`, `destructive`, `rail`, `tab`, and `inspector` variants.
 - `Toggle` and `ToggleGroupItem` support pressed petrol states (now with the `--shadow-pressed` depression) and underline-tab states.
-- `SegmentedTabsList`/`SegmentedTabsTrigger` and `SegmentedToggleGroup`/`SegmentedToggleGroupItem` (`ui/segmented.tsx`) render the recessed-track/raised-chip pickers with the sliding chip; `UnderlineTabsList`/`UnderlineTabsTrigger` render navigation tabs with the sliding petrol underline off the same measuring hook.
+- `SegmentedTabsList`/`SegmentedTabsTrigger` and `SegmentedToggleGroup`/`SegmentedToggleGroupItem` (`ui/segmented.tsx`) render the recessed-track/raised-chip pickers with the sliding chip; `UnderlineTabsList`/`UnderlineTabsTrigger` and `UnderlineToggleGroup`/`UnderlineToggleGroupItem` render tabs with the sliding petrol underline (3px, pill caps) off the same measuring hook.
 - `Tabs`, `Select`, `DropdownMenu`, and `Switch` keep Radix semantics while carrying Sightlines visual defaults.
 - `Collapsible` is a bare-behavior Radix wrapper (no baked-in look); `InspectorSection` composes it into the hairline-separated, summary-bearing disclosure rows the artwork inspector uses.
 - `cn()` uses `clsx` and `tailwind-merge`; compose variants there rather than concatenating ad hoc class strings.
@@ -89,8 +89,11 @@ Sightlines mixes square workspace structure with softer floating surfaces: recta
   - **Latching toggles** (Grid, Snap, Overlap, rail modes) do the
     opposite: they depress, keeping the petrol wash and adding
     `--shadow-pressed`. Raised = a choice within a set; pressed = a mode
-    that's engaged. Static underline tabs remain for subordinate
-    sub-choices (help-dialog groups, "Measured from").
+    that's engaged.
+  - **Sub-choice tabs** ("Measured from", the help dialog's view groups)
+    use the same sliding underline at smaller sizing, riding their row's
+    hairline. **Controls floating over the canvas** (the zoom cluster)
+    are borderless raised chips: white ground + `--shadow-chip`.
 - Overlays — dialogs, wizards, popovers, dropdown menus — use a 12px radius (`--radius-overlay`) with a soft, diffuse shadow and at most a whisper of border.
 - Inside overlays, structure content with spacing and alignment rather than full-bleed hairline rules. Edge-to-edge bordered grids (tab strips, stat cells, per-field border boxes) read as spreadsheet chrome — the harsh look we are moving away from.
 - Shadows are reserved for real overlays and canvas chips, not normal panels.
