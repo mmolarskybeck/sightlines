@@ -1,7 +1,7 @@
 import { OrbitControls } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
-import { Box3, MathUtils, PerspectiveCamera, Plane, Vector2, Vector3 } from "three";
+import { Box3, MathUtils, PerspectiveCamera, Plane, TOUCH, Vector2, Vector3 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { parseFaceWallId } from "../../../domain/geometry/freestandingWalls";
 import {
@@ -907,6 +907,13 @@ export function ThreeDView({
           minDistance={ORBIT_MIN_DISTANCE}
           maxDistance={ORBIT_MAX_DISTANCE}
           maxPolarAngle={Math.PI / 2}
+          // One finger pans like a map; two fingers pinch-zoom and twist to
+          // orbit. Touch-only — mouse bindings unchanged.
+          touches={{ ONE: TOUCH.PAN, TWO: TOUCH.DOLLY_ROTATE }}
+          // Pan slides along the ground plane, not the screen plane —
+          // deliberate for ALL inputs (mouse right-drag included), matching
+          // the floorplan-under-your-finger feel and height-preserving travel.
+          screenSpacePanning={false}
         />
         <CursorZoom />
         <KeyboardTravel />
