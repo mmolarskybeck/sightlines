@@ -56,21 +56,27 @@ function useSlidingIndicator(listRef: React.RefObject<HTMLDivElement | null>) {
 
     // Radix flips data-state on the triggers when the selection moves;
     // resizes (font load, container squeeze, label swap) re-measure too.
-    const mutations = new MutationObserver(measure);
-    mutations.observe(list, {
+    // Both observers are guarded for non-browser environments (jsdom has
+    // no ResizeObserver); there the one-shot measure above still runs.
+    const mutations =
+      typeof MutationObserver !== "undefined" ? new MutationObserver(measure) : null;
+    mutations?.observe(list, {
       attributes: true,
       attributeFilter: ["data-state"],
       subtree: true
     });
-    const resizes = new ResizeObserver(measure);
-    resizes.observe(list);
-    for (const child of Array.from(list.children)) {
-      resizes.observe(child);
+    const resizes =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    if (resizes) {
+      resizes.observe(list);
+      for (const child of Array.from(list.children)) {
+        resizes.observe(child);
+      }
     }
 
     return () => {
-      mutations.disconnect();
-      resizes.disconnect();
+      mutations?.disconnect();
+      resizes?.disconnect();
     };
   }, [listRef]);
 
@@ -166,3 +172,33 @@ export const UnderlineTabsTrigger = React.forwardRef<
 ));
 
 UnderlineTabsTrigger.displayName = "UnderlineTabsTrigger";
+
+export const UnderlineToggleGroup = React.forwardRef<
+  React.ElementRef<typeof ToggleGroupPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof ToggleGroupPrimitive.Root>
+>(({ className, children, ...props }, ref) => {
+  const listRef = React.useRef<HTMLDivElement | null>(null);
+  const indicatorRef = useSlidingIndicator(listRef);
+
+  return (
+    <ToggleGroupPrimitive.Root
+      ref={composeRefs(ref, listRef)}
+      className={cn("tabs-underline", className)}
+      {...props}
+    >
+      <div aria-hidden className="seg-underline" ref={indicatorRef} />
+      {children}
+    </ToggleGroupPrimitive.Root>
+  );
+});
+
+UnderlineToggleGroup.displayName = "UnderlineToggleGroup";
+
+export const UnderlineToggleGroupItem = React.forwardRef<
+  React.ElementRef<typeof ToggleGroupPrimitive.Item>,
+  React.ComponentPropsWithoutRef<typeof ToggleGroupPrimitive.Item>
+>(({ className, ...props }, ref) => (
+  <ToggleGroupPrimitive.Item ref={ref} className={cn("tab-button", className)} {...props} />
+));
+
+UnderlineToggleGroupItem.displayName = "UnderlineToggleGroupItem";

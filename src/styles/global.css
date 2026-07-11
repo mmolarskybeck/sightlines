@@ -340,6 +340,14 @@ input:focus-visible {
   justify-self: start;
 }
 
+/* Compact segments for the dialog-width track. */
+.help-input-toggle .seg-item {
+  min-height: 24px;
+  padding: 2px 10px;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+}
+
 .help-tabs {
   display: grid;
   gap: 14px;
@@ -2871,7 +2879,8 @@ body.panels-resizing * {
   bottom: 0;
   left: 0;
   width: 0;
-  height: 2px;
+  height: 3px;
+  border-radius: 999px;
   background: var(--primary);
   opacity: 0;
   transition:
@@ -2906,13 +2915,15 @@ body.panels-resizing * {
 }
 
 .tab-button:hover:not(:disabled),
-.tab-button[data-state="active"] {
+.tab-button[data-state="active"],
+.tab-button[data-state="on"] {
   color: var(--ink);
 }
 
 /* Fallback underline for first paint, before the sliding one has measured. */
-.tabs-underline:not([data-seg-ready]) .tab-button[data-state="active"] {
-  box-shadow: inset 0 -2px 0 var(--primary);
+.tabs-underline:not([data-seg-ready])
+  .tab-button:is([data-state="active"], [data-state="on"]) {
+  box-shadow: inset 0 -3px 0 var(--primary);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3601,9 +3612,11 @@ body.panels-resizing * {
   gap: 6px;
 }
 
-/* Zoom cluster (ViewportZoomControls) — floating chip anchored bottom-right
-   inside the 2D drawing surface. Square corners, white ground, no accent
-   stripes, matching the app's chip language. */
+/* Zoom cluster (ViewportZoomControls) — floating chips anchored bottom-right
+   inside the 2D drawing surface. Borderless raised chips (white ground +
+   --shadow-chip): the same "raised above the work" language as the
+   segmented pickers' active chip, fitting for controls that literally
+   float over the canvas. */
 .viewport-zoom {
   position: absolute;
   right: 14px;
@@ -3623,8 +3636,7 @@ body.panels-resizing * {
 }
 
 /* The effective-zoom readout doubles as a reset-to-fit button. Styled to match
-   the inspector-variant chips flanking it (bordered, surface ground) rather
-   than a bare number. */
+   the raised chips flanking it rather than a bare number. */
 .viewport-zoom-value {
   display: inline-flex;
   align-items: center;
@@ -3632,9 +3644,9 @@ body.panels-resizing * {
   min-width: 46px;
   height: 32px;
   padding: 0 8px;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--bg);
   color: var(--foreground);
   font-size: var(--type-sm);
   font-weight: var(--weight-semibold);
@@ -3644,8 +3656,20 @@ body.panels-resizing * {
   transition: background-color 150ms ease-out;
 }
 
+/* The cluster's Button chips (Fit / Fit selected / ± steps) trade their
+   inspector borders for the same raised-chip ground as the readout. */
+.viewport-zoom .plan-toolbar-button,
+.viewport-zoom .viewport-zoom-step,
+.viewport-zoom-value {
+  border: 0;
+  background: var(--bg);
+  box-shadow: var(--shadow-chip);
+}
+
+.viewport-zoom .plan-toolbar-button:hover:not(:disabled),
+.viewport-zoom .viewport-zoom-step:hover:not(:disabled),
 .viewport-zoom-value:hover {
-  background: var(--surface-strong);
+  background: var(--surface);
 }
 
 .viewport-zoom-value:focus-visible {
@@ -4330,19 +4354,17 @@ body.panels-resizing * {
   flex: 0 0 auto;
 }
 
-.arrange-mode:hover {
+.arrange-mode:hover:not([data-state="on"]) {
   background: var(--chip-ghost);
   color: var(--ink);
 }
 
-/* Active cell: the raised chip is the color-blind-safe cue; petrol ink
-   carries the brand state. Focus ring comes from the shared toggle
-   primitive. */
+/* Active cell: petrol ink only — the raised chip behind it is the sliding
+   .seg-chip (SegmentedToggleGroup), which is also the color-blind-safe
+   cue. The pre-measure fallback comes from the shared .seg-track rule. */
 .arrange-mode[data-state="on"],
 .arrange-mode[data-state="on"]:hover {
-  background: var(--chip);
   color: var(--primary-strong);
-  box-shadow: var(--shadow-chip);
 }
 
 .arrange-mode-body {
@@ -4387,25 +4409,23 @@ body.panels-resizing * {
   white-space: normal;
 }
 
-.placement-form-option:hover {
+.placement-form-option:hover:not([data-state="on"]) {
   background: var(--chip-ghost);
   color: var(--ink);
 }
 
-/* Active cell: raised chip + petrol ink (matches .arrange-mode's on-state;
-   the chip, not a weight shift, is the color-blind-safe cue). */
+/* Active cell: petrol ink only — the sliding .seg-chip behind it is the
+   raised, color-blind-safe cue (matches .arrange-mode's on-state). */
 .placement-form-option[data-state="on"],
 .placement-form-option[data-state="on"]:hover {
-  background: var(--chip);
   color: var(--primary-strong);
-  box-shadow: var(--shadow-chip);
 }
 
 /* "Measured from" — From-edges' side sub-choice: underline tabs, not a
    segmented control, since it's a plain side pick (left/both/right), not a
-   peer decision to the mode row above it. Reuses the app's shared tab
-   variant/underline grammar (ToggleGroupItem variant="tab", same recipe the
-   checklist filters use); only sizing is overridden here. */
+   peer decision to the mode row above it. Uses the shared sliding-underline
+   grammar (UnderlineToggleGroup); only sizing is overridden here, with the
+   underline riding the row's own hairline. */
 .arrange-anchor-row {
   display: grid;
   gap: 6px;
@@ -4424,6 +4444,7 @@ body.panels-resizing * {
 }
 
 .arrange-anchor-tab {
+  min-height: 0;
   padding: 2px 0 8px;
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
