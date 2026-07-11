@@ -13,7 +13,7 @@ import { Toggle } from "./ui/toggle";
 // the topbar and the workspace. Its top 80×80 cell is the brand cell (the "S"
 // monogram); below it sit the left-panel selectors (checklist / rooms), the
 // live placement-issue count, and — pushed to the bottom utility cluster — the
-// developer Data view and mocked (disabled) Settings/Help affordances.
+// developer Data view and functional Settings/Help affordances.
 export function AppRail({
   leftPanel,
   onSelectLeftPanel,
@@ -21,6 +21,7 @@ export function AppRail({
   onToggleInspector,
   isDataView,
   onOpenDataView,
+  onOpenSettings,
   onOpenHelp,
   issueCount,
   onSelectFirstIssue
@@ -36,6 +37,7 @@ export function AppRail({
   onToggleInspector: () => void;
   isDataView: boolean;
   onOpenDataView: () => void;
+  onOpenSettings: () => void;
   onOpenHelp: () => void;
   issueCount: number;
   onSelectFirstIssue: () => void;
@@ -107,9 +109,9 @@ export function AppRail({
           onClick={onOpenDataView}
         />
         <RailButton
-          disabled
           icon={<SlidersHorizontalIcon aria-hidden="true" size={22} />}
-          label="Settings — coming soon"
+          label="Settings"
+          onClick={onOpenSettings}
         />
         <RailButton
           icon={<QuestionIcon aria-hidden="true" size={22} />}

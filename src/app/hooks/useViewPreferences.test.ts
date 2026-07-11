@@ -300,4 +300,57 @@ describe("useViewPreferences", () => {
       details: false
     });
   });
+
+  it("resetPreferences restores all fields to defaults and persists the reset blob", () => {
+    const { result } = renderHook(() => useViewPreferences());
+
+    act(() => {
+      result.current.toggleShowGrid();
+      result.current.setLeftPanelWidth(400);
+      result.current.setInspectorSectionOpen("details", true);
+    });
+
+    expect(result.current.showGrid).toBe(false);
+    expect(result.current.leftPanelWidth).toBe(400);
+    expect(result.current.inspectorSections.details).toBe(true);
+
+    act(() => {
+      result.current.resetPreferences();
+    });
+
+    expect(result.current.showGrid).toBe(true);
+    expect(result.current.snapToGrid).toBe(true);
+    expect(result.current.showCenterline).toBe(true);
+    expect(result.current.gridPrecisionFloorMm).toBeNull();
+    expect(result.current.allowOverlappingPlacement).toBe(false);
+    expect(result.current.leftPanel).toBe("checklist");
+    expect(result.current.leftPanelWidth).toBe(LEFT_PANEL_DEFAULT_WIDTH);
+    expect(result.current.inspectorWidth).toBe(INSPECTOR_DEFAULT_WIDTH);
+    expect(result.current.inspectorCollapsed).toBe(false);
+    expect(result.current.inspectorSections).toEqual({
+      dimensions: true,
+      framing: true,
+      placement: true,
+      details: false
+    });
+
+    const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}");
+    expect(stored).toEqual({
+      showGrid: true,
+      snapToGrid: true,
+      showCenterline: true,
+      gridPrecisionFloorMm: null,
+      allowOverlappingPlacement: false,
+      leftPanel: "checklist",
+      leftPanelWidth: LEFT_PANEL_DEFAULT_WIDTH,
+      inspectorWidth: INSPECTOR_DEFAULT_WIDTH,
+      inspectorCollapsed: false,
+      inspectorSections: {
+        dimensions: true,
+        framing: true,
+        placement: true,
+        details: false
+      }
+    });
+  });
 });

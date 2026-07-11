@@ -187,6 +187,8 @@ export type AppState = ArrangeSliceState &
   intakeState: "idle" | "processing";
   pendingDuplicateUploads: { file: File; existingArtworkTitle: string }[];
   boot: () => Promise<void>;
+  /** Dev-only, non-persisting document swap used by renderer benchmarks. */
+  loadBenchmarkFixture: (project: Project, artworks: Artwork[]) => void;
   setViewMode: (viewMode: ViewMode) => void;
   selectWall: (wallId: string) => void;
   selectArtwork: (artworkId: string) => void;
@@ -201,6 +203,8 @@ export type AppState = ArrangeSliceState &
   renameRoom: (roomId: string, name: string) => Promise<void>;
   deleteRoom: (roomId: string) => Promise<void>;
   setUnit: (unit: DisplayUnit) => Promise<void>;
+  setDefaultWallHeightMm: (heightMm: number) => Promise<void>;
+  setDefaultCenterlineHeightMm: (heightMm: number) => Promise<void>;
   addRectangleRoom: () => Promise<void>;
   addPolygonRoom: (pointsFloorMm: Point[]) => Promise<void>;
   addFreestandingWall: (startFloorMm: Point, endFloorMm: Point) => Promise<void>;
@@ -826,6 +830,17 @@ export function createAppStore(deps: AppStoreDeps) {
         }
       },
 
+      loadBenchmarkFixture(project, artworks) {
+        // Deliberately bypass persistence: benchmark data must never replace a
+        // user's saved local project. The action is only wired to the dev
+        // benchmark entry point in App.tsx.
+        setDocument(project, {
+          viewMode: "3d",
+          saveState: "saved",
+          libraryArtworks: artworks
+        });
+      },
+
       setViewMode(viewMode) {
         autoAcceptArrangeSession();
         set({ viewMode });
@@ -1064,6 +1079,38 @@ export function createAppStore(deps: AppStoreDeps) {
         await applyEdit("Change display unit", (current) => ({
           ...current,
           unit
+        }));
+      },
+
+      async setDefaultWallHeightMm(heightMm) {
+        const project = get().project;
+        if (
+          !project ||
+          !Number.isFinite(heightMm) ||
+          heightMm <= 0 ||
+          heightMm === project.defaultWallHeightMm
+        )
+          return;
+
+        await applyEdit("Change default wall height", (current) => ({
+          ...current,
+          defaultWallHeightMm: heightMm
+        }));
+      },
+
+      async setDefaultCenterlineHeightMm(heightMm) {
+        const project = get().project;
+        if (
+          !project ||
+          !Number.isFinite(heightMm) ||
+          heightMm <= 0 ||
+          heightMm === project.defaultCenterlineHeightMm
+        )
+          return;
+
+        await applyEdit("Change default eyeline height", (current) => ({
+          ...current,
+          defaultCenterlineHeightMm: heightMm
         }));
       },
 

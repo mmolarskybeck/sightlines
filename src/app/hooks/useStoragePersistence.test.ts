@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { useStoragePersistence } from "./useStoragePersistence";
 
@@ -25,7 +25,7 @@ describe("useStoragePersistence", () => {
     // every render is guaranteed to observe.
     const { result } = renderHook(() => useStoragePersistence());
 
-    await waitFor(() => expect(result.current).toBe("unsupported"));
+    await waitFor(() => expect(result.current.state).toBe("unsupported"));
   });
 
   it("resolves to unsupported when persist/persisted methods are missing", async () => {
@@ -33,7 +33,7 @@ describe("useStoragePersistence", () => {
 
     const { result } = renderHook(() => useStoragePersistence());
 
-    await waitFor(() => expect(result.current).toBe("unsupported"));
+    await waitFor(() => expect(result.current.state).toBe("unsupported"));
   });
 
   it("starts pending while a supported API's check is still resolving", async () => {
@@ -44,8 +44,8 @@ describe("useStoragePersistence", () => {
 
     const { result } = renderHook(() => useStoragePersistence());
 
-    expect(result.current).toBe("pending");
-    await waitFor(() => expect(result.current).toBe("granted"));
+    expect(result.current.state).toBe("pending");
+    await waitFor(() => expect(result.current.state).toBe("granted"));
   });
 
   it("resolves to granted without requesting when already persisted", async () => {
@@ -60,7 +60,7 @@ describe("useStoragePersistence", () => {
 
     const { result } = renderHook(() => useStoragePersistence());
 
-    await waitFor(() => expect(result.current).toBe("granted"));
+    await waitFor(() => expect(result.current.state).toBe("granted"));
     expect(persistCalled).toBe(false);
   });
 
@@ -72,7 +72,7 @@ describe("useStoragePersistence", () => {
 
     const { result } = renderHook(() => useStoragePersistence());
 
-    await waitFor(() => expect(result.current).toBe("granted"));
+    await waitFor(() => expect(result.current.state).toBe("granted"));
   });
 
   it("resolves to denied when a fresh request is refused", async () => {
@@ -83,7 +83,7 @@ describe("useStoragePersistence", () => {
 
     const { result } = renderHook(() => useStoragePersistence());
 
-    await waitFor(() => expect(result.current).toBe("denied"));
+    await waitFor(() => expect(result.current.state).toBe("denied"));
   });
 
   it("resolves to unsupported instead of throwing when the API rejects", async () => {
@@ -96,7 +96,7 @@ describe("useStoragePersistence", () => {
 
     const { result } = renderHook(() => useStoragePersistence());
 
-    await waitFor(() => expect(result.current).toBe("unsupported"));
+    await waitFor(() => expect(result.current.state).toBe("unsupported"));
   });
 
   it("resolves to unsupported instead of throwing when persisted() itself rejects", async () => {
@@ -109,6 +109,28 @@ describe("useStoragePersistence", () => {
 
     const { result } = renderHook(() => useStoragePersistence());
 
-    await waitFor(() => expect(result.current).toBe("unsupported"));
+    await waitFor(() => expect(result.current.state).toBe("unsupported"));
+  });
+
+  it("retry() re-runs the request, flipping denied to granted once the browser allows it", async () => {
+    let persistResult = false;
+    setNavigatorStorage({
+      persist: async () => persistResult,
+      persisted: async () => false
+    });
+
+    const { result } = renderHook(() => useStoragePersistence());
+
+    await waitFor(() => expect(result.current.state).toBe("denied"));
+
+    // Simulate the browser being willing to grant on a later ask (e.g. after
+    // a user interaction) — retry() should re-run the same request routine.
+    persistResult = true;
+
+    act(() => {
+      result.current.retry();
+    });
+
+    await waitFor(() => expect(result.current.state).toBe("granted"));
   });
 });

@@ -218,6 +218,7 @@ export function useViewPreferences() {
       setPreferences((current) => ({
         ...current,
         allowOverlappingPlacement: !current.allowOverlappingPlacement
-      }))
+      })),
+    resetPreferences: () => setPreferences(DEFAULT_PREFERENCES)
   };
 }

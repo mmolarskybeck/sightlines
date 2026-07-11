@@ -105,10 +105,7 @@ import {
 import { Switch } from "./components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { Toggle } from "./components/ui/toggle";
-import {
-  useStoragePersistence,
-  type StoragePersistenceState
-} from "./hooks/useStoragePersistence";
+import { useStoragePersistence, getStorageNoteCopy } from "./hooks/useStoragePersistence";
 import {
   useViewPreferences,
   LEFT_PANEL_MIN_WIDTH,
@@ -142,6 +139,9 @@ const DataView = lazy(() =>
   import("./components/DataView").then((module) => ({ default: module.DataView }))
 );
 const ImportWizard = lazy(() => import("./components/ImportWizard"));
+const SettingsDialog = lazy(() =>
+  import("./components/SettingsDialog").then((module) => ({ default: module.SettingsDialog }))
+);
 const ElevationView = lazy(() =>
   import("./components/ElevationView").then((module) => ({ default: module.ElevationView }))
 );
@@ -162,6 +162,12 @@ const FontLab = import.meta.env.DEV
 // reference across renders, which keeps useAssetImageUrls from refetching
 // on every App re-render.
 const assetRepository = new IndexedDbAssetRepository();
+const rendererBenchmarkEnabled =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("benchmark") === "renderer";
+let rendererBenchmarkBlobLoader:
+  | ((key: string) => Promise<Blob | null>)
+  | null = null;
 // At this viewport width the medium panel tracks leave the canvas at the edge
 // of the compact toolbar's one-line budget. Collapse one side pane before the
 // toolbar starts clipping; the CSS workspace breakpoints use the same range.
@@ -266,6 +272,12 @@ function useResponsiveToolbarDensity(measurementKey: string) {
 }
 
 function getAssetBlob(key: string): Promise<Blob> {
+  if (rendererBenchmarkEnabled) {
+    return (rendererBenchmarkBlobLoader?.(key) ?? Promise.resolve(null)).then((blob) => {
+      if (blob) return blob;
+      return assetRepository.getBlob(key);
+    });
+  }
   return assetRepository.getBlob(key);
 }
 
@@ -289,6 +301,7 @@ export function App() {
     intakeState,
     pendingDuplicateUploads,
     boot,
+    loadBenchmarkFixture,
     setViewMode,
     selectWall,
     selectArtwork,
@@ -373,6 +386,7 @@ export function App() {
   const [importWizardOpen, setImportWizardOpen] = useState(false);
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   // The occupied room the Delete shortcut is asking to confirm about —
   // transient UI state like the armed tools (never in the store/undo). Empty
   // rooms skip this and delete immediately.
@@ -444,7 +458,8 @@ export function App() {
     toggleSnapToGrid,
     toggleShowCenterline,
     setGridPrecisionFloorMm,
-    toggleAllowOverlappingPlacement
+    toggleAllowOverlappingPlacement,
+    resetPreferences
   } = useViewPreferences();
   const [compactWorkspaceSide, setCompactWorkspaceSide] = useState<"left" | "right">("left");
   const compactWorkspaceEntryRef = useRef(false);
@@ -483,7 +498,7 @@ export function App() {
   const visibleInspectorCollapsed = isCompactWorkspace
     ? compactWorkspaceSide === "left"
     : inspectorCollapsed;
-  const storagePersistence = useStoragePersistence();
+  const { state: storagePersistence, retry: retryStoragePersistence } = useStoragePersistence();
   // One plan viewport per active project — resets to fit on project switch.
   const [planViewport, setPlanViewport] = useViewport2D(project?.id ?? "none");
   // The wall actually rendered by ElevationView — falls back to the floor's
@@ -500,8 +515,27 @@ export function App() {
   );
 
   useEffect(() => {
-    void boot();
-  }, [boot]);
+    let cancelled = false;
+    void (async () => {
+      await boot();
+      if (
+        cancelled ||
+        !import.meta.env.DEV ||
+        new URLSearchParams(window.location.search).get("benchmark") !== "renderer"
+      ) {
+        return;
+      }
+      const fixture = await import("../../fixtures/benchmarks/renderer-10-room-200-work");
+      const benchmarkAssets = await import("./rendererBenchmarkAssets");
+      rendererBenchmarkBlobLoader = benchmarkAssets.getRendererBenchmarkBlob;
+      if (!cancelled) {
+        loadBenchmarkFixture(fixture.rendererBenchmarkProject, fixture.rendererBenchmarkArtworks);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [boot, loadBenchmarkFixture]);
 
   // The insert-tools-disarm-on-view-change and reshape-follows-selection
   // effects that used to live here now live in usePlanMode itself (it takes
@@ -958,6 +992,7 @@ export function App() {
         onToggleInspector={handleInspectorToggle}
         isDataView={viewMode === "data"}
         onOpenDataView={() => setViewMode("data")}
+        onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenHelp={() => setIsHelpOpen(true)}
         issueCount={placementWarnings.length}
         onSelectFirstIssue={selectFirstWarningObject}
@@ -1696,6 +1731,16 @@ export function App() {
           onImportImages={addArtworksFromFiles}
           onOpenChange={setImportWizardOpen}
         />
+        <SettingsDialog
+          open={isSettingsOpen}
+          onOpenChange={setIsSettingsOpen}
+          storageState={storagePersistence}
+          onRetryStorage={retryStoragePersistence}
+          resetPreferences={resetPreferences}
+          onExport={() => project && downloadProject(project)}
+          onImport={() => fileInputRef.current?.click()}
+          onOpenHelp={() => { setIsSettingsOpen(false); setIsHelpOpen(true); }}
+        />
       </Suspense>
       <DeleteRoomDialog
         roomName={confirmDeleteRoomPlacement?.room.name ?? ""}
@@ -2238,24 +2283,6 @@ function StatusBadge({ state }: { state: "idle" | "saving" | "saved" | "error" }
       <span className="status-badge-label">{label}</span>
     </span>
   );
-}
-
-// "granted" covers both an already-durable store and a fresh grant this
-// session; either way the browser has committed not to evict it under
-// storage pressure, so the note can say so instead of just nudging toward
-// a backup. "pending" (the check hasn't resolved yet) keeps the original
-// neutral copy rather than flashing a stronger warning that may immediately
-// flip to reassurance.
-function getStorageNoteCopy(state: StoragePersistenceState): string {
-  if (state === "granted") {
-    return "Saved locally in this browser with durable storage — the browser won't clear it under storage pressure. Export a backup for long-term safekeeping.";
-  }
-
-  if (state === "denied" || state === "unsupported") {
-    return "Saved locally in this browser, which may clear it under storage pressure. Export a backup regularly for long-term safekeeping.";
-  }
-
-  return "Saved locally in this browser. Export a backup for long-term safekeeping.";
 }
 
 function getWallDimensionLink(

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CURRENT_ARTWORK_SCHEMA_VERSION,
   CURRENT_SCHEMA_VERSION,
@@ -381,6 +381,152 @@ describe("app store", () => {
 
     expect(store.getState().undoStack).toHaveLength(0);
     expect(store.getState().project).toBe(before);
+  });
+
+  describe("setDefaultWallHeightMm", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("updates the project's default wall height, persists, stamps updatedAt, and is undoable", async () => {
+      const before = store.getState().project!;
+      const previousHeight = before.defaultWallHeightMm;
+      const previousUpdatedAt = before.updatedAt;
+
+      // Advance the clock so the updatedAt stamp is provably fresh rather
+      // than coincidentally identical due to millisecond timing.
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(previousUpdatedAt).getTime() + 1_000);
+
+      await store.getState().setDefaultWallHeightMm(2_500);
+
+      const state = store.getState();
+      expect(state.project?.defaultWallHeightMm).toBe(2_500);
+      expect(state.project?.updatedAt).not.toBe(previousUpdatedAt);
+      expect(state.undoStack).toHaveLength(1);
+      expect(state.undoStack.at(-1)?.label).toBe("Change default wall height");
+
+      const persisted = repository.projects.get(state.project!.id)!;
+      expect(persisted.defaultWallHeightMm).toBe(2_500);
+
+      await store.getState().undo();
+      expect(store.getState().project?.defaultWallHeightMm).toBe(previousHeight);
+    });
+
+    it("leaves existing walls' heightMm unchanged", async () => {
+      const before = store.getState().project!;
+      const wallHeightsBefore = before.floor.rooms.flatMap((placement) =>
+        placement.room.walls.map((wall) => wall.heightMm)
+      );
+
+      await store.getState().setDefaultWallHeightMm(2_500);
+
+      const wallHeightsAfter = store
+        .getState()
+        .project!.floor.rooms.flatMap((placement) =>
+          placement.room.walls.map((wall) => wall.heightMm)
+        );
+      expect(wallHeightsAfter).toEqual(wallHeightsBefore);
+    });
+
+    it("a room created after the edit uses the new default wall height", async () => {
+      await store.getState().setDefaultWallHeightMm(2_500);
+      await store.getState().addRectangleRoom();
+
+      const added = store.getState().project!.floor.rooms.at(-1)!;
+      expect(added.room.walls.every((wall) => wall.heightMm === 2_500)).toBe(true);
+    });
+
+    it("skips a no-op call that does not change the height", async () => {
+      const before = store.getState().project!;
+
+      await store.getState().setDefaultWallHeightMm(before.defaultWallHeightMm);
+
+      expect(store.getState().undoStack).toHaveLength(0);
+      expect(store.getState().project).toBe(before);
+    });
+
+    it("skips a non-positive or non-finite height", async () => {
+      const before = store.getState().project!;
+
+      await store.getState().setDefaultWallHeightMm(0);
+      await store.getState().setDefaultWallHeightMm(-100);
+      await store.getState().setDefaultWallHeightMm(Number.NaN);
+      await store.getState().setDefaultWallHeightMm(Number.POSITIVE_INFINITY);
+
+      expect(store.getState().undoStack).toHaveLength(0);
+      expect(store.getState().project).toBe(before);
+    });
+
+    it("is a no-op when there is no open project", async () => {
+      const emptyStore = createAppStore(makeDeps());
+
+      await emptyStore.getState().setDefaultWallHeightMm(2_500);
+
+      expect(emptyStore.getState().undoStack).toHaveLength(0);
+      expect(emptyStore.getState().project).toBeNull();
+    });
+  });
+
+  describe("setDefaultCenterlineHeightMm", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("updates the project's default eyeline height, persists, stamps updatedAt, and is undoable", async () => {
+      const before = store.getState().project!;
+      const previousHeight = before.defaultCenterlineHeightMm;
+      const previousUpdatedAt = before.updatedAt;
+
+      // Advance the clock so the updatedAt stamp is provably fresh rather
+      // than coincidentally identical due to millisecond timing.
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(previousUpdatedAt).getTime() + 1_000);
+
+      await store.getState().setDefaultCenterlineHeightMm(1_500);
+
+      const state = store.getState();
+      expect(state.project?.defaultCenterlineHeightMm).toBe(1_500);
+      expect(state.project?.updatedAt).not.toBe(previousUpdatedAt);
+      expect(state.undoStack).toHaveLength(1);
+      expect(state.undoStack.at(-1)?.label).toBe("Change default eyeline height");
+
+      const persisted = repository.projects.get(state.project!.id)!;
+      expect(persisted.defaultCenterlineHeightMm).toBe(1_500);
+
+      await store.getState().undo();
+      expect(store.getState().project?.defaultCenterlineHeightMm).toBe(previousHeight);
+    });
+
+    it("skips a no-op call that does not change the height", async () => {
+      const before = store.getState().project!;
+
+      await store.getState().setDefaultCenterlineHeightMm(before.defaultCenterlineHeightMm);
+
+      expect(store.getState().undoStack).toHaveLength(0);
+      expect(store.getState().project).toBe(before);
+    });
+
+    it("skips a non-positive or non-finite height", async () => {
+      const before = store.getState().project!;
+
+      await store.getState().setDefaultCenterlineHeightMm(0);
+      await store.getState().setDefaultCenterlineHeightMm(-100);
+      await store.getState().setDefaultCenterlineHeightMm(Number.NaN);
+      await store.getState().setDefaultCenterlineHeightMm(Number.POSITIVE_INFINITY);
+
+      expect(store.getState().undoStack).toHaveLength(0);
+      expect(store.getState().project).toBe(before);
+    });
+
+    it("is a no-op when there is no open project", async () => {
+      const emptyStore = createAppStore(makeDeps());
+
+      await emptyStore.getState().setDefaultCenterlineHeightMm(1_500);
+
+      expect(emptyStore.getState().undoStack).toHaveLength(0);
+      expect(emptyStore.getState().project).toBeNull();
+    });
   });
 
   it("skips no-op and empty renames instead of recording undo entries", async () => {

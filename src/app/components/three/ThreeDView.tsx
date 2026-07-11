@@ -37,6 +37,85 @@ const CLICK_DRAG_TOLERANCE_PX = 6;
 
 type CameraPose = { position: Vector3; target: Vector3 };
 
+export type RendererBenchmarkMetrics = {
+  sceneDerivationMs: number;
+  roomCount: number;
+  wallCount: number;
+  artworkCount: number;
+  canvasCreatedAt: number;
+  firstFrameAt: number | null;
+  entryMs: number | null;
+  frameCount: number;
+  frameTimeMs: number | null;
+  maxFrameTimeMs: number | null;
+};
+
+declare global {
+  interface Window {
+    __sightlinesRendererBenchmark?: {
+      getMetrics: () => RendererBenchmarkMetrics | null;
+      reset: () => void;
+    };
+  }
+}
+
+const benchmarkMetrics: RendererBenchmarkMetrics = {
+  sceneDerivationMs: 0,
+  roomCount: 0,
+  wallCount: 0,
+  artworkCount: 0,
+  canvasCreatedAt: 0,
+  firstFrameAt: null,
+  entryMs: null,
+  frameCount: 0,
+  frameTimeMs: null,
+  maxFrameTimeMs: null
+};
+
+const benchmarkEnabled =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("benchmark") === "renderer";
+
+function resetBenchmarkMetrics() {
+  Object.assign(benchmarkMetrics, {
+    sceneDerivationMs: 0,
+    roomCount: 0,
+    wallCount: 0,
+    artworkCount: 0,
+    canvasCreatedAt: 0,
+    firstFrameAt: null,
+    entryMs: null,
+    frameCount: 0,
+    frameTimeMs: null,
+    maxFrameTimeMs: null
+  });
+}
+
+function BenchmarkFrameProbe() {
+  const lastFrameAt = useRef<number | null>(null);
+  useFrame(() => {
+    const now = performance.now();
+    if (benchmarkMetrics.firstFrameAt === null) {
+      benchmarkMetrics.firstFrameAt = now;
+      benchmarkMetrics.entryMs = now - benchmarkMetrics.canvasCreatedAt;
+    }
+    if (lastFrameAt.current !== null) {
+      const frameTime = now - lastFrameAt.current;
+      benchmarkMetrics.frameCount += 1;
+      benchmarkMetrics.frameTimeMs =
+        benchmarkMetrics.frameTimeMs === null
+          ? frameTime
+          : benchmarkMetrics.frameTimeMs * 0.9 + frameTime * 0.1;
+      benchmarkMetrics.maxFrameTimeMs = Math.max(
+        benchmarkMetrics.maxFrameTimeMs ?? 0,
+        frameTime
+      );
+    }
+    lastFrameAt.current = now;
+  });
+  return null;
+}
+
 // Every selectable wall surface in a room: perimeter walls plus partition
 // faces (spec §7.1). Eye-level lookup and camera framing both scan this.
 function roomWallPanels(room: Room3d): WallPanel3d[] {
@@ -351,14 +430,52 @@ export function ThreeDView({
   onClearSelection: () => void;
   actionsRef?: { current: ThreeDViewActions | null };
 }) {
+  const benchmarkProjectId = useRef<string | null>(null);
+  if (benchmarkEnabled && benchmarkProjectId.current !== project.id) {
+    resetBenchmarkMetrics();
+    benchmarkProjectId.current = project.id;
+  }
   const scene = useMemo(
-    () => deriveScene3d(project, artworksById),
+    () => {
+      const startedAt = performance.now();
+      const nextScene = deriveScene3d(project, artworksById);
+      benchmarkMetrics.sceneDerivationMs = performance.now() - startedAt;
+      benchmarkMetrics.roomCount = nextScene.rooms.length;
+      benchmarkMetrics.wallCount = nextScene.rooms.reduce(
+        (count, room) => count + room.walls.length + room.freestandingWalls.length * 2,
+        0
+      );
+      benchmarkMetrics.artworkCount =
+        nextScene.rooms.reduce(
+          (count, room) =>
+            count +
+            room.walls.reduce((wallCount, wall) => wallCount + wall.artworks.length, 0) +
+            room.freestandingWalls.reduce(
+              (partitionCount, partition) =>
+                partitionCount + partition.faces.reduce((faceCount, face) => faceCount + face.artworks.length, 0),
+              0
+            ),
+          0
+        ) + nextScene.floorObjects.filter((object) => object.kind === "artwork").length;
+      return nextScene;
+    },
     [project, artworksById]
   );
   const rigApi = useRef<CameraRigApi | null>(null);
   // Where the pointer went down, to tell a click from an orbit-drag release
   // in onPointerMissed (mesh handlers get the same guard via event.delta).
   const pointerDownAt = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!benchmarkEnabled) return;
+    window.__sightlinesRendererBenchmark = {
+      getMetrics: () => ({ ...benchmarkMetrics }),
+      reset: resetBenchmarkMetrics
+    };
+    return () => {
+      delete window.__sightlinesRendererBenchmark;
+    };
+  }, []);
 
   useEffect(() => {
     if (!actionsRef) return;
@@ -413,6 +530,7 @@ export function ThreeDView({
         gl={{ alpha: true, antialias: true }}
         camera={{ fov: CAMERA_FOV_DEG, near: 0.01, far: 1000, position: [4, 4, 4] }}
         onCreated={(state) => {
+          if (benchmarkEnabled) benchmarkMetrics.canvasCreatedAt = performance.now();
           if (import.meta.env.DEV) {
             // Dev-only escape hatch so browser-driven verification (and
             // debugging) can reach the LIVE R3F state (the state object is
@@ -447,6 +565,7 @@ export function ThreeDView({
           onClearSelection={onClearSelection}
         />
         <OrbitControls makeDefault enableDamping dampingFactor={0.1} />
+        {benchmarkEnabled ? <BenchmarkFrameProbe /> : null}
         <CameraRig scene={scene} fitKey={project.id} apiRef={rigApi} />
       </Canvas>
     </div>

@@ -5267,3 +5267,159 @@ body.panels-resizing * {
   min-height: 28px;
   padding: 0 8px;
 }
+
+/* Settings overlay — two stacked sections inside the shared .dialog-content
+   chrome (white bg, 12px overlay radius, --shadow-overlay). Narrower than the
+   import wizard and body-scrolled so a long project + storage stack never
+   pushes the header or footer off-screen. */
+.settings-dialog {
+  width: min(calc(100vw - 32px), 560px);
+  max-height: min(760px, calc(100dvh - 32px));
+}
+
+.settings-body {
+  display: grid;
+  gap: 24px;
+  padding: 20px 24px;
+  overflow-y: auto;
+}
+
+.settings-section {
+  display: grid;
+  gap: 12px;
+}
+
+/* Same uppercase kicker treatment as .help-dialog-kicker, so section titles
+   read as one family across the overlays. */
+.settings-section-title {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: 0.08em;
+  line-height: var(--leading-tight);
+  text-transform: uppercase;
+}
+
+/* Label-left / control-right. The control column is bounded so inputs and the
+   unit select don't stretch the full width of the wider dialog. */
+.settings-row {
+  display: grid;
+  grid-template-columns: 1fr minmax(180px, 220px);
+  align-items: center;
+  gap: 16px;
+}
+
+.settings-row-label {
+  color: var(--ink);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-ui);
+}
+
+/* Muted helper copy under a control; spans the full row so it wraps against
+   the dialog edge rather than the narrow control column. */
+.settings-row-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-xs);
+  line-height: var(--leading-copy);
+}
+
+/* LengthField brings its own .field-row label, so a measurement plus its note
+   stack directly in the section rather than in a .settings-row grid. */
+.settings-field {
+  display: grid;
+  gap: 4px;
+}
+
+/* Reflow the shared LengthField's stacked .field-row (span label, input wrap,
+   message) into the same label-left / control-right grid as .settings-row, so
+   all four Project rows read as one aligned group — CSS only, the component
+   itself is untouched. Row-gap 0 because the aria-live message div always
+   renders (usually empty); a populated message re-earns its space below. */
+.settings-field .field-row {
+  grid-template-columns: 1fr minmax(180px, 220px);
+  align-items: center;
+  gap: 0 16px;
+}
+
+/* Match the .settings-row-label voice instead of the inspector's muted
+   small-caps-weight field label. */
+.settings-field .field-row > span {
+  color: var(--ink);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-ui);
+}
+
+/* Collapse the inspector's reserved message strip (min-height + negative
+   margins) so an empty message costs no height here; errors and conversion
+   hints span the full row beneath the control when they do appear. */
+.settings-field .field-row .length-field-message {
+  grid-column: 1 / -1;
+  min-height: 0;
+  margin: 0;
+}
+
+.settings-field .field-row .length-field-message p {
+  margin: 4px 0 0;
+}
+
+.settings-status {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--type-sm);
+  line-height: var(--leading-copy);
+}
+
+.settings-status-action {
+  margin-left: 8px;
+  vertical-align: baseline;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Quiet danger zone: a hairline --danger-line border and nothing else — no
+   fill, no stripe. The destructive weight lives in the button, not the box. */
+.settings-danger {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--danger-line);
+  border-radius: var(--radius-fill);
+}
+
+.settings-danger-item {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.settings-footer {
+  padding: 14px 24px;
+  border-top: 1px solid var(--line);
+}
+
+/* Inline text button — reads as a link inside the muted footer line, no chrome
+   until focus. */
+.settings-footer-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-weight: var(--weight-semibold);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.settings-footer-link:hover {
+  color: var(--foreground);
+}
