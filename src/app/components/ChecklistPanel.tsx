@@ -316,10 +316,13 @@ export function ChecklistPanel({
           </SegmentedToggleGroup>
 
           {/* Sort is deliberately subordinate to the filter tabs: an
-              icon-only trigger at the row's right edge. The Select semantics
-              are unchanged — the visually-hidden SelectValue still announces
-              the active sort — and a non-default sort tints the icon petrol
-              so a surprising row order always has a visible cause. */}
+              icon-only trigger docked at the track's right end, behind a
+              hairline divider so it reads as part of the same instrument.
+              The Select semantics are unchanged — the visually-hidden
+              SelectValue still announces the active sort — and a
+              non-default sort tints the icon petrol so a surprising row
+              order always has a visible cause. */}
+          <div aria-hidden="true" className="checklist-sort-divider" />
           <Select value={sort} onValueChange={(value) => setSort(value as ChecklistSort)}>
             <Tooltip>
               <TooltipTrigger asChild>

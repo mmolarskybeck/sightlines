@@ -105,7 +105,7 @@ import {
 } from "./components/ui/select";
 import { Switch } from "./components/ui/switch";
 import { Tabs } from "./components/ui/tabs";
-import { SegmentedTabsList, SegmentedTabsTrigger } from "./components/ui/segmented";
+import { UnderlineTabsList, UnderlineTabsTrigger } from "./components/ui/segmented";
 import { Toggle } from "./components/ui/toggle";
 import { useStoragePersistence, getStorageNoteCopy } from "./hooks/useStoragePersistence";
 import {
@@ -1025,20 +1025,20 @@ export function App() {
             }
           }}
         >
-          <SegmentedTabsList aria-label="Workspace view" className="view-tabs">
-            <SegmentedTabsTrigger value="plan">
+          <UnderlineTabsList aria-label="Workspace view" className="view-tabs">
+            <UnderlineTabsTrigger value="plan">
               <MapTrifoldIcon aria-hidden="true" size={16} />
               <span>Plan</span>
-            </SegmentedTabsTrigger>
-            <SegmentedTabsTrigger value="elevation">
+            </UnderlineTabsTrigger>
+            <UnderlineTabsTrigger value="elevation">
               <PresentationIcon aria-hidden="true" size={16} />
               <span>Elevation</span>
-            </SegmentedTabsTrigger>
-            <SegmentedTabsTrigger value="3d">
+            </UnderlineTabsTrigger>
+            <UnderlineTabsTrigger value="3d">
               <CubeIcon aria-hidden="true" size={16} />
               <span>3D</span>
-            </SegmentedTabsTrigger>
-          </SegmentedTabsList>
+            </UnderlineTabsTrigger>
+          </UnderlineTabsList>
         </Tabs>
 
         <div className="topbar-right" aria-label="Project actions">

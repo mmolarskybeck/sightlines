@@ -48,7 +48,7 @@ The local wrappers in `src/app/components/ui` are the preferred surface for new 
 
 - `Button` supports `default`, `primary`, `ghost`, `subtle`, `outline`, `destructive`, `rail`, `tab`, and `inspector` variants.
 - `Toggle` and `ToggleGroupItem` support pressed petrol states (now with the `--shadow-pressed` depression) and underline-tab states.
-- `SegmentedTabsList`/`SegmentedTabsTrigger` and `SegmentedToggleGroup`/`SegmentedToggleGroupItem` (`ui/segmented.tsx`) render the recessed-track/raised-chip pickers with the sliding chip.
+- `SegmentedTabsList`/`SegmentedTabsTrigger` and `SegmentedToggleGroup`/`SegmentedToggleGroupItem` (`ui/segmented.tsx`) render the recessed-track/raised-chip pickers with the sliding chip; `UnderlineTabsList`/`UnderlineTabsTrigger` render navigation tabs with the sliding petrol underline off the same measuring hook.
 - `Tabs`, `Select`, `DropdownMenu`, and `Switch` keep Radix semantics while carrying Sightlines visual defaults.
 - `Collapsible` is a bare-behavior Radix wrapper (no baked-in look); `InspectorSection` composes it into the hairline-separated, summary-bearing disclosure rows the artwork inspector uses.
 - `cn()` uses `clsx` and `tailwind-merge`; compose variants there rather than concatenating ad hoc class strings.
@@ -74,17 +74,23 @@ Sightlines mixes square workspace structure with softer floating surfaces: recta
 - Major panes and layout divisions stay square and separated by 1px borders.
 - Inputs, buttons, selects, and compact toolbar controls use an 8px radius.
 - Borderless selected fills, rail buttons, and menu rows may use a 10px radius.
-- Soft-control grammar (this branch's speculative reroll): mutually-exclusive
-  pickers — topbar Plan/Elevation/3D, checklist filters, units, Insert,
-  arrange modes, wall/floor placement — are recessed grey tracks
-  (`--track`, `--radius-track`) holding quiet segments, with one raised
-  white chip (`--chip`, `--shadow-chip`) marking the active choice and
-  sliding between segments (220ms `--ease-soft`; suppressed under reduced
-  motion). Latching toggles (Grid, Snap, Overlap, rail modes) do the
-  opposite: they depress, keeping the petrol wash and adding
-  `--shadow-pressed`. Raised = a choice within a set; pressed = a mode
-  that's engaged. Underline tabs remain only for subordinate sub-choices
-  (help-dialog groups, "Measured from").
+- Soft-control grammar (this branch's speculative reroll):
+  - **Navigation** — the topbar Plan/Elevation/3D tabs — uses transparent
+    underline tabs whose 2px petrol underline *slides* between tabs (220ms
+    `--ease-soft`, suppressed under reduced motion): the original petrol
+    identity plus the sliding motion.
+  - **Value pickers** — checklist filters, units, Insert, arrange modes,
+    wall/floor placement — are recessed grey tracks (`--track`,
+    `--radius-track`) holding quiet segments, with one raised white chip
+    (`--chip`, `--shadow-chip`) marking the active choice and sliding
+    between segments. Auxiliary controls may dock inside a track behind a
+    hairline divider (the checklist's sort trigger is the reference case)
+    rather than floating beside it.
+  - **Latching toggles** (Grid, Snap, Overlap, rail modes) do the
+    opposite: they depress, keeping the petrol wash and adding
+    `--shadow-pressed`. Raised = a choice within a set; pressed = a mode
+    that's engaged. Static underline tabs remain for subordinate
+    sub-choices (help-dialog groups, "Measured from").
 - Overlays — dialogs, wizards, popovers, dropdown menus — use a 12px radius (`--radius-overlay`) with a soft, diffuse shadow and at most a whisper of border.
 - Inside overlays, structure content with spacing and alignment rather than full-bleed hairline rules. Edge-to-edge bordered grids (tab strips, stat cells, per-field border boxes) read as spreadsheet chrome — the harsh look we are moving away from.
 - Shadows are reserved for real overlays and canvas chips, not normal panels.
@@ -115,7 +121,7 @@ Keep panels flat. Improve polish through spacing, alignment, focus states, and c
 Use the primitive variants first. Add bespoke CSS only when the component is canvas-specific or has a domain-specific layout.
 
 - Use icon buttons for compact tools and include accessible labels.
-- Use soft segmented tracks (`SegmentedTabsList` / `SegmentedToggleGroup` in `ui/segmented.tsx`) for view modes, checklist filters, and other mutually-exclusive pickers; underline tabs only for subordinate sub-choices.
+- Use sliding-underline tabs (`UnderlineTabsList` in `ui/segmented.tsx`) for navigation (view modes); soft segmented tracks (`SegmentedTabsList` / `SegmentedToggleGroup`) for value pickers like the checklist filters; static underline tabs only for subordinate sub-choices.
 - Use Radix Select for option sets.
 - Use Radix Switch only when the binary state benefits from a switch; the unit selector is intentionally a two-label segmented switch.
 - Use petrol-filled primary buttons sparingly. `Import` is currently the main solid CTA in the workspace.

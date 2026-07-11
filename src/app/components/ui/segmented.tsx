@@ -3,13 +3,22 @@ import * as TabsPrimitive from "@radix-ui/react-tabs";
 import * as ToggleGroupPrimitive from "@radix-ui/react-toggle-group";
 import { cn } from "./utils";
 
-/* Soft segmented track: a recessed grey rail (.seg-track) whose active item
+/* Two sliding-indicator tab families sharing one measuring hook.
+
+   Soft segmented track: a recessed grey rail (.seg-track) whose active item
    is marked by one raised white chip (.seg-chip) that slides between
-   segments. Radix keeps the semantics (Tabs or ToggleGroup); the chip is a
+   segments — for value pickers (filters, units, arrange modes).
+
+   Underline tabs: transparent .tabs-underline rail whose active item is
+   marked by a 2px petrol underline (.seg-underline) that slides the same
+   way — for navigation (the topbar view modes).
+
+   Radix keeps the semantics (Tabs or ToggleGroup); the indicator is a
    purely presentational sibling positioned off the active trigger's
    measured box, so any mix of segment widths works. Until the first
-   measurement lands, the CSS fallback paints the active item as its own
-   chip, so there is no unstyled flash (and no-JS still reads correctly). */
+   measurement lands, a CSS fallback paints the active item's own chip or
+   underline, so there is no unstyled flash (and no-JS still reads
+   correctly). */
 
 function composeRefs<T>(...refs: Array<React.Ref<T> | undefined>) {
   return (node: T | null) => {
@@ -20,12 +29,12 @@ function composeRefs<T>(...refs: Array<React.Ref<T> | undefined>) {
   };
 }
 
-function useSlidingChip(listRef: React.RefObject<HTMLDivElement | null>) {
-  const chipRef = React.useRef<HTMLDivElement | null>(null);
+function useSlidingIndicator(listRef: React.RefObject<HTMLDivElement | null>) {
+  const indicatorRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useLayoutEffect(() => {
     const list = listRef.current;
-    const chip = chipRef.current;
+    const chip = indicatorRef.current;
     if (!list || !chip) return;
 
     const measure = () => {
@@ -65,7 +74,7 @@ function useSlidingChip(listRef: React.RefObject<HTMLDivElement | null>) {
     };
   }, [listRef]);
 
-  return chipRef;
+  return indicatorRef;
 }
 
 export const SegmentedTabsList = React.forwardRef<
@@ -73,7 +82,7 @@ export const SegmentedTabsList = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>
 >(({ className, children, ...props }, ref) => {
   const listRef = React.useRef<HTMLDivElement | null>(null);
-  const chipRef = useSlidingChip(listRef);
+  const chipRef = useSlidingIndicator(listRef);
 
   return (
     <TabsPrimitive.List
@@ -103,7 +112,7 @@ export const SegmentedToggleGroup = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof ToggleGroupPrimitive.Root>
 >(({ className, children, ...props }, ref) => {
   const listRef = React.useRef<HTMLDivElement | null>(null);
-  const chipRef = useSlidingChip(listRef);
+  const chipRef = useSlidingIndicator(listRef);
 
   return (
     <ToggleGroupPrimitive.Root
@@ -127,3 +136,33 @@ export const SegmentedToggleGroupItem = React.forwardRef<
 ));
 
 SegmentedToggleGroupItem.displayName = "SegmentedToggleGroupItem";
+
+export const UnderlineTabsList = React.forwardRef<
+  React.ElementRef<typeof TabsPrimitive.List>,
+  React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>
+>(({ className, children, ...props }, ref) => {
+  const listRef = React.useRef<HTMLDivElement | null>(null);
+  const indicatorRef = useSlidingIndicator(listRef);
+
+  return (
+    <TabsPrimitive.List
+      ref={composeRefs(ref, listRef)}
+      className={cn("tabs-underline", className)}
+      {...props}
+    >
+      <div aria-hidden className="seg-underline" ref={indicatorRef} />
+      {children}
+    </TabsPrimitive.List>
+  );
+});
+
+UnderlineTabsList.displayName = "UnderlineTabsList";
+
+export const UnderlineTabsTrigger = React.forwardRef<
+  React.ElementRef<typeof TabsPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>
+>(({ className, ...props }, ref) => (
+  <TabsPrimitive.Trigger ref={ref} className={cn("tab-button", className)} {...props} />
+));
+
+UnderlineTabsTrigger.displayName = "UnderlineTabsTrigger";

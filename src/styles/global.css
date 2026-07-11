@@ -1280,14 +1280,39 @@ body.panels-resizing * {
   scrollbar-width: none;
 }
 
-/* The filter track owns this row; sort is a subordinate icon at its right
-   edge. No hairline underneath — the recessed track is its own ground. */
+/* One composed instrument: the controls row IS the recessed track — the
+   filter group rides inside it (its own track chrome suppressed below) and
+   the sort trigger docks at the right end behind a hairline divider, so
+   nothing floats disconnected beside the group. */
 .checklist-controls {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 2px;
   margin-bottom: 14px;
+  padding: 3px;
+  border-radius: var(--radius-track);
+  background: var(--track);
+}
+
+/* The inner group already paints a track of its own; inside the shell it
+   goes transparent and the 3px inset comes from the shell instead. */
+.checklist-controls .seg-track {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.checklist-controls .seg-chip {
+  top: 0;
+  bottom: 0;
+}
+
+.checklist-sort-divider {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--input);
 }
 
 .checklist-sort-trigger {
@@ -1298,7 +1323,7 @@ body.panels-resizing * {
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-seg);
   background: transparent;
   color: var(--muted);
   transition:
@@ -1307,7 +1332,7 @@ body.panels-resizing * {
 }
 
 .checklist-sort-trigger:hover {
-  background: var(--surface);
+  background: var(--chip-ghost);
   color: var(--ink);
 }
 
@@ -2829,14 +2854,71 @@ body.panels-resizing * {
   }
 }
 
-/* Topbar mode tabs sit in the taller (80px) topbar; scale them up so the
-   track holds its weight there. */
-.view-tabs .seg-item {
-  min-height: 30px;
-  padding: 0 14px;
+/* Underline tabs — the navigation counterpart to the segmented track: a
+   transparent rail whose 2px petrol underline slides between tabs with the
+   same motion (UnderlineTabsList renders the .seg-underline element).
+   Used for the topbar view modes; recessed tracks stay reserved for value
+   pickers. */
+.tabs-underline {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.seg-underline {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: var(--primary);
+  opacity: 0;
+  transition:
+    transform var(--dur-slide) var(--ease-soft),
+    width var(--dur-slide) var(--ease-soft);
+  will-change: transform, width;
+}
+
+.tabs-underline[data-seg-ready] .seg-underline {
+  opacity: 1;
+}
+
+.tab-button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
   font-family: var(--font-ui);
+  /* Scaled up slightly so the mode tabs hold their weight in the taller
+     (80px) topbar rather than floating in it. */
   font-size: var(--type-md);
   font-weight: var(--weight-semibold);
+  transition: color 150ms ease-out;
+}
+
+.tab-button:hover:not(:disabled),
+.tab-button[data-state="active"] {
+  color: var(--ink);
+}
+
+/* Fallback underline for first paint, before the sliding one has measured. */
+.tabs-underline:not([data-seg-ready]) .tab-button[data-state="active"] {
+  box-shadow: inset 0 -2px 0 var(--primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seg-underline {
+    transition: none;
+  }
 }
 
 /* Latching toggles: soft grey fills that depress when on — the petrol wash
