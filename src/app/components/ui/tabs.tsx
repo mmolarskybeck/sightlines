@@ -32,3 +32,12 @@ export const TabsTrigger = React.forwardRef<
 ));
 
 TabsTrigger.displayName = TabsPrimitive.Trigger.displayName;
+
+export const TabsContent = React.forwardRef<
+  React.ElementRef<typeof TabsPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof TabsPrimitive.Content>
+>(({ className, ...props }, ref) => (
+  <TabsPrimitive.Content ref={ref} className={cn("outline-none", className)} {...props} />
+));
+
+TabsContent.displayName = TabsPrimitive.Content.displayName;

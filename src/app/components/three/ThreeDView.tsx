@@ -1,7 +1,7 @@
 import { OrbitControls } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
-import { Box3, MathUtils, PerspectiveCamera, Vector3 } from "three";
+import { Box3, MathUtils, PerspectiveCamera, Plane, TOUCH, Vector2, Vector3 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { parseFaceWallId } from "../../../domain/geometry/freestandingWalls";
 import {
@@ -13,6 +13,15 @@ import {
 } from "../../../domain/geometry/scene3d";
 import type { Artwork, Project } from "../../../domain/project";
 import { fitDistance } from "./cameraFit";
+import {
+  ORBIT_MAX_DISTANCE,
+  ORBIT_MIN_DISTANCE,
+  clampFocusDistance,
+  normalizeWheelDeltaY,
+  travelStepDistance,
+  updateCameraClipping,
+  zoomFactorFromDelta
+} from "./cameraNav";
 import { MM_TO_WORLD } from "./coordinates";
 import { SceneRooms } from "./SceneRooms";
 
@@ -143,6 +152,8 @@ type CameraRigApi = {
   overview: () => void;
   eyeLevel: (wall: WallPanel3d, eyeHeightMm: number) => void;
   focus: (target: Vector3) => void;
+  frameRoom: (room: Room3d) => void;
+  focusFloorUnderCursor: (clientX: number, clientY: number) => void;
 };
 
 export type ThreeDViewActions = {
@@ -151,45 +162,55 @@ export type ThreeDViewActions = {
   focusSelection: () => void;
 };
 
-// World-space bounding box of the union of every room's floor + wall heights.
-// null when there is nothing to frame.
+// World-space bounding box of one room's floor + wall heights, including its
+// freestanding partitions. Empty (isEmpty()) when the room has no geometry.
+function roomBounds(room: Room3d): Box3 {
+  const box = new Box3();
+  const maxWallHeightMm = room.walls.reduce(
+    (max, wall) => Math.max(max, wall.heightMm),
+    0
+  );
+  for (const point of room.floorPolygon) {
+    box.expandByPoint(
+      new Vector3(point.xMm * MM_TO_WORLD, 0, point.yMm * MM_TO_WORLD)
+    );
+    box.expandByPoint(
+      new Vector3(
+        point.xMm * MM_TO_WORLD,
+        maxWallHeightMm * MM_TO_WORLD,
+        point.yMm * MM_TO_WORLD
+      )
+    );
+  }
+
+  // A partition can be taller than the room's walls, and its endpoints can sit
+  // outside the room polygon (advisory, spec §6.4) — so frame by its cap
+  // outline and heightMm explicitly, or the fit derived from floors alone could
+  // clip it.
+  for (const partition of room.freestandingWalls) {
+    const { start, end, heightMm } = partition.capOutline;
+    for (const point of [start, end]) {
+      box.expandByPoint(new Vector3(point.xMm * MM_TO_WORLD, 0, point.yMm * MM_TO_WORLD));
+      box.expandByPoint(
+        new Vector3(point.xMm * MM_TO_WORLD, heightMm * MM_TO_WORLD, point.yMm * MM_TO_WORLD)
+      );
+    }
+  }
+
+  return box;
+}
+
+// World-space bounding box of the union of every room. null when there is
+// nothing to frame.
 function sceneBounds(scene: Scene3d): Box3 | null {
   const box = new Box3();
   let hasPoint = false;
 
   for (const room of scene.rooms) {
-    const maxWallHeightMm = room.walls.reduce(
-      (max, wall) => Math.max(max, wall.heightMm),
-      0
-    );
-    for (const point of room.floorPolygon) {
-      box.expandByPoint(
-        new Vector3(point.xMm * MM_TO_WORLD, 0, point.yMm * MM_TO_WORLD)
-      );
-      box.expandByPoint(
-        new Vector3(
-          point.xMm * MM_TO_WORLD,
-          maxWallHeightMm * MM_TO_WORLD,
-          point.yMm * MM_TO_WORLD
-        )
-      );
-      hasPoint = true;
-    }
-
-    // A partition can be taller than the room's walls, and its endpoints can
-    // sit outside the room polygon (advisory, spec §6.4) — so frame by its cap
-    // outline and heightMm explicitly, or the fit derived from floors alone
-    // could clip it.
-    for (const partition of room.freestandingWalls) {
-      const { start, end, heightMm } = partition.capOutline;
-      for (const point of [start, end]) {
-        box.expandByPoint(new Vector3(point.xMm * MM_TO_WORLD, 0, point.yMm * MM_TO_WORLD));
-        box.expandByPoint(
-          new Vector3(point.xMm * MM_TO_WORLD, heightMm * MM_TO_WORLD, point.yMm * MM_TO_WORLD)
-        );
-        hasPoint = true;
-      }
-    }
+    const bounds = roomBounds(room);
+    if (bounds.isEmpty()) continue;
+    box.union(bounds);
+    hasPoint = true;
   }
 
   return hasPoint ? box : null;
@@ -263,6 +284,17 @@ function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
+const FLOOR_PLANE = new Plane(new Vector3(0, 1, 0), 0);
+
+// Cursor position -> NDC on the canvas, for raycasts driven by native events.
+function cursorNdc(canvas: HTMLCanvasElement, clientX: number, clientY: number): Vector2 {
+  const rect = canvas.getBoundingClientRect();
+  return new Vector2(
+    ((clientX - rect.left) / rect.width) * 2 - 1,
+    -((clientY - rect.top) / rect.height) * 2 + 1
+  );
+}
+
 // Owns the camera: jumps to the fitted overview on entry/project switch
 // (deliberately NOT on scene edits — spec §4.2; Overview reclaims framing),
 // and animates the two presets. Both presets end in free orbit.
@@ -277,6 +309,8 @@ function CameraRig({
 }) {
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as OrbitControlsImpl | null;
+  const raycaster = useThree((state) => state.raycaster);
+  const gl = useThree((state) => state.gl);
   const invalidate = useThree((state) => state.invalidate);
 
   // Latest scene without making it an effect dependency — reads current
@@ -294,10 +328,7 @@ function CameraRig({
 
   const applyPose = (pose: CameraPose) => {
     camera.position.copy(pose.position);
-    const distance = pose.position.distanceTo(pose.target);
-    camera.near = Math.max(distance / 1000, 0.01);
-    camera.far = Math.max(distance * 100, 100);
-    camera.updateProjectionMatrix();
+    updateCameraClipping(camera, pose.position.distanceTo(pose.target));
     camera.lookAt(pose.target);
     if (controls) {
       controls.target.copy(pose.target);
@@ -344,16 +375,40 @@ function CameraRig({
   // Refs must not be written during render; publish the preset API after
   // commit (no deps — closures read refs/three objects, never stale props).
   useEffect(() => {
+    const focusPoint = (target: Vector3) => {
+      // Keep the current view direction, but pull the standoff into the
+      // focus envelope so a far overview actually flies in (spec §4.2).
+      const currentTarget = controls?.target.clone() ?? camera.position.clone();
+      const offset = camera.position.clone().sub(currentTarget);
+      if (offset.lengthSq() < 0.0001) offset.set(0, 2, 2);
+      offset.setLength(clampFocusDistance(offset.length()));
+      flyTo({ target, position: target.clone().add(offset) });
+    };
+
     apiRef.current = {
       overview: () => {
         const pose = overviewPose(sceneRef.current, aspect());
         if (pose) flyTo(pose);
       },
-      focus: (target) => {
+      focus: focusPoint,
+      focusFloorUnderCursor: (clientX, clientY) => {
+        // Empty-space double-click: nothing under the cursor to hit, so fly
+        // to the y=0 floor point on the cursor ray instead of silently
+        // no-oping (a ray missing the floor entirely stays a no-op).
+        raycaster.setFromCamera(cursorNdc(gl.domElement, clientX, clientY), camera);
+        const point = new Vector3();
+        if (raycaster.ray.intersectPlane(FLOOR_PLANE, point)) focusPoint(point);
+      },
+      frameRoom: (room) => {
+        const bounds = roomBounds(room);
+        if (bounds.isEmpty()) return;
         const currentTarget = controls?.target.clone() ?? camera.position.clone();
-        const offset = camera.position.clone().sub(currentTarget);
-        if (offset.lengthSq() < 0.0001) offset.set(0, 2, 2);
-        flyTo({ target, position: target.clone().add(offset) });
+        const direction = camera.position.clone().sub(currentTarget);
+        if (direction.lengthSq() < 0.0001) direction.set(1, 1, 1);
+        direction.normalize();
+        const distance = fitDistance(bounds, direction, CAMERA_FOV_DEG, aspect());
+        const target = bounds.getCenter(new Vector3());
+        flyTo({ target, position: target.clone().addScaledVector(direction, distance) });
       },
       eyeLevel: (wall, eyeHeightMm) => {
         flyTo(eyeLevelPose(sceneRef.current, wall, eyeHeightMm));
@@ -368,6 +423,181 @@ function CameraRig({
     // OrbitControls first registers. Not on scene edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitKey, controls]);
+
+  return null;
+}
+
+// Takes over wheel zoom from OrbitControls (three-stdlib's wheel dolly is
+// sign-only, so trackpads feel dead): a delta-proportional dolly toward the
+// world point under the cursor. Listens in the CAPTURE phase on the canvas's
+// parent so it fires before OrbitControls' own canvas listener, and swallows
+// the event so the two never fight.
+function CursorZoom() {
+  const camera = useThree((state) => state.camera);
+  const controls = useThree((state) => state.controls) as OrbitControlsImpl | null;
+  const raycaster = useThree((state) => state.raycaster);
+  const scene = useThree((state) => state.scene);
+  const gl = useThree((state) => state.gl);
+  const invalidate = useThree((state) => state.invalidate);
+
+  useEffect(() => {
+    const parent = gl.domElement.parentElement;
+    if (!parent || !controls) return;
+
+    const point = new Vector3();
+
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const currentDistance = camera.position.distanceTo(controls.target);
+      let factor = zoomFactorFromDelta(normalizeWheelDeltaY(event));
+      // Clamp the resulting orbit radius to the dolly envelope; scale the step
+      // to land exactly on the bound rather than skipping it.
+      const desired = currentDistance * factor;
+      const clamped = MathUtils.clamp(desired, ORBIT_MIN_DISTANCE, ORBIT_MAX_DISTANCE);
+      if (clamped !== desired && currentDistance > 0) factor = clamped / currentDistance;
+      if (Math.abs(factor - 1) < 1e-6) return;
+
+      // World point under the cursor: nearest mesh hit, else the y=0 floor,
+      // else the current orbit target.
+      raycaster.setFromCamera(cursorNdc(gl.domElement, event.clientX, event.clientY), camera);
+      const hit = raycaster.intersectObjects(scene.children, true)[0];
+      if (hit) {
+        point.copy(hit.point);
+      } else if (!raycaster.ray.intersectPlane(FLOOR_PLANE, point)) {
+        point.copy(controls.target);
+      }
+
+      // Lerp BOTH camera and target toward the point by the same alpha: the
+      // point stays visually fixed while the orbit radius shrinks by `factor`
+      // (negative alpha extrapolates for zoom-out).
+      const alpha = 1 - factor;
+      camera.position.lerp(point, alpha);
+      controls.target.lerp(point, alpha);
+      updateCameraClipping(camera, camera.position.distanceTo(controls.target));
+      controls.update();
+      invalidate();
+    };
+
+    parent.addEventListener("wheel", onWheel, { passive: false, capture: true });
+    return () => parent.removeEventListener("wheel", onWheel, { capture: true });
+  }, [camera, controls, gl, invalidate, raycaster, scene]);
+
+  return null;
+}
+
+// Continuous WASD / arrow travel (spec §4.2): pure translation of camera and
+// target together, so orbit radius is unchanged. Speed scales with zoom — a
+// walk when close, a glide when zoomed out (envelope in cameraNav.ts).
+const TRAVEL_CODES = new Set([
+  "KeyW",
+  "KeyS",
+  "KeyA",
+  "KeyD",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight"
+]);
+const WORLD_UP = new Vector3(0, 1, 0);
+
+// Typing in an inspector field must not drive the camera.
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    target.isContentEditable
+  );
+}
+
+function KeyboardTravel() {
+  const camera = useThree((state) => state.camera);
+  const controls = useThree((state) => state.controls) as OrbitControlsImpl | null;
+  const invalidate = useThree((state) => state.invalidate);
+
+  const pressed = useRef<Set<string>>(new Set());
+  const shift = useRef(false);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      shift.current = event.shiftKey;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (isEditableTarget(event.target)) return;
+      if (!TRAVEL_CODES.has(event.code)) return;
+      event.preventDefault();
+      pressed.current.add(event.code);
+      invalidate();
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      shift.current = event.shiftKey;
+      pressed.current.delete(event.code);
+    };
+    const onBlur = () => {
+      pressed.current.clear();
+      shift.current = false;
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [invalidate]);
+
+  const forward = useRef(new Vector3());
+  const right = useRef(new Vector3());
+  const move = useRef(new Vector3());
+
+  useFrame((_, delta) => {
+    if (!controls) return;
+    const codes = pressed.current;
+    if (codes.size === 0) return;
+
+    let forwardInput = 0;
+    let rightInput = 0;
+    if (codes.has("KeyW") || codes.has("ArrowUp")) forwardInput += 1;
+    if (codes.has("KeyS") || codes.has("ArrowDown")) forwardInput -= 1;
+    if (codes.has("KeyD") || codes.has("ArrowRight")) rightInput += 1;
+    if (codes.has("KeyA") || codes.has("ArrowLeft")) rightInput -= 1;
+    if (forwardInput === 0 && rightInput === 0) {
+      invalidate();
+      return;
+    }
+
+    // Forward = view direction flattened onto the floor. Looking (near)
+    // straight down leaves no projection, so fall back to screen-up flattened
+    // onto the floor.
+    camera.getWorldDirection(forward.current).setY(0);
+    if (forward.current.lengthSq() < 1e-6) {
+      forward.current.copy(WORLD_UP).applyQuaternion(camera.quaternion).setY(0);
+    }
+    if (forward.current.lengthSq() < 1e-6) {
+      invalidate();
+      return;
+    }
+    forward.current.normalize();
+    right.current.crossVectors(forward.current, WORLD_UP).normalize();
+
+    const distance = camera.position.distanceTo(controls.target);
+
+    move.current
+      .copy(forward.current)
+      .multiplyScalar(forwardInput)
+      .addScaledVector(right.current, rightInput)
+      .normalize()
+      .multiplyScalar(travelStepDistance(distance, shift.current, delta));
+
+    camera.position.add(move.current);
+    controls.target.add(move.current);
+    controls.update();
+    invalidate();
+  });
 
   return null;
 }
@@ -418,35 +648,24 @@ function wallFocusTarget(wall: WallPanel3d): Vector3 {
   );
 }
 
-function roomFocusTarget(room: Room3d): Vector3 {
-  const center = room.floorPolygon.reduce(
-    (sum, point) => ({ xMm: sum.xMm + point.xMm, yMm: sum.yMm + point.yMm }),
-    { xMm: 0, yMm: 0 }
-  );
-  const count = Math.max(room.floorPolygon.length, 1);
-  const wallHeightMm = room.walls.reduce(
-    (max, wall) => Math.max(max, wall.heightMm),
-    0
-  );
-  return new Vector3(
-    (center.xMm / count) * MM_TO_WORLD,
-    (wallHeightMm / 2) * MM_TO_WORLD,
-    (center.yMm / count) * MM_TO_WORLD
-  );
-}
+// A selected wall / artwork / floor object focuses on a point (clamped-distance
+// flight); a selected ROOM frames its whole bounding box instead (spec §4.2).
+type FocusSelection =
+  | { kind: "point"; point: Vector3 }
+  | { kind: "room"; room: Room3d };
 
-function focusTargetForSelection(
+function resolveFocusSelection(
   scene: Scene3d,
   selectedRoomId: string | null,
   selectedWallId: string | null,
   selectedObjectIds: string[],
   selectedArtworkId: string | null
-): Vector3 | null {
+): FocusSelection | null {
   const walls = scene.rooms.flatMap(roomWallPanels);
   const selectedWall = selectedWallId
     ? walls.find((wall) => wall.wallId === selectedWallId)
     : undefined;
-  if (selectedWall) return wallFocusTarget(selectedWall);
+  if (selectedWall) return { kind: "point", point: wallFocusTarget(selectedWall) };
 
   const artworkWall = walls.find((wall) =>
     wall.artworks.some(
@@ -455,7 +674,7 @@ function focusTargetForSelection(
         artwork.artworkId === selectedArtworkId
     )
   );
-  if (artworkWall) return wallFocusTarget(artworkWall);
+  if (artworkWall) return { kind: "point", point: wallFocusTarget(artworkWall) };
 
   const floorObject = scene.floorObjects.find(
     (object) =>
@@ -463,17 +682,20 @@ function focusTargetForSelection(
       object.artworkId === selectedArtworkId
   );
   if (floorObject) {
-    return new Vector3(
-      floorObject.xMm * MM_TO_WORLD,
-      floorObject.heightMm * 0.5 * MM_TO_WORLD,
-      floorObject.yMm * MM_TO_WORLD
-    );
+    return {
+      kind: "point",
+      point: new Vector3(
+        floorObject.xMm * MM_TO_WORLD,
+        floorObject.heightMm * 0.5 * MM_TO_WORLD,
+        floorObject.yMm * MM_TO_WORLD
+      )
+    };
   }
 
   const selectedRoom = selectedRoomId
     ? scene.rooms.find((room) => room.roomId === selectedRoomId)
     : undefined;
-  return selectedRoom ? roomFocusTarget(selectedRoom) : null;
+  return selectedRoom ? { kind: "room", room: selectedRoom } : null;
 }
 
 // Same idiom as the Plan/Elevation empty states: an aria-hidden glyph (a cube,
@@ -591,14 +813,16 @@ export function ThreeDView({
         }
       },
       focusSelection: () => {
-        const target = focusTargetForSelection(
+        const selection = resolveFocusSelection(
           scene,
           selectedRoomId,
           selectedWallId,
           selectedObjectIds,
           selectedArtworkId
         );
-        if (target) rigApi.current?.focus(target);
+        if (!selection) return;
+        if (selection.kind === "room") rigApi.current?.frameRoom(selection.room);
+        else rigApi.current?.focus(selection.point);
       }
     };
 
@@ -627,16 +851,6 @@ export function ThreeDView({
       onPointerDown={(event) => {
         pointerDownAt.current = { x: event.clientX, y: event.clientY };
       }}
-      onDoubleClick={() => {
-        const target = focusTargetForSelection(
-          scene,
-          selectedRoomId,
-          selectedWallId,
-          selectedObjectIds,
-          selectedArtworkId
-        );
-        if (target) rigApi.current?.focus(target);
-      }}
     >
       <Canvas
         frameloop="demand"
@@ -655,6 +869,13 @@ export function ThreeDView({
           }
         }}
         onPointerMissed={(event) => {
+          // r3f fires this for dblclick misses too: a double-click on the
+          // empty space between rooms focuses the floor point under the
+          // cursor, same fallback the wheel dolly uses (spec §4.2).
+          if (event.type === "dblclick") {
+            rigApi.current?.focusFloorUnderCursor(event.clientX, event.clientY);
+            return;
+          }
           // Empty space clears the object selection (spec §4.3) — but only
           // for true clicks, not the release of an orbit drag.
           const down = pointerDownAt.current;
@@ -677,18 +898,25 @@ export function ThreeDView({
           onSelectWall={onSelectWall}
           onSelectObject={onSelectObject}
           onClearSelection={onClearSelection}
+          onFocusPoint={(point) => rigApi.current?.focus(point)}
         />
         <OrbitControls
           makeDefault
           enableDamping
           dampingFactor={0.1}
-          zoomToCursor
-          keyEvents
-          keyPanSpeed={120}
-          minDistance={0.35}
-          maxDistance={200}
+          minDistance={ORBIT_MIN_DISTANCE}
+          maxDistance={ORBIT_MAX_DISTANCE}
           maxPolarAngle={Math.PI / 2}
+          // One finger pans like a map; two fingers pinch-zoom and twist to
+          // orbit. Touch-only — mouse bindings unchanged.
+          touches={{ ONE: TOUCH.PAN, TWO: TOUCH.DOLLY_ROTATE }}
+          // Pan slides along the ground plane, not the screen plane —
+          // deliberate for ALL inputs (mouse right-drag included), matching
+          // the floorplan-under-your-finger feel and height-preserving travel.
+          screenSpacePanning={false}
         />
+        <CursorZoom />
+        <KeyboardTravel />
         {benchmarkEnabled ? <BenchmarkFrameProbe /> : null}
         <CameraRig scene={scene} fitKey={project.id} apiRef={rigApi} />
       </Canvas>

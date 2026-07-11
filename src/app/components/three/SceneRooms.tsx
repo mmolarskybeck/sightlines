@@ -1,5 +1,6 @@
 import type { ThreeEvent } from "@react-three/fiber";
 import { useMemo } from "react";
+import type { Vector3 } from "three";
 import type { Scene3d } from "../../../domain/geometry/scene3d";
 import { FloorObjectBox } from "./FloorObjectBox";
 import { FloorSurface } from "./FloorSurface";
@@ -20,7 +21,8 @@ export function SceneRooms({
   selectedWallId,
   onSelectWall,
   onSelectObject,
-  onClearSelection
+  onClearSelection,
+  onFocusPoint
 }: {
   scene: Scene3d;
   getBlob: (key: string) => Promise<Blob>;
@@ -30,6 +32,7 @@ export function SceneRooms({
   onSelectWall: (wallId: string) => void;
   onSelectObject: (objectId: string, opts: { additive: boolean }) => void;
   onClearSelection: () => void;
+  onFocusPoint: (point: Vector3) => void;
 }) {
   const assetIds = useMemo(
     () => [
@@ -54,8 +57,16 @@ export function SceneRooms({
     onClearSelection();
   };
 
+  // One root-level double-click handler covers every surface: r3f reports the
+  // nearest intersection's world point, so walls, floors, partitions, artworks
+  // and floor objects all route to the same focus flight (spec §4.2).
+  const handleFocusPoint = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    onFocusPoint(event.point.clone());
+  };
+
   return (
-    <>
+    <group onDoubleClick={handleFocusPoint}>
       {scene.rooms.map((room) => (
         <group key={room.roomId}>
           <FloorSurface polygon={room.floorPolygon} onClick={handleFloorClick} />
@@ -99,6 +110,6 @@ export function SceneRooms({
           onSelect={onSelectObject}
         />
       ))}
-    </>
+    </group>
   );
 }
