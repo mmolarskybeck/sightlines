@@ -148,6 +148,11 @@ const FontLab = import.meta.env.DEV
 // reference across renders, which keeps useAssetImageUrls from refetching
 // on every App re-render.
 const assetRepository = new IndexedDbAssetRepository();
+// At this viewport width the medium panel tracks leave the canvas at the edge
+// of the compact toolbar's one-line budget. Collapse one side pane before the
+// toolbar starts clipping; the CSS workspace breakpoints use the same range.
+const SINGLE_PANE_WORKSPACE_MEDIA_QUERY = "(max-width: 1080px)";
+
 function getAssetBlob(key: string): Promise<Blob> {
   return assetRepository.getBlob(key);
 }
@@ -329,6 +334,43 @@ export function App() {
     setGridPrecisionFloorMm,
     toggleAllowOverlappingPlacement
   } = useViewPreferences();
+  const [compactWorkspaceSide, setCompactWorkspaceSide] = useState<"left" | "right">("left");
+  const compactWorkspaceEntryRef = useRef(false);
+  const [isCompactWorkspace, setIsCompactWorkspace] = useState(() =>
+    typeof window !== "undefined" &&
+    window.matchMedia(SINGLE_PANE_WORKSPACE_MEDIA_QUERY).matches
+  );
+
+  useEffect(() => {
+    const query = window.matchMedia(SINGLE_PANE_WORKSPACE_MEDIA_QUERY);
+    const update = () => setIsCompactWorkspace(query.matches);
+    update();
+    query.addEventListener?.("change", update);
+    return () => query.removeEventListener?.("change", update);
+  }, []);
+
+  // Preserve an already-collapsed side when entering the compact layout. If
+  // both sides were open, the left pane is the stable default because it owns
+  // the checklist/rooms navigation; the rail can switch to the inspector.
+  useEffect(() => {
+    if (!isCompactWorkspace) {
+      compactWorkspaceEntryRef.current = false;
+      return;
+    }
+    if (compactWorkspaceEntryRef.current) return;
+    compactWorkspaceEntryRef.current = true;
+    if (leftPanel === null && !inspectorCollapsed) {
+      setCompactWorkspaceSide("right");
+    } else if (leftPanel !== null && inspectorCollapsed) {
+      setCompactWorkspaceSide("left");
+    }
+  }, [inspectorCollapsed, isCompactWorkspace, leftPanel]);
+
+  const visibleLeftPanel =
+    isCompactWorkspace && compactWorkspaceSide === "right" ? null : leftPanel;
+  const visibleInspectorCollapsed = isCompactWorkspace
+    ? compactWorkspaceSide === "left"
+    : inspectorCollapsed;
   const storagePersistence = useStoragePersistence();
   // One plan viewport per active project — resets to fit on project switch.
   const [planViewport, setPlanViewport] = useViewport2D(project?.id ?? "none");
@@ -731,9 +773,27 @@ export function App() {
   };
 
   // Rail toggle semantic: clicking the active panel's icon collapses the
-  // column (null), clicking the other switches to it.
-  const selectLeftPanel = (panel: "checklist" | "rooms") =>
+  // column (null), clicking the other switches to it. In the compact layout,
+  // selecting a left pane also makes it the visible side of the workspace.
+  const selectLeftPanel = (panel: "checklist" | "rooms") => {
+    if (isCompactWorkspace) {
+      const shouldCollapse = visibleLeftPanel === panel && compactWorkspaceSide === "left";
+      setCompactWorkspaceSide("left");
+      setLeftPanel(shouldCollapse ? null : panel);
+      return;
+    }
+
     setLeftPanel(leftPanel === panel ? null : panel);
+  };
+
+  const handleInspectorToggle = () => {
+    if (isCompactWorkspace) {
+      setCompactWorkspaceSide((current) => (current === "right" ? "left" : "right"));
+      return;
+    }
+
+    toggleInspectorCollapsed();
+  };
 
   // Whether the inspector currently has anything to show — a resolved single
   // subject, a multi-selection, or a placement warning. Drives the contextual
@@ -760,8 +820,8 @@ export function App() {
   } as React.CSSProperties;
   const workspaceClassName = [
     "workspace",
-    leftPanel ? null : "left-collapsed",
-    inspectorCollapsed ? "right-collapsed" : null
+    visibleLeftPanel ? null : "left-collapsed",
+    visibleInspectorCollapsed ? "right-collapsed" : null
   ]
     .filter(Boolean)
     .join(" ");
@@ -772,10 +832,10 @@ export function App() {
     <TooltipProvider delayDuration={400}>
     <main className="app-shell">
       <AppRail
-        leftPanel={leftPanel}
+        leftPanel={visibleLeftPanel}
         onSelectLeftPanel={selectLeftPanel}
-        inspectorCollapsed={inspectorCollapsed}
-        onToggleInspector={toggleInspectorCollapsed}
+        inspectorCollapsed={visibleInspectorCollapsed}
+        onToggleInspector={handleInspectorToggle}
         isDataView={viewMode === "data"}
         onOpenDataView={() => setViewMode("data")}
         onOpenHelp={() => setIsHelpOpen(true)}
@@ -890,7 +950,7 @@ export function App() {
       {error ? <p className="error-banner">{error}</p> : null}
 
       <section className={workspaceClassName} style={workspaceStyle}>
-        {leftPanel ? (
+        {visibleLeftPanel ? (
           <PanelResizeHandle
             side="left"
             width={leftPanelWidth}
@@ -900,7 +960,7 @@ export function App() {
             onResize={setLeftPanelWidth}
           />
         ) : null}
-        {!inspectorCollapsed ? (
+        {!visibleInspectorCollapsed ? (
           <PanelResizeHandle
             side="right"
             width={inspectorWidth}
@@ -910,18 +970,18 @@ export function App() {
             onResize={setInspectorWidth}
           />
         ) : null}
-        {inspectorCollapsed && hasInspectorContent ? (
+        {visibleInspectorCollapsed && hasInspectorContent ? (
           <button
             type="button"
             className="inspector-reopen"
             title="Show inspector"
             aria-label="Show inspector"
-            onClick={toggleInspectorCollapsed}
+            onClick={handleInspectorToggle}
           >
             <CaretLeftIcon aria-hidden="true" size={16} />
           </button>
         ) : null}
-        {leftPanel === "checklist" ? (
+        {visibleLeftPanel === "checklist" ? (
           <ChecklistPanel
             getBlob={getAssetBlob}
             intakeState={intakeState}
@@ -938,7 +998,7 @@ export function App() {
             onRemovePlacement={removePlacement}
             onSelectArtwork={selectArtwork}
           />
-        ) : leftPanel === "rooms" ? (
+        ) : visibleLeftPanel === "rooms" ? (
           <RoomsPanel
             project={project}
             selectedWallId={selectedWall?.id ?? null}
@@ -1234,7 +1294,7 @@ export function App() {
           ) : null}
         </section>
 
-        {!inspectorCollapsed ? (
+        {!visibleInspectorCollapsed ? (
         <aside className="inspector" aria-label="Inspector">
           <div className="inspector-zone">
             {labeledPlacementWarnings.length > 0 ? (

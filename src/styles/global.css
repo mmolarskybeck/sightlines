@@ -2383,13 +2383,16 @@ body.panels-resizing * {
    narrow widths labels collapse before controls wrap, and horizontal scrolling
    is the final fallback instead of creating a second toolbar row. */
 .view-toolbar {
+  --toolbar-space-1: 4px;
+  --toolbar-space-2: 8px;
+  --toolbar-space-3: 12px;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--toolbar-space-3);
   flex: 0 0 auto;
   min-width: 0;
   overflow-x: auto;
   overscroll-behavior-x: contain;
-  padding: 8px 12px;
+  padding: var(--toolbar-space-2) var(--toolbar-space-3);
   scrollbar-width: none;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
@@ -2399,16 +2402,19 @@ body.panels-resizing * {
   display: none;
 }
 
-.view-tabs,
-.view-options {
+.view-tabs {
   gap: 6px;
+}
+
+.view-options {
+  gap: var(--toolbar-space-2);
 }
 
 .view-tools-primary,
 .three-camera-tools {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--toolbar-space-2);
 }
 
 .view-tools-primary {
@@ -2442,7 +2448,7 @@ body.panels-resizing * {
 .insert-tools-label {
   display: inline-flex;
   align-items: center;
-  padding: 0 10px;
+  padding: 0 var(--toolbar-space-2);
   color: var(--muted);
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
@@ -2452,7 +2458,7 @@ body.panels-resizing * {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
+  width: 36px;
   padding: 0;
   border: 0;
   border-left: 1px solid var(--border);
@@ -2505,8 +2511,8 @@ body.panels-resizing * {
   height: 30px;
   min-height: 30px;
   align-items: center;
-  gap: 5px;
-  padding: 0 8px;
+  gap: var(--toolbar-space-1);
+  padding: 0 var(--toolbar-space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   background: var(--bg);
@@ -2557,7 +2563,7 @@ body.panels-resizing * {
    touchable size and the rail remains one row. */
 @container (max-width: 750px) {
   .view-toolbar {
-    padding: 6px 8px;
+    padding: var(--toolbar-space-1) var(--toolbar-space-2);
   }
 
   .view-toolbar .view-tools-primary,
@@ -2651,7 +2657,10 @@ body.panels-resizing * {
 @container (max-width: 480px) {
   .view-toolbar {
     justify-content: flex-start;
-    gap: 0;
+    /* The full spacer is gone here, but keep one compact 8px beat between
+       insertion and view controls so the + target does not visually merge
+       with Grid. */
+    gap: var(--toolbar-space-2);
   }
 
   .view-toolbar .view-options {
@@ -2713,9 +2722,9 @@ body.panels-resizing * {
 .view-option-button {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--toolbar-space-2);
   min-height: 30px;
-  padding: 0 10px;
+  padding: 0 var(--toolbar-space-2);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: transparent;
@@ -2753,9 +2762,9 @@ body.panels-resizing * {
 .unit-select {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--toolbar-space-1);
   min-height: 30px;
-  padding: 0 8px 0 10px;
+  padding: 0 var(--toolbar-space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--muted);
@@ -2897,7 +2906,7 @@ body.panels-resizing * {
   display: inline-flex;
   min-height: 28px;
   align-items: center;
-  padding: 0 9px;
+  padding: 0 var(--toolbar-space-2);
   border: 0;
   background: none;
   color: var(--muted);
@@ -4512,6 +4521,10 @@ body.panels-resizing * {
   .workspace.left-collapsed {
     grid-template-columns: minmax(0, 1fr) 280px;
   }
+
+  .workspace.right-collapsed {
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 1180px) {
@@ -4521,6 +4534,10 @@ body.panels-resizing * {
 
   .workspace.left-collapsed {
     grid-template-columns: minmax(0, 1fr) 260px;
+  }
+
+  .workspace.right-collapsed {
+    grid-template-columns: 240px minmax(0, 1fr);
   }
 
   /* Reclaim row width where the panel is tightest — dragging still works
