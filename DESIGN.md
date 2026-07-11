@@ -24,10 +24,12 @@ typography:
   display: '"Figtree Variable", Figtree, ui-sans-serif, system-ui, sans-serif'
   ui: '"Geist Variable", Geist, ui-sans-serif, system-ui, -apple-system, sans-serif'
 radii:
-  control: "6px"
-  fill: "8px"
+  control: "8px"
+  fill: "10px"
   panel: "0"
   overlay: "12px"
+  seg: "7px"
+  track: "10px"
 ---
 
 # Design System: Sightlines
@@ -45,7 +47,8 @@ The design system is now implemented through Tailwind CSS 4 and local shadcn-sty
 The local wrappers in `src/app/components/ui` are the preferred surface for new components:
 
 - `Button` supports `default`, `primary`, `ghost`, `subtle`, `outline`, `destructive`, `rail`, `tab`, and `inspector` variants.
-- `Toggle` and `ToggleGroupItem` support pressed petrol states and underline-tab states.
+- `Toggle` and `ToggleGroupItem` support pressed petrol states (now with the `--shadow-pressed` depression) and underline-tab states.
+- `SegmentedTabsList`/`SegmentedTabsTrigger` and `SegmentedToggleGroup`/`SegmentedToggleGroupItem` (`ui/segmented.tsx`) render the recessed-track/raised-chip pickers with the sliding chip.
 - `Tabs`, `Select`, `DropdownMenu`, and `Switch` keep Radix semantics while carrying Sightlines visual defaults.
 - `Collapsible` is a bare-behavior Radix wrapper (no baked-in look); `InspectorSection` composes it into the hairline-separated, summary-bearing disclosure rows the artwork inspector uses.
 - `cn()` uses `clsx` and `tailwind-merge`; compose variants there rather than concatenating ad hoc class strings.
@@ -69,8 +72,19 @@ Avoid decorative color. The UI should not become teal-themed; petrol is an inter
 Sightlines mixes square workspace structure with softer floating surfaces: rectangular where the app is a drafting instrument, rounded where it floats above the work.
 
 - Major panes and layout divisions stay square and separated by 1px borders.
-- Inputs, buttons, selects, and compact toolbar controls use a 6px radius.
-- Borderless selected fills, rail buttons, and menu rows may use an 8px radius.
+- Inputs, buttons, selects, and compact toolbar controls use an 8px radius.
+- Borderless selected fills, rail buttons, and menu rows may use a 10px radius.
+- Soft-control grammar (this branch's speculative reroll): mutually-exclusive
+  pickers — topbar Plan/Elevation/3D, checklist filters, units, Insert,
+  arrange modes, wall/floor placement — are recessed grey tracks
+  (`--track`, `--radius-track`) holding quiet segments, with one raised
+  white chip (`--chip`, `--shadow-chip`) marking the active choice and
+  sliding between segments (220ms `--ease-soft`; suppressed under reduced
+  motion). Latching toggles (Grid, Snap, Overlap, rail modes) do the
+  opposite: they depress, keeping the petrol wash and adding
+  `--shadow-pressed`. Raised = a choice within a set; pressed = a mode
+  that's engaged. Underline tabs remain only for subordinate sub-choices
+  (help-dialog groups, "Measured from").
 - Overlays — dialogs, wizards, popovers, dropdown menus — use a 12px radius (`--radius-overlay`) with a soft, diffuse shadow and at most a whisper of border.
 - Inside overlays, structure content with spacing and alignment rather than full-bleed hairline rules. Edge-to-edge bordered grids (tab strips, stat cells, per-field border boxes) read as spreadsheet chrome — the harsh look we are moving away from.
 - Shadows are reserved for real overlays and canvas chips, not normal panels.
@@ -101,7 +115,7 @@ Keep panels flat. Improve polish through spacing, alignment, focus states, and c
 Use the primitive variants first. Add bespoke CSS only when the component is canvas-specific or has a domain-specific layout.
 
 - Use icon buttons for compact tools and include accessible labels.
-- Use underline tabs for view modes and checklist filters.
+- Use soft segmented tracks (`SegmentedTabsList` / `SegmentedToggleGroup` in `ui/segmented.tsx`) for view modes, checklist filters, and other mutually-exclusive pickers; underline tabs only for subordinate sub-choices.
 - Use Radix Select for option sets.
 - Use Radix Switch only when the binary state benefits from a switch; the unit selector is intentionally a two-label segmented switch.
 - Use petrol-filled primary buttons sparingly. `Import` is currently the main solid CTA in the workspace.

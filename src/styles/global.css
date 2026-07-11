@@ -106,7 +106,7 @@
   /* Small bordered controls use a restrained radius so inputs feel editable
      without going pill-shaped; panels and layout divisions stay square. */
   --radius: 0.25rem;
-  --radius-control: 6px;
+  --radius-control: 8px;
   --radius-panel: 0;
   --radius-sm: var(--radius-control);
   --radius-md: var(--radius-control);
@@ -114,10 +114,26 @@
      the topbar's icon buttons — are rounded and borderless, a selection wash
      rather than a boxed outline. Structural containers (panels, dividers)
      stay square; selection fills get a touch more radius than inputs. */
-  --radius-fill: 8px;
+  --radius-fill: 10px;
   /* Overlays (dialogs, wizards, popovers) are the rounded exception to the
      square workspace panels — see DESIGN.md's overlay grammar. */
   --radius-overlay: 12px;
+  /* Soft-control system. Mutually-exclusive choices live as a raised white
+     chip sliding inside a recessed grey track; latching toggles depress
+     instead (petrol wash + inset shadow). The track radius is the chip
+     radius plus its 3px inset, so the two curves stay concentric. */
+  --track: oklch(0.945 0.005 230);
+  --chip: oklch(1 0 0);
+  --chip-ghost: oklch(1 0 0 / 0.55);
+  --radius-seg: 7px;
+  --radius-track: 10px;
+  --shadow-chip:
+    0 1px 2px oklch(0 0 0 / 0.1),
+    0 1px 1px oklch(0 0 0 / 0.04),
+    0 0 0 1px oklch(0 0 0 / 0.04);
+  --shadow-pressed: inset 0 1px 2px oklch(0 0 0 / 0.07);
+  --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-slide: 220ms;
   --shadow-tight: 0 1px 2px oklch(0 0 0 / 0.08);
   --shadow-panel: 0 8px 24px oklch(0 0 0 / 0.12);
   --shadow-overlay: 0 16px 48px oklch(0 0 0 / 0.14), 0 4px 12px oklch(0 0 0 / 0.06);
@@ -237,7 +253,11 @@ input:focus-visible {
 .rail-button[data-state="on"] {
   background: var(--primary-soft);
   color: var(--primary-strong);
-  box-shadow: inset 0 0 0 1px var(--primary-line);
+  /* Latched mode reads as a pressed key: petrol hairline plus the shared
+     depression shadow. */
+  box-shadow:
+    inset 0 0 0 1px var(--primary-line),
+    var(--shadow-pressed);
 }
 
 .rail-button:disabled {
@@ -1260,17 +1280,14 @@ body.panels-resizing * {
   scrollbar-width: none;
 }
 
-/* The filter tabs own this row; sort is a subordinate icon at its right
-   edge. The row carries the full-width hairline, and the tabs stretch to
-   the row's bottom so the active 2px petrol underline sits directly on it
-   (which is why the row has no bottom padding). */
+/* The filter track owns this row; sort is a subordinate icon at its right
+   edge. No hairline underneath — the recessed track is its own ground. */
 .checklist-controls {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 14px;
-  border-bottom: 1px solid var(--line);
 }
 
 .checklist-sort-trigger {
@@ -1307,17 +1324,14 @@ body.panels-resizing * {
   color: var(--primary-strong);
 }
 
-/* Sizing (and weight) only — base color/hover/active underline come from the
-   shared underline-tab rule. Inactive tabs sit at 500 so the active tab's
-   600 reads as a real rank shift, not just the underline. */
+/* Sizing only — track/chip/ink states come from the shared .seg-* rules.
+   One weight at rest and active: the raised chip carries the state, so the
+   row never reflows as the selection moves. */
 .checklist-filter {
-  padding: 4px 8px;
+  min-height: 24px;
+  padding: 2px 9px;
   font-size: var(--type-xs);
   font-weight: var(--weight-medium);
-}
-
-.checklist-filter[data-state="on"] {
-  font-weight: var(--weight-semibold);
 }
 
 .checklist-filter-empty {
@@ -2434,14 +2448,15 @@ body.panels-resizing * {
   display: inline-flex;
   align-items: stretch;
   flex: none;
+  gap: 2px;
   /* Matches the row's other controls (.unit-select, .unit-switch,
      .view-option-button all sit at 30px) so the segmented control doesn't
      stand 2px proud of its neighbors. */
   min-height: 30px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  /* Clips the segments' square corners and petrol fill to the group radius. */
-  overflow: hidden;
+  padding: 3px;
+  border: 0;
+  border-radius: var(--radius-track);
+  background: var(--track);
 }
 
 .insert-tools-label {
@@ -2457,32 +2472,32 @@ body.panels-resizing * {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
+  width: 34px;
   padding: 0;
   border: 0;
-  border-left: 1px solid var(--border);
+  border-radius: var(--radius-seg);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
   transition: background-color 150ms ease-out, color 150ms ease-out;
 }
 
-.insert-tool-segment:hover:not(:disabled) {
-  background: var(--surface);
+.insert-tool-segment:hover:not(:disabled):not([aria-pressed="true"]) {
+  background: var(--chip-ghost);
   color: var(--ink);
 }
 
 .insert-tool-segment:focus-visible {
-  /* Inset so the ring survives the group's overflow:hidden corner clip. */
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
 
-/* The armed segment: same pressed petrol treatment as the Toggle
-   primitive's data-state=on (and the old floating palette before it). */
+/* The armed segment: the raised white chip, petrol glyph — the same state
+   language as the segmented pickers' active chip. */
 .insert-tool-segment[aria-pressed="true"] {
-  background: var(--primary-soft);
+  background: var(--chip);
   color: var(--primary-strong);
+  box-shadow: var(--shadow-chip);
 }
 
 .insert-tool-segment:disabled {
@@ -2511,26 +2526,29 @@ body.panels-resizing * {
   min-height: 30px;
   align-items: center;
   gap: var(--toolbar-space-1);
-  padding: 0 var(--toolbar-space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--bg);
+  padding: 0 calc(var(--toolbar-space-2) + 1px);
+  border: 0;
+  border-radius: var(--radius-seg);
+  background: var(--surface);
   color: var(--muted);
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
+  transition:
+    background-color 150ms ease-out,
+    box-shadow 150ms ease-out,
+    color 150ms ease-out;
 }
 
 .compact-insert-trigger:hover:not(:disabled),
 .compact-insert-trigger[data-state="open"] {
-  border-color: var(--input);
-  background: var(--surface);
+  background: var(--surface-strong);
   color: var(--ink);
 }
 
 .compact-insert-trigger[data-active="true"] {
-  border-color: transparent;
   background: var(--primary-soft);
   color: var(--primary-strong);
+  box-shadow: var(--shadow-pressed);
 }
 
 .compact-insert-menu {
@@ -2703,7 +2721,7 @@ body.panels-resizing * {
   }
 
   .view-toolbar .unit-switch-side {
-    min-height: 38px;
+    min-height: 34px;
   }
 
   .view-toolbar .precision-select-trigger {
@@ -2721,78 +2739,140 @@ body.panels-resizing * {
 
 }
 
-/* Underline tabs — the shared idiom for the top mode tabs (Plan/Elevation)
-   and the checklist filters: transparent, no border-box, muted text, an
-   active 2px petrol bottom border. Geist carries functional navigation;
-   Figtree is reserved for the brandmark. */
-.tab-button,
-.checklist-filter {
+/* Soft segmented tracks — the shared idiom for mutually-exclusive pickers
+   (topbar Plan/Elevation/3D, checklist filters, units, Insert, arrange
+   modes): a recessed grey track holding quiet items, with one raised white
+   chip marking the active choice. The chip is a real element rendered by
+   SegmentedTabsList / SegmentedToggleGroup so it can slide between
+   segments; until its first measurement the active item paints its own
+   chip as a fallback. The raised chip itself is the color-blind-safe state
+   cue, so items keep one weight and only shift ink. Geist carries
+   functional navigation; Figtree stays reserved for the brandmark. */
+.seg-track {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-track);
+  background: var(--track);
+}
+
+.seg-chip {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  width: 0;
+  border-radius: var(--radius-seg);
+  background: var(--chip);
+  box-shadow: var(--shadow-chip);
+  opacity: 0;
+  transition:
+    transform var(--dur-slide) var(--ease-soft),
+    width var(--dur-slide) var(--ease-soft);
+  will-change: transform, width;
+}
+
+.seg-track[data-seg-ready] .seg-chip {
+  opacity: 1;
+}
+
+.seg-item {
+  position: relative;
+  z-index: 1;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 7px;
+  min-height: 28px;
+  padding: 0 12px;
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-seg);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
   white-space: nowrap;
+  transition:
+    background-color 150ms ease-out,
+    color 150ms ease-out;
 }
 
-.tab-button {
-  min-height: 34px;
-  padding: 0 10px;
+.seg-item:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+/* Resting items get a ghost of the chip on hover; the active item already
+   has the real one behind it. */
+.seg-item:not([data-state="active"]):not([data-state="on"]):hover:not(:disabled) {
+  background: var(--chip-ghost);
+}
+
+.seg-item[data-state="active"],
+.seg-item[data-state="on"],
+.seg-item[data-state="active"]:hover,
+.seg-item[data-state="on"]:hover {
+  color: var(--primary-strong);
+}
+
+/* Fallback chip for first paint, before the sliding one has measured. */
+.seg-track:not([data-seg-ready]) .seg-item[data-state="active"],
+.seg-track:not([data-seg-ready]) .seg-item[data-state="on"] {
+  background: var(--chip);
+  box-shadow: var(--shadow-chip);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seg-chip {
+    transition: none;
+  }
+}
+
+/* Topbar mode tabs sit in the taller (80px) topbar; scale them up so the
+   track holds its weight there. */
+.view-tabs .seg-item {
+  min-height: 30px;
+  padding: 0 14px;
   font-family: var(--font-ui);
-  /* Scaled up slightly so the mode tabs hold their weight in the taller
-     (80px) topbar rather than floating in it. */
   font-size: var(--type-md);
   font-weight: var(--weight-semibold);
 }
 
-.tab-button:hover,
-.checklist-filter:hover {
-  color: var(--ink);
-}
-
-.tab-button[data-state="active"],
-.checklist-filter[data-state="on"] {
-  color: var(--ink);
-  border-bottom-color: var(--primary);
-}
-
+/* Latching toggles: soft grey fills that depress when on — the petrol wash
+   plus an inset shadow, the tactile counterpart to the raised chip (chips
+   mark a choice within a set; a pressed key marks a mode that's engaged). */
 .view-option-button {
   display: inline-flex;
   align-items: center;
   gap: var(--toolbar-space-2);
   min-height: 30px;
-  padding: 0 var(--toolbar-space-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: transparent;
+  padding: 0 calc(var(--toolbar-space-2) + 1px);
+  border: 0;
+  border-radius: var(--radius-seg);
+  background: var(--surface);
   color: var(--muted);
   cursor: pointer;
   font-size: var(--type-sm);
   font-weight: var(--weight-semibold);
   transition:
     background-color 150ms ease-out,
-    border-color 150ms ease-out,
+    box-shadow 150ms ease-out,
     color 150ms ease-out;
 }
 
 .view-option-button:hover:not(:disabled) {
-  border-color: var(--input);
-  background: var(--surface);
+  background: var(--surface-strong);
   color: var(--ink);
 }
 
-/* Shadcn-style toggle state: active state wins over hover, and off-hover uses
-   a hairline instead of the old grey fill so a click from on -> off visibly
-   changes immediately while the pointer is still over the control. */
+/* Active state wins over hover so a click from on -> off visibly changes
+   immediately while the pointer is still over the control. */
 .view-option-button[data-state="on"],
 .view-option-button[data-state="on"]:hover:not(:disabled) {
-  border-color: var(--primary-soft);
   background: var(--primary-soft);
   color: var(--primary-strong);
+  box-shadow: var(--shadow-pressed);
 }
 
 .view-option-button:disabled {
@@ -2805,19 +2885,18 @@ body.panels-resizing * {
   align-items: center;
   gap: var(--toolbar-space-1);
   min-height: 30px;
-  padding: 0 var(--toolbar-space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  padding: 0 calc(var(--toolbar-space-2) + 1px);
+  border: 0;
+  border-radius: var(--radius-seg);
+  background: var(--surface);
   color: var(--muted);
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
-  transition:
-    border-color 150ms ease-out,
-    background-color 150ms ease-out;
+  transition: background-color 150ms ease-out;
 }
 
 .unit-select:hover {
-  border-color: var(--input);
+  background: var(--surface-strong);
 }
 
 .unit-select-label {
@@ -2914,41 +2993,63 @@ body.panels-resizing * {
   color: var(--primary-strong);
 }
 
-/* Units control: a traditional slide switch — one small track with the two
-   unit systems as flanking words, not labels nested inside the track. The
-   same boxed-row treatment as .unit-select keeps it at the toolbar's height,
-   and the active side's word carries the state through an ink + weight step
-   so the reading survives without color. */
+/* Units control: a two-cell soft track — the same recessed-track /
+   raised-chip language as the segmented pickers, with the two unit systems
+   as equal cells and one white chip sliding between them. The chip is the
+   ::before, sized to one cell and translated by its own width, driven by
+   the wrapper's data-system attribute so it needs no measurement. The
+   hidden Radix switch below stays the single accessible control. */
 .unit-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 0;
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: stretch;
   min-height: 30px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  overflow: hidden;
+  padding: 3px;
+  border: 0;
+  border-radius: var(--radius-track);
+  background: var(--track);
   color: var(--muted);
   font-size: var(--type-xs);
   font-weight: var(--weight-medium);
-  transition:
-    border-color 150ms ease-out,
-    background-color 150ms ease-out;
 }
 
-.unit-switch:hover {
-  border-color: var(--input);
+.unit-switch::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  border-radius: var(--radius-seg);
+  background: var(--chip);
+  box-shadow: var(--shadow-chip);
+  transition: transform var(--dur-slide) var(--ease-soft);
+}
+
+.unit-switch[data-system="metric"]::before {
+  transform: translateX(100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .unit-switch::before {
+    transition: none;
+  }
 }
 
 /* Flanking words: quiet text buttons that are pointer shortcuts to a side —
    the switch is the one accessible control, so the markup keeps these
-   aria-hidden and unfocusable. */
+   aria-hidden and unfocusable. They ride above the chip (z-index). */
 .unit-switch-side {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
-  min-height: 28px;
   align-items: center;
+  justify-content: center;
+  min-height: 24px;
   padding: 0 var(--toolbar-space-2);
   border: 0;
+  border-radius: var(--radius-seg);
   background: none;
   color: var(--muted);
   cursor: pointer;
@@ -2960,14 +3061,10 @@ body.panels-resizing * {
   color: var(--ink);
 }
 
-.unit-switch-side[data-active="true"] {
-  background: var(--primary);
-  color: var(--primary-foreground);
-  font-weight: var(--weight-strong);
-}
-
+.unit-switch-side[data-active="true"],
 .unit-switch-side[data-active="true"]:hover:not(:disabled) {
-  color: var(--primary-foreground);
+  color: var(--primary-strong);
+  font-weight: var(--weight-strong);
 }
 
 .unit-switch-side:disabled {
@@ -4104,22 +4201,23 @@ body.panels-resizing * {
   gap: 12px;
 }
 
-/* Spacing-method switch: three equal-third segments inside one hairline-
-   bordered box, hairline dividers between them, the active segment filled with
-   the petrol wash. Each segment is an icon over a label that may wrap to two
-   lines — square corners, instrument-quiet, never a pill. */
+/* Spacing-method switch: three equal cells in one recessed track, the
+   active cell a raised white chip — the inspector-width cousin of the
+   toolbar's segmented pickers. Each segment is an icon over a label that
+   may wrap to two lines. */
 .arrange-modes {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   /* Override the ui/toggle-group wrapper's inline-flex items-center gap-1:
-     segments must sit flush in equal thirds so the hairline dividers read as
-     one drawn control, not three floating buttons. */
+     equal cells so the track reads as one drawn control, not three
+     floating buttons. */
   align-items: stretch;
-  gap: 0;
+  gap: 2px;
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
+  padding: 3px;
+  border: 0;
+  border-radius: var(--radius-track);
+  background: var(--track);
 }
 
 .arrange-modes .arrange-mode {
@@ -4135,9 +4233,8 @@ body.panels-resizing * {
   height: auto;
   padding: 10px 6px;
   border: 0;
-  border-left: 1px solid var(--line);
-  border-radius: 0;
-  background: var(--bg);
+  border-radius: var(--radius-seg);
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
   font-size: var(--type-2xs);
@@ -4147,26 +4244,23 @@ body.panels-resizing * {
   white-space: normal;
 }
 
-.arrange-mode:first-child {
-  border-left: 0;
-}
-
 .arrange-mode svg {
   flex: 0 0 auto;
 }
 
 .arrange-mode:hover {
-  background: var(--surface);
+  background: var(--chip-ghost);
   color: var(--ink);
 }
 
-/* Active row: petrol wash + weight shift, so the state survives without color
-   (the 500→650 weight step is the color-blind-safe cue). Focus ring comes from
-   the shared toggle primitive. */
-.arrange-mode[data-state="on"] {
-  background: var(--primary-soft);
+/* Active cell: the raised chip is the color-blind-safe cue; petrol ink
+   carries the brand state. Focus ring comes from the shared toggle
+   primitive. */
+.arrange-mode[data-state="on"],
+.arrange-mode[data-state="on"]:hover {
+  background: var(--chip);
   color: var(--primary-strong);
-  font-weight: var(--weight-strong);
+  box-shadow: var(--shadow-chip);
 }
 
 .arrange-mode-body {
@@ -4174,21 +4268,21 @@ body.panels-resizing * {
   gap: 8px;
 }
 
-/* Wall-vs-floor placement switch in the artwork inspector: two equal segments
-   in one hairline-bordered box, hairline divider between, active segment filled
-   with the petrol wash. Same square-cornered, instrument-quiet vocabulary as
-   .arrange-modes (label-only, no icons — the two words carry it). */
+/* Wall-vs-floor placement switch in the artwork inspector: two equal cells
+   in the same recessed track as .arrange-modes (label-only, no icons — the
+   two words carry it). */
 .placement-form-toggle {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   /* Override the ui/toggle-group wrapper's inline-flex items-center gap-1 so
-     the segments sit flush as one drawn control, not two floating buttons. */
+     the cells read as one drawn control, not two floating buttons. */
   align-items: stretch;
-  gap: 0;
+  gap: 2px;
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
+  padding: 3px;
+  border: 0;
+  border-radius: var(--radius-track);
+  background: var(--track);
 }
 
 .placement-form-toggle .placement-form-option {
@@ -4198,11 +4292,10 @@ body.panels-resizing * {
   min-width: 0;
   /* Beat the ui/toggle variant's fixed h-8 without !important. */
   height: auto;
-  padding: 8px 6px;
+  padding: 7px 6px;
   border: 0;
-  border-left: 1px solid var(--line);
-  border-radius: 0;
-  background: var(--bg);
+  border-radius: var(--radius-seg);
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
   font-size: var(--type-xs);
@@ -4212,21 +4305,18 @@ body.panels-resizing * {
   white-space: normal;
 }
 
-.placement-form-option:first-child {
-  border-left: 0;
-}
-
 .placement-form-option:hover {
-  background: var(--surface);
+  background: var(--chip-ghost);
   color: var(--ink);
 }
 
-/* Active segment: petrol wash + weight shift, so the state survives without
-   relying on color alone (matches .arrange-mode[data-state="on"]). */
-.placement-form-option[data-state="on"] {
-  background: var(--primary-soft);
+/* Active cell: raised chip + petrol ink (matches .arrange-mode's on-state;
+   the chip, not a weight shift, is the color-blind-safe cue). */
+.placement-form-option[data-state="on"],
+.placement-form-option[data-state="on"]:hover {
+  background: var(--chip);
   color: var(--primary-strong);
-  font-weight: var(--weight-strong);
+  box-shadow: var(--shadow-chip);
 }
 
 /* "Measured from" — From-edges' side sub-choice: underline tabs, not a

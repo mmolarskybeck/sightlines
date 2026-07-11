@@ -104,7 +104,8 @@ import {
   SelectValue
 } from "./components/ui/select";
 import { Switch } from "./components/ui/switch";
-import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { Tabs } from "./components/ui/tabs";
+import { SegmentedTabsList, SegmentedTabsTrigger } from "./components/ui/segmented";
 import { Toggle } from "./components/ui/toggle";
 import { useStoragePersistence, getStorageNoteCopy } from "./hooks/useStoragePersistence";
 import {
@@ -1024,20 +1025,20 @@ export function App() {
             }
           }}
         >
-          <TabsList aria-label="Workspace view" className="view-tabs">
-            <TabsTrigger className="tab-button" value="plan">
+          <SegmentedTabsList aria-label="Workspace view" className="view-tabs">
+            <SegmentedTabsTrigger value="plan">
               <MapTrifoldIcon aria-hidden="true" size={16} />
               <span>Plan</span>
-            </TabsTrigger>
-            <TabsTrigger className="tab-button" value="elevation">
+            </SegmentedTabsTrigger>
+            <SegmentedTabsTrigger value="elevation">
               <PresentationIcon aria-hidden="true" size={16} />
               <span>Elevation</span>
-            </TabsTrigger>
-            <TabsTrigger className="tab-button" value="3d">
+            </SegmentedTabsTrigger>
+            <SegmentedTabsTrigger value="3d">
               <CubeIcon aria-hidden="true" size={16} />
               <span>3D</span>
-            </TabsTrigger>
-          </TabsList>
+            </SegmentedTabsTrigger>
+          </SegmentedTabsList>
         </Tabs>
 
         <div className="topbar-right" aria-label="Project actions">
@@ -2102,6 +2103,7 @@ function UnitSystemToggle({
   return (
     <div
       className="unit-switch"
+      data-system={system}
       role="group"
       aria-label={`Units: ${labels.imperial} / ${labels.metric}`}
     >

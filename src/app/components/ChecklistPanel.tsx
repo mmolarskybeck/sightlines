@@ -24,7 +24,10 @@ import {
   SelectTrigger,
   SelectValue
 } from "./ui/select";
-import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
+import {
+  SegmentedToggleGroup,
+  SegmentedToggleGroupItem
+} from "./ui/segmented";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 // MIME key for the HTML5 drag payload carrying an artworkId — a later task
@@ -284,7 +287,7 @@ export function ChecklistPanel({
 
       {rows.length > 0 ? (
         <div className="checklist-controls">
-          <ToggleGroup
+          <SegmentedToggleGroup
             aria-label="Filter checklist"
             className="checklist-filters"
             type="single"
@@ -310,7 +313,7 @@ export function ChecklistPanel({
               label="Unplaced"
               value="unplaced"
             />
-          </ToggleGroup>
+          </SegmentedToggleGroup>
 
           {/* Sort is deliberately subordinate to the filter tabs: an
               icon-only trigger at the row's right edge. The Select semantics
@@ -468,14 +471,9 @@ function FilterTab({
   value: ChecklistFilter;
 }) {
   return (
-    <ToggleGroupItem
-      className="checklist-filter"
-      size="sm"
-      variant="tab"
-      value={value}
-    >
+    <SegmentedToggleGroupItem className="checklist-filter" value={value}>
       {label} · {count}
-    </ToggleGroupItem>
+    </SegmentedToggleGroupItem>
   );
 }
 
