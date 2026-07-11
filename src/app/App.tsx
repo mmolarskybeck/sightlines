@@ -12,6 +12,7 @@ import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowC
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
 import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
+import { CrosshairIcon } from "@phosphor-icons/react/dist/csr/Crosshair";
 import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
@@ -1197,7 +1198,10 @@ export function App() {
               <div className="view-options" aria-label="View options">
                 {viewMode === "3d" ? (
                   project.floor.rooms.length > 0 ? (
-                    <ThreeDCameraTools actionsRef={threeDActionsRef} />
+                    <ThreeDCameraTools
+                      actionsRef={threeDActionsRef}
+                      canFocus={Boolean(selectedRoomId || selectedWall || selectedObjectIds.length)}
+                    />
                   ) : null
                 ) : (
                   <>
@@ -1439,6 +1443,7 @@ export function App() {
                 getBlob={getAssetBlob}
                 selectedObjectIds={selectedObjectIds}
                 selectedArtworkId={selectedArtworkId}
+                selectedRoomId={selectedRoomId}
                 selectedWallId={selectedWall?.id ?? null}
                 onSelectWall={selectWall}
                 onSelectObject={selectObject}
@@ -2114,9 +2119,11 @@ function ViewOptionButton({
 }
 
 function ThreeDCameraTools({
-  actionsRef
+  actionsRef,
+  canFocus
 }: {
   actionsRef: { current: ThreeDViewActions | null };
+  canFocus: boolean;
 }) {
   return (
     <div className="three-camera-tools" role="group" aria-label="3D camera">
@@ -2137,6 +2144,16 @@ function ThreeDCameraTools({
       >
         <EyeIcon aria-hidden="true" size={16} />
         <span className="view-option-label">Eye level</span>
+      </Button>
+      <Button
+        className="view-option-button"
+        disabled={!canFocus}
+        title="Focus the selected room, wall, or artwork"
+        variant="inspector"
+        onClick={() => actionsRef.current?.focusSelection()}
+      >
+        <CrosshairIcon aria-hidden="true" size={16} />
+        <span className="view-option-label">Focus selection</span>
       </Button>
     </div>
   );

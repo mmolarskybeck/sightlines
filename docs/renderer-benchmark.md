@@ -18,9 +18,14 @@ window.__sightlinesRendererBenchmark.getMetrics()
 ```
 
 The result includes scene-derivation time, room/wall/artwork counts, canvas
-creation time, first-frame time, entry latency (`entryMs`), and frame-time
-samples. Orbit the scene for a few seconds before reading it so `frameCount`, `frameTimeMs`, and
-`maxFrameTimeMs` describe interactive navigation rather than just entry.
+creation time, first-frame time, entry latency (`entryMs`), and active frame-time
+percentiles. Gaps over 100 ms are counted as idle gaps and excluded from the
+frame sample ring buffer. Orbit the scene for a few seconds before reading it
+so `frameCount`, `frameTimeP50Ms`, `frameTimeP95Ms`, and
+`maxActiveFrameTimeMs` describe interactive navigation rather than idle time.
+
+For navigation checks, select a room, wall, or artwork and use **Focus
+selection** before orbiting. Double-clicking a selected mesh focuses it too.
 
 Record the result on a representative desktop and tablet. Repeat after a
 reload for a cold entry and once more for a warm entry. The benchmark is an

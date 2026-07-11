@@ -34,6 +34,8 @@ const EYE_DEPTH_FRACTION = 0.8;
 // A click that traveled further than this (px) was an orbit drag, not a
 // selection (browsers still fire click after a drag on the same element).
 const CLICK_DRAG_TOLERANCE_PX = 6;
+const ACTIVE_FRAME_GAP_MAX_MS = 100;
+const FRAME_SAMPLE_LIMIT = 256;
 
 type CameraPose = { position: Vector3; target: Vector3 };
 
@@ -44,10 +46,12 @@ export type RendererBenchmarkMetrics = {
   artworkCount: number;
   canvasCreatedAt: number;
   firstFrameAt: number | null;
+  idleGapCount: number;
   entryMs: number | null;
   frameCount: number;
-  frameTimeMs: number | null;
-  maxFrameTimeMs: number | null;
+  frameTimeP50Ms: number | null;
+  frameTimeP95Ms: number | null;
+  maxActiveFrameTimeMs: number | null;
 };
 
 declare global {
@@ -66,11 +70,14 @@ const benchmarkMetrics: RendererBenchmarkMetrics = {
   artworkCount: 0,
   canvasCreatedAt: 0,
   firstFrameAt: null,
+  idleGapCount: 0,
   entryMs: null,
   frameCount: 0,
-  frameTimeMs: null,
-  maxFrameTimeMs: null
+  frameTimeP50Ms: null,
+  frameTimeP95Ms: null,
+  maxActiveFrameTimeMs: null
 };
+const activeFrameSamplesMs: number[] = [];
 
 const benchmarkEnabled =
   typeof window !== "undefined" &&
@@ -84,11 +91,30 @@ function resetBenchmarkMetrics() {
     artworkCount: 0,
     canvasCreatedAt: 0,
     firstFrameAt: null,
+    idleGapCount: 0,
     entryMs: null,
     frameCount: 0,
-    frameTimeMs: null,
-    maxFrameTimeMs: null
+    frameTimeP50Ms: null,
+    frameTimeP95Ms: null,
+    maxActiveFrameTimeMs: null
   });
+  activeFrameSamplesMs.length = 0;
+}
+
+function recordFrameSample(frameTimeMs: number) {
+  if (frameTimeMs > ACTIVE_FRAME_GAP_MAX_MS) {
+    benchmarkMetrics.idleGapCount += 1;
+    return;
+  }
+  activeFrameSamplesMs.push(frameTimeMs);
+  if (activeFrameSamplesMs.length > FRAME_SAMPLE_LIMIT) activeFrameSamplesMs.shift();
+  const sorted = activeFrameSamplesMs.slice().sort((a, b) => a - b);
+  const percentile = (fraction: number) =>
+    sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction))] ?? null;
+  benchmarkMetrics.frameCount = sorted.length;
+  benchmarkMetrics.frameTimeP50Ms = percentile(0.5);
+  benchmarkMetrics.frameTimeP95Ms = percentile(0.95);
+  benchmarkMetrics.maxActiveFrameTimeMs = sorted.at(-1) ?? null;
 }
 
 function BenchmarkFrameProbe() {
@@ -100,16 +126,7 @@ function BenchmarkFrameProbe() {
       benchmarkMetrics.entryMs = now - benchmarkMetrics.canvasCreatedAt;
     }
     if (lastFrameAt.current !== null) {
-      const frameTime = now - lastFrameAt.current;
-      benchmarkMetrics.frameCount += 1;
-      benchmarkMetrics.frameTimeMs =
-        benchmarkMetrics.frameTimeMs === null
-          ? frameTime
-          : benchmarkMetrics.frameTimeMs * 0.9 + frameTime * 0.1;
-      benchmarkMetrics.maxFrameTimeMs = Math.max(
-        benchmarkMetrics.maxFrameTimeMs ?? 0,
-        frameTime
-      );
+      recordFrameSample(now - lastFrameAt.current);
     }
     lastFrameAt.current = now;
   });
@@ -125,11 +142,13 @@ function roomWallPanels(room: Room3d): WallPanel3d[] {
 type CameraRigApi = {
   overview: () => void;
   eyeLevel: (wall: WallPanel3d, eyeHeightMm: number) => void;
+  focus: (target: Vector3) => void;
 };
 
 export type ThreeDViewActions = {
   overview: () => void;
   eyeLevel: () => void;
+  focusSelection: () => void;
 };
 
 // World-space bounding box of the union of every room's floor + wall heights.
@@ -330,6 +349,12 @@ function CameraRig({
         const pose = overviewPose(sceneRef.current, aspect());
         if (pose) flyTo(pose);
       },
+      focus: (target) => {
+        const currentTarget = controls?.target.clone() ?? camera.position.clone();
+        const offset = camera.position.clone().sub(currentTarget);
+        if (offset.lengthSq() < 0.0001) offset.set(0, 2, 2);
+        flyTo({ target, position: target.clone().add(offset) });
+      },
       eyeLevel: (wall, eyeHeightMm) => {
         flyTo(eyeLevelPose(sceneRef.current, wall, eyeHeightMm));
       }
@@ -385,6 +410,72 @@ function pickEyeLevelWall(
   }, walls[0]);
 }
 
+function wallFocusTarget(wall: WallPanel3d): Vector3 {
+  return new Vector3(
+    ((wall.start.xMm + wall.end.xMm) / 2) * MM_TO_WORLD,
+    (wall.heightMm / 2) * MM_TO_WORLD,
+    ((wall.start.yMm + wall.end.yMm) / 2) * MM_TO_WORLD
+  );
+}
+
+function roomFocusTarget(room: Room3d): Vector3 {
+  const center = room.floorPolygon.reduce(
+    (sum, point) => ({ xMm: sum.xMm + point.xMm, yMm: sum.yMm + point.yMm }),
+    { xMm: 0, yMm: 0 }
+  );
+  const count = Math.max(room.floorPolygon.length, 1);
+  const wallHeightMm = room.walls.reduce(
+    (max, wall) => Math.max(max, wall.heightMm),
+    0
+  );
+  return new Vector3(
+    (center.xMm / count) * MM_TO_WORLD,
+    (wallHeightMm / 2) * MM_TO_WORLD,
+    (center.yMm / count) * MM_TO_WORLD
+  );
+}
+
+function focusTargetForSelection(
+  scene: Scene3d,
+  selectedRoomId: string | null,
+  selectedWallId: string | null,
+  selectedObjectIds: string[],
+  selectedArtworkId: string | null
+): Vector3 | null {
+  const walls = scene.rooms.flatMap(roomWallPanels);
+  const selectedWall = selectedWallId
+    ? walls.find((wall) => wall.wallId === selectedWallId)
+    : undefined;
+  if (selectedWall) return wallFocusTarget(selectedWall);
+
+  const artworkWall = walls.find((wall) =>
+    wall.artworks.some(
+      (artwork) =>
+        selectedObjectIds.includes(artwork.objectId) ||
+        artwork.artworkId === selectedArtworkId
+    )
+  );
+  if (artworkWall) return wallFocusTarget(artworkWall);
+
+  const floorObject = scene.floorObjects.find(
+    (object) =>
+      selectedObjectIds.includes(object.objectId) ||
+      object.artworkId === selectedArtworkId
+  );
+  if (floorObject) {
+    return new Vector3(
+      floorObject.xMm * MM_TO_WORLD,
+      floorObject.heightMm * 0.5 * MM_TO_WORLD,
+      floorObject.yMm * MM_TO_WORLD
+    );
+  }
+
+  const selectedRoom = selectedRoomId
+    ? scene.rooms.find((room) => room.roomId === selectedRoomId)
+    : undefined;
+  return selectedRoom ? roomFocusTarget(selectedRoom) : null;
+}
+
 // Same idiom as the Plan/Elevation empty states: an aria-hidden glyph (a cube,
 // shorthand for the 3D room) over the readable copy.
 function ThreeDEmptyState() {
@@ -413,6 +504,7 @@ export function ThreeDView({
   getBlob,
   selectedObjectIds,
   selectedArtworkId,
+  selectedRoomId,
   selectedWallId,
   onSelectWall,
   onSelectObject,
@@ -424,6 +516,7 @@ export function ThreeDView({
   getBlob: (key: string) => Promise<Blob>;
   selectedObjectIds: string[];
   selectedArtworkId: string | null;
+  selectedRoomId: string | null;
   selectedWallId: string | null;
   onSelectWall: (wallId: string) => void;
   onSelectObject: (objectId: string, opts: { additive: boolean }) => void;
@@ -496,6 +589,16 @@ export function ThreeDView({
         if (wall) {
           rigApi.current?.eyeLevel(wall, project.defaultCenterlineHeightMm);
         }
+      },
+      focusSelection: () => {
+        const target = focusTargetForSelection(
+          scene,
+          selectedRoomId,
+          selectedWallId,
+          selectedObjectIds,
+          selectedArtworkId
+        );
+        if (target) rigApi.current?.focus(target);
       }
     };
 
@@ -508,6 +611,7 @@ export function ThreeDView({
     scene,
     selectedArtworkId,
     selectedObjectIds,
+    selectedRoomId,
     selectedWallId
   ]);
 
@@ -522,6 +626,16 @@ export function ThreeDView({
       className="three-view"
       onPointerDown={(event) => {
         pointerDownAt.current = { x: event.clientX, y: event.clientY };
+      }}
+      onDoubleClick={() => {
+        const target = focusTargetForSelection(
+          scene,
+          selectedRoomId,
+          selectedWallId,
+          selectedObjectIds,
+          selectedArtworkId
+        );
+        if (target) rigApi.current?.focus(target);
       }}
     >
       <Canvas
@@ -564,7 +678,17 @@ export function ThreeDView({
           onSelectObject={onSelectObject}
           onClearSelection={onClearSelection}
         />
-        <OrbitControls makeDefault enableDamping dampingFactor={0.1} />
+        <OrbitControls
+          makeDefault
+          enableDamping
+          dampingFactor={0.1}
+          zoomToCursor
+          keyEvents
+          keyPanSpeed={120}
+          minDistance={0.35}
+          maxDistance={200}
+          maxPolarAngle={Math.PI / 2}
+        />
         {benchmarkEnabled ? <BenchmarkFrameProbe /> : null}
         <CameraRig scene={scene} fitKey={project.id} apiRef={rigApi} />
       </Canvas>
