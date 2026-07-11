@@ -46,6 +46,29 @@ export function clampFocusDistance(currentDistance: number): number {
   return MathUtils.clamp(currentDistance, FOCUS_MIN_DISTANCE, FOCUS_MAX_DISTANCE);
 }
 
+// WASD travel speed envelope (meters/second before the shift boost): scales
+// with orbit distance — walking-ish close in, a glide zoomed out.
+export const TRAVEL_MIN_SPEED = 1.5;
+export const TRAVEL_MAX_SPEED = 30;
+export const TRAVEL_SHIFT_MULTIPLIER = 3;
+
+// frameloop="demand": the first frame after an idle period reports a delta
+// spanning the entire gap (whole seconds), which would teleport the camera —
+// cap the integration step at a plausible frame time.
+export const MAX_TRAVEL_FRAME_DELTA = 0.05;
+
+// Distance (meters) one frame of travel covers, all clamps applied.
+export function travelStepDistance(
+  orbitDistance: number,
+  shiftHeld: boolean,
+  frameDelta: number
+): number {
+  const speed =
+    MathUtils.clamp(orbitDistance, TRAVEL_MIN_SPEED, TRAVEL_MAX_SPEED) *
+    (shiftHeld ? TRAVEL_SHIFT_MULTIPLIER : 1);
+  return speed * Math.min(frameDelta, MAX_TRAVEL_FRAME_DELTA);
+}
+
 // Near/far bracket the camera around its orbit distance so precision stays
 // even across the scene's scale — the standoff-derived clipping applyPose and
 // the wheel dolly both rely on.

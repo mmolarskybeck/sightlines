@@ -2,8 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   FOCUS_MAX_DISTANCE,
   FOCUS_MIN_DISTANCE,
+  MAX_TRAVEL_FRAME_DELTA,
+  TRAVEL_MAX_SPEED,
+  TRAVEL_MIN_SPEED,
+  TRAVEL_SHIFT_MULTIPLIER,
   clampFocusDistance,
   normalizeWheelDeltaY,
+  travelStepDistance,
   zoomFactorFromDelta
 } from "./cameraNav";
 
@@ -55,5 +60,28 @@ describe("clampFocusDistance", () => {
 
   it("leaves an in-range standoff untouched", () => {
     expect(clampFocusDistance(3)).toBe(3);
+  });
+});
+
+describe("travelStepDistance", () => {
+  it("moves at the orbit distance's speed for a normal frame", () => {
+    expect(travelStepDistance(10, false, 0.016)).toBeCloseTo(10 * 0.016, 10);
+  });
+
+  it("caps the step after a demand-frameloop idle gap", () => {
+    // A 3s idle gap must integrate as one plausible frame, not teleport.
+    expect(travelStepDistance(10, false, 3)).toBeCloseTo(10 * MAX_TRAVEL_FRAME_DELTA, 10);
+  });
+
+  it("clamps speed to the travel envelope", () => {
+    expect(travelStepDistance(500, false, 0.016)).toBeCloseTo(TRAVEL_MAX_SPEED * 0.016, 10);
+    expect(travelStepDistance(0.2, false, 0.016)).toBeCloseTo(TRAVEL_MIN_SPEED * 0.016, 10);
+  });
+
+  it("boosts by the shift multiplier", () => {
+    expect(travelStepDistance(10, true, 0.016)).toBeCloseTo(
+      travelStepDistance(10, false, 0.016) * TRAVEL_SHIFT_MULTIPLIER,
+      10
+    );
   });
 });

@@ -18,6 +18,7 @@ import {
   ORBIT_MIN_DISTANCE,
   clampFocusDistance,
   normalizeWheelDeltaY,
+  travelStepDistance,
   updateCameraClipping,
   zoomFactorFromDelta
 } from "./cameraNav";
@@ -152,6 +153,7 @@ type CameraRigApi = {
   eyeLevel: (wall: WallPanel3d, eyeHeightMm: number) => void;
   focus: (target: Vector3) => void;
   frameRoom: (room: Room3d) => void;
+  focusFloorUnderCursor: (clientX: number, clientY: number) => void;
 };
 
 export type ThreeDViewActions = {
@@ -282,6 +284,17 @@ function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
+const FLOOR_PLANE = new Plane(new Vector3(0, 1, 0), 0);
+
+// Cursor position -> NDC on the canvas, for raycasts driven by native events.
+function cursorNdc(canvas: HTMLCanvasElement, clientX: number, clientY: number): Vector2 {
+  const rect = canvas.getBoundingClientRect();
+  return new Vector2(
+    ((clientX - rect.left) / rect.width) * 2 - 1,
+    -((clientY - rect.top) / rect.height) * 2 + 1
+  );
+}
+
 // Owns the camera: jumps to the fitted overview on entry/project switch
 // (deliberately NOT on scene edits — spec §4.2; Overview reclaims framing),
 // and animates the two presets. Both presets end in free orbit.
@@ -296,6 +309,8 @@ function CameraRig({
 }) {
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as OrbitControlsImpl | null;
+  const raycaster = useThree((state) => state.raycaster);
+  const gl = useThree((state) => state.gl);
   const invalidate = useThree((state) => state.invalidate);
 
   // Latest scene without making it an effect dependency — reads current
@@ -360,19 +375,29 @@ function CameraRig({
   // Refs must not be written during render; publish the preset API after
   // commit (no deps — closures read refs/three objects, never stale props).
   useEffect(() => {
+    const focusPoint = (target: Vector3) => {
+      // Keep the current view direction, but pull the standoff into the
+      // focus envelope so a far overview actually flies in (spec §4.2).
+      const currentTarget = controls?.target.clone() ?? camera.position.clone();
+      const offset = camera.position.clone().sub(currentTarget);
+      if (offset.lengthSq() < 0.0001) offset.set(0, 2, 2);
+      offset.setLength(clampFocusDistance(offset.length()));
+      flyTo({ target, position: target.clone().add(offset) });
+    };
+
     apiRef.current = {
       overview: () => {
         const pose = overviewPose(sceneRef.current, aspect());
         if (pose) flyTo(pose);
       },
-      focus: (target) => {
-        // Keep the current view direction, but pull the standoff into the
-        // focus envelope so a far overview actually flies in (spec §4.2).
-        const currentTarget = controls?.target.clone() ?? camera.position.clone();
-        const offset = camera.position.clone().sub(currentTarget);
-        if (offset.lengthSq() < 0.0001) offset.set(0, 2, 2);
-        offset.setLength(clampFocusDistance(offset.length()));
-        flyTo({ target, position: target.clone().add(offset) });
+      focus: focusPoint,
+      focusFloorUnderCursor: (clientX, clientY) => {
+        // Empty-space double-click: nothing under the cursor to hit, so fly
+        // to the y=0 floor point on the cursor ray instead of silently
+        // no-oping (a ray missing the floor entirely stays a no-op).
+        raycaster.setFromCamera(cursorNdc(gl.domElement, clientX, clientY), camera);
+        const point = new Vector3();
+        if (raycaster.ray.intersectPlane(FLOOR_PLANE, point)) focusPoint(point);
       },
       frameRoom: (room) => {
         const bounds = roomBounds(room);
@@ -402,8 +427,6 @@ function CameraRig({
   return null;
 }
 
-const FLOOR_PLANE = new Plane(new Vector3(0, 1, 0), 0);
-
 // Takes over wheel zoom from OrbitControls (three-stdlib's wheel dolly is
 // sign-only, so trackpads feel dead): a delta-proportional dolly toward the
 // world point under the cursor. Listens in the CAPTURE phase on the canvas's
@@ -421,7 +444,6 @@ function CursorZoom() {
     const parent = gl.domElement.parentElement;
     if (!parent || !controls) return;
 
-    const ndc = new Vector2();
     const point = new Vector3();
 
     const onWheel = (event: WheelEvent) => {
@@ -439,12 +461,7 @@ function CursorZoom() {
 
       // World point under the cursor: nearest mesh hit, else the y=0 floor,
       // else the current orbit target.
-      const rect = gl.domElement.getBoundingClientRect();
-      ndc.set(
-        ((event.clientX - rect.left) / rect.width) * 2 - 1,
-        -((event.clientY - rect.top) / rect.height) * 2 + 1
-      );
-      raycaster.setFromCamera(ndc, camera);
+      raycaster.setFromCamera(cursorNdc(gl.domElement, event.clientX, event.clientY), camera);
       const hit = raycaster.intersectObjects(scene.children, true)[0];
       if (hit) {
         point.copy(hit.point);
@@ -472,10 +489,7 @@ function CursorZoom() {
 
 // Continuous WASD / arrow travel (spec §4.2): pure translation of camera and
 // target together, so orbit radius is unchanged. Speed scales with zoom — a
-// walk when close, a glide when zoomed out.
-const TRAVEL_MIN_SPEED = 1.5;
-const TRAVEL_MAX_SPEED = 30;
-const TRAVEL_SHIFT_MULTIPLIER = 3;
+// walk when close, a glide when zoomed out (envelope in cameraNav.ts).
 const TRAVEL_CODES = new Set([
   "KeyW",
   "KeyS",
@@ -571,16 +585,13 @@ function KeyboardTravel() {
     right.current.crossVectors(forward.current, WORLD_UP).normalize();
 
     const distance = camera.position.distanceTo(controls.target);
-    const speed =
-      MathUtils.clamp(distance, TRAVEL_MIN_SPEED, TRAVEL_MAX_SPEED) *
-      (shift.current ? TRAVEL_SHIFT_MULTIPLIER : 1);
 
     move.current
       .copy(forward.current)
       .multiplyScalar(forwardInput)
       .addScaledVector(right.current, rightInput)
       .normalize()
-      .multiplyScalar(speed * delta);
+      .multiplyScalar(travelStepDistance(distance, shift.current, delta));
 
     camera.position.add(move.current);
     controls.target.add(move.current);
@@ -858,6 +869,13 @@ export function ThreeDView({
           }
         }}
         onPointerMissed={(event) => {
+          // r3f fires this for dblclick misses too: a double-click on the
+          // empty space between rooms focuses the floor point under the
+          // cursor, same fallback the wheel dolly uses (spec §4.2).
+          if (event.type === "dblclick") {
+            rigApi.current?.focusFloorUnderCursor(event.clientX, event.clientY);
+            return;
+          }
           // Empty space clears the object selection (spec §4.3) — but only
           // for true clicks, not the release of an orbit drag.
           const down = pointerDownAt.current;
