@@ -2380,8 +2380,8 @@ body.panels-resizing * {
 /* A single non-wrapping utility rail (~44px total) so it reads as subordinate
    to the mode tabs in the 80px topbar above it. The insertion and view-option
    groups remain semantic siblings, but they touch and flow as one rail: at
-   narrow widths labels collapse before controls wrap, and horizontal scrolling
-   is the final fallback instead of creating a second toolbar row. */
+   narrow widths labels collapse before controls wrap. Density is measured from
+   the rendered controls rather than guessed from a viewport breakpoint. */
 .view-toolbar {
   --toolbar-space-1: 4px;
   --toolbar-space-2: 8px;
@@ -2390,8 +2390,8 @@ body.panels-resizing * {
   gap: var(--toolbar-space-3);
   flex: 0 0 auto;
   min-width: 0;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
+  overflow-x: hidden;
+  white-space: nowrap;
   padding: var(--toolbar-space-2) var(--toolbar-space-3);
   scrollbar-width: none;
   background: var(--bg);
@@ -2421,6 +2421,11 @@ body.panels-resizing * {
   min-width: 0;
   flex: 0 0 auto;
   flex-wrap: nowrap;
+}
+
+.view-tools-primary > *,
+.view-options > * {
+  flex: 0 0 auto;
 }
 
 /* Left zone of .view-toolbar: the Insert segmented control — a
@@ -2554,13 +2559,111 @@ body.panels-resizing * {
   justify-content: flex-end;
 }
 
-/* Compact toolbar, keyed on the CANVAS COLUMN's width (container query, see
-   .canvas-column's container-type) rather than the viewport's — both side
-   panels eat into the column, so a 1440px window with checklist + inspector
-   open leaves only ~740px here. Below 750px the ViewOptionButton labels drop
-   to icon-only — their title tooltips and aria-labels carry the meaning —
-   while Precision and Units keep their values. The controls stay at a
-   touchable size and the rail remains one row. */
+/* Density is selected by useResponsiveToolbarDensity after measuring each
+   rendered configuration. "Condensed" removes descriptive labels;
+   "compact" also replaces the four-segment Insert picker; "tight" removes
+   the flexible inter-zone spacer and leaves Insert as a single + target. */
+.view-toolbar:is(
+    [data-density="condensed"],
+    [data-density="compact"],
+    [data-density="tight"]
+  ) {
+  gap: var(--toolbar-space-2);
+}
+
+.view-toolbar:is(
+    [data-density="condensed"],
+    [data-density="compact"],
+    [data-density="tight"]
+  ) .view-tools-primary,
+.view-toolbar:is(
+    [data-density="condensed"],
+    [data-density="compact"],
+    [data-density="tight"]
+  ) .view-options {
+  gap: 6px;
+}
+
+.view-toolbar:is(
+    [data-density="condensed"],
+    [data-density="compact"],
+    [data-density="tight"]
+  ) .view-option-button {
+  min-width: 36px;
+  justify-content: center;
+  padding-inline: 8px;
+}
+
+.view-toolbar:is(
+    [data-density="condensed"],
+    [data-density="compact"],
+    [data-density="tight"]
+  ) .view-option-label,
+.view-toolbar:is(
+    [data-density="condensed"],
+    [data-density="compact"],
+    [data-density="tight"]
+  ) .unit-select-label {
+  display: none;
+}
+
+.view-toolbar:is(
+    [data-density="condensed"],
+    [data-density="compact"],
+    [data-density="tight"]
+  ) .unit-select {
+  padding-inline: 6px;
+}
+
+.view-toolbar:is(
+    [data-density="condensed"],
+    [data-density="compact"],
+    [data-density="tight"]
+  ) .precision-select-trigger {
+  min-width: 68px;
+}
+
+.view-toolbar:is(
+    [data-density="condensed"],
+    [data-density="compact"],
+    [data-density="tight"]
+  ) .unit-switch-side {
+  padding-inline: 6px;
+}
+
+.view-toolbar:is([data-density="compact"], [data-density="tight"]) .insert-tools {
+  display: none;
+}
+
+.view-toolbar:is([data-density="compact"], [data-density="tight"])
+  .compact-insert-tools {
+  display: inline-flex;
+}
+
+.view-toolbar[data-density="tight"] {
+  justify-content: flex-start;
+  gap: var(--toolbar-space-2);
+}
+
+.view-toolbar[data-density="tight"] .view-options {
+  flex: 0 0 auto;
+  justify-content: flex-start;
+}
+
+.view-toolbar[data-density="tight"] .compact-insert-trigger {
+  width: 40px;
+  padding: 0;
+  justify-content: center;
+}
+
+.view-toolbar[data-density="tight"] .compact-insert-label,
+.view-toolbar[data-density="tight"] .compact-insert-caret {
+  display: none;
+}
+
+/* Below 750px the ViewOptionButton labels drop to icon-only and controls
+   receive the 40px touch target. Precision keeps its value visible, while
+   its descriptive label moves into the accessible name and title. */
 @container (max-width: 750px) {
   .view-toolbar {
     padding: var(--toolbar-space-1) var(--toolbar-space-2);
@@ -2609,18 +2712,6 @@ body.panels-resizing * {
     min-height: 38px;
   }
 
-  .view-toolbar .view-option-label {
-    display: none;
-  }
-
-  /* Precision keeps its current value visible — "Auto", 1", 1', etc. —
-     while its descriptive label moves into the control's accessible name and
-     title. This is more useful than replacing a value-bearing select with an
-     icon that still needs explanation. */
-  .view-toolbar .unit-select-label {
-    display: none;
-  }
-
   .view-toolbar .precision-select-trigger {
     min-width: 72px;
     padding: 0 4px;
@@ -2634,50 +2725,6 @@ body.panels-resizing * {
     padding-inline: 8px;
   }
 
-}
-
-/* Once the canvas column is genuinely narrow, swap the full Insert segmented
-   control for its single-action menu. The rest of the toolbar stays in the
-   same row; icon-only controls and the value-bearing controls still fit in the
-   normal mobile rail in the common case. */
-@container (max-width: 620px) {
-  .view-toolbar .insert-tools {
-    display: none;
-  }
-
-  .view-toolbar .compact-insert-tools {
-    display: inline-flex;
-  }
-
-}
-
-/* Keep the compact toolbar's spacer while the two groups still fit in the
-   useful reading width. Only when the canvas becomes genuinely tight do we
-   attach the groups into one continuous rail. */
-@container (max-width: 480px) {
-  .view-toolbar {
-    justify-content: flex-start;
-    /* The full spacer is gone here, but keep one compact 8px beat between
-       insertion and view controls so the + target does not visually merge
-       with Grid. */
-    gap: var(--toolbar-space-2);
-  }
-
-  .view-toolbar .view-options {
-    flex: 0 0 auto;
-    justify-content: flex-start;
-  }
-
-  .view-toolbar .compact-insert-trigger {
-    width: 40px;
-    padding: 0;
-    justify-content: center;
-  }
-
-  .view-toolbar .compact-insert-label,
-  .view-toolbar .compact-insert-caret {
-    display: none;
-  }
 }
 
 /* Underline tabs — the shared idiom for the top mode tabs (Plan/Elevation)

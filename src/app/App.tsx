@@ -1,4 +1,12 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
@@ -152,6 +160,104 @@ const assetRepository = new IndexedDbAssetRepository();
 // of the compact toolbar's one-line budget. Collapse one side pane before the
 // toolbar starts clipping; the CSS workspace breakpoints use the same range.
 const SINGLE_PANE_WORKSPACE_MEDIA_QUERY = "(max-width: 1080px)";
+const TOOLBAR_DENSITIES = ["comfortable", "condensed", "compact", "tight"] as const;
+const TOOLBAR_FIT_BUFFER_PX = 2;
+
+function useResponsiveToolbarDensity(measurementKey: string) {
+  const toolbarRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const toolbar = toolbarRef.current;
+    if (!toolbar) return;
+
+    let frameId: number | null = null;
+    let disposed = false;
+
+    const requiredGroupWidth = (group: HTMLElement) => {
+      const style = window.getComputedStyle(group);
+      const children = Array.from(group.children).filter(
+        (child) => window.getComputedStyle(child).display !== "none"
+      );
+      const childrenWidth = children.reduce((total, child) => {
+        const element = child as HTMLElement;
+        const childStyle = window.getComputedStyle(element);
+        return (
+          total +
+          element.getBoundingClientRect().width +
+          (Number.parseFloat(childStyle.marginLeft) || 0) +
+          (Number.parseFloat(childStyle.marginRight) || 0)
+        );
+      }, 0);
+      const gap = Number.parseFloat(style.columnGap) || 0;
+      return (
+        childrenWidth +
+        Math.max(0, children.length - 1) * gap +
+        (Number.parseFloat(style.paddingLeft) || 0) +
+        (Number.parseFloat(style.paddingRight) || 0)
+      );
+    };
+
+    const fits = () => {
+      const style = window.getComputedStyle(toolbar);
+      const groups = Array.from(toolbar.children) as HTMLElement[];
+      const gap = Number.parseFloat(style.columnGap) || 0;
+      const requiredWidth =
+        groups.reduce((total, group) => total + requiredGroupWidth(group), 0) +
+        Math.max(0, groups.length - 1) * gap +
+        (Number.parseFloat(style.paddingLeft) || 0) +
+        (Number.parseFloat(style.paddingRight) || 0);
+      return requiredWidth <= toolbar.clientWidth - TOOLBAR_FIT_BUFFER_PX;
+    };
+
+    const measure = () => {
+      frameId = null;
+      if (disposed || toolbar.clientWidth === 0) return;
+
+      // Always try the richest layout first. Reading scrollWidth after each
+      // density change forces the browser to evaluate that exact rendered
+      // configuration, so panes, labels, fonts, and active view controls all
+      // contribute to the breakpoint instead of relying on a guessed width.
+      let nextDensity = TOOLBAR_DENSITIES.at(-1)!;
+      for (const density of TOOLBAR_DENSITIES) {
+        toolbar.dataset.density = density;
+        if (fits()) {
+          nextDensity = density;
+          break;
+        }
+      }
+      toolbar.dataset.density = nextDensity;
+    };
+
+    const scheduleMeasure = () => {
+      if (frameId !== null && typeof window.cancelAnimationFrame === "function") {
+        window.cancelAnimationFrame(frameId);
+      }
+      if (typeof window.requestAnimationFrame === "function") {
+        frameId = window.requestAnimationFrame(measure);
+      } else {
+        measure();
+      }
+    };
+
+    measure();
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleMeasure);
+    observer?.observe(toolbar);
+    void document.fonts?.ready.then(() => {
+      if (!disposed) scheduleMeasure();
+    });
+
+    return () => {
+      disposed = true;
+      observer?.disconnect();
+      if (frameId !== null && typeof window.cancelAnimationFrame === "function") {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, [measurementKey]);
+
+  return toolbarRef;
+}
 
 function getAssetBlob(key: string): Promise<Blob> {
   return assetRepository.getBlob(key);
@@ -461,6 +567,14 @@ export function App() {
           )
         : [],
     [project]
+  );
+  const toolbarRef = useResponsiveToolbarDensity(
+    [
+      viewMode,
+      project?.unit ?? "no-project",
+      gridPrecisionFloorMm ?? "auto",
+      project?.floor.rooms.length ?? 0
+    ].join(":")
   );
 
   if (!project) {
@@ -1013,7 +1127,7 @@ export function App() {
         <section className="canvas-column">
           {viewMode !== "data" &&
           (viewMode !== "3d" || project.floor.rooms.length > 0) ? (
-            <div className="view-toolbar">
+            <div className="view-toolbar" ref={toolbarRef}>
               <div className="view-tools-primary">
                 {viewMode === "plan" || viewMode === "elevation" ? (
                   <>
