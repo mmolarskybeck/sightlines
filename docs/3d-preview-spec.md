@@ -155,16 +155,16 @@ Implementation is delegated to subagents per workflow preference; the main sessi
 
 ## 9. Acceptance criteria
 
-- [ ] 3D tab appears in the topbar; switching modes preserves selection and panels; Plan/Elevation behavior unchanged.
-- [ ] Room floor + walls render at correct scale from real project data; wall heights per-wall (`Wall.heightMm`), including after room resize.
-- [ ] Every placed wall artwork appears at its exact position/size with its display-tier image; unknown/approximate dims show the uncertainty treatment.
-- [ ] Doors read as floor-to-top cutouts, windows as floating cutouts; you can see out through them.
-- [ ] Floor objects render as correctly sized/rotated boxes at their positions.
-- [ ] Clicking an artwork in 3D selects it in the shared store (inspector updates); clicking empty space deselects; checklist selection highlights in 3D.
-- [ ] Overview and Eye-level presets work; orbit/pan/zoom smooth; touch mapping intact (verify in devtools touch emulation minimum).
-- [ ] Idle 3D view renders on demand only (no continuous rAF loop when nothing moves).
-- [ ] `npm run check` and `npm test` pass; `scene3d.ts` derivation has meaningful unit coverage (including the wall-winding/normal fixtures from §5.1).
-- [ ] No document mutation is possible through direct 3D viewport interactions. Inspector edits remain fully functional in 3D mode and update the derived preview.
+- [x] 3D tab appears in the topbar; switching modes preserves selection and panels; Plan/Elevation behavior unchanged.
+- [x] Room floor + walls render at correct scale from real project data; wall heights per-wall (`Wall.heightMm`), including after room resize.
+- [x] Every placed wall artwork appears at its exact position/size with its display-tier image; unknown/approximate dims show the uncertainty treatment.
+- [x] Doors read as floor-to-top cutouts, windows as floating cutouts; you can see out through them.
+- [x] Floor objects render as correctly sized/rotated boxes at their positions.
+- [x] Clicking an artwork in 3D selects it in the shared store (inspector updates); clicking empty space deselects; checklist selection highlights in 3D.
+- [x] Overview and Eye-level presets work; orbit/pan/zoom smooth; touch mapping intact (verify in devtools touch emulation minimum).
+- [x] Idle 3D view renders on demand only (no continuous rAF loop when nothing moves).
+- [x] `npm run check` and `npm test` pass; `scene3d.ts` derivation has meaningful unit coverage (including the wall-winding/normal fixtures from §5.1).
+- [x] No document mutation is possible through direct 3D viewport interactions. Inspector edits remain fully functional in 3D mode and update the derived preview.
 
 ## 10. Risks / open edges
 
