@@ -1,7 +1,7 @@
 {
   "name": "Rijksmuseum and Art Institute of Chicago public-domain artwork corpus",
   "description": "Starter image corpus for Sightlines testing and sample projects, resolved from official museum APIs and IIIF services.",
-  "downloadedAt": "2026-07-12T00:42:07.481Z",
+  "downloadedAt": "2026-07-12T01:01:39.532Z",
   "targetWidthPx": 1686,
   "artworks": [
     {
@@ -12,6 +12,12 @@
       "artistName": "Johannes Vermeer",
       "year": "c. 1660",
       "medium": "",
+      "physicalDimensions": {
+        "heightCm": 45.5,
+        "widthCm": 41,
+        "display": "45.5 x 41 cm",
+        "sourceText": "hoogte 45,5 cm x breedte 41 cm"
+      },
       "source": {
         "repository": "Rijksmuseum",
         "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200108369",
@@ -36,6 +42,13 @@
       "artistName": "Johannes Vermeer",
       "year": "c. 1658",
       "medium": "",
+      "physicalDimensions": {
+        "heightCm": 54.3,
+        "widthCm": 44,
+        "depthCm": 9,
+        "display": "54.3 x 44 x 9 cm",
+        "sourceText": "doekmaat: hoogte 54,3 cm x breedte 44 cm x diepte 9 cm"
+      },
       "source": {
         "repository": "Rijksmuseum",
         "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200108371",
@@ -60,6 +73,12 @@
       "artistName": "Rembrandt van Rijn",
       "year": "1642",
       "medium": "",
+      "physicalDimensions": {
+        "heightCm": 379.5,
+        "widthCm": 453.5,
+        "display": "379.5 x 453.5 cm",
+        "sourceText": "height 379.5 cm x width 453.5 cm x weight 337 kg x weight 170 kg"
+      },
       "source": {
         "repository": "Rijksmuseum",
         "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200107928",
@@ -84,6 +103,12 @@
       "artistName": "Rembrandt van Rijn",
       "year": "c. 1665 - c. 1669",
       "medium": "",
+      "physicalDimensions": {
+        "heightCm": 121.5,
+        "widthCm": 166.5,
+        "display": "121.5 x 166.5 cm",
+        "sourceText": "height 121.5 cm x width 166.5 cm"
+      },
       "source": {
         "repository": "Rijksmuseum",
         "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200107934",
@@ -108,6 +133,12 @@
       "artistName": "Jan Asselijn",
       "year": "c. 1650",
       "medium": "",
+      "physicalDimensions": {
+        "heightCm": 144,
+        "widthCm": 171,
+        "display": "144 x 171 cm",
+        "sourceText": "height 144 cm x width 171 cm"
+      },
       "source": {
         "repository": "Rijksmuseum",
         "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200108146",
@@ -132,6 +163,12 @@
       "artistName": "Jan Havicksz. Steen",
       "year": "1668",
       "medium": "",
+      "physicalDimensions": {
+        "heightCm": 110.5,
+        "widthCm": 141,
+        "display": "110.5 x 141 cm",
+        "sourceText": "drager: hoogte 110,5 cm x breedte 141 cm"
+      },
       "source": {
         "repository": "Rijksmuseum",
         "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200108012",
@@ -156,6 +193,12 @@
       "artistName": "Rembrandt van Rijn",
       "year": "1662",
       "medium": "",
+      "physicalDimensions": {
+        "heightCm": 191.5,
+        "widthCm": 279,
+        "display": "191.5 x 279 cm",
+        "sourceText": "hoogte 191,5 cm x breedte 279 cm"
+      },
       "source": {
         "repository": "Rijksmuseum",
         "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200107929",
@@ -180,6 +223,12 @@
       "artistName": "Jacob Isaacksz van Ruisdael",
       "year": "c. 1668 - c. 1670",
       "medium": "",
+      "physicalDimensions": {
+        "heightCm": 83,
+        "widthCm": 101,
+        "display": "83 x 101 cm",
+        "sourceText": "height 83 cm x width 101 cm"
+      },
       "source": {
         "repository": "Rijksmuseum",
         "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200107959",
@@ -204,6 +253,12 @@
       "artistName": "",
       "year": "c. 1625 - c. 1630",
       "medium": "",
+      "physicalDimensions": {
+        "heightCm": 59,
+        "widthCm": 43,
+        "display": "59 x 43 cm",
+        "sourceText": "support: height 59 cm x width 43 cm"
+      },
       "source": {
         "repository": "Rijksmuseum",
         "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200108148",
@@ -228,6 +283,12 @@
       "artistName": "Jan Willem Pieneman",
       "year": "1824",
       "medium": "",
+      "physicalDimensions": {
+        "heightCm": 567,
+        "widthCm": 823,
+        "display": "567 x 823 cm",
+        "sourceText": "height 567 cm x width 823 cm"
+      },
       "source": {
         "repository": "Rijksmuseum",
         "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200107874",
@@ -252,6 +313,12 @@
       "artistName": "Utagawa Hiroshige (I) (vermeld op object)",
       "year": "1857-09",
       "medium": "",
+      "physicalDimensions": {
+        "heightCm": 36.4,
+        "widthCm": 24.900000000000002,
+        "display": "36.4 x 24.900000000000002 cm",
+        "sourceText": "height 364 mm x width 249 mm"
+      },
       "source": {
         "repository": "Rijksmuseum",
         "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200134877",
@@ -276,6 +343,12 @@
       "artistName": "",
       "year": "1651",
       "medium": "",
+      "physicalDimensions": {
+        "heightCm": 40.6,
+        "widthCm": 51,
+        "display": "40.6 x 51 cm",
+        "sourceText": "height 406 mm x width 510 mm"
+      },
       "source": {
         "repository": "Rijksmuseum",
         "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200420911",
@@ -300,6 +373,12 @@
       "artistName": "Winslow Homer (American, 1836–1910)",
       "year": "1885",
       "medium": "Oil on canvas",
+      "physicalDimensions": {
+        "heightCm": 76.5,
+        "widthCm": 122.9,
+        "display": "76.5 x 122.9 cm",
+        "sourceText": "76.5 × 122.9 cm (30 1/8 × 48 3/8 in.)"
+      },
       "department": "Arts of the Americas",
       "source": {
         "repository": "Art Institute of Chicago",
@@ -325,6 +404,12 @@
       "artistName": "Mary Cassatt (American, 1844–1926)",
       "year": "1893",
       "medium": "Oil on canvas",
+      "physicalDimensions": {
+        "heightCm": 101.3,
+        "widthCm": 67.3,
+        "display": "101.3 x 67.3 cm",
+        "sourceText": "101.3 × 67.3 cm (39 15/16 × 26 1/2 in.)"
+      },
       "department": "Arts of the Americas",
       "source": {
         "repository": "Art Institute of Chicago",
@@ -350,6 +435,12 @@
       "artistName": "Vincent van Gogh (Dutch, 1853–1890)",
       "year": "1889",
       "medium": "Oil on canvas",
+      "physicalDimensions": {
+        "heightCm": 73.6,
+        "widthCm": 92.3,
+        "display": "73.6 x 92.3 cm",
+        "sourceText": "73.6 × 92.3 cm (29 × 36 5/8 in.); Framed: 88.9 × 108 × 8.9 cm (35 × 42 1/2 × 3 1/2 in.)"
+      },
       "department": "Painting and Sculpture of Europe",
       "source": {
         "repository": "Art Institute of Chicago",
@@ -375,6 +466,12 @@
       "artistName": "Gustave Caillebotte (French, 1848–1894)",
       "year": "1877",
       "medium": "Oil on canvas",
+      "physicalDimensions": {
+        "heightCm": 212.2,
+        "widthCm": 276.2,
+        "display": "212.2 x 276.2 cm",
+        "sourceText": "212.2 × 276.2 cm (83 1/2 × 108 3/4 in.); Framed: 241.3 × 306.1 × 10.2 cm (95 × 120 1/2 × 4 in.)"
+      },
       "department": "Painting and Sculpture of Europe",
       "source": {
         "repository": "Art Institute of Chicago",
@@ -400,6 +497,12 @@
       "artistName": "Georges Seurat (French, 1859–1891)",
       "year": "1884–86, border added 1888–89",
       "medium": "Oil on canvas",
+      "physicalDimensions": {
+        "heightCm": 207.5,
+        "widthCm": 308.1,
+        "display": "207.5 x 308.1 cm",
+        "sourceText": "207.5 × 308.1 cm (81 3/4 × 121 1/4 in.)"
+      },
       "department": "Painting and Sculpture of Europe",
       "source": {
         "repository": "Art Institute of Chicago",
@@ -425,6 +528,12 @@
       "artistName": "Claude Monet (French, 1840–1926)",
       "year": "1906",
       "medium": "Oil on canvas",
+      "physicalDimensions": {
+        "heightCm": 89.9,
+        "widthCm": 94.1,
+        "display": "89.9 x 94.1 cm",
+        "sourceText": "89.9 × 94.1 cm (35 3/8 × 37 1/16 in.); Framed: 103.2 × 107 × 5.8 cm (40 5/8 × 42 1/8 × 2 1/4 in.)"
+      },
       "department": "Painting and Sculpture of Europe",
       "source": {
         "repository": "Art Institute of Chicago",
@@ -450,6 +559,12 @@
       "artistName": "El Greco (Doménikos Theotokópoulos; Greek, active in Spain, 1541–1614)",
       "year": "1577–79",
       "medium": "Oil on canvas",
+      "physicalDimensions": {
+        "heightCm": 403.2,
+        "widthCm": 211.8,
+        "display": "403.2 x 211.8 cm",
+        "sourceText": "403.2 × 211.8 cm (158 3/4 × 83 7/16 in.); Framed: 461.6 × 256.5 × 14 cm (181 3/4 × 101 × 5 9/16 in.)"
+      },
       "department": "Painting and Sculpture of Europe",
       "source": {
         "repository": "Art Institute of Chicago",
@@ -475,6 +590,12 @@
       "artistName": "Henri de Toulouse-Lautrec (French, 1864–1901)",
       "year": "1892–95",
       "medium": "Oil on canvas",
+      "physicalDimensions": {
+        "heightCm": 123,
+        "widthCm": 141,
+        "display": "123 x 141 cm",
+        "sourceText": "123 × 141 cm (48 7/16 × 55 1/2 in.); Framed: 136.9 × 154.7 × 8.5 cm (53 7/8 × 60 7/8 × 3 5/16 in.)"
+      },
       "department": "Painting and Sculpture of Europe",
       "source": {
         "repository": "Art Institute of Chicago",
@@ -500,6 +621,12 @@
       "artistName": "Georges Seurat French, 1859-1891",
       "year": "1881/83",
       "medium": "Black Conté crayon on ivory laid paper, discolored to tan, edge mounted on tan wove paper",
+      "physicalDimensions": {
+        "heightCm": 31.1,
+        "widthCm": 24,
+        "display": "31.1 x 24 cm",
+        "sourceText": "31.1 × 24 cm (12 1/4 × 9 1/2 in.)"
+      },
       "department": "Prints and Drawings",
       "source": {
         "repository": "Art Institute of Chicago",
@@ -525,6 +652,12 @@
       "artistName": "Georges Seurat French, 1859-1891",
       "year": "1882–83",
       "medium": "Black conte crayon on cream laid paper",
+      "physicalDimensions": {
+        "heightCm": 24,
+        "widthCm": 31.4,
+        "display": "24 x 31.4 cm",
+        "sourceText": "24 × 31.4 cm (9 1/2 × 12 3/8 in.)"
+      },
       "department": "Prints and Drawings",
       "source": {
         "repository": "Art Institute of Chicago",
@@ -550,6 +683,12 @@
       "artistName": "Berthe Morisot (French, 1841–1895)",
       "year": "1875–80",
       "medium": "Oil on canvas",
+      "physicalDimensions": {
+        "heightCm": 60.3,
+        "widthCm": 80.4,
+        "display": "60.3 x 80.4 cm",
+        "sourceText": "60.3 × 80.4 cm (23 3/4 × 31 5/8 in.); Framed: 85.8 × 105.5 × 10.5 cm (33 3/4 × 41 1/2 × 4 1/8 in.)"
+      },
       "department": "Painting and Sculpture of Europe",
       "source": {
         "repository": "Art Institute of Chicago",
@@ -575,6 +714,12 @@
       "artistName": "Katsushika Hokusai 葛飾 北斎 Japanese, 1760-1849",
       "year": "1830/33",
       "medium": "Color woodblock print; oban",
+      "physicalDimensions": {
+        "heightCm": 25.4,
+        "widthCm": 37.6,
+        "display": "25.4 x 37.6 cm",
+        "sourceText": "25.4 × 37.6 cm (10 × 14 3/4 in.)"
+      },
       "department": "Arts of Asia",
       "source": {
         "repository": "Art Institute of Chicago",
@@ -600,6 +745,12 @@
       "artistName": "Pietro Longhi (Italian, 1702–1785)",
       "year": "c. 1750",
       "medium": "Oil on canvas",
+      "physicalDimensions": {
+        "heightCm": 61.6,
+        "widthCm": 49.6,
+        "display": "61.6 x 49.6 cm",
+        "sourceText": "61.6 × 49.6 cm (24 1/4 × 19 1/2 in.); Framed: 74.3 × 59.1 × 6.4 cm (29 1/4 × 23 1/4 × 2 1/2 in.)"
+      },
       "department": "Painting and Sculpture of Europe",
       "source": {
         "repository": "Art Institute of Chicago",

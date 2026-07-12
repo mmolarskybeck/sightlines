@@ -69,6 +69,31 @@ function firstContent(value, patterns) {
   return values.find(Boolean) ?? '';
 }
 
+function physicalDimensionsFromRecord(record) {
+  const texts = findStrings(record, (item) => /\b(?:cm|mm)\b/i.test(item) && /(?:×|x)/i.test(item));
+  const sourceText = texts.find((item) => !/^framed\s*:/i.test(item)) ?? texts[0] ?? '';
+  if (!sourceText) return undefined;
+  const pair = sourceText.match(/(\d+(?:[.,]\d+)?)\s*(?:×|x)\s*(\d+(?:[.,]\d+)?)\s*(cm|mm)\b/i);
+  const unitScale = pair?.[3]?.toLowerCase() === 'mm' ? 0.1 : 1;
+  const values = pair
+    ? pair.slice(1, 3).map((value) => Number(value.replace(',', '.')) * unitScale)
+    : [...sourceText.matchAll(/(\d+(?:[.,]\d+)?)\s*(cm|mm)/gi)].map((match) => Number(match[1].replace(',', '.')) * (match[2].toLowerCase() === 'mm' ? 0.1 : 1));
+  if (values.length < 2) return undefined;
+  const heightMatch = sourceText.match(/(?:height|hoogte)\s*(\d+(?:[.,]\d+)?)\s*(cm|mm)/i);
+  const widthMatch = sourceText.match(/(?:width|breedte)\s*(\d+(?:[.,]\d+)?)\s*(cm|mm)/i);
+  const toCm = (match) => Number(match[1].replace(',', '.')) * (match[2].toLowerCase() === 'mm' ? 0.1 : 1);
+  const heightCm = heightMatch ? toCm(heightMatch) : values[0];
+  const widthCm = widthMatch ? toCm(widthMatch) : values[1];
+  const depthMatch = sourceText.match(/(?:depth|diepte)\s*(\d+(?:[.,]\d+)?)\s*cm/i);
+  return {
+    heightCm,
+    widthCm,
+    ...(depthMatch ? { depthCm: Number(depthMatch[1].replace(',', '.')) } : {}),
+    display: `${heightCm} x ${widthCm}${depthMatch ? ` x ${depthMatch[1].replace(',', '.')}` : ''} cm`,
+    sourceText,
+  };
+}
+
 function jpegDimensions(bytes) {
   let offset = 2;
   while (offset + 9 < bytes.length) {
@@ -89,12 +114,14 @@ async function resolveAic(selection) {
   const url = new URL('https://api.artic.edu/api/v1/artworks/search');
   url.searchParams.set('q', selection.title);
   url.searchParams.set('limit', '20');
-  url.searchParams.set('fields', 'id,title,artist_display,date_display,medium_display,department_title,image_id,is_public_domain');
+  url.searchParams.set('fields', 'id,title,artist_display,date_display,medium_display,dimensions,dimensions_detail,department_title,image_id,is_public_domain');
   const response = await json(url, { headers: { 'AIC-User-Agent': 'sightlines-artwork-corpus (local test fixture)' } });
   const exact = response.data.find((item) => item.title.toLowerCase() === selection.title.toLowerCase());
   const record = exact ?? response.data.find((item) => item.is_public_domain && item.image_id);
   if (!record) throw new Error(`No public-domain AIC record found for ${selection.title}`);
   if (!record.is_public_domain || !record.image_id) throw new Error(`AIC record is not downloadable/public domain: ${selection.title}`);
+  const detail = await json(`https://api.artic.edu/api/v1/artworks/${record.id}?fields=dimensions,dimensions_detail`);
+  const resolvedRecord = { ...record, ...detail.data };
   return {
     ...selection,
     objectId: String(record.id),
@@ -102,6 +129,7 @@ async function resolveAic(selection) {
     artistName: clean(record.artist_display),
     year: record.date_display ?? '',
     medium: record.medium_display ?? '',
+    physicalDimensions: physicalDimensionsFromRecord(resolvedRecord),
     department: record.department_title ?? '',
     source: {
       repository: 'Art Institute of Chicago',
@@ -144,6 +172,7 @@ async function resolveRijks(selection) {
     artistName: firstContent(record, [/Rembrandt|Vermeer|Asselijn|Steen|Ruisdael|Ruysch|Pieneman|Hiroshige|Hals|Gogh/i]),
     year: firstContent(record, [/^c?\.?\s?\d{4}/]),
     medium: '',
+    physicalDimensions: physicalDimensionsFromRecord(record),
     source: {
       repository: 'Rijksmuseum',
       objectUrl: `https://www.rijksmuseum.nl/en/collection/object/${objectId}`,
@@ -188,8 +217,8 @@ await writeFile(path.join(root, 'metadata.json'), JSON.stringify({
 }, null, 2) + '\n');
 
 const csv = [
-  ['museum', 'id', 'title', 'artistName', 'year', 'medium', 'objectId', 'imagePath', 'byteSize', 'sha256', 'license', 'objectUrl', 'imageUrl'],
-  ...resolved.map((item) => [item.museum, item.id, item.title, item.artistName, item.year, item.medium, item.objectId, item.image.path, item.image.byteSize, item.image.sha256, item.source.license, item.source.objectUrl, item.source.imageUrl]),
+  ['museum', 'id', 'title', 'artistName', 'year', 'medium', 'heightCm', 'widthCm', 'depthCm', 'dimensions', 'dimensionSourceText', 'objectId', 'imagePath', 'byteSize', 'sha256', 'license', 'objectUrl', 'imageUrl'],
+  ...resolved.map((item) => [item.museum, item.id, item.title, item.artistName, item.year, item.medium, item.physicalDimensions?.heightCm, item.physicalDimensions?.widthCm, item.physicalDimensions?.depthCm, item.physicalDimensions?.display, item.physicalDimensions?.sourceText, item.objectId, item.image.path, item.image.byteSize, item.image.sha256, item.source.license, item.source.objectUrl, item.source.imageUrl]),
 ].map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(',')).join('\n') + '\n';
 await writeFile(path.join(root, 'metadata.csv'), csv);
 console.log(`Wrote ${resolved.length} records to ${root}`);
