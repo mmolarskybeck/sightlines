@@ -1,5 +1,4 @@
 import {
-  Fragment,
   useEffect,
   useMemo,
   useRef,
@@ -14,32 +13,24 @@ import {
   proposeMovingEdgePointMm,
   type Vector2
 } from "../../domain/geometry/dragResize";
-import { unitLeftNormal, unitLeftNormalOrZero } from "../../domain/geometry/vector";
+import { unitLeftNormal } from "../../domain/geometry/vector";
 import type { ResizeAnchor } from "../../domain/geometry/editRoom";
 import { applyPlanPreview, type PlanPreview } from "../../domain/geometry/planPreview";
 import {
-  changedWallLengthIds,
   getFloorBounds,
   getRoomBounds,
-  getWallGeometry,
-  isRectangleRoom
+  getWallGeometry
 } from "../../domain/geometry/walls";
 import {
   getFloorObjectPlanRect,
   getFloorWalls,
   getWallObjectPlanRect,
-  offsetPlanRectToViewerSide,
   planRectIntersectsRect,
   projectPointToWall,
-  segmentPlanRect,
   WALL_OBJECT_PLAN_DEPTH_MM,
   type PlanRect
 } from "../../domain/geometry/planObjects";
-import {
-  buildPlanScene,
-  getRenderedWallObjectPlanRect,
-  svgPolygonPoints
-} from "../../domain/scene2d/planScene";
+import { buildPlanScene, svgPolygonPoints } from "../../domain/scene2d/planScene";
 import { getDefaultOpeningSizeMm, type OpeningKind } from "../../domain/placement/createOpening";
 import {
   effectiveFloorDepthMm,
@@ -54,7 +45,6 @@ import {
 import {
   DEFAULT_FLOOR_OBJECT_DEPTH_MM,
   type Artwork,
-  type Dimensions,
   type WallObject
 } from "../../domain/project";
 import {
@@ -69,7 +59,6 @@ import {
   type DrawRoomSnap
 } from "../../domain/geometry/drawSnapping";
 import { canMoveRoomVertex, moveRoomWall } from "../../domain/geometry/reshapeRoom";
-import { formatLength } from "../../domain/units/length";
 import { getGridSnapTargets } from "../../domain/snapping/gridSnapTargets";
 import {
   floatPolicyForKind,
@@ -112,14 +101,26 @@ import {
   subscribeArtworkTouchDrag
 } from "./artworkDragSession";
 import { GridOverlay } from "./GridOverlay";
-import { ArtworkTooltipContent, OpeningTooltipContent } from "./PlacementTooltip";
 import { marqueeRectMm, type MarqueeState } from "./marqueeRect";
-import { PlanObject } from "./PlanObject";
-import { RoomResizeHandles, type ResizeHandleTarget } from "./RoomResizeHandles";
-import { RoomReshapeHandles } from "./RoomReshapeHandles";
-import { WallSlideHandles } from "./WallSlideHandles";
-import { WallLengthLabels } from "./WallLengthLabels";
+import { type ResizeHandleTarget } from "./RoomResizeHandles";
 import { ViewportZoomControls } from "./ViewportZoomControls";
+import { PlanStructureLayer } from "./plan/PlanStructureLayer";
+import { PlacedObjectsLayer } from "./plan/PlacedObjectsLayer";
+import { PlanHandlesLayer } from "./plan/PlanHandlesLayer";
+import { PlanOverlaysLayer } from "./plan/PlanOverlaysLayer";
+import type {
+  DragState,
+  DrawState,
+  DropGhostState,
+  ObjectDragState,
+  PartitionDragState,
+  PartitionDrawState,
+  RectDrawState,
+  RoomDragState,
+  ToolGhostState,
+  VertexDragState,
+  WallDragState
+} from "./plan/types";
 
 // On-screen size of a selected room's wall-midpoint resize handles — small
 // and square (the design language has no pills), since they only ever render
@@ -159,204 +160,6 @@ const MIN_PLAN_FIT_EXTENT_MM = 9144;
 // ElevationView's NO_OP_GET_BLOB).
 const NO_OP_GET_BLOB: (key: string) => Promise<Blob> = () =>
   Promise.reject(new Error("PlanView: no getBlob provided"));
-
-type DragState = {
-  roomId: string;
-  targetWallId: string;
-  axis: Vector2;
-  // Which vertex of the target wall stays fixed in world space — determines
-  // both which handle wall this drag was started from (RoomResizeHandles
-  // picks the handle whose target wall actually moves for a given anchor)
-  // and the sign of the length delta (see computeDraggedLengthMm).
-  anchor: ResizeAnchor;
-  startLengthMm: number;
-  startPointerMm: Vector2;
-  // The wall's own moving edge (in floor coordinates) at drag start —
-  // snapping targets this point, not the pointer, so wherever inside the
-  // handle the user grabbed never leaks into the committed length. See
-  // getMovingWallEdgeWorldPointMm.
-  edgeStartMm: Vector2;
-  previewLengthMm: number;
-  // A wall-resize drag only ever snaps along the wall's own single axis, so
-  // one id is enough here — it maps into that axis's slot of resolveSnap's
-  // per-axis previousSnapTargetIds.
-  previousSnapTargetId?: string;
-  activeGuides: Guide[];
-};
-
-// A pointer-drag move of a whole room, transient until release: live preview
-// via displayedProject's offset override, exactly one onMoveRoom commit on
-// release. Mirrors the wall-resize DragState's discipline (effect keyed on
-// whether a drag is active, latest values read via a ref) rather than
-// reusing ObjectDragState, since a room move has no wall re-anchoring or
-// floor/wall conversion to resolve — just a translated offset.
-type RoomDragState = {
-  roomId: string;
-  startPointerMm: Vector2;
-  startOffsetMm: Vector2;
-  // The room's bounding-box top-left corner in world space at drag start —
-  // grid snapping targets this corner (not the raw pointer), the same
-  // grab-offset-cancelling trick the wall-resize drag's edgeStartMm uses.
-  startMinCornerMm: Vector2;
-  previewOffsetMm: Vector2;
-  previousSnapTargetIds?: SnapTargetIds;
-  activeGuides: Guide[];
-};
-
-// The click-to-place preview for an armed palette tool — parallels
-// ElevationView's DropGhostState, but there's no HTML5 drag gesture here:
-// this follows plain pointer hover over the plan SVG and commits on click.
-type ToolGhostState = {
-  planRect: PlanRect;
-  // Door/window/blocked-zone tools never reject (they float or capture at any
-  // distance), but the resolver's result is a ResolvedPlacement, so the field
-  // carries the wider type; the "none" case is simply never reached here.
-  placement: ResolvedPlacement;
-  activeGuides: Guide[];
-};
-
-// A pointer-drag move of an existing placed object (wall-anchored or floor-
-// placed), transient until release: live preview, exactly one commitPlanMove
-// on release (that single action handles same-wall / re-anchor / wall↔floor
-// atomically). Mirrors ElevationView's MoveDragState and PlanView's own
-// wall-resize DragState — the effect reads the latest values from a ref and
-// omits them from deps, so the drag never resubscribes mid-gesture.
-type ObjectDragState = {
-  objectId: string;
-  kind: WallObject["kind"];
-  // Per-kind fall-through behavior when no wall captures (floatPolicyForKind):
-  // artwork rejects (wall-only), blocked-zone floats, door/window capture-any.
-  floatPolicy: FloatPolicy;
-  movingSize: { widthMm: number; heightMm: number; depthMm: number };
-  // The rotation to preview a floated result at: the wall's floor-space angle
-  // for a wall object (so a wall→floor preview keeps its orientation, matching
-  // commitPlanMove), or the floor object's own rotation.
-  rotationDeg: number;
-  startPointerMm: Vector2;
-  startCenterMm: Vector2;
-  // The wall the live preview is currently anchored to (null when floating),
-  // threaded back into resolvePlanPlacement so its cross-boundary hysteresis
-  // tracks the drag rather than the object's committed wall.
-  currentAnchorWallId: string | null;
-  previewPlanRect: PlanRect;
-  // May be `{ anchor: "none" }` for an artwork dragged off all walls: the live
-  // preview shows the danger token and release is a no-op.
-  previewPlacement: ResolvedPlacement;
-  previousSnapTargetIds?: SnapTargetIds;
-  activeGuides: Guide[];
-  // Group drag: a rigid, translation-only move of a multi-selection.
-  // resolvePlanPlacement is skipped entirely (no mid-group wall re-anchoring —
-  // deliberate); the pointer delta is optionally grid-snapped on the group's
-  // box center, then applied to every member. Wall members stay glued to their
-  // own wall, floor members translate. Absent for a single-object drag — that
-  // path (previewPlanRect/previewPlacement/currentAnchorWallId) is untouched.
-  members?: PlanGroupMember[];
-  startGroupCenterMm?: Vector2;
-  previewGroupCenterMm?: Vector2;
-  // Per-member preview rects, id → PlanRect, recomputed each move — the group
-  // counterpart to the single object's previewPlanRect.
-  previewRectById?: Map<string, PlanRect>;
-};
-
-// The HTML5-drop preview for an artwork dragged in from the checklist —
-// mirrors ElevationView's DropGhostState, flowing through the same
-// resolvePlanPlacement call as the commit so a drop can never land where the
-// ghost didn't just show.
-type DropGhostState = {
-  planRect: PlanRect;
-  // `{ anchor: "none" }` when the artwork isn't over a wall — the ghost paints
-  // in the danger style and the drop is refused (artwork is wall-only).
-  placement: ResolvedPlacement;
-  activeGuides: Guide[];
-};
-
-// The in-progress polygon-room draw gesture, transient until close/cancel and
-// deliberately NOT in the store (same reasoning as the drag/marquee states):
-// no store write happens until the loop closes, so undo removes the whole room
-// in one step and Escape mid-draw costs nothing. `points` are floor-space mm.
-type DrawState = {
-  points: Vector2[];
-  // The snapped rubber-band endpoint following the cursor (null before the
-  // pointer has moved over the surface).
-  cursorMm: Vector2 | null;
-  // The current segment (last point → cursor) would self-intersect, or a close
-  // attempt failed its simple-polygon test — render the danger token.
-  invalid: boolean;
-  // Cursor is within the close radius of the first vertex (≥3 points), so the
-  // preview shows the closing segment instead of a rubber band. Also set when
-  // the cursor is room-snapped onto a wall that would close the loop (§6.3),
-  // so the same affordance reads for both close paths.
-  closing: boolean;
-  // The cursor is latched onto an existing room's perimeter geometry (§6.3) —
-  // drives the snap indicator. Transient, never written to the store.
-  snap: DrawRoomSnap | null;
-};
-
-// Reshape mode's vertex drag, transient until release — mirrors RoomDragState's
-// discipline exactly (ref-mirrored state, one commit on pointer-up), with one
-// addition: `valid` tracks whether the CURRENT preview position keeps the
-// room a simple polygon (canMoveRoomVertex, the same predicate moveRoomVertex
-// commits against), so the render layer can paint the danger token live and
-// pointer-up can revert instead of committing when the drag ends invalid.
-type VertexDragState = {
-  roomId: string;
-  vertexId: string;
-  startPointerMm: Vector2;
-  startLocalMm: Vector2;
-  previewLocalMm: Vector2;
-  valid: boolean;
-  previousSnapTargetIds?: SnapTargetIds;
-  activeGuides: Guide[];
-};
-
-// Reshape mode's whole-wall body drag — CAD "offset/re-intersect" (Sims-
-// style): slide the wall along its own perpendicular. Same discipline as
-// VertexDragState (ref-mirrored state, one commit on pointer-up, `valid`
-// tracks whether the CURRENT preview offset keeps moveRoomWall from
-// throwing, so the outline can paint the danger token live and pointer-up can
-// revert instead of commit). Unlike a vertex drag, the axis is fixed at drag
-// start (the wall's own left-normal, captured once) rather than free 2D
-// movement — every pointer delta gets projected onto it.
-type WallDragState = {
-  roomId: string;
-  wallId: string;
-  startPointerMm: Vector2;
-  normal: Vector2;
-  previewOffsetMm: number;
-  valid: boolean;
-};
-
-
-// The in-progress partition (free-standing wall) draw — a single centerline
-// segment dragged inside a room, transient until release (no store write until
-// then, so undo removes the partition in one step). Floor-space mm.
-type PartitionDrawState = {
-  startMm: Vector2;
-  endMm: Vector2 | null;
-  invalid: boolean;
-};
-
-// A rectangle-room create drag: the two grid-snapped corners, transient until
-// release (no store write until then, so undo removes the room in one step).
-// Floor-space mm.
-type RectDrawState = {
-  startMm: Vector2;
-  endMm: Vector2 | null;
-  invalid: boolean;
-};
-
-// A partition edit drag: a whole-body translation, or one endpoint re-drag
-// (resize/re-angle). Ref-mirrored, one commit on release, same discipline as
-// the vertex drag.
-type PartitionDragState = {
-  wallId: string;
-  mode: "move" | "start" | "end";
-  startPointerMm: Vector2;
-  startFloorMm: Vector2;
-  endFloorMm: Vector2;
-  previewStartFloorMm: Vector2;
-  previewEndFloorMm: Vector2;
-};
 
 export function PlanView({
   activeTool,
@@ -2442,206 +2245,43 @@ export function PlanView({
             y={viewBoxBounds.y}
           />
         ) : null}
-        {planScene.rooms.map((room) => (
-          <g key={room.roomId}>
-            {room.walls.map((wall) => {
-              const x1 = wall.startMm.xMm;
-              const y1 = wall.startMm.yMm;
-              const x2 = wall.endMm.xMm;
-              const y2 = wall.endMm.yMm;
-
-              // Teach the wall→chip link for a selected non-rectangle: hovering
-              // this edge lights the wall and its WallSlideHandles chip. Only
-              // eligible when the room is selected, not armed for edit-shape,
-              // and non-rectangular (rectangles use resize chips, not slides).
-              const slideHoverEligible =
-                room.roomId === selectedRoomId &&
-                reshapeRoomId !== room.roomId &&
-                !isRectangleRoom(room.placement.room);
-              const isHovered = slideHoverEligible && hoveredWallId === wall.wallId;
-              return (
-                <Fragment key={wall.wallId}>
-                  <line
-                    className={
-                      wall.wallId === selectedWallId || isHovered
-                        ? "wall-line active"
-                        : "wall-line"
-                    }
-                    x1={x1}
-                    y1={y1}
-                    x2={x2}
-                    y2={y2}
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  {/* Invisible, wide hit target painted on top of the visible
-                      line so it owns the click — wall-anchored doors/windows
-                      render in a later section of this svg, so they still
-                      paint above this and keep winning clicks by paint order
-                      alone, no z-ordering code needed. Hover here only teaches
-                      the chip link; the edge stays click-to-select, never
-                      draggable. */}
-                  <line
-                    className="wall-hit"
-                    x1={x1}
-                    y1={y1}
-                    x2={x2}
-                    y2={y2}
-                    vectorEffect="non-scaling-stroke"
-                    onPointerEnter={
-                      slideHoverEligible ? () => setHoveredWallId(wall.wallId) : undefined
-                    }
-                    onPointerLeave={
-                      slideHoverEligible
-                        ? () =>
-                            setHoveredWallId((current) =>
-                              current === wall.wallId ? null : current
-                            )
-                        : undefined
-                    }
-                    onClick={(event) => {
-                      // TRAP 1 — armed placement tool: doors/windows are
-                      // click-placed ON walls via handleSvgClick's tool
-                      // branch. Swallowing this click would break
-                      // click-to-place entirely, so with a tool armed the
-                      // wall is inert and the click bubbles through to the
-                      // svg handler.
-                      if (activeTool) return;
-                      event.stopPropagation();
-                      // TRAP 2 — a marquee that starts AND ends on this
-                      // wall's hit stroke fires its trailing click here
-                      // instead of on the svg, so handleSvgClick never
-                      // consumes the suppression flag. Consuming it here
-                      // keeps that click from hijacking the fresh marquee
-                      // selection into a wall select (selectWall drops
-                      // multi-select by design).
-                      if (suppressNextToolClickRef.current) {
-                        suppressNextToolClickRef.current = false;
-                        return;
-                      }
-                      onSelectWall?.(wall.wallId);
-                    }}
-                  />
-                </Fragment>
-              );
-            })}
-          </g>
-        ))}
-        {/* Transparent hit polygon per room, painted after the walls so it
-            sits above the wall lines but still below placed objects (next
-            block) — those must keep winning their own clicks by paint order.
-            At rest a room is otherwise unclickable chrome; this is the only
-            surface that turns a plain floor click into a selection. */}
-        {planScene.rooms.map((room) => {
-          const isSelected = room.roomId === selectedRoomId;
-          return (
-            <polygon
-              className={isSelected ? "room-hit selected" : "room-hit"}
-              key={room.roomId}
-              points={svgPolygonPoints(room.polygonMm)}
-              onPointerDown={(event) => {
-                // Unselected: let the pointerdown bubble untouched — a drag
-                // from here must still be able to start the background
-                // marquee (marquee-selecting placements inside a room is an
-                // existing feature this must not break). Selected: this
-                // polygon IS the move affordance now (the old corner grip is
-                // gone), so it claims the gesture the same way a resize
-                // handle does.
-                if (!isSelected) return;
-                event.stopPropagation();
-                beginRoomDrag(room.roomId, event);
-              }}
-              onClick={(event) => {
-                // Mirrors the wall-hit TRAP comments above: an armed tool
-                // must click through to place, and a marquee's trailing
-                // click (suppressNextToolClickRef, set by the marquee's own
-                // pointerup) must not be reinterpreted as a room select.
-                if (activeTool) return;
-                event.stopPropagation();
-                if (suppressNextToolClickRef.current) {
-                  suppressNextToolClickRef.current = false;
-                  return;
-                }
-                onSelectRoom?.(room.roomId);
-              }}
-              onDoubleClick={(event) => {
-                // Shortcut for RoomInspector's "Edit shape" button — selects
-                // the room (if it wasn't already) and arms reshape mode on it
-                // in one gesture.
-                if (activeTool || drawRoomActive || drawRectActive) return;
-                event.stopPropagation();
-                onSelectRoom?.(room.roomId);
-                onReshapeRoomChange?.(room.roomId);
-              }}
-            />
-          );
-        })}
-        {/* Partition slabs — filled rects for each free-standing wall, painted
-            above the room-hit polygon so a slab click selects the PARTITION
-            (its centerline id), not the room. Rendered below placed objects so
-            art on the faces sits on top. The dragged slab shows its live
-            preview endpoints. */}
-        {planScene.partitions.map(({ partition, rect: restRect }) => {
-          const isDragging = partitionDrag?.wallId === partition.wallId;
-          // The dragged slab previews its live endpoints through the same
-          // segment→rect lift the scene builder used for the rest rect.
-          const rect = isDragging
-            ? segmentPlanRect(
-                partitionDrag.previewStartFloorMm,
-                partitionDrag.previewEndFloorMm,
-                partition.thicknessMm
-              )
-            : restRect;
-          const isSelected = partition.wallId === selectedFreestandingWallId;
-          return (
-            <rect
-              key={partition.wallId}
-              x={rect.centerXMm - rect.widthMm / 2}
-              y={rect.centerYMm - rect.depthMm / 2}
-              width={rect.widthMm}
-              height={rect.depthMm}
-              transform={`rotate(${rect.angleDeg} ${rect.centerXMm} ${rect.centerYMm})`}
-              style={{
-                fill: "var(--ink)",
-                fillOpacity: isSelected ? 0.9 : 0.72,
-                stroke: isSelected ? "var(--selection)" : "transparent",
-                strokeWidth: 2,
-                cursor: partitionToolActive ? "crosshair" : "move",
-                vectorEffect: "non-scaling-stroke"
-              }}
-              onPointerDown={(event) => {
-                if (
-                  activeTool ||
-                  drawRoomActive ||
-                  partitionToolActive ||
-                  drawRectActive ||
-                  reshapeRoomId
-                )
-                  return;
-                beginPartitionDrag(partition, "move", event);
-              }}
-              onClick={(event) => {
-                if (activeTool || partitionToolActive) return;
-                event.stopPropagation();
-                if (suppressNextToolClickRef.current) {
-                  suppressNextToolClickRef.current = false;
-                  return;
-                }
-                onSelectFreestandingWall?.(partition.wallId);
-              }}
-            />
-          );
-        })}
-        {/* Placed objects render above walls/handles' room grouping but
-            below drag guides — matching the elevation-view convention that
-            geometry (walls/rooms) reads as structure and placements sit on
-            top of it. Wall-anchored objects need their FloorWall for the
-            wall-line-relative projection; floor-placed objects (later
-            phases) carry their own center/rotation already. */}
-        {(() => {
-          // Any in-flight gesture suppresses hover tooltips: they'd sit on top
-          // of the very geometry the user is trying to read while dragging,
-          // resizing, or aiming an armed placement tool.
-          const tooltipsDisabled = Boolean(
+        {/* Room walls (+ hover/hit strokes), the per-room hit polygons, and
+            the partition slabs — the static structure the user clicks to
+            select rooms/walls/partitions. Render-only; every handler stays
+            defined in this component and is threaded through. */}
+        <PlanStructureLayer
+          rooms={planScene.rooms}
+          partitions={planScene.partitions}
+          selectedRoomId={selectedRoomId}
+          reshapeRoomId={reshapeRoomId}
+          selectedWallId={selectedWallId}
+          hoveredWallId={hoveredWallId}
+          selectedFreestandingWallId={selectedFreestandingWallId}
+          activeTool={activeTool}
+          drawRoomActive={drawRoomActive}
+          drawRectActive={drawRectActive}
+          partitionToolActive={partitionToolActive}
+          partitionDrag={partitionDrag}
+          suppressNextToolClickRef={suppressNextToolClickRef}
+          setHoveredWallId={setHoveredWallId}
+          onSelectWall={onSelectWall}
+          onSelectRoom={onSelectRoom}
+          onReshapeRoomChange={onReshapeRoomChange}
+          onSelectFreestandingWall={onSelectFreestandingWall}
+          beginRoomDrag={beginRoomDrag}
+          beginPartitionDrag={beginPartitionDrag}
+        />
+        {/* Placed objects: opening-connection glyphs, wall-anchored object
+            rects, and floor-placed object rects. Reads the live objectDrag
+            preview + selection ids; tooltipsDisabled is derived here from the
+            in-flight gesture/armed-tool state this component owns. */}
+        <PlacedObjectsLayer
+          openingConnections={planScene.openingConnections}
+          wallObjects={planScene.wallObjects}
+          floorObjects={planScene.floorObjects}
+          pixelsPerMm={pixelsPerMm}
+          objectDrag={objectDrag}
+          tooltipsDisabled={Boolean(
             drag ||
               objectDrag ||
               dropGhost ||
@@ -2650,724 +2290,79 @@ export function PlanView({
               drawRoomActive ||
               drawRectActive ||
               vertexDrag
-          );
-          const artworkTooltip = (
-            artworkId: string,
-            displayDimensionsOverride?: Dimensions
-          ) => {
-            const artwork = artworksById?.get(artworkId);
-            if (!artwork) return undefined;
-            return (
-              <ArtworkTooltipContent
-                artwork={artwork}
-                dimensions={displayDimensionsOverride ?? artwork.dimensions}
-                thumbnailUrl={
-                  artwork.assetId ? thumbnailUrlsByAssetId.get(artwork.assetId) : undefined
-                }
-                unit={project.unit}
-              />
-            );
-          };
-          return (
-            <>
-              {planScene.openingConnections.map((connection) => (
-                <g
-                  aria-label={`Connected openings: ${connection.status}`}
-                  className={`opening-connection-glyph ${connection.status}`}
-                  key={connection.id}
-                  role="img"
-                >
-                  <line
-                    x1={connection.aCenterMm.xMm}
-                    y1={connection.aCenterMm.yMm}
-                    x2={connection.bCenterMm.xMm}
-                    y2={connection.bCenterMm.yMm}
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  <circle
-                    cx={connection.midMm.xMm}
-                    cy={connection.midMm.yMm}
-                    r={pixelsPerMm > 0 ? 5 / pixelsPerMm : 0}
-                  />
-                </g>
-              ))}
-              {planScene.wallObjects.map(({ object: wallObject, artwork, restRect, renderedRect }) => {
-                // Preview position, generalized over single and group drags: a
-                // group member reads its own rect from previewRectById, a single
-                // dragged object reads previewPlanRect, everything else rests.
-                const groupPreviewRect = objectDrag?.members
-                  ? objectDrag.previewRectById?.get(wallObject.id)
-                  : undefined;
-                const planRect =
-                  groupPreviewRect ??
-                  (objectDrag && !objectDrag.members && objectDrag.objectId === wallObject.id
-                    ? objectDrag.previewPlanRect
-                    : restRect);
-                // The live single-drag preview's anchor drives the look: "floor"
-                // → dashed floor object; "none" → danger token (artwork dragged
-                // off every wall — a refused move). A group drag is translation-
-                // only so a wall member stays on its wall; at rest, on the wall.
-                const previewAnchor =
-                  objectDrag != null &&
-                  !objectDrag.members &&
-                  objectDrag.objectId === wallObject.id
-                    ? objectDrag.previewPlacement.anchor
-                    : null;
-                const isFloorPlaced = previewAnchor === "floor";
-                const isInvalid = previewAnchor === "none";
-                const isSelected =
-                  (wallObject.kind === "artwork"
-                    ? wallObject.artworkId === selectedArtworkId
-                    : wallObject.id === selectedOpeningId) ||
-                  selectedObjectIds.includes(wallObject.id);
-                // What paints while wall-anchored (a floated/rejected preview
-                // already carries its real floor-object depth and sits off the
-                // wall, so it's drawn at its own center, untransformed): the
-                // scene's precomputed rect at rest, and the SAME domain
-                // transform (getRenderedWallObjectPlanRect — mat/frame
-                // widening, viewer-side offset, min-depth clamp) applied to
-                // any live single/group drag preview, so the drawing never
-                // disagrees between mid-drag and on-release — nothing jumps.
-                const renderedPlanRect =
-                  isFloorPlaced || isInvalid
-                    ? planRect
-                    : planRect === restRect
-                      ? renderedRect
-                      : getRenderedWallObjectPlanRect(
-                          planRect,
-                          wallObject.kind,
-                          artwork,
-                          wallObjectMinDepthMm
-                        );
-
-                return (
-                  <PlanObject
-                    hitMinSizeMm={objectHitMinMm}
-                    isFloorPlaced={isFloorPlaced}
-                    isInvalid={isInvalid}
-                    isSelected={isSelected}
-                    key={wallObject.id}
-                    kind={wallObject.kind}
-                    planRect={renderedPlanRect}
-                    tooltip={
-                      wallObject.kind === "artwork" ? (
-                        artworkTooltip(wallObject.artworkId, wallObject.displayDimensionsOverride)
-                      ) : (
-                        <OpeningTooltipContent
-                          kind={wallObject.kind}
-                          secondaryMm={wallObject.heightMm}
-                          unit={project.unit}
-                          widthMm={wallObject.widthMm}
-                        />
-                      )
-                    }
-                    tooltipDisabled={tooltipsDisabled}
-                    onBeginDrag={(event) =>
-                      beginObjectDrag(
-                        {
-                          objectId: wallObject.id,
-                          kind: wallObject.kind,
-                          startCenterMm: {
-                            xMm: restRect.centerXMm,
-                            yMm: restRect.centerYMm
-                          },
-                          movingSize: {
-                            widthMm: wallObject.widthMm,
-                            heightMm: wallObject.heightMm,
-                            // The eventual floor footprint depth if this drags
-                            // off the wall; unused while it stays on a wall.
-                            depthMm: DEFAULT_FLOOR_OBJECT_DEPTH_MM
-                          },
-                          // Preview a floated result at the wall's angle so a
-                          // wall→floor drag keeps its orientation (matching
-                          // commitPlanMove).
-                          rotationDeg: restRect.angleDeg,
-                          currentPlacement: {
-                            anchor: "wall",
-                            wallId: wallObject.wallId,
-                            xMm: wallObject.xMm
-                          },
-                          initialPlanRect: restRect
-                        },
-                        event
-                      )
-                    }
-                    onSelect={(event) => {
-                      if (consumeSelectSuppression()) return;
-                      if (onSelectObject) {
-                        onSelectObject(wallObject.id, {
-                          additive: event.shiftKey || event.metaKey || event.ctrlKey
-                        });
-                      } else if (wallObject.kind === "artwork") {
-                        onSelectArtwork?.(wallObject.artworkId);
-                      } else {
-                        onSelectOpening?.(wallObject.id);
-                      }
-                    }}
-                  />
-                );
-              })}
-              {planScene.floorObjects.map(({ object: floorObject, rect: restRect }) => {
-                const groupPreviewRect = objectDrag?.members
-                  ? objectDrag.previewRectById?.get(floorObject.id)
-                  : undefined;
-                const planRect =
-                  groupPreviewRect ??
-                  (objectDrag && !objectDrag.members && objectDrag.objectId === floorObject.id
-                    ? objectDrag.previewPlanRect
-                    : restRect);
-                // A floor object reads floor-placed at rest and under a group
-                // drag (translation-only keeps it on the floor); a single drag
-                // follows the preview — a floor→wall drag drops the dashed look,
-                // and an artwork dragged nowhere ("none") shows the danger token
-                // (the move is refused, it stays at its old floor spot on release).
-                const previewAnchor =
-                  objectDrag && !objectDrag.members && objectDrag.objectId === floorObject.id
-                    ? objectDrag.previewPlacement.anchor
-                    : null;
-                const isFloorPlaced = previewAnchor === null ? true : previewAnchor === "floor";
-                const isInvalid = previewAnchor === "none";
-                const isSelected =
-                  (floorObject.kind === "artwork"
-                    ? floorObject.artworkId === selectedArtworkId
-                    : floorObject.id === selectedOpeningId) ||
-                  selectedObjectIds.includes(floorObject.id);
-
-                return (
-                  <PlanObject
-                    hitMinSizeMm={objectHitMinMm}
-                    isFloorPlaced={isFloorPlaced}
-                    isInvalid={isInvalid}
-                    isSelected={isSelected}
-                    key={floorObject.id}
-                    kind={floorObject.kind}
-                    planRect={planRect}
-                    tooltip={
-                      floorObject.kind === "artwork" ? (
-                        artworkTooltip(floorObject.artworkId, floorObject.displayDimensionsOverride)
-                      ) : (
-                        // A floor blocked zone's footprint reads width × depth
-                        // (its plan axes), not width × height.
-                        <OpeningTooltipContent
-                          kind={floorObject.kind}
-                          secondaryMm={floorObject.depthMm}
-                          unit={project.unit}
-                          widthMm={floorObject.widthMm}
-                        />
-                      )
-                    }
-                    tooltipDisabled={tooltipsDisabled}
-                    onBeginDrag={(event) =>
-                      beginObjectDrag(
-                        {
-                          objectId: floorObject.id,
-                          kind: floorObject.kind,
-                          startCenterMm: { xMm: floorObject.xMm, yMm: floorObject.yMm },
-                          movingSize: {
-                            widthMm: floorObject.widthMm,
-                            heightMm: floorObject.heightMm,
-                            depthMm: floorObject.depthMm
-                          },
-                          rotationDeg: floorObject.rotationDeg,
-                          currentPlacement: {
-                            anchor: "floor",
-                            xMm: floorObject.xMm,
-                            yMm: floorObject.yMm
-                          },
-                          initialPlanRect: restRect
-                        },
-                        event
-                      )
-                    }
-                    onSelect={(event) => {
-                      if (consumeSelectSuppression()) return;
-                      if (onSelectObject) {
-                        onSelectObject(floorObject.id, {
-                          additive: event.shiftKey || event.metaKey || event.ctrlKey
-                        });
-                      } else if (floorObject.kind === "artwork") {
-                        onSelectArtwork?.(floorObject.artworkId);
-                      } else {
-                        onSelectOpening?.(floorObject.id);
-                      }
-                    }}
-                  />
-                );
-              })}
-            </>
-          );
-        })()}
-        {/* The selected room's outline/wash/handles paint in their own layer
-            ABOVE placed objects — at rest a room shows none of this (no
-            outline, no wash, no handles), so this block renders at most once,
-            for whichever room selectedRoomId names. */}
-        {(() => {
-          const selectedSceneRoom = planScene.rooms.find(
-            (room) => room.roomId === selectedRoomId
-          );
-          if (!selectedSceneRoom || handleSizeMm <= 0) return null;
-          const selectedPlacement = selectedSceneRoom.placement;
-
-          const isReshaping = reshapeRoomId === selectedPlacement.roomId;
-          const vertexDragInvalid =
-            isReshaping && vertexDrag?.roomId === selectedPlacement.roomId && !vertexDrag.valid;
-          // A wall slide only happens in the selected-default mode (not while
-          // armed for edit-shape), so its invalid tint is independent of
-          // isReshaping — the outline reads danger whenever the live slide is
-          // invalid for this room.
-          const wallDragInvalid =
-            wallDrag?.roomId === selectedPlacement.roomId && !wallDrag.valid;
-
-          // "A number sits on the wall it measures": during any reshape
-          // gesture on this room (chip resize, wall slide, vertex drag), diff
-          // the drag preview (selectedPlacement, from displayedProject)
-          // against the committed room — every wall whose length is changing
-          // labels itself. One derivation covers all three gestures,
-          // including a slide between non-parallel neighbours changing the
-          // dragged wall's own length. A whole-room move translates without
-          // reshaping, so it's excluded rather than diffed to nothing.
-          const reshapeDragActive =
-            drag?.roomId === selectedPlacement.roomId ||
-            wallDrag?.roomId === selectedPlacement.roomId ||
-            vertexDrag?.roomId === selectedPlacement.roomId;
-          const baselinePlacement = reshapeDragActive
-            ? project.floor.rooms.find(
-                (placement) => placement.roomId === selectedPlacement.roomId
-              )
-            : undefined;
-          const changedWallIds = baselinePlacement
-            ? changedWallLengthIds(baselinePlacement.room, selectedPlacement.room)
-            : [];
-
-          return (
-            <g>
-              <polygon
-                className="room-selection-wash"
-                points={svgPolygonPoints(selectedSceneRoom.polygonMm)}
-              />
-              <polygon
-                className="room-selection-outline"
-                points={svgPolygonPoints(selectedSceneRoom.polygonMm)}
-                vectorEffect="non-scaling-stroke"
-                style={vertexDragInvalid || wallDragInvalid ? { stroke: "var(--danger)" } : undefined}
-              />
-              {/* Three-way handle fork, mutually exclusive per the invariant:
-                  edit-shape armed → corner/split handles only; else a rectangle
-                  keeps its resize chips; else a non-rectangle gets wall-slide
-                  chips. Exactly one control set ever renders for a room. */}
-              {isReshaping ? (
-                <RoomReshapeHandles
-                  activeVertexId={vertexDrag?.roomId === selectedPlacement.roomId ? vertexDrag.vertexId : null}
-                  handleSizeMm={handleSizeMm}
-                  invalid={vertexDragInvalid}
-                  placement={selectedPlacement}
-                  selectedVertexId={selectedVertexId}
-                  onBeginVertexDrag={(vertexId, event) =>
-                    beginVertexDrag(selectedPlacement.roomId, vertexId, event)
-                  }
-                  onSplitWallClick={handleSplitWallClick}
-                />
-              ) : isRectangleRoom(selectedPlacement.room) ? (
-                <RoomResizeHandles
-                  activeDrag={
-                    drag && drag.roomId === selectedPlacement.roomId
-                      ? { targetWallId: drag.targetWallId, anchor: drag.anchor }
-                      : null
-                  }
-                  handleSizeMm={handleSizeMm}
-                  placement={selectedPlacement}
-                  onBeginDrag={beginDrag}
-                />
-              ) : (
-                <WallSlideHandles
-                  activeDrag={
-                    wallDrag?.roomId === selectedPlacement.roomId
-                      ? { wallId: wallDrag.wallId, valid: wallDrag.valid }
-                      : null
-                  }
-                  handleSizeMm={handleSizeMm}
-                  highlightedWallId={hoveredWallId}
-                  placement={selectedPlacement}
-                  onBeginWallDrag={(wallId, event) =>
-                    beginWallDrag(selectedPlacement.roomId, wallId, event)
-                  }
-                />
-              )}
-              {/* Live length labels compose as a sibling layer over whichever
-                  handle set is active — the handle components never label
-                  anything themselves. */}
-              <WallLengthLabels
-                changedWallIds={changedWallIds}
-                handleSizeMm={handleSizeMm}
-                invalid={vertexDragInvalid || wallDragInvalid}
-                placement={selectedPlacement}
-                unit={wallUnit}
-              />
-            </g>
-          );
-        })()}
-        {/* Selected partition: A/B face labels and the two endpoint handles
-            (resize/re-angle), painted above placed objects so they stay
-            grabbable. The body itself is the move affordance (slab rect above). */}
-        {selectedFreestandingWallId && handleSizeMm > 0
-          ? (() => {
-              const partition = planScene.partitions.find(
-                (candidate) => candidate.partition.wallId === selectedFreestandingWallId
-              )?.partition;
-              if (!partition) return null;
-              const isDragging = partitionDrag?.wallId === partition.wallId;
-              const startMm = isDragging ? partitionDrag.previewStartFloorMm : partition.startMm;
-              const endMm = isDragging ? partitionDrag.previewEndFloorMm : partition.endMm;
-              const { xMm: nx, yMm: ny } = unitLeftNormalOrZero(startMm, endMm);
-              const midX = (startMm.xMm + endMm.xMm) / 2;
-              const midY = (startMm.yMm + endMm.yMm) / 2;
-              const labelOffsetMm = partition.thicknessMm / 2 + handleSizeMm * 1.6;
-              const handle = handleSizeMm;
-              const endpoints: { end: "start" | "end"; xMm: number; yMm: number }[] = [
-                { end: "start", xMm: startMm.xMm, yMm: startMm.yMm },
-                { end: "end", xMm: endMm.xMm, yMm: endMm.yMm }
-              ];
-              return (
-                <g className="partition-selected-layer">
-                  {[
-                    { label: "A", ox: nx, oy: ny },
-                    { label: "B", ox: -nx, oy: -ny }
-                  ].map(({ label, ox, oy }) => (
-                    <text
-                      key={label}
-                      x={midX + ox * labelOffsetMm}
-                      y={midY + oy * labelOffsetMm}
-                      dominantBaseline="middle"
-                      textAnchor="middle"
-                      style={{
-                        fontSize: handle * 1.6,
-                        fill: "var(--selection)",
-                        fontWeight: 600,
-                        pointerEvents: "none",
-                        userSelect: "none"
-                      }}
-                    >
-                      {label}
-                    </text>
-                  ))}
-                  {endpoints.map(({ end, xMm, yMm }) => (
-                    <g key={end}>
-                      <rect
-                        className="resize-handle handle-hit"
-                        x={xMm - handle * 1.4}
-                        y={yMm - handle * 1.4}
-                        width={handle * 2.8}
-                        height={handle * 2.8}
-                        style={{ cursor: "move" }}
-                        onPointerDown={(event) => beginPartitionDrag(partition, end, event)}
-                      />
-                      <rect
-                        className="resize-handle active"
-                        x={xMm - handle / 2}
-                        y={yMm - handle / 2}
-                        width={handle}
-                        height={handle}
-                        style={{ cursor: "move", pointerEvents: "none" }}
-                      />
-                    </g>
-                  ))}
-                </g>
-              );
-            })()
-          : null}
-        {/* Polygon-room draw overlay: a full-viewBox transparent capture rect
-            owns every pointer event while drawing (so underlying walls/objects
-            never interfere), with the preview painted on top at
-            pointer-events:none so events fall through to the rect. Placed,
-            valid rubber-band, and invalid rubber-band each use existing plan
-            tokens (ink walls, petrol selection, danger). */}
-        {drawRoomActive && draw
-          ? (() => {
-              const last = draw.points.at(-1) ?? null;
-              const rubberEnd = draw.cursorMm;
-              const committedPoints = draw.points
-                .map((point) => `${point.xMm},${point.yMm}`)
-                .join(" ");
-              const segmentLengthMm =
-                last && rubberEnd && !draw.closing
-                  ? Math.hypot(rubberEnd.xMm - last.xMm, rubberEnd.yMm - last.yMm)
-                  : null;
-              const vertexSizeMm = handleSizeMm > 0 ? handleSizeMm : 0;
-              // The existing room geometry the cursor is latched onto (§6.3),
-              // so the snap indicator can also highlight the shared wall.
-              const snapWall = draw.snap
-                ? floorWallsForTool.find((wall) => wall.id === draw.snap?.wallId) ?? null
-                : null;
-
-              return (
-                <g className="draw-room-layer">
-                  <rect
-                    x={viewBoxBounds.x}
-                    y={viewBoxBounds.y}
-                    width={viewBoxBounds.width}
-                    height={viewBoxBounds.height}
-                    fill="transparent"
-                    onClick={handleDrawClick}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onPointerMove={handleDrawPointerMove}
-                  />
-                  {draw.points.length >= 2 ? (
-                    <polyline
-                      points={committedPoints}
-                      fill="none"
-                      stroke="var(--ink)"
-                      strokeWidth={5}
-                      strokeLinecap="square"
-                      vectorEffect="non-scaling-stroke"
-                      style={{ pointerEvents: "none" }}
-                    />
-                  ) : null}
-                  {last && rubberEnd ? (
-                    <line
-                      x1={last.xMm}
-                      y1={last.yMm}
-                      x2={rubberEnd.xMm}
-                      y2={rubberEnd.yMm}
-                      stroke={draw.invalid ? "var(--danger)" : "var(--selection)"}
-                      strokeWidth={4}
-                      strokeDasharray="6 5"
-                      vectorEffect="non-scaling-stroke"
-                      style={{ pointerEvents: "none" }}
-                    />
-                  ) : null}
-                  {vertexSizeMm > 0
-                    ? draw.points.map((point, index) => {
-                        const size =
-                          index === 0 && draw.closing ? vertexSizeMm * 1.5 : vertexSizeMm;
-                        return (
-                          <rect
-                            key={index}
-                            className="resize-handle"
-                            x={point.xMm - size / 2}
-                            y={point.yMm - size / 2}
-                            width={size}
-                            height={size}
-                            vectorEffect="non-scaling-stroke"
-                            style={{ pointerEvents: "none" }}
-                          />
-                        );
-                      })
-                    : null}
-                  {/* Room-snap indicator (§6.3): a crisp filled petrol square
-                      on the snapped point, with the shared wall segment
-                      highlighted in the same selection token — no pills, no
-                      circles, matching the draw preview's design language. */}
-                  {draw.snap && snapWall ? (
-                    <line
-                      className="draw-snap-wall"
-                      x1={snapWall.startFloorMm.xMm}
-                      y1={snapWall.startFloorMm.yMm}
-                      x2={snapWall.endFloorMm.xMm}
-                      y2={snapWall.endFloorMm.yMm}
-                      vectorEffect="non-scaling-stroke"
-                      style={{ pointerEvents: "none" }}
-                    />
-                  ) : null}
-                  {draw.snap && vertexSizeMm > 0 ? (
-                    <rect
-                      className="draw-snap-marker"
-                      x={draw.snap.pointMm.xMm - vertexSizeMm / 2}
-                      y={draw.snap.pointMm.yMm - vertexSizeMm / 2}
-                      width={vertexSizeMm}
-                      height={vertexSizeMm}
-                      vectorEffect="non-scaling-stroke"
-                      style={{ pointerEvents: "none" }}
-                    />
-                  ) : null}
-                  {segmentLengthMm != null && rubberEnd && vertexSizeMm > 0 ? (
-                    <text
-                      className="resize-handle-label"
-                      x={rubberEnd.xMm + vertexSizeMm}
-                      y={rubberEnd.yMm - vertexSizeMm}
-                      style={{
-                        // SVG user units (mm), sized off handleSizeMm so the
-                        // readout stays a constant on-screen size at any zoom —
-                        // the same trick RoomResizeHandles' label uses.
-                        fontSize: vertexSizeMm * 1.6,
-                        strokeWidth: vertexSizeMm * 0.5,
-                        pointerEvents: "none"
-                      }}
-                    >
-                      {formatLength(segmentLengthMm, { unit: wallUnit })}
-                    </text>
-                  ) : null}
-                </g>
-              );
-            })()
-          : null}
-        {/* Partition tool: a full-viewBox capture rect owns the press-drag
-            that draws the centerline; the live preview slab paints on top at
-            pointer-events:none. Release commits via onAddFreestandingWall. */}
-        {partitionToolActive ? (
-          <g className="partition-draw-layer">
-            <rect
-              x={viewBoxBounds.x}
-              y={viewBoxBounds.y}
-              width={viewBoxBounds.width}
-              height={viewBoxBounds.height}
-              fill="transparent"
-              style={{ cursor: "crosshair" }}
-              onPointerDown={beginPartitionDraw}
-            />
-            {partitionDraw && partitionDraw.endMm
-              ? (() => {
-                  const rect = segmentPlanRect(
-                    partitionDraw.startMm,
-                    partitionDraw.endMm,
-                    100
-                  );
-                  const color = partitionDraw.invalid ? "var(--danger)" : "var(--selection)";
-                  return (
-                    <g style={{ pointerEvents: "none" }}>
-                      <rect
-                        x={rect.centerXMm - rect.widthMm / 2}
-                        y={rect.centerYMm - rect.depthMm / 2}
-                        width={rect.widthMm}
-                        height={rect.depthMm}
-                        transform={`rotate(${rect.angleDeg} ${rect.centerXMm} ${rect.centerYMm})`}
-                        style={{ fill: color, fillOpacity: 0.4, stroke: color, strokeWidth: 2 }}
-                        vectorEffect="non-scaling-stroke"
-                      />
-                    </g>
-                  );
-                })()
-              : null}
-          </g>
-        ) : null}
-        {/* Rectangle-room tool: a full-viewBox capture rect owns the press-drag
-            between the two corners; the live preview rect and its W × D readout
-            paint on top at pointer-events:none. Release commits via
-            onAddRectangleRoom. */}
-        {drawRectActive ? (
-          <g className="rect-draw-layer">
-            <rect
-              x={viewBoxBounds.x}
-              y={viewBoxBounds.y}
-              width={viewBoxBounds.width}
-              height={viewBoxBounds.height}
-              fill="transparent"
-              style={{ cursor: "crosshair" }}
-              onPointerDown={beginRectDraw}
-            />
-            {rectDraw && rectDraw.endMm
-              ? (() => {
-                  const originXMm = Math.min(rectDraw.startMm.xMm, rectDraw.endMm.xMm);
-                  const originYMm = Math.min(rectDraw.startMm.yMm, rectDraw.endMm.yMm);
-                  const widthMm = Math.abs(rectDraw.endMm.xMm - rectDraw.startMm.xMm);
-                  const depthMm = Math.abs(rectDraw.endMm.yMm - rectDraw.startMm.yMm);
-                  const color = rectDraw.invalid ? "var(--danger)" : "var(--selection)";
-                  return (
-                    <g style={{ pointerEvents: "none" }}>
-                      <rect
-                        x={originXMm}
-                        y={originYMm}
-                        width={widthMm}
-                        height={depthMm}
-                        style={{ fill: color, fillOpacity: 0.4, stroke: color, strokeWidth: 2 }}
-                        vectorEffect="non-scaling-stroke"
-                      />
-                      {handleSizeMm > 0 ? (
-                        <text
-                          className="resize-handle-label"
-                          x={rectDraw.endMm.xMm + handleSizeMm}
-                          y={rectDraw.endMm.yMm - handleSizeMm}
-                          style={{
-                            // SVG user units (mm), sized off handleSizeMm so the
-                            // readout stays a constant on-screen size at any zoom
-                            // — the same trick the draw-room readout uses.
-                            fontSize: handleSizeMm * 1.6,
-                            strokeWidth: handleSizeMm * 0.5,
-                            pointerEvents: "none"
-                          }}
-                        >
-                          {`${formatLength(widthMm, { unit: wallUnit })} × ${formatLength(depthMm, {
-                            unit: wallUnit
-                          })}`}
-                        </text>
-                      ) : null}
-                    </g>
-                  );
-                })()
-              : null}
-          </g>
-        ) : null}
-        {toolGhost ? (
-          <PlanObject
-            isGhost
-            kind={activeTool ?? "door"}
-            planRect={
-              toolGhost.placement.anchor === "wall"
-                ? {
-                    ...toolGhost.planRect,
-                    depthMm: Math.max(toolGhost.planRect.depthMm, wallObjectMinDepthMm)
-                  }
-                : toolGhost.planRect
-            }
-          />
-        ) : null}
-        {dropGhost ? (
-          <PlanObject
-            isGhost
-            // No wall captured → wall-only artwork can't land here: paint the
-            // danger token so the refusal reads before release.
-            isInvalid={dropGhost.placement.anchor === "none"}
-            kind="artwork"
-            planRect={
-              dropGhost.placement.anchor === "wall"
-                ? {
-                    // Always artwork (checklist drag-in) — offset to the
-                    // viewer's side (spec §5.3) so the drop ghost matches
-                    // where the placed glyph will actually render.
-                    ...offsetPlanRectToViewerSide(dropGhost.planRect),
-                    depthMm: Math.max(dropGhost.planRect.depthMm, wallObjectMinDepthMm)
-                  }
-                : dropGhost.planRect
-            }
-          />
-        ) : null}
-        {(
-          objectDrag?.activeGuides ??
-          dropGhost?.activeGuides ??
-          drag?.activeGuides ??
-          roomDrag?.activeGuides ??
-          toolGhost?.activeGuides ??
-          []
-        ).map((guide) => (
-          <line
-            className="snap-guide"
-            key={guide.id}
-            x1={guide.axis === "x" ? guide.positionMm : viewBoxBounds.x}
-            y1={guide.axis === "y" ? guide.positionMm : viewBoxBounds.y}
-            x2={guide.axis === "x" ? guide.positionMm : viewBoxBounds.x + viewBoxBounds.width}
-            y2={
-              guide.axis === "y" ? guide.positionMm : viewBoxBounds.y + viewBoxBounds.height
-            }
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
-        {marquee
-          ? (() => {
-              // Plan is y-down (no flip), so the min/max rect maps straight to
-              // the <rect>. Dashed petrol stroke (.marquee-rect) — the same
-              // in-progress marquee look elevation uses.
-              const rect = marqueeRectMm(marquee);
-              return (
-                <rect
-                  className="marquee-rect"
-                  x={rect.minXMm}
-                  y={rect.minYMm}
-                  width={rect.maxXMm - rect.minXMm}
-                  height={rect.maxYMm - rect.minYMm}
-                  vectorEffect="non-scaling-stroke"
-                />
-              );
-            })()
-          : null}
+          )}
+          artworksById={artworksById}
+          thumbnailUrlsByAssetId={thumbnailUrlsByAssetId}
+          unit={project.unit}
+          wallObjectMinDepthMm={wallObjectMinDepthMm}
+          objectHitMinMm={objectHitMinMm}
+          selectedArtworkId={selectedArtworkId}
+          selectedOpeningId={selectedOpeningId}
+          selectedObjectIds={selectedObjectIds}
+          consumeSelectSuppression={consumeSelectSuppression}
+          beginObjectDrag={beginObjectDrag}
+          onSelectObject={onSelectObject}
+          onSelectArtwork={onSelectArtwork}
+          onSelectOpening={onSelectOpening}
+        />
+        {/* Selection decorations: the selected room's wash/outline/handle set
+            + live length labels, then the selected partition's face labels and
+            endpoint handles. Both paint above placed objects, at rest nothing.
+            committedRooms is the pre-drag baseline the reshape diff measures. */}
+        <PlanHandlesLayer
+          rooms={planScene.rooms}
+          partitions={planScene.partitions}
+          committedRooms={project.floor.rooms}
+          selectedRoomId={selectedRoomId}
+          selectedFreestandingWallId={selectedFreestandingWallId}
+          reshapeRoomId={reshapeRoomId}
+          handleSizeMm={handleSizeMm}
+          wallUnit={wallUnit}
+          hoveredWallId={hoveredWallId}
+          selectedVertexId={selectedVertexId}
+          drag={drag}
+          vertexDrag={vertexDrag}
+          wallDrag={wallDrag}
+          partitionDrag={partitionDrag}
+          beginDrag={beginDrag}
+          beginWallDrag={beginWallDrag}
+          beginVertexDrag={beginVertexDrag}
+          handleSplitWallClick={handleSplitWallClick}
+          beginPartitionDrag={beginPartitionDrag}
+        />
+        {/* Gestural overlays: the polygon-room draw preview + capture rect, the
+            partition- and rectangle-draw previews, the armed-tool/drop ghosts,
+            the snap guides, and the in-progress marquee. activeGuides picks the
+            single live gesture's guides in the same precedence as before. */}
+        <PlanOverlaysLayer
+          drawRoomActive={drawRoomActive}
+          draw={draw}
+          partitionToolActive={partitionToolActive}
+          partitionDraw={partitionDraw}
+          drawRectActive={drawRectActive}
+          rectDraw={rectDraw}
+          toolGhost={toolGhost}
+          dropGhost={dropGhost}
+          marquee={marquee}
+          activeGuides={
+            objectDrag?.activeGuides ??
+            dropGhost?.activeGuides ??
+            drag?.activeGuides ??
+            roomDrag?.activeGuides ??
+            toolGhost?.activeGuides ??
+            []
+          }
+          activeTool={activeTool}
+          viewBox={viewBoxBounds}
+          handleSizeMm={handleSizeMm}
+          wallUnit={wallUnit}
+          wallObjectMinDepthMm={wallObjectMinDepthMm}
+          floorWalls={floorWallsForTool}
+          handleDrawClick={handleDrawClick}
+          handleDrawPointerMove={handleDrawPointerMove}
+          beginPartitionDraw={beginPartitionDraw}
+          beginRectDraw={beginRectDraw}
+        />
       </svg>
     </div>
   );
