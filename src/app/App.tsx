@@ -1020,7 +1020,13 @@ export function App() {
   return (
     // One provider for every hover tooltip in the app (plan/elevation
     // placements), so they share a single warm-up delay and skip-delay window.
-    <TooltipProvider delayDuration={400}>
+    // disableHoverableContent: every tooltip in the app is a plain text hint,
+    // so nothing needs the pointer to reach the bubble — and Radix's
+    // hoverable-content "grace polygon" (trigger→content hull) is wider than
+    // the 32px toolbar segments, so a pointer arriving on a neighbor inside
+    // the previous tooltip's polygon counted as in-transit and the new
+    // tooltip silently never opened until the pointer left and came back.
+    <TooltipProvider delayDuration={400} disableHoverableContent>
     <main className="app-shell">
       <AppRail
         leftPanel={visibleLeftPanel}
