@@ -13,8 +13,9 @@ export type HelpHint = { action: string; keys: string[] };
 export type HelpGroup = { title: string; hints: HelpHint[] };
 
 // Single-key toolbar accelerators (useToolbarShortcuts) — keyboard only; touch
-// users tap the same toolbar buttons directly. Plan owns Partition/Draw room,
-// Elevation owns Eyeline; the opening tools and Grid/Snap/Overlap are shared.
+// users tap the same toolbar buttons directly. Plan owns Partition and the
+// room-draw tools (R rectangle, ⇧R outline), Elevation owns Eyeline; the
+// opening tools and Grid/Snap/Overlap are shared.
 function toolbarKeyboardGroup(view: "plan" | "elevation"): HelpGroup {
   return {
     title: "Toolbar",
@@ -25,7 +26,8 @@ function toolbarKeyboardGroup(view: "plan" | "elevation"): HelpGroup {
       ...(view === "plan"
         ? [
             { action: "Draw a partition", keys: ["P"] },
-            { action: "Draw a room", keys: ["R"] }
+            { action: "Draw a rectangular room", keys: ["R"] },
+            { action: "Draw a room outline", keys: ["⇧ R"] }
           ]
         : []),
       { action: "Toggle grid", keys: ["G"] },
@@ -80,7 +82,11 @@ function planGroups(inputMode: HelpInputMode, mod: string): HelpGroup[] {
         { action: "Select several", keys: ["Drag empty floor", "⇧ keeps existing"] },
         { action: "Move a room or object", keys: ["Drag it"] },
         {
-          action: "Draw a room (toolbar)",
+          action: "Draw a rectangular room (toolbar)",
+          keys: ["Drag corner to corner", "Esc cancels"]
+        },
+        {
+          action: "Draw a room outline (toolbar)",
           keys: ["Click corners", "Enter closes", "⌫ undoes one", "Esc cancels"]
         },
         { action: "Edit a room's shape", keys: ["Double-click it", "Esc done"] },

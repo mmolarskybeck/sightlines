@@ -242,6 +242,21 @@ export function createNextRectangleRoom(
   });
 }
 
+export function createNextDrawnRectangleRoom(
+  floor: Floor,
+  heightMm: number,
+  rect: { offsetXMm: number; offsetYMm: number; widthMm: number; depthMm: number }
+): RoomPlacement {
+  const roomNumber = getNextRoomNumber(floor);
+
+  return createRectangularRoomPlacement({
+    roomId: `room-${roomNumber}`,
+    name: `Gallery ${roomNumber}`,
+    heightMm,
+    ...rect
+  });
+}
+
 function getNextRoomNumber(floor: Floor): number {
   const roomIds = new Set(floor.rooms.map((placement) => placement.roomId));
   let roomNumber = floor.rooms.length + 1;

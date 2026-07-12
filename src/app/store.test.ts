@@ -654,6 +654,48 @@ describe("app store", () => {
     expect(state.error).toBeTruthy();
   });
 
+  it("addDrawnRectangleRoom adds a room in one undo step and selects it", async () => {
+    await store.getState().addDrawnRectangleRoom({
+      offsetXMm: 12_000,
+      offsetYMm: 0,
+      widthMm: 4_000,
+      depthMm: 2_500
+    });
+
+    const state = store.getState();
+    expect(state.project!.floor.rooms).toHaveLength(2);
+    const added = state.project!.floor.rooms[1];
+    expect(added.roomId).toBe("room-2");
+    expect(added.offsetXMm).toBe(12_000);
+    expect(added.offsetYMm).toBe(0);
+    expect(added.room.walls).toHaveLength(4);
+    expect(state.undoStack).toHaveLength(1);
+    expect(state.undoStack.at(-1)?.label).toBe("Add Gallery 2");
+    // Room is selected, and the sidebar wall context is its first wall.
+    expect(roomIdOf(state.selection)).toBe("room-2");
+    expect(state.wallContextId).toBe("room-2-wall-north");
+    expect(state.viewMode).toBe("plan");
+
+    await store.getState().undo();
+    expect(store.getState().project!.floor.rooms).toHaveLength(1);
+  });
+
+  it("addDrawnRectangleRoom rejects non-positive dimensions without committing", async () => {
+    const before = store.getState().project!;
+
+    await store.getState().addDrawnRectangleRoom({
+      offsetXMm: 0,
+      offsetYMm: 0,
+      widthMm: 0,
+      depthMm: 2_500
+    });
+
+    const state = store.getState();
+    expect(state.project).toBe(before);
+    expect(state.undoStack).toHaveLength(0);
+    expect(state.error).toBeTruthy();
+  });
+
   it("skips a resize that does not change any wall", async () => {
     const state = store.getState();
     const currentLength = getSelectedWall(

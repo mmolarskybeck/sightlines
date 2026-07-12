@@ -2521,40 +2521,62 @@ body.panels-resizing * {
   flex: 0 0 auto;
 }
 
-/* Left zone of .view-toolbar: the Insert tools — a quiet caption plus
-   three individual soft icon buttons (door/window/blocked-zone, see
-   PlanView's activeTool prop), the same family as the view-option
-   toggles. No track: most of the time no tool is armed, and an empty
-   tray reads wrong. Arming a tool is an engaged mode, so the armed
-   button presses in (petrol wash + inset shadow) exactly like Grid/Snap.
-   flex:none because the cluster must never be squeezed by the flexing
-   right zone — compactness comes from the container queries below. */
-.insert-tools {
+/* Left zone of .view-toolbar: a captioned tool cluster — one joined soft
+   group holding the caption and an icon segment per tool. Shared by the
+   Insert cluster (door/window/blocked-zone) and the Draw cluster
+   (rectangle/outline/partition). No track: most of the time no tool is
+   armed, and an empty tray reads wrong. Arming a tool is an engaged mode,
+   so the armed segment presses in (petrol wash + inset shadow) exactly
+   like Grid/Snap. flex:none because the cluster must never be squeezed by
+   the flexing right zone — compactness comes from the container queries
+   below. */
+.tool-cluster {
   display: inline-flex;
   align-items: center;
   flex: none;
-  gap: 4px;
 }
 
-.insert-tools-label {
+/* The caption sits inside the shared fill as a leading cell behind a
+   hairline (same dock-inside-the-control move as the checklist's sort
+   trigger), so "Draw"/"Insert" and their tools read as one object. Muted
+   ink and no hover keep it legible as a label, not a fourth button. */
+.tool-cluster-label {
   display: inline-flex;
   align-items: center;
-  padding: 0 var(--toolbar-space-1);
+  padding: 0 calc(var(--toolbar-space-1) + 4px);
+  border-right: 1px solid var(--surface-strong);
   color: var(--muted);
-  font-size: var(--type-sm);
+  /* One step below the 13px semibold button labels (Grid, Snap): labels
+     that NAME a control drop a size, not just a weight — size + weight
+     together keep caption vs action legible at a squint. Shared with
+     .unit-select-label ("Precision"), the same docked-label role. */
+  font-size: var(--type-xs);
   font-weight: var(--weight-medium);
 }
 
-.insert-tool-segment {
+/* The segments share one soft fill — the same --surface chip vocabulary as
+   every other toolbar control, spanning all three tools so the cluster reads
+   as a single object rather than three floating buttons. Not a recessed
+   track: no --track ground, no raised chip — tool arming is usually empty,
+   and states carve individual segments out of the shared fill instead.
+   overflow clips the square segment states to the group's outer radius. */
+.tool-cluster-segments {
+  display: inline-flex;
+  border-radius: var(--radius-seg);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.tool-cluster-segment {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
+  width: 32px;
   min-height: 30px;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-seg);
-  background: var(--surface);
+  border-radius: 0;
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
   transition:
@@ -2563,17 +2585,46 @@ body.panels-resizing * {
     color 150ms ease-out;
 }
 
-.insert-tool-segment:hover:not([aria-disabled="true"]):not([aria-pressed="true"]) {
+/* Interior hairlines chunk the shared fill into three tools without
+   promoting any of them to its own chip. */
+.tool-cluster-segment + .tool-cluster-segment {
+  border-left: 1px solid var(--surface-strong);
+}
+
+.tool-cluster-segment:hover:not([aria-disabled="true"]):not([aria-pressed="true"]) {
   background: var(--surface-strong);
   color: var(--ink);
 }
 
+/* The global button focus ring (2px, offset 2px outward) would be clipped
+   by the group's overflow everywhere except over the neighboring segment,
+   leaving a stray vertical bar — draw it inset instead, like the panel
+   resize handles and canvases do. */
+.tool-cluster-segment:focus-visible {
+  outline-offset: -2px;
+}
+
 /* The armed tool: engaged mode = pressed in, matching Grid/Snap, plus the
-   petrol inner ring that ranks armed tools above resting view toggles. */
-.insert-tool-segment[aria-pressed="true"] {
+   petrol inner ring that ranks armed tools above resting view toggles. The
+   wash keeps the shared chip radius so a pressed tool is the same rounded
+   petrol chip as every other pressed toolbar control, floating in the
+   group's fill; the hairlines beside it yield so nothing tangents its
+   corners. */
+.tool-cluster-segment[aria-pressed="true"] {
+  border-left-color: transparent;
+  border-radius: var(--radius-seg);
   background: var(--primary-soft);
   color: var(--primary-strong);
   box-shadow: var(--shadow-pressed), var(--ring-armed);
+}
+
+.tool-cluster-segment[aria-pressed="true"] + .tool-cluster-segment {
+  border-left-color: transparent;
+}
+
+.tool-cluster-segments:has(.tool-cluster-segment[aria-pressed="true"]:first-of-type)
+  .tool-cluster-label {
+  border-right-color: transparent;
 }
 
 /* Compact hover hint for toolbar icon controls — a quieter cut of the
@@ -2626,29 +2677,29 @@ body.panels-resizing * {
   }
 }
 
-/* Disabled insert tools keep the aria-disabled pattern (still focusable, so
-   keyboard/SR users reach them and their reason), not native disabled — so
-   the fogged look and cursor hang off [aria-disabled] instead of :disabled. */
-.insert-tool-segment[aria-disabled="true"] {
+/* A disabled cluster tool keeps the aria-disabled pattern (still focusable, so
+   keyboard/SR users reach it and its reason), not native disabled — so the
+   fogged look and cursor hang off [aria-disabled] instead of :disabled. */
+.tool-cluster-segment[aria-disabled="true"] {
   cursor: not-allowed;
 }
 
-/* A disabled insert control means the current 2D surface is missing its
-   required context (currently: Elevation has no selected wall). */
-.insert-tools:has(.insert-tool-segment[aria-disabled="true"]) {
+/* A disabled cluster (currently only Insert can disable) means the current 2D
+   surface is missing its required context (Elevation has no selected wall). */
+.tool-cluster:has(.tool-cluster-segment[aria-disabled="true"]) {
   cursor: not-allowed;
   opacity: 0.45;
 }
 
-/* Narrow-mode Insert control. The full segmented picker remains the desktop
-   affordance; this control is intentionally quiet and compact so insertion
-   reads as one action until the user chooses a specific opening. */
-.compact-insert-tools {
+/* Narrow-mode cluster control. The full segmented picker remains the desktop
+   affordance; this control is intentionally quiet and compact so the cluster
+   reads as one action until the user picks a specific tool from the menu. */
+.compact-cluster-tools {
   display: none;
   flex: none;
 }
 
-.compact-insert-trigger {
+.compact-cluster-trigger {
   display: inline-flex;
   min-width: 30px;
   height: 30px;
@@ -2670,9 +2721,9 @@ body.panels-resizing * {
 
 /* aria-expanded alongside data-state: the trigger sits inside a Radix
    Tooltip trigger, whose own data-state can clobber the menu's. */
-.compact-insert-trigger:hover:not([aria-disabled="true"]),
-.compact-insert-trigger[data-state="open"],
-.compact-insert-trigger[aria-expanded="true"] {
+.compact-cluster-trigger:hover:not([aria-disabled="true"]),
+.compact-cluster-trigger[data-state="open"],
+.compact-cluster-trigger[aria-expanded="true"] {
   background: var(--surface-strong);
   color: var(--ink);
 }
@@ -2680,7 +2731,7 @@ body.panels-resizing * {
 /* The trigger stands in for whichever tool is armed (icon + name swap in
    App), so it earns the same armed emphasis as a segment: petrol wash,
    pressed shadow, petrol ring. */
-.compact-insert-trigger[data-active="true"] {
+.compact-cluster-trigger[data-active="true"] {
   background: var(--primary-soft);
   color: var(--primary-strong);
   box-shadow: var(--shadow-pressed), var(--ring-armed);
@@ -2688,16 +2739,16 @@ body.panels-resizing * {
 
 /* Disabled compact trigger: fogged like the segmented picker, still focusable
    (aria-disabled, not native disabled) so the reason tooltip is reachable. */
-.compact-insert-trigger[aria-disabled="true"] {
+.compact-cluster-trigger[aria-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.45;
 }
 
-.compact-insert-menu {
+.compact-cluster-menu {
   min-width: 148px;
 }
 
-.compact-insert-item[data-active="true"] {
+.compact-cluster-item[data-active="true"] {
   background: var(--primary-soft);
   color: var(--primary-strong);
   font-weight: var(--weight-semibold);
@@ -2810,12 +2861,12 @@ body.panels-resizing * {
   padding-inline: 6px;
 }
 
-.view-toolbar:is([data-density="compact"], [data-density="tight"]) .insert-tools {
+.view-toolbar:is([data-density="compact"], [data-density="tight"]) .tool-cluster {
   display: none;
 }
 
 .view-toolbar:is([data-density="compact"], [data-density="tight"])
-  .compact-insert-tools {
+  .compact-cluster-tools {
   display: inline-flex;
 }
 
@@ -2829,14 +2880,14 @@ body.panels-resizing * {
   justify-content: flex-start;
 }
 
-.view-toolbar[data-density="tight"] .compact-insert-trigger {
+.view-toolbar[data-density="tight"] .compact-cluster-trigger {
   width: 40px;
   padding: 0;
   justify-content: center;
 }
 
-.view-toolbar[data-density="tight"] .compact-insert-label,
-.view-toolbar[data-density="tight"] .compact-insert-caret {
+.view-toolbar[data-density="tight"] .compact-cluster-label,
+.view-toolbar[data-density="tight"] .compact-cluster-caret {
   display: none;
 }
 
@@ -2861,16 +2912,16 @@ body.panels-resizing * {
     padding-inline: 8px;
   }
 
-  .view-toolbar .insert-tools {
+  .view-toolbar .tool-cluster {
     min-height: 40px;
   }
 
-  .view-toolbar .insert-tool-segment {
+  .view-toolbar .tool-cluster-segment {
     width: 40px;
     min-height: 40px;
   }
 
-  .view-toolbar .compact-insert-trigger {
+  .view-toolbar .compact-cluster-trigger {
     min-width: 40px;
     height: 40px;
     min-height: 40px;
@@ -3074,6 +3125,12 @@ body.panels-resizing * {
   display: inline-flex;
   align-items: center;
   gap: var(--toolbar-space-2);
+  /* Explicit height, not just min-height: the Toggle primitive's Tailwind
+     h-8 (32px) would otherwise win, leaving these toggles 1px proud of the
+     row's 30px lane (clusters, Precision, Units, compact triggers) on both
+     edges. The 750px container query below re-raises everything to 40px
+     touch targets together. */
+  height: 30px;
   min-height: 30px;
   padding: 0 calc(var(--toolbar-space-2) + 1px);
   border: 0;
@@ -3142,8 +3199,12 @@ body.panels-resizing * {
   background: var(--surface-strong);
 }
 
+/* Same docked-label role as .tool-cluster-label, so the same voice: one
+   size below the value it names, muted rather than subtle — --subtle on
+   the surface fill lands near 3.5:1, under AA for 13px text. */
 .unit-select-label {
-  color: var(--subtle);
+  color: var(--muted);
+  font-size: var(--type-xs);
 }
 
 .select-trigger {
@@ -3472,7 +3533,7 @@ body.panels-resizing * {
   outline-offset: -2px;
 }
 
-/* An armed insert-tools button (App's view-toolbar strip): the crosshair
+/* An armed tool-cluster button (App's view-toolbar strip): the crosshair
    signals "click to place" the way a drawing tool would, distinct from the
    plain pointer used for selecting and dragging existing geometry. */
 .plan-svg.tool-armed,

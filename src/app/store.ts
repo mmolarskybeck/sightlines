@@ -2,7 +2,11 @@ import { create } from "zustand";
 import { z } from "zod";
 import { createBrowserImageProcessor } from "../domain/assets/browserImageProcessor";
 import { titleFromFilename, validateImageFile, type ImageProcessor } from "../domain/assets/imageIntake";
-import { createNextPolygonRoom, createNextRectangleRoom } from "../domain/geometry/createRoom";
+import {
+  createNextDrawnRectangleRoom,
+  createNextPolygonRoom,
+  createNextRectangleRoom
+} from "../domain/geometry/createRoom";
 import type { Point } from "../domain/geometry/polygon";
 import {
   resizeWallPreservingAngles,
@@ -216,6 +220,12 @@ export type AppState = ArrangeSliceState &
   setDefaultCenterlineHeightMm: (heightMm: number) => Promise<void>;
   addRectangleRoom: () => Promise<void>;
   addPolygonRoom: (pointsFloorMm: Point[]) => Promise<void>;
+  addDrawnRectangleRoom: (rect: {
+    offsetXMm: number;
+    offsetYMm: number;
+    widthMm: number;
+    depthMm: number;
+  }) => Promise<void>;
   addFreestandingWall: (startFloorMm: Point, endFloorMm: Point) => Promise<void>;
   moveFreestandingWall: (wallId: string, deltaFloorMm: Point) => Promise<void>;
   moveFreestandingWallEndpoint: (
@@ -1187,6 +1197,46 @@ export function createAppStore(deps: AppStoreDeps) {
         };
 
         await applyEdit(`Add room`, () => nextProject, {
+          // Select the new room and move the sidebar wall context to its first
+          // wall, so plan handles and the elevation switcher both land on it.
+          ...selectionWrite(
+            nextProject,
+            { kind: "room", roomId: roomPlacement.roomId },
+            roomPlacement.room.walls[0]?.id ?? null
+          ),
+          viewMode: "plan"
+        });
+      },
+
+      async addDrawnRectangleRoom(rect) {
+        const project = get().project;
+        if (!project) return;
+
+        // The draw tool already enforces a minimum size, but the constructor is
+        // the defense-in-depth boundary — a bad rectangle fails calmly here
+        // rather than corrupting the document.
+        let roomPlacement;
+        try {
+          roomPlacement = createNextDrawnRectangleRoom(
+            project.floor,
+            project.defaultWallHeightMm,
+            rect
+          );
+        } catch (error) {
+          set({
+            error: `Could not add that room (${
+              error instanceof Error ? error.message : "invalid rectangle."
+            }).`
+          });
+          return;
+        }
+
+        const nextProject: Project = {
+          ...project,
+          floor: { rooms: [...project.floor.rooms, roomPlacement] }
+        };
+
+        await applyEdit(`Add ${roomPlacement.room.name}`, () => nextProject, {
           // Select the new room and move the sidebar wall context to its first
           // wall, so plan handles and the elevation switcher both land on it.
           ...selectionWrite(

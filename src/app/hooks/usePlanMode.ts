@@ -14,6 +14,7 @@ import type { ViewMode } from "../store";
 export type PlanMode =
   | { kind: "idle" }
   | { kind: "placeOpening"; tool: OpeningKind }
+  | { kind: "drawRect" }
   | { kind: "drawRoom" }
   | { kind: "reshapeRoom"; roomId: string }
   | { kind: "drawPartition" };
@@ -24,6 +25,9 @@ export interface UsePlanModeResult {
   // callers (InsertToolPicker) compute null-vs-tool by comparing against the
   // current armed tool before calling this, exactly as App did before.
   armOpeningTool: (tool: OpeningKind | null) => void;
+  // Real toggle, same family as toggleDrawRoom: arms the rectangle-room tool
+  // (drag corner-to-corner), disarming whatever else was armed.
+  toggleDrawRect: () => void;
   // Real toggle: calling it while drawRoom is armed disarms it, otherwise
   // arms it (and implicitly disarms whatever else was armed).
   toggleDrawRoom: () => void;
@@ -50,6 +54,10 @@ export function usePlanMode(viewMode: ViewMode, selectedRoomId: string | null): 
 
   const armOpeningTool = useCallback((tool: OpeningKind | null) => {
     setMode(tool ? { kind: "placeOpening", tool } : IDLE);
+  }, []);
+
+  const toggleDrawRect = useCallback(() => {
+    setMode((current) => (current.kind === "drawRect" ? IDLE : { kind: "drawRect" }));
   }, []);
 
   const toggleDrawRoom = useCallback(() => {
@@ -92,5 +100,13 @@ export function usePlanMode(viewMode: ViewMode, selectedRoomId: string | null): 
     );
   }, [selectedRoomId]);
 
-  return { mode, armOpeningTool, toggleDrawRoom, toggleReshapeRoom, togglePartitionTool, disarm };
+  return {
+    mode,
+    armOpeningTool,
+    toggleDrawRect,
+    toggleDrawRoom,
+    toggleReshapeRoom,
+    togglePartitionTool,
+    disarm
+  };
 }
