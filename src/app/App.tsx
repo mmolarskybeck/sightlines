@@ -2001,10 +2001,14 @@ function ToolClusterPicker({
       aria-label={caption}
       aria-disabled={disabled || undefined}
     >
-      <span className="tool-cluster-label" aria-hidden="true">
-        {caption}
-      </span>
       <div className="tool-cluster-segments">
+        {/* The caption docks inside the shared fill behind a hairline (the
+            checklist's sort trigger is the precedent), so the word and its
+            three tools read as one object. aria-hidden: the group's
+            aria-label already announces it. */}
+        <span className="tool-cluster-label" aria-hidden="true">
+          {caption}
+        </span>
         {segments.map((segment) => (
           // aria-disabled (not native disabled) keeps each segment focusable,
           // so keyboard/SR users still reach it and hear WHY it's off — the

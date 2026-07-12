@@ -2529,10 +2529,15 @@ body.panels-resizing * {
   gap: 4px;
 }
 
+/* The caption sits inside the shared fill as a leading cell behind a
+   hairline (same dock-inside-the-control move as the checklist's sort
+   trigger), so "Draw"/"Insert" and their tools read as one object. Muted
+   ink and no hover keep it legible as a label, not a fourth button. */
 .tool-cluster-label {
   display: inline-flex;
   align-items: center;
-  padding: 0 var(--toolbar-space-1);
+  padding: 0 calc(var(--toolbar-space-1) + 4px);
+  border-right: 1px solid var(--surface-strong);
   color: var(--muted);
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
@@ -2580,12 +2585,35 @@ body.panels-resizing * {
   color: var(--ink);
 }
 
+/* The global button focus ring (2px, offset 2px outward) would be clipped
+   by the group's overflow everywhere except over the neighboring segment,
+   leaving a stray vertical bar — draw it inset instead, like the panel
+   resize handles and canvases do. */
+.tool-cluster-segment:focus-visible {
+  outline-offset: -2px;
+}
+
 /* The armed tool: engaged mode = pressed in, matching Grid/Snap, plus the
-   petrol inner ring that ranks armed tools above resting view toggles. */
+   petrol inner ring that ranks armed tools above resting view toggles. The
+   wash keeps the shared chip radius so a pressed tool is the same rounded
+   petrol chip as every other pressed toolbar control, floating in the
+   group's fill; the hairlines beside it yield so nothing tangents its
+   corners. */
 .tool-cluster-segment[aria-pressed="true"] {
+  border-left-color: transparent;
+  border-radius: var(--radius-seg);
   background: var(--primary-soft);
   color: var(--primary-strong);
   box-shadow: var(--shadow-pressed), var(--ring-armed);
+}
+
+.tool-cluster-segment[aria-pressed="true"] + .tool-cluster-segment {
+  border-left-color: transparent;
+}
+
+.tool-cluster-segments:has(.tool-cluster-segment[aria-pressed="true"]:first-of-type)
+  .tool-cluster-label {
+  border-right-color: transparent;
 }
 
 /* Compact hover hint for toolbar icon controls — a quieter cut of the
