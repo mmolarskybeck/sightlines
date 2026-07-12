@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { toast } from "sonner";
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
 import { DotsSixVerticalIcon } from "@phosphor-icons/react/dist/csr/DotsSixVertical";
 import { FileArrowUpIcon } from "@phosphor-icons/react/dist/csr/FileArrowUp";
@@ -55,6 +56,11 @@ const COARSE_POINTER =
 // straying past 10px (that's a scroll, not a press-to-drag).
 const LONG_PRESS_MS = 300;
 const TOUCH_DRAG_SLOP_PX = 10;
+
+// Shared with the row's `title` tooltip below — one placement per artwork
+// per project, so a placed row can't be dragged out again (spec 2026-07-07).
+const ALREADY_PLACED_DRAG_MESSAGE =
+  "Already placed — drag is disabled. Duplicate the project to try another arrangement.";
 
 type ChecklistFilter = "all" | "placed" | "unplaced";
 export type ChecklistSort = "project" | "title" | "artist" | "status";
@@ -542,6 +548,16 @@ function ChecklistRow({
   // the drag here keeps the checklist from offering a move that would be rejected.
   const isDraggable = artwork !== null && !isPlaced;
 
+  // A placed row's drag is a silent no-op otherwise — the only feedback was
+  // the `title` tooltip above, which nothing surfaces without a hover. This
+  // fires on the first pointerdown/dragstart a drag attempt produces; the
+  // shared toast id dedupes repeat attempts into one visible toast rather
+  // than stacking a new one per press.
+  const notifyAlreadyPlaced = () => {
+    if (!isPlaced) return;
+    toast.warning(ALREADY_PLACED_DRAG_MESSAGE, { id: "checklist-already-placed" });
+  };
+
   // Store image dimensions for creating a properly-sized drag preview with
   // correct aspect ratio (task: fix squished drag thumbnail).
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
@@ -685,11 +701,7 @@ function ChecklistRow({
       // Coarse pointers use our long-press drag (below); native draggable would
       // race iPadOS's own long-press, so it's suppressed there.
       draggable={isDraggable && !COARSE_POINTER}
-      title={
-        isPlaced
-          ? "Already placed — drag is disabled. Duplicate the project to try another arrangement."
-          : undefined
-      }
+      title={isPlaced ? ALREADY_PLACED_DRAG_MESSAGE : undefined}
       role="button"
       tabIndex={0}
       onClick={onSelect}
@@ -711,6 +723,8 @@ function ChecklistRow({
               }
               longPressTimerRef.current = setTimeout(armTouchDrag, LONG_PRESS_MS);
             }
+          : isPlaced
+          ? () => notifyAlreadyPlaced()
           : undefined
       }
       onPointerMove={
@@ -818,6 +832,15 @@ function ChecklistRow({
 
               onDragStateChange?.(artworkId);
               beginArtworkDragSession(artworkId);
+            }
+          : isPlaced
+          ? (event) => {
+              // The row itself isn't draggable, but the thumbnail <img> is
+              // natively draggable by default and its dragstart still
+              // bubbles here — block it so a placed row's image can't be
+              // dragged out on its own.
+              event.preventDefault();
+              notifyAlreadyPlaced();
             }
           : undefined
       }
