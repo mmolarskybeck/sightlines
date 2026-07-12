@@ -2538,22 +2538,41 @@ body.panels-resizing * {
   font-weight: var(--weight-medium);
 }
 
+/* The segments share one soft fill — the same --surface chip vocabulary as
+   every other toolbar control, spanning all three tools so the cluster reads
+   as a single object rather than three floating buttons. Not a recessed
+   track: no --track ground, no raised chip — tool arming is usually empty,
+   and states carve individual segments out of the shared fill instead.
+   overflow clips the square segment states to the group's outer radius. */
+.tool-cluster-segments {
+  display: inline-flex;
+  border-radius: var(--radius-seg);
+  background: var(--surface);
+  overflow: hidden;
+}
+
 .tool-cluster-segment {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
+  width: 32px;
   min-height: 30px;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-seg);
-  background: var(--surface);
+  border-radius: 0;
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
   transition:
     background-color 150ms ease-out,
     box-shadow 150ms ease-out,
     color 150ms ease-out;
+}
+
+/* Interior hairlines chunk the shared fill into three tools without
+   promoting any of them to its own chip. */
+.tool-cluster-segment + .tool-cluster-segment {
+  border-left: 1px solid var(--surface-strong);
 }
 
 .tool-cluster-segment:hover:not([aria-disabled="true"]):not([aria-pressed="true"]) {

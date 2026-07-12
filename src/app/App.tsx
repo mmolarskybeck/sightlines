@@ -1207,26 +1207,12 @@ export function App() {
           (viewMode !== "3d" || project.floor.rooms.length > 0) ? (
             <div className="view-toolbar" ref={toolbarRef}>
               <div className="view-tools-primary">
-                {viewMode === "plan" || viewMode === "elevation" ? (
-                  <>
-                    <InsertToolPicker
-                      activeTool={activeTool}
-                      disabled={viewMode === "elevation" && !selectedWall}
-                      onToolChange={armOpeningTool}
-                    />
-                    <CompactInsertPicker
-                      activeTool={activeTool}
-                      disabled={viewMode === "elevation" && !selectedWall}
-                      onToolChange={armOpeningTool}
-                    />
-                  </>
-                ) : null}
+                {/* Draw leads: creating structure precedes decorating it, and
+                    the plan workflow starts by drawing a room. Elevation drops
+                    the whole Draw block, leaving Insert alone at the zone's
+                    start in both views. */}
                 {viewMode === "plan" ? (
                   <>
-                    {/* The hairline scopes each caption to its own cluster —
-                        without it "Insert"/"Draw" read as labels for the whole
-                        zone rather than their three tools. */}
-                    <div aria-hidden="true" className="toolbar-divider" />
                     <DrawToolPicker
                       rectActive={drawRectActive}
                       onRectToggle={toggleDrawRect}
@@ -1242,6 +1228,24 @@ export function App() {
                       onOutlineToggle={toggleDrawRoom}
                       partitionActive={partitionToolActive}
                       onPartitionToggle={togglePartitionTool}
+                    />
+                    {/* The hairline scopes each caption to its own cluster —
+                        without it "Draw"/"Insert" read as labels for the whole
+                        zone rather than their three tools. */}
+                    <div aria-hidden="true" className="toolbar-divider" />
+                  </>
+                ) : null}
+                {viewMode === "plan" || viewMode === "elevation" ? (
+                  <>
+                    <InsertToolPicker
+                      activeTool={activeTool}
+                      disabled={viewMode === "elevation" && !selectedWall}
+                      onToolChange={armOpeningTool}
+                    />
+                    <CompactInsertPicker
+                      activeTool={activeTool}
+                      disabled={viewMode === "elevation" && !selectedWall}
+                      onToolChange={armOpeningTool}
                     />
                   </>
                 ) : null}
@@ -1968,10 +1972,11 @@ type ClusterSegment = InsertToolMeta & { pressed: boolean; onClick: () => void }
 // state and select handler.
 type ClusterTool = InsertToolMeta & { active: boolean; onSelect: () => void };
 
-// The generic captioned segmented picker: a quiet caption followed by
-// individual soft icon buttons, one per tool. Insert and Draw both render
-// through this — the caption, the segment list, and the optional disabled
-// context are all the callers supply. Toggle semantics match the old floating
+// The generic captioned segmented picker: a quiet caption followed by one
+// joined soft group — a single surface fill holding a flush icon segment per
+// tool, split by interior hairlines. Insert and Draw both render through
+// this — the caption, the segment list, and the optional disabled context are
+// all the callers supply. Toggle semantics match the old floating
 // palette: the armed button reads pressed in petrol, clicking it again disarms,
 // and the view's own Escape/click-to-place handling disarms via the caller's
 // onClick. The caption is aria-hidden (the group's aria-label already carries
@@ -1999,43 +2004,45 @@ function ToolClusterPicker({
       <span className="tool-cluster-label" aria-hidden="true">
         {caption}
       </span>
-      {segments.map((segment) => (
-        // aria-disabled (not native disabled) keeps each segment focusable, so
-        // keyboard/SR users still reach it and hear WHY it's off — the reason
-        // rides the SAME styled Tooltip, firing on hover AND focus. The click
-        // is a no-op while disabled; the fogged look ports to [aria-disabled]
-        // in global.css. Pressed → the tooltip teaches the exit ("Esc
-        // cancels"); resting → it echoes the accelerator ("— D").
-        <Tooltip key={segment.key}>
-          <TooltipTrigger asChild>
-            <button
-              aria-label={segment.label}
-              aria-pressed={segment.pressed}
-              aria-disabled={disabled || undefined}
-              className="tool-cluster-segment"
-              type="button"
-              onClick={disabled ? undefined : segment.onClick}
-            >
-              {segment.icon}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent className="toolbar-tooltip" side="bottom">
-            {disabled ? (
-              disabledReason
-            ) : segment.pressed ? (
-              <>
-                {segment.armed}
-                <ToolbarTooltipKbd hint="Esc cancels" />
-              </>
-            ) : (
-              <>
-                {segment.hint}
-                <ToolbarTooltipKbd hint={segment.kbd} />
-              </>
-            )}
-          </TooltipContent>
-        </Tooltip>
-      ))}
+      <div className="tool-cluster-segments">
+        {segments.map((segment) => (
+          // aria-disabled (not native disabled) keeps each segment focusable,
+          // so keyboard/SR users still reach it and hear WHY it's off — the
+          // reason rides the SAME styled Tooltip, firing on hover AND focus.
+          // The click is a no-op while disabled; the fogged look ports to
+          // [aria-disabled] in global.css. Pressed → the tooltip teaches the
+          // exit ("Esc cancels"); resting → it echoes the accelerator ("— D").
+          <Tooltip key={segment.key}>
+            <TooltipTrigger asChild>
+              <button
+                aria-label={segment.label}
+                aria-pressed={segment.pressed}
+                aria-disabled={disabled || undefined}
+                className="tool-cluster-segment"
+                type="button"
+                onClick={disabled ? undefined : segment.onClick}
+              >
+                {segment.icon}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="toolbar-tooltip" side="bottom">
+              {disabled ? (
+                disabledReason
+              ) : segment.pressed ? (
+                <>
+                  {segment.armed}
+                  <ToolbarTooltipKbd hint="Esc cancels" />
+                </>
+              ) : (
+                <>
+                  {segment.hint}
+                  <ToolbarTooltipKbd hint={segment.kbd} />
+                </>
+              )}
+            </TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
     </div>
   );
 }
