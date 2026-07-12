@@ -15,6 +15,7 @@ export type UseToolbarShortcutsParams = {
   activeTool: OpeningKind | null;
   armOpeningTool: (tool: OpeningKind | null) => void;
   togglePartitionTool: () => void;
+  toggleDrawRect: () => void;
   toggleDrawRoom: () => void;
   toggleShowGrid: () => void;
   toggleSnapToGrid: () => void;
@@ -29,9 +30,12 @@ export type UseToolbarShortcutsParams = {
 // idiom as the other shortcut hooks: guard editable targets, stand down when a
 // dialog is up (suspended) or a modifier is held (⌘/Ctrl/Alt reserve their own
 // chords), and ignore auto-repeat so a held key can't strobe a toggle. Plan
-// owns Partition/Draw-room (R), Elevation owns Eyeline (E); Grid/Snap/Overlap
-// and the opening tools work in both. Deliberately no sticky repeat-placement
-// modifier — arming is a plain toggle here, same as the buttons.
+// owns Partition (P) and the room-draw tools — R arms the rectangle room, ⇧R
+// the polygon outline; Elevation owns Eyeline (E); Grid/Snap/Overlap and the
+// opening tools work in both. Shift is deliberately let through the modifier
+// guard (line below) only so ⇧R can select the outline variant. Deliberately
+// no sticky repeat-placement modifier — arming is a plain toggle here, same as
+// the buttons.
 export function useToolbarShortcuts({
   viewMode,
   suspended,
@@ -39,6 +43,7 @@ export function useToolbarShortcuts({
   activeTool,
   armOpeningTool,
   togglePartitionTool,
+  toggleDrawRect,
   toggleDrawRoom,
   toggleShowGrid,
   toggleSnapToGrid,
@@ -80,7 +85,10 @@ export function useToolbarShortcuts({
         case "r":
           if (viewMode !== "plan") return;
           event.preventDefault();
-          toggleDrawRoom();
+          // R arms the rectangle-room tool (the frequent path); ⇧R the polygon
+          // outline. key.toLowerCase() normalizes "R" so both reach here.
+          if (event.shiftKey) toggleDrawRoom();
+          else toggleDrawRect();
           break;
         case "g":
           event.preventDefault();
@@ -113,6 +121,7 @@ export function useToolbarShortcuts({
     activeTool,
     armOpeningTool,
     togglePartitionTool,
+    toggleDrawRect,
     toggleDrawRoom,
     toggleShowGrid,
     toggleSnapToGrid,

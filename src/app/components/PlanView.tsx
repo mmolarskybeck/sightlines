@@ -144,6 +144,10 @@ const DRAW_EPS = 1e-6;
 // click, not a drawn wall — the create drag ignores it (same floor the
 // constructor rejects at).
 const PARTITION_MIN_LENGTH_MM = 100;
+// A rectangle-room drag whose either axis falls below this (floor mm) reads as
+// an accidental click rather than a room — well above pointer jitter, at or
+// below every common grid precision, and the smallest plausible room dimension.
+const RECT_ROOM_MIN_SIZE_MM = 500;
 // Fit view never frames a window smaller than this on either axis — an empty
 // or near-empty floor (or a single tiny room) would otherwise fit-zoom to a
 // window a couple meters wide, reading as absurdly zoomed-in. ~30ft.
@@ -331,6 +335,15 @@ type PartitionDrawState = {
   invalid: boolean;
 };
 
+// A rectangle-room create drag: the two grid-snapped corners, transient until
+// release (no store write until then, so undo removes the room in one step).
+// Floor-space mm.
+type RectDrawState = {
+  startMm: Vector2;
+  endMm: Vector2 | null;
+  invalid: boolean;
+};
+
 // A partition edit drag: a whole-body translation, or one endpoint re-drag
 // (resize/re-angle). Ref-mirrored, one commit on release, same discipline as
 // the vertex drag.
@@ -364,6 +377,9 @@ export function PlanView({
   onMoveRoomWall,
   onSplitWall,
   onDeleteRoomVertex,
+  drawRectActive = false,
+  onDrawRectChange,
+  onAddRectangleRoom,
   partitionToolActive = false,
   onPartitionToolChange,
   onAddFreestandingWall,
@@ -436,6 +452,22 @@ export function PlanView({
   // Commits a vertex removal (merges its two walls). Absent/inert if the
   // stretch goal wasn't wired — the Delete/Backspace handler below no-ops.
   onDeleteRoomVertex?: (roomId: string, vertexId: string) => Promise<void>;
+  // Rectangle-room draw tool — armed alongside the other tools in App's
+  // toolbar, mutually exclusive with them. Press at one corner, drag to the
+  // opposite corner, release to create an axis-aligned room. The armed flag is
+  // lifted (App owns the toggle); the transient two-corner state, preview, and
+  // grid snapping live here. Disarms after one commit (and on Escape/cancel).
+  drawRectActive?: boolean;
+  // Reports an arm/disarm up to App (release and Escape both disarm from here).
+  onDrawRectChange?: (active: boolean) => void;
+  // Commits the drawn rectangle in ONE store edit; App wires it to
+  // addDrawnRectangleRoom. Min-corner origin, absolute width/depth.
+  onAddRectangleRoom?: (rect: {
+    offsetXMm: number;
+    offsetYMm: number;
+    widthMm: number;
+    depthMm: number;
+  }) => void;
   // Partition (free-standing wall) tool — armed alongside the other tools in
   // App's toolbar, mutually exclusive with them. Drag draws the centerline;
   // release commits via onAddFreestandingWall. Editing (select/move/re-angle)
@@ -1033,6 +1065,36 @@ export function PlanView({
       onAddFreestandingWall?.(current.startMm, current.endMm);
     }
   });
+  // Rectangle-room create-drag — same deferred-closure and Escape-as-commit-gate
+  // discipline as the partition machine above. onMove snaps each corner via
+  // snapDrawPoint(pointerMm, null, …): passing prev=null gives a pure grid snap,
+  // so Shift's H/V axis-lock is structurally inert here — correct, since locking
+  // a corner to the start's axis would degenerate the rectangle to a line.
+  // onRelease disarms FIRST (after both commit and cancel — disarm-after-one),
+  // then commits min-corner origin + absolute size, but only while still armed
+  // (the !drawRectActive gate is the Escape-cancel path, exactly like partition).
+  const {
+    drag: rectDraw,
+    dragRef: rectDrawRef,
+    beginDrag: startRectDraw
+  } = useDragGesture<RectDrawState>({
+    onMove: (current, event) => {
+      const pointerMm = toSvgMm(event.clientX, event.clientY);
+      if (!pointerMm) return null;
+      const endMm = snapDrawPoint(pointerMm, null, event.shiftKey);
+      return { ...current, endMm, invalid: rectDrawInvalid(current.startMm, endMm) };
+    },
+    onRelease: (current) => {
+      onDrawRectChange?.(false);
+      if (!current.endMm || current.invalid || !drawRectActive) return;
+      onAddRectangleRoom?.({
+        offsetXMm: Math.min(current.startMm.xMm, current.endMm.xMm),
+        offsetYMm: Math.min(current.startMm.yMm, current.endMm.yMm),
+        widthMm: Math.abs(current.endMm.xMm - current.startMm.xMm),
+        depthMm: Math.abs(current.endMm.yMm - current.startMm.yMm)
+      });
+    }
+  });
   // Partition edit-drag (whole-body move, or one endpoint re-drag) — same
   // deferred-closure note as the machines above: onMove references
   // gridSnapTargets/snapThresholdMm/snapToGrid/snapDrawPoint, onRelease
@@ -1417,6 +1479,17 @@ export function PlanView({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [partitionToolActive, onPartitionToolChange]);
+
+  // Escape disarms the rectangle-room tool (same shape as the partition handler
+  // above); the release gate then skips the commit if a drag was in flight.
+  useEffect(() => {
+    if (!drawRectActive) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onDrawRectChange?.(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [drawRectActive, onDrawRectChange]);
 
   // Snap a draw point: grid + axis-lock to the previous point's x/y (so
   // consecutive walls line up), with Shift forcing an exact H/V segment.
@@ -1835,6 +1908,16 @@ export function PlanView({
     return roomIdContainingPoint(project, midpoint) === null;
   }
 
+  // A rectangle whose either side is below the minimum reads as a stray click,
+  // not a room. No room-containment check (unlike partitions): rooms may overlap
+  // on creation, and this also lets the FIRST room be drawn on an empty floor.
+  function rectDrawInvalid(startMm: Vector2, endMm: Vector2): boolean {
+    return (
+      Math.abs(endMm.xMm - startMm.xMm) < RECT_ROOM_MIN_SIZE_MM ||
+      Math.abs(endMm.yMm - startMm.yMm) < RECT_ROOM_MIN_SIZE_MM
+    );
+  }
+
   // Begin a partition centerline drag from the capture overlay (armed tool).
   function beginPartitionDraw(event: ReactPointerEvent<SVGRectElement>) {
     event.stopPropagation();
@@ -1846,6 +1929,20 @@ export function PlanView({
     if (!startMm) return;
     const snapped = snapDrawPoint(startMm, null, event.shiftKey);
     startPartitionDraw({ startMm: snapped, endMm: null, invalid: true });
+  }
+
+  // Begin a rectangle-room drag from the capture overlay (armed tool). Grid-snap
+  // the first corner; prev=null keeps it a pure grid snap (see the machine note).
+  function beginRectDraw(event: ReactPointerEvent<SVGRectElement>) {
+    event.stopPropagation();
+    if (suppressNextToolClickRef.current) {
+      suppressNextToolClickRef.current = false;
+      return;
+    }
+    const startMm = toSvgMm(event.clientX, event.clientY);
+    if (!startMm) return;
+    const snapped = snapDrawPoint(startMm, null, event.shiftKey);
+    startRectDraw({ startMm: snapped, endMm: null, invalid: true });
   }
 
   // Begin a partition edit drag: whole-body move, or one endpoint re-drag.
@@ -1946,7 +2043,7 @@ export function PlanView({
     // Stay inert until App wires the multi-select handlers (same gate as
     // elevation). Never start over an in-flight gesture. Draw mode owns the
     // whole surface via its capture overlay, so a marquee must not start there.
-    if (activeTool || drawRoomActive || partitionToolActive) return;
+    if (activeTool || drawRoomActive || partitionToolActive || drawRectActive) return;
     if (!onMarqueeSelect && !onClearSelection) return;
     if (drag || objectDrag || dropGhost || roomDrag) return;
 
@@ -2327,7 +2424,9 @@ export function PlanView({
       />
       <svg
         className={
-          activeTool || drawRoomActive || partitionToolActive ? "plan-svg tool-armed" : "plan-svg"
+          activeTool || drawRoomActive || partitionToolActive || drawRectActive
+            ? "plan-svg tool-armed"
+            : "plan-svg"
         }
         ref={svgRef}
         viewBox={viewBox}
@@ -2490,7 +2589,7 @@ export function PlanView({
                 // Shortcut for RoomInspector's "Edit shape" button — selects
                 // the room (if it wasn't already) and arms reshape mode on it
                 // in one gesture.
-                if (activeTool || drawRoomActive) return;
+                if (activeTool || drawRoomActive || drawRectActive) return;
                 event.stopPropagation();
                 onSelectRoom?.(placement.roomId);
                 onReshapeRoomChange?.(placement.roomId);
@@ -2526,7 +2625,14 @@ export function PlanView({
                 vectorEffect: "non-scaling-stroke"
               }}
               onPointerDown={(event) => {
-                if (activeTool || drawRoomActive || partitionToolActive || reshapeRoomId) return;
+                if (
+                  activeTool ||
+                  drawRoomActive ||
+                  partitionToolActive ||
+                  drawRectActive ||
+                  reshapeRoomId
+                )
+                  return;
                 beginPartitionDrag(partition, "move", event);
               }}
               onClick={(event) => {
@@ -2554,7 +2660,14 @@ export function PlanView({
           // of the very geometry the user is trying to read while dragging,
           // resizing, or aiming an armed placement tool.
           const tooltipsDisabled = Boolean(
-            drag || objectDrag || dropGhost || activeTool || roomDrag || drawRoomActive || vertexDrag
+            drag ||
+              objectDrag ||
+              dropGhost ||
+              activeTool ||
+              roomDrag ||
+              drawRoomActive ||
+              drawRectActive ||
+              vertexDrag
           );
           const artworkTooltip = (
             artworkId: string,
@@ -3187,6 +3300,63 @@ export function PlanView({
                         style={{ fill: color, fillOpacity: 0.4, stroke: color, strokeWidth: 2 }}
                         vectorEffect="non-scaling-stroke"
                       />
+                    </g>
+                  );
+                })()
+              : null}
+          </g>
+        ) : null}
+        {/* Rectangle-room tool: a full-viewBox capture rect owns the press-drag
+            between the two corners; the live preview rect and its W × D readout
+            paint on top at pointer-events:none. Release commits via
+            onAddRectangleRoom. */}
+        {drawRectActive ? (
+          <g className="rect-draw-layer">
+            <rect
+              x={viewBoxBounds.x}
+              y={viewBoxBounds.y}
+              width={viewBoxBounds.width}
+              height={viewBoxBounds.height}
+              fill="transparent"
+              style={{ cursor: "crosshair" }}
+              onPointerDown={beginRectDraw}
+            />
+            {rectDraw && rectDraw.endMm
+              ? (() => {
+                  const originXMm = Math.min(rectDraw.startMm.xMm, rectDraw.endMm.xMm);
+                  const originYMm = Math.min(rectDraw.startMm.yMm, rectDraw.endMm.yMm);
+                  const widthMm = Math.abs(rectDraw.endMm.xMm - rectDraw.startMm.xMm);
+                  const depthMm = Math.abs(rectDraw.endMm.yMm - rectDraw.startMm.yMm);
+                  const color = rectDraw.invalid ? "var(--danger)" : "var(--selection)";
+                  return (
+                    <g style={{ pointerEvents: "none" }}>
+                      <rect
+                        x={originXMm}
+                        y={originYMm}
+                        width={widthMm}
+                        height={depthMm}
+                        style={{ fill: color, fillOpacity: 0.4, stroke: color, strokeWidth: 2 }}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      {handleSizeMm > 0 ? (
+                        <text
+                          className="resize-handle-label"
+                          x={rectDraw.endMm.xMm + handleSizeMm}
+                          y={rectDraw.endMm.yMm - handleSizeMm}
+                          style={{
+                            // SVG user units (mm), sized off handleSizeMm so the
+                            // readout stays a constant on-screen size at any zoom
+                            // — the same trick the draw-room readout uses.
+                            fontSize: handleSizeMm * 1.6,
+                            strokeWidth: handleSizeMm * 0.5,
+                            pointerEvents: "none"
+                          }}
+                        >
+                          {`${formatLength(widthMm, { unit: wallUnit })} × ${formatLength(depthMm, {
+                            unit: wallUnit
+                          })}`}
+                        </text>
+                      ) : null}
                     </g>
                   );
                 })()

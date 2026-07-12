@@ -71,6 +71,55 @@ describe("usePlanMode", () => {
     expect(result.current.mode).toEqual({ kind: "drawRoom" });
   });
 
+  it("toggleDrawRect arms drawRect, and calling it again disarms it", () => {
+    const { result } = renderHook(() => usePlanMode("plan", null));
+
+    act(() => {
+      result.current.toggleDrawRect();
+    });
+    expect(result.current.mode).toEqual({ kind: "drawRect" });
+
+    act(() => {
+      result.current.toggleDrawRect();
+    });
+    expect(result.current.mode).toEqual({ kind: "idle" });
+  });
+
+  it("toggleDrawRect disarms an armed opening tool, and other tools disarm it", () => {
+    const { result } = renderHook(() => usePlanMode("plan", null));
+
+    act(() => {
+      result.current.armOpeningTool("door");
+    });
+    act(() => {
+      result.current.toggleDrawRect();
+    });
+    expect(result.current.mode).toEqual({ kind: "drawRect" });
+
+    // Arming another tool disarms the rectangle tool.
+    act(() => {
+      result.current.toggleDrawRoom();
+    });
+    expect(result.current.mode).toEqual({ kind: "drawRoom" });
+  });
+
+  it("disarms drawRect whenever viewMode changes away from plan", () => {
+    const { result, rerender } = renderHook<
+      ReturnType<typeof usePlanMode>,
+      { viewMode: "plan" | "elevation" }
+    >(({ viewMode }) => usePlanMode(viewMode, null), {
+      initialProps: { viewMode: "plan" }
+    });
+
+    act(() => {
+      result.current.toggleDrawRect();
+    });
+    expect(result.current.mode).toEqual({ kind: "drawRect" });
+
+    rerender({ viewMode: "elevation" });
+    expect(result.current.mode).toEqual({ kind: "idle" });
+  });
+
   it("togglePartitionTool arms/disarms drawPartition and disarms other modes", () => {
     const { result } = renderHook(() => usePlanMode("plan", null));
 

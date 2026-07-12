@@ -1,11 +1,13 @@
 import type { ReactNode, SVGProps } from "react";
 
-// Custom 16px toolbar glyphs for two insert tools whose phosphor stand-ins
-// read wrong beside their neighbors: the partition's WallIcon collided with
-// the Grid toggle's GridFourIcon (both read as a boxed grid), and a bare
-// SquareIcon never read as a window. Both are tuned to phosphor regular's
-// ~1.5px stroke weight at 16px and paint in currentColor, so they inherit the
-// segment's resting/hover/armed ink exactly like any phosphor icon does.
+// Custom 16px toolbar glyphs for the draw/insert tools whose phosphor
+// stand-ins read wrong beside their neighbors: the partition's WallIcon
+// collided with the Grid toggle's GridFourIcon (both read as a boxed grid), a
+// bare SquareIcon never read as a window, and the rectangle-room tool needs a
+// corner-to-corner silhouette distinct from Blocked zone's RectangleDashedIcon.
+// All are tuned to phosphor regular's ~1.5px stroke weight at 16px and paint in
+// currentColor, so they inherit the segment's resting/hover/armed ink exactly
+// like any phosphor icon does.
 
 type GlyphProps = SVGProps<SVGSVGElement> & { size?: number };
 
@@ -33,6 +35,20 @@ export function PartitionGlyph(props: GlyphProps) {
   return (
     <Glyph {...props}>
       <rect x="1.5" y="6.75" width="13" height="2.5" fill="currentColor" stroke="none" />
+    </Glyph>
+  );
+}
+
+// A rectangle room drawn corner to corner: four crop-mark corner brackets, so
+// it reads as "frame a rectangle" and stays distinct at 16px from Blocked
+// zone's uniform RectangleDashedIcon and the partition's solid bar.
+export function RectangleRoomGlyph(props: GlyphProps) {
+  return (
+    <Glyph {...props}>
+      <path d="M5.75 2.75 H2.75 V5.75" />
+      <path d="M10.25 2.75 H13.25 V5.75" />
+      <path d="M13.25 10.25 V13.25 H10.25" />
+      <path d="M2.75 10.25 V13.25 H5.75" />
     </Glyph>
   );
 }
