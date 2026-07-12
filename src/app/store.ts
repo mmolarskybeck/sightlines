@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import { z } from "zod";
 import { createBrowserImageProcessor } from "../domain/assets/browserImageProcessor";
-import { titleFromFilename, validateImageFile, type ImageProcessor } from "../domain/assets/imageIntake";
+import { titleFromFilename, type ImageProcessor } from "../domain/assets/imageIntake";
+import { buildImageAsset, processImageFile } from "../domain/assets/intakeImageFile";
 import {
   createNextDrawnRectangleRoom,
   createNextPolygonRoom,
@@ -65,11 +66,9 @@ import {
 import type { ArtworkImportDraft } from "../domain/spreadsheetImport/types";
 import {
   CURRENT_ARTWORK_SCHEMA_VERSION,
-  CURRENT_ASSET_SCHEMA_VERSION,
   DEFAULT_FLOOR_OBJECT_DEPTH_MM,
   type Artwork,
   type ArtworkFloorObject,
-  type Asset,
   type BlockedZoneFloorObject,
   type ConnectableOpeningWallObject,
   type DisplayUnit,
@@ -91,7 +90,7 @@ import {
 } from "../domain/package/importPackage";
 import type { PackageExportMode } from "../domain/schema/packageSchema";
 import type { ArtworkLibraryRepository } from "../domain/repositories/artworkLibraryRepository";
-import { assetBlobKey, type AssetRepository } from "../domain/repositories/assetRepository";
+import type { AssetRepository } from "../domain/repositories/assetRepository";
 import { IndexedDbArtworkLibraryRepository } from "../domain/repositories/indexedDbArtworkLibraryRepository";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import { IndexedDbProjectRepository } from "../domain/repositories/indexedDbProjectRepository";
@@ -2028,21 +2027,12 @@ export function createAppStore(deps: AppStoreDeps) {
 
         try {
           for (const file of files) {
-            const validation = validateImageFile(file);
-            if (!validation.ok) {
-              failures.push(validation.reason);
+            const processResult = await processImageFile(file, deps.imageProcessor);
+            if (!processResult.ok) {
+              failures.push(processResult.reason);
               continue;
             }
-
-            let processed;
-            try {
-              processed = await deps.imageProcessor.process(file);
-            } catch (error) {
-              failures.push(
-                error instanceof Error ? error.message : `${file.name} could not be processed.`
-              );
-              continue;
-            }
+            const processed = processResult.processed;
 
             if (!skipDuplicateCheck) {
               const existingTitle = titleBySha.get(processed.sha256);
@@ -2053,27 +2043,14 @@ export function createAppStore(deps: AppStoreDeps) {
               titleBySha.set(processed.sha256, titleFromFilename(file.name)); // batch-internal twins
             }
 
-            const assetId = newId();
-            const asset: Asset = {
-              id: assetId,
-              schemaVersion: CURRENT_ASSET_SCHEMA_VERSION,
-              mimeType: file.type,
-              originalFilename: file.name,
-              originalKey: assetBlobKey(assetId, "original"),
-              displayKey: assetBlobKey(assetId, "display"),
-              thumbnailKey: assetBlobKey(assetId, "thumbnail"),
-              widthPx: processed.widthPx,
-              heightPx: processed.heightPx,
-              byteSize: processed.byteSize,
-              sha256: processed.sha256
-            };
+            const asset = buildImageAsset(file, processed);
 
             const artwork: Artwork = {
               id: newId(),
               schemaVersion: CURRENT_ARTWORK_SCHEMA_VERSION,
               title: titleFromFilename(file.name),
               dimensions: { status: "unknown" },
-              assetId,
+              assetId: asset.id,
               metadata: {}
             };
 
@@ -2155,38 +2132,22 @@ export function createAppStore(deps: AppStoreDeps) {
             let artwork = draft.artwork;
 
             if (draft.imageFile) {
-              const validation = validateImageFile(draft.imageFile);
-              if (!validation.ok) {
-                failures.push(validation.reason);
+              const imageFile = draft.imageFile;
+              const processResult = await processImageFile(imageFile, deps.imageProcessor);
+              if (!processResult.ok) {
+                failures.push(processResult.reason);
               } else {
                 try {
-                  const processed = await deps.imageProcessor.process(draft.imageFile);
-                  const assetId = newId();
-                  const asset: Asset = {
-                    id: assetId,
-                    schemaVersion: CURRENT_ASSET_SCHEMA_VERSION,
-                    mimeType: draft.imageFile.type,
-                    originalFilename: draft.imageFile.name,
-                    originalKey: assetBlobKey(assetId, "original"),
-                    displayKey: assetBlobKey(assetId, "display"),
-                    thumbnailKey: assetBlobKey(assetId, "thumbnail"),
-                    widthPx: processed.widthPx,
-                    heightPx: processed.heightPx,
-                    byteSize: processed.byteSize,
-                    sha256: processed.sha256
-                  };
-
+                  const asset = buildImageAsset(imageFile, processResult.processed);
                   await deps.assetRepository.saveAsset(asset, {
-                    original: processed.original,
-                    display: processed.display,
-                    thumbnail: processed.thumbnail
+                    original: processResult.processed.original,
+                    display: processResult.processed.display,
+                    thumbnail: processResult.processed.thumbnail
                   });
-                  artwork = { ...artwork, assetId };
+                  artwork = { ...artwork, assetId: asset.id };
                 } catch (error) {
                   failures.push(
-                    error instanceof Error
-                      ? error.message
-                      : `${draft.imageFile.name} could not be processed.`
+                    error instanceof Error ? error.message : `${imageFile.name} could not be processed.`
                   );
                 }
               }

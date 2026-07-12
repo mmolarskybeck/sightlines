@@ -8,6 +8,7 @@ import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { useFileImageUrls } from "../hooks/useFileImageUrls";
+import { ACCEPTED_IMAGE_MIME_TYPES, isAcceptedImageType } from "../../domain/assets/imageIntake";
 import { createArtworkImportPlan } from "../../domain/spreadsheetImport/importPlan";
 import type {
   ArtworkImportDraft,
@@ -65,7 +66,10 @@ const NO_COLUMN = "__none";
 const NO_IMAGE = "__none";
 
 const SPREADSHEET_NAME_PATTERN = /\.(csv|tsv|xlsx|xls)$/i;
-const IMAGE_MIME_PATTERN = /^image\/(jpeg|png|webp)$/i;
+// Filename fallback only — some drag/drop sources (e.g. certain OS file
+// pickers) hand over a file with an empty or generic `type`, so the MIME
+// check alone (isAcceptedImageType, the shared source of truth for which
+// image types this app accepts) would silently drop a valid file.
 const IMAGE_NAME_PATTERN = /\.(jpe?g|png|webp)$/i;
 
 const FIELD_LABELS: Record<ImportField, string> = {
@@ -266,7 +270,7 @@ export default function ImportWizard({
   }
 
   function isImportImageFile(file: File) {
-    return IMAGE_MIME_PATTERN.test(file.type) || IMAGE_NAME_PATTERN.test(file.name);
+    return isAcceptedImageType(file.type) || IMAGE_NAME_PATTERN.test(file.name);
   }
 
   function handleImageFiles(files: FileList | File[]) {
@@ -384,7 +388,7 @@ export default function ImportWizard({
               />
               <input
                 id={imageInputId}
-                accept="image/jpeg,image/png,image/webp"
+                accept={ACCEPTED_IMAGE_MIME_TYPES.join(",")}
                 className="visually-hidden"
                 multiple
                 type="file"
