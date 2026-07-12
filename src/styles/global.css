@@ -2514,19 +2514,19 @@ body.panels-resizing * {
   flex: 0 0 auto;
 }
 
-/* Left zone of .view-toolbar: a captioned tool cluster — a quiet caption
-   plus individual soft icon buttons, the same family as the view-option
-   toggles. Shared by the Insert cluster (door/window/blocked-zone) and the
-   Draw cluster (rectangle/outline/partition). No track: most of the time no
-   tool is armed, and an empty tray reads wrong. Arming a tool is an engaged
-   mode, so the armed button presses in (petrol wash + inset shadow) exactly
-   like Grid/Snap. flex:none because the cluster must never be squeezed by the
-   flexing right zone — compactness comes from the container queries below. */
+/* Left zone of .view-toolbar: a captioned tool cluster — one joined soft
+   group holding the caption and an icon segment per tool. Shared by the
+   Insert cluster (door/window/blocked-zone) and the Draw cluster
+   (rectangle/outline/partition). No track: most of the time no tool is
+   armed, and an empty tray reads wrong. Arming a tool is an engaged mode,
+   so the armed segment presses in (petrol wash + inset shadow) exactly
+   like Grid/Snap. flex:none because the cluster must never be squeezed by
+   the flexing right zone — compactness comes from the container queries
+   below. */
 .tool-cluster {
   display: inline-flex;
   align-items: center;
   flex: none;
-  gap: 4px;
 }
 
 /* The caption sits inside the shared fill as a leading cell behind a
@@ -2539,7 +2539,11 @@ body.panels-resizing * {
   padding: 0 calc(var(--toolbar-space-1) + 4px);
   border-right: 1px solid var(--surface-strong);
   color: var(--muted);
-  font-size: var(--type-sm);
+  /* One step below the 13px semibold button labels (Grid, Snap): labels
+     that NAME a control drop a size, not just a weight — size + weight
+     together keep caption vs action legible at a squint. Shared with
+     .unit-select-label ("Precision"), the same docked-label role. */
+  font-size: var(--type-xs);
   font-weight: var(--weight-medium);
 }
 
@@ -3114,6 +3118,12 @@ body.panels-resizing * {
   display: inline-flex;
   align-items: center;
   gap: var(--toolbar-space-2);
+  /* Explicit height, not just min-height: the Toggle primitive's Tailwind
+     h-8 (32px) would otherwise win, leaving these toggles 1px proud of the
+     row's 30px lane (clusters, Precision, Units, compact triggers) on both
+     edges. The 750px container query below re-raises everything to 40px
+     touch targets together. */
+  height: 30px;
   min-height: 30px;
   padding: 0 calc(var(--toolbar-space-2) + 1px);
   border: 0;
@@ -3182,8 +3192,12 @@ body.panels-resizing * {
   background: var(--surface-strong);
 }
 
+/* Same docked-label role as .tool-cluster-label, so the same voice: one
+   size below the value it names, muted rather than subtle — --subtle on
+   the surface fill lands near 3.5:1, under AA for 13px text. */
 .unit-select-label {
-  color: var(--subtle);
+  color: var(--muted);
+  font-size: var(--type-xs);
 }
 
 .select-trigger {
