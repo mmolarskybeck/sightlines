@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { FileCodeIcon } from "@phosphor-icons/react/dist/csr/FileCode";
 import { BoundingBoxIcon } from "@phosphor-icons/react/dist/csr/BoundingBox";
 import { ListChecksIcon } from "@phosphor-icons/react/dist/csr/ListChecks";
+import { ImagesSquareIcon } from "@phosphor-icons/react/dist/csr/ImagesSquare";
 import { QuestionIcon } from "@phosphor-icons/react/dist/csr/Question";
 import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { SlidersHorizontalIcon } from "@phosphor-icons/react/dist/csr/SlidersHorizontal";
@@ -20,6 +21,8 @@ export function AppRail({
   inspectorCollapsed,
   onToggleInspector,
   isDataView,
+  isLibraryView,
+  onOpenLibrary,
   onOpenDataView,
   onOpenSettings,
   onOpenHelp,
@@ -36,6 +39,8 @@ export function AppRail({
   inspectorCollapsed: boolean;
   onToggleInspector: () => void;
   isDataView: boolean;
+  isLibraryView: boolean;
+  onOpenLibrary: () => void;
   onOpenDataView: () => void;
   onOpenSettings: () => void;
   onOpenHelp: () => void;
@@ -65,6 +70,13 @@ export function AppRail({
           label={leftPanel === "rooms" ? "Hide rooms & walls" : "Show rooms & walls"}
           pressed={leftPanel === "rooms"}
           onClick={() => onSelectLeftPanel("rooms")}
+        />
+
+        <RailButton
+          active={isLibraryView}
+          icon={<ImagesSquareIcon aria-hidden="true" size={22} />}
+          label="Artwork Library"
+          onClick={onOpenLibrary}
         />
 
         <RailButton

@@ -1075,6 +1075,54 @@ describe("app store", () => {
     ]);
   });
 
+  it("lists saved project memberships for library artworks and opens a referenced project", async () => {
+    await store
+      .getState()
+      .addArtworksFromFiles([makeImageFile("shared.jpg"), makeImageFile("unused.jpg")], {
+        destination: "library"
+      });
+    const [sharedId, unusedId] = store
+      .getState()
+      .libraryArtworks.map((artwork) => artwork.id);
+    const base = store.getState().project!;
+    await repository.save({
+      ...base,
+      id: "project-with-shared-artwork",
+      title: "Shared Artwork Show",
+      updatedAt: "2026-07-11T12:00:00.000Z",
+      checklistArtworkIds: [sharedId]
+    });
+    await repository.save({
+      ...base,
+      id: "project-without-shared-artwork",
+      title: "Other Show",
+      updatedAt: "2026-07-11T11:00:00.000Z",
+      checklistArtworkIds: []
+    });
+
+    const memberships = await store
+      .getState()
+      .listArtworkProjectMemberships([sharedId, unusedId, sharedId]);
+
+    expect(memberships).toEqual([
+      {
+        artworkId: sharedId,
+        projects: [
+          {
+            id: "project-with-shared-artwork",
+            title: "Shared Artwork Show",
+            updatedAt: "2026-07-11T12:00:00.000Z"
+          }
+        ]
+      },
+      { artworkId: unusedId, projects: [] }
+    ]);
+
+    await store.getState().openProject(memberships[0].projects[0].id);
+    expect(store.getState().project?.title).toBe("Shared Artwork Show");
+    expect(store.getState().project?.checklistArtworkIds).toEqual([sharedId]);
+  });
+
   it("openProject switches the current document and resets edit history", async () => {
     const original = store.getState().project!;
     await store.getState().createProject("Winter Show");
@@ -1134,6 +1182,18 @@ describe("app store", () => {
   });
 
   describe("addArtworksFromFiles", () => {
+    it("can import to the library without changing the checklist or undo history", async () => {
+      await store
+        .getState()
+        .addArtworksFromFiles([makeImageFile("library-only.jpg")], { destination: "library" });
+
+      const state = store.getState();
+      expect(state.libraryArtworks.map((artwork) => artwork.title)).toEqual(["library-only"]);
+      expect(state.project!.checklistArtworkIds).toEqual([]);
+      expect(state.undoStack).toEqual([]);
+      expect(assetRepository.assets.size).toBe(1);
+    });
+
     it("uploads two files as two library records with three blobs each, in one undo entry", async () => {
       const files = [makeImageFile("one.jpg"), makeImageFile("two.png", "image/png")];
 
@@ -1309,6 +1369,31 @@ describe("app store", () => {
       expect(artworkLibraryRepository.artworks.get("metadata-only-artwork")?.assetId).toBeUndefined();
       expect(assetRepository.assets.size).toBe(0);
     });
+
+    it("can import drafts to the library without changing the checklist or undo history", async () => {
+      const draft: ArtworkImportDraft = {
+        id: "library-draft",
+        row: { sourceRowIndex: 2, values: ["Library Work"] },
+        artwork: {
+          id: "library-artwork",
+          schemaVersion: CURRENT_ARTWORK_SCHEMA_VERSION,
+          title: "Library Work",
+          dimensions: { status: "unknown" },
+          metadata: {}
+        },
+        imageMatch: { status: "none", candidates: [] },
+        warnings: [],
+        raw: { title: "Library Work" },
+        selected: true
+      };
+
+      await store.getState().importArtworkDrafts([draft], { destination: "library" });
+
+      const state = store.getState();
+      expect(state.libraryArtworks.map((artwork) => artwork.id)).toEqual(["library-artwork"]);
+      expect(state.project!.checklistArtworkIds).toEqual([]);
+      expect(state.undoStack).toEqual([]);
+    });
   });
 
   describe("upload duplicate detection", () => {
@@ -1386,6 +1471,25 @@ describe("app store", () => {
       expect(state.undoStack).toHaveLength(undoBefore + 1);
     });
 
+    it("confirmDuplicateUploads preserves a library-only destination", async () => {
+      await useSharedHash(["twin-a.jpg", "twin-b.jpg"], "shared-sha");
+
+      await store
+        .getState()
+        .addArtworksFromFiles([makeImageFile("twin-a.jpg")], { destination: "library" });
+      await store
+        .getState()
+        .addArtworksFromFiles([makeImageFile("twin-b.jpg")], { destination: "library" });
+
+      expect(store.getState().pendingDuplicateUploads[0].destination).toBe("library");
+      await store.getState().confirmDuplicateUploads();
+
+      const state = store.getState();
+      expect(state.libraryArtworks).toHaveLength(2);
+      expect(state.project!.checklistArtworkIds).toEqual([]);
+      expect(state.undoStack).toEqual([]);
+    });
+
     it("dismissDuplicateUploads drops the held files and touches no undo state", async () => {
       await useSharedHash(["twin-a.jpg", "twin-b.jpg"], "shared-sha");
 
@@ -1446,6 +1550,40 @@ describe("app store", () => {
       await store.getState().createProject("Another Show");
 
       expect(store.getState().pendingDuplicateUploads).toHaveLength(0);
+    });
+  });
+
+  describe("addExistingArtworksToChecklist", () => {
+    it("adds valid library works once in one undoable edit", async () => {
+      await store.getState().addArtworksFromFiles(
+        [makeImageFile("one.jpg"), makeImageFile("two.jpg")],
+        { destination: "library" }
+      );
+      const [oneId, twoId] = store.getState().libraryArtworks.map((artwork) => artwork.id);
+
+      await store
+        .getState()
+        .addExistingArtworksToChecklist([oneId, oneId, "missing-artwork", twoId]);
+
+      const state = store.getState();
+      expect(state.project!.checklistArtworkIds).toEqual([oneId, twoId]);
+      expect(state.undoStack).toHaveLength(1);
+      expect(state.undoStack[0].label).toBe("Add 2 artworks to checklist");
+
+      await state.undo();
+      expect(store.getState().project!.checklistArtworkIds).toEqual([]);
+      expect(store.getState().libraryArtworks).toHaveLength(2);
+    });
+
+    it("does nothing when every requested work is already checklisted", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("one.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const undoBefore = store.getState().undoStack.length;
+
+      await store.getState().addExistingArtworksToChecklist([artworkId, artworkId]);
+
+      expect(store.getState().project!.checklistArtworkIds).toEqual([artworkId]);
+      expect(store.getState().undoStack).toHaveLength(undoBefore);
     });
   });
 

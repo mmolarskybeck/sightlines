@@ -77,6 +77,7 @@ export function ArtworkInspector({
   isPlaced,
   placementSection,
   placementTitle,
+  scopeNote,
   sectionsOpen,
   onCommitDimensions,
   onCommitField,
@@ -98,6 +99,7 @@ export function ArtworkInspector({
   // already preventDefaults).
   placementSection?: ReactNode;
   placementTitle?: string;
+  scopeNote?: string;
   // Per-section open flags keyed by section id ("dimensions" | "framing" |
   // "placement" | "details") — App reads/writes them through
   // useViewPreferences' inspectorSections record.
@@ -165,6 +167,7 @@ export function ArtworkInspector({
 
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
+      {scopeNote ? <p className="artwork-inspector-scope">{scopeNote}</p> : null}
       {/* Thumbnail beside identity when the panel is wide enough, stacking
           above it when narrow (see .artwork-inspector-header). */}
       <div className="artwork-inspector-header">
