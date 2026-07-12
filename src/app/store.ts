@@ -76,6 +76,8 @@ import {
   type ProjectSummary,
   type WallObject
 } from "../domain/project";
+import { createSightlinesPackage, packageFilename } from "../domain/package/buildPackage";
+import type { PackageExportMode } from "../domain/schema/packageSchema";
 import type { ArtworkLibraryRepository } from "../domain/repositories/artworkLibraryRepository";
 import { assetBlobKey, type AssetRepository } from "../domain/repositories/assetRepository";
 import { IndexedDbArtworkLibraryRepository } from "../domain/repositories/indexedDbArtworkLibraryRepository";
@@ -234,6 +236,13 @@ export type AppState = ArrangeSliceState &
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   importProjectJson: (text: string) => Promise<void>;
+  // Builds a self-contained .sightlines package (docs/plan.md §6) for the
+  // current project. Pure derivation lives in the domain layer; this action
+  // wires it to the repositories and surfaces failures on the error banner,
+  // returning the zip bytes + filename for the thin UI to download (no DOM here).
+  exportProjectPackage: (
+    mode: PackageExportMode
+  ) => Promise<{ filename: string; zip: Uint8Array } | null>;
   listProjectSummaries: () => Promise<ProjectSummary[]>;
   openProject: (id: string) => Promise<void>;
   createProject: (title: string) => Promise<void>;
@@ -1650,6 +1659,30 @@ export function createAppStore(deps: AppStoreDeps) {
 
         setDocument(project, { viewMode: "plan" });
         await persist(project);
+      },
+
+      async exportProjectPackage(mode) {
+        const { project, libraryArtworks } = get();
+        if (!project) return null;
+
+        try {
+          const { zip } = await createSightlinesPackage({
+            project,
+            libraryArtworks,
+            mode,
+            getAsset: (assetId) => deps.assetRepository.getAsset(assetId),
+            getBlob: (key) => deps.assetRepository.getBlob(key)
+          });
+          set({ error: null });
+          return { filename: packageFilename(project), zip };
+        } catch (error) {
+          set({
+            error: `Export failed: ${
+              error instanceof Error ? error.message : "the package could not be built."
+            }`
+          });
+          return null;
+        }
       },
 
       async listProjectSummaries() {
