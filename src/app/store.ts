@@ -92,7 +92,7 @@ import {
 } from "../domain/package/importPackage";
 import type { PackageExportMode } from "../domain/schema/packageSchema";
 import type { ArtworkLibraryRepository } from "../domain/repositories/artworkLibraryRepository";
-import type { AssetRepository } from "../domain/repositories/assetRepository";
+import { AssetNotFoundError, type AssetRepository } from "../domain/repositories/assetRepository";
 import { IndexedDbArtworkLibraryRepository } from "../domain/repositories/indexedDbArtworkLibraryRepository";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import { IndexedDbProjectRepository } from "../domain/repositories/indexedDbProjectRepository";
@@ -395,17 +395,19 @@ export type AppStoreDeps = {
 
 export function createAppStore(deps: AppStoreDeps) {
   return create<AppState>((set, get) => {
-    async function persist(project: Project) {
+    async function persist(project: Project): Promise<boolean> {
       set({ saveState: "saving", error: null });
 
       try {
         await deps.projectRepository.save(project);
         set({ saveState: "saved" });
+        return true;
       } catch (error) {
         set({
           saveState: "error",
           error: error instanceof Error ? error.message : "Could not save project."
         });
+        return false;
       }
     }
 
@@ -538,8 +540,10 @@ export function createAppStore(deps: AppStoreDeps) {
       }
 
       const libraryArtworks = await deps.artworkLibraryRepository.list();
+      if (!(await persist(commit.project))) {
+        throw new Error(get().error ?? "The imported project could not be saved.");
+      }
       setDocument(commit.project, { viewMode: "plan", libraryArtworks });
-      await persist(commit.project);
 
       // A successful import — even a degraded one — is not an error, so it
       // no longer rides the red `error` banner (see docs/status.md). Both
@@ -915,7 +919,12 @@ export function createAppStore(deps: AppStoreDeps) {
       await applyEdit(args.label, () => result.project, extras);
     }
 
-    const arrange = createArrangeSlice(set, get, { commitWallObjectMoves, persist });
+    const arrange = createArrangeSlice(set, get, {
+      commitWallObjectMoves,
+      persist: async (project) => {
+        await persist(project);
+      }
+    });
     const { settleArrangeSession, autoAcceptArrangeSession } = arrange;
 
     return {
@@ -1156,6 +1165,12 @@ export function createAppStore(deps: AppStoreDeps) {
 
         try {
           const project = await deps.projectRepository.load(id);
+          // The project may have become the open document while the load was
+          // pending. Never write that now-stale snapshot over live edits.
+          if (get().project?.id === id) {
+            await get().renameProject(title);
+            return;
+          }
           if (trimmed === project.title) return;
 
           await deps.projectRepository.save({
@@ -1885,6 +1900,10 @@ export function createAppStore(deps: AppStoreDeps) {
       },
 
       async exportProjectPackageById(id, mode) {
+        const liveProject = get().project;
+        if (liveProject?.id === id) {
+          return buildPackageZip(liveProject, get().libraryArtworks, mode);
+        }
         let project: Project;
         try {
           project = await deps.projectRepository.load(id);
@@ -1918,11 +1937,18 @@ export function createAppStore(deps: AppStoreDeps) {
             try {
               const asset = await deps.assetRepository.getAsset(artwork.assetId);
               if (asset.sha256) assetShaById.set(asset.id, asset.sha256);
-            } catch {
-              // A dangling local assetId just can't participate in dedupe.
+            } catch (error) {
+              // A deterministically dangling assetId just can't participate
+              // in dedupe — it must not block importing forever. Anything
+              // else is an operational read failure and fails closed: a
+              // record we couldn't see could otherwise be overwritten.
+              if (!(error instanceof AssetNotFoundError)) throw error;
             }
           }
-          const summaries = await get().listProjectSummaries();
+          // Collision detection must fail closed. The project-manager list is
+          // intentionally tolerant, but treating a failed read as an empty
+          // repository here could overwrite an existing project.
+          const summaries = await deps.projectRepository.list();
 
           // 4-5. §6 merge rules + project identity, as one pure plan.
           const plan = planPackageImport(manifest, validated, {
@@ -2072,6 +2098,7 @@ export function createAppStore(deps: AppStoreDeps) {
 
       async addArtworksFromFiles(files, opts = {}) {
         const project = get().project;
+        const destinationProjectId = project?.id;
         const destination = opts.destination ?? "checklist";
         if ((destination === "checklist" && !project) || files.length === 0) return;
 
@@ -2161,6 +2188,13 @@ export function createAppStore(deps: AppStoreDeps) {
             set({ libraryArtworks: await deps.artworkLibraryRepository.list() });
 
             if (destination === "checklist") {
+              if (get().project?.id !== destinationProjectId) {
+                set({
+                  error:
+                    "Images were saved to the library, but were not added because the open project changed."
+                });
+                return;
+              }
               const label =
                 newArtworkIds.length === 1 ? "Add artwork" : `Add ${newArtworkIds.length} artworks`;
 
@@ -2201,6 +2235,7 @@ export function createAppStore(deps: AppStoreDeps) {
 
       async importArtworkDrafts(drafts, opts = {}) {
         const project = get().project;
+        const destinationProjectId = project?.id;
         const destination = opts.destination ?? "checklist";
         const selectedDrafts = drafts.filter((draft) => draft.selected);
         if ((destination === "checklist" && !project) || selectedDrafts.length === 0) return;
@@ -2252,6 +2287,13 @@ export function createAppStore(deps: AppStoreDeps) {
             set({ libraryArtworks: await deps.artworkLibraryRepository.list() });
 
             if (destination === "checklist") {
+              if (get().project?.id !== destinationProjectId) {
+                set({
+                  error:
+                    "Artworks were imported to the library, but were not added because the open project changed."
+                });
+                return;
+              }
               const label =
                 newArtworkIds.length === 1
                   ? "Import artwork"
@@ -2362,6 +2404,11 @@ export function createAppStore(deps: AppStoreDeps) {
         const targets = get().libraryArtworks.filter((artwork) => requested.has(artwork.id));
         if (targets.length === 0) return;
         const targetIds = new Set(targets.map((artwork) => artwork.id));
+        const retainedAssetIds = new Set(
+          get()
+            .libraryArtworks.filter((artwork) => !targetIds.has(artwork.id))
+            .flatMap((artwork) => (artwork.assetId ? [artwork.assetId] : []))
+        );
 
         // Strip every reference to a deleted artwork from a project, returning
         // a fresh project only when something actually changed (so the cascade
@@ -2461,7 +2508,12 @@ export function createAppStore(deps: AppStoreDeps) {
         for (const artwork of targets) {
           try {
             await deps.artworkLibraryRepository.delete(artwork.id);
-            if (artwork.assetId) await deps.assetRepository.delete(artwork.assetId);
+            // Package SHA dedupe can intentionally make multiple artworks
+            // share one asset. Delete its blobs only after the last artwork
+            // reference is removed.
+            if (artwork.assetId && !retainedAssetIds.has(artwork.assetId)) {
+              await deps.assetRepository.delete(artwork.assetId);
+            }
           } catch (error) {
             failureMessage = error instanceof Error ? error.message : "unknown error";
           }

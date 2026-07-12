@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   useViewPreferences,
   LEFT_PANEL_DEFAULT_WIDTH,
@@ -18,7 +18,28 @@ describe("useViewPreferences", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     window.localStorage.clear();
+  });
+
+  it("reports an actionable error when browser storage rejects a preference write", () => {
+    const onPersistenceError = vi.fn();
+    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("Quota exceeded", "QuotaExceededError");
+    });
+
+    const { result } = renderHook(() => useViewPreferences(onPersistenceError));
+
+    expect(onPersistenceError).toHaveBeenCalledWith(
+      expect.stringContaining("your latest preference changes may be lost when you reload")
+    );
+
+    act(() => {
+      result.current.toggleShowGrid();
+    });
+
+    expect(result.current.showGrid).toBe(false);
+    expect(onPersistenceError).toHaveBeenCalledTimes(2);
   });
 
   it("defaults gridPrecisionFloorMm to null (auto) when nothing is stored", () => {

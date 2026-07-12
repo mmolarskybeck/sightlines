@@ -14,9 +14,16 @@ export const ASSET_STORE = "assets";
 // a keyPath on the blob itself.
 export const ASSET_BLOB_STORE = "assetBlobs";
 
+let databasePromise: Promise<IDBDatabase> | undefined;
+
 export function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  if (databasePromise) {
+    return databasePromise;
+  }
+
+  const openingPromise = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
+    let blocked = false;
 
     request.onupgradeneeded = () => {
       const db = request.result;
@@ -40,9 +47,51 @@ export function openDatabase(): Promise<IDBDatabase> {
       }
     };
 
+    request.onblocked = () => {
+      blocked = true;
+      reject(
+        new Error(
+          "Sightlines storage could not be upgraded because it is open in another tab. Close other Sightlines tabs, then reload this page.",
+        ),
+      );
+    };
+
     request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+
+      // A blocked request can subsequently succeed after its promise has
+      // already rejected. Do not retain that otherwise-unreachable connection.
+      if (blocked) {
+        db.close();
+        return;
+      }
+
+      db.onversionchange = () => {
+        db.close();
+        if (databasePromise === openingPromise) {
+          databasePromise = undefined;
+        }
+      };
+      // The browser can also force-close the connection on its own (clearing
+      // site data, storage eviction). Drop the cache so the next operation
+      // reopens instead of transacting against a dead connection.
+      db.onclose = () => {
+        if (databasePromise === openingPromise) {
+          databasePromise = undefined;
+        }
+      };
+      resolve(db);
+    };
   });
+
+  databasePromise = openingPromise;
+  openingPromise.catch(() => {
+    if (databasePromise === openingPromise) {
+      databasePromise = undefined;
+    }
+  });
+  return openingPromise;
 }
 
 export function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {

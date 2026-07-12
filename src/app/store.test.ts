@@ -21,6 +21,7 @@ import { createRectangularRoomPlacement } from "../domain/geometry/createRoom";
 import { evaluateOpeningPair } from "../domain/geometry/openingConnections";
 import { createSampleProject } from "../domain/sample/sampleProject";
 import { MAX_IMPORT_JSON_LENGTH } from "../domain/schema/projectSchema";
+import { createSightlinesPackage } from "../domain/package/buildPackage";
 import { feetToMm } from "../domain/units/length";
 import {
   FakeImageProcessor,
@@ -58,6 +59,17 @@ describe("app store", () => {
       imageProcessor,
       ...overrides
     };
+  }
+
+  async function packageBytes(project: Project = store.getState().project!) {
+    const { zip } = await createSightlinesPackage({
+      project,
+      libraryArtworks: store.getState().libraryArtworks,
+      mode: "originals",
+      getAsset: (id) => assetRepository.getAsset(id),
+      getBlob: (key) => assetRepository.getBlob(key)
+    });
+    return zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.byteLength) as ArrayBuffer;
   }
 
   beforeEach(async () => {
@@ -355,6 +367,25 @@ describe("app store", () => {
     await store.getState().renameProject("Winter Show");
     expect(store.getState().redoStack).toHaveLength(0);
     expect(store.getState().undoStack).toHaveLength(1);
+  });
+
+  it("renameProjectById does not save a stale snapshot when the project becomes open", async () => {
+    const target = { ...store.getState().project!, id: "rename-target", title: "Old" };
+    await repository.save(target);
+    let releaseLoad!: (project: Project) => void;
+    const load = vi.spyOn(repository, "load").mockImplementationOnce(
+      () => new Promise<Project>((resolve) => (releaseLoad = resolve))
+    );
+
+    const rename = store.getState().renameProjectById(target.id, "Renamed");
+    store.setState({ project: { ...target, unit: "m" } });
+    releaseLoad(target);
+    await rename;
+
+    expect(store.getState().project?.title).toBe("Renamed");
+    expect(store.getState().project?.unit).toBe("m");
+    expect(repository.projects.get(target.id)?.unit).toBe("m");
+    load.mockRestore();
   });
 
   it("setUnit updates the project's display unit, persists, and is undoable", async () => {
@@ -1191,6 +1222,24 @@ describe("app store", () => {
       expect(store.getState().libraryArtworks).toBe(before);
       expect(store.getState().error).toBeNull();
     });
+
+    it("keeps a shared asset while another library artwork still references it", async () => {
+      await store.getState().addArtworksFromFiles(
+        [makeImageFile("first.jpg"), makeImageFile("second.jpg")],
+        { destination: "library" }
+      );
+      const [first, second] = store.getState().libraryArtworks;
+      const sharedAssetId = first.assetId!;
+      await artworkLibraryRepository.save({ ...second, assetId: sharedAssetId });
+      store.setState({ libraryArtworks: await artworkLibraryRepository.list() });
+      const deleteAsset = vi.spyOn(assetRepository, "delete");
+
+      await store.getState().deleteLibraryArtworks([first.id]);
+
+      expect(deleteAsset).not.toHaveBeenCalledWith(sharedAssetId);
+      expect(assetRepository.assets.has(sharedAssetId)).toBe(true);
+      expect(artworkLibraryRepository.artworks.get(second.id)?.assetId).toBe(sharedAssetId);
+    });
   });
 
   it("openProject switches the current document and resets edit history", async () => {
@@ -1377,6 +1426,28 @@ describe("app store", () => {
       expect(artworkLibraryRepository.artworks.size).toBe(0);
       expect(freshStore.getState().project).toBeNull();
     });
+
+    it("does not attach a delayed image intake to a different open project", async () => {
+      let release!: () => void;
+      const delayedProcessor = new FakeImageProcessor();
+      const originalProcess = delayedProcessor.process.bind(delayedProcessor);
+      vi.spyOn(delayedProcessor, "process").mockImplementation(async (file) => {
+        await new Promise<void>((resolve) => (release = resolve));
+        return originalProcess(file);
+      });
+      store = createAppStore(makeDeps({ imageProcessor: delayedProcessor }));
+      await store.getState().boot();
+      const intake = store.getState().addArtworksFromFiles([makeImageFile("slow.jpg")]);
+      await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+      await store.getState().createProject("Other project");
+      release();
+      await intake;
+
+      expect(store.getState().project?.title).toBe("Other project");
+      expect(store.getState().project?.checklistArtworkIds).toEqual([]);
+      expect(store.getState().libraryArtworks).toHaveLength(1);
+      expect(store.getState().error).toMatch(/open project changed/);
+    });
   });
 
   describe("importArtworkDrafts", () => {
@@ -1463,6 +1534,142 @@ describe("app store", () => {
       expect(state.libraryArtworks.map((artwork) => artwork.id)).toEqual(["library-artwork"]);
       expect(state.project!.checklistArtworkIds).toEqual([]);
       expect(state.undoStack).toEqual([]);
+    });
+
+    it("does not attach a delayed spreadsheet import to a different open project", async () => {
+      const draft: ArtworkImportDraft = {
+        id: "slow-draft",
+        row: { sourceRowIndex: 2, values: ["Slow"] },
+        artwork: {
+          id: "slow-artwork",
+          schemaVersion: CURRENT_ARTWORK_SCHEMA_VERSION,
+          title: "Slow",
+          dimensions: { status: "unknown" },
+          metadata: {}
+        },
+        imageMatch: { status: "none", candidates: [] },
+        warnings: [],
+        raw: { title: "Slow" },
+        selected: true
+      };
+      let release!: () => void;
+      const originalSave = artworkLibraryRepository.save.bind(artworkLibraryRepository);
+      vi.spyOn(artworkLibraryRepository, "save").mockImplementationOnce(async (artwork) => {
+        await new Promise<void>((resolve) => (release = resolve));
+        await originalSave(artwork);
+      });
+
+      const intake = store.getState().importArtworkDrafts([draft]);
+      await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+      await store.getState().createProject("Other project");
+      release();
+      await intake;
+
+      expect(store.getState().project?.title).toBe("Other project");
+      expect(store.getState().project?.checklistArtworkIds).toEqual([]);
+      expect(store.getState().libraryArtworks.map((artwork) => artwork.id)).toContain(
+        "slow-artwork"
+      );
+      expect(store.getState().error).toMatch(/open project changed/);
+    });
+  });
+
+  describe("package persistence boundaries", () => {
+    it("aborts before writes when an existing asset cannot be read for collision detection", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("existing.jpg")]);
+      const bytes = await packageBytes({
+        ...store.getState().project!,
+        id: "incoming-project",
+        title: "Incoming"
+      });
+      vi.spyOn(assetRepository, "getAsset").mockRejectedValue(new Error("asset read failed"));
+      const saveAsset = vi.spyOn(assetRepository, "saveAsset");
+      const saveArtwork = vi.spyOn(artworkLibraryRepository, "save");
+
+      await store.getState().importSightlinesPackage(bytes);
+
+      expect(saveAsset).not.toHaveBeenCalled();
+      expect(saveArtwork).not.toHaveBeenCalled();
+      expect(repository.projects.has("incoming-project")).toBe(false);
+      expect(store.getState().error).toMatch(/asset read failed/);
+    });
+
+    it("tolerates a dangling library assetId during collision detection", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("existing.jpg")]);
+      const bytes = await packageBytes({
+        ...store.getState().project!,
+        id: "incoming-project",
+        title: "Incoming"
+      });
+      // The dangling state an old shared-asset deletion could leave behind:
+      // the artwork survives while its asset record is gone. Unlike an
+      // operational read failure, this must not block importing forever —
+      // the unverifiable image lands in the conflict dialog instead.
+      assetRepository.assets.clear();
+
+      await store.getState().importSightlinesPackage(bytes);
+
+      expect(store.getState().error).toBeNull();
+      const plan = store.getState().pendingPackageImport;
+      expect(plan?.conflicts.map((conflict) => conflict.incoming.id)).toEqual([
+        store.getState().libraryArtworks[0]!.id
+      ]);
+
+      await store
+        .getState()
+        .resolvePackageImportConflicts({ [plan!.conflicts[0]!.incoming.id]: "theirs" });
+
+      expect(store.getState().error).toBeNull();
+      expect(store.getState().project?.id).toBe("incoming-project");
+      expect(repository.projects.has("incoming-project")).toBe(true);
+    });
+
+    it("aborts before writes when project collision detection cannot list projects", async () => {
+      const bytes = await packageBytes({
+        ...store.getState().project!,
+        id: "incoming-project",
+        title: "Incoming"
+      });
+      vi.spyOn(repository, "list").mockRejectedValueOnce(new Error("project list failed"));
+      const saveAsset = vi.spyOn(assetRepository, "saveAsset");
+      const saveArtwork = vi.spyOn(artworkLibraryRepository, "save");
+
+      await store.getState().importSightlinesPackage(bytes);
+
+      expect(saveAsset).not.toHaveBeenCalled();
+      expect(saveArtwork).not.toHaveBeenCalled();
+      expect(repository.projects.has("incoming-project")).toBe(false);
+      expect(store.getState().error).toMatch(/project list failed/);
+    });
+
+    it("does not switch documents when the imported project cannot be saved", async () => {
+      const original = store.getState().project!;
+      const incoming = { ...original, id: "incoming-project", title: "Incoming" };
+      const bytes = await packageBytes(incoming);
+      const originalSave = repository.save.bind(repository);
+      vi.spyOn(repository, "save").mockImplementation(async (project) => {
+        if (project.id === incoming.id) throw new Error("quota exceeded");
+        await originalSave(project);
+      });
+
+      await store.getState().importSightlinesPackage(bytes);
+
+      expect(store.getState().project?.id).toBe(original.id);
+      expect(store.getState().project?.title).toBe(original.title);
+      expect(repository.projects.has(incoming.id)).toBe(false);
+      expect(store.getState().saveState).toBe("error");
+      expect(store.getState().error).toMatch(/quota exceeded/);
+    });
+
+    it("exports the live current project without reloading a stale saved copy", async () => {
+      const current = store.getState().project!;
+      store.setState({ project: { ...current, title: "Live unsaved title" } });
+      const load = vi.spyOn(repository, "load");
+
+      const result = await store.getState().exportProjectPackageById(current.id, "originals");
+
+      expect(load).not.toHaveBeenCalled();
+      expect(result?.filename).toContain("live-unsaved-title");
     });
   });
 

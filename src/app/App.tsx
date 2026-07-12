@@ -429,7 +429,7 @@ export function App() {
     setGridPrecisionFloorMm,
     toggleAllowOverlappingPlacement,
     resetPreferences
-  } = useViewPreferences();
+  } = useViewPreferences((message) => toast.error(message));
   const [compactWorkspaceSide, setCompactWorkspaceSide] = useState<"left" | "right">("left");
   const compactWorkspaceEntryRef = useRef(false);
   const [isCompactWorkspace, setIsCompactWorkspace] = useState(() =>

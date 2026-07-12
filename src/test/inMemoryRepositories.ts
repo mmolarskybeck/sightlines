@@ -1,7 +1,7 @@
 import type { ImageProcessor, ProcessedImage } from "../domain/assets/imageIntake";
 import type { Artwork, Asset, Project, ProjectSummary } from "../domain/project";
 import type { ArtworkLibraryRepository } from "../domain/repositories/artworkLibraryRepository";
-import type { AssetRepository } from "../domain/repositories/assetRepository";
+import { AssetNotFoundError, type AssetRepository } from "../domain/repositories/assetRepository";
 import type { ProjectRepository } from "../domain/repositories/projectRepository";
 import { parseArtwork, parseAsset } from "../domain/schema/artworkSchema";
 import { parseProject } from "../domain/schema/projectSchema";
@@ -83,7 +83,7 @@ export class InMemoryAssetRepository implements AssetRepository {
 
   async getAsset(id: string): Promise<Asset> {
     const asset = this.assets.get(id);
-    if (!asset) throw new Error(`Asset not found: ${id}`);
+    if (!asset) throw new AssetNotFoundError(id);
     return asset;
   }
 

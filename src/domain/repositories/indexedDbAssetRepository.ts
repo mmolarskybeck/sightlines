@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { parseAsset } from "../schema/artworkSchema";
 import { CURRENT_ASSET_SCHEMA_VERSION, type Asset } from "../project";
-import { assetBlobKey, type AssetRepository } from "./assetRepository";
+import { assetBlobKey, AssetNotFoundError, type AssetRepository } from "./assetRepository";
 import {
   ASSET_BLOB_STORE,
   ASSET_STORE,
@@ -55,7 +55,7 @@ export class IndexedDbAssetRepository implements AssetRepository {
     );
 
     if (!value) {
-      throw new Error(`Asset not found: ${id}`);
+      throw new AssetNotFoundError(id);
     }
 
     return loadAsset(value);

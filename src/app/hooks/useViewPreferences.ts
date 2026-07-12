@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { clamp } from "../../domain/geometry/scalar";
 
 const STORAGE_KEY = "sightlines.viewPreferences.v1";
@@ -166,11 +166,19 @@ function readStoredPreferences(): ViewPreferences {
 // else's working-style preferences. "Show grid" and "snap to grid" are
 // intentionally separate: a curator may want the visual reference without
 // magnetic behavior during rough composition.
-export function useViewPreferences() {
+export function useViewPreferences(onPersistenceError?: (message: string) => void) {
   const [preferences, setPreferences] = useState<ViewPreferences>(readStoredPreferences);
+  const onPersistenceErrorRef = useRef(onPersistenceError);
+  onPersistenceErrorRef.current = onPersistenceError;
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));
+    } catch {
+      onPersistenceErrorRef.current?.(
+        "Could not save workspace preferences. Browser storage may be full or unavailable; your latest preference changes may be lost when you reload."
+      );
+    }
   }, [preferences]);
 
   return {
