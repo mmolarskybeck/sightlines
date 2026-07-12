@@ -300,6 +300,7 @@ export type AppState = ArrangeSliceState &
   confirmDuplicateUploads: () => Promise<void>;
   dismissDuplicateUploads: () => void;
   removeArtworkFromChecklist: (artworkId: string) => Promise<void>;
+  deleteLibraryArtworks: (artworkIds: string[]) => Promise<void>;
   updateArtwork: (artworkId: string, changes: UpdateArtworkChanges) => Promise<void>;
   placeArtwork: (
     artworkId: string,
@@ -2304,6 +2305,137 @@ export function createAppStore(deps: AppStoreDeps) {
             (floorObject) => !(floorObject.kind === "artwork" && floorObject.artworkId === artworkId)
           )
         }));
+      },
+
+      async deleteLibraryArtworks(artworkIds) {
+        // Deleting from the library is a full cascade: the library record and
+        // its blobs are the source of truth, so every project that references
+        // a deleted id must be stripped of that reference — no dangling
+        // placements or checklist entries survive anywhere (docs/plan.md §4.1
+        // inverted: remove from checklist leaves the record; deleting the
+        // record removes it from every checklist).
+        const requested = new Set(artworkIds);
+        const targets = get().libraryArtworks.filter((artwork) => requested.has(artwork.id));
+        if (targets.length === 0) return;
+        const targetIds = new Set(targets.map((artwork) => artwork.id));
+
+        // Strip every reference to a deleted artwork from a project, returning
+        // a fresh project only when something actually changed (so the cascade
+        // skips saving untouched projects).
+        const stripReferences = (project: Project): Project | null => {
+          const checklistArtworkIds = project.checklistArtworkIds.filter(
+            (id) => !targetIds.has(id)
+          );
+          const wallObjects = project.wallObjects.filter(
+            (wallObject) =>
+              !(wallObject.kind === "artwork" && targetIds.has(wallObject.artworkId))
+          );
+          const floorObjects = project.floorObjects.filter(
+            (floorObject) =>
+              !(floorObject.kind === "artwork" && targetIds.has(floorObject.artworkId))
+          );
+          const changed =
+            checklistArtworkIds.length !== project.checklistArtworkIds.length ||
+            wallObjects.length !== project.wallObjects.length ||
+            floorObjects.length !== project.floorObjects.length;
+          if (!changed) return null;
+          return {
+            ...project,
+            checklistArtworkIds,
+            wallObjects,
+            floorObjects,
+            updatedAt: new Date().toISOString()
+          };
+        };
+
+        const openProject = get().project;
+
+        // Cascade across every OTHER saved project. The open one is handled in
+        // memory below (its persisted copy tracks state via applyEdit, but we
+        // must also update the live `project` so the UI stops rendering the
+        // removed placements). Per-project load/save failures are swallowed so
+        // one bad project can't strand the rest — mirrors
+        // listArtworkProjectMemberships' tolerance.
+        try {
+          const summaries = await deps.projectRepository.list();
+          for (const summary of summaries) {
+            if (openProject && summary.id === openProject.id) continue;
+            try {
+              const project = await deps.projectRepository.load(summary.id);
+              const cleaned = stripReferences(project);
+              if (cleaned) await deps.projectRepository.save(cleaned);
+            } catch {
+              // Skip a project that vanished or won't save; keep cascading.
+            }
+          }
+        } catch {
+          // If the list itself fails, still clean the open project and delete
+          // the records below — a partial cascade beats leaving live state
+          // pointing at records we're about to erase.
+        }
+
+        // Clean the currently open project directly in memory. Deliberately NOT
+        // an applyEdit: the records and blobs are gone for good, so this must
+        // not land on the undo stack where undo could resurrect the placements
+        // as a first-class edit. (Pre-existing undo entries may still resurrect
+        // dangling checklist ids — ChecklistPanel renders those as `missing`.)
+        if (openProject) {
+          const cleaned = stripReferences(openProject);
+          if (cleaned) {
+            // Drop any selection pointing at a removed placement or a deleted
+            // library-artwork pick; leave an unaffected selection intact.
+            const removedPlacementIds = new Set(
+              [...openProject.wallObjects, ...openProject.floorObjects]
+                .filter(
+                  (object) => object.kind === "artwork" && targetIds.has(object.artworkId)
+                )
+                .map((object) => object.id)
+            );
+            let selection = get().selection;
+            if (selection.kind === "objects") {
+              selection = {
+                kind: "objects",
+                ids: selection.ids.filter((id) => !removedPlacementIds.has(id))
+              };
+            } else if (
+              selection.kind === "libraryArtwork" &&
+              targetIds.has(selection.artworkId)
+            ) {
+              selection = NO_SELECTION;
+            }
+            set({
+              project: cleaned,
+              ...selectionWrite(cleaned, selection, get().wallContextId)
+            });
+            await persist(cleaned);
+          }
+        }
+
+        // Erase the records and their 1:1 blobs. Individual failures are
+        // tolerated but surfaced together at the end.
+        let failureMessage: string | null = null;
+        for (const artwork of targets) {
+          try {
+            await deps.artworkLibraryRepository.delete(artwork.id);
+            if (artwork.assetId) await deps.assetRepository.delete(artwork.assetId);
+          } catch (error) {
+            failureMessage = error instanceof Error ? error.message : "unknown error";
+          }
+        }
+
+        try {
+          set({ libraryArtworks: await deps.artworkLibraryRepository.list() });
+        } catch (error) {
+          failureMessage = error instanceof Error ? error.message : "unknown error";
+        }
+
+        if (failureMessage) {
+          set({
+            error: `Could not delete ${
+              targets.length === 1 ? "that work" : "some works"
+            } from the library (${failureMessage}).`
+          });
+        }
       },
 
       async updateArtwork(artworkId, changes) {

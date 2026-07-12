@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { FileArrowUpIcon } from "@phosphor-icons/react/dist/csr/FileArrowUp";
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
 import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
+import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import type { Artwork, DisplayUnit, Project, ProjectSummary } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
@@ -38,6 +39,7 @@ export function ArtworkLibraryView({
   project,
   getBlob,
   onAddToChecklist,
+  onDeleteArtworks,
   onOpenImportWizard,
   pendingDuplicateUploads = [],
   onConfirmDuplicateUploads,
@@ -47,6 +49,7 @@ export function ArtworkLibraryView({
   onEditArtwork
 }: LibraryCommonProps & {
   onAddToChecklist: (artworkIds: string[]) => void | Promise<void>;
+  onDeleteArtworks?: (artworkIds: string[]) => void | Promise<void>;
   onOpenImportWizard: () => void;
   pendingDuplicateUploads?: { file: File; existingArtworkTitle: string }[];
   onConfirmDuplicateUploads?: () => void | Promise<void>;
@@ -59,6 +62,17 @@ export function ArtworkLibraryView({
   const [filter, setFilter] = useState<LibraryFilter>("all");
   const [sort, setSort] = useState<{ key: LibrarySort; direction: SortDirection }>({ key: "title", direction: "ascending" });
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
+  // Deleted/absent artworks must never linger in the selection (they'd let a
+  // stale id ride into a bulk add or delete). Prune whenever the device-level
+  // list changes — filtering/sorting is view-only and must not drop a pick.
+  useEffect(() => {
+    setSelected((current) => {
+      const present = new Set(artworks.map((artwork) => artwork.id));
+      if ([...current].every((id) => present.has(id))) return current;
+      return new Set([...current].filter((id) => present.has(id)));
+    });
+  }, [artworks]);
   const checklistIds = useMemo(() => new Set(project.checklistArtworkIds), [project.checklistArtworkIds]);
   const matches = useArtworkMatches(artworks, query);
   const rows = useMemo(() => sortArtworks(matches.filter((artwork) => filter === "all" || (filter === "in-project" ? checklistIds.has(artwork.id) : !checklistIds.has(artwork.id))), sort.key, sort.direction), [checklistIds, filter, matches, sort]);
@@ -127,7 +141,7 @@ export function ArtworkLibraryView({
               </span>
             </div>
           </div>
-          {selected.size > 0 ? <div className="artwork-library-selection" role="status"><span>{selected.size} selected</span><Button size="sm" variant="primary" onClick={() => { void onAddToChecklist([...selected]); setSelected(new Set()); }}>Add selected to checklist</Button><Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Clear</Button></div> : null}
+          {selected.size > 0 ? <div className="artwork-library-selection" role="status"><span>{selected.size} selected</span><Button size="sm" variant="primary" onClick={() => { void onAddToChecklist([...selected]); setSelected(new Set()); }}>Add selected to checklist</Button>{onDeleteArtworks ? <Button size="sm" variant="destructive-ghost" onClick={() => setPendingDeleteIds([...selected])}><TrashIcon aria-hidden="true" size={14} /> Delete</Button> : null}<Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Clear</Button></div> : null}
           {rows.length === 0 ? (
             <div className="artwork-library-no-results">
               <p>{query.trim() ? `No artworks match “${query}”.` : filter === "in-project" ? "No library artworks are in this checklist." : "Every library artwork is already in this checklist."}</p>
@@ -151,7 +165,93 @@ export function ArtworkLibraryView({
           )}
         </>
       )}
+      <DeleteArtworksDialog
+        pendingIds={pendingDeleteIds}
+        artworks={artworks}
+        projectMembershipsByArtworkId={projectMembershipsByArtworkId}
+        onConfirm={(ids) => {
+          void onDeleteArtworks?.(ids);
+          setSelected(new Set());
+          setPendingDeleteIds(null);
+        }}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteIds(null);
+        }}
+      />
     </section>
+  );
+}
+
+// Confirms a library mass-delete. Modeled on DeleteRoomDialog (showClose={false},
+// ghost Cancel + destructive confirm). Deleting a library record is a full
+// cascade with no undo, so the copy spells out the project fallout: how many of
+// the picked works are in checklists and across how many projects.
+function DeleteArtworksDialog({
+  pendingIds,
+  artworks,
+  projectMembershipsByArtworkId,
+  onConfirm,
+  onOpenChange
+}: {
+  pendingIds: string[] | null;
+  artworks: Artwork[];
+  projectMembershipsByArtworkId?: Map<string, ProjectSummary[]> | Record<string, ProjectSummary[]>;
+  onConfirm: (artworkIds: string[]) => void;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const membershipsFor = (id: string) =>
+    (projectMembershipsByArtworkId instanceof Map
+      ? projectMembershipsByArtworkId.get(id)
+      : projectMembershipsByArtworkId?.[id]) ?? [];
+  const ids = pendingIds ?? [];
+  const pending = ids
+    .map((id) => artworks.find((artwork) => artwork.id === id))
+    .filter((artwork): artwork is Artwork => Boolean(artwork));
+  const count = pending.length;
+  const firstTitle = pending[0]?.title?.trim() || "Untitled";
+  const worksInUse = pending.filter((artwork) => membershipsFor(artwork.id).length > 0).length;
+  const projectCount = new Set(
+    pending.flatMap((artwork) => membershipsFor(artwork.id).map((summary) => summary.id))
+  ).size;
+
+  const title = count === 1
+    ? `Delete “${firstTitle}” from the library?`
+    : `Delete ${count} works from the library?`;
+
+  // Name the project when there's exactly one — "the checklist in “X”" reads
+  // as a concrete consequence where "1 project checklist" reads as a tally.
+  const onlyProjectTitle =
+    projectCount === 1
+      ? pending.flatMap((artwork) => membershipsFor(artwork.id))[0]?.title?.trim() ||
+        "Untitled project"
+      : null;
+  const projectsPhrase = onlyProjectTitle
+    ? `the checklist in “${onlyProjectTitle}”`
+    : `${projectCount} project checklists`;
+  const thoseChecklists = projectCount === 1 ? "that checklist" : "those checklists";
+  const description = worksInUse === 0
+    ? `Deleting removes ${count === 1 ? "it" : "them"} from this device permanently. This can't be undone.`
+    : count === 1
+      ? `“${firstTitle}” is on ${projectsPhrase}. Deleting removes it from ${thoseChecklists} and any walls where it's placed. This can't be undone.`
+      : `${worksInUse === 1 ? "1 of these works is" : `${worksInUse} of these works are`} on ${projectsPhrase}. Deleting removes them from ${thoseChecklists} and any walls where they're placed. This can't be undone.`;
+
+  return (
+    <Dialog open={pendingIds !== null} onOpenChange={onOpenChange}>
+      <DialogContent showClose={false}>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={() => onConfirm(ids)}>
+            {count === 1 ? "Delete work" : `Delete ${count} works`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -232,12 +332,20 @@ function SearchField({ value, onChange, autoFocus = false }: { value: string; on
 function ArtworkTable({ artworks, checklistIds, thumbnails, unit, selected, sort, onSort, onSelectionChange, projectMembershipsByArtworkId, onOpenProject, onEditArtwork, onAdd }: { artworks: Artwork[]; checklistIds: Set<string>; thumbnails: Map<string, string>; unit: DisplayUnit; selected: Set<string>; sort: { key: LibrarySort; direction: SortDirection }; onSort: (key: LibrarySort) => void; onSelectionChange: (selected: Set<string>) => void; projectMembershipsByArtworkId?: Map<string, ProjectSummary[]> | Record<string, ProjectSummary[]>; onOpenProject?: (projectId: string) => void; onEditArtwork?: (artworkId: string) => void; onAdd: (id: string) => void }) {
   const membershipsFor = (id: string) => projectMembershipsByArtworkId instanceof Map ? projectMembershipsByArtworkId.get(id) : projectMembershipsByArtworkId?.[id];
   const hasProjects = Boolean(projectMembershipsByArtworkId);
-  return <div className="artwork-library-table-scroll"><table className="artwork-library-table"><thead><tr><th className="artwork-table-select" scope="col"><span className="visually-hidden">Select</span></th><SortableHeader active={sort.key === "title"} direction={sort.direction} label="Artwork" onClick={() => onSort("title")} /><SortableHeader active={sort.key === "artist"} direction={sort.direction} label="Artist" onClick={() => onSort("artist")} /><SortableHeader active={sort.key === "date"} direction={sort.direction} label="Date" onClick={() => onSort("date")} /><th scope="col">Dimensions</th>{hasProjects ? <th scope="col">Used in</th> : null}<th scope="col">Current project</th></tr></thead><tbody>{artworks.map((artwork) => {
+  const allVisibleSelected = artworks.length > 0 && artworks.every((artwork) => selected.has(artwork.id));
+  const someVisibleSelected = artworks.some((artwork) => selected.has(artwork.id));
+  const toggleAllVisible = () => {
+    const next = new Set(selected);
+    if (allVisibleSelected) artworks.forEach((artwork) => next.delete(artwork.id));
+    else artworks.forEach((artwork) => next.add(artwork.id));
+    onSelectionChange(next);
+  };
+  return <div className="artwork-library-table-scroll"><table className="artwork-library-table"><thead><tr><th className="artwork-table-select" scope="col"><Checkbox aria-label="Select all shown artworks" checked={allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false} onCheckedChange={toggleAllVisible} /></th><SortableHeader active={sort.key === "title"} direction={sort.direction} label="Artwork" onClick={() => onSort("title")} /><SortableHeader active={sort.key === "artist"} direction={sort.direction} label="Artist" onClick={() => onSort("artist")} /><SortableHeader active={sort.key === "date"} direction={sort.direction} label="Date" onClick={() => onSort("date")} /><th scope="col">Dimensions</th>{hasProjects ? <th scope="col">Used in</th> : null}<th scope="col">This project</th></tr></thead><tbody>{artworks.map((artwork) => {
     const isAdded = checklistIds.has(artwork.id);
     const thumbnail = artwork.assetId ? thumbnails.get(artwork.assetId) : undefined;
     const projects = membershipsFor(artwork.id) ?? [];
     const title = artwork.title?.trim() || "Untitled";
-    return <tr data-selected={selected.has(artwork.id) ? "" : undefined} key={artwork.id}><td className="artwork-table-select"><Checkbox aria-label={`Select ${title}`} checked={selected.has(artwork.id)} onCheckedChange={() => { const next = new Set(selected); if (next.has(artwork.id)) next.delete(artwork.id); else next.add(artwork.id); onSelectionChange(next); }} /></td><th scope="row"><button className="artwork-table-identity artwork-table-edit" type="button" onClick={() => onEditArtwork?.(artwork.id)}><span className="artwork-table-thumbnail">{thumbnail ? <img alt="" src={thumbnail} /> : <ImageSquareIcon aria-hidden="true" size={18} />}</span><span>{title}</span></button></th><td>{artwork.artist?.trim() || <span className="artwork-table-muted">Unknown</span>}</td><td>{artwork.date || <span className="artwork-table-muted">—</span>}</td><td>{formatDimensions(artwork, unit)}</td>{hasProjects ? <td><ProjectMembershipMenu projects={projects} onOpenProject={onOpenProject} /></td> : null}<td>{isAdded ? <span className="artwork-membership"><CheckIcon aria-hidden="true" size={13} /> In checklist</span> : <Button aria-label={`Add ${title} to current checklist`} size="sm" variant="outline" onClick={() => onAdd(artwork.id)}><PlusIcon aria-hidden="true" size={14} /> Add</Button>}</td></tr>;
+    return <tr data-selected={selected.has(artwork.id) ? "" : undefined} key={artwork.id}><td className="artwork-table-select"><Checkbox aria-label={`Select ${title}`} checked={selected.has(artwork.id)} onCheckedChange={() => { const next = new Set(selected); if (next.has(artwork.id)) next.delete(artwork.id); else next.add(artwork.id); onSelectionChange(next); }} /></td><th scope="row"><button className="artwork-table-identity artwork-table-edit" type="button" onClick={() => onEditArtwork?.(artwork.id)}><span className="artwork-table-thumbnail">{thumbnail ? <img alt="" src={thumbnail} /> : <ImageSquareIcon aria-hidden="true" size={18} />}</span><span>{title}</span></button></th><td>{artwork.artist?.trim() || <span className="artwork-table-muted">Unknown</span>}</td><td>{artwork.date || <span className="artwork-table-muted">—</span>}</td><td className="artwork-table-dimensions">{formatDimensions(artwork, unit)}</td>{hasProjects ? <td><ProjectMembershipMenu projects={projects} onOpenProject={onOpenProject} /></td> : null}<td>{isAdded ? <span className="artwork-membership"><CheckIcon aria-hidden="true" size={13} /> In checklist</span> : <Button aria-label={`Add ${title} to current checklist`} size="sm" variant="outline" onClick={() => onAdd(artwork.id)}><PlusIcon aria-hidden="true" size={14} /> Add</Button>}</td></tr>;
   })}</tbody></table></div>;
 }
 
@@ -247,7 +355,12 @@ function SortableHeader({ active, direction, label, onClick }: { active: boolean
 
 function ProjectMembershipMenu({ projects, onOpenProject }: { projects: ProjectSummary[]; onOpenProject?: (projectId: string) => void }) {
   if (projects.length === 0) return <span className="artwork-table-muted">Unused</span>;
-  return <DropdownMenu><DropdownMenuTrigger asChild><Button aria-label={`Used in ${projects.length} project${projects.length === 1 ? "" : "s"}`} size="sm" variant="ghost">{projects.length} project{projects.length === 1 ? "" : "s"}<CaretDownIcon aria-hidden="true" size={12} /></Button></DropdownMenuTrigger><DropdownMenuContent align="start">{projects.map((project) => <DropdownMenuItem key={project.id} onSelect={() => onOpenProject?.(project.id)}>{project.title}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>;
+  if (projects.length === 1) {
+    const [only] = projects;
+    const title = only.title?.trim() || "Untitled project";
+    return <Button aria-label={`Open ${title}`} className="artwork-membership-project" size="sm" variant="ghost" onClick={() => onOpenProject?.(only.id)}><span className="artwork-membership-project-label">{title}</span></Button>;
+  }
+  return <DropdownMenu><DropdownMenuTrigger asChild><Button aria-label={`Used in ${projects.length} projects`} className="artwork-membership-project" size="sm" variant="ghost"><span className="artwork-membership-project-label">{projects.length} projects</span><CaretDownIcon aria-hidden="true" size={12} /></Button></DropdownMenuTrigger><DropdownMenuContent align="start">{projects.map((project) => <DropdownMenuItem key={project.id} onSelect={() => onOpenProject?.(project.id)}>{project.title}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>;
 }
 
 function useArtworkMatches(artworks: Artwork[], query: string) {

@@ -4,7 +4,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "./utils";
 
 export const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-sm text-[var(--type-sm)] font-[var(--weight-semibold)] leading-none transition-[background-color,border-color,color,box-shadow,filter] duration-150 ease-out outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-sm text-[length:var(--type-sm)] font-[var(--weight-semibold)] leading-none transition-[background-color,border-color,color,box-shadow,filter] duration-150 ease-out outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -19,7 +19,7 @@ export const buttonVariants = cva(
         outline:
           "border border-border bg-background text-foreground shadow-[var(--shadow-tight)] hover:border-input hover:bg-surface active:bg-surface-strong active:shadow-[var(--shadow-pressed)]",
         destructive:
-          "border border-destructive bg-destructive text-destructive-foreground hover:text-destructive-foreground hover:brightness-95 active:brightness-90",
+          "border border-destructive bg-destructive text-destructive-foreground shadow-[var(--shadow-tight)] hover:border-destructive-strong hover:bg-destructive-strong hover:text-destructive-foreground active:border-destructive-strong active:bg-destructive-strong active:text-destructive-foreground active:brightness-90 active:shadow-[var(--shadow-pressed)]",
         rail:
           "border border-transparent bg-transparent text-muted-foreground hover:bg-surface hover:text-foreground active:bg-surface-strong data-[active=true]:bg-petrol-soft data-[active=true]:text-petrol-strong",
         tab:
@@ -35,7 +35,7 @@ export const buttonVariants = cva(
       },
       size: {
         default: "h-9 px-3",
-        sm: "h-8 px-2.5 text-[var(--type-xs)]",
+        sm: "h-8 px-2.5 text-[length:var(--type-xs)]",
         lg: "h-10 px-4",
         icon: "size-9 p-0",
         "icon-sm": "size-8 p-0",

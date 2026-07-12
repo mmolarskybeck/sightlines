@@ -368,6 +368,7 @@ export function App() {
     confirmDuplicateUploads,
     dismissDuplicateUploads,
     removeArtworkFromChecklist,
+    deleteLibraryArtworks,
     updateArtwork,
     placeArtwork,
     placeArtworkOnFloor,
@@ -419,21 +420,39 @@ export function App() {
   const [isExportingPackage, setIsExportingPackage] = useState(false);
 
   useEffect(() => {
-    if (viewMode !== "library") return;
+    if (viewMode !== "library" || !project) return;
+    const { id: liveId, title: liveTitle, updatedAt: liveUpdatedAt } = project;
+    const liveChecklist = new Set(project.checklistArtworkIds);
     let cancelled = false;
     void listArtworkProjectMemberships(libraryArtworks.map((artwork) => artwork.id)).then(
       (memberships) => {
-        if (!cancelled) {
-          setProjectMembershipsByArtworkId(
-            new Map(memberships.map(({ artworkId, projects }) => [artworkId, projects]))
-          );
-        }
+        if (cancelled) return;
+        // The repository read can lag the open project's in-memory checklist
+        // (persist is async), so the open project's own membership is
+        // recomputed from live state — otherwise "Used in" goes stale the
+        // moment a work is added or removed while the library is on screen.
+        const liveSummary: ProjectSummary = {
+          id: liveId,
+          title: liveTitle,
+          updatedAt: liveUpdatedAt
+        };
+        setProjectMembershipsByArtworkId(
+          new Map(
+            memberships.map(({ artworkId, projects }) => {
+              const others = projects.filter((summary) => summary.id !== liveId);
+              return [
+                artworkId,
+                liveChecklist.has(artworkId) ? [liveSummary, ...others] : others
+              ];
+            })
+          )
+        );
       }
     );
     return () => {
       cancelled = true;
     };
-  }, [libraryArtworks, listArtworkProjectMemberships, viewMode]);
+  }, [libraryArtworks, listArtworkProjectMemberships, viewMode, project]);
   // The occupied room the Delete shortcut is asking to confirm about —
   // transient UI state like the armed tools (never in the store/undo). Empty
   // rooms skip this and delete immediately.
@@ -1627,6 +1646,7 @@ export function App() {
               project={project}
               getBlob={getAssetBlob}
               onAddToChecklist={addExistingArtworksToChecklist}
+              onDeleteArtworks={(ids) => void deleteLibraryArtworks(ids)}
               pendingDuplicateUploads={pendingDuplicateUploads.filter(
                 (entry) => entry.destination === "library"
               )}

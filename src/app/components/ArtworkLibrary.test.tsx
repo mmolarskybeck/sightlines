@@ -90,9 +90,52 @@ describe("ArtworkLibraryView", () => {
     expect(onAddToChecklist).toHaveBeenCalledWith(["art-2"]);
   });
 
-  it("lists project memberships in an accessible menu", () => {
-    render(<ArtworkLibraryView artworks={artworks} project={project} getBlob={getBlob} onAddToChecklist={vi.fn()} onOpenImportWizard={vi.fn()} projectMembershipsByArtworkId={{ "art-1": [{ id: "project-2", title: "Summer rotation", updatedAt: "2026-01-02" }] }} onOpenProject={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "Used in 1 project" })).toHaveAttribute("aria-haspopup", "menu");
+  it("lists 2+ project memberships in an accessible menu", () => {
+    render(<ArtworkLibraryView artworks={artworks} project={project} getBlob={getBlob} onAddToChecklist={vi.fn()} onOpenImportWizard={vi.fn()} projectMembershipsByArtworkId={{ "art-1": [{ id: "project-2", title: "Summer rotation", updatedAt: "2026-01-02" }, { id: "project-3", title: "Winter rotation", updatedAt: "2026-01-03" }] }} onOpenProject={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Used in 2 projects" })).toHaveAttribute("aria-haspopup", "menu");
+  });
+
+  it("renders a single membership as a direct button that opens the project", () => {
+    const onOpenProject = vi.fn();
+    render(<ArtworkLibraryView artworks={artworks} project={project} getBlob={getBlob} onAddToChecklist={vi.fn()} onOpenImportWizard={vi.fn()} projectMembershipsByArtworkId={{ "art-1": [{ id: "project-2", title: "Summer rotation", updatedAt: "2026-01-02" }] }} onOpenProject={onOpenProject} />);
+    const button = screen.getByRole("button", { name: "Open Summer rotation" });
+    expect(button).not.toHaveAttribute("aria-haspopup");
+    expect(button.textContent).toContain("Summer rotation");
+    fireEvent.click(button);
+    expect(onOpenProject).toHaveBeenCalledWith("project-2");
+  });
+
+  it("select-all checks every visible row and goes indeterminate when partial", () => {
+    render(<ArtworkLibraryView artworks={artworks} project={project} getBlob={getBlob} onAddToChecklist={vi.fn()} onOpenImportWizard={vi.fn()} onDeleteArtworks={vi.fn()} />);
+    const selectAll = screen.getByRole("checkbox", { name: "Select all shown artworks" });
+    fireEvent.click(selectAll);
+    expect(screen.getByRole("checkbox", { name: "Select Wind and Crepe Myrtle Concerto" })).toHaveAttribute("data-state", "checked");
+    expect(screen.getByRole("checkbox", { name: "Select Relative" })).toHaveAttribute("data-state", "checked");
+    expect(selectAll).toHaveAttribute("data-state", "checked");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Relative" }));
+    expect(selectAll).toHaveAttribute("aria-checked", "mixed");
+  });
+
+  it("confirms a mass delete with usage copy and clears the selection", () => {
+    const onDeleteArtworks = vi.fn();
+    render(<ArtworkLibraryView artworks={artworks} project={project} getBlob={getBlob} onAddToChecklist={vi.fn()} onOpenImportWizard={vi.fn()} onDeleteArtworks={onDeleteArtworks} projectMembershipsByArtworkId={{ "art-1": [{ id: "project-2", title: "Summer rotation", updatedAt: "2026-01-02" }] }} />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Wind and Crepe Myrtle Concerto" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Relative" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByText(/1 of these works is on the checklist in “Summer rotation”/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Delete 2 works" }));
+    expect(onDeleteArtworks).toHaveBeenCalledWith(["art-1", "art-2"]);
+    expect(screen.queryByText("2 selected")).toBeNull();
+  });
+
+  it("cancels a mass delete without calling the callback or dropping the selection", () => {
+    const onDeleteArtworks = vi.fn();
+    render(<ArtworkLibraryView artworks={artworks} project={project} getBlob={getBlob} onAddToChecklist={vi.fn()} onOpenImportWizard={vi.fn()} onDeleteArtworks={onDeleteArtworks} />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Relative" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onDeleteArtworks).not.toHaveBeenCalled();
+    expect(screen.getByText("1 selected")).toBeTruthy();
   });
 
   it("teaches the global scope when empty", () => {

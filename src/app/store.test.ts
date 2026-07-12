@@ -1123,6 +1123,74 @@ describe("app store", () => {
     expect(store.getState().project?.checklistArtworkIds).toEqual([sharedId]);
   });
 
+  describe("deleteLibraryArtworks", () => {
+    it("cascades across projects, cleans the open one, and erases records + assets", async () => {
+      await store.getState().addArtworksFromFiles(
+        [makeImageFile("a.jpg"), makeImageFile("b.jpg"), makeImageFile("c.jpg")],
+        { destination: "library" }
+      );
+      const [a, b, c] = store.getState().libraryArtworks.map((artwork) => artwork.id);
+
+      // Open project references both a (placed + checklisted) and b (checklisted).
+      await store.getState().addExistingArtworksToChecklist([a, b]);
+      const wallId = getSelectedWall(
+        store.getState().project!,
+        store.getState().wallContextId
+      )!.id;
+      await store.getState().placeArtwork(a, wallId, 1_000, 1_450);
+      expect(objectIdsOf(store.getState().selection)[0]).toBeTruthy();
+
+      // A second saved (non-open) project references b in its checklist.
+      const base = store.getState().project!;
+      await repository.save({
+        ...base,
+        id: "other-project",
+        title: "Other Show",
+        updatedAt: "2026-07-11T10:00:00.000Z",
+        checklistArtworkIds: [b],
+        wallObjects: [],
+        floorObjects: []
+      });
+
+      const deleteArtwork = vi.spyOn(artworkLibraryRepository, "delete");
+      const deleteAsset = vi.spyOn(assetRepository, "delete");
+
+      await store.getState().deleteLibraryArtworks([a, b, "unknown-id"]);
+
+      const state = store.getState();
+      // Open project cleaned in memory: no references to a or b, no placement.
+      expect(state.project!.checklistArtworkIds).toEqual([]);
+      expect(state.project!.wallObjects.some((object) => object.kind === "artwork")).toBe(false);
+      // Selection that pointed at the removed placement is cleared.
+      expect(getSelectedArtworkId(state.project, state.selection)).toBeNull();
+      expect(state.selection.kind).toBe("none");
+      // Cascade stripped and re-saved the other project.
+      expect(repository.projects.get("other-project")!.checklistArtworkIds).toEqual([]);
+      // Records + their 1:1 blobs are gone; c survives.
+      expect(deleteArtwork).toHaveBeenCalledWith(a);
+      expect(deleteArtwork).toHaveBeenCalledWith(b);
+      expect(deleteAsset).toHaveBeenCalledTimes(2);
+      expect(artworkLibraryRepository.artworks.has(a)).toBe(false);
+      expect(artworkLibraryRepository.artworks.has(b)).toBe(false);
+      expect(assetRepository.assets.size).toBe(1);
+      // libraryArtworks refreshed to just c.
+      expect(state.libraryArtworks.map((artwork) => artwork.id)).toEqual([c]);
+      expect(state.error).toBeNull();
+    });
+
+    it("no-ops when no id matches a library record", async () => {
+      await store
+        .getState()
+        .addArtworksFromFiles([makeImageFile("only.jpg")], { destination: "library" });
+      const before = store.getState().libraryArtworks;
+
+      await store.getState().deleteLibraryArtworks(["nope"]);
+
+      expect(store.getState().libraryArtworks).toBe(before);
+      expect(store.getState().error).toBeNull();
+    });
+  });
+
   it("openProject switches the current document and resets edit history", async () => {
     const original = store.getState().project!;
     await store.getState().createProject("Winter Show");

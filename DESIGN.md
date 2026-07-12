@@ -18,7 +18,8 @@ colors:
   primary-strong: "oklch(0.3 0.065 200)"
   primary-soft: "oklch(0.94 0.022 200)"
   selection: "oklch(0.55 0.11 200)"
-  destructive: "oklch(0.53 0.18 28)"
+  destructive: "oklch(0.47 0.15 22)"
+  destructive-strong: "oklch(0.4 0.13 22)"
   caution: "oklch(0.5 0.13 75)"
 typography:
   display: '"Figtree Variable", Figtree, ui-sans-serif, system-ui, sans-serif'

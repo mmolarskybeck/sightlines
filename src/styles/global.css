@@ -19,6 +19,7 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-strong: var(--destructive-strong);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
@@ -87,10 +88,11 @@
   /* Petrol hairline for selected-row/pressed-fill edges — the same rank as
      --danger-line/--caution-line in their families. */
   --primary-line: oklch(0.82 0.045 200);
-  --destructive: oklch(0.53 0.18 28);
+  --destructive: oklch(0.47 0.15 22);
+  --destructive-strong: oklch(0.4 0.13 22);
   --destructive-foreground: oklch(1 0 0);
-  --danger-soft: oklch(0.94 0.052 28);
-  --danger-line: oklch(0.82 0.08 28);
+  --danger-soft: oklch(0.95 0.035 22);
+  --danger-line: oklch(0.8 0.07 22);
   --caution: oklch(0.5 0.13 75);
   --caution-soft: oklch(0.94 0.045 75);
   --caution-line: oklch(0.8 0.09 75);
@@ -6063,9 +6065,19 @@ body.panels-resizing * {
   border-top: 1px solid var(--border);
   background: var(--primary-soft);
   font-size: var(--type-sm);
+  animation: artwork-library-selection-in 150ms ease-out;
 }
 .artwork-library-selection > span { margin-right: auto; font-weight: 600; }
 .artwork-library-selection button.bg-primary { color: var(--primary-foreground); }
+
+@keyframes artwork-library-selection-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artwork-library-selection { animation: none; }
+}
 
 .artwork-library-table-scroll {
   min-height: 0;
@@ -6136,7 +6148,10 @@ body.panels-resizing * {
 .artwork-table-thumbnail { display: grid; width: 2.5rem; height: 2.5rem; flex: 0 0 auto; place-items: center; overflow: hidden; border-radius: var(--radius-control); background: var(--surface-strong); color: var(--muted-foreground); }
 .artwork-table-thumbnail img { width: 100%; height: 100%; object-fit: cover; }
 .artwork-table-muted { color: var(--muted-foreground); }
+.artwork-table-dimensions { font-variant-numeric: tabular-nums; }
 .artwork-membership { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--primary-strong); font-size: var(--type-xs); font-weight: 600; white-space: nowrap; }
+.artwork-membership-project { max-width: 100%; }
+.artwork-membership-project-label { display: block; overflow: hidden; max-width: 11rem; text-overflow: ellipsis; white-space: nowrap; }
 
 .artwork-inspector-scope {
   margin: 0;
