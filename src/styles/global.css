@@ -3442,6 +3442,34 @@ body.panels-resizing * {
   background: var(--line);
 }
 
+/* Wall switcher: a muted subsection heading (the "Partitions" group that sits
+   below a room's perimeter walls) plus the extra left indent that sets a
+   partition face apart from a perimeter wall — structure by spacing, no pill,
+   no accent stripe, matching the menu's Notion-like overlay language. */
+.dropdown-menu-section-label {
+  padding: 5px 8px 3px 8px;
+  color: var(--subtle);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
+}
+
+.dropdown-menu-item-indented {
+  padding-left: 20px;
+}
+
+/* Submenu trigger (an "other room"): reclaim the shared item's 28px trailing
+   reserve (there is no check here) and float a muted disclosure caret to the
+   trailing edge, echoing the room label's tone. */
+.dropdown-menu-sub-trigger {
+  padding-right: 8px;
+}
+
+.dropdown-menu-sub-caret {
+  margin-left: auto;
+  color: var(--subtle);
+}
+
 /* Menus surface from their trigger with the same quick fade + soft pop the
    tooltips use (shared tooltip-in keyframes) — one entrance voice for every
    floating hint or menu. */
@@ -3975,6 +4003,19 @@ body.panels-resizing * {
   font-size: var(--type-sm);
   font-weight: var(--weight-strong);
   cursor: pointer;
+}
+
+/* The current wall name truncates before the caret; a multi-room project
+   prefixes it with a muted room name so the chip reads "Room · Wall". */
+.surface-label-select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.surface-label-select-room {
+  color: var(--muted);
+  font-weight: var(--weight-medium);
 }
 
 /* 3D preview surface. Camera presets live in the shared view toolbar so the

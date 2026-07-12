@@ -77,15 +77,7 @@ import { GridOverlay } from "./GridOverlay";
 import { GroupDimensionLines } from "./GroupDimensionLines";
 import { Button } from "./ui/button";
 import { ViewportZoomControls } from "./ViewportZoomControls";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue
-} from "./ui/select";
+import { WallSwitcher, type WallSwitcherEntry } from "./WallSwitcher";
 
 // Re-exported for backward compatibility — this used to be defined here,
 // and nothing outside this file depends on the distinction between "defined
@@ -288,7 +280,7 @@ export function ElevationView({
   // The full wall inventory (in room order), so the elevation chip can double
   // as a wall switcher. App-derived (wallsForSwitcher memo), so it stays a
   // prop; onSelectWall is read from the store below.
-  walls?: { id: string; name: string; roomName: string }[];
+  walls?: WallSwitcherEntry[];
 }) {
   const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -1236,12 +1228,13 @@ export function ElevationView({
       ? getSpacingSegments(effectiveDimensionMembers, wallLengthMm)
       : getNeighborAwareSegments(effectiveDimensionMembers, dimensionOthers, wallLengthMm);
 
-  // Wall switcher wiring for the chip. Prev/next cycle through every wall in
-  // room order (wrapping), and the Select lists them all — grouped by room
-  // once more than one room exists.
+  // Wall switcher wiring for the chip. Prev/next cycle through every placeable
+  // surface in room order (each room's perimeter walls then its partition
+  // faces, wrapping at the ends), and the WallSwitcher menu lists them all —
+  // grouped by room, faces sectioned under "Partitions", once more than one
+  // room exists.
   const currentWallIndex = walls.findIndex((wall) => wall.id === wallId);
   const canSwitchWalls = walls.length > 0 && currentWallIndex >= 0 && Boolean(onSelectWall);
-  const roomNames = [...new Set(walls.map((wall) => wall.roomName))];
   const stepWall = (delta: number) => {
     if (currentWallIndex < 0) return;
     const next = walls[(currentWallIndex + delta + walls.length) % walls.length];
@@ -1278,34 +1271,11 @@ export function ElevationView({
             >
               <CaretLeftIcon aria-hidden="true" size={16} />
             </Button>
-            <Select
-              value={wallId}
-              onValueChange={(value) => onSelectWall?.(value)}
-            >
-              <SelectTrigger aria-label="Select wall" className="surface-label-select">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {roomNames.length > 1
-                  ? roomNames.map((roomName) => (
-                    <SelectGroup key={roomName}>
-                      <SelectLabel>{roomName}</SelectLabel>
-                      {walls
-                        .filter((wall) => wall.roomName === roomName)
-                        .map((wall) => (
-                          <SelectItem key={wall.id} value={wall.id}>
-                            {wall.name}
-                          </SelectItem>
-                        ))}
-                    </SelectGroup>
-                  ))
-                  : walls.map((wall) => (
-                    <SelectItem key={wall.id} value={wall.id}>
-                      {wall.name}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
+            <WallSwitcher
+              walls={walls}
+              currentWallId={wallId ?? ""}
+              onSelectWall={(value) => onSelectWall?.(value)}
+            />
             <Button
               aria-label="Next wall"
               className="surface-label-switch"
