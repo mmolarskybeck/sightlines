@@ -9,16 +9,21 @@ import {
 } from "react";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
+import { ArchiveIcon } from "@phosphor-icons/react/dist/csr/Archive";
+import { BracketsCurlyIcon } from "@phosphor-icons/react/dist/csr/BracketsCurly";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
+import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
 import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
 import { CrosshairIcon } from "@phosphor-icons/react/dist/csr/Crosshair";
 import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
+import { FileDashedIcon } from "@phosphor-icons/react/dist/csr/FileDashed";
 import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { GridFourIcon } from "@phosphor-icons/react/dist/csr/GridFour";
 import { MagnetIcon } from "@phosphor-icons/react/dist/csr/Magnet";
 import { MapTrifoldIcon } from "@phosphor-icons/react/dist/csr/MapTrifold";
+import { PackageIcon } from "@phosphor-icons/react/dist/csr/Package";
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import { PolygonIcon } from "@phosphor-icons/react/dist/csr/Polygon";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
@@ -103,6 +108,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger
 } from "./components/ui/dropdown-menu";
 import { Input } from "./components/ui/input";
@@ -413,6 +420,9 @@ export function App() {
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  // Package builds hash and zip every image blob, so a large project takes a
+  // beat — the Export trigger shows a spinner and refuses re-entry meanwhile.
+  const [isExportingPackage, setIsExportingPackage] = useState(false);
 
   useEffect(() => {
     if (viewMode !== "library") return;
@@ -1023,8 +1033,14 @@ export function App() {
   };
 
   const handleExportPackage = async (mode: PackageExportMode) => {
-    const result = await exportProjectPackage(mode);
-    if (result) triggerDownload(result.zip, result.filename);
+    if (isExportingPackage) return;
+    setIsExportingPackage(true);
+    try {
+      const result = await exportProjectPackage(mode);
+      if (result) triggerDownload(result.zip, result.filename);
+    } finally {
+      setIsExportingPackage(false);
+    }
   };
 
   // One Import entry point for both formats, detected by CONTENT, not
@@ -1167,44 +1183,70 @@ export function App() {
                 className="topbar-button"
                 title="Export"
                 aria-label="Export"
+                aria-busy={isExportingPackage}
+                disabled={isExportingPackage}
                 size="default"
                 variant="outline"
               >
-                <DownloadSimpleIcon aria-hidden="true" size={18} />
-                <span>Export</span>
+                {isExportingPackage ? (
+                  <CircleNotchIcon aria-hidden="true" className="animate-spin" size={18} />
+                ) : (
+                  <DownloadSimpleIcon aria-hidden="true" size={18} />
+                )}
+                <span>{isExportingPackage ? "Exporting…" : "Export"}</span>
                 <CaretDownIcon aria-hidden="true" className="topbar-button-caret" size={14} />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-64">
+            <DropdownMenuContent align="end" className="w-80">
+              <DropdownMenuLabel>Export package (.sightlines)</DropdownMenuLabel>
               <DropdownMenuItem
-                className="flex-col items-start gap-0.5"
+                className="dropdown-menu-item-stacked"
                 onSelect={() => void handleExportPackage("display")}
               >
-                <span>Package (.sightlines)</span>
-                <span className="text-[var(--type-xs)] text-muted-foreground">
-                  Display-quality images. Recommended for sharing and backup.
+                <PackageIcon aria-hidden="true" size={16} />
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span>Standard</span>
+                  <span className="text-[var(--type-xs)] leading-snug text-muted-foreground">
+                    Display-quality images. Recommended for sharing and backup.
+                  </span>
                 </span>
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="flex-col items-start gap-0.5"
+                className="dropdown-menu-item-stacked"
                 onSelect={() => void handleExportPackage("originals")}
               >
-                <span>Package with originals</span>
-                <span className="text-[var(--type-xs)] text-muted-foreground">
-                  Full-resolution originals too. Largest file; archival handoff.
+                <ArchiveIcon aria-hidden="true" size={16} />
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span>With originals</span>
+                  <span className="text-[var(--type-xs)] leading-snug text-muted-foreground">
+                    Adds full-resolution files. Largest export; archival handoff.
+                  </span>
                 </span>
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="flex-col items-start gap-0.5"
+                className="dropdown-menu-item-stacked"
                 onSelect={() => void handleExportPackage("metadata-only")}
               >
-                <span>Package without images</span>
-                <span className="text-[var(--type-xs)] text-muted-foreground">
-                  Checklist and layout only. Lightest possible file.
+                <FileDashedIcon aria-hidden="true" size={16} />
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span>Without images</span>
+                  <span className="text-[var(--type-xs)] leading-snug text-muted-foreground">
+                    Checklist and layout only. Relinks images on machines that have them.
+                  </span>
                 </span>
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => downloadProject(project)}>
-                Project JSON
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="dropdown-menu-item-stacked"
+                onSelect={() => downloadProject(project)}
+              >
+                <BracketsCurlyIcon aria-hidden="true" size={16} />
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span>Project JSON</span>
+                  <span className="text-[var(--type-xs)] leading-snug text-muted-foreground">
+                    Raw project data without images or library records.
+                  </span>
+                </span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

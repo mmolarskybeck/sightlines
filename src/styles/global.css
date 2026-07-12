@@ -3382,6 +3382,52 @@ body.panels-resizing * {
   opacity: 0.45;
 }
 
+.dropdown-menu-label {
+  padding: 5px 8px 3px;
+  color: var(--subtle);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
+}
+
+/* Two-line menu items (title + supporting line): the leading icon rides the
+   title's cap line instead of centering against the whole text block. Lives
+   here because .dropdown-menu-item's own align-items would beat per-instance
+   utility overrides in the cascade. */
+.dropdown-menu-item-stacked {
+  align-items: flex-start;
+  /* The shared item rule reserves 28px on the right for the select's check
+     indicator; menu items have none, so reclaim it for the description line. */
+  padding: 6px 10px 6px 8px;
+}
+
+.dropdown-menu-item-stacked > svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+/* Bleeds across the content's 4px inner padding so the hairline spans the
+   full menu width, matching how panel hairlines run edge to edge. */
+.dropdown-menu-separator {
+  height: 1px;
+  margin: 4px -4px;
+  background: var(--line);
+}
+
+/* Menus surface from their trigger with the same quick fade + soft pop the
+   tooltips use (shared tooltip-in keyframes) — one entrance voice for every
+   floating hint or menu. */
+.dropdown-menu-content[data-state="open"] {
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin);
+  animation: tooltip-in 140ms var(--ease-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dropdown-menu-content[data-state="open"] {
+    animation: none;
+  }
+}
+
 .select-item-indicator {
   position: absolute;
   right: 8px;
