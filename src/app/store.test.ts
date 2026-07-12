@@ -2047,6 +2047,21 @@ describe("app store", () => {
       expect(state.undoStack.at(-1)?.label).toBe("Add window");
     });
 
+    it("pins an elevation-placed door to the floorline (yMm = heightMm/2) regardless of pointer y", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+
+      // Try to place a door at y=1650, but it should snap to the floor
+      await store.getState().placeOpeningOnElevation("door", wall.id, 1800, 1650);
+
+      const state = store.getState();
+      const door = state.project!.wallObjects[0];
+      expect(door.kind).toBe("door");
+      expect(door.xMm).toBe(1800);
+      // Door height defaults to 2030, so center should be at 1015
+      expect(door.heightMm).toBe(2030);
+      expect(door.yMm).toBe(1015);
+    });
+
     it("is a no-op for an unknown wall id", async () => {
       const before = store.getState().project;
 
@@ -2089,6 +2104,45 @@ describe("app store", () => {
 
       expect(store.getState().undoStack).toHaveLength(undoStackBefore);
     });
+
+    it("clamps a door to the floorline (yMm = heightMm/2) and ignores vertical drag requests", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+      await store.getState().addOpening(wall.id, "door");
+      const door = store.getState().project!.wallObjects[0];
+      const originalYMm = door.yMm;
+      const undoStackBefore = store.getState().undoStack.length;
+
+      // Try to move the door vertically — it should be ignored (constrained to floor).
+      await store.getState().moveOpening(door.id, door.xMm + 500, 1500);
+
+      let state = store.getState();
+      let movedDoor = state.project!.wallObjects[0];
+      // X moves normally, but Y is clamped to the floor (heightMm/2 = 1015).
+      expect(movedDoor.xMm).toBe(door.xMm + 500);
+      expect(movedDoor.yMm).toBe(1015); // Door height is 2030, so center = 1015
+      expect(movedDoor.yMm).toBe(movedDoor.heightMm / 2);
+      expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+
+      // Undo restores the original x.
+      await store.getState().undo();
+      state = store.getState();
+      movedDoor = state.project!.wallObjects[0];
+      expect(movedDoor.xMm).toBe(door.xMm);
+      expect(movedDoor.yMm).toBe(originalYMm);
+    });
+
+    it("allows windows to move vertically while doors stay on the floorline", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+      await store.getState().addOpening(wall.id, "window");
+      const window = store.getState().project!.wallObjects[0];
+
+      // Windows can move vertically
+      await store.getState().moveOpening(window.id, window.xMm, 1500);
+
+      let state = store.getState();
+      let movedWindow = state.project!.wallObjects[0];
+      expect(movedWindow.yMm).toBe(1500);
+    });
   });
 
   describe("resizeOpening", () => {
@@ -2110,6 +2164,46 @@ describe("app store", () => {
       state = store.getState();
       opening = state.project!.wallObjects.find((o) => o.id === openingId)!;
       expect(opening.widthMm).not.toBe(1500);
+    });
+
+    it("recomputes a door's yMm to keep its bottom on the floorline when height changes", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+      await store.getState().addOpening(wall.id, "door");
+      const door = store.getState().project!.wallObjects[0];
+      const originalYMm = door.yMm; // Should be 2030/2 = 1015
+      const undoStackBefore = store.getState().undoStack.length;
+
+      // Resize the door's height to 1800 — the center should move to 900.
+      await store.getState().resizeOpening(door.id, 915, 1800);
+
+      let state = store.getState();
+      let resizedDoor = state.project!.wallObjects[0];
+      expect(resizedDoor.heightMm).toBe(1800);
+      expect(resizedDoor.yMm).toBe(900); // 1800 / 2
+      expect(resizedDoor.yMm).toBe(resizedDoor.heightMm / 2);
+      expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+
+      // Undo restores the original height and yMm.
+      await store.getState().undo();
+      state = store.getState();
+      resizedDoor = state.project!.wallObjects[0];
+      expect(resizedDoor.heightMm).toBe(2030);
+      expect(resizedDoor.yMm).toBe(originalYMm);
+    });
+
+    it("does not recompute window yMm when resizing height", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+      await store.getState().addOpening(wall.id, "window");
+      const window = store.getState().project!.wallObjects[0];
+      const originalYMm = window.yMm;
+
+      // Resize a window's height — yMm should not change.
+      await store.getState().resizeOpening(window.id, 1500, 1000);
+
+      let state = store.getState();
+      let resizedWindow = state.project!.wallObjects[0];
+      expect(resizedWindow.heightMm).toBe(1000);
+      expect(resizedWindow.yMm).toBe(originalYMm); // Unchanged
     });
   });
 

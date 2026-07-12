@@ -2658,10 +2658,14 @@ export function createAppStore(deps: AppStoreDeps) {
 
         const target = project.wallObjects.find((wallObject) => wallObject.id === wallObjectId);
         if (!target || target.kind === "artwork") return;
-        if (target.xMm === xMm && target.yMm === yMm) return;
+
+        // Doors must sit on the floorline (center at height/2).
+        const clampedYMm = target.kind === "door" ? target.heightMm / 2 : yMm;
+
+        if (target.xMm === xMm && target.yMm === clampedYMm) return;
 
         let nextWallObjects = project.wallObjects.map((wallObject) =>
-          wallObject.id === wallObjectId ? { ...wallObject, xMm, yMm } : wallObject
+          wallObject.id === wallObjectId ? { ...wallObject, xMm, yMm: clampedYMm } : wallObject
         );
         let validateIds = [wallObjectId];
 
@@ -2672,7 +2676,7 @@ export function createAppStore(deps: AppStoreDeps) {
           (target.kind === "door" || target.kind === "window") &&
           target.connectsToObjectId !== undefined
         ) {
-          const synced = syncPartnerMove(project, nextWallObjects, target, xMm, yMm);
+          const synced = syncPartnerMove(project, nextWallObjects, target, xMm, clampedYMm);
           if (synced) {
             nextWallObjects = synced.nextWallObjects;
             validateIds = [wallObjectId, synced.partnerId];
@@ -2698,8 +2702,11 @@ export function createAppStore(deps: AppStoreDeps) {
         if (!target || target.kind === "artwork") return;
         if (target.widthMm === widthMm && target.heightMm === heightMm) return;
 
+        // For doors, recompute yMm so the bottom stays on the floor when height changes.
+        const updatedYMm = target.kind === "door" ? heightMm / 2 : target.yMm;
+
         let nextWallObjects = project.wallObjects.map((wallObject) =>
-          wallObject.id === wallObjectId ? { ...wallObject, widthMm, heightMm } : wallObject
+          wallObject.id === wallObjectId ? { ...wallObject, widthMm, heightMm, yMm: updatedYMm } : wallObject
         );
         let validateIds = [wallObjectId];
 
@@ -2924,7 +2931,7 @@ export function createAppStore(deps: AppStoreDeps) {
         // matching the plan insertion rules. Blocked zones are annotations and
         // can be placed on either face.
         if (kind !== "blocked-zone" && parseFaceWallId(wallId) !== null) {
-          set({ error: "Doors and windows can't be placed on a partition." });
+          set({ error: "Doors and windows can’t be placed on a partition." });
           return;
         }
 
@@ -2938,12 +2945,15 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
+        // Doors must sit on the floorline (bottom edge at y=0, center at height/2).
+        const resolvedYMm = kind === "door" ? undefined : yMm;
+
         const { nextWallObjects, primaryId, validateIds } = buildOpeningWithMirror(
           project,
           wall,
           kind,
           xCenterMm,
-          yMm
+          resolvedYMm
         );
 
         await commitWallObjectEdit(

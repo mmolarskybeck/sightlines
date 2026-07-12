@@ -726,6 +726,7 @@ export function ElevationView({
   // Opening insertion uses the same live snap/barrier resolver as an elevation
   // move. The only difference is that the preview starts from the pointer and
   // the committed result creates a new wall object instead of moving one.
+  // Doors must sit on the floorline, so their preview y is pinned to heightMm/2.
   function resolveOpeningTool(proposed: Vector2) {
     if (!activeTool || !openingToolSize) return null;
     const result = resolveElevationPlacement(
@@ -739,6 +740,19 @@ export function ElevationView({
       new Set()
     );
     openingToolSnapTargetIdsRef.current = result.snapTargetIds;
+
+    // Doors sit on the floorline: pin their preview y to the center position
+    // (bottom edge at y=0 means center at height/2).
+    if (activeTool === "door") {
+      return {
+        ...result,
+        point: {
+          ...result.point,
+          yMm: openingToolSize.heightMm / 2
+        }
+      };
+    }
+
     return result;
   }
 

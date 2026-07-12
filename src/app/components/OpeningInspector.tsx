@@ -72,15 +72,17 @@ export function OpeningInspector({
           placeholder={position.placeholder}
           onCommit={(xMm) => onCommitPosition(xMm, opening.yMm)}
         />
-        <LengthField
-          compact
-          label="Y (from floor)"
-          valueMm={opening.yMm}
-          displayUnit={size.displayUnit}
-          parseUnit={size.parseUnit}
-          placeholder={size.placeholder}
-          onCommit={(yMm) => onCommitPosition(opening.xMm, yMm)}
-        />
+        {opening.kind !== "door" && (
+          <LengthField
+            compact
+            label="Y (from floor)"
+            valueMm={opening.yMm}
+            displayUnit={size.displayUnit}
+            parseUnit={size.parseUnit}
+            placeholder={size.placeholder}
+            onCommit={(yMm) => onCommitPosition(opening.xMm, yMm)}
+          />
+        )}
       </div>
 
       <div className="field-pair-grid">
