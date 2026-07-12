@@ -807,6 +807,67 @@ input:focus-visible {
   line-height: var(--leading-ui);
 }
 
+/* Toast (sonner) — the app's other transient surface, for one-shot outcomes
+   (export/import results, the already-placed drag hint) that don't warrant
+   a standing banner. Deliberately NOT "rich colors": every toast keeps the
+   same white surface and --radius-overlay corners as the dialog/help
+   overlays above — only the type icon carries semantic color — so the
+   result reads as restrained chrome, not a colored pill or left-stripe
+   alert (both banned by this project's design language).
+   Selectors set the rendered properties directly (background/border-color/
+   color) rather than overriding sonner's --normal-bg/--success-border/etc.
+   custom properties: sonner injects its own stylesheet at runtime via a
+   client-side <style> tag, so it can land after global.css in the cascade,
+   and several of its own rules (e.g. [data-sonner-toaster][data-sonner-
+   theme='light']) already match at 2 attribute selectors — tying or beating
+   a bare custom-property override and winning that tie on source order.
+   Every rule below is scoped under the .sonner-toaster class the wrapper
+   sets on the toaster root, which keeps its specificity strictly higher
+   than the sonner rule it's meant to replace, so the override holds
+   regardless of injection order. */
+.sonner-toaster [data-sonner-toast][data-styled="true"] {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--foreground);
+  border-radius: var(--radius-overlay);
+  box-shadow: var(--shadow-overlay);
+  font-family: var(--font-ui);
+}
+
+.sonner-toaster [data-sonner-toast][data-styled="true"] [data-title] {
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.sonner-toaster [data-sonner-toast][data-styled="true"] [data-description] {
+  color: var(--muted-foreground);
+  font-size: var(--type-xs);
+}
+
+.sonner-toaster [data-sonner-toast][data-type="success"] {
+  border-color: var(--primary-line);
+}
+
+.sonner-toaster [data-sonner-toast][data-type="success"] [data-icon] {
+  color: var(--primary);
+}
+
+.sonner-toaster [data-sonner-toast][data-type="warning"] {
+  border-color: var(--caution-line);
+}
+
+.sonner-toaster [data-sonner-toast][data-type="warning"] [data-icon] {
+  color: var(--caution);
+}
+
+.sonner-toaster [data-sonner-toast][data-type="error"] {
+  border-color: var(--danger-line);
+}
+
+.sonner-toaster [data-sonner-toast][data-type="error"] [data-icon] {
+  color: var(--destructive);
+}
+
 .dialog-overlay {
   position: fixed;
   inset: 0;

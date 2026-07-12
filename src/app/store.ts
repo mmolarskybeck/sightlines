@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { z } from "zod";
+import { toast } from "sonner";
 import { createBrowserImageProcessor } from "../domain/assets/browserImageProcessor";
 import { titleFromFilename, type ImageProcessor } from "../domain/assets/imageIntake";
 import { buildImageAsset, processImageFile } from "../domain/assets/intakeImageFile";
@@ -499,15 +500,19 @@ export function createAppStore(deps: AppStoreDeps) {
       setDocument(commit.project, { viewMode: "plan", libraryArtworks });
       await persist(commit.project);
 
-      // After persist — it clears the banner when it starts saving.
-      // Degradations surface once, here; the affected checklist rows also
-      // show the standing missing-image placeholder state.
+      // A successful import — even a degraded one — is not an error, so it
+      // no longer rides the red `error` banner (see docs/status.md). Both
+      // outcomes get a one-shot toast instead; degradations also surface via
+      // the standing missing-image placeholder state on the affected
+      // checklist rows, so the toast doesn't need to be permanent.
       if (commit.warnings.length > 0) {
-        set({
-          error: `Imported “${commit.project.title}” with ${commit.warnings.length} warning${
+        toast.warning(
+          `Imported “${commit.project.title}” with ${commit.warnings.length} warning${
             commit.warnings.length === 1 ? "" : "s"
           }: ${commit.warnings.join(" ")}`
-        });
+        );
+      } else {
+        toast.success(`Imported “${commit.project.title}”`);
       }
     }
 
@@ -1781,11 +1786,11 @@ export function createAppStore(deps: AppStoreDeps) {
         try {
           project = migrateProjectJson(text);
         } catch (error) {
-          set({
-            error: `Import failed: ${
-              error instanceof Error ? error.message : "the file could not be read."
-            }`
-          });
+          const message = `Import failed: ${
+            error instanceof Error ? error.message : "the file could not be read."
+          }`;
+          set({ error: message });
+          toast.error(message);
           return;
         }
 
@@ -1857,11 +1862,11 @@ export function createAppStore(deps: AppStoreDeps) {
 
           await commitPackageImport(plan, {});
         } catch (error) {
-          set({
-            error: `Import failed: ${
-              error instanceof Error ? error.message : "the package could not be read."
-            }`
-          });
+          const message = `Import failed: ${
+            error instanceof Error ? error.message : "the package could not be read."
+          }`;
+          set({ error: message });
+          toast.error(message);
         } finally {
           set({ intakeState: "idle" });
         }
@@ -1874,11 +1879,11 @@ export function createAppStore(deps: AppStoreDeps) {
         try {
           await commitPackageImport(plan, resolutions);
         } catch (error) {
-          set({
-            error: `Import failed: ${
-              error instanceof Error ? error.message : "the package could not be saved."
-            }`
-          });
+          const message = `Import failed: ${
+            error instanceof Error ? error.message : "the package could not be saved."
+          }`;
+          set({ error: message });
+          toast.error(message);
         }
       },
 

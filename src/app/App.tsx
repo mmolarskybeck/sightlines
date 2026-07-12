@@ -85,6 +85,8 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from "./components/ui/tooltip";
+import { Toaster } from "./components/ui/sonner";
+import { toast } from "sonner";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { RoomInspector } from "./components/RoomInspector";
 import { RoomsPanel } from "./components/RoomsPanel";
@@ -936,7 +938,21 @@ export function App() {
     setIsExportingPackage(true);
     try {
       const result = await exportProjectPackage(mode);
-      if (result) triggerDownload(result.zip, result.filename);
+      if (result) {
+        triggerDownload(result.zip, result.filename);
+        toast.success(`Exported ${result.filename}`);
+      } else {
+        // exportProjectPackage catches its own failures and records them on
+        // `error` (see store.ts) rather than throwing — read that message
+        // back out so the toast and the banner agree.
+        toast.error(useAppStore.getState().error ?? "Export failed: the package could not be built.");
+      }
+    } catch (error) {
+      // Guards anything unexpected outside exportProjectPackage's own try/
+      // catch — e.g. triggerDownload failing on the returned blob.
+      toast.error(
+        `Export failed: ${error instanceof Error ? error.message : "the package could not be built."}`
+      );
     } finally {
       setIsExportingPackage(false);
     }
@@ -988,6 +1004,7 @@ export function App() {
     // the previous tooltip's polygon counted as in-transit and the new
     // tooltip silently never opened until the pointer left and came back.
     <TooltipProvider delayDuration={400} disableHoverableContent>
+    <Toaster />
     <main className="app-shell">
       <AppRail
         leftPanel={visibleLeftPanel}
