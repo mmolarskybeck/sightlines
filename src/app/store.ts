@@ -81,6 +81,14 @@ import {
   type WallObject
 } from "../domain/project";
 import { createSightlinesPackage, packageFilename } from "../domain/package/buildPackage";
+import {
+  finalizePackageImport,
+  openSightlinesPackage,
+  planPackageImport,
+  validatePackageAssets,
+  type ConflictResolution,
+  type ImportPlan
+} from "../domain/package/importPackage";
 import type { PackageExportMode } from "../domain/schema/packageSchema";
 import type { ArtworkLibraryRepository } from "../domain/repositories/artworkLibraryRepository";
 import { assetBlobKey, type AssetRepository } from "../domain/repositories/assetRepository";
@@ -201,6 +209,9 @@ export type AppState = ArrangeSliceState &
     existingArtworkTitle: string;
     destination: ArtworkImportDestination;
   }[];
+  // A .sightlines import paused on §6 artwork conflicts, awaiting one review
+  // step in the conflict dialog. Nothing has been persisted yet.
+  pendingPackageImport: ImportPlan | null;
   boot: () => Promise<void>;
   /** Dev-only, non-persisting document swap used by renderer benchmarks. */
   loadBenchmarkFixture: (project: Project, artworks: Artwork[]) => void;
@@ -262,6 +273,14 @@ export type AppState = ArrangeSliceState &
   exportProjectPackage: (
     mode: PackageExportMode
   ) => Promise<{ filename: string; zip: Uint8Array } | null>;
+  // Runs the untrusted-file pipeline (docs/plan.md §13) over .sightlines
+  // bytes. If §6 artwork conflicts need a decision, the import parks in
+  // pendingPackageImport for the review dialog; otherwise it commits directly.
+  importSightlinesPackage: (bytes: ArrayBuffer) => Promise<void>;
+  resolvePackageImportConflicts: (
+    resolutions: Record<string, ConflictResolution>
+  ) => Promise<void>;
+  dismissPackageImport: () => void;
   listProjectSummaries: () => Promise<ProjectSummary[]>;
   listArtworkProjectMemberships: (
     artworkIds: string[]
@@ -447,6 +466,51 @@ export function createAppStore(deps: AppStoreDeps) {
       }
     }
 
+    // Copy into a fresh ArrayBuffer-backed part so Blob's part type is
+    // satisfied regardless of what pooled buffer the zip inflated into.
+    function bytesToBlob(bytes: Uint8Array, mimeType: string): Blob {
+      const copy = new Uint8Array(bytes.byteLength);
+      copy.set(bytes);
+      return new Blob([copy], { type: mimeType });
+    }
+
+    // The persistence half of a package import: only runs after the whole
+    // untrusted-file pipeline has succeeded and any conflicts are resolved
+    // (docs/plan.md §13 — nothing is written before then). Shared by the
+    // no-conflict fast path and the dialog resolution path.
+    async function commitPackageImport(
+      plan: ImportPlan,
+      resolutions: Record<string, ConflictResolution>
+    ) {
+      const commit = finalizePackageImport(plan, resolutions);
+
+      for (const prepared of commit.assetsToSave) {
+        await deps.assetRepository.saveAsset(prepared.asset, {
+          original: bytesToBlob(prepared.blobs.original.bytes, prepared.blobs.original.mimeType),
+          display: bytesToBlob(prepared.blobs.display.bytes, prepared.blobs.display.mimeType),
+          thumbnail: bytesToBlob(prepared.blobs.thumbnail.bytes, prepared.blobs.thumbnail.mimeType)
+        });
+      }
+      for (const artwork of commit.artworksToSave) {
+        await deps.artworkLibraryRepository.save(artwork);
+      }
+
+      const libraryArtworks = await deps.artworkLibraryRepository.list();
+      setDocument(commit.project, { viewMode: "plan", libraryArtworks });
+      await persist(commit.project);
+
+      // After persist — it clears the banner when it starts saving.
+      // Degradations surface once, here; the affected checklist rows also
+      // show the standing missing-image placeholder state.
+      if (commit.warnings.length > 0) {
+        set({
+          error: `Imported “${commit.project.title}” with ${commit.warnings.length} warning${
+            commit.warnings.length === 1 ? "" : "s"
+          }: ${commit.warnings.join(" ")}`
+        });
+      }
+    }
+
     // Replacing the whole document (boot, import, reset) starts a new edit
     // history — undoing across a document swap would resurrect the old one.
     function setDocument(project: Project, extras: Partial<AppState> = {}) {
@@ -460,6 +524,7 @@ export function createAppStore(deps: AppStoreDeps) {
         redoStack: [],
         error: null,
         pendingDuplicateUploads: [],
+        pendingPackageImport: null,
         ...extras
       });
     }
@@ -822,6 +887,7 @@ export function createAppStore(deps: AppStoreDeps) {
       libraryArtworks: [],
       intakeState: "idle",
       pendingDuplicateUploads: [],
+      pendingPackageImport: null,
 
       async boot() {
         // The library is a secondary document from the project's point of
@@ -1749,6 +1815,75 @@ export function createAppStore(deps: AppStoreDeps) {
           });
           return null;
         }
+      },
+
+      async importSightlinesPackage(bytes) {
+        set({ intakeState: "processing" });
+        try {
+          // 1-2. Zip safety + staged manifest pipeline (extract enforces the
+          // caps pre-inflation; readPackageManifest migrates embedded docs).
+          const { manifest, files } = await openSightlinesPackage(new Uint8Array(bytes));
+
+          // 3. Asset intake validation: re-hash, MIME allowlist, decode guards.
+          const validated = await validatePackageAssets(manifest, files);
+
+          // Existing-library snapshot the pure planner merges against.
+          const libraryArtworks = get().libraryArtworks;
+          const assetShaById = new Map<string, string>();
+          for (const artwork of libraryArtworks) {
+            if (!artwork.assetId || assetShaById.has(artwork.assetId)) continue;
+            try {
+              const asset = await deps.assetRepository.getAsset(artwork.assetId);
+              if (asset.sha256) assetShaById.set(asset.id, asset.sha256);
+            } catch {
+              // A dangling local assetId just can't participate in dedupe.
+            }
+          }
+          const summaries = await get().listProjectSummaries();
+
+          // 4-5. §6 merge rules + project identity, as one pure plan.
+          const plan = planPackageImport(manifest, validated, {
+            artworks: libraryArtworks,
+            assetShaById,
+            projectIds: summaries.map((summary) => summary.id)
+          });
+
+          if (plan.conflicts.length > 0) {
+            // Park for ONE review step in the conflict dialog — nothing has
+            // been persisted yet, so dismissing discards the import cleanly.
+            set({ pendingPackageImport: plan });
+            return;
+          }
+
+          await commitPackageImport(plan, {});
+        } catch (error) {
+          set({
+            error: `Import failed: ${
+              error instanceof Error ? error.message : "the package could not be read."
+            }`
+          });
+        } finally {
+          set({ intakeState: "idle" });
+        }
+      },
+
+      async resolvePackageImportConflicts(resolutions) {
+        const plan = get().pendingPackageImport;
+        if (!plan) return;
+        set({ pendingPackageImport: null });
+        try {
+          await commitPackageImport(plan, resolutions);
+        } catch (error) {
+          set({
+            error: `Import failed: ${
+              error instanceof Error ? error.message : "the package could not be saved."
+            }`
+          });
+        }
+      },
+
+      dismissPackageImport() {
+        set({ pendingPackageImport: null });
       },
 
       async listProjectSummaries() {
