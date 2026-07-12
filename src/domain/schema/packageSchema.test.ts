@@ -98,4 +98,36 @@ describe("readPackageManifest", () => {
     (manifest as unknown as Record<string, unknown>).exportedAt = 12345;
     expect(() => readPackageManifest(manifest)).toThrow(/Sightlines format/);
   });
+
+  // The staged parse (lenient envelope → migrate embedded docs → strict
+  // validation): a package written by an older app embeds older-schemaVersion
+  // documents, which must run their migration chains BEFORE strict validation
+  // (docs/plan.md §2) — the same way the app loads an old file off disk.
+  it("migrates an embedded v1-era project document before validating", () => {
+    const project = createSampleProject();
+    const v1Project: Record<string, unknown> = {
+      ...project,
+      schemaVersion: 1,
+      floor: {
+        rooms: project.floor.rooms.map((placement) => {
+          const { freestandingWalls: _dropped, ...room } = placement.room;
+          return { ...placement, room };
+        })
+      }
+    };
+    delete v1Project.floorObjects;
+
+    const manifest = { ...makeManifest(), project: v1Project };
+
+    const parsed = readPackageManifest(manifest);
+    expect(parsed.project.schemaVersion).toBe(project.schemaVersion);
+    expect(parsed.project.floorObjects).toEqual([]);
+    expect(parsed.project.floor.rooms[0].room.freestandingWalls).toEqual([]);
+  });
+
+  it("rejects an embedded project document newer than the app", () => {
+    const project = { ...createSampleProject(), schemaVersion: 99 };
+    const manifest = { ...makeManifest(), project };
+    expect(() => readPackageManifest(manifest)).toThrow(/newer version/);
+  });
 });

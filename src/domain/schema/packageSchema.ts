@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Artwork, Project } from "../project";
-import { artworkSchema } from "./artworkSchema";
-import { projectSchema } from "./projectSchema";
+import { artworkSchema, migrateArtwork } from "./artworkSchema";
+import { migrateProject, projectSchema } from "./projectSchema";
 
 // A `.sightlines` package is a self-contained, denormalized snapshot of one
 // project plus the artworks it actually references (docs/plan.md §6) — meant to
@@ -93,11 +93,41 @@ const versionedDocumentSchema = z.object({
   schemaVersion: z.number().int().positive()
 });
 
-// The version-guard half of the import pipeline (docs/plan.md §2/§13): confirm
-// the package isn't from a newer app before validating its full shape. A real
-// migration chain (v1→v2→...) slots in here exactly like migrateProject's, once
-// a second package version ever ships — today v1 is the only version, so a
-// behind-current package can't exist.
+// Stage 1 of the staged import parse: the ENVELOPE only. The embedded project
+// and artworks stay `unknown` here on purpose — a package written by an older
+// app legitimately embeds older-schemaVersion documents, and the strict
+// sightlinesPackageSchema above would reject them before their migration
+// chains ever ran. Import order is therefore (docs/plan.md §2):
+//   version guard → lenient envelope → migrate embedded docs → strict validate.
+// Export still uses the strict schema directly (it only ever writes
+// current-version documents).
+const packageEnvelopeSchema = z.object({
+  schemaVersion: z.literal(PACKAGE_SCHEMA_VERSION),
+  exportedAt: z.string(),
+  mode: z.enum(PACKAGE_EXPORT_MODES),
+  project: z.unknown(),
+  artworks: z.array(z.unknown()),
+  assets: z.array(z.unknown())
+});
+
+function toFormatError(error: unknown): Error {
+  if (error instanceof z.ZodError) {
+    const [issue] = error.issues;
+    const path = issue?.path.join(".");
+    return new Error(
+      `this package's data doesn't match the Sightlines format${path ? ` (${path}: ${issue.message})` : ""}.`
+    );
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+// The manifest half of the import pipeline (docs/plan.md §2/§13): version
+// guard, then the staged parse described on packageEnvelopeSchema. The
+// embedded documents run the SAME migration chains the app uses when loading
+// from IndexedDB (migrateProject v1→v3, migrateArtwork), so a v1-era package
+// opens exactly like a v1-era local file would. A package-level migration
+// chain (package v1→v2→...) slots in between the version guard and the
+// envelope parse once a second package version ever ships.
 export function readPackageManifest(input: unknown): SightlinesPackage {
   const versioned = versionedDocumentSchema.safeParse(input);
 
@@ -113,16 +143,32 @@ export function readPackageManifest(input: unknown): SightlinesPackage {
     );
   }
 
+  let envelope: z.infer<typeof packageEnvelopeSchema>;
   try {
-    return parseSightlinesPackage(input);
+    envelope = packageEnvelopeSchema.parse(input);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      const [issue] = error.issues;
-      const path = issue?.path.join(".");
-      throw new Error(
-        `this package's data doesn't match the Sightlines format${path ? ` (${path}: ${issue.message})` : ""}.`
-      );
-    }
-    throw error;
+    throw toFormatError(error);
+  }
+
+  // migrateProject / migrateArtwork throw their own human-readable errors
+  // (wrong shape, newer-than-app embedded documents, failed validation) —
+  // pass those through untouched.
+  const project = migrateProject(envelope.project);
+  const artworks = envelope.artworks.map((artwork) => migrateArtwork(artwork));
+
+  try {
+    const assets = envelope.assets.map((asset) => packageAssetEntrySchema.parse(asset));
+    // Final strict validation of the assembled, fully-migrated manifest —
+    // the same contract export writes (datetime format, mode, cross-checks).
+    return parseSightlinesPackage({
+      schemaVersion: envelope.schemaVersion,
+      exportedAt: envelope.exportedAt,
+      mode: envelope.mode,
+      project,
+      artworks,
+      assets
+    });
+  } catch (error) {
+    throw toFormatError(error);
   }
 }
