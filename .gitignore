@@ -6,6 +6,9 @@ sightlines-old/
 .DS_Store
 
 # Dependencies and build output
+# (both forms: the trailing-slash pattern matches only real directories, so a
+# node_modules *symlink* — e.g. in a worktree — would otherwise get tracked)
+node_modules
 node_modules/
 dist/
 build/
