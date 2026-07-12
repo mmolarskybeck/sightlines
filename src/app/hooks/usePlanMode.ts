@@ -22,7 +22,7 @@ export type PlanMode =
 export interface UsePlanModeResult {
   mode: PlanMode;
   // Sets (or clears, on null) the placeOpening tool — not itself a toggle;
-  // callers (InsertToolPicker) compute null-vs-tool by comparing against the
+  // callers (InsertPicker) compute null-vs-tool by comparing against the
   // current armed tool before calling this, exactly as App did before.
   armOpeningTool: (tool: OpeningKind | null) => void;
   // Real toggle, same family as toggleDrawRoom: arms the rectangle-room tool

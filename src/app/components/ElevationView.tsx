@@ -60,6 +60,7 @@ import { useContainerSize } from "../hooks/useContainerSize";
 import { useDragGesture } from "../hooks/useDragGesture";
 import { useSelectSuppression } from "../hooks/useSelectSuppression";
 import { useSvgViewportGestures } from "../hooks/useSvgViewportGestures";
+import { useAppStore } from "../store";
 import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
 import {
   consumeArtworkDragSession,
@@ -108,6 +109,11 @@ const BARRIER_BREAK_PX = 48;
 // "leave this id unresolved," never as a thrown error.
 const NO_OP_GET_BLOB: (key: string) => Promise<Blob> = () =>
   Promise.reject(new Error("ElevationView: no getBlob provided"));
+
+// Stable empty fallback for the store-connected wallObjects slice, so a null
+// project (pre-boot) never yields a fresh [] that would defeat the selector's
+// referential-equality re-render guard.
+const EMPTY_WALL_OBJECTS: WallObject[] = [];
 
 // A pointer-drag move of an existing placement, transient until release
 // (docs/plan.md §7: live preview, exactly one store commit on release).
@@ -192,10 +198,6 @@ export function ElevationView({
   onToolChange,
   onPlaceOpeningOnElevation,
   onPlaceArtwork,
-  onSelectArtwork,
-  onSelectOpening,
-  onSelectObject,
-  onClearSelection,
   onMarqueeSelect,
   selectedArtworkId = null,
   selectedOpeningId = null,
@@ -208,9 +210,7 @@ export function ElevationView({
   wallId,
   wallLengthMm,
   wallName,
-  wallObjects,
   walls = [],
-  onSelectWall,
   viewport,
   onViewportChange
 }: {
@@ -239,7 +239,6 @@ export function ElevationView({
   // doesn't pass these yet, that's the next task's wiring. Until then this
   // component renders and behaves exactly as it did before this change.
   wallId?: string;
-  wallObjects?: WallObject[];
   // Live arrange-session preview positions (id → center), layered over the
   // committed wallObjects before anything downstream reads them — rendering,
   // snap neighbors, drag start centers, group bounds, marquee hit-testing all
@@ -281,24 +280,31 @@ export function ElevationView({
     xMm: number,
     yMm: number
   ) => void;
-  onSelectArtwork?: (artworkId: string) => void;
-  onSelectOpening?: (wallObjectId: string) => void;
-  // Multi-select entry points. Selection ids are PLACEMENT ids (wall object
-  // ids), never artwork-library ids. All optional/inert until App wires them —
-  // click-to-select and the marquee both fall back to today's behavior when
-  // these are absent.
+  // Multi-select ids the inspector/marquee scope to. A derived selection
+  // value (App owns the derivation), so it stays a prop; the bare select/clear
+  // actions are read from the store in the body.
   selectedObjectIds?: string[];
-  onSelectObject?: (id: string, opts: { additive: boolean }) => void;
-  onClearSelection?: () => void;
   onMarqueeSelect?: (ids: string[], additive: boolean) => void;
-  // The full wall inventory (in room order) plus a selector, so the elevation
-  // chip can double as a wall switcher — the navigation the right panel used
-  // to carry. Optional/inert until App wires them.
+  // The full wall inventory (in room order), so the elevation chip can double
+  // as a wall switcher. App-derived (wallsForSwitcher memo), so it stays a
+  // prop; onSelectWall is read from the store below.
   walls?: { id: string; name: string; roomName: string }[];
-  onSelectWall?: (wallId: string) => void;
 }) {
   const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
+  // Store-connected passthroughs. App forwarded each of these verbatim (a bare
+  // `prop={storeAction}`, and wallObjects={project.wallObjects}), so reading
+  // them from the store here cuts the umbilical without moving ownership — the
+  // store already owns them. Action selectors return stable references (no
+  // re-render); the wallObjects slice re-renders on project change exactly as
+  // the old prop did, falling back to a stable module-level empty array pre-
+  // boot so the selector result never changes identity spuriously.
+  const wallObjects = useAppStore((state) => state.project?.wallObjects ?? EMPTY_WALL_OBJECTS);
+  const onSelectArtwork = useAppStore((state) => state.selectArtwork);
+  const onSelectOpening = useAppStore((state) => state.selectOpening);
+  const onSelectObject = useAppStore((state) => state.selectObject);
+  const onClearSelection = useAppStore((state) => state.clearObjectSelection);
+  const onSelectWall = useAppStore((state) => state.selectWall);
   const [dropGhost, setDropGhost] = useState<DropGhostState | null>(null);
   const [openingToolGhost, setOpeningToolGhost] = useState<OpeningToolGhostState | null>(null);
   const openingToolSnapTargetIdsRef = useRef<SnapTargetIds | undefined>(undefined);

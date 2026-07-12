@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSampleProject } from "../../domain/sample/sampleProject";
 import { getWallsWithGeometry } from "../../domain/geometry/walls";
 import { FIT_VIEWPORT } from "../../domain/viewport/viewport2d";
+import { useAppStore } from "../store";
 import { ElevationView } from "./ElevationView";
 import { PlanView } from "./PlanView";
 
@@ -12,18 +13,38 @@ class MockResizeObserver {
   disconnect() {}
 }
 
+// PlanView/ElevationView now read their store passthroughs (project,
+// wallObjects, the select/commit actions) straight from the singleton store
+// instead of from props, so each case seeds the store with the sample project
+// before rendering and restores the pristine state afterward.
+const initialStoreState = useAppStore.getState();
+
 beforeEach(() => {
   vi.stubGlobal("ResizeObserver", MockResizeObserver);
+  // jsdom implements no SVG geometry. The marquee pointer-down path is now
+  // reachable in these renders (the store-connected clear/marquee actions are
+  // always present, where the old props were absent-and-inert), so give
+  // createSVGPoint/getScreenCTM harmless stubs: toSvgPoint resolves to null and
+  // beginMarquee no-ops, leaving the focus handoff under test intact instead of
+  // throwing on the missing createSVGPoint.
+  (SVGSVGElement.prototype as unknown as { createSVGPoint: () => unknown }).createSVGPoint = () => ({
+    x: 0,
+    y: 0,
+    matrixTransform: () => ({ x: 0, y: 0 })
+  });
+  (SVGSVGElement.prototype as unknown as { getScreenCTM: () => unknown }).getScreenCTM = () => null;
 });
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  useAppStore.setState(initialStoreState, true);
 });
 
 describe("workspace focus handoff", () => {
   it("focuses the plan workspace on pointer down", async () => {
     const project = createSampleProject();
+    useAppStore.setState({ project });
     const { container } = render(
       <>
         <button type="button">Focused control</button>
@@ -31,11 +52,9 @@ describe("workspace focus handoff", () => {
           activeTool={null}
           gridPrecisionFloorMm={null}
           gridVisible={false}
-          project={project}
           selectedWallId={null}
           snapToGrid={false}
           viewport={FIT_VIEWPORT}
-          onCommitWallLength={async () => {}}
           onToolChange={() => {}}
           onViewportChange={() => {}}
         />
@@ -56,6 +75,7 @@ describe("workspace focus handoff", () => {
 
   it("focuses the elevation workspace on pointer down", async () => {
     const project = createSampleProject();
+    useAppStore.setState({ project });
     const wall = getWallsWithGeometry(project.floor.rooms[0].room)[0];
     const { container } = render(
       <>
@@ -69,7 +89,6 @@ describe("workspace focus handoff", () => {
           wallId={wall.id}
           wallLengthMm={wall.lengthMm}
           wallName={wall.name}
-          wallObjects={[]}
           viewport={FIT_VIEWPORT}
           onViewportChange={() => {}}
         />

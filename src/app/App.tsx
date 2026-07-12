@@ -2,7 +2,6 @@ import {
   Suspense,
   lazy,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState
@@ -12,9 +11,6 @@ import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowC
 import { ArchiveIcon } from "@phosphor-icons/react/dist/csr/Archive";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
-import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
-import { CrosshairIcon } from "@phosphor-icons/react/dist/csr/Crosshair";
-import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import { FileDashedIcon } from "@phosphor-icons/react/dist/csr/FileDashed";
@@ -23,12 +19,8 @@ import { GridFourIcon } from "@phosphor-icons/react/dist/csr/GridFour";
 import { MagnetIcon } from "@phosphor-icons/react/dist/csr/Magnet";
 import { MapTrifoldIcon } from "@phosphor-icons/react/dist/csr/MapTrifold";
 import { PackageIcon } from "@phosphor-icons/react/dist/csr/Package";
-import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
-import { PolygonIcon } from "@phosphor-icons/react/dist/csr/Polygon";
-import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { PresentationIcon } from "@phosphor-icons/react/dist/csr/Presentation";
 import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
-import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
 import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { StackIcon } from "@phosphor-icons/react/dist/csr/Stack";
 import { UploadSimpleIcon } from "@phosphor-icons/react/dist/csr/UploadSimple";
@@ -55,8 +47,6 @@ import type {
 import { faceWallId, parseFaceWallId } from "../domain/geometry/freestandingWalls";
 import type { PackageExportMode } from "../domain/schema/packageSchema";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
-import { formatLength } from "../domain/units/length";
-import { getGridPrecisionFloorOptionsMm } from "../domain/units/precision";
 import {
   displayUnitForSystem,
   unitSystemFromDisplayUnit,
@@ -79,7 +69,16 @@ import {
 } from "./components/OpeningInspector";
 import { PlanEmptyState } from "./components/PlanEmptyState";
 import { PlanView } from "./components/PlanView";
-import { PartitionGlyph, RectangleRoomGlyph, WindowGlyph } from "./components/toolbarGlyphs";
+import {
+  DrawPicker,
+  InsertPicker,
+  PrecisionSelect,
+  StatusBadge,
+  ThreeDCameraTools,
+  UnitSystemToggle,
+  useResponsiveToolbarDensity,
+  ViewOptionButton
+} from "./components/toolbar";
 import {
   Tooltip,
   TooltipContent,
@@ -90,12 +89,6 @@ import { ProjectPicker } from "./components/ProjectPicker";
 import { RoomInspector } from "./components/RoomInspector";
 import { RoomsPanel } from "./components/RoomsPanel";
 import { SelectionInspector } from "./components/SelectionInspector";
-import {
-  chooseToolbarDensity,
-  DEFAULT_TOOLBAR_FIT_BUFFER_PX,
-  TOOLBAR_DENSITIES,
-  type ToolbarDensity
-} from "./toolbarDensity";
 import {
   WallPlacementFields,
   getWallPlacementCenterTarget,
@@ -111,17 +104,8 @@ import {
   DropdownMenuTrigger
 } from "./components/ui/dropdown-menu";
 import { Input } from "./components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "./components/ui/select";
-import { Switch } from "./components/ui/switch";
 import { Tabs } from "./components/ui/tabs";
 import { UnderlineTabsList, UnderlineTabsTrigger } from "./components/ui/segmented";
-import { Toggle } from "./components/ui/toggle";
 import { useStoragePersistence, getStorageNoteCopy } from "./hooks/useStoragePersistence";
 import {
   useViewPreferences,
@@ -186,104 +170,6 @@ let rendererBenchmarkBlobLoader:
 // of the compact toolbar's one-line budget. Collapse one side pane before the
 // toolbar starts clipping; the CSS workspace breakpoints use the same range.
 const SINGLE_PANE_WORKSPACE_MEDIA_QUERY = "(max-width: 1080px)";
-
-function useResponsiveToolbarDensity(measurementKey: string) {
-  const toolbarRef = useRef<HTMLDivElement>(null);
-
-  useLayoutEffect(() => {
-    const toolbar = toolbarRef.current;
-    if (!toolbar) return;
-
-    let frameId: number | null = null;
-    let disposed = false;
-
-    const requiredGroupWidth = (group: HTMLElement) => {
-      const style = window.getComputedStyle(group);
-      const children = Array.from(group.children).filter(
-        (child) => window.getComputedStyle(child).display !== "none"
-      );
-      const childrenWidth = children.reduce((total, child) => {
-        const element = child as HTMLElement;
-        const childStyle = window.getComputedStyle(element);
-        return (
-          total +
-          element.getBoundingClientRect().width +
-          (Number.parseFloat(childStyle.marginLeft) || 0) +
-          (Number.parseFloat(childStyle.marginRight) || 0)
-        );
-      }, 0);
-      const gap = Number.parseFloat(style.columnGap) || 0;
-      return (
-        childrenWidth +
-        Math.max(0, children.length - 1) * gap +
-        (Number.parseFloat(style.paddingLeft) || 0) +
-        (Number.parseFloat(style.paddingRight) || 0)
-      );
-    };
-
-    const requiredToolbarWidth = () => {
-      const style = window.getComputedStyle(toolbar);
-      const groups = Array.from(toolbar.children) as HTMLElement[];
-      const gap = Number.parseFloat(style.columnGap) || 0;
-      return (
-        groups.reduce((total, group) => total + requiredGroupWidth(group), 0) +
-        Math.max(0, groups.length - 1) * gap +
-        (Number.parseFloat(style.paddingLeft) || 0) +
-        (Number.parseFloat(style.paddingRight) || 0)
-      );
-    };
-
-    const measure = () => {
-      frameId = null;
-      if (disposed || toolbar.clientWidth === 0) return;
-
-      // Always try the richest layout first. Reading scrollWidth after each
-      // density change forces the browser to evaluate that exact rendered
-      // configuration, so panes, labels, fonts, and active view controls all
-      // contribute to the breakpoint instead of relying on a guessed width.
-      const requiredWidths = {} as Record<ToolbarDensity, number>;
-      for (const density of TOOLBAR_DENSITIES) {
-        toolbar.dataset.density = density;
-        requiredWidths[density] = requiredToolbarWidth();
-      }
-      const nextDensity = chooseToolbarDensity(
-        toolbar.clientWidth,
-        requiredWidths,
-        DEFAULT_TOOLBAR_FIT_BUFFER_PX
-      );
-      toolbar.dataset.density = nextDensity;
-    };
-
-    const scheduleMeasure = () => {
-      if (frameId !== null && typeof window.cancelAnimationFrame === "function") {
-        window.cancelAnimationFrame(frameId);
-      }
-      if (typeof window.requestAnimationFrame === "function") {
-        frameId = window.requestAnimationFrame(measure);
-      } else {
-        measure();
-      }
-    };
-
-    measure();
-    const observer =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleMeasure);
-    observer?.observe(toolbar);
-    void document.fonts?.ready.then(() => {
-      if (!disposed) scheduleMeasure();
-    });
-
-    return () => {
-      disposed = true;
-      observer?.disconnect();
-      if (frameId !== null && typeof window.cancelAnimationFrame === "function") {
-        window.cancelAnimationFrame(frameId);
-      }
-    };
-  }, [measurementKey]);
-
-  return toolbarRef;
-}
 
 function getAssetBlob(key: string): Promise<Blob> {
   if (rendererBenchmarkEnabled) {
@@ -1364,7 +1250,8 @@ export function App() {
                     start in both views. */}
                 {viewMode === "plan" ? (
                   <>
-                    <DrawToolPicker
+                    <DrawPicker
+                      variant="full"
                       rectActive={drawRectActive}
                       onRectToggle={toggleDrawRect}
                       outlineActive={drawRoomActive}
@@ -1372,7 +1259,8 @@ export function App() {
                       partitionActive={partitionToolActive}
                       onPartitionToggle={togglePartitionTool}
                     />
-                    <CompactDrawPicker
+                    <DrawPicker
+                      variant="compact"
                       rectActive={drawRectActive}
                       onRectToggle={toggleDrawRect}
                       outlineActive={drawRoomActive}
@@ -1388,12 +1276,14 @@ export function App() {
                 ) : null}
                 {viewMode === "plan" || viewMode === "elevation" ? (
                   <>
-                    <InsertToolPicker
+                    <InsertPicker
+                      variant="full"
                       activeTool={activeTool}
                       disabled={viewMode === "elevation" && !selectedWall}
                       onToolChange={armOpeningTool}
                     />
-                    <CompactInsertPicker
+                    <InsertPicker
+                      variant="compact"
                       activeTool={activeTool}
                       disabled={viewMode === "elevation" && !selectedWall}
                       onToolChange={armOpeningTool}
@@ -1490,17 +1380,12 @@ export function App() {
                 onAddPolygonRoom={(points) => void addPolygonRoom(points)}
                 reshapeRoomId={reshapeRoomId}
                 onReshapeRoomChange={toggleReshapeRoom}
-                onMoveRoomVertex={moveRoomVertex}
-                onMoveRoomWall={moveRoomWall}
-                onSplitWall={splitWall}
-                onDeleteRoomVertex={deleteRoomVertex}
                 partitionToolActive={partitionToolActive}
                 onPartitionToolChange={setPartitionToolActive}
                 onAddFreestandingWall={(start, end) =>
                   void addFreestandingWall(start, end)
                 }
                 selectedFreestandingWallId={selectedFreestandingWallId}
-                onSelectFreestandingWall={selectFreestandingWall}
                 onMoveFreestandingWall={(wallId, delta) =>
                   void moveFreestandingWall(wallId, delta)
                 }
@@ -1512,7 +1397,6 @@ export function App() {
                 getBlob={getAssetBlob}
                 gridPrecisionFloorMm={gridPrecisionFloorMm}
                 gridVisible={showGrid}
-                project={project}
                 selectedArtworkId={selectedArtworkId}
                 selectedOpeningId={selectedOpeningId}
                 selectedRoomId={selectedRoomId}
@@ -1523,23 +1407,14 @@ export function App() {
                 onCommitPlanMove={(objectId, placement) =>
                   void commitPlanMove(objectId, placement, allowOverlappingPlacement)
                 }
-                onCommitWallLength={resizeWall}
-                onMoveRoom={moveRoom}
                 onPlaceArtwork={(artworkId, wallId, xMm, yMm) =>
                   void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement)
                 }
                 onPlaceArtworkOnFloor={(artworkId, xMm, yMm) =>
                   void placeArtworkOnFloor(artworkId, xMm, yMm)
                 }
-                onPlaceOpeningFromPlan={placeOpeningFromPlan}
-                onSelectArtwork={selectArtwork}
-                onSelectOpening={selectOpening}
-                onSelectRoom={selectRoom}
-                onSelectWall={selectWall}
                 onToolChange={armOpeningTool}
                 selectedObjectIds={selectedObjectIds}
-                onSelectObject={selectObject}
-                onClearSelection={clearObjectSelection}
                 onCommitPlanMoveGroup={(moves) =>
                   void movePlanObjectsGroup(moves, allowOverlappingPlacement)
                 }
@@ -1582,9 +1457,7 @@ export function App() {
                   wallId={selectedWall.id}
                   wallLengthMm={selectedWall.lengthMm}
                   wallName={selectedWall.name}
-                  wallObjects={project.wallObjects}
                   walls={wallsForSwitcher}
-                  onSelectWall={selectWall}
                   viewport={elevationViewport}
                   onViewportChange={setElevationViewport}
                   previewPositionsById={arrangeSession?.previewById}
@@ -1616,11 +1489,7 @@ export function App() {
                   onPlaceArtwork={(artworkId, wallId, xMm, yMm) =>
                     void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement)
                   }
-                  onSelectArtwork={selectArtwork}
-                  onSelectOpening={selectOpening}
                   selectedObjectIds={selectedObjectIds}
-                  onSelectObject={selectObject}
-                  onClearSelection={clearObjectSelection}
                   onMoveWallObjects={(moves) => {
                     // With a session open, a group drag becomes more live
                     // preview (one undo entry on session commit); without one
@@ -2058,692 +1927,6 @@ function ProjectTitleInput({
         event.currentTarget.blur();
       }}
     />
-  );
-}
-
-// Shared descriptors for the insert tools, so the full segmented picker and
-// the compact menu/trigger agree on every icon, label, resting hint, and
-// keyboard accelerator. Icons are the two custom glyphs (window as a mullioned
-// pane, partition as a solid wall bar) plus phosphor for the rest; the resting
-// hint and the armed phrase feed the tooltips — unpressed reads "Insert a
-// door — D", pressed reads "Placing a door — Esc cancels".
-type InsertToolMeta = {
-  key: string;
-  label: string;
-  hint: string;
-  armed: string;
-  kbd: string;
-  icon: React.ReactNode;
-};
-
-const OPENING_TOOL_ORDER: OpeningKind[] = ["door", "window", "blocked-zone"];
-
-const OPENING_TOOL_META: Record<OpeningKind, InsertToolMeta> = {
-  door: {
-    key: "door",
-    label: "Door",
-    hint: "Insert a door",
-    armed: "Placing a door",
-    kbd: "D",
-    icon: <DoorIcon aria-hidden="true" size={16} />
-  },
-  window: {
-    key: "window",
-    label: "Window",
-    hint: "Insert a window",
-    armed: "Placing a window",
-    kbd: "W",
-    icon: <WindowGlyph aria-hidden="true" size={16} />
-  },
-  "blocked-zone": {
-    key: "blocked-zone",
-    label: "Blocked zone",
-    hint: "Mark a blocked zone",
-    armed: "Marking a blocked zone",
-    kbd: "B",
-    icon: <RectangleDashedIcon aria-hidden="true" size={16} />
-  }
-};
-
-// The three Draw-cluster tools. Each armed phrase names its gesture verb (Drag…
-// / Click…), so the deliberate per-tool gesture differences — drag corner to
-// corner for the rectangle, click-to-place corners for the outline, drag for
-// the partition — are self-documenting in the tooltip.
-const RECT_ROOM_TOOL_META: InsertToolMeta = {
-  key: "rect-room",
-  label: "Rectangle room",
-  hint: "Draw a rectangular room",
-  armed: "Drag to draw a room",
-  kbd: "R",
-  icon: <RectangleRoomGlyph aria-hidden="true" size={16} />
-};
-
-const OUTLINE_ROOM_TOOL_META: InsertToolMeta = {
-  key: "outline-room",
-  label: "Room outline",
-  hint: "Draw a room outline",
-  armed: "Click to place corners",
-  kbd: "⇧R",
-  icon: <PolygonIcon aria-hidden="true" size={16} />
-};
-
-const PARTITION_TOOL_META: InsertToolMeta = {
-  key: "partition",
-  label: "Partition",
-  hint: "Draw a free-standing partition",
-  armed: "Drag to draw a partition",
-  kbd: "P",
-  icon: <PartitionGlyph aria-hidden="true" size={16} />
-};
-
-// The descriptor for whatever insert tool is armed, or null when idle — drives
-// the compact trigger's icon/name swap and its armed tooltip.
-function armedInsertMeta(activeTool: OpeningKind | null): InsertToolMeta | null {
-  return activeTool ? OPENING_TOOL_META[activeTool] : null;
-}
-
-// The descriptor for whatever Draw tool is armed, or null when idle — the same
-// role armedInsertMeta plays for the Insert cluster.
-function armedDrawMeta(
-  rectActive: boolean,
-  outlineActive: boolean,
-  partitionActive: boolean
-): InsertToolMeta | null {
-  if (rectActive) return RECT_ROOM_TOOL_META;
-  if (outlineActive) return OUTLINE_ROOM_TOOL_META;
-  if (partitionActive) return PARTITION_TOOL_META;
-  return null;
-}
-
-// A segment as the generic cluster picker consumes it: a tool meta plus its
-// live pressed state and click handler.
-type ClusterSegment = InsertToolMeta & { pressed: boolean; onClick: () => void };
-// A menu row for the compact cluster picker: a tool meta plus its live active
-// state and select handler.
-type ClusterTool = InsertToolMeta & { active: boolean; onSelect: () => void };
-
-// The generic captioned segmented picker: a quiet caption followed by one
-// joined soft group — a single surface fill holding a flush icon segment per
-// tool, split by interior hairlines. Insert and Draw both render through
-// this — the caption, the segment list, and the optional disabled context are
-// all the callers supply. Toggle semantics match the old floating
-// palette: the armed button reads pressed in petrol, clicking it again disarms,
-// and the view's own Escape/click-to-place handling disarms via the caller's
-// onClick. The caption is aria-hidden (the group's aria-label already carries
-// it, so announcing the text too would double up); each button carries its own
-// aria-label plus a styled Tooltip — with no visible per-tool text, the hover
-// hint is the only sighted name these have, so it matters here.
-function ToolClusterPicker({
-  caption,
-  segments,
-  disabled = false,
-  disabledReason
-}: {
-  caption: string;
-  segments: ClusterSegment[];
-  disabled?: boolean;
-  disabledReason?: string;
-}) {
-  return (
-    <div
-      className="tool-cluster"
-      role="group"
-      aria-label={caption}
-      aria-disabled={disabled || undefined}
-    >
-      <div className="tool-cluster-segments">
-        {/* The caption docks inside the shared fill behind a hairline (the
-            checklist's sort trigger is the precedent), so the word and its
-            three tools read as one object. aria-hidden: the group's
-            aria-label already announces it. */}
-        <span className="tool-cluster-label" aria-hidden="true">
-          {caption}
-        </span>
-        {segments.map((segment) => (
-          // aria-disabled (not native disabled) keeps each segment focusable,
-          // so keyboard/SR users still reach it and hear WHY it's off — the
-          // reason rides the SAME styled Tooltip, firing on hover AND focus.
-          // The click is a no-op while disabled; the fogged look ports to
-          // [aria-disabled] in global.css. Pressed → the tooltip teaches the
-          // exit ("Esc cancels"); resting → it echoes the accelerator ("— D").
-          <Tooltip key={segment.key}>
-            <TooltipTrigger asChild>
-              <button
-                aria-label={segment.label}
-                aria-pressed={segment.pressed}
-                aria-disabled={disabled || undefined}
-                className="tool-cluster-segment"
-                type="button"
-                onClick={disabled ? undefined : segment.onClick}
-              >
-                {segment.icon}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent className="toolbar-tooltip" side="bottom">
-              {disabled ? (
-                disabledReason
-              ) : segment.pressed ? (
-                <>
-                  {segment.armed}
-                  <ToolbarTooltipKbd hint="Esc cancels" />
-                </>
-              ) : (
-                <>
-                  {segment.hint}
-                  <ToolbarTooltipKbd hint={segment.kbd} />
-                </>
-              )}
-            </TooltipContent>
-          </Tooltip>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// The view-toolbar's Insert cluster: door/window/blocked-zone, identical
-// membership in both 2D views (Insert decorates existing geometry; Draw creates
-// new structure, so the partition tool now lives in the Draw cluster). A thin
-// call site over ToolClusterPicker — planMode's discriminated union keeps every
-// armed tool mutually exclusive.
-function InsertToolPicker({
-  activeTool,
-  disabled,
-  disabledReason = "Select a wall to place an opening",
-  onToolChange
-}: {
-  activeTool: OpeningKind | null;
-  disabled: boolean;
-  disabledReason?: string;
-  onToolChange: (tool: OpeningKind | null) => void;
-}) {
-  const segments: ClusterSegment[] = OPENING_TOOL_ORDER.map((kind) => ({
-    ...OPENING_TOOL_META[kind],
-    pressed: activeTool === kind,
-    onClick: () => onToolChange(activeTool === kind ? null : kind)
-  }));
-
-  return (
-    <ToolClusterPicker
-      caption="Insert"
-      segments={segments}
-      disabled={disabled}
-      disabledReason={disabledReason}
-    />
-  );
-}
-
-// The view-toolbar's Draw cluster: rectangle room, room outline, partition —
-// the three tools that create new structure. Plan-only, never disabled. A thin
-// call site over ToolClusterPicker.
-function DrawToolPicker({
-  rectActive,
-  onRectToggle,
-  outlineActive,
-  onOutlineToggle,
-  partitionActive,
-  onPartitionToggle
-}: {
-  rectActive: boolean;
-  onRectToggle: () => void;
-  outlineActive: boolean;
-  onOutlineToggle: () => void;
-  partitionActive: boolean;
-  onPartitionToggle: () => void;
-}) {
-  const segments: ClusterSegment[] = [
-    { ...RECT_ROOM_TOOL_META, pressed: rectActive, onClick: onRectToggle },
-    { ...OUTLINE_ROOM_TOOL_META, pressed: outlineActive, onClick: onOutlineToggle },
-    { ...PARTITION_TOOL_META, pressed: partitionActive, onClick: onPartitionToggle }
-  ];
-
-  return <ToolClusterPicker caption="Draw" segments={segments} />;
-}
-
-// The generic compact replacement for a segmented cluster. It is shown by the
-// canvas container query below the narrow breakpoint, so the desktop control
-// can keep its direct-manipulation affordance without making the narrow
-// toolbar carry a row of adjacent icon buttons. When a tool is armed the
-// trigger stands in for it — the tool's glyph replaces the idle icon and its
-// name replaces the caption — so identity survives the compact/tight tiers (at
-// tight, the icon-only trigger, the swapped glyph alone carries it). Insert and
-// Draw both render through this; the caller supplies the caption, the idle
-// icon/tooltip, the menu rows, and which tool (if any) is armed.
-function CompactClusterPicker({
-  caption,
-  idleIcon,
-  idleTooltip,
-  tools,
-  armed,
-  disabled = false,
-  disabledReason
-}: {
-  caption: string;
-  idleIcon: React.ReactNode;
-  idleTooltip: string;
-  tools: ClusterTool[];
-  armed: InsertToolMeta | null;
-  disabled?: boolean;
-  disabledReason?: string;
-}) {
-  const triggerButton = (
-    <Button
-      // Names both the control and the armed mode, so the swapped-in glyph is
-      // never the only cue for SR users.
-      aria-label={armed ? `${caption} — ${armed.label} armed` : caption}
-      aria-disabled={disabled || undefined}
-      className="compact-cluster-trigger"
-      data-active={armed ? "true" : "false"}
-      variant="outline"
-    >
-      {armed ? armed.icon : idleIcon}
-      <span className="compact-cluster-label">{armed ? armed.label : caption}</span>
-      <CaretDownIcon aria-hidden="true" className="compact-cluster-caret" size={14} />
-    </Button>
-  );
-
-  // Disabled: render no menu at all (so the dropdown can never open), just the
-  // fogged aria-disabled trigger under the styled reason Tooltip — reachable
-  // on hover AND focus, replacing the old pointer-only wrapper-span/title hack.
-  if (disabled) {
-    return (
-      <span className="compact-cluster-tools">
-        <Tooltip>
-          <TooltipTrigger asChild>{triggerButton}</TooltipTrigger>
-          <TooltipContent className="toolbar-tooltip" side="bottom">
-            {disabledReason}
-          </TooltipContent>
-        </Tooltip>
-      </span>
-    );
-  }
-
-  return (
-    <span className="compact-cluster-tools">
-      <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>{triggerButton}</DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent className="toolbar-tooltip" side="bottom">
-            {armed ? (
-              <>
-                {armed.armed}
-                <ToolbarTooltipKbd hint="Esc cancels" />
-              </>
-            ) : (
-              idleTooltip
-            )}
-          </TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="start" className="compact-cluster-menu">
-          {tools.map((tool) => (
-            <DropdownMenuItem
-              key={tool.key}
-              aria-checked={tool.active}
-              className="compact-cluster-item"
-              data-active={tool.active ? "true" : "false"}
-              role="menuitemradio"
-              onSelect={tool.onSelect}
-            >
-              {tool.icon}
-              <span>{tool.label}</span>
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </span>
-  );
-}
-
-// The compact Insert cluster: opening tools. A thin call site over
-// CompactClusterPicker with a Plus idle trigger.
-function CompactInsertPicker({
-  activeTool,
-  disabled,
-  disabledReason = "Select a wall to place an opening",
-  onToolChange
-}: {
-  activeTool: OpeningKind | null;
-  disabled: boolean;
-  disabledReason?: string;
-  onToolChange: (tool: OpeningKind | null) => void;
-}) {
-  const tools: ClusterTool[] = OPENING_TOOL_ORDER.map((kind) => ({
-    ...OPENING_TOOL_META[kind],
-    active: activeTool === kind,
-    onSelect: () => onToolChange(activeTool === kind ? null : kind)
-  }));
-
-  return (
-    <CompactClusterPicker
-      caption="Insert"
-      idleIcon={<PlusIcon aria-hidden="true" size={16} />}
-      idleTooltip="Insert an opening"
-      tools={tools}
-      armed={armedInsertMeta(activeTool)}
-      disabled={disabled}
-      disabledReason={disabledReason}
-    />
-  );
-}
-
-// The compact Draw cluster: rectangle room, room outline, partition. A thin
-// call site over CompactClusterPicker with a PencilSimple idle trigger.
-function CompactDrawPicker({
-  rectActive,
-  onRectToggle,
-  outlineActive,
-  onOutlineToggle,
-  partitionActive,
-  onPartitionToggle
-}: {
-  rectActive: boolean;
-  onRectToggle: () => void;
-  outlineActive: boolean;
-  onOutlineToggle: () => void;
-  partitionActive: boolean;
-  onPartitionToggle: () => void;
-}) {
-  const tools: ClusterTool[] = [
-    { ...RECT_ROOM_TOOL_META, active: rectActive, onSelect: onRectToggle },
-    { ...OUTLINE_ROOM_TOOL_META, active: outlineActive, onSelect: onOutlineToggle },
-    { ...PARTITION_TOOL_META, active: partitionActive, onSelect: onPartitionToggle }
-  ];
-
-  return (
-    <CompactClusterPicker
-      caption="Draw"
-      idleIcon={<PencilSimpleIcon aria-hidden="true" size={16} />}
-      idleTooltip="Draw a room or partition"
-      tools={tools}
-      armed={armedDrawMeta(rectActive, outlineActive, partitionActive)}
-    />
-  );
-}
-
-function ViewOptionButton({
-  active,
-  disabled,
-  icon,
-  label,
-  labelPriority = false,
-  title,
-  kbd,
-  onClick
-}: {
-  active: boolean;
-  disabled: boolean;
-  icon: React.ReactNode;
-  label: string;
-  // Keeps this label through the trimmed density tier (see global.css). Used
-  // for Overlap, whose glyph reads weakest of the view toggles.
-  labelPriority?: boolean;
-  title: string;
-  // The single-key accelerator (useToolbarShortcuts), echoed as a dimmed
-  // suffix in the tooltip so the hint teaches the key.
-  kbd?: string;
-  onClick: () => void;
-}) {
-  const toggle = (
-    <Toggle
-      // Kept the same string as the visible label below: on a narrow canvas
-      // column the container query in global.css hides .view-option-label
-      // and the button goes icon-only, so the accessible name must not
-      // depend on the span's visibility (and must never diverge from it).
-      aria-label={label}
-      className="view-option-button"
-      disabled={disabled}
-      pressed={active}
-      variant="default"
-      onPressedChange={onClick}
-    >
-      {icon}
-      <span
-        className={
-          labelPriority ? "view-option-label view-option-label-priority" : "view-option-label"
-        }
-      >
-        {label}
-      </span>
-    </Toggle>
-  );
-
-  // toggleVariants applies `disabled:pointer-events-none`, so a disabled
-  // Toggle never receives the hover that would open a Radix tooltip. A
-  // wrapping span keeps receiving pointer events, so the disabled-state
-  // title stays reachable on hover instead of silently going dark.
-  if (disabled) return <span title={title}>{toggle}</span>;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{toggle}</TooltipTrigger>
-      <TooltipContent className="toolbar-tooltip" side="bottom">
-        {title}
-        {kbd ? <ToolbarTooltipKbd hint={kbd} /> : null}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-// The dimmed, tabular key hint that trails a toolbar tooltip's phrase — e.g.
-// "Show grid — G" or "Placing a door — Esc cancels". A quiet suffix span, not
-// a heavy kbd chip; the "— " separator lives in CSS so callers pass only the
-// hint text.
-function ToolbarTooltipKbd({ hint }: { hint: string }) {
-  return <span className="toolbar-tooltip-kbd">{hint}</span>;
-}
-
-function ThreeDCameraTools({
-  actionsRef,
-  canFocus
-}: {
-  actionsRef: { current: ThreeDViewActions | null };
-  canFocus: boolean;
-}) {
-  const focusButton = (
-    <Button
-      className="view-option-button"
-      disabled={!canFocus}
-      variant="inspector"
-      onClick={() => actionsRef.current?.focusSelection()}
-    >
-      <CrosshairIcon aria-hidden="true" size={16} />
-      <span className="view-option-label">Focus selection</span>
-    </Button>
-  );
-
-  return (
-    <div className="three-camera-tools" role="group" aria-label="3D camera">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            className="view-option-button"
-            variant="inspector"
-            onClick={() => actionsRef.current?.overview()}
-          >
-            <CornersOutIcon aria-hidden="true" size={16} />
-            <span className="view-option-label">Overview</span>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent className="toolbar-tooltip" side="bottom">
-          Frame the whole layout
-        </TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            className="view-option-button"
-            variant="inspector"
-            onClick={() => actionsRef.current?.eyeLevel()}
-          >
-            <EyeIcon aria-hidden="true" size={16} />
-            <span className="view-option-label">Eye level</span>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent className="toolbar-tooltip" side="bottom">
-          View the selected wall at eye level
-        </TooltipContent>
-      </Tooltip>
-      {canFocus ? (
-        <Tooltip>
-          <TooltipTrigger asChild>{focusButton}</TooltipTrigger>
-          <TooltipContent className="toolbar-tooltip" side="bottom">
-            Focus the selected room, wall, or artwork
-          </TooltipContent>
-        </Tooltip>
-      ) : (
-        // Disabled buttons drop pointer events, so the hint rides a span.
-        <span title="Focus the selected room, wall, or artwork">{focusButton}</span>
-      )}
-    </div>
-  );
-}
-
-function UnitSystemToggle({
-  disabled,
-  labels = { imperial: "ft", metric: "m" },
-  system,
-  onChange
-}: {
-  disabled: boolean;
-  labels?: {
-    imperial: string;
-    metric: string;
-  };
-  system: UnitSystem;
-  onChange: (system: UnitSystem) => void;
-}) {
-  // Re-clicking the already-active side is a no-op: it must never fire
-  // onChange, or a legacy project stored as "in"/"cm" would get rewritten to
-  // "ft"/"m" and land a redundant entry on the undo stack.
-  const select = (next: UnitSystem) => {
-    if (next === system) return;
-    onChange(next);
-  };
-
-  // A traditional slide switch with the two unit systems as flanking words —
-  // one small track, no label-inside-track nesting. The words are pointer
-  // shortcuts to a specific side (routed through select(), so clicking the
-  // already-active side stays inert); the switch itself is the single
-  // accessible control, so the words stay out of the tab order and the
-  // accessibility tree rather than announcing as three separate controls.
-  return (
-    <div
-      className="unit-switch"
-      data-system={system}
-      role="group"
-      aria-label={`Units: ${labels.imperial} / ${labels.metric}`}
-    >
-      <button
-        aria-hidden="true"
-        className="unit-switch-side"
-        data-active={system === "imperial"}
-        disabled={disabled}
-        tabIndex={-1}
-        type="button"
-        onClick={() => select("imperial")}
-      >
-        {labels.imperial}
-      </button>
-      <Switch
-        aria-labelledby="unit-system-label unit-system-value"
-        checked={system === "metric"}
-        className="unit-switch-control"
-        disabled={disabled}
-        onCheckedChange={(checked) => select(checked ? "metric" : "imperial")}
-      >
-        <span className="visually-hidden" id="unit-system-label">
-          Units
-        </span>
-        <span className="visually-hidden" id="unit-system-value">
-          {system === "metric" ? `Metric (${labels.metric})` : `Imperial (${labels.imperial})`}
-        </span>
-      </Switch>
-      <button
-        aria-hidden="true"
-        className="unit-switch-side"
-        data-active={system === "metric"}
-        disabled={disabled}
-        tabIndex={-1}
-        type="button"
-        onClick={() => select("metric")}
-      >
-        {labels.metric}
-      </button>
-    </div>
-  );
-}
-
-function PrecisionSelect({
-  disabled,
-  floorMm,
-  unit,
-  onChange
-}: {
-  disabled: boolean;
-  floorMm: number | null;
-  unit: DisplayUnit;
-  onChange: (floorMm: number | null) => void;
-}) {
-  // Options are a curated subset of the active unit family's own grid
-  // interval table (domain/units/precision.ts), so a floor picked here is
-  // guaranteed to line up with an actual grid step rather than an arbitrary
-  // value. Always formatted with the family's "natural" unit (feet-and-
-  // inches for imperial, cm for metric) regardless of the project's current
-  // display unit, since the stored value is mm and clamps to the nearest
-  // table entry if the project unit later changes.
-  const labelUnit: DisplayUnit = unit === "in" ? "in" : unit === "ft" ? "ft" : "cm";
-  const options = getGridPrecisionFloorOptionsMm(unit);
-
-  return (
-    <div className="unit-select">
-      <span className="unit-select-label view-option-label-priority">Precision</span>
-      <Select
-        disabled={disabled}
-        value={floorMm === null ? "auto" : String(floorMm)}
-        onValueChange={(value) =>
-          onChange(value === "auto" ? null : Number(value))
-        }
-      >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <SelectTrigger className="precision-select-trigger" aria-label="Grid precision">
-              <SelectValue />
-            </SelectTrigger>
-          </TooltipTrigger>
-          <TooltipContent className="toolbar-tooltip" side="bottom">
-            Grid precision
-          </TooltipContent>
-        </Tooltip>
-        <SelectContent>
-          <SelectItem value="auto">Auto</SelectItem>
-        {options.map((optionMm) => (
-          <SelectItem key={optionMm} value={String(optionMm)}>
-            {formatLength(optionMm, { unit: labelUnit })}
-          </SelectItem>
-        ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-}
-
-function StatusBadge({ state }: { state: "idle" | "saving" | "saved" | "error" }) {
-  const label =
-    state === "saving"
-      ? "Saving"
-      : state === "saved"
-        ? "Saved"
-        : state === "error"
-          ? "Save issue"
-          : "Idle";
-
-  return (
-    <span className={`status-badge ${state}`}>
-      <span className="status-dot" aria-hidden="true" />
-      <span className="status-badge-label">{label}</span>
-    </span>
   );
 }
 

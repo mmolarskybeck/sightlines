@@ -1,0 +1,100 @@
+import type { ReactNode } from "react";
+import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
+import { PolygonIcon } from "@phosphor-icons/react/dist/csr/Polygon";
+import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
+import type { OpeningKind } from "../../../domain/placement/createOpening";
+import { PartitionGlyph, RectangleRoomGlyph, WindowGlyph } from "../toolbarGlyphs";
+
+// Shared descriptors for the insert tools, so the full segmented picker and
+// the compact menu/trigger agree on every icon, label, resting hint, and
+// keyboard accelerator. Icons are the two custom glyphs (window as a mullioned
+// pane, partition as a solid wall bar) plus phosphor for the rest; the resting
+// hint and the armed phrase feed the tooltips — unpressed reads "Insert a
+// door — D", pressed reads "Placing a door — Esc cancels".
+export type InsertToolMeta = {
+  key: string;
+  label: string;
+  hint: string;
+  armed: string;
+  kbd: string;
+  icon: ReactNode;
+};
+
+export const OPENING_TOOL_ORDER: OpeningKind[] = ["door", "window", "blocked-zone"];
+
+export const OPENING_TOOL_META: Record<OpeningKind, InsertToolMeta> = {
+  door: {
+    key: "door",
+    label: "Door",
+    hint: "Insert a door",
+    armed: "Placing a door",
+    kbd: "D",
+    icon: <DoorIcon aria-hidden="true" size={16} />
+  },
+  window: {
+    key: "window",
+    label: "Window",
+    hint: "Insert a window",
+    armed: "Placing a window",
+    kbd: "W",
+    icon: <WindowGlyph aria-hidden="true" size={16} />
+  },
+  "blocked-zone": {
+    key: "blocked-zone",
+    label: "Blocked zone",
+    hint: "Mark a blocked zone",
+    armed: "Marking a blocked zone",
+    kbd: "B",
+    icon: <RectangleDashedIcon aria-hidden="true" size={16} />
+  }
+};
+
+// The three Draw-cluster tools. Each armed phrase names its gesture verb (Drag…
+// / Click…), so the deliberate per-tool gesture differences — drag corner to
+// corner for the rectangle, click-to-place corners for the outline, drag for
+// the partition — are self-documenting in the tooltip.
+export const RECT_ROOM_TOOL_META: InsertToolMeta = {
+  key: "rect-room",
+  label: "Rectangle room",
+  hint: "Draw a rectangular room",
+  armed: "Drag to draw a room",
+  kbd: "R",
+  icon: <RectangleRoomGlyph aria-hidden="true" size={16} />
+};
+
+export const OUTLINE_ROOM_TOOL_META: InsertToolMeta = {
+  key: "outline-room",
+  label: "Room outline",
+  hint: "Draw a room outline",
+  armed: "Click to place corners",
+  kbd: "⇧R",
+  icon: <PolygonIcon aria-hidden="true" size={16} />
+};
+
+export const PARTITION_TOOL_META: InsertToolMeta = {
+  key: "partition",
+  label: "Partition",
+  hint: "Draw a free-standing partition",
+  armed: "Drag to draw a partition",
+  kbd: "P",
+  icon: <PartitionGlyph aria-hidden="true" size={16} />
+};
+
+// The descriptor for whatever insert tool is armed, or null when idle — drives
+// the compact trigger's icon/name swap and its armed tooltip.
+export function armedInsertMeta(activeTool: OpeningKind | null): InsertToolMeta | null {
+  return activeTool ? OPENING_TOOL_META[activeTool] : null;
+}
+
+// The descriptor for whatever Draw tool is armed, or null when idle — the same
+// role armedInsertMeta plays for the Insert cluster.
+export function armedDrawMeta(
+  rectActive: boolean,
+  outlineActive: boolean,
+  partitionActive: boolean
+): InsertToolMeta | null {
+  if (rectActive) return RECT_ROOM_TOOL_META;
+  if (outlineActive) return OUTLINE_ROOM_TOOL_META;
+  if (partitionActive) return PARTITION_TOOL_META;
+  return null;
+}

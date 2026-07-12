@@ -55,7 +55,6 @@ import {
   DEFAULT_FLOOR_OBJECT_DEPTH_MM,
   type Artwork,
   type Dimensions,
-  type Project,
   type WallObject
 } from "../../domain/project";
 import {
@@ -105,6 +104,7 @@ import { useContainerSize } from "../hooks/useContainerSize";
 import { useDragGesture } from "../hooks/useDragGesture";
 import { useSelectSuppression } from "../hooks/useSelectSuppression";
 import { useSvgViewportGestures } from "../hooks/useSvgViewportGestures";
+import { useAppStore } from "../store";
 import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
 import {
   consumeArtworkDragSession,
@@ -365,10 +365,6 @@ export function PlanView({
   onAddPolygonRoom,
   reshapeRoomId = null,
   onReshapeRoomChange,
-  onMoveRoomVertex,
-  onMoveRoomWall,
-  onSplitWall,
-  onDeleteRoomVertex,
   drawRectActive = false,
   onDrawRectChange,
   onAddRectangleRoom,
@@ -376,7 +372,6 @@ export function PlanView({
   onPartitionToolChange,
   onAddFreestandingWall,
   selectedFreestandingWallId = null,
-  onSelectFreestandingWall,
   onMoveFreestandingWall,
   onMoveFreestandingWallEndpoint,
   artworksById,
@@ -386,20 +381,10 @@ export function PlanView({
   gridVisible,
   onCommitPlanMove,
   onCommitPlanMoveGroup,
-  onCommitWallLength,
-  onMoveRoom,
   onPlaceArtwork,
   onPlaceArtworkOnFloor,
-  onPlaceOpeningFromPlan,
-  onSelectArtwork,
-  onSelectOpening,
-  onSelectObject,
-  onClearSelection,
   onMarqueeSelect,
-  onSelectRoom,
-  onSelectWall,
   onToolChange,
-  project,
   selectedArtworkId,
   selectedOpeningId,
   selectedObjectIds = [],
@@ -431,19 +416,6 @@ export function PlanView({
   // Reports an arm/toggle/exit up to App (Escape and the double-click
   // shortcut both call this from here).
   onReshapeRoomChange?: (roomId: string | null) => void;
-  // Commits one vertex move on pointer-up; App wires it to the store's
-  // moveRoomVertex. Never called for an invalid final position — the drag
-  // reverts locally instead (see the pointer-up handler below).
-  onMoveRoomVertex?: (roomId: string, vertexId: string, nextLocalMm: Point) => Promise<void>;
-  // Commits one whole-wall slide on pointer-up (a body drag, not a vertex
-  // drag). Never called for an invalid final offset — same revert-locally
-  // discipline as onMoveRoomVertex.
-  onMoveRoomWall?: (roomId: string, wallId: string, offsetMm: number) => Promise<void>;
-  // Commits a wall split at the clicked point along the wall.
-  onSplitWall?: (wallId: string, xAlongMm: number) => Promise<void>;
-  // Commits a vertex removal (merges its two walls). Absent/inert if the
-  // stretch goal wasn't wired — the Delete/Backspace handler below no-ops.
-  onDeleteRoomVertex?: (roomId: string, vertexId: string) => Promise<void>;
   // Rectangle-room draw tool — armed alongside the other tools in App's
   // toolbar, mutually exclusive with them. Press at one corner, drag to the
   // opposite corner, release to create an axis-aligned room. The armed flag is
@@ -468,7 +440,6 @@ export function PlanView({
   onPartitionToolChange?: (active: boolean) => void;
   onAddFreestandingWall?: (startFloorMm: Point, endFloorMm: Point) => void;
   selectedFreestandingWallId?: string | null;
-  onSelectFreestandingWall?: (wallId: string) => void;
   onMoveFreestandingWall?: (wallId: string, deltaFloorMm: Point) => void;
   onMoveFreestandingWallEndpoint?: (
     wallId: string,
@@ -492,42 +463,20 @@ export function PlanView({
   // x (yMm omitted); floor members carry a new floor center (xMm + yMm). The
   // single-object move keeps onCommitPlanMove; this is the multi-select path.
   onCommitPlanMoveGroup?: (moves: { id: string; xMm: number; yMm?: number }[]) => void;
-  onCommitWallLength: (wallId: string, lengthMm: number, anchor: ResizeAnchor) => Promise<void>;
-  // Commits a room-move drag on release. Optional/inert until App wires it —
-  // same "stay inert absent" convention as onCommitPlanMove above; the grip
-  // still drags and previews live either way, it just never commits.
-  onMoveRoom?: (roomId: string, offsetXMm: number, offsetYMm: number) => Promise<void>;
   onPlaceArtwork?: (artworkId: string, wallId: string, xMm: number, yMm: number) => void;
   // Floor works (effective form "floor") land here instead of onPlaceArtwork:
   // the plan drop resolves a floor center, and this commits via the store's
   // placeArtworkOnFloor. Optional/inert until App wires it.
   onPlaceArtworkOnFloor?: (artworkId: string, xMm: number, yMm: number) => void;
-  onPlaceOpeningFromPlan?: (kind: OpeningKind, placement: PlanPlacement) => Promise<void>;
-  onSelectArtwork?: (artworkId: string) => void;
-  onSelectOpening?: (wallObjectId: string) => void;
-  // Multi-select entry points. Selection ids are PLACEMENT ids (wall/floor
-  // object ids), never artwork-library ids. Optional/inert until App wires
-  // them — click-to-select falls back to today's onSelectArtwork/onSelectOpening
-  // and a background click does nothing when these are absent.
-  onSelectObject?: (id: string, opts: { additive: boolean }) => void;
-  onClearSelection?: () => void;
   // A rubber-band marquee committed on release: ids are PLACEMENT ids (wall/
   // floor object ids), never artwork-library ids, and `additive` reflects a
-  // held shift. Optional/inert until App wires it, exactly like onSelectObject/
-  // onClearSelection above.
+  // held shift. Composes App-owned selection state, so it stays a prop while
+  // the bare selection actions (select/clear) are read from the store below.
   onMarqueeSelect?: (ids: string[], additive: boolean) => void;
-  // Click-to-select a room's floor (its interior hit polygon) — optional/
-  // inert until App wires it, same convention as onSelectWall below.
-  onSelectRoom?: (roomId: string) => void;
-  // Click-to-select for a wall line, same contract as ElevationView's
-  // onSelectWall: optional/inert until App wires it, so the wall stays
-  // unclickable (today's behavior) when this prop is absent.
-  onSelectWall?: (wallId: string) => void;
   // Reports an arm/disarm/toggle of the insertion tool up to App, which owns
-  // activeTool now — not optional/inert like the selection props above,
-  // since App's toolbar buttons need a live callback to toggle against.
+  // activeTool (planMode) — so this stays a prop even though the bare store
+  // actions below don't.
   onToolChange: (tool: OpeningKind | null) => void;
-  project: Project;
   selectedArtworkId?: string | null;
   selectedOpeningId?: string | null;
   selectedObjectIds?: string[];
@@ -543,6 +492,31 @@ export function PlanView({
 }) {
   const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
+  // Store-connected passthroughs. App used to forward all of these verbatim
+  // (a bare `prop={storeAction}` or `project={project}`), so reading them
+  // straight from the store here cuts ~15 wires off the call site without
+  // relocating any ownership: the store already owns them, App was only a
+  // conduit. Each action selector returns a stable reference (actions are
+  // defined once in createAppStore), so these never trigger a re-render; only
+  // the `project` slice does, exactly as the old prop did. Anything App still
+  // wraps in an arrow (composing a view preference like allowOverlappingPlacement,
+  // or the derived selection ids) stays a prop above — that's genuinely
+  // App-owned composition, not a passthrough.
+  const project = useAppStore((state) => state.project)!;
+  const onMoveRoomVertex = useAppStore((state) => state.moveRoomVertex);
+  const onMoveRoomWall = useAppStore((state) => state.moveRoomWall);
+  const onSplitWall = useAppStore((state) => state.splitWall);
+  const onDeleteRoomVertex = useAppStore((state) => state.deleteRoomVertex);
+  const onSelectFreestandingWall = useAppStore((state) => state.selectFreestandingWall);
+  const onCommitWallLength = useAppStore((state) => state.resizeWall);
+  const onMoveRoom = useAppStore((state) => state.moveRoom);
+  const onPlaceOpeningFromPlan = useAppStore((state) => state.placeOpeningFromPlan);
+  const onSelectArtwork = useAppStore((state) => state.selectArtwork);
+  const onSelectOpening = useAppStore((state) => state.selectOpening);
+  const onSelectRoom = useAppStore((state) => state.selectRoom);
+  const onSelectWall = useAppStore((state) => state.selectWall);
+  const onSelectObject = useAppStore((state) => state.selectObject);
+  const onClearSelection = useAppStore((state) => state.clearObjectSelection);
   // Wall-resize drag (a rectangle room's RoomResizeHandles). onMove/onRelease
   // close over toSvgMm/gridSnapTargets/snapThresholdMm/snapToGrid/project,
   // all declared further down this component body — safe, since these
