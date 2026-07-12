@@ -1,7 +1,7 @@
 # Agent Instructions
 
 * Create a new branch for each feature using `feat/{feature-name}`, unless the task is explicitly meant for the current branch.
-* Leave completed work uncommitted. 
+* Leave completed work uncommitted.
 * Run relevant tests (if possible) before declaring a chunk complete. Notify me when a discrete chunk is ready, and I will review and commit it manually.
 * Use higher-intelligence models for planning and review. Use cheaper, lower-compute models for straightforward implementation, upgrading after repeated failure or when the task requires deeper reasoning.
 * Keep documentation changes proportional to the request. Update docs only when a shipped feature, refactor, or architecture change creates a concrete future-maintenance obligation, when an existing runbook/spec becomes factually wrong, or when the user asks for docs. Do not update for a small tweak unless crossing off a todo or revising inaccurate information.
