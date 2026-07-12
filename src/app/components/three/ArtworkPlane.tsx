@@ -2,20 +2,21 @@ import { useCursor } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
 import { useState } from "react";
 import type { Texture } from "three";
+import { FRAME_FINISH_HEX } from "../../../domain/framing";
+import type { ArtworkFrame } from "../../../domain/project";
 import type { WallArtwork3d } from "../../../domain/geometry/scene3d";
 import { fitArtworkImageSizeMm, textureNativeAspect } from "./artworkFit";
 import { mmToWorld } from "./coordinates";
+import { framingLayout } from "./framingGeometry";
 import {
   DashedRectOutline,
   isUncertain,
   SelectionRectOutline
 } from "./UncertaintyOutline";
-import { PLACEHOLDER_COLOR } from "./tokens";
+import { MAT_FILL_COLOR, PLACEHOLDER_COLOR } from "./tokens";
 
-// Off-the-wall offset (spec §5.3): enough to never z-fight the wall plane,
-// small enough to read as hanging flush.
-const WALL_OFFSET_MM = 20;
-// Outlines sit slightly proud of the artwork plane itself.
+// Outlines sit slightly proud of whatever face they wrap (the image plane, or
+// the frame's front face when framed) so they never z-fight it.
 const OUTLINE_OFFSET_MM = 5;
 
 // One placed wall artwork, in WALL-LOCAL coordinates: the parent WallPanel
@@ -24,22 +25,31 @@ const OUTLINE_OFFSET_MM = 5;
 // MeshBasicMaterial + toneMapped:false keeps the image's colors faithful
 // (spec §6.2) — lighting realism must never tint a work a curator is judging,
 // which is also why selection is outline-only here, never a material tint.
+//
+// Optional schematic framing (matWidthMm / frame) mirrors the elevation view:
+// a mat board grown OUTSIDE the stored image rect, and a frame ring outside the
+// mat, extruded off the wall for real depth. Both absent → the plane renders
+// exactly as it always has (legacy-identical).
 export function ArtworkPlane({
   artwork,
   texture,
+  matWidthMm,
+  frame,
   isSelected,
   onSelect
 }: {
   artwork: WallArtwork3d;
   texture: Texture | undefined;
+  matWidthMm?: number;
+  frame?: ArtworkFrame;
   isSelected: boolean;
   onSelect: (objectId: string, opts: { additive: boolean }) => void;
 }) {
   // Known/approximate placements fill their rect exactly as before. An
   // unknown-dimension placement has a placeholder rect whose aspect is
   // arbitrary, so the image plane is letterboxed to the texture's native aspect
-  // inside that rect (centered) — matching the elevation view — while the
-  // uncertainty/selection outlines below stay on the full rect.
+  // inside that rect (centered) — matching the elevation view — while the mat/
+  // frame bands and the outlines below stay on the full STORED rect.
   const imageSize = fitArtworkImageSizeMm(
     { widthMm: artwork.widthMm, heightMm: artwork.heightMm },
     artwork.status,
@@ -47,6 +57,12 @@ export function ArtworkPlane({
   );
   const width = mmToWorld(imageSize.widthMm);
   const height = mmToWorld(imageSize.heightMm);
+
+  // Bands wrap the STORED rect (not the letterboxed image), exactly as
+  // elevation does — the letterboxed image sits inside the opening.
+  const layout = framingLayout(artwork.widthMm, artwork.heightMm, matWidthMm, frame);
+  const frameFill = frame ? FRAME_FINISH_HEX[frame.finish] : undefined;
+
   // Desktop-only affordance (spec §4.3): a pointer cursor, nothing
   // load-bearing on hover.
   const [hovered, setHovered] = useState(false);
@@ -63,10 +79,65 @@ export function ArtworkPlane({
   };
 
   return (
-    <group
-      position={[mmToWorld(artwork.xMm), mmToWorld(artwork.yMm), mmToWorld(WALL_OFFSET_MM)]}
-    >
+    // Group sits AT the wall surface (z = 0); each layer carries its own
+    // off-wall depth. A plain work's image lands at WALL_OFFSET_MM, identical
+    // to the historical group-offset placement.
+    <group position={[mmToWorld(artwork.xMm), mmToWorld(artwork.yMm), 0]}>
+      {layout.hasFrame ? (
+        // Frame: a rectangular ring of four flat-finish Lambert boxes around
+        // the mat opening, extruded FRAME_DEPTH_MM off the wall. Lambert (not a
+        // metallic material) keeps it a flat schematic finish; the boxes' side
+        // faces self-shade under the scene's ambient+key so the ring reads as
+        // real depth. Horizontal bars span the full outer width; verticals fill
+        // only the opening height between them, so corners aren't doubled.
+        <group position={[0, 0, mmToWorld(layout.frameCenterZMm as number)]}>
+          {[1, -1].map((sign) => (
+            <mesh
+              key={`h${sign}`}
+              position={[0, mmToWorld(sign * (layout.openingHeightMm + layout.frameBandMm) / 2), 0]}
+              onClick={handleClick}
+            >
+              <boxGeometry
+                args={[
+                  mmToWorld(layout.outerWidthMm),
+                  mmToWorld(layout.frameBandMm),
+                  mmToWorld(layout.frameDepthMm)
+                ]}
+              />
+              <meshLambertMaterial color={frameFill} />
+            </mesh>
+          ))}
+          {[1, -1].map((sign) => (
+            <mesh
+              key={`v${sign}`}
+              position={[mmToWorld(sign * (layout.openingWidthMm + layout.frameBandMm) / 2), 0, 0]}
+              onClick={handleClick}
+            >
+              <boxGeometry
+                args={[
+                  mmToWorld(layout.frameBandMm),
+                  mmToWorld(layout.openingHeightMm),
+                  mmToWorld(layout.frameDepthMm)
+                ]}
+              />
+              <meshLambertMaterial color={frameFill} />
+            </mesh>
+          ))}
+        </group>
+      ) : null}
+      {layout.hasMat ? (
+        // Mat: an off-white board covering the frame's inner opening (image +
+        // mat band), recessed a step behind the frame's front face. Lambert so
+        // it takes the scene light like a physical board.
+        <mesh position={[0, 0, mmToWorld(layout.matZMm as number)]} onClick={handleClick}>
+          <planeGeometry
+            args={[mmToWorld(layout.openingWidthMm), mmToWorld(layout.openingHeightMm)]}
+          />
+          <meshLambertMaterial color={MAT_FILL_COLOR} />
+        </mesh>
+      ) : null}
       <mesh
+        position={[0, 0, mmToWorld(layout.imageZMm)]}
         onClick={handleClick}
         onPointerOver={() => setHovered(true)}
         onPointerOut={() => setHovered(false)}
@@ -79,17 +150,22 @@ export function ArtworkPlane({
         )}
       </mesh>
       {isUncertain(artwork.status) ? (
-        <group position={[0, 0, mmToWorld(OUTLINE_OFFSET_MM)]}>
+        // Outline wraps the OUTER rect (image + mat + frame), matching
+        // elevation's outerRect, seated at the frame front (or image) depth.
+        <group position={[0, 0, mmToWorld(layout.outlineZMm + OUTLINE_OFFSET_MM)]}>
           <DashedRectOutline
-            widthMm={artwork.widthMm}
-            heightMm={artwork.heightMm}
+            widthMm={layout.outerWidthMm}
+            heightMm={layout.outerHeightMm}
             status={artwork.status}
           />
         </group>
       ) : null}
       {isSelected ? (
-        <group position={[0, 0, mmToWorld(OUTLINE_OFFSET_MM * 2)]}>
-          <SelectionRectOutline widthMm={artwork.widthMm} heightMm={artwork.heightMm} />
+        <group position={[0, 0, mmToWorld(layout.outlineZMm + OUTLINE_OFFSET_MM * 2)]}>
+          <SelectionRectOutline
+            widthMm={layout.outerWidthMm}
+            heightMm={layout.outerHeightMm}
+          />
         </group>
       ) : null}
     </group>

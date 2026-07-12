@@ -66,6 +66,23 @@ export const BOX_COLOR = "#d5d8db";
 export const PLACEHOLDER_COLOR = "#e3e6e9";
 
 // ============================================================================
+// Framing (schematic frame + mat, spec docs/quick-todos.md)
+// ============================================================================
+
+// How far a frame stands OFF the wall in 3D (~1.5"). This is deliberately
+// independent of the frame's entered face width (frame.widthMm): that field
+// describes the width of the frame's FACE band (how thick the moulding looks
+// head-on), not how deep it projects from the wall. Every frame extrudes to
+// this same depth regardless of face width, matching how real gallery frames
+// have a roughly constant rebate depth.
+export const FRAME_DEPTH_MM = 38;
+
+// Off-white mat board for the 3D mat plane. Duplicated from MAT_FILL_HEX in
+// src/domain/framing.ts (kept as its own token here so this file stays the
+// single place three.js material colors live) — keep the two in sync.
+export const MAT_FILL_COLOR = "#F5F5F2";
+
+// ============================================================================
 // Blocked zones (planning annotations, not physical)
 // ============================================================================
 

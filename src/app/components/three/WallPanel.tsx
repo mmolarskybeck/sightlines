@@ -1,6 +1,7 @@
 import type { ThreeEvent } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import { Path, Shape, ShapeGeometry, type Texture } from "three";
+import type { Artwork } from "../../../domain/project";
 import type { WallPanel3d } from "../../../domain/geometry/scene3d";
 import { ArtworkPlane } from "./ArtworkPlane";
 import { mmToWorld, MM_TO_WORLD } from "./coordinates";
@@ -32,6 +33,7 @@ const WINDOW_CAP_OPACITY = 0.48;
 export function WallPanel({
   wall,
   texturesByAssetId,
+  artworksById,
   isSelected,
   selectedObjectIds,
   selectedArtworkId,
@@ -40,6 +42,10 @@ export function WallPanel({
 }: {
   wall: WallPanel3d;
   texturesByAssetId: ReadonlyMap<string, Texture>;
+  // Source of the optional schematic framing (matWidthMm / frame): these live
+  // on the Artwork record, not the derived WallArtwork3d, so the render layer
+  // looks them up here rather than the domain carrying them through.
+  artworksById: ReadonlyMap<string, Artwork>;
   isSelected: boolean;
   selectedObjectIds: string[];
   selectedArtworkId: string | null;
@@ -156,18 +162,23 @@ export function WallPanel({
           />
         </mesh>
       ))}
-      {wall.artworks.map((artwork) => (
-        <ArtworkPlane
-          key={artwork.objectId}
-          artwork={artwork}
-          texture={artwork.assetId ? texturesByAssetId.get(artwork.assetId) : undefined}
-          isSelected={
-            selectedObjectIds.includes(artwork.objectId) ||
-            artwork.artworkId === selectedArtworkId
-          }
-          onSelect={onSelectObject}
-        />
-      ))}
+      {wall.artworks.map((artwork) => {
+        const record = artworksById.get(artwork.artworkId);
+        return (
+          <ArtworkPlane
+            key={artwork.objectId}
+            artwork={artwork}
+            texture={artwork.assetId ? texturesByAssetId.get(artwork.assetId) : undefined}
+            matWidthMm={record?.matWidthMm}
+            frame={record?.frame}
+            isSelected={
+              selectedObjectIds.includes(artwork.objectId) ||
+              artwork.artworkId === selectedArtworkId
+            }
+            onSelect={onSelectObject}
+          />
+        );
+      })}
     </group>
   );
 }

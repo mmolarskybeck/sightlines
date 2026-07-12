@@ -1,6 +1,7 @@
 import type { ThreeEvent } from "@react-three/fiber";
 import { useMemo } from "react";
 import type { Vector3 } from "three";
+import type { Artwork } from "../../../domain/project";
 import type { Scene3d } from "../../../domain/geometry/scene3d";
 import { FloorObjectBox } from "./FloorObjectBox";
 import { FloorSurface } from "./FloorSurface";
@@ -16,6 +17,7 @@ import { WallPanel } from "./WallPanel";
 export function SceneRooms({
   scene,
   getBlob,
+  artworksById,
   selectedObjectIds,
   selectedArtworkId,
   selectedWallId,
@@ -26,6 +28,9 @@ export function SceneRooms({
 }: {
   scene: Scene3d;
   getBlob: (key: string) => Promise<Blob>;
+  // Passed to wall panels so framed/matted works can read matWidthMm / frame
+  // off the Artwork record (the derived scene doesn't carry them).
+  artworksById: ReadonlyMap<string, Artwork>;
   selectedObjectIds: string[];
   selectedArtworkId: string | null;
   selectedWallId: string | null;
@@ -75,6 +80,7 @@ export function SceneRooms({
               key={wall.wallId}
               wall={wall}
               texturesByAssetId={texturesByAssetId}
+              artworksById={artworksById}
               isSelected={wall.wallId === selectedWallId}
               selectedObjectIds={selectedObjectIds}
               selectedArtworkId={selectedArtworkId}
@@ -87,6 +93,7 @@ export function SceneRooms({
               key={partition.freestandingWallId}
               partition={partition}
               texturesByAssetId={texturesByAssetId}
+              artworksById={artworksById}
               selectedObjectIds={selectedObjectIds}
               selectedArtworkId={selectedArtworkId}
               selectedWallId={selectedWallId}

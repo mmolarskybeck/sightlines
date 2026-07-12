@@ -913,6 +913,7 @@ export function ThreeDView({
         <SceneRooms
           scene={scene}
           getBlob={getBlob}
+          artworksById={artworksById}
           selectedObjectIds={selectedObjectIds}
           selectedArtworkId={selectedArtworkId}
           selectedWallId={selectedWallId}

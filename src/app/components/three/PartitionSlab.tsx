@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { Texture } from "three";
+import type { Artwork } from "../../../domain/project";
 import type { FreestandingWall3d } from "../../../domain/geometry/scene3d";
 import { MM_TO_WORLD } from "./coordinates";
 import { WALL_COLOR } from "./tokens";
@@ -13,6 +14,7 @@ import { WallPanel } from "./WallPanel";
 export function PartitionSlab({
   partition,
   texturesByAssetId,
+  artworksById,
   selectedObjectIds,
   selectedArtworkId,
   selectedWallId,
@@ -21,6 +23,7 @@ export function PartitionSlab({
 }: {
   partition: FreestandingWall3d;
   texturesByAssetId: ReadonlyMap<string, Texture>;
+  artworksById: ReadonlyMap<string, Artwork>;
   selectedObjectIds: string[];
   selectedArtworkId: string | null;
   selectedWallId: string | null;
@@ -50,6 +53,7 @@ export function PartitionSlab({
           key={face.wallId}
           wall={face}
           texturesByAssetId={texturesByAssetId}
+          artworksById={artworksById}
           isSelected={face.wallId === selectedWallId}
           selectedObjectIds={selectedObjectIds}
           selectedArtworkId={selectedArtworkId}
