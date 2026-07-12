@@ -1933,39 +1933,43 @@ function armedInsertMeta(
 // so announcing the text too would double up); each button carries its own
 // aria-label plus a styled Tooltip — with no visible per-tool text, the
 // hover hint is the only sighted name these have, so it matters here.
-function InsertToolPicker({
-  activeTool,
-  disabled,
-  disabledReason = "Select a wall to place an opening",
-  partition,
-  onToolChange
-}: {
-  activeTool: OpeningKind | null;
-  disabled: boolean;
-  disabledReason?: string;
-  partition?: { active: boolean; onToggle: () => void };
-  onToolChange: (tool: OpeningKind | null) => void;
-}) {
-  const segments = [
-    ...OPENING_TOOL_ORDER.map((kind) => ({
-      ...OPENING_TOOL_META[kind],
-      pressed: activeTool === kind,
-      onClick: () => onToolChange(activeTool === kind ? null : kind)
-    })),
-    ...(partition
-      ? [{ ...PARTITION_TOOL_META, pressed: partition.active, onClick: partition.onToggle }]
-      : [])
-  ];
+// A segment as the generic cluster picker consumes it: a tool meta plus its
+// live pressed state and click handler.
+type ClusterSegment = InsertToolMeta & { pressed: boolean; onClick: () => void };
+// A menu row for the compact cluster picker: a tool meta plus its live active
+// state and select handler.
+type ClusterTool = InsertToolMeta & { active: boolean; onSelect: () => void };
 
+// The generic captioned segmented picker: a quiet caption followed by
+// individual soft icon buttons, one per tool. Insert and Draw both render
+// through this — the caption, the segment list, and the optional disabled
+// context are all the callers supply. Toggle semantics match the old floating
+// palette: the armed button reads pressed in petrol, clicking it again disarms,
+// and the view's own Escape/click-to-place handling disarms via the caller's
+// onClick. The caption is aria-hidden (the group's aria-label already carries
+// it, so announcing the text too would double up); each button carries its own
+// aria-label plus a styled Tooltip — with no visible per-tool text, the hover
+// hint is the only sighted name these have, so it matters here.
+function ToolClusterPicker({
+  caption,
+  segments,
+  disabled = false,
+  disabledReason
+}: {
+  caption: string;
+  segments: ClusterSegment[];
+  disabled?: boolean;
+  disabledReason?: string;
+}) {
   return (
     <div
-      className="insert-tools"
+      className="tool-cluster"
       role="group"
-      aria-label="Insert"
+      aria-label={caption}
       aria-disabled={disabled || undefined}
     >
-      <span className="insert-tools-label" aria-hidden="true">
-        Insert
+      <span className="tool-cluster-label" aria-hidden="true">
+        {caption}
       </span>
       {segments.map((segment) => (
         // aria-disabled (not native disabled) keeps each segment focusable, so
@@ -1980,7 +1984,7 @@ function InsertToolPicker({
               aria-label={segment.label}
               aria-pressed={segment.pressed}
               aria-disabled={disabled || undefined}
-              className="insert-tool-segment"
+              className="tool-cluster-segment"
               type="button"
               onClick={disabled ? undefined : segment.onClick}
             >
@@ -2008,13 +2012,141 @@ function InsertToolPicker({
   );
 }
 
-// The compact replacement for the segmented Insert control. It is shown by the
+// The view-toolbar's Insert cluster: door/window/blocked-zone in both 2D views,
+// plus the partition tool in Plan. A thin call site over ToolClusterPicker —
+// planMode's discriminated union keeps every armed tool mutually exclusive.
+function InsertToolPicker({
+  activeTool,
+  disabled,
+  disabledReason = "Select a wall to place an opening",
+  partition,
+  onToolChange
+}: {
+  activeTool: OpeningKind | null;
+  disabled: boolean;
+  disabledReason?: string;
+  partition?: { active: boolean; onToggle: () => void };
+  onToolChange: (tool: OpeningKind | null) => void;
+}) {
+  const segments: ClusterSegment[] = [
+    ...OPENING_TOOL_ORDER.map((kind) => ({
+      ...OPENING_TOOL_META[kind],
+      pressed: activeTool === kind,
+      onClick: () => onToolChange(activeTool === kind ? null : kind)
+    })),
+    ...(partition
+      ? [{ ...PARTITION_TOOL_META, pressed: partition.active, onClick: partition.onToggle }]
+      : [])
+  ];
+
+  return (
+    <ToolClusterPicker
+      caption="Insert"
+      segments={segments}
+      disabled={disabled}
+      disabledReason={disabledReason}
+    />
+  );
+}
+
+// The generic compact replacement for a segmented cluster. It is shown by the
 // canvas container query below the narrow breakpoint, so the desktop control
 // can keep its direct-manipulation affordance without making the narrow
-// toolbar carry five adjacent icon buttons. When a tool is armed the trigger
-// stands in for it — the tool's glyph replaces the Plus and its name replaces
-// "Insert" — so identity survives the compact/tight tiers (at tight, the
-// icon-only trigger, the swapped glyph alone carries it).
+// toolbar carry a row of adjacent icon buttons. When a tool is armed the
+// trigger stands in for it — the tool's glyph replaces the idle icon and its
+// name replaces the caption — so identity survives the compact/tight tiers (at
+// tight, the icon-only trigger, the swapped glyph alone carries it). Insert and
+// Draw both render through this; the caller supplies the caption, the idle
+// icon/tooltip, the menu rows, and which tool (if any) is armed.
+function CompactClusterPicker({
+  caption,
+  idleIcon,
+  idleTooltip,
+  tools,
+  armed,
+  disabled = false,
+  disabledReason
+}: {
+  caption: string;
+  idleIcon: React.ReactNode;
+  idleTooltip: string;
+  tools: ClusterTool[];
+  armed: InsertToolMeta | null;
+  disabled?: boolean;
+  disabledReason?: string;
+}) {
+  const triggerButton = (
+    <Button
+      // Names both the control and the armed mode, so the swapped-in glyph is
+      // never the only cue for SR users.
+      aria-label={armed ? `${caption} — ${armed.label} armed` : caption}
+      aria-disabled={disabled || undefined}
+      className="compact-cluster-trigger"
+      data-active={armed ? "true" : "false"}
+      variant="outline"
+    >
+      {armed ? armed.icon : idleIcon}
+      <span className="compact-cluster-label">{armed ? armed.label : caption}</span>
+      <CaretDownIcon aria-hidden="true" className="compact-cluster-caret" size={14} />
+    </Button>
+  );
+
+  // Disabled: render no menu at all (so the dropdown can never open), just the
+  // fogged aria-disabled trigger under the styled reason Tooltip — reachable
+  // on hover AND focus, replacing the old pointer-only wrapper-span/title hack.
+  if (disabled) {
+    return (
+      <span className="compact-cluster-tools">
+        <Tooltip>
+          <TooltipTrigger asChild>{triggerButton}</TooltipTrigger>
+          <TooltipContent className="toolbar-tooltip" side="bottom">
+            {disabledReason}
+          </TooltipContent>
+        </Tooltip>
+      </span>
+    );
+  }
+
+  return (
+    <span className="compact-cluster-tools">
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>{triggerButton}</DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent className="toolbar-tooltip" side="bottom">
+            {armed ? (
+              <>
+                {armed.armed}
+                <ToolbarTooltipKbd hint="Esc cancels" />
+              </>
+            ) : (
+              idleTooltip
+            )}
+          </TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="start" className="compact-cluster-menu">
+          {tools.map((tool) => (
+            <DropdownMenuItem
+              key={tool.key}
+              aria-checked={tool.active}
+              className="compact-cluster-item"
+              data-active={tool.active ? "true" : "false"}
+              role="menuitemradio"
+              onSelect={tool.onSelect}
+            >
+              {tool.icon}
+              <span>{tool.label}</span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </span>
+  );
+}
+
+// The compact Insert cluster: opening tools (+ partition in Plan). A thin call
+// site over CompactClusterPicker with a Plus idle trigger.
 function CompactInsertPicker({
   activeTool,
   disabled,
@@ -2028,7 +2160,7 @@ function CompactInsertPicker({
   partition?: { active: boolean; onToggle: () => void };
   onToolChange: (tool: OpeningKind | null) => void;
 }) {
-  const tools = [
+  const tools: ClusterTool[] = [
     ...OPENING_TOOL_ORDER.map((kind) => ({
       ...OPENING_TOOL_META[kind],
       active: activeTool === kind,
@@ -2038,77 +2170,17 @@ function CompactInsertPicker({
       ? [{ ...PARTITION_TOOL_META, active: partition.active, onSelect: partition.onToggle }]
       : [])
   ];
-  const armed = armedInsertMeta(activeTool, partition);
-
-  const triggerButton = (
-    <Button
-      // Names both the control and the armed mode, so the swapped-in glyph is
-      // never the only cue for SR users.
-      aria-label={armed ? `Insert — ${armed.label} armed` : "Insert"}
-      aria-disabled={disabled || undefined}
-      className="compact-insert-trigger"
-      data-active={armed ? "true" : "false"}
-      variant="outline"
-    >
-      {armed ? armed.icon : <PlusIcon aria-hidden="true" size={16} />}
-      <span className="compact-insert-label">{armed ? armed.label : "Insert"}</span>
-      <CaretDownIcon aria-hidden="true" className="compact-insert-caret" size={14} />
-    </Button>
-  );
-
-  // Disabled: render no menu at all (so the dropdown can never open), just the
-  // fogged aria-disabled trigger under the styled reason Tooltip — reachable
-  // on hover AND focus, replacing the old pointer-only wrapper-span/title hack.
-  if (disabled) {
-    return (
-      <span className="compact-insert-tools">
-        <Tooltip>
-          <TooltipTrigger asChild>{triggerButton}</TooltipTrigger>
-          <TooltipContent className="toolbar-tooltip" side="bottom">
-            {disabledReason}
-          </TooltipContent>
-        </Tooltip>
-      </span>
-    );
-  }
 
   return (
-    <span className="compact-insert-tools">
-      <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>{triggerButton}</DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent className="toolbar-tooltip" side="bottom">
-            {armed ? (
-              <>
-                {armed.armed}
-                <ToolbarTooltipKbd hint="Esc cancels" />
-              </>
-            ) : partition ? (
-              "Insert an opening or partition"
-            ) : (
-              "Insert an opening"
-            )}
-          </TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="start" className="compact-insert-menu">
-          {tools.map((tool) => (
-            <DropdownMenuItem
-              key={tool.key}
-              aria-checked={tool.active}
-              className="compact-insert-item"
-              data-active={tool.active ? "true" : "false"}
-              role="menuitemradio"
-              onSelect={tool.onSelect}
-            >
-              {tool.icon}
-              <span>{tool.label}</span>
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </span>
+    <CompactClusterPicker
+      caption="Insert"
+      idleIcon={<PlusIcon aria-hidden="true" size={16} />}
+      idleTooltip={partition ? "Insert an opening or partition" : "Insert an opening"}
+      tools={tools}
+      armed={armedInsertMeta(activeTool, partition)}
+      disabled={disabled}
+      disabledReason={disabledReason}
+    />
   );
 }
 
