@@ -549,14 +549,23 @@ function ChecklistRow({
   const isDraggable = artwork !== null && !isPlaced;
 
   // A placed row's drag is a silent no-op otherwise — the only feedback was
-  // the `title` tooltip above, which nothing surfaces without a hover. This
-  // fires on the first pointerdown/dragstart a drag attempt produces; the
+  // the `title` tooltip above, which nothing surfaces without a hover. The
   // shared toast id dedupes repeat attempts into one visible toast rather
   // than stacking a new one per press.
   const notifyAlreadyPlaced = () => {
     if (!isPlaced) return;
     toast.warning(ALREADY_PLACED_DRAG_MESSAGE, { id: "checklist-already-placed" });
   };
+
+  // A plain click on a placed row is how you SELECT it — that must stay
+  // silent. Only a press that travels (past the same slop the touch drag
+  // uses) or escapes the row while held reads as a drag attempt and warns.
+  const placedPressRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    notified: boolean;
+  } | null>(null);
 
   // Store image dimensions for creating a properly-sized drag preview with
   // correct aspect ratio (task: fix squished drag thumbnail).
@@ -724,7 +733,15 @@ function ChecklistRow({
               longPressTimerRef.current = setTimeout(armTouchDrag, LONG_PRESS_MS);
             }
           : isPlaced
-          ? () => notifyAlreadyPlaced()
+          ? (event) => {
+              if (!event.isPrimary) return;
+              placedPressRef.current = {
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+                notified: false
+              };
+            }
           : undefined
       }
       onPointerMove={
@@ -750,6 +767,17 @@ function ChecklistRow({
                 clientY: event.clientY
               });
             }
+          : isPlaced
+          ? (event) => {
+              const state = placedPressRef.current;
+              if (!state || state.pointerId !== event.pointerId || state.notified) return;
+              const dx = event.clientX - state.startX;
+              const dy = event.clientY - state.startY;
+              if (dx * dx + dy * dy > TOUCH_DRAG_SLOP_PX * TOUCH_DRAG_SLOP_PX) {
+                state.notified = true;
+                notifyAlreadyPlaced();
+              }
+            }
           : undefined
       }
       onPointerUp={
@@ -770,6 +798,10 @@ function ChecklistRow({
                 cancelPendingLongPress();
               }
             }
+          : isPlaced
+          ? () => {
+              placedPressRef.current = null;
+            }
           : undefined
       }
       onPointerCancel={
@@ -779,6 +811,10 @@ function ChecklistRow({
               if (!state || state.pointerId !== event.pointerId) return;
               if (state.armed) emitArtworkTouchDrag({ type: "cancel", artworkId });
               teardownTouchDrag();
+            }
+          : isPlaced
+          ? () => {
+              placedPressRef.current = null;
             }
           : undefined
       }
@@ -790,6 +826,14 @@ function ChecklistRow({
               // Once armed the pointer is captured, so leave won't fire; before
               // arming, leaving the row abandons the pending press.
               if (!state.armed) cancelPendingLongPress();
+            }
+          : isPlaced
+          ? (event) => {
+              const state = placedPressRef.current;
+              if (!state || state.pointerId !== event.pointerId) return;
+              // Escaping the row while still held is a drag attempt too.
+              if (!state.notified && event.buttons > 0) notifyAlreadyPlaced();
+              placedPressRef.current = null;
             }
           : undefined
       }
