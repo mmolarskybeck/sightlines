@@ -118,6 +118,11 @@ export function guessColumnMapping(table: ImportTable): {
 
 export function normalizeImportText(value: string): string {
   return value
+    // Preserve semantic word boundaries used by APIs and database exports.
+    // Do this before lowercasing: artistName -> artist Name, heightCM ->
+    // height CM, and IIIFImageURL -> IIIF Image URL.
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .normalize("NFKD")
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase()
@@ -153,6 +158,7 @@ const UNIT_BONUS_FIELDS = new Set<ImportField>(["height", "width", "depth"]);
 function scoreHeader(field: ImportField, label: string): { score: number; reason?: string } {
   const labelTokens = tokensOf(label);
   if (labelTokens.size === 0) return { score: 0 };
+  const compactLabel = [...labelTokens].join("");
 
   let best: { score: number; reason?: string } = { score: 0 };
 
@@ -163,6 +169,12 @@ function scoreHeader(field: ImportField, label: string): { score: number; reason
     let score = 0;
     if (tokenSetsEqual(labelTokens, aliasTokens)) {
       score = 60;
+    } else if (compactLabel === [...aliasTokens].join("")) {
+      // Some exports flatten identifiers completely (ARTISTNAME, imagefile).
+      // Requiring the whole compacted header to equal a known alias keeps this
+      // generous without introducing fuzzy substring matches such as
+      // "copyright" -> "right".
+      score = 56;
     } else if (isSubsetOf(aliasTokens, labelTokens)) {
       const [onlyAliasToken] = aliasTokens;
       const isSingleCharAlias = aliasTokens.size === 1 && onlyAliasToken.length === 1;
@@ -292,7 +304,13 @@ function looksLikeAccessionValue(value: string): boolean {
   const trimmed = value.trim();
   if (!trimmed) return false;
   if (/^\d+(\.\d+)?$/.test(trimmed)) return false;
-  if (/^[a-z]+[.\s]*\d/i.test(trimmed)) return true;
+  // Catalog codes are normally compact (ABC123), punctuated (P.123), or
+  // uppercase prefixes (INV 2003.4). Requiring one of those shapes prevents
+  // ordinary prose such as "height 45 cm" or "hoogte 45,5 cm" from being
+  // mistaken for an accession number.
+  if (/^[a-z]{1,6}[.-]\s*\d/i.test(trimmed)) return true;
+  if (/^[a-z]{1,4}\d/i.test(trimmed)) return true;
+  if (/^[A-Z]{1,6}\s+\d/.test(trimmed)) return true;
   const dotCount = (trimmed.match(/\./g) ?? []).length;
   return dotCount >= 2 && /^\d/.test(trimmed);
 }

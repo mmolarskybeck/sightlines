@@ -3,6 +3,102 @@ import { guessColumnMapping } from "./columnMapping";
 import type { ImportTable } from "./types";
 
 describe("guessColumnMapping", () => {
+  it("maps camelCase headers from the Rijksmuseum/AIC metadata fixture", () => {
+    const labels = [
+      "museum",
+      "id",
+      "title",
+      "artistName",
+      "year",
+      "medium",
+      "heightCm",
+      "widthCm",
+      "depthCm",
+      "dimensions",
+      "dimensionSourceText",
+      "objectId",
+      "imagePath",
+      "byteSize",
+      "sha256",
+      "license",
+      "objectUrl",
+      "imageUrl"
+    ];
+    const table: ImportTable = {
+      sourceFilename: "fixtures/artworks/rijks-aic/metadata.csv",
+      sheetName: "Sheet1",
+      headerRowIndex: 0,
+      columns: labels.map((label, index) => ({ index, label })),
+      rows: [
+        {
+          sourceRowIndex: 2,
+          values: [
+            "Rijksmuseum",
+            "the-milkmaid",
+            "The Milkmaid",
+            "Johannes Vermeer",
+            "c. 1660",
+            "Oil on canvas",
+            "45.5",
+            "41",
+            "",
+            "45.5 x 41 cm",
+            "hoogte 45,5 cm x breedte 41 cm",
+            "200108369",
+            "images/rijksmuseum-the-milkmaid.jpg",
+            "690193",
+            "e1fce25063d20f3cc14ce13a32c015746dbdac3cae6694f1e4cfcdb4b8e62ea1",
+            "Public domain",
+            "https://www.rijksmuseum.nl/en/collection/object/200108369",
+            "https://iiif.micr.io/QkOGy/full/1686,/0/default.jpg"
+          ]
+        }
+      ]
+    };
+
+    const { mapping, guesses } = guessColumnMapping(table);
+
+    expect(mapping).toMatchObject({
+      title: 2,
+      artist: 3,
+      date: 4,
+      medium: 5,
+      height: 6,
+      width: 7,
+      depth: 8,
+      dimensions: 9,
+      imageFilename: 12
+    });
+    expect(guesses.filter((guess) => [3, 6, 7, 8, 12].includes(guess.columnIndex)))
+      .toHaveLength(5);
+
+    const claimedColumns = new Set(Object.values(mapping));
+    for (const index of [0, 1, 10, 11, 13, 14, 15, 16, 17]) {
+      expect(claimedColumns.has(index)).toBe(false);
+    }
+  });
+
+  it("maps PascalCase and fully compact schema headers", () => {
+    const table: ImportTable = {
+      sourceFilename: "metadata.csv",
+      sheetName: "Sheet1",
+      headerRowIndex: 0,
+      columns: [
+        { index: 0, label: "ArtistName" },
+        { index: 1, label: "HEIGHTCM" },
+        { index: 2, label: "imagefilename" }
+      ],
+      rows: [
+        { sourceRowIndex: 2, values: ["Faith Ringgold", "182.9", "images/tar-beach.jpg"] }
+      ]
+    };
+
+    const { mapping, guesses } = guessColumnMapping(table);
+
+    expect(mapping).toMatchObject({ artist: 0, height: 1, imageFilename: 2 });
+    expect(guesses.every((guess) => guess.confidence === "high")).toBe(true);
+  });
+
   it("maps common artwork fixture headers", () => {
     const table: ImportTable = {
       sourceFilename: "metadata.csv",
