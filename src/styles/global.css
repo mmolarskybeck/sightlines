@@ -5094,6 +5094,12 @@ body.panels-resizing * {
     gap: 0;
   }
 
+  /* Icon-only tier: the Export menu caret drops with the label (same rule as
+     the tight-density .compact-cluster-caret in the canvas toolbar). */
+  .topbar-button-caret {
+    display: none;
+  }
+
   .topbar-left,
   .topbar-right {
     gap: 6px;

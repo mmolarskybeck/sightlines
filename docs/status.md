@@ -44,10 +44,11 @@ Touch drag-and-drop for artwork placement, insecure-context support for LAN dev 
 - **Settings dialog** with storage-persistence hook, durable-storage request, and elevation empty-state treatment.
 - **Context-aware help dialog** on the shared UI primitives.
 - **Test corpus + import intelligence**: Rijksmuseum and Art Institute of Chicago artwork metadata fixtures with download script (physical dimensions included), and `guessColumnMapping` handling for camelCase/PascalCase spreadsheet headers.
+- **`.sightlines` package export slice** (2026-07-12, import deferred): schema-versioned `SightlinesPackage` manifest (`src/domain/schema/packageSchema.ts`) with content-addressed, per-tier asset inventory (sha256/byteSize/mimeType/path); pure async derivation (`src/domain/package/buildPackage.ts`) selecting the referenced-artwork subset and three export modes (`originals` / `display` default / `metadata-only`); fflate zip writer storing image blobs uncompressed and deflating JSON; `exportProjectPackage(mode)` store action; topbar Export dropdown plus Settings "Export backup" wired to the display-tier package. Format documented in `docs/package-format.md`.
 
 ## Near-Term Order
 
-1. MVP package/export work: `.sightlines` import/export, backup flow, PNG/PDF exports (including the deferred 3D screenshot), and readiness reporting. Suggested first slice: define the package format and ship **export** (project JSON + assets, schema-versioned), then build import on the untrusted-file safety pipeline (parse → validate shape → migrate → validate → persist) that validates against that format.
+1. MVP package/export work: package **export** shipped 2026-07-12 (see above; format in `docs/package-format.md`) — next, build `.sightlines` **import** on the untrusted-file safety pipeline (parse → validate shape → migrate → validate → persist) validating against that format, then the backup flow, PNG/PDF exports (including the deferred 3D screenshot), and readiness reporting.
 2. Multi-room placement and management polish around the shared floor coordinate space.
 3. Run the 10-room / 200-work renderer benchmark fixture on desktop and tablet; defer room-visibility filtering until measurements show a material whole-floor 3D cost. Overview remains whole-floor; any future scope belongs to eye-level rendering and the render layer only.
 

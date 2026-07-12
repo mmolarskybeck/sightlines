@@ -49,6 +49,7 @@ import type {
   ProjectSummary
 } from "../domain/project";
 import { faceWallId, parseFaceWallId } from "../domain/geometry/freestandingWalls";
+import type { PackageExportMode } from "../domain/schema/packageSchema";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import { formatLength } from "../domain/units/length";
 import { getGridPrecisionFloorOptionsMm } from "../domain/units/precision";
@@ -349,6 +350,7 @@ export function App() {
     undo,
     redo,
     importProjectJson,
+    exportProjectPackage,
     listProjectSummaries,
     listArtworkProjectMemberships,
     openProject,
@@ -1015,6 +1017,11 @@ export function App() {
     toggleInspectorCollapsed();
   };
 
+  const handleExportPackage = async (mode: PackageExportMode) => {
+    const result = await exportProjectPackage(mode);
+    if (result) triggerDownload(result.zip, result.filename);
+  };
+
   // The grid tracks are driven by CSS custom properties (see .workspace in
   // global.css) rather than an inline grid-template-columns, so the narrow-
   // viewport media query can still override to a single stacked column — an
@@ -1133,17 +1140,53 @@ export function App() {
           >
             <UploadSimpleIcon aria-hidden="true" size={18} />
           </Button>
-          <Button
-            className="topbar-button"
-            title="Export project JSON"
-            aria-label="Export project JSON"
-            size="default"
-            variant="outline"
-            onClick={() => downloadProject(project)}
-          >
-            <DownloadSimpleIcon aria-hidden="true" size={18} />
-            <span>Export</span>
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                className="topbar-button"
+                title="Export"
+                aria-label="Export"
+                size="default"
+                variant="outline"
+              >
+                <DownloadSimpleIcon aria-hidden="true" size={18} />
+                <span>Export</span>
+                <CaretDownIcon aria-hidden="true" className="topbar-button-caret" size={14} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-64">
+              <DropdownMenuItem
+                className="flex-col items-start gap-0.5"
+                onSelect={() => void handleExportPackage("display")}
+              >
+                <span>Package (.sightlines)</span>
+                <span className="text-[var(--type-xs)] text-muted-foreground">
+                  Display-quality images. Recommended for sharing and backup.
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="flex-col items-start gap-0.5"
+                onSelect={() => void handleExportPackage("originals")}
+              >
+                <span>Package with originals</span>
+                <span className="text-[var(--type-xs)] text-muted-foreground">
+                  Full-resolution originals too. Largest file; archival handoff.
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="flex-col items-start gap-0.5"
+                onSelect={() => void handleExportPackage("metadata-only")}
+              >
+                <span>Package without images</span>
+                <span className="text-[var(--type-xs)] text-muted-foreground">
+                  Checklist and layout only. Lightest possible file.
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => downloadProject(project)}>
+                Project JSON
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <input
             ref={fileInputRef}
             className="visually-hidden"
@@ -1877,7 +1920,7 @@ export function App() {
           storageState={storagePersistence}
           onRetryStorage={retryStoragePersistence}
           resetPreferences={resetPreferences}
-          onExport={() => project && downloadProject(project)}
+          onExport={() => void handleExportPackage("display")}
           onImport={() => fileInputRef.current?.click()}
           onOpenHelp={() => { setIsSettingsOpen(false); setIsHelpOpen(true); }}
         />
@@ -2670,10 +2713,22 @@ function downloadProject(project: Project) {
   const blob = new Blob([exportProjectJson(project)], {
     type: "application/json"
   });
+  triggerDownload(blob, `${project.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.json`);
+}
+
+// Turns raw bytes into a browser download. The only DOM-bound step in the
+// package export path — the manifest/zip derivation is pure domain code.
+function triggerDownload(data: Blob | Uint8Array, filename: string) {
+  const blob =
+    data instanceof Blob
+      ? data
+      : // Fresh copy: Blob wants a plain ArrayBuffer, and a fflate Uint8Array
+        // may be a view into a larger pooled buffer.
+        new Blob([data.slice()], { type: "application/octet-stream" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${project.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.json`;
+  link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
 }
