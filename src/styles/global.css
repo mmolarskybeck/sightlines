@@ -2572,8 +2572,11 @@ body.panels-resizing * {
     color 150ms ease-out;
 }
 
+/* aria-expanded alongside data-state: the trigger sits inside a Radix
+   Tooltip trigger, whose own data-state can clobber the menu's. */
 .compact-insert-trigger:hover:not(:disabled),
-.compact-insert-trigger[data-state="open"] {
+.compact-insert-trigger[data-state="open"],
+.compact-insert-trigger[aria-expanded="true"] {
   background: var(--surface-strong);
   color: var(--ink);
 }
@@ -2961,9 +2964,14 @@ body.panels-resizing * {
 }
 
 /* Active state wins over hover so a click from on -> off visibly changes
-   immediately while the pointer is still over the control. */
+   immediately while the pointer is still over the control. Keyed on
+   aria-pressed, not data-state: these toggles are wrapped in Radix
+   Tooltip triggers, whose own data-state (closed/delayed-open) clobbers
+   the toggle's on/off value on the shared DOM node. */
 .view-option-button[data-state="on"],
-.view-option-button[data-state="on"]:hover:not(:disabled) {
+.view-option-button[aria-pressed="true"],
+.view-option-button[data-state="on"]:hover:not(:disabled),
+.view-option-button[aria-pressed="true"]:hover:not(:disabled) {
   background: var(--primary-soft);
   color: var(--primary-strong);
   box-shadow: var(--shadow-pressed);
