@@ -39,6 +39,7 @@
   --font-brand: "Figtree Variable", Figtree, ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-brand);
   --font-ui: "Geist Variable", Geist, ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   font-family: var(--font-ui);
   line-height: 1.5;
   font-weight: 400;
@@ -410,21 +411,45 @@ input:focus-visible {
 .help-shortcut-row dd {
   display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
   justify-content: flex-end;
-  gap: 4px;
+  gap: 10px;
   margin: 0;
 }
 
-.help-shortcut-row kbd {
+/* One alternative in the input column: an ordered run of key chips and
+   un-boxed gesture/connector words (e.g. [Space] drag). Alternatives stay
+   separate flex items in the dd, spaced by the wider gap above. */
+.help-input {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px;
+}
+
+/* Gesture / connector words ("drag", "scroll", "keeps existing"): plain,
+   un-boxed, muted, and a notch larger than the mono chips so they read as
+   prose sitting beside the keys. */
+.help-input-text {
+  color: var(--muted);
+  font-size: var(--type-xs);
+  line-height: var(--leading-ui);
+}
+
+/* shadcn-style key chip: monospace glyph in a square, hairline-bordered
+   surface tile. Matches the project's square-pane language (≤3px corners,
+   no pills). Shared by every <Kbd> instance. */
+.kbd {
   display: inline-flex;
   align-items: center;
-  min-width: 22px;
   justify-content: center;
+  min-width: 22px;
   padding: 2px 6px;
   border: 1px solid var(--line);
+  border-radius: 3px;
   background: var(--surface);
   color: var(--muted);
-  font-family: var(--font-ui);
+  font-family: var(--font-mono);
   font-size: var(--type-2xs);
   font-weight: var(--weight-medium);
   line-height: var(--leading-ui);
