@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { FileArrowUpIcon } from "@phosphor-icons/react/dist/csr/FileArrowUp";
@@ -6,6 +6,7 @@ import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
 import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
+import { ACCEPTED_IMAGE_MIME_TYPES } from "../../domain/assets/imageIntake";
 import type { Artwork, DisplayUnit, Project, ProjectSummary } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
@@ -40,6 +41,7 @@ export function ArtworkLibraryView({
   getBlob,
   onAddToChecklist,
   onDeleteArtworks,
+  onAddFiles,
   onOpenImportWizard,
   pendingDuplicateUploads = [],
   onConfirmDuplicateUploads,
@@ -50,6 +52,7 @@ export function ArtworkLibraryView({
 }: LibraryCommonProps & {
   onAddToChecklist: (artworkIds: string[]) => void | Promise<void>;
   onDeleteArtworks?: (artworkIds: string[]) => void | Promise<void>;
+  onAddFiles?: (files: File[]) => void | Promise<void>;
   onOpenImportWizard: () => void;
   pendingDuplicateUploads?: { file: File; existingArtworkTitle: string }[];
   onConfirmDuplicateUploads?: () => void | Promise<void>;
@@ -63,6 +66,7 @@ export function ArtworkLibraryView({
   const [sort, setSort] = useState<{ key: LibrarySort; direction: SortDirection }>({ key: "title", direction: "ascending" });
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
+  const quickAddInputRef = useRef<HTMLInputElement>(null);
   // Deleted/absent artworks must never linger in the selection (they'd let a
   // stale id ride into a bulk add or delete). Prune whenever the device-level
   // list changes — filtering/sorting is view-only and must not drop a pick.
@@ -86,9 +90,33 @@ export function ArtworkLibraryView({
           <h1 id="artwork-library-title">Artwork Library</h1>
           <p>{artworks.length} work{artworks.length === 1 ? "" : "s"} on this device</p>
         </div>
-        <Button variant="primary" onClick={onOpenImportWizard}>
-          <FileArrowUpIcon aria-hidden="true" size={16} /> Import
-        </Button>
+        <div className="artwork-library-header-actions">
+          {onAddFiles ? (
+            <>
+              {/* Quick path: one image straight into the library, skipping the
+                  wizard. Duplicate checks ride the same intake as the wizard's,
+                  surfacing in the banner below. */}
+              <input
+                ref={quickAddInputRef}
+                accept={ACCEPTED_IMAGE_MIME_TYPES.join(",")}
+                className="visually-hidden"
+                type="file"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void onAddFiles([file]);
+                  // Reset so picking the same file again still fires onChange.
+                  event.target.value = "";
+                }}
+              />
+              <Button variant="outline" onClick={() => quickAddInputRef.current?.click()}>
+                <PlusIcon aria-hidden="true" size={16} /> Add image
+              </Button>
+            </>
+          ) : null}
+          <Button variant="primary" onClick={onOpenImportWizard}>
+            <FileArrowUpIcon aria-hidden="true" size={16} /> Import
+          </Button>
+        </div>
       </header>
 
       {pendingDuplicateUploads.length > 0 ? (

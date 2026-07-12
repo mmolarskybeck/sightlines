@@ -5,6 +5,7 @@ import { DotsSixVerticalIcon } from "@phosphor-icons/react/dist/csr/DotsSixVerti
 import { FileArrowUpIcon } from "@phosphor-icons/react/dist/csr/FileArrowUp";
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
+import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { ACCEPTED_IMAGE_MIME_TYPES } from "../../domain/assets/imageIntake";
 import type { Artwork, DisplayUnit, Project } from "../../domain/project";
@@ -365,7 +366,7 @@ export function ChecklistPanel({
         <div className="checklist-empty">
           <ImageSquareIcon aria-hidden="true" size={26} />
           <p className="empty-copy">
-            Drop images here or click Add Artwork — no room required.
+            Drop images here or click <strong>Add Artwork</strong> to begin building the checklist.
           </p>
         </div>
       ) : visibleRows.length === 0 ? (
@@ -418,9 +419,15 @@ export function ChecklistPanel({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            {/* Quick path first: straight to the file picker, same intake as
+                drag-drop. The wizard is the bulk/metadata route. */}
+            <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
+              <PlusIcon aria-hidden="true" size={16} />
+              Add images…
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={onOpenImportWizard}>
               <FileArrowUpIcon aria-hidden="true" size={16} />
-              Import files…
+              Bulk import…
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={onOpenArtworkLibrary}>
               <ImageSquareIcon aria-hidden="true" size={16} />

@@ -61,6 +61,17 @@ describe("ArtworkLibraryView", () => {
     expect(onAddToChecklist).toHaveBeenCalledWith(["art-2"]);
   });
 
+  it("quick-adds a single picked image to the library", () => {
+    const onAddFiles = vi.fn();
+    const { container } = render(<ArtworkLibraryView artworks={artworks} project={project} getBlob={getBlob} onAddToChecklist={vi.fn()} onOpenImportWizard={vi.fn()} onAddFiles={onAddFiles} />);
+    expect(screen.getByRole("button", { name: "Add image" })).toBeTruthy();
+    const input = container.querySelector('input[type="file"]');
+    expect(input).not.toBeNull();
+    const file = new File(["png"], "study.png", { type: "image/png" });
+    fireEvent.change(input!, { target: { files: [file] } });
+    expect(onAddFiles).toHaveBeenCalledWith([file]);
+  });
+
   it("sorts from table headers and announces direction", () => {
     render(<ArtworkLibraryView artworks={artworks} project={project} getBlob={getBlob} onAddToChecklist={vi.fn()} onOpenImportWizard={vi.fn()} />);
     const titleHeader = screen.getByRole("columnheader", { name: /Artwork/ });

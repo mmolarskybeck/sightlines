@@ -1083,7 +1083,11 @@ export function App() {
   const workspaceClassName = [
     "workspace",
     visibleLeftPanel ? null : "left-collapsed",
-    visibleInspectorCollapsed ? "right-collapsed" : null
+    visibleInspectorCollapsed ? "right-collapsed" : null,
+    // The inspector toggle's vertical anchor depends on the view's topography:
+    // canvas views clear the toolbar band, the library seats it in its header
+    // lane (see .workspace.library-view .inspector-toggle).
+    viewMode === "library" ? "library-view" : null
   ]
     .filter(Boolean)
     .join(" ");
@@ -1312,7 +1316,7 @@ export function App() {
         >
           <SidebarSimpleIcon
             aria-hidden="true"
-            size={16}
+            size={18}
             style={{ transform: "scaleX(-1)" }}
           />
         </button>
@@ -1647,6 +1651,7 @@ export function App() {
               getBlob={getAssetBlob}
               onAddToChecklist={addExistingArtworksToChecklist}
               onDeleteArtworks={(ids) => void deleteLibraryArtworks(ids)}
+              onAddFiles={(files) => void addArtworksFromFiles(files, { destination: "library" })}
               pendingDuplicateUploads={pendingDuplicateUploads.filter(
                 (entry) => entry.destination === "library"
               )}

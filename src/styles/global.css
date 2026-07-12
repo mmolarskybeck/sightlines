@@ -1010,8 +1010,12 @@ body.panels-resizing * {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  /* 36px, not the toolbar's 30px lane: the chip governs workspace topography
+     (show/hide a pane) like the rail, not tool state — one step up from the
+     tool controls, still lighter than the 48px rail so it floats over the
+     canvas without occluding it. */
+  width: 36px;
+  height: 36px;
   padding: 0;
   border: 0;
   border-radius: var(--radius-control);
@@ -1027,6 +1031,23 @@ body.panels-resizing * {
 
 .workspace.right-collapsed .inspector-toggle {
   right: 12px;
+}
+
+/* The library has no canvas-toolbar band, so the 64px anchor above would drop
+   the chip onto the header's Import button and hairline. Seat it in the header
+   lane instead, vertically centered against the Import row, and have the
+   header reserve the chip's column (12px seam gap + 30px chip + 12px breath)
+   so the row reads [Artwork Library … Import] [chip] in both collapse
+   states — collapsed, the chip slides to right: 12px, still inside the
+   now-full-width library pane. */
+.workspace.library-view .inspector-toggle {
+  /* Centers the 36px chip on the header's Import row (also 36px): 24px header
+     padding + half the ~50px title-block content height ≈ 49px center,
+     minus 18px. */
+  top: 31px;
+}
+.workspace.library-view .artwork-library-header {
+  padding-right: calc(12px + 36px + 12px);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1321,10 +1342,10 @@ body.panels-resizing * {
   padding: 20px;
   background: var(--bg);
   border-right: 1px solid var(--line);
-  /* The panel is user-resizable, so its footer actions must respond to the
-     PANEL's width, not the viewport (see the .checklist-actions container
-     query). Inline-size containment only; block size stays natural so the
-     column still scrolls. */
+  /* The panel is user-resizable, so its contents must respond to the PANEL's
+     width, not the viewport (see the .checklist-filter container queries).
+     Inline-size containment only; block size stays natural so the column
+     still scrolls. */
   container-type: inline-size;
 }
 
@@ -1785,32 +1806,17 @@ body.panels-resizing * {
 }
 
 .checklist-actions {
-  display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-  gap: 8px;
   margin-top: 14px;
 }
 
-/* Below a narrow panel the two buttons can't share a row without their labels
-   colliding, so they stack into a single column. The container is the resizable
-   .checklist-panel, so this tracks the panel width down to its ~240px minimum. */
-@container (max-width: 250px) {
-  .checklist-actions {
-    grid-template-columns: 1fr;
-  }
-}
-
-.checklist-add-images,
 .checklist-add {
   width: 100%;
-  /* minmax(0,…) tracks can shrink below the button's content; min-width:0 lets
-     the button follow so its label truncates instead of spilling over its
-     neighbor near the stacking breakpoint. */
+  /* The panel resizes down to ~240px; the label truncates rather than
+     spilling past the button. */
   min-width: 0;
   min-height: 40px;
 }
 
-.checklist-add-images > span,
 .checklist-add > span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6004,6 +6010,13 @@ body.panels-resizing * {
   margin: 0.2rem 0 0;
   color: var(--muted-foreground);
   font-size: var(--type-sm);
+}
+
+.artwork-library-header-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
 }
 
 .artwork-library-duplicate {

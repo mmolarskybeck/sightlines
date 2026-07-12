@@ -90,7 +90,7 @@ export function FreestandingWallInspector({
         />
       </div>
 
-      <Button className="inspector-action" variant="destructive" onClick={onDelete}>
+      <Button className="inspector-action inspector-danger" variant="destructive-ghost" onClick={onDelete}>
         <TrashIcon aria-hidden="true" size={15} />
         Delete partition
       </Button>
