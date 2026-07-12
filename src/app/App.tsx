@@ -107,8 +107,7 @@ import {
   DropdownMenuTrigger
 } from "./components/ui/dropdown-menu";
 import { Input } from "./components/ui/input";
-import { Tabs } from "./components/ui/tabs";
-import { UnderlineTabsList, UnderlineTabsTrigger } from "./components/ui/segmented";
+import { UnderlineToggleGroup, UnderlineToggleGroupItem } from "./components/ui/segmented";
 import { useStoragePersistence, getStorageNoteCopy } from "./hooks/useStoragePersistence";
 import {
   useViewPreferences,
@@ -1081,30 +1080,33 @@ export function App() {
           </div>
         </div>
 
-        <Tabs
-          className="view-tabs topbar-center"
-          value={viewMode}
-          onValueChange={(value) => {
-            if (value === "plan" || value === "elevation" || value === "3d") {
-              setViewMode(value);
-            }
-          }}
-        >
-          <UnderlineTabsList aria-label="Workspace view" className="view-tabs">
-            <UnderlineTabsTrigger value="plan">
+        <div className="view-tabs topbar-center">
+          <UnderlineToggleGroup
+            aria-label="Workspace view"
+            className="view-tabs"
+            orientation="horizontal"
+            type="single"
+            value={viewMode}
+            onValueChange={(value) => {
+              if (value === "plan" || value === "elevation" || value === "3d") {
+                setViewMode(value);
+              }
+            }}
+          >
+            <UnderlineToggleGroupItem value="plan">
               <MapTrifoldIcon aria-hidden="true" size={16} />
               <span>Plan</span>
-            </UnderlineTabsTrigger>
-            <UnderlineTabsTrigger value="elevation">
+            </UnderlineToggleGroupItem>
+            <UnderlineToggleGroupItem value="elevation">
               <PresentationIcon aria-hidden="true" size={16} />
               <span>Elevation</span>
-            </UnderlineTabsTrigger>
-            <UnderlineTabsTrigger value="3d">
+            </UnderlineToggleGroupItem>
+            <UnderlineToggleGroupItem value="3d">
               <CubeIcon aria-hidden="true" size={16} />
               <span>3D</span>
-            </UnderlineTabsTrigger>
-          </UnderlineTabsList>
-        </Tabs>
+            </UnderlineToggleGroupItem>
+          </UnderlineToggleGroup>
+        </div>
 
         <div className="topbar-right" aria-label="Project actions">
           <StatusBadge state={saveState} />
@@ -1205,6 +1207,7 @@ export function App() {
           </DropdownMenu>
           <input
             ref={fileInputRef}
+            aria-label="Import project (.sightlines or JSON)"
             className="visually-hidden"
             type="file"
             accept="application/json,.json,.sightlines,application/zip"

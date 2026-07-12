@@ -272,6 +272,7 @@ export function ChecklistPanel({
       <input
         ref={fileInputRef}
         accept={ACCEPTED_IMAGE_MIME_TYPES.join(",")}
+        aria-label="Add artwork images"
         className="visually-hidden"
         multiple
         type="file"
