@@ -17,7 +17,9 @@ Here is where I gather small, actionable tasks and scraps for future implementat
 
 * Blocked zone and partition tool currently have same icon - how to differentiate  ?
 
-## Done / Folded Back Into Progress
+## Done / Folded Back Into Status
+
+(Shipped items are summarized in `docs/status.md`; fuller detail kept here until it stops being useful.)
 
 * Added an eyeline (centerline) show/hide toggle in elevation mode, mirroring the grid toggle's state, storage, and UI pattern; centerline alignment snapping stays active while hidden, matching how grid snap stays independent of grid visibility.
 * Added framing + matting previews. Optional additive `matWidthMm` + `frame` ({widthMm, finish}) on the artwork record (no schema-version bump). Elevation draws flat frame ring → off-white mat ring → image, with a thin bevel hairline at the mat opening; selection outline wraps the outer rect. Plan widens the artwork's along-wall extent by the outer width ("simple dim change"). Finishes via dropdown (gold/white/black/silver/wood); mat/frame fields carry band-width placeholder examples (3"/1", 75/25 mm); "Overall" W × H are editable LengthFields that solve for the frame band (mat untouched; overall = image + 2·mat clears the frame, smaller errors in the field's message slot). Frame band always reads via thin hairlines at its outer edge and the frame/mat (or frame/image) boundary. Pure `getArtworkOuterDimensionsMm` + `deriveFrameWidthFromOverallMm` helpers in `src/domain/framing.ts`. Artwork inspector reworked into collapsible `InspectorSection` rows (Radix Collapsible; Dimensions / Mat & frame / Position / Details) with at-rest summaries and per-section open state persisted in view preferences. Deliberate limitation: elevation snapping, dim lines, out-of-bounds, and fit-selected still use the image (wall-object) dims, not the outer framed size; floor-placed artwork in plan is not framed.

@@ -9,7 +9,12 @@ import type { DisplayUnit, WallObject } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
 import type { ArrangeBoundary } from "../hooks/arrangeReadout";
 import { LengthField } from "./LengthField";
-import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
+import {
+  SegmentedToggleGroup,
+  SegmentedToggleGroupItem,
+  UnderlineToggleGroup,
+  UnderlineToggleGroupItem
+} from "./ui/segmented";
 import { Button } from "./ui/button";
 import {
   Select,
@@ -207,7 +212,7 @@ export function SelectionInspector({
             {arrangeIgnoredNote ? (
               <p className="field-hint">{arrangeIgnoredNote}</p>
             ) : null}
-            <ToggleGroup
+            <SegmentedToggleGroup
               aria-label="Spacing method"
               className="arrange-modes"
               // Three-across segments, each an icon over a label that may wrap
@@ -230,19 +235,19 @@ export function SelectionInspector({
                 }
               }}
             >
-              <ToggleGroupItem className="arrange-mode" value="equal">
+              <SegmentedToggleGroupItem className="arrange-mode" value="equal">
                 <ArrowsOutLineHorizontalIcon aria-hidden="true" size={16} />
                 <span>Space evenly</span>
-              </ToggleGroupItem>
-              <ToggleGroupItem className="arrange-mode" value="inset">
+              </SegmentedToggleGroupItem>
+              <SegmentedToggleGroupItem className="arrange-mode" value="inset">
                 <ArrowsInLineHorizontalIcon aria-hidden="true" size={16} />
                 <span>From edges</span>
-              </ToggleGroupItem>
-              <ToggleGroupItem className="arrange-mode" value="gap">
+              </SegmentedToggleGroupItem>
+              <SegmentedToggleGroupItem className="arrange-mode" value="gap">
                 <ArrowsHorizontalIcon aria-hidden="true" size={16} />
                 <span>Between works</span>
-              </ToggleGroupItem>
-            </ToggleGroup>
+              </SegmentedToggleGroupItem>
+            </SegmentedToggleGroup>
 
             {arrange.mode === "equal" ? (
               <div className="arrange-mode-body">
@@ -291,7 +296,7 @@ export function SelectionInspector({
                     (onSetAnchor never moves anything on its own). */}
                 <div className="arrange-anchor-row">
                   <span className="arrange-anchor-label">Measured from</span>
-                  <ToggleGroup
+                  <UnderlineToggleGroup
                     aria-label="Measured from"
                     className="arrange-anchor-tabs"
                     orientation="horizontal"
@@ -303,31 +308,16 @@ export function SelectionInspector({
                       }
                     }}
                   >
-                    <ToggleGroupItem
-                      className="arrange-anchor-tab"
-                      value="left"
-                      variant="tab"
-                      size="sm"
-                    >
+                    <UnderlineToggleGroupItem className="arrange-anchor-tab" value="left">
                       Left
-                    </ToggleGroupItem>
-                    <ToggleGroupItem
-                      className="arrange-anchor-tab"
-                      value="both"
-                      variant="tab"
-                      size="sm"
-                    >
+                    </UnderlineToggleGroupItem>
+                    <UnderlineToggleGroupItem className="arrange-anchor-tab" value="both">
                       Both
-                    </ToggleGroupItem>
-                    <ToggleGroupItem
-                      className="arrange-anchor-tab"
-                      value="right"
-                      variant="tab"
-                      size="sm"
-                    >
+                    </UnderlineToggleGroupItem>
+                    <UnderlineToggleGroupItem className="arrange-anchor-tab" value="right">
                       Right
-                    </ToggleGroupItem>
-                  </ToggleGroup>
+                    </UnderlineToggleGroupItem>
+                  </UnderlineToggleGroup>
                 </div>
 
                 {arrange.insetAnchor === "both" ? (

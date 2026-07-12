@@ -32,7 +32,7 @@ import { UncertaintyIndicator } from "./UncertaintyIndicator";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Toggle } from "./ui/toggle";
-import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
+import { SegmentedToggleGroup, SegmentedToggleGroupItem } from "./ui/segmented";
 import {
   Select,
   SelectContent,
@@ -77,6 +77,7 @@ export function ArtworkInspector({
   isPlaced,
   placementSection,
   placementTitle,
+  scopeNote,
   sectionsOpen,
   onCommitDimensions,
   onCommitField,
@@ -98,6 +99,7 @@ export function ArtworkInspector({
   // already preventDefaults).
   placementSection?: ReactNode;
   placementTitle?: string;
+  scopeNote?: string;
   // Per-section open flags keyed by section id ("dimensions" | "framing" |
   // "placement" | "details") — App reads/writes them through
   // useViewPreferences' inspectorSections record.
@@ -165,6 +167,7 @@ export function ArtworkInspector({
 
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
+      {scopeNote ? <p className="artwork-inspector-scope">{scopeNote}</p> : null}
       {/* Thumbnail beside identity when the panel is wide enough, stacking
           above it when narrow (see .artwork-inspector-header). */}
       <div className="artwork-inspector-header">
@@ -399,13 +402,13 @@ function DimensionsSection({
         ))}
       </div>
 
-      {/* Wall vs floor: a two-segment switch matching the arrange-mode
-          vocabulary (crisp squares, petrol wash on the active segment, never a
-          pill). It DISPLAYS the effective form; a change writes the explicit
+      {/* Wall vs floor: a two-cell soft track matching the arrange-mode
+          vocabulary (recessed track, raised chip slides to the active cell).
+          It DISPLAYS the effective form; a change writes the explicit
           override in one commit. A Radix single toggle-group fires "" when the
           active segment is re-clicked (deselect) — ignore that and keep the
           current form, since there's no "back to auto" affordance in v1. */}
-      <ToggleGroup
+      <SegmentedToggleGroup
         aria-label="Placement type"
         className="placement-form-toggle"
         type="single"
@@ -414,13 +417,13 @@ function DimensionsSection({
           if (value === "wall" || value === "floor") onChangePlacementForm(value);
         }}
       >
-        <ToggleGroupItem className="placement-form-option" value="wall">
+        <SegmentedToggleGroupItem className="placement-form-option" value="wall">
           Hangs on wall
-        </ToggleGroupItem>
-        <ToggleGroupItem className="placement-form-option" value="floor">
+        </SegmentedToggleGroupItem>
+        <SegmentedToggleGroupItem className="placement-form-option" value="floor">
           Sits on floor
-        </ToggleGroupItem>
-      </ToggleGroup>
+        </SegmentedToggleGroupItem>
+      </SegmentedToggleGroup>
 
       <label className="field-row compact">
         <span>Status</span>

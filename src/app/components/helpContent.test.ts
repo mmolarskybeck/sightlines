@@ -49,6 +49,25 @@ describe("viewHelpGroups", () => {
     expect(keys).not.toContain("W A S D");
   });
 
+  it("lists the toolbar accelerators per view on keyboard, but not on touch", () => {
+    const planKeys = viewHelpGroups("plan", "keyboard", true)
+      .flatMap((group) => group.hints)
+      .flatMap((hint) => hint.keys);
+    expect(planKeys).toEqual(
+      expect.arrayContaining(["D", "W", "B", "P", "R", "⇧ R", "G", "S", "O"])
+    );
+    expect(planKeys).not.toContain("E"); // Eyeline is elevation-only
+
+    const elevationKeys = viewHelpGroups("elevation", "keyboard", true)
+      .flatMap((group) => group.hints)
+      .flatMap((hint) => hint.keys);
+    expect(elevationKeys).toEqual(expect.arrayContaining(["D", "W", "B", "G", "S", "O", "E"]));
+    expect(elevationKeys).not.toContain("R"); // Draw room / Partition are plan-only
+
+    const touchTitles = viewHelpGroups("plan", "touch", true).map((group) => group.title);
+    expect(touchTitles).not.toContain("Toolbar");
+  });
+
   it("keeps the elevation nudge family together on keyboard", () => {
     const actions = viewHelpGroups("elevation", "keyboard", true)
       .flatMap((group) => group.hints)

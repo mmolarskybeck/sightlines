@@ -1,6 +1,14 @@
 import { useRef, useState } from "react";
 import { clamp } from "../../domain/geometry/scalar";
 
+// How far past `min` a drag has to travel (in the collapsing direction)
+// before it snaps the pane shut instead of just resting at its floor. Without
+// slack, a drag that overshoots by a pixel while aiming for "small but still
+// open" would collapse the pane the instant it touches min — this threshold
+// gives the user room to park right at the floor before the gesture commits
+// to a full collapse.
+const COLLAPSE_THRESHOLD = 64;
+
 // A hand-rolled drag handle for the resizable workspace panels — deliberately
 // not a dependency (the app has no split-pane library and one thin pointer
 // handler covers both seams). It renders a vertical splitter that sits centered
@@ -19,7 +27,8 @@ export function PanelResizeHandle({
   min,
   max,
   label,
-  onResize
+  onResize,
+  onCollapse
 }: {
   // Which pane this handle resizes — "left" (checklist/rooms) grows as the
   // pointer moves right; "right" (inspector) grows as it moves left.
@@ -29,6 +38,13 @@ export function PanelResizeHandle({
   max: number;
   label: string;
   onResize: (nextWidth: number) => void;
+  // Dragging well past `min` collapses the pane instead of just parking at
+  // the floor — the same outcome as the rail toggle. Optional because the
+  // caller decides whether a given seam supports drag-to-collapse; when
+  // omitted, dragging simply clamps at `min` as before. The handle itself
+  // unmounts once the pane collapses (its `visible*` state goes away), so
+  // this fires at most once per drag.
+  onCollapse?: () => void;
 }) {
   const [dragging, setDragging] = useState(false);
   // Latch the down-press origin so a drag measures from where the grab
@@ -58,7 +74,20 @@ export function PanelResizeHandle({
     const origin = dragOrigin.current;
     if (!origin) return;
     const delta = (event.clientX - origin.pointerX) * directionSign;
-    onResize(clamp(origin.startWidth + delta, min, max));
+    // The raw (unclamped) width is what decides collapse — clamping first
+    // would hide how far past `min` the pointer actually travelled.
+    const rawWidth = origin.startWidth + delta;
+    if (onCollapse && rawWidth < min - COLLAPSE_THRESHOLD) {
+      // Past the collapse threshold: end the drag ourselves (this component
+      // is about to unmount as the pane collapses, so no further pointer
+      // events will reach it) and hand off to the caller. Cleanup runs
+      // first so nothing here touches a detached element after onCollapse
+      // triggers the unmount.
+      endDrag(event);
+      onCollapse();
+      return;
+    }
+    onResize(clamp(rawWidth, min, max));
   }
 
   function endDrag(event: React.PointerEvent<HTMLDivElement>) {

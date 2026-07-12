@@ -1,6 +1,8 @@
-# Sightlines Status Snapshot
+# Sightlines Status
 
-Last refreshed: 2026-07-10
+Last refreshed: 2026-07-12
+
+This is the single living status doc: current state, what shipped recently, and what comes next. The full product/architecture plan and roadmap live in `docs/plan.md`; small scraps live in `docs/quick-todos.md`; the chronological build log through 2026-07-10 is frozen at `docs/archive/progress.md`.
 
 ## Current Read
 
@@ -31,15 +33,28 @@ Touch drag-and-drop for artwork placement, insecure-context support for LAN dev 
 - **Error surface hardening**: `addArtworksFromFiles` and `importArtworkDrafts` now catch and surface intake errors in the error banner instead of failing silently.
 - **Topbar responsive at ≤1040px**: single-line icon-only layout; Plan/Elevation/3D tab labels, Export label, and save-badge text collapse to visually-hidden spans (accessible names preserved); colored save dot remains.
 
+## Shipped 2026-07-10 → 2026-07-12 (64 commits on main; tests 1117 → 1334, all green)
+
+- **3D navigation overhaul**: cursor-directed wheel dolly, WASD travel with idle-gap step capping, double-click focus flights (including empty-space focus), one-finger touch pan + ground-plane panning, focus selection, and renderer metrics. Tunables live in `cameraNav.ts`; verification levers are `__sightlines3d` and `?benchmark=renderer`.
+- **Rectangle-room draw gesture + Draw toolbar cluster**: `R` = rectangle, `⇧R` = outline (polygon), drawn-rectangle domain factory and store action, corner-bracket glyph. Toolbar reorganized around an Insert-decorates / Draw-creates grammar: the Draw cluster leads, partition moved out of Insert into Draw, generic `.tool-cluster` pickers extracted, one 30px control lane.
+- **Soft-tactile UI pass** (spec/soft-tactile-ui merged): recessed tracks with raised sliding chips, pressed toggle grammar, sliding petrol underline top nav, styled toolbar tooltips with entrance animation, Insert as pressed tool buttons, soft treatment extended to inspector pickers, help dialog, and zoom cluster.
+- **Cross-project artwork library view** plus a persistent inspector visibility toggle with engaged/collapsed styling.
+- **Framing + matting previews**: additive `matWidthMm` + `frame` on the artwork record (no schema bump); elevation draws frame ring → mat ring → image with bevel hairline; plan widens the along-wall extent to the outer size; editable Overall W×H solves for the frame band; artwork inspector reworked into collapsible sections with persisted open state. Known limitation: elevation snapping, dim lines, out-of-bounds, and fit-selected still use image dims, not outer framed size.
+- **Neighbor-aware dim lines** in the between-works tab: outer dim lines stop at the nearest neighbor edge (falling back to the wall edge), with per-side calculated distance readouts in the inspector.
+- **Settings dialog** with storage-persistence hook, durable-storage request, and elevation empty-state treatment.
+- **Context-aware help dialog** on the shared UI primitives.
+- **Test corpus + import intelligence**: Rijksmuseum and Art Institute of Chicago artwork metadata fixtures with download script (physical dimensions included), and `guessColumnMapping` handling for camelCase/PascalCase spreadsheet headers.
+- **`.sightlines` package export slice** (2026-07-12, import deferred): schema-versioned `SightlinesPackage` manifest (`src/domain/schema/packageSchema.ts`) with content-addressed, per-tier asset inventory (sha256/byteSize/mimeType/path); pure async derivation (`src/domain/package/buildPackage.ts`) selecting the referenced-artwork subset and three export modes (`originals` / `display` default / `metadata-only`); fflate zip writer storing image blobs uncompressed and deflating JSON; `exportProjectPackage(mode)` store action; topbar Export dropdown plus Settings "Export backup" wired to the display-tier package. Format documented in `docs/package-format.md`.
+
 ## Near-Term Order
 
-1. MVP package/export work: `.sightlines` import/export, backup flow, PNG/PDF exports (including the deferred 3D screenshot), and readiness reporting.
+1. MVP package/export work: package **export** shipped 2026-07-12 (see above; format in `docs/package-format.md`) — next, build `.sightlines` **import** on the untrusted-file safety pipeline (parse → validate shape → migrate → validate → persist) validating against that format, then the backup flow, PNG/PDF exports (including the deferred 3D screenshot), and readiness reporting.
 2. Multi-room placement and management polish around the shared floor coordinate space.
 3. Run the 10-room / 200-work renderer benchmark fixture on desktop and tablet; defer room-visibility filtering until measurements show a material whole-floor 3D cost. Overview remains whole-floor; any future scope belongs to eye-level rendering and the render layer only.
 
 ## Known Follow-Ups
 
-- Overlapping door/window holes on one wall triangulate with minor artifacts (see `docs/3d-preview-spec.md` §10); the domain already flags overlapping placements for review.
+- Overlapping door/window holes on one wall triangulate with minor artifacts (see `docs/archive/3d-preview-spec.md` §10); the domain already flags overlapping placements for review.
 - Eye height uses `project.defaultCenterlineHeightMm` as a proxy; add a per-project `eyeHeightMm` if users trip on it.
 - `.sightlines` package import/export still needs the untrusted-file safety pipeline before becoming the main backup/share surface.
 - Duplicate artwork/image import prevention is planned but not yet enforced across the new wizard path.
@@ -47,3 +62,5 @@ Touch drag-and-drop for artwork placement, insecure-context support for LAN dev 
 ## Deferred
 
 Curved walls, full 3D editing, hosted accounts/collaboration, and registrar-level collection management remain out of the near-term product scope.
+
+Deliberately skipped in the 2D zoom/pan MVP (revisit only on demand): ⌘+/⌘− zoom shortcuts (conflict with browser page zoom), double-click-to-fit, pan-distance clamping, and viewport persistence across sessions.

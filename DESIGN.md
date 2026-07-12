@@ -24,10 +24,12 @@ typography:
   display: '"Figtree Variable", Figtree, ui-sans-serif, system-ui, sans-serif'
   ui: '"Geist Variable", Geist, ui-sans-serif, system-ui, -apple-system, sans-serif'
 radii:
-  control: "6px"
-  fill: "8px"
+  control: "8px"
+  fill: "10px"
   panel: "0"
   overlay: "12px"
+  seg: "7px"
+  track: "10px"
 ---
 
 # Design System: Sightlines
@@ -45,7 +47,8 @@ The design system is now implemented through Tailwind CSS 4 and local shadcn-sty
 The local wrappers in `src/app/components/ui` are the preferred surface for new components:
 
 - `Button` supports `default`, `primary`, `ghost`, `subtle`, `outline`, `destructive`, `rail`, `tab`, and `inspector` variants.
-- `Toggle` and `ToggleGroupItem` support pressed petrol states and underline-tab states.
+- `Toggle` and `ToggleGroupItem` support pressed petrol states (now with the `--shadow-pressed` depression) and underline-tab states.
+- `SegmentedTabsList`/`SegmentedTabsTrigger` and `SegmentedToggleGroup`/`SegmentedToggleGroupItem` (`ui/segmented.tsx`) render the recessed-track/raised-chip pickers with the sliding chip; `UnderlineTabsList`/`UnderlineTabsTrigger` and `UnderlineToggleGroup`/`UnderlineToggleGroupItem` render tabs with the sliding petrol underline (3px, pill caps) off the same measuring hook.
 - `Tabs`, `Select`, `DropdownMenu`, and `Switch` keep Radix semantics while carrying Sightlines visual defaults.
 - `Collapsible` is a bare-behavior Radix wrapper (no baked-in look); `InspectorSection` composes it into the hairline-separated, summary-bearing disclosure rows the artwork inspector uses.
 - `cn()` uses `clsx` and `tailwind-merge`; compose variants there rather than concatenating ad hoc class strings.
@@ -58,6 +61,7 @@ Use a restrained white, black, graphite, and petrol system.
 - Near-black (`--foreground`) is primary text and structural drawing.
 - Thin neutral borders (`--border`, `--input`) separate panes and controls.
 - Petrol (`--primary`) is reserved for active modes, focus rings, snap guides, and high-commitment toggles — the chrome/interaction token.
+- Solid petrol controls always use `--primary-foreground` (white/light text). Never place black, foreground, or inherited dark text on a petrol fill; this applies to default, hover, active, and disabled states.
 - Petrol soft (`--primary-soft`) is the selected-row and pressed-toggle wash.
 - Canvas selection strokes (plan objects, rooms, resize handles, marquee, elevation openings/artwork) use `--selection`, a lighter petrol lifted for contrast against ink walls at canvas stroke weights, rather than `--primary`.
 - Caution amber and destructive red are semantic only: approximate data, invalid state, placement warnings, and failures.
@@ -69,8 +73,46 @@ Avoid decorative color. The UI should not become teal-themed; petrol is an inter
 Sightlines mixes square workspace structure with softer floating surfaces: rectangular where the app is a drafting instrument, rounded where it floats above the work.
 
 - Major panes and layout divisions stay square and separated by 1px borders.
-- Inputs, buttons, selects, and compact toolbar controls use a 6px radius.
-- Borderless selected fills, rail buttons, and menu rows may use an 8px radius.
+- Inputs, buttons, selects, and compact toolbar controls use an 8px radius.
+- Borderless selected fills, rail buttons, and menu rows may use a 10px radius.
+- Soft-control grammar (this branch's speculative reroll):
+  - **Navigation** — the topbar Plan/Elevation/3D tabs — uses transparent
+    underline tabs whose 2px petrol underline *slides* between tabs (220ms
+    `--ease-soft`, suppressed under reduced motion): the original petrol
+    identity plus the sliding motion.
+  - **Value pickers** — checklist filters, units, arrange modes,
+    wall/floor placement — are recessed grey tracks (`--track`,
+    `--radius-track`) holding quiet segments, with one raised white chip
+    (`--chip`, `--shadow-chip`) marking the active choice and sliding
+    between segments. Tracks are only for sets where something is always
+    chosen — a control that is usually empty (like tool arming) must not
+    be a track. Auxiliary controls may dock inside a track behind a
+    hairline divider (the checklist's sort trigger is the reference case)
+    rather than floating beside it.
+  - **Latching toggles and armed tools** (Grid, Snap, Overlap, rail
+    modes, the Insert door/window/zone tools) do the opposite: they
+    depress, keeping the petrol wash and adding `--shadow-pressed`
+    (a deepened inset with a faint full-perimeter inner ring, so the
+    depression survives a grayscale read). Raised = a choice within a
+    set; pressed = a mode that's engaged. Armed tools — the Insert
+    segments (door, window, blocked zone), the Draw segments (rectangle
+    room, room outline, partition), and either cluster's compact trigger
+    while a tool is armed — additionally carry `--ring-armed`, a 1px
+    translucent-petrol inner ring: a mode that changes what the next
+    canvas click does reads one step stronger than a resting display
+    toggle.
+  - **Sub-choice tabs** ("Measured from", the help dialog's view groups)
+    use the same sliding underline at smaller sizing, riding their row's
+    hairline. **Controls floating over the canvas** (the zoom cluster,
+    the inspector toggle) are borderless raised chips: white ground +
+    `--shadow-chip`. A floating chip that is also a latching toggle (the
+    inspector toggle is the reference case) depresses like any other
+    engaged mode — petrol-soft wash + `--shadow-pressed` — and pops back
+    to the raised chip when off; the raised/pressed flip is what
+    distinguishes its two states. The inspector toggle is the panel's
+    *only* affordance: it hugs the seam (sliding to the workspace corner
+    when collapsed), the rail governs the left pane exclusively, and the
+    inspector pane itself carries no collapse chrome.
 - Overlays — dialogs, wizards, popovers, dropdown menus — use a 12px radius (`--radius-overlay`) with a soft, diffuse shadow and at most a whisper of border.
 - Inside overlays, structure content with spacing and alignment rather than full-bleed hairline rules. Edge-to-edge bordered grids (tab strips, stat cells, per-field border boxes) read as spreadsheet chrome — the harsh look we are moving away from.
 - Shadows are reserved for real overlays and canvas chips, not normal panels.
@@ -90,7 +132,7 @@ The product grammar is stable:
 
 - Left rail chooses the left-side work context: checklist, rooms, issues, or data.
 - Topbar owns project identity, view mode, persistence state, and import/export.
-- Canvas toolbar has two zones: insertion tools on the left (a segmented Insert control — door, window, blocked zone — shared by Plan and Elevation, disabled only when Elevation has no selected wall), view options on the right (grid, snap, precision, overlap, units). It stays a single row at comfortable widths, then becomes two explicit rows in a narrow canvas column rather than relying on accidental wrapping. Toggle labels drop to icon-only, Insert becomes a caret menu (then a plus button at the smallest width), Precision keeps its current value while dropping only the redundant label, and Units becomes a compact two-segment control with the active system filled in petrol. Plan labels the governing scale as `ft / m`; Elevation labels its detail scale as `in / cm`.
+- Canvas toolbar has two zones: creation tools on the left, view options on the right (grid, snap, precision, overlap, units). The left zone holds up to two captioned clusters that split along one line — **Insert decorates existing geometry, Draw creates new structure** (refining commit `7cb0fef`'s outcome-based grouping, which a two-tool draw family was too thin to justify). **Draw leads**: creating structure precedes decorating it, and the plan workflow starts by drawing a room. Each cluster renders as one **joined soft group** — a single `--surface` fill holding the quiet caption docked as a leading cell behind a hairline (the checklist sort trigger's dock-inside move) plus a flush icon segment per tool, split by interior hairlines — so the word and its three tools read as one object, not a floating label beside three floating buttons. Still not a recessed track: tool arming is usually empty, and states carve segments out of the shared fill — an armed segment keeps the shared chip radius so it presses in as the same rounded petrol chip as every other pressed toolbar control, the hairlines beside it yielding; segment focus rings draw inset so the group's clipping never strands an outline fragment. The plan-only **Draw** cluster (rectangle room → room outline → partition) is never disabled. The **Insert** cluster (door, window, blocked zone) has identical membership in Plan and Elevation, each segment pressing in when armed, disabled only when Elevation has no selected wall — where Insert stands alone at the zone's start. A hairline divider separates the two clusters so each caption reads as labeling its own three tools, not the neighbors, and every toolbar control carries a compact styled tooltip. The whole row shares **one 30px control lane** (the touch container query lifts everything to 40px together), and docked labels follow one voice: a label that names a control (the cluster captions, "Precision") sits one size below the 13px semibold button labels — 12px medium in muted ink — so caption vs action survives a squint on size + weight, not weight alone. It never wraps or gains a second row: a measuring hook picks one of five density tiers from the rendered controls' actual widths (`comfortable → trimmed → condensed → compact → tight`, `toolbarDensity.ts`). Comfortable keeps every label. Trimmed — the tier a 1440px laptop with both panes open actually lives in — drops Grid, Snap, and Eyeline to icon-only while keeping the Overlap and Precision labels (the weakest icons) and the Units words. Condensed drops all descriptive labels; compact swaps both clusters for caret menus; tight collapses those to icon-only triggers and removes the flexible inter-zone spacer. Precision keeps its current value at every tier, and Units stays a compact two-segment control with the active system filled in petrol. Plan labels the governing scale as `ft / m`; Elevation labels its detail scale as `in / cm`.
 - Left pane is task inventory.
 - Right pane is inspection and numeric editing.
 
@@ -101,11 +143,13 @@ Keep panels flat. Improve polish through spacing, alignment, focus states, and c
 Use the primitive variants first. Add bespoke CSS only when the component is canvas-specific or has a domain-specific layout.
 
 - Use icon buttons for compact tools and include accessible labels.
-- Use underline tabs for view modes and checklist filters.
+- Use sliding-underline tabs (`UnderlineTabsList` in `ui/segmented.tsx`) for navigation (view modes); soft segmented tracks (`SegmentedTabsList` / `SegmentedToggleGroup`) for value pickers like the checklist filters; static underline tabs only for subordinate sub-choices.
 - Use Radix Select for option sets.
 - Use Radix Switch only when the binary state benefits from a switch; the unit selector is intentionally a two-label segmented switch.
 - Use petrol-filled primary buttons sparingly. `Import` is currently the main solid CTA in the workspace.
 - Every interactive control needs hover, pressed/active, disabled, and focus-visible states.
+- Toolbar verbs carry single-key shortcuts in the 2D views (never 3D, where WASD travels): D door, W window, B blocked zone, P partition, R rectangle room and ⇧R room outline (Plan), G grid, S snap, O overlap, E eyeline (Elevation) — `useToolbarShortcuts.ts`, suppressed while typing or while a dialog is open. Every toolbar tooltip echoes its key as a dimmed suffix ("Insert a door — D"); an armed tool's tooltip teaches its gesture and exit instead ("Drag to draw a room — Esc cancels").
+- Toolbar controls that disable use `aria-disabled`, staying focusable with clicks inert, and the reason rides the same styled toolbar tooltip on hover and focus — never a native `title`. Either cluster's compact trigger shows the armed tool's own glyph and name ("Rectangle room") so armed identity survives the narrow tiers.
 - Dialogs and wizards follow the overlay grammar: rounded 12px shell, soft shadow, a compact inline stepper or breadcrumb for multi-step flows (never a full-width bordered tab grid), centered rounded drop targets for uploads, and a single subtle top rule grounding the footer actions. Section structure inside the body comes from spacing, not rules.
 
 ## Canvas Grid

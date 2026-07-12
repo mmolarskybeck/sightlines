@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
+import { configDefaults } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -34,6 +35,10 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    setupFiles: "./src/test/setup.ts"
+    setupFiles: "./src/test/setup.ts",
+    // Claude Code worktrees live inside the checkout at .claude/worktrees/*;
+    // without this, running tests here also sweeps up every worktree's copy
+    // of the suite, which fails from the parent's context.
+    exclude: [...configDefaults.exclude, "**/.claude/**"]
   }
 });

@@ -3,6 +3,7 @@ import { parseProject } from "../schema/projectSchema";
 import { createSampleProject } from "../sample/sampleProject";
 import { feetToMm } from "../units/length";
 import {
+  createNextDrawnRectangleRoom,
   createNextPolygonRoom,
   createNextRectangleRoom,
   createPolygonRoomPlacement,
@@ -292,5 +293,52 @@ describe("createNextRectangleRoom", () => {
     expect(room.room.name).toBe("Gallery 2");
     expect(room.offsetXMm).toBeCloseTo(feetToMm(36));
     expect(getFloorBounds(nextFloor).width).toBeCloseTo(feetToMm(56));
+  });
+});
+
+describe("createNextDrawnRectangleRoom", () => {
+  it("names and numbers the next room, placed at the drawn offset", () => {
+    const project = createSampleProject();
+    const room = createNextDrawnRectangleRoom(
+      project.floor,
+      project.defaultWallHeightMm,
+      { offsetXMm: 2000, offsetYMm: 3000, widthMm: 4000, depthMm: 2500 }
+    );
+
+    expect(room.roomId).toBe("room-2");
+    expect(room.room.name).toBe("Gallery 2");
+    expect(room.offsetXMm).toBe(2000);
+    expect(room.offsetYMm).toBe(3000);
+    expect(getWallsWithGeometry(room.room)[0].lengthMm).toBeCloseTo(4000);
+  });
+
+  it("skips existing room numbers when naming", () => {
+    const project = createSampleProject();
+    const first = createNextDrawnRectangleRoom(
+      project.floor,
+      project.defaultWallHeightMm,
+      { offsetXMm: 0, offsetYMm: 0, widthMm: 4000, depthMm: 2500 }
+    );
+    const floorWithFirst = { rooms: [...project.floor.rooms, first] };
+    const second = createNextDrawnRectangleRoom(
+      floorWithFirst,
+      project.defaultWallHeightMm,
+      { offsetXMm: 0, offsetYMm: 0, widthMm: 4000, depthMm: 2500 }
+    );
+
+    expect(first.roomId).toBe("room-2");
+    expect(second.roomId).toBe("room-3");
+  });
+
+  it("rejects non-positive dimensions", () => {
+    const project = createSampleProject();
+    expect(() =>
+      createNextDrawnRectangleRoom(project.floor, project.defaultWallHeightMm, {
+        offsetXMm: 0,
+        offsetYMm: 0,
+        widthMm: 0,
+        depthMm: 2500
+      })
+    ).toThrow(/greater than zero/);
   });
 });

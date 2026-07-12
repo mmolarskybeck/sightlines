@@ -9,15 +9,15 @@ export const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "border border-border bg-background text-foreground hover:border-input hover:bg-surface hover:text-foreground active:bg-surface-strong",
+          "border border-border bg-background text-foreground shadow-[var(--shadow-tight)] hover:border-input hover:bg-surface hover:text-foreground active:bg-surface-strong active:shadow-[var(--shadow-pressed)]",
         primary:
-          "border border-primary bg-primary text-primary-foreground shadow-[var(--shadow-tight)] hover:border-petrol-strong hover:bg-petrol-strong hover:text-primary-foreground active:border-petrol-strong active:bg-petrol-strong active:text-primary-foreground active:brightness-90",
+          "border border-primary bg-primary text-primary-foreground shadow-[var(--shadow-tight)] hover:border-petrol-strong hover:bg-petrol-strong hover:text-primary-foreground active:border-petrol-strong active:bg-petrol-strong active:text-primary-foreground active:brightness-90 active:shadow-[var(--shadow-pressed)]",
         ghost:
           "border border-transparent bg-transparent text-muted-foreground hover:bg-surface hover:text-foreground active:bg-surface-strong active:text-foreground",
         subtle:
-          "border border-transparent bg-surface text-foreground hover:bg-surface-strong active:bg-surface-strong active:brightness-95",
+          "border border-transparent bg-surface text-foreground hover:bg-surface-strong active:bg-surface-strong active:shadow-[var(--shadow-pressed)]",
         outline:
-          "border border-border bg-background text-foreground hover:border-input hover:bg-surface active:bg-surface-strong",
+          "border border-border bg-background text-foreground shadow-[var(--shadow-tight)] hover:border-input hover:bg-surface active:bg-surface-strong active:shadow-[var(--shadow-pressed)]",
         destructive:
           "border border-destructive bg-destructive text-destructive-foreground hover:text-destructive-foreground hover:brightness-95 active:brightness-90",
         rail:

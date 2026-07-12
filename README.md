@@ -168,13 +168,19 @@ Implemented or substantially underway:
 * Centerline, neighbor, floor, and grid snapping for wall objects.
 * Transaction-bounded drag commits.
 * Door, window, and blocked-zone wall objects.
+* Paired door/window connections across rooms with advisory alignment status.
+* Framing and matting previews with adjustable band widths and finishes.
+* Neighbor-aware dimension lines between placed works.
 * Placement warnings for overlaps and out-of-bounds works.
 * Floor objects in plan view with snapping and drag-to-wall conversion.
 * Multi-select, group drag, and equal wall distribution.
 * Checklist filtering and sorting.
 * Stable measurement-field conversion hints.
 * More legible plan-view placement markers.
-* Read-only derived 3D preview with artwork textures, door/window cutouts, partition slabs, and camera presets.
+* Read-only derived 3D preview with artwork textures, door/window cutouts (see-through when aligned pairs connect rooms), partition slabs, and camera presets.
+* 3D navigation: cursor-directed wheel dolly, WASD travel, double-click focus flights, and touch pan.
+* Touch drag-and-drop artwork placement for iPad/iPhone.
+* Cross-project artwork library view and a settings dialog with durable-storage request.
 * Focus-aware keyboard guards so text fields, selects, SVG workspace focus, and panel resize handles keep their own shortcuts.
 * Static About, Privacy, Security, IT, `security.txt`, sitemap, robots, manifest, and `llms.txt` trust surfaces.
 * JSON import/export for development backup.
@@ -185,71 +191,13 @@ Sightlines is prepared for Cloudflare Workers static-assets deployment with Wran
 
 ## Roadmap
 
-### MVP 1C — Professional layout behaviors
+The detailed roadmap lives in `docs/plan.md` §9 (source of truth); the current position and near-term order live in `docs/status.md`. In brief:
 
-Shipped:
-
-* Multi-select
-* Grouping and group drag
-* Equal distribution spacing
-* Checklist filtering/sorting and 2D workflow confidence fixes
-* Simple derived 3D preview
-
-### MVP 2 — Room shape and multi-room flow
-
-Shipped:
-
-* Quick rectangle room path retained.
-* Polygon room drawing in Plan view.
-* Polygon reshape mode with vertex dragging, wall splitting/deleting, and wall-slide reshaping.
-* Free-standing partition walls with double-sided faces.
-* Paired door/window connections with live alignment status in Plan and the inspector.
-* True 3D sightlines through aligned pairs; unpaired and misaligned openings are visibly capped.
-
-Next:
-
-* Multi-room placement and management polish.
-* `.sightlines` package export/import and backup workflows.
-
-### MVP 3 — Project packages and export
-
-Next substantial product-infrastructure slice:
-
-* `.sightlines` package export/import
-* Self-contained project packages with project data and relevant artwork assets
-* Import safety checks
-* Prominent “Save backup” flow
-* PNG exports for floor plans, wall elevations, and 3D views
-* PDF checklist export
-* Missing/approximate-data readiness report
-
-### MVP 4 — Tablet and workflow depth
-
-Planned after the core desktop workflow is stable:
-
-* iPad-adapted layout and touch interaction
-* Touch-sized handles and bottom-sheet panels
-* Dropbox-folder sync
-* Richer checklist sorting and custom ordering
-* Command palette
-* Context menus
-* Better inspector workflows
-
-### Later / Backlog
-
-Not part of the near-term build:
-
-* Hosted accounts
-* Supabase or other cloud persistence
-* Public snapshot links
-* Real-time collaboration
-* Subscriptions or payments
-* Admin tools
-* Registrar-level collections management
-* Full 3D editing
-* Complex CAD tools
-* Curved walls
-* Photorealistic rendering
+* **MVP 1 — Spatial editor + checklist core: shipped.** Geometry spine, artwork library/checklist, placement with snapping and collision flagging, multi-select/group/arrange, simple derived 3D preview.
+* **MVP 2 — Room shape tools + multi-room flow: shipped** (a benchmark-triggered renderer-scalability gate remains open). Polygon rooms and reshaping, partitions, paired door/window connections with honest 3D see-through/capped treatment, multi-room placement, 3D navigation.
+* **MVP 3 — Project packages, sharing, polish: next.** `.sightlines` export/import with the untrusted-file safety pipeline, prominent backup flow, PNG/PDF exports, readiness reporting.
+* **MVP 4/5 — Tablet depth, then phone tier.** iPad-adapted layout, Dropbox-folder sync, richer checklist workflows, command palette; phone viewing later.
+* **Backlog (real demand only):** hosted accounts/cloud, real-time collaboration, registrar-level collections management, full 3D editing, curved walls.
 
 ## Tech Stack
 
@@ -295,10 +243,11 @@ Recommended docs structure:
 
 * `README.md` — concise project overview, current status, setup, roadmap.
 * `PRODUCT.md` — product purpose, users, brand personality, design principles.
+* `DESIGN.md` — visual language, tokens, component philosophy.
 * `docs/plan.md` — full architecture and roadmap source of truth.
-* `docs/progress.md` — tactical implementation checklist.
-* `docs/icon-migration.md` — current icon-family migration notes.
-* `docs/design-system.md` — visual language, tokens, component philosophy.
+* `docs/status.md` — the single living status doc: current state, recent shipping, near-term order.
+* `docs/quick-todos.md` — small open scraps that don't fit the roadmap.
+* `docs/archive/` — frozen historical docs (build log through 2026-07-10, completed specs).
 
 ## Product Promise
 
