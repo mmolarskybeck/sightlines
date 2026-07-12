@@ -221,6 +221,7 @@ export function App() {
     moveFreestandingWall,
     moveFreestandingWallEndpoint,
     rotateFreestandingWall,
+    centerFreestandingWall,
     setFreestandingWallThickness,
     setFreestandingWallLength,
     setFreestandingWallHeight,
@@ -1807,6 +1808,7 @@ export function App() {
               onCommitHeight={(heightMm) =>
                 setFreestandingWallHeight(selectedFreestandingWall.id, heightMm)
               }
+              onCenter={(axis) => centerFreestandingWall(selectedFreestandingWall.id, axis)}
               onViewFace={(face) =>
                 viewFreestandingFace(faceWallId(selectedFreestandingWall.id, face))
               }

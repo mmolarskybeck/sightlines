@@ -15,6 +15,7 @@ import {
   type ResizeAnchor
 } from "../domain/geometry/editRoom";
 import {
+  centerFreestandingWallBetweenWalls,
   createFreestandingWall,
   faceWallIdsOf,
   parseFaceWallId,
@@ -250,6 +251,7 @@ export type AppState = ArrangeSliceState &
     nextFloorMm: Point
   ) => Promise<void>;
   rotateFreestandingWall: (wallId: string, angleDeg: number) => Promise<void>;
+  centerFreestandingWall: (wallId: string, axis: "normal" | "axis") => Promise<void>;
   setFreestandingWallThickness: (wallId: string, thicknessMm: number) => Promise<void>;
   setFreestandingWallLength: (
     wallId: string,
@@ -1453,6 +1455,14 @@ export function createAppStore(deps: AppStoreDeps) {
           label: "Rotate partition",
           errorFallback: "Could not rotate that partition",
           compute: (project) => rotateFreestandingWallEdit(project, wallId, angleDeg)
+        });
+      },
+
+      async centerFreestandingWall(wallId, axis) {
+        await runPartitionEdit({
+          label: "Center partition",
+          errorFallback: "Could not center that partition",
+          compute: (project) => centerFreestandingWallBetweenWalls(project, wallId, axis)
         });
       },
 

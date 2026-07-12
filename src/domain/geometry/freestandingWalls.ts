@@ -11,6 +11,7 @@ import type {
   RoomVertex
 } from "../project";
 import type { GeometryEditResult } from "./editRoom";
+import { getPartitionClearances } from "./partitionSpacing";
 import { isPointInPolygon, type Point } from "./polygon";
 import { unitLeftNormalOrZero } from "./vector";
 import type { WallWithGeometry } from "./walls";
@@ -303,6 +304,41 @@ export function moveFreestandingEndpoint(
       ? { ...wall, startXMm: localX, startYMm: localY }
       : { ...wall, endXMm: localX, endYMm: localY };
   });
+}
+
+// Center a partition between the perimeter walls it sits between (spec §6.4).
+// "normal" centers across the centerline's normal — equal gap to the walls the
+// partition faces (the headline action); "axis" centers along the centerline
+// direction — equal gap to the walls at the ends of its span. Rays are cast
+// both ways from the centerline midpoint; if either misses (nothing on that
+// side to measure against), the edit fails through the standard error path.
+// Translating the centerline by half the difference of the two clearances
+// equalizes them: after a shift of (plus − minus)/2 along +dir, both sides
+// read (plus + minus)/2.
+export function centerFreestandingWallBetweenWalls(
+  project: Project,
+  wallId: string,
+  axis: "normal" | "axis"
+): GeometryEditResult {
+  const placement = findPlacementByPartitionId(project, wallId);
+  const partition = placement.room.freestandingWalls.find((wall) => wall.id === wallId);
+  if (!partition) throw new Error(`Partition not found: ${wallId}`);
+
+  const { dirUnit, plus, minus } = getPartitionClearances(placement.room, partition, axis);
+  if (!plus || !minus) {
+    throw new Error("Nothing on both sides to center between.");
+  }
+
+  const shift = (plus.distanceMm - minus.distanceMm) / 2;
+  const dx = dirUnit.xMm * shift;
+  const dy = dirUnit.yMm * shift;
+  return updatePartition(project, wallId, (wall) => ({
+    ...wall,
+    startXMm: wall.startXMm + dx,
+    startYMm: wall.startYMm + dy,
+    endXMm: wall.endXMm + dx,
+    endYMm: wall.endYMm + dy
+  }));
 }
 
 // Rotate to an absolute angle (degrees) about the centerline midpoint,

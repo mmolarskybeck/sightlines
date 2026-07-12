@@ -21,6 +21,7 @@ export function FreestandingWallInspector({
   onCommitAngle,
   onCommitThickness,
   onCommitHeight,
+  onCenter,
   onViewFace,
   onDelete
 }: {
@@ -30,6 +31,7 @@ export function FreestandingWallInspector({
   onCommitAngle: (angleDeg: number) => Promise<void> | void;
   onCommitThickness: (thicknessMm: number) => Promise<void> | void;
   onCommitHeight: (heightMm: number) => Promise<void> | void;
+  onCenter: (axis: "normal" | "axis") => Promise<void> | void;
   onViewFace: (face: "a" | "b") => void;
   onDelete: () => void;
 }) {
@@ -51,6 +53,25 @@ export function FreestandingWallInspector({
         <p className="field-hint">
           Hang artwork on either face — each side gets its own elevation view.
         </p>
+      </div>
+
+      <div className="inspector-placement">
+        <div className="wall-switcher" role="group" aria-label="Center this partition">
+          <Button
+            className="inspector-action"
+            variant="inspector"
+            onClick={() => void onCenter("normal")}
+          >
+            Center between walls
+          </Button>
+          <Button
+            className="inspector-action"
+            variant="inspector"
+            onClick={() => void onCenter("axis")}
+          >
+            Center along span
+          </Button>
+        </div>
       </div>
 
       <div className="artwork-dimensions">
