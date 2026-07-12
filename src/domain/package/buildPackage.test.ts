@@ -144,7 +144,7 @@ describe("buildSightlinesPackage", () => {
     // Drop asset-1's display blob only.
     blobs.delete(assets.get("asset-1")!.displayKey);
 
-    const { manifest, files } = await buildSightlinesPackage({
+    const { manifest, files, warnings } = await buildSightlinesPackage({
       project,
       libraryArtworks: library,
       mode: "display",
@@ -156,6 +156,7 @@ describe("buildSightlinesPackage", () => {
     expect(entry.tiers.map((t) => t.tier)).toEqual(["thumbnail"]);
     // asset-2 still ships both; asset-1 ships one → 3 blob files.
     expect(files.filter((f) => f.path.startsWith("assets/"))).toHaveLength(3);
+    expect(warnings.join(" ")).toMatch(/display image is missing/);
   });
 
   it("drops an asset entry whose record is missing but keeps the artwork", async () => {
@@ -167,7 +168,7 @@ describe("buildSightlinesPackage", () => {
       return asset;
     };
 
-    const { manifest } = await buildSightlinesPackage({
+    const { manifest, warnings } = await buildSightlinesPackage({
       project,
       libraryArtworks: library,
       mode: "display",
@@ -180,6 +181,32 @@ describe("buildSightlinesPackage", () => {
     // ...but no asset inventory entry for the missing record.
     expect(manifest.assets.some((a) => a.assetId === "asset-1")).toBe(false);
     expect(manifest.assets.some((a) => a.assetId === "asset-2")).toBe(true);
+    expect(warnings.join(" ")).toMatch(/asset-1.*missing/);
+  });
+
+  it("fails when the project references an artwork record missing from the library", async () => {
+    const { project, library, getAsset, getBlob } = makeFixture();
+    await expect(
+      buildSightlinesPackage({
+        project,
+        libraryArtworks: library.filter((artwork) => artwork.id !== "art-placed"),
+        mode: "display",
+        getAsset,
+        getBlob
+      })
+    ).rejects.toThrow(/art-placed/);
+  });
+
+  it("uses the computed original tier hash instead of a stale asset anchor", async () => {
+    const { project, library, assets, blobs, getAsset, getBlob } = makeFixture();
+    assets.get("asset-1")!.sha256 = "stale-anchor";
+    const { manifest } = await buildSightlinesPackage({
+      project, libraryArtworks: library, mode: "originals", getAsset, getBlob
+    });
+    const entry = manifest.assets.find((asset) => asset.assetId === "asset-1")!;
+    expect(entry.sha256).toBe(entry.tiers.find((tier) => tier.tier === "original")!.sha256);
+    expect(entry.sha256).not.toBe("stale-anchor");
+    expect(blobs.has(assets.get("asset-1")!.originalKey)).toBe(true);
   });
 
   it("content-addresses blobs so identical bytes dedupe to one file", async () => {

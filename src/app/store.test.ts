@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 import {
   CURRENT_ARTWORK_SCHEMA_VERSION,
   CURRENT_SCHEMA_VERSION,
@@ -21,6 +22,8 @@ import { createRectangularRoomPlacement } from "../domain/geometry/createRoom";
 import { evaluateOpeningPair } from "../domain/geometry/openingConnections";
 import { createSampleProject } from "../domain/sample/sampleProject";
 import { MAX_IMPORT_JSON_LENGTH } from "../domain/schema/projectSchema";
+import { createSightlinesPackage } from "../domain/package/buildPackage";
+import { makeFixture } from "../domain/package/packageTestFixtures";
 import { feetToMm } from "../domain/units/length";
 import {
   FakeImageProcessor,
@@ -1029,6 +1032,31 @@ describe("app store", () => {
     expect(state.redoStack).toHaveLength(0);
     expect(state.error).toBeNull();
     expect(repository.projects.has("imported")).toBe(true);
+  });
+
+  it("does not open the package or write library data when its project save fails", async () => {
+    const successToast = vi.spyOn(toast, "success");
+    const before = store.getState().project;
+    const fixture = makeFixture();
+    const { zip } = await createSightlinesPackage({
+      project: fixture.project,
+      libraryArtworks: fixture.library,
+      mode: "metadata-only",
+      getAsset: fixture.getAsset,
+      getBlob: fixture.getBlob
+    });
+    repository.save = async () => {
+      throw new Error("project save failed");
+    };
+
+    await store.getState().importSightlinesPackage(zip.buffer as ArrayBuffer);
+
+    expect(store.getState().project).toBe(before);
+    expect(store.getState().error).toMatch(/Import failed: project save failed/);
+    expect(artworkLibraryRepository.artworks.size).toBe(0);
+    expect(assetRepository.assets.size).toBe(0);
+    expect(successToast).not.toHaveBeenCalled();
+    successToast.mockRestore();
   });
 
   it("surfaces a load failure instead of silently swapping in the sample", async () => {

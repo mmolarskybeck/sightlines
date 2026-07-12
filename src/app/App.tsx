@@ -951,7 +951,15 @@ export function App() {
       const result = await exportProjectPackage(mode);
       if (result) {
         triggerDownload(result.zip, result.filename);
-        toast.success(`Exported ${result.filename}`);
+        if (result.warnings.length > 0) {
+          toast.warning(
+            `Exported ${result.filename} with ${result.warnings.length} warning${
+              result.warnings.length === 1 ? "" : "s"
+            }: ${result.warnings.join(" ")}`
+          );
+        } else {
+          toast.success(`Exported ${result.filename}`);
+        }
       } else {
         // exportProjectPackage catches its own failures and records them on
         // `error` (see store.ts) rather than throwing — read that message
@@ -977,7 +985,15 @@ export function App() {
       const result = await exportProjectPackageById(id, "display");
       if (result) {
         triggerDownload(result.zip, result.filename);
-        toast.success(`Exported ${result.filename}`);
+        if (result.warnings.length > 0) {
+          toast.warning(
+            `Exported ${result.filename} with ${result.warnings.length} warning${
+              result.warnings.length === 1 ? "" : "s"
+            }: ${result.warnings.join(" ")}`
+          );
+        } else {
+          toast.success(`Exported ${result.filename}`);
+        }
       } else {
         toast.error(useAppStore.getState().error ?? "Export failed: the package could not be built.");
       }

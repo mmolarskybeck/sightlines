@@ -84,6 +84,13 @@ describe("validatePackageInventory (caps run on declared sizes, pre-inflation)",
       ])
     ).not.toThrow();
   });
+
+  it("rejects duplicate physical paths", () => {
+    expect(() => validatePackageInventory([
+      { name: "manifest.json", originalSize: 4 },
+      { name: "manifest.json", originalSize: 5 }
+    ])).toThrow(/duplicate file path/);
+  });
 });
 
 describe("extractPackageEntries", () => {

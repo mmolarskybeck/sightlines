@@ -31,6 +31,7 @@ export type PackageZipFile = {
 export type BuiltPackage = {
   manifest: SightlinesPackage;
   files: PackageZipFile[];
+  warnings: string[];
 };
 
 export type BuildPackageInput = {
@@ -141,7 +142,16 @@ export async function buildSightlinesPackage(input: BuildPackageInput): Promise<
   const exportedAt = input.exportedAt ?? new Date().toISOString();
 
   const artworks = selectReferencedArtworks(project, libraryArtworks);
+  const missingArtworkIds = [...selectReferencedArtworkIds(project)].filter(
+    (id) => !artworks.some((artwork) => artwork.id === id)
+  );
+  if (missingArtworkIds.length > 0) {
+    throw new Error(
+      `the project references artwork records that are missing from the library (${missingArtworkIds.join(", ")}).`
+    );
+  }
   const tiers = tiersForMode(mode);
+  const warnings: string[] = [];
 
   // Unique asset ids referenced by the exported artworks.
   const assetIds: string[] = [];
@@ -164,6 +174,7 @@ export async function buildSightlinesPackage(input: BuildPackageInput): Promise<
     } catch {
       // Asset record gone locally — the artwork still ships; import degrades to
       // a missing-image warning (docs/plan.md §6).
+      warnings.push(`${assetId}: its asset record is missing; exported without an image.`);
       continue;
     }
 
@@ -177,6 +188,7 @@ export async function buildSightlinesPackage(input: BuildPackageInput): Promise<
         bytes = await toBytes(blob);
       } catch {
         // Missing tier blob — skip just this tier.
+        warnings.push(`${asset.originalFilename ?? asset.id}: its ${tier} image is missing.`);
         continue;
       }
       const sha256 = await hashBytes(bytes);
@@ -194,6 +206,8 @@ export async function buildSightlinesPackage(input: BuildPackageInput): Promise<
       });
     }
 
+    const originalTierHash = tierEntries.find((entry) => entry.tier === "original")?.sha256;
+    const originalContentHash = originalTierHash ?? asset.sha256;
     assetEntries.push({
       assetId: asset.id,
       mimeType: asset.mimeType,
@@ -202,7 +216,7 @@ export async function buildSightlinesPackage(input: BuildPackageInput): Promise<
       ...(asset.heightPx !== undefined ? { heightPx: asset.heightPx } : {}),
       ...(asset.byteSize !== undefined ? { byteSize: asset.byteSize } : {}),
       // Original content hash — the re-link anchor that survives metadata-only.
-      ...(asset.sha256 ? { sha256: asset.sha256 } : {}),
+      ...(originalContentHash ? { sha256: originalContentHash } : {}),
       tiers: tierEntries
     });
   }
@@ -226,12 +240,13 @@ export async function buildSightlinesPackage(input: BuildPackageInput): Promise<
     ...filesByHash.values()
   ];
 
-  return { manifest, files };
+  return { manifest, files, warnings };
 }
 
 export type CreatedPackage = {
   manifest: SightlinesPackage;
   zip: Uint8Array;
+  warnings: string[];
 };
 
 // Facade: build the manifest + file list, then zip it. The UI action calls this
@@ -241,7 +256,7 @@ export async function createSightlinesPackage(
 ): Promise<CreatedPackage> {
   const built = await buildSightlinesPackage(input);
   const zip = await writeSightlinesZip(built.files);
-  return { manifest: built.manifest, zip };
+  return { manifest: built.manifest, zip, warnings: built.warnings };
 }
 
 // `<project-name>.sightlines`, ascii-slugged like the existing JSON export.

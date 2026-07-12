@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createSampleProject } from "../sample/sampleProject";
+import { makeArtwork } from "../package/packageTestFixtures";
 import {
   PACKAGE_SCHEMA_VERSION,
   parseSightlinesPackage,
@@ -74,6 +75,29 @@ describe("sightlinesPackageSchema", () => {
       ]
     });
     expect(() => parseSightlinesPackage(manifest)).toThrow();
+  });
+
+  it("rejects duplicate asset and artwork ids", () => {
+    const asset = { assetId: "asset-1", mimeType: "image/jpeg", tiers: [] };
+    expect(() => parseSightlinesPackage(makeManifest({ assets: [asset, asset] }))).toThrow();
+    const artwork = makeArtwork("art-1");
+    expect(() => parseSightlinesPackage(makeManifest({ artworks: [artwork, artwork] }))).toThrow();
+  });
+
+  it("rejects duplicate tiers and conflicting checksums for one path", () => {
+    const tier = { tier: "display" as const, path: "assets/x.webp", sha256: "a", byteSize: 1, mimeType: "image/webp" };
+    expect(() => parseSightlinesPackage(makeManifest({ assets: [{ assetId: "a", mimeType: "image/jpeg", tiers: [tier, tier] }] }))).toThrow();
+    expect(() => parseSightlinesPackage(makeManifest({ assets: [
+      { assetId: "a", mimeType: "image/jpeg", tiers: [tier] },
+      { assetId: "b", mimeType: "image/jpeg", tiers: [{ ...tier, tier: "thumbnail", sha256: "b" }] }
+    ] }))).toThrow();
+  });
+
+  it("rejects tiers forbidden by the declared mode while allowing degraded subsets", () => {
+    const original = { tier: "original" as const, path: "assets/x.webp", sha256: "a", byteSize: 1, mimeType: "image/webp" };
+    expect(() => parseSightlinesPackage(makeManifest({ mode: "metadata-only", assets: [{ assetId: "a", mimeType: "image/jpeg", tiers: [original] }] }))).toThrow();
+    expect(() => parseSightlinesPackage(makeManifest({ mode: "display", assets: [{ assetId: "a", mimeType: "image/jpeg", tiers: [original] }] }))).toThrow();
+    expect(() => parseSightlinesPackage(makeManifest({ mode: "originals", assets: [{ assetId: "a", mimeType: "image/jpeg", tiers: [] }] }))).not.toThrow();
   });
 });
 
