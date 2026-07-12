@@ -2523,6 +2523,16 @@ body.panels-resizing * {
   box-shadow: var(--shadow-pressed);
 }
 
+/* Compact hover hint for toolbar icon controls — a quieter cut of the
+   shared TooltipContent shell (which defaults to placement-gloss sizing). */
+.toolbar-tooltip {
+  padding: 5px 9px;
+  border-radius: var(--radius-control);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-ui);
+}
+
 .insert-tool-segment:disabled {
   cursor: not-allowed;
 }
