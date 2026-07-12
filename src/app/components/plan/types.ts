@@ -209,4 +209,10 @@ export type PartitionDragState = {
   endFloorMm: Vector2;
   previewStartFloorMm: Vector2;
   previewEndFloorMm: Vector2;
+  // Live snap guides for the current move (equidistant/sibling/grid); the
+  // overlay layer renders them through the shared activeGuides precedence.
+  activeGuides: Guide[];
+  // Per-axis winning target ids from the previous resolve, feeding resolveSnap's
+  // break-free hysteresis so a held snap doesn't chatter.
+  previousSnapTargetIds?: SnapTargetIds;
 };

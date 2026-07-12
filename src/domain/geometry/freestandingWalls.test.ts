@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createRectangularRoomPlacement } from "./createRoom";
 import {
+  centerFreestandingWallBetweenWalls,
   createFreestandingWall,
   faceWallId,
   faceWallIdsOf,
@@ -311,5 +312,53 @@ describe("operations", () => {
     const [faceA, faceB] = getFreestandingFaces(room);
     expect(faceA.start.yMm).toBeCloseTo(1650); // +150
     expect(faceB.start.yMm).toBeCloseTo(1350); // -150
+  });
+});
+
+describe("centerFreestandingWallBetweenWalls", () => {
+  function findPartition(project: Project, wallId: string): FreestandingWall {
+    const wall = project.floor.rooms
+      .flatMap((placement) => placement.room.freestandingWalls)
+      .find((candidate) => candidate.id === wallId);
+    if (!wall) throw new Error("partition missing");
+    return wall;
+  }
+
+  it("centers across the normal (equal gap to the walls it faces)", () => {
+    // 4000x3000 room; partition horizontal at y=1000 → 2000 below, 1000 above.
+    const { project } = roomWithPartition({ startYMm: 1000, endYMm: 1000 });
+    const result = centerFreestandingWallBetweenWalls(
+      project,
+      "room-1-partition-1",
+      "normal"
+    );
+    const moved = findPartition(result.project, "room-1-partition-1");
+    expect(moved.startYMm).toBeCloseTo(1500, 6); // room center of a 3000-deep room
+    expect(moved.endYMm).toBeCloseTo(1500, 6);
+    expect(moved.startXMm).toBeCloseTo(1000, 6); // x untouched by a normal center
+    expect(result.changedWallIds).toEqual(["room-1-partition-1#a", "room-1-partition-1#b"]);
+  });
+
+  it("centers along the span (equal gap to the end walls)", () => {
+    // 4000-wide room; centerline x 500..1500 → 3000 past the end, 1000 before it.
+    const { project } = roomWithPartition({ startXMm: 500, endXMm: 1500 });
+    const result = centerFreestandingWallBetweenWalls(project, "room-1-partition-1", "axis");
+    const moved = findPartition(result.project, "room-1-partition-1");
+    expect(moved.startXMm).toBeCloseTo(1500, 6);
+    expect(moved.endXMm).toBeCloseTo(2500, 6);
+    expect(getFreestandingLengthMm(moved)).toBeCloseTo(1000, 6); // length preserved
+  });
+
+  it("throws when a ray misses (nothing on both sides)", () => {
+    // Midpoint outside the room polygon → both normal rays escape.
+    const { project } = roomWithPartition({
+      startXMm: 4500,
+      startYMm: 1500,
+      endXMm: 5500,
+      endYMm: 1500
+    });
+    expect(() =>
+      centerFreestandingWallBetweenWalls(project, "room-1-partition-1", "normal")
+    ).toThrow("Nothing on both sides to center between.");
   });
 });

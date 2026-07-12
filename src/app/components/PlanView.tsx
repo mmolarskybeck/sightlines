@@ -60,6 +60,11 @@ import {
 } from "../../domain/geometry/drawSnapping";
 import { canMoveRoomVertex, moveRoomWall } from "../../domain/geometry/reshapeRoom";
 import { getGridSnapTargets } from "../../domain/snapping/gridSnapTargets";
+import { getPartitionMoveSnapTargets } from "../../domain/snapping/partitionSnapTargets";
+import {
+  getPartitionClearances,
+  type PartitionClearances
+} from "../../domain/geometry/partitionSpacing";
 import {
   floatPolicyForKind,
   resolvePlanPlacement,
@@ -108,6 +113,7 @@ import { PlanStructureLayer } from "./plan/PlanStructureLayer";
 import { PlacedObjectsLayer } from "./plan/PlacedObjectsLayer";
 import { PlanHandlesLayer } from "./plan/PlanHandlesLayer";
 import { PlanOverlaysLayer } from "./plan/PlanOverlaysLayer";
+import { PartitionDimensionLines } from "./plan/PartitionDimensionLines";
 import type {
   DragState,
   DrawState,
@@ -883,19 +889,40 @@ export function PlanView({
       };
 
       if (current.mode === "move") {
-        const rawStart = {
-          xMm: current.startFloorMm.xMm + deltaMm.xMm,
-          yMm: current.startFloorMm.yMm + deltaMm.yMm
+        // Snap the MIDPOINT, not an endpoint: wall-aware targets (equidistant-
+        // between-walls + sibling-partition alignment) rank above grid and stay
+        // active even with grid snap OFF; snapping to an equidistant target
+        // lands the partition exactly where "center between walls" would.
+        const origMid = {
+          xMm: (current.startFloorMm.xMm + current.endFloorMm.xMm) / 2,
+          yMm: (current.startFloorMm.yMm + current.endFloorMm.yMm) / 2
         };
-        let snappedStart = rawStart;
-        if (snapToGrid) {
-          snappedStart = resolveSnap(rawStart, gridSnapTargets, {
-            thresholdMm: snapThresholdMm
-          }).point;
-        }
+        const proposedMid = { xMm: origMid.xMm + deltaMm.xMm, yMm: origMid.yMm + deltaMm.yMm };
+
+        const placement = project.floor.rooms.find((candidate) =>
+          candidate.room.freestandingWalls.some((wall) => wall.id === current.wallId)
+        );
+        const partition = placement?.room.freestandingWalls.find(
+          (wall) => wall.id === current.wallId
+        );
+        const partitionTargets: SnapTarget[] =
+          placement && partition
+            ? getPartitionMoveSnapTargets({
+                room: placement.room,
+                placementOffsetMm: { xMm: placement.offsetXMm, yMm: placement.offsetYMm },
+                partition,
+                proposedMidFloorMm: proposedMid
+              })
+            : [];
+
+        const snap = resolveSnap(
+          proposedMid,
+          [...partitionTargets, ...(snapToGrid ? gridSnapTargets : [])],
+          { thresholdMm: snapThresholdMm, previousSnapTargetIds: current.previousSnapTargetIds }
+        );
         const appliedDelta = {
-          xMm: snappedStart.xMm - current.startFloorMm.xMm,
-          yMm: snappedStart.yMm - current.startFloorMm.yMm
+          xMm: snap.point.xMm - origMid.xMm,
+          yMm: snap.point.yMm - origMid.yMm
         };
         return {
           ...current,
@@ -906,21 +933,34 @@ export function PlanView({
           previewEndFloorMm: {
             xMm: current.endFloorMm.xMm + appliedDelta.xMm,
             yMm: current.endFloorMm.yMm + appliedDelta.yMm
-          }
+          },
+          activeGuides: snap.activeGuides,
+          previousSnapTargetIds: snap.snapTargetIds
         };
       }
 
-      // Endpoint drag: the anchored end stays; the dragged end snaps (grid +
-      // axis-lock to the anchor, Shift forces H/V — same as the draw tool).
+      // Endpoint drag. Precedence: Shift H/V lock > wall-kiss > grid. Wall-kiss
+      // reuses snapDrawPointToRooms so the endpoint latches onto real room
+      // perimeter, excluding the dragged partition's OWN faces (it can't cling
+      // to the slab it belongs to). Shift then locks the run to the anchor.
       const anchor = current.mode === "start" ? current.endFloorMm : current.startFloorMm;
-      const moved = snapDrawPoint(
-        { xMm: pointerMm.xMm, yMm: pointerMm.yMm },
-        anchor,
-        event.shiftKey
-      );
+      const kissWalls = floorWallsForTool.filter((wall) => {
+        const parsed = parseFaceWallId(wall.id);
+        return parsed === null || parsed.freestandingWallId !== current.wallId;
+      });
+      const kiss = snapDrawPointToRooms(pointerMm, kissWalls, snapThresholdMm);
+      let moved: Vector2 = kiss
+        ? { xMm: kiss.pointMm.xMm, yMm: kiss.pointMm.yMm }
+        : snapDrawPoint({ xMm: pointerMm.xMm, yMm: pointerMm.yMm }, anchor, false);
+      if (event.shiftKey) {
+        const dx = Math.abs(pointerMm.xMm - anchor.xMm);
+        const dy = Math.abs(pointerMm.yMm - anchor.yMm);
+        moved =
+          dx >= dy ? { xMm: moved.xMm, yMm: anchor.yMm } : { xMm: anchor.xMm, yMm: moved.yMm };
+      }
       return current.mode === "start"
-        ? { ...current, previewStartFloorMm: moved }
-        : { ...current, previewEndFloorMm: moved };
+        ? { ...current, previewStartFloorMm: moved, activeGuides: [], previousSnapTargetIds: undefined }
+        : { ...current, previewEndFloorMm: moved, activeGuides: [], previousSnapTargetIds: undefined };
     },
     onRelease: (current) => {
       if (current.mode === "move") {
@@ -1122,6 +1162,50 @@ export function PlanView({
       }),
     [displayedProject, artworksById, wallObjectMinDepthMm]
   );
+
+  // Live "normal"-axis clearance dimension lines for the selected partition,
+  // or the actively dragged one (whichever is live). During a drag we build a
+  // temporary partition from the preview endpoints (floor → room-local by
+  // subtracting the placement offset) so the numbers track the pointer; the
+  // room perimeter itself is committed geometry, so we cast against `project`.
+  // The result is lifted back to floor space for the render-only component.
+  const partitionClearancesFloor = useMemo<PartitionClearances | null>(() => {
+    const activeWallId = partitionDrag?.wallId ?? selectedFreestandingWallId;
+    if (!activeWallId) return null;
+
+    const placement = project.floor.rooms.find((candidate) =>
+      candidate.room.freestandingWalls.some((wall) => wall.id === activeWallId)
+    );
+    const committed = placement?.room.freestandingWalls.find((wall) => wall.id === activeWallId);
+    if (!placement || !committed) return null;
+
+    const offset = { xMm: placement.offsetXMm, yMm: placement.offsetYMm };
+    const partition =
+      partitionDrag && partitionDrag.wallId === activeWallId
+        ? {
+            ...committed,
+            startXMm: partitionDrag.previewStartFloorMm.xMm - offset.xMm,
+            startYMm: partitionDrag.previewStartFloorMm.yMm - offset.yMm,
+            endXMm: partitionDrag.previewEndFloorMm.xMm - offset.xMm,
+            endYMm: partitionDrag.previewEndFloorMm.yMm - offset.yMm
+          }
+        : committed;
+
+    const local = getPartitionClearances(placement.room, partition, "normal");
+    const liftHit = (hit: PartitionClearances["plus"]) =>
+      hit
+        ? {
+            ...hit,
+            pointMm: { xMm: hit.pointMm.xMm + offset.xMm, yMm: hit.pointMm.yMm + offset.yMm }
+          }
+        : null;
+    return {
+      originMm: { xMm: local.originMm.xMm + offset.xMm, yMm: local.originMm.yMm + offset.yMm },
+      dirUnit: local.dirUnit,
+      plus: liftHit(local.plus),
+      minus: liftHit(local.minus)
+    };
+  }, [partitionDrag, selectedFreestandingWallId, project.floor.rooms]);
 
   function disarmTool() {
     onToolChange(null);
@@ -1748,7 +1832,9 @@ export function PlanView({
       startFloorMm: partition.startMm,
       endFloorMm: partition.endMm,
       previewStartFloorMm: partition.startMm,
-      previewEndFloorMm: partition.endMm
+      previewEndFloorMm: partition.endMm,
+      activeGuides: [],
+      previousSnapTargetIds: undefined
     });
   }
 
@@ -2271,6 +2357,15 @@ export function PlanView({
           beginRoomDrag={beginRoomDrag}
           beginPartitionDrag={beginPartitionDrag}
         />
+        {/* Live partition clearance dimension lines — shown while a partition
+            is selected or being dragged; render-only, muted drafting ink. */}
+        {partitionClearancesFloor ? (
+          <PartitionDimensionLines
+            clearances={partitionClearancesFloor}
+            handleSizeMm={handleSizeMm}
+            unit={wallUnit}
+          />
+        ) : null}
         {/* Placed objects: opening-connection glyphs, wall-anchored object
             rects, and floor-placed object rects. Reads the live objectDrag
             preview + selection ids; tooltipsDisabled is derived here from the
@@ -2349,6 +2444,7 @@ export function PlanView({
             dropGhost?.activeGuides ??
             drag?.activeGuides ??
             roomDrag?.activeGuides ??
+            partitionDrag?.activeGuides ??
             toolGhost?.activeGuides ??
             []
           }
