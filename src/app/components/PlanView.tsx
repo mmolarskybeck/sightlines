@@ -15,7 +15,6 @@ import {
   type Vector2
 } from "../../domain/geometry/dragResize";
 import { unitLeftNormal, unitLeftNormalOrZero } from "../../domain/geometry/vector";
-import { evaluateOpeningPair } from "../../domain/geometry/openingConnections";
 import type { ResizeAnchor } from "../../domain/geometry/editRoom";
 import { applyPlanPreview, type PlanPreview } from "../../domain/geometry/planPreview";
 import {
@@ -36,6 +35,11 @@ import {
   WALL_OBJECT_PLAN_DEPTH_MM,
   type PlanRect
 } from "../../domain/geometry/planObjects";
+import {
+  buildPlanScene,
+  getRenderedWallObjectPlanRect,
+  svgPolygonPoints
+} from "../../domain/scene2d/planScene";
 import { getDefaultOpeningSizeMm, type OpeningKind } from "../../domain/placement/createOpening";
 import {
   effectiveFloorDepthMm,
@@ -52,11 +56,9 @@ import {
   type Artwork,
   type Dimensions,
   type Project,
-  type RoomPlacement,
   type WallObject
 } from "../../domain/project";
 import {
-  getFloorPartitions,
   parseFaceWallId,
   roomIdContainingPoint,
   type FloorPartition
@@ -68,7 +70,6 @@ import {
   type DrawRoomSnap
 } from "../../domain/geometry/drawSnapping";
 import { canMoveRoomVertex, moveRoomWall } from "../../domain/geometry/reshapeRoom";
-import { getArtworkOuterDimensionsMm } from "../../domain/framing";
 import { formatLength } from "../../domain/units/length";
 import { getGridSnapTargets } from "../../domain/snapping/gridSnapTargets";
 import {
@@ -356,15 +357,6 @@ type PartitionDragState = {
   previewStartFloorMm: Vector2;
   previewEndFloorMm: Vector2;
 };
-
-// World-space (offset-applied) vertex loop for a room's polygon — shared by
-// the floor fill, the floor hit target, and the selected-room outline/wash,
-// so all four always trace the exact same boundary.
-function roomPolygonPoints(placement: RoomPlacement): string {
-  return placement.room.vertices
-    .map((vertex) => `${vertex.xMm + placement.offsetXMm},${vertex.yMm + placement.offsetYMm}`)
-    .join(" ");
-}
 
 export function PlanView({
   activeTool,
@@ -1336,6 +1328,23 @@ export function PlanView({
   const wallObjectMinDepthMm =
     pixelsPerMm > 0 ? MIN_WALL_OBJECT_DEPTH_PX / pixelsPerMm : 0;
   const objectHitMinMm = pixelsPerMm > 0 ? MIN_OBJECT_HIT_PX / pixelsPerMm : 0;
+
+  // The static plan drawing (room polygons/walls, partition slabs, opening-
+  // connection glyphs, placed object rects) — ONE derivation, shared with the
+  // PNG/PDF export builders, so an export can never disagree with the canvas.
+  // Built from displayedProject so every live drag preview that flows through
+  // the project override (wall resize, room move, reshape, partition edits)
+  // renders for free; the object-drag preview rects layer on top at render
+  // time via the same getRenderedWallObjectPlanRect the builder uses.
+  // Everything gestural (handles, ghosts, guides, marquee) stays inline below.
+  const planScene = useMemo(
+    () =>
+      buildPlanScene(displayedProject, {
+        artworksById,
+        minWallObjectDepthMm: wallObjectMinDepthMm
+      }),
+    [displayedProject, artworksById, wallObjectMinDepthMm]
+  );
 
   function disarmTool() {
     onToolChange(null);
@@ -2441,11 +2450,11 @@ export function PlanView({
         <title>{project.title} plan</title>
         {/* Room interiors render below the grid (the grid must stay visible
             on the room's "paper"), walls and handles above it. */}
-        {displayedProject.floor.rooms.map((placement) => (
+        {planScene.rooms.map((room) => (
           <polygon
             className="room-fill"
-            key={placement.roomId}
-            points={roomPolygonPoints(placement)}
+            key={room.roomId}
+            points={svgPolygonPoints(room.polygonMm)}
           />
         ))}
         {gridVisible ? (
@@ -2459,36 +2468,28 @@ export function PlanView({
             y={viewBoxBounds.y}
           />
         ) : null}
-        {displayedProject.floor.rooms.map((placement) => (
-          <g key={placement.roomId}>
-            {placement.room.walls.map((wall) => {
-              const start = placement.room.vertices.find(
-                (vertex) => vertex.id === wall.startVertexId
-              );
-              const end = placement.room.vertices.find(
-                (vertex) => vertex.id === wall.endVertexId
-              );
-              if (!start || !end) return null;
-
-              const x1 = start.xMm + placement.offsetXMm;
-              const y1 = start.yMm + placement.offsetYMm;
-              const x2 = end.xMm + placement.offsetXMm;
-              const y2 = end.yMm + placement.offsetYMm;
+        {planScene.rooms.map((room) => (
+          <g key={room.roomId}>
+            {room.walls.map((wall) => {
+              const x1 = wall.startMm.xMm;
+              const y1 = wall.startMm.yMm;
+              const x2 = wall.endMm.xMm;
+              const y2 = wall.endMm.yMm;
 
               // Teach the wall→chip link for a selected non-rectangle: hovering
               // this edge lights the wall and its WallSlideHandles chip. Only
               // eligible when the room is selected, not armed for edit-shape,
               // and non-rectangular (rectangles use resize chips, not slides).
               const slideHoverEligible =
-                placement.roomId === selectedRoomId &&
-                reshapeRoomId !== placement.roomId &&
-                !isRectangleRoom(placement.room);
-              const isHovered = slideHoverEligible && hoveredWallId === wall.id;
+                room.roomId === selectedRoomId &&
+                reshapeRoomId !== room.roomId &&
+                !isRectangleRoom(room.placement.room);
+              const isHovered = slideHoverEligible && hoveredWallId === wall.wallId;
               return (
-                <Fragment key={wall.id}>
+                <Fragment key={wall.wallId}>
                   <line
                     className={
-                      wall.id === selectedWallId || isHovered
+                      wall.wallId === selectedWallId || isHovered
                         ? "wall-line active"
                         : "wall-line"
                     }
@@ -2513,11 +2514,14 @@ export function PlanView({
                     y2={y2}
                     vectorEffect="non-scaling-stroke"
                     onPointerEnter={
-                      slideHoverEligible ? () => setHoveredWallId(wall.id) : undefined
+                      slideHoverEligible ? () => setHoveredWallId(wall.wallId) : undefined
                     }
                     onPointerLeave={
                       slideHoverEligible
-                        ? () => setHoveredWallId((current) => (current === wall.id ? null : current))
+                        ? () =>
+                            setHoveredWallId((current) =>
+                              current === wall.wallId ? null : current
+                            )
                         : undefined
                     }
                     onClick={(event) => {
@@ -2540,7 +2544,7 @@ export function PlanView({
                         suppressNextToolClickRef.current = false;
                         return;
                       }
-                      onSelectWall?.(wall.id);
+                      onSelectWall?.(wall.wallId);
                     }}
                   />
                 </Fragment>
@@ -2553,13 +2557,13 @@ export function PlanView({
             block) — those must keep winning their own clicks by paint order.
             At rest a room is otherwise unclickable chrome; this is the only
             surface that turns a plain floor click into a selection. */}
-        {displayedProject.floor.rooms.map((placement) => {
-          const isSelected = placement.roomId === selectedRoomId;
+        {planScene.rooms.map((room) => {
+          const isSelected = room.roomId === selectedRoomId;
           return (
             <polygon
               className={isSelected ? "room-hit selected" : "room-hit"}
-              key={placement.roomId}
-              points={roomPolygonPoints(placement)}
+              key={room.roomId}
+              points={svgPolygonPoints(room.polygonMm)}
               onPointerDown={(event) => {
                 // Unselected: let the pointerdown bubble untouched — a drag
                 // from here must still be able to start the background
@@ -2570,7 +2574,7 @@ export function PlanView({
                 // handle does.
                 if (!isSelected) return;
                 event.stopPropagation();
-                beginRoomDrag(placement.roomId, event);
+                beginRoomDrag(room.roomId, event);
               }}
               onClick={(event) => {
                 // Mirrors the wall-hit TRAP comments above: an armed tool
@@ -2583,7 +2587,7 @@ export function PlanView({
                   suppressNextToolClickRef.current = false;
                   return;
                 }
-                onSelectRoom?.(placement.roomId);
+                onSelectRoom?.(room.roomId);
               }}
               onDoubleClick={(event) => {
                 // Shortcut for RoomInspector's "Edit shape" button — selects
@@ -2591,8 +2595,8 @@ export function PlanView({
                 // in one gesture.
                 if (activeTool || drawRoomActive || drawRectActive) return;
                 event.stopPropagation();
-                onSelectRoom?.(placement.roomId);
-                onReshapeRoomChange?.(placement.roomId);
+                onSelectRoom?.(room.roomId);
+                onReshapeRoomChange?.(room.roomId);
               }}
             />
           );
@@ -2602,11 +2606,17 @@ export function PlanView({
             (its centerline id), not the room. Rendered below placed objects so
             art on the faces sits on top. The dragged slab shows its live
             preview endpoints. */}
-        {getFloorPartitions(displayedProject).map((partition) => {
+        {planScene.partitions.map(({ partition, rect: restRect }) => {
           const isDragging = partitionDrag?.wallId === partition.wallId;
-          const startMm = isDragging ? partitionDrag.previewStartFloorMm : partition.startMm;
-          const endMm = isDragging ? partitionDrag.previewEndFloorMm : partition.endMm;
-          const rect = segmentPlanRect(startMm, endMm, partition.thicknessMm);
+          // The dragged slab previews its live endpoints through the same
+          // segment→rect lift the scene builder used for the rest rect.
+          const rect = isDragging
+            ? segmentPlanRect(
+                partitionDrag.previewStartFloorMm,
+                partitionDrag.previewEndFloorMm,
+                partition.thicknessMm
+              )
+            : restRect;
           const isSelected = partition.wallId === selectedFreestandingWallId;
           return (
             <rect
@@ -2654,8 +2664,6 @@ export function PlanView({
             wall-line-relative projection; floor-placed objects (later
             phases) carry their own center/rotation already. */}
         {(() => {
-          const floorWalls = getFloorWalls(displayedProject.floor);
-          const floorWallsById = new Map(floorWalls.map((wall) => [wall.id, wall]));
           // Any in-flight gesture suppresses hover tooltips: they'd sit on top
           // of the very geometry the user is trying to read while dragging,
           // resizing, or aiming an armed placement tool.
@@ -2686,68 +2694,30 @@ export function PlanView({
               />
             );
           };
-          const openingConnectionGlyphs = displayedProject.wallObjects.flatMap((opening) => {
-            if (
-              (opening.kind !== "door" && opening.kind !== "window") ||
-              !opening.connectsToObjectId ||
-              opening.id > opening.connectsToObjectId
-            ) {
-              return [];
-            }
-            const partner = displayedProject.wallObjects.find(
-              (candidate) => candidate.id === opening.connectsToObjectId
-            );
-            const wallA = floorWallsById.get(opening.wallId);
-            const wallB = partner ? floorWallsById.get(partner.wallId) : undefined;
-            if (
-              !partner ||
-              (partner.kind !== "door" && partner.kind !== "window") ||
-              !wallA ||
-              !wallB
-            ) {
-              return [];
-            }
-            const a = getWallObjectPlanRect(wallA, opening);
-            const b = getWallObjectPlanRect(wallB, partner);
-            const alignment = evaluateOpeningPair(displayedProject, opening.id, partner.id);
-            return [
-              {
-                id: `${opening.id}:${partner.id}`,
-                a,
-                b,
-                status: alignment.status
-              }
-            ];
-          });
-
           return (
             <>
-              {openingConnectionGlyphs.map((connection) => {
-                const midX = (connection.a.centerXMm + connection.b.centerXMm) / 2;
-                const midY = (connection.a.centerYMm + connection.b.centerYMm) / 2;
-                return (
-                  <g
-                    aria-label={`Connected openings: ${connection.status}`}
-                    className={`opening-connection-glyph ${connection.status}`}
-                    key={connection.id}
-                    role="img"
-                  >
-                    <line
-                      x1={connection.a.centerXMm}
-                      y1={connection.a.centerYMm}
-                      x2={connection.b.centerXMm}
-                      y2={connection.b.centerYMm}
-                      vectorEffect="non-scaling-stroke"
-                    />
-                    <circle cx={midX} cy={midY} r={pixelsPerMm > 0 ? 5 / pixelsPerMm : 0} />
-                  </g>
-                );
-              })}
-              {displayedProject.wallObjects.map((wallObject) => {
-                const wall = floorWallsById.get(wallObject.wallId);
-                if (!wall) return null;
-
-                const restRect = getWallObjectPlanRect(wall, wallObject);
+              {planScene.openingConnections.map((connection) => (
+                <g
+                  aria-label={`Connected openings: ${connection.status}`}
+                  className={`opening-connection-glyph ${connection.status}`}
+                  key={connection.id}
+                  role="img"
+                >
+                  <line
+                    x1={connection.aCenterMm.xMm}
+                    y1={connection.aCenterMm.yMm}
+                    x2={connection.bCenterMm.xMm}
+                    y2={connection.bCenterMm.yMm}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <circle
+                    cx={connection.midMm.xMm}
+                    cy={connection.midMm.yMm}
+                    r={pixelsPerMm > 0 ? 5 / pixelsPerMm : 0}
+                  />
+                </g>
+              ))}
+              {planScene.wallObjects.map(({ object: wallObject, artwork, restRect, renderedRect }) => {
                 // Preview position, generalized over single and group drags: a
                 // group member reads its own rect from previewRectById, a single
                 // dragged object reads previewPlanRect, everything else rests.
@@ -2776,36 +2746,25 @@ export function PlanView({
                     ? wallObject.artworkId === selectedArtworkId
                     : wallObject.id === selectedOpeningId) ||
                   selectedObjectIds.includes(wallObject.id);
-                // On-screen depth floor so thin doors/windows stay visible when
-                // zoomed out — only while still wall-anchored (a floated/rejected
-                // preview already carries its real floor-object depth and sits off
-                // the wall, so it's drawn at its own center, not offset). Artwork
-                // additionally shifts to the viewer's side of the wall line (spec
-                // §5.3) here, at the very last step before rendering, so it applies
-                // identically to the rest rect AND any live single/group drag
-                // preview — the offset never disagrees between mid-drag and
-                // on-release, so nothing jumps.
-                // Mat/frame widen the along-wall extent (docs/quick-todos.md:
-                // plan mode is a simple dim change). The off-wall depth is left
-                // as-is — a schematic frame's face width, not its projection.
-                const framedWidthMm =
-                  wallObject.kind === "artwork"
-                    ? getArtworkOuterDimensionsMm(
-                        planRect.widthMm,
-                        planRect.widthMm,
-                        artworksById?.get(wallObject.artworkId)?.matWidthMm,
-                        artworksById?.get(wallObject.artworkId)?.frame
-                      ).widthMm
-                    : planRect.widthMm;
+                // What paints while wall-anchored (a floated/rejected preview
+                // already carries its real floor-object depth and sits off the
+                // wall, so it's drawn at its own center, untransformed): the
+                // scene's precomputed rect at rest, and the SAME domain
+                // transform (getRenderedWallObjectPlanRect — mat/frame
+                // widening, viewer-side offset, min-depth clamp) applied to
+                // any live single/group drag preview, so the drawing never
+                // disagrees between mid-drag and on-release — nothing jumps.
                 const renderedPlanRect =
                   isFloorPlaced || isInvalid
                     ? planRect
-                    : {
-                        ...(wallObject.kind === "artwork"
-                          ? offsetPlanRectToViewerSide({ ...planRect, widthMm: framedWidthMm })
-                          : planRect),
-                        depthMm: Math.max(planRect.depthMm, wallObjectMinDepthMm)
-                      };
+                    : planRect === restRect
+                      ? renderedRect
+                      : getRenderedWallObjectPlanRect(
+                          planRect,
+                          wallObject.kind,
+                          artwork,
+                          wallObjectMinDepthMm
+                        );
 
                 return (
                   <PlanObject
@@ -2874,8 +2833,7 @@ export function PlanView({
                   />
                 );
               })}
-              {displayedProject.floorObjects.map((floorObject) => {
-                const restRect = getFloorObjectPlanRect(floorObject);
+              {planScene.floorObjects.map(({ object: floorObject, rect: restRect }) => {
                 const groupPreviewRect = objectDrag?.members
                   ? objectDrag.previewRectById?.get(floorObject.id)
                   : undefined;
@@ -2970,10 +2928,11 @@ export function PlanView({
             outline, no wash, no handles), so this block renders at most once,
             for whichever room selectedRoomId names. */}
         {(() => {
-          const selectedPlacement = displayedProject.floor.rooms.find(
-            (placement) => placement.roomId === selectedRoomId
+          const selectedSceneRoom = planScene.rooms.find(
+            (room) => room.roomId === selectedRoomId
           );
-          if (!selectedPlacement || handleSizeMm <= 0) return null;
+          if (!selectedSceneRoom || handleSizeMm <= 0) return null;
+          const selectedPlacement = selectedSceneRoom.placement;
 
           const isReshaping = reshapeRoomId === selectedPlacement.roomId;
           const vertexDragInvalid =
@@ -3010,11 +2969,11 @@ export function PlanView({
             <g>
               <polygon
                 className="room-selection-wash"
-                points={roomPolygonPoints(selectedPlacement)}
+                points={svgPolygonPoints(selectedSceneRoom.polygonMm)}
               />
               <polygon
                 className="room-selection-outline"
-                points={roomPolygonPoints(selectedPlacement)}
+                points={svgPolygonPoints(selectedSceneRoom.polygonMm)}
                 vectorEffect="non-scaling-stroke"
                 style={vertexDragInvalid || wallDragInvalid ? { stroke: "var(--danger)" } : undefined}
               />
@@ -3078,9 +3037,9 @@ export function PlanView({
             grabbable. The body itself is the move affordance (slab rect above). */}
         {selectedFreestandingWallId && handleSizeMm > 0
           ? (() => {
-              const partition = getFloorPartitions(displayedProject).find(
-                (candidate) => candidate.wallId === selectedFreestandingWallId
-              );
+              const partition = planScene.partitions.find(
+                (candidate) => candidate.partition.wallId === selectedFreestandingWallId
+              )?.partition;
               if (!partition) return null;
               const isDragging = partitionDrag?.wallId === partition.wallId;
               const startMm = isDragging ? partitionDrag.previewStartFloorMm : partition.startMm;

@@ -33,9 +33,7 @@ import { getDefaultOpeningSizeMm, type OpeningKind } from "../../domain/placemen
 import { effectivePlacementForm } from "../../domain/placement/artworkForm";
 import type {
   Artwork,
-  ArtworkWallObject,
   DisplayUnit,
-  OpeningWallObject,
   WallObject,
   WallObjectBase
 } from "../../domain/project";
@@ -72,6 +70,7 @@ import { ElevationArtwork } from "./ElevationArtwork";
 import { ElevationOpening } from "./ElevationOpening";
 import { ArtworkTooltipContent, OpeningTooltipContent } from "./PlacementTooltip";
 import { marqueeRectMm, type MarqueeState } from "./marqueeRect";
+import { buildElevationScene } from "../../domain/scene2d/elevationScene";
 import { getFitSelectionBoundsSvg, isArtworkOutOfWallBounds, wallLocalYToSvgY } from "./elevationArtworkGeometry";
 import { GridOverlay } from "./GridOverlay";
 import { GroupDimensionLines } from "./GroupDimensionLines";
@@ -329,7 +328,6 @@ export function ElevationView({
     minIntervalMm: gridPrecisionFloorMm
   });
   const majorGridMm = getMajorGridIntervalMm(unit, minorGridMm);
-  const centerlineSvgY = wallLocalYToSvgY(wallHeightMm, centerlineMm);
   const snapThresholdMm = pixelsPerMm > 0 ? SNAP_THRESHOLD_PX / pixelsPerMm : 0;
   const barrierBreakMm = pixelsPerMm > 0 ? BARRIER_BREAK_PX / pixelsPerMm : 0;
 
@@ -509,19 +507,29 @@ export function ElevationView({
     return preview ? { ...object, xMm: preview.xMm, yMm: preview.yMm } : object;
   });
 
-  const placements: ArtworkWallObject[] = effectiveWallObjects.filter(
-    (object): object is ArtworkWallObject => object.kind === "artwork" && object.wallId === wallId
-  );
-  const openings: OpeningWallObject[] = effectiveWallObjects.filter(
-    (object): object is OpeningWallObject => object.kind !== "artwork" && object.wallId === wallId
-  );
+  // The static drawing (this-wall filter/kind split, out-of-bounds flags,
+  // artwork joins, floor/centerline positions) — ONE derivation, shared with
+  // the PNG/PDF export builders, so an export can never disagree with the
+  // canvas. Built from effectiveWallObjects so arrange-session previews flow
+  // through for free; the in-flight drag preview (previewCenterById) stacks
+  // on top at render time. Everything gestural stays in this component.
+  const elevationScene = buildElevationScene(effectiveWallObjects, {
+    wallId,
+    wallLengthMm,
+    wallHeightMm,
+    centerlineMm,
+    artworksById
+  });
   // Every wall object on this wall is a valid snap neighbor for any other —
   // an artwork can align to a door's edge just as readily as to another
   // artwork's (docs/plan.md §2 snap-target priority doesn't distinguish by
   // kind, only centerline > neighbor-center > neighbor-edge > grid).
-  const wallObjectsOnThisWall: WallObject[] = [...placements, ...openings];
+  const wallObjectsOnThisWall: WallObject[] = [
+    ...elevationScene.artworks.map((entry) => entry.object),
+    ...elevationScene.openings.map((entry) => entry.object)
+  ];
 
-  const assetIds = placements.map((placement) => artworksById?.get(placement.artworkId)?.assetId);
+  const assetIds = elevationScene.artworks.map((entry) => entry.artwork?.assetId);
   const imageUrlsByAssetId = useAssetImageUrls(assetIds, getBlob ?? NO_OP_GET_BLOB, "display");
 
   // The dragged artwork's image aspect, so a partial/unknown-dimension work's
@@ -873,7 +881,7 @@ export function ElevationView({
     // box, and remember each member's offset from that box's center. Everything
     // downstream then treats the group as one virtual object.
     if (!altSoloDrag && selectedObjectIds.includes(wallObject.id) && selectedObjectIds.length > 1) {
-      const groupMembers: WallObject[] = [...placements, ...openings].filter((object) =>
+      const groupMembers: WallObject[] = wallObjectsOnThisWall.filter((object) =>
         selectedObjectIds.includes(object.id)
       );
       if (groupMembers.length > 1) {
@@ -1362,27 +1370,26 @@ export function ElevationView({
           <line
             className="centerline"
             x1="0"
-            y1={centerlineSvgY}
+            y1={elevationScene.centerlineSvgY}
             x2={wallLengthMm}
-            y2={centerlineSvgY}
+            y2={elevationScene.centerlineSvgY}
             vectorEffect="non-scaling-stroke"
           />
         ) : null}
         <line
           className="floor-line"
           x1="0"
-          y1={wallHeightMm}
+          y1={elevationScene.floorLineSvgY}
           x2={wallLengthMm}
-          y2={wallHeightMm}
+          y2={elevationScene.floorLineSvgY}
           vectorEffect="non-scaling-stroke"
         />
-        {placements.map((placement) => {
+        {elevationScene.artworks.map(({ object: placement, artwork, centerMm, sizeMm, outOfBounds }) => {
           const previewCenter = previewCenterById.get(placement.id);
-          const center = previewCenter ?? { xMm: placement.xMm, yMm: placement.yMm };
+          const center = previewCenter ?? centerMm;
           // A move never resizes, so the object's own size always applies (for a
           // group, moveDrag.sizeMm is the union box, not this member's size).
-          const size = { widthMm: placement.widthMm, heightMm: placement.heightMm };
-          const artwork = artworksById?.get(placement.artworkId);
+          const size = sizeMm;
 
           return (
             <ElevationArtwork
@@ -1392,7 +1399,13 @@ export function ElevationView({
               frame={artwork?.frame}
               matWidthMm={artwork?.matWidthMm}
               imageUrl={artwork?.assetId ? imageUrlsByAssetId.get(artwork.assetId) : undefined}
-              isOutOfBounds={isArtworkOutOfWallBounds(wallLengthMm, wallHeightMm, center, size)}
+              isOutOfBounds={
+                // The scene's flag is the at-rest answer; a live drag preview
+                // re-checks the same predicate at the preview center.
+                previewCenter
+                  ? isArtworkOutOfWallBounds(wallLengthMm, wallHeightMm, center, size)
+                  : outOfBounds
+              }
               isSelected={selectedArtworkId === placement.artworkId || selectedObjectIds.includes(placement.id)}
               size={size}
               tooltip={
@@ -1428,16 +1441,20 @@ export function ElevationView({
             />
           );
         })}
-        {openings.map((opening) => {
+        {elevationScene.openings.map(({ object: opening, centerMm, sizeMm, outOfBounds }) => {
           const previewCenter = previewCenterById.get(opening.id);
-          const center = previewCenter ?? { xMm: opening.xMm, yMm: opening.yMm };
-          const size = { widthMm: opening.widthMm, heightMm: opening.heightMm };
+          const center = previewCenter ?? centerMm;
+          const size = sizeMm;
 
           return (
             <ElevationOpening
               key={opening.id}
               center={center}
-              isOutOfBounds={isArtworkOutOfWallBounds(wallLengthMm, wallHeightMm, center, size)}
+              isOutOfBounds={
+                previewCenter
+                  ? isArtworkOutOfWallBounds(wallLengthMm, wallHeightMm, center, size)
+                  : outOfBounds
+              }
               isSelected={selectedOpeningId === opening.id || selectedObjectIds.includes(opening.id)}
               kind={opening.kind}
               size={size}
