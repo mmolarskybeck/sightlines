@@ -216,7 +216,7 @@ export function SettingsDialog({
           open={confirmDeleteOpen}
           onOpenChange={(next) => setConfirmDeleteOpen(next)}
         >
-          <DialogContent showClose={false}>
+          <DialogContent className="dialog-alert" showClose={false}>
             <DialogHeader>
               <DialogTitle>Delete &ldquo;{project.title}&rdquo;?</DialogTitle>
               <DialogDescription>This can&rsquo;t be undone.</DialogDescription>

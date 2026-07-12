@@ -318,14 +318,6 @@ input:focus-visible {
   text-align: center;
 }
 
-/* Help overlay — shared .dialog-content chrome (same family as Settings),
-   sized like .settings-dialog. The body scrolls so the tabbed hint groups
-   stay reachable on a phone-height viewport. */
-.help-dialog-content {
-  width: min(calc(100vw - 32px), 560px);
-  max-height: min(760px, calc(100dvh - 32px));
-}
-
 .help-dialog-kicker {
   margin: 0;
   color: var(--muted);
@@ -338,6 +330,8 @@ input:focus-visible {
 
 .help-body {
   display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
   gap: 16px;
   padding: 14px 24px 20px;
   overflow-y: auto;
@@ -835,6 +829,32 @@ input:focus-visible {
   border-radius: var(--radius-overlay);
   background: var(--bg);
   box-shadow: var(--shadow-overlay);
+}
+
+/* Help overlay — shared .dialog-content chrome (same family as Settings),
+   sized like .settings-dialog. Declared after .dialog-content (equal
+   specificity — a class selector each) so this override actually wins the
+   cascade instead of losing the width tiebreak to the base rule; keep this
+   block below .dialog-content if it ever moves. The body scrolls so the
+   tabbed hint groups stay reachable on a phone-height viewport. */
+.help-dialog-content {
+  width: min(calc(100vw - 32px), 560px);
+  /* Fixed height, not max-height: Settings' content is shorter than Help's,
+     so a max-height alone let each overlay settle at its own natural size —
+     Help pinned to the cap (scrolling), Settings ~40px shorter. A fixed
+     height plus .help-body/.settings-body flex-growing to fill it (see
+     those rules) makes both overlays render as the same surface regardless
+     of which one has more content. */
+  height: min(760px, calc(100dvh - 32px));
+}
+
+/* Confirm/alert dialogs (delete room, delete artworks, delete project) — a
+   sentence or two of copy, not a wizard. Declared after .dialog-content so
+   the width override actually wins the cascade (see .help-dialog-content
+   above for why that ordering matters), narrower than the default 980px so
+   these read as confirms rather than banners. */
+.dialog-alert {
+  width: min(calc(100vw - 32px), 26.5rem);
 }
 
 .dialog-close {
@@ -5831,11 +5851,17 @@ body.panels-resizing * {
    pushes the header or footer off-screen. */
 .settings-dialog {
   width: min(calc(100vw - 32px), 560px);
-  max-height: min(760px, calc(100dvh - 32px));
+  /* Fixed height (see .help-dialog-content) so Settings renders at the same
+     size as Help instead of settling ~40px shorter at its natural content
+     height; .settings-body flex-grows to absorb the difference and keeps
+     .settings-footer pinned to the bottom edge. */
+  height: min(760px, calc(100dvh - 32px));
 }
 
 .settings-body {
   display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
   gap: 24px;
   padding: 20px 24px;
   overflow-y: auto;

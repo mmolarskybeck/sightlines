@@ -265,7 +265,7 @@ function DeleteArtworksDialog({
 
   return (
     <Dialog open={pendingIds !== null} onOpenChange={onOpenChange}>
-      <DialogContent showClose={false}>
+      <DialogContent className="dialog-alert" showClose={false}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>

@@ -27,7 +27,7 @@ export function DeleteRoomDialog({
 }) {
   return (
     <Dialog open={summary !== null} onOpenChange={onOpenChange}>
-      <DialogContent showClose={false}>
+      <DialogContent className="dialog-alert" showClose={false}>
         <DialogHeader>
           <DialogTitle>Delete {roomName}?</DialogTitle>
           <DialogDescription>
