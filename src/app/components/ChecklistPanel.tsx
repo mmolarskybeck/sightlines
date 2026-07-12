@@ -492,8 +492,13 @@ function FilterTab({
   value: ChecklistFilter;
 }) {
   return (
-    <SegmentedToggleGroupItem className="checklist-filter" value={value}>
-      {label} · {count}
+    <SegmentedToggleGroupItem
+      aria-label={`${label} (${count})`}
+      className="checklist-filter"
+      value={value}
+    >
+      {label}
+      <span className="checklist-filter-count">· {count}</span>
     </SegmentedToggleGroupItem>
   );
 }

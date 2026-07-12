@@ -1420,14 +1420,44 @@ body.panels-resizing * {
   color: var(--primary-strong);
 }
 
-/* Sizing only — track/chip/ink states come from the shared .seg-* rules.
-   One weight at rest and active: the raised chip carries the state, so the
-   row never reflows as the selection moves. */
-.checklist-filter {
-  min-height: 24px;
-  padding: 2px 9px;
+/* Type sizing only — track/chip/ink states and box metrics come from the
+   shared .seg-* rules. The child selector is load-bearing: .seg-item sits
+   later in this file and wins a bare-class tie, so a plain .checklist-filter
+   can't override segment declarations (the old min-height/padding here were
+   silently dead). One weight at rest and active: the raised chip carries the
+   state, so the row never reflows as the selection moves. */
+.checklist-filters > .checklist-filter {
+  /* Label and its count span are separate flex items now; 4px reads as the
+     single space the old one-text-node label had. */
+  gap: 4px;
   font-size: var(--type-xs);
   font-weight: var(--weight-medium);
+}
+
+/* Density tiers for the controls row, in the toolbar's spirit but pure CSS:
+   the resizable .checklist-panel is the container (content-box widths — the
+   panel minus its 40px padding, so the 240px panel minimum leaves 199px).
+   Measured at --type-xs Geist, the full track needs ~305px with two-digit
+   counts and ~226px labels-only. First tier drops the counts (each segment
+   keeps its count in an aria-label, and the heading still shows the total);
+   the second, near the panel minimum, tightens the segments so
+   "All / Placed / Unplaced" plus the docked sort trigger fit without
+   clipping. The filters' overflow-x pan stays as the fallback for outsized
+   counts above the first threshold. */
+@container (max-width: 308px) {
+  .checklist-filter-count {
+    display: none;
+  }
+}
+
+@container (max-width: 232px) {
+  .checklist-filters > .checklist-filter {
+    padding: 0 7px;
+  }
+
+  .checklist-sort-divider {
+    margin: 0 2px;
+  }
 }
 
 .checklist-filter-empty {
