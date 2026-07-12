@@ -1,11 +1,18 @@
 import type { DisplayUnit } from "../../../domain/project";
-import type { PartitionClearances } from "../../../domain/geometry/partitionSpacing";
+import type {
+  PartitionClearances,
+  SideClearance
+} from "../../../domain/geometry/partitionSpacing";
 import { formatLength } from "../../../domain/units/length";
 
 // Live clearance dimension lines for a selected (or actively dragged) partition
-// in plan mode: from the centerline midpoint out to each perimeter wall the
-// "normal"-axis rays hit, with a tick square at each end and the measured gap
-// labelled at the segment midpoint. Render-only — the caller casts the rays
+// in plan mode: ALL FOUR face-accurate clearances — the two normal (face) gaps
+// AND the two span (end-cap) gaps — each drawn from the side's own origin (a
+// slab face point or an end cap) out to the nearest obstacle it hit, with a
+// tick square at each end and the measured true clear gap labelled at the
+// segment midpoint. Sides that missed draw nothing. Dragging on x therefore
+// always shows the two x gaps AND the two y gaps, all reading true clear
+// distances that update live. Render-only — the caller casts the rays
 // (memoized) and lifts the result to floor space; this just paints it. Muted
 // drafting ink via the shared .dimension-* classes, deliberately quieter than
 // the petrol selection color. Sizes divide by nothing here — they are scaled
@@ -23,8 +30,12 @@ export function PartitionDimensionLines({
 }) {
   if (handleSizeMm <= 0) return null;
 
-  const { originMm, plus, minus } = clearances;
-  const sides = [plus, minus].filter((hit): hit is NonNullable<typeof hit> => hit !== null);
+  const sides: Array<{ key: string; side: SideClearance }> = [
+    { key: "normal-plus", side: clearances.normal.plus },
+    { key: "normal-minus", side: clearances.normal.minus },
+    { key: "span-plus", side: clearances.span.plus },
+    { key: "span-minus", side: clearances.span.minus }
+  ].filter((entry) => entry.side.hit !== null);
   if (sides.length === 0) return null;
 
   const tickHalfMm = handleSizeMm * 0.4;
@@ -32,11 +43,13 @@ export function PartitionDimensionLines({
 
   return (
     <g pointerEvents="none">
-      {sides.map((hit) => {
+      {sides.map(({ key, side }) => {
+        const hit = side.hit!;
+        const originMm = side.originMm;
         const midXMm = (originMm.xMm + hit.pointMm.xMm) / 2;
         const midYMm = (originMm.yMm + hit.pointMm.yMm) / 2;
         return (
-          <g key={hit.wallId}>
+          <g key={key}>
             <line
               className="dimension-line"
               x1={originMm.xMm}

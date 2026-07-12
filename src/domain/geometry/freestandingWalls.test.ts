@@ -340,13 +340,58 @@ describe("centerFreestandingWallBetweenWalls", () => {
   });
 
   it("centers along the span (equal gap to the end walls)", () => {
-    // 4000-wide room; centerline x 500..1500 → 3000 past the end, 1000 before it.
+    // 4000-wide room; centerline x 500..1500. End cap gaps: east cap 2500 to
+    // the east wall, west cap 500 to the west wall → shift +1000 to equalize.
     const { project } = roomWithPartition({ startXMm: 500, endXMm: 1500 });
     const result = centerFreestandingWallBetweenWalls(project, "room-1-partition-1", "axis");
     const moved = findPartition(result.project, "room-1-partition-1");
     expect(moved.startXMm).toBeCloseTo(1500, 6);
     expect(moved.endXMm).toBeCloseTo(2500, 6);
     expect(getFreestandingLengthMm(moved)).toBeCloseTo(1000, 6); // length preserved
+  });
+
+  it("counts a neighboring partition as a boundary (normal)", () => {
+    // Subject horizontal at y=1000; a sibling partition at y=500 bounds the −y
+    // side while the south wall (y=3000) bounds the +y side. Centering
+    // equalizes the two FACE gaps: +y face → wall 3000, −y face → sibling near
+    // face 550, solving to a midpoint of y=1775 (face gaps 1175 each).
+    const { project } = roomWithPartition({ startYMm: 1000, endYMm: 1000 });
+    const base = project.floor.rooms[0];
+    const withSibling: Project = {
+      ...project,
+      floor: {
+        rooms: [
+          {
+            ...base,
+            room: {
+              ...base.room,
+              freestandingWalls: [
+                ...base.room.freestandingWalls,
+                {
+                  id: "room-1-partition-2",
+                  roomId: "room-1",
+                  name: "Partition 2",
+                  startXMm: 1000,
+                  startYMm: 500,
+                  endXMm: 3000,
+                  endYMm: 500,
+                  heightMm: 3000,
+                  thicknessMm: 100
+                }
+              ]
+            }
+          }
+        ]
+      }
+    };
+    const result = centerFreestandingWallBetweenWalls(
+      withSibling,
+      "room-1-partition-1",
+      "normal"
+    );
+    const moved = findPartition(result.project, "room-1-partition-1");
+    expect(moved.startYMm).toBeCloseTo(1775, 6);
+    expect(moved.endYMm).toBeCloseTo(1775, 6);
   });
 
   it("throws when a ray misses (nothing on both sides)", () => {

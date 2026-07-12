@@ -306,15 +306,17 @@ export function moveFreestandingEndpoint(
   });
 }
 
-// Center a partition between the perimeter walls it sits between (spec §6.4).
-// "normal" centers across the centerline's normal — equal gap to the walls the
-// partition faces (the headline action); "axis" centers along the centerline
-// direction — equal gap to the walls at the ends of its span. Rays are cast
-// both ways from the centerline midpoint; if either misses (nothing on that
+// Center a partition between whatever bounds it (spec §6.4) — perimeter walls
+// AND neighboring partitions both count as boundaries. "normal" centers across
+// the centerline's normal (equal FACE gap to the things the partition faces —
+// the headline action); "axis" centers along the centerline direction (equal
+// end-cap gap to the things off its ends). Clearances are the new four-sided,
+// face-accurate set; if either side of the chosen axis misses (nothing on that
 // side to measure against), the edit fails through the standard error path.
 // Translating the centerline by half the difference of the two clearances
-// equalizes them: after a shift of (plus − minus)/2 along +dir, both sides
-// read (plus + minus)/2.
+// equalizes them: after a shift of (plus − minus)/2 along the +side direction,
+// both sides read (plus + minus)/2. (Span sides originate from opposite
+// endpoints, but the same translation equalizes the two end gaps.)
 export function centerFreestandingWallBetweenWalls(
   project: Project,
   wallId: string,
@@ -324,14 +326,16 @@ export function centerFreestandingWallBetweenWalls(
   const partition = placement.room.freestandingWalls.find((wall) => wall.id === wallId);
   if (!partition) throw new Error(`Partition not found: ${wallId}`);
 
-  const { dirUnit, plus, minus } = getPartitionClearances(placement.room, partition, axis);
-  if (!plus || !minus) {
+  const clearances = getPartitionClearances(placement.room, partition);
+  const side = axis === "normal" ? clearances.normal : clearances.span;
+  if (!side.plus.hit || !side.minus.hit) {
     throw new Error("Nothing on both sides to center between.");
   }
 
-  const shift = (plus.distanceMm - minus.distanceMm) / 2;
-  const dx = dirUnit.xMm * shift;
-  const dy = dirUnit.yMm * shift;
+  const plusDir = side.plus.dirUnit;
+  const shift = (side.plus.hit.distanceMm - side.minus.hit.distanceMm) / 2;
+  const dx = plusDir.xMm * shift;
+  const dy = plusDir.yMm * shift;
   return updatePartition(project, wallId, (wall) => ({
     ...wall,
     startXMm: wall.startXMm + dx,

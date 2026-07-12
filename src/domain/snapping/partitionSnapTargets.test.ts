@@ -90,4 +90,36 @@ describe("getPartitionMoveSnapTargets", () => {
     expect(sibY).toMatchObject({ kind: "neighbor-center", axis: "y" });
     expect(sibY?.point.yMm).toBeCloseTo(500, 6); // sibling midpoint y
   });
+
+  it("bounds an equidistant axis on a neighboring partition, not the far wall", () => {
+    // A vertical sibling at x=3500 (faces at 3450/3550) sits to the east of the
+    // dragged horizontal partition. The +x end-cap ray stops on the sibling's
+    // near face (3450) instead of the east wall (4000); the −x ray reaches the
+    // west wall (0). Equidistant x = midpoint of the two hits = 1725.
+    const withSibling: Room = {
+      ...room(),
+      freestandingWalls: [
+        {
+          id: "room-1-partition-2",
+          roomId: "room-1",
+          name: "P2",
+          startXMm: 3500,
+          startYMm: 1500,
+          endXMm: 3500,
+          endYMm: 2500,
+          heightMm: 3000,
+          thicknessMm: 100
+        }
+      ]
+    };
+    const targets = getPartitionMoveSnapTargets({
+      room: withSibling,
+      placementOffsetMm: { xMm: 0, yMm: 0 },
+      partition: dragged,
+      proposedMidFloorMm: { xMm: 2000, yMm: 2000 }
+    });
+    const centerX = targets.find((t) => t.id === "partition-center-x");
+    expect(centerX).toMatchObject({ kind: "centerline", axis: "x" });
+    expect(centerX?.point.xMm).toBeCloseTo(1725, 6);
+  });
 });

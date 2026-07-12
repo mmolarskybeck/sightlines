@@ -63,7 +63,8 @@ import { getGridSnapTargets } from "../../domain/snapping/gridSnapTargets";
 import { getPartitionMoveSnapTargets } from "../../domain/snapping/partitionSnapTargets";
 import {
   getPartitionClearances,
-  type PartitionClearances
+  type PartitionClearances,
+  type SideClearance
 } from "../../domain/geometry/partitionSpacing";
 import {
   floatPolicyForKind,
@@ -1163,12 +1164,14 @@ export function PlanView({
     [displayedProject, artworksById, wallObjectMinDepthMm]
   );
 
-  // Live "normal"-axis clearance dimension lines for the selected partition,
-  // or the actively dragged one (whichever is live). During a drag we build a
-  // temporary partition from the preview endpoints (floor → room-local by
-  // subtracting the placement offset) so the numbers track the pointer; the
-  // room perimeter itself is committed geometry, so we cast against `project`.
-  // The result is lifted back to floor space for the render-only component.
+  // Live four-sided clearance dimension lines for the selected partition, or
+  // the actively dragged one (whichever is live) — both normal (face) gaps and
+  // both span (end-cap) gaps, so dragging on either axis always shows all four
+  // true clear distances. During a drag we build a temporary partition from the
+  // preview endpoints (floor → room-local by subtracting the placement offset)
+  // so the numbers track the pointer; the room perimeter and sibling partitions
+  // are committed geometry, so we cast against `project`. The result is lifted
+  // back to floor space for the render-only component.
   const partitionClearancesFloor = useMemo<PartitionClearances | null>(() => {
     const activeWallId = partitionDrag?.wallId ?? selectedFreestandingWallId;
     if (!activeWallId) return null;
@@ -1191,19 +1194,23 @@ export function PlanView({
           }
         : committed;
 
-    const local = getPartitionClearances(placement.room, partition, "normal");
-    const liftHit = (hit: PartitionClearances["plus"]) =>
-      hit
+    const local = getPartitionClearances(placement.room, partition);
+    const liftSide = (side: SideClearance): SideClearance => ({
+      originMm: { xMm: side.originMm.xMm + offset.xMm, yMm: side.originMm.yMm + offset.yMm },
+      dirUnit: side.dirUnit,
+      hit: side.hit
         ? {
-            ...hit,
-            pointMm: { xMm: hit.pointMm.xMm + offset.xMm, yMm: hit.pointMm.yMm + offset.yMm }
+            ...side.hit,
+            pointMm: {
+              xMm: side.hit.pointMm.xMm + offset.xMm,
+              yMm: side.hit.pointMm.yMm + offset.yMm
+            }
           }
-        : null;
+        : null
+    });
     return {
-      originMm: { xMm: local.originMm.xMm + offset.xMm, yMm: local.originMm.yMm + offset.yMm },
-      dirUnit: local.dirUnit,
-      plus: liftHit(local.plus),
-      minus: liftHit(local.minus)
+      normal: { plus: liftSide(local.normal.plus), minus: liftSide(local.normal.minus) },
+      span: { plus: liftSide(local.span.plus), minus: liftSide(local.span.minus) }
     };
   }, [partitionDrag, selectedFreestandingWallId, project.floor.rooms]);
 
