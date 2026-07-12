@@ -13,8 +13,13 @@ import {
   DialogHeader,
   DialogTitle
 } from "./ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
+import { Tabs, TabsContent } from "./ui/tabs";
+import {
+  SegmentedToggleGroup,
+  SegmentedToggleGroupItem,
+  UnderlineTabsList,
+  UnderlineTabsTrigger
+} from "./ui/segmented";
 
 const VIEW_TABS: { value: HelpViewTab; label: string }[] = [
   { value: "plan", label: "Plan" },
@@ -77,7 +82,7 @@ export function HelpDialog({
             straight onto a wall.
           </p>
 
-          <ToggleGroup
+          <SegmentedToggleGroup
             aria-label="Input method"
             className="help-input-toggle"
             type="single"
@@ -88,24 +93,24 @@ export function HelpDialog({
               if (value) setInputMode(value as HelpInputMode);
             }}
           >
-            <ToggleGroupItem size="sm" value="keyboard">
+            <SegmentedToggleGroupItem value="keyboard">
               Keyboard &amp; mouse
-            </ToggleGroupItem>
-            <ToggleGroupItem size="sm" value="touch">
+            </SegmentedToggleGroupItem>
+            <SegmentedToggleGroupItem value="touch">
               Touch
-            </ToggleGroupItem>
-          </ToggleGroup>
+            </SegmentedToggleGroupItem>
+          </SegmentedToggleGroup>
 
           {/* DialogContent unmounts when closed, so defaultValue re-reads the
               active view on every open. */}
           <Tabs className="help-tabs" defaultValue={activeTab}>
-            <TabsList className="help-tabs-list">
+            <UnderlineTabsList className="help-tabs-list">
               {VIEW_TABS.map((tab) => (
-                <TabsTrigger key={tab.value} value={tab.value}>
+                <UnderlineTabsTrigger key={tab.value} value={tab.value}>
                   {tab.label}
-                </TabsTrigger>
+                </UnderlineTabsTrigger>
               ))}
-            </TabsList>
+            </UnderlineTabsList>
             {VIEW_TABS.map((tab) => (
               <TabsContent className="help-tab-panel" key={tab.value} value={tab.value}>
                 {viewHelpGroups(tab.value, inputMode, isMac).map((group) => (

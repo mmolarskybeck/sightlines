@@ -25,7 +25,6 @@ import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { PresentationIcon } from "@phosphor-icons/react/dist/csr/Presentation";
 import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
-import { SquareIcon } from "@phosphor-icons/react/dist/csr/Square";
 import { StackIcon } from "@phosphor-icons/react/dist/csr/Stack";
 import { UploadSimpleIcon } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
@@ -71,7 +70,13 @@ import {
 } from "./components/OpeningInspector";
 import { PlanEmptyState } from "./components/PlanEmptyState";
 import { PlanView } from "./components/PlanView";
-import { TooltipProvider } from "./components/ui/tooltip";
+import { PartitionGlyph, WindowGlyph } from "./components/toolbarGlyphs";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from "./components/ui/tooltip";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { RoomInspector } from "./components/RoomInspector";
 import { RoomsPanel } from "./components/RoomsPanel";
@@ -104,7 +109,8 @@ import {
   SelectValue
 } from "./components/ui/select";
 import { Switch } from "./components/ui/switch";
-import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { Tabs } from "./components/ui/tabs";
+import { UnderlineTabsList, UnderlineTabsTrigger } from "./components/ui/segmented";
 import { Toggle } from "./components/ui/toggle";
 import { useStoragePersistence, getStorageNoteCopy } from "./hooks/useStoragePersistence";
 import {
@@ -120,6 +126,7 @@ import { isEditableTarget } from "./hooks/isEditableTarget";
 import { useUndoRedoShortcuts } from "./hooks/useUndoRedoShortcuts";
 import { useArrangeNudgeShortcuts } from "./hooks/useArrangeNudgeShortcuts";
 import { useDeleteAndEscapeShortcuts } from "./hooks/useDeleteAndEscapeShortcuts";
+import { useToolbarShortcuts } from "./hooks/useToolbarShortcuts";
 import { deriveArrangeReadout } from "./hooks/arrangeReadout";
 import { shouldDeleteRoomOnKey, summarizeRoomContents } from "./roomDeletion";
 import {
@@ -579,6 +586,23 @@ export function App() {
     moveOpening
   });
 
+  useToolbarShortcuts({
+    viewMode,
+    // Any open workspace dialog owns the keyboard — stand down so a toolbar
+    // letter never fires behind it.
+    suspended:
+      isHelpOpen || isSettingsOpen || importWizardOpen || confirmDeleteRoomId !== null,
+    insertDisabled: viewMode === "elevation" && !selectedWall,
+    activeTool,
+    armOpeningTool,
+    togglePartitionTool,
+    toggleDrawRoom,
+    toggleShowGrid,
+    toggleSnapToGrid,
+    toggleAllowOverlappingPlacement,
+    toggleShowCenterline
+  });
+
   const selectedWallRoomPlacement =
     project && selectedWall
       ? (project.floor.rooms.find((placement) =>
@@ -1024,20 +1048,20 @@ export function App() {
             }
           }}
         >
-          <TabsList aria-label="Workspace view" className="view-tabs">
-            <TabsTrigger className="tab-button" value="plan">
+          <UnderlineTabsList aria-label="Workspace view" className="view-tabs">
+            <UnderlineTabsTrigger value="plan">
               <MapTrifoldIcon aria-hidden="true" size={16} />
               <span>Plan</span>
-            </TabsTrigger>
-            <TabsTrigger className="tab-button" value="elevation">
+            </UnderlineTabsTrigger>
+            <UnderlineTabsTrigger value="elevation">
               <PresentationIcon aria-hidden="true" size={16} />
               <span>Elevation</span>
-            </TabsTrigger>
-            <TabsTrigger className="tab-button" value="3d">
+            </UnderlineTabsTrigger>
+            <UnderlineTabsTrigger value="3d">
               <CubeIcon aria-hidden="true" size={16} />
               <span>3D</span>
-            </TabsTrigger>
-          </TabsList>
+            </UnderlineTabsTrigger>
+          </UnderlineTabsList>
         </Tabs>
 
         <div className="topbar-right" aria-label="Project actions">
@@ -1176,22 +1200,32 @@ export function App() {
                     <InsertToolPicker
                       activeTool={activeTool}
                       disabled={viewMode === "elevation" && !selectedWall}
+                      partition={
+                        viewMode === "plan"
+                          ? { active: partitionToolActive, onToggle: togglePartitionTool }
+                          : undefined
+                      }
                       onToolChange={armOpeningTool}
                     />
                     <CompactInsertPicker
                       activeTool={activeTool}
                       disabled={viewMode === "elevation" && !selectedWall}
+                      partition={
+                        viewMode === "plan"
+                          ? { active: partitionToolActive, onToggle: togglePartitionTool }
+                          : undefined
+                      }
                       onToolChange={armOpeningTool}
                     />
                   </>
                 ) : null}
                 {viewMode === "plan" ? (
                   <>
+                    {/* The hairline scopes the "Insert" caption to its own
+                        cluster — without it the caption reads as a label for
+                        the whole zone, Draw room included. */}
+                    <div aria-hidden="true" className="toolbar-divider" />
                     <DrawRoomButton active={drawRoomActive} onToggle={toggleDrawRoom} />
-                    <PartitionButton
-                      active={partitionToolActive}
-                      onToggle={togglePartitionTool}
-                    />
                   </>
                 ) : null}
               </div>
@@ -1211,6 +1245,7 @@ export function App() {
                       icon={<GridFourIcon aria-hidden="true" size={16} />}
                       label="Grid"
                       title={showGrid ? "Hide grid" : "Show grid"}
+                      kbd="G"
                       onClick={toggleShowGrid}
                     />
                     <ViewOptionButton
@@ -1219,6 +1254,7 @@ export function App() {
                       icon={<MagnetIcon aria-hidden="true" size={16} />}
                       label="Snap"
                       title={snapToGrid ? "Disable snap to grid" : "Enable snap to grid"}
+                      kbd="S"
                       onClick={toggleSnapToGrid}
                     />
                     <PrecisionSelect
@@ -1234,6 +1270,7 @@ export function App() {
                         icon={<EyeIcon aria-hidden="true" size={16} />}
                         label="Eyeline"
                         title={showCenterline ? "Hide eyeline" : "Show eyeline"}
+                        kbd="E"
                         onClick={toggleShowCenterline}
                       />
                     ) : null}
@@ -1242,11 +1279,13 @@ export function App() {
                       disabled={false}
                       icon={<StackIcon aria-hidden="true" size={16} />}
                       label="Overlap"
+                      labelPriority
                       title={
                         allowOverlappingPlacement
                           ? "Prevent overlapping placement"
                           : "Allow overlapping placement"
                       }
+                      kbd="O"
                       onClick={toggleAllowOverlappingPlacement}
                     />
                     <UnitSystemToggle
@@ -1808,135 +1847,267 @@ function ProjectTitleInput({
   );
 }
 
-// The view-toolbar's primary zone: one bordered segmented control reading
-// `[ Insert | door | window | zone ]` — a non-interactive "Insert" caption
-// followed by three icon-only toggle segments sharing the outer border with
-// 1px internal dividers (the same joined-segment feel as .unit-switch, not
-// three floating chips). Toggle semantics match the old floating palette:
-// the armed segment reads pressed in petrol, clicking it again disarms, and
-// PlanView/ElevationView's own Escape/click-to-place handling disarms via
-// onToolChange.
+// Shared descriptors for the insert tools, so the full segmented picker and
+// the compact menu/trigger agree on every icon, label, resting hint, and
+// keyboard accelerator. Icons are the two custom glyphs (window as a mullioned
+// pane, partition as a solid wall bar) plus phosphor for the rest; the resting
+// hint and the armed phrase feed the tooltips — unpressed reads "Insert a
+// door — D", pressed reads "Placing a door — Esc cancels".
+type InsertToolMeta = {
+  key: string;
+  label: string;
+  hint: string;
+  armed: string;
+  kbd: string;
+  icon: React.ReactNode;
+};
+
+const OPENING_TOOL_ORDER: OpeningKind[] = ["door", "window", "blocked-zone"];
+
+const OPENING_TOOL_META: Record<OpeningKind, InsertToolMeta> = {
+  door: {
+    key: "door",
+    label: "Door",
+    hint: "Insert a door",
+    armed: "Placing a door",
+    kbd: "D",
+    icon: <DoorIcon aria-hidden="true" size={16} />
+  },
+  window: {
+    key: "window",
+    label: "Window",
+    hint: "Insert a window",
+    armed: "Placing a window",
+    kbd: "W",
+    icon: <WindowGlyph aria-hidden="true" size={16} />
+  },
+  "blocked-zone": {
+    key: "blocked-zone",
+    label: "Blocked zone",
+    hint: "Mark a blocked zone",
+    armed: "Marking a blocked zone",
+    kbd: "B",
+    icon: <RectangleDashedIcon aria-hidden="true" size={16} />
+  }
+};
+
+const PARTITION_TOOL_META: InsertToolMeta = {
+  key: "partition",
+  label: "Partition",
+  hint: "Draw a free-standing partition",
+  armed: "Drawing a partition",
+  kbd: "P",
+  icon: <PartitionGlyph aria-hidden="true" size={16} />
+};
+
+// The descriptor for whatever insert tool is armed, or null when idle — drives
+// the compact trigger's icon/name swap and its armed tooltip.
+function armedInsertMeta(
+  activeTool: OpeningKind | null,
+  partition?: { active: boolean; onToggle: () => void }
+): InsertToolMeta | null {
+  if (activeTool) return OPENING_TOOL_META[activeTool];
+  if (partition?.active) return PARTITION_TOOL_META;
+  return null;
+}
+
+// The view-toolbar's primary zone: a quiet "Insert" caption followed by
+// individual soft icon buttons — door/window/blocked-zone in both 2D views,
+// plus the partition (free-standing wall) tool in Plan, where it belongs
+// with the other things you insert. Toggle semantics match the old floating
+// palette: the armed button reads pressed in petrol, clicking it again
+// disarms, and PlanView/ElevationView's own Escape/click-to-place handling
+// disarms via onToolChange. planMode's discriminated union keeps the
+// opening tools and the partition tool structurally mutually exclusive.
 // The caption is aria-hidden (the group's aria-label already says "Insert",
-// so announcing the text too would double up); each segment carries its own
-// aria-label AND title — with no visible per-tool text, the title is the
-// only sighted-hover name these have, so it matters here.
+// so announcing the text too would double up); each button carries its own
+// aria-label plus a styled Tooltip — with no visible per-tool text, the
+// hover hint is the only sighted name these have, so it matters here.
 function InsertToolPicker({
   activeTool,
   disabled,
   disabledReason = "Select a wall to place an opening",
+  partition,
   onToolChange
 }: {
   activeTool: OpeningKind | null;
   disabled: boolean;
   disabledReason?: string;
+  partition?: { active: boolean; onToggle: () => void };
   onToolChange: (tool: OpeningKind | null) => void;
 }) {
-  const tools: { kind: OpeningKind; label: string; icon: React.ReactNode }[] = [
-    { kind: "door", label: "Door", icon: <DoorIcon aria-hidden="true" size={16} /> },
-    { kind: "window", label: "Window", icon: <SquareIcon aria-hidden="true" size={16} /> },
-    {
-      kind: "blocked-zone",
-      label: "Blocked zone",
-      icon: <RectangleDashedIcon aria-hidden="true" size={16} />
-    }
+  const segments = [
+    ...OPENING_TOOL_ORDER.map((kind) => ({
+      ...OPENING_TOOL_META[kind],
+      pressed: activeTool === kind,
+      onClick: () => onToolChange(activeTool === kind ? null : kind)
+    })),
+    ...(partition
+      ? [{ ...PARTITION_TOOL_META, pressed: partition.active, onClick: partition.onToggle }]
+      : [])
   ];
 
-  const picker = (
-    <div className="insert-tools" role="group" aria-label="Insert">
+  return (
+    <div
+      className="insert-tools"
+      role="group"
+      aria-label="Insert"
+      aria-disabled={disabled || undefined}
+    >
       <span className="insert-tools-label" aria-hidden="true">
         Insert
       </span>
-      {tools.map((tool) => (
-        <button
-          aria-label={tool.label}
-          aria-pressed={activeTool === tool.kind}
-          className="insert-tool-segment"
-          disabled={disabled}
-          key={tool.kind}
-          title={disabled ? undefined : tool.label}
-          type="button"
-          onClick={() => onToolChange(activeTool === tool.kind ? null : tool.kind)}
-        >
-          {tool.icon}
-        </button>
+      {segments.map((segment) => (
+        // aria-disabled (not native disabled) keeps each segment focusable, so
+        // keyboard/SR users still reach it and hear WHY it's off — the reason
+        // rides the SAME styled Tooltip, firing on hover AND focus. The click
+        // is a no-op while disabled; the fogged look ports to [aria-disabled]
+        // in global.css. Pressed → the tooltip teaches the exit ("Esc
+        // cancels"); resting → it echoes the accelerator ("— D").
+        <Tooltip key={segment.key}>
+          <TooltipTrigger asChild>
+            <button
+              aria-label={segment.label}
+              aria-pressed={segment.pressed}
+              aria-disabled={disabled || undefined}
+              className="insert-tool-segment"
+              type="button"
+              onClick={disabled ? undefined : segment.onClick}
+            >
+              {segment.icon}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="toolbar-tooltip" side="bottom">
+            {disabled ? (
+              disabledReason
+            ) : segment.pressed ? (
+              <>
+                {segment.armed}
+                <ToolbarTooltipKbd hint="Esc cancels" />
+              </>
+            ) : (
+              <>
+                {segment.hint}
+                <ToolbarTooltipKbd hint={segment.kbd} />
+              </>
+            )}
+          </TooltipContent>
+        </Tooltip>
       ))}
     </div>
   );
-
-  // Same wrapper-span trick as ViewOptionButton below: hovering a disabled
-  // control must still explain WHY it's disabled, and per-segment titles are
-  // dropped above so this one wrapper title wins everywhere over the control.
-  return disabled ? <span title={disabledReason}>{picker}</span> : picker;
 }
 
-// The compact replacement for the three-segment Insert control. It is shown
-// by the canvas container query below the narrow breakpoint, so the desktop
-// control can keep its direct-manipulation affordance without making the
-// narrow toolbar carry five adjacent icon buttons.
+// The compact replacement for the segmented Insert control. It is shown by the
+// canvas container query below the narrow breakpoint, so the desktop control
+// can keep its direct-manipulation affordance without making the narrow
+// toolbar carry five adjacent icon buttons. When a tool is armed the trigger
+// stands in for it — the tool's glyph replaces the Plus and its name replaces
+// "Insert" — so identity survives the compact/tight tiers (at tight, the
+// icon-only trigger, the swapped glyph alone carries it).
 function CompactInsertPicker({
   activeTool,
   disabled,
   disabledReason = "Select a wall to place an opening",
+  partition,
   onToolChange
 }: {
   activeTool: OpeningKind | null;
   disabled: boolean;
   disabledReason?: string;
+  partition?: { active: boolean; onToggle: () => void };
   onToolChange: (tool: OpeningKind | null) => void;
 }) {
-  const tools: { kind: OpeningKind; label: string; icon: React.ReactNode }[] = [
-    { kind: "door", label: "Door", icon: <DoorIcon aria-hidden="true" size={16} /> },
-    { kind: "window", label: "Window", icon: <SquareIcon aria-hidden="true" size={16} /> },
-    {
-      kind: "blocked-zone",
-      label: "Blocked zone",
-      icon: <RectangleDashedIcon aria-hidden="true" size={16} />
-    }
+  const tools = [
+    ...OPENING_TOOL_ORDER.map((kind) => ({
+      ...OPENING_TOOL_META[kind],
+      active: activeTool === kind,
+      onSelect: () => onToolChange(activeTool === kind ? null : kind)
+    })),
+    ...(partition
+      ? [{ ...PARTITION_TOOL_META, active: partition.active, onSelect: partition.onToggle }]
+      : [])
   ];
+  const armed = armedInsertMeta(activeTool, partition);
 
-  const menu = (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          aria-label="Insert"
-          className="compact-insert-trigger"
-          data-active={activeTool ? "true" : "false"}
-          disabled={disabled}
-          title={disabled ? undefined : "Insert an opening"}
-          variant="outline"
-        >
-          <PlusIcon aria-hidden="true" size={16} />
-          <span className="compact-insert-label">Insert</span>
-          <CaretDownIcon aria-hidden="true" className="compact-insert-caret" size={14} />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="compact-insert-menu">
-        {tools.map((tool) => (
-          <DropdownMenuItem
-            key={tool.kind}
-            aria-checked={activeTool === tool.kind}
-            className="compact-insert-item"
-            data-active={activeTool === tool.kind ? "true" : "false"}
-            role="menuitemradio"
-            onSelect={() => onToolChange(activeTool === tool.kind ? null : tool.kind)}
-          >
-            {tool.icon}
-            <span>{tool.label}</span>
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+  const triggerButton = (
+    <Button
+      // Names both the control and the armed mode, so the swapped-in glyph is
+      // never the only cue for SR users.
+      aria-label={armed ? `Insert — ${armed.label} armed` : "Insert"}
+      aria-disabled={disabled || undefined}
+      className="compact-insert-trigger"
+      data-active={armed ? "true" : "false"}
+      variant="outline"
+    >
+      {armed ? armed.icon : <PlusIcon aria-hidden="true" size={16} />}
+      <span className="compact-insert-label">{armed ? armed.label : "Insert"}</span>
+      <CaretDownIcon aria-hidden="true" className="compact-insert-caret" size={14} />
+    </Button>
   );
 
-  const picker = <span className="compact-insert-tools">{menu}</span>;
-  return disabled ? <span title={disabledReason}>{picker}</span> : picker;
+  // Disabled: render no menu at all (so the dropdown can never open), just the
+  // fogged aria-disabled trigger under the styled reason Tooltip — reachable
+  // on hover AND focus, replacing the old pointer-only wrapper-span/title hack.
+  if (disabled) {
+    return (
+      <span className="compact-insert-tools">
+        <Tooltip>
+          <TooltipTrigger asChild>{triggerButton}</TooltipTrigger>
+          <TooltipContent className="toolbar-tooltip" side="bottom">
+            {disabledReason}
+          </TooltipContent>
+        </Tooltip>
+      </span>
+    );
+  }
+
+  return (
+    <span className="compact-insert-tools">
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>{triggerButton}</DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent className="toolbar-tooltip" side="bottom">
+            {armed ? (
+              <>
+                {armed.armed}
+                <ToolbarTooltipKbd hint="Esc cancels" />
+              </>
+            ) : partition ? (
+              "Insert an opening or partition"
+            ) : (
+              "Insert an opening"
+            )}
+          </TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="start" className="compact-insert-menu">
+          {tools.map((tool) => (
+            <DropdownMenuItem
+              key={tool.key}
+              aria-checked={tool.active}
+              className="compact-insert-item"
+              data-active={tool.active ? "true" : "false"}
+              role="menuitemradio"
+              onSelect={tool.onSelect}
+            >
+              {tool.icon}
+              <span>{tool.label}</span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </span>
+  );
 }
 
-// The polygon-room draw toggle, sat beside the Insert segmented control in the
-// view-toolbar's primary zone. Same armed-tool conventions as the insert
-// tools: pressed reads in petrol and clicking again disarms. It only renders
-// in Plan, where the mode is meaningful. A labeled Toggle rather than an
-// icon-only segment keeps the drawing mode plain at comfortable widths.
+// The polygon-room draw toggle, past the hairline divider that closes the
+// Insert cluster. Same armed-tool conventions as the insert tools: pressed
+// reads in petrol and clicking again disarms. It only renders in Plan,
+// where the mode is meaningful. A labeled Toggle rather than an icon-only
+// segment keeps the drawing mode plain at comfortable widths. (The
+// partition tool lives inside the Insert cluster now — it inserts a wall.)
 function DrawRoomButton({
   active,
   onToggle
@@ -1944,48 +2115,35 @@ function DrawRoomButton({
   active: boolean;
   onToggle: () => void;
 }) {
-  const toggle = (
-    <Toggle
-      aria-label="Draw room"
-      className="view-option-button"
-      pressed={active}
-      title="Draw a room outline"
-      variant="default"
-      onPressedChange={onToggle}
-    >
-      <PolygonIcon aria-hidden="true" size={16} />
-      <span className="view-option-label">Draw room</span>
-    </Toggle>
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Toggle
+          aria-label="Draw room"
+          className="view-option-button armed-tool"
+          pressed={active}
+          variant="default"
+          onPressedChange={onToggle}
+        >
+          <PolygonIcon aria-hidden="true" size={16} />
+          <span className="view-option-label">Draw room</span>
+        </Toggle>
+      </TooltipTrigger>
+      <TooltipContent className="toolbar-tooltip" side="bottom">
+        {active ? (
+          <>
+            Drawing a room
+            <ToolbarTooltipKbd hint="Esc cancels" />
+          </>
+        ) : (
+          <>
+            Draw a room outline
+            <ToolbarTooltipKbd hint="R" />
+          </>
+        )}
+      </TooltipContent>
+    </Tooltip>
   );
-
-  return toggle;
-}
-
-// The partition (free-standing wall) draw toggle, beside Draw room. It only
-// renders in Plan; the armed-tool convention remains: drag a centerline inside
-// a room to place it.
-function PartitionButton({
-  active,
-  onToggle
-}: {
-  active: boolean;
-  onToggle: () => void;
-}) {
-  const toggle = (
-    <Toggle
-      aria-label="Partition"
-      className="view-option-button"
-      pressed={active}
-      title="Draw a free-standing partition inside a room"
-      variant="default"
-      onPressedChange={onToggle}
-    >
-      <RectangleDashedIcon aria-hidden="true" size={16} />
-      <span className="view-option-label">Partition</span>
-    </Toggle>
-  );
-
-  return toggle;
 }
 
 function ViewOptionButton({
@@ -1993,14 +2151,22 @@ function ViewOptionButton({
   disabled,
   icon,
   label,
+  labelPriority = false,
   title,
+  kbd,
   onClick
 }: {
   active: boolean;
   disabled: boolean;
   icon: React.ReactNode;
   label: string;
+  // Keeps this label through the trimmed density tier (see global.css). Used
+  // for Overlap, whose glyph reads weakest of the view toggles.
+  labelPriority?: boolean;
   title: string;
+  // The single-key accelerator (useToolbarShortcuts), echoed as a dimmed
+  // suffix in the tooltip so the hint teaches the key.
+  kbd?: string;
   onClick: () => void;
 }) {
   const toggle = (
@@ -2013,21 +2179,43 @@ function ViewOptionButton({
       className="view-option-button"
       disabled={disabled}
       pressed={active}
-      title={disabled ? undefined : title}
       variant="default"
       onPressedChange={onClick}
     >
       {icon}
-      <span className="view-option-label">{label}</span>
+      <span
+        className={
+          labelPriority ? "view-option-label view-option-label-priority" : "view-option-label"
+        }
+      >
+        {label}
+      </span>
     </Toggle>
   );
 
   // toggleVariants applies `disabled:pointer-events-none`, so a disabled
-  // Toggle never receives the hover that would trigger its own `title`
-  // tooltip (e.g. the elevation insert row's "Select a wall to place an opening").
-  // A wrapping span keeps receiving pointer events, so the disabled-state
+  // Toggle never receives the hover that would open a Radix tooltip. A
+  // wrapping span keeps receiving pointer events, so the disabled-state
   // title stays reachable on hover instead of silently going dark.
-  return disabled ? <span title={title}>{toggle}</span> : toggle;
+  if (disabled) return <span title={title}>{toggle}</span>;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{toggle}</TooltipTrigger>
+      <TooltipContent className="toolbar-tooltip" side="bottom">
+        {title}
+        {kbd ? <ToolbarTooltipKbd hint={kbd} /> : null}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+// The dimmed, tabular key hint that trails a toolbar tooltip's phrase — e.g.
+// "Show grid — G" or "Placing a door — Esc cancels". A quiet suffix span, not
+// a heavy kbd chip; the "— " separator lives in CSS so callers pass only the
+// hint text.
+function ToolbarTooltipKbd({ hint }: { hint: string }) {
+  return <span className="toolbar-tooltip-kbd">{hint}</span>;
 }
 
 function ThreeDCameraTools({
@@ -2037,36 +2225,61 @@ function ThreeDCameraTools({
   actionsRef: { current: ThreeDViewActions | null };
   canFocus: boolean;
 }) {
+  const focusButton = (
+    <Button
+      className="view-option-button"
+      disabled={!canFocus}
+      variant="inspector"
+      onClick={() => actionsRef.current?.focusSelection()}
+    >
+      <CrosshairIcon aria-hidden="true" size={16} />
+      <span className="view-option-label">Focus selection</span>
+    </Button>
+  );
+
   return (
     <div className="three-camera-tools" role="group" aria-label="3D camera">
-      <Button
-        className="view-option-button"
-        title="Frame the whole layout"
-        variant="inspector"
-        onClick={() => actionsRef.current?.overview()}
-      >
-        <CornersOutIcon aria-hidden="true" size={16} />
-        <span className="view-option-label">Overview</span>
-      </Button>
-      <Button
-        className="view-option-button"
-        title="View the selected wall at eye level"
-        variant="inspector"
-        onClick={() => actionsRef.current?.eyeLevel()}
-      >
-        <EyeIcon aria-hidden="true" size={16} />
-        <span className="view-option-label">Eye level</span>
-      </Button>
-      <Button
-        className="view-option-button"
-        disabled={!canFocus}
-        title="Focus the selected room, wall, or artwork"
-        variant="inspector"
-        onClick={() => actionsRef.current?.focusSelection()}
-      >
-        <CrosshairIcon aria-hidden="true" size={16} />
-        <span className="view-option-label">Focus selection</span>
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            className="view-option-button"
+            variant="inspector"
+            onClick={() => actionsRef.current?.overview()}
+          >
+            <CornersOutIcon aria-hidden="true" size={16} />
+            <span className="view-option-label">Overview</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent className="toolbar-tooltip" side="bottom">
+          Frame the whole layout
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            className="view-option-button"
+            variant="inspector"
+            onClick={() => actionsRef.current?.eyeLevel()}
+          >
+            <EyeIcon aria-hidden="true" size={16} />
+            <span className="view-option-label">Eye level</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent className="toolbar-tooltip" side="bottom">
+          View the selected wall at eye level
+        </TooltipContent>
+      </Tooltip>
+      {canFocus ? (
+        <Tooltip>
+          <TooltipTrigger asChild>{focusButton}</TooltipTrigger>
+          <TooltipContent className="toolbar-tooltip" side="bottom">
+            Focus the selected room, wall, or artwork
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        // Disabled buttons drop pointer events, so the hint rides a span.
+        <span title="Focus the selected room, wall, or artwork">{focusButton}</span>
+      )}
     </div>
   );
 }
@@ -2102,6 +2315,7 @@ function UnitSystemToggle({
   return (
     <div
       className="unit-switch"
+      data-system={system}
       role="group"
       aria-label={`Units: ${labels.imperial} / ${labels.metric}`}
     >
@@ -2168,7 +2382,7 @@ function PrecisionSelect({
 
   return (
     <div className="unit-select">
-      <span className="unit-select-label">Precision</span>
+      <span className="unit-select-label view-option-label-priority">Precision</span>
       <Select
         disabled={disabled}
         value={floorMm === null ? "auto" : String(floorMm)}
@@ -2176,13 +2390,16 @@ function PrecisionSelect({
           onChange(value === "auto" ? null : Number(value))
         }
       >
-        <SelectTrigger
-          className="precision-select-trigger"
-          aria-label="Grid precision"
-          title="Grid precision"
-        >
-          <SelectValue />
-        </SelectTrigger>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <SelectTrigger className="precision-select-trigger" aria-label="Grid precision">
+              <SelectValue />
+            </SelectTrigger>
+          </TooltipTrigger>
+          <TooltipContent className="toolbar-tooltip" side="bottom">
+            Grid precision
+          </TooltipContent>
+        </Tooltip>
         <SelectContent>
           <SelectItem value="auto">Auto</SelectItem>
         {options.map((optionMm) => (

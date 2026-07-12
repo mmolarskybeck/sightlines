@@ -7,6 +7,7 @@ import {
 
 const requiredWidths: Record<ToolbarDensity, number> = {
   comfortable: 1_000,
+  trimmed: 820,
   condensed: 720,
   compact: 520,
   tight: 360
@@ -19,8 +20,14 @@ describe("chooseToolbarDensity", () => {
     );
   });
 
+  it("trims the weakest-need labels one tier before condensing them all", () => {
+    // A ~740px canvas column (this width) no longer fits the full labels but
+    // keeps the priority Overlap + Precision labels the trimmed tier retains.
+    expect(chooseToolbarDensity(850, requiredWidths)).toBe("trimmed");
+  });
+
   it("condenses labels at the first actual fit boundary", () => {
-    expect(chooseToolbarDensity(900, requiredWidths)).toBe("condensed");
+    expect(chooseToolbarDensity(760, requiredWidths)).toBe("condensed");
   });
 
   it("uses the compact Insert menu when condensed controls do not fit", () => {
@@ -32,11 +39,11 @@ describe("chooseToolbarDensity", () => {
   });
 
   it("does not use a layout that only fits exactly at the edge", () => {
-    expect(chooseToolbarDensity(999, requiredWidths)).toBe("condensed");
+    expect(chooseToolbarDensity(999, requiredWidths)).toBe("trimmed");
   });
 
   it("supports a larger buffer for touch and visual breathing room", () => {
     expect(chooseToolbarDensity(1_008, requiredWidths, 8)).toBe("comfortable");
-    expect(chooseToolbarDensity(1_007, requiredWidths, 8)).toBe("condensed");
+    expect(chooseToolbarDensity(1_007, requiredWidths, 8)).toBe("trimmed");
   });
 });
