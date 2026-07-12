@@ -19,6 +19,7 @@ function renderHarness(
   const handlers = {
     armOpeningTool: vi.fn((_tool: OpeningKind | null) => {}),
     togglePartitionTool: vi.fn(() => {}),
+    toggleDrawRect: vi.fn(() => {}),
     toggleDrawRoom: vi.fn(() => {}),
     toggleShowGrid: vi.fn(() => {}),
     toggleSnapToGrid: vi.fn(() => {}),
@@ -79,18 +80,32 @@ describe("useToolbarShortcuts", () => {
     expect(plan.toggleAllowOverlappingPlacement).toHaveBeenCalledTimes(1);
   });
 
-  it("scopes Partition and Draw room to plan only", () => {
+  it("scopes Partition and the room-draw tools to plan only", () => {
     const plan = renderHarness({ viewMode: "plan" });
     press("p");
     press("r");
     expect(plan.togglePartitionTool).toHaveBeenCalledTimes(1);
-    expect(plan.toggleDrawRoom).toHaveBeenCalledTimes(1);
+    expect(plan.toggleDrawRect).toHaveBeenCalledTimes(1);
 
     const elevation = renderHarness({ viewMode: "elevation" });
     press("p");
     press("r");
     expect(elevation.togglePartitionTool).not.toHaveBeenCalled();
+    expect(elevation.toggleDrawRect).not.toHaveBeenCalled();
     expect(elevation.toggleDrawRoom).not.toHaveBeenCalled();
+  });
+
+  it("maps R to the rectangle room and ⇧R to the polygon outline", () => {
+    const plain = renderHarness({ viewMode: "plan" });
+    press("r");
+    expect(plain.toggleDrawRect).toHaveBeenCalledTimes(1);
+    expect(plain.toggleDrawRoom).not.toHaveBeenCalled();
+
+    // Uppercase "R" with shift held selects the outline variant instead.
+    const shifted = renderHarness({ viewMode: "plan" });
+    press("R", { shiftKey: true });
+    expect(shifted.toggleDrawRoom).toHaveBeenCalledTimes(1);
+    expect(shifted.toggleDrawRect).not.toHaveBeenCalled();
   });
 
   it("scopes Eyeline to elevation only", () => {

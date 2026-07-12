@@ -413,6 +413,7 @@ export function App() {
   const {
     mode: planMode,
     armOpeningTool,
+    toggleDrawRect,
     toggleDrawRoom,
     toggleReshapeRoom,
     togglePartitionTool,
@@ -422,6 +423,7 @@ export function App() {
   // (PlanView, the view-toolbar buttons, RoomInspector's "Edit shape") keeps
   // reading these exact shapes, derived fresh each render from planMode.
   const activeTool = planMode.kind === "placeOpening" ? planMode.tool : null;
+  const drawRectActive = planMode.kind === "drawRect";
   const drawRoomActive = planMode.kind === "drawRoom";
   const reshapeRoomId = planMode.kind === "reshapeRoom" ? planMode.roomId : null;
   const partitionToolActive = planMode.kind === "drawPartition";
@@ -432,6 +434,13 @@ export function App() {
   // route that back to "idle" directly, and (for completeness, though never
   // observed) arm the mode via the same toggle used by the view-toolbar
   // button when called with `true` while it isn't already active.
+  const setDrawRectActive = (active: boolean) => {
+    if (!active) {
+      if (planMode.kind === "drawRect") disarmPlanMode();
+    } else if (planMode.kind !== "drawRect") {
+      toggleDrawRect();
+    }
+  };
   const setDrawRoomActive = (active: boolean) => {
     if (!active) {
       if (planMode.kind === "drawRoom") disarmPlanMode();
@@ -596,6 +605,7 @@ export function App() {
     activeTool,
     armOpeningTool,
     togglePartitionTool,
+    toggleDrawRect,
     toggleDrawRoom,
     toggleShowGrid,
     toggleSnapToGrid,
