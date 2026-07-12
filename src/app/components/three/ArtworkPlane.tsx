@@ -13,7 +13,7 @@ import {
   isUncertain,
   SelectionRectOutline
 } from "./UncertaintyOutline";
-import { MAT_FILL_COLOR, PLACEHOLDER_COLOR } from "./tokens";
+import { GHOST_OPACITY, MAT_FILL_COLOR, PLACEHOLDER_COLOR } from "./tokens";
 
 // Outlines sit slightly proud of whatever face they wrap (the image plane, or
 // the frame's front face when framed) so they never z-fight it.
@@ -36,7 +36,8 @@ export function ArtworkPlane({
   matWidthMm,
   frame,
   isSelected,
-  onSelect
+  onSelect,
+  ghosted = false
 }: {
   artwork: WallArtwork3d;
   texture: Texture | undefined;
@@ -44,6 +45,9 @@ export function ArtworkPlane({
   frame?: ArtworkFrame;
   isSelected: boolean;
   onSelect: (objectId: string, opts: { additive: boolean }) => void;
+  // The wall this work hangs on crosses the active eye-level sightline: the
+  // work fades with its wall, and outlines drop out entirely.
+  ghosted?: boolean;
 }) {
   // Known/approximate placements fill their rect exactly as before. An
   // unknown-dimension placement has a placeholder rect whose aspect is
@@ -104,7 +108,13 @@ export function ArtworkPlane({
                   mmToWorld(layout.frameDepthMm)
                 ]}
               />
-              <meshLambertMaterial color={frameFill} />
+              <meshLambertMaterial
+                key={ghosted ? "ghosted" : "solid"}
+                color={frameFill}
+                transparent={ghosted}
+                opacity={ghosted ? GHOST_OPACITY : 1}
+                depthWrite={!ghosted}
+              />
             </mesh>
           ))}
           {[1, -1].map((sign) => (
@@ -120,7 +130,13 @@ export function ArtworkPlane({
                   mmToWorld(layout.frameDepthMm)
                 ]}
               />
-              <meshLambertMaterial color={frameFill} />
+              <meshLambertMaterial
+                key={ghosted ? "ghosted" : "solid"}
+                color={frameFill}
+                transparent={ghosted}
+                opacity={ghosted ? GHOST_OPACITY : 1}
+                depthWrite={!ghosted}
+              />
             </mesh>
           ))}
         </group>
@@ -133,7 +149,13 @@ export function ArtworkPlane({
           <planeGeometry
             args={[mmToWorld(layout.openingWidthMm), mmToWorld(layout.openingHeightMm)]}
           />
-          <meshLambertMaterial color={MAT_FILL_COLOR} />
+          <meshLambertMaterial
+            key={ghosted ? "ghosted" : "solid"}
+            color={MAT_FILL_COLOR}
+            transparent={ghosted}
+            opacity={ghosted ? GHOST_OPACITY : 1}
+            depthWrite={!ghosted}
+          />
         </mesh>
       ) : null}
       <mesh
@@ -144,12 +166,25 @@ export function ArtworkPlane({
       >
         <planeGeometry args={[width, height]} />
         {texture ? (
-          <meshBasicMaterial map={texture} toneMapped={false} />
+          <meshBasicMaterial
+            key={ghosted ? "ghosted" : "solid"}
+            map={texture}
+            toneMapped={false}
+            transparent={ghosted}
+            opacity={ghosted ? GHOST_OPACITY : 1}
+            depthWrite={!ghosted}
+          />
         ) : (
-          <meshLambertMaterial color={PLACEHOLDER_COLOR} />
+          <meshLambertMaterial
+            key={ghosted ? "ghosted" : "solid"}
+            color={PLACEHOLDER_COLOR}
+            transparent={ghosted}
+            opacity={ghosted ? GHOST_OPACITY : 1}
+            depthWrite={!ghosted}
+          />
         )}
       </mesh>
-      {isUncertain(artwork.status) ? (
+      {!ghosted && isUncertain(artwork.status) ? (
         // Outline wraps the OUTER rect (image + mat + frame), matching
         // elevation's outerRect, seated at the frame front (or image) depth.
         <group position={[0, 0, mmToWorld(layout.outlineZMm + OUTLINE_OFFSET_MM)]}>
@@ -160,7 +195,7 @@ export function ArtworkPlane({
           />
         </group>
       ) : null}
-      {isSelected ? (
+      {!ghosted && isSelected ? (
         <group position={[0, 0, mmToWorld(layout.outlineZMm + OUTLINE_OFFSET_MM * 2)]}>
           <SelectionRectOutline
             widthMm={layout.outerWidthMm}

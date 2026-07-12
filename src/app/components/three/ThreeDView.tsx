@@ -1,6 +1,6 @@
 import { OrbitControls } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Box3, MathUtils, PerspectiveCamera, Plane, TOUCH, Vector2, Vector3 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { parseFaceWallId } from "../../../domain/geometry/freestandingWalls";
@@ -9,6 +9,7 @@ import {
   wallInwardNormal,
   type Room3d,
   type Scene3d,
+  type WallArtwork3d,
   type WallPanel3d
 } from "../../../domain/geometry/scene3d";
 import type { Artwork, Project } from "../../../domain/project";
@@ -17,6 +18,10 @@ import {
   ORBIT_MAX_DISTANCE,
   ORBIT_MIN_DISTANCE,
   clampFocusDistance,
+  eyeLevelArtworkDistanceMm,
+  eyeLevelWallDistanceMm,
+  sightlineOccluders,
+  type SightlineSegment,
   normalizeWheelDeltaY,
   travelStepDistance,
   updateCameraClipping,
@@ -35,11 +40,6 @@ const CAMERA_FOV_DEG = 50;
 // Preset flights are quick enough to stay an instrument, slow enough to keep
 // spatial continuity.
 const FLIGHT_MS = 600;
-
-// Eye-level standoff bounds (spec §4.2): far enough back to read the hang,
-// never through the opposite wall.
-const EYE_MIN_STANDOFF_MM = 1200;
-const EYE_DEPTH_FRACTION = 0.8;
 
 // A click that traveled further than this (px) was an orbit drag, not a
 // selection (browsers still fire click after a drag on the same element).
@@ -151,7 +151,11 @@ function roomWallPanels(room: Room3d): WallPanel3d[] {
 
 type CameraRigApi = {
   overview: () => void;
-  eyeLevel: (wall: WallPanel3d, eyeHeightMm: number) => void;
+  eyeLevel: (
+    wall: WallPanel3d,
+    artwork: WallArtwork3d | null,
+    eyeHeightMm: number
+  ) => ReadonlySet<string>;
   focus: (target: Vector3) => void;
   frameRoom: (room: Room3d) => void;
   focusFloorUnderCursor: (clientX: number, clientY: number) => void;
@@ -236,49 +240,105 @@ function overviewPose(scene: Scene3d, aspect: number): CameraPose | null {
   return { position, target };
 }
 
-// A standing viewpoint facing `wall` (spec §4.2): eye at the project's
-// centerline height, backed off along the wall's inward normal — 80% of the
-// room's depth behind that wall, never closer than EYE_MIN_STANDOFF_MM. The
-// orbit target moves to the wall's center at eye height so subsequent
-// orbiting pivots around what you're looking at.
-function eyeLevelPose(
+// Every candidate occluder in the scene, floor-space: perimeter walls carry
+// their inward normal (single-sided — seen from outside they're already
+// back-face culled, WallPanel's dollhouse note), partition slabs are opaque
+// from both sides so they carry none.
+function sceneSightlineSegments(scene: Scene3d): SightlineSegment[] {
+  return scene.rooms.flatMap((room) => [
+    ...room.walls.map((wall) => ({
+      id: wall.wallId,
+      start: wall.start,
+      end: wall.end,
+      facing: wallInwardNormal(wall)
+    })),
+    ...room.freestandingWalls.map((partition) => ({
+      id: partition.freestandingWallId,
+      start: partition.capOutline.start,
+      end: partition.capOutline.end
+    }))
+  ]);
+}
+
+// A standing viewpoint facing the SELECTED thing (spec §4.2): the whole wall
+// framed in the frustum when the wall drove the preset, the work plus
+// breathing room when a specific artwork did — camera level at the project's
+// eye height either way. The standoff comes from the framing fit alone;
+// anything crossing the sightline (partition slabs, interior-facing walls in
+// an L-shaped room) is returned for the render layer to GHOST rather than the
+// camera creeping closer — position is framing's job, visibility is
+// ghosting's. The fit may stand outside the room; the dollhouse back-face
+// culling already opens that view.
+function eyeLevelView(
   scene: Scene3d,
   wall: WallPanel3d,
-  eyeHeightMm: number
-): CameraPose {
-  const centerXMm = (wall.start.xMm + wall.end.xMm) / 2;
-  const centerYMm = (wall.start.yMm + wall.end.yMm) / 2;
+  artwork: WallArtwork3d | null,
+  eyeHeightMm: number,
+  aspect: number
+): { pose: CameraPose; ghostedIds: ReadonlySet<string> } {
   const { xMm: normalX, yMm: normalY } = wallInwardNormal(wall);
-
-  // Room depth behind this wall: the farthest floor vertex measured along the
-  // inward normal, across the room that owns the wall. For a partition face,
-  // find the owning room via its centerline id — the face's outward normal
-  // still points into the room on that side, so the depth probe holds; the
-  // Math.max clamp below covers the advisory outside-the-polygon case.
-  const faceRef = parseFaceWallId(wall.wallId);
-  const room = faceRef
-    ? scene.rooms.find((candidate) =>
-        candidate.freestandingWalls.some(
-          (partition) => partition.freestandingWallId === faceRef.freestandingWallId
-        )
-      )
-    : scene.rooms.find((candidate) => candidate.walls.some((w) => w.wallId === wall.wallId));
-  let depthMm = EYE_MIN_STANDOFF_MM;
-  for (const point of room?.floorPolygon ?? []) {
-    const along =
-      (point.xMm - centerXMm) * normalX + (point.yMm - centerYMm) * normalY;
-    depthMm = Math.max(depthMm, along);
-  }
-  const standoffMm = Math.max(EYE_MIN_STANDOFF_MM, depthMm * EYE_DEPTH_FRACTION);
-
-  const eyeY = eyeHeightMm * MM_TO_WORLD;
-  const target = new Vector3(centerXMm * MM_TO_WORLD, eyeY, centerYMm * MM_TO_WORLD);
-  const position = new Vector3(
-    (centerXMm + normalX * standoffMm) * MM_TO_WORLD,
-    eyeY,
-    (centerYMm + normalY * standoffMm) * MM_TO_WORLD
+  const wallLengthMm = Math.hypot(
+    wall.end.xMm - wall.start.xMm,
+    wall.end.yMm - wall.start.yMm
   );
-  return { position, target };
+
+  let targetFloor: { xMm: number; yMm: number };
+  let targetHeightMm: number;
+  let distanceMm: number;
+  if (artwork) {
+    const ux = (wall.end.xMm - wall.start.xMm) / wallLengthMm;
+    const uy = (wall.end.yMm - wall.start.yMm) / wallLengthMm;
+    targetFloor = {
+      xMm: wall.start.xMm + ux * artwork.xMm,
+      yMm: wall.start.yMm + uy * artwork.xMm
+    };
+    // Aim at the work's actual hang point — a slight upward gaze at a
+    // high-hung work is the natural standing read.
+    targetHeightMm = artwork.yMm;
+    distanceMm = eyeLevelArtworkDistanceMm(artwork.widthMm, artwork.heightMm);
+  } else {
+    targetFloor = {
+      xMm: (wall.start.xMm + wall.end.xMm) / 2,
+      yMm: (wall.start.yMm + wall.end.yMm) / 2
+    };
+    targetHeightMm = eyeHeightMm;
+    distanceMm = eyeLevelWallDistanceMm(
+      wallLengthMm,
+      wall.heightMm,
+      eyeHeightMm,
+      MathUtils.degToRad(CAMERA_FOV_DEG),
+      aspect
+    );
+  }
+
+  const cameraFloor = {
+    xMm: targetFloor.xMm + normalX * distanceMm,
+    yMm: targetFloor.yMm + normalY * distanceMm
+  };
+  const pose: CameraPose = {
+    target: new Vector3(
+      targetFloor.xMm * MM_TO_WORLD,
+      targetHeightMm * MM_TO_WORLD,
+      targetFloor.yMm * MM_TO_WORLD
+    ),
+    position: new Vector3(
+      cameraFloor.xMm * MM_TO_WORLD,
+      eyeHeightMm * MM_TO_WORLD,
+      cameraFloor.yMm * MM_TO_WORLD
+    )
+  };
+
+  // Belt-and-braces exclusion: the viewed wall sits AT the target (t≈1, which
+  // the occluder test already rejects), and a viewed partition face's own
+  // slab sits behind the ray start.
+  const faceRef = parseFaceWallId(wall.wallId);
+  const exclude = new Set(
+    faceRef ? [wall.wallId, faceRef.freestandingWallId] : [wall.wallId]
+  );
+  const ghostedIds = new Set(
+    sightlineOccluders(cameraFloor, targetFloor, sceneSightlineSegments(scene), exclude)
+  );
+  return { pose, ghostedIds };
 }
 
 function easeInOutCubic(t: number): number {
@@ -411,8 +471,10 @@ function CameraRig({
         const target = bounds.getCenter(new Vector3());
         flyTo({ target, position: target.clone().addScaledVector(direction, distance) });
       },
-      eyeLevel: (wall, eyeHeightMm) => {
-        flyTo(eyeLevelPose(sceneRef.current, wall, eyeHeightMm));
+      eyeLevel: (wall, artwork, eyeHeightMm) => {
+        const view = eyeLevelView(sceneRef.current, wall, artwork, eyeHeightMm, aspect());
+        flyTo(view.pose);
+        return view.ghostedIds;
       }
     };
   });
@@ -606,39 +668,45 @@ function KeyboardTravel() {
 // Eye-level target wall priority (spec §4.2): selected wall, then the wall
 // holding the selected artwork placement, then the longest wall, then the
 // first.
+// A selected ARTWORK takes precedence over the wall context: the wall context
+// lingers from placement, but a picked work is what the user is judging — eye
+// level frames it, not its wall's midpoint. Wall selection frames the whole
+// wall; with nothing selected, the longest wall stands in.
 function pickEyeLevelWall(
   scene: Scene3d,
   selectedWallId: string | null,
   selectedObjectIds: string[],
   selectedArtworkId: string | null
-): WallPanel3d | null {
+): { wall: WallPanel3d; artwork: WallArtwork3d | null } | null {
   const walls = scene.rooms.flatMap(roomWallPanels);
   if (walls.length === 0) return null;
 
+  for (const wall of walls) {
+    const artwork = wall.artworks.find(
+      (candidate) =>
+        selectedObjectIds.includes(candidate.objectId) ||
+        candidate.artworkId === selectedArtworkId
+    );
+    if (artwork) return { wall, artwork };
+  }
+
   if (selectedWallId) {
     const wall = walls.find((w) => w.wallId === selectedWallId);
-    if (wall) return wall;
+    if (wall) return { wall, artwork: null };
   }
-  const holdingSelected = walls.find((wall) =>
-    wall.artworks.some(
-      (artwork) =>
-        selectedObjectIds.includes(artwork.objectId) ||
-        artwork.artworkId === selectedArtworkId
-    )
-  );
-  if (holdingSelected) return holdingSelected;
 
-  return walls.reduce((longest, wall) => {
+  const longest = walls.reduce((best, wall) => {
     const length = Math.hypot(
       wall.end.xMm - wall.start.xMm,
       wall.end.yMm - wall.start.yMm
     );
-    const longestLength = Math.hypot(
-      longest.end.xMm - longest.start.xMm,
-      longest.end.yMm - longest.start.yMm
+    const bestLength = Math.hypot(
+      best.end.xMm - best.start.xMm,
+      best.end.yMm - best.start.yMm
     );
-    return length > longestLength ? wall : longest;
+    return length > bestLength ? wall : best;
   }, walls[0]);
+  return { wall: longest, artwork: null };
 }
 
 function wallFocusTarget(wall: WallPanel3d): Vector3 {
@@ -781,6 +849,17 @@ export function ThreeDView({
   // Where the pointer went down, to tell a click from an orbit-drag release
   // in onPointerMissed (mesh handlers get the same guard via event.delta).
   const pointerDownAt = useRef<{ x: number; y: number } | null>(null);
+  // Walls/partitions ghosted because they cross the eye-level sightline. The
+  // session ref keeps ghosting live across orbits (each orbit-end recomputes
+  // the set from the new sightline) until another preset ends the session.
+  const [ghostedWallIds, setGhostedWallIds] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
+  const ghostSessionRef = useRef(false);
+  const endGhostSession = () => {
+    ghostSessionRef.current = false;
+    setGhostedWallIds((current) => (current.size === 0 ? current : new Set()));
+  };
 
   useEffect(() => {
     if (!benchmarkEnabled) return;
@@ -801,16 +880,25 @@ export function ThreeDView({
     }
 
     actionsRef.current = {
-      overview: () => rigApi.current?.overview(),
+      overview: () => {
+        endGhostSession();
+        rigApi.current?.overview();
+      },
       eyeLevel: () => {
-        const wall = pickEyeLevelWall(
+        const picked = pickEyeLevelWall(
           scene,
           selectedWallId,
           selectedObjectIds,
           selectedArtworkId
         );
-        if (wall) {
-          rigApi.current?.eyeLevel(wall, project.defaultCenterlineHeightMm);
+        if (picked) {
+          const ghosted = rigApi.current?.eyeLevel(
+            picked.wall,
+            picked.artwork,
+            project.defaultCenterlineHeightMm
+          );
+          ghostSessionRef.current = true;
+          setGhostedWallIds(ghosted ?? new Set());
         }
       },
       focusSelection: () => {
@@ -822,6 +910,7 @@ export function ThreeDView({
           selectedArtworkId
         );
         if (!selection) return;
+        endGhostSession();
         if (selection.kind === "room") rigApi.current?.frameRoom(selection.room);
         else rigApi.current?.focus(selection.point);
       }
@@ -920,7 +1009,11 @@ export function ThreeDView({
           onSelectWall={onSelectWall}
           onSelectObject={onSelectObject}
           onClearSelection={onClearSelection}
-          onFocusPoint={(point) => rigApi.current?.focus(point)}
+          onFocusPoint={(point) => {
+            endGhostSession();
+            rigApi.current?.focus(point);
+          }}
+          ghostedWallIds={ghostedWallIds}
         />
         <OrbitControls
           makeDefault
@@ -929,6 +1022,27 @@ export function ThreeDView({
           minDistance={ORBIT_MIN_DISTANCE}
           maxDistance={ORBIT_MAX_DISTANCE}
           maxPolarAngle={Math.PI / 2}
+          // While an eye-level ghost session is live, each orbit re-derives
+          // which walls/partitions cross the new sightline — obstructions
+          // un-ghost as you swing past them and new ones fade in.
+          onEnd={(event) => {
+            if (!ghostSessionRef.current) return;
+            const controls = event?.target as OrbitControlsImpl | undefined;
+            if (!controls) return;
+            const cameraFloor = {
+              xMm: controls.object.position.x / MM_TO_WORLD,
+              yMm: controls.object.position.z / MM_TO_WORLD
+            };
+            const targetFloor = {
+              xMm: controls.target.x / MM_TO_WORLD,
+              yMm: controls.target.z / MM_TO_WORLD
+            };
+            setGhostedWallIds(
+              new Set(
+                sightlineOccluders(cameraFloor, targetFloor, sceneSightlineSegments(scene))
+              )
+            );
+          }}
           // One finger pans like a map; two fingers pinch-zoom and twist to
           // orbit. Touch-only — mouse bindings unchanged.
           touches={{ ONE: TOUCH.PAN, TWO: TOUCH.DOLLY_ROTATE }}

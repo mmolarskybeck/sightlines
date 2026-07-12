@@ -24,7 +24,8 @@ export function SceneRooms({
   onSelectWall,
   onSelectObject,
   onClearSelection,
-  onFocusPoint
+  onFocusPoint,
+  ghostedWallIds
 }: {
   scene: Scene3d;
   getBlob: (key: string) => Promise<Blob>;
@@ -38,6 +39,10 @@ export function SceneRooms({
   onSelectObject: (objectId: string, opts: { additive: boolean }) => void;
   onClearSelection: () => void;
   onFocusPoint: (point: Vector3) => void;
+  // Walls (by wallId) and partitions (by freestandingWallId) crossing the
+  // active eye-level sightline — rendered ghosted so the viewed wall stays
+  // readable behind them (spec §4.2).
+  ghostedWallIds: ReadonlySet<string>;
 }) {
   const assetIds = useMemo(
     () => [
@@ -86,6 +91,7 @@ export function SceneRooms({
               selectedArtworkId={selectedArtworkId}
               onSelectWall={onSelectWall}
               onSelectObject={onSelectObject}
+              ghosted={ghostedWallIds.has(wall.wallId)}
             />
           ))}
           {room.freestandingWalls.map((partition) => (
@@ -99,6 +105,7 @@ export function SceneRooms({
               selectedWallId={selectedWallId}
               onSelectWall={onSelectWall}
               onSelectObject={onSelectObject}
+              ghosted={ghostedWallIds.has(partition.freestandingWallId)}
             />
           ))}
         </group>

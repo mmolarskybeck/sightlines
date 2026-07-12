@@ -93,7 +93,13 @@ export function LengthField({
     }
 
     if (positiveOnly && parsed.valueMm <= 0) {
-      setError(`${label} must be greater than zero.`);
+      // A clearable band (mat, frame) treats "none" as an empty field — say
+      // so, since typing 0 is the natural first guess for removing it.
+      setError(
+        clearable
+          ? `${label} must be greater than zero. Leave the field empty for none.`
+          : `${label} must be greater than zero.`
+      );
       return;
     }
 

@@ -92,6 +92,15 @@ export const MAT_FILL_COLOR = "#F5F5F2";
 export const BLOCKED_ZONE_COLOR = "#565b60";
 
 // ============================================================================
+// Eye-level ghosting
+// ============================================================================
+
+// Opacity for walls/partitions standing across the eye-level sightline: the
+// obstruction fades to a readable hint instead of the camera creeping closer
+// (position is framing's job, visibility is ghosting's — spec §4.2).
+export const GHOST_OPACITY = 0.15;
+
+// ============================================================================
 // Uncertainty and selection indicators
 // ============================================================================
 

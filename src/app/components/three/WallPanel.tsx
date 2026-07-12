@@ -7,6 +7,7 @@ import { ArtworkPlane } from "./ArtworkPlane";
 import { mmToWorld, MM_TO_WORLD } from "./coordinates";
 import {
   BLOCKED_ZONE_COLOR,
+  GHOST_OPACITY,
   OPENING_CAP_COLOR,
   WALL_COLOR,
   WALL_SELECTED_COLOR,
@@ -38,7 +39,8 @@ export function WallPanel({
   selectedObjectIds,
   selectedArtworkId,
   onSelectWall,
-  onSelectObject
+  onSelectObject,
+  ghosted = false
 }: {
   wall: WallPanel3d;
   texturesByAssetId: ReadonlyMap<string, Texture>;
@@ -51,6 +53,9 @@ export function WallPanel({
   selectedArtworkId: string | null;
   onSelectWall: (wallId: string) => void;
   onSelectObject: (objectId: string, opts: { additive: boolean }) => void;
+  // The wall crosses the active eye-level sightline: fade it (and everything
+  // riding on it) to a hint so the viewed wall reads through.
+  ghosted?: boolean;
 }) {
   const { originX, originZ, rotationY, lengthWorld, heightWorld } = useMemo(() => {
     const dxMm = wall.end.xMm - wall.start.xMm;
@@ -112,7 +117,13 @@ export function WallPanel({
   return (
     <group position={[originX, 0, originZ]} rotation={[0, rotationY, 0]}>
       <mesh geometry={geometry} onClick={handleWallClick}>
-        <meshLambertMaterial color={isSelected ? WALL_SELECTED_COLOR : WALL_COLOR} />
+        <meshLambertMaterial
+          key={ghosted ? "ghosted" : "solid"}
+          color={isSelected ? WALL_SELECTED_COLOR : WALL_COLOR}
+          transparent={ghosted}
+          opacity={ghosted ? GHOST_OPACITY : 1}
+          depthWrite={!ghosted}
+        />
       </mesh>
       {wall.holes
         .filter((hole) => hole.treatment === "capped")
@@ -133,15 +144,24 @@ export function WallPanel({
               ]}
             />
             <meshLambertMaterial
+              key={ghosted ? "ghosted" : "solid"}
               color={hole.kind === "window" ? WINDOW_CAP_COLOR : OPENING_CAP_COLOR}
-              transparent={hole.kind === "window"}
-              opacity={hole.kind === "window" ? WINDOW_CAP_OPACITY : 1}
+              transparent={ghosted || hole.kind === "window"}
+              opacity={
+                ghosted
+                  ? GHOST_OPACITY
+                  : hole.kind === "window"
+                    ? WINDOW_CAP_OPACITY
+                    : 1
+              }
+              depthWrite={!ghosted}
             />
           </mesh>
         ))}
       {wall.blockedZones.map((zone, index) => (
         <mesh
           key={index}
+          visible={!ghosted}
           position={[
             mmToWorld((zone.xMinMm + zone.xMaxMm) / 2),
             mmToWorld((zone.yMinMm + zone.yMaxMm) / 2),
@@ -176,6 +196,7 @@ export function WallPanel({
               artwork.artworkId === selectedArtworkId
             }
             onSelect={onSelectObject}
+            ghosted={ghosted}
           />
         );
       })}

@@ -69,6 +69,92 @@ export function travelStepDistance(
   return speed * Math.min(frameDelta, MAX_TRAVEL_FRAME_DELTA);
 }
 
+// Eye level never lands closer than this (~6ft): a natural standing viewing
+// distance — closer reads as pressing your nose to the work.
+export const EYE_MIN_VIEW_MM = 1800;
+// Breathing room multiplier on the exact frustum fit.
+export const EYE_FIT_MARGIN = 1.08;
+// Artwork viewing rule of thumb: stand about 1.5 diagonals back.
+export const EYE_ARTWORK_DIAGONALS = 1.5;
+
+// Standoff that fits a WHOLE wall from a camera held level at eye height:
+// horizontal fit of the wall's length, plus vertical fit of the asymmetric
+// extents — the wall spans floor..height around an eye that sits low, so the
+// extent above the eye usually governs. Obstructions never shorten this;
+// they're ghosted by the render layer instead (position is framing's job,
+// visibility is ghosting's).
+export function eyeLevelWallDistanceMm(
+  wallLengthMm: number,
+  wallHeightMm: number,
+  eyeHeightMm: number,
+  fovVerticalRad: number,
+  aspect: number
+): number {
+  const halfV = fovVerticalRad / 2;
+  const halfH = Math.atan(Math.tan(halfV) * aspect);
+  const widthFit = wallLengthMm / 2 / Math.tan(halfH);
+  const heightFit =
+    Math.max(wallHeightMm - eyeHeightMm, eyeHeightMm) / Math.tan(halfV);
+  return Math.max(EYE_MIN_VIEW_MM, EYE_FIT_MARGIN * Math.max(widthFit, heightFit));
+}
+
+// Standing distance for one work: ~1.5 diagonals of its rect, floored at the
+// minimum standing distance so small works don't pull the camera into them.
+export function eyeLevelArtworkDistanceMm(widthMm: number, heightMm: number): number {
+  return Math.max(
+    EYE_MIN_VIEW_MM,
+    EYE_ARTWORK_DIAGONALS * Math.hypot(widthMm, heightMm)
+  );
+}
+
+export type SightlineSegment = {
+  id: string;
+  start: { xMm: number; yMm: number };
+  end: { xMm: number; yMm: number };
+  // Present for single-sided perimeter walls: they only occlude when the
+  // camera sits on this (inward) side — seen from outside they're already
+  // back-face culled (the dollhouse effect, see WallPanel). Absent for
+  // partition slabs, which are opaque from both sides.
+  facing?: { xMm: number; yMm: number };
+};
+
+// Every segment crossing the OPEN sight segment camera -> target in floor
+// space — the set the render layer ghosts while an eye-level view is active.
+// Endpoint hits don't count: the viewed wall sits exactly at the target and
+// must never ghost itself.
+export function sightlineOccluders(
+  camera: { xMm: number; yMm: number },
+  target: { xMm: number; yMm: number },
+  segments: readonly SightlineSegment[],
+  excludeIds: ReadonlySet<string> = new Set()
+): string[] {
+  const rx = target.xMm - camera.xMm;
+  const ry = target.yMm - camera.yMm;
+  const occluders: string[] = [];
+  for (const segment of segments) {
+    if (excludeIds.has(segment.id)) continue;
+    const dx = segment.end.xMm - segment.start.xMm;
+    const dy = segment.end.yMm - segment.start.yMm;
+    const denom = rx * dy - ry * dx;
+    // Parallel to the sightline — never crosses it.
+    if (Math.abs(denom) < 1e-9) continue;
+    const ax = segment.start.xMm - camera.xMm;
+    const ay = segment.start.yMm - camera.yMm;
+    // Sight segment camera + t·r meets occluder start + s·d.
+    const t = (ax * dy - ay * dx) / denom;
+    const s = (ax * ry - ay * rx) / denom;
+    if (t <= 0.001 || t >= 0.999 || s < 0 || s > 1) continue;
+    if (segment.facing) {
+      const side =
+        (camera.xMm - segment.start.xMm) * segment.facing.xMm +
+        (camera.yMm - segment.start.yMm) * segment.facing.yMm;
+      if (side <= 0) continue;
+    }
+    occluders.push(segment.id);
+  }
+  return occluders;
+}
+
 // Near/far bracket the camera around its orbit distance so precision stays
 // even across the scene's scale — the standoff-derived clipping applyPose and
 // the wheel dolly both rely on.

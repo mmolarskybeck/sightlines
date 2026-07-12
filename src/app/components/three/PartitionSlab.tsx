@@ -3,7 +3,7 @@ import type { Texture } from "three";
 import type { Artwork } from "../../../domain/project";
 import type { FreestandingWall3d } from "../../../domain/geometry/scene3d";
 import { MM_TO_WORLD } from "./coordinates";
-import { WALL_COLOR } from "./tokens";
+import { GHOST_OPACITY, WALL_COLOR } from "./tokens";
 import { WallPanel } from "./WallPanel";
 
 // A partition slab (spec §7.1): the two derived faces render as ordinary
@@ -19,7 +19,8 @@ export function PartitionSlab({
   selectedArtworkId,
   selectedWallId,
   onSelectWall,
-  onSelectObject
+  onSelectObject,
+  ghosted = false
 }: {
   partition: FreestandingWall3d;
   texturesByAssetId: ReadonlyMap<string, Texture>;
@@ -29,6 +30,9 @@ export function PartitionSlab({
   selectedWallId: string | null;
   onSelectWall: (wallId: string) => void;
   onSelectObject: (objectId: string, opts: { additive: boolean }) => void;
+  // The slab crosses the active eye-level sightline: both faces and the caps
+  // fade to a hint so the viewed wall reads through.
+  ghosted?: boolean;
 }) {
   const { originX, originZ, rotationY, lengthWorld, thicknessWorld, heightWorld } =
     useMemo(() => {
@@ -59,6 +63,7 @@ export function PartitionSlab({
           selectedArtworkId={selectedArtworkId}
           onSelectWall={onSelectWall}
           onSelectObject={onSelectObject}
+          ghosted={ghosted}
         />
       ))}
       {/* Caps in the slab's local frame (origin at the centerline start, +x
@@ -67,15 +72,36 @@ export function PartitionSlab({
       <group position={[originX, 0, originZ]} rotation={[0, rotationY, 0]}>
         <mesh position={[lengthWorld / 2, heightWorld, 0]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[lengthWorld, thicknessWorld]} />
-          <meshLambertMaterial color={WALL_COLOR} side={2} />
+          <meshLambertMaterial
+            key={ghosted ? "ghosted" : "solid"}
+            color={WALL_COLOR}
+            side={2}
+            transparent={ghosted}
+            opacity={ghosted ? GHOST_OPACITY : 1}
+            depthWrite={!ghosted}
+          />
         </mesh>
         <mesh position={[0, heightWorld / 2, 0]} rotation={[0, -Math.PI / 2, 0]}>
           <planeGeometry args={[thicknessWorld, heightWorld]} />
-          <meshLambertMaterial color={WALL_COLOR} side={2} />
+          <meshLambertMaterial
+            key={ghosted ? "ghosted" : "solid"}
+            color={WALL_COLOR}
+            side={2}
+            transparent={ghosted}
+            opacity={ghosted ? GHOST_OPACITY : 1}
+            depthWrite={!ghosted}
+          />
         </mesh>
         <mesh position={[lengthWorld, heightWorld / 2, 0]} rotation={[0, Math.PI / 2, 0]}>
           <planeGeometry args={[thicknessWorld, heightWorld]} />
-          <meshLambertMaterial color={WALL_COLOR} side={2} />
+          <meshLambertMaterial
+            key={ghosted ? "ghosted" : "solid"}
+            color={WALL_COLOR}
+            side={2}
+            transparent={ghosted}
+            opacity={ghosted ? GHOST_OPACITY : 1}
+            depthWrite={!ghosted}
+          />
         </mesh>
       </group>
     </group>
