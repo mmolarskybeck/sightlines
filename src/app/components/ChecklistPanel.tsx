@@ -4,6 +4,7 @@ import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
 import { DotsSixVerticalIcon } from "@phosphor-icons/react/dist/csr/DotsSixVertical";
 import { FileArrowUpIcon } from "@phosphor-icons/react/dist/csr/FileArrowUp";
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
+import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { ACCEPTED_IMAGE_MIME_TYPES } from "../../domain/assets/imageIntake";
 import type { Artwork, DisplayUnit, Project } from "../../domain/project";
@@ -17,6 +18,12 @@ import {
 } from "./artworkDragSession";
 import { UncertaintyIndicator } from "./UncertaintyIndicator";
 import { Button } from "./ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from "./ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -90,6 +97,7 @@ export function ChecklistPanel({
   onConfirmDuplicateUploads,
   onDismissDuplicateUploads,
   onOpenImportWizard,
+  onOpenArtworkLibrary,
   onRemoveArtworkFromChecklist,
   onRemovePlacement,
   onSelectArtwork,
@@ -104,6 +112,7 @@ export function ChecklistPanel({
   onConfirmDuplicateUploads: () => Promise<void>;
   onDismissDuplicateUploads: () => void;
   onOpenImportWizard: () => void;
+  onOpenArtworkLibrary: () => void;
   // Optional: App.tsx uses this to track which artwork is mid-drag so
   // ElevationView can size its drop ghost during dragover, since dataTransfer
   // payloads are unreadable until drop. Fired with the artworkId on
@@ -400,18 +409,25 @@ export function ChecklistPanel({
       )}
 
       <div className="checklist-actions">
-        <Button
-          className="checklist-add-images"
-          variant="subtle"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <ImageSquareIcon aria-hidden="true" size={16} />
-          <span>Add images</span>
-        </Button>
-        <Button className="checklist-add" variant="primary" onClick={onOpenImportWizard}>
-          <FileArrowUpIcon aria-hidden="true" size={16} />
-          <span>Import</span>
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button className="checklist-add" variant="primary">
+              <ImageSquareIcon aria-hidden="true" size={16} />
+              <span>Add artwork</span>
+              <CaretDownIcon aria-hidden="true" size={13} />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={onOpenImportWizard}>
+              <FileArrowUpIcon aria-hidden="true" size={16} />
+              Import files…
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onOpenArtworkLibrary}>
+              <ImageSquareIcon aria-hidden="true" size={16} />
+              Add from Artwork Library…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </section>
   );

@@ -109,7 +109,12 @@ export {
   getSelectedOpeningId
 } from "./store/selectionSlice";
 
-export type ViewMode = "plan" | "elevation" | "data" | "3d";
+export type ViewMode = "plan" | "elevation" | "data" | "3d" | "library";
+export type ArtworkImportDestination = "library" | "checklist";
+export type ArtworkProjectMembership = {
+  artworkId: string;
+  projects: ProjectSummary[];
+};
 
 // An entry may carry either half, or both. A pure geometry/metadata edit
 // (resize a wall, rename the project) only ever needs `project`. A checklist
@@ -185,7 +190,11 @@ export type AppState = ArrangeSliceState &
   redoStack: EditEntry[];
   libraryArtworks: Artwork[];
   intakeState: "idle" | "processing";
-  pendingDuplicateUploads: { file: File; existingArtworkTitle: string }[];
+  pendingDuplicateUploads: {
+    file: File;
+    existingArtworkTitle: string;
+    destination: ArtworkImportDestination;
+  }[];
   boot: () => Promise<void>;
   /** Dev-only, non-persisting document swap used by renderer benchmarks. */
   loadBenchmarkFixture: (project: Project, artworks: Artwork[]) => void;
@@ -235,14 +244,21 @@ export type AppState = ArrangeSliceState &
   redo: () => Promise<void>;
   importProjectJson: (text: string) => Promise<void>;
   listProjectSummaries: () => Promise<ProjectSummary[]>;
+  listArtworkProjectMemberships: (
+    artworkIds: string[]
+  ) => Promise<ArtworkProjectMembership[]>;
   openProject: (id: string) => Promise<void>;
   createProject: (title: string) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
   addArtworksFromFiles: (
     files: File[],
-    opts?: { skipDuplicateCheck?: boolean }
+    opts?: { skipDuplicateCheck?: boolean; destination?: ArtworkImportDestination }
   ) => Promise<void>;
-  importArtworkDrafts: (drafts: ArtworkImportDraft[]) => Promise<void>;
+  importArtworkDrafts: (
+    drafts: ArtworkImportDraft[],
+    opts?: { destination?: ArtworkImportDestination }
+  ) => Promise<void>;
+  addExistingArtworksToChecklist: (artworkIds: string[]) => Promise<void>;
   confirmDuplicateUploads: () => Promise<void>;
   dismissDuplicateUploads: () => void;
   removeArtworkFromChecklist: (artworkId: string) => Promise<void>;
@@ -1660,6 +1676,35 @@ export function createAppStore(deps: AppStoreDeps) {
         }
       },
 
+      async listArtworkProjectMemberships(artworkIds) {
+        const uniqueArtworkIds = [...new Set(artworkIds)];
+        if (uniqueArtworkIds.length === 0) return [];
+
+        try {
+          const summaries = await deps.projectRepository.list();
+          const loadedProjects = await Promise.all(
+            summaries.map(async (summary) => {
+              try {
+                return { summary, project: await deps.projectRepository.load(summary.id) };
+              } catch {
+                // A project may disappear between list and load. Skip that
+                // stale summary without making the whole library query fail.
+                return null;
+              }
+            })
+          );
+
+          return uniqueArtworkIds.map((artworkId) => ({
+            artworkId,
+            projects: loadedProjects.flatMap((entry) =>
+              entry?.project.checklistArtworkIds.includes(artworkId) ? [entry.summary] : []
+            )
+          }));
+        } catch {
+          return uniqueArtworkIds.map((artworkId) => ({ artworkId, projects: [] }));
+        }
+      },
+
       async openProject(id) {
         if (get().project?.id === id) return;
 
@@ -1726,26 +1771,27 @@ export function createAppStore(deps: AppStoreDeps) {
 
       async addArtworksFromFiles(files, opts = {}) {
         const project = get().project;
-        if (!project || files.length === 0) return;
+        const destination = opts.destination ?? "checklist";
+        if ((destination === "checklist" && !project) || files.length === 0) return;
 
         set({ intakeState: "processing", error: null });
 
         const newArtworkIds: string[] = [];
         const failures: string[] = [];
 
-        // Duplicate screen: exact content-hash match against the current
-        // checklist's assets (and earlier files in this batch), not the
-        // whole cross-project library — a work removed from the checklist,
-        // or only ever used in another project, must not trigger a hold.
+        // Duplicate screen: exact content-hash match against the destination
+        // collection (and earlier files in this batch). Checklist intake only
+        // compares the current checklist; library intake compares the global
+        // on-device library.
         // Legacy assets without a sha256 never match. Held files are
         // surfaced for confirmation instead of intaken — re-uploading the
         // same image is usually a mistake, occasionally deliberate.
         const skipDuplicateCheck = opts.skipDuplicateCheck === true;
         const titleBySha = new Map<string, string>();
         if (!skipDuplicateCheck) {
-          const checklistIds = new Set(project.checklistArtworkIds);
+          const checklistIds = new Set(project?.checklistArtworkIds ?? []);
           for (const libraryArtwork of get().libraryArtworks) {
-            if (!checklistIds.has(libraryArtwork.id)) continue;
+            if (destination === "checklist" && !checklistIds.has(libraryArtwork.id)) continue;
             if (!libraryArtwork.assetId) continue;
             try {
               const asset = await deps.assetRepository.getAsset(libraryArtwork.assetId);
@@ -1755,7 +1801,11 @@ export function createAppStore(deps: AppStoreDeps) {
             }
           }
         }
-        const heldDuplicates: { file: File; existingArtworkTitle: string }[] = [];
+        const heldDuplicates: {
+          file: File;
+          existingArtworkTitle: string;
+          destination: ArtworkImportDestination;
+        }[] = [];
 
         try {
           for (const file of files) {
@@ -1778,7 +1828,7 @@ export function createAppStore(deps: AppStoreDeps) {
             if (!skipDuplicateCheck) {
               const existingTitle = titleBySha.get(processed.sha256);
               if (existingTitle !== undefined) {
-                heldDuplicates.push({ file, existingArtworkTitle: existingTitle });
+                heldDuplicates.push({ file, existingArtworkTitle: existingTitle, destination });
                 continue;
               }
               titleBySha.set(processed.sha256, titleFromFilename(file.name)); // batch-internal twins
@@ -1831,13 +1881,15 @@ export function createAppStore(deps: AppStoreDeps) {
           if (newArtworkIds.length > 0) {
             set({ libraryArtworks: await deps.artworkLibraryRepository.list() });
 
-            const label =
-              newArtworkIds.length === 1 ? "Add artwork" : `Add ${newArtworkIds.length} artworks`;
+            if (destination === "checklist") {
+              const label =
+                newArtworkIds.length === 1 ? "Add artwork" : `Add ${newArtworkIds.length} artworks`;
 
-            await applyEdit(label, (current) => ({
-              ...current,
-              checklistArtworkIds: [...current.checklistArtworkIds, ...newArtworkIds]
-            }));
+              await applyEdit(label, (current) => ({
+                ...current,
+                checklistArtworkIds: [...current.checklistArtworkIds, ...newArtworkIds]
+              }));
+            }
           }
 
           if (heldDuplicates.length > 0) {
@@ -1868,10 +1920,11 @@ export function createAppStore(deps: AppStoreDeps) {
         }
       },
 
-      async importArtworkDrafts(drafts) {
+      async importArtworkDrafts(drafts, opts = {}) {
         const project = get().project;
+        const destination = opts.destination ?? "checklist";
         const selectedDrafts = drafts.filter((draft) => draft.selected);
-        if (!project || selectedDrafts.length === 0) return;
+        if ((destination === "checklist" && !project) || selectedDrafts.length === 0) return;
 
         set({ intakeState: "processing", error: null });
 
@@ -1935,15 +1988,17 @@ export function createAppStore(deps: AppStoreDeps) {
           if (newArtworkIds.length > 0) {
             set({ libraryArtworks: await deps.artworkLibraryRepository.list() });
 
-            const label =
-              newArtworkIds.length === 1
-                ? "Import artwork"
-                : `Import ${newArtworkIds.length} artworks`;
+            if (destination === "checklist") {
+              const label =
+                newArtworkIds.length === 1
+                  ? "Import artwork"
+                  : `Import ${newArtworkIds.length} artworks`;
 
-            await applyEdit(label, (current) => ({
-              ...current,
-              checklistArtworkIds: [...current.checklistArtworkIds, ...newArtworkIds]
-            }));
+              await applyEdit(label, (current) => ({
+                ...current,
+                checklistArtworkIds: [...current.checklistArtworkIds, ...newArtworkIds]
+              }));
+            }
           }
 
           if (failures.length > 0) {
@@ -1967,14 +2022,39 @@ export function createAppStore(deps: AppStoreDeps) {
         const held = get().pendingDuplicateUploads;
         if (held.length === 0) return;
         set({ pendingDuplicateUploads: [] });
-        await get().addArtworksFromFiles(
-          held.map((entry) => entry.file),
-          { skipDuplicateCheck: true }
-        );
+        for (const destination of ["library", "checklist"] as const) {
+          const files = held
+            .filter((entry) => entry.destination === destination)
+            .map((entry) => entry.file);
+          if (files.length > 0) {
+            await get().addArtworksFromFiles(files, { skipDuplicateCheck: true, destination });
+          }
+        }
       },
 
       dismissDuplicateUploads() {
         set({ pendingDuplicateUploads: [] });
+      },
+
+      async addExistingArtworksToChecklist(artworkIds) {
+        const project = get().project;
+        if (!project || artworkIds.length === 0) return;
+
+        const libraryIds = new Set(get().libraryArtworks.map((artwork) => artwork.id));
+        const existingIds = new Set(project.checklistArtworkIds);
+        const additions = [...new Set(artworkIds)].filter(
+          (artworkId) => libraryIds.has(artworkId) && !existingIds.has(artworkId)
+        );
+        if (additions.length === 0) return;
+
+        const label =
+          additions.length === 1
+            ? "Add artwork to checklist"
+            : `Add ${additions.length} artworks to checklist`;
+        await applyEdit(label, (current) => ({
+          ...current,
+          checklistArtworkIds: [...current.checklistArtworkIds, ...additions]
+        }));
       },
 
       async removeArtworkFromChecklist(artworkId) {

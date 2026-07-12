@@ -44,7 +44,8 @@ import type {
   DisplayUnit,
   FreestandingWall,
   OpeningWallObject,
-  Project
+  Project,
+  ProjectSummary
 } from "../domain/project";
 import { faceWallId, parseFaceWallId } from "../domain/geometry/freestandingWalls";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
@@ -57,6 +58,7 @@ import {
 } from "../domain/units/unitSystem";
 import { AppRail } from "./components/AppRail";
 import { ArtworkInspector } from "./components/ArtworkInspector";
+import { ArtworkLibraryPicker, ArtworkLibraryView } from "./components/ArtworkLibrary";
 import { PanelResizeHandle } from "./components/PanelResizeHandle";
 import { ChecklistPanel } from "./components/ChecklistPanel";
 import { DeleteRoomDialog } from "./components/DeleteRoomDialog";
@@ -346,11 +348,13 @@ export function App() {
     redo,
     importProjectJson,
     listProjectSummaries,
+    listArtworkProjectMemberships,
     openProject,
     createProject,
     deleteProject,
     addArtworksFromFiles,
     importArtworkDrafts,
+    addExistingArtworksToChecklist,
     confirmDuplicateUploads,
     dismissDuplicateUploads,
     removeArtworkFromChecklist,
@@ -392,9 +396,31 @@ export function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const threeDActionsRef = useRef<ThreeDViewActions | null>(null);
   const [importWizardOpen, setImportWizardOpen] = useState(false);
+  const [importDestination, setImportDestination] = useState<"library" | "checklist">("checklist");
+  const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
+  const [projectMembershipsByArtworkId, setProjectMembershipsByArtworkId] = useState<
+    Map<string, ProjectSummary[]>
+  >(() => new Map());
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  useEffect(() => {
+    if (viewMode !== "library") return;
+    let cancelled = false;
+    void listArtworkProjectMemberships(libraryArtworks.map((artwork) => artwork.id)).then(
+      (memberships) => {
+        if (!cancelled) {
+          setProjectMembershipsByArtworkId(
+            new Map(memberships.map(({ artworkId, projects }) => [artworkId, projects]))
+          );
+        }
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [libraryArtworks, listArtworkProjectMemberships, viewMode]);
   // The occupied room the Delete shortcut is asking to confirm about —
   // transient UI state like the armed tools (never in the store/undo). Empty
   // rooms skip this and delete immediately.
@@ -502,7 +528,9 @@ export function App() {
   }, [inspectorCollapsed, isCompactWorkspace, leftPanel]);
 
   const visibleLeftPanel =
-    isCompactWorkspace && compactWorkspaceSide === "right" ? null : leftPanel;
+    viewMode === "library" || (isCompactWorkspace && compactWorkspaceSide === "right")
+      ? null
+      : leftPanel;
   const visibleInspectorCollapsed = isCompactWorkspace
     ? compactWorkspaceSide === "left"
     : inspectorCollapsed;
@@ -955,6 +983,7 @@ export function App() {
   // column (null), clicking the other switches to it. In the compact layout,
   // selecting a left pane also makes it the visible side of the workspace.
   const selectLeftPanel = (panel: "checklist" | "rooms") => {
+    if (viewMode === "library" || viewMode === "data") setViewMode("plan");
     if (isCompactWorkspace) {
       const shouldCollapse = visibleLeftPanel === panel && compactWorkspaceSide === "left";
       setCompactWorkspaceSide("left");
@@ -1016,6 +1045,8 @@ export function App() {
         inspectorCollapsed={visibleInspectorCollapsed}
         onToggleInspector={handleInspectorToggle}
         isDataView={viewMode === "data"}
+        isLibraryView={viewMode === "library"}
+        onOpenLibrary={() => setViewMode("library")}
         onOpenDataView={() => setViewMode("data")}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenHelp={() => setIsHelpOpen(true)}
@@ -1173,7 +1204,11 @@ export function App() {
             onArtworkDragStateChange={setDraggingArtworkId}
             onConfirmDuplicateUploads={confirmDuplicateUploads}
             onDismissDuplicateUploads={dismissDuplicateUploads}
-            onOpenImportWizard={() => setImportWizardOpen(true)}
+            onOpenImportWizard={() => {
+              setImportDestination("checklist");
+              setImportWizardOpen(true);
+            }}
+            onOpenArtworkLibrary={() => setLibraryPickerOpen(true)}
             onRemoveArtworkFromChecklist={removeArtworkFromChecklist}
             onRemovePlacement={removePlacement}
             onSelectArtwork={selectArtwork}
@@ -1191,7 +1226,7 @@ export function App() {
         ) : null}
 
         <section className="canvas-column">
-          {viewMode !== "data" &&
+          {viewMode !== "data" && viewMode !== "library" &&
           (viewMode !== "3d" || project.floor.rooms.length > 0) ? (
             <div className="view-toolbar" ref={toolbarRef}>
               <div className="view-tools-primary">
@@ -1474,6 +1509,29 @@ export function App() {
               <DataView json={exportProjectJson(project)} />
             </Suspense>
           ) : null}
+          {viewMode === "library" ? (
+            <ArtworkLibraryView
+              artworks={libraryArtworks}
+              project={project}
+              getBlob={getAssetBlob}
+              onAddToChecklist={addExistingArtworksToChecklist}
+              pendingDuplicateUploads={pendingDuplicateUploads.filter(
+                (entry) => entry.destination === "library"
+              )}
+              onConfirmDuplicateUploads={confirmDuplicateUploads}
+              onDismissDuplicateUploads={dismissDuplicateUploads}
+              projectMembershipsByArtworkId={projectMembershipsByArtworkId}
+              onOpenProject={(projectId) => void openProject(projectId)}
+              onEditArtwork={(artworkId) => {
+                selectArtwork(artworkId);
+                if (inspectorCollapsed) toggleInspectorCollapsed();
+              }}
+              onOpenImportWizard={() => {
+                setImportDestination("library");
+                setImportWizardOpen(true);
+              }}
+            />
+          ) : null}
           {viewMode === "3d" ? (
             <Suspense fallback={<div className="skeleton-panel" />}>
               <ThreeDView
@@ -1590,6 +1648,11 @@ export function App() {
             ) : selectedArtwork ? (
               <ArtworkInspector
                 artwork={selectedArtwork}
+                scopeNote={
+                  viewMode === "library"
+                    ? "Changes apply everywhere this artwork is used."
+                    : undefined
+                }
                 isPlaced={isArtworkPlaced}
                 placementTitle={
                   placedWallObject && placedWallObjectWall
@@ -1771,8 +1834,9 @@ export function App() {
           intakeState={intakeState}
           open={importWizardOpen}
           projectUnit={project.unit}
-          onImportDrafts={importArtworkDrafts}
-          onImportImages={addArtworksFromFiles}
+          destination={importDestination}
+          onImportDrafts={(drafts) => importArtworkDrafts(drafts, { destination: importDestination })}
+          onImportImages={(files) => addArtworksFromFiles(files, { destination: importDestination })}
           onOpenChange={setImportWizardOpen}
         />
         <SettingsDialog
@@ -1786,6 +1850,14 @@ export function App() {
           onOpenHelp={() => { setIsSettingsOpen(false); setIsHelpOpen(true); }}
         />
       </Suspense>
+      <ArtworkLibraryPicker
+        open={libraryPickerOpen}
+        artworks={libraryArtworks}
+        project={project}
+        getBlob={getAssetBlob}
+        onOpenChange={setLibraryPickerOpen}
+        onAddToChecklist={addExistingArtworksToChecklist}
+      />
       <DeleteRoomDialog
         roomName={confirmDeleteRoomPlacement?.room.name ?? ""}
         summary={confirmDeleteRoomSummary}

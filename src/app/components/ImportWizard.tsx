@@ -98,6 +98,7 @@ const MAPPABLE_FIELDS: ImportField[] = [
 
 export default function ImportWizard({
   open,
+  destination = "checklist",
   projectUnit,
   intakeState,
   onOpenChange,
@@ -105,6 +106,7 @@ export default function ImportWizard({
   onImportImages
 }: {
   open: boolean;
+  destination?: "library" | "checklist";
   projectUnit: DisplayUnit;
   intakeState: "idle" | "processing";
   onOpenChange: (open: boolean) => void;
@@ -331,7 +333,9 @@ export default function ImportWizard({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="import-dialog">
         <DialogHeader className="import-dialog-header">
-          <DialogTitle className="visually-hidden">Import checklist</DialogTitle>
+          <DialogTitle className="visually-hidden">
+            {destination === "library" ? "Import to Artwork Library" : "Import to checklist"}
+          </DialogTitle>
           <DialogDescription className="visually-hidden">{stepCopy.description}</DialogDescription>
           <div className="import-steps" aria-label="Import steps">
             <StepButton index={1} label="Upload" state={stepState("upload")} onClick={() => setStep("upload")} />
@@ -352,6 +356,11 @@ export default function ImportWizard({
               onClick={() => setStep("review")}
             />
           </div>
+          <p className="import-destination-note">
+            {destination === "library"
+              ? "These artworks will be saved to your library on this device."
+              : "These artworks will be saved to your library and added to this checklist."}
+          </p>
         </DialogHeader>
 
         {error ? <p className="import-error">{error}</p> : null}

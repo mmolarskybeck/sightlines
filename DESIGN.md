@@ -61,6 +61,7 @@ Use a restrained white, black, graphite, and petrol system.
 - Near-black (`--foreground`) is primary text and structural drawing.
 - Thin neutral borders (`--border`, `--input`) separate panes and controls.
 - Petrol (`--primary`) is reserved for active modes, focus rings, snap guides, and high-commitment toggles — the chrome/interaction token.
+- Solid petrol controls always use `--primary-foreground` (white/light text). Never place black, foreground, or inherited dark text on a petrol fill; this applies to default, hover, active, and disabled states.
 - Petrol soft (`--primary-soft`) is the selected-row and pressed-toggle wash.
 - Canvas selection strokes (plan objects, rooms, resize handles, marquee, elevation openings/artwork) use `--selection`, a lighter petrol lifted for contrast against ink walls at canvas stroke weights, rather than `--primary`.
 - Caution amber and destructive red are semantic only: approximate data, invalid state, placement warnings, and failures.
