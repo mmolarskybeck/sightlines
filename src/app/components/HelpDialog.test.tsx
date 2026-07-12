@@ -48,25 +48,28 @@ describe("HelpDialog", () => {
 
   it("defaults to keyboard hints and flips to touch via the toggle", () => {
     renderHelp("3d");
-    // Keyboard variant: WASD travel is listed.
-    expect(screen.getByText("W A S D")).toBeInTheDocument();
+    // Keyboard variant: WASD travel is listed (each key is its own chip).
+    expect(screen.getByText("Walk around")).toBeInTheDocument();
+    expect(screen.getByText("W")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("radio", { name: "Touch" }));
-    expect(screen.queryByText("W A S D")).not.toBeInTheDocument();
-    expect(screen.getByText("Pinch and twist two fingers")).toBeInTheDocument();
+    expect(screen.queryByText("Walk around")).not.toBeInTheDocument();
+    expect(screen.getByText("pinch and twist two fingers")).toBeInTheDocument();
   });
 
   it("defaults to touch hints on a coarse-pointer device", () => {
     coarsePointer = true;
     renderHelp("3d");
-    expect(screen.getByText("One-finger drag")).toBeInTheDocument();
-    expect(screen.queryByText("W A S D")).not.toBeInTheDocument();
+    expect(screen.getByText("one-finger drag")).toBeInTheDocument();
+    expect(screen.queryByText("Walk around")).not.toBeInTheDocument();
   });
 
-  it("renders the platform modifier in the general shortcuts", () => {
+  it("renders the platform modifier as a key chip in the general shortcuts", () => {
     // jsdom's navigator.platform is not mac-like, so the Ctrl chord renders.
     renderHelp();
-    expect(screen.getByText("Ctrl Z")).toBeInTheDocument();
+    // The chord is split into separate chips now; Ctrl appears in both Z and Y.
+    expect(screen.getAllByText("Ctrl").length).toBeGreaterThan(0);
+    expect(screen.getByText("Del")).toBeInTheDocument();
   });
 
   it("keeps the general group visible on every tab", () => {

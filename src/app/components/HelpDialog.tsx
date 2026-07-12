@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle
 } from "./ui/dialog";
+import { Kbd } from "./ui/kbd";
 import { Tabs, TabsContent } from "./ui/tabs";
 import {
   SegmentedToggleGroup,
@@ -156,8 +157,18 @@ function HintGroup({ group }: { group: HelpGroup }) {
           <div className="help-shortcut-row" key={hint.action}>
             <dt>{hint.action}</dt>
             <dd>
-              {hint.keys.map((key) => (
-                <kbd key={key}>{key}</kbd>
+              {hint.inputs.map((input) => (
+                <span className="help-input" key={input.map((token) => token.label).join("|")}>
+                  {input.map((token, index) =>
+                    token.kind === "key" ? (
+                      <Kbd key={`${token.label}-${index}`}>{token.label}</Kbd>
+                    ) : (
+                      <span className="help-input-text" key={`${token.label}-${index}`}>
+                        {token.label}
+                      </span>
+                    )
+                  )}
+                </span>
               ))}
             </dd>
           </div>
