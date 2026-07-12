@@ -123,7 +123,7 @@ export {
   getSelectedOpeningId
 } from "./store/selectionSlice";
 
-export type ViewMode = "plan" | "elevation" | "data" | "3d" | "library";
+export type ViewMode = "plan" | "elevation" | "3d" | "library";
 export type ArtworkImportDestination = "library" | "checklist";
 export type ArtworkProjectMembership = {
   artworkId: string;

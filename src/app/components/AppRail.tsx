@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { FileCodeIcon } from "@phosphor-icons/react/dist/csr/FileCode";
 import { BoundingBoxIcon } from "@phosphor-icons/react/dist/csr/BoundingBox";
 import { ListChecksIcon } from "@phosphor-icons/react/dist/csr/ListChecks";
 import { ImagesSquareIcon } from "@phosphor-icons/react/dist/csr/ImagesSquare";
@@ -12,15 +11,13 @@ import { Toggle } from "./ui/toggle";
 // The full-height icon rail — the layout's left anchor, spanning beside both
 // the topbar and the workspace. Its top 80×80 cell is the brand cell (the "S"
 // monogram); below it sit the left-panel selectors (checklist / rooms), the
-// live placement-issue count, and — pushed to the bottom utility cluster — the
-// developer Data view and functional Settings/Help affordances.
+// live placement-issue count, and — pushed to the bottom utility cluster —
+// the Settings/Help affordances.
 export function AppRail({
   leftPanel,
   onSelectLeftPanel,
-  isDataView,
   isLibraryView,
   onOpenLibrary,
-  onOpenDataView,
   onOpenSettings,
   onOpenHelp,
   issueCount,
@@ -30,10 +27,8 @@ export function AppRail({
   // Toggle semantic: the active panel's icon collapses to null, the other
   // switches. App owns that logic; the rail just reports which was clicked.
   onSelectLeftPanel: (panel: "checklist" | "rooms") => void;
-  isDataView: boolean;
   isLibraryView: boolean;
   onOpenLibrary: () => void;
-  onOpenDataView: () => void;
   onOpenSettings: () => void;
   onOpenHelp: () => void;
   issueCount: number;
@@ -91,12 +86,6 @@ export function AppRail({
         <div className="rail-spacer" />
 
         <RailButton
-          active={isDataView}
-          icon={<FileCodeIcon aria-hidden="true" size={22} />}
-          label="Data view"
-          onClick={onOpenDataView}
-        />
-        <RailButton
           icon={<SlidersHorizontalIcon aria-hidden="true" size={22} />}
           label="Settings"
           onClick={onOpenSettings}
@@ -126,7 +115,7 @@ function RailButton({
   icon: ReactNode;
   label: string;
   // Only functional toggles carry aria-pressed; navigation-style buttons
-  // (Data view) and disabled placeholders leave it off.
+  // (Artwork Library) and disabled placeholders leave it off.
   pressed?: boolean;
   onClick?: () => void;
 }) {

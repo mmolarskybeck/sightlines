@@ -19,7 +19,7 @@ afterEach(() => {
   cleanup();
 });
 
-function renderHelp(viewMode: "plan" | "elevation" | "data" | "3d" = "plan") {
+function renderHelp(viewMode: "plan" | "elevation" | "library" | "3d" = "plan") {
   return render(
     <HelpDialog open viewMode={viewMode} onOpenChange={() => {}} />
   );
@@ -38,8 +38,8 @@ describe("HelpDialog", () => {
     );
   });
 
-  it("falls back to the Plan tab for the data view", () => {
-    renderHelp("data");
+  it("falls back to the Plan tab for non-canvas views", () => {
+    renderHelp("library");
     expect(screen.getByRole("tab", { name: "Plan" })).toHaveAttribute(
       "aria-selected",
       "true"

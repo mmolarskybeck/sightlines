@@ -10,7 +10,6 @@ import {
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import { ArchiveIcon } from "@phosphor-icons/react/dist/csr/Archive";
-import { BracketsCurlyIcon } from "@phosphor-icons/react/dist/csr/BracketsCurly";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
 import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
@@ -109,7 +108,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger
 } from "./components/ui/dropdown-menu";
 import { Input } from "./components/ui/input";
@@ -142,7 +140,6 @@ import { useToolbarShortcuts } from "./hooks/useToolbarShortcuts";
 import { deriveArrangeReadout } from "./hooks/arrangeReadout";
 import { shouldDeleteRoomOnKey, summarizeRoomContents } from "./roomDeletion";
 import {
-  exportProjectJson,
   freestandingWallIdOf,
   getProjectWalls,
   getSelectedArtworkId,
@@ -155,9 +152,6 @@ import {
 import { getArrangeEligibility } from "./store/arrangeEligibility";
 import type { ThreeDViewActions } from "./components/three/ThreeDView";
 
-const DataView = lazy(() =>
-  import("./components/DataView").then((module) => ({ default: module.DataView }))
-);
 const ImportWizard = lazy(() => import("./components/ImportWizard"));
 const SettingsDialog = lazy(() =>
   import("./components/SettingsDialog").then((module) => ({ default: module.SettingsDialog }))
@@ -1012,7 +1006,7 @@ export function App() {
   // column (null), clicking the other switches to it. In the compact layout,
   // selecting a left pane also makes it the visible side of the workspace.
   const selectLeftPanel = (panel: "checklist" | "rooms") => {
-    if (viewMode === "library" || viewMode === "data") setViewMode("plan");
+    if (viewMode === "library") setViewMode("plan");
     if (isCompactWorkspace) {
       const shouldCollapse = visibleLeftPanel === panel && compactWorkspaceSide === "left";
       setCompactWorkspaceSide("left");
@@ -1089,10 +1083,8 @@ export function App() {
       <AppRail
         leftPanel={visibleLeftPanel}
         onSelectLeftPanel={selectLeftPanel}
-        isDataView={viewMode === "data"}
         isLibraryView={viewMode === "library"}
         onOpenLibrary={() => setViewMode("library")}
-        onOpenDataView={() => setViewMode("data")}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenHelp={() => setIsHelpOpen(true)}
         issueCount={placementWarnings.length}
@@ -1235,19 +1227,6 @@ export function App() {
                   </span>
                 </span>
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="dropdown-menu-item-stacked"
-                onSelect={() => downloadProject(project)}
-              >
-                <BracketsCurlyIcon aria-hidden="true" size={16} />
-                <span className="flex min-w-0 flex-col gap-0.5">
-                  <span>Project JSON</span>
-                  <span className="text-[var(--type-xs)] leading-snug text-muted-foreground">
-                    Raw project data without images or library records.
-                  </span>
-                </span>
-              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <input
@@ -1352,7 +1331,7 @@ export function App() {
         ) : null}
 
         <section className="canvas-column">
-          {viewMode !== "data" && viewMode !== "library" &&
+          {viewMode !== "library" &&
           (viewMode !== "3d" || project.floor.rooms.length > 0) ? (
             <div className="view-toolbar" ref={toolbarRef}>
               <div className="view-tools-primary">
@@ -1641,11 +1620,6 @@ export function App() {
             ) : (
               <ElevationEmptyState hasRooms={project.floor.rooms.length > 0} />
             )
-          ) : null}
-          {viewMode === "data" ? (
-            <Suspense fallback={<div className="skeleton-panel" />}>
-              <DataView json={exportProjectJson(project)} />
-            </Suspense>
           ) : null}
           {viewMode === "library" ? (
             <ArtworkLibraryView
@@ -2775,13 +2749,6 @@ function getWallNames(project: Project, wallIds: string[]): string[] {
   );
 
   return wallIds.map((wallId) => namesById.get(wallId) ?? wallId);
-}
-
-function downloadProject(project: Project) {
-  const blob = new Blob([exportProjectJson(project)], {
-    type: "application/json"
-  });
-  triggerDownload(blob, `${project.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.json`);
 }
 
 // Turns raw bytes into a browser download. The only DOM-bound step in the
