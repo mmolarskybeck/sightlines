@@ -1015,6 +1015,19 @@ body.panels-resizing * {
   background: var(--surface);
 }
 
+/* Open inspector = engaged mode, so the chip depresses like every other
+   latching toggle (Grid, Snap): petrol wash + the pressed inset instead of
+   the raised chip shadow. Collapsed, it pops back up as the raised white
+   chip — the raised/pressed flip is what tells the two states apart at a
+   glance. The pressed look holds through hover; hover feedback belongs to
+   the resting state only. */
+.inspector-toggle[aria-expanded="true"],
+.inspector-toggle[aria-expanded="true"]:hover {
+  color: var(--primary-strong);
+  background: var(--primary-soft);
+  box-shadow: var(--shadow-pressed);
+}
+
 .inspector-toggle:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;

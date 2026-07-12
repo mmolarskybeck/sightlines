@@ -103,8 +103,16 @@ Sightlines mixes square workspace structure with softer floating surfaces: recta
     toggle.
   - **Sub-choice tabs** ("Measured from", the help dialog's view groups)
     use the same sliding underline at smaller sizing, riding their row's
-    hairline. **Controls floating over the canvas** (the zoom cluster)
-    are borderless raised chips: white ground + `--shadow-chip`.
+    hairline. **Controls floating over the canvas** (the zoom cluster,
+    the inspector toggle) are borderless raised chips: white ground +
+    `--shadow-chip`. A floating chip that is also a latching toggle (the
+    inspector toggle is the reference case) depresses like any other
+    engaged mode — petrol-soft wash + `--shadow-pressed` — and pops back
+    to the raised chip when off; the raised/pressed flip is what
+    distinguishes its two states. The inspector toggle is the panel's
+    *only* affordance: it hugs the seam (sliding to the workspace corner
+    when collapsed), the rail governs the left pane exclusively, and the
+    inspector pane itself carries no collapse chrome.
 - Overlays — dialogs, wizards, popovers, dropdown menus — use a 12px radius (`--radius-overlay`) with a soft, diffuse shadow and at most a whisper of border.
 - Inside overlays, structure content with spacing and alignment rather than full-bleed hairline rules. Edge-to-edge bordered grids (tab strips, stat cells, per-field border boxes) read as spreadsheet chrome — the harsh look we are moving away from.
 - Shadows are reserved for real overlays and canvas chips, not normal panels.
