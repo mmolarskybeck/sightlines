@@ -973,8 +973,19 @@ export function App() {
   // default as the primary Export button's first, recommended option, minus
   // the mode picker: a project list row isn't the place for that choice.
   const handleExportProjectById = async (id: string) => {
-    const result = await exportProjectPackageById(id, "display");
-    if (result) triggerDownload(result.zip, result.filename);
+    try {
+      const result = await exportProjectPackageById(id, "display");
+      if (result) {
+        triggerDownload(result.zip, result.filename);
+        toast.success(`Exported ${result.filename}`);
+      } else {
+        toast.error(useAppStore.getState().error ?? "Export failed: the package could not be built.");
+      }
+    } catch (error) {
+      toast.error(
+        `Export failed: ${error instanceof Error ? error.message : "the package could not be built."}`
+      );
+    }
   };
 
   // One Import entry point for both formats, detected by CONTENT, not
