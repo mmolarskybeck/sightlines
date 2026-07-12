@@ -56,6 +56,10 @@ export type ObstacleSegment = {
   a: Point;
   b: Point;
   id: string;
+  // Solid obstacle outlines (currently sibling partition slabs) contain their
+  // interior. A ray beginning in one has zero clearance rather than an
+  // apparent gap to the outline's far face.
+  solid?: boolean;
 };
 
 // Direction/parallel tolerance for the parametric solve. Coordinates arrive
@@ -85,10 +89,10 @@ export function partitionSlabSegments(partition: FreestandingWall): ObstacleSegm
   const startMinus = subtract(start, off);
   const endMinus = subtract(end, off);
   return [
-    { a: startPlus, b: endPlus, id: partition.id }, // +normal long face
-    { a: startMinus, b: endMinus, id: partition.id }, // -normal long face
-    { a: startPlus, b: startMinus, id: partition.id }, // start end cap
-    { a: endPlus, b: endMinus, id: partition.id } // end end cap
+    { a: startPlus, b: endPlus, id: partition.id, solid: true }, // +normal long face
+    { a: startMinus, b: endMinus, id: partition.id, solid: true }, // -normal long face
+    { a: startPlus, b: startMinus, id: partition.id, solid: true }, // start end cap
+    { a: endPlus, b: endMinus, id: partition.id, solid: true } // end end cap
   ];
 }
 
@@ -121,6 +125,18 @@ export function castRay(
 ): RayHit | null {
   if (Math.abs(dirUnit.xMm) < EPS && Math.abs(dirUnit.yMm) < EPS) return null;
 
+  // A positive hit on the far face of a solid slab is not open clearance when
+  // the origin already lies inside (or on) that slab. Preserve a concrete hit
+  // so dimensions can truthfully display zero and consumers can identify the
+  // blocking sibling.
+  const solidIds = new Set(segments.filter((segment) => segment.solid).map((segment) => segment.id));
+  for (const id of solidIds) {
+    const outline = segments.filter((segment) => segment.solid && segment.id === id);
+    if (pointInOrOnOutline(originMm, outline)) {
+      return { distanceMm: 0, pointMm: originMm, obstacleId: id };
+    }
+  }
+
   let best: RayHit | null = null;
 
   for (const segment of segments) {
@@ -151,6 +167,31 @@ export function castRay(
   }
 
   return best;
+}
+
+function pointInOrOnOutline(point: Point, outline: ObstacleSegment[]): boolean {
+  let inside = false;
+  for (const edge of outline) {
+    const dx = edge.b.xMm - edge.a.xMm;
+    const dy = edge.b.yMm - edge.a.yMm;
+    const px = point.xMm - edge.a.xMm;
+    const py = point.yMm - edge.a.yMm;
+    const crossProduct = cross(px, py, dx, dy);
+    const dotProduct = px * dx + py * dy;
+    if (
+      Math.abs(crossProduct) <= EPS &&
+      dotProduct >= -EPS &&
+      dotProduct <= dx * dx + dy * dy + EPS
+    ) {
+      return true;
+    }
+
+    const crossesHorizontalRay =
+      (edge.a.yMm > point.yMm) !== (edge.b.yMm > point.yMm) &&
+      point.xMm < edge.a.xMm + (dx * (point.yMm - edge.a.yMm)) / dy;
+    if (crossesHorizontalRay) inside = !inside;
+  }
+  return inside;
 }
 
 // The four face-accurate clearances of `partition` inside `room`. Normal casts

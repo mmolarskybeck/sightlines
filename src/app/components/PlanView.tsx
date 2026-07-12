@@ -893,6 +893,15 @@ export function PlanView({
       };
 
       if (current.mode === "move") {
+        // Do not let a nearby snap target turn a click (or tiny pointer jitter)
+        // into a move. The same screen-scaled threshold drives the dimension
+        // axis latch, and only raw pointer travel may activate an axis.
+        const latchThresholdMm = snapThresholdMm / 2;
+        const movedAxes = getPartitionMovedAxes(current.movedAxes, deltaMm, latchThresholdMm);
+        if (!movedAxes.x && !movedAxes.y) {
+          return { ...current, movedAxes };
+        }
+
         // Snap the MIDPOINT, not an endpoint: wall-aware targets (equidistant-
         // between-walls + sibling-partition alignment) rank above grid and stay
         // active even with grid snap OFF; snapping to an equidistant target
@@ -927,15 +936,6 @@ export function PlanView({
         const appliedDelta = {
           xMm: snap.point.xMm - origMid.xMm,
           yMm: snap.point.yMm - origMid.yMm
-        };
-        // Latch the axes the user has actually travelled on (never unlatch), so
-        // the dimension mask can show only the motion-relevant gaps. Threshold
-        // is half the snap threshold — small enough to feel immediate, large
-        // enough that a purely-one-axis drag never lights up the other.
-        const latchThresholdMm = snapThresholdMm / 2;
-        const movedAxes = {
-          x: current.movedAxes.x || Math.abs(appliedDelta.xMm) > latchThresholdMm,
-          y: current.movedAxes.y || Math.abs(appliedDelta.yMm) > latchThresholdMm
         };
         // Clip the snap guides to the containing room's floor-space bbox (padded
         // ~200mm so they read just beyond the walls) rather than the full
@@ -992,6 +992,7 @@ export function PlanView({
     },
     onRelease: (current) => {
       if (current.mode === "move") {
+        if (!current.movedAxes.x && !current.movedAxes.y) return;
         const delta = {
           xMm: current.previewStartFloorMm.xMm - current.startFloorMm.xMm,
           yMm: current.previewStartFloorMm.yMm - current.startFloorMm.yMm
@@ -2521,6 +2522,20 @@ function getPlanViewPaddingMm(bounds: { width: number; height: number }): number
   const largestDimensionMm = Math.max(bounds.width, bounds.height);
 
   return Math.max(900, largestDimensionMm * 0.14);
+}
+
+// Whole-partition moves latch each axis from pointer travel, never from the
+// potentially larger correction introduced by snapping. Exported for the
+// focused interaction regression tests alongside clampFitExtent below.
+export function getPartitionMovedAxes(
+  current: { x: boolean; y: boolean },
+  pointerDeltaMm: Vector2,
+  thresholdMm: number
+): { x: boolean; y: boolean } {
+  return {
+    x: current.x || Math.abs(pointerDeltaMm.xMm) > thresholdMm,
+    y: current.y || Math.abs(pointerDeltaMm.yMm) > thresholdMm
+  };
 }
 
 // The padded floor bounds, expanded (never shrunk) so neither axis is

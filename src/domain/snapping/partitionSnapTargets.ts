@@ -91,6 +91,9 @@ export function getPartitionMoveSnapTargets(args: {
         axis === "x" ? { xMm: -1, yMm: 0 } : { xMm: 0, yMm: -1 }
       );
       if (!plus || !minus) return;
+      // A zero hit means an extent already overlaps a solid sibling slab.
+      // There is no open interval to center within on this axis.
+      if (plus.distanceMm <= 0 || minus.distanceMm <= 0) return;
       const midLocal: Point =
         axis === "x"
           ? { xMm: (plus.pointMm.xMm + minus.pointMm.xMm) / 2, yMm: proposedMidLocal.yMm }

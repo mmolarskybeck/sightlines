@@ -1,5 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { clampFitExtent } from "./PlanView";
+import { clampFitExtent, getPartitionMovedAxes } from "./PlanView";
+
+describe("whole-partition drag activation", () => {
+  it("does not activate from click jitter below the pointer-travel threshold", () => {
+    expect(
+      getPartitionMovedAxes({ x: false, y: false }, { xMm: 4.9, yMm: -4.9 }, 5)
+    ).toEqual({ x: false, y: false });
+  });
+
+  it("activates only the axes travelled by the pointer and keeps them latched", () => {
+    expect(
+      getPartitionMovedAxes({ x: false, y: false }, { xMm: 5.1, yMm: 0 }, 5)
+    ).toEqual({ x: true, y: false });
+
+    expect(
+      getPartitionMovedAxes({ x: true, y: false }, { xMm: 0, yMm: -5.1 }, 5)
+    ).toEqual({ x: true, y: true });
+  });
+});
 
 // clampFitExtent backs PlanView's contentBounds derivation: it must never
 // let the fit window narrow below MIN_PLAN_FIT_EXTENT_MM (9144mm, ~30ft) on

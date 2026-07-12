@@ -158,6 +158,47 @@ describe("getPartitionClearances — neighboring partition as an obstacle", () =
     // West cap still reaches the west wall (1000).
     expect(clear.span.minus.hit?.distanceMm).toBeCloseTo(1000, 6);
   });
+
+  it("reports zero clearance when a face origin overlaps a sibling slab", () => {
+    const subject = partition({ startYMm: 2000, endYMm: 2000 });
+    const sibling = partition({
+      id: "room-1-partition-2",
+      startYMm: 1925,
+      endYMm: 1925,
+      thicknessMm: 100
+    });
+    const room = withPartitions(rectRoom(4000, 4000), [subject, sibling]);
+
+    const clear = getPartitionClearances(room, subject);
+
+    expect(clear.normal.minus.hit).toEqual({
+      distanceMm: 0,
+      pointMm: { xMm: 2000, yMm: 1950 },
+      obstacleId: "room-1-partition-2"
+    });
+    expect(clear.normal.plus.hit?.distanceMm).toBeCloseTo(1950, 6);
+  });
+
+  it("reports zero clearance when an end-cap origin overlaps a sibling slab", () => {
+    const subject = partition({});
+    const sibling = partition({
+      id: "room-1-partition-2",
+      startXMm: 2950,
+      startYMm: 1500,
+      endXMm: 2950,
+      endYMm: 2500,
+      thicknessMm: 200
+    });
+    const room = withPartitions(rectRoom(4000, 4000), [subject, sibling]);
+
+    const clear = getPartitionClearances(room, subject);
+
+    expect(clear.span.plus.hit).toEqual({
+      distanceMm: 0,
+      pointMm: { xMm: 3000, yMm: 2000 },
+      obstacleId: "room-1-partition-2"
+    });
+  });
 });
 
 describe("getPartitionClearances — L-shaped room", () => {

@@ -122,4 +122,33 @@ describe("getPartitionMoveSnapTargets", () => {
     expect(centerX).toMatchObject({ kind: "centerline", axis: "x" });
     expect(centerX?.point.xMm).toBeCloseTo(1725, 6);
   });
+
+  it("omits an equidistant target on an axis where an extent overlaps a sibling", () => {
+    const withSibling: Room = {
+      ...room(),
+      freestandingWalls: [
+        {
+          id: "room-1-partition-2",
+          roomId: "room-1",
+          name: "P2",
+          startXMm: 2950,
+          startYMm: 1500,
+          endXMm: 2950,
+          endYMm: 2500,
+          heightMm: 3000,
+          thicknessMm: 200
+        }
+      ]
+    };
+
+    const targets = getPartitionMoveSnapTargets({
+      room: withSibling,
+      placementOffsetMm: { xMm: 0, yMm: 0 },
+      partition: dragged,
+      proposedMidFloorMm: { xMm: 2000, yMm: 2000 }
+    });
+
+    expect(targets.some((target) => target.id === "partition-center-x")).toBe(false);
+    expect(targets.some((target) => target.id === "partition-center-y")).toBe(true);
+  });
 });
