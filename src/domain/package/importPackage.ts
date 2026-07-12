@@ -1,3 +1,4 @@
+import { readImageDimensions } from "../assets/imageDimensions";
 import { newId } from "../id";
 import {
   CURRENT_ASSET_SCHEMA_VERSION,
@@ -60,8 +61,16 @@ export const IMPORT_MIME_ALLOWLIST: ReadonlySet<string> = new Set([
 
 // Decode guard: 16384px is the common GPU texture ceiling; a dimension above
 // it is either corrupt or hostile (a 65k×65k claim would decode to gigabytes
-// of RGBA). Checked from the manifest BEFORE any decode is attempted.
+// of RGBA). The ENFORCEMENT reads the actual file headers (readImageDimensions,
+// no decoding) — manifest-declared widthPx/heightPx are attacker-controlled and
+// only serve as a cheap fast-reject.
 export const MAX_ASSET_DIMENSION_PX = 16384;
+
+// image/jpg is a legacy alias some encoders emit; treat it as image/jpeg when
+// comparing a manifest claim against what the header magic identifies.
+function normalizeMime(mimeType: string): string {
+  return mimeType === "image/jpg" ? "image/jpeg" : mimeType;
+}
 
 export type ValidatedTierBlob = {
   bytes: Uint8Array;
@@ -118,6 +127,29 @@ export async function validatePackageAssets(
       }
       if ((await hashBytes(bytes)) !== tier.sha256) {
         warnings.push(`${label}: image file is corrupt (checksum mismatch, ${tier.path}).`);
+        continue;
+      }
+
+      // The real dimension enforcement: sniff the ACTUAL file header (no
+      // decode). Fail closed — an "image" whose header can't be read is
+      // never persisted, and a pixel bomb is caught here regardless of what
+      // the manifest declared (or omitted).
+      const sniffed = readImageDimensions(bytes);
+      if (!sniffed) {
+        warnings.push(`${label}: unreadable image data (${tier.path}).`);
+        continue;
+      }
+      if (sniffed.widthPx > MAX_ASSET_DIMENSION_PX || sniffed.heightPx > MAX_ASSET_DIMENSION_PX) {
+        warnings.push(`${label}: image dimensions exceed the ${MAX_ASSET_DIMENSION_PX}px limit.`);
+        continue;
+      }
+      // The header magic must agree with the allowlisted MIME claim — a
+      // mislabelled blob (PNG bytes claiming image/webp) degrades rather
+      // than being persisted under a false type.
+      if (sniffed.format !== normalizeMime(tier.mimeType)) {
+        warnings.push(
+          `${label}: image data (${sniffed.format}) does not match its declared type (${tier.mimeType}).`
+        );
         continue;
       }
 

@@ -213,12 +213,26 @@ current-version documents.
 
 Per manifest asset entry, before anything is decoded:
 
-- `widthPx`/`heightPx` are sanity-capped at **16384 px** (the common GPU texture
-  ceiling) — a hostile dimension is rejected from the manifest, never decoded.
 - Each shipped tier blob must: exist at its manifest `path`, match the recorded
   `byteSize`, **re-hash to the recorded `sha256`** (the content-addressing
   promise, verified), and carry a MIME type in the allowlist export can emit
   (`image/webp,jpeg,jpg,png,gif,avif,tiff`) — extension is never trusted.
+- **Dimension enforcement reads the ACTUAL file headers**, not the manifest:
+  `readImageDimensions` (`src/domain/assets/imageDimensions.ts`) parses
+  dimensions header-only — no decoding — for every allowlisted format (PNG
+  IHDR, JPEG SOFn scan, GIF screen descriptor, WebP VP8/VP8L/VP8X, AVIF `ispe`
+  box walk taking the max across boxes, TIFF first-IFD in both endiannesses).
+  Either sniffed dimension over **16384 px** (the common GPU texture ceiling)
+  degrades the tier. Manifest-declared `widthPx`/`heightPx` are
+  attacker-controlled and serve only as a cheap fast-reject; omitting or
+  under-declaring them does not bypass the guard.
+- **Unreadable headers fail closed**: a blob whose header can't be parsed as
+  any allowlisted image format is never persisted (degraded with a warning).
+- **The header magic must agree with the declared MIME**: a blob whose bytes
+  identify a *different* allowlisted format than its manifest `mimeType` claims
+  (e.g. PNG bytes labelled `image/webp`) is degraded rather than persisted
+  under a false type. (`image/jpg` is normalized to `image/jpeg` before the
+  comparison.)
 
 Failures degrade per-tier, then per-asset: a corrupt tier drops just that tier;
 an asset with no intact tiers imports its artwork **metadata-only** with a

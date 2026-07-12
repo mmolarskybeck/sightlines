@@ -16,9 +16,22 @@ import {
   type ImportPlan,
   type ValidatedPackageAssets
 } from "./importPackage";
-import { makeArtwork, makeFixture } from "./packageTestFixtures";
+import { makeArtwork, makeFixture, makeWebpStubBytes } from "./packageTestFixtures";
 
 const enc = new TextEncoder();
+
+// A GIF header stub for pixel-bomb tests: GIF's 16-bit dimensions can exceed
+// the 16384px cap, unlike the VP8L fixture stubs (whose 14-bit fields max out
+// at exactly 16384).
+function makeGifStubBytes(widthPx: number, heightPx: number): Uint8Array {
+  const bytes = new Uint8Array(16);
+  bytes.set(Uint8Array.from("GIF89a", (c) => c.charCodeAt(0)), 0);
+  bytes[6] = widthPx & 0xff;
+  bytes[7] = (widthPx >> 8) & 0xff;
+  bytes[8] = heightPx & 0xff;
+  bytes[9] = (heightPx >> 8) & 0xff;
+  return bytes;
+}
 
 async function makeTierEntry(
   tier: "original" | "display" | "thumbnail",
@@ -59,7 +72,7 @@ function emptyExisting(): ExistingLibraryState {
 
 describe("validatePackageAssets", () => {
   async function makeAssetCase() {
-    const bytes = enc.encode("blob-bytes");
+    const bytes = makeWebpStubBytes("blob-bytes");
     const tier = await makeTierEntry("display", bytes);
     const entry: PackageAssetEntry = {
       assetId: "asset-1",
@@ -122,8 +135,8 @@ describe("validatePackageAssets", () => {
   });
 
   it("keeps intact tiers when a sibling tier is corrupt", async () => {
-    const good = enc.encode("good-thumbnail");
-    const bad = enc.encode("display-bytes");
+    const good = makeWebpStubBytes("good-thumbnail");
+    const bad = makeWebpStubBytes("display-bytes");
     const goodTier = await makeTierEntry("thumbnail", good);
     const badTier = await makeTierEntry("display", bad);
     const manifest = makeManifest({
@@ -143,11 +156,87 @@ describe("validatePackageAssets", () => {
     expect(tiers?.display).toBeUndefined();
     expect(validated.warnings.length).toBe(1);
   });
+
+  // --- header-sniffed enforcement (fail closed on actual bytes) -------------
+
+  it("degrades a pixel bomb whose manifest declares innocent dimensions", async () => {
+    const bomb = makeGifStubBytes(60000, 60000);
+    const tier = await makeTierEntry("display", bomb, { mimeType: "image/gif" });
+    const manifest = makeManifest({
+      assets: [
+        {
+          assetId: "asset-1",
+          mimeType: "image/gif",
+          sha256: "orig",
+          widthPx: 100, // attacker-declared, innocent
+          heightPx: 100,
+          tiers: [tier]
+        }
+      ]
+    });
+
+    const validated = await validatePackageAssets(manifest, new Map([[tier.path, bomb]]));
+
+    expect(validated.byAssetId.size).toBe(0);
+    expect(validated.warnings.join(" ")).toMatch(/dimensions exceed/);
+  });
+
+  it("degrades a pixel bomb when the manifest omits dimensions entirely", async () => {
+    const bomb = makeGifStubBytes(60000, 60000);
+    const tier = await makeTierEntry("display", bomb, { mimeType: "image/gif" });
+    const manifest = makeManifest({
+      assets: [{ assetId: "asset-1", mimeType: "image/gif", sha256: "orig", tiers: [tier] }]
+    });
+
+    const validated = await validatePackageAssets(manifest, new Map([[tier.path, bomb]]));
+
+    expect(validated.byAssetId.size).toBe(0);
+    expect(validated.warnings.join(" ")).toMatch(/dimensions exceed/);
+  });
+
+  it("degrades a blob whose header cannot be read as any allowlisted image", async () => {
+    const notAnImage = enc.encode("this passes the hash check but is not an image");
+    const tier = await makeTierEntry("display", notAnImage);
+    const manifest = makeManifest({
+      assets: [{ assetId: "asset-1", mimeType: "image/jpeg", sha256: "orig", tiers: [tier] }]
+    });
+
+    const validated = await validatePackageAssets(manifest, new Map([[tier.path, notAnImage]]));
+
+    expect(validated.byAssetId.size).toBe(0);
+    expect(validated.warnings.join(" ")).toMatch(/unreadable image data/);
+  });
+
+  it("degrades a blob whose header identifies a different format than it claims", async () => {
+    const webpBytes = makeWebpStubBytes("mislabeled");
+    const tier = await makeTierEntry("display", webpBytes, { mimeType: "image/png" });
+    const manifest = makeManifest({
+      assets: [{ assetId: "asset-1", mimeType: "image/png", sha256: "orig", tiers: [tier] }]
+    });
+
+    const validated = await validatePackageAssets(manifest, new Map([[tier.path, webpBytes]]));
+
+    expect(validated.byAssetId.size).toBe(0);
+    expect(validated.warnings.join(" ")).toMatch(/does not match its declared type/);
+  });
+
+  it("accepts a small valid image at its true dimensions", async () => {
+    const smallGif = makeGifStubBytes(320, 200);
+    const tier = await makeTierEntry("display", smallGif, { mimeType: "image/gif" });
+    const manifest = makeManifest({
+      assets: [{ assetId: "asset-1", mimeType: "image/gif", sha256: "orig", tiers: [tier] }]
+    });
+
+    const validated = await validatePackageAssets(manifest, new Map([[tier.path, smallGif]]));
+
+    expect(validated.warnings).toEqual([]);
+    expect(validated.byAssetId.get("asset-1")?.tiers.display).toBeDefined();
+  });
 });
 
 describe("planPackageImport — §6 merge rules", () => {
   it("adds unknown artworks and prepares their assets", async () => {
-    const bytes = enc.encode("display-a");
+    const bytes = makeWebpStubBytes("display-a");
     const tier = await makeTierEntry("display", bytes);
     const entry: PackageAssetEntry = {
       assetId: "asset-a",
@@ -208,7 +297,7 @@ describe("planPackageImport — §6 merge rules", () => {
   });
 
   it("dedupes identical image content under a different asset id (reuses stored blob)", async () => {
-    const bytes = enc.encode("shared-display");
+    const bytes = makeWebpStubBytes("shared-display");
     const tier = await makeTierEntry("display", bytes);
     const manifest = makeManifest({
       artworks: [makeArtwork("art-new", { assetId: "asset-theirs" })],
@@ -288,7 +377,7 @@ describe("planPackageImport — §6 merge rules", () => {
   });
 
   it("gives an incoming asset a fresh id when its id is taken by different content", async () => {
-    const bytes = enc.encode("their-display");
+    const bytes = makeWebpStubBytes("their-display");
     const tier = await makeTierEntry("display", bytes);
     const manifest = makeManifest({
       artworks: [makeArtwork("art-1", { assetId: "asset-shared-id" })],
