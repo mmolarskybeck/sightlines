@@ -28,9 +28,10 @@ import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
 import {
   getPlacedRoomBounds,
   getRectangleRoomDimensions,
-  getWallsWithGeometry,
   getOrthogonalQuadWallPair,
 } from "../domain/geometry/walls";
+import { getRoomPlaceableWalls } from "../domain/geometry/placeableWalls";
+import type { WallSwitcherEntry } from "./components/WallSwitcher";
 import { evaluateOpeningPair } from "../domain/geometry/openingConnections";
 import { getOpeningKindLabel, type OpeningKind } from "../domain/placement/createOpening";
 import type {
@@ -576,14 +577,19 @@ export function App() {
 
   // The flat wall inventory (room order) that feeds the elevation chip's wall
   // switcher — the navigation that used to live in the right-panel wall list.
-  const wallsForSwitcher = useMemo(
+  // Each room contributes its perimeter walls then its partition faces (the
+  // placeable-surface union), so the switcher and its prev/next stepping cover
+  // partitions too; `kind` lets the menu set faces apart from perimeter walls.
+  const wallsForSwitcher = useMemo<WallSwitcherEntry[]>(
     () =>
       project
         ? project.floor.rooms.flatMap((placement) =>
-            getWallsWithGeometry(placement.room).map((wall) => ({
+            getRoomPlaceableWalls(placement.room).map((wall) => ({
               id: wall.id,
               name: wall.name,
-              roomName: placement.room.name
+              roomId: placement.roomId,
+              roomName: placement.room.name,
+              kind: parseFaceWallId(wall.id) ? ("partition-face" as const) : ("perimeter" as const)
             }))
           )
         : [],
