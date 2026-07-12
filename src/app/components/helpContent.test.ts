@@ -71,7 +71,7 @@ describe("viewHelpGroups", () => {
     const groups = viewHelpGroups("3d", "keyboard", true);
     const keys = keyLabels(groups);
     const text = textLabels(groups);
-    expect(keys).toEqual(expect.arrayContaining(["W", "A", "S", "D", "Arrow keys"]));
+    expect(keys).toEqual(expect.arrayContaining(["W", "A", "S", "D", "←", "↑", "↓", "→"]));
     expect(text).toContain("double-click it");
     expect(text).toContain("right-drag");
   });

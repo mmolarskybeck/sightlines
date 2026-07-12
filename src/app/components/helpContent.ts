@@ -30,6 +30,7 @@ export type HelpGroup = { title: string; hints: HelpHint[] };
 // Pure-data token constructors (no JSX) so the content tables below stay terse.
 const k = (label: string): HelpKeyToken => ({ kind: "key", label });
 const t = (label: string): HelpKeyToken => ({ kind: "text", label });
+const arrowKeys = (): HelpInput => [k("←"), k("↑"), k("↓"), k("→")];
 
 // Single-key toolbar accelerators (useToolbarShortcuts) — keyboard only; touch
 // users tap the same toolbar buttons directly. Plan owns Partition and the
@@ -132,7 +133,7 @@ function elevationGroups(inputMode: HelpInputMode, mod: string): HelpGroup[] {
     {
       title: "Hang & arrange",
       hints: [
-        { action: "Nudge a work", inputs: [[k("Arrow keys")]] },
+        { action: "Nudge a work", inputs: [arrowKeys()] },
         { action: "Nudge in larger steps", inputs: [[k("⇧"), t("arrow")]] },
         { action: "Nudge in fine steps", inputs: [[k("⌥"), t("arrow")]] },
         { action: "Apply a group nudge", inputs: [[k("Enter")]] },
@@ -166,7 +167,7 @@ function threeDGroups(inputMode: HelpInputMode): HelpGroup[] {
       title: "Move the camera",
       hints: [
         { action: "Pan along the floor", inputs: [[t("right-drag")]] },
-        { action: "Walk around", inputs: [[k("W"), k("A"), k("S"), k("D")], [k("Arrow keys")]] },
+        { action: "Walk around", inputs: [[k("W"), k("A"), k("S"), k("D")], arrowKeys()] },
         { action: "Walk faster", inputs: [[k("⇧"), t("held")]] },
         { action: "Focus a spot", inputs: [[t("double-click it")]] }
       ]
