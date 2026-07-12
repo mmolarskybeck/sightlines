@@ -152,14 +152,134 @@ the hash of that specific tier's bytes.
   `metadata` bag, framing) do **not** require a package-version bump — they are
   absorbed by the existing per-document schemas (docs/plan.md §4.4).
 
-## Deferred to the import slice
+## Import behavior
 
-Export only produces packages. The import pipeline (docs/plan.md §13) will add,
-on top of this format: zip path-traversal rejection, extracted file-count and
-total-uncompressed-size caps (decompression-bomb guard), MIME validation over
-extension trust, image-dimension checks before decode, freeform-text
-sanitization, the `readPackageManifest` migrate-then-validate run, sha256-based
-library dedupe, and graceful missing-asset degradation (import a work as
-metadata-only with a "missing image" warning rather than failing the whole
-import). `readSightlinesZip()` in `zipPackage.ts` is the seam those checks layer
-onto.
+Import treats every `.sightlines` file as untrusted input (docs/plan.md §13) and
+runs one pipeline end to end before anything is persisted:
+**zip safety → staged manifest parse → asset intake validation → merge plan →
+(conflict review) → commit**. Nothing is written to IndexedDB until the final
+commit step; cancelling the conflict dialog discards the import completely.
+
+Relevant code: `src/domain/package/extractPackage.ts` (zip safety),
+`readPackageManifest` in `packageSchema.ts` (staged manifest parse),
+`src/domain/package/importPackage.ts` (asset validation, merge planning,
+finalize), `importSightlinesPackage` in `src/app/store.ts` (wiring + persistence),
+`src/app/components/ImportConflictDialog.tsx` (one-step conflict review).
+
+### Zip safety caps (enforced on declared sizes, BEFORE inflation)
+
+The zip directory is walked once with a filter that admits nothing, building an
+inventory of declared (pre-inflation) sizes; the caps and path rules run against
+that inventory, and only then are the meaningful entries inflated. A
+decompression bomb is rejected from its headers.
+
+| Cap | Value | Rationale |
+|---|---|---|
+| Entry count | 4096 files | a 10-room / 200-work show at three tiers is ~600 blobs |
+| Per-entry uncompressed | 256 MB | above any plausible single museum scan |
+| Total uncompressed | 2 GB | the package inflates into memory; this bounds the peak |
+| `manifest.json` | 20 MB | same cap as bare project-JSON import |
+
+Path rules: `..` segments, absolute paths, drive letters, backslashes, and empty
+segments are all rejected — and a single hostile path rejects the **whole
+package** (a hostile path means a hostile file). Directory entries (`assets/`)
+are tolerated and skipped. **Unknown-but-safe extra entries are ignored, never
+inflated** — forward compatibility, so a future package version can add new
+folders without breaking older apps. Only `manifest.json` and `assets/*` mean
+anything in v1.
+
+### Staged manifest parse (docs/plan.md §2 ordering)
+
+The strict `sightlinesPackageSchema` embeds the CURRENT project/artwork schemas,
+but a package written by an older app legitimately embeds older-schemaVersion
+documents. Import therefore parses in stages:
+
+1. **Version guard** — a package `schemaVersion` newer than the app is refused
+   with a clear message (and a package-level migration chain slots in here when
+   a v2 ever ships).
+2. **Lenient envelope** — `{ schemaVersion, exportedAt, mode, project: unknown,
+   artworks: unknown[], assets }` validates the wrapper only.
+3. **Migrate embedded documents** — the embedded project and artworks run the
+   SAME migration chains the app uses when loading from IndexedDB
+   (`migrateProject` v1→v3, `migrateArtwork`), so a v1-era package opens exactly
+   like a v1-era local file.
+4. **Strict validation** — the assembled, fully-migrated manifest must pass the
+   same contract export writes.
+
+Export still uses the strict schema directly; it only ever writes
+current-version documents.
+
+### Asset intake validation
+
+Per manifest asset entry, before anything is decoded:
+
+- Each shipped tier blob must: exist at its manifest `path`, match the recorded
+  `byteSize`, **re-hash to the recorded `sha256`** (the content-addressing
+  promise, verified), and carry a MIME type in the allowlist export can emit
+  (`image/webp,jpeg,jpg,png,gif,avif,tiff`) — extension is never trusted.
+- **Dimension enforcement reads the ACTUAL file headers**, not the manifest:
+  `readImageDimensions` (`src/domain/assets/imageDimensions.ts`) parses
+  dimensions header-only — no decoding — for every allowlisted format (PNG
+  IHDR, JPEG SOFn scan, GIF screen descriptor, WebP VP8/VP8L/VP8X, AVIF `ispe`
+  box walk taking the max across boxes, TIFF first-IFD in both endiannesses).
+  Either sniffed dimension over **16384 px** (the common GPU texture ceiling)
+  degrades the tier. Manifest-declared `widthPx`/`heightPx` are
+  attacker-controlled and serve only as a cheap fast-reject; omitting or
+  under-declaring them does not bypass the guard.
+- **Unreadable headers fail closed**: a blob whose header can't be parsed as
+  any allowlisted image format is never persisted (degraded with a warning).
+- **The header magic must agree with the declared MIME**: a blob whose bytes
+  identify a *different* allowlisted format than its manifest `mimeType` claims
+  (e.g. PNG bytes labelled `image/webp`) is degraded rather than persisted
+  under a false type. (`image/jpg` is normalized to `image/jpeg` before the
+  comparison.)
+
+Failures degrade per-tier, then per-asset: a corrupt tier drops just that tier;
+an asset with no intact tiers imports its artwork **metadata-only** with a
+visible missing-image state and a one-line warning in the banner. One bad image
+never fails the whole import.
+
+### Library merge rules (docs/plan.md §6)
+
+- **Same `artworkId`, identical content** (record fields match, image content
+  hash matches) → the existing library record is reused untouched.
+- **Same `artworkId`, differing content** → collected into ONE review dialog
+  (never N sequential prompts) with a per-work choice: **Keep mine** (default —
+  the local record stays; the imported layout references it), **Use theirs**
+  (overwrite the library record), **Keep both** (the imported version gets a
+  fresh id and every project reference — checklist, wall and floor placements —
+  is remapped to it).
+- **Referenced asset absent** (metadata-only mode, dropped blob, or corrupt) →
+  the artwork imports without an image (`assetId` removed) and shows the app's
+  standing missing-image placeholder.
+- **Identical image content already in the library under a different id** →
+  deduped by hash: the incoming artwork is re-bound to the existing local asset
+  and **the incoming asset record and blobs are discarded** — no second copy is
+  written. This also gives metadata-only packages automatic **re-linking**: on a
+  machine that already has the image (matched by the manifest's original
+  `sha256`), the artwork arrives with its image connected.
+- An incoming asset whose id is already taken locally by different content gets
+  a fresh id; ids are never reused for different bytes.
+
+### Tier fallback on partial packages
+
+Local storage always keeps three blob slots per asset. When a package ships
+fewer tiers (display mode has no originals), the best available tier stands in
+upward: stored *original* ← display ← thumbnail; *display* ← original-stand-in;
+*thumbnail* ← display. The record's `sha256` remains the **manifest's original
+hash**, so dedupe against a future upload of the true original file still
+matches even though the stored stand-in bytes hash differently.
+
+### Project identity
+
+An incoming project whose id already exists locally imports as a **new** project
+(fresh id, title suffixed “ (imported)”) — local work is never silently
+overwritten. Without a collision, the project keeps its id.
+
+### Entry point + text safety
+
+One Import control accepts both formats and detects by **content**, not
+extension: zip magic bytes (`PK\x03\x04`) route to the package pipeline,
+anything else to the existing project-JSON pipeline. Imported strings are only
+ever rendered through React text nodes — the codebase contains no
+`dangerouslySetInnerHTML` — so no imported text is ever interpreted as HTML.

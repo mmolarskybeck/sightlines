@@ -49,9 +49,41 @@ export type PackageFixture = {
   getBlob: (key: string) => Promise<Blob>;
 };
 
+// A minimal VALID WebP (VP8L flavor): RIFF/WEBP container, VP8L chunk with the
+// 0x2F signature and real 14-bit dimensions, then the label as trailing payload
+// so every stub has distinct, deterministic content (distinct hashes). Import's
+// fail-closed header sniffer (readImageDimensions) accepts these; arbitrary
+// text bytes would be rejected as unreadable image data.
+export function makeWebpStubBytes(label: string, widthPx = 8, heightPx = 6): Uint8Array {
+  const payload = new TextEncoder().encode(`:${label}`);
+  // VP8L chunk data: signature byte + 4 dimension-bit bytes + payload.
+  const chunkSize = 5 + payload.length;
+  const bytes = new Uint8Array(12 + 8 + chunkSize);
+  const ascii = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) bytes[offset + i] = text.charCodeAt(i);
+  };
+  const u32le = (offset: number, value: number) => {
+    bytes[offset] = value & 0xff;
+    bytes[offset + 1] = (value >> 8) & 0xff;
+    bytes[offset + 2] = (value >> 16) & 0xff;
+    bytes[offset + 3] = (value >> 24) & 0xff;
+  };
+
+  ascii(0, "RIFF");
+  u32le(4, bytes.length - 8);
+  ascii(8, "WEBP");
+  ascii(12, "VP8L");
+  u32le(16, chunkSize);
+  bytes[20] = 0x2f; // VP8L signature
+  u32le(21, ((widthPx - 1) & 0x3fff) | (((heightPx - 1) & 0x3fff) << 14));
+  bytes.set(payload, 25);
+  return bytes;
+}
+
 function bytesFor(label: string): Uint8Array {
-  // Distinct, deterministic content per tier so hashes differ.
-  return new TextEncoder().encode(`fake-image-bytes:${label}`);
+  // Distinct, deterministic, VALID image content per tier so hashes differ
+  // and the import-side header sniffer accepts them.
+  return makeWebpStubBytes(label);
 }
 
 // A project with:

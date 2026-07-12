@@ -64,6 +64,7 @@ import { ArtworkLibraryPicker, ArtworkLibraryView } from "./components/ArtworkLi
 import { PanelResizeHandle } from "./components/PanelResizeHandle";
 import { ChecklistPanel } from "./components/ChecklistPanel";
 import { DeleteRoomDialog } from "./components/DeleteRoomDialog";
+import { ImportConflictDialog } from "./components/ImportConflictDialog";
 import { HelpDialog } from "./components/HelpDialog";
 import { ElevationEmptyState } from "./components/ElevationEmptyState";
 import { FloorObjectInspector, FloorPlacementFields } from "./components/FloorObjectInspector";
@@ -312,6 +313,7 @@ export function App() {
     libraryArtworks,
     intakeState,
     pendingDuplicateUploads,
+    pendingPackageImport,
     boot,
     loadBenchmarkFixture,
     setViewMode,
@@ -351,6 +353,9 @@ export function App() {
     redo,
     importProjectJson,
     exportProjectPackage,
+    importSightlinesPackage,
+    resolvePackageImportConflicts,
+    dismissPackageImport,
     listProjectSummaries,
     listArtworkProjectMemberships,
     openProject,
@@ -1022,6 +1027,22 @@ export function App() {
     if (result) triggerDownload(result.zip, result.filename);
   };
 
+  // One Import entry point for both formats, detected by CONTENT, not
+  // extension: zip magic bytes ("PK\x03\x04") mean a .sightlines package,
+  // anything else goes down the existing project-JSON path.
+  const handleImportFile = async (file: File) => {
+    const buffer = await file.arrayBuffer();
+    const head = new Uint8Array(buffer, 0, Math.min(4, buffer.byteLength));
+    const isZip =
+      head.length === 4 &&
+      head[0] === 0x50 &&
+      head[1] === 0x4b &&
+      head[2] === 0x03 &&
+      head[3] === 0x04;
+    if (isZip) await importSightlinesPackage(buffer);
+    else await importProjectJson(new TextDecoder().decode(buffer));
+  };
+
   // The grid tracks are driven by CSS custom properties (see .workspace in
   // global.css) rather than an inline grid-template-columns, so the narrow-
   // viewport media query can still override to a single stacked column — an
@@ -1132,8 +1153,8 @@ export function App() {
           <div className="toolbar-divider" aria-hidden="true" />
           <Button
             className="icon-button"
-            title="Import project JSON"
-            aria-label="Import project JSON"
+            title="Import project (.sightlines or JSON)"
+            aria-label="Import project (.sightlines or JSON)"
             size="icon"
             variant="ghost"
             onClick={() => fileInputRef.current?.click()}
@@ -1191,11 +1212,11 @@ export function App() {
             ref={fileInputRef}
             className="visually-hidden"
             type="file"
-            accept="application/json,.json"
+            accept="application/json,.json,.sightlines,application/zip"
             onChange={(event) => {
               const file = event.target.files?.[0];
               if (!file) return;
-              void file.text().then(importProjectJson);
+              void handleImportFile(file);
               event.target.value = "";
             }}
           />
@@ -1944,6 +1965,11 @@ export function App() {
         onOpenChange={(open) => {
           if (!open) setConfirmDeleteRoomId(null);
         }}
+      />
+      <ImportConflictDialog
+        conflicts={pendingPackageImport?.conflicts ?? null}
+        onResolve={(resolutions) => void resolvePackageImportConflicts(resolutions)}
+        onDismiss={dismissPackageImport}
       />
     </main>
     </TooltipProvider>

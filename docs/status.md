@@ -45,10 +45,11 @@ Touch drag-and-drop for artwork placement, insecure-context support for LAN dev 
 - **Context-aware help dialog** on the shared UI primitives.
 - **Test corpus + import intelligence**: Rijksmuseum and Art Institute of Chicago artwork metadata fixtures with download script (physical dimensions included), and `guessColumnMapping` handling for camelCase/PascalCase spreadsheet headers.
 - **`.sightlines` package export slice** (2026-07-12, import deferred): schema-versioned `SightlinesPackage` manifest (`src/domain/schema/packageSchema.ts`) with content-addressed, per-tier asset inventory (sha256/byteSize/mimeType/path); pure async derivation (`src/domain/package/buildPackage.ts`) selecting the referenced-artwork subset and three export modes (`originals` / `display` default / `metadata-only`); fflate zip writer storing image blobs uncompressed and deflating JSON; `exportProjectPackage(mode)` store action; topbar Export dropdown plus Settings "Export backup" wired to the display-tier package. Format documented in `docs/package-format.md`.
+- **`.sightlines` package import slice** (2026-07-12): the full untrusted-file pipeline (docs/plan.md §13) — pre-inflation zip caps + path-traversal rejection (`extractPackage.ts`), staged manifest parse (lenient envelope → migrate embedded docs via the existing project/artwork chains → strict validation), per-blob re-hash/MIME-allowlist/dimension guards with graceful per-asset degradation, and the §6 merge rules (`importPackage.ts`): identical-content reuse, one-step keep-mine/use-theirs/keep-both conflict review dialog, sha256 dedupe against the local library (with automatic re-link for metadata-only packages), and import-as-new-project on id collision. One topbar Import control detects package-vs-JSON by content. Import behavior documented in `docs/package-format.md`.
 
 ## Near-Term Order
 
-1. MVP package/export work: package **export** shipped 2026-07-12 (see above; format in `docs/package-format.md`) — next, build `.sightlines` **import** on the untrusted-file safety pipeline (parse → validate shape → migrate → validate → persist) validating against that format, then the backup flow, PNG/PDF exports (including the deferred 3D screenshot), and readiness reporting.
+1. MVP package/export work: `.sightlines` **export and import** shipped 2026-07-12 (format + import behavior in `docs/package-format.md`) — next, the prominent backup flow, PNG/PDF exports (including the deferred 3D screenshot), and readiness reporting.
 2. Multi-room placement and management polish around the shared floor coordinate space.
 3. Run the 10-room / 200-work renderer benchmark fixture on desktop and tablet; defer room-visibility filtering until measurements show a material whole-floor 3D cost. Overview remains whole-floor; any future scope belongs to eye-level rendering and the render layer only.
 
@@ -56,7 +57,6 @@ Touch drag-and-drop for artwork placement, insecure-context support for LAN dev 
 
 - Overlapping door/window holes on one wall triangulate with minor artifacts (see `docs/archive/3d-preview-spec.md` §10); the domain already flags overlapping placements for review.
 - Eye height uses `project.defaultCenterlineHeightMm` as a proxy; add a per-project `eyeHeightMm` if users trip on it.
-- `.sightlines` package import/export still needs the untrusted-file safety pipeline before becoming the main backup/share surface.
 - Duplicate artwork/image import prevention is planned but not yet enforced across the new wizard path.
 
 ## Deferred

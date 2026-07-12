@@ -124,8 +124,9 @@ async function toBytes(blob: Blob): Promise<Uint8Array> {
 
 // Hash over a fresh, contiguous ArrayBuffer copy — a Uint8Array read off a Blob
 // can be a view into a larger/shared buffer, which sha256Hex's ArrayBuffer
-// parameter won't accept directly.
-async function hashBytes(bytes: Uint8Array): Promise<string> {
+// parameter won't accept directly. Exported for the import side, which
+// re-hashes every extracted blob against the manifest (integrity check).
+export async function hashBytes(bytes: Uint8Array): Promise<string> {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
   return sha256Hex(copy.buffer);
