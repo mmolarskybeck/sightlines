@@ -1111,7 +1111,9 @@ describe("app store", () => {
           {
             id: "project-with-shared-artwork",
             title: "Shared Artwork Show",
-            updatedAt: "2026-07-11T12:00:00.000Z"
+            updatedAt: "2026-07-11T12:00:00.000Z",
+            roomCount: 1,
+            artworkCount: 1
           }
         ]
       },

@@ -241,6 +241,7 @@ export function App() {
     redo,
     importProjectJson,
     exportProjectPackage,
+    exportProjectPackageById,
     importSightlinesPackage,
     resolvePackageImportConflicts,
     dismissPackageImport,
@@ -248,6 +249,7 @@ export function App() {
     listArtworkProjectMemberships,
     openProject,
     createProject,
+    renameProjectById,
     deleteProject,
     addArtworksFromFiles,
     importArtworkDrafts,
@@ -321,7 +323,9 @@ export function App() {
         const liveSummary: ProjectSummary = {
           id: liveId,
           title: liveTitle,
-          updatedAt: liveUpdatedAt
+          updatedAt: liveUpdatedAt,
+          roomCount: project.floor.rooms.length,
+          artworkCount: project.checklistArtworkIds.length
         };
         setProjectMembershipsByArtworkId(
           new Map(
@@ -948,6 +952,14 @@ export function App() {
     }
   };
 
+  // Project manager's per-row quick export — same "Standard" (display-quality)
+  // default as the primary Export button's first, recommended option, minus
+  // the mode picker: a project list row isn't the place for that choice.
+  const handleExportProjectById = async (id: string) => {
+    const result = await exportProjectPackageById(id, "display");
+    if (result) triggerDownload(result.zip, result.filename);
+  };
+
   // One Import entry point for both formats, detected by CONTENT, not
   // extension: zip magic bytes ("PK\x03\x04") mean a .sightlines package,
   // anything else goes down the existing project-JSON path.
@@ -1017,7 +1029,9 @@ export function App() {
               listProjectSummaries={listProjectSummaries}
               onCreateProject={createProject}
               onDeleteProject={deleteProject}
+              onExportProject={handleExportProjectById}
               onOpenProject={openProject}
+              onRenameProject={renameProjectById}
             />
           </div>
         </div>

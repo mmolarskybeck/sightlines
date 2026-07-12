@@ -213,4 +213,10 @@ export type ProjectSummary = {
   id: string;
   title: string;
   updatedAt: string;
+  // Cheap counts for the project manager's per-row meta line — read straight
+  // off the raw record (see toProjectSummary), not a full parseProject.
+  roomCount: number;
+  // Checklist size, not placed-artwork count: the number a "3 rooms · 12
+  // works" line means for the whole project, placed or not.
+  artworkCount: number;
 };
