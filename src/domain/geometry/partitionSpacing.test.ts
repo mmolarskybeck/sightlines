@@ -3,7 +3,8 @@ import { createPolygonRoomPlacement, createRectangularRoomPlacement } from "./cr
 import {
   castRay,
   collectObstacleSegments,
-  getPartitionClearances
+  getPartitionClearances,
+  partitionAxisForWorldAxis
 } from "./partitionSpacing";
 import type { FreestandingWall, Room } from "../project";
 
@@ -238,5 +239,34 @@ describe("getPartitionClearances — ray miss", () => {
     // that single ray hits; the other three escape. The centering guard needs
     // only one side to miss to refuse, which it does here.
     expect(clear.span.minus.hit).not.toBeNull();
+  });
+});
+
+describe("partitionAxisForWorldAxis", () => {
+  it("maps a horizontal partition: left–right → span (axis), up–down → normal", () => {
+    const wall = partition({ startXMm: 1000, startYMm: 2000, endXMm: 3000, endYMm: 2000 });
+    expect(partitionAxisForWorldAxis(wall, "x")).toBe("axis");
+    expect(partitionAxisForWorldAxis(wall, "y")).toBe("normal");
+  });
+
+  it("mirrors for a vertical partition: left–right → normal, up–down → span (axis)", () => {
+    const wall = partition({ startXMm: 2000, startYMm: 1000, endXMm: 2000, endYMm: 3000 });
+    expect(partitionAxisForWorldAxis(wall, "x")).toBe("normal");
+    expect(partitionAxisForWorldAxis(wall, "y")).toBe("axis");
+  });
+
+  it("classifies a shallow (30°) partition by its dominant span component", () => {
+    // Span ≈ (0.866, 0.5): x-dominant, so it behaves like a horizontal one.
+    const wall = partition({ startXMm: 0, startYMm: 0, endXMm: 866, endYMm: 500 });
+    expect(partitionAxisForWorldAxis(wall, "x")).toBe("axis");
+    expect(partitionAxisForWorldAxis(wall, "y")).toBe("normal");
+  });
+
+  it("breaks the exact 45° tie toward the span being x-dominant", () => {
+    // |span.x| == |span.y|: world x favors the span (axis), world y the normal,
+    // so the two world axes never resolve to the same direction.
+    const wall = partition({ startXMm: 0, startYMm: 0, endXMm: 1000, endYMm: 1000 });
+    expect(partitionAxisForWorldAxis(wall, "x")).toBe("axis");
+    expect(partitionAxisForWorldAxis(wall, "y")).toBe("normal");
   });
 });

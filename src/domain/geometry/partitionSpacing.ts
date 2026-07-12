@@ -197,6 +197,31 @@ export function getPartitionClearances(
   };
 }
 
+// Which of a partition's two clearance DIRECTIONS — its span (the along-
+// centerline / end-cap gaps, reported as "axis") or its unit normal (the
+// perpendicular / face gaps, reported as "normal") — is DOMINANT on the given
+// world axis. Span and normal are perpendicular, so exactly one is x-dominant
+// and the other y-dominant, except at an exact 45° tilt where their |components|
+// tie. The tie is broken deterministically so the span always counts as
+// x-dominant: world "x" favors the span (>=), world "y" favors the normal
+// (strict >), and the two world axes therefore never resolve to the same
+// direction. For a horizontal partition: world x → "axis", world y → "normal";
+// a vertical partition is the mirror. Drives both the axis-named centering
+// buttons and the motion-relevant dimension mask.
+export function partitionAxisForWorldAxis(
+  partition: FreestandingWall,
+  world: "x" | "y"
+): "normal" | "axis" {
+  const start: Point = { xMm: partition.startXMm, yMm: partition.startYMm };
+  const end: Point = { xMm: partition.endXMm, yMm: partition.endYMm };
+  const spanDir = safeDirection(start, end);
+  const normalDir = unitLeftNormalOrZero(start, end);
+  const spanComp = world === "x" ? Math.abs(spanDir.xMm) : Math.abs(spanDir.yMm);
+  const normalComp = world === "x" ? Math.abs(normalDir.xMm) : Math.abs(normalDir.yMm);
+  if (world === "x") return spanComp >= normalComp ? "axis" : "normal";
+  return spanComp > normalComp ? "axis" : "normal";
+}
+
 // Centerline direction as a unit vector, tolerating a degenerate (coincident-
 // endpoint) partition by returning the zero vector — castRay then reports no
 // hit rather than dividing by zero.

@@ -5,6 +5,7 @@ import {
   getFreestandingAngleDeg,
   getFreestandingLengthMm
 } from "../../domain/geometry/freestandingWalls";
+import { partitionAxisForWorldAxis } from "../../domain/geometry/partitionSpacing";
 import { getScopedUnitContext } from "./scopedUnits";
 import { LengthField } from "./LengthField";
 import { Button } from "./ui/button";
@@ -60,16 +61,16 @@ export function FreestandingWallInspector({
           <Button
             className="inspector-action"
             variant="inspector"
-            onClick={() => void onCenter("normal")}
+            onClick={() => void onCenter(partitionAxisForWorldAxis(wall, "x"))}
           >
-            Center between walls
+            Center left–right
           </Button>
           <Button
             className="inspector-action"
             variant="inspector"
-            onClick={() => void onCenter("axis")}
+            onClick={() => void onCenter(partitionAxisForWorldAxis(wall, "y"))}
           >
-            Center along span
+            Center up–down
           </Button>
         </div>
       </div>

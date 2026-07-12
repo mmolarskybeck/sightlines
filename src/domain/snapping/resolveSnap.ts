@@ -20,6 +20,13 @@ export type Guide = {
   axis: "x" | "y";
   positionMm: number;
   targetId: string;
+  // Optional segment extent ALONG the guide's length (for a vertical x-guide
+  // this is the y range; for a horizontal y-guide the x range). When set, the
+  // overlay draws the guide as a bounded segment over [startMm, endMm] instead
+  // of a full-viewBox line — used to clip a partition drag's guides to the
+  // containing room. Producers that leave it undefined keep full-viewport
+  // rendering; resolveSnap itself never sets it (the drag stamps it afterward).
+  extentMm?: { startMm: number; endMm: number };
 };
 
 // The ids of the targets that won each axis on a previous resolve, so the

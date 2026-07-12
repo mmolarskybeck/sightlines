@@ -335,17 +335,28 @@ export function PlanOverlaysLayer({
           }
         />
       ) : null}
-      {activeGuides.map((guide) => (
-        <line
-          className="snap-guide"
-          key={guide.id}
-          x1={guide.axis === "x" ? guide.positionMm : viewBox.x}
-          y1={guide.axis === "y" ? guide.positionMm : viewBox.y}
-          x2={guide.axis === "x" ? guide.positionMm : viewBox.x + viewBox.width}
-          y2={guide.axis === "y" ? guide.positionMm : viewBox.y + viewBox.height}
-          vectorEffect="non-scaling-stroke"
-        />
-      ))}
+      {activeGuides.map((guide) => {
+        // A bounded guide (extentMm set, e.g. a partition drag clipped to its
+        // room) draws as a segment over that range along its length; an
+        // unbounded guide spans the full viewBox. For an x-guide (vertical) the
+        // extent is the y range; for a y-guide (horizontal) it is the x range.
+        const alongStart =
+          guide.extentMm?.startMm ?? (guide.axis === "x" ? viewBox.y : viewBox.x);
+        const alongEnd =
+          guide.extentMm?.endMm ??
+          (guide.axis === "x" ? viewBox.y + viewBox.height : viewBox.x + viewBox.width);
+        return (
+          <line
+            className="snap-guide"
+            key={guide.id}
+            x1={guide.axis === "x" ? guide.positionMm : alongStart}
+            y1={guide.axis === "y" ? guide.positionMm : alongStart}
+            x2={guide.axis === "x" ? guide.positionMm : alongEnd}
+            y2={guide.axis === "y" ? guide.positionMm : alongEnd}
+            vectorEffect="non-scaling-stroke"
+          />
+        );
+      })}
       {marquee
         ? (() => {
             // Plan is y-down (no flip), so the min/max rect maps straight to

@@ -215,4 +215,10 @@ export type PartitionDragState = {
   // Per-axis winning target ids from the previous resolve, feeding resolveSnap's
   // break-free hysteresis so a held snap doesn't chatter.
   previousSnapTargetIds?: SnapTargetIds;
+  // Which world axes this MOVE drag has actually travelled on, latched true
+  // (never unlatched) once the cumulative delta on that axis crosses a small
+  // threshold. Drives the motion-relevant dimension mask so only the gaps on
+  // the axes the user is moving on are drawn during a move. Both false until
+  // the first threshold crossing; ignored for endpoint drags (always all four).
+  movedAxes: { x: boolean; y: boolean };
 };

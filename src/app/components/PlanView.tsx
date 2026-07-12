@@ -18,6 +18,7 @@ import type { ResizeAnchor } from "../../domain/geometry/editRoom";
 import { applyPlanPreview, type PlanPreview } from "../../domain/geometry/planPreview";
 import {
   getFloorBounds,
+  getPlacedRoomBounds,
   getRoomBounds,
   getWallGeometry
 } from "../../domain/geometry/walls";
@@ -45,6 +46,7 @@ import {
 import {
   DEFAULT_FLOOR_OBJECT_DEPTH_MM,
   type Artwork,
+  type FreestandingWall,
   type WallObject
 } from "../../domain/project";
 import {
@@ -63,6 +65,7 @@ import { getGridSnapTargets } from "../../domain/snapping/gridSnapTargets";
 import { getPartitionMoveSnapTargets } from "../../domain/snapping/partitionSnapTargets";
 import {
   getPartitionClearances,
+  partitionAxisForWorldAxis,
   type PartitionClearances,
   type SideClearance
 } from "../../domain/geometry/partitionSpacing";
@@ -925,6 +928,29 @@ export function PlanView({
           xMm: snap.point.xMm - origMid.xMm,
           yMm: snap.point.yMm - origMid.yMm
         };
+        // Latch the axes the user has actually travelled on (never unlatch), so
+        // the dimension mask can show only the motion-relevant gaps. Threshold
+        // is half the snap threshold — small enough to feel immediate, large
+        // enough that a purely-one-axis drag never lights up the other.
+        const latchThresholdMm = snapThresholdMm / 2;
+        const movedAxes = {
+          x: current.movedAxes.x || Math.abs(appliedDelta.xMm) > latchThresholdMm,
+          y: current.movedAxes.y || Math.abs(appliedDelta.yMm) > latchThresholdMm
+        };
+        // Clip the snap guides to the containing room's floor-space bbox (padded
+        // ~200mm so they read just beyond the walls) rather than the full
+        // viewBox. An x-guide (vertical) is bounded on y and vice versa.
+        const guidePadMm = 200;
+        const roomBox = placement ? getPlacedRoomBounds(placement) : null;
+        const activeGuides = roomBox
+          ? snap.activeGuides.map((guide) => ({
+              ...guide,
+              extentMm:
+                guide.axis === "x"
+                  ? { startMm: roomBox.minY - guidePadMm, endMm: roomBox.maxY + guidePadMm }
+                  : { startMm: roomBox.minX - guidePadMm, endMm: roomBox.maxX + guidePadMm }
+            }))
+          : snap.activeGuides;
         return {
           ...current,
           previewStartFloorMm: {
@@ -935,7 +961,8 @@ export function PlanView({
             xMm: current.endFloorMm.xMm + appliedDelta.xMm,
             yMm: current.endFloorMm.yMm + appliedDelta.yMm
           },
-          activeGuides: snap.activeGuides,
+          activeGuides,
+          movedAxes,
           previousSnapTargetIds: snap.snapTargetIds
         };
       }
@@ -1172,7 +1199,10 @@ export function PlanView({
   // so the numbers track the pointer; the room perimeter and sibling partitions
   // are committed geometry, so we cast against `project`. The result is lifted
   // back to floor space for the render-only component.
-  const partitionClearancesFloor = useMemo<PartitionClearances | null>(() => {
+  const partitionClearancesFloor = useMemo<{
+    clearances: PartitionClearances;
+    partition: FreestandingWall;
+  } | null>(() => {
     const activeWallId = partitionDrag?.wallId ?? selectedFreestandingWallId;
     if (!activeWallId) return null;
 
@@ -1209,8 +1239,13 @@ export function PlanView({
         : null
     });
     return {
-      normal: { plus: liftSide(local.normal.plus), minus: liftSide(local.normal.minus) },
-      span: { plus: liftSide(local.span.plus), minus: liftSide(local.span.minus) }
+      clearances: {
+        normal: { plus: liftSide(local.normal.plus), minus: liftSide(local.normal.minus) },
+        span: { plus: liftSide(local.span.plus), minus: liftSide(local.span.minus) }
+      },
+      // Direction-only — the mask mapping is translation-invariant, so the
+      // room-local `partition` serves without lifting to floor space.
+      partition
     };
   }, [partitionDrag, selectedFreestandingWallId, project.floor.rooms]);
 
@@ -1841,6 +1876,7 @@ export function PlanView({
       previewStartFloorMm: partition.startMm,
       previewEndFloorMm: partition.endMm,
       activeGuides: [],
+      movedAxes: { x: false, y: false },
       previousSnapTargetIds: undefined
     });
   }
@@ -2368,7 +2404,17 @@ export function PlanView({
             is selected or being dragged; render-only, muted drafting ink. */}
         {partitionClearancesFloor ? (
           <PartitionDimensionLines
-            clearances={partitionClearancesFloor}
+            clearances={partitionClearancesFloor.clearances}
+            partition={partitionClearancesFloor.partition}
+            visibleWorldAxes={
+              // At rest (no drag) or during an endpoint re-drag, show all four
+              // gaps. During a MOVE drag show only the latched axes — both false
+              // until the first threshold crossing, so nothing shows until the
+              // partition has actually travelled.
+              partitionDrag && partitionDrag.mode === "move"
+                ? partitionDrag.movedAxes
+                : { x: true, y: true }
+            }
             handleSizeMm={handleSizeMm}
             unit={wallUnit}
           />
