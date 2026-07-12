@@ -10,7 +10,6 @@ import {
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
-import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
 import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
 import { CrosshairIcon } from "@phosphor-icons/react/dist/csr/Crosshair";
 import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
@@ -26,6 +25,7 @@ import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { PresentationIcon } from "@phosphor-icons/react/dist/csr/Presentation";
 import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
+import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { StackIcon } from "@phosphor-icons/react/dist/csr/Stack";
 import { UploadSimpleIcon } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
@@ -1015,21 +1015,6 @@ export function App() {
     toggleInspectorCollapsed();
   };
 
-  // Whether the inspector currently has anything to show — a resolved single
-  // subject, a multi-selection, or a placement warning. Drives the contextual
-  // "reopen inspector" tab that surfaces only when the panel is collapsed AND
-  // there's something in it worth reopening for (a bare rail toggle is always
-  // available, but this makes the hidden content discoverable in the moment).
-  const hasInspectorContent =
-    isMultiSelect ||
-    selectedArtwork !== null ||
-    selectedOpening !== null ||
-    selectedFloorBlockedZone !== null ||
-    selectedRoomPlacement !== null ||
-    selectedFreestandingWall !== null ||
-    selectedWall !== null ||
-    labeledPlacementWarnings.length > 0;
-
   // The grid tracks are driven by CSS custom properties (see .workspace in
   // global.css) rather than an inline grid-template-columns, so the narrow-
   // viewport media query can still override to a single stacked column — an
@@ -1060,8 +1045,6 @@ export function App() {
       <AppRail
         leftPanel={visibleLeftPanel}
         onSelectLeftPanel={selectLeftPanel}
-        inspectorCollapsed={visibleInspectorCollapsed}
-        onToggleInspector={handleInspectorToggle}
         isDataView={viewMode === "data"}
         isLibraryView={viewMode === "library"}
         onOpenLibrary={() => setViewMode("library")}
@@ -1187,6 +1170,10 @@ export function App() {
             max={LEFT_PANEL_MAX_WIDTH}
             label="Resize left panel"
             onResize={setLeftPanelWidth}
+            // Dragging well past the min width collapses the panel — the
+            // same `leftPanel: null` the rail toggle sets, so a drag and a
+            // click land in the exact same state.
+            onCollapse={() => setLeftPanel(null)}
           />
         ) : null}
         {!visibleInspectorCollapsed ? (
@@ -1197,19 +1184,34 @@ export function App() {
             max={INSPECTOR_MAX_WIDTH}
             label="Resize inspector"
             onResize={setInspectorWidth}
+            // Routes through the same toggle as the floating chip below, so
+            // the compact-workspace side-swap special case stays honored here too.
+            onCollapse={handleInspectorToggle}
           />
         ) : null}
-        {visibleInspectorCollapsed && hasInspectorContent ? (
-          <button
-            type="button"
-            className="inspector-reopen"
-            title="Show inspector"
-            aria-label="Show inspector"
-            onClick={handleInspectorToggle}
-          >
-            <CaretLeftIcon aria-hidden="true" size={16} />
-          </button>
-        ) : null}
+        {/* The single persistent inspector toggle — a borderless floating chip
+            (same raised-chip grammar as the canvas's zoom cluster) anchored
+            top-right, always present regardless of collapse state. It hugs
+            the inspector seam: sitting just left of it when the inspector is
+            open, and sliding to the screen's right edge once collapsed (see
+            .workspace.right-collapsed .inspector-toggle). The rail
+            deliberately does not own the inspector — this floating chip is
+            the only affordance for it, keeping the inspector's own cramped
+            pane free of chrome. */}
+        <button
+          type="button"
+          className="inspector-toggle"
+          title={visibleInspectorCollapsed ? "Show inspector" : "Hide inspector"}
+          aria-label={visibleInspectorCollapsed ? "Show inspector" : "Hide inspector"}
+          aria-expanded={!visibleInspectorCollapsed}
+          onClick={handleInspectorToggle}
+        >
+          <SidebarSimpleIcon
+            aria-hidden="true"
+            size={16}
+            style={{ transform: "scaleX(-1)" }}
+          />
+        </button>
         {visibleLeftPanel === "checklist" ? (
           <ChecklistPanel
             getBlob={getAssetBlob}

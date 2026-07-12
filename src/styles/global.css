@@ -918,12 +918,11 @@ input:focus-visible {
 .panel-resize-handle::after {
   content: "";
   position: absolute;
-  /* Starts below the view-toolbar band (~47px at desktop padding, ~49px in
-     the ≤750px container query — see .inspector-reopen above) so the visible
-     line doesn't slice through the toolbar; the hit area above stays full
-     height. 49px clears both, and the 2px slack at the wider band reads as
-     flush against the toolbar's own bottom border. */
-  top: 49px;
+  /* Runs the full height of the seam, top to bottom — the toolbar sits to the
+     right of the seam (inside the canvas column), not across it, so there's
+     nothing for a full-height line to slice through. Matches the hit area
+     above, which has always been full height. */
+  top: 0;
   bottom: 0;
   left: 50%;
   width: 1px;
@@ -960,39 +959,65 @@ body.panels-resizing * {
   user-select: none !important;
 }
 
-/* When the inspector is collapsed but a selection (or warning) still has
-   content to show, this tab clings to the workspace's right edge as a one-click
-   way back in — the same square, hairline-bordered vocabulary as the rest of
-   the chrome. */
-.inspector-reopen {
+/* The single persistent inspector toggle — floats over the canvas hugging
+   the inspector seam, the only affordance for the inspector (the rail
+   deliberately doesn't own it, and the inspector's own cramped pane carries
+   no collapse chrome). Borrows the zoom cluster's floating-chip grammar
+   (see .viewport-zoom below): borderless, white/--bg ground, --shadow-chip —
+   the same "raised above the work" language for anything that literally
+   floats over the drawing surface, rather than the hairline-bordered
+   vocabulary used by panel-anchored chrome. */
+.inspector-toggle {
   position: absolute;
   /* Clears the view-toolbar band (~47px at desktop padding, ~49px in the
-     ≤750px container query) so the caret never overlays the toolbar's right
-     zone — at ~800–1000px it used to sit over the Units switch's "m" cell and
-     steal that tap. Below the band it still reads as anchored to the top-right. */
+     ≤750px container query) so the icon never overlays the toolbar's right
+     zone — at ~800–1000px it would otherwise sit over the Units switch's "m"
+     cell and steal that tap. Below the band it still reads as anchored to
+     the top-right. */
   top: 64px;
-  right: 0;
+  /* Open: sits just left of the seam, over the canvas. Collapsed: the seam
+     is gone, so it slides to the workspace's right edge instead (see
+     .workspace.right-collapsed below). */
+  right: calc(var(--inspector-width, 300px) + 12px);
   z-index: 6;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 40px;
+  width: 30px;
+  height: 30px;
   padding: 0;
-  color: var(--muted);
+  border: 0;
+  border-radius: var(--radius-control);
   background: var(--bg);
-  border: 1px solid var(--line);
-  border-right: 0;
-  border-radius: var(--radius-control) 0 0 var(--radius-control);
+  color: var(--muted);
+  box-shadow: var(--shadow-chip);
   cursor: pointer;
   transition:
+    right 150ms ease-out,
     color 120ms ease,
-    background 120ms ease;
+    background-color 120ms ease;
 }
 
-.inspector-reopen:hover {
+.workspace.right-collapsed .inspector-toggle {
+  right: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inspector-toggle {
+    transition:
+      color 120ms ease,
+      background-color 120ms ease;
+  }
+}
+
+.inspector-toggle:hover {
   color: var(--ink);
   background: var(--surface);
+}
+
+.inspector-toggle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 .inspector {
@@ -5108,10 +5133,14 @@ body.panels-resizing * {
   }
 
   /* Resizing is meaningless once the panes stack vertically — hide the seam
-     handles and the reopen tab, both of which are positioned off horizontal
-     column widths that no longer exist here. */
+     handles and the floating toggle, both of which are positioned off the
+     horizontal seam math (--inspector-width, the right edge) that no longer
+     applies once the columns collapse to one. handleInspectorToggle's
+     compact-workspace side-swap (App.tsx) still governs which pane shows in
+     this stacked layout; there's just no floating chip left to drive it from
+     below this width, matching the old .inspector-reopen tab's behavior. */
   .panel-resize-handle,
-  .inspector-reopen {
+  .inspector-toggle {
     display: none;
   }
 
