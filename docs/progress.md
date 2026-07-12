@@ -135,6 +135,9 @@ Refer to `docs/plan.md` as the full project overview, product/architecture plan,
 **2026-07-10:**
 - [x] Room-shape slices 4-5 shipped: reciprocal `connectsToObjectId` writers with atomic re-pair/disconnect/delete cleanup; pure angle/gap/overlap/height alignment status; inspector connection controls and a shared plan glyph; and 3D opening treatments where aligned pairs use the mirrored clear intersection while unpaired/misaligned doors and windows render with recessed caps instead of false portals. Tests: 1117 passing; browser-verified misaligned→aligned status changes and capped→see-through eye-level 3D behavior.
 
+**2026-07-12:**
+- [x] `.sightlines` package **export** slice (import deferred): schema-versioned `SightlinesPackage` manifest (`src/domain/schema/packageSchema.ts`) with content-addressed, per-tier asset inventory (sha256/byteSize/mimeType/path); pure async derivation (`src/domain/package/buildPackage.ts`) selecting the referenced-artwork subset and three export modes (`originals` / `display` default / `metadata-only`); fflate zip writer (`zipPackage.ts`) storing image blobs uncompressed and deflating the JSON; a `exportProjectPackage(mode)` store action; and a topbar Export dropdown plus Settings "Export backup" wired to the display-tier package. Format documented in `docs/package-format.md`. Tests: 1300 → 1324.
+
 ## In Progress / Immediate Next
 
 - [x] Paired door/window connections (`connectsToObjectId` writers + alignment status) and 3D see-through openings.
