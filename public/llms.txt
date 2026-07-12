@@ -1,0 +1,30 @@
+# Sightlines
+
+Sightlines is a private-by-design exhibition planning tool. This is the browser-first, local-first application — no account required in v1, project data stays on the user's device.
+
+## Application Details
+
+Sightlines is an interactive tool for curators, exhibition planners, and gallery teams to plan scaled room layouts, wall elevations, artwork placement, and 3D preview. The app runs entirely in your browser with no backend server dependency.
+
+### Key Features
+
+- Local-first architecture: all project data stays on your device
+- No account or authentication required in v1
+- Artwork images stored locally in browser storage
+- Simple 3D visualization of exhibition layouts
+
+### Learn More
+
+- [Main Site](https://sightlines.art/) — Project information and landing page
+- [About](https://sightlines.art/about) — Detailed product information
+- [Privacy](https://sightlines.art/privacy) — Privacy policy
+- [Security](https://sightlines.art/security) — Security notes
+- [IT Access Notes](https://sightlines.art/it) — Technical details for institutions
+
+### Security & Privacy
+
+- HTTPS-only deployment
+- No user projects or artwork hosted on servers
+- No executable downloads
+- No third-party tracking
+- Static application served from Cloudflare Workers
