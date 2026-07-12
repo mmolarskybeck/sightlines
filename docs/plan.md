@@ -1,5 +1,7 @@
 # Sightlines Rebuild Plan
 
+This is the product/architecture plan and roadmap source of truth. For where the build currently stands and what's next, see `docs/status.md` (the single living status doc); the chronological build log through 2026-07-10 is frozen at `docs/archive/progress.md`.
+
 ## 0. Why this rebuild, in one paragraph
 
 The first build had two architectural failures: it wasn't structured for eventual public deployment with accounts, and snapping was unreliable because it wasn't isolated from rendering. This rebuild fixes both by (1) going **local-first** — no hosted user images, no accounts in v1, which also sidesteps most cost and content-liability concerns until there's real demand — and (2) treating **project data as the single source of truth**, with snapping as a pure function and the canvas as a disposable view layer.
@@ -428,14 +430,16 @@ MVP1 bundles a lot — geometry, artwork/checklist, snapping/collision/undo, and
 
 **1C — Professional layout behaviors.** Doors/windows/blocked zones + `validatePlacement` collision (§2) · multi-select, grouping, group drag, group-centerline snap · equal-distribution spacing · floor objects (plan view only) · simple derived 3D preview, orbit camera · checklist panel: thumbnail, core fields, sort. **Shipped.**
 
-### MVP 2 — Room shape tools + multi-room flow [IN PROGRESS]
+### MVP 2 — Room shape tools + multi-room flow [SHIPPED, benchmark gate open]
 - **Shipped:** polygon room drawing in Plan view; polygon reshape with vertex drag, wall split/delete, wall-slide reshaping, closed-room validation, and one undo entry per committed gesture.
+- **Shipped:** rectangle-room draw gesture (`R` / `⇧R` outline) and the Draw toolbar cluster organized around the Insert-decorates / Draw-creates grammar.
 - **Shipped:** free-standing partition walls as room-owned, double-sided placement surfaces, with schema v3 migration and 3D slab projection.
 - **Shipped:** paired door/window connections with reciprocal opening IDs, advisory alignment status, plan/inspector feedback, and honest 3D see-through/capped treatment.
 - **Shipped:** Multi-room UI polish: place and manage additional rooms in the shared floor coordinate space.
-- **Deferred, benchmark-triggered renderer scalability:** validate whole-floor 3D with the deterministic 10-room / 200-work fixture in `fixtures/benchmarks/renderer-10-room-200-work.ts` on desktop and tablet. Keep Overview whole-floor; if eye-level navigation or texture pressure becomes material, scope eye-level rendering to the camera's containing room plus one-hop rooms visible through aligned connected openings. Treat this as render-layer filtering only — no project-schema change.
+- **Shipped:** 3D navigation overhaul — cursor-directed wheel dolly, WASD travel, double-click focus flights, touch pan (tunables in `cameraNav.ts`).
+- **Open, benchmark-triggered renderer scalability:** validate whole-floor 3D with the deterministic 10-room / 200-work fixture in `fixtures/benchmarks/renderer-10-room-200-work.ts` on desktop and tablet. Keep Overview whole-floor; if eye-level navigation or texture pressure becomes material, scope eye-level rendering to the camera's containing room plus one-hop rooms visible through aligned connected openings. Treat this as render-layer filtering only — no project-schema change.
 
-### MVP 3 — Project packages, sharing, polish
+### MVP 3 — Project packages, sharing, polish [NEXT]
 - `.sightlines` export/import as a self-contained `SightlinesPackage` (§6) — embeds the artwork snapshot the project actually needs, not just references into the local library — including library-wide `exportAll()`/`importAll()` alongside per-project export (§8)
 - Import safety pipeline (§13) applied to every import path
 - Prominent "Save backup" UX, `navigator.storage.persist()`, and a visible storage-status message — IndexedDB/OPFS are caches, not archives (§11)

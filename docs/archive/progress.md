@@ -1,8 +1,10 @@
-# Sightlines Rebuild Progress
+# Sightlines Rebuild Progress (archived)
 
-This is the working implementation checklist for the rebuild. It is intentionally shorter and more tactical than `docs/plan.md`.
-
-Refer to `docs/plan.md` as the full project overview, product/architecture plan, and roadmap source of truth. This file tracks what has already been built and what should be tackled next.
+> **Frozen 2026-07-12.** This was the working implementation checklist for the rebuild, kept chronologically through 2026-07-10. It is preserved as the historical build log — nothing here is maintained anymore.
+>
+> - Current state and near-term order: `docs/status.md` (the single living status doc)
+> - Architecture, product plan, and roadmap: `docs/plan.md`
+> - Small open scraps: `docs/quick-todos.md`
 
 ## Done
 

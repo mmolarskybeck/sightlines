@@ -1,6 +1,8 @@
-# Sightlines Status Snapshot
+# Sightlines Status
 
 Last refreshed: 2026-07-12
+
+This is the single living status doc: current state, what shipped recently, and what comes next. The full product/architecture plan and roadmap live in `docs/plan.md`; small scraps live in `docs/quick-todos.md`; the chronological build log through 2026-07-10 is frozen at `docs/archive/progress.md`.
 
 ## Current Read
 
@@ -37,6 +39,8 @@ Touch drag-and-drop for artwork placement, insecure-context support for LAN dev 
 - **Rectangle-room draw gesture + Draw toolbar cluster**: `R` = rectangle, `⇧R` = outline (polygon), drawn-rectangle domain factory and store action, corner-bracket glyph. Toolbar reorganized around an Insert-decorates / Draw-creates grammar: the Draw cluster leads, partition moved out of Insert into Draw, generic `.tool-cluster` pickers extracted, one 30px control lane.
 - **Soft-tactile UI pass** (spec/soft-tactile-ui merged): recessed tracks with raised sliding chips, pressed toggle grammar, sliding petrol underline top nav, styled toolbar tooltips with entrance animation, Insert as pressed tool buttons, soft treatment extended to inspector pickers, help dialog, and zoom cluster.
 - **Cross-project artwork library view** plus a persistent inspector visibility toggle with engaged/collapsed styling.
+- **Framing + matting previews**: additive `matWidthMm` + `frame` on the artwork record (no schema bump); elevation draws frame ring → mat ring → image with bevel hairline; plan widens the along-wall extent to the outer size; editable Overall W×H solves for the frame band; artwork inspector reworked into collapsible sections with persisted open state. Known limitation: elevation snapping, dim lines, out-of-bounds, and fit-selected still use image dims, not outer framed size.
+- **Neighbor-aware dim lines** in the between-works tab: outer dim lines stop at the nearest neighbor edge (falling back to the wall edge), with per-side calculated distance readouts in the inspector.
 - **Settings dialog** with storage-persistence hook, durable-storage request, and elevation empty-state treatment.
 - **Context-aware help dialog** on the shared UI primitives.
 - **Test corpus + import intelligence**: Rijksmuseum and Art Institute of Chicago artwork metadata fixtures with download script (physical dimensions included), and `guessColumnMapping` handling for camelCase/PascalCase spreadsheet headers.
@@ -57,3 +61,5 @@ Touch drag-and-drop for artwork placement, insecure-context support for LAN dev 
 ## Deferred
 
 Curved walls, full 3D editing, hosted accounts/collaboration, and registrar-level collection management remain out of the near-term product scope.
+
+Deliberately skipped in the 2D zoom/pan MVP (revisit only on demand): ⌘+/⌘− zoom shortcuts (conflict with browser page zoom), double-click-to-fit, pan-distance clamping, and viewport persistence across sessions.
