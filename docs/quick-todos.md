@@ -1,24 +1,44 @@
 # Quick Todos
+
 Here is where I gather small, actionable tasks and scraps for future implementation, things that don't fit cleanly into the overall roadmap and aren't necessarily part of major features.
 
 ## Open Scraps
 
-## 3d refinement
-* no frames and mats rendered in 3d - add them
+### quick fixes
 
-### Mobile issues
+* doors should snap to / start at floorline in elevation mode (they already do this in plan mode i think?) - i dont think we need to allow doors to be above the floorline
+* partitions should be accessible from elevation mode without having to open floors & walls pane - i think easiest way is to add them to existing wall picker - maybe we polish the wall picker now that we allow multi-room, and allow the user to choose all walls/partitions without a room, and then to also move between rooms? not sure the cleanest and most elegant way to do this, we should def default to having current room/wall selected if it has already been selected by the user
+
+### ui / ux
+
+* add toasts for graceful feedback on actions (export/import?)
+* * polish single artwork inspector view and make arrange higher up so it's easier to access / has better ui/ux?
+* * **better feedback** for already placed artwork - currently will not place, but no error/message/warning…
+
+### To add
+
+* dim lines, smart snapping (aware of nearby walls), and alignment tools for wall partitions (at minimum we need to be able to center the partition between walls, in both directions)
+
+## project management
+
+* Project management - make into modal  or expanded popover 
+* We also need to add basic management of projects - delete, edit title, maybe bulk edit? Maybe a quick way to export a project from the project manager without opening it?
+* basic info per project like # of rooms, # of artworks?
+
+## possible adds
+
+* By default, dimension lines currently appear when objects/works are selected, but we should have an option to have these visible all the time (w maybe intelligent changes on drag, to change which dims are visible?) - by default this would show the spacing in between every object/artwork on the visible wall (in elevation mode)
+* and a way to switch on other dimension lines being visible, line the space from the floor to the bottom of each work? this is noisy most of the time but there are scenarios where you’d want to see it (especially also on export as pdf or elevation png)
+
+## mobile / phone view
+
 * Drawing room tool - needs better feedback, way to unplace a point or rearrange it maybe? Easy to make mistakes (current behavior on touch/iOS seems to require one gesture to draw line, and a second one to place the point down? This feels a bit weird but idk how to improve it)
 * No backspace so we have a little floating delete button OR maybe better context menu on long press to delete?
 * If we remove scale dropdown or move it up to main nav bar, or somewhere, maybe we have room for whole toolbar
 * Consider making left rail a bit narrower ?
+* for phones or very small viewports, we should make checklist, rooms & walls, and the inspector into sheets/drawers
 
-### General todos
-* Project management - make into modal  or expanded popover 
-* We also need to add basic management - delete, edit title, maybe bulk edit? Maybe a quick way to export a project from the project manager without opening it?
-
-* Should we remove the partition tool and instead allow just drawing a single freestanding wall with the draw irregular room tool? But then we need a way to say, this is done (a check/cancel button? Maybe floating) - bc right now the room tool stops drawing when it forms a solid contained shape kind of like the select tool or pen tool in photoshop 
-
-* Blocked zone and partition tool currently have same icon - how to differentiate  ?
+### 3d objects & sculptures
 
 * add plinths and make floor objects placeable on top of them?
 * 3d/floor objects need a way to be rotated
@@ -45,3 +65,4 @@ Here is where I gather small, actionable tasks and scraps for future implementat
   * NOTE re: granular numeric adjustment of the left/right gaps to neighbour groups — this ALREADY exists via the "From edges" tab: its left/right/both anchors measure to and slide the group against detectBoundary's target, which is the nearest neighbour edge (wall only when there's no neighbour). So the "version of from wall edges but treating the neighbour groups as targets" is the From-edges tab today. Only remaining question is whether that adjustment should also be reachable from inside the between-works tab itself (currently between-works stays center-fixed and edits interior gap only); left as-is since it would duplicate From-edges.
 * we need some sort of way to resolve/handle when dims don't perfectly match the aspect ratio of the image
   * for instance, we could add an option to arrive image aspect ratio w the accurate dims, but we don't want to the resulting image preview to appear squished/distorted
+* no frames and mats rendered in 3d - add them
