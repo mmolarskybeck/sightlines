@@ -225,6 +225,10 @@ export type AppState = ArrangeSliceState &
   setObjectSelection: (ids: string[]) => void;
   clearObjectSelection: () => void;
   renameProject: (title: string) => Promise<void>;
+  // Project manager row rename — targets any saved project by id, not just
+  // the open one. Delegates to renameProject when id is the open document,
+  // so the topbar title and undo stack stay the single source of truth.
+  renameProjectById: (id: string, title: string) => Promise<void>;
   renameRoom: (roomId: string, name: string) => Promise<void>;
   deleteRoom: (roomId: string) => Promise<void>;
   setUnit: (unit: DisplayUnit) => Promise<void>;
@@ -270,6 +274,12 @@ export type AppState = ArrangeSliceState &
   // wires it to the repositories and surfaces failures on the error banner,
   // returning the zip bytes + filename for the thin UI to download (no DOM here).
   exportProjectPackage: (
+    mode: PackageExportMode
+  ) => Promise<{ filename: string; zip: Uint8Array } | null>;
+  // Same package build, for a project manager row that isn't necessarily the
+  // open document — loads it via the repository instead of reading get().project.
+  exportProjectPackageById: (
+    id: string,
     mode: PackageExportMode
   ) => Promise<{ filename: string; zip: Uint8Array } | null>;
   // Runs the untrusted-file pipeline (docs/plan.md §13) over .sightlines
@@ -463,6 +473,35 @@ export function createAppStore(deps: AppStoreDeps) {
         return { widthPx: asset.widthPx, heightPx: asset.heightPx };
       } catch {
         return undefined;
+      }
+    }
+
+    // Shared by exportProjectPackage (the open document) and
+    // exportProjectPackageById (any saved project, via the repository) — the
+    // only difference between the two call sites is which Project they hand
+    // in. No DOM here; the thin UI turns the returned zip into a download.
+    async function buildPackageZip(
+      project: Project,
+      libraryArtworks: Artwork[],
+      mode: PackageExportMode
+    ): Promise<{ filename: string; zip: Uint8Array } | null> {
+      try {
+        const { zip } = await createSightlinesPackage({
+          project,
+          libraryArtworks,
+          mode,
+          getAsset: (assetId) => deps.assetRepository.getAsset(assetId),
+          getBlob: (key) => deps.assetRepository.getBlob(key)
+        });
+        set({ error: null });
+        return { filename: packageFilename(project), zip };
+      } catch (error) {
+        set({
+          error: `Export failed: ${
+            error instanceof Error ? error.message : "the package could not be built."
+          }`
+        });
+        return null;
       }
     }
 
@@ -1094,6 +1133,36 @@ export function createAppStore(deps: AppStoreDeps) {
           ...current,
           title: trimmed
         }));
+      },
+
+      async renameProjectById(id, title) {
+        const trimmed = title.trim();
+        if (trimmed.length === 0) return;
+
+        // The open document is the single source of truth for its own title
+        // (undo stack, topbar input) — route through renameProject instead of
+        // a parallel load/save that would drift out of sync with it.
+        if (get().project?.id === id) {
+          await get().renameProject(title);
+          return;
+        }
+
+        try {
+          const project = await deps.projectRepository.load(id);
+          if (trimmed === project.title) return;
+
+          await deps.projectRepository.save({
+            ...project,
+            title: trimmed,
+            updatedAt: new Date().toISOString()
+          });
+        } catch (error) {
+          set({
+            error: `Could not rename that project (${
+              error instanceof Error ? error.message : "unknown error"
+            }).`
+          });
+        }
       },
 
       async renameRoom(roomId, name) {
@@ -1797,24 +1866,23 @@ export function createAppStore(deps: AppStoreDeps) {
         const { project, libraryArtworks } = get();
         if (!project) return null;
 
+        return buildPackageZip(project, libraryArtworks, mode);
+      },
+
+      async exportProjectPackageById(id, mode) {
+        let project: Project;
         try {
-          const { zip } = await createSightlinesPackage({
-            project,
-            libraryArtworks,
-            mode,
-            getAsset: (assetId) => deps.assetRepository.getAsset(assetId),
-            getBlob: (key) => deps.assetRepository.getBlob(key)
-          });
-          set({ error: null });
-          return { filename: packageFilename(project), zip };
+          project = await deps.projectRepository.load(id);
         } catch (error) {
           set({
             error: `Export failed: ${
-              error instanceof Error ? error.message : "the package could not be built."
+              error instanceof Error ? error.message : "that project could not be loaded."
             }`
           });
           return null;
         }
+
+        return buildPackageZip(project, get().libraryArtworks, mode);
       },
 
       async importSightlinesPackage(bytes) {

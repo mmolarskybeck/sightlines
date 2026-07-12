@@ -22,7 +22,13 @@ export class InMemoryProjectRepository implements ProjectRepository {
 
   async list(): Promise<ProjectSummary[]> {
     return [...this.projects.values()]
-      .map(({ id, title, updatedAt }) => ({ id, title, updatedAt }))
+      .map(({ id, title, updatedAt, floor, checklistArtworkIds }) => ({
+        id,
+        title,
+        updatedAt,
+        roomCount: floor.rooms.length,
+        artworkCount: checklistArtworkIds.length
+      }))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 

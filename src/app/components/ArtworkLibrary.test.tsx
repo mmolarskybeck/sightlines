@@ -102,13 +102,13 @@ describe("ArtworkLibraryView", () => {
   });
 
   it("lists 2+ project memberships in an accessible menu", () => {
-    render(<ArtworkLibraryView artworks={artworks} project={project} getBlob={getBlob} onAddToChecklist={vi.fn()} onOpenImportWizard={vi.fn()} projectMembershipsByArtworkId={{ "art-1": [{ id: "project-2", title: "Summer rotation", updatedAt: "2026-01-02" }, { id: "project-3", title: "Winter rotation", updatedAt: "2026-01-03" }] }} onOpenProject={vi.fn()} />);
+    render(<ArtworkLibraryView artworks={artworks} project={project} getBlob={getBlob} onAddToChecklist={vi.fn()} onOpenImportWizard={vi.fn()} projectMembershipsByArtworkId={{ "art-1": [{ id: "project-2", title: "Summer rotation", updatedAt: "2026-01-02", roomCount: 1, artworkCount: 1 }, { id: "project-3", title: "Winter rotation", updatedAt: "2026-01-03", roomCount: 1, artworkCount: 1 }] }} onOpenProject={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Used in 2 projects" })).toHaveAttribute("aria-haspopup", "menu");
   });
 
   it("renders a single membership as a direct button that opens the project", () => {
     const onOpenProject = vi.fn();
-    render(<ArtworkLibraryView artworks={artworks} project={project} getBlob={getBlob} onAddToChecklist={vi.fn()} onOpenImportWizard={vi.fn()} projectMembershipsByArtworkId={{ "art-1": [{ id: "project-2", title: "Summer rotation", updatedAt: "2026-01-02" }] }} onOpenProject={onOpenProject} />);
+    render(<ArtworkLibraryView artworks={artworks} project={project} getBlob={getBlob} onAddToChecklist={vi.fn()} onOpenImportWizard={vi.fn()} projectMembershipsByArtworkId={{ "art-1": [{ id: "project-2", title: "Summer rotation", updatedAt: "2026-01-02", roomCount: 1, artworkCount: 1 }] }} onOpenProject={onOpenProject} />);
     const button = screen.getByRole("button", { name: "Open Summer rotation" });
     expect(button).not.toHaveAttribute("aria-haspopup");
     expect(button.textContent).toContain("Summer rotation");
@@ -129,7 +129,7 @@ describe("ArtworkLibraryView", () => {
 
   it("confirms a mass delete with usage copy and clears the selection", () => {
     const onDeleteArtworks = vi.fn();
-    render(<ArtworkLibraryView artworks={artworks} project={project} getBlob={getBlob} onAddToChecklist={vi.fn()} onOpenImportWizard={vi.fn()} onDeleteArtworks={onDeleteArtworks} projectMembershipsByArtworkId={{ "art-1": [{ id: "project-2", title: "Summer rotation", updatedAt: "2026-01-02" }] }} />);
+    render(<ArtworkLibraryView artworks={artworks} project={project} getBlob={getBlob} onAddToChecklist={vi.fn()} onOpenImportWizard={vi.fn()} onDeleteArtworks={onDeleteArtworks} projectMembershipsByArtworkId={{ "art-1": [{ id: "project-2", title: "Summer rotation", updatedAt: "2026-01-02", roomCount: 1, artworkCount: 1 }] }} />);
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Wind and Crepe Myrtle Concerto" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Relative" }));
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));

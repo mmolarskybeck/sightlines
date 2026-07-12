@@ -67,9 +67,19 @@ function toProjectSummary(value: unknown): ProjectSummary | null {
   const record = value as Record<string, unknown>;
   if (typeof record.id !== "string" || record.id.length === 0) return null;
 
+  const floor = typeof record.floor === "object" && record.floor !== null
+    ? (record.floor as Record<string, unknown>)
+    : null;
+  const rooms = floor && Array.isArray(floor.rooms) ? floor.rooms : [];
+  const checklistArtworkIds = Array.isArray(record.checklistArtworkIds)
+    ? record.checklistArtworkIds
+    : [];
+
   return {
     id: record.id,
     title: typeof record.title === "string" ? record.title : "Untitled",
-    updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : ""
+    updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : "",
+    roomCount: rooms.length,
+    artworkCount: checklistArtworkIds.length
   };
 }
