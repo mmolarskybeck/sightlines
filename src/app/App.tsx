@@ -20,6 +20,7 @@ import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { GridFourIcon } from "@phosphor-icons/react/dist/csr/GridFour";
 import { MagnetIcon } from "@phosphor-icons/react/dist/csr/Magnet";
 import { MapTrifoldIcon } from "@phosphor-icons/react/dist/csr/MapTrifold";
+import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import { PolygonIcon } from "@phosphor-icons/react/dist/csr/Polygon";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { PresentationIcon } from "@phosphor-icons/react/dist/csr/Presentation";
@@ -70,7 +71,7 @@ import {
 } from "./components/OpeningInspector";
 import { PlanEmptyState } from "./components/PlanEmptyState";
 import { PlanView } from "./components/PlanView";
-import { PartitionGlyph, WindowGlyph } from "./components/toolbarGlyphs";
+import { PartitionGlyph, RectangleRoomGlyph, WindowGlyph } from "./components/toolbarGlyphs";
 import {
   Tooltip,
   TooltipContent,
@@ -322,6 +323,7 @@ export function App() {
     clearObjectSelection,
     addRectangleRoom,
     addPolygonRoom,
+    addDrawnRectangleRoom,
     addFreestandingWall,
     moveFreestandingWall,
     moveFreestandingWallEndpoint,
@@ -554,7 +556,7 @@ export function App() {
     };
   }, [boot, loadBenchmarkFixture]);
 
-  // The insert-tools-disarm-on-view-change and reshape-follows-selection
+  // The tool-disarm-on-view-change and reshape-follows-selection
   // effects that used to live here now live in usePlanMode itself (it takes
   // viewMode and selectedRoomId as arguments above).
 
@@ -1210,32 +1212,37 @@ export function App() {
                     <InsertToolPicker
                       activeTool={activeTool}
                       disabled={viewMode === "elevation" && !selectedWall}
-                      partition={
-                        viewMode === "plan"
-                          ? { active: partitionToolActive, onToggle: togglePartitionTool }
-                          : undefined
-                      }
                       onToolChange={armOpeningTool}
                     />
                     <CompactInsertPicker
                       activeTool={activeTool}
                       disabled={viewMode === "elevation" && !selectedWall}
-                      partition={
-                        viewMode === "plan"
-                          ? { active: partitionToolActive, onToggle: togglePartitionTool }
-                          : undefined
-                      }
                       onToolChange={armOpeningTool}
                     />
                   </>
                 ) : null}
                 {viewMode === "plan" ? (
                   <>
-                    {/* The hairline scopes the "Insert" caption to its own
-                        cluster — without it the caption reads as a label for
-                        the whole zone, Draw room included. */}
+                    {/* The hairline scopes each caption to its own cluster —
+                        without it "Insert"/"Draw" read as labels for the whole
+                        zone rather than their three tools. */}
                     <div aria-hidden="true" className="toolbar-divider" />
-                    <DrawRoomButton active={drawRoomActive} onToggle={toggleDrawRoom} />
+                    <DrawToolPicker
+                      rectActive={drawRectActive}
+                      onRectToggle={toggleDrawRect}
+                      outlineActive={drawRoomActive}
+                      onOutlineToggle={toggleDrawRoom}
+                      partitionActive={partitionToolActive}
+                      onPartitionToggle={togglePartitionTool}
+                    />
+                    <CompactDrawPicker
+                      rectActive={drawRectActive}
+                      onRectToggle={toggleDrawRect}
+                      outlineActive={drawRoomActive}
+                      onOutlineToggle={toggleDrawRoom}
+                      partitionActive={partitionToolActive}
+                      onPartitionToggle={togglePartitionTool}
+                    />
                   </>
                 ) : null}
               </div>
@@ -1315,11 +1322,14 @@ export function App() {
           ) : null}
 
           {viewMode === "plan" ? (
-            project.floor.rooms.length === 0 && !drawRoomActive ? (
+            project.floor.rooms.length === 0 && !drawRoomActive && !drawRectActive ? (
               <PlanEmptyState onAddRoom={() => void addRectangleRoom()} />
             ) : (
               <PlanView
                 activeTool={activeTool}
+                drawRectActive={drawRectActive}
+                onDrawRectChange={setDrawRectActive}
+                onAddRectangleRoom={(rect) => void addDrawnRectangleRoom(rect)}
                 drawRoomActive={drawRoomActive}
                 onDrawRoomChange={setDrawRoomActive}
                 onAddPolygonRoom={(points) => void addPolygonRoom(points)}
@@ -1901,38 +1911,56 @@ const OPENING_TOOL_META: Record<OpeningKind, InsertToolMeta> = {
   }
 };
 
+// The three Draw-cluster tools. Each armed phrase names its gesture verb (Drag…
+// / Click…), so the deliberate per-tool gesture differences — drag corner to
+// corner for the rectangle, click-to-place corners for the outline, drag for
+// the partition — are self-documenting in the tooltip.
+const RECT_ROOM_TOOL_META: InsertToolMeta = {
+  key: "rect-room",
+  label: "Rectangle room",
+  hint: "Draw a rectangular room",
+  armed: "Drag to draw a room",
+  kbd: "R",
+  icon: <RectangleRoomGlyph aria-hidden="true" size={16} />
+};
+
+const OUTLINE_ROOM_TOOL_META: InsertToolMeta = {
+  key: "outline-room",
+  label: "Room outline",
+  hint: "Draw a room outline",
+  armed: "Click to place corners",
+  kbd: "⇧R",
+  icon: <PolygonIcon aria-hidden="true" size={16} />
+};
+
 const PARTITION_TOOL_META: InsertToolMeta = {
   key: "partition",
   label: "Partition",
   hint: "Draw a free-standing partition",
-  armed: "Drawing a partition",
+  armed: "Drag to draw a partition",
   kbd: "P",
   icon: <PartitionGlyph aria-hidden="true" size={16} />
 };
 
 // The descriptor for whatever insert tool is armed, or null when idle — drives
 // the compact trigger's icon/name swap and its armed tooltip.
-function armedInsertMeta(
-  activeTool: OpeningKind | null,
-  partition?: { active: boolean; onToggle: () => void }
+function armedInsertMeta(activeTool: OpeningKind | null): InsertToolMeta | null {
+  return activeTool ? OPENING_TOOL_META[activeTool] : null;
+}
+
+// The descriptor for whatever Draw tool is armed, or null when idle — the same
+// role armedInsertMeta plays for the Insert cluster.
+function armedDrawMeta(
+  rectActive: boolean,
+  outlineActive: boolean,
+  partitionActive: boolean
 ): InsertToolMeta | null {
-  if (activeTool) return OPENING_TOOL_META[activeTool];
-  if (partition?.active) return PARTITION_TOOL_META;
+  if (rectActive) return RECT_ROOM_TOOL_META;
+  if (outlineActive) return OUTLINE_ROOM_TOOL_META;
+  if (partitionActive) return PARTITION_TOOL_META;
   return null;
 }
 
-// The view-toolbar's primary zone: a quiet "Insert" caption followed by
-// individual soft icon buttons — door/window/blocked-zone in both 2D views,
-// plus the partition (free-standing wall) tool in Plan, where it belongs
-// with the other things you insert. Toggle semantics match the old floating
-// palette: the armed button reads pressed in petrol, clicking it again
-// disarms, and PlanView/ElevationView's own Escape/click-to-place handling
-// disarms via onToolChange. planMode's discriminated union keeps the
-// opening tools and the partition tool structurally mutually exclusive.
-// The caption is aria-hidden (the group's aria-label already says "Insert",
-// so announcing the text too would double up); each button carries its own
-// aria-label plus a styled Tooltip — with no visible per-tool text, the
-// hover hint is the only sighted name these have, so it matters here.
 // A segment as the generic cluster picker consumes it: a tool meta plus its
 // live pressed state and click handler.
 type ClusterSegment = InsertToolMeta & { pressed: boolean; onClick: () => void };
@@ -2012,32 +2040,27 @@ function ToolClusterPicker({
   );
 }
 
-// The view-toolbar's Insert cluster: door/window/blocked-zone in both 2D views,
-// plus the partition tool in Plan. A thin call site over ToolClusterPicker —
-// planMode's discriminated union keeps every armed tool mutually exclusive.
+// The view-toolbar's Insert cluster: door/window/blocked-zone, identical
+// membership in both 2D views (Insert decorates existing geometry; Draw creates
+// new structure, so the partition tool now lives in the Draw cluster). A thin
+// call site over ToolClusterPicker — planMode's discriminated union keeps every
+// armed tool mutually exclusive.
 function InsertToolPicker({
   activeTool,
   disabled,
   disabledReason = "Select a wall to place an opening",
-  partition,
   onToolChange
 }: {
   activeTool: OpeningKind | null;
   disabled: boolean;
   disabledReason?: string;
-  partition?: { active: boolean; onToggle: () => void };
   onToolChange: (tool: OpeningKind | null) => void;
 }) {
-  const segments: ClusterSegment[] = [
-    ...OPENING_TOOL_ORDER.map((kind) => ({
-      ...OPENING_TOOL_META[kind],
-      pressed: activeTool === kind,
-      onClick: () => onToolChange(activeTool === kind ? null : kind)
-    })),
-    ...(partition
-      ? [{ ...PARTITION_TOOL_META, pressed: partition.active, onClick: partition.onToggle }]
-      : [])
-  ];
+  const segments: ClusterSegment[] = OPENING_TOOL_ORDER.map((kind) => ({
+    ...OPENING_TOOL_META[kind],
+    pressed: activeTool === kind,
+    onClick: () => onToolChange(activeTool === kind ? null : kind)
+  }));
 
   return (
     <ToolClusterPicker
@@ -2047,6 +2070,33 @@ function InsertToolPicker({
       disabledReason={disabledReason}
     />
   );
+}
+
+// The view-toolbar's Draw cluster: rectangle room, room outline, partition —
+// the three tools that create new structure. Plan-only, never disabled. A thin
+// call site over ToolClusterPicker.
+function DrawToolPicker({
+  rectActive,
+  onRectToggle,
+  outlineActive,
+  onOutlineToggle,
+  partitionActive,
+  onPartitionToggle
+}: {
+  rectActive: boolean;
+  onRectToggle: () => void;
+  outlineActive: boolean;
+  onOutlineToggle: () => void;
+  partitionActive: boolean;
+  onPartitionToggle: () => void;
+}) {
+  const segments: ClusterSegment[] = [
+    { ...RECT_ROOM_TOOL_META, pressed: rectActive, onClick: onRectToggle },
+    { ...OUTLINE_ROOM_TOOL_META, pressed: outlineActive, onClick: onOutlineToggle },
+    { ...PARTITION_TOOL_META, pressed: partitionActive, onClick: onPartitionToggle }
+  ];
+
+  return <ToolClusterPicker caption="Draw" segments={segments} />;
 }
 
 // The generic compact replacement for a segmented cluster. It is shown by the
@@ -2145,86 +2195,69 @@ function CompactClusterPicker({
   );
 }
 
-// The compact Insert cluster: opening tools (+ partition in Plan). A thin call
-// site over CompactClusterPicker with a Plus idle trigger.
+// The compact Insert cluster: opening tools. A thin call site over
+// CompactClusterPicker with a Plus idle trigger.
 function CompactInsertPicker({
   activeTool,
   disabled,
   disabledReason = "Select a wall to place an opening",
-  partition,
   onToolChange
 }: {
   activeTool: OpeningKind | null;
   disabled: boolean;
   disabledReason?: string;
-  partition?: { active: boolean; onToggle: () => void };
   onToolChange: (tool: OpeningKind | null) => void;
 }) {
-  const tools: ClusterTool[] = [
-    ...OPENING_TOOL_ORDER.map((kind) => ({
-      ...OPENING_TOOL_META[kind],
-      active: activeTool === kind,
-      onSelect: () => onToolChange(activeTool === kind ? null : kind)
-    })),
-    ...(partition
-      ? [{ ...PARTITION_TOOL_META, active: partition.active, onSelect: partition.onToggle }]
-      : [])
-  ];
+  const tools: ClusterTool[] = OPENING_TOOL_ORDER.map((kind) => ({
+    ...OPENING_TOOL_META[kind],
+    active: activeTool === kind,
+    onSelect: () => onToolChange(activeTool === kind ? null : kind)
+  }));
 
   return (
     <CompactClusterPicker
       caption="Insert"
       idleIcon={<PlusIcon aria-hidden="true" size={16} />}
-      idleTooltip={partition ? "Insert an opening or partition" : "Insert an opening"}
+      idleTooltip="Insert an opening"
       tools={tools}
-      armed={armedInsertMeta(activeTool, partition)}
+      armed={armedInsertMeta(activeTool)}
       disabled={disabled}
       disabledReason={disabledReason}
     />
   );
 }
 
-// The polygon-room draw toggle, past the hairline divider that closes the
-// Insert cluster. Same armed-tool conventions as the insert tools: pressed
-// reads in petrol and clicking again disarms. It only renders in Plan,
-// where the mode is meaningful. A labeled Toggle rather than an icon-only
-// segment keeps the drawing mode plain at comfortable widths. (The
-// partition tool lives inside the Insert cluster now — it inserts a wall.)
-function DrawRoomButton({
-  active,
-  onToggle
+// The compact Draw cluster: rectangle room, room outline, partition. A thin
+// call site over CompactClusterPicker with a PencilSimple idle trigger.
+function CompactDrawPicker({
+  rectActive,
+  onRectToggle,
+  outlineActive,
+  onOutlineToggle,
+  partitionActive,
+  onPartitionToggle
 }: {
-  active: boolean;
-  onToggle: () => void;
+  rectActive: boolean;
+  onRectToggle: () => void;
+  outlineActive: boolean;
+  onOutlineToggle: () => void;
+  partitionActive: boolean;
+  onPartitionToggle: () => void;
 }) {
+  const tools: ClusterTool[] = [
+    { ...RECT_ROOM_TOOL_META, active: rectActive, onSelect: onRectToggle },
+    { ...OUTLINE_ROOM_TOOL_META, active: outlineActive, onSelect: onOutlineToggle },
+    { ...PARTITION_TOOL_META, active: partitionActive, onSelect: onPartitionToggle }
+  ];
+
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Toggle
-          aria-label="Draw room"
-          className="view-option-button armed-tool"
-          pressed={active}
-          variant="default"
-          onPressedChange={onToggle}
-        >
-          <PolygonIcon aria-hidden="true" size={16} />
-          <span className="view-option-label">Draw room</span>
-        </Toggle>
-      </TooltipTrigger>
-      <TooltipContent className="toolbar-tooltip" side="bottom">
-        {active ? (
-          <>
-            Drawing a room
-            <ToolbarTooltipKbd hint="Esc cancels" />
-          </>
-        ) : (
-          <>
-            Draw a room outline
-            <ToolbarTooltipKbd hint="R" />
-          </>
-        )}
-      </TooltipContent>
-    </Tooltip>
+    <CompactClusterPicker
+      caption="Draw"
+      idleIcon={<PencilSimpleIcon aria-hidden="true" size={16} />}
+      idleTooltip="Draw a room or partition"
+      tools={tools}
+      armed={armedDrawMeta(rectActive, outlineActive, partitionActive)}
+    />
   );
 }
 

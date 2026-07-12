@@ -53,7 +53,9 @@ describe("viewHelpGroups", () => {
     const planKeys = viewHelpGroups("plan", "keyboard", true)
       .flatMap((group) => group.hints)
       .flatMap((hint) => hint.keys);
-    expect(planKeys).toEqual(expect.arrayContaining(["D", "W", "B", "P", "R", "G", "S", "O"]));
+    expect(planKeys).toEqual(
+      expect.arrayContaining(["D", "W", "B", "P", "R", "⇧ R", "G", "S", "O"])
+    );
     expect(planKeys).not.toContain("E"); // Eyeline is elevation-only
 
     const elevationKeys = viewHelpGroups("elevation", "keyboard", true)
