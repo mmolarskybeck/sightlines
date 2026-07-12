@@ -1,0 +1,621 @@
+{
+  "name": "Rijksmuseum and Art Institute of Chicago public-domain artwork corpus",
+  "description": "Starter image corpus for Sightlines testing and sample projects, resolved from official museum APIs and IIIF services.",
+  "downloadedAt": "2026-07-12T00:42:07.481Z",
+  "targetWidthPx": 1686,
+  "artworks": [
+    {
+      "museum": "Rijksmuseum",
+      "id": "the-milkmaid",
+      "title": "The Milkmaid",
+      "objectId": "200108369",
+      "artistName": "Johannes Vermeer",
+      "year": "c. 1660",
+      "medium": "",
+      "source": {
+        "repository": "Rijksmuseum",
+        "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200108369",
+        "apiUrl": "https://data.rijksmuseum.nl/200108369?_profile=la-framed",
+        "imageUrl": "https://iiif.micr.io/QkOGy/full/1686,/0/default.jpg",
+        "license": "Public domain / CC0 per Rijksmuseum open-data policy; retain object record for review"
+      },
+      "image": {
+        "path": "images/rijksmuseum-the-milkmaid.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1878,
+        "widthPx": 1686,
+        "byteSize": 690193,
+        "sha256": "e1fce25063d20f3cc14ce13a32c015746dbdac3cae6694f1e4cfcdb4b8e62ea1"
+      }
+    },
+    {
+      "museum": "Rijksmuseum",
+      "id": "the-little-street",
+      "title": "View of Houses in Delft, Known as ‘The Little Street’",
+      "objectId": "200108371",
+      "artistName": "Johannes Vermeer",
+      "year": "c. 1658",
+      "medium": "",
+      "source": {
+        "repository": "Rijksmuseum",
+        "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200108371",
+        "apiUrl": "https://data.rijksmuseum.nl/200108371?_profile=la-framed",
+        "imageUrl": "https://iiif.micr.io/VWEov/full/1686,/0/default.jpg",
+        "license": "Public domain / CC0 per Rijksmuseum open-data policy; retain object record for review"
+      },
+      "image": {
+        "path": "images/rijksmuseum-the-little-street.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 2061,
+        "widthPx": 1686,
+        "byteSize": 902396,
+        "sha256": "aba90449f0ae52ccc78eade8b0a4514bd72140aa30644b02cf77b360873a0686"
+      }
+    },
+    {
+      "museum": "Rijksmuseum",
+      "id": "the-night-watch",
+      "title": "The Night Watch Militia Company of District II under the Command of Captain Frans Banninck Cocq",
+      "objectId": "200107928",
+      "artistName": "Rembrandt van Rijn",
+      "year": "1642",
+      "medium": "",
+      "source": {
+        "repository": "Rijksmuseum",
+        "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200107928",
+        "apiUrl": "https://data.rijksmuseum.nl/200107928?_profile=la-framed",
+        "imageUrl": "https://iiif.micr.io/PJEZO/full/1686,/0/default.jpg",
+        "license": "Public domain / CC0 per Rijksmuseum open-data policy; retain object record for review"
+      },
+      "image": {
+        "path": "images/rijksmuseum-the-night-watch.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1400,
+        "widthPx": 1686,
+        "byteSize": 285160,
+        "sha256": "391cce3f4cbacef92d6102a6e0c81f2ad8d8f2535418fc17f8b25d37c15bc73f"
+      }
+    },
+    {
+      "museum": "Rijksmuseum",
+      "id": "the-jewish-bride",
+      "title": "Isaac and Rebecca, Known as ‘The Jewish Bride’",
+      "objectId": "200107934",
+      "artistName": "Rembrandt van Rijn",
+      "year": "c. 1665 - c. 1669",
+      "medium": "",
+      "source": {
+        "repository": "Rijksmuseum",
+        "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200107934",
+        "apiUrl": "https://data.rijksmuseum.nl/200107934?_profile=la-framed",
+        "imageUrl": "https://iiif.micr.io/uRWXq/full/1686,/0/default.jpg",
+        "license": "Public domain / CC0 per Rijksmuseum open-data policy; retain object record for review"
+      },
+      "image": {
+        "path": "images/rijksmuseum-the-jewish-bride.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1227,
+        "widthPx": 1686,
+        "byteSize": 363375,
+        "sha256": "e6062f88851606180fce8242df94e3b6b802e85e3b7762b2965896bb91950583"
+      }
+    },
+    {
+      "museum": "Rijksmuseum",
+      "id": "the-threatened-swan",
+      "title": "The Threatened Swan",
+      "objectId": "200108146",
+      "artistName": "Jan Asselijn",
+      "year": "c. 1650",
+      "medium": "",
+      "source": {
+        "repository": "Rijksmuseum",
+        "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200108146",
+        "apiUrl": "https://data.rijksmuseum.nl/200108146?_profile=la-framed",
+        "imageUrl": "https://iiif.micr.io/hZepb/full/1686,/0/default.jpg",
+        "license": "Public domain / CC0 per Rijksmuseum open-data policy; retain object record for review"
+      },
+      "image": {
+        "path": "images/rijksmuseum-the-threatened-swan.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1403,
+        "widthPx": 1686,
+        "byteSize": 402441,
+        "sha256": "0f94be479c4794b18da7d612dd79b19fd0fc306f69edd7d97eefb82b1d9cf1ae"
+      }
+    },
+    {
+      "museum": "Rijksmuseum",
+      "id": "the-merry-family",
+      "title": "The Merry Family",
+      "objectId": "200108012",
+      "artistName": "Jan Havicksz. Steen",
+      "year": "1668",
+      "medium": "",
+      "source": {
+        "repository": "Rijksmuseum",
+        "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200108012",
+        "apiUrl": "https://data.rijksmuseum.nl/200108012?_profile=la-framed",
+        "imageUrl": "https://iiif.micr.io/SbsFC/full/1686,/0/default.jpg",
+        "license": "Public domain / CC0 per Rijksmuseum open-data policy; retain object record for review"
+      },
+      "image": {
+        "path": "images/rijksmuseum-the-merry-family.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1326,
+        "widthPx": 1686,
+        "byteSize": 583451,
+        "sha256": "8a63c2e3374b962ce967a1d73c34ca0044d926c9e100d25c2bbd2bdcae1be580"
+      }
+    },
+    {
+      "museum": "Rijksmuseum",
+      "id": "the-syndics",
+      "title": "The Sampling Officials of the Amsterdam Drapers’ Guild, Known as ‘The Syndics’",
+      "objectId": "200107929",
+      "artistName": "Rembrandt van Rijn",
+      "year": "1662",
+      "medium": "",
+      "source": {
+        "repository": "Rijksmuseum",
+        "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200107929",
+        "apiUrl": "https://data.rijksmuseum.nl/200107929?_profile=la-framed",
+        "imageUrl": "https://iiif.micr.io/cWWQE/full/1686,/0/default.jpg",
+        "license": "Public domain / CC0 per Rijksmuseum open-data policy; retain object record for review"
+      },
+      "image": {
+        "path": "images/rijksmuseum-the-syndics.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1143,
+        "widthPx": 1686,
+        "byteSize": 323635,
+        "sha256": "2b81c0749f99e1d3fd17aac0c9f473efed0852fef354f6157e0bb51a944b6b54"
+      }
+    },
+    {
+      "museum": "Rijksmuseum",
+      "id": "windmill-at-wijk-bij-duurstede",
+      "title": "The Windmill at Wijk bij Duurstede",
+      "objectId": "200107959",
+      "artistName": "Jacob Isaacksz van Ruisdael",
+      "year": "c. 1668 - c. 1670",
+      "medium": "",
+      "source": {
+        "repository": "Rijksmuseum",
+        "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200107959",
+        "apiUrl": "https://data.rijksmuseum.nl/200107959?_profile=la-framed",
+        "imageUrl": "https://iiif.micr.io/XWEFp/full/1686,/0/default.jpg",
+        "license": "Public domain / CC0 per Rijksmuseum open-data policy; retain object record for review"
+      },
+      "image": {
+        "path": "images/rijksmuseum-windmill-at-wijk-bij-duurstede.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1430,
+        "widthPx": 1686,
+        "byteSize": 407773,
+        "sha256": "0a9fb0bb65e5fc920bbd3cb0f0441a857ce85c022e8dd1555b2723831fdb7481"
+      }
+    },
+    {
+      "museum": "Rijksmuseum",
+      "id": "still-life-with-flowers",
+      "title": "Still Life with Flowers",
+      "objectId": "200108148",
+      "artistName": "",
+      "year": "c. 1625 - c. 1630",
+      "medium": "",
+      "source": {
+        "repository": "Rijksmuseum",
+        "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200108148",
+        "apiUrl": "https://data.rijksmuseum.nl/200108148?_profile=la-framed",
+        "imageUrl": "https://iiif.micr.io/aasHz/full/1686,/0/default.jpg",
+        "license": "Public domain / CC0 per Rijksmuseum open-data policy; retain object record for review"
+      },
+      "image": {
+        "path": "images/rijksmuseum-still-life-with-flowers.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 2409,
+        "widthPx": 1686,
+        "byteSize": 762244,
+        "sha256": "d1d24e5a984c9f77d509c1ad31f21e00913581da19837a3365c2da0ca80488ed"
+      }
+    },
+    {
+      "museum": "Rijksmuseum",
+      "id": "battle-of-waterloo",
+      "title": "The Battle of Waterloo",
+      "objectId": "200107874",
+      "artistName": "Jan Willem Pieneman",
+      "year": "1824",
+      "medium": "",
+      "source": {
+        "repository": "Rijksmuseum",
+        "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200107874",
+        "apiUrl": "https://data.rijksmuseum.nl/200107874?_profile=la-framed",
+        "imageUrl": "https://iiif.micr.io/GebpD/full/1686,/0/default.jpg",
+        "license": "Public domain / CC0 per Rijksmuseum open-data policy; retain object record for review"
+      },
+      "image": {
+        "path": "images/rijksmuseum-battle-of-waterloo.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1123,
+        "widthPx": 1686,
+        "byteSize": 346935,
+        "sha256": "aa121c76e18fcd8605193c3027ab05011bb0992c6295cf6ce0842640e8ea423e"
+      }
+    },
+    {
+      "museum": "Rijksmuseum",
+      "id": "sudden-shower-at-ohashi",
+      "title": "Sudden Shower over Ohashi Bridge at Atake",
+      "objectId": "200134877",
+      "artistName": "Utagawa Hiroshige (I) (vermeld op object)",
+      "year": "1857-09",
+      "medium": "",
+      "source": {
+        "repository": "Rijksmuseum",
+        "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200134877",
+        "apiUrl": "https://data.rijksmuseum.nl/200134877?_profile=la-framed",
+        "imageUrl": "https://iiif.micr.io/NrgzO/full/1686,/0/default.jpg",
+        "license": "Public domain / CC0 per Rijksmuseum open-data policy; retain object record for review"
+      },
+      "image": {
+        "path": "images/rijksmuseum-sudden-shower-at-ohashi.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 2432,
+        "widthPx": 1686,
+        "byteSize": 1008574,
+        "sha256": "32951d9650cda1e14eeb87540ff214d4ad7f51d89130b856114fe607e3e476b3"
+      }
+    },
+    {
+      "museum": "Rijksmuseum",
+      "id": "breach-of-saint-anthonys-dike",
+      "title": "The Breach of the Saint Anthony’s Dike near Amsterdam",
+      "objectId": "200420911",
+      "artistName": "",
+      "year": "1651",
+      "medium": "",
+      "source": {
+        "repository": "Rijksmuseum",
+        "objectUrl": "https://www.rijksmuseum.nl/en/collection/object/200420911",
+        "apiUrl": "https://data.rijksmuseum.nl/200420911?_profile=la-framed",
+        "imageUrl": "https://iiif.micr.io/WzRNZ/full/1686,/0/default.jpg",
+        "license": "Public domain / CC0 per Rijksmuseum open-data policy; retain object record for review"
+      },
+      "image": {
+        "path": "images/rijksmuseum-breach-of-saint-anthonys-dike.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1310,
+        "widthPx": 1686,
+        "byteSize": 1010938,
+        "sha256": "1225ceab6e93e3ecc4a7dd3a369ee8221201b0a3e6059014c1853a39194a57a1"
+      }
+    },
+    {
+      "museum": "Art Institute of Chicago",
+      "id": "the-herring-net",
+      "title": "The Herring Net",
+      "objectId": "25865",
+      "artistName": "Winslow Homer (American, 1836–1910)",
+      "year": "1885",
+      "medium": "Oil on canvas",
+      "department": "Arts of the Americas",
+      "source": {
+        "repository": "Art Institute of Chicago",
+        "objectUrl": "https://www.artic.edu/artworks/25865",
+        "apiUrl": "https://api.artic.edu/api/v1/artworks/25865",
+        "imageUrl": "https://www.artic.edu/iiif/2/5dca7347-c6dc-24dd-d073-d705b9cdc575/full/1686,/0/default.jpg",
+        "license": "CC0 / public domain designation"
+      },
+      "image": {
+        "path": "images/aic-the-herring-net.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1037,
+        "widthPx": 1686,
+        "byteSize": 498465,
+        "sha256": "09cd52903d8882b3ce7df6174a10394fe01372d556a9950c12adad44a53efe58"
+      }
+    },
+    {
+      "museum": "Art Institute of Chicago",
+      "id": "the-childs-bath",
+      "title": "The Child's Bath",
+      "objectId": "111442",
+      "artistName": "Mary Cassatt (American, 1844–1926)",
+      "year": "1893",
+      "medium": "Oil on canvas",
+      "department": "Arts of the Americas",
+      "source": {
+        "repository": "Art Institute of Chicago",
+        "objectUrl": "https://www.artic.edu/artworks/111442",
+        "apiUrl": "https://api.artic.edu/api/v1/artworks/111442",
+        "imageUrl": "https://www.artic.edu/iiif/2/3b885ae0-4d46-5fe4-d70a-00474827f02c/full/1686,/0/default.jpg",
+        "license": "CC0 / public domain designation"
+      },
+      "image": {
+        "path": "images/aic-the-childs-bath.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 2558,
+        "widthPx": 1686,
+        "byteSize": 1382866,
+        "sha256": "82b9ace5cdb81b74e0a6c83e2bdff56e6b683cb4248b4bd43ca83791203b58d6"
+      }
+    },
+    {
+      "museum": "Art Institute of Chicago",
+      "id": "the-bedroom",
+      "title": "The Bedroom",
+      "objectId": "28560",
+      "artistName": "Vincent van Gogh (Dutch, 1853–1890)",
+      "year": "1889",
+      "medium": "Oil on canvas",
+      "department": "Painting and Sculpture of Europe",
+      "source": {
+        "repository": "Art Institute of Chicago",
+        "objectUrl": "https://www.artic.edu/artworks/28560",
+        "apiUrl": "https://api.artic.edu/api/v1/artworks/28560",
+        "imageUrl": "https://www.artic.edu/iiif/2/6644829f-f292-c5c4-a73c-0356a6fdbf0d/full/1686,/0/default.jpg",
+        "license": "CC0 / public domain designation"
+      },
+      "image": {
+        "path": "images/aic-the-bedroom.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1320,
+        "widthPx": 1686,
+        "byteSize": 932823,
+        "sha256": "7b0cb3c2514181a95a15706c5863bf6a9602d52d7d844259475a98434d0ae556"
+      }
+    },
+    {
+      "museum": "Art Institute of Chicago",
+      "id": "paris-street-rainy-day",
+      "title": "Paris Street; Rainy Day",
+      "objectId": "20684",
+      "artistName": "Gustave Caillebotte (French, 1848–1894)",
+      "year": "1877",
+      "medium": "Oil on canvas",
+      "department": "Painting and Sculpture of Europe",
+      "source": {
+        "repository": "Art Institute of Chicago",
+        "objectUrl": "https://www.artic.edu/artworks/20684",
+        "apiUrl": "https://api.artic.edu/api/v1/artworks/20684",
+        "imageUrl": "https://www.artic.edu/iiif/2/f8fd76e9-c396-5678-36ed-6a348c904d27/full/1686,/0/default.jpg",
+        "license": "CC0 / public domain designation"
+      },
+      "image": {
+        "path": "images/aic-paris-street-rainy-day.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1309,
+        "widthPx": 1686,
+        "byteSize": 658998,
+        "sha256": "2b5b34eeee43dbc6d08b4f0ed4c17c2577b29a3809aa0761781531b1ee7a3952"
+      }
+    },
+    {
+      "museum": "Art Institute of Chicago",
+      "id": "la-grande-jatte",
+      "title": "A Sunday on La Grande Jatte — 1884",
+      "objectId": "27992",
+      "artistName": "Georges Seurat (French, 1859–1891)",
+      "year": "1884–86, border added 1888–89",
+      "medium": "Oil on canvas",
+      "department": "Painting and Sculpture of Europe",
+      "source": {
+        "repository": "Art Institute of Chicago",
+        "objectUrl": "https://www.artic.edu/artworks/27992",
+        "apiUrl": "https://api.artic.edu/api/v1/artworks/27992",
+        "imageUrl": "https://www.artic.edu/iiif/2/2d484387-2509-5e8e-2c43-22f9981972eb/full/1686,/0/default.jpg",
+        "license": "CC0 / public domain designation"
+      },
+      "image": {
+        "path": "images/aic-la-grande-jatte.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1130,
+        "widthPx": 1686,
+        "byteSize": 849983,
+        "sha256": "14a893bee0c73c9bae05508c1901e2cdf7940d4686988d17360d098dff561d7f"
+      }
+    },
+    {
+      "museum": "Art Institute of Chicago",
+      "id": "water-lilies",
+      "title": "Water Lilies",
+      "objectId": "16568",
+      "artistName": "Claude Monet (French, 1840–1926)",
+      "year": "1906",
+      "medium": "Oil on canvas",
+      "department": "Painting and Sculpture of Europe",
+      "source": {
+        "repository": "Art Institute of Chicago",
+        "objectUrl": "https://www.artic.edu/artworks/16568",
+        "apiUrl": "https://api.artic.edu/api/v1/artworks/16568",
+        "imageUrl": "https://www.artic.edu/iiif/2/3c27b499-af56-f0d5-93b5-a7f2f1ad5813/full/1686,/0/default.jpg",
+        "license": "CC0 / public domain designation"
+      },
+      "image": {
+        "path": "images/aic-water-lilies.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1619,
+        "widthPx": 1686,
+        "byteSize": 1165558,
+        "sha256": "bab7cc062608fdb0601f3bb43f927eb20516525755a0a519f5f40fb301fe0074"
+      }
+    },
+    {
+      "museum": "Art Institute of Chicago",
+      "id": "assumption-of-the-virgin",
+      "title": "The Assumption of the Virgin",
+      "objectId": "87479",
+      "artistName": "El Greco (Doménikos Theotokópoulos; Greek, active in Spain, 1541–1614)",
+      "year": "1577–79",
+      "medium": "Oil on canvas",
+      "department": "Painting and Sculpture of Europe",
+      "source": {
+        "repository": "Art Institute of Chicago",
+        "objectUrl": "https://www.artic.edu/artworks/87479",
+        "apiUrl": "https://api.artic.edu/api/v1/artworks/87479",
+        "imageUrl": "https://www.artic.edu/iiif/2/47fd1564-93f5-f30b-7786-013421133b4a/full/1686,/0/default.jpg",
+        "license": "CC0 / public domain designation"
+      },
+      "image": {
+        "path": "images/aic-assumption-of-the-virgin.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 3225,
+        "widthPx": 1686,
+        "byteSize": 2020738,
+        "sha256": "af9819fb52c03f65322410c6283918cab978c167ff2ded6ba49562ea28dc5e9e"
+      }
+    },
+    {
+      "museum": "Art Institute of Chicago",
+      "id": "at-the-moulin-rouge",
+      "title": "At the Moulin Rouge",
+      "objectId": "61128",
+      "artistName": "Henri de Toulouse-Lautrec (French, 1864–1901)",
+      "year": "1892–95",
+      "medium": "Oil on canvas",
+      "department": "Painting and Sculpture of Europe",
+      "source": {
+        "repository": "Art Institute of Chicago",
+        "objectUrl": "https://www.artic.edu/artworks/61128",
+        "apiUrl": "https://api.artic.edu/api/v1/artworks/61128",
+        "imageUrl": "https://www.artic.edu/iiif/2/defb4004-b500-218d-3d9b-9a02423f097d/full/1686,/0/default.jpg",
+        "license": "CC0 / public domain designation"
+      },
+      "image": {
+        "path": "images/aic-at-the-moulin-rouge.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1473,
+        "widthPx": 1686,
+        "byteSize": 605047,
+        "sha256": "0bf6bc568f5b92ee44151ef26daa9f5d2bb9baed74a7765edfe39f9d74a55e9e"
+      }
+    },
+    {
+      "museum": "Art Institute of Chicago",
+      "id": "roses-in-a-vase",
+      "title": "Roses in a Vase",
+      "objectId": "150828",
+      "artistName": "Georges Seurat French, 1859-1891",
+      "year": "1881/83",
+      "medium": "Black Conté crayon on ivory laid paper, discolored to tan, edge mounted on tan wove paper",
+      "department": "Prints and Drawings",
+      "source": {
+        "repository": "Art Institute of Chicago",
+        "objectUrl": "https://www.artic.edu/artworks/150828",
+        "apiUrl": "https://api.artic.edu/api/v1/artworks/150828",
+        "imageUrl": "https://www.artic.edu/iiif/2/a153e6ac-16fa-88f3-4984-f96ee6e7353b/full/1686,/0/default.jpg",
+        "license": "CC0 / public domain designation"
+      },
+      "image": {
+        "path": "images/aic-roses-in-a-vase.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1969,
+        "widthPx": 1686,
+        "byteSize": 1517976,
+        "sha256": "c8d39aaf656dc9c1a4374240977371bbdabd3f06e3beb40152da4a61e14c16d0"
+      }
+    },
+    {
+      "museum": "Art Institute of Chicago",
+      "id": "the-zone",
+      "title": "The Zone (Outside the City Walls)",
+      "objectId": "243810",
+      "artistName": "Georges Seurat French, 1859-1891",
+      "year": "1882–83",
+      "medium": "Black conte crayon on cream laid paper",
+      "department": "Prints and Drawings",
+      "source": {
+        "repository": "Art Institute of Chicago",
+        "objectUrl": "https://www.artic.edu/artworks/243810",
+        "apiUrl": "https://api.artic.edu/api/v1/artworks/243810",
+        "imageUrl": "https://www.artic.edu/iiif/2/dbb031cc-7171-448a-23bb-bfbdb3b021fa/full/1686,/0/default.jpg",
+        "license": "CC0 / public domain designation"
+      },
+      "image": {
+        "path": "images/aic-the-zone.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1303,
+        "widthPx": 1686,
+        "byteSize": 1306674,
+        "sha256": "972772055a7c6f26b7ac7a4baabe444dea0476c0d5c0ced61e70b5ca029e1b39"
+      }
+    },
+    {
+      "museum": "Art Institute of Chicago",
+      "id": "woman-at-her-toilette",
+      "title": "Woman at Her Toilette",
+      "objectId": "11723",
+      "artistName": "Berthe Morisot (French, 1841–1895)",
+      "year": "1875–80",
+      "medium": "Oil on canvas",
+      "department": "Painting and Sculpture of Europe",
+      "source": {
+        "repository": "Art Institute of Chicago",
+        "objectUrl": "https://www.artic.edu/artworks/11723",
+        "apiUrl": "https://api.artic.edu/api/v1/artworks/11723",
+        "imageUrl": "https://www.artic.edu/iiif/2/78c80988-6524-cec7-c661-a4c0a706d06f/full/1686,/0/default.jpg",
+        "license": "CC0 / public domain designation"
+      },
+      "image": {
+        "path": "images/aic-woman-at-her-toilette.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1262,
+        "widthPx": 1686,
+        "byteSize": 716437,
+        "sha256": "ce8205a931567bf01b146fe4f0ff373208c43d8802365f719b562194a22fa82e"
+      }
+    },
+    {
+      "museum": "Art Institute of Chicago",
+      "id": "great-wave-off-kanagawa",
+      "title": "Under the Wave off Kanagawa (Kanagawa oki nami ura), also known as The Great Wave, from the series \"Thirty-Six Views of Mount Fuji (Fugaku sanjūrokkei)\"",
+      "objectId": "24645",
+      "artistName": "Katsushika Hokusai 葛飾 北斎 Japanese, 1760-1849",
+      "year": "1830/33",
+      "medium": "Color woodblock print; oban",
+      "department": "Arts of Asia",
+      "source": {
+        "repository": "Art Institute of Chicago",
+        "objectUrl": "https://www.artic.edu/artworks/24645",
+        "apiUrl": "https://api.artic.edu/api/v1/artworks/24645",
+        "imageUrl": "https://www.artic.edu/iiif/2/b3974542-b9b4-7568-fc4b-966738f61d78/full/1686,/0/default.jpg",
+        "license": "CC0 / public domain designation"
+      },
+      "image": {
+        "path": "images/aic-great-wave-off-kanagawa.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 1155,
+        "widthPx": 1686,
+        "byteSize": 872279,
+        "sha256": "22020dce06855ab7df4e45fe33e350c9e7c679491beeab3bb900c1bdd7308b93"
+      }
+    },
+    {
+      "museum": "Art Institute of Chicago",
+      "id": "the-dance",
+      "title": "The Dance",
+      "objectId": "10550",
+      "artistName": "Pietro Longhi (Italian, 1702–1785)",
+      "year": "c. 1750",
+      "medium": "Oil on canvas",
+      "department": "Painting and Sculpture of Europe",
+      "source": {
+        "repository": "Art Institute of Chicago",
+        "objectUrl": "https://www.artic.edu/artworks/10550",
+        "apiUrl": "https://api.artic.edu/api/v1/artworks/10550",
+        "imageUrl": "https://www.artic.edu/iiif/2/cb178a5a-6c55-c423-a186-d3d467a72f2f/full/1686,/0/default.jpg",
+        "license": "CC0 / public domain designation"
+      },
+      "image": {
+        "path": "images/aic-the-dance.jpg",
+        "mimeType": "image/jpeg",
+        "heightPx": 2052,
+        "widthPx": 1686,
+        "byteSize": 747929,
+        "sha256": "5ed7fa7b9ff66bc5a1c77935effe2c1dcca789de3ddd027444655f942893aa93"
+      }
+    }
+  ]
+}
