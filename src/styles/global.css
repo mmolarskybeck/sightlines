@@ -2533,6 +2533,34 @@ body.panels-resizing * {
   line-height: var(--leading-ui);
 }
 
+/* Entrance for every tooltip (the .placement-tooltip class rides the
+   shared TooltipContent shell): a quick fade + soft pop scaled from the
+   Radix-provided origin, so the hint reads as surfacing from its trigger
+   whichever side it lands on. */
+@keyframes tooltip-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.placement-tooltip[data-state="delayed-open"],
+.placement-tooltip[data-state="instant-open"] {
+  transform-origin: var(--radix-tooltip-content-transform-origin);
+  animation: tooltip-in 140ms var(--ease-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .placement-tooltip[data-state="delayed-open"],
+  .placement-tooltip[data-state="instant-open"] {
+    animation: none;
+  }
+}
+
 .insert-tool-segment:disabled {
   cursor: not-allowed;
 }

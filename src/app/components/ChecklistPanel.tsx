@@ -337,7 +337,9 @@ export function ChecklistPanel({
                   </span>
                 </SelectTrigger>
               </TooltipTrigger>
-              <TooltipContent side="bottom">Sort: {SORT_LABELS[sort]}</TooltipContent>
+              <TooltipContent className="toolbar-tooltip" side="bottom">
+                Sort: {SORT_LABELS[sort]}
+              </TooltipContent>
             </Tooltip>
             <SelectContent align="end">
               {CHECKLIST_SORTS.map((value) => (
