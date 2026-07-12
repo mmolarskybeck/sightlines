@@ -60,6 +60,14 @@ export function isMeaningfulEntryPath(name: string): boolean {
 export function validatePackageInventory(entries: PackageEntryInfo[]): void {
   const files = entries.filter((entry) => !isDirectoryEntry(entry.name));
 
+  const seenPaths = new Set<string>();
+  for (const entry of entries) {
+    if (seenPaths.has(entry.name)) {
+      throw new Error(`the package contains a duplicate file path (${entry.name}).`);
+    }
+    seenPaths.add(entry.name);
+  }
+
   for (const entry of files) {
     if (!isSafeEntryPath(entry.name)) {
       throw new Error(`the package contains an unsafe file path (${entry.name}).`);

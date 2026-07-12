@@ -87,8 +87,12 @@ describe("export → import round trip", () => {
       expect(Array.from(prepared.blobs.thumbnail.bytes)).toEqual(
         Array.from(blobs.get(source.thumbnailKey)!)
       );
-      // The manifest's original hash lands on the record — the dedupe anchor.
-      expect(prepared.asset.sha256).toBe(source.sha256);
+      // The verified original tier hash lands on the record — even if the
+      // source record's cached anchor was stale.
+      const manifestAsset = opened.manifest.assets.find((asset) => asset.assetId === source.id)!;
+      expect(prepared.asset.sha256).toBe(
+        manifestAsset.tiers.find((tier) => tier.tier === "original")!.sha256
+      );
     }
   });
 

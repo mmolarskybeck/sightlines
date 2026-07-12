@@ -278,13 +278,13 @@ export type AppState = ArrangeSliceState &
   // returning the zip bytes + filename for the thin UI to download (no DOM here).
   exportProjectPackage: (
     mode: PackageExportMode
-  ) => Promise<{ filename: string; zip: Uint8Array } | null>;
+  ) => Promise<{ filename: string; zip: Uint8Array; warnings: string[] } | null>;
   // Same package build, for a project manager row that isn't necessarily the
   // open document — loads it via the repository instead of reading get().project.
   exportProjectPackageById: (
     id: string,
     mode: PackageExportMode
-  ) => Promise<{ filename: string; zip: Uint8Array } | null>;
+  ) => Promise<{ filename: string; zip: Uint8Array; warnings: string[] } | null>;
   // Runs the untrusted-file pipeline (docs/plan.md §13) over .sightlines
   // bytes. If §6 artwork conflicts need a decision, the import parks in
   // pendingPackageImport for the review dialog; otherwise it commits directly.
@@ -489,9 +489,9 @@ export function createAppStore(deps: AppStoreDeps) {
       project: Project,
       libraryArtworks: Artwork[],
       mode: PackageExportMode
-    ): Promise<{ filename: string; zip: Uint8Array } | null> {
+    ): Promise<{ filename: string; zip: Uint8Array; warnings: string[] } | null> {
       try {
-        const { zip } = await createSightlinesPackage({
+        const { zip, warnings } = await createSightlinesPackage({
           project,
           libraryArtworks,
           mode,
@@ -499,7 +499,7 @@ export function createAppStore(deps: AppStoreDeps) {
           getBlob: (key) => deps.assetRepository.getBlob(key)
         });
         set({ error: null });
-        return { filename: packageFilename(project), zip };
+        return { filename: packageFilename(project), zip, warnings };
       } catch (error) {
         set({
           error: `Export failed: ${
@@ -527,6 +527,14 @@ export function createAppStore(deps: AppStoreDeps) {
       resolutions: Record<string, ConflictResolution>
     ) {
       const commit = finalizePackageImport(plan, resolutions);
+
+      // Persist the project first and let failures reject. This keeps a failed
+      // project save from writing library data or opening a document that will
+      // disappear on reload. Later repository failures remain visible to the
+      // caller and leave a recoverable project with potentially missing images.
+      set({ saveState: "saving", error: null });
+      await deps.projectRepository.save(commit.project);
+      set({ saveState: "saved" });
 
       for (const prepared of commit.assetsToSave) {
         await deps.assetRepository.saveAsset(prepared.asset, {

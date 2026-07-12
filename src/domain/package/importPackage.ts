@@ -240,6 +240,16 @@ function fillTierSlots(
   return { original, display, thumbnail };
 }
 
+function resolvedOriginalContentHash(
+  entry: PackageAssetEntry,
+  validatedAsset: ValidatedPackageAsset | undefined
+): string | undefined {
+  if (validatedAsset?.tiers.original) {
+    return entry.tiers.find((tier) => tier.tier === "original")?.sha256 ?? entry.sha256;
+  }
+  return entry.sha256;
+}
+
 export function planPackageImport(
   manifest: SightlinesPackage,
   validated: ValidatedPackageAssets,
@@ -251,13 +261,15 @@ export function planPackageImport(
   // collision imports as a NEW project with a fresh id and a marked title.
   const projectIds = new Set(existing.projectIds);
   const projectRenamed = projectIds.has(manifest.project.id);
+  const importedAt = new Date().toISOString();
   const project: Project = projectRenamed
     ? {
         ...manifest.project,
         id: newId(),
-        title: `${manifest.project.title} (imported)`
+        title: `${manifest.project.title} (imported)`,
+        updatedAt: importedAt
       }
-    : manifest.project;
+    : { ...manifest.project, updatedAt: importedAt };
 
   // --- Asset resolution. For each manifest asset entry, decide what the
   // importing machine's artwork records should point at:
@@ -280,13 +292,14 @@ export function planPackageImport(
   for (const entry of manifest.assets) {
     const label = entry.originalFilename ?? entry.assetId;
 
-    const localMatch = entry.sha256 ? localAssetIdBySha.get(entry.sha256) : undefined;
+    const validatedAsset = validated.byAssetId.get(entry.assetId);
+    const contentHash = resolvedOriginalContentHash(entry, validatedAsset);
+    const localMatch = contentHash ? localAssetIdBySha.get(contentHash) : undefined;
     if (localMatch !== undefined) {
       assetRebinds.set(entry.assetId, localMatch);
       continue;
     }
 
-    const validatedAsset = validated.byAssetId.get(entry.assetId);
     const slots = validatedAsset ? fillTierSlots(validatedAsset.tiers) : null;
     if (!slots) {
       assetRebinds.set(entry.assetId, null);
@@ -300,7 +313,7 @@ export function planPackageImport(
     // content — ids are never reused for different bytes.
     const idTaken =
       existing.assetShaById.has(entry.assetId) &&
-      existing.assetShaById.get(entry.assetId) !== entry.sha256;
+      existing.assetShaById.get(entry.assetId) !== contentHash;
     const assetId = idTaken ? newId() : entry.assetId;
 
     const asset: Asset = {
@@ -316,7 +329,7 @@ export function planPackageImport(
       ...(entry.widthPx !== undefined ? { widthPx: entry.widthPx } : {}),
       ...(entry.heightPx !== undefined ? { heightPx: entry.heightPx } : {}),
       ...(entry.byteSize !== undefined ? { byteSize: entry.byteSize } : {}),
-      ...(entry.sha256 ? { sha256: entry.sha256 } : {})
+      ...(contentHash ? { sha256: contentHash } : {})
     };
 
     assetsToSave.push({ asset, blobs: slots });
@@ -327,7 +340,12 @@ export function planPackageImport(
   // into manifest.artworks by export; everything here references that subset.
   const existingById = new Map(existing.artworks.map((artwork) => [artwork.id, artwork]));
   const entryShaByAssetId = new Map(
-    manifest.assets.filter((entry) => entry.sha256).map((entry) => [entry.assetId, entry.sha256!])
+    manifest.assets
+      .map((entry) => [
+        entry.assetId,
+        resolvedOriginalContentHash(entry, validated.byAssetId.get(entry.assetId))
+      ] as const)
+      .filter((entry): entry is readonly [string, string] => entry[1] !== undefined)
   );
 
   const artworksToAdd: Artwork[] = [];

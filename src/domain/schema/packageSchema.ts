@@ -71,6 +71,68 @@ export const sightlinesPackageSchema = z.object({
   // Blob inventory + hashes for every referenced asset, present in all modes
   // (empty `tiers` in metadata-only mode).
   assets: z.array(packageAssetEntrySchema)
+}).superRefine((manifest, context) => {
+  const assetIds = new Set<string>();
+  const artworkIds = new Set<string>();
+  const shaByPath = new Map<string, string>();
+
+  manifest.artworks.forEach((artwork, index) => {
+    if (artworkIds.has(artwork.id)) {
+      context.addIssue({
+        code: "custom",
+        path: ["artworks", index, "id"],
+        message: "duplicate artwork id"
+      });
+    }
+    artworkIds.add(artwork.id);
+  });
+
+  manifest.assets.forEach((asset, assetIndex) => {
+    if (assetIds.has(asset.assetId)) {
+      context.addIssue({
+        code: "custom",
+        path: ["assets", assetIndex, "assetId"],
+        message: "duplicate asset id"
+      });
+    }
+    assetIds.add(asset.assetId);
+
+    const tiers = new Set<AssetTier>();
+    asset.tiers.forEach((tier, tierIndex) => {
+      if (tiers.has(tier.tier)) {
+        context.addIssue({
+          code: "custom",
+          path: ["assets", assetIndex, "tiers", tierIndex, "tier"],
+          message: "duplicate asset tier"
+        });
+      }
+      tiers.add(tier.tier);
+
+      const knownSha = shaByPath.get(tier.path);
+      if (knownSha !== undefined && knownSha !== tier.sha256) {
+        context.addIssue({
+          code: "custom",
+          path: ["assets", assetIndex, "tiers", tierIndex, "path"],
+          message: "the same path has conflicting checksums"
+        });
+      }
+      shaByPath.set(tier.path, tier.sha256);
+
+      if (manifest.mode === "metadata-only") {
+        context.addIssue({
+          code: "custom",
+          path: ["assets", assetIndex, "tiers", tierIndex],
+          message: "metadata-only packages cannot contain image tiers"
+        });
+      } else if (manifest.mode === "display" && tier.tier === "original") {
+        context.addIssue({
+          code: "custom",
+          path: ["assets", assetIndex, "tiers", tierIndex, "tier"],
+          message: "display packages cannot contain original tiers"
+        });
+      }
+    });
+  });
 });
 
 export type SightlinesPackage = {

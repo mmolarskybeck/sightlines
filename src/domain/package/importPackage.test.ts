@@ -363,6 +363,7 @@ describe("planPackageImport — §6 merge rules", () => {
 
   it("imports as a NEW project when the project id already exists locally", () => {
     const manifest = makeManifest();
+    manifest.project.updatedAt = "2020-01-01T00:00:00.000Z";
     const existing: ExistingLibraryState = {
       artworks: [],
       assetShaById: new Map(),
@@ -374,6 +375,57 @@ describe("planPackageImport — §6 merge rules", () => {
     expect(plan.projectRenamed).toBe(true);
     expect(plan.project.id).not.toBe(manifest.project.id);
     expect(plan.project.title).toBe(`${manifest.project.title} (imported)`);
+    expect(plan.project.updatedAt).not.toBe(manifest.project.updatedAt);
+  });
+
+  it("stamps a non-colliding imported project with the import time", () => {
+    const manifest = makeManifest();
+    manifest.project.updatedAt = "2020-01-01T00:00:00.000Z";
+    const plan = planPackageImport(manifest, noAssets(), emptyExisting());
+    expect(plan.project.updatedAt).not.toBe(manifest.project.updatedAt);
+    expect(Date.parse(plan.project.updatedAt)).toBeGreaterThan(Date.parse(manifest.exportedAt));
+  });
+
+  it("uses a verified original tier hash for dedupe and persistence", async () => {
+    const bytes = makeWebpStubBytes("true-original");
+    const original = await makeTierEntry("original", bytes);
+    const manifest = makeManifest({
+      mode: "originals",
+      artworks: [makeArtwork("art-1", { assetId: "asset-a" })],
+      assets: [{ assetId: "asset-a", mimeType: "image/webp", sha256: "stale", tiers: [original] }]
+    });
+    const validated = await validatePackageAssets(manifest, new Map([[original.path, bytes]]));
+    const plan = planPackageImport(manifest, validated, emptyExisting());
+    expect(plan.assetsToSave[0].asset.sha256).toBe(original.sha256);
+  });
+
+  it("uses the verified original hash when deciding an artwork is unchanged", async () => {
+    const bytes = makeWebpStubBytes("same-original");
+    const original = await makeTierEntry("original", bytes);
+    const incoming = makeArtwork("art-1", { assetId: "asset-incoming" });
+    const manifest = makeManifest({
+      mode: "originals",
+      artworks: [incoming],
+      assets: [
+        {
+          assetId: "asset-incoming",
+          mimeType: "image/webp",
+          sha256: "stale-anchor",
+          tiers: [original]
+        }
+      ]
+    });
+    const validated = await validatePackageAssets(manifest, new Map([[original.path, bytes]]));
+    const existing: ExistingLibraryState = {
+      artworks: [makeArtwork("art-1", { assetId: "asset-local" })],
+      assetShaById: new Map([["asset-local", original.sha256]]),
+      projectIds: []
+    };
+
+    const plan = planPackageImport(manifest, validated, existing);
+
+    expect(plan.reusedArtworkIds).toEqual(["art-1"]);
+    expect(plan.conflicts).toEqual([]);
   });
 
   it("gives an incoming asset a fresh id when its id is taken by different content", async () => {
