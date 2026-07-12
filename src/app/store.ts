@@ -532,9 +532,9 @@ export function createAppStore(deps: AppStoreDeps) {
       // project save from writing library data or opening a document that will
       // disappear on reload. Later repository failures remain visible to the
       // caller and leave a recoverable project with potentially missing images.
-      set({ saveState: "saving", error: null });
-      await deps.projectRepository.save(commit.project);
-      set({ saveState: "saved" });
+      if (!(await persist(commit.project))) {
+        throw new Error(get().error ?? "The imported project could not be saved.");
+      }
 
       for (const prepared of commit.assetsToSave) {
         await deps.assetRepository.saveAsset(prepared.asset, {
@@ -548,9 +548,6 @@ export function createAppStore(deps: AppStoreDeps) {
       }
 
       const libraryArtworks = await deps.artworkLibraryRepository.list();
-      if (!(await persist(commit.project))) {
-        throw new Error(get().error ?? "The imported project could not be saved.");
-      }
       setDocument(commit.project, { viewMode: "plan", libraryArtworks });
 
       // A successful import — even a degraded one — is not an error, so it
