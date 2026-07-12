@@ -79,17 +79,19 @@ Sightlines mixes square workspace structure with softer floating surfaces: recta
     underline tabs whose 2px petrol underline *slides* between tabs (220ms
     `--ease-soft`, suppressed under reduced motion): the original petrol
     identity plus the sliding motion.
-  - **Value pickers** — checklist filters, units, Insert, arrange modes,
+  - **Value pickers** — checklist filters, units, arrange modes,
     wall/floor placement — are recessed grey tracks (`--track`,
     `--radius-track`) holding quiet segments, with one raised white chip
     (`--chip`, `--shadow-chip`) marking the active choice and sliding
-    between segments. Auxiliary controls may dock inside a track behind a
+    between segments. Tracks are only for sets where something is always
+    chosen — a control that is usually empty (like tool arming) must not
+    be a track. Auxiliary controls may dock inside a track behind a
     hairline divider (the checklist's sort trigger is the reference case)
     rather than floating beside it.
-  - **Latching toggles** (Grid, Snap, Overlap, rail modes) do the
-    opposite: they depress, keeping the petrol wash and adding
-    `--shadow-pressed`. Raised = a choice within a set; pressed = a mode
-    that's engaged.
+  - **Latching toggles and armed tools** (Grid, Snap, Overlap, rail
+    modes, the Insert door/window/zone tools) do the opposite: they
+    depress, keeping the petrol wash and adding `--shadow-pressed`.
+    Raised = a choice within a set; pressed = a mode that's engaged.
   - **Sub-choice tabs** ("Measured from", the help dialog's view groups)
     use the same sliding underline at smaller sizing, riding their row's
     hairline. **Controls floating over the canvas** (the zoom cluster)
@@ -113,7 +115,7 @@ The product grammar is stable:
 
 - Left rail chooses the left-side work context: checklist, rooms, issues, or data.
 - Topbar owns project identity, view mode, persistence state, and import/export.
-- Canvas toolbar has two zones: insertion tools on the left (a segmented Insert control — door, window, blocked zone — shared by Plan and Elevation, disabled only when Elevation has no selected wall), view options on the right (grid, snap, precision, overlap, units). It stays a single row at comfortable widths, then becomes two explicit rows in a narrow canvas column rather than relying on accidental wrapping. Toggle labels drop to icon-only, Insert becomes a caret menu (then a plus button at the smallest width), Precision keeps its current value while dropping only the redundant label, and Units becomes a compact two-segment control with the active system filled in petrol. Plan labels the governing scale as `ft / m`; Elevation labels its detail scale as `in / cm`.
+- Canvas toolbar has two zones: insertion tools on the left (an Insert cluster — a quiet caption plus three soft icon buttons for door, window, and blocked zone that press in when armed — shared by Plan and Elevation, disabled only when Elevation has no selected wall), view options on the right (grid, snap, precision, overlap, units). It stays a single row at comfortable widths, then becomes two explicit rows in a narrow canvas column rather than relying on accidental wrapping. Toggle labels drop to icon-only, Insert becomes a caret menu (then a plus button at the smallest width), Precision keeps its current value while dropping only the redundant label, and Units becomes a compact two-segment control with the active system filled in petrol. Plan labels the governing scale as `ft / m`; Elevation labels its detail scale as `in / cm`.
 - Left pane is task inventory.
 - Right pane is inspection and numeric editing.
 

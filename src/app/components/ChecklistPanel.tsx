@@ -400,7 +400,7 @@ export function ChecklistPanel({
       <div className="checklist-actions">
         <Button
           className="checklist-add-images"
-          variant="outline"
+          variant="subtle"
           onClick={() => fileInputRef.current?.click()}
         >
           <ImageSquareIcon aria-hidden="true" size={16} />

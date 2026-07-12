@@ -2469,33 +2469,25 @@ body.panels-resizing * {
   flex: 0 0 auto;
 }
 
-/* Left zone of .view-toolbar: the Insert segmented control — a
-   non-interactive "Insert" caption plus three icon-only toggle segments
-   (door/window/blocked-zone, see PlanView's activeTool prop) joined under
-   one shared border with 1px internal dividers. Same joined-segment
-   language as .unit-switch, not three floating chips; control radius per
-   the app's rectangular-before-rounded rule. flex:none because a rigid
-   segmented control must never be squeezed by the flexing right zone —
-   compactness comes from the container queries below instead. */
+/* Left zone of .view-toolbar: the Insert tools — a quiet caption plus
+   three individual soft icon buttons (door/window/blocked-zone, see
+   PlanView's activeTool prop), the same family as the view-option
+   toggles. No track: most of the time no tool is armed, and an empty
+   tray reads wrong. Arming a tool is an engaged mode, so the armed
+   button presses in (petrol wash + inset shadow) exactly like Grid/Snap.
+   flex:none because the cluster must never be squeezed by the flexing
+   right zone — compactness comes from the container queries below. */
 .insert-tools {
   display: inline-flex;
-  align-items: stretch;
+  align-items: center;
   flex: none;
-  gap: 2px;
-  /* Matches the row's other controls (.unit-select, .unit-switch,
-     .view-option-button all sit at 30px) so the segmented control doesn't
-     stand 2px proud of its neighbors. */
-  min-height: 30px;
-  padding: 3px;
-  border: 0;
-  border-radius: var(--radius-track);
-  background: var(--track);
+  gap: 4px;
 }
 
 .insert-tools-label {
   display: inline-flex;
   align-items: center;
-  padding: 0 var(--toolbar-space-2);
+  padding: 0 var(--toolbar-space-1);
   color: var(--muted);
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
@@ -2506,31 +2498,29 @@ body.panels-resizing * {
   align-items: center;
   justify-content: center;
   width: 34px;
+  min-height: 30px;
   padding: 0;
   border: 0;
   border-radius: var(--radius-seg);
-  background: transparent;
+  background: var(--surface);
   color: var(--muted);
   cursor: pointer;
-  transition: background-color 150ms ease-out, color 150ms ease-out;
+  transition:
+    background-color 150ms ease-out,
+    box-shadow 150ms ease-out,
+    color 150ms ease-out;
 }
 
 .insert-tool-segment:hover:not(:disabled):not([aria-pressed="true"]) {
-  background: var(--chip-ghost);
+  background: var(--surface-strong);
   color: var(--ink);
 }
 
-.insert-tool-segment:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
-
-/* The armed segment: the raised white chip, petrol glyph — the same state
-   language as the segmented pickers' active chip. */
+/* The armed tool: engaged mode = pressed in, matching Grid/Snap. */
 .insert-tool-segment[aria-pressed="true"] {
-  background: var(--chip);
+  background: var(--primary-soft);
   color: var(--primary-strong);
-  box-shadow: var(--shadow-chip);
+  box-shadow: var(--shadow-pressed);
 }
 
 .insert-tool-segment:disabled {
@@ -2733,6 +2723,7 @@ body.panels-resizing * {
 
   .view-toolbar .insert-tool-segment {
     width: 40px;
+    min-height: 40px;
   }
 
   .view-toolbar .compact-insert-trigger {
@@ -4515,8 +4506,9 @@ body.panels-resizing * {
 }
 
 /* Apply is the primary action — a solid petrol fill (white text + Check icon)
-   so it reads as the clear commit. Cancel is the quiet ghost beside it: no
-   fill, borderless, muted until hovered. */
+   so it reads as the clear commit. Cancel is the soft-grey sibling: a
+   resting fill (not a hover-only ghost) so the pair reads as one tactile
+   group with a clear rank. */
 /* Chained with .inspector-action: the base rule is declared later in this
    file and would otherwise win the equal-specificity tie, washing these
    variants back to neutral. */
@@ -4533,12 +4525,13 @@ body.panels-resizing * {
 
 .inspector-action.arrange-cancel {
   border-color: transparent;
-  background: transparent;
+  background: var(--surface);
   color: var(--muted);
 }
 
 .inspector-action.arrange-cancel:hover {
-  background: var(--surface);
+  border-color: transparent;
+  background: var(--surface-strong);
   color: var(--ink);
 }
 
