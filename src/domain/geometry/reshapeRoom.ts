@@ -58,8 +58,8 @@ function intersectLines(p1: Point, d1: Vector2, p2: Point, d2: Vector2): Point |
 
 // CAD "offset/re-intersect" whole-wall drag (Sims-style): translate the
 // dragged wall's infinite line by offsetMm along its own LEFT-normal (rotate
-// its start→end axis 90° CCW — same convention as editRoom.ts's
-// chooseSideDirection; a positive offsetMm is never sign-flipped). The
+// its start→end axis 90° CCW; a positive offsetMm is never sign-flipped —
+// editRoom.ts's resizeWallPreservingAngles converts into this convention). The
 // previous and next walls stay on their existing infinite lines; only the
 // dragged wall's start/end vertices move, to wherever those two lines now
 // cross the translated line. Every other vertex in the room is untouched, and

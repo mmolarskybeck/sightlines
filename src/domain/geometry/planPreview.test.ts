@@ -142,15 +142,18 @@ describe("applyPlanPreview", () => {
   });
 
   describe("layering order", () => {
-    it("applies roomMove AFTER wallResize, so an end-anchored resize's offset shift on the same room is overwritten by roomMove's absolute value", () => {
+    it("composes wallResize and roomMove on the same room: resize never touches the offset, roomMove sets it absolutely, both effects show through", () => {
       const project = createSampleProject();
 
-      // Ground truth: an end-anchored resize of wall-north shifts room-main's
-      // placement offset (to hold the end vertex fixed in world space) — the
-      // offset does NOT stay (0, 0).
+      // Ground truth: since the pipeline merge into moveRoomWall, an
+      // end-anchored resize moves only room-local vertices — the placement
+      // offset stays (0, 0). (The pre-merge implementation shifted the
+      // offset to hold the end vertex fixed, which made wallResize and
+      // roomMove conflict on the offset and layer order observable here;
+      // the two layers now compose without interacting.)
       const resizeOnly = resizeWallPreservingAngles(project, "wall-north", feetToMm(30), "end").project;
-      const resizeOnlyOffset = resizeOnly.floor.rooms[0];
-      expect(resizeOnlyOffset.offsetXMm).not.toBeCloseTo(0);
+      expect(resizeOnly.floor.rooms[0].offsetXMm).toBe(0);
+      expect(resizeOnly.floor.rooms[0].offsetYMm).toBe(0);
 
       const preview: PlanPreview = {
         wallResize: { wallId: "wall-north", lengthMm: feetToMm(30), anchor: "end" },
@@ -159,14 +162,10 @@ describe("applyPlanPreview", () => {
 
       const result = applyPlanPreview(project, preview);
 
-      // If roomMove ran BEFORE wallResize, the final offset would be
-      // (500, 300) further shifted by the resize's own offset delta — it
-      // isn't. roomMove wins outright because it's the later layer, proving
-      // the pipeline order (wallResize, then roomMove, ...) actually matters
-      // and applyPlanPreview reproduces it.
+      // roomMove's absolute offset lands untouched...
       expect(result.floor.rooms[0]).toMatchObject({ offsetXMm: 500, offsetYMm: 300 });
-      // But the resize's effect on the ROOM geometry (not the offset) still
-      // shows through — roomMove only overrides offsetXMm/offsetYMm.
+      // ...and the resize's effect on the ROOM geometry still shows through —
+      // roomMove only overrides offsetXMm/offsetYMm.
       expect(result.floor.rooms[0].room).toEqual(resizeOnly.floor.rooms[0].room);
     });
   });

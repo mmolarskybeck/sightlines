@@ -82,6 +82,12 @@ describe("resizeWallPreservingAngles", () => {
     expect(worldVertex(result.project, "v-nw").xMm).toBeCloseTo(
       worldStartBefore.xMm - feetToMm(2)
     );
+    // Since the merge into moveRoomWall, an "end" anchor is a slide of the
+    // PREVIOUS wall in room-local space — the placement offset is never
+    // touched (pre-merge it was shifted to compensate a start-anchored
+    // local resize).
+    expect(result.project.floor.rooms[0].offsetXMm).toBe(0);
+    expect(result.project.floor.rooms[0].offsetYMm).toBe(0);
   });
 
   it("anchor \"end\" holds a depth wall's end vertex fixed in world space too", () => {
@@ -155,11 +161,10 @@ describe("resizeWallPreservingAngles", () => {
 });
 
 // Characterization tests for the rectangle-only numeric resize pipeline
-// (RoomResizeHandles -> dragResize -> resizeWallPreservingAngles ->
-// resizeOrthogonalQuad). A future change may fold this dedicated path into
-// the general polygon wall-move core (reshapeRoom.moveRoomWall, which
-// already carries a comment cross-referencing this function). These tests
-// pin the exact behavior that merge must preserve. Anchor semantics (which
+// (RoomResizeHandles -> dragResize -> resizeWallPreservingAngles). Since
+// 2026-07-12 that path delegates into the general polygon wall-move core
+// (reshapeRoom.moveRoomWall) — the merge this suite was built to gate —
+// and these tests now pin the wrapper's contract. Anchor semantics (which
 // vertex is held fixed in world space for "start" vs "end"), non-rectangle
 // rejection, and a width-wall resize's changedWallIds are already covered
 // by the tests above; this block fills in what wasn't: full-quad

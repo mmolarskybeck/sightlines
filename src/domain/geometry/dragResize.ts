@@ -11,10 +11,10 @@ export type { Vector2 } from "./vector";
 // >0 check on release.
 const MIN_DRAG_LENGTH_MM = 152.4; // 6 inches
 
-// resizeOrthogonalQuad (editRoom.ts) always anchors a resized wall's
-// startVertexId and moves its endVertexId along the wall's own axis — so
-// the wall's end vertex, in floor/world coordinates, *is* the point a
-// "start"-anchored resize drag actually moves. An "end"-anchored resize pins
+// resizeWallPreservingAngles (editRoom.ts) with anchor "start" holds a
+// resized wall's startVertexId and moves its endVertexId along the wall's own
+// axis — so the wall's end vertex, in floor/world coordinates, *is* the point
+// a "start"-anchored resize drag actually moves. An "end"-anchored resize pins
 // that end vertex instead and moves the start side, so the moving point is
 // the start vertex. Snapping needs to operate on whichever point moves, not
 // on wherever inside the 16px handle hit-target the user happened to grab, or

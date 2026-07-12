@@ -117,9 +117,9 @@ describe("app store", () => {
   });
 
   // Numeric-path counterpart to editRoom.test.ts's "rectangle resize
-  // characterization (pipeline-merge gate)" block — a future change may fold
-  // this store action's geometry call into the general polygon wall-move
-  // core (reshapeRoom.moveRoomWall). Geometry invariants (orthogonality,
+  // characterization (pipeline-merge gate)" block — since 2026-07-12 the
+  // geometry call delegates into the general polygon wall-move core
+  // (reshapeRoom.moveRoomWall). Geometry invariants (orthogonality,
   // paired dimensions, anchor semantics, non-rectangle rejection) are pinned
   // there; this pins what's specific to the store action itself. One undo
   // entry and cross-selection editing are already covered by the test above;
