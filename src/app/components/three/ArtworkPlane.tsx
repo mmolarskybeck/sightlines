@@ -3,6 +3,7 @@ import type { ThreeEvent } from "@react-three/fiber";
 import { useState } from "react";
 import type { Texture } from "three";
 import type { WallArtwork3d } from "../../../domain/geometry/scene3d";
+import { fitArtworkImageSizeMm, textureNativeAspect } from "./artworkFit";
 import { mmToWorld } from "./coordinates";
 import {
   DashedRectOutline,
@@ -34,8 +35,18 @@ export function ArtworkPlane({
   isSelected: boolean;
   onSelect: (objectId: string, opts: { additive: boolean }) => void;
 }) {
-  const width = mmToWorld(artwork.widthMm);
-  const height = mmToWorld(artwork.heightMm);
+  // Known/approximate placements fill their rect exactly as before. An
+  // unknown-dimension placement has a placeholder rect whose aspect is
+  // arbitrary, so the image plane is letterboxed to the texture's native aspect
+  // inside that rect (centered) — matching the elevation view — while the
+  // uncertainty/selection outlines below stay on the full rect.
+  const imageSize = fitArtworkImageSizeMm(
+    { widthMm: artwork.widthMm, heightMm: artwork.heightMm },
+    artwork.status,
+    textureNativeAspect(texture?.image)
+  );
+  const width = mmToWorld(imageSize.widthMm);
+  const height = mmToWorld(imageSize.heightMm);
   // Desktop-only affordance (spec §4.3): a pointer cursor, nothing
   // load-bearing on hover.
   const [hovered, setHovered] = useState(false);

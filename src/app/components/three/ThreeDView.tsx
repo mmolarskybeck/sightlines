@@ -24,6 +24,7 @@ import {
 } from "./cameraNav";
 import { MM_TO_WORLD } from "./coordinates";
 import { SceneRooms } from "./SceneRooms";
+import { SCENE_BACKGROUND_COLOR } from "./tokens";
 
 // Entry framing: above and outside the room, looking down at ~40° elevation
 // from a corner (spec §4.2).
@@ -844,8 +845,10 @@ export function ThreeDView({
   }
 
   return (
-    // The app canvas background token carries the backdrop (spec §6.1); a
-    // transparent WebGL canvas lets it show through so 3D honours the theme.
+    // The 3D viewport carries its own quiet grey ground (SCENE_BACKGROUND_COLOR,
+    // set on the three.js scene below) so near-white walls read as lit volumes.
+    // The surrounding workspace chrome stays white — this greys only the WebGL
+    // viewport, not the app.
     <div
       className="three-view"
       onPointerDown={(event) => {
@@ -855,6 +858,15 @@ export function ThreeDView({
       <Canvas
         frameloop="demand"
         dpr={[1, 2]}
+        // `flat` = NoToneMapping. R3F's default ACESFilmic compresses a lit
+        // near-white Lambert wall to ~0.9 sRGB while a plain-Color scene
+        // background is cleared WITHOUT tone mapping — so the walls rendered
+        // darker than the grey backdrop and the value scheme read inverted.
+        // This flat-lit architectural scene needs no filmic curve; artwork
+        // textures already opt out (meshBasicMaterial toneMapped={false}), so
+        // their colors are unchanged. Light intensities below are tuned for
+        // the linear->sRGB-only pipeline (no face may exceed 1.0 or it clips).
+        flat
         gl={{ alpha: true, antialias: true }}
         camera={{ fov: CAMERA_FOV_DEG, near: 0.01, far: 1000, position: [4, 4, 4] }}
         onCreated={(state) => {
@@ -885,9 +897,18 @@ export function ThreeDView({
           if (moved <= CLICK_DRAG_TOLERANCE_PX) onClearSelection();
         }}
       >
+        {/* Quiet cool-grey ground for the viewport (white walls on grey). */}
+        <color attach="background" args={[SCENE_BACKGROUND_COLOR]} />
         {/* Soft, shadowless lighting (spec §6.1): flat ambient plus one gentle
-            high front-left key so walls shade apart and read as volume. */}
-        <ambientLight intensity={0.9} />
+            high front-left key so walls shade apart and read as volume.
+            Tuned for NoToneMapping (see `flat` above) AND three's physical
+            lights mode (r155+), where Lambert divides irradiance by π — an
+            intensity of 1 delivers only ~0.32 of the albedo, so intensities
+            here carry the π factor. Measured targets: an ambient-only interior
+            wall face lands ~0.93 sRGB (white but readable as a shaded plane)
+            and a key-facing wall ~0.97 — one clear value step so depth reads
+            without shadows. */}
+        <ambientLight intensity={2.9} />
         <directionalLight intensity={0.4} position={[-6, 8, 6]} />
         <SceneRooms
           scene={scene}
