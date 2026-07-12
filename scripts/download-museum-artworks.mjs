@@ -169,7 +169,7 @@ async function resolveRijks(selection) {
     ...selection,
     objectId,
     title: firstContent(record, [/The Milkmaid|The Night Watch|The Jewish Bride|The Threatened Swan|The Merry Family|Windmill|Still Life|Battle|Shower|River Landscape|Sampling Officials|Little Street/i]) || selection.title,
-    artistName: firstContent(record, [/Rembrandt|Vermeer|Asselijn|Steen|Ruisdael|Ruysch|Pieneman|Hiroshige|Hals|Gogh/i]),
+    artistName: firstContent(record, [/Balthasar van der Ast|Rembrandt|Vermeer|Asselijn|Steen|Ruisdael|Ruysch|Pieneman|Hiroshige|Hals|Gogh/i]),
     year: firstContent(record, [/^c?\.?\s?\d{4}/]),
     medium: '',
     physicalDimensions: physicalDimensionsFromRecord(record),
