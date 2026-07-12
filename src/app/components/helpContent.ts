@@ -1,15 +1,40 @@
 // The help dialog's control inventory, per view x input mode, as plain data.
 // Every entry mirrors a real binding — the source of truth is cited per group
 // so drift is checkable: useUndoRedoShortcuts / useDeleteAndEscapeShortcuts /
-// useArrangeNudgeShortcuts (keyboard), useSvgViewportGestures (2D pan/zoom),
-// PlanView's draw/reshape/marquee handlers, ChecklistPanel's drag sources, and
-// ThreeDView's CursorZoom / KeyboardTravel / OrbitControls bindings.
+// useArrangeNudgeShortcuts / useToolbarShortcuts (keyboard),
+// useSvgViewportGestures (2D pan/zoom), PlanView's draw/reshape/marquee
+// handlers, ChecklistPanel's drag sources, and ThreeDView's CursorZoom /
+// KeyboardTravel / OrbitControls bindings.
 
 export type HelpInputMode = "keyboard" | "touch";
 export type HelpViewTab = "plan" | "elevation" | "3d";
 
 export type HelpHint = { action: string; keys: string[] };
 export type HelpGroup = { title: string; hints: HelpHint[] };
+
+// Single-key toolbar accelerators (useToolbarShortcuts) — keyboard only; touch
+// users tap the same toolbar buttons directly. Plan owns Partition/Draw room,
+// Elevation owns Eyeline; the opening tools and Grid/Snap/Overlap are shared.
+function toolbarKeyboardGroup(view: "plan" | "elevation"): HelpGroup {
+  return {
+    title: "Toolbar",
+    hints: [
+      { action: "Insert a door", keys: ["D"] },
+      { action: "Insert a window", keys: ["W"] },
+      { action: "Mark a blocked zone", keys: ["B"] },
+      ...(view === "plan"
+        ? [
+            { action: "Draw a partition", keys: ["P"] },
+            { action: "Draw a room", keys: ["R"] }
+          ]
+        : []),
+      { action: "Toggle grid", keys: ["G"] },
+      { action: "Toggle snap", keys: ["S"] },
+      { action: "Toggle overlap", keys: ["O"] },
+      ...(view === "elevation" ? [{ action: "Toggle eyeline", keys: ["E"] }] : [])
+    ]
+  };
+}
 
 // The 2D canvases (Plan and Elevation) share one gesture engine
 // (useSvgViewportGestures), so their navigation hints are identical.
@@ -63,6 +88,7 @@ function planGroups(inputMode: HelpInputMode, mod: string): HelpGroup[] {
         { action: "Place a door or window (toolbar)", keys: ["Click a wall"] }
       ]
     },
+    toolbarKeyboardGroup("plan"),
     canvas2dNavigation(inputMode, mod)
   ];
 }
@@ -94,6 +120,7 @@ function elevationGroups(inputMode: HelpInputMode, mod: string): HelpGroup[] {
         { action: "Switch walls", keys: ["Chevrons on the wall label"] }
       ]
     },
+    toolbarKeyboardGroup("elevation"),
     canvas2dNavigation(inputMode, mod)
   ];
 }

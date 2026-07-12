@@ -1,5 +1,6 @@
 export const TOOLBAR_DENSITIES = [
   "comfortable",
+  "trimmed",
   "condensed",
   "compact",
   "tight"

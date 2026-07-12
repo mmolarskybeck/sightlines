@@ -131,7 +131,18 @@
     0 1px 2px oklch(0 0 0 / 0.1),
     0 1px 1px oklch(0 0 0 / 0.04),
     0 0 0 1px oklch(0 0 0 / 0.04);
-  --shadow-pressed: inset 0 1px 2px oklch(0 0 0 / 0.07);
+  /* Latching toggles depress: a stronger inset than a hairline plus a faint
+     full-perimeter inner ring, so a pressed control stays legible in a
+     grayscale screenshot — under deuteranopia the petrol wash alone reads as
+     pale grey. Shared by rail modes and every toolbar toggle. */
+  --shadow-pressed:
+    inset 0 1px 3px oklch(0 0 0 / 0.14),
+    inset 0 0 0 1px oklch(0 0 0 / 0.07);
+  /* Armed tools (insert segments, partition, Draw room, the compact Insert
+     trigger) rank one step above resting view toggles: the pressed shadow
+     plus a 1px petrol inner ring. The color is --primary held translucent —
+     a hierarchy nudge, not a new color. */
+  --ring-armed: inset 0 0 0 1px oklch(0.42 0.07 200 / 0.5);
   --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
   --dur-slide: 220ms;
   --shadow-tight: 0 1px 2px oklch(0 0 0 / 0.08);
@@ -907,7 +918,12 @@ input:focus-visible {
 .panel-resize-handle::after {
   content: "";
   position: absolute;
-  top: 0;
+  /* Starts below the view-toolbar band (~47px at desktop padding, ~49px in
+     the ≤750px container query — see .inspector-reopen above) so the visible
+     line doesn't slice through the toolbar; the hit area above stays full
+     height. 49px clears both, and the 2px slack at the wider band reads as
+     flush against the toolbar's own bottom border. */
+  top: 49px;
   bottom: 0;
   left: 50%;
   width: 1px;
@@ -950,7 +966,11 @@ body.panels-resizing * {
    the chrome. */
 .inspector-reopen {
   position: absolute;
-  top: 16px;
+  /* Clears the view-toolbar band (~47px at desktop padding, ~49px in the
+     ≤750px container query) so the caret never overlays the toolbar's right
+     zone — at ~800–1000px it used to sit over the Units switch's "m" cell and
+     steal that tap. Below the band it still reads as anchored to the top-right. */
+  top: 64px;
   right: 0;
   z-index: 6;
   display: flex;
@@ -1236,6 +1256,11 @@ body.panels-resizing * {
   padding: 20px;
   background: var(--bg);
   border-right: 1px solid var(--line);
+  /* The panel is user-resizable, so its footer actions must respond to the
+     PANEL's width, not the viewport (see the .checklist-actions container
+     query). Inline-size containment only; block size stays natural so the
+     column still scrolls. */
+  container-type: inline-size;
 }
 
 /* The whole panel — heading, filters, rows, and Add button — is the drop
@@ -1671,10 +1696,30 @@ body.panels-resizing * {
   margin-top: 14px;
 }
 
+/* Below a narrow panel the two buttons can't share a row without their labels
+   colliding, so they stack into a single column. The container is the resizable
+   .checklist-panel, so this tracks the panel width down to its ~240px minimum. */
+@container (max-width: 250px) {
+  .checklist-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
 .checklist-add-images,
 .checklist-add {
   width: 100%;
+  /* minmax(0,…) tracks can shrink below the button's content; min-width:0 lets
+     the button follow so its label truncates instead of spilling over its
+     neighbor near the stacking breakpoint. */
+  min-width: 0;
   min-height: 40px;
+}
+
+.checklist-add-images > span,
+.checklist-add > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .import-dialog {
@@ -2511,16 +2556,17 @@ body.panels-resizing * {
     color 150ms ease-out;
 }
 
-.insert-tool-segment:hover:not(:disabled):not([aria-pressed="true"]) {
+.insert-tool-segment:hover:not([aria-disabled="true"]):not([aria-pressed="true"]) {
   background: var(--surface-strong);
   color: var(--ink);
 }
 
-/* The armed tool: engaged mode = pressed in, matching Grid/Snap. */
+/* The armed tool: engaged mode = pressed in, matching Grid/Snap, plus the
+   petrol inner ring that ranks armed tools above resting view toggles. */
 .insert-tool-segment[aria-pressed="true"] {
   background: var(--primary-soft);
   color: var(--primary-strong);
-  box-shadow: var(--shadow-pressed);
+  box-shadow: var(--shadow-pressed), var(--ring-armed);
 }
 
 /* Compact hover hint for toolbar icon controls — a quieter cut of the
@@ -2531,6 +2577,18 @@ body.panels-resizing * {
   font-size: var(--type-xs);
   font-weight: var(--weight-medium);
   line-height: var(--leading-ui);
+}
+
+/* The trailing key hint in a toolbar tooltip ("Show grid — G", "Placing a
+   door — Esc cancels"): a dimmed, tabular suffix rather than a heavy kbd chip.
+   The "— " separator rides here so the phrase stays a plain string upstream. */
+.toolbar-tooltip-kbd {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.toolbar-tooltip-kbd::before {
+  content: " — ";
 }
 
 /* Entrance for every tooltip (the .placement-tooltip class rides the
@@ -2561,13 +2619,16 @@ body.panels-resizing * {
   }
 }
 
-.insert-tool-segment:disabled {
+/* Disabled insert tools keep the aria-disabled pattern (still focusable, so
+   keyboard/SR users reach them and their reason), not native disabled — so
+   the fogged look and cursor hang off [aria-disabled] instead of :disabled. */
+.insert-tool-segment[aria-disabled="true"] {
   cursor: not-allowed;
 }
 
 /* A disabled insert control means the current 2D surface is missing its
    required context (currently: Elevation has no selected wall). */
-.insert-tools:has(.insert-tool-segment:disabled) {
+.insert-tools:has(.insert-tool-segment[aria-disabled="true"]) {
   cursor: not-allowed;
   opacity: 0.45;
 }
@@ -2602,17 +2663,27 @@ body.panels-resizing * {
 
 /* aria-expanded alongside data-state: the trigger sits inside a Radix
    Tooltip trigger, whose own data-state can clobber the menu's. */
-.compact-insert-trigger:hover:not(:disabled),
+.compact-insert-trigger:hover:not([aria-disabled="true"]),
 .compact-insert-trigger[data-state="open"],
 .compact-insert-trigger[aria-expanded="true"] {
   background: var(--surface-strong);
   color: var(--ink);
 }
 
+/* The trigger stands in for whichever tool is armed (icon + name swap in
+   App), so it earns the same armed emphasis as a segment: petrol wash,
+   pressed shadow, petrol ring. */
 .compact-insert-trigger[data-active="true"] {
   background: var(--primary-soft);
   color: var(--primary-strong);
-  box-shadow: var(--shadow-pressed);
+  box-shadow: var(--shadow-pressed), var(--ring-armed);
+}
+
+/* Disabled compact trigger: fogged like the segmented picker, still focusable
+   (aria-disabled, not native disabled) so the reason tooltip is reachable. */
+.compact-insert-trigger[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .compact-insert-menu {
@@ -2636,10 +2707,12 @@ body.panels-resizing * {
 }
 
 /* Density is selected by useResponsiveToolbarDensity after measuring each
-   rendered configuration. "Condensed" removes descriptive labels;
-   "compact" also replaces the four-segment Insert picker; "tight" removes
-   the flexible inter-zone spacer and leaves Insert as a single + target. */
+   rendered configuration. "Trimmed" drops only the weakest-need labels;
+   "condensed" removes every descriptive label; "compact" also replaces the
+   four-segment Insert picker; "tight" removes the flexible inter-zone spacer
+   and leaves Insert as a single + target. */
 .view-toolbar:is(
+    [data-density="trimmed"],
     [data-density="condensed"],
     [data-density="compact"],
     [data-density="tight"]
@@ -2648,16 +2721,39 @@ body.panels-resizing * {
 }
 
 .view-toolbar:is(
+    [data-density="trimmed"],
     [data-density="condensed"],
     [data-density="compact"],
     [data-density="tight"]
   ) .view-tools-primary,
 .view-toolbar:is(
+    [data-density="trimmed"],
     [data-density="condensed"],
     [data-density="compact"],
     [data-density="tight"]
   ) .view-options {
   gap: 6px;
+}
+
+/* Trimmed sits between comfortable and condensed for a ~740px canvas column
+   (a 1440px laptop): it hides the labels whose icons read strongest on their
+   own (Grid, Snap, Eyeline, Draw room) but KEEPS the two whose icon/value is
+   weakest — Overlap and Precision, marked .view-option-label-priority — plus
+   the Units switch words. Only these non-priority labels collapse here; the
+   condensed rule below then takes the rest. */
+.view-toolbar[data-density="trimmed"]
+  :is(.view-option-label, .unit-select-label):not(.view-option-label-priority) {
+  display: none;
+}
+
+/* The buttons that just went icon-only get condensed's centered, compact
+   target; the labeled Overlap button (a priority label inside) keeps its
+   natural width. */
+.view-toolbar[data-density="trimmed"]
+  .view-option-button:not(:has(.view-option-label-priority)) {
+  min-width: 36px;
+  justify-content: center;
+  padding-inline: 8px;
 }
 
 .view-toolbar:is(
@@ -3003,6 +3099,16 @@ body.panels-resizing * {
   background: var(--primary-soft);
   color: var(--primary-strong);
   box-shadow: var(--shadow-pressed);
+}
+
+/* Draw room is an armed TOOL, not a resting view toggle: when pressed it gets
+   the extra petrol inner ring so it outranks Grid/Snap/Eyeline/Overlap, which
+   keep the quieter pressed look above. (Insert segments carry .armed-tool via
+   their own rules; this covers the one armed control that shares
+   .view-option-button.) */
+.view-option-button.armed-tool[data-state="on"],
+.view-option-button.armed-tool[aria-pressed="true"] {
+  box-shadow: var(--shadow-pressed), var(--ring-armed);
 }
 
 .view-option-button:disabled {

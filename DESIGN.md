@@ -90,8 +90,15 @@ Sightlines mixes square workspace structure with softer floating surfaces: recta
     rather than floating beside it.
   - **Latching toggles and armed tools** (Grid, Snap, Overlap, rail
     modes, the Insert door/window/zone tools) do the opposite: they
-    depress, keeping the petrol wash and adding `--shadow-pressed`.
-    Raised = a choice within a set; pressed = a mode that's engaged.
+    depress, keeping the petrol wash and adding `--shadow-pressed`
+    (a deepened inset with a faint full-perimeter inner ring, so the
+    depression survives a grayscale read). Raised = a choice within a
+    set; pressed = a mode that's engaged. Armed tools — the insert
+    segments, partition, Draw room, and the compact Insert trigger
+    while a tool is armed — additionally carry `--ring-armed`, a 1px
+    translucent-petrol inner ring: a mode that changes what the next
+    canvas click does reads one step stronger than a resting display
+    toggle.
   - **Sub-choice tabs** ("Measured from", the help dialog's view groups)
     use the same sliding underline at smaller sizing, riding their row's
     hairline. **Controls floating over the canvas** (the zoom cluster)
@@ -115,7 +122,7 @@ The product grammar is stable:
 
 - Left rail chooses the left-side work context: checklist, rooms, issues, or data.
 - Topbar owns project identity, view mode, persistence state, and import/export.
-- Canvas toolbar has two zones: insertion tools on the left (an Insert cluster — a quiet caption plus soft icon buttons for door, window, blocked zone, and (in Plan) partition, each pressing in when armed — shared by Plan and Elevation, disabled only when Elevation has no selected wall; a hairline divider closes the cluster so the caption never reads as labeling the neighbors, and every toolbar control carries a compact styled tooltip), view options on the right (grid, snap, precision, overlap, units). It stays a single row at comfortable widths, then becomes two explicit rows in a narrow canvas column rather than relying on accidental wrapping. Toggle labels drop to icon-only, Insert becomes a caret menu (then a plus button at the smallest width), Precision keeps its current value while dropping only the redundant label, and Units becomes a compact two-segment control with the active system filled in petrol. Plan labels the governing scale as `ft / m`; Elevation labels its detail scale as `in / cm`.
+- Canvas toolbar has two zones: insertion tools on the left (an Insert cluster — a quiet caption plus soft icon buttons for door, window, blocked zone, and (in Plan) partition, each pressing in when armed — shared by Plan and Elevation, disabled only when Elevation has no selected wall; a hairline divider closes the cluster so the caption never reads as labeling the neighbors, and every toolbar control carries a compact styled tooltip), view options on the right (grid, snap, precision, overlap, units). It never wraps or gains a second row: a measuring hook picks one of five density tiers from the rendered controls' actual widths (`comfortable → trimmed → condensed → compact → tight`, `toolbarDensity.ts`). Comfortable keeps every label. Trimmed — the tier a 1440px laptop with both panes open actually lives in — drops Grid, Snap, Eyeline, and Draw room to icon-only while keeping the Overlap and Precision labels (the weakest icons) and the Units words. Condensed drops all descriptive labels; compact swaps the Insert cluster for a caret menu; tight collapses that to an icon-only plus and removes the flexible inter-zone spacer. Precision keeps its current value at every tier, and Units stays a compact two-segment control with the active system filled in petrol. Plan labels the governing scale as `ft / m`; Elevation labels its detail scale as `in / cm`.
 - Left pane is task inventory.
 - Right pane is inspection and numeric editing.
 
@@ -131,6 +138,8 @@ Use the primitive variants first. Add bespoke CSS only when the component is can
 - Use Radix Switch only when the binary state benefits from a switch; the unit selector is intentionally a two-label segmented switch.
 - Use petrol-filled primary buttons sparingly. `Import` is currently the main solid CTA in the workspace.
 - Every interactive control needs hover, pressed/active, disabled, and focus-visible states.
+- Toolbar verbs carry single-key shortcuts in the 2D views (never 3D, where WASD travels): D door, W window, B blocked zone, P partition and R draw room (Plan), G grid, S snap, O overlap, E eyeline (Elevation) — `useToolbarShortcuts.ts`, suppressed while typing or while a dialog is open. Every toolbar tooltip echoes its key as a dimmed suffix ("Insert a door — D"); an armed tool's tooltip teaches the exit instead ("Placing a door — Esc cancels").
+- Toolbar controls that disable use `aria-disabled`, staying focusable with clicks inert, and the reason rides the same styled toolbar tooltip on hover and focus — never a native `title`. The compact Insert trigger shows the armed tool's own glyph and name ("Door") so armed identity survives the narrow tiers.
 - Dialogs and wizards follow the overlay grammar: rounded 12px shell, soft shadow, a compact inline stepper or breadcrumb for multi-step flows (never a full-width bordered tab grid), centered rounded drop targets for uploads, and a single subtle top rule grounding the footer actions. Section structure inside the body comes from spacing, not rules.
 
 ## Canvas Grid
