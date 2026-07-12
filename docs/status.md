@@ -1,6 +1,6 @@
 # Sightlines Status
 
-Last refreshed: 2026-07-12
+Last refreshed: 2026-07-12 (quick-todos batch)
 
 This is the single living status doc: current state, what shipped recently, and what comes next. The full product/architecture plan and roadmap live in `docs/plan.md`; small scraps live in `docs/quick-todos.md`; the chronological build log through 2026-07-10 is frozen at `docs/archive/progress.md`.
 
@@ -42,6 +42,16 @@ KISS/DRY foundation pass: 4 commits, all phases green (1,453 tests, no test modi
 - **Store-connected views and toolbar extraction** (App.tsx 2,794 → 1,977 lines): PlanView reads 15 former props and ElevationView 6 via narrow useAppStore selectors (SettingsDialog subscription pattern, one value per selector, stable action refs). Ownership line: anything App composes stays a prop (allowOverlappingPlacement wrappers, marquee selection ids, derived ids). Toolbar pickers move to `components/toolbar/` with Compact/full twins merged behind a variant prop (ClusterPicker, markup/classes/tooltips/kbd preserved verbatim). WorkspaceFocus.test.tsx seeded the store and stubbed jsdom missing SVG methods; marquee wiring live in view now.
 - **PlanView rendering split into layer components** (PlanView.tsx 3,403 → 2,398 lines): new `components/plan/` directory with PlanStructureLayer (walls/hit polygons/partition slabs), PlacedObjectsLayer (connection glyphs, wall+floor object rects + drag-preview), PlanHandlesLayer (room wash, resize/reshape/slide handles, wall/partition labels), PlanOverlaysLayer (draw previews, tool/drop ghosts, snap guides, marquee), and shared `types.ts` (11 gesture-state types). Every hook, drag machine, handler stayed in PlanView — layers are render-only, JSX relocated not restructured, SVG paint order and handler attachment points preserved exactly. Room-fill polygons and GridOverlay stay inline (grid paints between fills and structure).
 - **Deliberately deferred** (KISS/YAGNI — revisit on demand): store.ts slicing (applyEdit spine is sound), inspector components (MVP4 rework scheduled), doorway-slice deferrals (single-mode prop, room-qualified hover ids, schema v4 tightening).
+
+## Quick-Todos Batch (shipped 2026-07-12, five concurrent slices)
+
+Five parallel agent slices merged sequentially, all green (tests 1477 → 1502). Full detail in `docs/quick-todos.md` Done section.
+
+- **Doors pinned to the floorline in elevation**: placement ignores pointer y for doors (ghost rides the floor), `moveOpening` hard-clamps `yMm = heightMm/2`, height edits keep the bottom grounded, door inspector hides the pinned Y field. Windows/blocked-zones untouched.
+- **Toasts (shadcn sonner)**: export success/failure, import success/warnings/failure, and placed-checklist-row drag attempts now toast; import successes no longer misuse the red error banner. Placed rows warn only on an actual drag (press travels past slop or escapes the row) — plain selection clicks stay silent. Overrides scoped under `.sonner-toaster` so they beat sonner's runtime stylesheet; white card, semantic color on icon/border only.
+- **Elevation wall switcher redesign** (`WallSwitcher.tsx`): current room's perimeter walls inline + indented Partitions section (faces via `getRoomPlaceableWalls`), other rooms as DropdownMenu submenus, flat list single-room, "Room · Wall" trigger when multi-room; prev/next steps perimeter → faces → next room. New Sub/Radio wrappers in `ui/dropdown-menu.tsx`.
+- **Project manager modal** (`ProjectManager.tsx`): open/inline-rename/two-step-delete/quick-export per row without opening the project (`renameProjectById`, `exportProjectPackageById` sharing `buildPackageZip`); `ProjectSummary` gained roomCount/artworkCount populated cheaply in `toProjectSummary`.
+- **Partition alignment package**: `partitionSpacing.ts` ray-casting core (angled partitions + polygonal rooms by construction); Center between walls / Center along span inspector actions through `runPartitionEdit` (undo free); move-drag snapping to equidistant-between-walls and sibling-partition midpoints with guides via the existing `.snap-guide` chain; endpoint wall-kiss (Shift-lock > wall-kiss > grid); `PartitionDimensionLines.tsx` live perpendicular clearance dims while selected or dragging.
 
 ## Shipped 2026-07-10 → 2026-07-12 (64 commits on main; tests 1117 → 1334, all green)
 

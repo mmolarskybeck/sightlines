@@ -4,26 +4,13 @@ Here is where I gather small, actionable tasks and scraps for future implementat
 
 ## Open Scraps
 
-### quick fixes
-
-* doors should snap to / start at floorline in elevation mode (they already do this in plan mode i think?) - i dont think we need to allow doors to be above the floorline
-* partitions should be accessible from elevation mode without having to open floors & walls pane - i think easiest way is to add them to existing wall picker - maybe we polish the wall picker now that we allow multi-room, and allow the user to choose all walls/partitions without a room, and then to also move between rooms? not sure the cleanest and most elegant way to do this, we should def default to having current room/wall selected if it has already been selected by the user
-
 ### ui / ux
 
-* add toasts for graceful feedback on actions (export/import?)
-* * polish single artwork inspector view and make arrange higher up so it's easier to access / has better ui/ux?
-* * **better feedback** for already placed artwork - currently will not place, but no error/message/warning…
-
-### To add
-
-* dim lines, smart snapping (aware of nearby walls), and alignment tools for wall partitions (at minimum we need to be able to center the partition between walls, in both directions)
+* polish single artwork inspector view and make arrange higher up so it's easier to access / has better ui/ux?
 
 ## project management
 
-* Project management - make into modal  or expanded popover 
-* We also need to add basic management of projects - delete, edit title, maybe bulk edit? Maybe a quick way to export a project from the project manager without opening it?
-* basic info per project like # of rooms, # of artworks?
+* bulk edit of projects in the project manager?
 
 ## possible adds
 
@@ -46,6 +33,12 @@ Here is where I gather small, actionable tasks and scraps for future implementat
 ## Done / Folded Back Into Status
 
 (Shipped items are summarized in `docs/status.md`; fuller detail kept here until it stops being useful.)
+
+* (2026-07-12 batch) Doors pinned to the floorline in elevation: elevation placement ignores pointer y for doors (ghost rides the floor), `moveOpening` hard-clamps door `yMm = heightMm/2`, height edits keep the bottom on the floor, and the door inspector hides the pinned Y field. Windows/blocked-zones untouched.
+* (2026-07-12 batch) Toasts via shadcn sonner (`ui/sonner.tsx`, light theme, bottom-center; overrides scoped under `.sonner-toaster` beat sonner's runtime stylesheet; no richColors — white card, semantic color on icon/border only). Export success/failure and import success/warnings/failure now toast (import successes no longer misuse the red error banner). Placed checklist rows warn via toast on an actual drag attempt — press must travel past the touch-drag slop or escape the row while held; a plain selection click stays silent.
+* (2026-07-12 batch) Elevation wall switcher redesigned (`WallSwitcher.tsx` on Radix DropdownMenu with new Sub/Radio wrappers): current room's perimeter walls inline + indented "Partitions" section (faces from `getRoomPlaceableWalls`), other rooms as submenus, flat list for single-room projects, trigger shows "Room · Wall" when multi-room. Prev/next stepping walks perimeter → faces → next room unchanged.
+* (2026-07-12 batch) Project manager modal (`ProjectManager.tsx`, Radix Dialog; ProjectPicker reduced to the trigger): per-row open, inline pencil rename (`renameProjectById`, syncs the open project), two-step inline delete confirm (no window.confirm), quick `.sightlines` export without opening (`exportProjectPackageById`, shares `buildPackageZip` with the main export, toasts on success/failure). `ProjectSummary` gained `roomCount`/`artworkCount`, populated cheaply in `toProjectSummary`.
+* (2026-07-12 batch) Partition alignment package: `partitionSpacing.ts` ray-casts from the centerline midpoint (no parallelism assumption — angled partitions and polygonal rooms work); "Center between walls" / "Center along span" buttons in the partition inspector via `centerFreestandingWallBetweenWalls` (+ `centerFreestandingWall` store action through `runPartitionEdit`, undo free; errors "Nothing on both sides to center between." when a ray misses). Move-drags snap the midpoint to equidistant-between-walls targets (rank above grid; snapping there = the centered position) and sibling-partition midpoints, with guides through the existing `.snap-guide` chain; endpoint drags wall-kiss via `snapDrawPointToRooms` (Shift-lock > wall-kiss > grid). `PartitionDimensionLines.tsx` shows muted perpendicular clearance dims whenever a partition is selected or dragged, tracking live.
 
 * Added an eyeline (centerline) show/hide toggle in elevation mode, mirroring the grid toggle's state, storage, and UI pattern; centerline alignment snapping stays active while hidden, matching how grid snap stays independent of grid visibility.
 * Added framing + matting previews. Optional additive `matWidthMm` + `frame` ({widthMm, finish}) on the artwork record (no schema-version bump). Elevation draws flat frame ring → off-white mat ring → image, with a thin bevel hairline at the mat opening; selection outline wraps the outer rect. Plan widens the artwork's along-wall extent by the outer width ("simple dim change"). Finishes via dropdown (gold/white/black/silver/wood); mat/frame fields carry band-width placeholder examples (3"/1", 75/25 mm); "Overall" W × H are editable LengthFields that solve for the frame band (mat untouched; overall = image + 2·mat clears the frame, smaller errors in the field's message slot). Frame band always reads via thin hairlines at its outer edge and the frame/mat (or frame/image) boundary. Pure `getArtworkOuterDimensionsMm` + `deriveFrameWidthFromOverallMm` helpers in `src/domain/framing.ts`. Artwork inspector reworked into collapsible `InspectorSection` rows (Radix Collapsible; Dimensions / Mat & frame / Position / Details) with at-rest summaries and per-section open state persisted in view preferences. Deliberate limitation: elevation snapping, dim lines, out-of-bounds, and fit-selected still use the image (wall-object) dims, not the outer framed size; floor-placed artwork in plan is not framed.
