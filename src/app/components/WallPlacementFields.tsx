@@ -74,56 +74,71 @@ export function WallPlacementFields({
   // App builds from the wall name, e.g. "Position on North wall").
   return (
     <>
-      <LengthField
-        compact
-        label="From left edge"
-        valueMm={leftEdgeMm}
-        displayUnit={displayUnit}
-        parseUnit={parseUnit}
-        placeholder={placeholder}
-        stepMm={stepMm}
-        onCommit={(v) => onCommit(v + halfWidthMm, placement.yMm)}
-      />
-
-      <LengthField
-        compact
-        label="From right edge"
-        valueMm={wallLengthMm - rightEdgeMm}
-        displayUnit={displayUnit}
-        parseUnit={parseUnit}
-        placeholder={placeholder}
-        stepMm={stepMm}
-        onCommit={(v) => onCommit(wallLengthMm - v - halfWidthMm, placement.yMm)}
-      />
-
-      {leftNeighborRightEdgeMm !== undefined ? (
+      {/* The two edge distances are symmetric views of ONE position, so they
+          share a row — the pairing says "move either, the other follows"
+          better than a stack of two full-width fields ever did. */}
+      <div className="field-pair-grid">
         <LengthField
           compact
-          label="To work on left"
-          valueMm={leftEdgeMm - leftNeighborRightEdgeMm}
+          label="From left edge"
+          valueMm={leftEdgeMm}
           displayUnit={displayUnit}
           parseUnit={parseUnit}
           placeholder={placeholder}
           stepMm={stepMm}
-          onCommit={(v) =>
-            onCommit(leftNeighborRightEdgeMm + v + halfWidthMm, placement.yMm)
-          }
+          onCommit={(v) => onCommit(v + halfWidthMm, placement.yMm)}
         />
-      ) : null}
-
-      {rightNeighborLeftEdgeMm !== undefined ? (
         <LengthField
           compact
-          label="To work on right"
-          valueMm={rightNeighborLeftEdgeMm - rightEdgeMm}
+          label="From right edge"
+          valueMm={wallLengthMm - rightEdgeMm}
           displayUnit={displayUnit}
           parseUnit={parseUnit}
           placeholder={placeholder}
           stepMm={stepMm}
-          onCommit={(v) =>
-            onCommit(rightNeighborLeftEdgeMm - v - halfWidthMm, placement.yMm)
-          }
+          onCommit={(v) => onCommit(wallLengthMm - v - halfWidthMm, placement.yMm)}
         />
+      </div>
+
+      {/* Neighbour gaps pair up when both sides have a work; a lone gap keeps
+          the full width rather than sitting beside an empty cell. */}
+      {leftNeighborRightEdgeMm !== undefined || rightNeighborLeftEdgeMm !== undefined ? (
+        <div
+          className={
+            leftNeighborRightEdgeMm !== undefined && rightNeighborLeftEdgeMm !== undefined
+              ? "field-pair-grid"
+              : undefined
+          }
+        >
+          {leftNeighborRightEdgeMm !== undefined ? (
+            <LengthField
+              compact
+              label="To work on left"
+              valueMm={leftEdgeMm - leftNeighborRightEdgeMm}
+              displayUnit={displayUnit}
+              parseUnit={parseUnit}
+              placeholder={placeholder}
+              stepMm={stepMm}
+              onCommit={(v) =>
+                onCommit(leftNeighborRightEdgeMm + v + halfWidthMm, placement.yMm)
+              }
+            />
+          ) : null}
+          {rightNeighborLeftEdgeMm !== undefined ? (
+            <LengthField
+              compact
+              label="To work on right"
+              valueMm={rightNeighborLeftEdgeMm - rightEdgeMm}
+              displayUnit={displayUnit}
+              parseUnit={parseUnit}
+              placeholder={placeholder}
+              stepMm={stepMm}
+              onCommit={(v) =>
+                onCommit(rightNeighborLeftEdgeMm - v - halfWidthMm, placement.yMm)
+              }
+            />
+          ) : null}
+        </div>
       ) : null}
 
       {/* Horizontal-only, so it sits with the horizontal fields above rather
@@ -131,6 +146,7 @@ export function WallPlacementFields({
           wall (worst case, its edges) to center against. */}
       <Button
         className="inspector-action"
+        size="sm"
         variant="inspector"
         onClick={() => onCommit(centerTargetXMm, placement.yMm)}
       >

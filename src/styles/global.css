@@ -4423,6 +4423,10 @@ body.panels-resizing * {
    own fields tight. */
 .inspector-form {
   display: grid;
+  /* minmax(0, …) caps every row at the pane, so one long nowrap child (a
+     badge, a summary) can only ellipsize — it can never inflate the form's
+     min-content and push the whole panel past the right edge. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
 }
 
@@ -4832,6 +4836,39 @@ body.panels-resizing * {
   min-width: 0;
 }
 
+/* Controls inside a label-left row take the compact-field chrome the old
+   .field-row.compact carried — without these a bare .select-trigger falls
+   back to 16px browser sizing with no visible bounds and reads broken beside
+   the 13px bordered length fields. The quiet surface fill (Rayon-style)
+   makes the hit area legible without adding a border. */
+.inspector-row-control > .select-trigger {
+  width: 100%;
+  /* Explicit height: SelectTrigger's base class carries Tailwind's h-9
+     (36px), which a min-height can't shrink (same note as
+     .precision-select-trigger). */
+  height: 32px;
+  min-height: 32px;
+  padding: 6px 8px;
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font-size: var(--type-sm);
+}
+
+.inspector-row-control > .select-trigger:hover {
+  background: var(--surface-strong);
+}
+
+.inspector-row-control > .select-trigger:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.inspector-row-control input {
+  min-height: 32px;
+  padding: 6px 8px;
+  font-size: var(--type-sm);
+}
+
 /* Read-only readout row (InspectorSummaryRow): muted label left, quiet value
    right in tabular numerals, optional inline action trailing the value. Same
    quiet register as .inspector-section-summary; values stay at --muted (never
@@ -4878,7 +4915,9 @@ body.panels-resizing * {
   padding: 7px 9px;
   border-radius: var(--radius-sm);
   font-size: var(--type-xs);
-  font-weight: var(--weight-semibold);
+  /* Medium, not semibold: the wash already carries the tone — bold amber on
+     amber reads as shouting in a panel built on quiet hairlines. */
+  font-weight: var(--weight-medium);
   line-height: var(--leading-ui);
 }
 
@@ -4967,6 +5006,9 @@ body.panels-resizing * {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
+  /* Buttons don't inherit type — without this the trigger renders in the
+     platform font, visibly off from every Geist label beside it. */
+  font-family: inherit;
   font-size: var(--type-xs);
   font-weight: var(--weight-semibold);
   line-height: var(--leading-ui);
@@ -5006,11 +5048,16 @@ body.panels-resizing * {
    keeps caution ink on the neutral surface (a quieter approximate read); true
    is muted with no fill (accurate scale isn't a warning). */
 .scale-badge {
-  flex: 0 0 auto;
+  /* Shrinkable (0 1) with ellipsis: inside the section trigger the badge
+     yields width rather than widening the panel — the title outranks it. */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
   padding: 2px 7px;
   border-radius: 2px;
   font-size: var(--type-xs);
   font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -5141,10 +5188,11 @@ body.panels-resizing * {
    the thumbnail. */
 .artwork-identity-summary {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  /* Nudge the first line down to sit near where the top field's label would,
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  /* Nudge the line down to sit near where the top field's label would,
      so the thumbnail stays optically anchored across the mode flip. */
   padding-top: 2px;
 }

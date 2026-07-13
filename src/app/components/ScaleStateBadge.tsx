@@ -28,11 +28,14 @@ export function ScaleStateBadge({ state }: { state: ScaleState }) {
   return (
     <span className={`scale-badge ${state}`} title={TITLES[state]}>
       {state === "missing" ? (
-        // Visible "approx." with a visually-hidden full word so a screen
-        // reader announces "No dims — approximate scale", not the truncation.
+        // Terse on purpose: the badge shares one row with the section title
+        // and lock toggle at 260px, and the full "add width and height" story
+        // lives in the notice below plus this badge's title. Visible
+        // "Approx." with a visually-hidden full word so a screen reader
+        // announces "Approximate scale", not the truncation.
         <>
-          No dims &mdash; <span aria-hidden="true">approx.</span>
-          <span className="visually-hidden">approximate</span> scale
+          <span aria-hidden="true">Approx.</span>
+          <span className="visually-hidden">Approximate</span> scale
         </>
       ) : state === "estimated" ? (
         "Estimated scale"

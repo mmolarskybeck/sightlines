@@ -481,11 +481,14 @@ function PlacementTypeRow({
           if (value === "wall" || value === "floor") onChangePlacementForm(value);
         }}
       >
+        {/* One-word cells: the row's "Type" label carries the context the old
+            in-Dimensions control needed to spell out ("Hangs on wall"), and
+            the verb phrases wrap to two lines inside a 260px pane's cells. */}
         <SegmentedToggleGroupItem className="placement-form-option" value="wall">
-          Hangs on wall
+          Wall
         </SegmentedToggleGroupItem>
         <SegmentedToggleGroupItem className="placement-form-option" value="floor">
-          Sits on floor
+          Floor
         </SegmentedToggleGroupItem>
       </SegmentedToggleGroup>
     </InspectorRow>
