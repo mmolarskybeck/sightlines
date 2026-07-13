@@ -56,7 +56,10 @@ import {
   getOpeningKindLabel,
   type OpeningKind
 } from "../domain/placement/createOpening";
-import { clearOpeningPartners } from "../domain/placement/openingPairs";
+import {
+  clearOpeningPartners,
+  includePairedOpenings
+} from "../domain/placement/openingPairs";
 import { createArtworkPlacement, getEffectivePlacementSizeMm } from "../domain/placement/placeArtwork";
 import { effectiveFloorDepthMm } from "../domain/placement/artworkForm";
 import { withArtworkFootprint } from "../domain/framing";
@@ -2680,15 +2683,7 @@ export function createAppStore(deps: AppStoreDeps) {
         // clearOpeningPartners still clears any other surviving partner's
         // connectsToObjectId that pointed at a removed opening, so no dangling
         // pairing ref persists.
-        const removed = project.wallObjects.find((wallObject) => wallObject.id === wallObjectId);
-        const removedIds = new Set([wallObjectId]);
-        if (
-          removed &&
-          (removed.kind === "door" || removed.kind === "window") &&
-          removed.connectsToObjectId !== undefined
-        ) {
-          removedIds.add(removed.connectsToObjectId);
-        }
+        const removedIds = includePairedOpenings(project.wallObjects, [wallObjectId]);
 
         const nextProject: Project = {
           ...project,
@@ -3262,17 +3257,20 @@ export function createAppStore(deps: AppStoreDeps) {
 
         const label = removedCount === 1 ? "Remove 1 object" : `Remove ${removedCount} objects`;
 
-        // clearOpeningPartners clears any surviving partner's
-        // connectsToObjectId that pointed at one of the removed openings, so
-        // no dangling pairing ref persists.
+        // Keyboard and multi-selection deletion obey the same shared-wall
+        // full-sync contract as removePlacement: selecting either face removes
+        // both stored halves of a paired door/window in this one commit. Keep
+        // the label based on the user's selected objects; mirrored twins are a
+        // storage detail rather than an additional selected object.
+        const removedIds = includePairedOpenings(project.wallObjects, idSet);
         const nextProject: Project = {
           ...project,
           wallObjects: clearOpeningPartners(
-            project.wallObjects.filter((wallObject) => !idSet.has(wallObject.id)),
-            idSet
+            project.wallObjects.filter((wallObject) => !removedIds.has(wallObject.id)),
+            removedIds
           ),
           floorObjects: project.floorObjects.filter(
-            (floorObject) => !idSet.has(floorObject.id)
+            (floorObject) => !removedIds.has(floorObject.id)
           )
         };
 

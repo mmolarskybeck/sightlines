@@ -2529,30 +2529,41 @@ describe("app store", () => {
       expect(store.getState().project!.wallObjects).toHaveLength(0);
     });
 
-    it("full-syncs a paired deletion: removing one paired door removes its twin in one undo step", async () => {
-      // Paired openings must disappear together in one undoable commit.
-      await store.getState().addOpening("wall-north", "door");
-      const doorA = store.getState().project!.wallObjects[0];
-      await store.getState().addOpening("wall-south", "door");
-      const doorB = store
-        .getState()
-        .project!.wallObjects.find((wallObject) => wallObject.id !== doorA.id)!;
-      await store.getState().connectOpenings(doorA.id, doorB.id);
-      const undoStackBefore = store.getState().undoStack.length;
+    it.each(["door", "window"] as const)(
+      "full-syncs a paired deletion: removing one paired %s removes its twin in one undo step",
+      async (kind) => {
+        // Paired openings must disappear together in one undoable commit.
+        await store.getState().addOpening("wall-north", kind);
+        const openingA = store.getState().project!.wallObjects[0];
+        await store.getState().addOpening("wall-south", kind);
+        const openingB = store
+          .getState()
+          .project!.wallObjects.find((wallObject) => wallObject.id !== openingA.id)!;
+        await store.getState().connectOpenings(openingA.id, openingB.id);
+        const undoStackBefore = store.getState().undoStack.length;
 
-      await store.getState().removePlacement(doorB.id);
+        await store.getState().removePlacement(openingB.id);
 
-      expect(store.getState().project!.wallObjects).toHaveLength(0);
-      expect(store.getState().undoStack).toHaveLength(undoStackBefore + 1);
+        expect(store.getState().project!.wallObjects).toHaveLength(0);
+        expect(store.getState().undoStack).toHaveLength(undoStackBefore + 1);
 
-      await store.getState().undo();
-      const restored = store.getState().project!.wallObjects;
-      expect(restored).toHaveLength(2);
-      const restoredA = restored.find((object) => object.id === doorA.id)!;
-      const restoredB = restored.find((object) => object.id === doorB.id)!;
-      expect(restoredA.kind === "door" ? restoredA.connectsToObjectId : undefined).toBe(doorB.id);
-      expect(restoredB.kind === "door" ? restoredB.connectsToObjectId : undefined).toBe(doorA.id);
-    });
+        await store.getState().undo();
+        const restored = store.getState().project!.wallObjects;
+        expect(restored).toHaveLength(2);
+        const restoredA = restored.find((object) => object.id === openingA.id)!;
+        const restoredB = restored.find((object) => object.id === openingB.id)!;
+        expect(
+          restoredA.kind === "door" || restoredA.kind === "window"
+            ? restoredA.connectsToObjectId
+            : undefined
+        ).toBe(openingB.id);
+        expect(
+          restoredB.kind === "door" || restoredB.kind === "window"
+            ? restoredB.connectsToObjectId
+            : undefined
+        ).toBe(openingA.id);
+      }
+    );
   });
 
   describe("shared wall opening mirroring", () => {
@@ -3733,34 +3744,63 @@ describe("app store", () => {
         expect(objectIdsOf(state.selection)).toEqual([]);
       });
 
-      it("clears a surviving partner's connectsToObjectId when its paired door is removed via selection", async () => {
-        await store.getState().addOpening("wall-north", "door");
-        const doorA = store.getState().project!.wallObjects[0];
-        await store.getState().addOpening("wall-south", "door");
-        const doorB = store
+      it.each(["door", "window"] as const)(
+        "removes both halves of a paired %s via selection in one undo step",
+        async (kind) => {
+          await store.getState().addOpening("wall-north", kind);
+          const openingA = store.getState().project!.wallObjects[0];
+          await store.getState().addOpening("wall-south", kind);
+          const openingB = store
+            .getState()
+            .project!.wallObjects.find((wallObject) => wallObject.id !== openingA.id)!;
+
+          const pairedProject: Project = {
+            ...store.getState().project!,
+            wallObjects: store.getState().project!.wallObjects.map((wallObject) => {
+              if (wallObject.id === openingA.id) {
+                return { ...wallObject, connectsToObjectId: openingB.id };
+              }
+              if (wallObject.id === openingB.id) {
+                return { ...wallObject, connectsToObjectId: openingA.id };
+              }
+              return wallObject;
+            })
+          };
+          await repository.save(pairedProject);
+          store.setState({ project: pairedProject });
+
+          store.getState().setObjectSelection([openingB.id]);
+          const undoStackBefore = store.getState().undoStack.length;
+          await store.getState().removeSelectedPlacements();
+
+          expect(store.getState().project!.wallObjects).toHaveLength(0);
+          expect(store.getState().undoStack).toHaveLength(undoStackBefore + 1);
+          expect(store.getState().undoStack.at(-1)?.label).toBe("Remove 1 object");
+
+          await store.getState().undo();
+          expect(store.getState().project!.wallObjects).toEqual(pairedProject.wallObjects);
+        }
+      );
+
+      it("includes linked twins when deleting a mixed multi-selection", async () => {
+        const artwork = await placeArtworkOnWall(500, 1450);
+        await store.getState().addOpening("wall-north", "window");
+        const windowA = store
           .getState()
-          .project!.wallObjects.find((wallObject) => wallObject.id !== doorA.id)!;
+          .project!.wallObjects.find((wallObject) => wallObject.kind === "window")!;
+        await store.getState().addOpening("wall-south", "window");
+        const windowB = store
+          .getState()
+          .project!.wallObjects.find(
+            (wallObject) => wallObject.kind === "window" && wallObject.id !== windowA.id
+          )!;
+        await store.getState().connectOpenings(windowA.id, windowB.id);
 
-        const pairedProject: Project = {
-          ...store.getState().project!,
-          wallObjects: store.getState().project!.wallObjects.map((wallObject) => {
-            if (wallObject.id === doorA.id) return { ...wallObject, connectsToObjectId: doorB.id };
-            if (wallObject.id === doorB.id) return { ...wallObject, connectsToObjectId: doorA.id };
-            return wallObject;
-          })
-        };
-        await repository.save(pairedProject);
-        store.setState({ project: pairedProject });
-
-        store.getState().setObjectSelection([doorB.id]);
+        store.getState().setObjectSelection([artwork.placementId, windowB.id]);
         await store.getState().removeSelectedPlacements();
 
-        const survivingDoorA = store
-          .getState()
-          .project!.wallObjects.find((wallObject) => wallObject.id === doorA.id)!;
-        expect(
-          (survivingDoorA as { connectsToObjectId?: string }).connectsToObjectId
-        ).toBeUndefined();
+        expect(store.getState().project!.wallObjects).toHaveLength(0);
+        expect(store.getState().undoStack.at(-1)?.label).toBe("Remove 2 objects");
       });
     });
 
