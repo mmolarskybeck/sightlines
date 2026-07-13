@@ -3531,6 +3531,21 @@ body.panels-resizing * {
   box-shadow: var(--shadow-panel);
 }
 
+/* Popover: a standalone overlay (a topbar status panel, not a trigger-anchored
+   menu list), so it takes the heavier overlay grammar the dialog/toast shells
+   use — 12px radius, --shadow-overlay's softer diffuse cast, and at most a
+   whisper of border — rather than the tighter --radius-sm/--shadow-panel the
+   menus above share. */
+.popover-content {
+  overflow: hidden;
+  padding: 16px;
+  border: 1px solid color-mix(in oklch, var(--line) 70%, transparent);
+  border-radius: var(--radius-overlay);
+  background: var(--bg);
+  color: var(--foreground);
+  box-shadow: var(--shadow-overlay);
+}
+
 .select-viewport {
   padding: 4px;
 }
@@ -3640,6 +3655,19 @@ body.panels-resizing * {
 
 @media (prefers-reduced-motion: reduce) {
   .dropdown-menu-content[data-state="open"] {
+    animation: none;
+  }
+}
+
+/* Same quick fade + soft pop entrance as the dropdown/tooltip content above —
+   one shared voice for every floating surface. */
+.popover-content[data-state="open"] {
+  transform-origin: var(--radix-popover-content-transform-origin);
+  animation: tooltip-in 140ms var(--ease-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popover-content[data-state="open"] {
     animation: none;
   }
 }
