@@ -1,8 +1,9 @@
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactElement } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RectangleRoomDimensions } from "../../domain/geometry/walls";
 import { RoomInspector } from "./RoomInspector";
+import { TooltipProvider } from "./ui/tooltip";
 
 afterEach(cleanup);
 
@@ -13,6 +14,9 @@ const rectangleDimensions: RectangleRoomDimensions = {
   depthWallId: "wall-east"
 };
 
+// Edit shape's full how-to now lives in a Radix Tooltip on the button (see
+// RoomInspector), which needs a TooltipProvider ancestor — same wrapper
+// ArtworkInspector.test.tsx uses for its own Tooltip-bearing control.
 function renderInspector(overrides: Partial<ComponentProps<typeof RoomInspector>> = {}) {
   const props: ComponentProps<typeof RoomInspector> = {
     artworkCount: 0,
@@ -29,7 +33,17 @@ function renderInspector(overrides: Partial<ComponentProps<typeof RoomInspector>
     onToggleReshape: vi.fn(),
     ...overrides
   };
-  return { props, ...render(<RoomInspector {...props} />) };
+  const result = render(
+    <TooltipProvider>
+      <RoomInspector {...props} />
+    </TooltipProvider>
+  );
+
+  return {
+    props,
+    ...result,
+    rerender: (ui: ReactElement) => result.rerender(<TooltipProvider>{ui}</TooltipProvider>)
+  };
 }
 
 describe("RoomInspector Edit shape button", () => {
