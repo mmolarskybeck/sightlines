@@ -4,6 +4,9 @@ import { getOpeningKindLabel } from "../../domain/placement/createOpening";
 import type { OpeningWallObject, DisplayUnit } from "../../domain/project";
 import { getScopedUnitContext } from "./scopedUnits";
 import { LengthField } from "./LengthField";
+import { InspectorFieldGrid } from "./InspectorFieldGrid";
+import { InspectorRow } from "./InspectorRow";
+import { InspectorNotice } from "./InspectorNotice";
 import { Button } from "./ui/button";
 import {
   Select,
@@ -62,7 +65,7 @@ export function OpeningInspector({
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
       {/* No "Kind" row: the panel's subject header directly above already
           names it (e.g. "Door / Opening"). */}
-      <div className="field-pair-grid">
+      <InspectorFieldGrid columns={2}>
         <LengthField
           compact
           label="X (wall start)"
@@ -83,9 +86,9 @@ export function OpeningInspector({
             onCommit={(yMm) => onCommitPosition(opening.xMm, yMm)}
           />
         )}
-      </div>
+      </InspectorFieldGrid>
 
-      <div className="field-pair-grid">
+      <InspectorFieldGrid columns={2}>
         <LengthField
           compact
           positiveOnly
@@ -106,54 +109,64 @@ export function OpeningInspector({
           placeholder={size.placeholder}
           onCommit={(heightMm) => onCommitSize(opening.widthMm, heightMm)}
         />
-      </div>
+      </InspectorFieldGrid>
 
       {opening.kind === "door" || opening.kind === "window" ? (
         <div className="opening-connection-section">
-          <div className="artwork-dimensions-heading">
-            <h3>Connects to</h3>
-            {opening.connectsToObjectId ? (
-              <Button size="sm" variant="ghost" onClick={onDisconnect}>
-                Disconnect
-              </Button>
-            ) : null}
-          </div>
-          {connectionCandidates.length > 0 ? (
-            <Select
-              value={opening.connectsToObjectId ?? ""}
-              onValueChange={(partnerId) => onConnect(partnerId)}
-            >
-              <SelectTrigger aria-label={`Connect ${opening.kind} to`}>
-                <SelectValue placeholder={`Choose another ${opening.kind}`} />
-              </SelectTrigger>
-              <SelectContent>
-                {connectionCandidates.map((candidate) => (
-                  <SelectItem key={candidate.id} value={candidate.id}>
-                    {candidate.label} — {alignmentLabel(candidate.alignment)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <p className="field-hint">
-              No nearby {opening.kind}s on a facing wall.
-            </p>
-          )}
+          {/* The row's own label replaces the old "Connects to" <h3> —
+              InspectorRow's label-wrapping-control association (no htmlFor,
+              same pattern as ArtworkInspector's Finish select) is exactly the
+              ArtworkInspector template for a Select with its own aria-label. */}
+          <InspectorRow label="Connects to">
+            {connectionCandidates.length > 0 ? (
+              <Select
+                value={opening.connectsToObjectId ?? ""}
+                onValueChange={(partnerId) => onConnect(partnerId)}
+              >
+                <SelectTrigger aria-label={`Connect ${opening.kind} to`}>
+                  <SelectValue placeholder={`Choose another ${opening.kind}`} />
+                </SelectTrigger>
+                <SelectContent>
+                  {connectionCandidates.map((candidate) => (
+                    <SelectItem key={candidate.id} value={candidate.id}>
+                      {candidate.label} — {alignmentLabel(candidate.alignment)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <p className="field-hint">
+                No nearby {opening.kind}s on a facing wall.
+              </p>
+            )}
+          </InspectorRow>
           {opening.connectsToObjectId ? (() => {
             const connected = connectionCandidates.find(
               (candidate) => candidate.id === opening.connectsToObjectId
             );
-            return connected ? (
-              <p
-                className={`opening-connection-status ${connected.alignment.status}`}
-                role="status"
+            // InspectorNotice generalizes .opening-connection-status (aligned
+            // -> positive, misaligned -> caution); Disconnect rides its
+            // trailing `action` slot since both only ever show together (the
+            // old heading-row button had the same connectsToObjectId gate).
+            // role="status" stays on an inner span, not the notice's own div,
+            // so its text is exactly the alignment label — the Disconnect
+            // button's text must not leak into the live-region readout the
+            // test asserts on.
+            return (
+              <InspectorNotice
+                tone={connected?.alignment.status === "aligned" ? "positive" : "caution"}
+                action={
+                  <Button size="sm" variant="ghost" onClick={onDisconnect}>
+                    Disconnect
+                  </Button>
+                }
               >
-                {alignmentLabel(connected.alignment)}
-              </p>
-            ) : (
-              <p className="opening-connection-status misaligned" role="status">
-                Connected opening is unavailable
-              </p>
+                <span role="status">
+                  {connected
+                    ? alignmentLabel(connected.alignment)
+                    : "Connected opening is unavailable"}
+                </span>
+              </InspectorNotice>
             );
           })() : null}
         </div>
