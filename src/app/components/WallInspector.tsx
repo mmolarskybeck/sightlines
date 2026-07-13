@@ -98,7 +98,7 @@ export function WallInspector({
             // focused, and stands in for both fields' accepted-format hint
             // plus the room-wide scope note (an error, when present, still
             // takes precedence over it).
-            focusHint={`Accepts 12', 12 ft, 144", 365.8 cm, or 3.66 m. Applies to every wall in ${roomName}.`}
+            focusHint={`Applies to every wall in ${roomName}.`}
           />
         </InspectorSection>
       </div>

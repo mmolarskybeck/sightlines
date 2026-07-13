@@ -52,6 +52,7 @@ The local wrappers in `src/app/components/ui` are the preferred surface for new 
 - `SegmentedTabsList`/`SegmentedTabsTrigger` and `SegmentedToggleGroup`/`SegmentedToggleGroupItem` (`ui/segmented.tsx`) render the recessed-track/raised-chip pickers with the sliding chip; `UnderlineTabsList`/`UnderlineTabsTrigger` and `UnderlineToggleGroup`/`UnderlineToggleGroupItem` render tabs with the sliding petrol underline (3px, pill caps) off the same measuring hook.
 - `Tabs`, `Select`, `DropdownMenu`, and `Switch` keep Radix semantics while carrying Sightlines visual defaults.
 - `Checkbox` and `Tooltip` are the standard primitives for boolean data qualifiers and contextual help. Do not introduce native checkbox styling or browser `title` tooltips when these wrappers apply.
+- `Field` composes labels, controls, transient guidance, and errors in stacked or inspector-row layouts; `Input` supplies the shared text-control states and sizing. Measurement-specific parsing and conversion behavior remains in `LengthField`, which composes both primitives.
 - `Collapsible` is a bare-behavior Radix wrapper (no baked-in look); `InspectorSection` composes it into the hairline-separated, summary-bearing disclosure rows the artwork inspector uses.
 - `cn()` uses `clsx` and `tailwind-merge`; compose variants there rather than concatenating ad hoc class strings.
 
@@ -194,8 +195,7 @@ These custom surfaces should still consume the same tokens and focus rules.
 
 Continue migrating in this order:
 
-1. `LengthField` and inspector field rows into a reusable `Field`/`Input` primitive.
-2. `UncertaintyIndicator`, warning panels, and status copy into semantic alert/badge primitives.
-3. Checklist and wall rows into shared selectable-row styles.
-4. Canvas chips and toolbar groups into reusable overlay/toolbar primitives.
-5. Responsive pane behavior and mobile toolbar density.
+1. `UncertaintyIndicator`, warning panels, and status copy into semantic alert/badge primitives.
+2. Checklist and wall rows into shared selectable-row styles.
+3. Canvas chips and toolbar groups into reusable overlay/toolbar primitives.
+4. Responsive pane behavior and mobile toolbar density.

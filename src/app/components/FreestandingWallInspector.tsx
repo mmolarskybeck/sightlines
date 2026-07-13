@@ -12,6 +12,7 @@ import { InspectorSection } from "./InspectorSection";
 import { InspectorFieldGrid } from "./InspectorFieldGrid";
 import { InspectorActionGroup } from "./InspectorActionGroup";
 import { Button } from "./ui/button";
+import { Field } from "./ui/field";
 import { Input } from "./ui/input";
 
 // The partition inspector (spec §8): length, angle, thickness, height, the two
@@ -149,8 +150,7 @@ function AngleField({
   };
 
   return (
-    <label className="field-row">
-      <span>Angle (°)</span>
+    <Field label="Angle (°)">
       <Input
         inputMode="decimal"
         value={draft}
@@ -163,6 +163,6 @@ function AngleField({
           event.currentTarget.blur();
         }}
       />
-    </label>
+    </Field>
   );
 }

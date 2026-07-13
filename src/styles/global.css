@@ -1399,6 +1399,7 @@ body.panels-resizing * {
 .room-dimensions {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  align-items: start;
   gap: 8px;
   padding: 0 2px 4px;
 }
@@ -1407,7 +1408,8 @@ body.panels-resizing * {
   gap: 4px;
 }
 
-.field-row.compact > span {
+.field-row.compact > span,
+.field-row.compact > .field-control > span {
   font-size: var(--type-xs);
 }
 
@@ -4511,11 +4513,19 @@ body.panels-resizing * {
   gap: 6px;
 }
 
+/* The label wraps only the label text and control so helper/error copy does
+   not become part of the control's accessible name. `display: contents`
+   keeps those children participating in the field row's existing grid. */
+.field-control {
+  display: contents;
+}
+
 /* Flex, not the bare inline text a plain label needs, so an optional
    labelBadge (LengthField's "Neighbor" tag) sits inline right after the
    label text instead of wrapping under it — a single-text label still lays
    out exactly as before. */
-.field-row > span {
+.field-row > span,
+.field-row > .field-control > span {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -4644,19 +4654,6 @@ body.panels-resizing * {
   line-height: var(--leading-copy);
 }
 
-.length-field-message {
-  min-height: 1.25rem;
-  margin: -2px 0 2px;
-}
-
-.field-row.compact .length-field-message {
-  min-height: 0;
-}
-
-.field-row.compact .length-field-message:empty {
-  display: none;
-}
-
 .field-hint,
 .length-field-hint {
   color: var(--muted);
@@ -4744,15 +4741,6 @@ body.panels-resizing * {
   gap: 8px;
 }
 
-/* Paired compact measurements keep exactly one helper line in reserve. This
-   prevents a conversion hint or short validation error in one field from
-   shifting its neighbour's input, without carrying the roomier default
-   LengthField message strip into every compact inspector field. */
-.field-pair-grid .field-row.compact .length-field-message {
-  display: block;
-  min-height: 1.25rem;
-}
-
 /* Placeholders are worked examples ("e.g. 3\""), not values — the "e.g."
    prefix disambiguates, so they can take the full muted ink and clear WCAG
    4.5:1 against white (the lighter --subtle token measures just under it at
@@ -4760,6 +4748,13 @@ body.panels-resizing * {
 .field-row input::placeholder {
   color: var(--muted);
   opacity: 1;
+}
+
+/* Clear a LengthField's worked example while focus reveals accepted formats,
+   a conversion, or an error below. The placeholder itself is unchanged, so
+   it returns automatically on blur. Other Field/Input uses are unaffected. */
+.length-field-input:focus::placeholder {
+  color: transparent;
 }
 
 /* Collapsible inspector sections (InspectorSection.tsx). The zero-gap
@@ -6621,23 +6616,19 @@ body.panels-resizing * {
 
 /* Match the .settings-row-label voice instead of the inspector's muted
    small-caps-weight field label. */
-.settings-field .field-row > span {
+.settings-field .field-row > span,
+.settings-field .field-row > .field-control > span {
   color: var(--ink);
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
   line-height: var(--leading-ui);
 }
 
-/* Collapse the inspector's reserved message strip (min-height + negative
-   margins) so an empty message costs no height here; errors and conversion
-   hints span the full row beneath the control when they do appear. */
-.settings-field .field-row .length-field-message {
+/* Errors and transient guidance span the full row beneath the control. */
+.settings-field .field-row > .field-hint,
+.settings-field .field-row > .length-field-hint,
+.settings-field .field-row > .field-error {
   grid-column: 1 / -1;
-  min-height: 0;
-  margin: 0;
-}
-
-.settings-field .field-row .length-field-message p {
   margin: 4px 0 0;
 }
 

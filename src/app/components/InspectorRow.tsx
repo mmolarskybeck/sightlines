@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Field } from "./ui/field";
 
 // Label-left / control-right row for a single full-width secondary control —
 // the Status, Finish, and Type selects that sit below the primary length
@@ -22,30 +23,9 @@ export function InspectorRow({
   htmlFor?: string;
   label: string;
 }) {
-  const labelCell = htmlFor ? (
-    <label className="inspector-row-label" htmlFor={htmlFor}>
-      {label}
-    </label>
-  ) : (
-    <span className="inspector-row-label">{label}</span>
-  );
-
-  const body = (
-    <>
-      {labelCell}
-      <div className="inspector-row-control">
-        {children}
-        {hint ? <p className="field-hint">{hint}</p> : null}
-      </div>
-    </>
-  );
-
-  // With an explicit htmlFor the label is its own element, so the row is a
-  // plain grid; without one the row itself is the label so the wrapped
-  // control is programmatically named.
-  return htmlFor ? (
-    <div className="inspector-row">{body}</div>
-  ) : (
-    <label className="inspector-row">{body}</label>
+  return (
+    <Field htmlFor={htmlFor} label={label} layout="inline" message={hint}>
+      {children}
+    </Field>
   );
 }

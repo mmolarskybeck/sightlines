@@ -4,11 +4,13 @@ import { CaretUpIcon } from "@phosphor-icons/react/dist/csr/CaretUp";
 import type { DisplayUnit } from "../../domain/project";
 import { formatLength, parseLength } from "../../domain/units/length";
 import { getConversionHint } from "../../domain/units/conversionHint";
+import { Field } from "./ui/field";
 import { Input } from "./ui/input";
 
 // Epsilon below which two lengths (in mm) are treated as identical for
 // "clean" (unchanged) detection — well under any unit's display precision.
 const CLEAN_EPSILON_MM = 0.001;
+const ACCEPTED_LENGTH_FORMATS = `Accepts 12', 12 ft, 144", 365.8 cm, or 3.66 m.`;
 
 // Shared commit-on-blur/Enter measurement field. Consolidates the parse,
 // validate, and reformat dance that ArtworkInspector, OpeningInspector,
@@ -47,6 +49,7 @@ export function LengthField({
   onClear?: () => void;
   positiveOnly?: boolean;
   onCommit: (valueMm: number) => void | Promise<void>;
+  /** Optional context appended to the standard accepted-format guidance. */
   focusHint?: string;
   commitErrorFallback?: string;
   /** Enables the chevron stepper column + ArrowUp/ArrowDown nudge, stepping by this many mm. */
@@ -148,34 +151,29 @@ export function LengthField({
   const conversionHint = error
     ? null
     : getConversionHint(input, { parseUnit, displayUnit });
-  const showFocusHint = Boolean(focused && !error && !conversionHint && focusHint);
+  const showFocusHint = focused && !error && !conversionHint;
 
-  let message: JSX.Element | null = null;
+  let message: string | null = null;
+  let messageTone: "hint" | "conversion" | "error" = "hint";
   if (error) {
-    message = (
-      <p className="field-error" id={messageId}>
-        {error}
-      </p>
-    );
+    message = error;
+    messageTone = "error";
   } else if (conversionHint) {
-    message = (
-      <p className="length-field-hint" id={messageId}>
-        → {conversionHint}
-      </p>
-    );
+    message = `→ ${conversionHint}`;
+    messageTone = "conversion";
   } else if (showFocusHint) {
-    message = (
-      <p className="field-hint" id={messageId}>
-        {focusHint}
-      </p>
-    );
+    message = focusHint ? `${ACCEPTED_LENGTH_FORMATS} ${focusHint}` : ACCEPTED_LENGTH_FORMATS;
   }
 
   const inputElement = (
     <Input
       aria-describedby={message ? messageId : undefined}
       aria-invalid={error ? "true" : "false"}
-      className={stepMm !== undefined ? "length-field-input-stepped" : undefined}
+      className={
+        stepMm !== undefined
+          ? "length-field-input length-field-input-stepped"
+          : "length-field-input"
+      }
       inputMode="decimal"
       placeholder={placeholder}
       size={compact ? "compact" : "default"}
@@ -219,11 +217,14 @@ export function LengthField({
   );
 
   return (
-    <label className={compact ? "field-row compact" : "field-row"}>
-      <span>
-        {label}
-        {labelBadge}
-      </span>
+    <Field
+      compact={compact}
+      label={label}
+      labelBadge={labelBadge}
+      message={message}
+      messageId={messageId}
+      messageTone={messageTone}
+    >
       {stepMm !== undefined ? (
         <div className="length-field-input-wrap">
           {inputElement}
@@ -249,9 +250,6 @@ export function LengthField({
       ) : (
         inputElement
       )}
-      <div aria-live="polite" className="length-field-message">
-        {message}
-      </div>
-    </label>
+    </Field>
   );
 }

@@ -19,6 +19,7 @@ import {
   UnderlineToggleGroupItem
 } from "./ui/segmented";
 import { Button } from "./ui/button";
+import { Field } from "./ui/field";
 import {
   Select,
   SelectContent,
@@ -255,8 +256,7 @@ export function SelectionInspector({
                     enabled panel shows one value instead of two live options.
                     Radix Select never fires the ""-deselect the old toggle
                     needed a re-click guard for. */}
-                <label className="field-row compact">
-                  <span>Space within</span>
+                <Field compact label="Space within">
                   <Select
                     value={arrange.evenZone}
                     onValueChange={(value) => onSetEvenZone(value as EvenZone)}
@@ -269,7 +269,7 @@ export function SelectionInspector({
                       <SelectItem value="open">Open space</SelectItem>
                     </SelectContent>
                   </Select>
-                </label>
+                </Field>
                 <div className="arrange-readout">
                   <span className="arrange-readout-label">Equal distance</span>
                   <span className="arrange-readout-value-row">

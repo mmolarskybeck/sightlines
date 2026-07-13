@@ -111,7 +111,6 @@ export function RoomInspector({
           placeholder={placeholder}
           onCommit={onCommitHeight}
           commitErrorFallback="Could not resize this room's walls."
-          focusHint={"Accepts 12', 12 ft, 144\", 365.8 cm, or 3.66 m."}
         />
         <p className="field-hint">
           Applies to all {wallCount} wall{wallCount === 1 ? "" : "s"} in {roomName}.

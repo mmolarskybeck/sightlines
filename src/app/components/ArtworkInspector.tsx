@@ -40,6 +40,7 @@ import { ScaleStateBadge } from "./ScaleStateBadge";
 import { LengthField } from "./LengthField";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
+import { Field } from "./ui/field";
 import { Input } from "./ui/input";
 import { Toggle } from "./ui/toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
@@ -407,8 +408,7 @@ function TextField({
   };
 
   return (
-    <label className="field-row">
-      <span>{label}</span>
+    <Field label={label}>
       <Input
         value={input}
         onBlur={commit}
@@ -420,7 +420,7 @@ function TextField({
           event.currentTarget.blur();
         }}
       />
-    </label>
+    </Field>
   );
 }
 
@@ -643,7 +643,7 @@ function FramingSection({
   // Editing an overall dim solves for the FRAME band only (mat stays as
   // entered); bands are uniform, so committing either axis updates both —
   // same spirit as the image dims' aspect-ratio autofill. A too-small entry
-  // throws, which LengthField surfaces in its reserved message slot without
+  // throws, which LengthField surfaces beneath the active field without
   // committing; an entry exactly equal to image + 2·mat clears the frame.
   const commitOverall = (imageMm: number) => (overallMm: number) => {
     const derivation = deriveFrameWidthFromOverallMm(overallMm, imageMm, matWidthMm);

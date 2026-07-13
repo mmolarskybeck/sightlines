@@ -99,10 +99,47 @@ describe("LengthField", () => {
     expect(screen.queryByText(/→/)).not.toBeInTheDocument();
   });
 
-  it("keeps a reserved message slot even when there is no hint or error", () => {
+  it("does not reserve a blank message row", () => {
     const { container } = renderField({ valueMm: 304.8 });
 
-    expect(container.querySelector(".length-field-message")).toBeInTheDocument();
+    expect(container.querySelector(".field-hint, .length-field-hint, .field-error")).toBeNull();
+  });
+
+  it("shows accepted formats while focused when no conversion or error takes precedence", () => {
+    const { input } = renderField({ valueMm: 304.8 });
+
+    fireEvent.focus(input);
+
+    expect(screen.getByText(/Accepts 12'/)).toBeInTheDocument();
+  });
+
+  it("keeps the placeholder available to return after focus guidance closes", () => {
+    const { input } = renderField({ placeholder: "e.g. 24" });
+
+    expect(input).toHaveAttribute("placeholder", "e.g. 24");
+    expect(input).toHaveAttribute("aria-invalid", "false");
+    expect(input).toHaveClass("length-field-input");
+
+    fireEvent.focus(input);
+    expect(screen.getByText(/Accepts 12'/)).toBeInTheDocument();
+    expect(input).toHaveAttribute("placeholder", "e.g. 24");
+
+    fireEvent.blur(input);
+    expect(screen.queryByText(/Accepts 12'/)).not.toBeInTheDocument();
+    expect(input).toHaveAttribute("placeholder", "e.g. 24");
+  });
+
+  it("appends field-specific focus guidance to the standard accepted formats", () => {
+    const { input } = renderField({
+      valueMm: 304.8,
+      focusHint: "Applies to every wall in Main Gallery."
+    });
+
+    fireEvent.focus(input);
+
+    expect(
+      screen.getByText(/Accepts 12'.*Applies to every wall in Main Gallery\./)
+    ).toBeInTheDocument();
   });
 
   it("renders no stepper buttons when stepMm is not provided (regression guard)", () => {
