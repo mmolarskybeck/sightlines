@@ -164,7 +164,7 @@ export function WallInspector({
             </Button>
           </TooltipTrigger>
           <TooltipContent className="opening-add-tooltip" side="bottom">
-            Marks a region where artwork can&rsquo;t be hung — a vent,
+            Marks a region where artwork can&rsquo;t be hung: a vent,
             outlet, thermostat, or other obstruction.
           </TooltipContent>
         </Tooltip>
