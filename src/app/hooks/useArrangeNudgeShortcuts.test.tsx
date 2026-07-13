@@ -2,6 +2,7 @@ import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Project, WallObject } from "../../domain/project";
 import { createSampleProject } from "../../domain/sample/sampleProject";
+import type { ArrangeSession } from "../store";
 import { useArrangeNudgeShortcuts } from "./useArrangeNudgeShortcuts";
 
 const artworkPlacement: WallObject = {
@@ -33,11 +34,15 @@ function projectWith(wallObjects: WallObject[]): Project {
 function renderNudgeHarness({
   project = projectWith([artworkPlacement]),
   selectedObjectIds = [artworkPlacement.id],
-  moveArtworkPlacement = vi.fn(async () => {})
+  moveArtworkPlacement = vi.fn(async () => {}),
+  arrangeSession = null,
+  commitArrangeSession = vi.fn()
 }: {
   project?: Project;
   selectedObjectIds?: string[];
   moveArtworkPlacement?: (wallObjectId: string, xMm: number, yMm: number, allowOverlap?: boolean) => Promise<void>;
+  arrangeSession?: ArrangeSession | null;
+  commitArrangeSession?: (allowOverlap?: boolean) => void;
 } = {}) {
   const targetKeyDown = vi.fn((event: KeyboardEvent) => event.stopPropagation());
 
@@ -47,13 +52,13 @@ function renderNudgeHarness({
       viewMode: "elevation",
       selectedObjectIds,
       draggingArtworkId: null,
-      arrangeSession: null,
+      arrangeSession,
       allowOverlappingPlacement: false,
       snapToGrid: false,
       gridPrecisionFloorMm: null,
       beginArrangeSession: vi.fn(),
       setArrangeSessionPreview: vi.fn(),
-      commitArrangeSession: vi.fn(),
+      commitArrangeSession,
       moveArtworkPlacement,
       moveOpening: vi.fn(async () => {})
     });
@@ -73,11 +78,25 @@ function renderNudgeHarness({
           data-testid="splitter"
           onKeyDown={(event) => targetKeyDown(event.nativeEvent)}
         />
+        <div data-owns-arrow-keys>
+          <button
+            type="button"
+            data-testid="arrow-key-owner"
+            onKeyDown={(event) => targetKeyDown(event.nativeEvent)}
+          >
+            Wall switcher
+          </button>
+        </div>
       </>
     );
   }
 
-  return { moveArtworkPlacement, targetKeyDown, ...render(<Harness />) };
+  return {
+    moveArtworkPlacement,
+    commitArrangeSession,
+    targetKeyDown,
+    ...render(<Harness />)
+  };
 }
 
 afterEach(() => {
@@ -125,6 +144,67 @@ describe("useArrangeNudgeShortcuts focus handling", () => {
     });
 
     expect(moveArtworkPlacement).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+    expect(targetKeyDown).toHaveBeenCalled();
+  });
+
+  it.each(["ArrowLeft", "ArrowRight"])(
+    "leaves %s to a focused widget that declares arrow-key ownership",
+    (key) => {
+      const { getByTestId, moveArtworkPlacement, targetKeyDown } = renderNudgeHarness();
+      const owner = getByTestId("arrow-key-owner");
+      owner.focus();
+
+      const event = new KeyboardEvent("keydown", {
+        key,
+        bubbles: true,
+        cancelable: true
+      });
+      act(() => {
+        owner.dispatchEvent(event);
+      });
+
+      expect(moveArtworkPlacement).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
+      expect(targetKeyDown).toHaveBeenCalled();
+    }
+  );
+
+  it("leaves Enter to a focused widget that declares arrow-key ownership", () => {
+    const arrangeSession: ArrangeSession = {
+      wallId: "wall-north",
+      memberIds: [artworkPlacement.id],
+      originalById: {
+        [artworkPlacement.id]: { xMm: artworkPlacement.xMm, yMm: artworkPlacement.yMm }
+      },
+      previewById: {
+        [artworkPlacement.id]: { xMm: artworkPlacement.xMm, yMm: artworkPlacement.yMm }
+      },
+      mode: "inset",
+      insetAnchor: "both",
+      insetBoundary: {
+        left: { type: "wall", edgeMm: 0 },
+        right: { type: "wall", edgeMm: 3000 }
+      },
+      evenZone: "wall",
+      openZoneBoundsMm: { startMm: 0, endMm: 3000 }
+    };
+    const { getByTestId, commitArrangeSession, targetKeyDown } = renderNudgeHarness({
+      arrangeSession
+    });
+    const owner = getByTestId("arrow-key-owner");
+    owner.focus();
+
+    const event = new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true
+    });
+    act(() => {
+      owner.dispatchEvent(event);
+    });
+
+    expect(commitArrangeSession).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(false);
     expect(targetKeyDown).toHaveBeenCalled();
   });

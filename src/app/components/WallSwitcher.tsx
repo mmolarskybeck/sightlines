@@ -106,17 +106,78 @@ export function WallSwitcher({
   onSelectWall: (id: string) => void;
   unit: DisplayUnit;
 }) {
+  const roomsRef = React.useRef<HTMLDivElement>(null);
+  const elevationsRef = React.useRef<HTMLDivElement>(null);
+  const focusElevationAfterRoomChangeRef = React.useRef(false);
   const groups = groupByRoom(walls);
   const current = walls.find((wall) => wall.id === currentWallId);
   const currentGroup =
     groups.find((group) => group.roomId === current?.roomId) ?? groups[0] ?? null;
+  const formattedCurrentName = current ? formatElevationName(current.name) : "";
+
+  const focusColumnItem = (column: "rooms" | "elevations") => {
+    const columnElement = column === "rooms" ? roomsRef.current : elevationsRef.current;
+    if (!columnElement) return;
+
+    const preferredSelector =
+      column === "rooms"
+        ? '.wall-switcher-room-item[aria-current="true"]'
+        : '[role="menuitemradio"][data-state="checked"]';
+    const fallbackSelector =
+      column === "rooms"
+        ? '[role="menuitem"]:not([data-disabled])'
+        : '[role="menuitemradio"]:not([data-disabled])';
+    const target =
+      columnElement.querySelector<HTMLElement>(preferredSelector) ??
+      columnElement.querySelector<HTMLElement>(fallbackSelector);
+    target?.focus();
+  };
+
+  React.useEffect(() => {
+    if (!focusElevationAfterRoomChangeRef.current) return;
+    focusElevationAfterRoomChangeRef.current = false;
+    focusColumnItem("elevations");
+  }, [currentWallId]);
+
+  const handleMenuKeyDownCapture = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+
+    const target = event.target as HTMLElement;
+    const currentColumn = target.closest<HTMLElement>("[data-wall-switcher-column]")?.dataset
+      .wallSwitcherColumn;
+
+    // Radix reserves horizontal arrows for submenus. This menu uses them to
+    // cross its two peer columns instead, and owns both keys at the outer
+    // edges so they cannot leak to canvas shortcuts behind the portal.
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (event.key === "ArrowRight" && currentColumn === "rooms") {
+      const focusedRoomId = target.closest<HTMLElement>("[data-room-id]")?.dataset.roomId;
+      const focusedGroup = groups.find((group) => group.roomId === focusedRoomId);
+      const firstElevation = focusedGroup?.walls[0];
+
+      if (firstElevation && focusedRoomId !== current?.roomId) {
+        // Crossing into a different room mirrors submenu navigation: reveal
+        // that room's elevations, then place focus on its checked first row.
+        focusElevationAfterRoomChangeRef.current = true;
+        onSelectWall(firstElevation.id);
+      } else {
+        focusColumnItem("elevations");
+      }
+    } else if (event.key === "ArrowLeft" && currentColumn === "elevations") {
+      focusColumnItem("rooms");
+    }
+  };
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          aria-label="Select wall elevation"
+          aria-label={
+            current ? `Change wall — ${formattedCurrentName}, ${current.roomName}` : "Change wall"
+          }
           className={cn(TRIGGER_CLASS, "surface-label-select")}
         >
           <span className="surface-label-select-value">
@@ -146,9 +207,15 @@ export function WallSwitcher({
         alignOffset={-5}
         sideOffset={8}
         className="wall-switcher-menu"
+        data-owns-arrow-keys
+        onKeyDownCapture={handleMenuKeyDownCapture}
       >
         <div className="wall-switcher-columns">
-          <div className="wall-switcher-rooms">
+          <div
+            ref={roomsRef}
+            className="wall-switcher-rooms"
+            data-wall-switcher-column="rooms"
+          >
             <DropdownMenuLabel>Rooms</DropdownMenuLabel>
             {groups.map((group) => {
               const isCurrentRoom = group.roomId === current?.roomId;
@@ -160,6 +227,7 @@ export function WallSwitcher({
                     isCurrentRoom && "wall-switcher-room-item-current"
                   )}
                   aria-current={isCurrentRoom ? "true" : undefined}
+                  data-room-id={group.roomId}
                   onSelect={(event) => {
                     // Keep the two-column browser open while the right column
                     // updates to the selected room's elevations.
@@ -176,7 +244,11 @@ export function WallSwitcher({
               );
             })}
           </div>
-          <div className="wall-switcher-elevations">
+          <div
+            ref={elevationsRef}
+            className="wall-switcher-elevations"
+            data-wall-switcher-column="elevations"
+          >
             <DropdownMenuLabel>Elevations</DropdownMenuLabel>
             {currentGroup ? (
               <DropdownMenuRadioGroup value={currentWallId} onValueChange={onSelectWall}>
@@ -186,6 +258,9 @@ export function WallSwitcher({
           </div>
         </div>
       </DropdownMenuContent>
+      <span className="visually-hidden" aria-live="polite" aria-atomic="true">
+        {current ? `Now viewing ${formattedCurrentName} in ${current.roomName}` : ""}
+      </span>
     </DropdownMenu>
   );
 }

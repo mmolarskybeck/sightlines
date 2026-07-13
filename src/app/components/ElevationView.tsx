@@ -71,6 +71,7 @@ import {
 import { ElevationArtwork } from "./ElevationArtwork";
 import { ElevationOpening } from "./ElevationOpening";
 import { ArtworkTooltipContent, OpeningTooltipContent } from "./PlacementTooltip";
+import { ToolbarTooltipKbd } from "./toolbar/ToolbarTooltipKbd";
 import { marqueeRectMm, type MarqueeState } from "./marqueeRect";
 import { buildElevationScene } from "../../domain/scene2d/elevationScene";
 import { getFitSelectionBoundsSvg, isArtworkOutOfWallBounds, wallLocalYToSvgY } from "./elevationArtworkGeometry";
@@ -286,6 +287,8 @@ export function ElevationView({
 }) {
   const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
+  const previousWallButtonRef = useRef<HTMLButtonElement>(null);
+  const nextWallButtonRef = useRef<HTMLButtonElement>(null);
   // Store-connected passthroughs. App forwarded each of these verbatim (a bare
   // `prop={storeAction}`, and wallObjects={project.wallObjects}), so reading
   // them from the store here cuts the umbilical without moving ownership — the
@@ -1290,7 +1293,23 @@ export function ElevationView({
         // and dimensions itself) and the prev/next steppers dock behind a
         // hairline at the trailing edge, so the two-column menu can align with
         // the chip's leading edge and drop fully below it.
-        <div className="surface-label surface-label-switcher">
+        <div
+          className="surface-label surface-label-switcher"
+          data-owns-arrow-keys
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            event.stopPropagation();
+            const direction = event.key === "ArrowLeft" ? -1 : 1;
+            const focusedStepper =
+              event.target === previousWallButtonRef.current ||
+              event.target === nextWallButtonRef.current;
+            stepWall(direction);
+            if (focusedStepper) {
+              (direction === -1 ? previousWallButtonRef : nextWallButtonRef).current?.focus();
+            }
+          }}
+        >
           <WallSwitcher
             walls={walls}
             unit={unit}
@@ -1304,6 +1323,7 @@ export function ElevationView({
                 <Button
                   aria-label="Previous wall"
                   className="surface-label-switch"
+                  ref={previousWallButtonRef}
                   size="icon-sm"
                   variant="ghost"
                   onClick={() => stepWall(-1)}
@@ -1312,7 +1332,7 @@ export function ElevationView({
                 </Button>
               </TooltipTrigger>
               <TooltipContent className="toolbar-tooltip" side="bottom">
-                Previous wall
+                Previous wall <ToolbarTooltipKbd hint="←" />
               </TooltipContent>
             </Tooltip>
             <Tooltip>
@@ -1320,6 +1340,7 @@ export function ElevationView({
                 <Button
                   aria-label="Next wall"
                   className="surface-label-switch"
+                  ref={nextWallButtonRef}
                   size="icon-sm"
                   variant="ghost"
                   onClick={() => stepWall(1)}
@@ -1328,7 +1349,7 @@ export function ElevationView({
                 </Button>
               </TooltipTrigger>
               <TooltipContent className="toolbar-tooltip" side="bottom">
-                Next wall
+                Next wall <ToolbarTooltipKbd hint="→" />
               </TooltipContent>
             </Tooltip>
           </div>

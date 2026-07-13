@@ -60,6 +60,17 @@ export function useArrangeNudgeShortcuts({
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (isEditableTarget(event.target)) return;
+      // Some composite widgets deliberately own Enter and the arrow keys while
+      // focus is inside them. This listener runs in window capture phase, so a
+      // local key handler cannot win by stopping propagation; the widget marks
+      // its root instead and this global shortcut stands down before claiming
+      // the event. The convention is reusable for future arrow-key widgets.
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-owns-arrow-keys]") !== null
+      ) {
+        return;
+      }
       if (!project) return;
 
       if (event.key === "Enter") {
