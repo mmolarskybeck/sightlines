@@ -4783,6 +4783,252 @@ body.panels-resizing * {
   padding-bottom: 5px;
 }
 
+/* Non-collapsible section (collapsible={false}): a plain <h3> header row over
+   an always-open body, no trigger/chevron. The header keeps the trigger's row
+   height so it lines up with collapsible siblings, and the title stays flush
+   left with the field labels below (no chevron indent), matching the
+   .inspector-section-trigger's optical-flush intent. */
+.inspector-section-static .inspector-section-header {
+  min-height: 30px;
+}
+
+/* Right-aligned header affordance visible open OR closed (InspectorSection's
+   `action`). In a collapsible header the flex-grow trigger already pushes it
+   to the edge; a static header has no such filler, so the auto margin does
+   the pushing there. */
+.inspector-section-action {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.inspector-section-static .inspector-section-action {
+  margin-inline-start: auto;
+}
+
+/* Label-left / control-right row for a single full-width secondary control
+   (InspectorRow — Status, Finish, Type selects). The label column reuses the
+   .field-row > span voice (duplicated below, as .field-row does for its own
+   label); the control cell stacks an optional .field-hint under the input. */
+.inspector-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 42%) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.inspector-row-label {
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
+}
+
+.inspector-row-control {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Read-only readout row (InspectorSummaryRow): muted label left, quiet value
+   right in tabular numerals, optional inline action trailing the value. Same
+   quiet register as .inspector-section-summary; values stay at --muted (never
+   --subtle, which drops under 4.5:1 at this size). Never an input. */
+.inspector-summary-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.inspector-summary-row-label {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
+}
+
+.inspector-summary-row-value {
+  min-width: 0;
+  margin-inline-start: auto;
+  color: var(--muted);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.inspector-summary-row-action {
+  flex: 0 0 auto;
+}
+
+/* Quiet filled note (InspectorNotice), generalized from
+   .opening-connection-status: same padding/radius/type, three tones. Each
+   wash carries a strong-enough ink for WCAG AA — positive reuses the
+   aligned-status pairing, caution the misaligned one, info sits on the
+   neutral surface with full foreground ink. */
+.inspector-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
+}
+
+.inspector-notice.info {
+  background: var(--surface);
+  color: var(--foreground);
+}
+
+.inspector-notice.caution {
+  background: var(--caution-soft);
+  color: var(--caution);
+}
+
+.inspector-notice.positive {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.inspector-notice-icon {
+  display: flex;
+  flex: 0 0 auto;
+  /* Nudge the glyph onto the first text line rather than the box top. */
+  margin-top: 1px;
+}
+
+.inspector-notice-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.inspector-notice-action {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+}
+
+/* Optionally-labeled row of one-click action chips (InspectorActionGroup),
+   adapted from .opening-add-row / .opening-add-buttons: set slightly apart
+   from the field grids above, its buttons wrapping across the panel width so
+   the group reads as "act" rather than as more data entry. (The .opening-add-*
+   rules stay put — a later task removes them once OpeningInspector adopts
+   this.) */
+.inspector-action-group {
+  display: grid;
+  gap: 8px;
+}
+
+.inspector-action-group-label {
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
+}
+
+.inspector-action-group-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Chrome-free disclosure (InspectorDisclosure): a small ghost text-button
+   trigger, no hairline/chevron, for a secondary "Edit details" reveal nested
+   inside an already-open section. The negative inline margin lets the trigger's
+   hover wash bleed left of the body text it labels, matching how
+   .inspector-section-trigger sits. */
+.inspector-disclosure {
+  display: grid;
+  gap: 8px;
+}
+
+.inspector-disclosure-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.inspector-disclosure-trigger {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: -4px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
+}
+
+.inspector-disclosure-trigger:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.inspector-disclosure-trigger:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* Summary beside the trigger — quiet, tabular, ellipsized like the section
+   summary so a long value can't widen the panel. */
+.inspector-disclosure-summary {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-disclosure-body {
+  display: grid;
+  gap: 10px;
+  padding-top: 8px;
+}
+
+/* Scale-state badge (ScaleStateBadge) — sibling of .uncertainty-badge, same
+   box; tiers by severity. missing takes the full caution wash; estimated
+   keeps caution ink on the neutral surface (a quieter approximate read); true
+   is muted with no fill (accurate scale isn't a warning). */
+.scale-badge {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 2px;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+}
+
+.scale-badge.missing {
+  background: var(--caution-soft);
+  color: var(--caution);
+}
+
+.scale-badge.estimated {
+  background: var(--surface);
+  color: var(--caution);
+}
+
+.scale-badge.true {
+  background: transparent;
+  color: var(--muted);
+}
+
 /* Radix Collapsible open/close: height animates between 0 and the measured
    --radix-collapsible-content-height (Radix keeps the node mounted until the
    close animation ends). prefers-reduced-motion collapses both to instant

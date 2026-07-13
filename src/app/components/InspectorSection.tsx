@@ -2,20 +2,34 @@ import type { ReactNode } from "react";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 
-// One collapsible inspector section: hairline-separated row with a
-// full-width header trigger (chevron + title + at-rest summary) and a
-// Radix-animated body. Built for the right inspector's quiet register —
-// structure via hairlines and spacing, no cards — and adoptable by any
-// inspector, though only ArtworkInspector uses it today.
+// One inspector section: hairline-separated row over a body of fields. Built
+// for the right inspector's quiet register — structure via hairlines and
+// spacing, no cards — and adoptable by any inspector, though only
+// ArtworkInspector uses it today.
 //
-// Collapsed is never information lost: `summary` shows the section's current
-// value at rest (muted, tabular-nums via CSS) and disappears when open —
-// the body then carries the real fields. `headerExtras` (e.g. the Dimensions
-// lock toggle) render beside the trigger only while open; a hidden section
-// must not offer a live control. They're siblings of the trigger, not
-// children — a button cannot nest inside a button.
+// Collapsible by default: a full-width header trigger (chevron + title +
+// at-rest summary) opens a Radix-animated body. Collapsed is never
+// information lost: `summary` shows the section's current value at rest
+// (muted, tabular-nums via CSS) and disappears when open — the body then
+// carries the real fields. `headerExtras` (e.g. the Dimensions lock toggle)
+// render beside the trigger only while open; a hidden section must not offer
+// a live control. They're siblings of the trigger, not children — a button
+// cannot nest inside a button.
+//
+// `collapsible={false}` drops the disclosure entirely: no Radix Collapsible,
+// no chevron, no trigger — just a plain header row (an <h3> in the same row
+// chrome so it lines up with collapsible siblings) over an always-open body.
+// `open`/`onOpenChange` are ignored in that mode, and `summary`/`headerExtras`
+// (both tied to the collapsed/open flip) have nothing to key off, so callers
+// leave them out. Used for the panel's always-present anchors (identity).
+//
+// `action` is a right-aligned header affordance visible open OR closed —
+// unlike `headerExtras`, which the collapsed state hides. Like the extras it
+// is a sibling of the trigger, never a child (no button-in-button).
 export function InspectorSection({
+  action,
   children,
+  collapsible = true,
   headerExtras,
   onOpenChange,
   open,
@@ -23,10 +37,14 @@ export function InspectorSection({
   title,
   titleAdornment
 }: {
+  action?: ReactNode;
   children: ReactNode;
+  collapsible?: boolean;
   headerExtras?: ReactNode;
-  onOpenChange: (open: boolean) => void;
-  open: boolean;
+  // Optional so `collapsible={false}` callers, which have no open/close state
+  // to drive, can omit them; the collapsible path still expects both.
+  onOpenChange?: (open: boolean) => void;
+  open?: boolean;
   summary?: ReactNode;
   title: string;
   // Non-interactive status content (e.g. the dimensions uncertainty badge)
@@ -35,6 +53,19 @@ export function InspectorSection({
   // a control: the trigger is a button.
   titleAdornment?: ReactNode;
 }) {
+  if (!collapsible) {
+    return (
+      <div className="inspector-section inspector-section-static">
+        <div className="inspector-section-header">
+          <h3 className="inspector-section-title">{title}</h3>
+          {titleAdornment}
+          {action ? <div className="inspector-section-action">{action}</div> : null}
+        </div>
+        <div className="inspector-section-body">{children}</div>
+      </div>
+    );
+  }
+
   return (
     <Collapsible className="inspector-section" open={open} onOpenChange={onOpenChange}>
       <div className="inspector-section-header">
@@ -49,6 +80,7 @@ export function InspectorSection({
         {open && headerExtras ? (
           <div className="inspector-section-extras">{headerExtras}</div>
         ) : null}
+        {action ? <div className="inspector-section-action">{action}</div> : null}
       </div>
       <CollapsibleContent>
         <div className="inspector-section-body">{children}</div>
