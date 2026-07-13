@@ -119,14 +119,14 @@ describe("ArtworkInspector identity", () => {
 });
 
 describe("ArtworkInspector scale badge", () => {
-  it("reads 'Approx. scale' (with a visually-hidden 'Approximate') when width/height are missing", () => {
+  it("shows the missing-state dot (visually-hidden 'Approximate scale') when width/height are missing", () => {
     renderInspector({ artwork: { ...baseArtwork, dimensions: { status: "known" } } });
 
     const badge = screen.getByTitle(
       "No dimensions — the artwork is drawn at an approximate scale"
     );
     expect(badge).toBeInTheDocument();
-    expect(badge.querySelector(".visually-hidden")?.textContent).toBe("Approximate");
+    expect(badge.querySelector(".visually-hidden")?.textContent).toBe("Approximate scale");
   });
 
   it("reads 'Estimated scale' when dims are present but status is approximate", () => {

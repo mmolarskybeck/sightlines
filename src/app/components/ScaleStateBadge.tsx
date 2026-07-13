@@ -1,18 +1,15 @@
-// Sibling of UncertaintyIndicator's `.uncertainty-badge`: a small
-// non-interactive badge saying how trustworthy an artwork's ON-CANVAS SCALE
-// is, given its dimensions. Where UncertaintyIndicator flags the dimension
-// record ("Approx." / "No dims"), this flags what that means for the drawing —
-// whether the shape on the wall is at true scale or a stand-in size.
+// Non-interactive status dot saying how trustworthy an artwork's ON-CANVAS
+// SCALE is, given its dimensions. Where UncertaintyIndicator flags the
+// dimension record ("Approx." / "No dims"), this flags what that means for
+// the drawing — whether the shape on the wall is at true scale or a stand-in
+// size. A dot, not words: even a two-word badge was too wide for the section
+// header at the 260px pane minimum, so color + fill carry the tier (solid
+// caution = missing, hollow caution = estimated, quiet petrol = true) and
+// the sentence rides the title tooltip plus visually-hidden text.
 //
-// `state` mirrors `ArtworkScaleState` in src/domain/artworkScale.ts (created
-// by a parallel task) — deliberately re-declared as an inline union here so
-// this component doesn't take a build dependency on that in-flight module.
+// `state` mirrors `ArtworkScaleState` in src/domain/artworkScale.ts —
+// deliberately re-declared as an inline union so this stays a leaf component.
 // Keep the two in sync; if the domain type grows a case, add it here.
-//
-// Palette tiers by severity (loudest → quietest): `missing` takes the full
-// caution wash (no dims → the scale is a guess), `estimated` keeps the caution
-// ink on the neutral surface (a softer "approximate" read), `true` renders
-// quiet/muted with no fill (accurate scale is not a warning).
 //
 // Pure <span>, no controls — safe to drop inside a button (e.g. an
 // InspectorSection titleAdornment) without nesting interactive content.
@@ -24,24 +21,16 @@ const TITLES: Record<ScaleState, string> = {
   true: "Dimensions are known — the artwork is drawn at true scale"
 };
 
+const HIDDEN_LABELS: Record<ScaleState, string> = {
+  missing: "Approximate scale",
+  estimated: "Estimated scale",
+  true: "True scale"
+};
+
 export function ScaleStateBadge({ state }: { state: ScaleState }) {
   return (
-    <span className={`scale-badge ${state}`} title={TITLES[state]}>
-      {state === "missing" ? (
-        // Terse on purpose: the badge shares one row with the section title
-        // and lock toggle at 260px, and the full "add width and height" story
-        // lives in the notice below plus this badge's title. Visible
-        // "Approx." with a visually-hidden full word so a screen reader
-        // announces "Approximate scale", not the truncation.
-        <>
-          <span aria-hidden="true">Approx.</span>
-          <span className="visually-hidden">Approximate</span> scale
-        </>
-      ) : state === "estimated" ? (
-        "Estimated scale"
-      ) : (
-        "True scale"
-      )}
+    <span className={`scale-dot ${state}`} title={TITLES[state]}>
+      <span className="visually-hidden">{HIDDEN_LABELS[state]}</span>
     </span>
   );
 }

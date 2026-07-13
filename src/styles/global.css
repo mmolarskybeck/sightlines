@@ -4781,8 +4781,17 @@ body.panels-resizing * {
 
 .inspector-section-chevron {
   flex: 0 0 auto;
+  /* Trails the row: pushed to the far edge when the section is open (no
+     summary in the DOM), docking beside the summary when collapsed — the
+     sibling rule below cancels the auto margin so the pair reads as one
+     right-aligned unit. */
+  margin-left: auto;
   color: var(--subtle);
   transition: transform 180ms ease-out;
+}
+
+.inspector-section-summary + .inspector-section-chevron {
+  margin-left: 0;
 }
 
 .inspector-section-trigger:hover .inspector-section-chevron {
@@ -5073,37 +5082,31 @@ body.panels-resizing * {
   padding-top: 8px;
 }
 
-/* Scale-state badge (ScaleStateBadge) — sibling of .uncertainty-badge, same
-   box; tiers by severity. missing takes the full caution wash; estimated
-   keeps caution ink on the neutral surface (a quieter approximate read); true
-   is muted with no fill (accurate scale isn't a warning). */
-.scale-badge {
-  /* Shrinkable (0 1) with ellipsis: inside the section trigger the badge
-     yields width rather than widening the panel — the title outranks it. */
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  padding: 2px 7px;
-  border-radius: 2px;
-  font-size: var(--type-xs);
-  font-weight: var(--weight-semibold);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* Scale-state dot (ScaleStateBadge): a badge's worth of words was too wide
+   for the section header at 260px, so the state compresses to a color dot.
+   Solid caution = missing, hollow caution = estimated — the fill difference
+   keeps the pair apart without relying on hue alone — and quiet petrol-soft
+   = true. The full sentence rides the title tooltip + visually-hidden text. */
+.scale-dot {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
 }
 
-.scale-badge.missing {
-  background: var(--caution-soft);
-  color: var(--caution);
+.scale-dot.missing {
+  background: var(--caution);
 }
 
-.scale-badge.estimated {
-  background: var(--surface);
-  color: var(--caution);
-}
-
-.scale-badge.true {
+.scale-dot.estimated {
+  border: 2px solid var(--caution);
   background: transparent;
-  color: var(--muted);
+}
+
+.scale-dot.true {
+  border: 1px solid var(--primary-line);
+  background: var(--primary-soft);
 }
 
 /* Radix Collapsible open/close: height animates between 0 and the measured
@@ -5574,6 +5577,10 @@ body.panels-resizing * {
 }
 
 .inspector-placement {
+  /* Grid gap separates the unplaced state's notice from the Type row —
+     butted together they read as one confusing object. */
+  display: grid;
+  gap: 12px;
   padding-top: 4px;
 }
 

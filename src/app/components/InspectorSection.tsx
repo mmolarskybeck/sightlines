@@ -7,8 +7,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collap
 // spacing, no cards — and adoptable by any inspector, though only
 // ArtworkInspector uses it today.
 //
-// Collapsible by default: a full-width header trigger (chevron + title +
-// at-rest summary) opens a Radix-animated body. Collapsed is never
+// Collapsible by default: a full-width header trigger (title + at-rest
+// summary + trailing chevron) opens a Radix-animated body. Collapsed is never
 // information lost: `summary` shows the section's current value at rest
 // (muted, tabular-nums via CSS) and disappears when open — the body then
 // carries the real fields. `headerExtras` (e.g. the Dimensions lock toggle)
@@ -69,13 +69,17 @@ export function InspectorSection({
   return (
     <Collapsible className="inspector-section" open={open} onOpenChange={onOpenChange}>
       <div className="inspector-section-header">
+        {/* Title leads and the chevron trails (Linear-style disclosure row):
+            a leading chevron indented every title ~18px past the flush-left
+            body content below it, which read as the header being narrower
+            than its own section. */}
         <CollapsibleTrigger className="inspector-section-trigger">
-          <CaretRightIcon aria-hidden="true" className="inspector-section-chevron" size={11} />
           <span className="inspector-section-title">{title}</span>
           {titleAdornment}
           {!open && summary ? (
             <span className="inspector-section-summary">{summary}</span>
           ) : null}
+          <CaretRightIcon aria-hidden="true" className="inspector-section-chevron" size={11} />
         </CollapsibleTrigger>
         {open && headerExtras ? (
           <div className="inspector-section-extras">{headerExtras}</div>
