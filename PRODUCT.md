@@ -27,6 +27,7 @@ Sightlines should not feel like a CAD program, a SketchUp clone, a generic SaaS 
 3. Make uncertainty visible without making it punitive.
 4. Pair tactile editing with numeric precision everywhere measurements matter.
 5. Keep privacy and portability visible in the product experience, not hidden in documentation.
+6. Use state-aware density: incomplete records should teach and prompt, while complete records should compact into recognizable summaries without hiding essential spatial facts.
 
 ## Accessibility & Inclusion
 

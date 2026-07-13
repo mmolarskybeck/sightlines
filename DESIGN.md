@@ -51,6 +51,7 @@ The local wrappers in `src/app/components/ui` are the preferred surface for new 
 - `Toggle` and `ToggleGroupItem` support pressed petrol states (now with the `--shadow-pressed` depression) and underline-tab states.
 - `SegmentedTabsList`/`SegmentedTabsTrigger` and `SegmentedToggleGroup`/`SegmentedToggleGroupItem` (`ui/segmented.tsx`) render the recessed-track/raised-chip pickers with the sliding chip; `UnderlineTabsList`/`UnderlineTabsTrigger` and `UnderlineToggleGroup`/`UnderlineToggleGroupItem` render tabs with the sliding petrol underline (3px, pill caps) off the same measuring hook.
 - `Tabs`, `Select`, `DropdownMenu`, and `Switch` keep Radix semantics while carrying Sightlines visual defaults.
+- `Checkbox` and `Tooltip` are the standard primitives for boolean data qualifiers and contextual help. Do not introduce native checkbox styling or browser `title` tooltips when these wrappers apply.
 - `Collapsible` is a bare-behavior Radix wrapper (no baked-in look); `InspectorSection` composes it into the hairline-separated, summary-bearing disclosure rows the artwork inspector uses.
 - `cn()` uses `clsx` and `tailwind-merge`; compose variants there rather than concatenating ad hoc class strings.
 
@@ -139,6 +140,21 @@ The product grammar is stable:
 
 Keep panels flat. Improve polish through spacing, alignment, focus states, and component consistency rather than by adding cards.
 
+## Inspector System
+
+Inspectors use state-aware density rather than giving every field equal weight. Stable identity and metadata compact after completion; active spatial controls remain easy to reach; incomplete records expand enough to explain what is missing and why it matters.
+
+- A selected artwork keeps a persistent tombstone near the top with thumbnail, title, artist/date, dimensions, and an edit affordance. The tombstone remains visible while details are edited so context is never replaced by a generic form.
+- Artwork dimensions stay near the top because they govern rendered scale. Width and height remain a paired row with enough room for common fractional-inch values; depth may occupy the next row rather than forcing three narrow columns.
+- Missing width or height is derived automatically as a missing-scale state. Once both dimensions exist, users may qualify them as approximate with a checkbox; unchecked complete dimensions are treated as known. Do not expose this as a three-option status menu.
+- Scale language distinguishes input quality from spatial consequence: users enter **approximate dimensions**, which produce **estimated scale**; complete known dimensions produce **true scale**. Missing and estimated states may use compact semantic icons with accessible shadcn tooltips. The healthy true-scale state should not consume scarce section-header space.
+- Proportion locking changes field behavior, so it uses a pressed toggle. In dense layouts it may be icon-only with an accessible name and a brief tooltip. Approximate remains a labeled checkbox because it qualifies the data rather than enabling behavior.
+- Conversion previews are transient help. Show them only while relevant, do not reserve blank message rows, and do not let one field's preview push its paired input out of alignment.
+- Collapsed section headers prioritize recognizable values, especially dimension summaries. Status decoration must yield before the summary truncates.
+- Derived measurements read as summaries rather than editable fields. Use a familiar edit icon with an accessible label to reveal an inline editor; avoid ambiguous actions such as “Set…” or “Done” when edits already save on blur.
+- Inspector layout follows the pane's actual width through intrinsic sizing and container-responsive reflow. All controls, focus rings, labels, and long values must remain reachable at the 260px minimum, with no horizontal scrolling or clipped content.
+- Inspector microcopy is brief and literal. Prefer short sentences in tooltips and notices; avoid em dashes when a period or separate phrase is clearer.
+
 ## Component Rules
 
 Use the primitive variants first. Add bespoke CSS only when the component is canvas-specific or has a domain-specific layout.
@@ -146,6 +162,8 @@ Use the primitive variants first. Add bespoke CSS only when the component is can
 - Use icon buttons for compact tools and include accessible labels.
 - Use sliding-underline tabs (`UnderlineTabsList` in `ui/segmented.tsx`) for navigation (view modes); soft segmented tracks (`SegmentedTabsList` / `SegmentedToggleGroup`) for value pickers like the checklist filters; static underline tabs only for subordinate sub-choices.
 - Use Radix Select for option sets.
+- Use Radix Checkbox for persistent boolean data attributes; use Toggle for pressed behaviors or modes.
+- Use the shared shadcn-style Tooltip for icon-only controls and contextual explanations. Never rely on a native `title` as the only explanation.
 - Use Radix Switch only when the binary state benefits from a switch; the unit selector is intentionally a two-label segmented switch.
 - Use petrol-filled primary buttons sparingly. `Import` is currently the main solid CTA in the workspace.
 - Every interactive control needs hover, pressed/active, disabled, and focus-visible states.
