@@ -53,29 +53,27 @@ export function RoomInspector({
 
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
-      <div className="inspector-placement">
+      <div className="room-shape-row">
         {/* Edit shape arms corner/split editing for every room. Not armed, a
             selected room shows wall-slide chips (rectangles show resize chips
             instead); the button swaps those for vertex/split handles. */}
-        <InspectorActionGroup>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                aria-pressed={reshapeActive}
-                className="inspector-action"
-                variant={reshapeActive ? "primary" : "inspector"}
-                onClick={onToggleReshape}
-              >
-                <PencilSimpleIcon aria-hidden="true" size={15} />
-                {reshapeActive ? "Done editing shape" : "Edit shape"}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent className="toolbar-tooltip" side="bottom">
-              {reshapeGuidance}
-            </TooltipContent>
-          </Tooltip>
-        </InspectorActionGroup>
         <p className="field-hint">{reshapeHint}</p>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              aria-pressed={reshapeActive}
+              className="inspector-action room-shape-action"
+              variant={reshapeActive ? "primary" : "inspector"}
+              onClick={onToggleReshape}
+            >
+              <PencilSimpleIcon aria-hidden="true" size={15} />
+              {reshapeActive ? "Done editing shape" : "Edit shape"}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent className="toolbar-tooltip" side="bottom">
+            {reshapeGuidance}
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       {rectangleDimensions ? (

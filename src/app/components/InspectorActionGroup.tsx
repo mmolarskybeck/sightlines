@@ -16,15 +16,17 @@ import type { ReactNode } from "react";
 // same, unlike a wrapping burst of content-width chips.
 export function InspectorActionGroup({
   children,
+  className,
   label,
   split = false
 }: {
   children: ReactNode;
+  className?: string;
   label?: string;
   split?: boolean;
 }) {
   return (
-    <div className="inspector-action-group">
+    <div className={["inspector-action-group", className].filter(Boolean).join(" ")}>
       {label ? <span className="inspector-action-group-label">{label}</span> : null}
       <div className={split ? "inspector-action-group-buttons split" : "inspector-action-group-buttons"}>
         {children}

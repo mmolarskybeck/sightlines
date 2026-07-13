@@ -69,7 +69,7 @@ export function WallInspector({
       className="inspector-form"
       onSubmit={(event) => event.preventDefault()}
     >
-      <div className="inspector-sections">
+      <div className="inspector-sections wall-size-sections">
         {/* Length and room height are the two anchors of a wall's geometry —
             one static (non-collapsible) section, not two separately-headed
             blocks, so they read as a single "Size" thought with one gap
@@ -119,7 +119,7 @@ export function WallInspector({
         </p>
       ) : null}
 
-      <InspectorActionGroup label="Add to this wall">
+      <InspectorActionGroup className="wall-opening-actions" label="Add to this wall">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

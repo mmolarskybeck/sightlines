@@ -4740,8 +4740,17 @@ body.panels-resizing * {
 .field-pair-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: end;
+  align-items: start;
   gap: 8px;
+}
+
+/* Paired compact measurements keep exactly one helper line in reserve. This
+   prevents a conversion hint or short validation error in one field from
+   shifting its neighbour's input, without carrying the roomier default
+   LengthField message strip into every compact inspector field. */
+.field-pair-grid .field-row.compact .length-field-message {
+  display: block;
+  min-height: 1.25rem;
 }
 
 /* Placeholders are worked examples ("e.g. 3\""), not values — the "e.g."
@@ -4765,6 +4774,12 @@ body.panels-resizing * {
 .inspector-section {
   padding-block: 5px 7px;
   border-top: 1px solid var(--line);
+}
+
+/* The inspector subject header already supplies the Wall panel's opening
+   rule. Suppress only the first static Size row's duplicate hairline. */
+.wall-size-sections > .inspector-section:first-child {
+  border-top: 0;
 }
 
 .inspector-section-header {
@@ -5068,6 +5083,15 @@ body.panels-resizing * {
 .inspector-action-group-buttons.split > * {
   width: 100%;
   justify-content: center;
+}
+
+.wall-opening-actions .inspector-action-group-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.wall-opening-actions .opening-add-chip {
+  width: 100%;
 }
 
 /* Chrome-free disclosure (InspectorDisclosure): a small ghost text-button
@@ -5651,6 +5675,24 @@ body.panels-resizing * {
   display: grid;
   gap: 12px;
   padding-top: 4px;
+}
+
+/* Room shape is a secondary editing mode, not the panel's main CTA. Keep its
+   short explanation and control on one compact line; narrow panes may wrap
+   the text, while the button remains a stable touch target at the edge. */
+.room-shape-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.room-shape-row .field-hint {
+  min-width: 0;
+}
+
+.room-shape-action {
+  flex: 0 0 auto;
 }
 
 .inspector-action {

@@ -31,6 +31,7 @@ import {
 } from "../../domain/placement/placeArtwork";
 import { getDefaultOpeningSizeMm, type OpeningKind } from "../../domain/placement/createOpening";
 import { effectivePlacementForm } from "../../domain/placement/artworkForm";
+import { withArtworkFootprint } from "../../domain/framing";
 import type {
   Artwork,
   DisplayUnit,
@@ -1224,11 +1225,21 @@ export function ElevationView({
   const isDimensionLinesEligible =
     dimensionMemberSource.length >= 1 && selectionAllOnThisWall;
   const effectiveDimensionMembers: WallObjectBase[] =
-    dimensionMemberSource.map(applyDragPreview);
+    dimensionMemberSource.map((wallObject) => {
+      const previewed = applyDragPreview(wallObject) as WallObject;
+      const artwork =
+        previewed.kind === "artwork" ? artworksById?.get(previewed.artworkId) : undefined;
+      return withArtworkFootprint(previewed, artwork);
+    });
   const dimensionMemberIds = new Set(dimensionMemberSource.map((wallObject) => wallObject.id));
   const dimensionOthers: WallObjectBase[] = wallObjectsOnThisWall
     .filter((wallObject) => !dimensionMemberIds.has(wallObject.id))
-    .map(applyDragPreview);
+    .map((wallObject) => {
+      const previewed = applyDragPreview(wallObject) as WallObject;
+      const artwork =
+        previewed.kind === "artwork" ? artworksById?.get(previewed.artworkId) : undefined;
+      return withArtworkFootprint(previewed, artwork);
+    });
   // Idle, or an active "From edges"/"Between works" session → neighbour-aware
   // (stop at the nearest window/door/work — "From edges" measures to that same
   // detected boundary, and "Between works" re-spaces about a fixed centre so
