@@ -247,7 +247,7 @@ type WallObjectBase = {
 type ArtworkWallObject = WallObjectBase & {
   kind: "artwork"
   artworkId: string
-  // optional per-placement override — doesn't touch the library record
+  // display/provenance metadata only; geometry uses stored width/height
   displayDimensionsOverride?: Dimensions
 }
 
@@ -258,7 +258,7 @@ type OpeningWallObject = WallObjectBase & {
 }
 ```
 
-**Placement can override display dimensions without touching the library record.** A curator might need a framed size, a mat size, or a placeholder mockup size specific to one layout — without permanently editing the canonical `Artwork`, which may be shared across other projects or tour stops (§4.3). `displayDimensionsOverride` on the placement handles this; absent, the placement just uses the library artwork's own `dimensions`.
+**Placement dimensions are the behavioral image footprint; display overrides are metadata.** `displayDimensionsOverride` may preserve a framed, matted, or placeholder provenance/display value without editing the shared library record, but geometry never resolves it. Every persisted or imported placement uses its stored `widthMm`/`heightMm` for image footprint; a future writer must explicitly rebake those stored dimensions (including partial/placeholder cases) when that is intended. Wall dimension edits resync matching wall placements without an explicit override; override-bearing placements retain their explicitly stored footprint until deliberately rebaked. Mat/frame-only edits never touch placement geometry. Floor objects retain their stored dimensions until the physical floor representation is decided (see `docs/framing-dimension-contract.md` Phase 6b). Tooltips may continue to show the override as display/provenance text, but it does not alter geometry.
 
 When two connectable openings reference each other across rooms and their positions geometrically align within the shared floor coordinate space, the 3D renderer treats the shared clear intersection as a true opening rather than a capped wall — letting a camera view actually see through it into the next room. This pairing lives on opening objects (`connectsToObjectId`) rather than walls because a single wall can carry several openings. Reciprocal writers, advisory angle/gap/overlap/height status, plan/inspector feedback, and open-vs-capped 3D treatment shipped with room-shape slices 4-5; the `Floor`/`RoomPlacement` structure remains the shared coordinate spine.
 

@@ -2015,7 +2015,7 @@ describe("app store", () => {
       ).toBeUndefined();
     });
 
-    it("leaves a placement's displayDimensionsOverride alone on a dimension edit", async () => {
+    it("keeps an override and its stored behavioral footprint on dimension edits", async () => {
       await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
       const artworkId = store.getState().project!.checklistArtworkIds[0];
       const wallId = getSelectedWall(
@@ -2052,10 +2052,49 @@ describe("app store", () => {
       const placement = store
         .getState()
         .project!.wallObjects.find((wallObject) => wallObject.id === placementId)!;
-      // Unchanged from placement time (the override blocks the resize): the
-      // square 100×100 asset contains to 610×610 in the placeholder box.
+      // An explicit override opts this persisted placement out of the
+      // library-dimension rebake; its stored image footprint remains stable.
       expect(placement.widthMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
       expect(placement.heightMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
+      expect(placement.kind).toBe("artwork");
+      if (placement.kind === "artwork") {
+        expect(placement.displayDimensionsOverride).toEqual({
+          widthMm: 300,
+          heightMm: 300,
+          status: "known"
+        });
+      }
+    });
+
+    it("does not mutate placement geometry for mat- or frame-only edits", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      await store.getState().updateArtwork(artworkId, {
+        dimensions: { widthMm: 500, heightMm: 400, status: "known" }
+      });
+      const wallId = getSelectedWall(
+        store.getState().project!,
+        store.getState().wallContextId
+      )!.id;
+      await store.getState().placeArtwork(artworkId, wallId, 1000, 1450);
+      const projectWithPersistedSize: Project = {
+        ...store.getState().project!,
+        wallObjects: store.getState().project!.wallObjects.map((wallObject) => ({
+          ...wallObject,
+          widthMm: 460,
+          heightMm: 360
+        }))
+      };
+      await repository.save(projectWithPersistedSize);
+      store.setState({ project: projectWithPersistedSize });
+      const before = store.getState().project!.wallObjects[0];
+
+      await store.getState().updateArtwork(artworkId, {
+        matWidthMm: 75,
+        frame: { widthMm: 25, finish: "black" }
+      });
+
+      expect(store.getState().project!.wallObjects[0]).toEqual(before);
     });
 
     it("errors calmly on an invalid change: nothing persists, no undo entry", async () => {
@@ -2117,6 +2156,27 @@ describe("app store", () => {
       expect(placement.widthMm).toBe(500);
       expect(placement.heightMm).toBe(400);
       expect(getSelectedArtworkId(state.project, state.selection)).toBe(artworkId);
+    });
+
+    it("stores image dimensions for a framed placement", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("framed.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      await store.getState().updateArtwork(artworkId, {
+        dimensions: { widthMm: 400, heightMm: 300, status: "known" },
+        matWidthMm: 75,
+        frame: { widthMm: 25, finish: "black" }
+      });
+      const wallId = getSelectedWall(
+        store.getState().project!,
+        store.getState().wallContextId
+      )!.id;
+
+      await store.getState().placeArtwork(artworkId, wallId, 1200, 1450);
+
+      expect(store.getState().project!.wallObjects[0]).toMatchObject({
+        widthMm: 400,
+        heightMm: 300
+      });
     });
 
     it("sizes an unknown-dims artwork from its image within the placeholder box", async () => {
@@ -3178,7 +3238,26 @@ describe("app store", () => {
 
     it("converts a wall artwork to a floor object: same id, one undo entry, and undo restores the wall placement", async () => {
       const { placementId } = await placeArtworkOnWall(1000, 1450);
-      const before = store.getState().project!.wallObjects.find((o) => o.id === placementId)!;
+      const projectWithOverride: Project = {
+        ...store.getState().project!,
+        wallObjects: store.getState().project!.wallObjects.map((object) =>
+          object.id === placementId && object.kind === "artwork"
+            ? {
+                ...object,
+                widthMm: 437,
+                heightMm: 319,
+                displayDimensionsOverride: {
+                  widthMm: 900,
+                  heightMm: 700,
+                  status: "known" as const
+                }
+              }
+            : object
+        )
+      };
+      await repository.save(projectWithOverride);
+      store.setState({ project: projectWithOverride });
+      const before = projectWithOverride.wallObjects.find((o) => o.id === placementId)!;
       const undoStackBefore = store.getState().undoStack.length;
 
       await store.getState().commitPlanMove(placementId, {
@@ -3197,7 +3276,12 @@ describe("app store", () => {
       expect(floorObject.yMm).toBe(3000);
       // Remembered hang height + elevation height, for a later floor→wall trip.
       expect(floorObject.wallYMm).toBe(1450);
+      expect(floorObject.widthMm).toBe(before.widthMm);
       expect(floorObject.heightMm).toBe(before.heightMm);
+      expect(floorObject.kind).toBe("artwork");
+      if (floorObject.kind === "artwork" && before.kind === "artwork") {
+        expect(floorObject.displayDimensionsOverride).toEqual(before.displayDimensionsOverride);
+      }
 
       await store.getState().undo();
       state = store.getState();
@@ -3211,7 +3295,26 @@ describe("app store", () => {
       await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
       const artworkId = store.getState().project!.checklistArtworkIds[0];
       await store.getState().placeArtworkOnFloor(artworkId, 4000, 4000);
-      const floorObject = store.getState().project!.floorObjects[0];
+      const projectWithOverride: Project = {
+        ...store.getState().project!,
+        floorObjects: store.getState().project!.floorObjects.map((object) =>
+          object.kind === "artwork"
+            ? {
+                ...object,
+                widthMm: 437,
+                heightMm: 319,
+                displayDimensionsOverride: {
+                  widthMm: 900,
+                  heightMm: 700,
+                  status: "known" as const
+                }
+              }
+            : object
+        )
+      };
+      await repository.save(projectWithOverride);
+      store.setState({ project: projectWithOverride });
+      const floorObject = projectWithOverride.floorObjects[0];
       const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
 
       await store.getState().commitPlanMove(floorObject.id, {
@@ -3227,7 +3330,14 @@ describe("app store", () => {
       expect(wallObject.wallId).toBe(wall.id);
       expect(wallObject.xMm).toBe(1200);
       expect(wallObject.yMm).toBe(floorObject.wallYMm);
+      expect(wallObject.widthMm).toBe(floorObject.widthMm);
       expect(wallObject.heightMm).toBe(floorObject.heightMm);
+      expect(wallObject.kind).toBe("artwork");
+      if (wallObject.kind === "artwork" && floorObject.kind === "artwork") {
+        expect(wallObject.displayDimensionsOverride).toEqual(
+          floorObject.displayDimensionsOverride
+        );
+      }
     });
 
     it("moves a floor object to a new floor position", async () => {

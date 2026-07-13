@@ -154,6 +154,9 @@ export type WallObjectBase = {
 export type ArtworkWallObject = WallObjectBase & {
   kind: "artwork";
   artworkId: string;
+  // Display/provenance metadata only. Geometry always uses the placement's
+  // stored widthMm/heightMm as its image footprint and never resolves this
+  // override. A future writer must explicitly rebake stored dimensions.
   displayDimensionsOverride?: Dimensions;
 };
 

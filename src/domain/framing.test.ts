@@ -3,9 +3,11 @@ import {
   FRAME_FINISHES,
   FRAME_FINISH_HEX,
   deriveFrameWidthFromOverallMm,
-  getArtworkOuterDimensionsMm
+  getArtworkOuterDimensionsMm,
+  getPlacementFootprintMm,
+  withArtworkFootprint
 } from "./framing";
-import type { ArtworkFrame, FrameFinish } from "./project";
+import type { ArtworkFrame, FrameFinish, WallObject } from "./project";
 
 describe("getArtworkOuterDimensionsMm", () => {
   it("returns the image size unchanged with no mat or frame (legacy records)", () => {
@@ -43,6 +45,70 @@ describe("getArtworkOuterDimensionsMm", () => {
       widthMm: 600,
       heightMm: 400
     });
+  });
+});
+
+describe("placement footprint contract", () => {
+  const placement: WallObject = {
+    id: "placement-1",
+    kind: "artwork",
+    artworkId: "artwork-1",
+    wallId: "wall-1",
+    groupId: "group-1",
+    xMm: 900,
+    yMm: 1200,
+    widthMm: 400,
+    heightMm: 300,
+    rotationDeg: 5,
+    displayDimensionsOverride: {
+      widthMm: 999,
+      heightMm: 888,
+      status: "known"
+    }
+  };
+
+  const artwork = {
+    matWidthMm: 75,
+    frame: { widthMm: 25, finish: "black" as const }
+  };
+
+  it("expands stored placement dimensions without resolving the display override", () => {
+    expect(getPlacementFootprintMm(placement, artwork)).toEqual({
+      widthMm: 600,
+      heightMm: 500
+    });
+  });
+
+  it("adapts artwork size while preserving placement identity and position fields", () => {
+    expect(withArtworkFootprint(placement, artwork)).toEqual({
+      ...placement,
+      widthMm: 600,
+      heightMm: 500
+    });
+  });
+
+  it("passes openings through unchanged", () => {
+    const opening: WallObject = {
+      id: "door-1",
+      kind: "door",
+      wallId: "wall-1",
+      xMm: 500,
+      yMm: 1000,
+      widthMm: 900,
+      heightMm: 2100,
+      blocksPlacement: true
+    };
+
+    expect(withArtworkFootprint(opening, artwork)).toBe(opening);
+  });
+
+  it("passes dangling artwork placements through unchanged", () => {
+    expect(withArtworkFootprint(placement)).toBe(placement);
+  });
+
+  it("preserves identity for an unframed artwork placement", () => {
+    const unframed = { ...placement, displayDimensionsOverride: undefined };
+    expect(withArtworkFootprint(unframed, {})).toBe(unframed);
   });
 });
 

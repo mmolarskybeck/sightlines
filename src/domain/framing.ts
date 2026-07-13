@@ -1,4 +1,10 @@
-import type { ArtworkFrame, FrameFinish } from "./project";
+import type {
+  Artwork,
+  ArtworkFrame,
+  FrameFinish,
+  WallObject,
+  WallObjectBase
+} from "./project";
 
 // Schematic, flat mockup colors — deliberately NOT photoreal frame textures
 // (docs/quick-todos.md). One tasteful flat value per finish, shared by the
@@ -53,6 +59,43 @@ export function getArtworkOuterDimensionsMm(
     widthMm: imageWidthMm + bandPerSide * 2,
     heightMm: imageHeightMm + bandPerSide * 2
   };
+}
+
+// Placement width/height are always the persisted image footprint. Framing is
+// a read-time expansion; displayDimensionsOverride is provenance/display
+// metadata and is deliberately not consulted here. The wallId requirement is
+// intentional: a floor object's heightMm is its remembered hang height, not a
+// footprint axis.
+export function getPlacementFootprintMm(
+  placement: Pick<WallObjectBase, "widthMm" | "heightMm"> & { wallId: string },
+  artwork?: Pick<Artwork, "matWidthMm" | "frame">
+): OuterDimensionsMm {
+  return getArtworkOuterDimensionsMm(
+    placement.widthMm,
+    placement.heightMm,
+    artwork?.matWidthMm,
+    artwork?.frame
+  );
+}
+
+// Canonical adapter for geometry boundaries. Domain geometry remains pure over
+// WallObjectBase, while callers widen only resolved wall artwork placements. A
+// missing artwork record (including a dangling artworkId) and non-artwork wall
+// objects pass through by identity.
+export function withArtworkFootprint<T extends WallObject>(
+  object: T,
+  artwork?: Pick<Artwork, "matWidthMm" | "frame">
+): T {
+  if (object.kind !== "artwork" || !artwork) {
+    return object;
+  }
+
+  const footprint = getPlacementFootprintMm(object, artwork);
+  if (footprint.widthMm === object.widthMm && footprint.heightMm === object.heightMm) {
+    return object;
+  }
+
+  return { ...object, ...footprint };
 }
 
 // Below this, a derived frame band counts as "exactly zero" rather than

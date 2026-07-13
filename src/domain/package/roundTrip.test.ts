@@ -18,6 +18,11 @@ const emptyLibrary: ExistingLibraryState = {
 describe("export → import round trip", () => {
   it("display mode: project, checklist, placements, and assets arrive intact in an empty library", async () => {
     const { project, library, getAsset, getBlob } = makeFixture();
+    library[0] = {
+      ...library[0],
+      matWidthMm: 75,
+      frame: { widthMm: 25, finish: "black" }
+    };
 
     const { zip } = await createSightlinesPackage({
       project,
@@ -45,6 +50,14 @@ describe("export → import round trip", () => {
     // Both referenced artworks arrive; the unreferenced one does not exist here.
     expect(commit.artworksToSave.map((a) => a.id).sort()).toEqual(["art-placed", "art-unplaced"]);
     expect(commit.artworksToSave.every((a) => a.assetId !== undefined)).toBe(true);
+    expect(commit.artworksToSave.find((a) => a.id === "art-placed")).toMatchObject({
+      matWidthMm: 75,
+      frame: { widthMm: 25, finish: "black" }
+    });
+    expect(commit.project.wallObjects.find((object) => object.id === "wo-1")).toMatchObject({
+      widthMm: 500,
+      heightMm: 400
+    });
 
     // Both assets save with display bytes standing in for the original slot.
     expect(commit.assetsToSave).toHaveLength(2);

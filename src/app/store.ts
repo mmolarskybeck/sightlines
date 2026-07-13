@@ -2545,10 +2545,11 @@ export function createAppStore(deps: AppStoreDeps) {
 
         const next: Artwork = { ...before, ...changes };
         const touchedKeys = Object.keys(changes) as (keyof UpdateArtworkChanges)[];
-        const hasChange = touchedKeys.some(
+        const changedKeys = touchedKeys.filter(
           (key) => JSON.stringify(before[key]) !== JSON.stringify(next[key])
         );
-        if (!hasChange) return;
+        if (changedKeys.length === 0) return;
+        const dimensionsChanged = changedKeys.includes("dimensions");
 
         let parsed: Artwork;
         try {
@@ -2565,16 +2566,18 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
-        // A dimension edit should resize any placement of this artwork that
-        // doesn't have its own displayDimensionsOverride (docs/plan.md
-        // §4.2) — otherwise the wall would silently drift out of sync with
-        // the library record it renders. Both halves ride in one EditEntry
-        // so undo reverts the artwork and the placement size together.
+        // A dimension edit resizes matching wall placements that do not carry
+        // an explicit display/provenance override. Override-bearing records
+        // retain their explicitly stored behavioral footprint until a writer
+        // deliberately rebakes it. Floor objects intentionally retain their
+        // stored dimensions until the physical floor representation is
+        // decided (framing-dimension-contract §6b). Both halves ride in one
+        // EditEntry so undo reverts the artwork and wall placement sizes.
         const project = get().project;
         let projectEdit: { before: Project; after: Project } | undefined;
         let placementWarnings: PlacementWarning[] = [];
 
-        if (project) {
+        if (project && dimensionsChanged) {
           // A derived axis needs the image ratio; skip the asset fetch on the
           // common both-known path (no axis to derive) so a plain dimension
           // edit stays synchronous-cheap.
