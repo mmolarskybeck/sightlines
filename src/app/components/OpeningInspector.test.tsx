@@ -56,4 +56,36 @@ describe("OpeningInspector connections", () => {
     ).toBe(false);
     consoleError.mockRestore();
   });
+
+  it("does not emit a connection change when selection moves between paired openings", () => {
+    const firstOnConnect = vi.fn();
+    const secondOnConnect = vi.fn();
+    const rendered = render(
+      <OpeningInspector
+        {...props({ ...door, connectsToObjectId: "door-b" })}
+        onConnect={firstOnConnect}
+      />
+    );
+
+    const nextPartner: OpeningConnectionCandidate = {
+      ...candidate,
+      id: "door-d",
+      label: "Gallery 3, South wall"
+    };
+    rendered.rerender(
+      <OpeningInspector
+        {...props({
+          ...door,
+          id: "door-c",
+          wallId: "wall-c",
+          connectsToObjectId: nextPartner.id
+        })}
+        connectionCandidates={[nextPartner]}
+        onConnect={secondOnConnect}
+      />
+    );
+
+    expect(firstOnConnect).not.toHaveBeenCalled();
+    expect(secondOnConnect).not.toHaveBeenCalled();
+  });
 });

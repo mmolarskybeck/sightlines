@@ -120,6 +120,7 @@ export function OpeningInspector({
           <InspectorRow label="Connects to">
             {connectionCandidates.length > 0 ? (
               <Select
+                key={opening.id}
                 value={opening.connectsToObjectId ?? ""}
                 onValueChange={(partnerId) => onConnect(partnerId)}
               >
