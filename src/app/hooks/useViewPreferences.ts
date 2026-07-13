@@ -62,10 +62,13 @@ type ViewPreferences = {
 
 // Everyday-editing sections start open; registrar reference data starts
 // closed (consulted less often than measurements or arranging — the same
-// reading-order reasoning as ArtworkInspector's field clusters).
+// reading-order reasoning as ArtworkInspector's field clusters). "matframe"
+// is deliberately absent: its at-rest state is data-derived at the call site
+// (open only when there's a mat or frame to show), so it has no fixed default
+// here. A stale stored "framing" key from before the rename survives
+// sanitization as an unknown id and is simply never read.
 export const DEFAULT_INSPECTOR_SECTIONS: Record<string, boolean> = {
   dimensions: true,
-  framing: true,
   placement: true,
   details: false
 };

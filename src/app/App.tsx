@@ -1728,6 +1728,9 @@ export function App() {
                     : undefined
                 }
                 isPlaced={isArtworkPlaced}
+                // A floor-placed work is dragged/dropped off a wall onto open
+                // floor; its remove affordance disconnects that floor object.
+                removeLabel={placedFloorArtwork ? "Remove from floor" : "Remove from wall"}
                 placementTitle={
                   placedWallObject && placedWallObjectWall
                     ? `Position on ${placedWallObjectWall.name}`

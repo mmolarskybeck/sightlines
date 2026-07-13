@@ -4423,7 +4423,7 @@ body.panels-resizing * {
    own fields tight. */
 .inspector-form {
   display: grid;
-  gap: 20px;
+  gap: 16px;
 }
 
 .opening-connection-section {
@@ -4455,7 +4455,7 @@ body.panels-resizing * {
 }
 
 /* Groups related fields into one tight cluster (identity, registrar, etc.)
-   within the more generous 20px rhythm of .inspector-form. */
+   within the more generous 16px rhythm of .inspector-form. */
 .field-group {
   display: grid;
   gap: 8px;
@@ -5076,6 +5076,14 @@ body.panels-resizing * {
   margin-top: 2px;
 }
 
+/* Revealed Overall editor (the "Set…" disclosure body): the editable W/H pair
+   plus its hint, set a breath below the summary row it hangs off. */
+.framing-overall-editor {
+  display: grid;
+  gap: 6px;
+  padding-top: 4px;
+}
+
 /* The ratio lock rides the right edge of the Dimensions heading row; the
    Toggle primitive supplies its ghost hover and pressed-petrol states. */
 .artwork-dimensions-lock {
@@ -5124,6 +5132,44 @@ body.panels-resizing * {
 .artwork-inspector-identity {
   flex: 1 1 180px;
   min-width: 180px;
+}
+
+/* Compact identity (a complete record at rest): a muted one-line Artist ·
+   Date over the ghost "Edit details" reveal. The title is deliberately
+   absent — the panel heading already carries it. Occupies the same
+   thumbnail-beside slot as the field editor, so switching modes doesn't shift
+   the thumbnail. */
+.artwork-identity-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  /* Nudge the first line down to sit near where the top field's label would,
+     so the thumbnail stays optically anchored across the mode flip. */
+  padding-top: 2px;
+}
+
+.artwork-identity-summary-text {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--type-sm);
+  line-height: var(--leading-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* No artist or date recorded: same muted ink (stays ≥ 4.5:1), italic to read
+   as an absence rather than a value. */
+.artwork-identity-summary-text.empty {
+  font-style: italic;
+}
+
+/* Trailing "Done" affordance in the expanded-complete state — pushed to the
+   panel edge so it reads as a way out of the editor, not another field. */
+.artwork-identity-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 /* Arrange-on-wall controls: a full-width segmented mode switch, then the one

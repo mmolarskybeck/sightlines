@@ -263,12 +263,13 @@ describe("useViewPreferences", () => {
     expect(result.current.inspectorCollapsed).toBe(false);
   });
 
-  it("defaults inspector sections to dimensions/framing/placement open, details closed", () => {
+  it("defaults inspector sections to dimensions/placement open, details closed", () => {
     const { result } = renderHook(() => useViewPreferences());
 
+    // "matframe" is intentionally absent: its at-rest state is data-derived
+    // at the call site, so it carries no fixed default here.
     expect(result.current.inspectorSections).toEqual({
       dimensions: true,
-      framing: true,
       placement: true,
       details: false
     });
@@ -278,19 +279,19 @@ describe("useViewPreferences", () => {
     const { result } = renderHook(() => useViewPreferences());
 
     act(() => {
-      result.current.setInspectorSectionOpen("framing", false);
+      result.current.setInspectorSectionOpen("matframe", false);
     });
-    expect(result.current.inspectorSections.framing).toBe(false);
+    expect(result.current.inspectorSections.matframe).toBe(false);
     expect(result.current.inspectorSections.dimensions).toBe(true);
     expect(
-      JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}").inspectorSections.framing
+      JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}").inspectorSections.matframe
     ).toBe(false);
 
     act(() => {
       result.current.setInspectorSectionOpen("details", true);
     });
     expect(result.current.inspectorSections.details).toBe(true);
-    expect(result.current.inspectorSections.framing).toBe(false);
+    expect(result.current.inspectorSections.matframe).toBe(false);
   });
 
   it("honors stored section booleans and drops malformed entries onto defaults", () => {
@@ -306,7 +307,7 @@ describe("useViewPreferences", () => {
     expect(result.current.inspectorSections.dimensions).toBe(false);
     expect(result.current.inspectorSections.details).toBe(false);
     expect(result.current.inspectorSections.extra).toBe(true);
-    expect(result.current.inspectorSections.framing).toBe(true);
+    expect(result.current.inspectorSections.placement).toBe(true);
   });
 
   it("falls back to default sections for a malformed inspectorSections value", () => {
@@ -316,7 +317,6 @@ describe("useViewPreferences", () => {
 
     expect(result.current.inspectorSections).toEqual({
       dimensions: true,
-      framing: true,
       placement: true,
       details: false
     });
@@ -350,7 +350,6 @@ describe("useViewPreferences", () => {
     expect(result.current.inspectorCollapsed).toBe(false);
     expect(result.current.inspectorSections).toEqual({
       dimensions: true,
-      framing: true,
       placement: true,
       details: false
     });
@@ -368,7 +367,6 @@ describe("useViewPreferences", () => {
       inspectorCollapsed: false,
       inspectorSections: {
         dimensions: true,
-        framing: true,
         placement: true,
         details: false
       }
