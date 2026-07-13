@@ -34,6 +34,7 @@ import { getRoomPlaceableWalls } from "../domain/geometry/placeableWalls";
 import type { WallSwitcherEntry } from "./components/WallSwitcher";
 import { evaluateOpeningPair } from "../domain/geometry/openingConnections";
 import { getOpeningKindLabel, type OpeningKind } from "../domain/placement/createOpening";
+import { withArtworkFootprint } from "../domain/framing";
 import type {
   Artwork,
   ArtworkFloorObject,
@@ -495,6 +496,7 @@ export function App() {
 
   useArrangeNudgeShortcuts({
     project,
+    artworks: libraryArtworks,
     viewMode,
     selectedObjectIds,
     draggingArtworkId,
@@ -648,24 +650,40 @@ export function App() {
   // Remove the artwork from whichever surface currently owns it.
   const artworkPlacementId = placedWallObject?.id ?? placedFloorArtwork?.id ?? null;
 
+  // Placement readouts measure the same outer footprint the elevation paints.
+  // Keep persisted image dimensions untouched and adapt only this geometry
+  // boundary; openings and unresolved artwork records pass through unchanged.
+  const wallPlacementGeometryObjects = project.wallObjects.map((wallObject) =>
+    withArtworkFootprint(
+      wallObject,
+      wallObject.kind === "artwork" ? artworksById.get(wallObject.artworkId) : undefined
+    )
+  );
+  const placedWallObjectFootprint: ArtworkWallObject | null = placedWallObject
+    ? (wallPlacementGeometryObjects.find(
+        (wallObject): wallObject is ArtworkWallObject =>
+          wallObject.kind === "artwork" && wallObject.id === placedWallObject.id
+      ) ?? null)
+    : null;
+
   // Position fields consider artwork neighbors only, not openings.
   const placedWallObjectWall = placedWallObject
     ? (getProjectWalls(project).find((wall) => wall.id === placedWallObject.wallId) ?? null)
     : null;
-  const wallPlacementNeighbors = placedWallObject
+  const wallPlacementNeighbors = placedWallObjectFootprint
     ? getWallPlacementNeighborEdges(
-        placedWallObject,
-        project.wallObjects.filter(
+        placedWallObjectFootprint,
+        wallPlacementGeometryObjects.filter(
           (wallObject): wallObject is ArtworkWallObject => wallObject.kind === "artwork"
         )
       )
     : { leftNeighborRightEdgeMm: undefined, rightNeighborLeftEdgeMm: undefined };
   // Centering boundaries include every wall-object kind.
   const wallPlacementCenterTarget =
-    placedWallObject && placedWallObjectWall
+    placedWallObjectFootprint && placedWallObjectWall
       ? getWallPlacementCenterTarget(
-          placedWallObject,
-          project.wallObjects,
+          placedWallObjectFootprint,
+          wallPlacementGeometryObjects,
           placedWallObjectWall.lengthMm
         )
       : { xMm: 0, boundaryKind: "wall" as const };
@@ -1665,7 +1683,7 @@ export function App() {
                 placementSection={
                   placedWallObject && placedWallObjectWall ? (
                     <WallPlacementFields
-                      placement={placedWallObject}
+                      placement={placedWallObjectFootprint ?? placedWallObject}
                       wallLengthMm={placedWallObjectWall.lengthMm}
                       leftNeighborRightEdgeMm={wallPlacementNeighbors.leftNeighborRightEdgeMm}
                       rightNeighborLeftEdgeMm={wallPlacementNeighbors.rightNeighborLeftEdgeMm}

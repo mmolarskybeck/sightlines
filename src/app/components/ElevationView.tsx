@@ -75,6 +75,7 @@ import { marqueeRectMm, type MarqueeState } from "./marqueeRect";
 import { buildElevationScene } from "../../domain/scene2d/elevationScene";
 import {
   getElevationDropGhostSizeMm,
+  getElevationFootprintObjects,
   getFitSelectionBoundsSvg,
   isArtworkOutOfWallBounds,
   wallLocalYToSvgY
@@ -467,7 +468,13 @@ export function ElevationView({
         return;
       }
 
-      onMarqueeSelect?.(getIdsIntersectingRect(wallObjectsOnThisWall, rect), event.shiftKey);
+      onMarqueeSelect?.(
+        getIdsIntersectingRect(
+          getElevationFootprintObjects(wallObjectsOnThisWall, artworksById),
+          rect
+        ),
+        event.shiftKey
+      );
     }
   });
 
@@ -1206,8 +1213,10 @@ export function ElevationView({
   // selected outline.
   const isGroupOutlineEligible =
     selectedMembersOnThisWall.length >= 2 && selectionAllOnThisWall;
-  const effectiveOutlineMembers: WallObjectBase[] =
-    selectedMembersOnThisWall.map(applyDragPreview);
+  const effectiveOutlineMembers: WallObjectBase[] = getElevationFootprintObjects(
+    selectedMembersOnThisWall.map((wallObject) => applyDragPreview(wallObject) as WallObject),
+    artworksById
+  );
 
   // "Fit selected" bounds — the padded union (SVG-userspace) of every
   // selected artwork/opening ON THIS WALL, drag preview applied (harmless
@@ -1251,22 +1260,18 @@ export function ElevationView({
       : selectedMembersOnThisWall.filter((wallObject) => wallObject.kind === "artwork");
   const isDimensionLinesEligible =
     dimensionMemberSource.length >= 1 && selectionAllOnThisWall;
-  const effectiveDimensionMembers: WallObjectBase[] =
-    dimensionMemberSource.map((wallObject) => {
-      const previewed = applyDragPreview(wallObject) as WallObject;
-      const artwork =
-        previewed.kind === "artwork" ? artworksById?.get(previewed.artworkId) : undefined;
-      return withArtworkFootprint(previewed, artwork);
-    });
+  const effectiveDimensionMembers: WallObjectBase[] = getElevationFootprintObjects(
+    dimensionMemberSource.map((wallObject) => applyDragPreview(wallObject) as WallObject),
+    artworksById
+  );
   const dimensionMemberIds = new Set(dimensionMemberSource.map((wallObject) => wallObject.id));
-  const dimensionOthers: WallObjectBase[] = wallObjectsOnThisWall
+  const dimensionOthers: WallObject[] = wallObjectsOnThisWall
     .filter((wallObject) => !dimensionMemberIds.has(wallObject.id))
-    .map((wallObject) => {
-      const previewed = applyDragPreview(wallObject) as WallObject;
-      const artwork =
-        previewed.kind === "artwork" ? artworksById?.get(previewed.artworkId) : undefined;
-      return withArtworkFootprint(previewed, artwork);
-    });
+    .map((wallObject) => applyDragPreview(wallObject) as WallObject);
+  const effectiveDimensionOthers: WallObjectBase[] = getElevationFootprintObjects(
+    dimensionOthers,
+    artworksById
+  );
   // Idle, or an active "From edges"/"Between works" session → neighbour-aware
   // (stop at the nearest window/door/work — "From edges" measures to that same
   // detected boundary, and "Between works" re-spaces about a fixed centre so
@@ -1278,7 +1283,11 @@ export function ElevationView({
   const dimensionSegments =
     arrangeSessionMode === "equal"
       ? getSpacingSegments(effectiveDimensionMembers, wallLengthMm)
-      : getNeighborAwareSegments(effectiveDimensionMembers, dimensionOthers, wallLengthMm);
+      : getNeighborAwareSegments(
+          effectiveDimensionMembers,
+          effectiveDimensionOthers,
+          wallLengthMm
+        );
 
   // Wall switcher wiring for the chip. Prev/next cycle through every placeable
   // surface in room order (each room's perimeter walls then its partition

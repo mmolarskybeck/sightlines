@@ -1,4 +1,5 @@
 import type { Artwork, Project, WallObject } from "../../domain/project";
+import { withArtworkFootprint } from "../../domain/framing";
 import type { WallWithGeometry } from "../../domain/geometry/walls";
 import { getOpeningKindLabel } from "../../domain/placement/createOpening";
 import {
@@ -79,37 +80,61 @@ export function deriveArrangeReadout({
 }: UseArrangeReadoutParams): ArrangeReadout | null {
   if (!arrangeWall) return null;
 
-  const detailed = getArrangeReadoutDetailed(arrangeMembers, arrangeWall.lengthMm);
-  const equal = solveEqualArrangement(arrangeMembers, arrangeWall.lengthMm);
-  // All boundary calculations share the same unselected wall objects.
-  const others = wallObjects.filter(
-    (wallObject) =>
-      wallObject.wallId === arrangeWall.id && !selectedObjectIds.includes(wallObject.id)
+  const withResolvedArtworkFootprint = (wallObject: WallObject): WallObject =>
+    withArtworkFootprint(
+      wallObject,
+      wallObject.kind === "artwork" ? artworksById.get(wallObject.artworkId) : undefined
+    );
+  const footprintArrangeMembers = arrangeMembers.map(withResolvedArtworkFootprint);
+  const footprintSelectedArtworkMembers = selectedArtworkMembers.map(
+    withResolvedArtworkFootprint
   );
+  const detailed = getArrangeReadoutDetailed(
+    footprintArrangeMembers,
+    arrangeWall.lengthMm
+  );
+  const equal = solveEqualArrangement(footprintArrangeMembers, arrangeWall.lengthMm);
+  // All boundary calculations share the same unselected wall objects.
+  const others = wallObjects
+    .filter(
+      (wallObject) =>
+        wallObject.wallId === arrangeWall.id && !selectedObjectIds.includes(wallObject.id)
+    )
+    .map(withResolvedArtworkFootprint);
   // Freeze open-space bounds during a live preview.
   const openBounds = activeArrangeSession
     ? activeArrangeSession.openZoneBoundsMm
-    : getOpenSpaceBounds(selectedArtworkMembers, others, arrangeWall.lengthMm);
+    : getOpenSpaceBounds(footprintSelectedArtworkMembers, others, arrangeWall.lengthMm);
   const equalOpen = solveEqualArrangementInZone(
-    arrangeMembers,
+    footprintArrangeMembers,
     openBounds.startMm,
     openBounds.endMm
   );
   // Freeze edge targets during a live preview so they cannot jump.
   const leftBoundaryDetection = activeArrangeSession
     ? activeArrangeSession.insetBoundary.left
-    : detectBoundary("left", selectedArtworkMembers, others, arrangeWall.lengthMm);
+    : detectBoundary(
+        "left",
+        footprintSelectedArtworkMembers,
+        others,
+        arrangeWall.lengthMm
+      );
   const rightBoundaryDetection = activeArrangeSession
     ? activeArrangeSession.insetBoundary.right
-    : detectBoundary("right", selectedArtworkMembers, others, arrangeWall.lengthMm);
+    : detectBoundary(
+        "right",
+        footprintSelectedArtworkMembers,
+        others,
+        arrangeWall.lengthMm
+      );
   const leftBoundary = resolveBoundary(leftBoundaryDetection, wallObjects, artworksById);
   const rightBoundary = resolveBoundary(rightBoundaryDetection, wallObjects, artworksById);
   // Measure from detected boundaries, which may be neighbouring objects.
   const memberLeftEdgeMm = Math.min(
-    ...arrangeMembers.map((member) => member.xMm - member.widthMm / 2)
+    ...footprintArrangeMembers.map((member) => member.xMm - member.widthMm / 2)
   );
   const memberRightEdgeMm = Math.max(
-    ...arrangeMembers.map((member) => member.xMm + member.widthMm / 2)
+    ...footprintArrangeMembers.map((member) => member.xMm + member.widthMm / 2)
   );
   const leftEdgeDistanceMm = memberLeftEdgeMm - leftBoundaryDetection.edgeMm;
   const rightEdgeDistanceMm = rightBoundaryDetection.edgeMm - memberRightEdgeMm;

@@ -23,15 +23,17 @@ import {
   getWallGeometry
 } from "../../domain/geometry/walls";
 import {
-  getFloorObjectPlanRect,
   getFloorWalls,
   getWallObjectPlanRect,
-  planRectIntersectsRect,
   projectPointToWall,
   WALL_OBJECT_PLAN_DEPTH_MM,
   type PlanRect
 } from "../../domain/geometry/planObjects";
-import { buildPlanScene, svgPolygonPoints } from "../../domain/scene2d/planScene";
+import {
+  buildPlanScene,
+  getPlanSceneObjectIdsIntersectingRect,
+  svgPolygonPoints
+} from "../../domain/scene2d/planScene";
 import { getArtworkOuterDimensionsMm, withArtworkFootprint } from "../../domain/framing";
 import { getDefaultOpeningSizeMm, type OpeningKind } from "../../domain/placement/createOpening";
 import {
@@ -1617,50 +1619,15 @@ export function PlanView({
   const { suppressNextSelect, consumeSelectSuppression, suppressNextSelectRef } =
     useSelectSuppression();
 
-  // Placement ids whose (possibly rotated) plan rects intersect the marquee.
-  // The committed project is correct here — no drag can be in flight during a
-  // marquee (beginMarquee bails when one is). Wall objects need their FloorWall
-  // for the wall-line projection (objects whose wall vanished drop out, same as
-  // beginObjectDrag); floor objects carry their own center/rotation.
+  // Placement ids whose rendered plan rects intersect the marquee. No object
+  // drag can be in flight during a marquee, so the static scene is authoritative.
   function idsIntersectingMarquee(marqueeRect: {
     minXMm: number;
     maxXMm: number;
     minYMm: number;
     maxYMm: number;
   }): string[] {
-    const wallsById = new Map(floorWallsForTool.map((wall) => [wall.id, wall]));
-    const ids: string[] = [];
-
-    // Deliberately viewport-dependent: this must capture the same on-screen
-    // extent the object is rendered with, including the min-depth clamp, or a
-    // marquee could visibly enclose an object without selecting it.
-    const effectiveWallObjectDepthMm = Math.max(WALL_OBJECT_PLAN_DEPTH_MM, wallObjectMinDepthMm);
-    for (const object of project.wallObjects) {
-      const wall = wallsById.get(object.wallId);
-      if (!wall) continue;
-      if (
-        planRectIntersectsRect(
-          // Artwork renders offset to the viewer's side (spec §5.3); picking
-          // must follow what's on screen, not the wall centerline.
-          getWallObjectPlanRect(
-            wall,
-            object,
-            effectiveWallObjectDepthMm,
-            object.kind === "artwork"
-          ),
-          marqueeRect
-        )
-      ) {
-        ids.push(object.id);
-      }
-    }
-    for (const object of project.floorObjects) {
-      if (planRectIntersectsRect(getFloorObjectPlanRect(object), marqueeRect)) {
-        ids.push(object.id);
-      }
-    }
-
-    return ids;
+    return getPlanSceneObjectIdsIntersectingRect(planScene, marqueeRect);
   }
 
   function beginMarquee(event: ReactPointerEvent<SVGSVGElement>) {

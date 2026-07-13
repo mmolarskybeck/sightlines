@@ -18,6 +18,7 @@ import {
   solveEqualArrangement,
   solveEqualArrangementInZone
 } from "../domain/placement/arrangeOnWall";
+import { withArtworkFootprint } from "../domain/framing";
 import { createRectangularRoomPlacement } from "../domain/geometry/createRoom";
 import { evaluateOpeningPair } from "../domain/geometry/openingConnections";
 import { createSampleProject } from "../domain/sample/sampleProject";
@@ -3980,6 +3981,47 @@ describe("app store", () => {
         }
         expect(store.getState().project).toBe(projectBefore);
         expect(store.getState().undoStack).toHaveLength(undoBefore);
+      });
+
+      it("spaces mixed framed and unframed works equally between their outer edges", async () => {
+        const { wall, a, b, c } = await threeWorksOnWall();
+        await store.getState().updateArtwork(a.artworkId, {
+          matWidthMm: 75,
+          frame: { widthMm: 25, finish: "black" }
+        });
+        const persistedBefore = store.getState().project!.wallObjects.filter((object) =>
+          [a.placementId, b.placementId, c.placementId].includes(object.id)
+        );
+
+        store.getState().beginArrangeSession("equal");
+        store.getState().updateArrangeSession({ equal: true });
+
+        const preview = store.getState().arrangeSession!.previewById;
+        const artworksById = new Map(
+          store.getState().libraryArtworks.map((artwork) => [artwork.id, artwork])
+        );
+        const footprintMembers = persistedBefore.map((object) => {
+          const previewCenter = preview[object.id];
+          const previewed = { ...object, xMm: previewCenter.xMm, yMm: previewCenter.yMm };
+          return withArtworkFootprint(
+            previewed,
+            previewed.kind === "artwork"
+              ? artworksById.get(previewed.artworkId)
+              : undefined
+          );
+        });
+        const spaces = getSpacingSegments(footprintMembers, wall.lengthMm).map(
+          (segment) => segment.toMm - segment.fromMm
+        );
+
+        expect(new Set(spaces.map((space) => space.toFixed(6))).size).toBe(1);
+        expect(footprintMembers.find((member) => member.id === a.placementId)?.widthMm).toBe(
+          708
+        );
+        expect(
+          store.getState().project!.wallObjects.find((object) => object.id === a.placementId)
+            ?.widthMm
+        ).toBe(508);
       });
 
       it("setArrangeAnchor alone moves nothing (no preview change, no project touch)", async () => {

@@ -66,7 +66,7 @@ algorithms stay `WallObjectBase`-pure and framing-agnostic.
 | Plan wall glyph + its click hit, elevation band painting, 3D wall meshes + raycast, single selection outline | **outer** | correct today |
 | Collision/overlap validation, bounds check, out-of-bounds | **outer** | correct |
 | Snap edge/flush targets (both views), floor-line snap, 48px drag barriers, drop ghosts | **outer** | correct |
-| Marquee (both views), group bounds/outline, fit-selected, arrange/distribute solvers, neighbor detection, spacing readouts, dimension lines | **outer** | Phase 4 |
+| Marquee (both views), group bounds/outline, fit-selected, arrange/distribute solvers, neighbor detection, spacing readouts, dimension lines | **outer** | correct |
 | Tooltips, inspector summaries | image **and** "overall" line when framed | Phase 5 |
 | 3D eye-level camera standoff | **outer** | Phase 5 |
 | Spreadsheet import `framed`-role cells | persisted provenance, never silently stored as image dims | Phase 6a |
@@ -151,6 +151,22 @@ Open (blocks only Phase 6b):
   and cheap; (b) pick a physical representation and derive footprint from it.
   Default to (a) unless a representation is chosen.
 
+Recommend **(a) — declare framing wall-only geometry** and close Phase 6b as a decision rather than leaving it open. Three things in the code push hard that way, beyond it just being cheap:
+
+**The depth fallback would silently inherit the frame band.** `effectiveFloorDepthMm` (artworkForm.ts:13) falls back to `widthMm` when no depth is entered. If you widened a floor artwork's `widthMm` to the outer size, a depth-less floor work would pick up a plan depth of image + 2·(mat+frame) — the frame band would leak into an axis it has no physical relationship to. That's exactly the "auto-map outer onto depth" failure you're guarding against, and it happens implicitly rather than by anyone choosing it.
+
+**The populations barely overlap.** `effectivePlacementForm` sends a work to the floor when `placementForm === "floor"` or `depthMm > 0`. Mat and frame are 2D-work fields; a framed painting is wall-form by construction. A framed work only becomes floor-form if someone enters a depth or flips the form explicitly — which is precisely the leaning/crated case where you don't yet know the representation. So (a) is not deferring a common case, it's declining to guess about a rare one.
+
+**(a) is the only option that preserves the invariant the whole contract rests on.** Storage stays image-sized; framing is a read-time expansion applied at wall-geometry boundaries. A floor→wall conversion restores `heightMm`/`wallYMm` and the work re-expands automatically the moment it's back on a wall, with nothing to migrate — that only holds because no floor field ever absorbed a frame band.
+
+What I'd actually do:
+
+Compute `wallFootprintWidthMm` in PlanView only when `effectivePlacementForm(artwork) === "wall"`, so a floor work's footprint is image-sized by construction rather than by the floor stage happening to ignore the field. Then fix the reject path I flagged: `resolveRejected` should use the footprint width, because a rejected wall-only artwork is still a framed wall work under the cursor, not a floor object — that's the one place the current "floor stage keeps `movingSize`" rule is wrong. With those two, the wall/floor split is enforced at the source instead of downstream.
+
+Then pin the decision where the next reader will hit it: a comment on `effectiveFloorDepthMm` saying the width fallback must never receive an outer width, and one near `getPlacementFootprintMm` stating floor geometry is framing-agnostic. Cover it with three tests — a mat+frame floor work keeps image-sized plan geometry through a drag, a rejected wall work keeps its outer ghost width, and a wall→floor→wall round trip re-expands with no stored dimension change.
+
+Finally, rewrite the Phase 6b row from "Open" to the decision plus its unblock condition: floor geometry stays image-sized until an artwork carries an explicit physical orientation (flat / leaning / crated), because that enum — not the framing fields — is what determines whether the outer height maps to plan depth at all. That turns a vague open question into a concrete precondition for whoever picks it up.
+
 ## 4. Phases
 
 Each phase: implement → its regression tests → `npm test` green →
@@ -194,7 +210,7 @@ mat 75, frame 25 → outer 600×500).
   frame edges; floor snap keeps frame above floorline; barrier flush stop
   leaves frames tangent; ghost size equals rendered size.
 
-### Phase 4 — Selection, group, arrangement, readout geometry
+### Phase 4 — Selection, group, arrangement, readout geometry (complete 2026-07-13)
 
 - Arrange member assembly (`ElevationView.tsx`, `arrangeSlice`/
   `arrangeReadout` inputs) built through the adapter — every `arrangeOnWall.ts`

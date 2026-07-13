@@ -1,6 +1,11 @@
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Project, WallObject } from "../../domain/project";
+import {
+  CURRENT_SCHEMA_VERSION,
+  type Artwork,
+  type Project,
+  type WallObject
+} from "../../domain/project";
 import { createSampleProject } from "../../domain/sample/sampleProject";
 import type { ArrangeSession } from "../store";
 import { useArrangeNudgeShortcuts } from "./useArrangeNudgeShortcuts";
@@ -33,31 +38,47 @@ function projectWith(wallObjects: WallObject[]): Project {
 
 function renderNudgeHarness({
   project = projectWith([artworkPlacement]),
+  artworks = [],
   selectedObjectIds = [artworkPlacement.id],
   moveArtworkPlacement = vi.fn(async () => {}),
   arrangeSession = null,
-  commitArrangeSession = vi.fn()
+  commitArrangeSession = vi.fn(),
+  snapToGrid = false,
+  gridPrecisionFloorMm = null,
+  beginArrangeSession = vi.fn(),
+  setArrangeSessionPreview = vi.fn()
 }: {
   project?: Project;
+  artworks?: Artwork[];
   selectedObjectIds?: string[];
-  moveArtworkPlacement?: (wallObjectId: string, xMm: number, yMm: number, allowOverlap?: boolean) => Promise<void>;
+  moveArtworkPlacement?: (
+    wallObjectId: string,
+    xMm: number,
+    yMm: number,
+    allowOverlap?: boolean
+  ) => Promise<void>;
   arrangeSession?: ArrangeSession | null;
   commitArrangeSession?: (allowOverlap?: boolean) => void;
+  snapToGrid?: boolean;
+  gridPrecisionFloorMm?: number | null;
+  beginArrangeSession?: (mode: ArrangeSession["mode"]) => void;
+  setArrangeSessionPreview?: (moves: { id: string; xMm: number; yMm: number }[]) => void;
 } = {}) {
   const targetKeyDown = vi.fn((event: KeyboardEvent) => event.stopPropagation());
 
   function Harness() {
     useArrangeNudgeShortcuts({
       project,
+      artworks,
       viewMode: "elevation",
       selectedObjectIds,
       draggingArtworkId: null,
       arrangeSession,
       allowOverlappingPlacement: false,
-      snapToGrid: false,
-      gridPrecisionFloorMm: null,
-      beginArrangeSession: vi.fn(),
-      setArrangeSessionPreview: vi.fn(),
+      snapToGrid,
+      gridPrecisionFloorMm,
+      beginArrangeSession,
+      setArrangeSessionPreview,
       commitArrangeSession,
       moveArtworkPlacement,
       moveOpening: vi.fn(async () => {})
@@ -94,6 +115,8 @@ function renderNudgeHarness({
   return {
     moveArtworkPlacement,
     commitArrangeSession,
+    beginArrangeSession,
+    setArrangeSessionPreview,
     targetKeyDown,
     ...render(<Harness />)
   };
@@ -228,5 +251,100 @@ describe("useArrangeNudgeShortcuts focus handling", () => {
     expect(moveArtworkPlacement).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(false);
     expect(targetKeyDown).toHaveBeenCalled();
+  });
+});
+
+describe("useArrangeNudgeShortcuts framed footprint geometry", () => {
+  const framedArtwork = (
+    id: string,
+    framing: Pick<Artwork, "matWidthMm" | "frame">
+  ): Artwork => ({
+    id,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    title: id,
+    dimensions: { widthMm: 300, heightMm: 400, status: "known" },
+    metadata: {},
+    ...framing
+  });
+
+  it("uses a framed neighbor's outer edge when cleaning a single-work nudge", () => {
+    const selected = { ...artworkPlacement, xMm: 1000 };
+    const neighbor: WallObject = {
+      ...artworkPlacement,
+      id: "placement-art-2",
+      artworkId: "art-2",
+      xMm: 600,
+      widthMm: 200
+    };
+    const project = projectWith([selected, neighbor]);
+    const northEast = project.floor.rooms[0].room.vertices.find(
+      (vertex) => vertex.id === "v-ne"
+    )!;
+    northEast.xMm = 3000;
+    const { getByTestId, moveArtworkPlacement } = renderNudgeHarness({
+      project,
+      artworks: [framedArtwork("art-2", { matWidthMm: 75 })],
+      snapToGrid: true,
+      gridPrecisionFloorMm: 100
+    });
+
+    act(() => {
+      getByTestId("topbar-button").dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowRight",
+          bubbles: true,
+          cancelable: true
+        })
+      );
+    });
+
+    // Neighbor outer right edge is 775mm (not the stored-image edge 700mm),
+    // so the nearest clean 100mm gap lattice lands the center at 1125mm.
+    expect(moveArtworkPlacement).toHaveBeenCalledWith(
+      selected.id,
+      1125,
+      selected.yMm,
+      false
+    );
+  });
+
+  it("quantizes a selected group from its framed outer union", () => {
+    const first: WallObject = { ...artworkPlacement, yMm: 240, xMm: 1000 };
+    const second: WallObject = {
+      ...artworkPlacement,
+      id: "placement-art-2",
+      artworkId: "art-2",
+      yMm: 240,
+      xMm: 1500
+    };
+    const { getByTestId, beginArrangeSession, setArrangeSessionPreview } =
+      renderNudgeHarness({
+        project: projectWith([first, second]),
+        artworks: [
+          framedArtwork("art-1", {
+            matWidthMm: 50,
+            frame: { widthMm: 25, finish: "black" }
+          })
+        ],
+        selectedObjectIds: [first.id, second.id],
+        snapToGrid: true,
+        gridPrecisionFloorMm: 100
+      });
+
+    act(() => {
+      getByTestId("topbar-button").dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowUp",
+          bubbles: true,
+          cancelable: true
+        })
+      );
+    });
+
+    expect(beginArrangeSession).toHaveBeenCalledWith("inset");
+    expect(setArrangeSessionPreview).toHaveBeenCalledWith([
+      { id: first.id, xMm: first.xMm, yMm: 375 },
+      { id: second.id, xMm: second.xMm, yMm: 375 }
+    ]);
   });
 });

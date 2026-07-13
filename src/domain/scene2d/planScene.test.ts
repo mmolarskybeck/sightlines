@@ -11,6 +11,7 @@ import { createSampleProject } from "../sample/sampleProject";
 import { feetToMm } from "../units/length";
 import {
   buildPlanScene,
+  getPlanSceneObjectIdsIntersectingRect,
   getRenderedWallObjectPlanRect,
   svgPolygonPoints
 } from "./planScene";
@@ -207,6 +208,41 @@ describe("buildPlanScene wall objects", () => {
 
     expect(scene.wallObjects.map((entry) => entry.object.id)).toEqual(["wo-door"]);
     expect(scene.wallObjects[0]!.renderedRect.depthMm).toBe(WALL_OBJECT_PLAN_DEPTH_MM);
+  });
+});
+
+describe("getPlanSceneObjectIdsIntersectingRect", () => {
+  it("selects a wall artwork when the marquee grazes only its frame band", () => {
+    const project = createSampleProject();
+    project.wallObjects.push(placedArtwork());
+    const artwork = artworkRecord({
+      matWidthMm: 50,
+      frame: { widthMm: 25, finish: "black" }
+    });
+    const scene = buildPlanScene(project, {
+      artworksById: new Map([[artwork.id, artwork]])
+    });
+
+    // Stored image width spans x [1500, 2500], while the rendered framed
+    // width spans [1425, 2575]. This marquee touches only the right frame band.
+    expect(
+      getPlanSceneObjectIdsIntersectingRect(scene, {
+        minXMm: 2520,
+        maxXMm: 2560,
+        minYMm: 1,
+        maxYMm: 100
+      })
+    ).toEqual(["wo-artwork"]);
+
+    // A marquee just beyond the rendered outer edge must not select it.
+    expect(
+      getPlanSceneObjectIdsIntersectingRect(scene, {
+        minXMm: 2576,
+        maxXMm: 2600,
+        minYMm: 1,
+        maxYMm: 100
+      })
+    ).toEqual([]);
   });
 });
 

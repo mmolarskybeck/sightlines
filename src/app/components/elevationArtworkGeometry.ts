@@ -4,9 +4,12 @@ import {
   type ArtworkSizeMm,
   type SvgRectMm
 } from "../../domain/scene2d/elevationScene";
-import { getArtworkOuterDimensionsMm } from "../../domain/framing";
+import {
+  getArtworkOuterDimensionsMm,
+  withArtworkFootprint
+} from "../../domain/framing";
 import { getEffectivePlacementSizeMm } from "../../domain/placement/placeArtwork";
-import type { Artwork } from "../../domain/project";
+import type { Artwork, WallObject } from "../../domain/project";
 import type { PixelAspect } from "../../domain/units/aspectFill";
 
 // The pure center/size→SVG-rect math (and the shared y-flip) moved to
@@ -29,6 +32,20 @@ export type SelectedElevationRect = {
   center: ArtworkCenterMm;
   size: ArtworkSizeMm;
 };
+
+// Selection/annotation geometry uses the same framed outer footprint as the
+// painted artwork. Openings and unresolved artwork records pass through.
+export function getElevationFootprintObjects<T extends WallObject>(
+  objects: T[],
+  artworksById?: ReadonlyMap<string, Artwork>
+): T[] {
+  return objects.map((object) =>
+    withArtworkFootprint(
+      object,
+      object.kind === "artwork" ? artworksById?.get(object.artworkId) : undefined
+    )
+  );
+}
 
 // A checklist drop has no placement record yet. Resolve the image size exactly
 // as placement creation does, then widen it for the elevation ghost so its

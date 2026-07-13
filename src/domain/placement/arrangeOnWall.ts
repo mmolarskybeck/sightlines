@@ -172,8 +172,14 @@ export function getSpacingSegments(
   if (members.length === 0) return [];
 
   const sorted = [...members].sort((a, b) => a.xMm - b.xMm);
+  const leftEdgeMm = Math.min(
+    ...members.map((member) => member.xMm - member.widthMm / 2)
+  );
+  const rightEdgeMm = Math.max(
+    ...members.map((member) => member.xMm + member.widthMm / 2)
+  );
   const segments: { fromMm: number; toMm: number }[] = [
-    { fromMm: 0, toMm: sorted[0].xMm - sorted[0].widthMm / 2 }
+    { fromMm: 0, toMm: leftEdgeMm }
   ];
 
   for (let i = 0; i < sorted.length - 1; i++) {
@@ -183,9 +189,8 @@ export function getSpacingSegments(
     });
   }
 
-  const rightmost = sorted[sorted.length - 1];
   segments.push({
-    fromMm: rightmost.xMm + rightmost.widthMm / 2,
+    fromMm: rightEdgeMm,
     toMm: wallLengthMm
   });
 
@@ -216,10 +221,15 @@ export function detectBoundary(
   others: WallObjectBase[],
   wallLengthMm: number
 ): BoundaryDetection {
-  const sorted = [...members].sort((a, b) => a.xMm - b.xMm);
-  const leftEdgeMm = sorted[0].xMm - sorted[0].widthMm / 2;
-  const rightmost = sorted[sorted.length - 1];
-  const rightEdgeMm = rightmost.xMm + rightmost.widthMm / 2;
+  // Mixed widths can make a center-sorted first/last member differ from the
+  // selection's true outermost edge (a wide frame can extend past its
+  // neighbour). Boundary detection must use the union extent.
+  const leftEdgeMm = Math.min(
+    ...members.map((member) => member.xMm - member.widthMm / 2)
+  );
+  const rightEdgeMm = Math.max(
+    ...members.map((member) => member.xMm + member.widthMm / 2)
+  );
 
   // The selection's union vertical band; a neighbour must overlap it to count.
   const bandTopMm = Math.max(...members.map((member) => member.yMm + member.heightMm / 2));
@@ -276,9 +286,12 @@ export function getNeighborAwareSegments(
   if (members.length === 0) return [];
 
   const sorted = [...members].sort((a, b) => a.xMm - b.xMm);
-  const leftEdgeMm = sorted[0].xMm - sorted[0].widthMm / 2;
-  const rightmost = sorted[sorted.length - 1];
-  const rightEdgeMm = rightmost.xMm + rightmost.widthMm / 2;
+  const leftEdgeMm = Math.min(
+    ...members.map((member) => member.xMm - member.widthMm / 2)
+  );
+  const rightEdgeMm = Math.max(
+    ...members.map((member) => member.xMm + member.widthMm / 2)
+  );
 
   // Neighbors affect only the two outer segments.
   const { startMm: leftBoundaryMm, endMm: rightBoundaryMm } = getOpenSpaceBounds(

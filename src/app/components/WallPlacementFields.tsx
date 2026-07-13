@@ -16,6 +16,17 @@ const CENTER_BUTTON_LABEL: Record<WallPlacementCenterBoundaryKind, string> = {
   open: "Center in open space"
 };
 
+export function getWallPlacementEdges(
+  placement: Pick<ArtworkWallObject, "xMm" | "widthMm">
+): { halfWidthMm: number; leftEdgeMm: number; rightEdgeMm: number } {
+  const halfWidthMm = placement.widthMm / 2;
+  return {
+    halfWidthMm,
+    leftEdgeMm: placement.xMm - halfWidthMm,
+    rightEdgeMm: placement.xMm + halfWidthMm
+  };
+}
+
 // Numeric counterpart to dragging an artwork along its wall.
 export function WallPlacementFields({
   placement,
@@ -41,9 +52,7 @@ export function WallPlacementFields({
 }) {
   const { displayUnit, parseUnit, placeholder, stepMm } = getScopedUnitContext(unit, "openingPosition");
 
-  const halfWidthMm = placement.widthMm / 2;
-  const leftEdgeMm = placement.xMm - halfWidthMm;
-  const rightEdgeMm = placement.xMm + halfWidthMm;
+  const { halfWidthMm, leftEdgeMm, rightEdgeMm } = getWallPlacementEdges(placement);
 
   return (
     <>

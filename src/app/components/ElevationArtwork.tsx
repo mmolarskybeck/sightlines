@@ -60,8 +60,8 @@ export function ElevationArtwork({
   // already provides it.
   onSelect?: (event: ReactMouseEvent<SVGGElement>) => void;
   // The IMAGE size (as stored on the wall object). Mat/frame bands render
-  // outside this; snapping and dim lines still use this image size (see
-  // docs/quick-todos.md note).
+  // outside it; interaction geometry expands the placement through the
+  // framing adapter at its call boundaries.
   size: ArtworkSizeMm;
   // Hover-tooltip body (see PlacementTooltip); elevation passes title/artist/
   // dims but no thumbnail — the artwork itself is already visible. Ghosts

@@ -7,6 +7,7 @@ import {
   spaceGroupAboutCenter,
   type BoundaryDetection
 } from "../../domain/placement/arrangeOnWall";
+import { withArtworkFootprint } from "../../domain/framing";
 import type { Project } from "../../domain/project";
 import { getProjectWalls } from "../projectWalls";
 import type { AppState, EditExtras } from "../store";
@@ -169,7 +170,17 @@ export function createArrangeSlice(
       if (!eligibility.eligible) return;
 
       // Architecture is ignored; only selected artworks become members.
-      const members = eligibility.members;
+      const artworksById = new Map(
+        get().libraryArtworks.map((artwork) => [artwork.id, artwork])
+      );
+      const withResolvedArtworkFootprint = (wallObject: Project["wallObjects"][number]) =>
+        withArtworkFootprint(
+          wallObject,
+          wallObject.kind === "artwork"
+            ? artworksById.get(wallObject.artworkId)
+            : undefined
+        );
+      const members = eligibility.members.map(withResolvedArtworkFootprint);
 
       const memberIds = members.map((member) => member.id);
 
@@ -187,10 +198,12 @@ export function createArrangeSlice(
       if (!wall) return;
 
       // Freeze the open-space span from unselected same-wall objects.
-      const others = project.wallObjects.filter(
-        (wallObject) =>
-          wallObject.wallId === wall.id && !selectedIds.includes(wallObject.id)
-      );
+      const others = project.wallObjects
+        .filter(
+          (wallObject) =>
+            wallObject.wallId === wall.id && !selectedIds.includes(wallObject.id)
+        )
+        .map(withResolvedArtworkFootprint);
       const openZoneBoundsMm = getOpenSpaceBounds(members, others, wall.lengthMm);
       // Default to the open zone only when neighbors bound the group.
       const isBounded =
@@ -276,7 +289,15 @@ export function createArrangeSlice(
         .map((wallObject) => {
           const preview = session.previewById[wallObject.id];
           return preview ? { ...wallObject, xMm: preview.xMm, yMm: preview.yMm } : wallObject;
-        });
+        })
+        .map((wallObject) =>
+          withArtworkFootprint(
+            wallObject,
+            wallObject.kind === "artwork"
+              ? get().libraryArtworks.find((artwork) => artwork.id === wallObject.artworkId)
+              : undefined
+          )
+        );
 
       // "both" re-solves symmetrically; one-sided anchors translate rigidly.
       const insetAnchor: ArrangeSession["insetAnchor"] =

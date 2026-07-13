@@ -3,11 +3,36 @@ import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
   getElevationDropGhostSizeMm,
+  getElevationFootprintObjects,
   getArtworkRectSvg,
   getFitSelectionBoundsSvg,
   isArtworkOutOfWallBounds
 } from "./elevationArtworkGeometry";
 import { ElevationArtwork } from "./ElevationArtwork";
+import { getGroupBounds, getIdsIntersectingRect } from "../../domain/placement/groupBounds";
+import type { Artwork, ArtworkWallObject } from "../../domain/project";
+
+function framedSelectionFixture() {
+  const artwork: Artwork = {
+    id: "art-framed",
+    schemaVersion: 1,
+    dimensions: { widthMm: 400, heightMm: 300, status: "known" },
+    matWidthMm: 75,
+    frame: { widthMm: 25, finish: "black" },
+    metadata: {}
+  };
+  const placement: ArtworkWallObject = {
+    id: "placement-framed",
+    kind: "artwork",
+    artworkId: artwork.id,
+    wallId: "wall-north",
+    xMm: 1000,
+    yMm: 1000,
+    widthMm: 400,
+    heightMm: 300
+  };
+  return { artwork, placement };
+}
 
 describe("getElevationDropGhostSizeMm", () => {
   it("matches the outer size rendered for the framed placement after drop", () => {
@@ -35,6 +60,82 @@ describe("getElevationDropGhostSizeMm", () => {
     expect(ghostSize).toEqual({ widthMm: 600, heightMm: 500 });
     expect(renderedOutline?.getAttribute("width")).toBe(String(ghostSize.widthMm));
     expect(renderedOutline?.getAttribute("height")).toBe(String(ghostSize.heightMm));
+  });
+});
+
+describe("framed elevation selection geometry", () => {
+  it("selects a marquee that intersects only the frame band", () => {
+    const { artwork, placement } = framedSelectionFixture();
+    const footprintObjects = getElevationFootprintObjects(
+      [placement],
+      new Map([[artwork.id, artwork]])
+    );
+
+    expect(
+      getIdsIntersectingRect(footprintObjects, {
+        minXMm: 720,
+        maxXMm: 760,
+        minYMm: 950,
+        maxYMm: 1050
+      })
+    ).toEqual([placement.id]);
+    expect(
+      getIdsIntersectingRect([placement], {
+        minXMm: 720,
+        maxXMm: 760,
+        minYMm: 950,
+        maxYMm: 1050
+      })
+    ).toEqual([]);
+  });
+
+  it("gives a one-member group outline the same outer dimensions as the single outline", () => {
+    const { artwork, placement } = framedSelectionFixture();
+    const [footprint] = getElevationFootprintObjects(
+      [placement],
+      new Map([[artwork.id, artwork]])
+    );
+    const bounds = getGroupBounds([footprint]);
+    const { container } = render(
+      createElement(
+        "svg",
+        null,
+        createElement(ElevationArtwork, {
+          center: { xMm: placement.xMm, yMm: placement.yMm },
+          frame: artwork.frame,
+          matWidthMm: artwork.matWidthMm,
+          size: { widthMm: placement.widthMm, heightMm: placement.heightMm },
+          wallHeightMm: 3000
+        })
+      )
+    );
+    const singleOutline = container.querySelector(".artwork-outline");
+
+    expect(bounds.widthMm).toBe(Number(singleOutline?.getAttribute("width")));
+    expect(bounds.heightMm).toBe(Number(singleOutline?.getAttribute("height")));
+    expect(bounds).toMatchObject({
+      centerXMm: placement.xMm,
+      centerYMm: placement.yMm,
+      widthMm: 600,
+      heightMm: 500
+    });
+  });
+
+  it("fits the framed outer footprint rather than the stored image box", () => {
+    const { artwork, placement } = framedSelectionFixture();
+    const [footprint] = getElevationFootprintObjects(
+      [placement],
+      new Map([[artwork.id, artwork]])
+    );
+
+    const bounds = getFitSelectionBoundsSvg(3000, [
+      {
+        center: { xMm: footprint.xMm, yMm: footprint.yMm },
+        size: { widthMm: footprint.widthMm, heightMm: footprint.heightMm }
+      }
+    ]);
+
+    expect(bounds).toEqual({ xMm: 550, yMm: 1600, widthMm: 900, heightMm: 800 });
   });
 });
 

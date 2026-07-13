@@ -12,6 +12,7 @@ import {
   getFloorWalls,
   getWallObjectPlanRect,
   offsetPlanRectToViewerSide,
+  planRectIntersectsRect,
   segmentPlanRect,
   type PlanRect
 } from "../geometry/planObjects";
@@ -106,6 +107,31 @@ export type PlanSceneOptions = {
   // is small; 0 (the default) keeps true model depth.
   minWallObjectDepthMm?: number;
 };
+
+export type PlanMarqueeRect = {
+  minXMm: number;
+  maxXMm: number;
+  minYMm: number;
+  maxYMm: number;
+};
+
+// Hit-test the same rectangles the plan scene paints. Wall artwork is the
+// important case: renderedRect includes its framed outer width and the
+// viewer-side offset, while openings remain centered on the wall and floor
+// objects keep their stored footprint.
+export function getPlanSceneObjectIdsIntersectingRect(
+  scene: Pick<PlanScene, "wallObjects" | "floorObjects">,
+  marqueeRect: PlanMarqueeRect
+): string[] {
+  return [
+    ...scene.wallObjects
+      .filter(({ renderedRect }) => planRectIntersectsRect(renderedRect, marqueeRect))
+      .map(({ object }) => object.id),
+    ...scene.floorObjects
+      .filter(({ rect }) => planRectIntersectsRect(rect, marqueeRect))
+      .map(({ object }) => object.id)
+  ];
+}
 
 // The SVG <polygon points> encoding of a world-space loop. Trivial, but
 // keeping the one formatter here means every consumer of polygonMm renders

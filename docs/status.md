@@ -1,6 +1,6 @@
 # Sightlines Status
 
-Last refreshed: 2026-07-12 (quick-todos batch)
+Last refreshed: 2026-07-13 (framing dimension contract Phase 4)
 
 This is the single living status doc: current state, what shipped recently, and what comes next. The full product/architecture plan and roadmap live in `docs/plan.md`; small scraps live in `docs/quick-todos.md`; the chronological build log through 2026-07-10 is frozen at `docs/archive/progress.md`.
 
@@ -59,7 +59,7 @@ Five parallel agent slices merged sequentially, all green (tests 1477 → 1502).
 - **Rectangle-room draw gesture + Draw toolbar cluster**: `R` = rectangle, `⇧R` = outline (polygon), drawn-rectangle domain factory and store action, corner-bracket glyph. Toolbar reorganized around an Insert-decorates / Draw-creates grammar: the Draw cluster leads, partition moved out of Insert into Draw, generic `.tool-cluster` pickers extracted, one 30px control lane.
 - **Soft-tactile UI pass** (spec/soft-tactile-ui merged): recessed tracks with raised sliding chips, pressed toggle grammar, sliding petrol underline top nav, styled toolbar tooltips with entrance animation, Insert as pressed tool buttons, soft treatment extended to inspector pickers, help dialog, and zoom cluster.
 - **Cross-project artwork library view** plus a persistent inspector visibility toggle with engaged/collapsed styling.
-- **Framing + matting previews**: additive `matWidthMm` + `frame` on the artwork record (no schema bump); elevation draws frame ring → mat ring → image with bevel hairline; plan widens the along-wall extent to the outer size; editable Overall W×H solves for the frame band; artwork inspector reworked into collapsible sections with persisted open state. Known limitation: elevation snapping, dim lines, out-of-bounds, and fit-selected still use image dims, not outer framed size.
+- **Framing + matting previews**: additive `matWidthMm` + `frame` on the artwork record (no schema bump); elevation draws frame ring → mat ring → image with bevel hairline; plan widens the along-wall extent to the outer size; editable Overall W×H solves for the frame band; artwork inspector reworked into collapsible sections with persisted open state. Framing contract Phases 1–4 now keep stored placement dimensions image-sized while wall validation, snapping, selection, grouping, fit-selected, arrangement, neighbor detection, spacing readouts, and dimension lines measure outer framed footprints. Tooltip/inspector dual-size copy and 3D camera standoff remain Phase 5; floor framing remains deferred pending a representation decision.
 - **Neighbor-aware dim lines** in the between-works tab: outer dim lines stop at the nearest neighbor edge (falling back to the wall edge), with per-side calculated distance readouts in the inspector.
 - **Settings dialog** with storage-persistence hook, durable-storage request, and elevation empty-state treatment.
 - **Context-aware help dialog** on the shared UI primitives.

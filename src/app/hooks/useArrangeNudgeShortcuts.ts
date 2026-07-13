@@ -5,13 +5,15 @@ import {
   quantizeXToCleanIncrement,
   quantizeYToCleanIncrement
 } from "../../domain/snapping/cleanIncrement";
-import type { Project } from "../../domain/project";
+import { withArtworkFootprint } from "../../domain/framing";
+import type { Artwork, Project, WallObject } from "../../domain/project";
 import { unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
 import { getProjectWalls, type ArrangeSession, type ViewMode } from "../store";
 import { isEditableTarget } from "./isEditableTarget";
 
 export type UseArrangeNudgeShortcutsParams = {
   project: Project | null;
+  artworks: Artwork[];
   viewMode: ViewMode;
   selectedObjectIds: string[];
   draggingArtworkId: string | null;
@@ -44,6 +46,7 @@ export type UseArrangeNudgeShortcutsParams = {
 // wall objects, no floor member, all on one wall.
 export function useArrangeNudgeShortcuts({
   project,
+  artworks,
   viewMode,
   selectedObjectIds,
   draggingArtworkId,
@@ -58,6 +61,13 @@ export function useArrangeNudgeShortcuts({
   moveOpening
 }: UseArrangeNudgeShortcutsParams) {
   useEffect(() => {
+    const artworksById = new Map(artworks.map((artwork) => [artwork.id, artwork]));
+    const withResolvedArtworkFootprint = (wallObject: WallObject): WallObject =>
+      withArtworkFootprint(
+        wallObject,
+        wallObject.kind === "artwork" ? artworksById.get(wallObject.artworkId) : undefined
+      );
+
     function onKeyDown(event: KeyboardEvent) {
       if (isEditableTarget(event.target)) return;
       // Some composite widgets deliberately own Enter and the arrow keys while
@@ -155,10 +165,14 @@ export function useArrangeNudgeShortcuts({
         if (useQuantize) {
           const wall = getProjectWalls(project).find((candidate) => candidate.id === member.wallId);
           if (wall) {
-            const size = { widthMm: member.widthMm, heightMm: member.heightMm };
+            const footprintMember = withResolvedArtworkFootprint(member);
+            const size = {
+              widthMm: footprintMember.widthMm,
+              heightMm: footprintMember.heightMm
+            };
             const neighbors = project.wallObjects.filter(
               (object) => object.wallId === member.wallId && object.id !== member.id
-            );
+            ).map(withResolvedArtworkFootprint);
             if (dxMm !== 0) {
               nextXMm = quantizeXToCleanIncrement(
                 { xMm: nextXMm, yMm: nextYMm },
@@ -200,11 +214,12 @@ export function useArrangeNudgeShortcuts({
         const preview = arrangeSession?.previewById[member.id];
         return preview ? { ...member, xMm: preview.xMm, yMm: preview.yMm } : member;
       });
+      const footprintBased = based.map(withResolvedArtworkFootprint);
 
       // Quantize the group as ONE virtual object (its union box) and apply the
       // resulting common delta to every member, so the rigid group lands on a
       // clean measurement without disturbing interior spacing.
-      const box = getGroupBounds(based);
+      const box = getGroupBounds(footprintBased);
       let centerXMm = box.centerXMm + dxMm;
       let centerYMm = box.centerYMm + dyMm;
       if (useQuantize) {
@@ -214,7 +229,7 @@ export function useArrangeNudgeShortcuts({
           const memberIds = new Set(members.map((member) => member.id));
           const neighbors = project.wallObjects.filter(
             (object) => object.wallId === members[0].wallId && !memberIds.has(object.id)
-          );
+          ).map(withResolvedArtworkFootprint);
           if (dxMm !== 0) {
             centerXMm = quantizeXToCleanIncrement(
               { xMm: centerXMm, yMm: centerYMm },
@@ -249,6 +264,7 @@ export function useArrangeNudgeShortcuts({
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [
     project,
+    artworks,
     viewMode,
     selectedObjectIds,
     draggingArtworkId,

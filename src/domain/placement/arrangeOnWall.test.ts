@@ -470,6 +470,19 @@ describe("getSpacingSegments", () => {
     expect(segments[1]).toEqual({ fromMm: 700, toMm: 400 });
     expect(segments[1].toMm).toBeLessThan(segments[1].fromMm);
   });
+
+  it("uses the union edges for outer margins when a wide member crosses center order", () => {
+    const members = [
+      makeMember({ id: "left-center", widthMm: 100, xMm: 600 }),
+      makeMember({ id: "wide", widthMm: 1000, xMm: 1000 }),
+      makeMember({ id: "right-center", widthMm: 100, xMm: 1400 })
+    ];
+
+    const segments = getSpacingSegments(members, 2000);
+
+    expect(segments[0]).toEqual({ fromMm: 0, toMm: 500 });
+    expect(segments.at(-1)).toEqual({ fromMm: 1500, toMm: 2000 });
+  });
 });
 
 describe("getNeighborAwareSegments", () => {
@@ -489,6 +502,19 @@ describe("getNeighborAwareSegments", () => {
     expect(getNeighborAwareSegments(members, [], 2000)).toEqual(
       getSpacingSegments(members, 2000)
     );
+  });
+
+  it("uses the union edges when mixed widths extend past center-sorted neighbors", () => {
+    const members = [
+      makeMember({ id: "left-center", widthMm: 100, xMm: 600 }),
+      makeMember({ id: "wide", widthMm: 1000, xMm: 1000 }),
+      makeMember({ id: "right-center", widthMm: 100, xMm: 1400 })
+    ];
+
+    const segments = getNeighborAwareSegments(members, [], 2000);
+
+    expect(segments[0]).toEqual({ fromMm: 0, toMm: 500 });
+    expect(segments.at(-1)).toEqual({ fromMm: 1500, toMm: 2000 });
   });
 
   it("a window to the right ends the right segment at the window's left edge; left runs to the wall start", () => {
