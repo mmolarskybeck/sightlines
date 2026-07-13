@@ -2,7 +2,7 @@ import { getProjectPlaceableWalls } from "../domain/geometry/placeableWalls";
 import type { Project, Wall } from "../domain/project";
 
 // Perimeter walls plus each partition's two derived faces (spec §5.3). Faces
-// carry display names "Partition 1 — side A/B" (from getFreestandingFaces) and
+// carry display names "Partition 1 · Side A/B" (from getFreestandingFaces) and
 // stable face ids, so the sidebar/elevation wall list treats them as walls.
 export { getProjectPlaceableWalls as getProjectWalls };
 

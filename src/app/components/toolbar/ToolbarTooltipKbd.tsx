@@ -1,7 +1,22 @@
-// The dimmed, tabular key hint that trails a toolbar tooltip's phrase — e.g.
-// "Show grid — G" or "Placing a door — Esc cancels". A quiet suffix span, not
-// a heavy kbd chip; the "— " separator lives in CSS so callers pass only the
-// hint text. Shared by the cluster pickers and the view-option controls.
+import { Kbd } from "../ui/kbd";
+
+// The key hint that trails a toolbar tooltip's phrase. The first token is the
+// key itself; any remaining text stays as a quiet explanatory suffix.
 export function ToolbarTooltipKbd({ hint }: { hint: string }) {
-  return <span className="toolbar-tooltip-kbd">{hint}</span>;
+  const [key, ...suffix] = hint.split(" ");
+  const hasShiftModifier = key.startsWith("⇧") && key.length > 1;
+
+  return (
+    <span className="toolbar-tooltip-kbd">
+      {hasShiftModifier ? (
+        <>
+          <Kbd>⇧</Kbd>
+          <Kbd>{key.slice(1)}</Kbd>
+        </>
+      ) : (
+        <Kbd>{key}</Kbd>
+      )}
+      {suffix.length > 0 ? <span>{suffix.join(" ")}</span> : null}
+    </span>
+  );
 }

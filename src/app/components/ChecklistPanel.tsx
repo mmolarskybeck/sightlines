@@ -60,7 +60,7 @@ const TOUCH_DRAG_SLOP_PX = 10;
 // Shared with the row's `title` tooltip below — one placement per artwork
 // per project, so a placed row can't be dragged out again (spec 2026-07-07).
 const ALREADY_PLACED_DRAG_MESSAGE =
-  "Already placed — drag is disabled. Duplicate the project to try another arrangement.";
+  "Already placed. Drag is disabled. Duplicate the project to try another arrangement.";
 
 type ChecklistFilter = "all" | "placed" | "unplaced";
 export type ChecklistSort = "project" | "title" | "artist" | "status";

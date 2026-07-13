@@ -108,7 +108,7 @@ export function WallInspector({
           icon={<LinkIcon aria-hidden="true" size={15} />}
           tone="info"
         >
-          Linked with {dimensionLink.pairedWallName} — {dimensionLink.roomName}{" "}
+          Linked with {dimensionLink.pairedWallName}, {dimensionLink.roomName}{" "}
           keeps opposing wall lengths linked.
         </InspectorNotice>
       ) : null}

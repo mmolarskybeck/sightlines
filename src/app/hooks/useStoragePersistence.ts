@@ -67,7 +67,7 @@ export function useStoragePersistence(): {
 // flip to reassurance.
 export function getStorageNoteCopy(state: StoragePersistenceState): string {
   if (state === "granted") {
-    return "Saved locally in this browser with durable storage — the browser won't clear it under storage pressure. Export a backup for long-term safekeeping.";
+    return "Saved locally in this browser with durable storage. The browser won't clear it under storage pressure. Export a backup for long-term safekeeping.";
   }
 
   if (state === "denied" || state === "unsupported") {

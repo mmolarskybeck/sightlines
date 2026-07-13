@@ -112,11 +112,11 @@ describe("getFreestandingFaces", () => {
     expect(faceB.lengthMm).toBeCloseTo(2000);
   });
 
-  it("names faces '<partition> — side A/B'", () => {
+  it("names faces '<partition> · Side A/B'", () => {
     const { room } = roomWithPartition({});
     const [faceA, faceB] = getFreestandingFaces(room);
-    expect(faceA.name).toBe("Partition 1 — side A");
-    expect(faceB.name).toBe("Partition 1 — side B");
+    expect(faceA.name).toBe("Partition 1 · Side A");
+    expect(faceB.name).toBe("Partition 1 · Side B");
   });
 
   it("face B's panel-local x mirrors face A's (measured from the physical end)", () => {

@@ -30,7 +30,7 @@ export async function openSightlinesPackage(bytes: Uint8Array): Promise<OpenedPa
 
   const manifestBytes = files.get(MANIFEST_PATH);
   if (!manifestBytes) {
-    throw new Error("the package has no manifest.json — this is not a Sightlines package.");
+    throw new Error("The package has no manifest.json. This is not a Sightlines package.");
   }
 
   let json: unknown;

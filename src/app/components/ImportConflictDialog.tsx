@@ -14,7 +14,7 @@ import { SegmentedToggleGroup, SegmentedToggleGroupItem } from "./ui/segmented";
 
 function artworkLabel(artwork: Artwork): string {
   const title = artwork.title?.trim() || "Untitled";
-  return artwork.artist ? `${title} — ${artwork.artist}` : title;
+  return artwork.artist ? `${title}, ${artwork.artist}` : title;
 }
 
 // ONE review step for every §6 same-id-different-content conflict in a

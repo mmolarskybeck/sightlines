@@ -72,7 +72,7 @@ export function RoomsPanel({
       <nav className="room-list" aria-label="Rooms and walls">
         {project.floor.rooms.length === 0 ? (
           <p className="empty-copy">
-            No rooms yet — draw one, or skip straight to the checklist.
+            No rooms yet. Draw one, or skip straight to the checklist.
           </p>
         ) : null}
         {project.floor.rooms.map((placement) => {

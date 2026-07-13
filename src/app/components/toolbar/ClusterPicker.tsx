@@ -80,7 +80,7 @@ function ClusterPicker({
       <Button
         // Names both the control and the armed mode, so the swapped-in glyph is
         // never the only cue for SR users.
-        aria-label={armed ? `${caption} — ${armed.label} armed` : caption}
+        aria-label={armed ? `${caption}, ${armed.label} armed` : caption}
         aria-disabled={disabled || undefined}
         className="compact-cluster-trigger"
         data-active={armed ? "true" : "false"}

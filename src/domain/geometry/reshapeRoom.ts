@@ -117,11 +117,11 @@ export function moveRoomWall(
 
   const newStart = intersectLines(previousGeom.start, previousAxis, translatedPointMm, axis);
   if (!newStart) {
-    throw new Error("That wall isn’t allowed to move that way — its previous wall runs parallel to it.");
+    throw new Error("That wall isn’t allowed to move that way. Its previous wall runs parallel to it.");
   }
   const newEnd = intersectLines(translatedPointMm, axis, nextGeom.start, nextAxis);
   if (!newEnd) {
-    throw new Error("That wall isn’t allowed to move that way — its next wall runs parallel to it.");
+    throw new Error("That wall isn’t allowed to move that way. Its next wall runs parallel to it.");
   }
 
   if (
@@ -135,7 +135,7 @@ export function moveRoomWall(
       MIN_VERTEX_SPACING_MM
   ) {
     throw new Error(
-      "That wall isn’t allowed to move that far — it would collapse a corner too close to a neighbouring vertex."
+      "That wall isn’t allowed to move that far. It would collapse a corner too close to a neighbouring vertex."
     );
   }
 
@@ -146,7 +146,7 @@ export function moveRoomWall(
   });
 
   if (!isSimplePolygon(nextVertices.map((vertex) => ({ xMm: vertex.xMm, yMm: vertex.yMm })))) {
-    throw new Error("That wall isn’t allowed to move there — it would cross another wall.");
+    throw new Error("That wall isn’t allowed to move there. It would cross another wall.");
   }
 
   const nextRoom: Room = { ...room, vertices: nextVertices };
@@ -205,7 +205,7 @@ export function moveRoomVertex(
 
   if (!canMoveRoomVertex(room, vertexId, nextLocalMm)) {
     throw new Error(
-      "That vertex position isn’t allowed — it would cross another wall or sit too close to a neighbouring corner."
+      "That vertex position isn’t allowed. It would cross another wall or sit too close to a neighbouring corner."
     );
   }
 
@@ -255,7 +255,7 @@ export function splitWall(
     xAlongMm < MIN_VERTEX_SPACING_MM ||
     xAlongMm > geometry.lengthMm - MIN_VERTEX_SPACING_MM
   ) {
-    throw new Error("Can’t split this close to a wall’s end — drag the split point further in.");
+    throw new Error("Can’t split this close to a wall’s end. Drag the split point further in.");
   }
 
   const t = xAlongMm / geometry.lengthMm;
@@ -321,7 +321,7 @@ export function deleteRoomVertex(project: Project, roomId: string, vertexId: str
   findVertex(room, vertexId); // throws if missing
 
   if (room.vertices.length <= 3) {
-    throw new Error("A room needs at least three corners — this is the last one that can go.");
+    throw new Error("A room needs at least three corners. This is the last one that can go.");
   }
 
   const enteringWallIndex = room.walls.findIndex((wall) => wall.endVertexId === vertexId);

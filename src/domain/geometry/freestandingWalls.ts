@@ -138,7 +138,7 @@ function buildFace(
   return {
     id,
     roomId: wall.roomId,
-    name: `${wall.name} — side ${face === "a" ? "A" : "B"}`,
+    name: `${wall.name} · Side ${face === "a" ? "A" : "B"}`,
     startVertexId: start.id,
     endVertexId: end.id,
     heightMm: wall.heightMm,

@@ -32,7 +32,7 @@ export function DeleteRoomDialog({
           <DialogTitle>Delete {roomName}?</DialogTitle>
           <DialogDescription>
             {summary
-              ? `It contains ${describeRoomContents(summary)}. Deleting the room removes them too — undo brings everything back.`
+              ? `It contains ${describeRoomContents(summary)}. Deleting the room removes them too. Undo brings everything back.`
               : null}
           </DialogDescription>
         </DialogHeader>

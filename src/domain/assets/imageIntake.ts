@@ -21,14 +21,14 @@ export function validateImageFile(
   if (!isAcceptedImageType(file.type)) {
     return {
       ok: false,
-      reason: `${file.name} is not a supported image type — accepted formats are JPEG, PNG, and WebP.`
+      reason: `${file.name} is not a supported image type. Accepted formats are JPEG, PNG, and WebP.`
     };
   }
 
   if (file.size > MAX_IMAGE_FILE_BYTES) {
     return {
       ok: false,
-      reason: `${file.name} is too large (${formatMegabytes(file.size)}) — images are limited to ${formatMegabytes(MAX_IMAGE_FILE_BYTES)}.`
+      reason: `${file.name} is too large (${formatMegabytes(file.size)}). Images are limited to ${formatMegabytes(MAX_IMAGE_FILE_BYTES)}.`
     };
   }
 

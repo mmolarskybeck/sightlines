@@ -423,7 +423,7 @@ export function SelectionInspector({
                   isNeighbor={arrange.rightBoundary.type === "object"}
                 />
                 <p className="field-hint">
-                  The group stays where it is — the side distances follow.
+                  The group stays where it is. The side distances follow.
                 </p>
                 <p className="field-hint">
                   {bothEdgeCaption(arrange.leftBoundary, arrange.rightBoundary)}

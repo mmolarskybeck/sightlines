@@ -2924,16 +2924,15 @@ body.panels-resizing * {
   line-height: var(--leading-ui);
 }
 
-/* The trailing key hint in a toolbar tooltip ("Show grid — G", "Placing a
-   door — Esc cancels"): a dimmed, tabular suffix rather than a heavy kbd chip.
-   The "— " separator rides here so the phrase stays a plain string upstream. */
+/* The trailing key hint in a toolbar tooltip: a compact key chip followed by
+   optional explanatory text. */
 .toolbar-tooltip-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 7px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
-}
-
-.toolbar-tooltip-kbd::before {
-  content: " — ";
 }
 
 /* Entrance for every tooltip (the .placement-tooltip class rides the

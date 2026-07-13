@@ -33,7 +33,7 @@ const walls: WallSwitcherEntry[] = [
   },
   {
     id: "gallery-2-partition-a",
-    name: "Divider — side A",
+    name: "Divider · Side A",
     roomId: "gallery-2",
     roomName: "Gallery 2",
     kind: "partition-face",
@@ -163,7 +163,7 @@ describe("WallSwitcher accessible context", () => {
   it("names the trigger with the current wall and room and announces changes politely", async () => {
     const { onSelectWall } = renderSwitcher();
     const trigger = screen.getByRole("button", {
-      name: "Change wall — East wall, Gallery 1"
+      name: "Change wall: East wall, Gallery 1"
     });
 
     const liveRegion = document.querySelector<HTMLElement>('[aria-live="polite"]');
@@ -177,7 +177,7 @@ describe("WallSwitcher accessible context", () => {
     await waitFor(() => expect(onSelectWall).toHaveBeenCalledWith("gallery-2-south"));
     // Radix makes the trigger inert to accessibility APIs while its modal menu
     // is open, so assert its updated name through the persistent DOM node.
-    expect(trigger).toHaveAttribute("aria-label", "Change wall — South wall, Gallery 2");
+    expect(trigger).toHaveAttribute("aria-label", "Change wall: South wall, Gallery 2");
     expect(liveRegion).toHaveTextContent("Now viewing South wall in Gallery 2");
   });
 });

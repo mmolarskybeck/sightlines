@@ -151,13 +151,13 @@ const UNDO_STACK_LIMIT = 100;
 // "Allow overlap" view option, so a curator who genuinely wants to stack
 // pieces over an obstacle for now isn't blocked outright.
 export const OVERLAP_BLOCKED_MESSAGE =
-  'Can’t place it there — it would overlap another object on this wall. Turn on "Allow overlap" in view options to allow it.';
+  'Can’t place it there. It would overlap another object on this wall. Turn on "Allow overlap" in view options to allow it.';
 
 // A door/window/blocked-zone pair overlapping each other is forbidden outright
 // (see overlapPolicy.ts) — there's no "Allow overlap" that rescues it, so this
 // message deliberately omits the toggle advice OVERLAP_BLOCKED_MESSAGE gives.
 export const FORBIDDEN_OVERLAP_MESSAGE =
-  "Can’t place it there — doors, windows and blocked zones can’t overlap each other.";
+  "Can’t place it there. Doors, windows and blocked zones can’t overlap each other.";
 
 // One placement per artwork per project — trying layout variants is what
 // project duplication is for (spec 2026-07-07). Enforced only on NEW
@@ -694,7 +694,7 @@ export function createAppStore(deps: AppStoreDeps) {
     ): Promise<void> {
       if (wallObject.kind !== "artwork" && wallObject.kind !== "blocked-zone") {
         throw new Error(
-          `A ${wallObject.kind} cannot be moved onto the floor — it must stay on a wall.`
+          `A ${wallObject.kind} cannot be moved onto the floor. It must stay on a wall.`
         );
       }
 
@@ -962,7 +962,7 @@ export function createAppStore(deps: AppStoreDeps) {
         } catch (error) {
           libraryError = `Could not load the artwork library (${
             error instanceof Error ? error.message : "unknown error"
-          }). Your project is unaffected — try reloading to pick the library back up.`;
+          }). Your project is unaffected. Try reloading to pick the library back up.`;
         }
 
         try {
@@ -986,7 +986,7 @@ export function createAppStore(deps: AppStoreDeps) {
             libraryArtworks,
             error: `Could not load the saved project (${
               error instanceof Error ? error.message : "unknown error"
-            }). Showing an unsaved sample instead — your data is still in browser storage.`
+            }). Showing an unsaved sample instead. Your data is still in browser storage.`
           });
         }
       },
@@ -2977,7 +2977,7 @@ export function createAppStore(deps: AppStoreDeps) {
           // fail loudly.
           if (kind !== "blocked-zone") {
             throw new Error(
-              `Cannot place a ${kind} on the floor — only blocked zones can be floor-placed.`
+              `Cannot place a ${kind} on the floor. Only blocked zones can be floor-placed.`
             );
           }
 

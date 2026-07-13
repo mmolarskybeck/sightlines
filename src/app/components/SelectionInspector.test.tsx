@@ -126,7 +126,7 @@ describe("SelectionInspector arrange body", () => {
     expect(screen.getByText("Distance from right wall edge")).toBeTruthy();
     expect(screen.getByText("Measuring to each wall edge.")).toBeTruthy();
     expect(
-      screen.getByText(/The group stays where it is — the side distances follow/)
+      screen.getByText(/The group stays where it is\. The side distances follow/)
     ).toBeTruthy();
     // No "Neighbor" tag when both detected boundaries are the wall.
     expect(screen.queryByText("Neighbor")).toBeNull();

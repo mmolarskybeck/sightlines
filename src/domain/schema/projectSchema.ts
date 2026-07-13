@@ -330,7 +330,7 @@ export function migrateProjectJson(text: string): Project {
   // just to reject it.
   if (text.length > MAX_IMPORT_JSON_LENGTH) {
     throw new Error(
-      `the file is too large (${formatApproxMegabytes(text.length)}) — imports are limited to ${formatApproxMegabytes(MAX_IMPORT_JSON_LENGTH)}.`
+      `the file is too large (${formatApproxMegabytes(text.length)}). Imports are limited to ${formatApproxMegabytes(MAX_IMPORT_JSON_LENGTH)}.`
     );
   }
 

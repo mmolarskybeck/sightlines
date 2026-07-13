@@ -52,7 +52,7 @@ export const OPENING_TOOL_META: Record<OpeningKind, InsertToolMeta> = {
 // The three Draw-cluster tools. Each armed phrase names its gesture verb (Drag…
 // / Click…), so the deliberate per-tool gesture differences — drag corner to
 // corner for the rectangle, click-to-place corners for the outline, drag for
-// the partition — are self-documenting in the tooltip.
+// the partition, are self-documenting in the tooltip.
 export const RECT_ROOM_TOOL_META: InsertToolMeta = {
   key: "rect-room",
   label: "Rectangle room",

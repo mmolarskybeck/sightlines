@@ -52,7 +52,7 @@ function groupByRoom(walls: WallSwitcherEntry[]): RoomGroup[] {
 }
 
 function formatElevationName(name: string) {
-  const partitionFace = name.match(/^(.*) — side ([AB])$/i);
+  const partitionFace = name.match(/^(.*?)(?:\s*[—,·]\s*)side\s+([AB])$/i);
   return partitionFace ? `${partitionFace[1]} · Side ${partitionFace[2].toUpperCase()}` : name;
 }
 
@@ -176,7 +176,7 @@ export function WallSwitcher({
         <button
           type="button"
           aria-label={
-            current ? `Change wall — ${formattedCurrentName}, ${current.roomName}` : "Change wall"
+            current ? `Change wall: ${formattedCurrentName}, ${current.roomName}` : "Change wall"
           }
           className={cn(TRIGGER_CLASS, "surface-label-select")}
         >

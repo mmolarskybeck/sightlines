@@ -911,7 +911,7 @@ function SampleCard({
     return (
       <div className="import-sample-card">
         <p className="import-sample-empty">
-          No data rows in this sheet — check the header row setting.
+          No data rows in this sheet. Check the header row setting.
         </p>
       </div>
     );

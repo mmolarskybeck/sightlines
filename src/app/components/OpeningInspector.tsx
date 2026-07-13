@@ -129,7 +129,7 @@ export function OpeningInspector({
                 <SelectContent>
                   {connectionCandidates.map((candidate) => (
                     <SelectItem key={candidate.id} value={candidate.id}>
-                      {candidate.label} — {alignmentLabel(candidate.alignment)}
+                      {candidate.label}, {alignmentLabel(candidate.alignment)}
                     </SelectItem>
                   ))}
                 </SelectContent>

@@ -264,7 +264,7 @@ export function ArtworkInspector({
           // placing (the Type row lives in the placement section once placed).
           <>
             <InspectorNotice tone="info">
-              Not placed yet — drag it onto a wall or the floor.
+              Not placed yet. Drag it onto a wall or the floor.
             </InspectorNotice>
             <PlacementTypeRow artwork={artwork} onChangePlacementForm={onChangePlacementForm} />
           </>
@@ -773,7 +773,7 @@ function FramingSection({
                   onCommit={commitOverall(dimensions.heightMm)}
                 />
               </div>
-              <p className="field-hint">Framed size — editing either derives the frame width.</p>
+              <p className="field-hint">Framed size. Editing either derives the frame width.</p>
             </div>
           ) : null}
         </div>

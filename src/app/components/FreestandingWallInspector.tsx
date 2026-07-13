@@ -56,7 +56,7 @@ export function FreestandingWallInspector({
           </Button>
         </InspectorActionGroup>
         <p className="field-hint">
-          Hang artwork on either face — each side gets its own elevation view.
+          Hang artwork on either face. Each side gets its own elevation view.
         </p>
       </div>
 

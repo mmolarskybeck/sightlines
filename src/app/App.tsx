@@ -755,7 +755,7 @@ export function App() {
             return {
               id: candidate.id,
               label: owner
-                ? `${owner.room.name} — ${wallName ?? "Wall"}`
+                ? `${owner.room.name}, ${wallName ?? "Wall"}`
                 : wallName ?? "Unknown wall",
               alignment
             };
@@ -843,18 +843,18 @@ export function App() {
   const arrangeDisabledReason = arrangeEligibility.eligible
     ? ""
     : arrangeEligibility.reason === "floorMember"
-      ? "Arranging is for works hung on a wall — this selection includes floor-placed objects."
+      ? "Arranging is for works hung on a wall. This selection includes floor-placed objects."
       : arrangeEligibility.reason === "noArtworks"
-        ? "Arranging is for works only — doors, windows, and blocked zones stay where they are."
+        ? "Arranging is for works only. Doors, windows, and blocked zones stay where they are."
         : arrangeEligibility.reason === "singleArtwork"
-          ? "Arranging is for works only — select at least two works on the same wall to arrange them."
-          : "Select works on a single wall to arrange them — this selection spans more than one wall.";
+        ? "Arranging is for works only. Select at least two works on the same wall to arrange them."
+        : "Select works on a single wall to arrange them. This selection spans more than one wall.";
   // When the selection IS arrangeable but also contains openings, arranging
   // silently ignores them (see selectedArtworkMembers above) — surface that
   // explicitly rather than let the curator wonder why a door didn't move.
   const arrangeIgnoredNote =
     arrangeWall && selectedObjectIds.length > selectedArtworkMembers.length
-      ? "Only the works are arranged — doors, windows, and blocked zones stay put."
+      ? "Only the works are arranged. Doors, windows, and blocked zones stay put."
       : undefined;
 
   // Warnings carry a wallObjectId, but a raw id means nothing to a curator —
