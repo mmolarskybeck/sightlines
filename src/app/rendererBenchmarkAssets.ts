@@ -1,7 +1,4 @@
-// Dev benchmark asset bridge. The normal app reads artwork blobs from
-// IndexedDB; the benchmark fixture is intentionally non-persisting, so its
-// six Wikimedia display assets are served directly from the existing fixture
-// corpus instead.
+// Non-persisting benchmark fixtures load images directly instead of from IndexedDB.
 const benchmarkImageUrls = import.meta.glob(
   "../../fixtures/artworks/wikimedia/images/*.jpg",
   { eager: true, import: "default", query: "?url" }

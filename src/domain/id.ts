@@ -1,10 +1,4 @@
-// crypto.randomUUID exists only in "secure contexts" — HTTPS or localhost,
-// same restriction as crypto.subtle (see assets/sha256.ts). A curator testing
-// image intake on an iPad over plain http against a LAN dev box gets a
-// `crypto.randomUUID` that's `undefined`, so every id-assigning call site
-// (asset ids, artwork ids, project ids, ...) would throw. crypto.getRandomValues
-// has no such restriction, though, so fall back to building a spec-correct
-// UUID v4 from it when randomUUID isn't there.
+// randomUUID requires a secure context; getRandomValues supports LAN dev sessions.
 
 export function newId(): string {
   if (typeof globalThis.crypto?.randomUUID === "function") {
@@ -16,8 +10,7 @@ export function newId(): string {
   return uuidV4FromBytes(bytes);
 }
 
-// Exported so tests can exercise it directly: the test environment always
-// has crypto.randomUUID, so newId() above would never actually take this path.
+// Exported to test the fallback when randomUUID exists in the test environment.
 export function uuidV4FromBytes(bytes: Uint8Array): string {
   bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
   bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10xx

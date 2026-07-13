@@ -1,11 +1,5 @@
-// scripts/assert-chunk-graph.mjs
-//
 // Build invariant: the eager chunk graph must never reach the three chunk.
-// The 3D stack (three.js + react-three fiber/drei) is reachable only through
-// the lazy ThreeDView import; a static edge from any eagerly-loaded chunk
-// (entry or its static-import closure) would put ~1MB of three.js on the
-// critical path. This regressed once via Vite's preload helper being placed
-// in the three chunk — see vite.config.ts manualChunks.
+// Three.js must remain reachable only through the lazy ThreeDView import.
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
@@ -18,17 +12,14 @@ if (!entryMatch) {
   process.exit(1);
 }
 
-// Self-check: if chunk naming ever changes, fail loudly instead of silently
-// asserting nothing.
+// Fail if naming changes instead of silently asserting nothing.
 const threeChunks = readdirSync(path.join(dist, "assets")).filter((file) => /^three-.*\.js$/.test(file));
 if (threeChunks.length === 0) {
   console.error("assert-chunk-graph: no three-*.js chunk in dist/assets — chunk naming changed; update this script.");
   process.exit(1);
 }
 
-// Static import specifiers of a built chunk. Dynamic `import(...)` is masked
-// out first so only static `import ... from "..."`, bare `import "..."`, and
-// `export ... from "..."` edges remain.
+// Mask dynamic imports before extracting static import/export edges.
 function staticImports(file) {
   const source = readFileSync(path.join(dist, file), "utf8").replaceAll("import(", "__dynamic_import__(");
   const deps = new Set();

@@ -29,22 +29,11 @@ import {
 } from "./ui/select";
 import { getScopedUnitContext } from "./scopedUnits";
 
-// Wall-length nudge per stepper press / ArrowUp-Down: a clean ¼″ for imperial,
-// a round 10mm for metric — the same "smallest sensible hand adjustment" the
-// arrow-key nudges use, matched to each system so the value lands on tidy
-// numbers instead of a converted fraction.
-
 type ArrangeMode = "equal" | "inset" | "gap";
 type InsetAnchor = "left" | "both" | "right";
 type EvenZone = "wall" | "open";
 
-// "From edges" is deliberately agnostic about what it measures to — a wall
-// has an edge, a neighbouring artwork or opening has an edge, and the panel
-// never asks the curator to choose which; it states whatever detectBoundary
-// found. These turn one ArrangeBoundary into the three copy surfaces that
-// need it: the editable field's own label, its "on the {side}" phrasing, and
-// the one-line caption confirming the target for anyone not watching the
-// canvas closely.
+// "From edges" names whichever wall or neighboring object was auto-detected.
 function nearestNounFor(kind: WallObject["kind"]): string {
   switch (kind) {
     case "artwork":
@@ -81,17 +70,8 @@ function bothEdgeCaption(left: ArrangeBoundary, right: ArrangeBoundary): string 
   return `Measuring to ${leftPhrase} and ${rightPhrase}.`;
 }
 
-// The same quiet gray pill "Calculated" already uses, reused verbatim per the
-// panel's one-tag visual grammar — a curator can tell at a glance that a
-// number moves if that neighbour moves, without reading the caption.
-//
-// `decorative` hides it from the accessible name: a labelBadge sits inside
-// the LengthField's own <label>, and a browser folds ALL of a label's text
-// content into the input's accessible name — without this the field would
-// announce as e.g. "Distance from Portrait Study on the leftNeighbor". The
-// label text already names the neighbour, so hiding the tag there loses
-// nothing; the ArrangeCalculatedReadout usage isn't inside a <label> at all,
-// so it stays announced normally.
+// Hide the tag inside a field label so it is not appended to the input's
+// accessible name. Readout tags remain announced.
 function NeighborTag({ decorative = false }: { decorative?: boolean } = {}) {
   return (
     <span aria-hidden={decorative || undefined} className="arrange-tag">
@@ -100,19 +80,7 @@ function NeighborTag({ decorative = false }: { decorative?: boolean } = {}) {
   );
 }
 
-// Right-inspector panel for a multi-object selection (2+ placements picked in
-// the plan/elevation view). Props-driven, same discipline as
-// ArtworkInspector/OpeningInspector — nothing here reaches into the store, so
-// the store's arrange/remove guards (the arrange-session actions,
-// removeSelectedPlacements) are the only place the actual rules live; this
-// component just renders whatever the caller decided the selection can do.
-//
-// The arrange controls speak the curator's physical language, never the
-// engine's: the segmented control offers "Space evenly / From wall edges /
-// Between works" (internal modes equal/inset/gap), only the chosen mode's
-// value is editable, and the companion measurement it forces reads as plain
-// "Calculated" text. A live arrange session (arrange.sessionActive) surfaces
-// Apply/Cancel; committing/reverting is the caller's job.
+// Props-driven multi-selection inspector; arrange/remove rules stay in the store.
 export function SelectionInspector({
   arrange,
   arrangeDisabledReason,
@@ -130,35 +98,21 @@ export function SelectionInspector({
 }: {
   count: number;
   unit: DisplayUnit;
-  // The wall the selection lives on, for the section header; null falls back
-  // to the generic "Arrange on wall".
+  // null falls back to the generic "Arrange on wall" heading.
   wallName: string | null;
-  // null when the selection can't be arranged (not 2+ wall objects on one
-  // wall) — see the arrange-session guards in store.ts. `mode` is the current
-  // interpretation of the layout and is ALWAYS one of the three modes (a live
-  // session's mode, "equal" when the freeform layout already reads as evenly
-  // spaced, else the caller's remembered lastArrangeMode) — the panel never
-  // sits in a no-mode state. The *IsMixed flags say whether a single companion
-  // value can be trusted.
+  // null when the selection is not 2+ arrangeable objects on one wall.
   arrange: {
     mode: ArrangeMode;
-    // Which side the "From edges" mode measures from. Only affects the
-    // inset-mode body; "both" is the centred default.
+    // "both" is the centered default for From edges.
     insetAnchor: InsetAnchor;
-    // Which span "Space evenly" distributes across. Only affects the equal-mode
-    // body; "wall" is the whole-wall default.
+    // "wall" is the default Space evenly span.
     evenZone: EvenZone;
     insetMm: number;
     gapMm: number;
-    // Distance from the group's leftmost/rightmost edge to whatever
-    // leftBoundary/rightBoundary detected on that side — the two single-
-    // sided measurements the left/right/both anchors edit and read back.
+    // Distances from the group to the detected boundary on each side.
     leftEdgeDistanceMm: number;
     rightEdgeDistanceMm: number;
-    // What "From edges" measures against on each side: the wall, or the
-    // nearest unselected neighbour beside the group (auto-detected — there is
-    // no manual wall-vs-neighbour toggle). Drives the field label, the
-    // "Neighbor" tag, and the caption.
+    // Auto-detected wall or nearest unselected neighbor on each side.
     leftBoundary: ArrangeBoundary;
     rightBoundary: ArrangeBoundary;
     insetIsMixed: boolean;
@@ -167,9 +121,7 @@ export function SelectionInspector({
     sessionActive: boolean;
   } | null;
   arrangeDisabledReason?: string;
-  // Set when the selection IS arrangeable but also contains openings (doors/
-  // windows/blocked zones), which arranging ignores rather than blocks — shown
-  // so that artwork-only scope is explicit instead of silent.
+  // Explains that arranging ignores openings in an otherwise valid selection.
   arrangeIgnoredNote?: string;
   onSetMode: (mode: ArrangeMode) => void;
   onSetAnchor: (anchor: InsetAnchor) => void;
@@ -181,20 +133,11 @@ export function SelectionInspector({
   onCancelArrange: () => void;
   onRemoveAll: () => void;
 }) {
-  // Margin/spacing are wall-length measurements, same natural unit as an
-  // opening's X position (docs/plan.md's openingPosition scope) — inset and
-  // gap are just two more offsets along the wall.
   const { displayUnit, parseUnit, placeholder, stepMm } = getScopedUnitContext(unit, "openingPosition");
 
   const formatValue = (valueMm: number) => formatLength(valueMm, { unit: displayUnit });
 
-  // "Remove all" is destructive and irreversible-feeling, so it takes a two-
-  // step confirm (same pattern as RoomsPanel's delete): the first click swaps
-  // the row for "Remove N objects?" with confirm/keep buttons. "Objects" (not
-  // "works") because the selection can mix artworks and openings, matching the
-  // "N objects selected" header. The transient confirm resets whenever the
-  // selection size changes, so a stale confirm can never fire against a
-  // different selection.
+  // Reset confirmation when the selection changes so it cannot remove a new selection.
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   useEffect(() => {
     setConfirmingRemove(false);
@@ -215,19 +158,11 @@ export function SelectionInspector({
             <SegmentedToggleGroup
               aria-label="Spacing method"
               className="arrange-modes"
-              // Three-across segments, each an icon over a label that may wrap
-              // to two lines. Horizontal orientation keeps Radix's roving
-              // Left/Right arrow navigation.
               orientation="horizontal"
               type="single"
               value={arrange.mode}
               onValueChange={(value) => {
-                // A Radix single toggle-group fires "" when the active segment
-                // is clicked again (deselect). The displayed mode is often just
-                // the remembered default (lastArrangeMode) with no live session
-                // behind it, so a re-click must APPLY the mode, not deselect —
-                // clicking "Space evenly" has to space evenly even when that
-                // segment already reads as active.
+                // Radix sends "" when the active item is re-clicked; reapply it instead.
                 if (value === "equal" || value === "inset" || value === "gap") {
                   onSetMode(value);
                 } else {

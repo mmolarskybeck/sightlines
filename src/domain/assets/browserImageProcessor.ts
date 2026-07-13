@@ -1,9 +1,4 @@
-// Effectful half of the image intake pipeline (docs/plan.md §4.5): decode,
-// hash, and re-encode using real browser APIs. Not unit-tested in jsdom —
-// every decision that can be expressed as pure data lives in imageIntake.ts
-// instead, where it's covered by real tests. This file is deliberately thin:
-// wire the browser APIs together, and throw calm, per-file errors so the
-// store layer can skip a bad file without sinking the whole batch.
+// Browser-backed image decode, hash, and tier encoding.
 
 import { DISPLAY_MAX_PX, THUMBNAIL_MAX_PX, WEBP_QUALITY, fitWithin } from "./imageIntake";
 import type { ImageProcessor, ProcessedImage } from "./imageIntake";
@@ -14,9 +9,7 @@ type EncodableCanvas = OffscreenCanvas | HTMLCanvasElement;
 export function createBrowserImageProcessor(): ImageProcessor {
   return {
     async process(file: File): Promise<ProcessedImage> {
-      // Read the bytes once — they're needed for both the content hash and
-      // the untouched "original" tier (§4.5: originals are never
-      // re-encoded), so there's no reason to read the file twice.
+      // Originals remain untouched; bytes are also used for the content hash.
       const bytes = await file.arrayBuffer();
       const sha256 = await sha256Hex(bytes);
 
@@ -44,9 +37,7 @@ export function createBrowserImageProcessor(): ImageProcessor {
 
 async function decodeBitmap(file: File): Promise<ImageBitmap> {
   try {
-    // "from-image" applies the file's own EXIF orientation during decode, so
-    // a photo shot in portrait on a phone doesn't come out sideways in every
-    // derivative tier.
+    // Apply EXIF orientation before producing derivative tiers.
     return await createImageBitmap(file, { imageOrientation: "from-image" });
   } catch {
     throw new Error(`${file.name} could not be read as an image.`);
@@ -63,9 +54,7 @@ async function renderTier(bitmap: ImageBitmap, maxPx: number, filename: string):
 }
 
 function createCanvas(widthPx: number, heightPx: number): EncodableCanvas {
-  // OffscreenCanvas keeps encoding off the main thread's paint path; fall
-  // back to a plain <canvas> element for Safari versions that don't support
-  // it yet.
+  // Fall back for browsers without OffscreenCanvas.
   if (typeof OffscreenCanvas !== "undefined") {
     return new OffscreenCanvas(widthPx, heightPx);
   }
@@ -83,9 +72,7 @@ function drawBitmap(
   heightPx: number,
   filename: string
 ): void {
-  // Branching on the concrete type (rather than calling canvas.getContext
-  // directly on the union) keeps each branch's context type — and its
-  // drawImage overload — unambiguous to the compiler.
+  // Narrow the canvas type so each drawImage overload remains unambiguous.
   if (canvas instanceof HTMLCanvasElement) {
     const context = canvas.getContext("2d");
     if (!context) {

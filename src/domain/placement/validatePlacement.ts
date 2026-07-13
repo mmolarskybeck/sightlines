@@ -9,19 +9,9 @@ export type PlacementWarning = {
   wallObjectId: string;
   wallId: string;
   message: string;
-  // "collision" warnings are the ones a caller can choose to block on — every
-  // overlapping same-wall pair now emits one (see validateWallObjectCollisions).
-  // "bounds" warnings (off the wall's edges, or a dangling wall reference) stay
-  // advisory only; there's no "override" for a placement that isn't on the wall
-  // at all. "overlap" is retired — it's kept in the union purely for
-  // back-compat with persisted PlacementWarnings that predate the policy change
-  // (older projects may still carry a stored "overlap" warning); nothing writes
-  // it anymore.
+  // "overlap" is read-only compatibility for older persisted warnings.
   type: "bounds" | "collision" | "overlap";
-  // Only meaningful on "collision" warnings. Whether the curator's "Allow
-  // overlap" preference can override this overlap at commit time. Mirrors
-  // getOverlapRule: false for opening×opening (physically forbidden), true for
-  // any pair involving an artwork. Absent on non-collision warnings.
+  // Present only for collisions; false for non-artwork pairs.
   overridable?: boolean;
 };
 
@@ -41,10 +31,7 @@ export function validateChangedWallPlacements(
   return validateWallObjects(project, wallObjects);
 }
 
-// Validates specific wall objects (by id) against their wall's current
-// geometry — the same bounds check as validateChangedWallPlacements, just
-// keyed by wall object rather than by which walls just changed. Used after a
-// fresh placement or move, where there's no "changed wall" to key off of.
+// Validates placements by wall-object id rather than changed wall id.
 export function validateWallObjectPlacements(
   project: Project,
   wallObjectIds: string[]
@@ -64,9 +51,7 @@ export function validateWallObjectPlacements(
 function validateWallObjects(project: Project, wallObjects: WallObject[]): PlacementWarning[] {
   if (wallObjects.length === 0) return [];
 
-  // Keyed by wall id, including partition faces (spec §6.2) — bounds/collision
-  // per face. Objects on face A vs face B have different ids so they never
-  // collide with each other (back-to-back hangs are physically fine).
+  // Partition faces have distinct ids, so back-to-back objects do not collide.
   const wallGeometryById = new Map<string, WallWithGeometry>(
     project.floor.rooms.flatMap((placement) =>
       getRoomPlaceableWalls(placement.room).map((wall) => [wall.id, wall])
@@ -128,24 +113,7 @@ function validateWallObjectBounds(
   return warnings;
 }
 
-// Flags EVERY overlapping same-wall pair as a "collision", attaching the
-// warning to whichever side was actually revalidated (moved/placed). This is
-// detection only — the store decides what to do with a "collision" (see
-// gatePlacementWarnings). What differs per pair is `overridable`, derived from
-// getOverlapRule (the single source of truth shared with the drag barriers):
-//
-//   opening × opening  → overridable: false — doors/windows/blocked zones can
-//                        never share space, no matter the "Allow overlap"
-//                        preference.
-//   artwork × artwork  → overridable: true  — two works stacked on a wall is a
-//                        deliberate-if-unusual arrangement the curator can opt
-//                        into. (Behavior change: this used to be a non-blocking
-//                        "overlap" advisory that always committed.)
-//   artwork × opening  → overridable: true  — an artwork over an obstacle,
-//                        rejected by default but opt-in via "Allow overlap".
-//
-// The message is tailored per pair so the inspector reads naturally, but the
-// commit/override decision comes from `overridable`, not the wording.
+// Report each overlapping same-wall pair against the object being revalidated.
 function validateWallObjectCollisions(
   wallObject: WallObject,
   allWallObjects: WallObject[]

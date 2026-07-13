@@ -3,11 +3,7 @@ import { clamp } from "../../domain/geometry/scalar";
 
 const STORAGE_KEY = "sightlines.viewPreferences.v1";
 
-// Resizable-panel bounds, exported so both the drag handles (for their
-// aria-valuemin/max and clamping) and the stored-preference sanitizer share a
-// single source of truth. The defaults match the original fixed grid tracks
-// (320px / 300px in global.css's .workspace) so an existing user with no stored
-// widths sees no layout shift the first time this ships.
+// Shared by drag-handle constraints and persisted-value sanitization.
 export const LEFT_PANEL_MIN_WIDTH = 240;
 export const LEFT_PANEL_MAX_WIDTH = 480;
 export const LEFT_PANEL_DEFAULT_WIDTH = 320;
@@ -18,55 +14,24 @@ export const INSPECTOR_DEFAULT_WIDTH = 300;
 type ViewPreferences = {
   showGrid: boolean;
   snapToGrid: boolean;
-  // Elevation-only: shows/hides the centerline (a.k.a. eyeline) at the wall's
-  // default hang height. Independent of centerline SNAPPING the same way
-  // showGrid is independent of snapToGrid below — the alignment snap to
-  // centerlineMm in resolveElevationPlacement is unconditional either way, so
-  // hiding the line only removes the visual reference, never the magnetism.
+  // Visibility only; centerline snapping remains unconditional.
   showCenterline: boolean;
-  // The user's chosen precision floor in mm, or null for "auto" (no floor —
-  // the grid keeps stepping down with zoom per docs/plan.md §5.5). Stored
-  // in mm regardless of display unit so a floor picked under one unit
-  // family keeps working if the project's unit later changes; consumers
-  // clamp it to the nearest table entry, so an odd stored value is safe.
+  // Millimetres regardless of display unit; null selects automatic precision.
   gridPrecisionFloorMm: number | null;
-  // Off by default: artwork/opening collisions are rejected outright (see
-  // store.ts's allowOverlap gating) unless a curator deliberately opts in
-  // here, so this is a rare, low-visibility override rather than a
-  // frequently-toggled option like grid/snap.
+  // Explicit opt-in to bypass the default collision rejection.
   allowOverlappingPlacement: boolean;
-  // Which inventory the left column shows, or null when collapsed. The rail
-  // selects it: clicking the active panel's icon collapses to null, clicking
-  // the other switches. Defaults to "checklist" — the left anchor of the
-  // workspace on first open. A workspace preference like grid/snap; it sticks.
+  // null means the left column is collapsed.
   leftPanel: "checklist" | "rooms" | null;
-  // User-dragged panel widths in px, clamped to the bounds above. Like the
-  // other fields here they're workspace preferences (a working-style choice,
-  // not project geometry), so they live in localStorage and never travel with
-  // an exported .sightlines file.
+  // Workspace-only pixel widths, clamped to the bounds above.
   leftPanelWidth: number;
   inspectorWidth: number;
-  // Whether the right inspector is collapsed entirely. Symmetric with
-  // leftPanel === null on the other side — toggled from the rail. Defaults to
-  // open: the inspector is where a selection's editable fields live, so hiding
-  // it is a deliberate opt-out.
+  // Whether the right inspector is fully collapsed.
   inspectorCollapsed: boolean;
-  // Open/closed state per collapsible inspector section (InspectorSection),
-  // keyed by a stable section id. A working-style preference like the panel
-  // widths: it survives selection changes and reloads, and never travels
-  // with an exported project. Unknown ids simply fall back to their
-  // section's own default, so shipping a new section never breaks a stored
-  // record.
+  // Open state keyed by stable section id; unknown ids use their local default.
   inspectorSections: Record<string, boolean>;
 };
 
-// Everyday-editing sections start open; registrar reference data starts
-// closed (consulted less often than measurements or arranging — the same
-// reading-order reasoning as ArtworkInspector's field clusters). "matframe"
-// is deliberately absent: its at-rest state is data-derived at the call site
-// (open only when there's a mat or frame to show), so it has no fixed default
-// here. A stale stored "framing" key from before the rename survives
-// sanitization as an unknown id and is simply never read.
+// Mat/frame is omitted because its default is derived from the selected artwork.
 export const DEFAULT_INSPECTOR_SECTIONS: Record<string, boolean> = {
   dimensions: true,
   placement: true,
@@ -74,14 +39,8 @@ export const DEFAULT_INSPECTOR_SECTIONS: Record<string, boolean> = {
 };
 
 const DEFAULT_PREFERENCES: ViewPreferences = {
-  // On by default: the visible grid is what makes the canvas read as a
-  // measured drafting surface rather than a blank sheet on first open.
-  // Still a workspace preference — turning it off sticks.
   showGrid: true,
   snapToGrid: true,
-  // On by default: matches the pre-toggle behavior where the centerline was
-  // always rendered in elevation mode, so an existing user sees no change
-  // the first time this ships.
   showCenterline: true,
   gridPrecisionFloorMm: null,
   allowOverlappingPlacement: false,
@@ -92,9 +51,7 @@ const DEFAULT_PREFERENCES: ViewPreferences = {
   inspectorSections: DEFAULT_INSPECTOR_SECTIONS
 };
 
-// Keeps only well-formed `sectionId: boolean` entries from a stored record,
-// layered over the defaults — a hand-edited value or a section id from a
-// newer build can never poison the whole map.
+// Layer valid stored entries over current defaults.
 function sanitizeInspectorSections(value: unknown): Record<string, boolean> {
   const sections = { ...DEFAULT_INSPECTOR_SECTIONS };
   if (typeof value !== "object" || value === null || Array.isArray(value)) return sections;
@@ -133,17 +90,14 @@ function readStoredPreferences(): ViewPreferences {
         typeof parsed.allowOverlappingPlacement === "boolean"
           ? parsed.allowOverlappingPlacement
           : DEFAULT_PREFERENCES.allowOverlappingPlacement,
-      // A stored `null` means the user deliberately collapsed the column, so
-      // it's honored; only a missing/invalid value falls back to the default.
+      // Preserve an intentional collapsed state.
       leftPanel:
         parsed.leftPanel === "checklist" ||
         parsed.leftPanel === "rooms" ||
         parsed.leftPanel === null
           ? parsed.leftPanel
           : DEFAULT_PREFERENCES.leftPanel,
-      // Stored widths are clamped on read as well as on write: a hand-edited
-      // localStorage value, or one saved before the bounds changed, can never
-      // push a panel to an unusable size.
+      // Clamp on read to tolerate edited or legacy values.
       leftPanelWidth:
         typeof parsed.leftPanelWidth === "number" && Number.isFinite(parsed.leftPanelWidth)
           ? clamp(parsed.leftPanelWidth, LEFT_PANEL_MIN_WIDTH, LEFT_PANEL_MAX_WIDTH)
@@ -163,12 +117,7 @@ function readStoredPreferences(): ViewPreferences {
   }
 }
 
-// Grid visibility and snap-to-grid are workspace preferences, not project
-// geometry (docs/plan.md §5.5) — they live in localStorage, independent of
-// each other, so importing a shared .sightlines file never imports someone
-// else's working-style preferences. "Show grid" and "snap to grid" are
-// intentionally separate: a curator may want the visual reference without
-// magnetic behavior during rough composition.
+// Workspace preferences stay local and never travel with exported projects.
 export function useViewPreferences(onPersistenceError?: (message: string) => void) {
   const [preferences, setPreferences] = useState<ViewPreferences>(readStoredPreferences);
   const onPersistenceErrorRef = useRef(onPersistenceError);

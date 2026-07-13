@@ -36,7 +36,6 @@ const features = [
 
 <BaseLayout description={description}>
   <main class="landing">
-    <!-- ================= HERO ================= -->
     <section class="hero">
       <div class="hero-copy">
         <p class="kicker rise" style="--i: 0">Exhibition planning, drawn to scale</p>
@@ -59,8 +58,7 @@ const features = [
       </div>
 
       <div class="hero-figure rise" style="--i: 2" aria-hidden="true">
-        <!-- Wall elevation: three framed works hung to a shared eye line,
-             with dimension lines and a centerline. Decorative. -->
+        <!-- Decorative wall elevation. -->
         <svg
           class="elevation"
           viewBox="0 0 660 452"
@@ -84,10 +82,8 @@ const features = [
             </pattern>
           </defs>
 
-          <!-- subtle grid ground -->
           <rect x="40" y="24" width="580" height="360" fill="url(#grid)" />
 
-          <!-- floor -->
           <line
             class="ink"
             x1="40"
@@ -97,7 +93,6 @@ const features = [
             stroke-width="1.6"
           />
 
-          <!-- eye-line / centerline -->
           <line
             class="accent-line"
             x1="40"
@@ -107,7 +102,6 @@ const features = [
             stroke-dasharray="5 5"
           />
 
-          <!-- vertical dimension: floor -> eye line -->
           <g class="dim">
             <line x1="64" y1="200" x2="64" y2="384" />
             <line x1="59" y1="200" x2="69" y2="200" />
@@ -117,28 +111,24 @@ const features = [
             1450 mm
           </text>
 
-          <!-- Frame 1 -->
           <g class="frame">
             <rect x="112" y="136" width="96" height="128" />
             <rect class="mat" x="120" y="144" width="80" height="112" />
             <circle class="hang" cx="160" cy="200" r="3" />
           </g>
 
-          <!-- Frame 2 (petrol-washed accent) -->
           <g class="frame">
             <rect x="266" y="153" width="70" height="94" />
             <rect class="mat mat-accent" x="274" y="161" width="54" height="78" />
             <circle class="hang" cx="301" cy="200" r="3" />
           </g>
 
-          <!-- Frame 3 -->
           <g class="frame">
             <rect x="394" y="158" width="124" height="84" />
             <rect class="mat" x="402" y="166" width="108" height="68" />
             <circle class="hang" cx="456" cy="200" r="3" />
           </g>
 
-          <!-- horizontal dimension: gap between frame 1 and frame 2 edges -->
           <g class="dim">
             <line x1="208" y1="296" x2="266" y2="296" />
             <line x1="208" y1="289" x2="208" y2="303" />
@@ -146,7 +136,6 @@ const features = [
           </g>
           <text class="dim-label" x="237" y="318" text-anchor="middle">460 mm</text>
 
-          <!-- horizontal dimension: frame 3 edge to end of wall -->
           <g class="dim">
             <line x1="518" y1="296" x2="620" y2="296" />
             <line x1="518" y1="289" x2="518" y2="303" />
@@ -154,7 +143,6 @@ const features = [
           </g>
           <text class="dim-label" x="569" y="318" text-anchor="middle">800 mm</text>
 
-          <!-- full wall length, below the floor line -->
           <g class="dim">
             <line x1="40" y1="410" x2="620" y2="410" />
             <line x1="40" y1="403" x2="40" y2="417" />
@@ -165,7 +153,6 @@ const features = [
       </div>
     </section>
 
-    <!-- ================= FEATURES ================= -->
     <section class="features" aria-labelledby="features-h">
       <h2 id="features-h" class="section-title">
         Two ways of thinking, one project
@@ -234,7 +221,6 @@ const features = [
       </ol>
     </section>
 
-    <!-- ================= PRIVATE BY DESIGN ================= -->
     <section class="privacy-strip" aria-labelledby="privacy-h">
       <div class="privacy-inner">
         <div class="privacy-lead">
@@ -260,7 +246,6 @@ const features = [
       </div>
     </section>
 
-    <!-- ================= WHO IT'S FOR ================= -->
     <section class="audience" aria-labelledby="audience-h">
       <h2 id="audience-h" class="section-title">Who it's for</h2>
       <p class="audience-copy">
@@ -273,7 +258,6 @@ const features = [
       </p>
     </section>
 
-    <!-- ================= CLOSING CTA ================= -->
     <section class="closing">
       <h2 class="closing-title">Open Sightlines and draw your first room.</h2>
       <p class="closing-sub">
@@ -418,7 +402,6 @@ const features = [
     padding: 8px;
   }
 
-  /* SVG elevation styling */
   .elevation .ink {
     stroke: var(--foreground);
   }

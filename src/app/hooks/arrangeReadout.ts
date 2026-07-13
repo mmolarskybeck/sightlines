@@ -11,11 +11,7 @@ import {
 } from "../../domain/placement/arrangeOnWall";
 import type { ArrangeSession } from "../store";
 
-// What one side of the "From edges" mode measures against, resolved to
-// something the panel can render directly — a plain "wall" tag, or an
-// "object" tag carrying the neighbour's display name (an artwork's title, or
-// an opening's kind label) and kind, so the panel/caption can say "nearest
-// artwork" vs "nearest door" without reaching back into the project itself.
+// Display-ready target for one side of "From edges."
 export type ArrangeBoundary =
   | { type: "wall" }
   | { type: "object"; name: string; kind: WallObject["kind"] };
@@ -49,9 +45,7 @@ export type UseArrangeReadoutParams = {
   lastEvenZone: ArrangeSession["evenZone"] | null;
 };
 
-// Resolves a raw wall-vs-neighbour detection to display-ready info — pure
-// project lookups, kept out of the domain layer (which knows nothing of
-// artwork titles or opening-kind copy).
+// Keep display-name lookups out of the geometry domain.
 function resolveBoundary(
   detection: BoundaryDetection,
   wallObjects: Project["wallObjects"],
@@ -70,13 +64,7 @@ function resolveBoundary(
   return { type: "object", kind: object.kind, name: getOpeningKindLabel(object.kind) };
 }
 
-// The arrange panel's live readout — spacing mode, zone, and the equal-solve
-// matching that decides whether the idle layout already reads as "Space
-// evenly". null when the selection isn't arrangeable (see arrangeWall in
-// App.tsx). A pure per-render derivation (not a hook — calls no React hooks),
-// re-run on every call same as the inline IIFE this was extracted from —
-// not memoized, so it always reflects the latest (possibly preview-overridden)
-// member positions and session state.
+// Derives the current arrange readout, including live preview positions.
 export function deriveArrangeReadout({
   arrangeWall,
   arrangeMembers,
@@ -93,16 +81,12 @@ export function deriveArrangeReadout({
 
   const detailed = getArrangeReadoutDetailed(arrangeMembers, arrangeWall.lengthMm);
   const equal = solveEqualArrangement(arrangeMembers, arrangeWall.lengthMm);
-  // The unselected same-wall objects — every "beside the group" computation
-  // below (the open-space zone, and each side's From-edges boundary) is
-  // detectBoundary asking this same question, so it's filtered once here.
+  // All boundary calculations share the same unselected wall objects.
   const others = wallObjects.filter(
     (wallObject) =>
       wallObject.wallId === arrangeWall.id && !selectedObjectIds.includes(wallObject.id)
   );
-  // The open-space span the "Open space" zone spreads within. Live, use
-  // the session's fixed bounds so previews don't move it; idle, derive it
-  // from the committed members and `others`.
+  // Freeze open-space bounds during a live preview.
   const openBounds = activeArrangeSession
     ? activeArrangeSession.openZoneBoundsMm
     : getOpenSpaceBounds(selectedArtworkMembers, others, arrangeWall.lengthMm);
@@ -111,9 +95,7 @@ export function deriveArrangeReadout({
     openBounds.startMm,
     openBounds.endMm
   );
-  // What "From edges" measures against on each side — the session's frozen
-  // detection while live (so the target doesn't hop as the group moves),
-  // else the same detector run fresh against the committed layout.
+  // Freeze edge targets during a live preview so they cannot jump.
   const leftBoundaryDetection = activeArrangeSession
     ? activeArrangeSession.insetBoundary.left
     : detectBoundary("left", selectedArtworkMembers, others, arrangeWall.lengthMm);
@@ -122,9 +104,7 @@ export function deriveArrangeReadout({
     : detectBoundary("right", selectedArtworkMembers, others, arrangeWall.lengthMm);
   const leftBoundary = resolveBoundary(leftBoundaryDetection, wallObjects, artworksById);
   const rightBoundary = resolveBoundary(rightBoundaryDetection, wallObjects, artworksById);
-  // The two single-sided distances the left/right (and "both") anchors edit
-  // and read back — measured from each side's DETECTED boundary rather than
-  // always the wall edge, so the field shows what it's actually driving.
+  // Measure from detected boundaries, which may be neighbouring objects.
   const memberLeftEdgeMm = Math.min(
     ...arrangeMembers.map((member) => member.xMm - member.widthMm / 2)
   );
@@ -133,15 +113,11 @@ export function deriveArrangeReadout({
   );
   const leftEdgeDistanceMm = memberLeftEdgeMm - leftBoundaryDetection.edgeMm;
   const rightEdgeDistanceMm = rightBoundaryDetection.edgeMm - memberRightEdgeMm;
-  // The anchor follows the session when one is open, else the remembered
-  // default — the mirror of how `mode` resolves just below.
+  // A live session overrides the remembered anchor.
   const insetAnchor = activeArrangeSession
     ? activeArrangeSession.insetAnchor
     : lastInsetAnchor;
-  // Does the idle layout already read as evenly spaced? Whole-wall equal
-  // wants uniform gaps AND symmetric insets. Open-zone equal wants uniform
-  // gaps and the leftmost left edge at (zone start + zone inset) — its
-  // insets are asymmetric by design, so insetIsMixed is NOT required here.
+  // Whole-wall equality requires symmetric insets; open-zone equality does not.
   const matchesWholeWallEqual =
     !detailed.gapIsMixed &&
     !detailed.insetIsMixed &&
@@ -151,34 +127,25 @@ export function deriveArrangeReadout({
     !detailed.gapIsMixed &&
     Math.abs(detailed.insetMm - (openBounds.startMm + equalOpen.insetMm)) < 0.5 &&
     Math.abs(detailed.gapMm - equalOpen.gapMm) < 0.5;
-  // Which zone (if either) the idle layout matches — whole wall wins ties
-  // (the unbounded case, where the two solves are identical).
+  // Whole wall wins when both equal solves match.
   const idleEqualZone: "wall" | "open" | null = matchesWholeWallEqual
     ? "wall"
     : matchesOpenZoneEqual
       ? "open"
       : null;
-  // The smart default used when nothing has been chosen and no layout
-  // matches: open when the group is boxed in by neighbours, else whole
-  // wall — the same rule beginArrangeSession applies.
+  // Default to open space only when neighbours bound the group.
   const smartDefaultZone: "wall" | "open" =
     openBounds.startMm > 0 || openBounds.endMm < arrangeWall.lengthMm
       ? "open"
       : "wall";
-  // The panel always shows an active mode — never a blank "choose one"
-  // state. With a session open the segment follows the session's mode;
-  // idle, a freeform layout reads as "Space evenly" when it matches either
-  // the whole-wall or the open-zone equal solve; otherwise it falls back
-  // to the last mode the curator used (default "From wall edges"). Showing
-  // a mode idle never moves anything — inset/gap seed their field from the
-  // current layout readout, and only an edit begins a session.
+  // Idle mode reflects an equal layout or the last choice; displaying it alone
+  // never starts a session or moves artwork.
   const mode: "equal" | "inset" | "gap" = activeArrangeSession
     ? activeArrangeSession.mode
     : idleEqualZone !== null
       ? "equal"
       : lastArrangeMode;
-  // Displayed zone: the session's when active, else the idle-matched zone,
-  // else the remembered choice or the smart default.
+  // Prefer live, matched, remembered, then derived zone state.
   const evenZone: "wall" | "open" = activeArrangeSession
     ? activeArrangeSession.evenZone
     : idleEqualZone ?? lastEvenZone ?? smartDefaultZone;
@@ -194,7 +161,7 @@ export function deriveArrangeReadout({
     rightBoundary,
     insetIsMixed: detailed.insetIsMixed,
     gapIsMixed: detailed.gapIsMixed,
-    // The "Equal distance" readout reflects the displayed zone.
+    // Equal distance follows the displayed zone.
     equalSpacingMm: evenZone === "open" ? equalOpen.insetMm : equal.insetMm,
     sessionActive: activeArrangeSession !== null
   };

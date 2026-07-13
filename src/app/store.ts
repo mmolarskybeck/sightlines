@@ -131,12 +131,7 @@ export type ArtworkProjectMembership = {
   projects: ProjectSummary[];
 };
 
-// An entry may carry either half, or both. A pure geometry/metadata edit
-// (resize a wall, rename the project) only ever needs `project`. A checklist
-// artwork edit (updateArtwork) only needs `artwork` — unless the edit also
-// resizes a placement on a wall, in which case both halves ride together so
-// undo reverts the artwork record and the placement it drove in one step
-// (docs/plan.md §7: "a single command stack lives at the project level").
+// Entries may atomically undo project state, artwork state, or both.
 type EditEntry = {
   label: string;
   project?: { before: Project; after: Project };
@@ -145,23 +140,15 @@ type EditEntry = {
 
 const UNDO_STACK_LIMIT = 100;
 
-// Collisions between an artwork and a door/window/blocked-zone are rejected
-// by default (see validatePlacement.ts's "collision" warning type) — the
-// caller opts in per-call via allowOverlap, sourced from the workspace's
-// "Allow overlap" view option, so a curator who genuinely wants to stack
-// pieces over an obstacle for now isn't blocked outright.
+// Artwork overlaps require the caller's explicit allowOverlap preference.
 export const OVERLAP_BLOCKED_MESSAGE =
   'Can’t place it there. It would overlap another object on this wall. Turn on "Allow overlap" in view options to allow it.';
 
-// A door/window/blocked-zone pair overlapping each other is forbidden outright
-// (see overlapPolicy.ts) — there's no "Allow overlap" that rescues it, so this
-// message deliberately omits the toggle advice OVERLAP_BLOCKED_MESSAGE gives.
+// Non-artwork overlaps cannot be overridden.
 export const FORBIDDEN_OVERLAP_MESSAGE =
   "Can’t place it there. Doors, windows and blocked zones can’t overlap each other.";
 
-// One placement per artwork per project — trying layout variants is what
-// project duplication is for (spec 2026-07-07). Enforced only on NEW
-// placements; legacy projects that already contain duplicates keep them.
+// Enforce one placement only when adding; preserve duplicates already loaded.
 const ALREADY_PLACED_MESSAGE =
   "This artwork is already placed. To try another arrangement, duplicate the project and experiment there.";
 
@@ -188,10 +175,7 @@ type UpdateArtworkChanges = Partial<
 export type AppState = ArrangeSliceState &
   ArrangeSliceActions & {
   project: Project | null;
-  // The store's ONLY selection state: one discriminated union value (see
-  // selectionSlice.ts). Written only via selectionWrite. Consumers derive
-  // everything they need from it through the pure helpers (objectIdsOf,
-  // roomIdOf, getSelectedArtworkId, getSelectedOpeningId).
+  // Sole selection state; write through selectionWrite and derive via helpers.
   selection: Selection;
   // Persistent sidebar wall context. Survives object selection; dropped only by
   // room selection and full clears. NOT part of the selection union.
@@ -227,9 +211,7 @@ export type AppState = ArrangeSliceState &
   setObjectSelection: (ids: string[]) => void;
   clearObjectSelection: () => void;
   renameProject: (title: string) => Promise<void>;
-  // Project manager row rename — targets any saved project by id, not just
-  // the open one. Delegates to renameProject when id is the open document,
-  // so the topbar title and undo stack stay the single source of truth.
+  // Saved-project rename; the open document still routes through undoable renameProject.
   renameProjectById: (id: string, title: string) => Promise<void>;
   renameRoom: (roomId: string, name: string) => Promise<void>;
   deleteRoom: (roomId: string) => Promise<void>;
@@ -411,10 +393,7 @@ export function createAppStore(deps: AppStoreDeps) {
       }
     }
 
-    // Pushes one entry onto the undo stack and applies whichever half(s) it
-    // carries to state — project-only, artwork-only, or both (see EditEntry
-    // above). Split out from applyEdit so updateArtwork can push a single
-    // combined entry when a dimension edit also resizes a placement.
+    // Apply project/artwork halves together and create one undo entry.
     function pushEditEntry(entry: EditEntry, extras: EditExtras = {}) {
       set({
         ...(entry.project ? { project: entry.project.after } : {}),
@@ -422,19 +401,13 @@ export function createAppStore(deps: AppStoreDeps) {
         redoStack: [],
         placementWarnings: [],
         lastGeometryEdit: null,
-        // Any committed edit settles a pending arrange session by default — a
-        // foreign edit (or the session's own commit, which re-passes this via
-        // extras) can't leave a stale session pointing at pre-edit positions.
+        // Committed edits cannot leave previews pointing at stale positions.
         arrangeSession: null,
         ...extras
       });
     }
 
-    // Every project-only mutation flows through here: stamp updatedAt, push
-    // the undo stack, drop the redo stack, persist. Actions stay thin
-    // constructors. (An edit that also touches the artwork library —
-    // updateArtwork — builds its EditEntry directly and calls pushEditEntry
-    // itself, since it needs to persist both halves.)
+    // Project-only transaction boundary: timestamp, undo, redo reset, persistence.
     async function applyEdit(
       label: string,
       buildNextProject: (project: Project) => Project,
@@ -584,15 +557,8 @@ export function createAppStore(deps: AppStoreDeps) {
       });
     }
 
-    // Shared gate behind every placement commit (place/move/resize a wall
-    // object): validates the touched ids against the candidate wallObjects and
-    // decides whether the edit may commit. A "collision" blocks when it's
-    // forbidden (overridable === false — an opening/opening overlap, never
-    // permitted) OR when the curator hasn't opted into overlap. A forbidden
-    // collision anywhere in the batch wins the error wording (its "Allow
-    // overlap" advice would be wrong), otherwise the toggle-advising message.
-    // Returns null when blocked (caller must not commit), else the warnings to
-    // carry through.
+    // Placement commit gate. Forbidden collisions always block; artwork
+    // collisions block unless allowOverlap is true. null means do not commit.
     function gatePlacementWarnings(
       project: Project,
       candidateWallObjects: WallObject[],
@@ -616,11 +582,7 @@ export function createAppStore(deps: AppStoreDeps) {
       return placementWarnings;
     }
 
-    // Shared commit path for a single placement edit (add/move/resize a wall
-    // object, optionally alongside a floorObjects change): runs the same
-    // collision gate as commitWallObjectMoves, then applies via applyEdit
-    // (which persists) with placementWarnings plus any caller extras. Returns
-    // whether the edit committed, for callers that branch on it.
+    // Gate and persist one placement edit, optionally with a floor-object change.
     async function commitWallObjectEdit(
       label: string,
       project: Project,
@@ -650,10 +612,6 @@ export function createAppStore(deps: AppStoreDeps) {
     }
 
     // --- commitPlanMove case handlers ----------------------------------------
-    // The four outcomes of a plan drag, split out of commitPlanMove so the
-    // action stays a thin dispatcher. Each is self-contained (runs its own
-    // applyEdit/commit) and returns void; observable behavior is byte-identical
-    // to the pre-extraction inline branches.
 
     // wall → wall: same wall (x only) or re-anchor to another wall. Either way
     // the hang height (yMm) and size carry over unchanged — an artwork keeps
@@ -827,14 +785,8 @@ export function createAppStore(deps: AppStoreDeps) {
       );
     }
 
-    // Shared commit path for a batch of wall-object x/y moves: all-or-nothing
-    // collision gate (a single overlap blocks the whole batch), then one undo
-    // entry. Extracted from moveWallObjectsGroup so the arrange session can
-    // commit its preview through the exact same validation. Deliberately does
-    // NOT persist — it returns the after-project so the caller decides whether
-    // to `await persist` (group drag) or fire `void persist` (session settle,
-    // which must finish its synchronous state changes before the caller
-    // continues). The pushEditEntry `set()` here runs synchronously.
+    // Synchronous all-or-nothing batch commit. Persistence stays caller-owned
+    // because arrange settling must finish state changes before awaiting.
     function commitWallObjectMoves(
       moves: { id: string; xMm: number; yMm: number }[],
       label: string | ((movedCount: number) => string),
@@ -867,8 +819,7 @@ export function createAppStore(deps: AppStoreDeps) {
       });
       if (movedIds.length === 0) return { status: "no-op" };
 
-      // One batch is one commit: either every member's move lands together, or
-      // a single collision anywhere blocks the whole thing.
+      // One collision blocks the entire batch.
       const placementWarnings = gatePlacementWarnings(project, nextWallObjects, movedIds, allowOverlap);
       if (placementWarnings === null) return { status: "blocked" };
 
@@ -885,12 +836,7 @@ export function createAppStore(deps: AppStoreDeps) {
       return { status: "committed", project: after };
     }
 
-    // Shared commit path for the six freestanding-wall (partition) edits
-    // below: load the project, run the caller's domain edit, validate the
-    // changed walls' placements (unless the caller opts out), then commit via
-    // applyEdit. Every domain throw now routes into `error` state the same
-    // way — previously move/rotate had no catch at all (an unhandled
-    // rejection) while the other four each hand-rolled the same try/catch.
+    // Partition edit boundary: compute, validate affected placements, and commit.
     async function runPartitionEdit(args: {
       label: string;
       errorFallback: string;
@@ -1019,10 +965,7 @@ export function createAppStore(deps: AppStoreDeps) {
       selectArtwork(artworkId) {
         autoAcceptArrangeSession();
         const project = get().project;
-        // Wart fix: a checklist click on a PLACED artwork selects its (first)
-        // placement — wallObjects before floorObjects, the same resolution the
-        // Delete handler uses — so Fit-selected, arrange, delete and highlight
-        // all read one selection. An unplaced pick is inspector-only.
+        // Prefer the first wall placement, then floor placement; unplaced picks stay library-only.
         const placement =
           project?.wallObjects.find(
             (object) => object.kind === "artwork" && object.artworkId === artworkId
@@ -1040,9 +983,7 @@ export function createAppStore(deps: AppStoreDeps) {
         autoAcceptArrangeSession();
         const project = get().project;
         if (!project) return;
-        // Openings are placements now — an opening selection is an objects
-        // selection. Validate the id against the live project (same tolerance
-        // as selectObject); a dead id is an inert no-op, not a clear.
+        // Dead opening ids are inert rather than clearing selection.
         const exists =
           project.wallObjects.some((object) => object.id === wallObjectId) ||
           project.floorObjects.some((object) => object.id === wallObjectId);
@@ -1160,9 +1101,7 @@ export function createAppStore(deps: AppStoreDeps) {
         const trimmed = title.trim();
         if (trimmed.length === 0) return;
 
-        // The open document is the single source of truth for its own title
-        // (undo stack, topbar input) — route through renameProject instead of
-        // a parallel load/save that would drift out of sync with it.
+        // Route open-document renames through its undoable live state.
         if (get().project?.id === id) {
           await get().renameProject(title);
           return;
@@ -1220,13 +1159,10 @@ export function createAppStore(deps: AppStoreDeps) {
         );
         if (!project || !roomPlacement) return;
 
-        // The whole cascade (prune room, drop its wallObjects, clear dangling
-        // partner refs; floorObjects untouched) lives in the domain now.
+        // Domain cascade removes room wall objects and dangling partner refs.
         const { project: nextProject } = deleteRoomFromProject(project, roomId);
         const nextRooms = nextProject.floor.rooms;
-        // Perimeter wall ids only — the selection/wallContext bookkeeping below
-        // keys off the room's own walls (NOT its partition faces), matching the
-        // pre-refactor behavior exactly.
+        // Selection context keys off perimeter walls, not partition faces.
         const { wallIds: deletedWallIds } = getRoomCascadeScope(project, roomId);
 
         // Wall context falls back to a surviving wall when the deleted room
@@ -1236,14 +1172,8 @@ export function createAppStore(deps: AppStoreDeps) {
           ? (nextRooms[0]?.room.walls[0]?.id ?? null)
           : wallContextId;
 
-        // Faithful port of the pre-union pruning, no more: the legacy code
-        // nulled selectedOpeningId when that opening sat on a deleted wall
-        // (under the union: a single-opening objects-selection clears to
-        // none), and dropped room focus if this was the focused room. It
-        // never touched selectedObjectIds — dangling artwork/multi-select
-        // ids stay dangling here too (consumers tolerate them; undo can
-        // create them as well). Broader stale-id pruning is a follow-up
-        // pending explicit sanction.
+        // Clear focused rooms and single opening selections; preserve tolerant
+        // multi-selection ids because undo may make them live again.
         const current = get().selection;
         const isDyingOpeningSelection =
           current.kind === "objects" &&
@@ -1943,10 +1873,7 @@ export function createAppStore(deps: AppStoreDeps) {
               const asset = await deps.assetRepository.getAsset(artwork.assetId);
               if (asset.sha256) assetShaById.set(asset.id, asset.sha256);
             } catch (error) {
-              // A deterministically dangling assetId just can't participate
-              // in dedupe — it must not block importing forever. Anything
-              // else is an operational read failure and fails closed: a
-              // record we couldn't see could otherwise be overwritten.
+              // Missing assets skip dedupe; operational read failures fail closed.
               if (!(error instanceof AssetNotFoundError)) throw error;
             }
           }
@@ -2112,13 +2039,8 @@ export function createAppStore(deps: AppStoreDeps) {
         const newArtworkIds: string[] = [];
         const failures: string[] = [];
 
-        // Duplicate screen: exact content-hash match against the destination
-        // collection (and earlier files in this batch). Checklist intake only
-        // compares the current checklist; library intake compares the global
-        // on-device library.
-        // Legacy assets without a sha256 never match. Held files are
-        // surfaced for confirmation instead of intaken — re-uploading the
-        // same image is usually a mistake, occasionally deliberate.
+        // Screen exact hashes against the destination and earlier batch files;
+        // hold matches for confirmation. Assets without hashes never match.
         const skipDuplicateCheck = opts.skipDuplicateCheck === true;
         const titleBySha = new Map<string, string>();
         if (!skipDuplicateCheck) {
@@ -2470,11 +2392,7 @@ export function createAppStore(deps: AppStoreDeps) {
           // pointing at records we're about to erase.
         }
 
-        // Clean the currently open project directly in memory. Deliberately NOT
-        // an applyEdit: the records and blobs are gone for good, so this must
-        // not land on the undo stack where undo could resurrect the placements
-        // as a first-class edit. (Pre-existing undo entries may still resurrect
-        // dangling checklist ids — ChecklistPanel renders those as `missing`.)
+        // Permanent record deletion must not create an undoable project edit.
         if (openProject) {
           const cleaned = stripReferences(openProject);
           if (cleaned) {
@@ -2555,9 +2473,7 @@ export function createAppStore(deps: AppStoreDeps) {
         try {
           parsed = parseArtwork(next);
         } catch (error) {
-          // Validate before touching anything persisted — a bad edit (e.g. a
-          // negative widthMm) should error calmly and leave the library,
-          // project, and undo stack exactly as they were.
+          // Validate before mutating persistence, project state, or undo history.
           set({
             error: `Could not save that change (${
               error instanceof z.ZodError ? formatZodIssue(error) : "invalid value."
@@ -2566,13 +2482,8 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
-        // A dimension edit resizes matching wall placements that do not carry
-        // an explicit display/provenance override. Override-bearing records
-        // retain their explicitly stored behavioral footprint until a writer
-        // deliberately rebakes it. Floor objects intentionally retain their
-        // stored dimensions until the physical floor representation is
-        // decided (framing-dimension-contract §6b). Both halves ride in one
-        // EditEntry so undo reverts the artwork and wall placement sizes.
+        // Resize wall placements without display overrides. Floor footprints
+        // remain stored as-is; artwork and placement changes share one undo entry.
         const project = get().project;
         let projectEdit: { before: Project; after: Project } | undefined;
         let placementWarnings: PlacementWarning[] = [];
@@ -2655,8 +2566,7 @@ export function createAppStore(deps: AppStoreDeps) {
           [placement.id],
           allowOverlap,
           {
-            // Placing selects the new placement (wart-fix umbrella: previously
-            // it set only the inspector slot and left any multi-select intact).
+            // Replace selection with the new placement.
             extras: selectionWrite(
               { ...project, wallObjects: nextWallObjects },
               { kind: "objects", ids: [placement.id] },
@@ -2749,13 +2659,7 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
-        // Centered on the wall by default — the curator adjusts from there,
-        // same "place first, refine after" spirit as artwork placement. But an
-        // opening may never be created overlapping another opening (that's a
-        // forbidden pair — see overlapPolicy.ts — with no "Allow overlap"
-        // escape), so slide off the center to the nearest free slot; if the
-        // wall is already full of openings, refuse rather than commit an
-        // overlap the curator can't undo by toggling a preference.
+        // Start near center but never create a forbidden opening overlap.
         const xMm = resolveFreeOpeningXMm(project, wall, kind, wall.lengthMm / 2);
         if (xMm === null) {
           set({ error: "There isn’t room for another opening on this wall." });
@@ -2783,9 +2687,7 @@ export function createAppStore(deps: AppStoreDeps) {
           validateIds,
           true,
           {
-            // Selecting a placement is an objects selection now (openings fold
-            // into the union) — the freshly-added opening becomes the selection.
-            // A mirrored twin is created silently; only the primary is selected.
+            // Select only the primary; a mirrored twin is created silently.
             extras: selectionWrite(
               { ...project, wallObjects: nextWallObjects },
               { kind: "objects", ids: [primaryId] },
@@ -2905,10 +2807,7 @@ export function createAppStore(deps: AppStoreDeps) {
         }
         if (a.connectsToObjectId === b.id && b.connectsToObjectId === a.id) return;
 
-        // Re-pairing is atomic: clear any previous relationships touching
-        // either endpoint, then write the new symmetric double-pointer in the
-        // same project revision. This preserves the schema invariant at every
-        // persisted/undoable state.
+        // Re-pair atomically so every persisted state keeps symmetric pointers.
         const displacedIds = new Set(
           [a.connectsToObjectId, b.connectsToObjectId].filter(
             (id): id is string => id !== undefined
@@ -3028,9 +2927,7 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
-        // As in addOpening: slide off the drop point to the nearest free slot so
-        // we never commit a forbidden opening×opening overlap, and refuse if the
-        // wall has no room.
+        // Slide to the nearest free slot; refuse when no legal slot exists.
         const xMm = resolveFreeOpeningXMm(project, wall, kind, placement.xMm);
         if (xMm === null) {
           set({ error: "There isn’t room for another opening on this wall." });
@@ -3160,7 +3057,7 @@ export function createAppStore(deps: AppStoreDeps) {
           true,
           {
             nextFloorObjects: [...project.floorObjects, floorObject],
-            // Placing selects the new floor placement (wart-fix umbrella).
+            // Replace selection with the new floor placement.
             extras: selectionWrite(
               { ...project, floorObjects: [...project.floorObjects, floorObject] },
               { kind: "objects", ids: [floorObject.id] },
@@ -3470,9 +3367,7 @@ function isOpeningSlotFree(
   return freeXMm !== null && Math.abs(freeXMm - xMm) < 1;
 }
 
-// The fresh-twin case: a mirrored twin takes the default size/centerline for its
-// kind, so resolve those the same way buildOpeningOnWall/resolveFreeOpeningXMm do
-// before testing the slot.
+// Test a fresh mirrored twin using its resolved default size and centerline.
 function isTwinSlotFree(
   project: Project,
   wall: WallWithGeometry,
@@ -3487,14 +3382,8 @@ function isTwinSlotFree(
   return isOpeningSlotFree(project, wall, { widthMm, heightMm }, resolvedCenterYMm, xMm, null);
 }
 
-// Shared-wall move sync: given the wallObjects with the target already moved to
-// (`targetXMm`, `targetYMm`), returns them with the target's paired twin dragged
-// so the pair stays aligned across the two rooms — the twin's x is the target's
-// new floor-space center projected onto the twin's wall, its y tracks the
-// target. Returns null (leave the twin put) when there is no live partner or
-// when the mirrored slot would collide with another opening on the twin's wall
-// (a forbidden opening×opening overlap); the pair then reads "misaligned" via
-// the existing advisory, the deliberate fallback.
+// Mirror a paired opening move across rooms. Return null when no live partner
+// or legal mirrored slot exists; the alignment advisory then reports the drift.
 function syncPartnerMove(
   project: Project,
   movedWallObjects: WallObject[],
@@ -3533,10 +3422,7 @@ function syncPartnerMove(
   };
 }
 
-// Shared-wall resize sync: mirrors the target's new width/height onto its paired
-// twin (the twin keeps its own position). Same collision-skip exception as the
-// move: if the twin's new footprint at its current x would overlap another
-// opening, leave the twin unchanged.
+// Mirror size onto a paired twin only when its current slot remains legal.
 function syncPartnerResize(
   project: Project,
   resizedWallObjects: WallObject[],
@@ -3563,15 +3449,8 @@ function syncPartnerResize(
   };
 }
 
-// Resolves a collision-free x-center for a new opening on `wall`, sliding it
-// off `preferredXMm` to the nearest free slot when it would overlap an existing
-// opening — because an opening×opening overlap is forbidden (overlapPolicy.ts)
-// and can't be rescued after commit by toggling "Allow overlap". Mirrors
-// buildOpeningOnWall's size/centerline math so the free-slot search uses the
-// exact geometry the opening will be created with. Only same-wall openings
-// count as blockers: an opening added over an artwork is a blockable collision
-// the curator resolves later, not a creation-time hard stop. Returns null when
-// the wall has no free slot.
+// Resolve the nearest legal x using the opening's exact default geometry.
+// Same-wall openings block; artwork overlaps remain separately overridable.
 function resolveFreeOpeningXMm(
   project: Project,
   wall: WallWithGeometry,

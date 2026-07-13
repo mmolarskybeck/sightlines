@@ -1,10 +1,7 @@
 @import "tailwindcss";
 
-/* Self-hosted at stable /fonts/ URLs (not the @fontsource package) so
-   index.html can preload them by a known path — see src/main.tsx. Rules
-   replicate @fontsource-variable/{figtree,geist}'s latin + latin-ext CSS
-   exactly (family names, weight ranges, unicode-range). Cyrillic/Vietnamese
-   subsets are intentionally dropped; this app's copy is Latin-script only. */
+/* Stable URLs allow preloading. Keep these rules aligned with @fontsource's
+   Latin and Latin Extended definitions; other subsets are omitted. */
 @font-face {
   font-family: "Figtree Variable";
   font-style: normal;
@@ -123,11 +120,9 @@
   --primary-foreground: oklch(1 0 0);
   --primary-strong: oklch(0.3 0.065 200);
   --primary-soft: oklch(0.94 0.022 200);
-  /* Canvas selection petrol: same hue as --primary, lifted so selected
-     strokes read clearly apart from ink walls at canvas stroke weights. */
+  /* Lighter than --primary so canvas selections separate from ink walls. */
   --selection: oklch(0.55 0.11 200);
-  /* Petrol hairline for selected-row/pressed-fill edges — the same rank as
-     --danger-line/--caution-line in their families. */
+  /* Selection-state counterpart to --danger-line and --caution-line. */
   --primary-line: oklch(0.82 0.045 200);
   --destructive: oklch(0.47 0.15 22);
   --destructive-strong: oklch(0.4 0.13 22);
@@ -147,25 +142,17 @@
   --ink: var(--foreground);
   --line: var(--border);
   --danger: var(--destructive);
-  /* Small bordered controls use a restrained radius so inputs feel editable
-     without going pill-shaped; panels and layout divisions stay square. */
+  /* Controls are rounded; structural panels remain square. */
   --radius: 0.25rem;
   --radius-control: 8px;
   --radius-panel: 0;
   --radius-sm: var(--radius-control);
   --radius-md: var(--radius-control);
-  /* Interactive fills — list rows (wall-row, checklist-row), rail buttons,
-     the topbar's icon buttons — are rounded and borderless, a selection wash
-     rather than a boxed outline. Structural containers (panels, dividers)
-     stay square; selection fills get a touch more radius than inputs. */
+  /* Borderless interactive fills are slightly rounder than inputs. */
   --radius-fill: 10px;
-  /* Overlays (dialogs, wizards, popovers) are the rounded exception to the
-     square workspace panels — see DESIGN.md's overlay grammar. */
+  /* Overlays are the rounded exception to square workspace panels. */
   --radius-overlay: 12px;
-  /* Soft-control system. Mutually-exclusive choices live as a raised white
-     chip sliding inside a recessed grey track; latching toggles depress
-     instead (petrol wash + inset shadow). The track radius is the chip
-     radius plus its 3px inset, so the two curves stay concentric. */
+  /* Segmented choices use raised chips; latching toggles use pressed states. */
   --track: oklch(0.945 0.005 230);
   --chip: oklch(1 0 0);
   --chip-ghost: oklch(1 0 0 / 0.55);
@@ -175,17 +162,11 @@
     0 1px 2px oklch(0 0 0 / 0.1),
     0 1px 1px oklch(0 0 0 / 0.04),
     0 0 0 1px oklch(0 0 0 / 0.04);
-  /* Latching toggles depress: a stronger inset than a hairline plus a faint
-     full-perimeter inner ring, so a pressed control stays legible in a
-     grayscale screenshot — under deuteranopia the petrol wash alone reads as
-     pale grey. Shared by rail modes and every toolbar toggle. */
+  /* The inset keeps pressed toggles legible without relying on color. */
   --shadow-pressed:
     inset 0 1px 3px oklch(0 0 0 / 0.14),
     inset 0 0 0 1px oklch(0 0 0 / 0.07);
-  /* Armed tools (insert segments, partition, Draw room, the compact Insert
-     trigger) rank one step above resting view toggles: the pressed shadow
-     plus a 1px petrol inner ring. The color is --primary held translucent —
-     a hierarchy nudge, not a new color. */
+  /* Armed tools add a ring above the standard pressed state. */
   --ring-armed: inset 0 0 0 1px oklch(0.42 0.07 200 / 0.5);
   --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
   --dur-slide: 220ms;
@@ -210,10 +191,7 @@ body {
   font-family: var(--font-display);
 }
 
-/* In @layer base so Tailwind component utilities (@layer utilities) can
-   override it — unlayered, this reset silently beat every [font-size:…]/
-   [font-weight:…] utility on the ui primitives and buttons rendered at the
-   body's 16px/400. */
+/* Layer the reset so Tailwind component utilities can override it. */
 @layer base {
   button,
   input,
@@ -241,8 +219,7 @@ input:focus-visible {
   min-height: 100vh;
 }
 
-/* Top-level shell: a full-height icon rail in column 1 (spanning beside both
-   the topbar and the workspace), everything else in column 2. */
+/* Full-height rail beside the topbar and workspace. */
 .app-shell {
   display: grid;
   grid-template-columns: 80px 1fr;
@@ -251,10 +228,7 @@ input:focus-visible {
   overflow: hidden;
 }
 
-/* The 80px module: the rail is one module wide, its brand cell one module
-   tall. The brand cell's bottom hairline continues the topbar's bottom rule
-   straight across the rail, so the rail's right border and that rule form a
-   true intersecting cross at (80, 80). */
+/* The 80px rail and brand cell align with the topbar rule. */
 .app-rail {
   display: flex;
   flex-direction: column;
@@ -783,24 +757,9 @@ input:focus-visible {
   line-height: var(--leading-ui);
 }
 
-/* Toast (sonner) — the app's other transient surface, for one-shot outcomes
-   (export/import results, the already-placed drag hint) that don't warrant
-   a standing banner. Deliberately NOT "rich colors": every toast keeps the
-   same white surface and --radius-overlay corners as the dialog/help
-   overlays above — only the type icon carries semantic color — so the
-   result reads as restrained chrome, not a colored pill or left-stripe
-   alert (both banned by this project's design language).
-   Selectors set the rendered properties directly (background/border-color/
-   color) rather than overriding sonner's --normal-bg/--success-border/etc.
-   custom properties: sonner injects its own stylesheet at runtime via a
-   client-side <style> tag, so it can land after global.css in the cascade,
-   and several of its own rules (e.g. [data-sonner-toaster][data-sonner-
-   theme='light']) already match at 2 attribute selectors — tying or beating
-   a bare custom-property override and winning that tie on source order.
-   Every rule below is scoped under the .sonner-toaster class the wrapper
-   sets on the toaster root, which keeps its specificity strictly higher
-   than the sonner rule it's meant to replace, so the override holds
-   regardless of injection order. */
+/* Toasts keep neutral overlay chrome; only icons carry semantic color.
+   Sonner injects styles at runtime, so these scoped selectors intentionally
+   outrank its attribute selectors. */
 .sonner-toaster [data-sonner-toast][data-styled="true"] {
   background: var(--bg);
   border-color: var(--border);
@@ -868,36 +827,19 @@ input:focus-visible {
   box-shadow: var(--shadow-overlay);
 }
 
-/* Help overlay — shared .dialog-content chrome (same family as Settings),
-   sized like .settings-dialog. Declared after .dialog-content (equal
-   specificity — a class selector each) so this override actually wins the
-   cascade instead of losing the width tiebreak to the base rule; keep this
-   block below .dialog-content if it ever moves. The body scrolls so the
-   tabbed hint groups stay reachable on a phone-height viewport. */
+/* Keep after .dialog-content so the equal-specificity width override wins. */
 .help-dialog-content {
   width: min(calc(100vw - 32px), 560px);
-  /* Fixed height, not max-height: Settings' content is shorter than Help's,
-     so a max-height alone let each overlay settle at its own natural size —
-     Help pinned to the cap (scrolling), Settings ~40px shorter. A fixed
-     height plus .help-body/.settings-body flex-growing to fill it (see
-     those rules) makes both overlays render as the same surface regardless
-     of which one has more content. */
+  /* Fixed height keeps Help and Settings the same size. */
   height: min(760px, calc(100dvh - 32px));
 }
 
-/* Confirm/alert dialogs (delete room, delete artworks, delete project) — a
-   sentence or two of copy, not a wizard. Declared after .dialog-content so
-   the width override actually wins the cascade (see .help-dialog-content
-   above for why that ordering matters), narrower than the default 980px so
-   these read as confirms rather than banners. */
+/* Compact confirms; keep after .dialog-content for cascade order. */
 .dialog-alert {
   width: min(calc(100vw - 32px), 26.5rem);
 }
 
-/* Project manager — narrower than the default 980px (a list of rows, not a
-   wizard), body-scrolled like Settings/Help so a long project list never
-   pushes the header off-screen. Declared after .dialog-content for the same
-   cascade-order reason as .help-dialog-content/.dialog-alert above. */
+/* Scroll long project lists within a compact dialog. Keep after the base. */
 .project-manager-dialog {
   width: min(calc(100vw - 32px), 620px);
   max-height: min(640px, calc(100dvh - 32px));
@@ -1085,25 +1027,18 @@ input:focus-visible {
 
 .workspace {
   display: grid;
-  /* Widths are user-draggable; App sets --left-panel-width / --inspector-width
-     inline (persisted via useViewPreferences), with the original 320/300 as the
-     fallback. Kept as CSS custom properties rather than an inline template so
-     the narrow-viewport media query below can still collapse to one column —
-     an inline grid-template-columns would outrank the stylesheet. */
+  /* Custom properties preserve persisted widths without outranking mobile CSS. */
   grid-template-columns:
     var(--left-panel-width, 320px) minmax(0, 1fr) var(--inspector-width, 300px);
-  /* The seam handles are absolutely positioned against this box. */
   position: relative;
   flex: 1;
   min-height: 0;
 }
 
-/* Left panel collapsed from the rail — the left column drops. */
 .workspace.left-collapsed {
   grid-template-columns: minmax(0, 1fr) var(--inspector-width, 300px);
 }
 
-/* Inspector collapsed from the rail — the right column drops. */
 .workspace.right-collapsed {
   grid-template-columns: var(--left-panel-width, 320px) minmax(0, 1fr);
 }
@@ -1112,11 +1047,7 @@ input:focus-visible {
   grid-template-columns: minmax(0, 1fr);
 }
 
-/* The seam splitters between panes. Each sits centered on a boundary; at rest
-   it's transparent (the panel's own hairline border is the visible line) and
-   only its ::after tints/thickens on hover, focus, or drag — discoverable but
-   quiet, per the design language. Absolutely positioned off --*-width rather
-   than living in the grid, so they never consume a track. */
+/* Overlay seam handles so resizing never consumes a grid track. */
 .panel-resize-handle {
   position: absolute;
   top: 0;
@@ -1143,10 +1074,6 @@ input:focus-visible {
 .panel-resize-handle::after {
   content: "";
   position: absolute;
-  /* Runs the full height of the seam, top to bottom — the toolbar sits to the
-     right of the seam (inside the canvas column), not across it, so there's
-     nothing for a full-height line to slice through. Matches the hit area
-     above, which has always been full height. */
   top: 0;
   bottom: 0;
   left: 50%;
@@ -1164,8 +1091,7 @@ input:focus-visible {
   background: var(--primary);
 }
 
-/* Keyboard focus gets the same visible line plus the app's standard focus ring
-   (this is a div, so the global button:focus-visible rule doesn't reach it). */
+/* This div needs its own focus treatment. */
 .panel-resize-handle:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: -1px;
@@ -1176,42 +1102,25 @@ input:focus-visible {
   background: var(--primary);
 }
 
-/* While a drag is in flight, force the resize cursor everywhere and suppress
-   text selection so sweeping over the canvas or a label never flickers. */
+/* Keep cursor and selection stable during panel resizing. */
 body.panels-resizing,
 body.panels-resizing * {
   cursor: col-resize !important;
   user-select: none !important;
 }
 
-/* The single persistent inspector toggle — floats over the canvas hugging
-   the inspector seam, the only affordance for the inspector (the rail
-   deliberately doesn't own it, and the inspector's own cramped pane carries
-   no collapse chrome). Borrows the zoom cluster's floating-chip grammar
-   (see .viewport-zoom below): borderless, white/--bg ground, --shadow-chip —
-   the same "raised above the work" language for anything that literally
-   floats over the drawing surface, rather than the hairline-bordered
-   vocabulary used by panel-anchored chrome. */
+/* The inspector's only toggle floats beside its seam. */
 .inspector-toggle {
   position: absolute;
-  /* Clears the view-toolbar band (~47px at desktop padding, ~49px in the
-     ≤750px container query) so the icon never overlays the toolbar's right
-     zone — at ~800–1000px it would otherwise sit over the Units switch's "m"
-     cell and steal that tap. Below the band it still reads as anchored to
-     the top-right. */
+  /* Clear the view toolbar so the toggle cannot steal its taps. */
   top: 64px;
-  /* Open: sits just left of the seam, over the canvas. Collapsed: the seam
-     is gone, so it slides to the workspace's right edge instead (see
-     .workspace.right-collapsed below). */
+  /* Collapsed state moves this to the workspace edge below. */
   right: calc(var(--inspector-width, 300px) + 12px);
   z-index: 6;
   display: flex;
   align-items: center;
   justify-content: center;
-  /* 36px, not the toolbar's 30px lane: the chip governs workspace topography
-     (show/hide a pane) like the rail, not tool state — one step up from the
-     tool controls, still lighter than the 48px rail so it floats over the
-     canvas without occluding it. */
+  /* Larger than tool controls, smaller than rail controls. */
   width: 36px;
   height: 36px;
   padding: 0;
@@ -1231,17 +1140,9 @@ body.panels-resizing * {
   right: 12px;
 }
 
-/* The library has no canvas-toolbar band, so the 64px anchor above would drop
-   the chip onto the header's Import button and hairline. Seat it in the header
-   lane instead, vertically centered against the Import row, and have the
-   header reserve the chip's column (12px seam gap + 30px chip + 12px breath)
-   so the row reads [Artwork Library … Import] [chip] in both collapse
-   states — collapsed, the chip slides to right: 12px, still inside the
-   now-full-width library pane. */
+/* The library has no canvas toolbar, so align the toggle with its header. */
 .workspace.library-view .inspector-toggle {
-  /* Centers the 36px chip on the header's Import row (also 36px): 24px header
-     padding + half the ~50px title-block content height ≈ 49px center,
-     minus 18px. */
+  /* Center the 36px toggle on the 36px Import row. */
   top: 31px;
 }
 .workspace.library-view .artwork-library-header {
@@ -1261,12 +1162,7 @@ body.panels-resizing * {
   background: var(--surface);
 }
 
-/* Open inspector = engaged mode, so the chip depresses like every other
-   latching toggle (Grid, Snap): petrol wash + the pressed inset instead of
-   the raised chip shadow. Collapsed, it pops back up as the raised white
-   chip — the raised/pressed flip is what tells the two states apart at a
-   glance. The pressed look holds through hover; hover feedback belongs to
-   the resting state only. */
+/* Expanded state uses the shared pressed-toggle treatment. */
 .inspector-toggle[aria-expanded="true"],
 .inspector-toggle[aria-expanded="true"]:hover {
   color: var(--primary-strong);
@@ -1431,11 +1327,6 @@ body.panels-resizing * {
   gap: 3px;
 }
 
-/* Borderless rounded fill, not a boxed row: resting is transparent, hover is
-   a Cool Fog wash, selected is petrol-soft — no border at any state. Padding
-   is 1px larger than the old bordered version (which had a 1px transparent/
-   petrol border) so the row's footprint doesn't shift now that the border
-   is gone. */
 .wall-row {
   display: flex;
   align-items: center;
@@ -1484,17 +1375,11 @@ body.panels-resizing * {
   font-variant-numeric: tabular-nums;
 }
 
-/* The right panel is now a pure inspector: warnings (when present), the
-   subject heading, then its fields. The storage note that used to live here,
-   pinned to the bottom, moved to the topbar's status popover (.storage-popover
-   below) — this is the sole child of .inspector's flex column now. */
 .inspector-zone {
   flex: 0 0 auto;
   padding-bottom: 18px;
 }
 
-/* The Rooms & Walls left pane — same box idiom as the checklist panel: a flat
-   white column, scrollable, with a hairline toward the canvas. */
 .rooms-panel {
   display: flex;
   min-height: 0;
@@ -1505,10 +1390,6 @@ body.panels-resizing * {
   border-right: 1px solid var(--line);
 }
 
-/* The Inspector heading names its subject (wall/artwork/opening) rather than
-   the static word "Inspector"; the small span labels which kind it is. Sized
-   a notch above the generic .panel-heading h2 (0.95rem) so the selected
-   object itself outranks a plain section label. */
 .inspector-subject h2 {
   min-width: 0;
   overflow: hidden;
@@ -1517,9 +1398,6 @@ body.panels-resizing * {
   white-space: nowrap;
 }
 
-/* The left workspace pane is the checklist itself: a flat white panel with a
-   hairline border toward the canvas, scrollable, laid out as a flex column so
-   the Add button sits at the bottom. */
 .checklist-panel {
   display: flex;
   min-height: 0;
@@ -1528,17 +1406,11 @@ body.panels-resizing * {
   padding: 20px;
   background: var(--bg);
   border-right: 1px solid var(--line);
-  /* The panel is user-resizable, so its contents must respond to the PANEL's
-     width, not the viewport (see the .checklist-filter container queries).
-     Inline-size containment only; block size stays natural so the column
-     still scrolls. */
+  /* Density follows the resizable panel, not the viewport. */
   container-type: inline-size;
 }
 
-/* The whole panel — heading, filters, rows, and Add button — is the drop
-   target, so the highlight goes on the section itself. A full-bleed petrol
-   wash plus an inset outline (not a shadow — DESIGN.md keeps panels flat)
-   reads as "drop here" without shifting layout. */
+/* Inset outline highlights the full drop target without shifting layout. */
 .checklist-panel.drop-active {
   background: var(--primary-soft);
   outline: 2px solid var(--primary);
@@ -1550,9 +1422,6 @@ body.panels-resizing * {
   font-weight: var(--weight-strong);
 }
 
-/* Held-duplicate confirm strip: a plain square panel (flat per DESIGN.md, no
-   pill, no new color) sitting above the list. The hairline frame and surface
-   fill mark it as a hold to resolve, not an error. */
 .checklist-duplicate-notice {
   display: flex;
   flex-direction: column;
@@ -1580,15 +1449,11 @@ body.panels-resizing * {
   flex: 1 1 auto;
   min-width: 0;
   gap: 6px;
-  /* Tabs never wrap — at a narrow panel the row pans instead of stacking. */
+  /* Pan instead of wrapping at narrow panel widths. */
   overflow-x: auto;
   scrollbar-width: none;
 }
 
-/* One composed instrument: the controls row IS the recessed track — the
-   filter group rides inside it (its own track chrome suppressed below) and
-   the sort trigger docks at the right end behind a hairline divider, so
-   nothing floats disconnected beside the group. */
 .checklist-controls {
   display: flex;
   align-items: center;
@@ -1599,8 +1464,6 @@ body.panels-resizing * {
   background: var(--track);
 }
 
-/* The inner group already paints a track of its own; inside the shell it
-   goes transparent and the 3px inset comes from the shell instead. */
 .checklist-controls .seg-track {
   padding: 0;
   border-radius: 0;
@@ -1641,43 +1504,23 @@ body.panels-resizing * {
   color: var(--ink);
 }
 
-/* The select primitive's baked-in caret would make the icon-only trigger
-   read as two glyphs; the sort icon alone is the whole affordance. */
+/* Hide the Select primitive's caret on this icon-only trigger. */
 .checklist-sort-trigger > svg:last-of-type {
   display: none;
 }
 
-/* A non-default sort is state, not decoration — petrol per the
-   active-control vocabulary, so a surprising row order has a visible
-   cause even after the menu closes. */
 .checklist-sort-trigger[data-nondefault] {
   color: var(--primary-strong);
 }
 
-/* Type sizing only — track/chip/ink states and box metrics come from the
-   shared .seg-* rules. The child selector is load-bearing: .seg-item sits
-   later in this file and wins a bare-class tie, so a plain .checklist-filter
-   can't override segment declarations (the old min-height/padding here were
-   silently dead). One weight at rest and active: the raised chip carries the
-   state, so the row never reflows as the selection moves. */
+/* Child specificity must beat the later bare .seg-item rule. */
 .checklist-filters > .checklist-filter {
-  /* Label and its count span are separate flex items now; 4px reads as the
-     single space the old one-text-node label had. */
   gap: 4px;
   font-size: var(--type-xs);
   font-weight: var(--weight-medium);
 }
 
-/* Density tiers for the controls row, in the toolbar's spirit but pure CSS:
-   the resizable .checklist-panel is the container (content-box widths — the
-   panel minus its 40px padding, so the 240px panel minimum leaves 199px).
-   Measured at --type-xs Geist, the full track needs ~305px with two-digit
-   counts and ~226px labels-only. First tier drops the counts (each segment
-   keeps its count in an aria-label, and the heading still shows the total);
-   the second, near the panel minimum, tightens the segments so
-   "All / Placed / Unplaced" plus the docked sort trigger fit without
-   clipping. The filters' overflow-x pan stays as the fallback for outsized
-   counts above the first threshold. */
+/* Container-density tiers keep filters usable at the panel's minimum width. */
 @container (max-width: 308px) {
   .checklist-filter-count {
     display: none;
@@ -1699,8 +1542,6 @@ body.panels-resizing * {
   padding: 14px 2px;
 }
 
-/* Real dropzone visual for the empty checklist — a dashed hairline frame
-   rather than a bare line of copy, so a first-time curator sees a target. */
 .checklist-empty {
   display: flex;
   flex: 1 1 auto;
@@ -1733,9 +1574,6 @@ body.panels-resizing * {
   list-style: none;
 }
 
-/* Borderless rounded fill, same idiom as .wall-row — padding gained 1px over
-   the old bordered version (1px transparent/petrol border) so the row's
-   footprint is unchanged now that the border is gone. */
 .checklist-row {
   position: relative;
   display: flex;
@@ -1756,8 +1594,6 @@ body.panels-resizing * {
   background: var(--surface);
 }
 
-/* Same active-state language as .wall-row — one selected item at a time, a
-   petrol-soft wash with no border. */
 .checklist-row.selected {
   background: var(--primary-soft);
   box-shadow: inset 0 0 0 1px var(--primary-line);
@@ -1783,9 +1619,6 @@ body.panels-resizing * {
   color: var(--subtle);
 }
 
-/* 48px square slot, white bg, hairline border, square corners. object-fit:
-   contain so the uncropped image floats in the square — portrait vs landscape
-   proportions read at a glance rather than being cropped to fill. */
 .checklist-thumb {
   flex: 0 0 auto;
   width: 48px;
@@ -1808,8 +1641,6 @@ body.panels-resizing * {
   gap: 2px;
 }
 
-/* Title now has the full line to itself — nothing else competes for width,
-   so it only truncates once it genuinely runs out of row to fill. */
 .checklist-title-line {
   display: flex;
   min-width: 0;
@@ -1818,11 +1649,7 @@ body.panels-resizing * {
   gap: 8px;
 }
 
-/* Artist and the placement tag share this line — the tag lives inside the
-   main column rather than as a sibling flex item, so at narrow panel widths
-   the artist name truncates instead of the tag collapsing to zero. When
-   there's no artist an empty span still holds the first slot so
-   space-between keeps pinning the tag to the right edge. */
+/* Keep the placement tag visible while long artist names truncate. */
 .checklist-artist-line {
   display: flex;
   min-width: 0;
@@ -1840,13 +1667,7 @@ body.panels-resizing * {
   white-space: nowrap;
 }
 
-/* When the remove button is revealed it overlays the row's right edge. The
-   button is centered on the whole row (position: absolute; top: 50%), and
-   with three text lines stacked in .checklist-row-main that column is now
-   taller than the 48px thumb, so the row's vertical center — and the
-   button — lands on the middle line rather than the top one. Give that line
-   (the one holding the placement tag) the clearance instead of the title.
-   (Coarse pointers keep the button in flow, so no shift is needed there.) */
+/* Fine pointers reveal an overlaid remove button; reserve space on its row. */
 @media (pointer: fine) {
   .checklist-row:hover .checklist-artist-line,
   .checklist-row:focus-within .checklist-artist-line,
@@ -1888,8 +1709,6 @@ body.panels-resizing * {
   white-space: nowrap;
 }
 
-/* Placement is plain text, no background: the placed wall name reads in the
-   petrol marker color, "Unplaced" stays subtle. */
 .checklist-tag {
   flex: 0 0 auto;
   max-width: 104px;
@@ -1905,20 +1724,12 @@ body.panels-resizing * {
   color: var(--primary-strong);
 }
 
-/* Revealed on row hover/focus/selection so a resting row stays calm. Out of
-   flow — a hidden button must not reserve row width the title needs at
-   narrow panel widths — so when revealed it overlays the row's right edge
-   (its solid fill and border keep it legible over the tag). Coarse pointers
-   get it in-flow and always visible instead: no hover exists to reveal it,
-   and a transparent overlay would sit exactly where a thumb drags. */
+/* Overlay on fine pointers; coarse pointers keep this visible and in flow. */
 .checklist-remove {
   position: absolute;
   top: 50%;
   right: 6px;
-  /* .icon-button is borderless now, but this one overlays row content when
-     revealed — it needs its own solid ground to stay legible over the title/
-     tag underneath, so it keeps the old boxed look explicitly rather than
-     inheriting the new transparent base. */
+  /* Solid background keeps the overlaid control legible. */
   background: var(--bg);
   border: 1px solid var(--line);
   opacity: 0;
@@ -1943,9 +1754,7 @@ body.panels-resizing * {
     transform: none;
   }
 
-  /* A row is the source of a long-press drag on touch. Without these iOS pops
-     its own text-selection handles and the callout menu over the row the
-     instant the press is held, fighting our drag. */
+  /* Prevent iOS selection/callouts from interrupting long-press drag. */
   .checklist-row {
     -webkit-user-select: none;
     user-select: none;
@@ -1953,18 +1762,12 @@ body.panels-resizing * {
   }
 }
 
-/* The pressed/lifted look while a touch drag is armed — the same petrol-soft
-   selection wash the row already uses when selected, so a dragging row reads as
-   "active" in the app's existing language. */
 .checklist-row.touch-dragging {
   background: var(--primary-soft);
   box-shadow: inset 0 0 0 1px var(--primary-line);
 }
 
-/* The floating thumbnail that follows the finger during a touch drag (rendered
-   to <body> via a portal). Fixed and pointer-events:none so it can't intercept
-   the drag it previews; positioned by an inline transform from the latest
-   pointer coordinates. Small radius — it's transient chrome, not a panel. */
+/* Portal drag preview must never intercept its pointer. */
 .artwork-drag-preview {
   position: fixed;
   top: 0;
@@ -1997,8 +1800,7 @@ body.panels-resizing * {
 
 .checklist-add {
   width: 100%;
-  /* The panel resizes down to ~240px; the label truncates rather than
-     spilling past the button. */
+  /* Truncate rather than overflow at the panel's minimum width. */
   min-width: 0;
   min-height: 40px;
 }
@@ -2808,45 +2610,23 @@ body.panels-resizing * {
   flex: 0 0 auto;
 }
 
-/* Left zone of .view-toolbar: a captioned tool cluster — one joined soft
-   group holding the caption and an icon segment per tool. Shared by the
-   Insert cluster (door/window/blocked-zone) and the Draw cluster
-   (rectangle/outline/partition). No track: most of the time no tool is
-   armed, and an empty tray reads wrong. Arming a tool is an engaged mode,
-   so the armed segment presses in (petrol wash + inset shadow) exactly
-   like Grid/Snap. flex:none because the cluster must never be squeezed by
-   the flexing right zone — compactness comes from the container queries
-   below. */
+/* Keep tool clusters unsqueezed; density changes handle compactness. */
 .tool-cluster {
   display: inline-flex;
   align-items: center;
   flex: none;
 }
 
-/* The caption sits inside the shared fill as a leading cell behind a
-   hairline (same dock-inside-the-control move as the checklist's sort
-   trigger), so "Draw"/"Insert" and their tools read as one object. Muted
-   ink and no hover keep it legible as a label, not a fourth button. */
 .tool-cluster-label {
   display: inline-flex;
   align-items: center;
   padding: 0 calc(var(--toolbar-space-1) + 4px);
   border-right: 1px solid var(--surface-strong);
   color: var(--muted);
-  /* One step below the 13px semibold button labels (Grid, Snap): labels
-     that NAME a control drop a size, not just a weight — size + weight
-     together keep caption vs action legible at a squint. Shared with
-     .unit-select-label ("Precision"), the same docked-label role. */
   font-size: var(--type-xs);
   font-weight: var(--weight-medium);
 }
 
-/* The segments share one soft fill — the same --surface chip vocabulary as
-   every other toolbar control, spanning all three tools so the cluster reads
-   as a single object rather than three floating buttons. Not a recessed
-   track: no --track ground, no raised chip — tool arming is usually empty,
-   and states carve individual segments out of the shared fill instead.
-   overflow clips the square segment states to the group's outer radius. */
 .tool-cluster-segments {
   display: inline-flex;
   border-radius: var(--radius-seg);
@@ -2872,8 +2652,6 @@ body.panels-resizing * {
     color 150ms ease-out;
 }
 
-/* Interior hairlines chunk the shared fill into three tools without
-   promoting any of them to its own chip. */
 .tool-cluster-segment + .tool-cluster-segment {
   border-left: 1px solid var(--surface-strong);
 }
@@ -2883,20 +2661,11 @@ body.panels-resizing * {
   color: var(--ink);
 }
 
-/* The global button focus ring (2px, offset 2px outward) would be clipped
-   by the group's overflow everywhere except over the neighboring segment,
-   leaving a stray vertical bar — draw it inset instead, like the panel
-   resize handles and canvases do. */
+/* The cluster clips outward focus rings, so draw this one inset. */
 .tool-cluster-segment:focus-visible {
   outline-offset: -2px;
 }
 
-/* The armed tool: engaged mode = pressed in, matching Grid/Snap, plus the
-   petrol inner ring that ranks armed tools above resting view toggles. The
-   wash keeps the shared chip radius so a pressed tool is the same rounded
-   petrol chip as every other pressed toolbar control, floating in the
-   group's fill; the hairlines beside it yield so nothing tangents its
-   corners. */
 .tool-cluster-segment[aria-pressed="true"] {
   border-left-color: transparent;
   border-radius: var(--radius-seg);
@@ -2914,8 +2683,6 @@ body.panels-resizing * {
   border-right-color: transparent;
 }
 
-/* Compact hover hint for toolbar icon controls — a quieter cut of the
-   shared TooltipContent shell (which defaults to placement-gloss sizing). */
 .toolbar-tooltip {
   padding: 5px 9px;
   border-radius: var(--radius-control);
@@ -2924,8 +2691,6 @@ body.panels-resizing * {
   line-height: var(--leading-ui);
 }
 
-/* The trailing key hint in a toolbar tooltip: a compact key chip followed by
-   optional explanatory text. */
 .toolbar-tooltip-kbd {
   display: inline-flex;
   align-items: center;
@@ -2935,10 +2700,6 @@ body.panels-resizing * {
   font-variant-numeric: tabular-nums;
 }
 
-/* Entrance for every tooltip (the .placement-tooltip class rides the
-   shared TooltipContent shell): a quick fade + soft pop scaled from the
-   Radix-provided origin, so the hint reads as surfacing from its trigger
-   whichever side it lands on. */
 @keyframes tooltip-in {
   from {
     opacity: 0;
@@ -2963,23 +2724,16 @@ body.panels-resizing * {
   }
 }
 
-/* A disabled cluster tool keeps the aria-disabled pattern (still focusable, so
-   keyboard/SR users reach it and its reason), not native disabled — so the
-   fogged look and cursor hang off [aria-disabled] instead of :disabled. */
+/* aria-disabled stays focusable so keyboard and screen-reader users get the reason. */
 .tool-cluster-segment[aria-disabled="true"] {
   cursor: not-allowed;
 }
 
-/* A disabled cluster (currently only Insert can disable) means the current 2D
-   surface is missing its required context (Elevation has no selected wall). */
 .tool-cluster:has(.tool-cluster-segment[aria-disabled="true"]) {
   cursor: not-allowed;
   opacity: 0.45;
 }
 
-/* Narrow-mode cluster control. The full segmented picker remains the desktop
-   affordance; this control is intentionally quiet and compact so the cluster
-   reads as one action until the user picks a specific tool from the menu. */
 .compact-cluster-tools {
   display: none;
   flex: none;
@@ -3005,8 +2759,7 @@ body.panels-resizing * {
     color 150ms ease-out;
 }
 
-/* aria-expanded alongside data-state: the trigger sits inside a Radix
-   Tooltip trigger, whose own data-state can clobber the menu's. */
+/* Radix Tooltip can clobber data-state, so aria-expanded is also required. */
 .compact-cluster-trigger:hover:not([aria-disabled="true"]),
 .compact-cluster-trigger[data-state="open"],
 .compact-cluster-trigger[aria-expanded="true"] {
@@ -3014,17 +2767,12 @@ body.panels-resizing * {
   color: var(--ink);
 }
 
-/* The trigger stands in for whichever tool is armed (icon + name swap in
-   App), so it earns the same armed emphasis as a segment: petrol wash,
-   pressed shadow, petrol ring. */
 .compact-cluster-trigger[data-active="true"] {
   background: var(--primary-soft);
   color: var(--primary-strong);
   box-shadow: var(--shadow-pressed), var(--ring-armed);
 }
 
-/* Disabled compact trigger: fogged like the segmented picker, still focusable
-   (aria-disabled, not native disabled) so the reason tooltip is reachable. */
 .compact-cluster-trigger[aria-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.45;
@@ -3041,20 +2789,13 @@ body.panels-resizing * {
 }
 
 .view-options {
-  /* At comfortable widths this keeps the two semantic groups visually
-     distinct. The spacer is intentionally the first thing removed by the
-     narrow container query below. */
   min-width: 0;
   flex: 1 1 auto;
   flex-wrap: nowrap;
   justify-content: flex-end;
 }
 
-/* Density is selected by useResponsiveToolbarDensity after measuring each
-   rendered configuration. "Trimmed" drops only the weakest-need labels;
-   "condensed" removes every descriptive label; "compact" also replaces the
-   four-segment Insert picker; "tight" removes the flexible inter-zone spacer
-   and leaves Insert as a single + target. */
+/* Density is selected after measuring each rendered configuration. */
 .view-toolbar:is(
     [data-density="trimmed"],
     [data-density="condensed"],
@@ -3079,20 +2820,12 @@ body.panels-resizing * {
   gap: 6px;
 }
 
-/* Trimmed sits between comfortable and condensed for a ~740px canvas column
-   (a 1440px laptop): it hides the labels whose icons read strongest on their
-   own (Grid, Snap, Eyeline, Draw room) but KEEPS the two whose icon/value is
-   weakest — Overlap and Precision, marked .view-option-label-priority — plus
-   the Units switch words. Only these non-priority labels collapse here; the
-   condensed rule below then takes the rest. */
+/* Trimmed preserves labels marked as priority. */
 .view-toolbar[data-density="trimmed"]
   :is(.view-option-label, .unit-select-label):not(.view-option-label-priority) {
   display: none;
 }
 
-/* The buttons that just went icon-only get condensed's centered, compact
-   target; the labeled Overlap button (a priority label inside) keeps its
-   natural width. */
 .view-toolbar[data-density="trimmed"]
   .view-option-button:not(:has(.view-option-label-priority)) {
   min-width: 36px;
@@ -3177,9 +2910,7 @@ body.panels-resizing * {
   display: none;
 }
 
-/* Below 750px the ViewOptionButton labels drop to icon-only and controls
-   receive the 40px touch target. Precision keeps its value visible, while
-   its descriptive label moves into the accessible name and title. */
+/* Preserve 40px touch targets when toolbar labels collapse. */
 @container (max-width: 750px) {
   .view-toolbar {
     padding: var(--toolbar-space-1) var(--toolbar-space-2);
@@ -3244,15 +2975,7 @@ body.panels-resizing * {
 
 }
 
-/* Soft segmented tracks — the shared idiom for mutually-exclusive pickers
-   (topbar Plan/Elevation/3D, checklist filters, units, Insert, arrange
-   modes): a recessed grey track holding quiet items, with one raised white
-   chip marking the active choice. The chip is a real element rendered by
-   SegmentedTabsList / SegmentedToggleGroup so it can slide between
-   segments; until its first measurement the active item paints its own
-   chip as a fallback. The raised chip itself is the color-blind-safe state
-   cue, so items keep one weight and only shift ink. Geist carries
-   functional navigation; Figtree stays reserved for the brandmark. */
+/* Shared sliding-chip track for mutually exclusive choices. */
 .seg-track {
   position: relative;
   display: inline-flex;
@@ -3308,8 +3031,6 @@ body.panels-resizing * {
   color: var(--ink);
 }
 
-/* Resting items get a ghost of the chip on hover; the active item already
-   has the real one behind it. */
 .seg-item:not([data-state="active"]):not([data-state="on"]):hover:not(:disabled) {
   background: var(--chip-ghost);
 }
@@ -3321,7 +3042,7 @@ body.panels-resizing * {
   color: var(--primary-strong);
 }
 
-/* Fallback chip for first paint, before the sliding one has measured. */
+/* First-paint fallback before the sliding chip is measured. */
 .seg-track:not([data-seg-ready]) .seg-item[data-state="active"],
 .seg-track:not([data-seg-ready]) .seg-item[data-state="on"] {
   background: var(--chip);
@@ -3334,11 +3055,7 @@ body.panels-resizing * {
   }
 }
 
-/* Underline tabs — the navigation counterpart to the segmented track: a
-   transparent rail whose 2px petrol underline slides between tabs with the
-   same motion (UnderlineTabsList renders the .seg-underline element).
-   Used for the topbar view modes; recessed tracks stay reserved for value
-   pickers. */
+/* Sliding underline for navigation tabs. */
 .tabs-underline {
   position: relative;
   display: inline-flex;
@@ -3379,8 +3096,6 @@ body.panels-resizing * {
   cursor: pointer;
   white-space: nowrap;
   font-family: var(--font-ui);
-  /* Scaled up slightly so the mode tabs hold their weight in the taller
-     (80px) topbar rather than floating in it. */
   font-size: var(--type-md);
   font-weight: var(--weight-semibold);
   transition: color 150ms ease-out;
@@ -3392,7 +3107,7 @@ body.panels-resizing * {
   color: var(--ink);
 }
 
-/* Fallback underline for first paint, before the sliding one has measured. */
+/* First-paint fallback before the underline is measured. */
 .tabs-underline:not([data-seg-ready])
   .tab-button:is([data-state="active"], [data-state="on"]) {
   box-shadow: inset 0 -3px 0 var(--primary);
@@ -3404,18 +3119,11 @@ body.panels-resizing * {
   }
 }
 
-/* Latching toggles: soft grey fills that depress when on — the petrol wash
-   plus an inset shadow, the tactile counterpart to the raised chip (chips
-   mark a choice within a set; a pressed key marks a mode that's engaged). */
 .view-option-button {
   display: inline-flex;
   align-items: center;
   gap: var(--toolbar-space-2);
-  /* Explicit height, not just min-height: the Toggle primitive's Tailwind
-     h-8 (32px) would otherwise win, leaving these toggles 1px proud of the
-     row's 30px lane (clusters, Precision, Units, compact triggers) on both
-     edges. The 750px container query below re-raises everything to 40px
-     touch targets together. */
+  /* Override the primitive's fixed height; the container query restores 40px. */
   height: 30px;
   min-height: 30px;
   padding: 0 calc(var(--toolbar-space-2) + 1px);
@@ -3437,11 +3145,7 @@ body.panels-resizing * {
   color: var(--ink);
 }
 
-/* Active state wins over hover so a click from on -> off visibly changes
-   immediately while the pointer is still over the control. Keyed on
-   aria-pressed, not data-state: these toggles are wrapped in Radix
-   Tooltip triggers, whose own data-state (closed/delayed-open) clobbers
-   the toggle's on/off value on the shared DOM node. */
+/* Radix Tooltip can clobber data-state; aria-pressed preserves toggle state. */
 .view-option-button[data-state="on"],
 .view-option-button[aria-pressed="true"],
 .view-option-button[data-state="on"]:hover:not(:disabled),
@@ -3451,11 +3155,6 @@ body.panels-resizing * {
   box-shadow: var(--shadow-pressed);
 }
 
-/* Draw room is an armed TOOL, not a resting view toggle: when pressed it gets
-   the extra petrol inner ring so it outranks Grid/Snap/Eyeline/Overlap, which
-   keep the quieter pressed look above. (Insert segments carry .armed-tool via
-   their own rules; this covers the one armed control that shares
-   .view-option-button.) */
 .view-option-button.armed-tool[data-state="on"],
 .view-option-button.armed-tool[aria-pressed="true"] {
   box-shadow: var(--shadow-pressed), var(--ring-armed);
@@ -3485,9 +3184,7 @@ body.panels-resizing * {
   background: var(--surface-strong);
 }
 
-/* Same docked-label role as .tool-cluster-label, so the same voice: one
-   size below the value it names, muted rather than subtle — --subtle on
-   the surface fill lands near 3.5:1, under AA for 13px text. */
+/* Use --muted here; --subtle falls below AA contrast at this size. */
 .unit-select-label {
   color: var(--muted);
   font-size: var(--type-xs);
@@ -3506,11 +3203,7 @@ body.panels-resizing * {
 }
 
 .precision-select-trigger {
-  /* SelectTrigger's own base class carries Tailwind's h-9 (36px), which
-     would otherwise force .unit-select taller than every other 30px
-     control in the row (Grid/Snap, Overlap, Units). Override the height
-     directly rather than min-width/padding alone, since a min-height on
-     the wrapper can't shrink a child's explicit height. */
+  /* Override SelectTrigger's fixed 36px height to match the toolbar lane. */
   height: 30px;
   min-width: 54px;
   padding: 0;
@@ -3536,11 +3229,6 @@ body.panels-resizing * {
   box-shadow: var(--shadow-panel);
 }
 
-/* Popover: a standalone overlay (a topbar status panel, not a trigger-anchored
-   menu list), so it takes the heavier overlay grammar the dialog/toast shells
-   use — 12px radius, --shadow-overlay's softer diffuse cast, and at most a
-   whisper of border — rather than the tighter --radius-sm/--shadow-panel the
-   menus above share. */
 .popover-content {
   overflow: hidden;
   padding: 16px;
@@ -3551,10 +3239,6 @@ body.panels-resizing * {
   box-shadow: var(--shadow-overlay);
 }
 
-/* The topbar status popover (StatusBadge's trigger) — where the storage note
-   that used to be pinned to the bottom of the inspector now lives. A compact
-   heading + copy line, an inline Retry when persistence was denied, then a
-   two-action footer. */
 .storage-popover {
   display: grid;
   gap: 10px;
@@ -4995,10 +4679,6 @@ body.panels-resizing * {
   gap: 8px;
 }
 
-/* The full-width disclosure control. Negative inline margin + matching
-   padding keep the title optically flush with the field labels below while
-   letting the hover wash bleed slightly past them. Focus ring comes from the
-   global button:focus-visible rule. */
 .inspector-section-trigger {
   display: flex;
   flex: 1 1 auto;
@@ -5021,9 +4701,7 @@ body.panels-resizing * {
   color: var(--ink);
 }
 
-/* Same voice as the .artwork-dimensions-heading h3 it replaces. Never
-   shrinks — at narrow panel widths the adornment/summary give way first,
-   so "Dimensions" can't clip to "Dimension" beside a wide extras row. */
+/* Keep the title intact while summaries and adornments yield. */
 .inspector-section-title {
   flex: 0 0 auto;
   font-size: var(--type-sm);
@@ -5031,9 +4709,7 @@ body.panels-resizing * {
   line-height: var(--leading-ui);
 }
 
-/* At-rest value readout while collapsed. Muted (≥ 4.5:1 on white; --subtle
-   isn't at this size), tabular so dims don't jitter, ellipsized so a long
-   accession number can never widen the panel. */
+/* --muted maintains AA contrast; ellipsis prevents panel widening. */
 .inspector-section-summary {
   min-width: 0;
   margin-left: auto;
@@ -5048,10 +4724,7 @@ body.panels-resizing * {
 
 .inspector-section-chevron {
   flex: 0 0 auto;
-  /* Trails the row: pushed to the far edge when the section is open (no
-     summary in the DOM), docking beside the summary when collapsed — the
-     sibling rule below cancels the auto margin so the pair reads as one
-     right-aligned unit. */
+  /* Dock beside a collapsed summary, otherwise trail the row. */
   margin-left: auto;
   color: var(--subtle);
   transition: transform 180ms ease-out;
@@ -5069,10 +4742,7 @@ body.panels-resizing * {
   transform: rotate(90deg);
 }
 
-/* Header extras (uncertainty badge, lock ratio toggle) sit at the row's
-   right edge, outside the trigger — a button can't nest in a button, and a
-   collapsed section hides them entirely (InspectorSection renders them only
-   while open). */
+/* Keep interactive extras outside the disclosure button. */
 .inspector-section-extras {
   display: flex;
   flex: 0 0 auto;
@@ -5088,19 +4758,11 @@ body.panels-resizing * {
   padding-bottom: 5px;
 }
 
-/* Non-collapsible section (collapsible={false}): a plain <h3> header row over
-   an always-open body, no trigger/chevron. The header keeps the trigger's row
-   height so it lines up with collapsible siblings, and the title stays flush
-   left with the field labels below (no chevron indent), matching the
-   .inspector-section-trigger's optical-flush intent. */
 .inspector-section-static .inspector-section-header {
   min-height: 30px;
 }
 
-/* Right-aligned header affordance visible open OR closed (InspectorSection's
-   `action`). In a collapsible header the flex-grow trigger already pushes it
-   to the edge; a static header has no such filler, so the auto margin does
-   the pushing there. */
+/* Static headers need an explicit push for right-aligned actions. */
 .inspector-section-action {
   display: flex;
   flex: 0 0 auto;
@@ -5112,10 +4774,6 @@ body.panels-resizing * {
   margin-inline-start: auto;
 }
 
-/* Label-left / control-right row for a single full-width secondary control
-   (InspectorRow — Status, Finish, Type selects). The label column reuses the
-   .field-row > span voice (duplicated below, as .field-row does for its own
-   label); the control cell stacks an optional .field-hint under the input. */
 .inspector-row {
   display: grid;
   grid-template-columns: minmax(72px, 42%) minmax(0, 1fr);
@@ -5137,16 +4795,9 @@ body.panels-resizing * {
   min-width: 0;
 }
 
-/* Controls inside a label-left row take the compact-field chrome the old
-   .field-row.compact carried — without these a bare .select-trigger falls
-   back to 16px browser sizing with no visible bounds and reads broken beside
-   the 13px bordered length fields. Bordered like the length fields (one
-   editable-value look across the panel), at the 32px compact height. */
 .inspector-row-control > .select-trigger {
   width: 100%;
-  /* Explicit height: SelectTrigger's base class carries Tailwind's h-9
-     (36px), which a min-height can't shrink (same note as
-     .precision-select-trigger). */
+  /* Override SelectTrigger's fixed 36px height. */
   height: 32px;
   min-height: 32px;
   padding: 6px 8px;
@@ -5172,10 +4823,7 @@ body.panels-resizing * {
   font-size: var(--type-sm);
 }
 
-/* Read-only readout row (InspectorSummaryRow): muted label left, quiet value
-   right in tabular numerals, optional inline action trailing the value. Same
-   quiet register as .inspector-section-summary; values stay at --muted (never
-   --subtle, which drops under 4.5:1 at this size). Never an input. */
+/* Read-only values use --muted because --subtle misses AA at this size. */
 .inspector-summary-row {
   display: flex;
   align-items: baseline;
@@ -5205,11 +4853,7 @@ body.panels-resizing * {
   flex: 0 0 auto;
 }
 
-/* Quiet filled note (InspectorNotice), generalized from
-   .opening-connection-status: same padding/radius/type, three tones. Each
-   wash carries a strong-enough ink for WCAG AA — positive reuses the
-   aligned-status pairing, caution the misaligned one, info sits on the
-   neutral surface with full foreground ink. */
+/* Notice tone pairings maintain WCAG AA contrast. */
 .inspector-notice {
   display: flex;
   align-items: flex-start;
@@ -5218,8 +4862,6 @@ body.panels-resizing * {
   padding: 7px 9px;
   border-radius: var(--radius-sm);
   font-size: var(--type-xs);
-  /* Medium, not semibold: the wash already carries the tone — bold amber on
-     amber reads as shouting in a panel built on quiet hairlines. */
   font-weight: var(--weight-medium);
   line-height: var(--leading-ui);
 }
@@ -5242,7 +4884,6 @@ body.panels-resizing * {
 .inspector-notice-icon {
   display: flex;
   flex: 0 0 auto;
-  /* Nudge the glyph onto the first text line rather than the box top. */
   margin-top: 1px;
 }
 
@@ -5256,12 +4897,6 @@ body.panels-resizing * {
   margin-inline-start: auto;
 }
 
-/* Optionally-labeled row of one-click action chips (InspectorActionGroup),
-   adapted from .opening-add-row / .opening-add-buttons: set slightly apart
-   from the field grids above, its buttons wrapping across the panel width so
-   the group reads as "act" rather than as more data entry. (The .opening-add-*
-   rules stay put — a later task removes them once OpeningInspector adopts
-   this.) */
 .inspector-action-group {
   display: grid;
   gap: 8px;
@@ -5280,8 +4915,6 @@ body.panels-resizing * {
   gap: 8px;
 }
 
-/* Equal-weight verb pairs (Apply · Cancel): two full-width centered columns,
-   the layout .arrange-actions carried before the primitives replaced it. */
 .inspector-action-group-buttons.split {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5301,11 +4934,6 @@ body.panels-resizing * {
   width: 100%;
 }
 
-/* Chrome-free disclosure (InspectorDisclosure): a small ghost text-button
-   trigger, no hairline/chevron, for a secondary "Edit details" reveal nested
-   inside an already-open section. The negative inline margin lets the trigger's
-   hover wash bleed left of the body text it labels, matching how
-   .inspector-section-trigger sits. */
 .inspector-disclosure {
   display: grid;
   gap: 8px;
@@ -5330,8 +4958,7 @@ body.panels-resizing * {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  /* Buttons don't inherit type — without this the trigger renders in the
-     platform font, visibly off from every Geist label beside it. */
+  /* Buttons do not inherit font-family. */
   font-family: inherit;
   font-size: var(--type-xs);
   font-weight: var(--weight-semibold);
@@ -5348,8 +4975,6 @@ body.panels-resizing * {
   outline-offset: 1px;
 }
 
-/* Summary beside the trigger — quiet, tabular, ellipsized like the section
-   summary so a long value can't widen the panel. */
 .inspector-disclosure-summary {
   min-width: 0;
   overflow: hidden;
@@ -5367,11 +4992,7 @@ body.panels-resizing * {
   padding-top: 8px;
 }
 
-/* Scale-state dot (ScaleStateBadge): a badge's worth of words was too wide
-   for the section header at 260px, so the state compresses to a color dot.
-   Solid caution = missing, hollow caution = estimated — the fill difference
-   keeps the pair apart without relying on hue alone — and quiet petrol-soft
-   = true. The full sentence rides the title tooltip + visually-hidden text. */
+/* Fill distinguishes scale states without relying on hue alone. */
 .scale-state-icon {
   flex: 0 0 auto;
   display: inline-flex;
@@ -5387,18 +5008,12 @@ body.panels-resizing * {
   color: var(--muted);
 }
 
-/* Radix Collapsible open/close: height animates between 0 and the measured
-   --radix-collapsible-content-height (Radix keeps the node mounted until the
-   close animation ends). prefers-reduced-motion collapses both to instant
-   via the global reduced-motion rule. */
+/* Radix keeps content mounted until the measured-height animation ends. */
 .collapsible-content {
   overflow: hidden;
 }
 
-/* Focus rings reach 4px past an input (2px outline + 2px offset), and this
-   wrapper must clip for the height animation — so let the clip box bleed 5px
-   sideways and pad the body back, keeping fields aligned with the section
-   header while their rings render whole at the panel edges. */
+/* Bleed the animation clip so input focus rings remain visible. */
 .inspector-section > .collapsible-content {
   margin-inline: -5px;
 }
@@ -5437,30 +5052,18 @@ body.panels-resizing * {
   }
 }
 
-/* "What results" (the derived Overall pair + its hint) sits a breath below
-   "what you enter" (band widths + finish) — the section body's 10px rhythm
-   plus this nudge reads as two thoughts without opening a new section. */
 .framing-overall {
   display: grid;
   gap: 6px;
   margin-top: 2px;
 }
 
-/* Revealed Overall editor (the "Set…" disclosure body): the editable W/H pair
-   plus its hint, set a breath below the summary row it hangs off. */
 .framing-overall-editor {
   display: grid;
   gap: 6px;
   padding-top: 4px;
 }
 
-/* The ratio lock rides the right edge of the Dimensions heading row; the
-   Toggle primitive supplies its ghost hover and pressed-petrol states. */
-
-/* Artwork inspector header: an aspect-true thumbnail beside the identity
-   fields when the panel has room, wrapping to a stack (thumbnail above the
-   fields) once it's narrow. flex-wrap + the identity block's flex-basis/
-   min-width set the wrap threshold, so no media query is needed. */
 .artwork-inspector-header {
   display: grid;
   grid-template-columns: minmax(0, auto) minmax(0, 1fr);
@@ -5468,10 +5071,6 @@ body.panels-resizing * {
   gap: 12px;
 }
 
-/* Same square-slot vocabulary as .checklist-thumb — white bg, hairline border,
-   square corners, uncropped — but sized to the image's own proportions rather
-   than a fixed square: the intrinsic pixels (via the inline aspect-ratio) cap
-   inside a 96px box, so a portrait reads tall and a landscape wide. */
 .artwork-inspector-thumb {
   flex: 0 0 auto;
   width: auto;
@@ -5484,14 +5083,11 @@ body.panels-resizing * {
   object-fit: contain;
 }
 
-/* No image yet: a plain square placeholder holds the slot. */
 .artwork-inspector-thumb.placeholder {
   width: 88px;
   height: 88px;
 }
 
-/* Grows to fill the row beside the thumbnail; min-width is the wrap threshold —
-   below it the identity fields drop under the thumbnail. */
 .artwork-inspector-identity {
   grid-column: 1 / -1;
   min-width: 0;
@@ -5539,10 +5135,7 @@ body.panels-resizing * {
   right: -4px;
 }
 
-/* The inspector's width is user-controlled, so artwork reflow follows the
-   pane rather than the viewport. At the default 300px pane there is 260px of
-   content after padding: stack the edit form below its thumbnail instead of
-   asking the flex row for 96 + 12 + 180px and creating horizontal overflow. */
+/* Reflow against the resizable inspector, not the viewport. */
 @container inspector (max-width: 280px) {
   .artwork-inspector-thumb {
     max-width: 80px;
@@ -5550,9 +5143,7 @@ body.panels-resizing * {
   }
 }
 
-/* At the 260px minimum pane the content lane is only 220px. Preserve usable
-   input widths by letting label/control rows stack and moving the aspect lock
-   onto its own narrow middle row between Width and Height. */
+/* Stack controls at the inspector's minimum width. */
 @container inspector (max-width: 230px) {
   .inspector-row {
     grid-template-columns: minmax(0, 1fr);
@@ -5572,30 +5163,15 @@ body.panels-resizing * {
   }
 }
 
-/* Compact identity (a complete record at rest): a muted one-line Artist ·
-   Date over the ghost "Edit details" reveal. The title is deliberately
-   absent — the panel heading already carries it. Occupies the same
-   thumbnail-beside slot as the field editor, so switching modes doesn't shift
-   the thumbnail. */
-
-/* Arrange-on-wall controls: a full-width segmented mode switch, then the one
-   editable measurement for the chosen mode plus its "Calculated" companion,
-   and (only during a live session) the Apply/Cancel row. */
 .arrange-controls {
   display: grid;
   gap: 12px;
 }
 
-/* Spacing-method switch: three equal cells in one recessed track, the
-   active cell a raised white chip — the inspector-width cousin of the
-   toolbar's segmented pickers. Each segment is an icon over a label that
-   may wrap to two lines. */
 .arrange-modes {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  /* Override the ui/toggle-group wrapper's inline-flex items-center gap-1:
-     equal cells so the track reads as one drawn control, not three
-     floating buttons. */
+  /* Override the primitive's inline-flex layout with equal cells. */
   align-items: stretch;
   gap: 2px;
   width: 100%;
@@ -5613,8 +5189,7 @@ body.panels-resizing * {
   gap: 5px;
   min-width: 0;
   min-height: 0;
-  /* Beat the ui/toggle variant's fixed h-8 (32px) without !important: the
-     segment must grow to fit icon + a label that may wrap to two lines. */
+  /* Override the primitive's fixed height for wrapped labels. */
   height: auto;
   padding: 10px 6px;
   border: 0;
@@ -5638,9 +5213,6 @@ body.panels-resizing * {
   color: var(--ink);
 }
 
-/* Active cell: petrol ink only — the raised chip behind it is the sliding
-   .seg-chip (SegmentedToggleGroup), which is also the color-blind-safe
-   cue. The pre-measure fallback comes from the shared .seg-track rule. */
 .arrange-mode[data-state="on"],
 .arrange-mode[data-state="on"]:hover {
   color: var(--primary-strong);
@@ -5651,14 +5223,10 @@ body.panels-resizing * {
   gap: 8px;
 }
 
-/* Wall-vs-floor placement switch in the artwork inspector: two equal cells
-   in the same recessed track as .arrange-modes (label-only, no icons — the
-   two words carry it). */
 .placement-form-toggle {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  /* Override the ui/toggle-group wrapper's inline-flex items-center gap-1 so
-     the cells read as one drawn control, not two floating buttons. */
+  /* Override the primitive's inline-flex layout with equal cells. */
   align-items: stretch;
   gap: 2px;
   width: 100%;
@@ -5673,7 +5241,7 @@ body.panels-resizing * {
   align-items: center;
   justify-content: center;
   min-width: 0;
-  /* Beat the ui/toggle variant's fixed h-8 without !important. */
+  /* Override the primitive's fixed height. */
   height: auto;
   padding: 7px 6px;
   border: 0;
@@ -5693,18 +5261,11 @@ body.panels-resizing * {
   color: var(--ink);
 }
 
-/* Active cell: petrol ink only — the sliding .seg-chip behind it is the
-   raised, color-blind-safe cue (matches .arrange-mode's on-state). */
 .placement-form-option[data-state="on"],
 .placement-form-option[data-state="on"]:hover {
   color: var(--primary-strong);
 }
 
-/* "Measured from" — From-edges' side sub-choice: underline tabs, not a
-   segmented control, since it's a plain side pick (left/both/right), not a
-   peer decision to the mode row above it. Uses the shared sliding-underline
-   grammar (UnderlineToggleGroup); only sizing is overridden here, with the
-   underline riding the row's own hairline. */
 .arrange-anchor-row {
   display: grid;
   gap: 6px;
@@ -5733,9 +5294,7 @@ body.panels-resizing * {
   font-weight: var(--weight-semibold);
 }
 
-/* One locked two-line readout everywhere: a small muted label on line 1, the
-   value (semibold, larger) with its tag(s) inline right after it on line 2.
-   Kept as one block so a screen reader reads them together. */
+/* Keep label and value in one screen-reader readout. */
 .arrange-readout {
   display: grid;
   gap: 2px;
@@ -5762,13 +5321,7 @@ body.panels-resizing * {
   font-weight: var(--weight-strong);
 }
 
-/* The panel's one small hairline tag style — a 6px-radius chip in a muted
-   ink that clears AA at this size against the surface wash. Reused for both
-   "Calculated" (a value derived from the others) and "Neighbor" (a value
-   measured against another object, not a wall); the two can appear together
-   on one readout, so they share this exact visual grammar rather than each
-   inventing its own. Sits inline right after the value, or right after a
-   LengthField's own label. */
+/* Shared AA-contrast tag for calculated and neighbour readouts. */
 .arrange-tag {
   padding: 1px 6px;
   border: 1px solid var(--line);
@@ -5783,13 +5336,7 @@ body.panels-resizing * {
 }
 
 
-/* Apply is the primary action — a solid petrol fill (white text + Check icon)
-   so it reads as the clear commit. Cancel is the soft-grey sibling: a
-   resting fill (not a hover-only ghost) so the pair reads as one tactile
-   group with a clear rank. */
-/* Chained with .inspector-action: the base rule is declared later in this
-   file and would otherwise win the equal-specificity tie, washing these
-   variants back to neutral. */
+/* Chain with .inspector-action to beat the later equal-specificity base rule. */
 .inspector-action.arrange-apply {
   border-color: var(--primary);
   background: var(--primary);
@@ -5813,13 +5360,7 @@ body.panels-resizing * {
   color: var(--ink);
 }
 
-/* The one destructive vocabulary shared by every object-removing inspector
-   button: danger ink + hairline, filling with the danger wash on hover, and a
-   danger-tinted focus outline so keyboard users see the intent. Single-object
-   removals are one-click (covered by global undo); only Remove all layers the
-   two-step confirm on top, which keeps this same danger vocabulary.
-   Chained with .inspector-action so it wins the equal-specificity tie against
-   the later base rule. */
+/* Chain with .inspector-action to beat the later equal-specificity base rule. */
 .inspector-action.inspector-danger {
   border-color: var(--danger-line);
   background: transparent;
@@ -5877,16 +5418,11 @@ body.panels-resizing * {
 }
 
 .inspector-placement {
-  /* Grid gap separates the unplaced state's notice from the Type row —
-     butted together they read as one confusing object. */
   display: grid;
   gap: 12px;
   padding-top: 4px;
 }
 
-/* Room shape is a secondary editing mode, not the panel's main CTA. Keep its
-   short explanation and control on one compact line; narrow panes may wrap
-   the text, while the button remains a stable touch target at the edge. */
 .room-shape-row {
   display: flex;
   align-items: center;
@@ -6416,9 +5952,6 @@ body.panels-resizing * {
   opacity: 1;
 }
 
-/* Click-to-place preview: same translucent/dashed/non-interactive treatment
-   as .elevation-artwork.ghost, so the plan and elevation ghosts read as the
-   same convention. */
 .plan-object.is-ghost {
   pointer-events: none;
   opacity: 0.75;
@@ -6431,10 +5964,7 @@ body.panels-resizing * {
   stroke-dasharray: 6 5;
 }
 
-/* Refused placement: a wall-only artwork dragged or dropped off every wall.
-   Danger stroke/wash overrides the ghost and selection looks above (same
-   specificity, declared later) so the "you can't drop here" reads whether the
-   object is a live drop ghost or a placed object mid-drag. */
+/* Declared after ghost/selection styles so invalid placement always wins. */
 .plan-object.is-invalid .plan-object-outline {
   fill: var(--danger-soft);
   fill-opacity: 0.5;
@@ -6446,8 +5976,6 @@ body.panels-resizing * {
   opacity: 1;
 }
 
-/* A paired opening's shared 2D status: one restrained connector behind the
-   objects, driven by the same domain evaluation as the inspector and 3D. */
 .opening-connection-glyph {
   pointer-events: none;
 }
@@ -6474,10 +6002,6 @@ body.panels-resizing * {
   stroke: var(--caution);
 }
 
-/* WallInspector's "Add to this wall" row — three equal-width chips (icon
-   over label, same recipe as .arrange-mode) so "Door" and "Blocked zone"
-   occupy identical footprints instead of ragged flex widths. */
-
 .opening-add-chip {
   display: flex;
   flex-direction: column;
@@ -6485,8 +6009,7 @@ body.panels-resizing * {
   justify-content: center;
   gap: 5px;
   min-width: 0;
-  /* Beat the ui/button variant's fixed h-9 without !important: the chip
-     grows to fit icon + a label that may wrap to two lines. */
+  /* Override the primitive's fixed height for wrapped labels. */
   height: auto;
   min-height: 52px;
   padding: 8px 6px;
@@ -6501,19 +6024,13 @@ body.panels-resizing * {
   flex: 0 0 auto;
 }
 
-/* The chips' hover glosses reuse the placement-tooltip shell; this only
-   scales the copy down to inspector hint size. */
 .opening-add-tooltip {
   font-size: var(--type-xs);
   line-height: var(--leading-copy);
 }
 
 /* ---- Placement hover tooltips (plan + elevation) ---------------------- */
-/* The Radix content shell (.placement-tooltip, styled inline in
-   ui/tooltip.tsx via tokens) carries the border/background/shadow; these
-   rules lay out the body: an opening reads icon + kind over its dims, an
-   artwork reads thumbnail beside title / artist / dims. Square corners,
-   hairline borders, restrained type — same vocabulary as the checklist. */
+/* Radix supplies tooltip chrome; these rules only lay out its body. */
 .placement-tooltip-opening,
 .placement-tooltip-body {
   display: flex;
@@ -6536,8 +6053,6 @@ body.panels-resizing * {
   gap: 10px;
 }
 
-/* Same 56px-capped slot treatment as .checklist-thumb: aspect-true via
-   object-fit, never cropped. */
 .placement-tooltip-thumb {
   flex: 0 0 auto;
   width: 56px;
@@ -6743,16 +6258,10 @@ body.panels-resizing * {
   padding: 0 8px;
 }
 
-/* Settings overlay — two stacked sections inside the shared .dialog-content
-   chrome (white bg, 12px overlay radius, --shadow-overlay). Narrower than the
-   import wizard and body-scrolled so a long project + storage stack never
-   pushes the header or footer off-screen. */
+/* Scroll the body independently so header and footer stay visible. */
 .settings-dialog {
   width: min(calc(100vw - 32px), 560px);
-  /* Fixed height (see .help-dialog-content) so Settings renders at the same
-     size as Help instead of settling ~40px shorter at its natural content
-     height; .settings-body flex-grows to absorb the difference and keeps
-     .settings-footer pinned to the bottom edge. */
+  /* Match Help height and keep the footer pinned. */
   height: min(760px, calc(100dvh - 32px));
 }
 
@@ -6770,8 +6279,6 @@ body.panels-resizing * {
   gap: 12px;
 }
 
-/* Same uppercase kicker treatment as .help-dialog-kicker, so section titles
-   read as one family across the overlays. */
 .settings-section-title {
   margin: 0;
   color: var(--muted);
@@ -6782,8 +6289,6 @@ body.panels-resizing * {
   text-transform: uppercase;
 }
 
-/* Label-left / control-right. The control column is bounded so inputs and the
-   unit select don't stretch the full width of the wider dialog. */
 .settings-row {
   display: grid;
   grid-template-columns: 1fr minmax(180px, 220px);
@@ -6798,8 +6303,7 @@ body.panels-resizing * {
   line-height: var(--leading-ui);
 }
 
-/* Muted helper copy under a control; spans the full row so it wraps against
-   the dialog edge rather than the narrow control column. */
+/* Notes span both columns to use the dialog width. */
 .settings-row-note {
   grid-column: 1 / -1;
   margin: 0;
@@ -6808,26 +6312,18 @@ body.panels-resizing * {
   line-height: var(--leading-copy);
 }
 
-/* LengthField brings its own .field-row label, so a measurement plus its note
-   stack directly in the section rather than in a .settings-row grid. */
 .settings-field {
   display: grid;
   gap: 4px;
 }
 
-/* Reflow the shared LengthField's stacked .field-row (span label, input wrap,
-   message) into the same label-left / control-right grid as .settings-row, so
-   all four Project rows read as one aligned group — CSS only, the component
-   itself is untouched. Row-gap 0 because the aria-live message div always
-   renders (usually empty); a populated message re-earns its space below. */
+/* aria-live always renders, so keep row gap zero until it has content. */
 .settings-field .field-row {
   grid-template-columns: 1fr minmax(180px, 220px);
   align-items: center;
   gap: 0 16px;
 }
 
-/* Match the .settings-row-label voice instead of the inspector's muted
-   small-caps-weight field label. */
 .settings-field .field-row > span,
 .settings-field .field-row > .field-control > span {
   color: var(--ink);
@@ -6836,7 +6332,6 @@ body.panels-resizing * {
   line-height: var(--leading-ui);
 }
 
-/* Errors and transient guidance span the full row beneath the control. */
 .settings-field .field-row > .field-hint,
 .settings-field .field-row > .length-field-hint,
 .settings-field .field-row > .field-error {
@@ -6862,8 +6357,6 @@ body.panels-resizing * {
   gap: 8px;
 }
 
-/* Quiet danger zone: a hairline --danger-line border and nothing else — no
-   fill, no stripe. The destructive weight lives in the button, not the box. */
 .settings-danger {
   display: grid;
   gap: 12px;
@@ -6883,8 +6376,6 @@ body.panels-resizing * {
   border-top: 1px solid var(--line);
 }
 
-/* Inline text button — reads as a link inside the muted footer line, no chrome
-   until focus. */
 .settings-footer-link {
   padding: 0;
   border: 0;

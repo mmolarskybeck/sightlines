@@ -4,12 +4,11 @@ import path from 'node:path';
 
 const root = path.resolve('fixtures/artworks/rijks-aic');
 const imagesDir = path.join(root, 'images');
-// AIC recommends 1686px for larger public-domain downloads; this is close to
-// the requested 1800px target and avoids requesting unnecessarily large files.
+// AIC's recommended large public-domain image width.
 const width = 1686;
 
 const selections = [
-  // Rijksmuseum: canonical works mixed with quieter paintings, prints, and objects.
+  // Rijksmuseum: a mix of paintings, prints, and objects.
   ...[
     ['the-milkmaid', 'The Milkmaid'],
     ['the-little-street', 'View of Houses in Delft, Known as “The Little Street”'],
@@ -24,7 +23,7 @@ const selections = [
     ['sudden-shower-at-ohashi', 'Sudden Shower over Ohashi Bridge at Atake'],
     ['breach-of-saint-anthonys-dike', 'The Breach of the Saint Anthony’s Dike near Amsterdam'],
   ].map(([id, title]) => ({ museum: 'Rijksmuseum', id, title })),
-  // Art Institute of Chicago: public-domain records, with several less canonical studies and prints.
+  // AIC: public-domain paintings, studies, and prints.
   ...[
     ['the-herring-net', 'The Herring Net'],
     ['the-childs-bath', "The Child's Bath"],
@@ -152,8 +151,7 @@ async function resolveRijks(selection) {
   const apiUrl = `https://data.rijksmuseum.nl/${objectId}?_profile=la-framed`;
   const record = await json(apiUrl);
   let imageSource = firstContent(record, [/^https:\/\/iiif\.micr\.io\/[^/]+\//]);
-  // The current Linked Art response exposes the collection page as the
-  // digital object; the page contains the IIIF image identifier.
+  // The Linked Art record may expose the IIIF ID only through its collection page.
   if (!imageSource) {
     const pageUrl = firstContent(record, [/^https:\/\/www\.rijksmuseum\.nl\/(?:nl\/collectie\/object|en\/collection\/object)\//]);
     if (pageUrl) {

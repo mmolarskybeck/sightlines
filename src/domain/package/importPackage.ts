@@ -16,9 +16,7 @@ import {
 import { hashBytes, MANIFEST_PATH } from "./buildPackage";
 import { extractPackageEntries } from "./extractPackage";
 
-// ---------------------------------------------------------------------------
-// Open: zip safety + manifest pipeline composed (docs/plan.md §13 steps 1-2).
-// ---------------------------------------------------------------------------
+// Open: zip safety and manifest validation.
 
 export type OpenedPackage = {
   manifest: SightlinesPackage;
@@ -43,9 +41,7 @@ export async function openSightlinesPackage(bytes: Uint8Array): Promise<OpenedPa
   return { manifest: readPackageManifest(json), files };
 }
 
-// ---------------------------------------------------------------------------
-// Asset intake validation (docs/plan.md §13 step 3).
-// ---------------------------------------------------------------------------
+// Asset intake validation.
 
 // Exactly what export can emit (buildPackage's extensionForMime table). A blob
 // claiming any other type is rejected regardless of its path's extension.
@@ -59,11 +55,7 @@ export const IMPORT_MIME_ALLOWLIST: ReadonlySet<string> = new Set([
   "image/tiff"
 ]);
 
-// Decode guard: 16384px is the common GPU texture ceiling; a dimension above
-// it is either corrupt or hostile (a 65k×65k claim would decode to gigabytes
-// of RGBA). The ENFORCEMENT reads the actual file headers (readImageDimensions,
-// no decoding) — manifest-declared widthPx/heightPx are attacker-controlled and
-// only serve as a cheap fast-reject.
+// Enforce the common GPU texture ceiling from file headers, not manifest claims.
 export const MAX_ASSET_DIMENSION_PX = 16384;
 
 // image/jpg is a legacy alias some encoders emit; treat it as image/jpeg when
@@ -88,9 +80,7 @@ export type ValidatedPackageAssets = {
   warnings: string[];
 };
 
-// Integrity + safety pass over every blob the manifest inventories. Per-asset
-// failures degrade (drop the tier / the asset, record a warning) — one bad
-// image never fails the whole import (docs/plan.md §6/§13).
+// Invalid image tiers degrade with warnings instead of failing the package.
 export async function validatePackageAssets(
   manifest: SightlinesPackage,
   files: Map<string, Uint8Array>
@@ -130,10 +120,7 @@ export async function validatePackageAssets(
         continue;
       }
 
-      // The real dimension enforcement: sniff the ACTUAL file header (no
-      // decode). Fail closed — an "image" whose header can't be read is
-      // never persisted, and a pixel bomb is caught here regardless of what
-      // the manifest declared (or omitted).
+      // Header dimensions are authoritative; unreadable headers fail closed.
       const sniffed = readImageDimensions(bytes);
       if (!sniffed) {
         warnings.push(`${label}: unreadable image data (${tier.path}).`);
@@ -143,9 +130,7 @@ export async function validatePackageAssets(
         warnings.push(`${label}: image dimensions exceed the ${MAX_ASSET_DIMENSION_PX}px limit.`);
         continue;
       }
-      // The header magic must agree with the allowlisted MIME claim — a
-      // mislabelled blob (PNG bytes claiming image/webp) degrades rather
-      // than being persisted under a false type.
+      // File magic must match the allowlisted MIME claim.
       if (sniffed.format !== normalizeMime(tier.mimeType)) {
         warnings.push(
           `${label}: image data (${sniffed.format}) does not match its declared type (${tier.mimeType}).`
@@ -159,20 +144,16 @@ export async function validatePackageAssets(
     if (Object.keys(tiers).length > 0) {
       byAssetId.set(entry.assetId, { entry, tiers });
     } else if (entry.tiers.length > 0) {
-      // Every shipped tier failed — the asset degrades to metadata-only.
+      // All shipped tiers failed; retain metadata only.
       warnings.push(`${label}: no usable image data; importing without an image.`);
     }
-    // entry.tiers.length === 0 (metadata-only mode) is not a warning by
-    // itself — the mode promises no blobs. Whether the artwork ends up
-    // imageless or re-linked is decided by planPackageImport.
+    // Metadata-only packages intentionally omit tiers.
   }
 
   return { byAssetId, warnings };
 }
 
-// ---------------------------------------------------------------------------
-// Merge planning (docs/plan.md §6 rules) — pure, no repositories.
-// ---------------------------------------------------------------------------
+// Pure merge planning.
 
 export type ExistingLibraryState = {
   artworks: Artwork[];
@@ -205,10 +186,7 @@ export type ImportPlan = {
   warnings: string[];
 };
 
-// Order-insensitive structural equality for the §6 "identical content" test.
-// assetId and schemaVersion are excluded: the incoming record's assetId may
-// have been legitimately rebound to a local asset id carrying the same image
-// bytes, and image identity is compared by content hash separately.
+// Ignore assetId/schemaVersion; image identity is compared by content hash.
 export function artworkContentEquals(a: Artwork, b: Artwork): boolean {
   const strip = ({ assetId: _a, schemaVersion: _v, ...rest }: Artwork) => rest;
   return stableStringify(strip(a)) === stableStringify(strip(b));
@@ -224,12 +202,8 @@ function stableStringify(value: unknown): string {
   return `{${entries.join(",")}}`;
 }
 
-// Best-available fallback chain for the fixed three-slot local blob store: a
-// display-mode package has no original bytes, so the display tier stands in
-// as the stored "original" (the best fidelity this machine has ever seen).
-// The Asset record's sha256 stays the MANIFEST's original hash, so dedupe
-// against a future upload of the true original still matches. Documented in
-// docs/package-format.md.
+// Missing local tiers use the best shipped tier. Keep the manifest's original
+// hash so a later upload of the true original still deduplicates.
 function fillTierSlots(
   tiers: Partial<Record<AssetTier, ValidatedTierBlob>>
 ): Record<AssetTier, ValidatedTierBlob> | null {
@@ -257,8 +231,7 @@ export function planPackageImport(
 ): ImportPlan {
   const warnings = [...validated.warnings];
 
-  // --- Project identity: never silently overwrite local work. An id
-  // collision imports as a NEW project with a fresh id and a marked title.
+  // Never overwrite a local project on id collision.
   const projectIds = new Set(existing.projectIds);
   const projectRenamed = projectIds.has(manifest.project.id);
   const importedAt = new Date().toISOString();
@@ -271,15 +244,7 @@ export function planPackageImport(
       }
     : { ...manifest.project, updatedAt: importedAt };
 
-  // --- Asset resolution. For each manifest asset entry, decide what the
-  // importing machine's artwork records should point at:
-  //   1. identical content already in the library (any id) → reuse that
-  //      asset id; the incoming record and blobs are discarded (dedupe, §6).
-  //      This also covers metadata-only packages landing on a machine that
-  //      already has the images: the sha anchor re-links them automatically.
-  //   2. blobs shipped and intact → save as a (possibly re-identified) new
-  //      asset record.
-  //   3. nothing shipped, nothing local → the artwork imports imageless.
+  // Reuse local content by hash, otherwise save shipped blobs or import imageless.
   const localAssetIdBySha = new Map<string, string>();
   for (const [assetId, sha] of existing.assetShaById) {
     if (!localAssetIdBySha.has(sha)) localAssetIdBySha.set(sha, assetId);
@@ -309,8 +274,7 @@ export function planPackageImport(
       continue;
     }
 
-    // Keep the incoming id unless it is already taken locally by DIFFERENT
-    // content — ids are never reused for different bytes.
+    // Never reuse an asset id for different bytes.
     const idTaken =
       existing.assetShaById.has(entry.assetId) &&
       existing.assetShaById.get(entry.assetId) !== contentHash;

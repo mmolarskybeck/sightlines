@@ -14,13 +14,7 @@ import {
   splitWall
 } from "./reshapeRoom";
 
-// Same L-shape as createRoom.test.ts. It's clockwise as drawn, so the
-// constructor reverses it to CCW at creation (see createRoom.test.ts's
-// "normalises clockwise input" case) — stored room-local vertices are the
-// input points in REVERSE order, minus the bbox-min offset (1000,1000):
-// v0 (4000,0) v1 (4000,1000) v2 (2000,1000) v3 (2000,3000) v4 (0,3000)
-// v5 (0,0). Wall lengths: wall0 1000, wall1 2000, wall2 2000, wall3 2000,
-// wall4 3000, wall5 4000.
+// Clockwise L-shape; construction normalizes it to CCW room-local geometry.
 const L_SHAPE = [
   { xMm: 1000, yMm: 1000 },
   { xMm: 1000, yMm: 4000 },
@@ -52,17 +46,13 @@ describe("moveRoomVertex", () => {
 
     expect(result.changedWallIds.sort()).toEqual(["wall-east", "wall-north"].sort());
     expect(result.anchorVertexId).toBe("v-ne");
-    // Once skewed, the room stops being a rectangle: getRectangleRoomDimensions
-    // goes null (isRectangleRoom checks corner angles, not just counts), the
-    // rectangle-only UI disappears, and reshape handles take over. The north
-    // wall's reported length reflects the new corner.
+    // A skewed quad must stop qualifying as a rectangle.
     const walls = getWallsWithGeometry(result.project.floor.rooms[0].room);
     expect(walls.find((wall) => wall.id === "wall-north")?.lengthMm).toBeCloseTo(
       Math.hypot(feetToMm(10), feetToMm(4))
     );
     expect(() => parseProject(result.project)).not.toThrow();
 
-    // The original project is untouched.
     expect(
       project.floor.rooms[0].room.vertices.find((vertex) => vertex.id === "v-ne")
     ).toMatchObject({ xMm: feetToMm(28), yMm: 0 });
@@ -99,8 +89,6 @@ describe("moveRoomVertex", () => {
   it("rejects a move that would make the room self-intersect", () => {
     const project = createSampleProject();
 
-    // Swings v-ne far enough past the room's depth that edge nw→v-ne crosses
-    // the opposite se→sw edge (verified against isSimplePolygon directly).
     expect(() =>
       moveRoomVertex(project, "room-main", "v-ne", {
         xMm: feetToMm(10),
@@ -142,9 +130,7 @@ function directionOf(wall: WallWithGeometry): { xMm: number; yMm: number } {
   return { xMm: dx / len, yMm: dy / len };
 }
 
-// An asymmetric trapezoid (all four edges distinct lengths, so a wall can be
-// found back by its length alone): A(0,0) B(4000,0) C(3500,2000) D(500,2500).
-// AB is the axis-aligned top edge; BC and DA are both genuinely slanted.
+// Asymmetric trapezoid with distinct wall lengths.
 function trapezoidRoomProject(): Project {
   const base = createBlankProject("Trapezoid test");
   const placement = createPolygonRoomPlacement({
@@ -161,14 +147,7 @@ function trapezoidRoomProject(): Project {
   return { ...base, floor: { rooms: [placement] } };
 }
 
-// A pentagon with an extra vertex (v1) sitting exactly mid-straight along the
-// top edge — built by hand rather than via createPolygonRoomPlacement, whose
-// constructor merges any straight-through vertex on construction (see
-// createRoom.ts's dropStraightThroughVertices). wall0 (v0->v1) and wall1
-// (v1->v2) are collinear/parallel by construction, and adjacent — the only
-// geometry where two ADJACENT walls can be parallel without being the same
-// wall (adjacent segments that are parallel must, by definition, be
-// collinear).
+// Hand-built because the constructor removes this straight-through vertex.
 function collinearNeighbourProject(): Project {
   const base = createBlankProject("Collinear neighbour test");
   const roomId = "room-col";
@@ -215,8 +194,6 @@ describe("moveRoomWall", () => {
     expect(walls.find((wall) => wall.id === "wall-west")!.lengthMm).toBeCloseTo(feetToMm(18) - 1000);
     expect(walls.find((wall) => wall.id === "wall-east")!.lengthMm).toBeCloseTo(feetToMm(18) - 1000);
 
-    // v-se and v-sw belong to wall-south, which never touches the dragged
-    // wall — byte-identical to the original project.
     expect(room.vertices.find((vertex) => vertex.id === "v-sw")).toEqual(originalSw);
     expect(room.vertices.find((vertex) => vertex.id === "v-se")).toEqual(originalSe);
 
@@ -379,8 +356,6 @@ describe("splitWall", () => {
 
   it("splits a wall on a polygon room and the result round-trips parseProject", () => {
     const project = polygonRoomProject();
-    // wall4 is the 3000mm leg (v4→v5); wall0 is only 1000mm, too short for a
-    // 1500mm split.
     const wallId = project.floor.rooms[0].room.walls[4].id;
 
     const result = splitWall(project, wallId, 1500);
@@ -400,7 +375,6 @@ describe("deleteRoomVertex", () => {
   it("merges the two adjoining walls, keeping the entering wall's id", () => {
     const project = polygonRoomProject();
     const room = project.floor.rooms[0].room;
-    // v1 (room-l-v-1) sits between wall0 (v0->v1) and wall1 (v1->v2).
     const vertexId = room.vertices[1].id;
     const enteringWallId = room.walls[0].id;
     const exitingWallId = room.walls[1].id;
@@ -456,11 +430,7 @@ describe("deleteRoomVertex", () => {
     const onExiting = result.project.wallObjects.find((object) => object.id === "on-exiting")!;
     expect(onEntering.wallId).toBe(enteringWallId);
     expect(onExiting.wallId).toBe(enteringWallId);
-    // Both objects sat near the shared (now-removed) vertex; the merged wall
-    // bends 90° there, so the projections land close to the vertex end of
-    // the merged wall (whose length is hypot(2000, 1000) ≈ 2236mm) rather
-    // than exactly on top of each other — verified against the implementation
-    // directly (see reshapeRoom.ts's projectPointToWall usage).
+    // Objects on both old walls project independently onto the merged diagonal.
     const mergedLengthMm = Math.hypot(2000, 1000);
     expect(onEntering.xMm).toBeGreaterThan(0);
     expect(onEntering.xMm).toBeLessThan(mergedLengthMm);
@@ -472,7 +442,6 @@ describe("deleteRoomVertex", () => {
   it("rejects deleting a vertex that would leave fewer than three corners", () => {
     const project = createSampleProject();
     const room = project.floor.rooms[0].room;
-    // Drop to a triangle first (still schema-valid).
     project.floor.rooms[0].room = {
       ...room,
       vertices: room.vertices.filter((vertex) => vertex.id !== "v-sw"),
@@ -483,8 +452,7 @@ describe("deleteRoomVertex", () => {
   });
 
   it("rejects a merge that would self-intersect", () => {
-    // A hexagon (verified simple, CCW so the constructor stores it as drawn)
-    // where bridging over vertex index 4 crosses the opposite edge.
+    // Bridging over vertex 4 in this simple hexagon crosses the opposite edge.
     const base = createBlankProject("Reflex hexagon");
     const placement = createPolygonRoomPlacement({
       roomId: "room-z",

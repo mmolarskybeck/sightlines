@@ -1,8 +1,6 @@
 import type { Project } from "../../domain/project";
 
-// What is selected, as one value. Selection is view state (never undoable,
-// never persisted — docs/plan.md §7 scopes undo to the document). Invalid
-// combinations of the old five slots are unrepresentable here:
+// Selection is transient view state: never persisted or undoable.
 //   none           — nothing selected
 //   objects        — 1+ placement ids (wallObjects/floorObjects entries);
 //                    NEVER library artwork ids. [] is normalized to none.
@@ -15,9 +13,7 @@ export type Selection =
   | { kind: "objects"; ids: string[] }
   | { kind: "libraryArtwork"; artworkId: string }
   | { kind: "room"; roomId: string }
-  // A free-standing partition, selected by its CENTERLINE id (never a face id).
-  // Its inspector drives move/rotate/thickness/length/height; the Side A/B
-  // buttons set wallContextId to a face id for elevation (spec §6.5).
+  // Partitions are selected by centerline id, never face id.
   | { kind: "freestandingWall"; wallId: string };
 
 export const NO_SELECTION: Selection = { kind: "none" };
@@ -43,9 +39,7 @@ function findPlacement(project: Project, id: string) {
   );
 }
 
-// The library artwork the inspector should show: an explicit checklist pick,
-// or the artwork behind a single selected artwork placement. Multi-select and
-// dangling ids resolve to null — there's no single artwork to describe.
+// Resolve the inspector artwork; multi-select and dangling ids return null.
 export function getSelectedArtworkId(project: Project | null, selection: Selection): string | null {
   if (selection.kind === "libraryArtwork") return selection.artworkId;
   if (!project || selection.kind !== "objects" || selection.ids.length !== 1) return null;
@@ -53,24 +47,16 @@ export function getSelectedArtworkId(project: Project | null, selection: Selecti
   return placement?.kind === "artwork" ? placement.artworkId : null;
 }
 
-// The opening/blocked-zone placement the inspector should show — a single
-// selected non-artwork placement (doors/windows/blocked zones, wall or floor).
+// Resolve a single selected opening or blocked zone for the inspector.
 export function getSelectedOpeningId(project: Project | null, selection: Selection): string | null {
   if (!project || selection.kind !== "objects" || selection.ids.length !== 1) return null;
   const placement = findPlacement(project, selection.ids[0]);
   return placement && placement.kind !== "artwork" ? selection.ids[0] : null;
 }
 
-// The single place selection state is written. Normalizes an empty objects
-// selection to none, then returns the union + wall context as one bundle so an
-// edit can't set the selection without its context (and vice versa). The
-// project param is retained so this stays the one hook if selection ever needs
-// project-aware normalization again — the pure helpers above already take a
-// project for exactly that reason.
+// Centralizes selection writes and normalizes an empty object selection to none.
 export function selectionWrite(
-  // Convention: callers pass the AFTER-project (the edit's post-state), not
-  // the pre-edit one — selection is normalized against what the document
-  // looks like once the edit lands, not what it looked like before.
+  // Callers pass the post-edit project.
   _project: Project | null,
   selection: Selection,
   wallContextId: string | null

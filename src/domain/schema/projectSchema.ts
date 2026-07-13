@@ -169,9 +169,7 @@ const roomSchema = z
       }
     }
 
-    // Partition invariants (spec §5.6): unique ids, roomId match, endpoints not
-    // coincident. (`#` ban and positive thickness are enforced by the field
-    // schemas above.)
+    // Partition ids are unique, room-owned, and have distinct endpoints.
     const partitionIds = new Set<string>();
     for (const partition of room.freestandingWalls) {
       if (partitionIds.has(partition.id)) {
@@ -233,9 +231,7 @@ export const projectSchema = z
     defaultWallHeightMm: z.number().positive(),
     defaultCenterlineHeightMm: z.number().positive(),
     floor: z.object({
-      // No minimum: a brand-new project can start with an empty floor and go
-      // straight to the checklist (docs/plan.md §1.5) — room layout is one of
-      // two equally valid starting points, not a prerequisite.
+      // Empty floors are valid; users may begin from the checklist.
       rooms: z.array(roomPlacementSchema)
     }),
     checklistArtworkIds: z.array(z.string()),
@@ -304,30 +300,20 @@ const versionedDocumentSchema = z.object({
   schemaVersion: z.number().int().positive()
 });
 
-// A grossly oversized paste/drop (a multi-hundred-MB string) would block the
-// tab just to JSON.parse it, before validation ever gets a chance to reject
-// it — so the size check in migrateProjectJson runs first, on the raw text.
-// 20 MB comfortably covers a project.json (no embedded image bytes; those
-// live in the future .sightlines package's assets/, §6 of docs/plan.md).
+// Cap raw text before JSON.parse can block the tab; project JSON embeds no images.
 export const MAX_IMPORT_JSON_LENGTH = 20 * 1024 * 1024;
 
 function formatApproxMegabytes(lengthInUtf16Units: number): string {
   return `${(lengthInUtf16Units / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// Every load path that can receive an externally-authored document runs
-// parse → validate minimal shape → migrate → validate current schema
-// (docs/plan.md §2). This function is that pipeline for a raw text payload;
-// migrateProject below is the parsed-value half of it, reused by the
-// IndexedDB repository for records that never went through JSON.parse here.
+// External JSON follows parse → minimal validation → migration → current validation.
 export function migrateProjectJson(text: string): Project {
   if (typeof text !== "string") {
     throw new Error("no file content was provided.");
   }
 
-  // `.length` counts UTF-16 code units, not exact UTF-8 bytes — close enough
-  // for a sanity cap, and free to read, unlike encoding the whole string
-  // just to reject it.
+  // UTF-16 length is sufficient for this pre-parse sanity cap.
   if (text.length > MAX_IMPORT_JSON_LENGTH) {
     throw new Error(
       `the file is too large (${formatApproxMegabytes(text.length)}). Imports are limited to ${formatApproxMegabytes(MAX_IMPORT_JSON_LENGTH)}.`
@@ -346,20 +332,11 @@ export function migrateProjectJson(text: string): Project {
 
 type Doc = Record<string, unknown>;
 
-// Stepwise migrations keyed by the *from* version, applied in a loop while the
-// document's version is behind CURRENT_SCHEMA_VERSION (spec §5.6). This lets a
-// v1 document walk 1→2→3 instead of jumping straight to the newest schema — the
-// old single-block form would stamp a v1 doc as v2 and then fail v3 validation,
-// and reject v2 docs outright. Each step bumps schemaVersion itself.
+// Migrations are keyed by source version and each step advances schemaVersion.
 const MIGRATIONS: Record<number, (doc: Doc) => Doc> = {
-  // v1 → v2: floor objects (plan-view artwork/blocked-zone placements not
-  // anchored to a wall) are a new concept in v2, so v1 documents simply never
-  // had any — an empty array is the only valid migration.
+  // v1 had no floor objects.
   1: (doc) => ({ ...doc, floorObjects: [], schemaVersion: 2 }),
-  // v2 → v3: partitions (a new per-room array) and the openings' pairing field
-  // change. Add an empty freestandingWalls to every room, and strip any
-  // connectsToWallId keys (never written by the app; connectsToObjectId
-  // replaces it — discarding is safe).
+  // v3 adds partitions and replaces the never-written connectsToWallId field.
   2: (doc) => migrateV2ToV3(doc)
 };
 

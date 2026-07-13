@@ -61,8 +61,6 @@ describe("getArtworkSnapTargets", () => {
   });
 
   it("computes neighbor-edge flush/align candidate centers from neighbor bounds and moving size", () => {
-    // Neighbor: center (1000, 1500), 400 wide x 600 tall -> left 800, right
-    // 1200, top 1800, bottom 1200. Moving artwork: 300 wide x 200 tall.
     const targets = getArtworkSnapTargets({
       centerlineYMm: 1450,
       wallLengthMm: 4000,
@@ -75,22 +73,18 @@ describe("getArtworkSnapTargets", () => {
     const edgeTargets = targets.filter((target) => target.kind === "neighbor-edge");
     const byId = new Map(edgeTargets.map((target) => [target.id, target]));
 
-    // Moving's right edge flush with neighbor's left edge (800): center = 800 - 150 = 650.
     expect(byId.get("neighbor-edge:neighbor-1:left")).toMatchObject({
       axis: "x",
       point: { xMm: 650 }
     });
-    // Moving's left edge flush with neighbor's right edge (1200): center = 1200 + 150 = 1350.
     expect(byId.get("neighbor-edge:neighbor-1:right")).toMatchObject({
       axis: "x",
       point: { xMm: 1350 }
     });
-    // Moving's top edge aligned with neighbor's top edge (1800): center = 1800 - 100 = 1700.
     expect(byId.get("neighbor-edge:neighbor-1:top")).toMatchObject({
       axis: "y",
       point: { yMm: 1700 }
     });
-    // Moving's bottom edge aligned with neighbor's bottom edge (1200): center = 1200 + 100 = 1300.
     expect(byId.get("neighbor-edge:neighbor-1:bottom")).toMatchObject({
       axis: "y",
       point: { yMm: 1300 }
@@ -151,15 +145,11 @@ describe("resolveArtworkSnap", () => {
       { ...baseArgs, snapToGrid: false }
     );
 
-    // No centerline/neighbor target is anywhere near (205, 900); with grid
-    // disabled there is nothing left to snap to.
     expect(result.snapTargetIds).toEqual({});
     expect(result.point).toEqual({ xMm: 205, yMm: 900 });
   });
 
   it("includes grid targets when snapToGrid is true, as the lowest-priority tier", () => {
-    // yMm: 930 is deliberately off any grid line (nearest is 900/1000, both
-    // outside the 20mm threshold) so only the x-axis grid target is in play.
     const result = resolveArtworkSnap({ xMm: 205, yMm: 930 }, { ...baseArgs, snapToGrid: true });
 
     expect(result.snapTargetIds).toEqual({ x: "grid-x-200" });
@@ -167,9 +157,7 @@ describe("resolveArtworkSnap", () => {
   });
 
   it("snaps y to the centerline and x to the grid simultaneously", () => {
-    // The user-reported elevation drag: near the eyeline in y AND near a
-    // grid line in x with Snap on — both must engage at once (centerline
-    // first on its axis, grid on the other), with one guide per axis.
+    // Regression: centerline y and grid x must snap simultaneously.
     const result = resolveArtworkSnap(
       { xMm: 205, yMm: 1442 },
       { ...baseArgs, snapToGrid: true }
@@ -191,15 +179,11 @@ describe("resolveArtworkSnap", () => {
       }
     );
 
-    // 13mm away exceeds the plain 10mm threshold but not resolveSnap's
-    // default 1.5x break-free multiplier (15mm) applied to the target this
-    // axis was previously snapped to.
     expect(result.snapTargetIds.x).toBe("grid-x-200");
   });
 
   describe("door floor snapping", () => {
-    // A 900 x 2100 door: its bottom edge sits on the floor when its center-y
-    // is heightMm / 2 = 1050 (wall-local y=0 is the floor, y up).
+    // Doors snap their bottom edge to wall-local floor y=0.
     const doorArgs = {
       ...baseArgs,
       movingSize: { widthMm: 900, heightMm: 2100 },
@@ -220,9 +204,7 @@ describe("resolveArtworkSnap", () => {
     });
 
     it("prefers the floor over the centerline when both are within threshold", () => {
-      // A 2800-tall door puts the floor target at y=1400, 50mm below the
-      // 1450 centerline. Proposed y=1430 is 30mm from the floor and only
-      // 20mm from the centerline — floor still wins by tier priority.
+      // Door floor priority beats the nearer centerline target.
       const result = resolveArtworkSnap(
         { xMm: 555, yMm: 1430 },
         {
@@ -238,10 +220,7 @@ describe("resolveArtworkSnap", () => {
     });
 
     it("keeps the floor tier active regardless of the snapToGrid preference", () => {
-      // The floor target is never preference-gated: snapToGrid toggles only
-      // the grid tier. Nearest grid-y lines (1000, 1100) are outside the
-      // 20mm threshold either way, so the floor is the sole y candidate in
-      // both calls.
+      // snapToGrid gates only grid targets, never the floor target.
       const withGrid = resolveArtworkSnap(
         { xMm: 555, yMm: 1062 },
         { ...doorArgs, snapToGrid: true }
@@ -280,8 +259,6 @@ describe("resolveArtworkSnap", () => {
     });
 
     it("snaps an artwork's bottom edge to the floor when the centerline is out of range", () => {
-      // 300 x 400 artwork: floor target at heightMm / 2 = 200. Proposed
-      // y=210 is 10mm from the floor and nowhere near the 1450 centerline.
       const result = resolveArtworkSnap(
         { xMm: 555, yMm: 210 },
         { ...baseArgs, snapToGrid: false }
@@ -295,10 +272,7 @@ describe("resolveArtworkSnap", () => {
     });
 
     it("prefers the centerline over the floor for a tall artwork with both in range", () => {
-      // Mirror of the door priority test with the ranks flipped: a
-      // 2800-tall artwork puts the floor target at y=1400, 50mm below the
-      // 1450 centerline. Proposed y=1430 is 30mm from the floor and 20mm
-      // from the centerline — and unlike the door, the centerline wins.
+      // Artwork centerline priority beats the floor target, opposite doors.
       const result = resolveArtworkSnap(
         { xMm: 555, yMm: 1430 },
         {
@@ -315,9 +289,7 @@ describe("resolveArtworkSnap", () => {
     });
 
     it("floor-snaps the artwork drop-ghost path (movingKind 'artwork', grid on)", () => {
-      // The HTML5 drag-in path passes movingKind "artwork" with snapToGrid
-      // live: near the floor, the floor target (priority 1.5) outranks the
-      // coincident grid-y-200 line (priority 4).
+      // The artwork drop ghost uses the same floor-over-grid priority.
       const result = resolveArtworkSnap(
         { xMm: 555, yMm: 210 },
         { ...baseArgs, movingKind: "artwork", snapToGrid: true }

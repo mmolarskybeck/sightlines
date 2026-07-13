@@ -11,15 +11,10 @@ import {
 } from "../schema/packageSchema";
 import { writeSightlinesZip } from "./zipPackage";
 
-// manifest.json (not project.sightlines.json): a single, fixed, well-known entry
-// point at the zip root is the simplest thing for import to locate — it never
-// has to guess a name derived from the project title. Image blobs live under
-// assets/. Documented in docs/package-format.md.
+// Fixed zip entry point; image blobs live under assets/.
 export const MANIFEST_PATH = "manifest.json";
 
-// store = no additional compression (already-compressed WebP/JPEG bytes;
-// recompressing wastes CPU for no size benefit — docs/plan.md §4.5).
-// deflate = real compression, reserved for the JSON manifest.
+// Store compressed images as-is; deflate the JSON manifest.
 export type ZipCompression = "store" | "deflate";
 
 export type PackageZipFile = {
@@ -36,14 +31,13 @@ export type BuiltPackage = {
 
 export type BuildPackageInput = {
   project: Project;
-  // The whole library; only the referenced subset is included (§4.1/§6).
+  // Only referenced library records are included.
   libraryArtworks: Artwork[];
   mode: PackageExportMode;
-  // Async repository seams (docs/plan.md §2) — no browser/canvas access here, so
-  // the whole derivation is testable in Node.
+  // Repository seams keep package derivation browser-independent.
   getAsset: (assetId: string) => Promise<Asset>;
   getBlob: (key: string) => Promise<Blob>;
-  // Injectable clock keeps the output deterministic under test.
+  // Injectable for deterministic output.
   exportedAt?: string;
 };
 
@@ -51,18 +45,17 @@ export type BuildPackageInput = {
 export function tiersForMode(mode: PackageExportMode): AssetTier[] {
   switch (mode) {
     case "originals":
-      // Archival: everything, so a re-import never has to regenerate derivatives.
+      // Archival mode includes every tier.
       return ["original", "display", "thumbnail"];
     case "display":
-      // Default: what the canvas/3D and most exports actually render.
+      // Default mode includes rendered tiers.
       return ["display", "thumbnail"];
     case "metadata-only":
       return [];
   }
 }
 
-// The artworks a package must carry: checklist membership (§4.1) unioned with
-// anything actually placed on a wall or floor, deduped. Never the whole library.
+// Export the deduplicated union of checklist and placed artworks.
 export function selectReferencedArtworkIds(project: Project): Set<string> {
   const ids = new Set<string>(project.checklistArtworkIds);
   for (const object of project.wallObjects) {
@@ -93,8 +86,7 @@ function tierBlobKey(asset: Asset, tier: AssetTier): string {
   }
 }
 
-// Derivatives are WebP (docs/plan.md §4.5); originals stay as-uploaded. The blob's
-// own type is authoritative when present, with these as the fallback.
+// Originals retain their type; derivative fallback is WebP.
 function fallbackMimeForTier(asset: Asset, tier: AssetTier): string {
   return tier === "original" ? asset.mimeType : "image/webp";
 }
@@ -123,20 +115,14 @@ async function toBytes(blob: Blob): Promise<Uint8Array> {
   return new Uint8Array(await blob.arrayBuffer());
 }
 
-// Hash over a fresh, contiguous ArrayBuffer copy — a Uint8Array read off a Blob
-// can be a view into a larger/shared buffer, which sha256Hex's ArrayBuffer
-// parameter won't accept directly. Exported for the import side, which
-// re-hashes every extracted blob against the manifest (integrity check).
+// Copy views into a contiguous buffer before hashing; import reuses this integrity check.
 export async function hashBytes(bytes: Uint8Array): Promise<string> {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
   return sha256Hex(copy.buffer);
 }
 
-// Pure (no DOM/canvas) async derivation: project + library + blob getters in,
-// manifest + zip file list out. Graceful degradation on missing local data
-// (docs/plan.md §6/§13): a missing asset record drops its inventory entry, a
-// missing tier blob drops just that tier — the artwork still exports.
+// Missing asset data degrades per tier; artwork metadata still exports.
 export async function buildSightlinesPackage(input: BuildPackageInput): Promise<BuiltPackage> {
   const { project, libraryArtworks, mode, getAsset, getBlob } = input;
   const exportedAt = input.exportedAt ?? new Date().toISOString();
@@ -172,8 +158,7 @@ export async function buildSightlinesPackage(input: BuildPackageInput): Promise<
     try {
       asset = await getAsset(assetId);
     } catch {
-      // Asset record gone locally — the artwork still ships; import degrades to
-      // a missing-image warning (docs/plan.md §6).
+      // Preserve artwork metadata when its asset record is missing.
       warnings.push(`${assetId}: its asset record is missing; exported without an image.`);
       continue;
     }
@@ -230,8 +215,7 @@ export async function buildSightlinesPackage(input: BuildPackageInput): Promise<
     assets: assetEntries
   };
 
-  // Never emit an invalid manifest (docs/plan.md §8). This also normalizes the
-  // embedded project/artworks through the same validators the app persists with.
+  // Validate and normalize the manifest before writing it.
   parseSightlinesPackage(manifest);
 
   const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest, null, 2));
@@ -249,8 +233,7 @@ export type CreatedPackage = {
   warnings: string[];
 };
 
-// Facade: build the manifest + file list, then zip it. The UI action calls this
-// and triggers the download; everything above stays independently testable.
+// Build the manifest and file list, then zip them.
 export async function createSightlinesPackage(
   input: BuildPackageInput
 ): Promise<CreatedPackage> {

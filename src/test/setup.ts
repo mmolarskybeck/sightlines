@@ -1,13 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 
-// Node 22+ defines its own global `localStorage`/`sessionStorage` (an
-// accessor that throws unless the process is launched with
-// `--localstorage-file`). In this jsdom test environment `window` is
-// `globalThis` itself, so that pre-existing Node property shadows jsdom's
-// real Storage implementation instead of being replaced by it — any code
-// under test that reads/writes localStorage (workspace preferences, etc.)
-// would otherwise silently get a non-functional stub. Swap in a small
-// in-memory Storage polyfill whenever the built-in one isn't usable.
+// Node 22+'s unusable Storage accessors can shadow jsdom's implementation.
+// Replace them only when the current global does not satisfy Storage.
 class MemoryStorage implements Storage {
   private readonly store = new Map<string, string>();
 
@@ -54,9 +48,7 @@ function installWorkingStorage(propertyName: "localStorage" | "sessionStorage") 
 installWorkingStorage("localStorage");
 installWorkingStorage("sessionStorage");
 
-// Radix primitives measure their hidden form-control mirrors with
-// ResizeObserver. jsdom does not implement it, so provide the inert contract
-// tests need; layout itself is verified in the browser, not in jsdom.
+// Radix needs ResizeObserver; jsdom layout tests only need an inert contract.
 if (typeof globalThis.ResizeObserver === "undefined") {
   globalThis.ResizeObserver = class ResizeObserver {
     observe() {}

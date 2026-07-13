@@ -4,20 +4,9 @@ import type { Project, RoomPlacement } from "../domain/project";
 import { isEditableTarget } from "./hooks/isEditableTarget";
 import { roomIdOf, type Selection } from "./store/selectionSlice";
 
-// The Delete/Backspace → delete-room decision, factored out of App's keydown
-// chain so it's unit-testable without a full App mount (same reasoning as the
-// selectionSlice helpers). Returns the room to delete, or null when the
-// shortcut must not fire. The selection union already makes the exclusivity
-// guards structural:
-//   - objects/partition selections are different `kind`s (and App's chain
-//     handles them BEFORE this runs, keeping their priority);
-//   - a wall focus is NOT a whole-room selection — selectWall writes
-//     NO_SELECTION plus wallContextId, so kind "room" never coexists with a
-//     selected wall. wallContextId itself is sidebar context that persists
-//     under a room selection, so it deliberately does NOT block deletion.
-// Edit-shape mode owns Delete for vertex removal (PlanView's armed handler),
-// so an armed reshapeRoomId always wins over room deletion. Focused inputs
-// keep the key for text editing (LengthFields use Backspace).
+// Returns the room owned by Delete/Backspace, or null when another selection,
+// focused editor, or reshape mode owns the key. Wall context does not block a
+// room deletion because it is sidebar state, not a wall selection.
 export function shouldDeleteRoomOnKey({
   eventTarget,
   reshapeRoomId,
@@ -32,14 +21,8 @@ export function shouldDeleteRoomOnKey({
   return roomIdOf(selection);
 }
 
-// What deleting this room would cascade away, bucketed for the confirm
-// dialog's copy. The wall/face-object scope comes from getRoomCascadeScope —
-// the same domain rule the actual delete uses — so the dialog can't drift from
-// what deleteRoom removes. Floor objects within the placed bounds are counted
-// here for the copy ONLY: the delete action deliberately does NOT remove floor
-// objects, so this count overstates what actually disappears. That discrepancy
-// is intentional dialog copy (the same derivation App uses for RoomInspector's
-// counts) and is left as-is. Partitions are counted from the room itself.
+// Contents summarized for confirmation copy. Floor objects inside the room are
+// counted for context but are intentionally not deleted with the room.
 export type RoomContentsSummary = {
   artworks: number;
   doors: number;
@@ -90,9 +73,7 @@ export function summarizeRoomContents(
   };
 }
 
-// "4 artworks and 2 doors" / "1 artwork, 1 window, and 1 partition" — zero
-// categories are omitted; the caller composes the surrounding sentence. Empty
-// contents never reach this (empty rooms delete without a dialog).
+// Formats nonzero categories for the confirmation sentence.
 export function describeRoomContents(summary: RoomContentsSummary): string {
   const parts: string[] = [];
   const push = (count: number, singular: string, plural = `${singular}s`) => {

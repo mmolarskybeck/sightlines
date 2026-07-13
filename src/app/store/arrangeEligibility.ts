@@ -1,13 +1,6 @@
 import type { ArtworkWallObject, Project } from "../../domain/project";
 
-// The single source of truth for "can this selection be arranged": no
-// floor-placed member, at least two ARTWORK wall-objects (openings are
-// architecture, never members — see beginArrangeSession), all on the same
-// wall. Previously computed independently in App.tsx (feeding the disabled-
-// reason ladder) and arrangeSlice's beginArrangeSession guard (a silent
-// no-op) — this is the one place the facts get derived; each reason maps to
-// exactly one of App's disabled-copy strings, kept there since they're
-// user-facing UI copy, not domain facts.
+// Arrangement requires 2+ wall-mounted artworks on one wall and no floor member.
 export type ArrangeEligibility =
   | { eligible: true; members: ArtworkWallObject[]; wallId: string }
   | {

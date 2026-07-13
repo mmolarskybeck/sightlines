@@ -1,16 +1,8 @@
-// Header-only image dimension sniffing — NO decoding. The import pipeline
-// must know how big an image really is before anything ever decodes it
-// (docs/plan.md §13): manifest-declared dimensions are attacker-controlled,
-// so the enforcement reads the actual file headers. Lives in domain/assets
-// (not package/) because upload intake can reuse it later.
-//
-// Covers exactly the import MIME allowlist: PNG, JPEG, GIF, WebP
-// (VP8/VP8L/VP8X), AVIF (ISOBMFF ispe walk), TIFF (both endiannesses).
-// Returns null for anything truncated, malformed, or unrecognized — callers
-// fail closed on null.
+// Decode-free dimension sniffing for the import allowlist. Never trust
+// manifest dimensions; malformed or unknown headers fail closed as null.
 
 export type SniffedImage = {
-  // Normalized MIME of the format the MAGIC identifies (jpg → image/jpeg).
+  // MIME derived from file magic, normalized to image/jpeg.
   format: "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/avif" | "image/tiff";
   widthPx: number;
   heightPx: number;

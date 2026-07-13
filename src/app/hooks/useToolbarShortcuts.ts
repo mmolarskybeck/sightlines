@@ -6,11 +6,9 @@ import { isEditableTarget } from "./isEditableTarget";
 
 export type UseToolbarShortcutsParams = {
   viewMode: ViewMode;
-  // True while any workspace dialog owns the keyboard (help, import, settings,
-  // delete-confirm). App tracks each of these; the caller ORs them together.
+  // True while a workspace dialog owns the keyboard.
   suspended: boolean;
-  // The insert tools are disabled when Elevation has no selected wall — D/W/B
-  // become no-ops there, mirroring the disabled buttons.
+  // Mirrors disabled insert buttons, such as Elevation without a selected wall.
   insertDisabled: boolean;
   activeTool: OpeningKind | null;
   armOpeningTool: (tool: OpeningKind | null) => void;
@@ -23,19 +21,8 @@ export type UseToolbarShortcutsParams = {
   toggleShowCenterline: () => void;
 };
 
-// Single-key toolbar accelerators, live only in the two 2D views — never 3D,
-// where WASD owns the letter keys for camera travel. Each key mirrors a
-// toolbar control's click exactly (arm/disarm via the same toggle the button
-// calls), so a tooltip's "— D" hint always tells the truth. Same window-level
-// idiom as the other shortcut hooks: guard editable targets, stand down when a
-// dialog is up (suspended) or a modifier is held (⌘/Ctrl/Alt reserve their own
-// chords), and ignore auto-repeat so a held key can't strobe a toggle. Plan
-// owns Partition (P) and the room-draw tools — R arms the rectangle room, ⇧R
-// the polygon outline; Elevation owns Eyeline (E); Grid/Snap/Overlap and the
-// opening tools work in both. Shift is deliberately let through the modifier
-// guard (line below) only so ⇧R can select the outline variant. Deliberately
-// no sticky repeat-placement modifier — arming is a plain toggle here, same as
-// the buttons.
+// Single-key 2D toolbar accelerators. They stand down for editable targets,
+// dialogs, modifiers, and repeats; 3D reserves letters for camera controls.
 export function useToolbarShortcuts({
   viewMode,
   suspended,
@@ -60,8 +47,7 @@ export function useToolbarShortcuts({
       if (isEditableTarget(event.target)) return;
 
       const armOpening = (kind: OpeningKind) => {
-        // A no-op when the tools are disabled (Elevation with no selected
-        // wall), matching the buttons that ignore the click there.
+        // Match disabled insert buttons.
         if (insertDisabled) return;
         event.preventDefault();
         armOpeningTool(activeTool === kind ? null : kind);
@@ -85,8 +71,7 @@ export function useToolbarShortcuts({
         case "r":
           if (viewMode !== "plan") return;
           event.preventDefault();
-          // R arms the rectangle-room tool (the frequent path); ⇧R the polygon
-          // outline. key.toLowerCase() normalizes "R" so both reach here.
+          // R draws rectangles; Shift+R draws polygon outlines.
           if (event.shiftKey) toggleDrawRoom();
           else toggleDrawRect();
           break;

@@ -1,6 +1,4 @@
-/* Global stylesheet for the Sightlines public site.
-   Mirrors the app's design language: white ground, square corners, thin grey
-   hairlines, petrol accents, Figtree for display and Geist for UI/body. */
+/* Shared public-site tokens and layout. */
 
 @font-face {
   font-family: "Figtree Variable";
@@ -222,8 +220,6 @@ code {
 .prose li::marker {
   color: var(--faint);
 }
-
-/* Key-value fact table (square, hairline rows) */
 
 .prose table {
   width: 100%;

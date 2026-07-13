@@ -16,11 +16,7 @@ import {
   type WallPanel3d
 } from "./scene3d";
 
-// --- Fixture helpers -------------------------------------------------------
-
-// A closed wall loop over an ordered vertex ring: wall_i connects vertex_i to
-// vertex_{i+1}, last wall closes back to vertex_0. Mirrors how createRoom.ts
-// lays out its rooms, but lets a test pick any winding / polygon shape.
+// Build a closed wall loop from an ordered vertex ring.
 function makeRoom(
   id: string,
   ring: Array<{ id: string; xMm: number; yMm: number }>,
@@ -88,7 +84,6 @@ function makeArtwork(id: string, overrides: Partial<Artwork> = {}): Artwork {
   };
 }
 
-// Counter-clockwise (positive signed area in math y-up) rectangle.
 const CCW_RECT = [
   { id: "v0", xMm: 0, yMm: 0 },
   { id: "v1", xMm: 4000, yMm: 0 },
@@ -96,16 +91,13 @@ const CCW_RECT = [
   { id: "v3", xMm: 0, yMm: 3000 }
 ];
 
-// Same rectangle wound the other way (clockwise) — the derivation must
-// normalise this so walls still face inward.
+// Clockwise equivalent; derivation must still orient walls inward.
 const CW_RECT = [
   { id: "v0", xMm: 0, yMm: 0 },
   { id: "v1", xMm: 0, yMm: 3000 },
   { id: "v2", xMm: 4000, yMm: 3000 },
   { id: "v3", xMm: 4000, yMm: 0 }
 ];
-
-// --- Geometry assertions ---------------------------------------------------
 
 function midpoint(panel: WallPanel3d): Vec2 {
   return {
@@ -114,8 +106,7 @@ function midpoint(panel: WallPanel3d): Vec2 {
   };
 }
 
-// Ray-cast point-in-polygon (mm space). Used to prove an inward normal really
-// points into the room rather than trusting a hand-computed vector.
+// Ray-cast independently verifies that normals point into the room.
 function pointInPolygon(point: Vec2, polygon: Vec2[]): boolean {
   let inside = false;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
@@ -194,7 +185,6 @@ describe("deriveScene3d — floor-space placement", () => {
     );
 
     const room = scene.rooms[0];
-    // Original corners shifted by (1000, 2000); order preserved (already CCW).
     expect(room.floorPolygon).toContainEqual({ xMm: 1000, yMm: 2000 });
     expect(room.floorPolygon).toContainEqual({ xMm: 5000, yMm: 5000 });
     expect(room.walls[0].start).toEqual({ xMm: 1000, yMm: 2000 });
@@ -211,13 +201,11 @@ describe("deriveScene3d — floor-space placement", () => {
       ])
     );
 
-    // Vertex (4000, 0) rotated +90° about origin -> (0, 4000), then +offset.
     const rotated = scene.rooms[0].floorPolygon.map((point) => ({
       xMm: Math.round(point.xMm),
       yMm: Math.round(point.yMm)
     }));
     expect(rotated).toContainEqual({ xMm: 1000, yMm: 6000 });
-    // Vertex (0, 3000) rotated +90° -> (-3000, 0), then +offset.
     expect(rotated).toContainEqual({ xMm: -2000, yMm: 2000 });
   });
 });
@@ -245,7 +233,6 @@ describe("wallInwardNormal — winding / orientation", () => {
     );
     const room = scene.rooms[0];
 
-    // Floor polygon is re-wound to CCW (positive signed area).
     expect(signedArea(room.floorPolygon)).toBeGreaterThan(0);
 
     for (const wall of room.walls) {
@@ -262,7 +249,6 @@ describe("wallInwardNormal — winding / orientation", () => {
     const scene = deriveScene3d(
       makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))])
     );
-    // Wall 0 runs (0,0)->(4000,0); inward normal is straight +y into the room.
     const normal = wallInwardNormal(scene.rooms[0].walls[0]);
     expect(normal.xMm).toBeCloseTo(0);
     expect(normal.yMm).toBeCloseTo(1);
@@ -349,17 +335,13 @@ describe("deriveScene3d — wall artworks (M2)", () => {
         heightMm: 800
       }
     ]);
-    // No artworks leak onto other walls.
     for (const other of scene.rooms[0].walls) {
       if (other.wallId !== "room-a-wall-0") expect(other.artworks).toEqual([]);
     }
   });
 
   it("remaps wall-local x on walls whose endpoints were swapped by CW normalisation", () => {
-    // CW_RECT wall 0 is authored v0(0,0) -> v1(0,3000); the derivation swaps
-    // its endpoints to keep the inward normal on the left of start->end. A
-    // domain x of 1000 (measured from the AUTHORED start, v0) must become
-    // length - 1000 = 2000 so the artwork stays at the same floor-space spot.
+    // Swapping a clockwise wall's endpoints must mirror its wall-local x.
     const artwork = makeArtwork("art-1");
     const scene = deriveScene3d(
       makeProject([makePlacement(makeRoom("room-a", CW_RECT, 2500))], {
@@ -381,8 +363,6 @@ describe("deriveScene3d — wall artworks (M2)", () => {
 
     const wall = scene.rooms[0].walls.find((w) => w.wallId === "room-a-wall-0");
     expect(wall?.artworks[0]?.xMm).toBe(2000);
-    // The floor-space position implied by the panel-local x is the authored
-    // one: start + x * direction = (0,3000) + 2000 * (0,-1) = (0, 1000).
     expect(wall?.start).toEqual({ xMm: 0, yMm: 3000 });
   });
 
@@ -462,8 +442,6 @@ describe("deriveScene3d — door/window holes (M3)", () => {
   }
 
   it("derives a door as a floor-to-top cutout regardless of its stored center", () => {
-    // Door centered at y=1000, height 2000 -> top edge at 2000; the hole must
-    // run from the floor (0) to that top edge.
     const wall = deriveWall0(makeOpening("door"));
     expect(wall.holes).toEqual([
       {
@@ -496,8 +474,6 @@ describe("deriveScene3d — door/window holes (M3)", () => {
   });
 
   it("clamps holes to the wall bounds and flags them", () => {
-    // Window pushed past the wall's start and above its top (wall is 4000 long,
-    // 2500 high).
     const wall = deriveWall0(
       makeOpening("window", { xMm: 200, yMm: 2300, widthMm: 800, heightMm: 800 })
     );
@@ -522,8 +498,6 @@ describe("deriveScene3d — door/window holes (M3)", () => {
   });
 
   it("remaps hole x extents on walls swapped by CW normalisation", () => {
-    // CW_RECT wall 0 is 3000 long and gets its endpoints swapped; a door
-    // centered at authored x=1000 lands at panel-local center 2000.
     const wall = deriveWall0(
       makeOpening("door", { xMm: 1000, widthMm: 800, heightMm: 2000 }),
       CW_RECT
@@ -737,7 +711,6 @@ describe("deriveScene3d — partitions", () => {
       thicknessMm: 100,
       heightMm: 2800
     });
-    // Faces have no holes in v1.
     expect(partition.faces[0].holes).toEqual([]);
     expect(partition.faces[1].holes).toEqual([]);
   });
@@ -748,10 +721,8 @@ describe("deriveScene3d — partitions", () => {
     const normalA = wallInwardNormal(faceA);
     const normalB = wallInwardNormal(faceB);
 
-    // Horizontal partition: face A looks toward +y, face B toward -y.
     expect(normalA.yMm).toBeCloseTo(1);
     expect(normalB.yMm).toBeCloseTo(-1);
-    // Opposite directions.
     expect(normalA.xMm * normalB.xMm + normalA.yMm * normalB.yMm).toBeCloseTo(-1);
   });
 
@@ -785,7 +756,6 @@ describe("deriveScene3d — partitions", () => {
     const [faceA, faceB] = scene.rooms[0].freestandingWalls[0].faces;
     const artA = faceA.artworks[0];
     const artB = faceB.artworks[0];
-    // Panel-local x passes through unchanged for faces.
     expect(artA.xMm).toBe(500);
     expect(artB.xMm).toBe(1500);
 
@@ -799,7 +769,6 @@ describe("deriveScene3d — partitions", () => {
     };
     const posA = floorOf(faceA, artA.xMm);
     const posB = floorOf(faceB, artB.xMm);
-    // Same centerline x (both 1500), each on its own side of the slab.
     expect(posA.xMm).toBeCloseTo(1500);
     expect(posB.xMm).toBeCloseTo(1500);
   });
@@ -810,7 +779,7 @@ describe("deriveScene3d — partitions", () => {
   });
 });
 
-// Local mirror of the derivation's signed-area convention, for the CW test.
+// Independent mirror of the derivation's signed-area convention.
 function signedArea(polygon: Vec2[]): number {
   let sum = 0;
   for (let i = 0; i < polygon.length; i += 1) {

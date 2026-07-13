@@ -23,50 +23,28 @@ import {
 } from "../../domain/viewport/viewport2d";
 import { isEditableTarget } from "./isEditableTarget";
 
-// A touch gesture (one-finger pan or two-finger pinch) that moves less than
-// this many client px on release is treated as a stationary tap — beyond it,
-// the release is a pan/pinch. The consuming view decides what a tap vs a
-// pan/pinch means for its own selection/tool state (via onGestureEnd).
+// Maximum client-pixel travel still treated as a tap.
 export const TOUCH_TAP_SLOP_PX = 8;
 
-// Emitted once when a viewport gesture ends, so each view can reproduce its own
-// divergent post-gesture behavior without the hook needing to know about it:
-//   • PlanView arms its trailing-click suppression when kind === "mouse-pan"
-//     (a space/middle pan fires a trailing click) or when !isTap (a real touch
-//     pan/pinch also fires one).
-//   • ElevationView clears the selection when kind === "touch" && isTap &&
-//     startedOnBackground (a stationary background tap — elevation has no svg
-//     click handler to ride, so the clear can't piggyback a trailing click).
+// Lets each view apply its own post-gesture selection and click-suppression policy.
 export type ViewportGestureEnd = {
-  kind: "mouse-pan" | "touch"; // space/middle-drag vs touch pan/pinch
-  movedPx: number; // total client-px travel (0 for mouse-pan; not tracked today)
-  isTap: boolean; // touch only: movedPx <= TOUCH_TAP_SLOP_PX
-  startedOnBackground: boolean; // touch pan began via beginTouchPan (bubble-phase background press)
+  kind: "mouse-pan" | "touch";
+  movedPx: number;
+  isTap: boolean;
+  startedOnBackground: boolean;
 };
 
-// The shared 2D viewport gesture engine (pan / zoom / pinch / wheel / keyboard),
-// extracted verbatim from PlanView and ElevationView (which each carried a
-// near-identical ~350-line copy). The hook works EXCLUSIVELY in SVG userspace
-// (y-down): every viewport helper (zoomAtPoint, panBy, getViewBox2D,
-// pinchZoomPan) is y-down, so there is deliberately NO y-flip parameter here —
-// ElevationView's y-flip lives in its own toWallLocalMm placement helper and
-// stays in the view. Callbacks and view-owned flags (isPinchBlocked,
-// onGestureEnd) are mirrored into refs and read fresh, matching the existing
-// viewportRef discipline, so the once-per-gesture window effects never need to
-// resubscribe on their identity.
+// Shared 2D pan, zoom, pinch, wheel, and keyboard engine. All coordinates are
+// y-down SVG userspace; Elevation performs its own wall-local y-flip.
 export function useSvgViewportGestures(options: {
   svgRef: RefObject<SVGSVGElement | null>;
   viewport: Viewport2D;
   onViewportChange: (v: Viewport2D) => void;
-  // The padded fit extent the view already computes (plan: floor bounds +
-  // padding; elevation: wall rect + 6% pad) — the FIT extent every gesture
-  // measures against.
+  // Padded extent used for fit and gesture calculations.
   contentBounds: ViewBox;
   containerSize: Size;
   zoomLimits: ZoomLimits;
-  // True while a view-owned single-finger edit (wall resize / room move /
-  // object-or-placement move-drag) is in flight — a 2nd finger then blocks
-  // rather than starting a pinch over that edit. Defaults to never-blocked.
+  // Blocks a second finger from pinching over an active edit gesture.
   isPinchBlocked?: () => boolean;
   onGestureEnd?: (info: ViewportGestureEnd) => void;
 }): {
@@ -81,35 +59,25 @@ export function useSvgViewportGestures(options: {
 } {
   const { svgRef, viewport, onViewportChange, contentBounds, containerSize, zoomLimits } = options;
 
-  // Space-drag / middle-mouse pan. `isSpaceDown` drives the container cursor
-  // (grab), `panning` drives it while a pan drag is live (grabbing).
-  // `isSpaceDown` is mirrored into `spaceHeldRef` so the capture-phase
-  // pointerdown and the window-level pan move handlers read a fresh value
-  // without resubscribing.
+  // Space-drag and middle-mouse pan state.
   const [isSpaceDown, setIsSpaceDown] = useState(false);
   const spaceHeldRef = useRef(false);
   const pointerInsideSvgRef = useRef(false);
   const [panning, setPanning] = useState(false);
-  // Last pointer client position of the in-flight pan, for incremental deltas.
+  // Last pointer position for incremental pan deltas.
   const panLastRef = useRef<{ x: number; y: number } | null>(null);
-  // Fresh viewport for gesture handlers that were subscribed once (pan moves,
-  // wheel) and must not close over a stale prop — same ref-mirror discipline
-  // the drag gestures use for their transient state.
+  // Fresh viewport for once-subscribed gesture handlers.
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
 
-  // View-owned callbacks/flags mirrored into refs so the once-per-gesture
-  // window effects can read the latest without resubscribing on identity.
+  // Keep callbacks fresh without resubscribing mid-gesture.
   const onViewportChangeRef = useRef(onViewportChange);
   onViewportChangeRef.current = onViewportChange;
   const isPinchBlockedRef = useRef<() => boolean>(options.isPinchBlocked ?? (() => false));
   isPinchBlockedRef.current = options.isPinchBlocked ?? (() => false);
   const onGestureEndRef = useRef<((info: ViewportGestureEnd) => void) | undefined>(options.onGestureEnd);
   onGestureEndRef.current = options.onGestureEnd;
-  // contentBounds/containerSize/zoomLimits can't change mid-gesture (no commit,
-  // no resize while a pointer is captured), but the once-subscribed window
-  // handlers still read them fresh via refs so a resize between gestures is
-  // picked up without resubscribing.
+  // Refs pick up resize/bounds changes between gestures.
   const contentBoundsRef = useRef(contentBounds);
   contentBoundsRef.current = contentBounds;
   const containerSizeRef = useRef(containerSize);
@@ -117,9 +85,7 @@ export function useSvgViewportGestures(options: {
   const zoomLimitsRef = useRef(zoomLimits);
   zoomLimitsRef.current = zoomLimits;
 
-  // Touch (tablet) gestures: one-finger canvas pan and two-finger pinch-zoom.
-  // A small explicit state machine keyed off the number of tracked touch
-  // pointers:
+  // Touch state machine:
   //   • touchPointsRef  — every live touch pointer's latest client position.
   //   • touchModeRef    — which gesture currently owns the viewport.
   //   • touchPanLastRef — last client position of a one-finger pan (deltas).
@@ -127,10 +93,7 @@ export function useSvgViewportGestures(options: {
   //   • touchMovedPxRef — total client-px travelled this gesture (tap vs pan).
   //   • touchPanTapCandidateRef — true once a one-finger pan begins on true
   //     background, so a stationary release is reported as a background tap.
-  // `touchTracking` (state) keys the window move/up effect on/off, mirroring
-  // how `panning` gates the mouse-pan effect. A single finger that lands on a
-  // view object owns its own move-drag — touchMode stays "idle" and these
-  // handlers stay out of its way.
+  // A finger on an object remains owned by that object's drag gesture.
   const touchPointsRef = useRef(new Map<number, { x: number; y: number }>());
   const touchModeRef = useRef<"idle" | "pan" | "pinch">("idle");
   const touchPanLastRef = useRef<{ x: number; y: number } | null>(null);
@@ -141,21 +104,14 @@ export function useSvgViewportGestures(options: {
     prevDist: number;
   } | null>(null);
   const touchMovedPxRef = useRef(0);
-  // True once a one-finger pan begins on true background (via beginTouchPan) —
-  // surfaced through onGestureEnd's startedOnBackground so a stationary release
-  // can clear the selection. Stays false for a finger that started on an object.
+  // Tracks background starts so stationary taps can clear selection.
   const touchPanTapCandidateRef = useRef(false);
   const [touchTracking, setTouchTracking] = useState(false);
 
-  // The concrete zoomed viewBox rect for the current viewport — the anchor for
-  // the [+]/[−] buttons' center-zoom.
+  // Current viewBox used to center button-driven zoom.
   const { viewBox: viewBoxBounds } = getViewBox2D(viewport, contentBounds, containerSize);
 
-  // Client-px → viewBox-mm conversion in plain SVG userspace (y-down). Every
-  // viewport helper works in SVG userspace, never wall-local (y-up) — the
-  // elevation y-flip lives in the view's own toWallLocalMm. Used for the
-  // wheel-zoom anchor and the pinch anchor. Returns null when the CTM is
-  // unavailable (e.g. jsdom, or before first layout).
+  // Client pixels to y-down SVG units. The CTM may be absent before layout.
   function toSvgPoint(clientX: number, clientY: number): Vector2 | null {
     const svg = svgRef.current;
     if (!svg) return null;
@@ -170,8 +126,7 @@ export function useSvgViewportGestures(options: {
     return { xMm: transformed.x, yMm: transformed.y };
   }
 
-  // Zoom the current viewBox about its own center — the [+]/[−] buttons' target
-  // point, since there's no cursor to anchor on for a button press.
+  // Buttons zoom around the viewBox center because they have no cursor anchor.
   function zoomAtCenter(factor: number) {
     onViewportChange(
       zoomAtPoint(
@@ -185,8 +140,7 @@ export function useSvgViewportGestures(options: {
     );
   }
 
-  // The zoom-control affordances: a step-zoom is possible only when it would
-  // actually change the effective zoom (clampZoom holds it at the limit).
+  // Disable step controls when clamping would produce no change.
   const canZoomIn =
     clampZoom(getEffectiveZoom(viewport) * ZOOM_STEP, contentBounds, containerSize, zoomLimits) !==
     getEffectiveZoom(viewport);
@@ -194,19 +148,14 @@ export function useSvgViewportGestures(options: {
     clampZoom(getEffectiveZoom(viewport) / ZOOM_STEP, contentBounds, containerSize, zoomLimits) !==
     getEffectiveZoom(viewport);
 
-  // Wheel = zoom (ctrl/⌘ or trackpad pinch) or pan (plain / shift-horizontal).
-  // Reassigned every render so it always sees the latest viewport/bounds;
-  // registered once as a NON-passive native listener (React's onWheel can be
-  // passive, which would make preventDefault a no-op) in the effect below.
+  // Native non-passive wheel handling is required for preventDefault.
   const wheelHandlerRef = useRef<(e: WheelEvent) => void>(() => {});
   wheelHandlerRef.current = (e: WheelEvent) => {
     e.preventDefault();
-    // Line-mode wheels (deltaMode 1) report in lines, not pixels — scale up so
-    // one detent moves a comparable amount to a pixel-mode wheel.
+    // Normalize line-mode wheel deltas to approximate pixels.
     const norm = (d: number) => (e.deltaMode === 1 ? d * 16 : d);
     if (e.ctrlKey || e.metaKey) {
-      // ctrlKey===true is also how a trackpad pinch arrives in Chrome/Firefox/
-      // Safari — same code path, anchored on the cursor's world point.
+      // Browsers report trackpad pinch as ctrl/meta-wheel.
       const point = toSvgPoint(e.clientX, e.clientY);
       if (!point) return;
       const factor = Math.min(2, Math.max(0.5, Math.exp(-norm(e.deltaY) * WHEEL_ZOOM_SENSITIVITY)));
@@ -214,9 +163,7 @@ export function useSvgViewportGestures(options: {
         zoomAtPoint(viewportRef.current, point, factor, contentBounds, containerSize, zoomLimits)
       );
     } else {
-      // Plain wheel pans; shift+wheel pans horizontally on Windows (macOS
-      // already flips deltaX for a shifted wheel, so only synthesize when the
-      // browser left deltaX at 0).
+      // Synthesize Shift-horizontal pan only when the browser did not.
       const dx = e.shiftKey && e.deltaX === 0 ? norm(e.deltaY) : norm(e.deltaX);
       const dy = e.shiftKey && e.deltaX === 0 ? 0 : norm(e.deltaY);
       onViewportChange(panBy(viewportRef.current, { x: dx, y: dy }, contentBounds, containerSize));
@@ -227,7 +174,7 @@ export function useSvgViewportGestures(options: {
     const el = svgRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => wheelHandlerRef.current(e);
-    // Safari's non-standard pinch events would otherwise page-zoom the app.
+    // Prevent Safari's non-standard pinch page zoom.
     const onGesture = (e: Event) => e.preventDefault();
     const onPointerEnter = () => {
       pointerInsideSvgRef.current = true;
@@ -256,26 +203,19 @@ export function useSvgViewportGestures(options: {
     };
   }, []);
 
-  // Track Space (for the grab cursor + capture-phase pan intercept) and handle
-  // ⌘0 / Ctrl+0 = reset to fit. Window-scoped; skips edit fields so typing a
-  // literal "0" or space in an input is never hijacked. plan/elevation are
-  // never both mounted at once (viewMode gates which one App renders), so
-  // there's no risk of two of these double-firing on the same keystroke.
+  // Track Space-pan and Cmd/Ctrl+0 fit without hijacking editable fields.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (isEditableTarget(event.target)) return;
       if ((event.metaKey || event.ctrlKey) && event.key === "0") {
-        // Also blocks the browser's own zoom-reset.
+        // Block the browser's own zoom reset.
         event.preventDefault();
         onViewportChangeRef.current(FIT_VIEWPORT);
         return;
       }
       if (event.code === "Space" || event.key === " ") {
         const interactiveTarget = (event.target as HTMLElement)?.closest?.('button, a, [role="button"]');
-        // A Tab-focused button/link must still activate on Space. The one
-        // exception is pointer-led viewport work: focus may still sit on a
-        // topbar control while the pointer is over the SVG, and in that case
-        // Space should arm pan instead of clicking the stale focused control.
+        // Preserve Space activation unless the pointer is actively over the SVG.
         if (interactiveTarget && !pointerInsideSvgRef.current) {
           return;
         }
@@ -283,9 +223,7 @@ export function useSvgViewportGestures(options: {
           spaceHeldRef.current = true;
           setIsSpaceDown(true);
         }
-        // Stops the page from scrolling while space engages pan. e.repeat is
-        // ignored for the flag (already set) but still prevented so
-        // held-space never scrolls.
+        // Held Space must never scroll the page.
         event.preventDefault();
         if (interactiveTarget) {
           event.stopPropagation();
@@ -301,7 +239,7 @@ export function useSvgViewportGestures(options: {
     }
 
     function onBlur() {
-      // ⌘Tab away while holding space would otherwise leave the flag stuck.
+      // Avoid a stuck Space state after switching windows.
       spaceHeldRef.current = false;
       pointerInsideSvgRef.current = false;
       setIsSpaceDown(false);
@@ -317,11 +255,7 @@ export function useSvgViewportGestures(options: {
     };
   }, []);
 
-  // Space/middle-mouse pan drag. Subscribed once per gesture (keyed on
-  // `panning`), reading the live viewport via viewportRef and applying the
-  // negated incremental pointer delta so the drawing tracks the pointer.
-  // contentBounds/containerSize are read fresh via refs — they can't change
-  // mid-gesture (no commit, no resize while a button is held).
+  // Subscribe once per Space/middle-mouse pan gesture.
   useEffect(() => {
     if (!panning) return;
 

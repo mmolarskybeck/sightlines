@@ -132,42 +132,26 @@ import type {
   WallDragState
 } from "./plan/types";
 
-// On-screen size of a selected room's wall-midpoint resize handles — small
-// and square (the design language has no pills), since they only ever render
-// for the one selected room rather than floating outside every room at rest.
+// Selected-room resize handle size in screen pixels.
 const SELECTED_HANDLE_PX = 10;
 const SNAP_THRESHOLD_PX = 10;
-// Wall objects render at their true model depth once it's on-screen large
-// enough to read as a rect; below that, clamp to a visible floor (doors/
-// windows are thin by design and would otherwise vanish to a hairline when
-// zoomed out).
+// Keep thin wall objects visible when zoomed out.
 const MIN_WALL_OBJECT_DEPTH_PX = 9;
-// Every plan object gets an invisible hit pad at least this big on both axes
-// so small objects (esp. thin wall objects) stay clickable at any zoom.
+// Minimum invisible hit target for plan objects.
 const MIN_OBJECT_HIT_PX = 20;
-// Click within this many screen px of the polygon's first vertex closes the
-// loop (needs ≥3 points); mirrors the wall-object capture radius feel.
+// Polygon close-target radius in screen pixels.
 const CLOSE_HANDLE_PX = 12;
-// Consecutive draw points closer than this (floor mm) collapse to a
-// zero-length wall — ignore the click, same floor the constructor rejects at.
+// Ignore points that would create a zero-length wall.
 const MIN_DRAW_SPACING_MM = 10;
 const DRAW_EPS = 1e-6;
-// A partition centerline shorter than this (floor mm) reads as an accidental
-// click, not a drawn wall — the create drag ignores it (same floor the
-// constructor rejects at).
+// Minimum partition centerline length in floor millimeters.
 const PARTITION_MIN_LENGTH_MM = 100;
-// A rectangle-room drag whose either axis falls below this (floor mm) reads as
-// an accidental click rather than a room — well above pointer jitter, at or
-// below every common grid precision, and the smallest plausible room dimension.
+// Reject rectangle drags below the smallest plausible room dimension.
 const RECT_ROOM_MIN_SIZE_MM = 500;
-// Fit view never frames a window smaller than this on either axis — an empty
-// or near-empty floor (or a single tiny room) would otherwise fit-zoom to a
-// window a couple meters wide, reading as absurdly zoomed-in. ~30ft.
+// Prevent fit-view from over-zooming sparse plans (~30 ft minimum extent).
 const MIN_PLAN_FIT_EXTENT_MM = 9144;
 
-// Stable module-level reference so a caller that doesn't pass `getBlob`
-// doesn't retrigger useAssetImageUrls' effect on every render (same idiom as
-// ElevationView's NO_OP_GET_BLOB).
+// Stable fallback avoids retriggering useAssetImageUrls.
 const NO_OP_GET_BLOB: (key: string) => Promise<Blob> = () =>
   Promise.reject(new Error("PlanView: no getBlob provided"));
 
@@ -207,48 +191,26 @@ export function PlanView({
   viewport,
   onViewportChange
 }: {
-  // Which insertion tool (door/window/blocked-zone) is armed — lifted up
-  // into App's view-toolbar strip (the old floating PlanToolbar palette is
-  // gone), so PlanView is a controlled component here: it reads the armed
-  // kind and reports intent via onToolChange, exactly like PlanToolbar used
-  // to, but this component now owns the ghost preview and click-to-place
-  // commit that arming enables.
+  // Controlled door/window/blocked-zone insertion tool.
   activeTool: OpeningKind | null;
-  // Polygon-room draw mode — armed alongside activeTool in App's toolbar and
-  // mutually exclusive with it. The armed flag is lifted (App owns the toolbar
-  // toggle); the transient point list, preview, and snapping live here.
+  // App owns the mode; transient polygon points and snapping stay local.
   drawRoomActive?: boolean;
-  // Reports a draw arm/disarm up to App (Escape/Enter-close disarm from here).
   onDrawRoomChange?: (active: boolean) => void;
-  // Commits the closed polygon in ONE store edit; App wires it to addPolygonRoom.
   onAddPolygonRoom?: (pointsFloorMm: Point[]) => void;
-  // Slice 2 (reshape): which room's vertex/split handles show, lifted the
-  // same way as drawRoomActive — armed by RoomInspector's "Edit shape"
-  // button, mutually exclusive with activeTool/drawRoomActive in App.
+  // Room whose reshape handles are active.
   reshapeRoomId?: string | null;
-  // Reports an arm/toggle/exit up to App (Escape and the double-click
-  // shortcut both call this from here).
   onReshapeRoomChange?: (roomId: string | null) => void;
-  // Rectangle-room draw tool — armed alongside the other tools in App's
-  // toolbar, mutually exclusive with them. Press at one corner, drag to the
-  // opposite corner, release to create an axis-aligned room. The armed flag is
-  // lifted (App owns the toggle); the transient two-corner state, preview, and
-  // grid snapping live here. Disarms after one commit (and on Escape/cancel).
+  // Controlled rectangle-room mode; local drag state disarms after commit/cancel.
   drawRectActive?: boolean;
-  // Reports an arm/disarm up to App (release and Escape both disarm from here).
   onDrawRectChange?: (active: boolean) => void;
-  // Commits the drawn rectangle in ONE store edit; App wires it to
-  // addDrawnRectangleRoom. Min-corner origin, absolute width/depth.
+  // Rectangle origin is its minimum corner; dimensions are absolute.
   onAddRectangleRoom?: (rect: {
     offsetXMm: number;
     offsetYMm: number;
     widthMm: number;
     depthMm: number;
   }) => void;
-  // Partition (free-standing wall) tool — armed alongside the other tools in
-  // App's toolbar, mutually exclusive with them. Drag draws the centerline;
-  // release commits via onAddFreestandingWall. Editing (select/move/re-angle)
-  // is always available, independent of the armed tool.
+  // Controlled partition drawing; existing partitions remain editable when disarmed.
   partitionToolActive?: boolean;
   onPartitionToolChange?: (active: boolean) => void;
   onAddFreestandingWall?: (startFloorMm: Point, endFloorMm: Point) => void;
@@ -260,61 +222,32 @@ export function PlanView({
     nextFloorMm: Point
   ) => void;
   artworksById?: Map<string, Artwork>;
-  // Which artwork the checklist is mid-drag, so a plan dragover can size its
-  // ghost — HTML5 dragover can't read the payload, so App threads this the
-  // same way it does for ElevationView.
+  // Needed because HTML5 dragover cannot read the artwork payload.
   draggingArtworkId?: string | null;
-  // Resolves asset blob keys for artwork tooltip thumbnails (same contract as
-  // ElevationView's getBlob, but at the thumbnail tier).
   getBlob?: (key: string) => Promise<Blob>;
   gridPrecisionFloorMm: number | null;
   gridVisible: boolean;
-  // THE single commit for a plan object move — handles same-wall move,
-  // re-anchor, and wall↔floor conversion atomically (one undo entry).
+  // Atomically handles same-wall moves, re-anchoring, and wall/floor conversion.
   onCommitPlanMove?: (objectId: string, placement: PlanPlacement) => void;
-  // Commits a plan group drag in ONE call: wall members carry a new wall-local
-  // x (yMm omitted); floor members carry a new floor center (xMm + yMm). The
-  // single-object move keeps onCommitPlanMove; this is the multi-select path.
+  // Wall moves omit yMm; floor moves include their new center.
   onCommitPlanMoveGroup?: (moves: { id: string; xMm: number; yMm?: number }[]) => void;
   onPlaceArtwork?: (artworkId: string, wallId: string, xMm: number, yMm: number) => void;
-  // Floor works (effective form "floor") land here instead of onPlaceArtwork:
-  // the plan drop resolves a floor center, and this commits via the store's
-  // placeArtworkOnFloor. Optional/inert until App wires it.
   onPlaceArtworkOnFloor?: (artworkId: string, xMm: number, yMm: number) => void;
-  // A rubber-band marquee committed on release: ids are PLACEMENT ids (wall/
-  // floor object ids), never artwork-library ids, and `additive` reflects a
-  // held shift. Composes App-owned selection state, so it stays a prop while
-  // the bare selection actions (select/clear) are read from the store below.
+  // IDs are placements, never artwork-library records.
   onMarqueeSelect?: (ids: string[], additive: boolean) => void;
-  // Reports an arm/disarm/toggle of the insertion tool up to App, which owns
-  // activeTool (planMode) — so this stays a prop even though the bare store
-  // actions below don't.
   onToolChange: (tool: OpeningKind | null) => void;
   selectedArtworkId?: string | null;
   selectedOpeningId?: string | null;
   selectedObjectIds?: string[];
-  // Which room shows its selection-scoped outline/wash/resize-handles — at
-  // rest (null) the canvas shows nothing but the drawing itself.
   selectedRoomId?: string | null;
   selectedWallId: string | null;
   snapToGrid: boolean;
-  // The manual/fit viewport for this surface (owned by App via useViewport2D),
-  // and the setter every zoom/pan gesture routes its next viewport through.
   viewport: Viewport2D;
   onViewportChange: (v: Viewport2D) => void;
 }) {
   const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
-  // Store-connected passthroughs. App used to forward all of these verbatim
-  // (a bare `prop={storeAction}` or `project={project}`), so reading them
-  // straight from the store here cuts ~15 wires off the call site without
-  // relocating any ownership: the store already owns them, App was only a
-  // conduit. Each action selector returns a stable reference (actions are
-  // defined once in createAppStore), so these never trigger a re-render; only
-  // the `project` slice does, exactly as the old prop did. Anything App still
-  // wraps in an arrow (composing a view preference like allowOverlappingPlacement,
-  // or the derived selection ids) stays a prop above — that's genuinely
-  // App-owned composition, not a passthrough.
+  // Store-owned actions are read here; App-owned compositions remain props.
   const project = useAppStore((state) => state.project)!;
   const onMoveRoomVertex = useAppStore((state) => state.moveRoomVertex);
   const onMoveRoomWall = useAppStore((state) => state.moveRoomWall);
@@ -330,11 +263,7 @@ export function PlanView({
   const onSelectWall = useAppStore((state) => state.selectWall);
   const onSelectObject = useAppStore((state) => state.selectObject);
   const onClearSelection = useAppStore((state) => state.clearObjectSelection);
-  // Wall-resize drag (a rectangle room's RoomResizeHandles). onMove/onRelease
-  // close over toSvgMm/gridSnapTargets/snapThresholdMm/snapToGrid/project,
-  // all declared further down this component body — safe, since these
-  // closures only ever run later, from a window pointer event, by which time
-  // every one of those consts has already been initialized for this render.
+  // These handlers run after render, so later-declared geometry constants are initialized.
   const {
     drag,
     dragRef,
@@ -344,20 +273,14 @@ export function PlanView({
       const pointerMm = toSvgMm(event.clientX, event.clientY);
       if (!pointerMm) return null;
 
-      // Snap the wall's moving edge, not the raw pointer — the handle can be
-      // grabbed anywhere within its 16px hit target, and that grab offset
-      // must not leak into the committed length even when the pointer lands
-      // exactly on a grid line.
+      // Snap the moving edge, not the pointer, to preserve the grab offset.
       const proposedEdgeMm = proposeMovingEdgePointMm(
         current.edgeStartMm,
         current.startPointerMm,
         pointerMm
       );
 
-      // A handle only ever moves along its target wall's own axis, so only
-      // grid lines perpendicular to that axis are relevant — snapping the
-      // other coordinate would be meaningless for this drag and could
-      // trigger on incidental hand-tremor alignment.
+      // Only the wall's movement axis can snap.
       let snappedEdgeMm = proposedEdgeMm;
       let snapTargetId: string | undefined;
       let activeGuides: Guide[] = [];
@@ -370,8 +293,7 @@ export function PlanView({
         );
         const snapResult = resolveSnap(proposedEdgeMm, relevantTargets, {
           thresholdMm: snapThresholdMm,
-          // Single-axis drag: the remembered id lives in the drag axis's
-          // slot of the per-axis hysteresis map.
+          // Store hysteresis only on the active axis.
           previousSnapTargetIds:
             dragAxis === "x"
               ? { x: current.previousSnapTargetId }
@@ -398,10 +320,7 @@ export function PlanView({
       void onCommitWallLength(current.targetWallId, current.previewLengthMm, current.anchor);
     }
   });
-  // Whole-room move drag (the selected room's floor polygon as move
-  // affordance). Same deferred-closure note as `drag` above: onMove/onRelease
-  // reference gridSnapTargets/snapThresholdMm/snapToGrid/onMoveRoom, all
-  // declared further down this component body.
+  // Whole-room drag uses the selected floor polygon as its move affordance.
   const {
     drag: roomDrag,
     dragRef: roomDragRef,
@@ -527,9 +446,7 @@ export function PlanView({
         };
       }
 
-      // Move the object's own center by the pointer delta, not the raw pointer
-      // — wherever inside the object the user grabbed must not leak into the
-      // committed center.
+      // Preserve the grab offset by moving the center by pointer delta.
       const proposedCenterMm: Vector2 = {
         xMm: current.startCenterMm.xMm + (pointerMm.xMm - current.startPointerMm.xMm),
         yMm: current.startCenterMm.yMm + (pointerMm.yMm - current.startPointerMm.yMm)
@@ -537,12 +454,12 @@ export function PlanView({
 
       const result = resolvePlanPlacement(proposedCenterMm, {
         walls: floorWallsForTool,
-        // Exclude the moving object so it never snaps to its own old position.
+        // Do not snap to the moving object's old position.
         wallObjects: project.wallObjects.filter((object) => object.id !== current.objectId),
         movingSize: current.movingSize,
         movingKind: current.kind,
         floatPolicy: current.floatPolicy,
-        // Live preview's current wall, so hysteresis tracks the drag.
+        // Keep wall-capture hysteresis across pointer moves.
         currentAnchorWallId: current.currentAnchorWallId,
         captureDistanceMm,
         gridTargets: gridSnapTargets,
@@ -563,8 +480,7 @@ export function PlanView({
       };
     },
     onRelease: (current) => {
-      // Group drag: sub-threshold release is a click (no commit, no phantom
-      // undo); else one commit carrying every member's translated result.
+      // Commit a group move once; sub-threshold releases remain clicks.
       if (current.members && current.startGroupCenterMm && current.previewGroupCenterMm) {
         const deltaMm: Vector2 = {
           xMm: current.previewGroupCenterMm.xMm - current.startGroupCenterMm.xMm,
@@ -572,9 +488,7 @@ export function PlanView({
         };
         if (Math.hypot(deltaMm.xMm, deltaMm.yMm) < 0.5) return;
 
-        // Whether or not the commit survives the collision gate, the click
-        // that trails the release must not collapse the multi-selection to
-        // the one grabbed member (see suppressNextSelect).
+        // Prevent the trailing click from collapsing the multi-selection.
         suppressNextSelect();
         const moves = current.members.map(
           (member) => resolvePlanGroupMemberMove(member, deltaMm).commit
@@ -583,17 +497,14 @@ export function PlanView({
         return;
       }
 
-      // Sub-threshold release is a click, not a move — it must not commit (and
-      // so land a phantom undo entry); the object's onClick still selects it.
+      // Sub-threshold releases remain clicks and create no undo entry.
       const movedMm = Math.hypot(
         current.previewPlanRect.centerXMm - current.startCenterMm.xMm,
         current.previewPlanRect.centerYMm - current.startCenterMm.yMm
       );
       if (movedMm < 0.5) return;
 
-      // A rejected preview (artwork dragged off every wall — wall-only) commits
-      // nothing: the object stays exactly where it was, on its wall or its old
-      // floor spot. The trailing click still re-selects it via onClick.
+      // Invalid wall-only drops keep the original placement.
       if (current.previewPlacement.anchor === "none") return;
 
       onCommitPlanMove?.(current.objectId, current.previewPlacement);
@@ -601,10 +512,7 @@ export function PlanView({
   });
   const [dropGhost, setDropGhost] = useState<DropGhostState | null>(null);
   const dropSnapTargetIdsRef = useRef<SnapTargetIds | undefined>(undefined);
-  // Rubber-band marquee selection on the plan background. Same deferred-
-  // closure note as the machines above: onMove references toSvgMm, onRelease
-  // references snapThresholdMm/idsIntersectingMarquee/onMarqueeSelect/
-  // suppressNextToolClickRef, all declared further down this component body.
+  // Rubber-band selection on the plan background.
   const {
     drag: marquee,
     dragRef: marqueeRef,
@@ -617,22 +525,11 @@ export function PlanView({
     },
     onRelease: (current, event) => {
       const rect = marqueeRectMm(current);
-      // A sub-threshold rect is a plain background click, not a drag. Unlike
-      // elevation (which clears the selection here), PlanView must do NOTHING:
-      // the browser fires a `click` on the svg right after this pointerup, and
-      // handleSvgClick's no-tool branch already calls onClearSelection for that
-      // background click — clearing here too would be redundant.
+      // The trailing SVG click handles sub-threshold background clicks.
       const draggedMm = Math.hypot(rect.maxXMm - rect.minXMm, rect.maxYMm - rect.minYMm);
       if (draggedMm < snapThresholdMm) return;
 
-      // A real marquee. CRITICALLY suppress the trailing background click: the
-      // browser fires `click` on the svg right after pointerup, and handleSvg-
-      // Click's no-tool branch calls onClearSelection — which would instantly
-      // wipe the selection this marquee just made. suppressNextToolClickRef is
-      // the same flag handleSvgClick already consumes for placement clicks; the
-      // window.setTimeout(..., 0) is the safety net for a release that lands
-      // where no click follows (pointer left the svg mid-drag), same idiom as
-      // suppressNextSelect.
+      // Suppress the trailing SVG click or it would clear the new selection.
       suppressNextToolClickRef.current = true;
       window.setTimeout(() => {
         suppressNextToolClickRef.current = false;
@@ -641,17 +538,7 @@ export function PlanView({
     }
   });
 
-  // Which tool is armed lives in App now (activeTool prop, lifted alongside
-  // the toolbar buttons that toggle it) — deliberately NOT in the store, same
-  // reasoning as the drag/marquee state above: it's transient UI, not
-  // something undo history or persistence should ever see. What stays local
-  // here is the live ghost and the hysteresis id threaded across pointer
-  // moves (the same discipline as the wall-resize drag's previousSnapTargetId,
-  // just keyed on hover instead of a pointer-capture gesture) — both reset
-  // whenever activeTool changes so a re-arm (or disarm) starts clean.
-
-  // Thumbnails for placed-artwork tooltips (thumbnail tier — the plan rect is
-  // too small to justify display-tier blobs the way elevation does).
+  // Plan tooltips use thumbnail-tier images.
   const placedArtworkAssetIds = [
     ...project.wallObjects.map((object) =>
       object.kind === "artwork" ? artworksById?.get(object.artworkId)?.assetId : undefined
@@ -666,27 +553,17 @@ export function PlanView({
   );
   const [toolGhost, setToolGhost] = useState<ToolGhostState | null>(null);
   const toolSnapTargetIdsRef = useRef<SnapTargetIds | undefined>(undefined);
-  // Set on pointerdown-capture when the gesture starts on a resize handle or
-  // an existing plan object, so the click that follows (native click fires
-  // even when the underlying pointerdown/up were consumed elsewhere) doesn't
-  // also commit a placement underneath it.
+  // Prevent a gesture's trailing native click from placing another object.
   const suppressNextToolClickRef = useRef(false);
 
-  // Polygon-room draw state. Latest value mirrored into a ref so the scoped
-  // keyboard handler (Enter/Backspace/Escape) reads live points without
-  // resubscribing on every appended vertex — same discipline as the drags.
+  // Ref lets keyboard handlers read current points without resubscribing.
   const [draw, setDraw] = useState<DrawState | null>(null);
   const drawRef = useRef<DrawState | null>(null);
   useEffect(() => {
     drawRef.current = draw;
   }, [draw]);
 
-  // Reshape mode's vertex drag. `selectedVertexId` is separate: a plain click
-  // (no movement) still "selects" a vertex for the Delete/Backspace merge
-  // shortcut, whether or not this gesture also turns into a drag. Same
-  // deferred-closure note as `drag` above: onMove/onRelease reference
-  // project/gridSnapTargets/snapThresholdMm/snapToGrid/onMoveRoomVertex, all
-  // declared further down this component body.
+  // A plain vertex click still selects it for Delete/Backspace.
   const {
     drag: vertexDrag,
     dragRef: vertexDragRef,
@@ -714,9 +591,7 @@ export function PlanView({
       let snapTargetIds = current.previousSnapTargetIds;
       let activeGuides: Guide[] = [];
       if (snapToGrid) {
-        // gridSnapTargets are in floor space; add the room's placement offset
-        // before snapping, then subtract it back off — the same grab-offset
-        // convention roomDrag's corner snap uses.
+        // Snap in floor space, then convert back to room-local coordinates.
         const proposedFloorMm: Vector2 = {
           xMm: proposedLocalMm.xMm + placement.offsetXMm,
           yMm: proposedLocalMm.yMm + placement.offsetYMm
@@ -748,21 +623,13 @@ export function PlanView({
         current.previewLocalMm.xMm - current.startLocalMm.xMm,
         current.previewLocalMm.yMm - current.startLocalMm.yMm
       );
-      // Sub-threshold release is a click (already handled by selecting the
-      // vertex on pointerdown), not a move — no commit. An invalid final
-      // position REVERTS: displayedProject falls back to the committed
-      // project the instant vertexDrag goes null above, so "revert" costs
-      // nothing extra here — just don't call onMoveRoomVertex.
+      // Invalid or sub-threshold releases revert by skipping the commit.
       if (movedMm < 0.5 || !current.valid) return;
 
       void onMoveRoomVertex?.(current.roomId, current.vertexId, current.previewLocalMm);
     }
   });
-  // A selected non-rectangle's wall slide (WallSlideHandles chips →
-  // moveRoomWall). Same deferred-closure note as `drag` above: onMove
-  // references `project` and `toSvgMm`, declared further down this component
-  // body — safe, since onMove only ever runs later, from a window pointer
-  // event.
+  // Slide a selected non-rectangle wall along its perpendicular.
   const {
     drag: wallDrag,
     dragRef: wallDragRef,
@@ -776,14 +643,10 @@ export function PlanView({
         xMm: pointerMm.xMm - current.startPointerMm.xMm,
         yMm: pointerMm.yMm - current.startPointerMm.yMm
       };
-      // Constrain the pointer delta to the wall's own perpendicular — project
-      // it onto the unit normal captured at drag start, so a diagonal mouse
-      // movement only ever drives the wall along its normal, never sideways.
+      // Project diagonal pointer movement onto the wall normal.
       const offsetMm = deltaMm.xMm * current.normal.xMm + deltaMm.yMm * current.normal.yMm;
 
-      // Live preview validity: run the actual domain op against the
-      // committed project (not the store) purely to see whether it throws —
-      // same idiom as canMoveRoomVertex gating the vertex-drag preview.
+      // Validate previews with the domain operation without mutating the store.
       let valid = true;
       try {
         moveRoomWall(project, current.roomId, current.wallId, offsetMm);
@@ -794,39 +657,16 @@ export function PlanView({
       return { ...current, previewOffsetMm: offsetMm, valid };
     },
     onRelease: (current) => {
-      // Sub-threshold release is a click, not a move — no commit. An invalid
-      // final offset REVERTS: displayedProject falls back to the pre-drag
-      // project the instant wallDrag goes null above, so "revert" costs
-      // nothing extra here — just don't call onMoveRoomWall.
+      // Invalid or sub-threshold releases revert by skipping the commit.
       if (Math.abs(current.previewOffsetMm) < 0.5 || !current.valid) return;
 
       void onMoveRoomWall?.(current.roomId, current.wallId, current.previewOffsetMm);
     }
   });
-  // The wall edge the pointer is hovering, when it belongs to the selected
-  // non-rectangle room — teaches the wall→chip link (the wall lights up and its
-  // WallSlideHandles chip gets the stronger treatment). Cheap: only set while
-  // hovering an eligible edge, cleared on leave.
+  // Links the hovered wall edge to its slide handle.
   const [hoveredWallId, setHoveredWallId] = useState<string | null>(null);
-  // Partition create-drag — same deferred-closure note as `drag` above:
-  // onMove references toSvgMm/snapDrawPoint/partitionDrawInvalid, and
-  // onRelease references onAddFreestandingWall/onPartitionToolChange, all
-  // declared further down this component body.
-  //
-  // Escape disarms the partition tool mid-draw (see the keydown handler
-  // below, which calls onPartitionToolChange?.(false)); the old hand-rolled
-  // version cancelled the gesture outright by nulling this state directly,
-  // which tore the window listeners down on the spot. useDragGesture has no
-  // such imperative cancel, so cancellation is expressed as a commit-time
-  // gate instead: onRelease reads the live `partitionToolActive` prop (fresh
-  // every render, same as every other closure here) and skips the commit —
-  // and skips it silently, since RENDER already hides the whole preview layer
-  // behind `{partitionToolActive ? ... : null}` the instant Escape fires, so
-  // there is nothing left on screen for the lingering listeners to animate.
-  // The one observable difference from the original: the window listeners
-  // stay subscribed until the pointer actually lifts (instead of tearing
-  // down at the keypress) — inert, since nothing renders and nothing commits
-  // in that window.
+  // Escape disarms the tool; onRelease gates the commit because useDragGesture
+  // has no imperative cancel. Its inert listeners remain until pointerup.
   const {
     drag: partitionDraw,
     dragRef: partitionDrawRef,
@@ -844,14 +684,8 @@ export function PlanView({
       onAddFreestandingWall?.(current.startMm, current.endMm);
     }
   });
-  // Rectangle-room create-drag — same deferred-closure and Escape-as-commit-gate
-  // discipline as the partition machine above. onMove snaps each corner via
-  // snapDrawPoint(pointerMm, null, …): passing prev=null gives a pure grid snap,
-  // so Shift's H/V axis-lock is structurally inert here — correct, since locking
-  // a corner to the start's axis would degenerate the rectangle to a line.
-  // onRelease disarms FIRST (after both commit and cancel — disarm-after-one),
-  // then commits min-corner origin + absolute size, but only while still armed
-  // (the !drawRectActive gate is the Escape-cancel path, exactly like partition).
+  // Pure grid snapping avoids Shift axis-lock degenerating the rectangle.
+  // onRelease always disarms and commits only while the tool remains armed.
   const {
     drag: rectDraw,
     dragRef: rectDrawRef,
@@ -874,11 +708,7 @@ export function PlanView({
       });
     }
   });
-  // Partition edit-drag (whole-body move, or one endpoint re-drag) — same
-  // deferred-closure note as the machines above: onMove references
-  // gridSnapTargets/snapThresholdMm/snapToGrid/snapDrawPoint, onRelease
-  // references onMoveFreestandingWall/onMoveFreestandingWallEndpoint, all
-  // declared further down this component body.
+  // Partition edit drag supports whole-body moves and endpoint changes.
   const {
     drag: partitionDrag,
     dragRef: partitionDragRef,
@@ -893,19 +723,14 @@ export function PlanView({
       };
 
       if (current.mode === "move") {
-        // Do not let a nearby snap target turn a click (or tiny pointer jitter)
-        // into a move. The same screen-scaled threshold drives the dimension
-        // axis latch, and only raw pointer travel may activate an axis.
+        // Only raw pointer travel can activate an axis; snaps cannot create a move.
         const latchThresholdMm = snapThresholdMm / 2;
         const movedAxes = getPartitionMovedAxes(current.movedAxes, deltaMm, latchThresholdMm);
         if (!movedAxes.x && !movedAxes.y) {
           return { ...current, movedAxes };
         }
 
-        // Snap the MIDPOINT, not an endpoint: wall-aware targets (equidistant-
-        // between-walls + sibling-partition alignment) rank above grid and stay
-        // active even with grid snap OFF; snapping to an equidistant target
-        // lands the partition exactly where "center between walls" would.
+        // Snap the midpoint; wall-aware targets outrank grid and work with grid off.
         const origMid = {
           xMm: (current.startFloorMm.xMm + current.endFloorMm.xMm) / 2,
           yMm: (current.startFloorMm.yMm + current.endFloorMm.yMm) / 2
@@ -937,9 +762,7 @@ export function PlanView({
           xMm: snap.point.xMm - origMid.xMm,
           yMm: snap.point.yMm - origMid.yMm
         };
-        // Clip the snap guides to the containing room's floor-space bbox (padded
-        // ~200mm so they read just beyond the walls) rather than the full
-        // viewBox. An x-guide (vertical) is bounded on y and vice versa.
+        // Clip guides to the room bounds with a small overhang.
         const guidePadMm = 200;
         const roomBox = placement ? getPlacedRoomBounds(placement) : null;
         const activeGuides = roomBox
@@ -967,10 +790,7 @@ export function PlanView({
         };
       }
 
-      // Endpoint drag. Precedence: Shift H/V lock > wall-kiss > grid. Wall-kiss
-      // reuses snapDrawPointToRooms so the endpoint latches onto real room
-      // perimeter, excluding the dragged partition's OWN faces (it can't cling
-      // to the slab it belongs to). Shift then locks the run to the anchor.
+      // Endpoint precedence: Shift axis-lock > other wall faces > grid.
       const anchor = current.mode === "start" ? current.endFloorMm : current.startFloorMm;
       const kissWalls = floorWallsForTool.filter((wall) => {
         const parsed = parseFaceWallId(wall.id);
@@ -1015,20 +835,13 @@ export function PlanView({
     selectedVertexIdRef.current = selectedVertexId;
   }, [selectedVertexId]);
   useEffect(() => {
-    // Disarming (or re-arming on a different room) clears any vertex selection,
-    // so a stale vertex can't be the target of a later Delete keypress.
+    // Prevent Delete from targeting a stale vertex after changing modes.
     setSelectedVertexId(null);
   }, [reshapeRoomId]);
 
   const bounds = getFloorBounds(project.floor);
   const padding = getPlanViewPaddingMm(bounds);
-  // The fit extent every gesture measures against: the padded floor bounds,
-  // clamped to a sane minimum window (see clampFitExtent) so an empty floor
-  // or a lone tiny room doesn't fit-zoom in absurdly tight.
-  // getViewBox2D turns the current viewport (fit or manual pan/zoom) into the
-  // concrete viewBox rect + its exact pixels-per-mm, so `viewBoxBounds` below
-  // is the ZOOMED window — every downstream consumer (grid, snap targets,
-  // px→mm constants, guide extents) inherits the zoom automatically.
+  // All px/mm thresholds derive from the current zoomed viewBox.
   const contentBounds = clampFitExtent(bounds, padding);
   const { viewBox: viewBoxBounds, pixelsPerMm } = getViewBox2D(
     viewport,
@@ -1037,15 +850,12 @@ export function PlanView({
   );
   const viewBox = `${viewBoxBounds.x} ${viewBoxBounds.y} ${viewBoxBounds.width} ${viewBoxBounds.height}`;
   const minorGridMm = getMinorGridIntervalMm(project.unit, pixelsPerMm, {
-    // Plan reads in feet/meters: room layout is a whole-feet activity, so a
-    // coarser target than the shared default keeps the plan lattice on the
-    // (1ft, 5ft) / (20cm, 1m) rung at typical whole-floor zoom.
+    // Keep whole-floor grids coarser than the shared default.
     targetMinorPx: 12,
     minIntervalMm: gridPrecisionFloorMm
   });
   const majorGridMm = getMajorGridIntervalMm(project.unit, minorGridMm);
-  // Grid intervals above stay on project.unit (family-based). The resize
-  // handle labels show a wall length, so they read in the wall scope's unit.
+  // Resize labels use the wall scope's unit.
   const wallUnit = getScopeUnits(
     unitSystemFromDisplayUnit(project.unit),
     "wall"
@@ -1175,14 +985,7 @@ export function PlanView({
     pixelsPerMm > 0 ? MIN_WALL_OBJECT_DEPTH_PX / pixelsPerMm : 0;
   const objectHitMinMm = pixelsPerMm > 0 ? MIN_OBJECT_HIT_PX / pixelsPerMm : 0;
 
-  // The static plan drawing (room polygons/walls, partition slabs, opening-
-  // connection glyphs, placed object rects) — ONE derivation, shared with the
-  // PNG/PDF export builders, so an export can never disagree with the canvas.
-  // Built from displayedProject so every live drag preview that flows through
-  // the project override (wall resize, room move, reshape, partition edits)
-  // renders for free; the object-drag preview rects layer on top at render
-  // time via the same getRenderedWallObjectPlanRect the builder uses.
-  // Everything gestural (handles, ghosts, guides, marquee) stays inline below.
+  // Shared with exports; displayedProject includes geometry drag previews.
   const planScene = useMemo(
     () =>
       buildPlanScene(displayedProject, {
@@ -1192,14 +995,7 @@ export function PlanView({
     [displayedProject, artworksById, wallObjectMinDepthMm]
   );
 
-  // Live four-sided clearance dimension lines for the selected partition, or
-  // the actively dragged one (whichever is live) — both normal (face) gaps and
-  // both span (end-cap) gaps, so dragging on either axis always shows all four
-  // true clear distances. During a drag we build a temporary partition from the
-  // preview endpoints (floor → room-local by subtracting the placement offset)
-  // so the numbers track the pointer; the room perimeter and sibling partitions
-  // are committed geometry, so we cast against `project`. The result is lifted
-  // back to floor space for the render-only component.
+  // Compute all four partition clearances from preview geometry in room-local space.
   const partitionClearancesFloor = useMemo<{
     clearances: PartitionClearances;
     partition: FreestandingWall;
@@ -1244,8 +1040,7 @@ export function PlanView({
         normal: { plus: liftSide(local.normal.plus), minus: liftSide(local.normal.minus) },
         span: { plus: liftSide(local.span.plus), minus: liftSide(local.span.minus) }
       },
-      // Direction-only — the mask mapping is translation-invariant, so the
-      // room-local `partition` serves without lifting to floor space.
+      // Direction-only mask mapping is translation-invariant.
       partition
     };
   }, [partitionDrag, selectedFreestandingWallId, project.floor.rooms]);
@@ -1254,12 +1049,7 @@ export function PlanView({
     onToolChange(null);
   }
 
-  // Whenever the armed tool changes — App toggling a toolbar button, the
-  // Escape handler below disarming it, or the single-shot disarm after a
-  // placement commits — drop the stale ghost/hysteresis so the next arm (or
-  // a re-arm of a different kind) starts clean. This lived inline in a
-  // combined setActiveTool+reset call before activeTool was lifted into App;
-  // syncing off the prop here is the controlled-component equivalent.
+  // Reset ghost and snap hysteresis whenever the controlled tool changes.
   useEffect(() => {
     setToolGhost(null);
     toolSnapTargetIdsRef.current = undefined;
@@ -1274,10 +1064,6 @@ export function PlanView({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-    // Scoped to only listen while a tool is armed, so it never competes with
-    // App.tsx's global undo/redo keydown handler (that one is gated on
-    // Cmd/Ctrl, this one on Escape — but no sense listening when there's
-    // nothing to cancel).
   }, [activeTool]);
 
   function handleToolPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
@@ -1312,8 +1098,7 @@ export function PlanView({
     setToolGhost(null);
   }
 
-  // Arming/disarming draw mode starts a fresh gesture or discards the pending
-  // one — no store write ever happens for the discarded points (see DrawState).
+  // Arming starts fresh; disarming discards uncommitted points.
   useEffect(() => {
     setDraw(
       drawRoomActive
@@ -1322,9 +1107,7 @@ export function PlanView({
     );
   }, [drawRoomActive]);
 
-  // Enter closes (≥3 points), Backspace pops the last point, Escape cancels the
-  // whole draw. Scoped to while draw mode is armed so it never competes with
-  // App's global handlers; reads live points via drawRef.
+  // Enter closes, Backspace removes a point, and Escape cancels.
   useEffect(() => {
     if (!drawRoomActive) return;
 
@@ -1350,17 +1133,9 @@ export function PlanView({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-    // Subscribed once per arm (keyed on drawRoomActive), reading live points
-    // via drawRef — same discipline as the drag effects, so the handler set is
-    // deliberately not resubscribed on every appended vertex.
   }, [drawRoomActive]);
 
-  // Edit-shape mode is armed explicitly for every room (RoomInspector's "Edit
-  // shape" button / a plan double-click set reshapeRoomId). Escape disarms it;
-  // Delete/Backspace removes the selected vertex (merges its two walls). Scoped
-  // to while it's armed, same idiom as the draw-mode handler above — reads the
-  // live selection via selectedVertexIdRef so it isn't resubscribed on every
-  // vertex click.
+  // In reshape mode, Escape exits and Delete/Backspace merges at the selected vertex.
   useEffect(() => {
     if (!reshapeRoomId) return;
 
@@ -1382,8 +1157,6 @@ export function PlanView({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [reshapeRoomId, onReshapeRoomChange, onDeleteRoomVertex]);
 
-  // Escape disarms the partition tool (mirrors the draw-mode handler), scoped
-  // to while it's armed so it never competes with App's global handlers.
   useEffect(() => {
     if (!partitionToolActive) return;
     function onKeyDown(event: KeyboardEvent) {
@@ -1393,8 +1166,7 @@ export function PlanView({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [partitionToolActive, onPartitionToolChange]);
 
-  // Escape disarms the rectangle-room tool (same shape as the partition handler
-  // above); the release gate then skips the commit if a drag was in flight.
+  // The release gate skips an in-flight rectangle after Escape.
   useEffect(() => {
     if (!drawRectActive) return;
     function onKeyDown(event: KeyboardEvent) {
@@ -1404,8 +1176,7 @@ export function PlanView({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [drawRectActive, onDrawRectChange]);
 
-  // Snap a draw point: grid + axis-lock to the previous point's x/y (so
-  // consecutive walls line up), with Shift forcing an exact H/V segment.
+  // Snap to grid/previous axes; Shift forces an exact horizontal or vertical segment.
   function snapDrawPoint(pointerMm: Vector2, prev: Vector2 | null, shiftKey: boolean): Vector2 {
     let result: Vector2 = pointerMm;
     if (snapToGrid) {
@@ -1421,19 +1192,14 @@ export function PlanView({
     if (shiftKey && prev) {
       const dx = Math.abs(pointerMm.xMm - prev.xMm);
       const dy = Math.abs(pointerMm.yMm - prev.yMm);
-      // Lock the minor axis to the previous point, keep the (snapped) major one.
+      // Keep the snapped major axis and lock the minor axis.
       result =
         dx >= dy ? { xMm: result.xMm, yMm: prev.yMm } : { xMm: prev.xMm, yMm: result.yMm };
     }
     return result;
   }
 
-  // The draw candidate: existing-room snapping takes PRECEDENCE over grid +
-  // axis-lock (§6.3), so a new room latches onto a placed room and can share a
-  // wall exactly. When nothing is in range it falls back to snapDrawPoint's
-  // grid + previous-point behavior. Shift's H/V lock still applies afterward —
-  // to whichever base point won — exactly as it applies to the grid-snapped
-  // result. Returns the snap so the indicator and close-on-wall test can use it.
+  // Existing-room snapping outranks grid; Shift axis-lock applies afterward.
   function snapDrawCandidate(
     pointerMm: Vector2,
     prev: Vector2 | null,
@@ -1453,10 +1219,7 @@ export function PlanView({
     return { point, snap };
   }
 
-  // Does clicking this room-snapped candidate close the loop onto its wall
-  // (§6.3)? Requires ≥3 points, an edge/vertex snap onto a perimeter wall whose
-  // segment also carries points[0], and the closed polygon staying valid
-  // (no self-intersection). Mirrors attemptCloseDraw's simple-polygon gate.
+  // Close on a shared wall only when the resulting polygon remains simple.
   function drawCloseOnWall(points: Vector2[], candidate: Vector2, snap: DrawRoomSnap | null): boolean {
     if (!snap || points.length < 3) return false;
     const wall = floorWallsForTool.find((candidateWall) => candidateWall.id === snap.wallId);
@@ -1466,10 +1229,7 @@ export function PlanView({
     return isSimplePolygon([...points, candidate]);
   }
 
-  // Would the new segment (last point → candidate) cross the placed path? The
-  // segment adjacent to it legitimately shares the last vertex, so only a
-  // collinear backtrack over that one counts; every earlier segment uses the
-  // full intersection test.
+  // The adjacent segment may share its endpoint but may not backtrack collinearly.
   function drawSegmentInvalid(points: Vector2[], candidate: Vector2): boolean {
     const n = points.length;
     if (n === 0) return false;
@@ -1532,9 +1292,7 @@ export function PlanView({
 
     const prev = current.points.at(-1) ?? null;
     const { point: candidate, snap } = snapDrawCandidate(pointerMm, prev, event.shiftKey);
-    // A room-snapped candidate on a wall carrying points[0] previews as a
-    // close, not a rubber-band vertex — same `closing` affordance as the
-    // near-first-vertex path so the user sees the click will finish the room.
+    // Preview a shared-wall close with the same affordance as the first vertex.
     const willClose = drawCloseOnWall(current.points, candidate, snap);
     const invalid = !willClose && drawSegmentInvalid(current.points, candidate);
     setDraw((state) =>
@@ -1543,12 +1301,9 @@ export function PlanView({
   }
 
   function handleDrawClick(event: ReactMouseEvent<SVGRectElement>) {
-    // Own the click entirely so the svg's handleSvgClick (background clear /
-    // tool place) never also runs while drawing.
+    // Prevent the SVG background/tool handler from also running.
     event.stopPropagation();
-    // A space/middle-mouse pan fires a trailing click on this capture rect;
-    // swallow it so a pan never drops a spurious vertex (same flag the svg
-    // click handler consumes for placement clicks).
+    // Swallow the trailing click from a space/middle-button pan.
     if (suppressNextToolClickRef.current) {
       suppressNextToolClickRef.current = false;
       return;
@@ -1565,10 +1320,7 @@ export function PlanView({
 
     const prev = current.points.at(-1) ?? null;
     const { point: candidate, snap } = snapDrawCandidate(pointerMm, prev, event.shiftKey);
-    // Closing onto an existing wall (§6.3): append the on-wall candidate and
-    // commit in one shot — same path as attemptCloseDraw — so the shared wall
-    // emerges as coincident geometry. Checked before the min-spacing guard so a
-    // close that lands near the previous vertex still completes.
+    // Shared-wall close precedes minimum spacing so a nearby close still completes.
     if (drawCloseOnWall(current.points, candidate, snap)) {
       const closedPoints = [...current.points, candidate];
       onAddPolygonRoom?.(closedPoints.map((point) => ({ xMm: point.xMm, yMm: point.yMm })));
@@ -1598,50 +1350,18 @@ export function PlanView({
     );
   }
 
-  // A resize handle's pointerdown stops its own propagation (so it doesn't
-  // also start a room-resize's sibling behavior), but the native `click`
-  // that follows a pointerdown/pointerup pair still fires on — and bubbles
-  // from — that same element regardless. Marking the gesture here in the
-  // capture phase (before any handler's stopPropagation can run) lets the
-  // click handler below recognize "this click started on something else"
-  // and skip placing, without needing RoomResizeHandles/PlanObject to know
-  // anything about the plan-view tool.
+  // Capture the gesture origin before child handlers stop propagation.
   function handleSvgPointerDownCapture(event: ReactPointerEvent<SVGSVGElement>) {
     if (event.pointerType !== "touch") {
       event.currentTarget.focus({ preventScroll: true });
     }
 
-    // The touch pinch/pan bookkeeping and the space/middle-mouse pan claim now
-    // live in the hook. It returns true ONLY when it CONSUMED the event (a pinch
-    // claim — including the blocked-pinch case — or a space/middle pan claim),
-    // in which case the view's own capture-tail below must not run. On false (a
-    // 1st touch, a 3rd+ touch, or an ordinary left press) the tail still runs,
-    // so a press on an object still arms suppressNextToolClickRef exactly as a
-    // mouse press did.
+    // A consumed pan/pinch must not reach the view's capture tail.
     if (gestures.handlePointerDownCapture(event)) return;
 
     const target = event.target as Element | null;
-    // The ghost itself carries the `.plan-object` class too (so it shares
-    // PlanObject's rendering), and it sits directly under the pointer at the
-    // moment of a placement click — excluding `.is-ghost` here is what lets
-    // that click through to actually commit instead of being mistaken for a
-    // click on a real, already-placed object.
-    //
-    // Assigned (not just set) so the flag is per-gesture: an object's own
-    // click stops propagation, so a flag set by an object press was never
-    // consumed by handleSvgClick and would silently swallow the NEXT svg
-    // click — a placement, a wall select, or a background clear. Recomputing
-    // here clears that stale state at the start of every gesture. The one
-    // setter that runs AFTER pointerdown — the marquee's pointerup — is safe:
-    // its trailing click arrives before any next pointerdown could reset this.
-    // .room-hit is deliberately absent here: an unselected room's hit
-    // polygon must NOT stopPropagation on pointerdown (a drag over it has to
-    // still start the marquee — see the room-hit rendering below), so
-    // marking it here would suppress the click that's supposed to select the
-    // room. The selected room's hit polygon DOES stopPropagation (it starts
-    // a room-move drag instead), but its trailing click merely re-selects
-    // the same already-selected room — a harmless no-op, the same precedent
-    // PlanObject's own drag-then-click re-select relies on.
+    // Exclude ghosts so placement clicks commit. Reassign per gesture to clear
+    // flags left unconsumed by child clicks that stopped propagation.
     suppressNextToolClickRef.current = Boolean(
       target?.closest(".resize-handle, .plan-object:not(.is-ghost)")
     );
@@ -1653,10 +1373,7 @@ export function PlanView({
       return;
     }
     if (drag) return;
-    // A background click with no tool armed clears the current selection (the
-    // plan counterpart to elevation's marquee click-clear). Object clicks never
-    // reach here — PlanObject stops propagation, and the capture-phase suppress
-    // catches a click that merely started on an object but landed elsewhere.
+    // Object clicks stop propagation; an unarmed background click clears selection.
     if (!activeTool) {
       onClearSelection?.();
       return;
@@ -1680,15 +1397,11 @@ export function PlanView({
       previousSnapTargetIds: toolSnapTargetIdsRef.current
     });
 
-    // Door/window/blocked-zone tools never reject (float or capture-any), so
-    // "none" is unreachable here — this guard just narrows the type for the
-    // store call, which only accepts a committable PlanPlacement.
+    // Tool policies make "none" unreachable; this narrows the store call type.
     if (result.placement.anchor === "none") return;
 
     const kind = activeTool;
-    // Single-shot: disarm immediately so the tool never lingers armed after
-    // a placement, matching WallInspector's "Add to this wall" buttons
-    // (one click, one object) rather than a rubber-stamp mode.
+    // Placement tools are single-shot.
     disarmTool();
     void onPlaceOpeningFromPlan(kind, result.placement);
   }
@@ -1698,9 +1411,6 @@ export function PlanView({
     target: ResizeHandleTarget,
     event: ReactPointerEvent<SVGRectElement>
   ) {
-    // toSvgMm is byte-identical to the old inline createSVGPoint/getScreenCTM/
-    // matrixTransform(inverse()) sequence — both are SVG-userspace mm, and
-    // both bail (here: silently return) when the svg has no CTM yet.
     const startPointerMm = toSvgMm(event.clientX, event.clientY);
     if (!startPointerMm) return;
 

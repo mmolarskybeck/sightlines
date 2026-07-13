@@ -5,10 +5,7 @@ import { unitLeftNormal } from "../geometry/vector";
 import { getGridSnapTargets } from "./gridSnapTargets";
 import { floatPolicyForKind, resolvePlanPlacement, WALL_CAPTURE_PX } from "./planSnapTargets";
 
-// Build a FloorWall from floor-space endpoints. The room offset is already
-// baked into start/end here (offset 0), so startFloorMm === start etc.; the
-// RoomVertex start/end fields are unused by the snapping/geometry paths but
-// required by the type.
+// Build a zero-offset FloorWall; RoomVertex fields only satisfy the type.
 function makeWall(
   id: string,
   startMm: { xMm: number; yMm: number },
@@ -53,9 +50,7 @@ const baseArgs = {
   wallObjects: [] as WallObjectBase[],
   movingSize: { widthMm: 300, heightMm: 400, depthMm: 400 },
   movingKind: "artwork" as const,
-  // The float-mechanics tests below exercise the floor stage generically, so
-  // baseArgs opts into "float" explicitly; the artwork-specific "reject" policy
-  // (floatPolicyForKind("artwork")) has its own describe block.
+  // Generic floor-stage tests opt into floating; artwork rejection is tested separately.
   floatPolicy: "float" as const,
   currentAnchorWallId: null,
   captureDistanceMm: 50,
@@ -87,8 +82,6 @@ describe("resolvePlanPlacement — wall capture", () => {
 });
 
 describe("resolvePlanPlacement — cross-boundary hysteresis", () => {
-  // Distance 60mm: beyond the 50mm base radius, within the 1.5×=75mm break-free
-  // radius the current anchor wall gets.
   it("keeps the anchored wall captured between 1× and 1.5× capture distance", () => {
     const result = resolvePlanPlacement(
       { xMm: 2000, yMm: 60 },
@@ -109,8 +102,6 @@ describe("resolvePlanPlacement — cross-boundary hysteresis", () => {
 
   it("still re-anchors to a genuinely closer non-anchor wall", () => {
     const wallB = makeWall("wall-2", { xMm: 0, yMm: 200 }, { xMm: 4000, yMm: 200 });
-    // Point 10mm from wall-2, 190mm from anchored wall-1. wall-2 wins by
-    // distance even though wall-1 is the sticky anchor.
     const result = resolvePlanPlacement(
       { xMm: 2000, yMm: 190 },
       { ...baseArgs, walls: [HORIZONTAL_WALL, wallB], currentAnchorWallId: "wall-1" }
@@ -136,7 +127,6 @@ describe("resolvePlanPlacement — doors/windows never float", () => {
 
   it("re-anchors across walls to whichever is nearest", () => {
     const wallB = makeWall("wall-2", { xMm: 0, yMm: 3000 }, { xMm: 4000, yMm: 3000 });
-    // Closer to wall-2 (100mm) than wall-1 (2900mm), currently anchored to A.
     const result = resolvePlanPlacement(
       { xMm: 2000, yMm: 2900 },
       { ...doorArgs, walls: [HORIZONTAL_WALL, wallB], currentAnchorWallId: "wall-1" }
@@ -156,7 +146,6 @@ describe("resolvePlanPlacement — doors/windows never float", () => {
 });
 
 describe("resolvePlanPlacement — floor stage grid snapping", () => {
-  // A wall at y=0, but the point is 5000mm away so nothing captures.
   const gridTargets = getGridSnapTargets(100, {
     minXMm: 0,
     maxXMm: 6000,
@@ -200,7 +189,6 @@ describe("resolvePlanPlacement — wall-local neighbor snapping", () => {
   const neighbor = wallObject({ id: "n1", wallId: "wall-1", xMm: 1000, widthMm: 400 });
 
   it("snaps to a neighbor's center in wall-local x", () => {
-    // Pointer projects to xAlong≈1005, 5mm from the neighbor-center target at 1000.
     const result = resolvePlanPlacement(
       { xMm: 1005, yMm: 5 },
       { ...baseArgs, wallObjects: [neighbor] }
@@ -211,8 +199,6 @@ describe("resolvePlanPlacement — wall-local neighbor snapping", () => {
   });
 
   it("snaps to a neighbor's edge (flush) in wall-local x", () => {
-    // Neighbor left edge = 1000 - 200 = 800; moving (width 300) right-edge-flush
-    // center = 800 - 150 = 650. Pointer at xAlong≈655.
     const result = resolvePlanPlacement(
       { xMm: 655, yMm: 5 },
       { ...baseArgs, wallObjects: [neighbor] }
@@ -229,7 +215,6 @@ describe("resolvePlanPlacement — wall-local neighbor snapping", () => {
       { ...baseArgs, wallObjects: [otherWallNeighbor] }
     );
 
-    // n2 is on wall-2, not the captured wall-1, so no snap occurs.
     expect(result.snapTargetIds.x).toBeUndefined();
     expect(result.placement.anchor).toBe("wall");
     if (result.placement.anchor === "wall") {
@@ -245,7 +230,6 @@ describe("resolvePlanPlacement — wall-local neighbor snapping", () => {
       { xMm: 0, yMm: 0 },
       { xMm: 4000 * cos45, yMm: 4000 * cos45 }
     );
-    // Point exactly on the wall at xAlong = 1005 (t = 1005/4000).
     const t = 1005 / 4000;
     const result = resolvePlanPlacement(
       { xMm: 4000 * cos45 * t, yMm: 4000 * cos45 * t },
@@ -262,16 +246,12 @@ describe("resolvePlanPlacement — wall-local neighbor snapping", () => {
 
 describe("resolvePlanPlacement — clamping", () => {
   it("clamps the center so the object's width stays on the wall (start end)", () => {
-    // Pointer just past the wall start corner projects to xAlong 0 (and stays
-    // within capture distance of that corner); width 300 → min 150.
     const result = resolvePlanPlacement({ xMm: -30, yMm: 5 }, baseArgs);
 
     expect(result.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 150 });
   });
 
   it("clamps at the far end of the wall", () => {
-    // Pointer just past the wall end corner projects to xAlong 4000; max =
-    // 4000 - 150 = 3850.
     const result = resolvePlanPlacement({ xMm: 4030, yMm: 5 }, baseArgs);
 
     expect(result.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 3850 });
@@ -284,26 +264,18 @@ describe("resolvePlanPlacement — clamping", () => {
       { ...baseArgs, walls: [shortWall] }
     );
 
-    // width 300 > length 200 → no valid range → centered at length/2 = 100.
     expect(result.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 100 });
   });
 });
 
 describe("resolvePlanPlacement — side-aware capture on coincident twin walls", () => {
-  // Two coincident anti-parallel faces of one shared wall (spec §5.5), one wall
-  // record per abutting room. wallB points +x, so by unitLeftNormal's (-dy, dx)
-  // convention its interior is the +y side; wallA points -x, so its interior is
-  // the -y side. Both project to EXACTLY the same distance for any cursor, so the
-  // side-aware tie-break is what decides — not a hair of distance, not iteration
-  // order.
+  // Coincident anti-parallel faces require an interior-side tie-break.
   const wallB = makeWall("wall-B", { xMm: 0, yMm: 1000 }, { xMm: 4000, yMm: 1000 });
   const wallA = makeWall("wall-A", { xMm: 4000, yMm: 1000 }, { xMm: 0, yMm: 1000 });
   const twinWalls = [wallA, wallB];
 
   it("captures the wall whose unitLeftNormal (interior/left) side holds the cursor", () => {
-    // Step along wallB's OWN left normal from a point on the shared line: by
-    // definition that lands on wallB's interior side, pinning the sign convention
-    // to unitLeftNormal rather than a guess.
+    // Derive the interior side from unitLeftNormal rather than assuming its sign.
     const leftB = unitLeftNormal(wallB.startFloorMm, wallB.endFloorMm); // (0, +1)
     const onWall = { xMm: 2000, yMm: 1000 };
 
@@ -312,7 +284,6 @@ describe("resolvePlanPlacement — side-aware capture on coincident twin walls",
     expect(resultB.placement.anchor).toBe("wall");
     if (resultB.placement.anchor === "wall") expect(resultB.placement.wallId).toBe("wall-B");
 
-    // The opposite step lands on wallA's interior → captures wallA.
     const cursorInA = { xMm: onWall.xMm - leftB.xMm * 30, yMm: onWall.yMm - leftB.yMm * 30 };
     const resultA = resolvePlanPlacement(cursorInA, { ...baseArgs, walls: twinWalls });
     expect(resultA.placement.anchor).toBe("wall");
@@ -320,10 +291,7 @@ describe("resolvePlanPlacement — side-aware capture on coincident twin walls",
   });
 
   it("lets the interior side win even when the other wall is closer within the tie epsilon", () => {
-    // wallB at y=1000 (interior +y), wallHigh at y=1000.5 pointing -x (interior
-    // -y, i.e. below 1000.5). Cursor at y=1000.8 is 0.8 from wallB and 0.3 from
-    // wallHigh — wallHigh is 0.5mm closer, but that's inside DISTANCE_TIE_EPSILON,
-    // and only wallB's interior holds the cursor, so wallB wins.
+    // Within the distance epsilon, interior side outranks the slightly nearer face.
     const wallHigh = makeWall("wall-high", { xMm: 4000, yMm: 1000.5 }, { xMm: 0, yMm: 1000.5 });
     const result = resolvePlanPlacement(
       { xMm: 2000, yMm: 1000.8 },
@@ -334,8 +302,7 @@ describe("resolvePlanPlacement — side-aware capture on coincident twin walls",
   });
 
   it("falls back to deterministic wallId order when the cursor is on the line (no side)", () => {
-    // Exactly on the shared line: distance 0 to both, cross product 0 for both →
-    // neither interior → the id order breaks the tie (wall-A < wall-B).
+    // With no interior side, wall ID provides deterministic ordering.
     const result = resolvePlanPlacement({ xMm: 2000, yMm: 1000 }, { ...baseArgs, walls: twinWalls });
     expect(result.placement.anchor).toBe("wall");
     if (result.placement.anchor === "wall") expect(result.placement.wallId).toBe("wall-A");
@@ -346,7 +313,6 @@ describe("resolvePlanPlacement — artwork reject policy (wall-only)", () => {
   const rejectArgs = { ...baseArgs, floatPolicy: floatPolicyForKind("artwork") };
 
   it("floatPolicyForKind maps kinds to their policy", () => {
-    // Artwork with no form (or an unresolved artwork) reads as wall-only.
     expect(floatPolicyForKind("artwork")).toBe("reject");
     expect(floatPolicyForKind("artwork", "wall")).toBe("reject");
     expect(floatPolicyForKind("artwork", "floor")).toBe("floor-only");
@@ -358,10 +324,8 @@ describe("resolvePlanPlacement — artwork reject policy (wall-only)", () => {
   it("rejects (anchor 'none') when no wall captures, with a cursor-tracking rect and no guides", () => {
     const result = resolvePlanPlacement({ xMm: 2000, yMm: 80 }, rejectArgs);
     expect(result.placement).toEqual({ anchor: "none" });
-    // The danger ghost still needs geometry under the cursor.
     expect(result.planRect.centerXMm).toBeCloseTo(2000);
     expect(result.planRect.centerYMm).toBeCloseTo(80);
-    // No alignment guides for a placement that won't commit.
     expect(result.activeGuides).toEqual([]);
   });
 
@@ -400,9 +364,7 @@ describe("resolvePlanPlacement — floor-only policy (floor artwork)", () => {
   };
 
   it("never captures a wall even when dropped directly on one", () => {
-    // yMm: 30 is well inside the 50mm capture radius — a wall work would grab
-    // wall-1 here (see the reject-policy 'still captures' test), but a floor
-    // work must land on the floor at the drop point instead.
+    // Floor-only objects ignore walls even inside capture distance.
     const result = resolvePlanPlacement({ xMm: 2000, yMm: 30 }, floorOnlyArgs);
     expect(result.placement).toEqual({ anchor: "floor", xMm: 2000, yMm: 30 });
   });
@@ -423,8 +385,6 @@ describe("resolvePlanPlacement — floor-only policy (floor artwork)", () => {
       { xMm: 1990, yMm: 10 },
       { ...floorOnlyArgs, gridTargets, snapToGrid: true }
     );
-    // Snaps to the 2000/0 grid intersection rather than capturing the wall the
-    // drop sits right on (yMm 10 is inside the 50mm wall-capture radius).
     expect(result.placement).toEqual({ anchor: "floor", xMm: 2000, yMm: 0 });
   });
 

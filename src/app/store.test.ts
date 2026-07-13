@@ -130,16 +130,7 @@ describe("app store", () => {
     expect(store.getState().undoStack).toHaveLength(1);
   });
 
-  // Numeric-path counterpart to editRoom.test.ts's "rectangle resize
-  // characterization (pipeline-merge gate)" block — since 2026-07-12 the
-  // geometry call delegates into the general polygon wall-move core
-  // (reshapeRoom.moveRoomWall). Geometry invariants (orthogonality,
-  // paired dimensions, anchor semantics, non-rectangle rejection) are pinned
-  // there; this pins what's specific to the store action itself. One undo
-  // entry and cross-selection editing are already covered by the test above;
-  // placement revalidation on a shortened wall is already covered by
-  // "revalidates a placed artwork's bounds when its wall is later resized
-  // shorter" further below.
+  // Store-level contract for rectangle resize; geometry invariants live in editRoom.test.ts.
   describe("resizeWall (rectangle resize characterization – pipeline-merge gate)", () => {
     it('commits with the exact label "Resize wall" and populates lastGeometryEdit for a width-wall resize', async () => {
       await store.getState().resizeWall("wall-north", feetToMm(30));
@@ -215,7 +206,6 @@ describe("app store", () => {
       .addFreestandingWall({ xMm: 3000, yMm: 2700 }, { xMm: 5000, yMm: 2700 });
     const partitionId = store.getState().project!.floor.rooms[0].room.freestandingWalls[0].id;
 
-    // Hang a work on each face at the same x — different face ids, so no warning.
     const project = store.getState().project!;
     store.setState({
       project: {
@@ -315,7 +305,6 @@ describe("app store", () => {
     const [defaultPartition, overriddenPartition] = room().freestandingWalls;
     const previousRoomHeightMm = room().heightMm;
 
-    // Override the second partition's height to something shorter than ceiling.
     await store.getState().setFreestandingWallHeight(overriddenPartition.id, 2000);
     expect(defaultPartition.heightMm).toBe(previousRoomHeightMm);
 
@@ -426,8 +415,7 @@ describe("app store", () => {
       const previousHeight = before.defaultWallHeightMm;
       const previousUpdatedAt = before.updatedAt;
 
-      // Advance the clock so the updatedAt stamp is provably fresh rather
-      // than coincidentally identical due to millisecond timing.
+      // Ensure updatedAt cannot match by millisecond coincidence.
       vi.useFakeTimers();
       vi.setSystemTime(new Date(previousUpdatedAt).getTime() + 1_000);
 
@@ -511,8 +499,7 @@ describe("app store", () => {
       const previousHeight = before.defaultCenterlineHeightMm;
       const previousUpdatedAt = before.updatedAt;
 
-      // Advance the clock so the updatedAt stamp is provably fresh rather
-      // than coincidentally identical due to millisecond timing.
+      // Ensure updatedAt cannot match by millisecond coincidence.
       vi.useFakeTimers();
       vi.setSystemTime(new Date(previousUpdatedAt).getTime() + 1_000);
 
@@ -662,7 +649,6 @@ describe("app store", () => {
     expect(added.room.walls).toHaveLength(6);
     expect(state.undoStack).toHaveLength(1);
     expect(state.undoStack.at(-1)?.label).toBe("Add room");
-    // Room is selected, and the sidebar wall context is its first wall.
     expect(roomIdOf(state.selection)).toBe("room-2");
     expect(state.wallContextId).toBe("room-2-wall-0");
     expect(state.viewMode).toBe("plan");
@@ -704,7 +690,6 @@ describe("app store", () => {
     expect(added.room.walls).toHaveLength(4);
     expect(state.undoStack).toHaveLength(1);
     expect(state.undoStack.at(-1)?.label).toBe("Add Gallery 2");
-    // Room is selected, and the sidebar wall context is its first wall.
     expect(roomIdOf(state.selection)).toBe("room-2");
     expect(state.wallContextId).toBe("room-2-wall-north");
     expect(state.viewMode).toBe("plan");
@@ -773,8 +758,7 @@ describe("app store", () => {
       expect(state.lastGeometryEdit?.changedWallIds.sort()).toEqual(
         ["wall-east", "wall-north"].sort()
       );
-      // The north wall shrank from 28ft to hypot(10ft,4ft), well short of the
-      // artwork's original xMm — a bounds warning, not a silent move.
+      // Shortening a wall warns instead of silently moving its artwork.
       expect(state.placementWarnings.some((warning) => warning.wallObjectId === "art-1")).toBe(
         true
       );
@@ -819,9 +803,6 @@ describe("app store", () => {
         }
       });
 
-      // wall-north's neighbours are wall-west and wall-east; sliding it
-      // 1000mm south shrinks both by 1000mm, well short of the artwork's
-      // xMm on wall-east — a bounds warning, not a silent move.
       await store.getState().moveRoomWall("room-main", "wall-north", 1000);
 
       const state = store.getState();
@@ -840,9 +821,7 @@ describe("app store", () => {
     it("rejects an offset that collapses the wall without committing", async () => {
       const before = store.getState().project!;
 
-      // Sliding wall-north down by exactly the room's depth (feetToMm(18))
-      // lands its new corners exactly on top of wall-south's — well under
-      // the 10mm minimum spacing guard.
+      // Collapse the north wall onto the south wall.
       await store.getState().moveRoomWall("room-main", "wall-north", feetToMm(18));
 
       const state = store.getState();
@@ -893,7 +872,6 @@ describe("app store", () => {
       const room = state.project!.floor.rooms[0].room;
       expect(room.vertices).toHaveLength(3);
       expect(room.walls.some((wall) => wall.id === "wall-east")).toBe(false);
-      // wall-east is gone; the sidebar context falls back to the merged wall.
       expect(state.wallContextId).toBe("wall-north");
     });
 
@@ -1191,7 +1169,6 @@ describe("app store", () => {
       );
       const [a, b, c] = store.getState().libraryArtworks.map((artwork) => artwork.id);
 
-      // Open project references both a (placed + checklisted) and b (checklisted).
       await store.getState().addExistingArtworksToChecklist([a, b]);
       const wallId = getSelectedWall(
         store.getState().project!,
@@ -1200,7 +1177,6 @@ describe("app store", () => {
       await store.getState().placeArtwork(a, wallId, 1_000, 1_450);
       expect(objectIdsOf(store.getState().selection)[0]).toBeTruthy();
 
-      // A second saved (non-open) project references b in its checklist.
       const base = store.getState().project!;
       await repository.save({
         ...base,
@@ -1218,22 +1194,17 @@ describe("app store", () => {
       await store.getState().deleteLibraryArtworks([a, b, "unknown-id"]);
 
       const state = store.getState();
-      // Open project cleaned in memory: no references to a or b, no placement.
       expect(state.project!.checklistArtworkIds).toEqual([]);
       expect(state.project!.wallObjects.some((object) => object.kind === "artwork")).toBe(false);
-      // Selection that pointed at the removed placement is cleared.
       expect(getSelectedArtworkId(state.project, state.selection)).toBeNull();
       expect(state.selection.kind).toBe("none");
-      // Cascade stripped and re-saved the other project.
       expect(repository.projects.get("other-project")!.checklistArtworkIds).toEqual([]);
-      // Records + their 1:1 blobs are gone; c survives.
       expect(deleteArtwork).toHaveBeenCalledWith(a);
       expect(deleteArtwork).toHaveBeenCalledWith(b);
       expect(deleteAsset).toHaveBeenCalledTimes(2);
       expect(artworkLibraryRepository.artworks.has(a)).toBe(false);
       expect(artworkLibraryRepository.artworks.has(b)).toBe(false);
       expect(assetRepository.assets.size).toBe(1);
-      // libraryArtworks refreshed to just c.
       expect(state.libraryArtworks.map((artwork) => artwork.id)).toEqual([c]);
       expect(state.error).toBeNull();
     });
@@ -1288,8 +1259,7 @@ describe("app store", () => {
 
     await store.getState().openProject(project.id);
 
-    // Re-opening the already-open project must not reset the edit history
-    // that was just built up.
+    // Reopening the active project must preserve edit history.
     expect(store.getState().undoStack).toHaveLength(1);
   });
 
@@ -1410,7 +1380,6 @@ describe("app store", () => {
       expect(state.error).toMatch(/bad\.gif/);
       expect(state.error).toMatch(/not a supported image type/);
 
-      // The bad file never reached the processor at all.
       expect(imageProcessor.processedFilenames).toEqual(["good.jpg"]);
     });
 
@@ -1628,10 +1597,8 @@ describe("app store", () => {
         id: "incoming-project",
         title: "Incoming"
       });
-      // The dangling state an old shared-asset deletion could leave behind:
-      // the artwork survives while its asset record is gone. Unlike an
-      // operational read failure, this must not block importing forever —
-      // the unverifiable image lands in the conflict dialog instead.
+      // A legacy artwork may outlive its deleted asset; import must surface a
+      // conflict rather than block forever.
       assetRepository.assets.clear();
 
       await store.getState().importSightlinesPackage(bytes);
@@ -1701,8 +1668,7 @@ describe("app store", () => {
   });
 
   describe("upload duplicate detection", () => {
-    // Rebuilds the store with a processor that pins a shared sha256 across the
-    // named files, so intake sees them as content-identical.
+    // Force named files to share content identity.
     async function useSharedHash(names: string[], sha: string): Promise<void> {
       imageProcessor = new FakeImageProcessor(
         new Set(),
@@ -1811,9 +1777,7 @@ describe("app store", () => {
     });
 
     it("a library asset without a sha256 never matches", async () => {
-      // A legacy asset predates sha256. Intake one, strip its stored hash, then
-      // upload a content-identical file: with no hash on record it can't match,
-      // and reading the sha-less asset must not throw.
+      // Legacy assets without hashes cannot participate in duplicate detection.
       await useSharedHash(["legacy.jpg", "other.jpg"], "shared-sha");
 
       await store.getState().addArtworksFromFiles([makeImageFile("legacy.jpg")]);
@@ -1896,8 +1860,7 @@ describe("app store", () => {
       await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
       const artworkId = store.getState().project!.checklistArtworkIds[0];
 
-      // Defensive coverage per docs/plan.md §4.1 — placements don't exist in
-      // the UI yet, but the action should still clean up a dangling one.
+      // Defensive coverage for a dangling placement.
       await applyPlacementDirectly(repository, store, artworkId);
 
       await store.getState().removeArtworkFromChecklist(artworkId);
@@ -1951,7 +1914,6 @@ describe("app store", () => {
     it("writes an explicit placementForm override in one undoable commit", async () => {
       await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
       const artworkId = store.getState().project!.checklistArtworkIds[0];
-      // No depth and no override → effective form is "wall" by inference.
       expect(
         store.getState().libraryArtworks.find((a) => a.id === artworkId)?.placementForm
       ).toBeUndefined();
@@ -1963,7 +1925,6 @@ describe("app store", () => {
       expect(state.error).toBeNull();
       expect(state.libraryArtworks.find((a) => a.id === artworkId)?.placementForm).toBe("floor");
       expect(artworkLibraryRepository.artworks.get(artworkId)?.placementForm).toBe("floor");
-      // One commit for the gesture.
       expect(state.undoStack).toHaveLength(undoStackBefore + 1);
 
       await store.getState().undo();
@@ -1993,8 +1954,7 @@ describe("app store", () => {
       });
 
       let state = store.getState();
-      // One combined entry, not two — the artwork edit and the placement
-      // resize it caused are a single undoable step (docs/plan.md §7).
+      // Artwork edit and placement resize are one undoable step.
       expect(state.undoStack).toHaveLength(undoStackBefore + 1);
       let placement = state.project!.wallObjects.find((w) => w.id === placementId)!;
       expect(placement.widthMm).toBe(500);
@@ -2006,8 +1966,6 @@ describe("app store", () => {
       await store.getState().undo();
       state = store.getState();
       placement = state.project!.wallObjects.find((w) => w.id === placementId)!;
-      // The imported asset is a square 100×100 (FakeImageProcessor), so unknown
-      // dims re-derive to a 610×610 square contained in the placeholder box.
       expect(placement.widthMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
       expect(placement.heightMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
       expect(
@@ -2025,8 +1983,7 @@ describe("app store", () => {
       await store.getState().placeArtwork(artworkId, wallId, 1000, 1450);
       const placementId = store.getState().project!.wallObjects[0].id;
 
-      // No store action creates an override yet (a later milestone) — set
-      // one directly to prove updateArtwork respects it when present.
+      // Inject an override to verify updateArtwork preserves it.
       const projectWithOverride: Project = {
         ...store.getState().project!,
         wallObjects: store.getState().project!.wallObjects.map((wallObject) =>
@@ -2052,8 +2009,7 @@ describe("app store", () => {
       const placement = store
         .getState()
         .project!.wallObjects.find((wallObject) => wallObject.id === placementId)!;
-      // An explicit override opts this persisted placement out of the
-      // library-dimension rebake; its stored image footprint remains stable.
+      // An explicit override opts the placement out of dimension rebaking.
       expect(placement.widthMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
       expect(placement.heightMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
       expect(placement.kind).toBe("artwork");
@@ -2190,7 +2146,6 @@ describe("app store", () => {
       await store.getState().placeArtwork(artworkId, wallId, 0, 1450);
 
       const placement = store.getState().project!.wallObjects[0];
-      // Square 100×100 asset (FakeImageProcessor) contains to 610×610.
       expect(placement.widthMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
       expect(placement.heightMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
     });
@@ -2283,7 +2238,6 @@ describe("app store", () => {
     });
     const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
 
-    // Comfortably inside today's wall length, near the far end.
     await store.getState().placeArtwork(artworkId, wall.id, wall.lengthMm - 300, 1450);
     expect(store.getState().placementWarnings).toHaveLength(0);
 
@@ -2346,14 +2300,12 @@ describe("app store", () => {
     it("pins an elevation-placed door to the floorline (yMm = heightMm/2) regardless of pointer y", async () => {
       const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
 
-      // Try to place a door at y=1650, but it should snap to the floor
       await store.getState().placeOpeningOnElevation("door", wall.id, 1800, 1650);
 
       const state = store.getState();
       const door = state.project!.wallObjects[0];
       expect(door.kind).toBe("door");
       expect(door.xMm).toBe(1800);
-      // Door height defaults to 2030, so center should be at 1015
       expect(door.heightMm).toBe(2030);
       expect(door.yMm).toBe(1015);
     });
@@ -2408,18 +2360,15 @@ describe("app store", () => {
       const originalYMm = door.yMm;
       const undoStackBefore = store.getState().undoStack.length;
 
-      // Try to move the door vertically — it should be ignored (constrained to floor).
       await store.getState().moveOpening(door.id, door.xMm + 500, 1500);
 
       let state = store.getState();
       let movedDoor = state.project!.wallObjects[0];
-      // X moves normally, but Y is clamped to the floor (heightMm/2 = 1015).
       expect(movedDoor.xMm).toBe(door.xMm + 500);
-      expect(movedDoor.yMm).toBe(1015); // Door height is 2030, so center = 1015
+      expect(movedDoor.yMm).toBe(1015);
       expect(movedDoor.yMm).toBe(movedDoor.heightMm / 2);
       expect(state.undoStack).toHaveLength(undoStackBefore + 1);
 
-      // Undo restores the original x.
       await store.getState().undo();
       state = store.getState();
       movedDoor = state.project!.wallObjects[0];
@@ -2432,7 +2381,6 @@ describe("app store", () => {
       await store.getState().addOpening(wall.id, "window");
       const window = store.getState().project!.wallObjects[0];
 
-      // Windows can move vertically
       await store.getState().moveOpening(window.id, window.xMm, 1500);
 
       let state = store.getState();
@@ -2469,7 +2417,6 @@ describe("app store", () => {
       const originalYMm = door.yMm; // Should be 2030/2 = 1015
       const undoStackBefore = store.getState().undoStack.length;
 
-      // Resize the door's height to 1800 — the center should move to 900.
       await store.getState().resizeOpening(door.id, 915, 1800);
 
       let state = store.getState();
@@ -2479,7 +2426,6 @@ describe("app store", () => {
       expect(resizedDoor.yMm).toBe(resizedDoor.heightMm / 2);
       expect(state.undoStack).toHaveLength(undoStackBefore + 1);
 
-      // Undo restores the original height and yMm.
       await store.getState().undo();
       state = store.getState();
       resizedDoor = state.project!.wallObjects[0];
@@ -2493,7 +2439,6 @@ describe("app store", () => {
       const window = store.getState().project!.wallObjects[0];
       const originalYMm = window.yMm;
 
-      // Resize a window's height — yMm should not change.
       await store.getState().resizeOpening(window.id, 1500, 1000);
 
       let state = store.getState();
@@ -2585,9 +2530,7 @@ describe("app store", () => {
     });
 
     it("full-syncs a paired deletion: removing one paired door removes its twin in one undo step", async () => {
-      // Removing a shared-wall door/window removes its twin too, so the two
-      // rooms never diverge (spec §5.5). The pair is symmetric, so it doesn't
-      // matter which side is deleted — both vanish, in a single undoable commit.
+      // Paired openings must disappear together in one undoable commit.
       await store.getState().addOpening("wall-north", "door");
       const doorA = store.getState().project!.wallObjects[0];
       await store.getState().addOpening("wall-south", "door");
@@ -2602,7 +2545,6 @@ describe("app store", () => {
       expect(store.getState().project!.wallObjects).toHaveLength(0);
       expect(store.getState().undoStack).toHaveLength(undoStackBefore + 1);
 
-      // Undo restores both openings with the pairing intact.
       await store.getState().undo();
       const restored = store.getState().project!.wallObjects;
       expect(restored).toHaveLength(2);
@@ -2614,9 +2556,7 @@ describe("app store", () => {
   });
 
   describe("shared wall opening mirroring", () => {
-    // Two rooms flush along room-a's east / room-b's west edge (offset 4000 =
-    // room-a's width): a coincident twin wall pair. Both walls are 3000 mm long
-    // and anti-parallel, so an opening at x mirrors to (3000 − x) on the twin.
+    // Coincident anti-parallel walls mirror opening x as 3000 - x.
     const A_EAST = "room-a-wall-east";
     const B_WEST = "room-b-wall-west";
     const DOOR_Y_MM = 1015; // door center = height/2 (2030/2), the placement default.
@@ -2672,9 +2612,7 @@ describe("app store", () => {
       expect(twin.kind).toBe("door");
       expect(partnerOf(primary)).toBe(twin.id);
       expect(partnerOf(twin)).toBe(primary.id);
-      // The twin mirrors the centered primary (both 1500 on a 3000 mm wall).
       expect(twin.xMm).toBeCloseTo(1500);
-      // One commit, one undo step; only the primary is selected.
       expect(store.getState().undoStack).toHaveLength(undoBefore + 1);
       expect(
         getSelectedOpeningId(store.getState().project, store.getState().selection)
@@ -2686,7 +2624,6 @@ describe("app store", () => {
 
     it("connects to an existing alignable opening on the twin wall instead of duplicating", async () => {
       setupSharedWallRooms();
-      // An unpaired door already sits on the twin wall at the mirrored position.
       const base = store.getState().project!;
       store.setState({
         project: {
@@ -2709,7 +2646,6 @@ describe("app store", () => {
       await store.getState().addOpening(A_EAST, "door");
 
       const objects = store.getState().project!.wallObjects;
-      // No duplicate twin — the primary connects to the existing opening.
       expect(objects).toHaveLength(2);
       const primary = onWall(A_EAST);
       const existing = objects.find((object) => object.id === "existing-door")!;
@@ -2733,7 +2669,6 @@ describe("app store", () => {
         .getState()
         .project!.wallObjects.find((object) => object.id === twin.id)!;
       expect(movedPrimary.xMm).toBe(800);
-      // Twin mirrors the new position (3000 − 800) and tracks the primary's y.
       expect(movedTwin.xMm).toBeCloseTo(2200);
       expect(movedTwin.yMm).toBe(primary.yMm);
       expect(store.getState().undoStack).toHaveLength(undoBefore + 1);
@@ -2748,9 +2683,7 @@ describe("app store", () => {
       const primary = onWall(A_EAST);
       const twin = onWall(B_WEST);
 
-      // A blocker on the twin wall sits where the twin would land after the move
-      // (mirrored x = 3000 − 2200 = 800). Narrow, so it doesn't overlap the twin
-      // at its current x = 1500.
+      // Block only the twin's proposed mirrored destination.
       const base = store.getState().project!;
       store.setState({
         project: {
@@ -2780,7 +2713,6 @@ describe("app store", () => {
         .getState()
         .project!.wallObjects.find((object) => object.id === twin.id)!;
       expect(movedPrimary.xMm).toBe(2200);
-      // The twin stayed put; the pair now reads misaligned via the advisory.
       expect(unmovedTwin.xMm).toBeCloseTo(1500);
       expect(
         evaluateOpeningPair(store.getState().project!, movedPrimary.id, unmovedTwin.id).status
@@ -2812,8 +2744,7 @@ describe("app store", () => {
       await store.getState().deleteRoom("room-b");
 
       const objects = store.getState().project!.wallObjects;
-      // room-b's twin is gone with its room, but room-a's opening survives,
-      // merely disconnected (its dangling pointer cleared).
+      // Deleting one room leaves the surviving opening disconnected.
       expect(objects).toHaveLength(1);
       const survivor = objects[0];
       expect(survivor.id).toBe(primary.id);
@@ -2885,16 +2816,13 @@ describe("app store", () => {
 
       await store.getState().moveOpening(doorId, door.xMm + 2000, door.yMm, true);
 
-      // moveOpening only revalidates the door itself, so its own warning
-      // clears — proving the collision check is symmetric and re-run live,
-      // not a stale flag left over from the artwork's placement.
+      // Revalidation is symmetric and clears stale collision warnings.
       expect(store.getState().placementWarnings).toEqual([]);
     });
   });
 
   describe("selection", () => {
-    // selectOpening now validates against the live project (a dead id is a
-    // no-op), so these tests place a real opening instead of a made-up id.
+    // Selection validates against live opening IDs.
     async function addRealOpening(): Promise<string> {
       await store.getState().addOpening("wall-north", "door");
       return store.getState().project!.wallObjects.find((object) => object.kind === "door")!.id;
@@ -3033,7 +2961,6 @@ describe("app store", () => {
       expect(opening.kind).toBe("door");
       expect(opening.wallId).toBe(wall.id);
       expect(opening.xMm).toBe(1234);
-      // Same defaults addOpening uses: a door reaches the floor.
       expect(opening.yMm - opening.heightMm / 2).toBeCloseTo(0);
       expect(getSelectedOpeningId(state.project, state.selection)).toBe(opening.id);
       expect(state.project!.floorObjects).toHaveLength(0);
@@ -3109,8 +3036,6 @@ describe("app store", () => {
       await store.getState().placeArtworkOnFloor(artworkId, 0, 0);
 
       const floorObject = store.getState().project!.floorObjects[0];
-      // Square 100×100 asset (FakeImageProcessor) contains to 610×610; only
-      // depth still falls back to its default.
       expect(floorObject.widthMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
       expect(floorObject.heightMm).toBe(PLACEHOLDER_ARTWORK_WIDTH_MM);
       expect(floorObject.depthMm).toBe(DEFAULT_FLOOR_OBJECT_DEPTH_MM);
@@ -3151,9 +3076,7 @@ describe("app store", () => {
     });
 
     it("a legacy project with duplicate placements still loads and its members still move", async () => {
-      // Place once through the store to get a schema-valid wall object, then
-      // clone it (fresh id, same artworkId) so the imported project already
-      // contains a duplicate the guard would otherwise forbid.
+      // Inject a schema-valid legacy duplicate that current actions forbid.
       await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
       const artworkId = store.getState().project!.checklistArtworkIds[0];
       const wallId = getSelectedWall(
@@ -3274,7 +3197,6 @@ describe("app store", () => {
       expect(floorObject.kind).toBe("artwork");
       expect(floorObject.xMm).toBe(5000);
       expect(floorObject.yMm).toBe(3000);
-      // Remembered hang height + elevation height, for a later floor→wall trip.
       expect(floorObject.wallYMm).toBe(1450);
       expect(floorObject.widthMm).toBe(before.widthMm);
       expect(floorObject.heightMm).toBe(before.heightMm);
@@ -3507,8 +3429,6 @@ describe("app store", () => {
 
         store.getState().selectOpening(openingId);
 
-        // selectOpening is an objects selection now — it replaces the prior
-        // selection with the single opening placement rather than clearing it.
         expect(objectIdsOf(store.getState().selection)).toEqual([openingId]);
       });
 
@@ -3528,7 +3448,6 @@ describe("app store", () => {
         await store.getState().createProject("Another Show");
         store.getState().selectObject(a.placementId);
 
-        // Re-select back onto the original project (a fresh document swap).
         await store.getState().openProject(original.id);
 
         expect(objectIdsOf(store.getState().selection)).toEqual([]);
@@ -3735,8 +3654,6 @@ describe("app store", () => {
       });
 
       it("clears a surviving partner's connectsToObjectId when its paired door is removed via selection", async () => {
-        // Same hand-constructed symmetric pair as the removePlacement case
-        // above, routed through the selection-based removal path instead.
         await store.getState().addOpening("wall-north", "door");
         const doorA = store.getState().project!.wallObjects[0];
         await store.getState().addOpening("wall-south", "door");
@@ -3768,8 +3685,7 @@ describe("app store", () => {
     });
 
     describe("arrange session", () => {
-      // Canonical setup: a 2540mm wall with three 508mm works, matching the
-      // arrangeSelectedOnWall example. Returns the three placement ids.
+      // Canonical 2540 mm wall with three 508 mm works.
       async function threeWorksOnWall() {
         const wallId = getSelectedWall(store.getState().project!, store.getState().wallContextId)!.id;
         await store.getState().resizeWall(wallId, 2540);
@@ -3777,7 +3693,6 @@ describe("app store", () => {
         const b = await placeArtworkOnWall(1000, 1450, 508);
         const c = await placeArtworkOnWall(2000, 1450, 508);
         store.getState().setObjectSelection([a.placementId, b.placementId, c.placementId]);
-        // Re-fetch after the resize so lengthMm reflects the 2540mm wall.
         const wall = getSelectedWall(store.getState().project!, wallId)!;
         return { wall, a, b, c };
       }
@@ -3852,13 +3767,10 @@ describe("app store", () => {
 
           const session = store.getState().arrangeSession!;
           expect(session.mode).toBe("inset");
-          // Preview survived the mode switch (not re-seeded from committed).
           expect(session.previewById).toEqual(previewAfterEqual);
         });
 
         it("remembers the last arrange mode across begins (default inset)", async () => {
-          // Plain view state seeded to "inset" so the panel always opens in a
-          // real mode, and it tracks the mode the curator last worked in.
           expect(store.getState().lastArrangeMode).toBe("inset");
 
           await threeWorksOnWall();
@@ -3868,7 +3780,6 @@ describe("app store", () => {
           store.getState().beginArrangeSession("equal");
           expect(store.getState().lastArrangeMode).toBe("equal");
 
-          // A no-op begin (guards fail) must not disturb the remembered mode.
           store.getState().clearObjectSelection();
           store.getState().beginArrangeSession("inset");
           expect(store.getState().lastArrangeMode).toBe("equal");
@@ -3904,7 +3815,6 @@ describe("app store", () => {
           store.getState().beginArrangeSession("equal");
           store.getState().updateArrangeSession({ equal: true });
           const preview = store.getState().arrangeSession!.previewById;
-          // allowOverlap so a work landing over the centered door can't block.
           store.getState().commitArrangeSession(true);
 
           const state = store.getState();
@@ -3948,7 +3858,6 @@ describe("app store", () => {
         for (const move of expected) {
           expect(preview[move.id].xMm).toBeCloseTo(move.xMm);
         }
-        // Project untouched while previewing.
         expect(store.getState().project).toBe(projectBefore);
         expect(store.getState().undoStack).toHaveLength(undoBefore);
       });
@@ -3964,7 +3873,6 @@ describe("app store", () => {
 
         const session = store.getState().arrangeSession!;
         expect(session.insetAnchor).toBe("left");
-        // Preview object is untouched — switching the anchor never re-slides.
         expect(session.previewById).toBe(previewBefore);
         expect(store.getState().project).toBe(projectBefore);
         expect(store.getState().undoStack).toHaveLength(undoBefore);
@@ -3980,7 +3888,6 @@ describe("app store", () => {
         expect(store.getState().arrangeSession).toBeNull();
         expect(store.getState().lastInsetAnchor).toBe("right");
 
-        // A freshly begun session opens on the remembered anchor.
         store.getState().beginArrangeSession("inset");
         expect(store.getState().arrangeSession!.insetAnchor).toBe("right");
       });
@@ -4005,22 +3912,18 @@ describe("app store", () => {
           ...m,
           xMm: preview[m.id].xMm
         }));
-        // Leftmost edge now sits at 300mm from the wall start.
         const newLeftEdge = Math.min(
           ...movedMembers.map((m) => m.xMm - m.widthMm / 2)
         );
         expect(newLeftEdge).toBeCloseTo(300);
-        // Interior gaps are unchanged (rigid translation).
         const gapsAfter = getSpacingSegments(movedMembers, wall.lengthMm)
           .slice(1, -1)
           .map((s) => s.toMm - s.fromMm);
         expect(gapsAfter).toEqual(gapsBefore);
-        // Every member moved by the same delta.
         const deltas = movedMembers.map(
           (m, i) => m.xMm - membersBefore[i].xMm
         );
         expect(new Set(deltas.map((d) => d.toFixed(6))).size).toBe(1);
-        // Preview only — project untouched, no undo entry yet.
         expect(store.getState().project).toBe(projectBefore);
         expect(store.getState().undoStack).toHaveLength(undoBefore);
       });
@@ -4054,8 +3957,7 @@ describe("app store", () => {
         const b = await placeArtworkOnWall(1500, 1450, 400);
         await store.getState().addOpening(wallId, "door");
         const door = store.getState().project!.wallObjects.find((o) => o.kind === "door")!;
-        // Slide the door well left of the group, clear of the wall start, so
-        // it — not the wall edge — is the nearest thing beside the group.
+        // Make the door the nearest left boundary.
         await store.getState().moveOpening(door.id, 200, door.yMm, true);
 
         store.getState().setObjectSelection([a.placementId, b.placementId]);
@@ -4071,15 +3973,12 @@ describe("app store", () => {
         });
         expect(session.insetBoundary.right).toEqual({ type: "wall", edgeMm: 3000 });
 
-        // Editing the left-anchor field now measures from the door's right
-        // edge, not the wall start.
         store.getState().updateArrangeSession({ insetMm: 100, anchor: "left" });
         const preview = store.getState().arrangeSession!.previewById;
         const groupLeftEdgeMm = preview[a.placementId].xMm - 400 / 2;
         expect(groupLeftEdgeMm).toBeCloseTo(doorRightEdgeMm + 100);
 
-        // Committing moves only the artworks — the door (the boundary itself)
-        // stays exactly where it was slid to.
+        // The detected boundary itself must not move on commit.
         store.getState().commitArrangeSession(true);
         const doorAfter = store
           .getState()
@@ -4147,7 +4046,6 @@ describe("app store", () => {
         for (const id of [a.placementId, b.placementId, c.placementId]) {
           expect(xById(id)).toBeCloseTo(preview[id].xMm);
         }
-        // The click collapsed the group to a single selection.
         expect(objectIdsOf(state.selection)).toEqual([a.placementId]);
       });
 
@@ -4178,7 +4076,6 @@ describe("app store", () => {
         const state = store.getState();
         expect(state.arrangeSession).toBeNull();
         expect(state.undoStack.at(-1)?.label).toBe("Rename project");
-        // The preview was dropped, not committed — the work never moved.
         expect(xById(a.placementId)).toBe(originalX);
       });
 
@@ -4212,7 +4109,6 @@ describe("app store", () => {
         expect(state.arrangeSession).not.toBeNull();
         expect(state.error).toMatch(/overlap/i);
         expect(state.undoStack).toHaveLength(undoBefore);
-        // Nothing committed — the work stayed at its original x.
         expect(xById(a.placementId)).toBe(500);
       });
 
@@ -4240,10 +4136,7 @@ describe("app store", () => {
       });
 
       it("a gap-mode update on an off-center pair re-spaces about the pair's center without recentering on the wall", async () => {
-        // Repro of the reported bug's fix: select only the right-hand 2 of 4
-        // works (the pair hangs well right of wall center). Editing the spacing
-        // must keep the pair where it is, moving each work by half the gap
-        // delta in opposite directions — NOT teleport the pair to wall center.
+        // Regression: changing a gap must preserve an off-center pair's union center.
         const wallId = getSelectedWall(
           store.getState().project!,
           store.getState().wallContextId
@@ -4271,21 +4164,15 @@ describe("app store", () => {
         const cx1 = preview[c.placementId].xMm;
         const dx1 = preview[d.placementId].xMm;
 
-        // Interior gap is now exactly the requested value.
         expect(dx1 - w / 2 - (cx1 + w / 2)).toBeCloseTo(newGap);
-        // The pair's union center is preserved — no recentering on the wall.
         const newCenter = (cx1 - w / 2 + (dx1 + w / 2)) / 2;
         expect(newCenter).toBeCloseTo(oldCenter);
-        // And it emphatically did NOT jump toward the wall's midpoint.
         expect(Math.abs(newCenter - wall.lengthMm / 2)).toBeGreaterThan(500);
-        // Each work moved by half the gap delta, in opposite directions.
         const delta = newGap - oldGap;
         expect(cx1 - cx0).toBeCloseTo(-delta / 2);
         expect(dx1 - dx0).toBeCloseTo(delta / 2);
-        // Preview only — project untouched.
         expect(store.getState().undoStack).toHaveLength(undoBefore);
 
-        // Commit yields exactly one "Arrange on wall" entry.
         store.getState().commitArrangeSession();
         const state = store.getState();
         expect(state.undoStack).toHaveLength(undoBefore + 1);
@@ -4295,12 +4182,7 @@ describe("app store", () => {
       });
 
       describe("space-within zone (Space evenly)", () => {
-        // The canonical three works to arrange, plus an UNSELECTED neighbour to
-        // their left, so the open-space span is bounded on the left (narrower
-        // than the whole 3000mm wall). Neighbour: width 800, center 400 -> right
-        // edge 800. Works: 508mm each at 1200/1800/2400 (group left edge 946),
-        // so the left boundary is the neighbour's right edge (800), the right
-        // the wall end (3000).
+        // An unselected neighbor bounds the open-space zone on the left.
         async function boundedScenario() {
           const wallId = getSelectedWall(
             store.getState().project!,
@@ -4368,10 +4250,8 @@ describe("app store", () => {
           expect(session.mode).toBe("equal");
           expect(session.evenZone).toBe("open");
           expect(store.getState().lastEvenZone).toBe("open");
-          // The preview spread the works across the open zone [800, 3000].
           const equalOpen = solveEqualArrangementInZone(members, 800, 3000);
           expect(groupLeftEdge(ids)).toBeCloseTo(800 + equalOpen.insetMm, 4);
-          // Preview only — the project isn't touched until commit.
           expect(store.getState().undoStack).toHaveLength(undoBefore);
         });
 
@@ -4388,7 +4268,6 @@ describe("app store", () => {
           const equalOpen = solveEqualArrangementInZone(members, 800, 3000);
           expect(groupLeftEdge(ids)).toBeCloseTo(800 + equalOpen.insetMm, 4);
 
-          // Switch to the whole wall — the works re-space across [0, 3000].
           store.getState().setArrangeEvenZone("wall");
           expect(store.getState().arrangeSession!.evenZone).toBe("wall");
           const equalWhole = solveEqualArrangement(members, wall.lengthMm);
@@ -4504,10 +4383,7 @@ describe("app store", () => {
     });
   });
 
-  // Artwork/artwork overlap is now a BLOCKABLE "collision" (overlapPolicy.ts):
-  // rejected by default, opt-in via "Allow overlap". This replaces the old
-  // always-commits "overlap" advisory. Kept in its own describe block, separate
-  // from the artwork/opening "arrange session" tests above.
+  // Artwork collisions are blockable; the explicit overlap preference opts in.
   describe("artwork/artwork overlap (blockable)", () => {
     async function placeTwoArtworks() {
       await store.getState().addArtworksFromFiles([makeImageFile("overlap-a.jpg")]);
@@ -4558,14 +4434,11 @@ describe("app store", () => {
       expect(state.undoStack).toHaveLength(undoBefore + 1);
       expect(state.undoStack.at(-1)?.label).toBe("Arrange on wall");
       expect(state.placementWarnings.some((warning) => warning.type === "collision")).toBe(true);
-      // The retired advisory is never emitted anymore.
       expect(state.placementWarnings.every((warning) => warning.type !== "overlap")).toBe(true);
     });
   });
 
-  // Opening×opening overlap is FORBIDDEN — never committable, whatever the
-  // "Allow overlap" preference says (overlapPolicy.ts). Covers the commit gate
-  // (moveOpening) and the creation paths (addOpening) that must never author one.
+  // Opening/opening overlap is forbidden regardless of the overlap preference.
   describe("opening/opening overlap (forbidden)", () => {
     async function addTwoOpenings() {
       const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
@@ -4582,7 +4455,7 @@ describe("app store", () => {
       expect(store.getState().project!.wallObjects).toHaveLength(2);
       expect(store.getState().error).toBeNull();
 
-      // Their x-intervals must not strictly overlap (edge-touch is legal).
+      // Edge-touch is legal.
       const doorRight = door.xMm + door.widthMm / 2;
       const windowLeft = window_.xMm - window_.widthMm / 2;
       const doorLeft = door.xMm - door.widthMm / 2;
@@ -4595,20 +4468,17 @@ describe("app store", () => {
       const { door, window_ } = await addTwoOpenings();
       const undoBefore = store.getState().undoStack.length;
 
-      // Drop the window right onto the door — a forbidden pair.
       await store.getState().moveOpening(window_.id, door.xMm, door.yMm, true);
 
       const state = store.getState();
       expect(state.error).toBe(FORBIDDEN_OVERLAP_MESSAGE);
       expect(state.undoStack).toHaveLength(undoBefore);
-      // The window did not move.
       const stillThere = state.project!.wallObjects.find((o) => o.id === window_.id)!;
       expect(stillThere.xMm).toBe(window_.xMm);
     });
 
     it("moving a legacy already-overlapping opening OUT of the overlap commits fine", async () => {
-      // Store actions can't author an opening×opening overlap, so inject one
-      // directly to model legacy/persisted data that predates this policy.
+      // Inject legacy data that predates the overlap policy.
       const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
       const project = store.getState().project!;
       const overlapping: Project = {
@@ -4639,9 +4509,7 @@ describe("app store", () => {
       store.setState({ project: overlapping });
       const undoBefore = store.getState().undoStack.length;
 
-      // Slide the window well clear of the door — the resulting state is
-      // overlap-free, so the gate must accept it (it validates the destination,
-      // not the origin).
+      // The gate validates the destination, not the legacy origin.
       await store.getState().moveOpening("window-legacy", 6000, 1450, false);
 
       const state = store.getState();
@@ -4653,10 +4521,7 @@ describe("app store", () => {
   });
 });
 
-// Injects a wall placement directly into the current project, bypassing
-// applyEdit, purely to set up the "dangling placement" scenario for the
-// removeArtworkFromChecklist test above — there's no store action yet that
-// creates placements (docs/plan.md's placement UI is a later milestone).
+// Bypass applyEdit to construct a dangling-placement fixture.
 async function applyPlacementDirectly(
   repository: InMemoryProjectRepository,
   store: ReturnType<typeof createAppStore>,

@@ -1,13 +1,8 @@
 import type { Artwork, Project, WallObject } from "../../src/domain/project";
 
 /**
- * Deterministic renderer stress fixture: ten rooms in a shared floor space,
- * four walls per room, and twenty wall works per room (200 total).
- *
- * The six source assets are the public-domain Wikimedia Commons corpus in
- * ../artworks/wikimedia. Reusing those display-tier assets keeps this fixture
- * small while the 200 distinct records exercise scene derivation, placement,
- * selection, and mesh-count costs.
+ * Deterministic renderer fixture: 10 rooms, 40 walls, and 200 placements.
+ * Reuses six public-domain assets to keep the fixture small.
  */
 const sourceWorks = [
   ["mona-lisa", "Mona Lisa", "Leonardo da Vinci", 530, 770],

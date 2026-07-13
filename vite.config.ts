@@ -6,20 +6,15 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
-    // The three chunk is intentionally large; it loads only via the lazy
-    // ThreeDView import (enforced by scripts/assert-chunk-graph.mjs). Warn
-    // only if it grows well past its current ~830 kB.
+    // Three.js is intentionally large but lazy; warn above its ~830 kB baseline.
     chunkSizeWarningLimit: 900,
     rollupOptions: {
       output: {
         manualChunks(id) {
-          // Vite's preload helper is used by both the eager entry and the lazy 3D
-          // stack; without pinning it eagerly, Rollup can place it inside the three
-          // chunk, giving index a static import of all of three.js.
+          // Keep Vite's shared preload helper out of the lazy Three.js chunk.
           if (id.includes("vite/preload-helper")) return "vendor";
           if (!id.includes("node_modules")) return undefined;
-          // 3D stack is reachable only from the lazy ThreeDView import; its own chunk
-          // keeps it off the critical path. Includes fiber/drei transitive deps.
+          // Keep the full 3D stack off the critical path.
           if (/node_modules\/(three|@react-three|three-stdlib|react-reconciler|its-fine|suspend-react|maath)\//.test(id)) {
             return "three";
           }
@@ -36,9 +31,7 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: "./src/test/setup.ts",
-    // Claude Code worktrees live inside the checkout at .claude/worktrees/*;
-    // without this, running tests here also sweeps up every worktree's copy
-    // of the suite, which fails from the parent's context.
+    // Avoid collecting duplicate suites from in-repo Claude worktrees.
     exclude: [...configDefaults.exclude, "**/.claude/**"]
   }
 });

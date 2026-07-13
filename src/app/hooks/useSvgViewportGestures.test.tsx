@@ -19,16 +19,14 @@ import {
   type ZoomLimits
 } from "../../domain/viewport/viewport2d";
 
-// jsdom has no PointerEvent constructor (probed: undefined), so window pointer
-// events are synthesized as plain Events with the fields the handlers read.
+// jsdom lacks PointerEvent, so synthesize Events with the required fields.
 function pointerEvent(type: string, props: Record<string, unknown>): Event {
   const event = new Event(type, { bubbles: true, cancelable: true });
   Object.assign(event, props);
   return event;
 }
 
-// The React SyntheticPointerEvent the capture handler consumes — only the
-// fields the handler touches, plus spy-able preventDefault/stopPropagation.
+// Minimal SyntheticPointerEvent shape with observable cancellation.
 function reactPointer(props: Record<string, unknown> = {}) {
   return {
     preventDefault: vi.fn(),
@@ -58,8 +56,6 @@ type Options = {
 
 type Api = ReturnType<typeof useSvgViewportGestures>;
 
-// Renders the hook in a real component with a real <svg> so svgRef is wired,
-// exposing the latest hook return and the svg element to the test.
 function renderGestures(opts: Options) {
   const holder: { api: Api | null; svg: SVGSVGElement | null } = { api: null, svg: null };
 
@@ -90,9 +86,7 @@ function renderGestures(opts: Options) {
   return { holder, ...utils };
 }
 
-// Give the svg element working createSVGPoint/getScreenCTM so toSvgPoint can
-// exercise its anchor math (both are undefined in jsdom). matrixTransform
-// applies a fixed translate so the result is easy to assert against.
+// Supply SVG geometry APIs missing from jsdom.
 function mockCtm(svg: SVGSVGElement, translate = { x: -5, y: -7 }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (svg as any).createSVGPoint = () => {
@@ -127,7 +121,6 @@ describe("useSvgViewportGestures — Space / ⌘0 keyboard", () => {
     });
     expect(holder.api!.isSpaceDown).toBe(false);
 
-    // Re-arm, then blur.
     act(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { code: "Space", key: " ", cancelable: true }));
     });
@@ -284,12 +277,7 @@ describe("useSvgViewportGestures — pinch claim", () => {
   });
 
   it("when isPinchBlocked() is true the 2nd finger is still consumed but starts no pinch", () => {
-    // NOTE: the API brief's test text says a blocked pinch returns false, but the
-    // actual PlanView/ElevationView code ALWAYS preventDefaults+stopPropagates the
-    // 2nd finger (to block the object under it from starting a competing drag) and
-    // only gates beginPinch on the block. Behavior-preserving extraction keeps that:
-    // consumed (returns true) but no pinch — verified here by the absence of any
-    // onViewportChange when the fingers then move.
+    // A blocked second finger is still consumed to prevent a competing object drag.
     const onViewportChange = vi.fn();
     const { holder } = renderGestures({
       viewport: FIT_VIEWPORT,
@@ -307,11 +295,9 @@ describe("useSvgViewportGestures — pinch claim", () => {
     act(() => {
       secondClaimed = holder.api!.handlePointerDownCapture(second);
     });
-    // Consumed (finger blocked) even though the pinch itself is suppressed.
     expect(secondClaimed).toBe(true);
     expect(second.preventDefault).toHaveBeenCalled();
 
-    // No pinch began → moving the two fingers changes nothing.
     onViewportChange.mockClear();
     act(() => {
       window.dispatchEvent(pointerEvent("pointermove", { pointerType: "touch", pointerId: 1, clientX: 10, clientY: 10 }));
@@ -328,7 +314,6 @@ describe("useSvgViewportGestures — touch pan (beginTouchPan)", () => {
         reactPointer({ pointerType: "touch", pointerId: 1, clientX: 50, clientY: 50 })
       );
     });
-    // The view calls beginTouchPan from its bubble-phase background pointerdown.
     holder.api!.beginTouchPan(50, 50);
   }
 
@@ -340,7 +325,6 @@ describe("useSvgViewportGestures — touch pan (beginTouchPan)", () => {
     startBackgroundTouch(holder);
 
     act(() => {
-      // dx = 40 > TOUCH_TAP_SLOP_PX
       window.dispatchEvent(
         pointerEvent("pointermove", { pointerType: "touch", pointerId: 1, clientX: 90, clientY: 50 })
       );
@@ -378,7 +362,6 @@ describe("useSvgViewportGestures — touch pan (beginTouchPan)", () => {
     const { holder } = renderGestures({ viewport: FIT_VIEWPORT, onViewportChange, onGestureEnd });
     mockCtm(holder.svg!);
 
-    // Two fingers → live pinch.
     act(() => {
       holder.api!.handlePointerDownCapture(
         reactPointer({ pointerType: "touch", pointerId: 1, clientX: 0, clientY: 0 })
@@ -390,10 +373,7 @@ describe("useSvgViewportGestures — touch pan (beginTouchPan)", () => {
       );
     });
 
-    // A 3rd finger lands on true background: the capture handler only does
-    // bookkeeping (returns false, no stopPropagation), so the view's
-    // bubble-phase background handler fires and calls beginTouchPan
-    // unconditionally. The internal guard must ignore it.
+    // A third background finger reaches beginTouchPan but must not steal the pinch.
     let thirdClaimed = true;
     act(() => {
       thirdClaimed = holder.api!.handlePointerDownCapture(
@@ -403,8 +383,6 @@ describe("useSvgViewportGestures — touch pan (beginTouchPan)", () => {
     expect(thirdClaimed).toBe(false);
     holder.api!.beginTouchPan(200, 200);
 
-    // The pinch still owns the gesture: spreading the two pinch fingers keeps
-    // firing viewport changes...
     onViewportChange.mockClear();
     act(() => {
       window.dispatchEvent(
@@ -413,8 +391,6 @@ describe("useSvgViewportGestures — touch pan (beginTouchPan)", () => {
     });
     expect(onViewportChange).toHaveBeenCalled();
 
-    // ...and the release reports NO background pan-start — had beginTouchPan
-    // hijacked the pinch as a pan, startedOnBackground would be true here.
     act(() => {
       window.dispatchEvent(pointerEvent("pointerup", { pointerType: "touch", pointerId: 1 }));
       window.dispatchEvent(pointerEvent("pointerup", { pointerType: "touch", pointerId: 2 }));
@@ -450,7 +426,6 @@ describe("useSvgViewportGestures — zoom affordances (real math)", () => {
 describe("useSvgViewportGestures — toSvgPoint", () => {
   it("returns null when getScreenCTM is unavailable (jsdom / pre-layout)", () => {
     const { holder } = renderGestures({ viewport: FIT_VIEWPORT });
-    // createSVGPoint present but getScreenCTM returns null → the null branch.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (holder.svg as any).createSVGPoint = () => ({ x: 0, y: 0, matrixTransform: () => ({ x: 0, y: 0 }) });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -513,9 +488,6 @@ describe("useSvgViewportGestures — wheel handler math", () => {
   it("ctrl+wheel zooms at the pointer with factor exp(-deltaY * sensitivity)", () => {
     const onViewportChange = vi.fn();
     const { holder } = renderGestures({ viewport: FIT_VIEWPORT, onViewportChange });
-    // Identity CTM: mockCtm's matrixTransform ignores its argument and maps
-    // point.{x,y} (set to clientX/clientY by toSvgPoint) plus a translate —
-    // {x:0,y:0} makes it the identity map, so xMm/yMm equal clientX/clientY.
     mockCtm(holder.svg!, { x: 0, y: 0 });
     dispatchWheel(holder.svg!, { ctrlKey: true, clientX: 100, clientY: 80, deltaY: 50 });
     const factor = Math.exp(-50 * WHEEL_ZOOM_SENSITIVITY);
@@ -541,14 +513,7 @@ describe("useSvgViewportGestures — wheel handler math", () => {
   });
 
   it("ctrl+wheel before first layout (no getScreenCTM) is a no-op, not a crash", () => {
-    // jsdom implements neither createSVGPoint nor getScreenCTM at all (both
-    // are `undefined`, so calling the truly-bare element throws "not a
-    // function" rather than characterizing anything about the hook). A real
-    // SVGSVGElement always has createSVGPoint, but getScreenCTM legitimately
-    // returns null before the element's first layout — that's the actual
-    // "no CTM yet" case toSvgPoint's null guard exists for, so stub only
-    // createSVGPoint (to stand in for the always-present real API) and leave
-    // getScreenCTM returning null.
+    // Model the real pre-layout case: createSVGPoint exists but getScreenCTM is null.
     const onViewportChange = vi.fn();
     const { holder } = renderGestures({ viewport: FIT_VIEWPORT, onViewportChange });
     const svg = holder.svg!;

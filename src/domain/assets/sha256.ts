@@ -1,13 +1,4 @@
-// crypto.subtle only exists in "secure contexts" — HTTPS or localhost. A
-// curator testing photo import on an iPad over plain http against a LAN IP
-// (the normal way to point a tablet at a dev box that has no cert) gets a
-// `crypto.subtle` that's `undefined`, and the WebCrypto digest call blows up
-// with "undefined is not an object". The hash isn't cosmetic, though — it's
-// persisted as the asset's content address and used for cross-upload dedupe
-// (see titleBySha in app/store.ts), so whatever fills in for WebCrypto has to
-// produce byte-identical standard SHA-256 hex output. Hence: use
-// crypto.subtle when it's there, and fall back to a plain-TypeScript
-// FIPS 180-4 implementation when it isn't.
+// WebCrypto requires a secure context; use the FIPS 180-4 fallback on LAN dev hosts.
 
 export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   const subtle = globalThis.crypto?.subtle;
@@ -27,8 +18,7 @@ function toHex(bytes: Uint8Array): string {
 }
 
 // --- Pure fallback (FIPS 180-4) -------------------------------------------
-// Exported so tests can exercise it directly: the test environment always
-// has crypto.subtle, so sha256Hex above would never actually take this path.
+// Exported to test the fallback when subtle exists in the test environment.
 
 const ROUND_CONSTANTS = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
@@ -124,12 +114,7 @@ function rotr(x: number, n: number): number {
   return ((x >>> n) | (x << (32 - n))) >>> 0;
 }
 
-// Pads to a whole number of 512-bit (64-byte) blocks: a single 0x80 byte,
-// zeros, then the original length in bits as a big-endian 64-bit suffix.
-// Images are never within reach of 2^32 bits (~512 MiB), but the high word
-// is still filled in correctly (bit length = byte length × 8 can exceed
-// 2^32 well before it exceeds Number.MAX_SAFE_INTEGER) rather than assumed
-// zero, so this stays correct for any input the platform could hand it.
+// SHA-256 padding: 0x80, zeros, then the 64-bit big-endian bit length.
 function padMessage(message: Uint8Array): Uint8Array[] {
   const bitLenLow = (message.length * 8) >>> 0;
   const bitLenHigh = Math.floor(message.length / 0x20000000);

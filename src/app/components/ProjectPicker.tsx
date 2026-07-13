@@ -4,10 +4,7 @@ import type { ProjectSummary } from "../../domain/project";
 import { Button } from "./ui/button";
 import { ProjectManager } from "./ProjectManager";
 
-// The topbar caret's whole job is opening the project manager modal — the
-// list/rename/delete/export UI that used to live in this file's own
-// DropdownMenu now lives in ProjectManager (see that file for why: counts,
-// inline rename, and quick export don't fit a DropdownMenuItem).
+// Topbar project caret opens the project manager modal.
 export function ProjectPicker({
   currentProjectId,
   listProjectSummaries,

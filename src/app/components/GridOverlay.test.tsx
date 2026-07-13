@@ -10,24 +10,8 @@ import { GridOverlay } from "./GridOverlay";
 
 afterEach(cleanup);
 
-// Task M3, Test D: grid pattern anchoring under pan — the "grid must not
-// swim" regression pin, exercised through the REAL rendered GridOverlay
-// rather than through the phase helper alone (calling getGridPatternPhaseMm
-// with the same fixed anchor twice proves nothing — purity guarantees
-// equality). Here the rendered <pattern> attributes are read back for
-// viewBoxes produced by actual panBy calls, so the pin covers the actual
-// integration surface: PlanView hands GridOverlay a rect that MOVES with
-// the pan (x/y/width/height = the panned viewBox) while leaving the
-// originXMm/originYMm props unset — and because the patterns tile in
-// userSpaceOnUse (world) coordinates with a phase derived only from that
-// fixed default origin, the implied world-space lattice must come out
-// identical however far the rect has panned.
-
-// Same fixture as gridZoomRange.test.ts: 10m x 10m content in a 1600x1000px
-// container. At zoom 1 (fit ppm = 0.1) the viewBox is 16000x10000mm at
-// x = -3000 — and the two pans below are chosen so the three viewBox origins
-// all differ mod the minor spacing (0, 400, 130 mod 500), which is exactly
-// what makes the anti-regression case at the bottom able to discriminate.
+// Regression: rendered userSpaceOnUse grid phases must stay fixed while panning.
+// Pan offsets differ modulo grid spacing so a viewBox-coupled phase would fail.
 const CONTENT_BOUNDS: ViewBox = { x: 0, y: 0, width: 10000, height: 10000 };
 const CONTAINER = { width: 1600, height: 1000 };
 const MINOR_SPACING_MM = 500;
@@ -46,10 +30,7 @@ type RenderedGrid = {
   fillRects: { x: number; y: number }[];
 };
 
-// Renders GridOverlay with EXACTLY the props PlanView passes (rect = the
-// viewBox, id="plan-grid", origin props left to their defaults unless the
-// buggy-coupling case injects them) and reads back the attributes the
-// browser would actually tile from.
+// Render with PlanView's prop shape and inspect the browser-facing attributes.
 function renderGrid(
   viewBox: ViewBox,
   originProps: { originXMm?: number; originYMm?: number } = {}
@@ -92,11 +73,7 @@ function renderGrid(
   };
 }
 
-// A userSpaceOnUse pattern with attribute x = phase and width = spacing puts
-// its tile seams (the grid lines) at every world-space position ≡ phase
-// (mod spacing). Two renders with the same spacing therefore draw the same
-// world lattice iff their phases are equal — this reduces "did the grid
-// swim?" to a comparison of the rendered phase attributes.
+// Equal phase modulo spacing means an equal world-space lattice.
 function worldLatticePhase(pattern: { x: number; width: number }): number {
   return ((pattern.x % pattern.width) + pattern.width) % pattern.width;
 }
@@ -109,10 +86,7 @@ describe("GridOverlay pattern anchoring under pan (M3 Test D)", () => {
   const { viewBox: viewBoxPan2 } = getViewBox2D(viewportPan2, CONTENT_BOUNDS, CONTAINER);
 
   it("keeps the world-space grid lattice identical across pans when origin props are left to PlanView's defaults", () => {
-    // Sanity: the pans genuinely moved the viewBox, and moved it to origins
-    // that are NOT a whole number of minor tiles apart — otherwise phase
-    // equality below would hold even under the buggy viewBox-coupled origin,
-    // and this pin would be toothless.
+    // Ensure the pan offsets can distinguish a viewBox-coupled phase.
     expect(viewBoxPan1.x).not.toBeCloseTo(viewBoxStart.x);
     expect(viewBoxPan2.x).not.toBeCloseTo(viewBoxPan1.x);
     expect((viewBoxPan1.x - viewBoxStart.x) % MINOR_SPACING_MM).not.toBeCloseTo(0);
@@ -122,16 +96,10 @@ describe("GridOverlay pattern anchoring under pan (M3 Test D)", () => {
     const gridPan1 = renderGrid(viewBoxPan1);
     const gridPan2 = renderGrid(viewBoxPan2);
 
-    // The fill rects DO follow the pan (they're what keeps the grid covering
-    // the visible window) — proving the pattern-phase equality below isn't
-    // holding just because nothing about the render changed.
     expect(gridPan1.fillRects[0].x).toBeCloseTo(viewBoxPan1.x, 6);
     expect(gridPan2.fillRects[0].x).toBeCloseTo(viewBoxPan2.x, 6);
     expect(gridPan1.fillRects[0].x).not.toBeCloseTo(gridStart.fillRects[0].x);
 
-    // The pin itself: the rendered patterns' world-space phases — and hence
-    // the world positions of every grid line they tile — are identical for
-    // all three differently-panned viewBoxes, on both axes, in both tiers.
     for (const grid of [gridPan1, gridPan2]) {
       expect(worldLatticePhase(grid.minorPattern)).toBeCloseTo(
         worldLatticePhase(gridStart.minorPattern),
@@ -147,12 +115,7 @@ describe("GridOverlay pattern anchoring under pan (M3 Test D)", () => {
   });
 
   it("would catch the regression: a viewBox-derived origin prop shifts the phase between pans", () => {
-    // The anti-regression teeth. If someone reintroduced letterbox-era
-    // coupling at PlanView's call site — e.g. originXMm={viewBoxBounds.x} —
-    // the pattern phase would become a function of the pan position, and the
-    // lattice would visibly swim. Rendering that buggy coupling here and
-    // asserting the phases DIFFER proves the previous test's equality check
-    // can actually discriminate, rather than passing for any inputs.
+    // Model the buggy viewBox-coupled origin to prove this test can discriminate.
     const buggyPan1 = renderGrid(viewBoxPan1, { originXMm: viewBoxPan1.x });
     const buggyPan2 = renderGrid(viewBoxPan2, { originXMm: viewBoxPan2.x });
 

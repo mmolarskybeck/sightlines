@@ -9,15 +9,13 @@ interface Props {
 
 const { title, description = DEFAULT_DESCRIPTION } = Astro.props;
 const pageTitle = title ? `${title} — ${SITE_NAME}` : SITE_NAME;
-// Cloudflare serves built pages extensionless (/about.html redirects to
-// /about), so canonicals and nav state must use the extensionless path.
+// Match Cloudflare's extensionless canonical URLs.
 const currentPath =
   Astro.url.pathname.replace(/\.html$/, "").replace(/\/$/, "") || "/";
 const canonical = new URL(currentPath, Astro.site);
 const ogImage = new URL("/og-image.png", Astro.site);
 
-// Structured data. On the homepage, describe the product as a WebApplication;
-// on inner pages, a lighter WebSite node is enough for the graph.
+// The homepage describes the app; inner pages describe the site.
 const siteUrl = new URL("/", Astro.site).href;
 const structuredData =
   currentPath === "/"

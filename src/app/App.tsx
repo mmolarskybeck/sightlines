@@ -153,15 +153,7 @@ const FontLab = import.meta.env.DEV
   ? lazy(() => import("./components/FontLab"))
   : null;
 
-// A second, independent IndexedDbAssetRepository instance dedicated to
-// reads (thumbnail lookups for the checklist). It talks to the same
-// IndexedDB database as the one store.ts constructs for writes — the
-// repository is a stateless wrapper around the browser API, not something
-// that needs a single shared instance — so this avoids exporting store.ts's
-// internals just to hand a `getBlob` down to one panel. getBlob is declared
-// at module scope (not inside the component) so it's a stable function
-// reference across renders, which keeps useAssetImageUrls from refetching
-// on every App re-render.
+// Stable read-only asset lookup; the repository wrapper is stateless.
 const assetRepository = new IndexedDbAssetRepository();
 const rendererBenchmarkEnabled =
   typeof window !== "undefined" &&
@@ -286,11 +278,7 @@ export function App() {
     commitArrangeSession,
     cancelArrangeSession
   } = useAppStore();
-  // Derived once per render from the selection union (source of truth) —
-  // objectIdsOf/roomIdOf are pure lookups; getSelectedArtworkId/
-  // getSelectedOpeningId additionally resolve against the live project (both
-  // accept a null project for the pre-boot render). Kept under their old
-  // mirror-field names so every read site and child prop below is unchanged.
+  // Selection union is the source of truth; single-subject ids resolve live.
   const selectedObjectIds = objectIdsOf(selection);
   const selectedRoomId = roomIdOf(selection);
   const selectedFreestandingWallId = freestandingWallIdOf(selection);
@@ -307,8 +295,7 @@ export function App() {
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  // Package builds hash and zip every image blob, so a large project takes a
-  // beat — the Export trigger shows a spinner and refuses re-entry meanwhile.
+  // Prevent re-entry while package assets are hashed and zipped.
   const [isExportingPackage, setIsExportingPackage] = useState(false);
 
   useEffect(() => {
@@ -319,10 +306,7 @@ export function App() {
     void listArtworkProjectMemberships(libraryArtworks.map((artwork) => artwork.id)).then(
       (memberships) => {
         if (cancelled) return;
-        // The repository read can lag the open project's in-memory checklist
-        // (persist is async), so the open project's own membership is
-        // recomputed from live state — otherwise "Used in" goes stale the
-        // moment a work is added or removed while the library is on screen.
+        // Async persistence may lag; derive the open project's membership live.
         const liveSummary: ProjectSummary = {
           id: liveId,
           title: liveTitle,
@@ -347,21 +331,9 @@ export function App() {
       cancelled = true;
     };
   }, [libraryArtworks, listArtworkProjectMemberships, viewMode, project]);
-  // The occupied room the Delete shortcut is asking to confirm about —
-  // transient UI state like the armed tools (never in the store/undo). Empty
-  // rooms skip this and delete immediately.
+  // Transient confirmation state; empty rooms delete immediately.
   const [confirmDeleteRoomId, setConfirmDeleteRoomId] = useState<string | null>(null);
-  // The plan canvas's single armed-tool mode (door/window/blocked-zone
-  // placement, polygon-room draw, room reshape, or partition draw) — a
-  // discriminated union so the four are structurally mutually exclusive
-  // instead of four separate useStates that each had to hand-disarm the
-  // other three. Transient UI state, deliberately NOT in the store: same
-  // reasoning as PlanView's other drag/marquee state (see the comment near
-  // its former activeTool declaration), it must never enter undo history or
-  // get persisted. Lives here (not in PlanView) now that the toolbar buttons
-  // that arm it live in this component's view-toolbar strip. See
-  // usePlanMode's own doc comment for how a future mode (doorway pairing)
-  // slots into the union.
+  // Mutually exclusive, transient plan tools must not persist or enter undo history.
   const {
     mode: planMode,
     armOpeningTool,
@@ -371,21 +343,13 @@ export function App() {
     togglePartitionTool,
     disarm: disarmPlanMode
   } = usePlanMode(viewMode, selectedRoomId);
-  // Legacy field names — every existing read site and child prop below
-  // (PlanView, the view-toolbar buttons, RoomInspector's "Edit shape") keeps
-  // reading these exact shapes, derived fresh each render from planMode.
+  // Compatibility aliases derived from planMode.
   const activeTool = planMode.kind === "placeOpening" ? planMode.tool : null;
   const drawRectActive = planMode.kind === "drawRect";
   const drawRoomActive = planMode.kind === "drawRoom";
   const reshapeRoomId = planMode.kind === "reshapeRoom" ? planMode.roomId : null;
   const partitionToolActive = planMode.kind === "drawPartition";
-  // PlanView's onDrawRoomChange/onPartitionToolChange props are raw boolean
-  // setters (unlike the toggle handlers above, which flip regardless of
-  // argument) — PlanView only ever calls them with `false`, to disarm its
-  // own mode once a draw/placement completes or Escape is pressed. These
-  // route that back to "idle" directly, and (for completeness, though never
-  // observed) arm the mode via the same toggle used by the view-toolbar
-  // button when called with `true` while it isn't already active.
+  // PlanView uses boolean setters so completion and Escape can disarm tools.
   const setDrawRectActive = (active: boolean) => {
     if (!active) {
       if (planMode.kind === "drawRect") disarmPlanMode();
@@ -508,10 +472,6 @@ export function App() {
     };
   }, [boot, loadBenchmarkFixture]);
 
-  // The tool-disarm-on-view-change and reshape-follows-selection
-  // effects that used to live here now live in usePlanMode itself (it takes
-  // viewMode and selectedRoomId as arguments above).
-
   useUndoRedoShortcuts({ undo, redo });
 
   useDeleteAndEscapeShortcuts({
@@ -582,11 +542,7 @@ export function App() {
     [libraryArtworks]
   );
 
-  // The flat wall inventory (room order) that feeds the elevation chip's wall
-  // switcher — the navigation that used to live in the right-panel wall list.
-  // Each room contributes its perimeter walls then its partition faces (the
-  // placeable-surface union), so the switcher and its prev/next stepping cover
-  // partitions too; `kind` lets the menu set faces apart from perimeter walls.
+  // Elevation navigation includes perimeter walls and partition faces in room order.
   const wallsForSwitcher = useMemo<WallSwitcherEntry[]>(
     () =>
       project
@@ -630,8 +586,7 @@ export function App() {
   const selectedRoomPlacement = selectedRoomId
     ? (project.floor.rooms.find((placement) => placement.roomId === selectedRoomId) ?? null)
     : null;
-  // The selected partition, resolved against the live project — a stale id
-  // (undo/redo can orphan it) drops to null and the inspector falls through.
+  // Stale partition ids from undo/redo resolve to null.
   const selectedFreestandingWall: FreestandingWall | null = selectedFreestandingWallId
     ? (project.floor.rooms
         .flatMap((placement) => placement.room.freestandingWalls)
@@ -640,9 +595,7 @@ export function App() {
   const selectedRoomDimensions = selectedRoomPlacement
     ? getRectangleRoomDimensions(selectedRoomPlacement.room)
     : null;
-  // The room the delete-confirm dialog is asking about, resolved against the
-  // live project — a stale id (undo/redo or deletion elsewhere) resolves to
-  // null and the dialog simply closes.
+  // A stale pending-delete id closes the dialog safely.
   const confirmDeleteRoomPlacement = confirmDeleteRoomId
     ? (project.floor.rooms.find(
         (placement) => placement.roomId === confirmDeleteRoomId
@@ -675,9 +628,7 @@ export function App() {
     selectedRoomWallObjects.filter((wallObject) => wallObject.kind === "artwork").length +
     selectedRoomFloorObjects.filter((floorObject) => floorObject.kind === "artwork").length;
 
-  // A dangling selectedArtworkId (library record deleted out from under the
-  // project) resolves to nothing here, so the inspector falls back to the
-  // wall view below rather than rendering a dead end.
+  // Dangling library selections fall through to the wall inspector.
   const selectedArtwork: Artwork | null =
     (selectedArtworkId ? artworksById.get(selectedArtworkId) : undefined) ?? null;
   const placedWallObject: ArtworkWallObject | null = selectedArtwork
@@ -686,9 +637,7 @@ export function App() {
           wallObject.kind === "artwork" && wallObject.artworkId === selectedArtwork.id
       ) ?? null)
     : null;
-  // An artwork placed on the floor (dragged off a wall, or dropped straight
-  // onto open floor) — ids/artworkId survive wall↔floor conversion, so the
-  // same selectedArtworkId resolves here when it isn't on a wall.
+  // Artwork ids survive wall↔floor conversion.
   const placedFloorArtwork: ArtworkFloorObject | null = selectedArtwork
     ? (project.floorObjects.find(
         (floorObject): floorObject is ArtworkFloorObject =>
@@ -696,15 +645,10 @@ export function App() {
       ) ?? null)
     : null;
   const isArtworkPlaced = placedWallObject !== null || placedFloorArtwork !== null;
-  // The placement to remove when the artwork inspector's action fires —
-  // whichever surface it currently lives on.
+  // Remove the artwork from whichever surface currently owns it.
   const artworkPlacementId = placedWallObject?.id ?? placedFloorArtwork?.id ?? null;
 
-  // The wall a wall-placed work hangs on (for its "Position on wall" section's
-  // length + header) and the nearest artwork neighbours on each side — both
-  // derived here from the live project so the section stays purely
-  // presentational. Neighbours are artwork-kind wall objects only; openings and
-  // blocked zones are not "works".
+  // Position fields consider artwork neighbors only, not openings.
   const placedWallObjectWall = placedWallObject
     ? (getProjectWalls(project).find((wall) => wall.id === placedWallObject.wallId) ?? null)
     : null;
@@ -716,9 +660,7 @@ export function App() {
         )
       )
     : { leftNeighborRightEdgeMm: undefined, rightNeighborLeftEdgeMm: undefined };
-  // The Center button's target + label classification — unlike
-  // wallPlacementNeighbors above, every wall object counts (openings
-  // included), matching detectBoundary's own rule.
+  // Centering boundaries include every wall-object kind.
   const wallPlacementCenterTarget =
     placedWallObject && placedWallObjectWall
       ? getWallPlacementCenterTarget(
@@ -728,8 +670,7 @@ export function App() {
         )
       : { xMm: 0, boundaryKind: "wall" as const };
 
-  // A dangling selectedOpeningId (the opening was just deleted) resolves to
-  // nothing here too, the same fallback shape as selectedArtwork above.
+  // Deleted opening selections resolve to null.
   const selectedOpening: OpeningWallObject | null = selectedOpeningId
     ? (project.wallObjects.find(
         (wallObject): wallObject is OpeningWallObject =>
@@ -760,9 +701,7 @@ export function App() {
               alignment
             };
           })
-          // New candidates must at least sit on nearby, facing wall lines.
-          // Keep an existing partner visible even after a room move makes it
-          // fail angle/gap so the inspector can explain and disconnect it.
+          // Keep an invalid existing partner visible so it can be disconnected.
           .filter(
             (candidate) =>
               candidate.id === selectedOpening.connectsToObjectId ||
@@ -771,9 +710,7 @@ export function App() {
           )
           .sort((a, b) => a.label.localeCompare(b.label))
       : [];
-  // selectedOpeningId doubles as the slot for a floor-placed blocked zone
-  // (no separate selection slot — ids are unique across both arrays), so a
-  // selection that isn't a wall opening may resolve to a floor blocked zone.
+  // Opening selection also represents floor blocked zones; ids are globally unique.
   const selectedFloorBlockedZone: BlockedZoneFloorObject | null =
     selectedOpeningId && !selectedOpening
       ? (project.floorObjects.find(
@@ -782,34 +719,21 @@ export function App() {
         ) ?? null)
       : null;
 
-  // The multi-selection resolved against the live project — stale ids (undo/
-  // redo or a document swap can orphan them) simply drop out here rather than
-  // ever reaching an action. The arrange readout only exists when the whole
-  // selection is 2+ wall objects on a single wall — the same guard the
-  // arrange-session actions enforce, computed here so the inspector can show
-  // the current spacing (or a hint) instead of failing on commit.
+  // Drop stale multi-selection ids before deriving arrange eligibility.
   const isMultiSelect = selectedObjectIds.length > 1;
-  // Arranging operates on ARTWORKS only — a selected opening (door/window/
-  // blocked zone) is architecture, never a member. So the readout, the panel's
-  // eligibility, and the keyboard nudges all derive from artwork members;
-  // openings in the selection are ignored rather than blocking arrangement.
+  // Arrangement ignores selected architecture and operates on artworks only.
   const selectedArtworkMembers = project.wallObjects.filter(
     (wallObject) =>
       wallObject.kind === "artwork" && selectedObjectIds.includes(wallObject.id)
   );
-  // Single source of truth for the "can this selection be arranged" facts —
-  // see arrangeEligibility.ts. beginArrangeSession enforces the same guard;
-  // this is only the derived-state side (readout + disabled-reason copy).
+  // beginArrangeSession enforces the same eligibility at commit time.
   const arrangeEligibility = getArrangeEligibility(project, selectedObjectIds);
   const arrangeWall = arrangeEligibility.eligible
     ? (getProjectWalls(project).find(
         (wall) => wall.id === arrangeEligibility.wallId
       ) ?? null)
     : null;
-  // A live session ties itself to the current selection (the store auto-
-  // accepts on any selection/view change), so its previewById describes these
-  // very members — override their committed positions with it before reading
-  // the layout back, so the panel and its Apply/Cancel reflect the preview.
+  // Read arrangement values from live preview positions when a session exists.
   const activeArrangeSession =
     arrangeWall && arrangeSession && arrangeSession.wallId === arrangeWall.id
       ? arrangeSession
@@ -833,13 +757,7 @@ export function App() {
     lastEvenZone
   });
 
-  // Why the arrange panel is disabled, named specifically — the static "select
-  // two objects" line read as nonsense to a user who already had three objects
-  // selected but only one work among them. Branch order mirrors the
-  // arrangeEligibility guard above (floor members block first, then the works
-  // count, then the single-wall rule) so the hint always names the actual
-  // blocker. The strings themselves are UI copy, so they stay here rather
-  // than in arrangeEligibility.ts.
+  // Branch order mirrors arrange eligibility so the hint names the first blocker.
   const arrangeDisabledReason = arrangeEligibility.eligible
     ? ""
     : arrangeEligibility.reason === "floorMember"
@@ -849,18 +767,13 @@ export function App() {
         : arrangeEligibility.reason === "singleArtwork"
         ? "Arranging is for works only. Select at least two works on the same wall to arrange them."
         : "Select works on a single wall to arrange them. This selection spans more than one wall.";
-  // When the selection IS arrangeable but also contains openings, arranging
-  // silently ignores them (see selectedArtworkMembers above) — surface that
-  // explicitly rather than let the curator wonder why a door didn't move.
+  // Explain that selected openings are excluded from arrangement.
   const arrangeIgnoredNote =
     arrangeWall && selectedObjectIds.length > selectedArtworkMembers.length
       ? "Only the works are arranged. Doors, windows, and blocked zones stay put."
       : undefined;
 
-  // Warnings carry a wallObjectId, but a raw id means nothing to a curator —
-  // resolve it to the artwork's title, or the opening's human-readable kind
-  // label ("Door"/"Window"/"Blocked zone", never a raw `kind` string), for
-  // display.
+  // Resolve warning ids to artwork titles or human-readable opening labels.
   const labeledPlacementWarnings = placementWarnings.map((warning) => {
     const wallObject = project.wallObjects.find(
       (candidate) => candidate.id === warning.wallObjectId
@@ -874,11 +787,7 @@ export function App() {
     return { ...warning, subject };
   });
 
-  // The rail's Issues button jumps to the first warning's wall object so the
-  // inspector reveals it — an artwork placement selects the placement itself
-  // (not just the library artwork, so a stale multi-selection resolves back
-  // to this one work), any other kind (door/window/blocked zone) selects the
-  // opening.
+  // Issues navigation selects the first warning's placement in the inspector.
   const selectFirstWarningObject = () => {
     const first = placementWarnings[0];
     if (!first) return;
@@ -979,9 +888,7 @@ export function App() {
     }
   };
 
-  // Project manager's per-row quick export — same "Standard" (display-quality)
-  // default as the primary Export button's first, recommended option, minus
-  // the mode picker: a project list row isn't the place for that choice.
+  // Project-row quick export uses the standard display-quality mode.
   const handleExportProjectById = async (id: string) => {
     try {
       const result = await exportProjectPackageById(id, "display");
@@ -1006,9 +913,7 @@ export function App() {
     }
   };
 
-  // One Import entry point for both formats, detected by CONTENT, not
-  // extension: zip magic bytes ("PK\x03\x04") mean a .sightlines package,
-  // anything else goes down the existing project-JSON path.
+  // Detect package vs. project JSON by zip magic, not file extension.
   const handleImportFile = async (file: File) => {
     const buffer = await file.arrayBuffer();
     const head = new Uint8Array(buffer, 0, Math.min(4, buffer.byteLength));
@@ -1022,10 +927,7 @@ export function App() {
     else await importProjectJson(new TextDecoder().decode(buffer));
   };
 
-  // The grid tracks are driven by CSS custom properties (see .workspace in
-  // global.css) rather than an inline grid-template-columns, so the narrow-
-  // viewport media query can still override to a single stacked column — an
-  // inline template would win over the stylesheet and defeat requirement 7.
+  // CSS variables let narrow-view media queries override the grid layout.
   const workspaceStyle = {
     "--left-panel-width": `${leftPanelWidth}px`,
     "--inspector-width": `${inspectorWidth}px`
@@ -1034,23 +936,14 @@ export function App() {
     "workspace",
     visibleLeftPanel ? null : "left-collapsed",
     visibleInspectorCollapsed ? "right-collapsed" : null,
-    // The inspector toggle's vertical anchor depends on the view's topography:
-    // canvas views clear the toolbar band, the library seats it in its header
-    // lane (see .workspace.library-view .inspector-toggle).
+    // Library view seats the inspector toggle in its header lane.
     viewMode === "library" ? "library-view" : null
   ]
     .filter(Boolean)
     .join(" ");
 
   return (
-    // One provider for every hover tooltip in the app (plan/elevation
-    // placements), so they share a single warm-up delay and skip-delay window.
-    // disableHoverableContent: every tooltip in the app is a plain text hint,
-    // so nothing needs the pointer to reach the bubble — and Radix's
-    // hoverable-content "grace polygon" (trigger→content hull) is wider than
-    // the 32px toolbar segments, so a pointer arriving on a neighbor inside
-    // the previous tooltip's polygon counted as in-transit and the new
-    // tooltip silently never opened until the pointer left and came back.
+    // Disable hoverable content: the grace polygon can swallow adjacent 32px triggers.
     <TooltipProvider delayDuration={400} disableHoverableContent>
     <Toaster />
     <main className="app-shell">
@@ -1720,10 +1613,7 @@ export function App() {
             ) : null}
 
             {isMultiSelect ? (
-              // A multi-selection replaces the whole single-subject chain —
-              // the legacy inspector slots are already null (the store clears
-              // them whenever more than one object is selected), so nothing
-              // below could render meaningfully anyway.
+              // Multi-selection replaces the single-subject inspector chain.
               <SelectionInspector
                 arrange={arrangeReadout}
                 arrangeDisabledReason={arrangeDisabledReason}

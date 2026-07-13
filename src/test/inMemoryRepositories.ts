@@ -37,9 +37,7 @@ export class InMemoryProjectRepository implements ProjectRepository {
   }
 }
 
-// Validates on save the same way IndexedDbArtworkLibraryRepository does
-// (parseArtwork), so a store bug that writes a malformed record fails the
-// test the same way it would fail against the real repository.
+// Match the production repository's validate-on-save behavior.
 export class InMemoryArtworkLibraryRepository implements ArtworkLibraryRepository {
   artworks = new Map<string, Artwork>();
 
@@ -63,9 +61,7 @@ export class InMemoryArtworkLibraryRepository implements ArtworkLibraryRepositor
   }
 }
 
-// Same validate-on-save shape as IndexedDbAssetRepository, backed by plain
-// maps instead of IndexedDB — real Blob instances flow through unchanged so
-// tests can assert on their content.
+// Match production validation while keeping Blobs directly inspectable.
 export class InMemoryAssetRepository implements AssetRepository {
   assets = new Map<string, Asset>();
   blobs = new Map<string, Blob>();
@@ -98,17 +94,11 @@ export class InMemoryAssetRepository implements AssetRepository {
   }
 }
 
-// A fake processor that skips real image decoding entirely (jsdom has no
-// Canvas/ImageBitmap support) — it returns tiny deterministic blobs and
-// metadata instead, and can be told to throw for specific filenames to
-// exercise the store's per-file failure containment.
+// Deterministic substitute for browser image decoding, which jsdom lacks.
 export class FakeImageProcessor implements ImageProcessor {
   processedFilenames: string[] = [];
 
-  // `hashForName` lets a test pin a specific sha256 per filename so two
-  // differently-named files can be made content-identical (or vice versa).
-  // Names absent from the map fall back to a name-derived hash, so distinct
-  // filenames stay distinct by default.
+  // Tests can override hashes to model matching or distinct file contents.
   constructor(
     private readonly failingFilenames: ReadonlySet<string> = new Set(),
     private readonly hashForName: ReadonlyMap<string, string> = new Map()

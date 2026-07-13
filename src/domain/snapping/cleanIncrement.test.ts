@@ -22,9 +22,6 @@ function neighbor(overrides: Partial<WallObjectBase> = {}): WallObjectBase {
 
 describe("quantizeXToCleanIncrement", () => {
   it("lands the left edge on a whole increment from the wall start (family a)", () => {
-    // width 300 → half 150. Proposed center 452 → left edge 302. Nearest clean
-    // left-edge distance is 12·25.4 = 304.8 → center 454.8. No neighbours, and
-    // the wall end is far away so family (a) wins.
     const result = quantizeXToCleanIncrement(
       { xMm: 452, yMm: 1500 },
       { widthMm: 300, heightMm: 400 },
@@ -36,9 +33,6 @@ describe("quantizeXToCleanIncrement", () => {
   });
 
   it("lands the right edge on a whole increment from the wall end (family b)", () => {
-    // wallLength 3000, half-width 150. A clean right-edge-from-wall-end of 10
-    // inches puts the center at 2596; the left-edge family's nearest there is
-    // ~7.6mm off, so a proposal 2mm from the clean center lets family (b) win.
     const wallLengthMm = 3000;
     const halfWidthMm = 150;
     const result = quantizeXToCleanIncrement(
@@ -48,13 +42,10 @@ describe("quantizeXToCleanIncrement", () => {
       wallLengthMm,
       []
     );
-    // right-edge distance from wall end is a clean 10 inches
     expect(wallLengthMm - (result + halfWidthMm)).toBeCloseTo(10 * INCH, 6);
   });
 
   it("lands a clean gap to the nearest left neighbour (family c)", () => {
-    // Neighbour right edge at 1200. Moving width 300 (half 150). A center just
-    // right of a clean 2-inch gap should snap the left-edge gap to 2 inches.
     const n = neighbor({ xMm: 1000, widthMm: 400 }); // right edge 1200
     const cleanCenter = 1200 + 2 * INCH + 150; // gap exactly 2 inches
     const result = quantizeXToCleanIncrement(
@@ -69,8 +60,6 @@ describe("quantizeXToCleanIncrement", () => {
   });
 
   it("lands a clean gap to the nearest right neighbour (family d)", () => {
-    // Neighbour left edge at 2000. Moving width 300 (half 150). A center just
-    // left of a clean 3-inch gap should snap the right-edge gap to 3 inches.
     const n = neighbor({ id: "n-right", xMm: 2200, widthMm: 400 }); // left edge 2000
     const cleanCenter = 2000 - 3 * INCH - 150; // gap exactly 3 inches
     const result = quantizeXToCleanIncrement(
@@ -85,8 +74,6 @@ describe("quantizeXToCleanIncrement", () => {
   });
 
   it("picks the nearest candidate across competing families", () => {
-    // A left neighbour offers a clean gap 1mm away; the wall-start family offers
-    // one 8mm away. The nearer (neighbour) candidate must win.
     const n = neighbor({ xMm: 1000, widthMm: 400, heightMm: 600 }); // right edge 1200
     const halfWidthMm = 150;
     const nearGapCenter = 1200 + 1 * INCH + halfWidthMm; // 1-inch gap
@@ -102,8 +89,6 @@ describe("quantizeXToCleanIncrement", () => {
   });
 
   it("ignores neighbours whose vertical band does not overlap the moving object", () => {
-    // A neighbour far above the moving object (no y-band overlap) must not bound
-    // a horizontal gap; only the wall families remain.
     const highNeighbor = neighbor({
       xMm: 1000,
       widthMm: 400,
@@ -162,7 +147,6 @@ describe("quantizeXToCleanIncrement", () => {
 
 describe("quantizeYToCleanIncrement", () => {
   it("lands the center height on a whole increment from the floor", () => {
-    // Proposed center 1449 → nearest 57·25.4 = 1447.8. Bottom family is farther.
     const result = quantizeYToCleanIncrement(
       { xMm: 0, yMm: 1449 },
       { widthMm: 300, heightMm: 405 }, // half 202.5, bottom family off-lattice
@@ -172,9 +156,6 @@ describe("quantizeYToCleanIncrement", () => {
   });
 
   it("lands the bottom edge on a whole increment from the floor when nearer", () => {
-    // Half-height 12.7 puts the center exactly on a half-increment offset, so
-    // the center family is a full 12.7mm away while the bottom edge sits ~2mm
-    // from a clean 40-inch multiple — the bottom family wins.
     const heightMm = 25.4; // half 12.7
     const cleanBottomMm = 40 * INCH;
     const proposedYMm = cleanBottomMm + 12.7 + 2; // bottom 2mm from clean
@@ -196,17 +177,12 @@ describe("quantizeYToCleanIncrement", () => {
 });
 
 describe("nudge-progress invariant", () => {
-  // For any position p and step s ≥ incrementMm, quantize(p + s) − quantize(p)
-  // must share the sign of s and have magnitude ≥ s/2 — a nudge always makes
-  // real progress in the travel direction. Verified on single-lattice configs
-  // (where the property holds rigorously): x with the two wall families made to
-  // coincide, and y with the two vertical families made to coincide.
+  // A nudge on a single-lattice setup must make meaningful progress in its direction.
   const incrementMm = INCH;
 
   it("advances x monotonically (single-lattice config, no neighbours)", () => {
     const widthMm = 300;
-    // (wallLength − width) a whole number of increments → families a and b share
-    // one lattice, so the quantizer behaves as a single round-to-nearest.
+    // Make both horizontal families share one lattice.
     const wallLengthMm = widthMm + 50 * incrementMm;
     const size = { widthMm, heightMm: 400 };
     for (const step of [incrementMm, 4 * incrementMm]) {
@@ -231,8 +207,7 @@ describe("nudge-progress invariant", () => {
   });
 
   it("advances y monotonically (single-lattice config)", () => {
-    // Half-height a whole number of increments → center and bottom families
-    // coincide into one lattice.
+    // Make center and bottom families share one lattice.
     const size = { widthMm: 300, heightMm: 4 * incrementMm };
     for (const step of [incrementMm, 4 * incrementMm]) {
       for (let p = -100; p <= 2000; p += 4.3) {

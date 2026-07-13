@@ -1,8 +1,4 @@
-// Pure decision logic for the image intake pipeline (docs/plan.md §4.5). No
-// browser APIs here on purpose — decode/encode/hash live in
-// browserImageProcessor.ts, which isn't unit-testable in jsdom. Anything that
-// *can* be expressed as plain data-in/data-out belongs in this file instead,
-// so it's covered by real tests.
+// Pure image-intake decisions; browser decoding and encoding live separately.
 
 export const ACCEPTED_IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 
@@ -10,9 +6,7 @@ export function isAcceptedImageType(mimeType: string): boolean {
   return (ACCEPTED_IMAGE_MIME_TYPES as readonly string[]).includes(mimeType);
 }
 
-// Local-first means this is a disk/memory budget, not a hosting-cost one —
-// still worth a cap so one runaway file doesn't stall a batch upload or blow
-// past IndexedDB/OPFS quota without warning.
+// Protect batch processing and local-storage quotas from oversized files.
 export const MAX_IMAGE_FILE_BYTES = 50 * 1024 * 1024;
 
 export function validateImageFile(
@@ -39,17 +33,12 @@ function formatMegabytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// Tier sizes and encode quality, per docs/plan.md §4.5 — display is
-// deliberately above "just a glance" resolution (a 3D camera moving close to
-// a wall should still read as sharp); thumbnail is checklist/fast-list only.
+// Display supports close 3D views; thumbnails serve lists.
 export const THUMBNAIL_MAX_PX = 400;
 export const DISPLAY_MAX_PX = 1800;
 export const WEBP_QUALITY = 0.82;
 
-// Scales the longer edge down to maxPx, preserving aspect ratio. Never
-// upscales — a source image already smaller than the cap is returned as-is,
-// since generating a display/thumbnail tier bigger than the original would
-// waste space without adding real detail.
+// Fits the longer edge without upscaling.
 export function fitWithin(
   widthPx: number,
   heightPx: number,
@@ -63,24 +52,19 @@ export function fitWithin(
 
   const scale = maxPx / longerEdge;
 
-  // Math.max(1, ...) guards extreme aspect ratios (e.g. a 10000x1 banner)
-  // where the shorter edge would otherwise round down to 0.
+  // Preserve at least one pixel for extreme aspect ratios.
   return {
     widthPx: Math.max(1, Math.round(widthPx * scale)),
     heightPx: Math.max(1, Math.round(heightPx * scale))
   };
 }
 
-// Derives a starting artwork title from an uploaded filename: strip the
-// extension, trim whitespace, and leave everything else — including
-// underscores/hyphens/case — untouched, since those are the artist's own
-// naming convention, not ours to normalize.
+// Strip the extension but preserve the user's filename conventions.
 export function titleFromFilename(filename: string): string {
   const trimmed = filename.trim();
   const lastDot = trimmed.lastIndexOf(".");
 
-  // lastDot > 0 (not >= 0) so a dotfile-style name like ".scan" is treated as
-  // having no extension rather than stripping down to an empty stem.
+  // Dotfile-style names such as ".scan" have no extension.
   const stem = lastDot > 0 ? trimmed.slice(0, lastDot) : trimmed;
   const trimmedStem = stem.trim();
 
@@ -99,10 +83,7 @@ export type ProcessedImage = {
   thumbnail: Blob;
 };
 
-// The seam between this pure module and the effectful browser implementation
-// (browserImageProcessor.ts). The app store depends on this interface, not
-// the concrete implementation, so its tests can inject a fake processor
-// instead of exercising real Canvas/crypto APIs.
+// Injectable boundary around browser Canvas and crypto APIs.
 export type ImageProcessor = {
   process(file: File): Promise<ProcessedImage>;
 };

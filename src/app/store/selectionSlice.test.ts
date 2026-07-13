@@ -23,10 +23,7 @@ import {
   type Selection
 } from "./selectionSlice";
 
-// The stock sample project ships with EMPTY wallObjects/floorObjects, so
-// (unlike the brief's sketch) we can't pluck a placement off it — we build a
-// fixture project with one artwork placement and one opening placement whose
-// ids the helpers resolve against.
+// Fixture with real artwork and opening IDs for selection resolution.
 const artworkPlacement: ArtworkWallObject = {
   id: "wo-artwork-1",
   wallId: "wall-north",
@@ -119,9 +116,6 @@ function makeStore() {
 }
 
 describe("selection transitions through the store", () => {
-  // The booted sample project has room-main with wall-north/east/south/west
-  // and empty object arrays — we add the placements/openings/checklist entries
-  // each test needs.
   let store: ReturnType<typeof makeStore>;
 
   beforeEach(async () => {
@@ -155,9 +149,7 @@ describe("selection transitions through the store", () => {
     return store.getState().project!.wallObjects.find((object) => object.kind === "door")!.id;
   }
 
-  // Three equal-width works on a wall too short for their current spread, then
-  // selected — begin+update produces a real preview delta the settle logic can
-  // commit.
+  // Produce a nontrivial arrange preview for settle tests.
   async function threeWorksOnWall(): Promise<string[]> {
     await store.getState().resizeWall("wall-north", 2540);
     const ids: string[] = [];
@@ -206,7 +198,6 @@ describe("selection transitions through the store", () => {
 
     const before = store.getState().selection;
     store.getState().selectOpening("dead-id");
-    // A dead id leaves the selection untouched (same object reference).
     expect(store.getState().selection).toBe(before);
   });
 
@@ -262,11 +253,7 @@ describe("selection transitions through the store", () => {
     const openingId = await addDoor();
     const unplaced = await addChecklistArtwork("drift-unplaced.jpg");
 
-    // The mirror fields are gone; the union is the only selection state. This
-    // sweep locks the same behaviors the old mirror-drift invariant did — that
-    // each action produces the right selection — by asserting the union
-    // directly and checking the pure helpers derive the intended values from
-    // it, action by action.
+    // Verify each action directly against the unified selection state.
     type Expectation = {
       act: () => void;
       selection: Selection;
@@ -364,13 +351,9 @@ describe("selection transitions through the store", () => {
   });
 
   it("deleteRoom clears a selected dying opening but preserves dangling multi-select ids", async () => {
-    // Faithful port of the pre-union pruning: the legacy code nulled
-    // selectedOpeningId when its opening sat on a deleted wall, but never
-    // touched selectedObjectIds — dangling ids stay dangling (undo can
-    // create them too, and consumers tolerate them).
+    // Preserve the tolerated dangling multi-select behavior after room deletion.
     await store.getState().addRectangleRoom();
 
-    // A selected opening on the doomed room clears to none.
     await store.getState().addOpening("room-2-wall-north", "door");
     const openingId = store.getState().project!.wallObjects.find(
       (object) => object.kind === "door"
@@ -384,7 +367,6 @@ describe("selection transitions through the store", () => {
     expect(getSelectedOpeningId(state.project, state.selection)).toBeNull();
     expect(objectIdsOf(state.selection)).toEqual([]);
 
-    // A multi-select on the doomed room is left exactly as it was — dangling.
     await store.getState().undo(); // resurrect room-2 (and its door)
     const a = await addChecklistArtwork("dying-a.jpg");
     const b = await addChecklistArtwork("dying-b.jpg");
@@ -421,10 +403,7 @@ describe("selection transitions through the store", () => {
   });
 });
 
-// The spec asks for an explicit settle matrix. These rows are NOT already
-// covered in store.test.ts (which covers: selection change → accept via
-// selectObject/clearObjectSelection, foreign edit → cancel, undo → cancel,
-// collision-blocked auto-accept → cancel). The rows added here fill the gaps.
+// Settle-matrix cases not covered in store.test.ts.
 describe("arrange-session settle matrix (rows missing from store.test.ts)", () => {
   let store: ReturnType<typeof makeStore>;
 
@@ -467,7 +446,6 @@ describe("arrange-session settle matrix (rows missing from store.test.ts)", () =
   it("selection change with no preview delta settles silently (no undo entry)", async () => {
     await threeWorksOnWall();
     store.getState().beginArrangeSession("equal");
-    // No updateArrangeSession: the preview equals the committed layout.
     const undoBefore = store.getState().undoStack.length;
 
     store.getState().selectWall("wall-east");
@@ -489,7 +467,6 @@ describe("arrange-session settle matrix (rows missing from store.test.ts)", () =
 
     const state = store.getState();
     expect(state.arrangeSession).toBeNull();
-    // The redone entry is the move, not a phantom arrange commit.
     expect(state.undoStack.at(-1)?.label).toBe("Move artwork");
   });
 });

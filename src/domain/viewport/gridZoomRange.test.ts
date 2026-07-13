@@ -6,17 +6,9 @@ import {
 } from "../units/precision";
 import { getViewBox2D, PLAN_ZOOM_LIMITS, type ViewBox, type Viewport2D } from "./viewport2d";
 
-// Task M3 regression pins (docs: task-m3-brief.md). M2 already made the
-// getViewBox2D → precision → gridSnapTargets pipeline correct (the viewBox
-// IS the visible window, aspect-matched, no letterboxing) — these tests pin
-// that behavior across the zoom range so a future change can't silently
-// regress grid density or snap-threshold scaling. The companion pin for
-// grid-pattern anchoring under pan (Test D) renders the real GridOverlay
-// and lives with that component: src/app/components/GridOverlay.test.tsx.
+// Regression coverage for grid density and snap thresholds across the zoom range.
 
-// A realistic worst case: a modest room-scale plan (10m x 10m) viewed in a
-// wide, short container — the aspect mismatch (1.6 vs 1.0) is deliberate,
-// it's what makes the viewBox's non-constrained axis extend past contentBounds.
+// Aspect mismatch forces the unconstrained viewBox axis beyond content bounds.
 const CONTENT_BOUNDS: ViewBox = { x: 0, y: 0, width: 10000, height: 10000 };
 const CONTAINER = { width: 1600, height: 1000 };
 
@@ -40,9 +32,6 @@ function boundsOf(viewBox: ViewBox) {
 
 describe("grid/snap correctness across the zoom range (M3)", () => {
   it("Test A: snap-target volume stays well under the per-axis cap at min zoom + finest precision floor", () => {
-    // minZoom = 4x the fit size — the widest possible visible window, and the
-    // finest precision floor the app offers (metric: 0.5cm; imperial: 0.5in),
-    // so the minor interval is pinned as fine as the ladder ever allows.
     const viewport = manualViewport(PLAN_ZOOM_LIMITS.minZoom);
     const { viewBox, pixelsPerMm } = getViewBox2D(viewport, CONTENT_BOUNDS, CONTAINER);
     const visibleBounds = boundsOf(viewBox);
@@ -56,10 +45,7 @@ describe("grid/snap correctness across the zoom range (M3)", () => {
     const metricXCount = metricTargets.filter((t) => t.axis === "x").length;
     const metricYCount = metricTargets.filter((t) => t.axis === "y").length;
 
-    // Pinned actual counts (10m x 10m content, 1600x1000px container,
-    // minZoom=0.25 -> 64000x40000mm visible window, 500mm metric minor): a
-    // future change to any link in the pipeline that inflates this materially
-    // will fail here instead of silently ballooning the DOM/snap-candidate set.
+    // Pin target volume so DOM/snap candidates cannot silently balloon.
     expect(metricMinorMm).toBe(500);
     expect(metricXCount).toBe(129);
     expect(metricYCount).toBe(81);
@@ -93,20 +79,14 @@ describe("grid/snap correctness across the zoom range (M3)", () => {
       return { zoom, pixelsPerMm, minorMm };
     });
 
-    // (1) monotonically non-increasing as zoom increases.
     for (let i = 1; i < unfloored.length; i += 1) {
       expect(unfloored[i].minorMm).toBeLessThanOrEqual(unfloored[i - 1].minorMm);
     }
 
-    // (2) the on-screen minor spacing never drops below the target — the
-    // invariant the whole ladder exists to guarantee.
     for (const { minorMm, pixelsPerMm } of unfloored) {
       expect(minorMm * pixelsPerMm).toBeGreaterThanOrEqual(targetMinorPx - 1e-9);
     }
 
-    // (3) with a precision floor set, the interval never goes below it even
-    // at the deepest zoom (where the unfloored ladder would otherwise pick a
-    // finer rung).
     const floored = zooms.map((zoom) => {
       const { pixelsPerMm } = getViewBox2D(manualViewport(zoom), CONTENT_BOUNDS, CONTAINER);
       return getMinorGridIntervalMm("m", pixelsPerMm, { targetMinorPx, minIntervalMm: floorMm });
@@ -114,9 +94,6 @@ describe("grid/snap correctness across the zoom range (M3)", () => {
     for (const minorMm of floored) {
       expect(minorMm).toBeGreaterThanOrEqual(floorMm);
     }
-    // At max zoom the unfloored ladder would pick a rung finer than the
-    // floor (10mm < 25.4mm) — confirming the floor is actually doing work,
-    // not just trivially satisfied because nothing ever got that fine.
     expect(unfloored[unfloored.length - 1].minorMm).toBeLessThan(floorMm);
     expect(floored[floored.length - 1]).toBeGreaterThanOrEqual(floorMm);
   });
@@ -132,13 +109,10 @@ describe("grid/snap correctness across the zoom range (M3)", () => {
     });
 
     for (const { pixelsPerMm, snapThresholdMm } of results) {
-      // Trivially true by construction — documents the definition so a future
-      // refactor that stores the threshold in mm (losing the constant-px
-      // property) would have to knowingly break this line.
+      // Snap threshold must remain constant in screen pixels.
       expect(snapThresholdMm * pixelsPerMm).toBeCloseTo(SNAP_THRESHOLD_PX, 9);
     }
 
-    // Inversely proportional to zoom: doubling zoom halves the mm threshold.
     for (let i = 1; i < results.length; i += 1) {
       const prev = results[i - 1];
       const curr = results[i];

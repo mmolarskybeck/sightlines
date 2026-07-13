@@ -26,10 +26,7 @@ describe("resizeWallPreservingAngles", () => {
   });
 
   it("refuses a skewed four-wall room instead of silently squaring it", () => {
-    // This used to "rectify" the skew — reasonable when a skewed quad could
-    // only mean drift or corruption, wrong now that polygon drawing makes
-    // non-rectangular quads deliberate geometry. resizeOrthogonalQuad would
-    // rebuild this as a rectangle, so it must never run on one.
+    // Regression: deliberate skewed quads must not be rectified into rectangles.
     const project = createSampleProject();
     project.floor.rooms[0].room.vertices = project.floor.rooms[0].room.vertices.map(
       (vertex) =>
@@ -75,17 +72,13 @@ describe("resizeWallPreservingAngles", () => {
     expect(northWall?.lengthMm).toBeCloseTo(feetToMm(30));
     expect(result.anchorVertexId).toBe("v-ne");
 
-    // The end side is pinned in world space; the start side absorbs the growth.
     const worldEndAfter = worldVertex(result.project, "v-ne");
     expect(worldEndAfter.xMm).toBeCloseTo(worldEndBefore.xMm);
     expect(worldEndAfter.yMm).toBeCloseTo(worldEndBefore.yMm);
     expect(worldVertex(result.project, "v-nw").xMm).toBeCloseTo(
       worldStartBefore.xMm - feetToMm(2)
     );
-    // Since the merge into moveRoomWall, an "end" anchor is a slide of the
-    // PREVIOUS wall in room-local space — the placement offset is never
-    // touched (pre-merge it was shifted to compensate a start-anchored
-    // local resize).
+    // End anchoring moves room-local geometry without changing placement offset.
     expect(result.project.floor.rooms[0].offsetXMm).toBe(0);
     expect(result.project.floor.rooms[0].offsetYMm).toBe(0);
   });
@@ -142,8 +135,7 @@ describe("resizeWallPreservingAngles", () => {
   it("rejects numeric resize on a non-rectangular room instead of skewing it", () => {
     const project = createSampleProject();
     const room = project.floor.rooms[0].room;
-    // Turn the sample rectangle into a triangle (still a valid closed loop
-    // per the schema) by dropping the west wall and rejoining south to nw.
+    // Convert the sample into a schema-valid triangle.
     project.floor.rooms[0].room = {
       ...room,
       vertices: room.vertices.filter((vertex) => vertex.id !== "v-sw"),
@@ -160,17 +152,7 @@ describe("resizeWallPreservingAngles", () => {
   });
 });
 
-// Characterization tests for the rectangle-only numeric resize pipeline
-// (RoomResizeHandles -> dragResize -> resizeWallPreservingAngles). Since
-// 2026-07-12 that path delegates into the general polygon wall-move core
-// (reshapeRoom.moveRoomWall) — the merge this suite was built to gate —
-// and these tests now pin the wrapper's contract. Anchor semantics (which
-// vertex is held fixed in world space for "start" vs "end"), non-rectangle
-// rejection, and a width-wall resize's changedWallIds are already covered
-// by the tests above; this block fills in what wasn't: full-quad
-// orthogonality (all four corners, not just one adjacent pair) and the
-// depth-wall (perpendicular-dimension) counterpart of the paired-dimension
-// and changed-wall-ids promises.
+// Rectangle resize wrapper contract; core polygon movement is tested separately.
 describe("rectangle resize characterization (pipeline-merge gate)", () => {
   it("resizing the width wall keeps the whole quad rectangular, not just the one adjacent corner already checked above", () => {
     const project = createSampleProject();
@@ -194,18 +176,14 @@ describe("rectangle resize characterization (pipeline-merge gate)", () => {
     const south = walls.find((wall) => wall.id === "wall-south");
     const west = walls.find((wall) => wall.id === "wall-west");
 
-    // The resized wall and its opposite (parallel) wall both land on the
-    // new length — a rectangle's opposite sides must match.
     expect(east?.lengthMm).toBeCloseTo(feetToMm(10));
     expect(west?.lengthMm).toBeCloseTo(feetToMm(10));
-    // The perpendicular dimension (width) is untouched.
     expect(north?.lengthMm).toBeCloseTo(feetToMm(28));
     expect(south?.lengthMm).toBeCloseTo(feetToMm(28));
   });
 });
 
-// A vertex's position in world/floor space is its room-local position plus
-// the placement offset — the invariant an "end"-anchored resize must hold.
+// Convert a room-local vertex to floor space.
 function worldVertex(
   project: ReturnType<typeof createSampleProject>,
   vertexId: string

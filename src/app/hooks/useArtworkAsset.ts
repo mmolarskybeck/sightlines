@@ -3,14 +3,7 @@ import type { Asset } from "../../domain/project";
 import { IndexedDbAssetRepository } from "../../domain/repositories/indexedDbAssetRepository";
 import { useAssetImageUrls } from "./useAssetImageUrls";
 
-// Read-only asset access for the inspector, which needs the selected artwork's
-// Asset record (its widthPx/heightPx drive aspect-ratio auto-fill) and a
-// thumbnail to sit beside the metadata. Mirrors App.tsx's own rationale for a
-// dedicated read-side IndexedDbAssetRepository: the repository is a stateless
-// wrapper around IndexedDB, not something that needs a single shared instance,
-// so a second instance here avoids threading getBlob/asset props through App
-// for one panel. A failed load just leaves the asset undefined (no ratio, no
-// thumbnail) rather than throwing.
+// Read-only inspector access. Missing assets degrade to no ratio or thumbnail.
 const assetRepository = new IndexedDbAssetRepository();
 function getBlob(key: string): Promise<Blob> {
   return assetRepository.getBlob(key);
@@ -28,8 +21,7 @@ export function useArtworkAsset(assetId: string | undefined): {
       return;
     }
 
-    // Guards a late resolution after the selection changed out from under us
-    // (a different artwork, or none) so we never show a stale record.
+    // Ignore loads completed after the selection changes.
     let cancelled = false;
     assetRepository
       .getAsset(assetId)
@@ -45,9 +37,7 @@ export function useArtworkAsset(assetId: string | undefined): {
     };
   }, [assetId]);
 
-  // Stable array identity so useAssetImageUrls' effect doesn't refetch on
-  // every render (it keys off a JSON snapshot, but a fresh [] each render still
-  // churns state updates).
+  // Stable identity avoids unnecessary URL-state updates.
   const assetIds = useMemo(() => (assetId ? [assetId] : []), [assetId]);
   const urls = useAssetImageUrls(assetIds, getBlob, "thumbnail");
 
