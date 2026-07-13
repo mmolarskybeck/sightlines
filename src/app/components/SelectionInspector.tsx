@@ -9,6 +9,9 @@ import type { DisplayUnit, WallObject } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
 import type { ArrangeBoundary } from "../hooks/arrangeReadout";
 import { LengthField } from "./LengthField";
+import { InspectorSection } from "./InspectorSection";
+import { InspectorNotice } from "./InspectorNotice";
+import { InspectorActionGroup } from "./InspectorActionGroup";
 import {
   SegmentedToggleGroup,
   SegmentedToggleGroupItem,
@@ -202,15 +205,11 @@ export function SelectionInspector({
         {count} object{count === 1 ? "" : "s"} selected
       </h3>
 
-      <div className="artwork-dimensions">
-        <div className="artwork-dimensions-heading">
-          <h3>Arrange on {wallName ?? "wall"}</h3>
-        </div>
-
+      <InspectorSection collapsible={false} title={`Arrange on ${wallName ?? "wall"}`}>
         {arrange ? (
           <div className="arrange-controls">
             {arrangeIgnoredNote ? (
-              <p className="field-hint">{arrangeIgnoredNote}</p>
+              <InspectorNotice tone="info">{arrangeIgnoredNote}</InspectorNotice>
             ) : null}
             <SegmentedToggleGroup
               aria-label="Spacing method"
@@ -433,7 +432,7 @@ export function SelectionInspector({
             )}
 
             {arrange.sessionActive ? (
-              <div className="arrange-actions">
+              <InspectorActionGroup>
                 <Button
                   className="inspector-action arrange-apply"
                   variant="primary"
@@ -450,13 +449,13 @@ export function SelectionInspector({
                   <XIcon aria-hidden="true" size={15} />
                   Cancel
                 </Button>
-              </div>
+              </InspectorActionGroup>
             ) : null}
           </div>
         ) : (
-          <p className="field-hint">{arrangeDisabledReason}</p>
+          <InspectorNotice tone="caution">{arrangeDisabledReason}</InspectorNotice>
         )}
-      </div>
+      </InspectorSection>
 
       <div className="inspector-placement">
         {confirmingRemove ? (
@@ -485,14 +484,16 @@ export function SelectionInspector({
             </Button>
           </div>
         ) : (
-          <Button
-            className="inspector-action inspector-danger"
-            variant="destructive-ghost"
-            onClick={() => setConfirmingRemove(true)}
-          >
-            <TrashIcon aria-hidden="true" size={15} />
-            Remove all
-          </Button>
+          <InspectorActionGroup>
+            <Button
+              className="inspector-action inspector-danger"
+              variant="destructive-ghost"
+              onClick={() => setConfirmingRemove(true)}
+            >
+              <TrashIcon aria-hidden="true" size={15} />
+              Remove all
+            </Button>
+          </InspectorActionGroup>
         )}
       </div>
     </form>
