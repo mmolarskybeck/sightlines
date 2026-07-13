@@ -59,11 +59,12 @@ import {
 import { clearOpeningPartners } from "../domain/placement/openingPairs";
 import { createArtworkPlacement, getEffectivePlacementSizeMm } from "../domain/placement/placeArtwork";
 import { effectiveFloorDepthMm } from "../domain/placement/artworkForm";
+import { withArtworkFootprint } from "../domain/framing";
 import type { PixelAspect } from "../domain/units/aspectFill";
 import type { PlacementWarning } from "../domain/placement/validatePlacement";
 import {
-  validateChangedWallPlacements,
-  validateWallObjectPlacements
+  validateChangedWallPlacements as validateChangedWallPlacementsRaw,
+  validateWallObjectPlacements as validateWallObjectPlacementsRaw
 } from "../domain/placement/validatePlacement";
 import type { ArtworkImportDraft } from "../domain/spreadsheetImport/types";
 import {
@@ -377,6 +378,43 @@ export type AppStoreDeps = {
 
 export function createAppStore(deps: AppStoreDeps) {
   return create<AppState>((set, get) => {
+    function projectWithArtworkFootprints(
+      project: Project,
+      artworks: Artwork[] = get().libraryArtworks
+    ): Project {
+      const artworksById = new Map(artworks.map((artwork) => [artwork.id, artwork]));
+      return {
+        ...project,
+        wallObjects: project.wallObjects.map((wallObject) =>
+          withArtworkFootprint(
+            wallObject,
+            wallObject.kind === "artwork" ? artworksById.get(wallObject.artworkId) : undefined
+          )
+        )
+      };
+    }
+
+    // Placement validation stays framing-agnostic. Widen resolved artwork
+    // copies only at this store boundary; persisted placement dimensions remain
+    // image-sized.
+    function validateChangedWallPlacements(project: Project, changedWallIds: string[]) {
+      return validateChangedWallPlacementsRaw(
+        projectWithArtworkFootprints(project),
+        changedWallIds
+      );
+    }
+
+    function validateWallObjectPlacements(
+      project: Project,
+      wallObjectIds: string[],
+      artworks?: Artwork[]
+    ) {
+      return validateWallObjectPlacementsRaw(
+        projectWithArtworkFootprints(project, artworks),
+        wallObjectIds
+      );
+    }
+
     async function persist(project: Project): Promise<boolean> {
       set({ saveState: "saving", error: null });
 
@@ -2468,6 +2506,7 @@ export function createAppStore(deps: AppStoreDeps) {
         );
         if (changedKeys.length === 0) return;
         const dimensionsChanged = changedKeys.includes("dimensions");
+        const framingChanged = changedKeys.includes("matWidthMm") || changedKeys.includes("frame");
 
         let parsed: Artwork;
         try {
@@ -2487,6 +2526,7 @@ export function createAppStore(deps: AppStoreDeps) {
         const project = get().project;
         let projectEdit: { before: Project; after: Project } | undefined;
         let placementWarnings: PlacementWarning[] = [];
+        const affectedIds = new Set<string>();
 
         if (project && dimensionsChanged) {
           // A derived axis needs the image ratio; skip the asset fetch on the
@@ -2496,7 +2536,6 @@ export function createAppStore(deps: AppStoreDeps) {
             parsed.dimensions.widthMm === undefined || parsed.dimensions.heightMm === undefined;
           const aspect = needsAspect ? await loadArtworkAspect(parsed) : undefined;
 
-          const affectedIds: string[] = [];
           const nextWallObjects = project.wallObjects.map((wallObject) => {
             if (
               wallObject.kind !== "artwork" ||
@@ -2511,19 +2550,37 @@ export function createAppStore(deps: AppStoreDeps) {
               return wallObject;
             }
 
-            affectedIds.push(wallObject.id);
+            affectedIds.add(wallObject.id);
             return { ...wallObject, widthMm: size.widthMm, heightMm: size.heightMm };
           });
 
-          if (affectedIds.length > 0) {
+          if (affectedIds.size > 0) {
             const after = {
               ...project,
               wallObjects: nextWallObjects,
               updatedAt: new Date().toISOString()
             };
             projectEdit = { before: project, after };
-            placementWarnings = validateWallObjectPlacements(after, affectedIds);
           }
+        }
+
+        if (project && framingChanged) {
+          for (const wallObject of project.wallObjects) {
+            if (wallObject.kind === "artwork" && wallObject.artworkId === artworkId) {
+              affectedIds.add(wallObject.id);
+            }
+          }
+        }
+
+        if (project && affectedIds.size > 0) {
+          const validationArtworks = get().libraryArtworks.map((artwork) =>
+            artwork.id === artworkId ? parsed : artwork
+          );
+          placementWarnings = validateWallObjectPlacements(
+            projectEdit?.after ?? project,
+            [...affectedIds],
+            validationArtworks
+          );
         }
 
         pushEditEntry(

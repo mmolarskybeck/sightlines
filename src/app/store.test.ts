@@ -2821,6 +2821,86 @@ describe("app store", () => {
     });
   });
 
+  describe("framed placement validation", () => {
+    it("revalidates existing placements when framing changes without rebaking stored dimensions", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("frame-added-later.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds.at(-1)!;
+      await store.getState().updateArtwork(artworkId, {
+        dimensions: { widthMm: 500, heightMm: 400, status: "known" }
+      });
+
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+      await store.getState().placeArtwork(artworkId, wall.id, 300, 1450, true);
+      const placementBefore = store.getState().project!.wallObjects.at(-1)!;
+      expect(store.getState().placementWarnings).toEqual([]);
+
+      await store.getState().updateArtwork(artworkId, {
+        matWidthMm: 75,
+        frame: { widthMm: 25, finish: "black" }
+      });
+
+      expect(store.getState().project!.wallObjects.at(-1)).toEqual(placementBefore);
+      expect(store.getState().placementWarnings).toEqual([
+        expect.objectContaining({
+          wallObjectId: placementBefore.id,
+          message: "Placement extends beyond the wall's length.",
+          type: "bounds"
+        })
+      ]);
+    });
+
+    it("warns when outer frames overlap even though the stored image rectangles do not", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("framed-a.jpg")]);
+      const artworkAId = store.getState().project!.checklistArtworkIds.at(-1)!;
+      await store.getState().addArtworksFromFiles([makeImageFile("framed-b.jpg")]);
+      const artworkBId = store.getState().project!.checklistArtworkIds.at(-1)!;
+
+      for (const artworkId of [artworkAId, artworkBId]) {
+        await store.getState().updateArtwork(artworkId, {
+          dimensions: { widthMm: 500, heightMm: 400, status: "known" },
+          matWidthMm: 75,
+          frame: { widthMm: 25, finish: "black" }
+        });
+      }
+
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+      await store.getState().placeArtwork(artworkAId, wall.id, 1000, 1450, true);
+      await store.getState().placeArtwork(artworkBId, wall.id, 1650, 1450, true);
+
+      expect(store.getState().placementWarnings).toEqual([
+        expect.objectContaining({
+          message: "Artworks overlap on this wall.",
+          type: "collision",
+          overridable: true
+        })
+      ]);
+    });
+
+    it("flags a frame past the wall edge while the stored image rectangle remains inside", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("framed-edge.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds.at(-1)!;
+      await store.getState().updateArtwork(artworkId, {
+        dimensions: { widthMm: 500, heightMm: 400, status: "known" },
+        matWidthMm: 75,
+        frame: { widthMm: 25, finish: "black" }
+      });
+
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+      await store.getState().placeArtwork(artworkId, wall.id, 300, 1450, true);
+
+      const placement = store.getState().project!.wallObjects.at(-1)!;
+      expect(placement.widthMm).toBe(500);
+      expect(placement.xMm - placement.widthMm / 2).toBeGreaterThan(0);
+      expect(store.getState().placementWarnings).toEqual([
+        expect.objectContaining({
+          wallObjectId: placement.id,
+          message: "Placement extends beyond the wall's length.",
+          type: "bounds"
+        })
+      ]);
+    });
+  });
+
   describe("selection", () => {
     // Selection validates against live opening IDs.
     async function addRealOpening(): Promise<string> {

@@ -31,7 +31,7 @@ import {
 } from "../../domain/placement/placeArtwork";
 import { getDefaultOpeningSizeMm, type OpeningKind } from "../../domain/placement/createOpening";
 import { effectivePlacementForm } from "../../domain/placement/artworkForm";
-import { withArtworkFootprint } from "../../domain/framing";
+import { getPlacementFootprintMm, withArtworkFootprint } from "../../domain/framing";
 import type {
   Artwork,
   DisplayUnit,
@@ -531,7 +531,6 @@ export function ElevationView({
     ...elevationScene.artworks.map((entry) => entry.object),
     ...elevationScene.openings.map((entry) => entry.object)
   ];
-
   const assetIds = elevationScene.artworks.map((entry) => entry.artwork?.assetId);
   const imageUrlsByAssetId = useAssetImageUrls(assetIds, getBlob ?? NO_OP_GET_BLOB, "display");
 
@@ -1435,6 +1434,7 @@ export function ElevationView({
           // A move never resizes, so the object's own size always applies (for a
           // group, moveDrag.sizeMm is the union box, not this member's size).
           const size = sizeMm;
+          const footprintSize = getPlacementFootprintMm(placement, artwork);
 
           return (
             <ElevationArtwork
@@ -1448,7 +1448,12 @@ export function ElevationView({
                 // The scene's flag is the at-rest answer; a live drag preview
                 // re-checks the same predicate at the preview center.
                 previewCenter
-                  ? isArtworkOutOfWallBounds(wallLengthMm, wallHeightMm, center, size)
+                  ? isArtworkOutOfWallBounds(
+                      wallLengthMm,
+                      wallHeightMm,
+                      center,
+                      footprintSize
+                    )
                   : outOfBounds
               }
               isSelected={selectedArtworkId === placement.artworkId || selectedObjectIds.includes(placement.id)}

@@ -106,6 +106,21 @@ describe("buildElevationScene", () => {
     expect(scene.openings[0]!.outOfBounds).toBe(false);
   });
 
+  it("flags a framed footprint past the wall edge while keeping scene size image-sized", () => {
+    const artwork = {
+      ...artworkRecord(),
+      matWidthMm: 75,
+      frame: { widthMm: 25, finish: "black" as const }
+    };
+    const scene = buildElevationScene(
+      [placement({ xMm: 550 })],
+      { ...WALL, artworksById: new Map([[artwork.id, artwork]]) }
+    );
+
+    expect(scene.artworks[0]!.sizeMm).toEqual({ widthMm: 1000, heightMm: 800 });
+    expect(scene.artworks[0]!.outOfBounds).toBe(true);
+  });
+
   it("joins the artwork record when it resolves and leaves it undefined when dangling", () => {
     const artwork = artworkRecord();
     const scene = buildElevationScene(

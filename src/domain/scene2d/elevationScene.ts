@@ -4,6 +4,7 @@ import type {
   OpeningWallObject,
   WallObject
 } from "../project";
+import { getPlacementFootprintMm } from "../framing";
 
 // Pure derivation: one wall's object inventory -> the static elevation
 // drawing, as plain-data primitives (planScene.ts's twin). ElevationView maps
@@ -138,10 +139,16 @@ export function buildElevationScene(
     if (object.wallId !== wallId) continue;
     const centerMm = { xMm: object.xMm, yMm: object.yMm };
     const sizeMm = { widthMm: object.widthMm, heightMm: object.heightMm };
-    const outOfBounds = isArtworkOutOfWallBounds(wallLengthMm, wallHeightMm, centerMm, sizeMm);
 
     if (object.kind === "artwork") {
       const artwork = artworksById?.get(object.artworkId);
+      const footprintMm = getPlacementFootprintMm(object, artwork);
+      const outOfBounds = isArtworkOutOfWallBounds(
+        wallLengthMm,
+        wallHeightMm,
+        centerMm,
+        footprintMm
+      );
       artworks.push({
         object,
         ...(artwork ? { artwork } : {}),
@@ -150,6 +157,12 @@ export function buildElevationScene(
         outOfBounds
       });
     } else {
+      const outOfBounds = isArtworkOutOfWallBounds(
+        wallLengthMm,
+        wallHeightMm,
+        centerMm,
+        sizeMm
+      );
       openings.push({ object, centerMm, sizeMm, outOfBounds });
     }
   }

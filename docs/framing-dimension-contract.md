@@ -64,7 +64,7 @@ algorithms stay `WallObjectBase`-pure and framing-agnostic.
 |---|---|---|
 | Image plane render, mat bevel/opening rect, aspect-fit, inspector Image W×H | **image** (mat opening ≡ image in this model) | correct today |
 | Plan wall glyph + its click hit, elevation band painting, 3D wall meshes + raycast, single selection outline | **outer** | correct today |
-| Collision/overlap validation, bounds check, out-of-bounds | **outer** | Phase 2 |
+| Collision/overlap validation, bounds check, out-of-bounds | **outer** | correct |
 | Snap edge/flush targets (both views), floor-line snap, 48px drag barriers, drop ghosts | **outer** | Phase 3 |
 | Marquee (both views), group bounds/outline, fit-selected, arrange/distribute solvers, neighbor detection, spacing readouts, dimension lines | **outer** | Phase 4 |
 | Tooltips, inspector summaries | image **and** "overall" line when framed | Phase 5 |
@@ -171,7 +171,7 @@ mat 75, frame 25 → outer 600×500).
 - Encode the override rule in code comments at `project.ts:157` and in this
   doc. No consumers change yet.
 
-### Phase 2 — Validation and bounds
+### Phase 2 — Validation and bounds (complete 2026-07-13)
 
 - Adapter applied at the `validatePlacement`/collision call boundaries in
   `store.ts` and `ElevationView`; elevation out-of-bounds size fed through the
