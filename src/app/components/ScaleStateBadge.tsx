@@ -1,11 +1,12 @@
-// Non-interactive status dot saying how trustworthy an artwork's ON-CANVAS
-// SCALE is, given its dimensions. Where UncertaintyIndicator flags the
-// dimension record ("Approx." / "No dims"), this flags what that means for
-// the drawing — whether the shape on the wall is at true scale or a stand-in
-// size. A dot, not words: even a two-word badge was too wide for the section
-// header at the 260px pane minimum, so color + fill carry the tier (solid
-// caution = missing, hollow caution = estimated, quiet petrol = true) and
-// the sentence rides the title tooltip plus visually-hidden text.
+import { RulerIcon } from "@phosphor-icons/react/dist/csr/Ruler";
+import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+
+// Non-interactive status icon saying how trustworthy an artwork's ON-CANVAS
+// SCALE is, given its dimensions. It flags what the record means for the
+// drawing — whether the shape on the wall is at true scale or a stand-in.
+// Only exceptional states render: an icon preserves the collapsed dimension
+// summary's width, while the full sentence rides the title and hidden label.
 //
 // `state` mirrors `ArtworkScaleState` in src/domain/artworkScale.ts —
 // deliberately re-declared as an inline union so this stays a leaf component.
@@ -16,9 +17,9 @@
 export type ScaleState = "missing" | "estimated" | "true";
 
 const TITLES: Record<ScaleState, string> = {
-  missing: "No dimensions — the artwork is drawn at an approximate scale",
-  estimated: "Dimensions are approximate — the artwork is drawn at an estimated scale",
-  true: "Dimensions are known — the artwork is drawn at true scale"
+  missing: "Dimensions missing. Scale is approximate.",
+  estimated: "Approximate dimensions. Scale is estimated.",
+  true: "Dimensions known. Artwork is shown at true scale."
 };
 
 const HIDDEN_LABELS: Record<ScaleState, string> = {
@@ -28,9 +29,26 @@ const HIDDEN_LABELS: Record<ScaleState, string> = {
 };
 
 export function ScaleStateBadge({ state }: { state: ScaleState }) {
+  // True scale is the healthy default. Giving it permanent header chrome
+  // crowds the collapsed dimensions summary and competes with actionable
+  // states, so only missing/estimated scale gets an icon here.
+  if (state === "true") return null;
+
   return (
-    <span className={`scale-dot ${state}`} title={TITLES[state]}>
-      <span className="visually-hidden">{HIDDEN_LABELS[state]}</span>
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={`scale-state-icon ${state}`}>
+          {state === "missing" ? (
+            <WarningIcon aria-hidden="true" size={13} weight="fill" />
+          ) : (
+            <RulerIcon aria-hidden="true" size={13} />
+          )}
+          <span className="visually-hidden">{HIDDEN_LABELS[state]}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="toolbar-tooltip" side="bottom">
+        {TITLES[state]}
+      </TooltipContent>
+    </Tooltip>
   );
 }

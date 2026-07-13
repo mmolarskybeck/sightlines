@@ -1264,10 +1264,14 @@ body.panels-resizing * {
 .inspector {
   display: flex;
   flex-direction: column;
-  overflow: auto;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 20px;
   background: var(--bg);
   border-left: 1px solid var(--line);
+  container-name: inspector;
+  container-type: inline-size;
 }
 
 .panel-heading {
@@ -4462,6 +4466,18 @@ body.panels-resizing * {
      min-content and push the whole panel past the right edge. */
   grid-template-columns: minmax(0, 1fr);
   gap: 16px;
+  min-width: 0;
+}
+
+.inspector-zone,
+.inspector-sections,
+.inspector-section,
+.inspector-section-header,
+.inspector-section-body,
+.field-group,
+.field-row,
+.length-field-input-wrap {
+  min-width: 0;
 }
 
 .opening-connection-section {
@@ -4643,7 +4659,11 @@ body.panels-resizing * {
 }
 
 .field-row.compact .length-field-message {
-  min-height: 1.2rem;
+  min-height: 0;
+}
+
+.field-row.compact .length-field-message:empty {
+  display: none;
 }
 
 .field-hint,
@@ -4691,7 +4711,10 @@ body.panels-resizing * {
      where the old three-across trio was not. minmax(0) so labels and
      placeholders shrink inside the track instead of blowing it out. */
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: end;
+  /* Keep the input tops aligned while a focused field reveals its transient
+     conversion preview below. Bottom alignment made the untouched sibling
+     jump downward whenever the hint appeared. */
+  align-items: start;
   gap: 8px;
 }
 
@@ -4701,19 +4724,42 @@ body.panels-resizing * {
    gaps tighten so the lock reads as part of the W·H pair rather than a third
    field. */
 .artwork-dimensions-grid.has-lock {
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  column-gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 8px;
 }
 
-/* Icon-only lock, bottom-aligned to the inputs: the grid end-aligns cells, so
-   clearing the reserved message slot (1.2rem + 2px margin) parks the toggle
-   exactly on the 32px compact input row. */
-.artwork-dimensions-lock-inline {
-  align-self: end;
+.artwork-dimensions-utility-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.artwork-dimensions-lock-row {
+  flex: 0 0 auto;
   width: 26px;
-  height: 32px;
-  margin-bottom: calc(1.2rem + 2px);
+  height: 26px;
   padding: 0;
+  color: var(--muted);
+}
+
+.artwork-dimensions-approximate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-ui);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.artwork-dimensions-approximate .checkbox-control {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
 }
 
 /* Two equal side-by-side compact fields: the Opening/Floor X·Y and
@@ -5115,26 +5161,19 @@ body.panels-resizing * {
    Solid caution = missing, hollow caution = estimated — the fill difference
    keeps the pair apart without relying on hue alone — and quiet petrol-soft
    = true. The full sentence rides the title tooltip + visually-hidden text. */
-.scale-dot {
+.scale-state-icon {
   flex: 0 0 auto;
-  box-sizing: border-box;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.scale-dot.missing {
-  background: var(--caution);
+.scale-state-icon.missing {
+  color: var(--caution);
 }
 
-.scale-dot.estimated {
-  border: 2px solid var(--caution);
-  background: transparent;
-}
-
-.scale-dot.true {
-  border: 1px solid var(--primary-line);
-  background: var(--primary-soft);
+.scale-state-icon.estimated {
+  color: var(--muted);
 }
 
 /* Radix Collapsible open/close: height animates between 0 and the measured
@@ -5219,8 +5258,8 @@ body.panels-resizing * {
    fields) once it's narrow. flex-wrap + the identity block's flex-basis/
    min-width set the wrap threshold, so no media query is needed. */
 .artwork-inspector-header {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
   align-items: flex-start;
   gap: 12px;
 }
@@ -5250,8 +5289,83 @@ body.panels-resizing * {
 /* Grows to fill the row beside the thumbnail; min-width is the wrap threshold —
    below it the identity fields drop under the thumbnail. */
 .artwork-inspector-identity {
-  flex: 1 1 180px;
-  min-width: 180px;
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.artwork-tombstone {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+  padding-right: 28px;
+}
+
+.artwork-tombstone-title {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-ui);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.artwork-tombstone-byline,
+.artwork-tombstone-dimensions {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--type-xs);
+  line-height: var(--leading-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artwork-tombstone-dimensions {
+  font-variant-numeric: tabular-nums;
+}
+
+.artwork-tombstone-edit {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+}
+
+/* The inspector's width is user-controlled, so artwork reflow follows the
+   pane rather than the viewport. At the default 300px pane there is 260px of
+   content after padding: stack the edit form below its thumbnail instead of
+   asking the flex row for 96 + 12 + 180px and creating horizontal overflow. */
+@container inspector (max-width: 280px) {
+  .artwork-inspector-thumb {
+    max-width: 80px;
+    max-height: 80px;
+  }
+}
+
+/* At the 260px minimum pane the content lane is only 220px. Preserve usable
+   input widths by letting label/control rows stack and moving the aspect lock
+   onto its own narrow middle row between Width and Height. */
+@container inspector (max-width: 230px) {
+  .inspector-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    gap: 5px;
+  }
+
+  .panel-heading {
+    align-items: flex-start;
+  }
+
+  .panel-heading h2,
+  .inspector-section-title,
+  .inspector-notice-body {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
 }
 
 /* Compact identity (a complete record at rest): a muted one-line Artist ·
@@ -5752,29 +5866,33 @@ body.panels-resizing * {
 
 @media (max-width: 1200px) {
   .workspace {
-    grid-template-columns: 280px minmax(0, 1fr) 280px;
+    grid-template-columns:
+      minmax(0, var(--left-panel-width, 320px)) minmax(0, 1fr)
+      minmax(0, var(--inspector-width, 300px));
   }
 
   .workspace.left-collapsed {
-    grid-template-columns: minmax(0, 1fr) 280px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, var(--inspector-width, 300px));
   }
 
   .workspace.right-collapsed {
-    grid-template-columns: 280px minmax(0, 1fr);
+    grid-template-columns: minmax(0, var(--left-panel-width, 320px)) minmax(0, 1fr);
   }
 }
 
 @media (max-width: 1180px) {
   .workspace {
-    grid-template-columns: 240px minmax(0, 1fr) 260px;
+    grid-template-columns:
+      minmax(0, var(--left-panel-width, 320px)) minmax(0, 1fr)
+      minmax(0, var(--inspector-width, 300px));
   }
 
   .workspace.left-collapsed {
-    grid-template-columns: minmax(0, 1fr) 260px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, var(--inspector-width, 300px));
   }
 
   .workspace.right-collapsed {
-    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-columns: minmax(0, var(--left-panel-width, 320px)) minmax(0, 1fr);
   }
 
   /* Reclaim row width where the panel is tightest — dragging still works

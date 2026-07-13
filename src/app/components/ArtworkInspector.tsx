@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { LinkBreakIcon } from "@phosphor-icons/react/dist/csr/LinkBreak";
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/csr/LockSimple";
 import { LockSimpleOpenIcon } from "@phosphor-icons/react/dist/csr/LockSimpleOpen";
+import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import type { Artwork, ArtworkFrame, Dimensions, DisplayUnit } from "../../domain/project";
 import {
   effectivePlacementForm,
@@ -38,6 +39,7 @@ import { InspectorNotice } from "./InspectorNotice";
 import { ScaleStateBadge } from "./ScaleStateBadge";
 import { LengthField } from "./LengthField";
 import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
 import { Toggle } from "./ui/toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
@@ -166,6 +168,7 @@ export function ArtworkInspector({
         artwork={artwork}
         aspect={aspect}
         thumbnailUrl={thumbnailUrl}
+        unit={unit}
         onCommitField={onCommitField}
       />
 
@@ -280,11 +283,13 @@ function ArtworkIdentity({
   artwork,
   aspect,
   thumbnailUrl,
+  unit,
   onCommitField
 }: {
   artwork: Artwork;
   aspect: PixelAspect;
   thumbnailUrl?: string;
+  unit: DisplayUnit;
   onCommitField: (changes: Partial<Pick<Artwork, ArtworkTextFieldKey>>) => void;
 }) {
   const complete = isArtworkRecordComplete(artwork);
@@ -296,10 +301,8 @@ function ArtworkIdentity({
 
   const artist = artwork.artist?.trim();
   const date = artwork.date?.trim();
-  // Title is omitted — App's inspector-subject heading already shows it.
-  // Drop whichever half is missing; both missing reads a quiet placeholder.
-  const summaryParts = [artist, date].filter((part): part is string => Boolean(part));
-  const summary = summaryParts.join(" · ");
+  const { displayUnit } = getScopedUnitContext(unit, "artwork");
+  const dimensions = formatDimensionsSummary(artwork.dimensions, displayUnit);
 
   return (
     <div className="artwork-inspector-header">
@@ -321,6 +324,29 @@ function ArtworkIdentity({
         <div aria-hidden="true" className="artwork-inspector-thumb placeholder" />
       )}
 
+      <div className="artwork-tombstone">
+        <strong className="artwork-tombstone-title">
+          {artwork.title?.trim() || "Untitled artwork"}
+        </strong>
+        <span className="artwork-tombstone-byline">
+          {[artist, date].filter(Boolean).join(" · ") || "Artist and date not recorded"}
+        </span>
+        <span className="artwork-tombstone-dimensions">{dimensions}</span>
+        {complete ? (
+          <Button
+            aria-expanded={editing}
+            aria-label={editing ? "Close artwork details" : "Edit artwork details"}
+            className="artwork-tombstone-edit"
+            size="icon-sm"
+            title={editing ? "Close artwork details" : "Edit artwork details"}
+            variant="ghost"
+            onClick={() => setUserEditing((open) => !open)}
+          >
+            <PencilSimpleIcon aria-hidden="true" size={14} />
+          </Button>
+        ) : null}
+      </div>
+
       {editing ? (
         <div className="field-group artwork-inspector-identity">
           {IDENTITY_FIELDS.map((field) => (
@@ -336,30 +362,8 @@ function ArtworkIdentity({
               onFocus={() => setUserEditing(true)}
             />
           ))}
-          {/* Only a complete record can compact, so the "Done" affordance
-              appears only then; an incomplete one has nothing to collapse to. */}
-          {complete ? (
-            <div className="artwork-identity-actions">
-              <Button size="sm" variant="ghost" onClick={() => setUserEditing(false)}>
-                Done
-              </Button>
-            </div>
-          ) : null}
         </div>
-      ) : (
-        <div className="artwork-inspector-identity artwork-identity-summary">
-          {summaryParts.length > 0 ? (
-            <span className="artwork-identity-summary-text" title={summary}>
-              {summary}
-            </span>
-          ) : (
-            <span className="artwork-identity-summary-text empty">No artist or date</span>
-          )}
-          <Button size="sm" variant="ghost" onClick={() => setUserEditing(true)}>
-            Edit details
-          </Button>
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -480,11 +484,11 @@ function DimensionsSection({
 
   // The lock toggle only makes sense when there's an image ratio to lock
   // to — with no linked image (or a legacy asset missing pixel dims),
-  // width/height are just independent numbers. It sits BETWEEN the Width and
-  // Height fields, beside the exact pair it binds; being body content, it
-  // hides with the collapsed section for free.
+  // width/height are just independent numbers.
   const ratio = imageAspectRatio(aspect);
   const locked = ratio !== undefined && isAspectLocked(dimensions, aspect);
+  const hasFaceDimensions =
+    dimensions.widthMm !== undefined && dimensions.heightMm !== undefined;
 
   const renderAxis = (field: { key: DimensionAxisKey; label: string }) => (
     <LengthField
@@ -526,60 +530,57 @@ function DimensionsSection({
     <>
       <div className={ratio !== undefined ? "artwork-dimensions-grid has-lock" : "artwork-dimensions-grid"}>
         {renderAxis(DIMENSION_FIELDS[0])}
-        {ratio !== undefined ? (
-          // Icon-only: the visible label is gone, so aria-label names it and
-          // aria-pressed (via Toggle) carries the state; the tooltip teaches
-          // what locking does without spending a text label's width.
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Toggle
-                aria-label="Lock ratio"
-                className="artwork-dimensions-lock-inline"
-                pressed={locked}
-                size="sm"
-                variant="ghost"
-                onPressedChange={(pressed) =>
-                  onCommitDimensions({ ...dimensions, aspectLocked: pressed })
-                }
-              >
-                {locked ? (
-                  <LockSimpleIcon aria-hidden="true" size={13} />
-                ) : (
-                  <LockSimpleOpenIcon aria-hidden="true" size={13} />
-                )}
-              </Toggle>
-            </TooltipTrigger>
-            <TooltipContent className="toolbar-tooltip" side="bottom">
-              {locked
-                ? "Ratio locked — width and height fill each other from the image"
-                : "Lock to the image ratio so width and height fill each other"}
-            </TooltipContent>
-          </Tooltip>
-        ) : null}
         {renderAxis(DIMENSION_FIELDS[1])}
         {renderAxis(DIMENSION_FIELDS[2])}
       </div>
 
-      <InspectorRow label="Status">
-        <Select
-          value={dimensions.status}
-          onValueChange={(value) =>
-            onCommitDimensions({
-              ...dimensions,
-              status: value as Dimensions["status"]
-            })
-          }
-        >
-          <SelectTrigger aria-label="Dimension status">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="known">Known</SelectItem>
-            <SelectItem value="approximate">Approximate</SelectItem>
-            <SelectItem value="unknown">Unknown</SelectItem>
-          </SelectContent>
-        </Select>
-      </InspectorRow>
+      {ratio !== undefined || hasFaceDimensions ? (
+        <div className="artwork-dimensions-utility-row">
+          {ratio !== undefined ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Toggle
+                  aria-label="Keep proportions"
+                  className="artwork-dimensions-lock-row"
+                  pressed={locked}
+                  size="sm"
+                  variant="ghost"
+                  onPressedChange={(pressed) =>
+                    onCommitDimensions({ ...dimensions, aspectLocked: pressed })
+                  }
+                >
+                  {locked ? (
+                    <LockSimpleIcon aria-hidden="true" size={14} />
+                  ) : (
+                    <LockSimpleOpenIcon aria-hidden="true" size={14} />
+                  )}
+                </Toggle>
+              </TooltipTrigger>
+              <TooltipContent className="toolbar-tooltip" side="bottom">
+                Keep proportions
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
+
+          {hasFaceDimensions ? (
+            <label
+              className="artwork-dimensions-approximate"
+            >
+              <Checkbox
+                aria-label="Dimensions are approximate"
+                checked={dimensions.status === "approximate"}
+                onCheckedChange={(checked) =>
+                  onCommitDimensions({
+                    ...dimensions,
+                    status: checked === true ? "approximate" : "known"
+                  })
+                }
+              />
+              <span>Approximate</span>
+            </label>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* No real width/height means nothing is drawn to scale — the badge
           says so, this closes the loop with the fix. The notice text isn't
@@ -731,13 +732,14 @@ function FramingSection({
             )}`}
             action={
               <button
+                aria-label={overallOpen ? "Close overall size editor" : "Edit overall size"}
                 aria-controls="framing-overall-editor"
                 aria-expanded={overallOpen}
                 className="inspector-disclosure-trigger"
                 type="button"
                 onClick={() => setOverallOpen((open) => !open)}
               >
-                {overallOpen ? "Done" : "Set…"}
+                <PencilSimpleIcon aria-hidden="true" size={14} />
               </button>
             }
           />

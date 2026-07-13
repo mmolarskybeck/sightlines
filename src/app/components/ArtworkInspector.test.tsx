@@ -1,8 +1,9 @@
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactElement } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Artwork } from "../../domain/project";
 import { ArtworkInspector } from "./ArtworkInspector";
+import { TooltipProvider } from "./ui/tooltip";
 
 afterEach(cleanup);
 
@@ -33,7 +34,18 @@ function renderInspector(overrides: Partial<ComponentProps<typeof ArtworkInspect
     onSectionOpenChange: vi.fn(),
     ...overrides
   };
-  return { props, ...render(<ArtworkInspector {...props} />) };
+  const result = render(
+    <TooltipProvider>
+      <ArtworkInspector {...props} />
+    </TooltipProvider>
+  );
+
+  return {
+    props,
+    ...result,
+    rerender: (ui: ReactElement) =>
+      result.rerender(<TooltipProvider>{ui}</TooltipProvider>)
+  };
 }
 
 describe("ArtworkInspector identity", () => {
@@ -55,21 +67,20 @@ describe("ArtworkInspector identity", () => {
     expect(screen.queryByRole("button", { name: "Edit details" })).not.toBeInTheDocument();
   });
 
-  it("complete: compacts to an Artist · Date summary with an Edit details affordance, and Done returns to compact", () => {
+  it("complete: keeps a compact tombstone visible and toggles the details editor", () => {
     renderInspector();
 
+    expect(screen.getByText("Portrait Study")).toBeInTheDocument();
     expect(screen.getByText("Jane Doe · 1990")).toBeInTheDocument();
+    expect(screen.getByText("50 cm × 70 cm")).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit artwork details" }));
 
     expect(screen.getByRole("textbox", { name: "Title" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Artist" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Date" })).toBeInTheDocument();
-    const doneButton = screen.getByRole("button", { name: "Done" });
-    expect(doneButton).toBeInTheDocument();
-
-    fireEvent.click(doneButton);
+    fireEvent.click(screen.getByRole("button", { name: "Close artwork details" }));
 
     expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
     expect(screen.getByText("Jane Doe · 1990")).toBeInTheDocument();
@@ -105,7 +116,7 @@ describe("ArtworkInspector identity", () => {
   it("resets the explicit-edit latch when the artwork id changes", () => {
     const { rerender, props } = renderInspector(); // complete, starts compact
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit artwork details" }));
     expect(screen.getByRole("textbox", { name: "Title" })).toBeInTheDocument();
 
     // A different artwork id (also complete) — ArtworkIdentity is keyed on
@@ -114,22 +125,18 @@ describe("ArtworkInspector identity", () => {
     rerender(<ArtworkInspector {...props} artwork={otherArtwork} />);
 
     expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Edit details" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit artwork details" })).toBeInTheDocument();
   });
 });
 
-describe("ArtworkInspector scale badge", () => {
-  it("shows the missing-state dot (visually-hidden 'Approximate scale') when width/height are missing", () => {
+describe("ArtworkInspector scale status", () => {
+  it("shows a compact missing-state icon when width/height are missing", () => {
     renderInspector({ artwork: { ...baseArtwork, dimensions: { status: "known" } } });
 
-    const badge = screen.getByTitle(
-      "No dimensions — the artwork is drawn at an approximate scale"
-    );
-    expect(badge).toBeInTheDocument();
-    expect(badge.querySelector(".visually-hidden")?.textContent).toBe("Approximate scale");
+    expect(screen.getByText("Approximate scale")).toBeInTheDocument();
   });
 
-  it("reads 'Estimated scale' when dims are present but status is approximate", () => {
+  it("shows a compact estimated-state icon when dimensions are approximate", () => {
     renderInspector({
       artwork: { ...baseArtwork, dimensions: { widthMm: 500, heightMm: 700, status: "approximate" } }
     });
@@ -137,10 +144,10 @@ describe("ArtworkInspector scale badge", () => {
     expect(screen.getByText("Estimated scale")).toBeInTheDocument();
   });
 
-  it("reads 'True scale' when dims are present and status is known", () => {
+  it("uses no header icon for the healthy true-scale state", () => {
     renderInspector();
 
-    expect(screen.getByText("True scale")).toBeInTheDocument();
+    expect(screen.queryByText("True scale")).not.toBeInTheDocument();
   });
 });
 
@@ -172,6 +179,55 @@ describe("ArtworkInspector missing-dims notice", () => {
 
     expect(
       screen.queryByText("Add width and height to show this artwork at true scale.")
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("ArtworkInspector dimension utilities", () => {
+  it("replaces the status dropdown with a compact Approximate checkbox", () => {
+    renderInspector({
+      artwork: {
+        ...baseArtwork,
+        dimensions: { ...baseArtwork.dimensions, status: "approximate" }
+      },
+      sectionsOpen: { dimensions: true }
+    });
+
+    expect(
+      screen.getByRole("checkbox", { name: "Dimensions are approximate" })
+    ).toBeChecked();
+    expect(screen.queryByText("Status")).not.toBeInTheDocument();
+  });
+
+  it("marks complete dimensions approximate or known while preserving their values", () => {
+    const onCommitDimensions = vi.fn();
+    renderInspector({
+      sectionsOpen: { dimensions: true },
+      onCommitDimensions
+    });
+
+    const approximate = screen.getByRole("checkbox", {
+      name: "Dimensions are approximate"
+    });
+    fireEvent.click(approximate);
+    expect(onCommitDimensions).toHaveBeenLastCalledWith({
+      widthMm: 500,
+      heightMm: 700,
+      status: "approximate"
+    });
+  });
+
+  it("hides Approximate until both width and height exist", () => {
+    renderInspector({
+      artwork: {
+        ...baseArtwork,
+        dimensions: { widthMm: 500, status: "unknown" }
+      },
+      sectionsOpen: { dimensions: true }
+    });
+
+    expect(
+      screen.queryByRole("checkbox", { name: "Dimensions are approximate" })
     ).not.toBeInTheDocument();
   });
 });
@@ -246,7 +302,7 @@ describe("ArtworkInspector overall disclosure", () => {
     frame: { widthMm: 50, finish: "black" }
   };
 
-  it("Overall reads quiet at rest and reveals W/H inputs only after Set…", () => {
+  it("Overall reads quiet at rest and reveals W/H inputs from its edit icon", () => {
     renderInspector({ artwork: framedArtwork }); // matframe opens by default (has a frame)
 
     expect(screen.getByText("Overall")).toBeInTheDocument();
@@ -254,7 +310,7 @@ describe("ArtworkInspector overall disclosure", () => {
     expect(screen.queryByRole("textbox", { name: "Overall W" })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Overall H" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Set…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit overall size" }));
 
     expect(screen.getByRole("textbox", { name: "Overall W" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Overall H" })).toBeInTheDocument();

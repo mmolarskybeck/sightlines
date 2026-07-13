@@ -53,3 +53,14 @@ function installWorkingStorage(propertyName: "localStorage" | "sessionStorage") 
 
 installWorkingStorage("localStorage");
 installWorkingStorage("sessionStorage");
+
+// Radix primitives measure their hidden form-control mirrors with
+// ResizeObserver. jsdom does not implement it, so provide the inert contract
+// tests need; layout itself is verified in the browser, not in jsdom.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}

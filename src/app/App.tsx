@@ -1658,7 +1658,7 @@ export function App() {
               <div className="panel-heading inspector-subject">
                 <h2>
                   {selectedArtwork
-                    ? selectedArtwork.title ?? "Untitled"
+                    ? "Artwork"
                     : selectedOpening
                       ? getOpeningKindLabel(selectedOpening.kind)
                       : selectedFloorBlockedZone
@@ -1669,10 +1669,8 @@ export function App() {
                             ? selectedFreestandingWall.name
                             : selectedWall?.name}
                 </h2>
-                <span>
-                  {selectedArtwork
-                    ? "Artwork"
-                    : selectedOpening
+                {!selectedArtwork ? <span>
+                  {selectedOpening
                       ? "Opening"
                       : selectedFloorBlockedZone
                         ? "Floor object"
@@ -1681,7 +1679,7 @@ export function App() {
                           : selectedFreestandingWall
                             ? "Partition"
                             : "Wall"}
-                </span>
+                </span> : null}
               </div>
             ) : null}
 
