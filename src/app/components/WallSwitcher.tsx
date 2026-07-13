@@ -1,4 +1,7 @@
 import * as React from "react";
+import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
+import type { DisplayUnit } from "../../domain/project";
+import { formatLength } from "../../domain/units/length";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,10 +22,12 @@ export type WallSwitcherEntry = {
   roomId: string;
   roomName: string;
   kind: "perimeter" | "partition-face";
+  lengthMm: number;
+  heightMm: number;
 };
 
 const TRIGGER_CLASS =
-  "select-trigger inline-flex h-9 w-full items-center rounded-sm border border-input bg-background px-2.5 [font-size:var(--type-sm)] [font-weight:var(--weight-medium)] text-foreground outline-none transition-[border-color,box-shadow,color] duration-150 ease-out hover:border-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-45";
+  "outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 type RoomGroup = {
   roomId: string;
@@ -46,15 +51,27 @@ function groupByRoom(walls: WallSwitcherEntry[]): RoomGroup[] {
   return groups;
 }
 
-function ElevationItems({ group }: { group: RoomGroup }) {
+function formatElevationName(name: string) {
+  const partitionFace = name.match(/^(.*) — side ([AB])$/i);
+  return partitionFace ? `${partitionFace[1]} · Side ${partitionFace[2].toUpperCase()}` : name;
+}
+
+function formatElevationDimensions(wall: WallSwitcherEntry, unit: DisplayUnit) {
+  return `${formatLength(wall.lengthMm, { unit })} × ${formatLength(wall.heightMm, { unit })}`;
+}
+
+function ElevationItems({ group, unit }: { group: RoomGroup; unit: DisplayUnit }) {
   const perimeter = group.walls.filter((wall) => wall.kind === "perimeter");
   const faces = group.walls.filter((wall) => wall.kind === "partition-face");
 
   return (
     <>
       {perimeter.map((wall) => (
-        <DropdownMenuRadioItem key={wall.id} value={wall.id}>
-          {wall.name}
+        <DropdownMenuRadioItem key={wall.id} value={wall.id} className="wall-switcher-elevation-item">
+          <span className="wall-switcher-elevation-name">{formatElevationName(wall.name)}</span>
+          <span className="wall-switcher-elevation-dimensions">
+            {formatElevationDimensions(wall, unit)}
+          </span>
         </DropdownMenuRadioItem>
       ))}
       {faces.length > 0 ? (
@@ -64,9 +81,12 @@ function ElevationItems({ group }: { group: RoomGroup }) {
             <DropdownMenuRadioItem
               key={wall.id}
               value={wall.id}
-              className="dropdown-menu-item-indented"
+              className="wall-switcher-elevation-item wall-switcher-elevation-item-indented"
             >
-              {wall.name}
+              <span className="wall-switcher-elevation-name">{formatElevationName(wall.name)}</span>
+              <span className="wall-switcher-elevation-dimensions">
+                {formatElevationDimensions(wall, unit)}
+              </span>
             </DropdownMenuRadioItem>
           ))}
         </>
@@ -78,14 +98,15 @@ function ElevationItems({ group }: { group: RoomGroup }) {
 export function WallSwitcher({
   walls,
   currentWallId,
-  onSelectWall
+  onSelectWall,
+  unit
 }: {
   walls: WallSwitcherEntry[];
   currentWallId: string;
   onSelectWall: (id: string) => void;
+  unit: DisplayUnit;
 }) {
   const groups = groupByRoom(walls);
-  const multiRoom = groups.length > 1;
   const current = walls.find((wall) => wall.id === currentWallId);
   const currentGroup =
     groups.find((group) => group.roomId === current?.roomId) ?? groups[0] ?? null;
@@ -99,14 +120,33 @@ export function WallSwitcher({
           className={cn(TRIGGER_CLASS, "surface-label-select")}
         >
           <span className="surface-label-select-value">
-            {multiRoom && current ? (
-              <span className="surface-label-select-room">{current.roomName} · </span>
+            {current ? (
+              <span className="surface-label-select-room">{current.roomName}</span>
             ) : null}
-            {current?.name ?? ""}
+            <span className="surface-label-select-line">
+              <span className="surface-label-select-wall">
+                {current ? formatElevationName(current.name) : ""}
+              </span>
+              {current ? (
+                <span className="surface-label-select-dimensions">
+                  {formatElevationDimensions(current, unit)}
+                </span>
+              ) : null}
+            </span>
           </span>
+          <CaretDownIcon aria-hidden="true" size={12} className="surface-label-select-caret" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="wall-switcher-menu">
+      {/* The offsets re-anchor the menu to the chip's frame rather than the
+          trigger inside it: -5 walks back the chip's 4px padding + 1px border
+          so the columns align with the chip's leading edge, and 8 (plus the
+          shared content's 4px translate) clears the chip's bottom entirely. */}
+      <DropdownMenuContent
+        align="start"
+        alignOffset={-5}
+        sideOffset={8}
+        className="wall-switcher-menu"
+      >
         <div className="wall-switcher-columns">
           <div className="wall-switcher-rooms">
             <DropdownMenuLabel>Rooms</DropdownMenuLabel>
@@ -137,15 +177,10 @@ export function WallSwitcher({
             })}
           </div>
           <div className="wall-switcher-elevations">
-            <DropdownMenuLabel>
-              <span>Elevations</span>
-              {currentGroup ? (
-                <span className="wall-switcher-elevation-room">{currentGroup.roomName}</span>
-              ) : null}
-            </DropdownMenuLabel>
+            <DropdownMenuLabel>Elevations</DropdownMenuLabel>
             {currentGroup ? (
               <DropdownMenuRadioGroup value={currentWallId} onValueChange={onSelectWall}>
-                <ElevationItems group={currentGroup} />
+                <ElevationItems group={currentGroup} unit={unit} />
               </DropdownMenuRadioGroup>
             ) : null}
           </div>

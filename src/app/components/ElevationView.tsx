@@ -77,6 +77,7 @@ import { getFitSelectionBoundsSvg, isArtworkOutOfWallBounds, wallLocalYToSvgY } 
 import { GridOverlay } from "./GridOverlay";
 import { GroupDimensionLines } from "./GroupDimensionLines";
 import { Button } from "./ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { ViewportZoomControls } from "./ViewportZoomControls";
 import { WallSwitcher, type WallSwitcherEntry } from "./WallSwitcher";
 
@@ -1284,41 +1285,63 @@ export function ElevationView({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      <div className="surface-label">
-        {canSwitchWalls ? (
-          <div className="surface-label-nav">
-            <Button
-              aria-label="Previous wall"
-              className="surface-label-switch"
-              size="icon-sm"
-              variant="ghost"
-              onClick={() => stepWall(-1)}
-            >
-              <CaretLeftIcon aria-hidden="true" size={16} />
-            </Button>
-            <WallSwitcher
-              walls={walls}
-              currentWallId={wallId ?? ""}
-              onSelectWall={(value) => onSelectWall?.(value)}
-            />
-            <Button
-              aria-label="Next wall"
-              className="surface-label-switch"
-              size="icon-sm"
-              variant="ghost"
-              onClick={() => stepWall(1)}
-            >
-              <CaretRightIcon aria-hidden="true" size={16} />
-            </Button>
+      {canSwitchWalls ? (
+        // Switcher chip: the browser trigger leads (it carries the room, wall,
+        // and dimensions itself) and the prev/next steppers dock behind a
+        // hairline at the trailing edge, so the two-column menu can align with
+        // the chip's leading edge and drop fully below it.
+        <div className="surface-label surface-label-switcher">
+          <WallSwitcher
+            walls={walls}
+            unit={unit}
+            currentWallId={wallId ?? ""}
+            onSelectWall={(value) => onSelectWall?.(value)}
+          />
+          <span aria-hidden="true" className="surface-label-divider" />
+          <div className="surface-label-steps">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label="Previous wall"
+                  className="surface-label-switch"
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={() => stepWall(-1)}
+                >
+                  <CaretLeftIcon aria-hidden="true" size={16} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className="toolbar-tooltip" side="bottom">
+                Previous wall
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label="Next wall"
+                  className="surface-label-switch"
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={() => stepWall(1)}
+                >
+                  <CaretRightIcon aria-hidden="true" size={16} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className="toolbar-tooltip" side="bottom">
+                Next wall
+              </TooltipContent>
+            </Tooltip>
           </div>
-        ) : (
+        </div>
+      ) : (
+        <div className="surface-label">
           <strong>{wallName}</strong>
-        )}
-        <span>
-          {formatLength(wallLengthMm, { unit })} by{" "}
-          {formatLength(wallHeightMm, { unit })}
-        </span>
-      </div>
+          <span>
+            {formatLength(wallLengthMm, { unit })} by{" "}
+            {formatLength(wallHeightMm, { unit })}
+          </span>
+        </div>
+      )}
       <ViewportZoomControls
         zoom={getEffectiveZoom(viewport)}
         isFit={viewport.mode === "fit"}

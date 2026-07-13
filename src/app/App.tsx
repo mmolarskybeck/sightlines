@@ -596,6 +596,8 @@ export function App() {
               name: wall.name,
               roomId: placement.roomId,
               roomName: placement.room.name,
+              lengthMm: wall.lengthMm,
+              heightMm: wall.heightMm,
               kind: parseFaceWallId(wall.id) ? ("partition-face" as const) : ("perimeter" as const)
             }))
           )

@@ -3672,58 +3672,69 @@ body.panels-resizing * {
   background: var(--line);
 }
 
-/* Wall switcher: a muted subsection heading (the "Partitions" group that sits
-   below a room's perimeter walls) plus the extra left indent that sets a
-   partition face apart from a perimeter wall — structure by spacing, no pill,
-   no accent stripe, matching the menu's Notion-like overlay language. */
+/* Wall switcher menu: the two-column room/elevation browser. Rooms on the
+   left carry a trailing surface count; the active room's elevations run as
+   single-line rows on the right — name leading, dimensions closing ranks in a
+   right-aligned tabular column — with partition faces sectioned under a muted
+   "Partitions" heading and an extra indent. Structure by spacing, no pills,
+   no accent stripes, matching the menu's Notion-like overlay language. */
 .wall-switcher-menu {
-  min-width: min(380px, calc(100vw - 24px));
-  padding: 4px;
+  min-width: min(448px, calc(100vw - 24px));
+  padding: 6px;
   border-radius: var(--radius-overlay);
-  box-shadow: var(--shadow-overlay);
+  font-family: var(--font-ui);
+  font-kerning: normal;
 }
 
 .wall-switcher-columns {
   display: grid;
-  grid-template-columns: minmax(118px, 0.72fr) minmax(190px, 1.28fr);
+  grid-template-columns: minmax(148px, 0.85fr) minmax(268px, 1.15fr);
   min-width: 0;
 }
 
 .wall-switcher-rooms {
   min-width: 0;
+  padding-right: 6px;
   border-right: 1px solid var(--line);
 }
 
 .wall-switcher-elevations {
   min-width: 0;
+  padding-left: 6px;
+}
+
+/* Tall inventories scroll per column, so each list keeps its own heading in
+   reach instead of the whole overlay growing past the viewport. */
+.wall-switcher-rooms,
+.wall-switcher-elevations {
+  max-height: min(480px, 64vh);
+  overflow-y: auto;
 }
 
 .wall-switcher-menu .dropdown-menu-label {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 28px;
-  padding: 6px 8px 4px;
-}
-
-.wall-switcher-elevation-room {
-  overflow: hidden;
+  min-height: 26px;
+  padding: 6px 10px 4px;
   color: var(--muted);
   font-size: var(--type-xs);
-  font-weight: var(--weight-regular);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.015em;
+  line-height: var(--leading-ui);
+}
+
+.wall-switcher-menu .dropdown-menu-item {
+  min-height: 34px;
+  font-size: var(--type-md);
+  line-height: var(--leading-ui);
 }
 
 .wall-switcher-room-item {
   justify-content: space-between;
-  min-height: 32px;
-  padding: 0 8px;
+  gap: 12px;
+  padding: 0 10px;
 }
 
 .wall-switcher-room-item-current {
-  background: var(--surface);
+  background: var(--primary-soft);
   font-weight: var(--weight-medium);
 }
 
@@ -3741,8 +3752,57 @@ body.panels-resizing * {
   font-variant-numeric: tabular-nums;
 }
 
+.wall-switcher-room-item-current .wall-switcher-room-count {
+  color: var(--primary-strong);
+}
+
 .wall-switcher-elevations .dropdown-menu-section-label {
   margin-top: 4px;
+  letter-spacing: 0.015em;
+}
+
+.wall-switcher-elevation-item {
+  gap: 10px;
+  padding: 0 30px 0 10px;
+}
+
+.wall-switcher-elevation-item-indented {
+  padding-left: 20px;
+}
+
+.wall-switcher-elevation-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wall-switcher-elevation-dimensions {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: var(--type-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The petrol wash marks the current room and elevation. Pointer/keyboard
+   highlight deepens that wash a step rather than flashing back to the
+   neutral grey the plain rows use. */
+.wall-switcher-menu .dropdown-menu-item[data-state="checked"] {
+  background: var(--primary-soft);
+}
+
+.wall-switcher-menu .dropdown-menu-item[data-state="checked"][data-highlighted],
+.wall-switcher-room-item-current[data-highlighted] {
+  background: color-mix(in oklch, var(--primary-soft), var(--primary) 8%);
+}
+
+.wall-switcher-menu .select-item-indicator {
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .dropdown-menu-section-label {
@@ -3775,8 +3835,13 @@ body.panels-resizing * {
   }
 
   .wall-switcher-rooms {
+    padding: 0 0 6px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
+  }
+
+  .wall-switcher-elevations {
+    padding: 6px 0 0;
   }
 }
 
@@ -4294,27 +4359,46 @@ body.panels-resizing * {
   font-weight: var(--weight-semibold);
 }
 
-/* The elevation chip doubles as a wall switcher: compact chevron buttons
-   flanking a Radix Select of every wall. Buttons stay borderless with the
-   hover-fog treatment; the select is borderless like .unit-select. */
-.surface-label-nav {
+/* The elevation chip doubles as a text-first wall switcher: the browser
+   trigger leads with the room, wall, and dimensions, and the prev/next
+   steppers dock behind a hairline at the trailing edge — the checklist
+   sort trigger's dock-inside move — so the two-column menu can align with
+   the chip's leading edge and drop fully below it. */
+.surface-label-switcher {
+  flex-direction: row;
+  align-items: stretch;
+  gap: 6px;
+  padding: 4px;
+}
+
+.surface-label-divider {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 1px;
+  margin: 3px 0;
+  background: var(--line);
+}
+
+.surface-label-steps {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 2px;
-  margin: -2px 0 0 -4px;
+  padding-right: 2px;
 }
 
 .surface-label-switch {
   display: grid;
   flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   place-items: center;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
+  transition: background-color 150ms ease-out, color 150ms ease-out;
 }
 
 .surface-label-switch:hover {
@@ -4323,30 +4407,83 @@ body.panels-resizing * {
 }
 
 .surface-label-select {
-  max-width: 180px;
-  min-height: 24px;
-  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 216px;
+  max-width: 320px;
+  padding: 5px 10px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--ink);
   font: inherit;
-  font-size: var(--type-sm);
-  font-weight: var(--weight-strong);
+  text-align: left;
   cursor: pointer;
+  transition: background-color 150ms ease-out;
 }
 
-/* The current wall name truncates before the caret; a multi-room project
-   prefixes it with a muted room name so the chip reads "Room · Wall". */
+.surface-label-select:hover,
+.surface-label-select[data-state="open"] {
+  background: var(--surface);
+}
+
+.surface-label-select:hover .surface-label-select-caret,
+.surface-label-select[data-state="open"] .surface-label-select-caret {
+  color: var(--ink);
+}
+
+/* Keep the room as a quiet first line and the elevation as the typographic
+   anchor, even when the project currently has only one room. The dimensions
+   ride the wall's baseline at the trailing edge, mirroring the menu rows. */
 .surface-label-select-value {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+}
+
+.surface-label-select-room {
   overflow: hidden;
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.01em;
+  line-height: var(--leading-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.surface-label-select-room {
+.surface-label-select-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.surface-label-select-wall {
+  overflow: hidden;
+  font-size: var(--type-md);
+  font-weight: var(--weight-strong);
+  letter-spacing: -0.005em;
+  line-height: var(--leading-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.surface-label-select-dimensions {
+  flex: 0 0 auto;
+  margin-left: auto;
   color: var(--muted);
-  font-weight: var(--weight-medium);
+  font-size: var(--type-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-ui);
+}
+
+.surface-label-select-caret {
+  flex: 0 0 auto;
+  color: var(--subtle);
+  transition: color 150ms ease-out;
 }
 
 /* 3D preview surface. Camera presets live in the shared view toolbar so the
@@ -4425,10 +4562,6 @@ body.panels-resizing * {
 .viewport-zoom-value:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
-}
-
-.surface-label-select:hover {
-  background: var(--surface);
 }
 
 /* Elevation wall anatomy: white face, thin muted boundary, a heavier ink
