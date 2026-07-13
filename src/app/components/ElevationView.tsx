@@ -30,7 +30,7 @@ import {
 } from "../../domain/placement/placeArtwork";
 import { getDefaultOpeningSizeMm, type OpeningKind } from "../../domain/placement/createOpening";
 import { effectivePlacementForm } from "../../domain/placement/artworkForm";
-import { getPlacementFootprintMm, withArtworkFootprint } from "../../domain/framing";
+import { getPlacementFootprintMm, withArtworkFootprintFromMap } from "../../domain/framing";
 import type {
   Artwork,
   DisplayUnit,
@@ -133,15 +133,16 @@ type MoveDragState = {
   previousSnapTargetIds?: SnapTargetIds;
   activeGuides: Guide[];
   // Group drag: when the pressed object belongs to a multi-selection, the whole
-  // group translates rigidly. `members` records each member's kind/size and its
-  // offset from the group's union-box center; for a group drag startCenterMm /
-  // previewCenterMm track that union-box center (and sizeMm is the union box's
-  // size, fed to resolveArtworkSnap as one virtual object). Absent for a
-  // single-object drag — that path is left exactly as it was.
+  // group translates rigidly. `members` records each member's kind and its
+  // offset from the group's union-box center (member size is never read — the
+  // group resolves and paints as one virtual object sized by the union box);
+  // for a group drag startCenterMm / previewCenterMm track that union-box
+  // center (and sizeMm is the union box's size, fed to resolveArtworkSnap as
+  // one virtual object). Absent for a single-object drag — that path is left
+  // exactly as it was.
   members?: {
     id: string;
     kind: WallObject["kind"];
-    sizeMm: { widthMm: number; heightMm: number };
     offsetFromGroupCenterMm: Vector2;
   }[];
   startGroupCenterMm?: Vector2;
@@ -543,10 +544,7 @@ export function ElevationView({
     ...elevationScene.openings.map((entry) => entry.object)
   ];
   const withResolvedArtworkFootprint = (object: WallObject): WallObject =>
-    withArtworkFootprint(
-      object,
-      object.kind === "artwork" ? artworksById?.get(object.artworkId) : undefined
-    );
+    withArtworkFootprintFromMap(object, artworksById);
   const assetIds = elevationScene.artworks.map((entry) => entry.artwork?.assetId);
   const imageUrlsByAssetId = useAssetImageUrls(assetIds, getBlob ?? NO_OP_GET_BLOB, "display");
 
@@ -947,21 +945,14 @@ export function ElevationView({
             },
             groupNeighbors
           ),
-          members: groupMembers.map((member) => {
-            const footprintMember = withResolvedArtworkFootprint(member);
-            return {
-              id: member.id,
-              kind: member.kind,
-              sizeMm: {
-                widthMm: footprintMember.widthMm,
-                heightMm: footprintMember.heightMm
-              },
-              offsetFromGroupCenterMm: {
-                xMm: member.xMm - groupCenterMm.xMm,
-                yMm: member.yMm - groupCenterMm.yMm
-              }
-            };
-          }),
+          members: groupMembers.map((member) => ({
+            id: member.id,
+            kind: member.kind,
+            offsetFromGroupCenterMm: {
+              xMm: member.xMm - groupCenterMm.xMm,
+              yMm: member.yMm - groupCenterMm.yMm
+            }
+          })),
           startGroupCenterMm: groupCenterMm
         });
         return;
@@ -1467,7 +1458,6 @@ export function ElevationView({
           // A move never resizes, so the object's own size always applies (for a
           // group, moveDrag.sizeMm is the union box, not this member's size).
           const size = sizeMm;
-          const footprintSize = getPlacementFootprintMm(placement, artwork);
 
           return (
             <ElevationArtwork
@@ -1485,7 +1475,7 @@ export function ElevationView({
                       wallLengthMm,
                       wallHeightMm,
                       center,
-                      footprintSize
+                      getPlacementFootprintMm(placement, artwork)
                     )
                   : outOfBounds
               }

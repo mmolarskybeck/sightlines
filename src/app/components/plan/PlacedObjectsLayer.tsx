@@ -160,6 +160,13 @@ export function PlacedObjectsLayer({
         // widening, viewer-side offset, min-depth clamp) applied to
         // any live single/group drag preview, so the drawing never
         // disagrees between mid-drag and on-release — nothing jumps.
+        //
+        // The preview rect's provenance travels in `sizing`, not by lying about
+        // the artwork: a single-drag rect arrives already outer-sized from
+        // resolvePlanPlacement, while a group preview rect arrives image-sized
+        // (its members are built from stored project.wallObjects) and still
+        // needs widening. Both still need the viewer-side offset and min-depth
+        // clamp, so both go through the transform.
         const renderedPlanRect =
           isFloorPlaced || isInvalid
             ? planRect
@@ -168,11 +175,9 @@ export function PlacedObjectsLayer({
               : getRenderedWallObjectPlanRect(
                   planRect,
                   wallObject.kind,
-                  // resolvePlanPlacement already returns the outer wall
-                  // footprint for a single framed drag. Group previews remain
-                  // image-sized until Phase 4 and still need expansion here.
-                  isSinglePreview ? undefined : artwork,
-                  wallObjectMinDepthMm
+                  artwork,
+                  wallObjectMinDepthMm,
+                  isSinglePreview ? "outer" : "image"
                 );
 
         return (

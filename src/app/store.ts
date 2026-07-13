@@ -62,7 +62,7 @@ import {
 } from "../domain/placement/openingPairs";
 import { createArtworkPlacement, getEffectivePlacementSizeMm } from "../domain/placement/placeArtwork";
 import { effectiveFloorDepthMm } from "../domain/placement/artworkForm";
-import { withArtworkFootprint } from "../domain/framing";
+import { withArtworkFootprintFromMap } from "../domain/framing";
 import type { PixelAspect } from "../domain/units/aspectFill";
 import type { PlacementWarning } from "../domain/placement/validatePlacement";
 import {
@@ -389,10 +389,7 @@ export function createAppStore(deps: AppStoreDeps) {
       return {
         ...project,
         wallObjects: project.wallObjects.map((wallObject) =>
-          withArtworkFootprint(
-            wallObject,
-            wallObject.kind === "artwork" ? artworksById.get(wallObject.artworkId) : undefined
-          )
+          withArtworkFootprintFromMap(wallObject, artworksById)
         )
       };
     }

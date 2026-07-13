@@ -34,7 +34,7 @@ import { getRoomPlaceableWalls } from "../domain/geometry/placeableWalls";
 import type { WallSwitcherEntry } from "./components/WallSwitcher";
 import { evaluateOpeningPair } from "../domain/geometry/openingConnections";
 import { getOpeningKindLabel, type OpeningKind } from "../domain/placement/createOpening";
-import { withArtworkFootprint } from "../domain/framing";
+import { withArtworkFootprintFromMap } from "../domain/framing";
 import type {
   Artwork,
   ArtworkFloorObject,
@@ -654,10 +654,7 @@ export function App() {
   // Keep persisted image dimensions untouched and adapt only this geometry
   // boundary; openings and unresolved artwork records pass through unchanged.
   const wallPlacementGeometryObjects = project.wallObjects.map((wallObject) =>
-    withArtworkFootprint(
-      wallObject,
-      wallObject.kind === "artwork" ? artworksById.get(wallObject.artworkId) : undefined
-    )
+    withArtworkFootprintFromMap(wallObject, artworksById)
   );
   const placedWallObjectFootprint: ArtworkWallObject | null = placedWallObject
     ? (wallPlacementGeometryObjects.find(

@@ -70,7 +70,7 @@ algorithms stay `WallObjectBase`-pure and framing-agnostic.
 | Tooltips, inspector summaries | image **and** "overall" line when framed | Phase 5 |
 | 3D eye-level camera standoff | **outer** | Phase 5 |
 | Spreadsheet import `framed`-role cells | persisted provenance, never silently stored as image dims | Phase 6a |
-| Floor artwork glyph/hit/3D | **undecided** — physical representation first (see §3) | Phase 6b |
+| Floor artwork glyph/hit/3D | **image** — framing is wall-only geometry; floor stays framing-agnostic (see §3) | decided, Phase 6b |
 | `displayDimensionsOverride` | display/provenance metadata; geometry reads stored dims (rule above) | decided, Phase 1 documents it |
 | Center-snap targets, group-drag anchor math | stored dims (centers identical under symmetric bands — deliberate) | exempt, document |
 | Plan off-wall depth, floor-object +20mm 3D pad | schematic constants | exempt, document |
@@ -141,31 +141,43 @@ Decided:
   acceptable if the review/commit flow provably carries it; provenance in the
   record is the fallback that always survives.
 
-Open (blocks only Phase 6b):
-- **Floor-placed framed artwork: physical representation first, geometry
-  second.** An artwork on the floor has ambiguous orientation (flat? boxed?
-  leaning? inventory-parked?), and stored floor `depthMm` already has its own
-  spatial meaning — do NOT auto-map outer height onto plan depth. Options:
-  (a) declare framing wall-only: conversion keeps framing fields on the
-  artwork record but floor geometry ignores them, documented in-code — honest
-  and cheap; (b) pick a physical representation and derive footprint from it.
-  Default to (a) unless a representation is chosen.
+- **Framing is WALL-ONLY geometry** (decided 2026-07-13, closing Phase 6b —
+  option (a) of the two that were open). Conversion keeps mat/frame on the
+  artwork record, but floor geometry ignores them: a floor-placed artwork's
+  plan glyph, hit area, and 3D box stay image-sized. Three reasons, in code:
 
-Recommend **(a) — declare framing wall-only geometry** and close Phase 6b as a decision rather than leaving it open. Three things in the code push hard that way, beyond it just being cheap:
+  1. **The depth fallback would silently inherit the frame band.**
+     `effectiveFloorDepthMm` (`artworkForm.ts`) falls back to `widthMm` when no
+     depth is entered. If a floor artwork's width were ever the OUTER width, a
+     depth-less floor work would pick up a plan depth of image + 2·(mat+frame) —
+     the frame band leaking into an axis it has no physical relationship to. The
+     failure would happen implicitly, rather than by anyone choosing it.
+  2. **A floor artwork has ambiguous physical orientation** (flat on the floor?
+     leaning against a wall? crated?), so outer HEIGHT cannot be auto-mapped
+     onto plan DEPTH. Stored floor `depthMm` already has its own spatial
+     meaning.
+  3. **The populations barely overlap.** `effectivePlacementForm` sends a work
+     to the floor only when `placementForm === "floor"` or `depthMm > 0`; mat
+     and frame are 2D wall-work fields. A framed work becomes floor-form only if
+     someone enters a depth or flips the form explicitly — precisely the
+     leaning/crated case where the representation is unknown. This declines to
+     guess about a rare case; it does not defer a common one.
 
-**The depth fallback would silently inherit the frame band.** `effectiveFloorDepthMm` (artworkForm.ts:13) falls back to `widthMm` when no depth is entered. If you widened a floor artwork's `widthMm` to the outer size, a depth-less floor work would pick up a plan depth of image + 2·(mat+frame) — the frame band would leak into an axis it has no physical relationship to. That's exactly the "auto-map outer onto depth" failure you're guarding against, and it happens implicitly rather than by anyone choosing it.
+  It also preserves the invariant the whole contract rests on: storage stays
+  image-sized, so a floor→wall conversion restores `heightMm`/`wallYMm` and the
+  work re-expands the moment it is back on a wall, with nothing to migrate —
+  which only holds because no floor field ever absorbed a frame band.
 
-**The populations barely overlap.** `effectivePlacementForm` sends a work to the floor when `placementForm === "floor"` or `depthMm > 0`. Mat and frame are 2D-work fields; a framed painting is wall-form by construction. A framed work only becomes floor-form if someone enters a depth or flips the form explicitly — which is precisely the leaning/crated case where you don't yet know the representation. So (a) is not deferring a common case, it's declining to guess about a rare one.
+  **Unblock condition:** floor geometry stays image-sized until an artwork
+  carries an explicit physical orientation (flat / leaning / crated). That enum
+  — not the framing fields — is what determines whether outer height maps to
+  plan depth at all. Reopening this without one is guessing.
 
-**(a) is the only option that preserves the invariant the whole contract rests on.** Storage stays image-sized; framing is a read-time expansion applied at wall-geometry boundaries. A floor→wall conversion restores `heightMm`/`wallYMm` and the work re-expands automatically the moment it's back on a wall, with nothing to migrate — that only holds because no floor field ever absorbed a frame band.
-
-What I'd actually do:
-
-Compute `wallFootprintWidthMm` in PlanView only when `effectivePlacementForm(artwork) === "wall"`, so a floor work's footprint is image-sized by construction rather than by the floor stage happening to ignore the field. Then fix the reject path I flagged: `resolveRejected` should use the footprint width, because a rejected wall-only artwork is still a framed wall work under the cursor, not a floor object — that's the one place the current "floor stage keeps `movingSize`" rule is wrong. With those two, the wall/floor split is enforced at the source instead of downstream.
-
-Then pin the decision where the next reader will hit it: a comment on `effectiveFloorDepthMm` saying the width fallback must never receive an outer width, and one near `getPlacementFootprintMm` stating floor geometry is framing-agnostic. Cover it with three tests — a mat+frame floor work keeps image-sized plan geometry through a drag, a rejected wall work keeps its outer ghost width, and a wall→floor→wall round trip re-expands with no stored dimension change.
-
-Finally, rewrite the Phase 6b row from "Open" to the decision plus its unblock condition: floor geometry stays image-sized until an artwork carries an explicit physical orientation (flat / leaning / crated), because that enum — not the framing fields — is what determines whether the outer height maps to plan depth at all. That turns a vague open question into a concrete precondition for whoever picks it up.
+  Note the one thing that is NOT the floor stage: a **rejected** plan drop
+  (`floatPolicy: "reject"`, no wall in capture range) is a wall-only artwork
+  that lost capture, not a floor placement. Its ghost keeps the outer width.
+  `resolveRejected` and `resolveOnFloor` must stay distinct for exactly that
+  reason (`planSnapTargets.ts`).
 
 ## 4. Phases
 
@@ -243,12 +255,24 @@ mat 75, frame 25 → outer 600×500).
 - Regression tests: a `"Framed: 24 x 36 in"` cell lands in `dimensions` WITH
   persisted provenance; review model carries the flag through commit.
 
-### Phase 6b — Floor behavior (after product decision)
+### Phase 6b — Floor behavior: framing is wall-only (complete 2026-07-13)
 
-- Blocked on §3's open decision. If (a) wall-only: document the exemption
-  in-code (`FloorObjectBox.tsx`, `getFloorObjectPlanRect` call sites) and add
-  a test pinning that floor geometry ignores framing *by design*. If (b):
-  implement the chosen representation with its own adapter variant.
+- Decision per §3: floor geometry is image-sized and framing-agnostic. No
+  floor adapter variant, no floor footprint helper.
+- The wall/floor split is enforced at the SOURCE, not downstream: `PlanView`'s
+  drop-dimension helper produces `wallFootprintWidthMm` only when
+  `effectivePlacementForm(artwork) === "wall"`, so a floor work is image-sized
+  by construction rather than by the floor stage happening to ignore the field.
+- Bug fixed at the same seam: `resolveRejected` (`planSnapTargets.ts`) built its
+  rect through `resolveOnFloor` and so dropped the footprint width — a framed
+  wall work's ghost visibly shrank by 2·(mat+frame) the instant wall capture was
+  lost, then grew back on re-capture. A reject is a wall work, not a floor
+  object; it now keeps its outer width. The two paths stay deliberately distinct.
+- Decision pinned in-code at `effectiveFloorDepthMm` (the width fallback must
+  never receive an outer width) and `getPlacementFootprintMm` (no floor variant).
+- Regression tests: a rejected drop keeps the outer width; a floor-only drop
+  keeps the image width even when handed a footprint width; a framed floor work's
+  derived plan depth is the image width, not the outer width.
 
 ## 5. Docs to update on completion
 

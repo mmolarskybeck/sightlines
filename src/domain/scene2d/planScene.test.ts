@@ -167,6 +167,28 @@ describe("getRenderedWallObjectPlanRect", () => {
     expect(renderedArtwork.centerYMm).toBeCloseTo(WALL_OBJECT_PLAN_DEPTH_MM / 2);
     expect(renderedArtwork.depthMm).toBe(400);
   });
+
+  // The rect's provenance is a fact independent of whether the artwork is
+  // framed: an already-outer rect (what resolvePlanPlacement hands a single-drag
+  // preview) must not be widened a second time, but it still needs the
+  // viewer-side offset and the min-depth clamp — so it cannot simply skip this
+  // transform.
+  it("widens an image-sized rect but not an already-outer one, offsetting and clamping both", () => {
+    const artwork = { matWidthMm: 50, frame: { widthMm: 25, finish: "black" as const } };
+
+    const fromImage = getRenderedWallObjectPlanRect(restRect, "artwork", artwork, 400, "image");
+    const fromOuter = getRenderedWallObjectPlanRect(restRect, "artwork", artwork, 400, "outer");
+
+    // Same framed artwork, same rect: only the provenance differs.
+    expect(fromImage.widthMm).toBe(restRect.widthMm + 2 * (50 + 25));
+    expect(fromOuter.widthMm).toBe(restRect.widthMm);
+
+    // Both still get the viewer-side shift (pre-clamp half-depth) and the floor.
+    expect(fromImage.centerYMm).toBeCloseTo(WALL_OBJECT_PLAN_DEPTH_MM / 2);
+    expect(fromOuter.centerYMm).toBeCloseTo(WALL_OBJECT_PLAN_DEPTH_MM / 2);
+    expect(fromImage.depthMm).toBe(400);
+    expect(fromOuter.depthMm).toBe(400);
+  });
 });
 
 describe("buildPlanScene wall objects", () => {

@@ -34,7 +34,7 @@ import {
   getPlanSceneObjectIdsIntersectingRect,
   svgPolygonPoints
 } from "../../domain/scene2d/planScene";
-import { getArtworkOuterDimensionsMm, withArtworkFootprint } from "../../domain/framing";
+import { getArtworkOuterDimensionsMm, withArtworkFootprintFromMap } from "../../domain/framing";
 import { getDefaultOpeningSizeMm, type OpeningKind } from "../../domain/placement/createOpening";
 import {
   effectiveFloorDepthMm,
@@ -1003,12 +1003,7 @@ export function PlanView({
   // changing persisted data or the selection geometry owned by a later phase.
   const snappingWallObjects = useMemo(
     () =>
-      project.wallObjects.map((object) =>
-        withArtworkFootprint(
-          object,
-          object.kind === "artwork" ? artworksById?.get(object.artworkId) : undefined
-        )
-      ),
+      project.wallObjects.map((object) => withArtworkFootprintFromMap(object, artworksById)),
     [project.wallObjects, artworksById]
   );
 
@@ -1802,12 +1797,16 @@ export function PlanView({
       // The aspect only applies to the artwork we actually loaded it for.
       const aspect = artworkId === draggingArtworkId ? draggingArtworkAspect : undefined;
       const { widthMm, heightMm } = getEffectivePlacementSizeMm(artwork.dimensions, aspect);
-      const wallFootprintWidthMm = getArtworkOuterDimensionsMm(
-        widthMm,
-        heightMm,
-        artwork.matWidthMm,
-        artwork.frame
-      ).widthMm;
+      // Framing is WALL-ONLY geometry (docs/framing-dimension-contract.md §3,
+      // Phase 6b): a floor work gets NO outer width, by construction rather than
+      // by the floor stage happening to ignore one. An outer width leaking into
+      // a floor drop would also reach effectiveFloorDepthMm's width fallback and
+      // put the frame band on the depth axis, which it has no relationship to.
+      const wallFootprintWidthMm =
+        effectivePlacementForm(artwork) === "wall"
+          ? getArtworkOuterDimensionsMm(widthMm, heightMm, artwork.matWidthMm, artwork.frame)
+              .widthMm
+          : undefined;
       return {
         widthMm,
         heightMm,

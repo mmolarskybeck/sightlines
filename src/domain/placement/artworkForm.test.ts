@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CURRENT_ARTWORK_SCHEMA_VERSION, DEFAULT_FLOOR_OBJECT_DEPTH_MM, type Artwork, type Dimensions } from "../project";
+import { getArtworkOuterDimensionsMm } from "../framing";
 import { effectiveFloorDepthMm, effectivePlacementForm } from "./artworkForm";
 
 function makeArtwork(dimensions: Dimensions, placementForm?: "wall" | "floor"): Artwork {
@@ -56,5 +57,35 @@ describe("effectiveFloorDepthMm — depth fallback", () => {
 
   it("falls back to the default when neither depth nor width is known", () => {
     expect(effectiveFloorDepthMm({ status: "unknown" })).toBe(DEFAULT_FLOOR_OBJECT_DEPTH_MM);
+  });
+});
+
+describe("floor form is framing-agnostic (Phase 6b)", () => {
+  // A framed work forced onto the floor: mat 75 + frame 25 make the outer width
+  // 600 against an image width of 400. Floor geometry must stay image-sized.
+  const framedFloorWork: Artwork = {
+    ...makeArtwork({ widthMm: 400, heightMm: 300, status: "known" }, "floor"),
+    matWidthMm: 75,
+    frame: { widthMm: 25, finish: "black" }
+  };
+
+  it("derives its plan depth from the image width, never the framed outer width", () => {
+    expect(effectivePlacementForm(framedFloorWork)).toBe("floor");
+    // The trap: the width fallback would otherwise hand the depth axis a frame
+    // band it has no physical relationship to.
+    expect(
+      getArtworkOuterDimensionsMm(400, 300, framedFloorWork.matWidthMm, framedFloorWork.frame)
+        .widthMm
+    ).toBe(600);
+    expect(effectiveFloorDepthMm(framedFloorWork.dimensions)).toBe(400);
+  });
+
+  it("still reads as a wall work — and so is framing-widened — without the floor form", () => {
+    const wallWork: Artwork = {
+      ...framedFloorWork,
+      placementForm: undefined,
+      dimensions: { widthMm: 400, heightMm: 300, status: "known" }
+    };
+    expect(effectivePlacementForm(wallWork)).toBe("wall");
   });
 });

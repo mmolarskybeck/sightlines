@@ -7,7 +7,7 @@ import {
   spaceGroupAboutCenter,
   type BoundaryDetection
 } from "../../domain/placement/arrangeOnWall";
-import { withArtworkFootprint } from "../../domain/framing";
+import { withArtworkFootprintFromMap } from "../../domain/framing";
 import type { Project } from "../../domain/project";
 import { getProjectWalls } from "../projectWalls";
 import type { AppState, EditExtras } from "../store";
@@ -174,12 +174,7 @@ export function createArrangeSlice(
         get().libraryArtworks.map((artwork) => [artwork.id, artwork])
       );
       const withResolvedArtworkFootprint = (wallObject: Project["wallObjects"][number]) =>
-        withArtworkFootprint(
-          wallObject,
-          wallObject.kind === "artwork"
-            ? artworksById.get(wallObject.artworkId)
-            : undefined
-        );
+        withArtworkFootprintFromMap(wallObject, artworksById);
       const members = eligibility.members.map(withResolvedArtworkFootprint);
 
       const memberIds = members.map((member) => member.id);
@@ -284,20 +279,16 @@ export function createArrangeSlice(
       if (!wall) return;
 
       // Successive edits compose from preview positions; collisions gate only at commit.
+      const artworksById = new Map(
+        get().libraryArtworks.map((artwork) => [artwork.id, artwork])
+      );
       const previewMembers = project.wallObjects
         .filter((wallObject) => session.memberIds.includes(wallObject.id))
         .map((wallObject) => {
           const preview = session.previewById[wallObject.id];
           return preview ? { ...wallObject, xMm: preview.xMm, yMm: preview.yMm } : wallObject;
         })
-        .map((wallObject) =>
-          withArtworkFootprint(
-            wallObject,
-            wallObject.kind === "artwork"
-              ? get().libraryArtworks.find((artwork) => artwork.id === wallObject.artworkId)
-              : undefined
-          )
-        );
+        .map((wallObject) => withArtworkFootprintFromMap(wallObject, artworksById));
 
       // "both" re-solves symmetrically; one-sided anchors translate rigidly.
       const insetAnchor: ArrangeSession["insetAnchor"] =

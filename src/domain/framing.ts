@@ -66,6 +66,12 @@ export function getArtworkOuterDimensionsMm(
 // metadata and is deliberately not consulted here. The wallId requirement is
 // intentional: a floor object's heightMm is its remembered hang height, not a
 // footprint axis.
+//
+// Framing is WALL-ONLY geometry: floor objects have no footprint helper here and
+// are deliberately framing-agnostic (docs/framing-dimension-contract.md §3, Phase
+// 6b). A floor work's physical orientation is unknown — flat, leaning, crated —
+// so an outer height cannot be mapped onto plan depth. Do not add a floor variant
+// until artworks carry an explicit orientation.
 export function getPlacementFootprintMm(
   placement: Pick<WallObjectBase, "widthMm" | "heightMm"> & { wallId: string },
   artwork?: Pick<Artwork, "matWidthMm" | "frame">
@@ -96,6 +102,23 @@ export function withArtworkFootprint<T extends WallObject>(
   }
 
   return { ...object, ...footprint };
+}
+
+// Callers that hold an id→Artwork lookup rather than an already-resolved
+// artwork record collapse onto this instead of repeating the kind guard +
+// map lookup inline. The guard stays here (not just inside
+// withArtworkFootprint) because artworkId only exists on the artwork member
+// of the WallObject union — narrowing before the lookup is what makes the
+// `.get` call type-check, not merely an optimization. A missing map (some
+// callers hold it as optional) behaves like a missing entry: identity.
+export function withArtworkFootprintFromMap<T extends WallObject>(
+  object: T,
+  artworksById: Map<string, Artwork> | undefined
+): T {
+  return withArtworkFootprint(
+    object,
+    object.kind === "artwork" ? artworksById?.get(object.artworkId) : undefined
+  );
 }
 
 // Below this, a derived frame band counts as "exactly zero" rather than

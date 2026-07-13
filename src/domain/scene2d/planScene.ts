@@ -153,14 +153,24 @@ export function svgPolygonPoints(polygonMm: Point[]): string {
 // - Every kind then gets the min-depth floor. The viewer-side offset is
 //   deliberately computed from the PRE-clamp depth (the model's
 //   WALL_OBJECT_PLAN_DEPTH_MM), so zoom never moves an artwork's center.
+//
+// `sizing` is the rect's PROVENANCE, a fact independent of whether the artwork
+// is framed — the two must not share one channel. An "outer" rect has already
+// been widened upstream (resolvePlanPlacement returns one for a single-drag
+// preview) and widening it again would double the mat/frame band; an "image"
+// rect carries the stored image size and still needs widening. An "outer" rect
+// still needs THIS function for the viewer-side offset and the min-depth clamp,
+// which apply in both cases — that is why such callers must pass sizing rather
+// than skip the call.
 export function getRenderedWallObjectPlanRect(
   planRect: PlanRect,
   kind: WallObject["kind"],
   artwork: Pick<Artwork, "matWidthMm" | "frame"> | undefined,
-  minDepthMm: number
+  minDepthMm: number,
+  sizing: "image" | "outer" = "image"
 ): PlanRect {
   const framedWidthMm =
-    kind === "artwork"
+    kind === "artwork" && sizing === "image"
       ? getArtworkOuterDimensionsMm(
           planRect.widthMm,
           planRect.widthMm,

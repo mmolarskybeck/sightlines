@@ -101,8 +101,11 @@ export function resolvePlanPlacement(
     wallObjects: WallObjectBase[];
     movingSize: PlanMovingSize;
     // Optional wall-only rendered footprint. Artwork storage stays image-sized,
-    // but framing widens the edges used by wall snapping, clamping, and ghosts.
-    // The floor stage deliberately continues to use movingSize (Phase 6b).
+    // but framing widens the edges used by wall snapping, clamping, and ghosts —
+    // including the REJECTED ghost, which is still a wall work under the cursor.
+    // Only the genuine floor stage (float / floor-only) keeps movingSize: floor
+    // geometry is framing-agnostic by decision (docs/framing-dimension-contract.md
+    // §3, Phase 6b), and callers do not even supply this field for a floor work.
     wallFootprintWidthMm?: number;
     movingKind: WallObject["kind"];
     // Per-kind behavior when no wall captures — see FloatPolicy /
@@ -283,6 +286,10 @@ function resolveOnWall(
   };
 }
 
+// The floor stage. movingSize is the image size and stays that way: floor
+// geometry never expands by mat/frame (Phase 6b decision — a floor work has no
+// settled physical orientation, so an outer height cannot be mapped onto plan
+// depth). wallFootprintWidthMm is deliberately absent from this signature.
 function resolveOnFloor(
   proposedCenterFloorMm: Point,
   args: {
@@ -324,14 +331,23 @@ function resolveOnFloor(
 
 // A rejected drop (floatPolicy "reject", nothing captured). Nothing commits —
 // the placement is `{ anchor: "none" }` — but we still hand back a planRect at
-// the cursor (reusing the floor resolve so the ghost tracks the pointer exactly
-// like a floor preview would) so the caller can paint the danger ghost right
-// where the release was refused. Alignment guides are suppressed: there is no
-// placement to align, so drawing them would imply a commit that never happens.
+// the cursor (reusing the floor resolve's cursor tracking, which is all we want
+// from it) so the caller can paint the danger ghost right where the release was
+// refused. Alignment guides are suppressed: there is no placement to align, so
+// drawing them would imply a commit that never happens.
+//
+// The rect is WALL-sized, not floor-sized: a reject is a wall-only artwork that
+// lost wall capture, so the thing under the cursor is still the same framed wall
+// work and its ghost must keep its outer width (otherwise it visibly shrinks by
+// 2·(mat+frame) the instant capture breaks, then grows back on re-capture). Do
+// NOT unify this with the floor stage's movingSize.widthMm — that stage serves
+// genuine floor objects, whose geometry is framing-agnostic by decision
+// (docs/framing-dimension-contract.md §3, Phase 6b).
 function resolveRejected(
   proposedCenterFloorMm: Point,
   args: {
     movingSize: PlanMovingSize;
+    wallFootprintWidthMm?: number;
     gridTargets: SnapTarget[];
     snapToGrid: boolean;
     thresholdMm: number;
@@ -340,5 +356,13 @@ function resolveRejected(
   }
 ): PlanPlacementResult {
   const floor = resolveOnFloor(proposedCenterFloorMm, args);
-  return { ...floor, placement: { anchor: "none" }, activeGuides: [] };
+  return {
+    ...floor,
+    placement: { anchor: "none" },
+    planRect: {
+      ...floor.planRect,
+      widthMm: args.wallFootprintWidthMm ?? args.movingSize.widthMm
+    },
+    activeGuides: []
+  };
 }

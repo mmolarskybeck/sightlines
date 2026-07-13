@@ -10,6 +10,11 @@ export function effectivePlacementForm(artwork: Artwork): PlacementForm {
 }
 
 // Missing floor depth falls back to width, then the default footprint depth.
+// The width handed in must always be the IMAGE width, never a mat/frame outer
+// width: this fallback would otherwise give a depth-less floor work a plan depth
+// of image + 2·(mat + frame), putting the frame band on an axis it has no
+// physical relationship to. This is why floor geometry is framing-agnostic
+// (docs/framing-dimension-contract.md §3, Phase 6b).
 export function effectiveFloorDepthMm(dimensions: Dimensions): number {
   const { depthMm, widthMm } = dimensions;
   if (typeof depthMm === "number" && depthMm > 0) return depthMm;

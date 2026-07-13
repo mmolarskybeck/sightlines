@@ -300,6 +300,22 @@ describe("resolvePlanPlacement — clamping", () => {
     expect(floorGhost.planRect.widthMm).toBe(300);
   });
 
+  it("a floor-only placement keeps the image width even if a footprint width is passed", () => {
+    // Floor geometry is framing-agnostic by decision (Phase 6b): the floor stage
+    // never widens, even on a wall and even when handed an outer width.
+    const result = resolvePlanPlacement(
+      { xMm: 2000, yMm: 5 },
+      {
+        ...baseArgs,
+        floatPolicy: floatPolicyForKind("artwork", "floor"),
+        wallFootprintWidthMm: 500
+      }
+    );
+
+    expect(result.placement.anchor).toBe("floor");
+    expect(result.planRect.widthMm).toBe(300);
+  });
+
   it("centers the object on a wall shorter than the object", () => {
     const shortWall = makeWall("wall-1", { xMm: 0, yMm: 0 }, { xMm: 200, yMm: 0 });
     const result = resolvePlanPlacement(
@@ -370,6 +386,24 @@ describe("resolvePlanPlacement — artwork reject policy (wall-only)", () => {
     expect(result.planRect.centerXMm).toBeCloseTo(2000);
     expect(result.planRect.centerYMm).toBeCloseTo(80);
     expect(result.activeGuides).toEqual([]);
+  });
+
+  it("keeps the framed outer width in the rejected ghost (it is still a wall work)", () => {
+    // A reject is a wall-only work that lost capture, not a floor object: the
+    // ghost must not shrink to the image width the instant the wall lets go.
+    const args = { ...rejectArgs, wallFootprintWidthMm: 500 };
+    const captured = resolvePlanPlacement({ xMm: 2000, yMm: 30 }, args);
+    const rejected = resolvePlanPlacement({ xMm: 2000, yMm: 80 }, args);
+
+    expect(captured.placement.anchor).toBe("wall");
+    expect(rejected.placement).toEqual({ anchor: "none" });
+    expect(rejected.planRect.widthMm).toBe(500);
+    expect(rejected.planRect.widthMm).toBe(captured.planRect.widthMm);
+  });
+
+  it("falls back to the image width in the rejected ghost when the work is unframed", () => {
+    const result = resolvePlanPlacement({ xMm: 2000, yMm: 80 }, rejectArgs);
+    expect(result.planRect.widthMm).toBe(300);
   });
 
   it("still captures a wall in range — reject only bites when nothing captures", () => {

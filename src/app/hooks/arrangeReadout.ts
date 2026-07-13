@@ -1,5 +1,5 @@
 import type { Artwork, Project, WallObject } from "../../domain/project";
-import { withArtworkFootprint } from "../../domain/framing";
+import { withArtworkFootprintFromMap } from "../../domain/framing";
 import type { WallWithGeometry } from "../../domain/geometry/walls";
 import { getOpeningKindLabel } from "../../domain/placement/createOpening";
 import {
@@ -81,10 +81,7 @@ export function deriveArrangeReadout({
   if (!arrangeWall) return null;
 
   const withResolvedArtworkFootprint = (wallObject: WallObject): WallObject =>
-    withArtworkFootprint(
-      wallObject,
-      wallObject.kind === "artwork" ? artworksById.get(wallObject.artworkId) : undefined
-    );
+    withArtworkFootprintFromMap(wallObject, artworksById);
   const footprintArrangeMembers = arrangeMembers.map(withResolvedArtworkFootprint);
   const footprintSelectedArtworkMembers = selectedArtworkMembers.map(
     withResolvedArtworkFootprint

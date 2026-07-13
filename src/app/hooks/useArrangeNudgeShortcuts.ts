@@ -5,7 +5,7 @@ import {
   quantizeXToCleanIncrement,
   quantizeYToCleanIncrement
 } from "../../domain/snapping/cleanIncrement";
-import { withArtworkFootprint } from "../../domain/framing";
+import { withArtworkFootprintFromMap } from "../../domain/framing";
 import type { Artwork, Project, WallObject } from "../../domain/project";
 import { unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
 import { getProjectWalls, type ArrangeSession, type ViewMode } from "../store";
@@ -63,10 +63,7 @@ export function useArrangeNudgeShortcuts({
   useEffect(() => {
     const artworksById = new Map(artworks.map((artwork) => [artwork.id, artwork]));
     const withResolvedArtworkFootprint = (wallObject: WallObject): WallObject =>
-      withArtworkFootprint(
-        wallObject,
-        wallObject.kind === "artwork" ? artworksById.get(wallObject.artworkId) : undefined
-      );
+      withArtworkFootprintFromMap(wallObject, artworksById);
 
     function onKeyDown(event: KeyboardEvent) {
       if (isEditableTarget(event.target)) return;
