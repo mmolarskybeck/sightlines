@@ -24,7 +24,7 @@ export const FRAME_FINISHES: { value: FrameFinish; label: string }[] = [
   { value: "gold", label: "Gold" },
   { value: "white", label: "White" },
   { value: "black", label: "Black" },
-  { value: "silver", label: "Silver / brushed aluminum" },
+  { value: "silver", label: "Silver" },
   { value: "wood", label: "Wood" }
 ];
 
