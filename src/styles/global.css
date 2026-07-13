@@ -4463,46 +4463,6 @@ body.panels-resizing * {
   line-height: var(--leading-copy);
 }
 
-.property-list {
-  display: grid;
-  gap: 1px;
-  margin: 0;
-  border: 1px solid var(--line);
-  border-radius: 0;
-  overflow: hidden;
-}
-
-.property-list div {
-  display: grid;
-  grid-template-columns: minmax(88px, 0.8fr) minmax(0, 1.2fr);
-  gap: 10px;
-  padding: 10px;
-  background: var(--bg);
-}
-
-.property-list div + div {
-  border-top: 1px solid var(--line);
-}
-
-.property-list dt {
-  color: var(--muted);
-  font-size: var(--type-xs);
-  font-weight: var(--weight-semibold);
-  line-height: var(--leading-ui);
-}
-
-.property-list dd {
-  min-width: 0;
-  margin: 0;
-  font-size: var(--type-md);
-  font-weight: var(--weight-medium);
-  font-variant-numeric: tabular-nums;
-  line-height: var(--leading-ui);
-}
-
-.property-list.compact {
-  margin-top: 14px;
-}
 
 /* Generous gap between top-level children so distinct sections (a
    .field-group cluster, the dimensions block, action buttons, property
@@ -4538,24 +4498,6 @@ body.panels-resizing * {
   width: 100%;
 }
 
-.opening-connection-status {
-  margin: 0;
-  padding: 7px 9px;
-  border-radius: var(--radius-sm);
-  font-size: var(--type-xs);
-  font-weight: var(--weight-semibold);
-  line-height: var(--leading-ui);
-}
-
-.opening-connection-status.aligned {
-  background: var(--primary-soft);
-  color: var(--primary-strong);
-}
-
-.opening-connection-status.misaligned {
-  background: var(--caution-soft);
-  color: var(--caution);
-}
 
 /* Groups related fields into one tight cluster (identity, registrar, etc.)
    within the more generous 16px rhythm of .inspector-form. */
@@ -4732,26 +4674,6 @@ body.panels-resizing * {
   font-weight: var(--weight-strong);
 }
 
-.artwork-dimensions {
-  display: grid;
-  gap: 10px;
-  margin-top: 4px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-}
-
-.artwork-dimensions-heading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.artwork-dimensions-heading h3 {
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--type-sm);
-  font-weight: var(--weight-strong);
-}
 
 .artwork-dimensions-grid {
   display: grid;
@@ -4936,9 +4858,6 @@ body.panels-resizing * {
   gap: 8px;
 }
 
-.inspector-section-extras .artwork-dimensions-lock {
-  margin-left: 0;
-}
 
 .inspector-section-body {
   display: grid;
@@ -5306,13 +5225,6 @@ body.panels-resizing * {
 
 /* The ratio lock rides the right edge of the Dimensions heading row; the
    Toggle primitive supplies its ghost hover and pressed-petrol states. */
-.artwork-dimensions-lock {
-  margin-left: auto;
-  height: 24px;
-  gap: 4px;
-  padding-inline: 6px;
-  font-size: var(--type-xs);
-}
 
 /* Artwork inspector header: an aspect-true thumbnail beside the identity
    fields when the panel has room, wrapping to a stack (thumbnail above the
@@ -5434,42 +5346,6 @@ body.panels-resizing * {
    absent — the panel heading already carries it. Occupies the same
    thumbnail-beside slot as the field editor, so switching modes doesn't shift
    the thumbnail. */
-.artwork-identity-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  /* Unlike the field editor (180px floor → wraps under the thumbnail), the
-     one-line summary shrinks: its text ellipsizes, so it always sits BESIDE
-     the thumbnail as a compact card row, centered against it. */
-  min-width: 0;
-  flex-basis: 120px;
-  align-self: center;
-  padding-top: 0;
-}
-
-.artwork-identity-summary-text {
-  max-width: 100%;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: var(--type-sm);
-  line-height: var(--leading-ui);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* No artist or date recorded: same muted ink (stays ≥ 4.5:1), italic to read
-   as an absence rather than a value. */
-.artwork-identity-summary-text.empty {
-  font-style: italic;
-}
-
-/* Trailing "Done" affordance in the expanded-complete state — pushed to the
-   panel edge so it reads as a way out of the editor, not another field. */
-.artwork-identity-actions {
-  display: flex;
-  justify-content: flex-end;
-}
 
 /* Arrange-on-wall controls: a full-width segmented mode switch, then the one
    editable measurement for the chosen mode plus its "Calculated" companion,
@@ -5675,16 +5551,6 @@ body.panels-resizing * {
   white-space: nowrap;
 }
 
-.arrange-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.arrange-actions .inspector-action {
-  justify-content: center;
-  width: 100%;
-}
 
 /* Apply is the primary action — a solid petrol fill (white text + Check icon)
    so it reads as the clear commit. Cancel is the soft-grey sibling: a
@@ -6362,25 +6228,6 @@ body.panels-resizing * {
 /* WallInspector's "Add to this wall" row — three equal-width chips (icon
    over label, same recipe as .arrange-mode) so "Door" and "Blocked zone"
    occupy identical footprints instead of ragged flex widths. */
-.opening-add-row {
-  display: grid;
-  gap: 8px;
-  margin-top: 4px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-}
-
-.opening-add-row > span {
-  color: var(--muted);
-  font-size: var(--type-xs);
-  font-weight: var(--weight-semibold);
-}
-
-.opening-add-buttons {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-}
 
 .opening-add-chip {
   display: flex;
