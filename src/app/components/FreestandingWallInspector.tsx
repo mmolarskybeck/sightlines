@@ -8,6 +8,9 @@ import {
 import { partitionAxisForWorldAxis } from "../../domain/geometry/partitionSpacing";
 import { getScopedUnitContext } from "./scopedUnits";
 import { LengthField } from "./LengthField";
+import { InspectorSection } from "./InspectorSection";
+import { InspectorFieldGrid } from "./InspectorFieldGrid";
+import { InspectorActionGroup } from "./InspectorActionGroup";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
@@ -43,21 +46,21 @@ export function FreestandingWallInspector({
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
       <div className="inspector-placement">
-        <div className="wall-switcher" role="group" aria-label="View a face in elevation">
+        <InspectorActionGroup label="View a face in elevation">
           <Button className="inspector-action" variant="inspector" onClick={() => onViewFace("a")}>
             View side A
           </Button>
           <Button className="inspector-action" variant="inspector" onClick={() => onViewFace("b")}>
             View side B
           </Button>
-        </div>
+        </InspectorActionGroup>
         <p className="field-hint">
           Hang artwork on either face — each side gets its own elevation view.
         </p>
       </div>
 
       <div className="inspector-placement">
-        <div className="wall-switcher" role="group" aria-label="Center this partition">
+        <InspectorActionGroup label="Center this partition">
           <Button
             className="inspector-action"
             variant="inspector"
@@ -72,45 +75,46 @@ export function FreestandingWallInspector({
           >
             Center up–down
           </Button>
-        </div>
+        </InspectorActionGroup>
       </div>
 
-      <div className="artwork-dimensions">
-        <div className="artwork-dimensions-heading">
-          <h3>Partition</h3>
-        </div>
-        <LengthField
-          positiveOnly
-          label="Length"
-          valueMm={getFreestandingLengthMm(wall)}
-          displayUnit={wallScope.displayUnit}
-          parseUnit={wallScope.parseUnit}
-          placeholder={wallPlaceholder}
-          onCommit={onCommitLength}
-          commitErrorFallback="Could not resize this partition."
-        />
-        <AngleField valueDeg={getFreestandingAngleDeg(wall)} onCommit={onCommitAngle} />
-        <LengthField
-          positiveOnly
-          label="Thickness"
-          valueMm={wall.thicknessMm}
-          displayUnit={wallScope.displayUnit}
-          parseUnit={wallScope.parseUnit}
-          placeholder={wallPlaceholder}
-          onCommit={onCommitThickness}
-          commitErrorFallback="Could not change this partition's thickness."
-        />
-        <LengthField
-          positiveOnly
-          label="Height"
-          valueMm={wall.heightMm}
-          displayUnit={wallScope.displayUnit}
-          parseUnit={wallScope.parseUnit}
-          placeholder={wallPlaceholder}
-          onCommit={onCommitHeight}
-          commitErrorFallback="Could not change this partition's height."
-        />
-      </div>
+      <InspectorSection collapsible={false} title="Partition">
+        <InspectorFieldGrid columns={2}>
+          <LengthField
+            positiveOnly
+            label="Length"
+            valueMm={getFreestandingLengthMm(wall)}
+            displayUnit={wallScope.displayUnit}
+            parseUnit={wallScope.parseUnit}
+            placeholder={wallPlaceholder}
+            onCommit={onCommitLength}
+            commitErrorFallback="Could not resize this partition."
+          />
+          <AngleField valueDeg={getFreestandingAngleDeg(wall)} onCommit={onCommitAngle} />
+        </InspectorFieldGrid>
+        <InspectorFieldGrid columns={2}>
+          <LengthField
+            positiveOnly
+            label="Thickness"
+            valueMm={wall.thicknessMm}
+            displayUnit={wallScope.displayUnit}
+            parseUnit={wallScope.parseUnit}
+            placeholder={wallPlaceholder}
+            onCommit={onCommitThickness}
+            commitErrorFallback="Could not change this partition's thickness."
+          />
+          <LengthField
+            positiveOnly
+            label="Height"
+            valueMm={wall.heightMm}
+            displayUnit={wallScope.displayUnit}
+            parseUnit={wallScope.parseUnit}
+            placeholder={wallPlaceholder}
+            onCommit={onCommitHeight}
+            commitErrorFallback="Could not change this partition's height."
+          />
+        </InspectorFieldGrid>
+      </InspectorSection>
 
       <Button className="inspector-action inspector-danger" variant="destructive-ghost" onClick={onDelete}>
         <TrashIcon aria-hidden="true" size={15} />

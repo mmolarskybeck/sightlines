@@ -3,6 +3,7 @@ import { getOpeningKindLabel } from "../../domain/placement/createOpening";
 import type { BlockedZoneFloorObject, DisplayUnit, FloorObject } from "../../domain/project";
 import { getScopedUnitContext } from "./scopedUnits";
 import { LengthField } from "./LengthField";
+import { InspectorFieldGrid } from "./InspectorFieldGrid";
 import { Button } from "./ui/button";
 
 // The floor-space position (X/Y) and editable footprint (Width/Depth) shared
@@ -27,7 +28,7 @@ export function FloorPlacementFields({
 
   return (
     <>
-      <div className="field-pair-grid">
+      <InspectorFieldGrid columns={2}>
         <LengthField
           compact
           label="X (floor)"
@@ -46,9 +47,9 @@ export function FloorPlacementFields({
           placeholder={position.placeholder}
           onCommit={(yMm) => onCommitPosition(floorObject.xMm, yMm)}
         />
-      </div>
+      </InspectorFieldGrid>
 
-      <div className="field-pair-grid">
+      <InspectorFieldGrid columns={2}>
         <LengthField
           compact
           positiveOnly
@@ -69,7 +70,7 @@ export function FloorPlacementFields({
           placeholder={size.placeholder}
           onCommit={(depthMm) => onCommitSize(floorObject.widthMm, depthMm)}
         />
-      </div>
+      </InspectorFieldGrid>
     </>
   );
 }
