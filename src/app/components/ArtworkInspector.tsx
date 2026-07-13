@@ -568,7 +568,12 @@ function DimensionsSection({
             >
               <Checkbox
                 aria-label="Dimensions are approximate"
-                checked={dimensions.status === "approximate"}
+                // "unknown" (the image-first default, and every legacy record)
+                // reads as checked: it is NOT known, and the scale icon already
+                // calls it estimated — an unchecked box beside an "Estimated
+                // scale" ruler would have the two disagreeing. Unchecking
+                // commits "known"; checking commits "approximate".
+                checked={dimensions.status !== "known"}
                 onCheckedChange={(checked) =>
                   onCommitDimensions({
                     ...dimensions,
