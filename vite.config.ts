@@ -31,7 +31,7 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: "./src/test/setup.ts",
-    // Avoid collecting duplicate suites from in-repo Claude worktrees.
-    exclude: [...configDefaults.exclude, "**/.claude/**"]
+    // Keep agent worktrees and Playwright's browser suite out of Vitest.
+    exclude: [...configDefaults.exclude, "**/.claude/**", "**/e2e/**"]
   }
 });
