@@ -553,7 +553,6 @@ input:focus-visible {
 .view-toolbar,
 .view-tabs,
 .view-options,
-.storage-note,
 .next-panel {
   display: flex;
   align-items: center;
@@ -707,16 +706,35 @@ input:focus-visible {
   height: 32px;
 }
 
-/* Save status: a small dot + muted text label. No pill, no fill. */
+/* Save status: a small dot + muted text label. No pill, no fill — but it's
+   also the trigger for the storage-details popover (see .storage-popover),
+   so it gets the same quiet-button hover wash + focus ring as the other
+   borderless topbar controls (.icon-button, .project-title) instead of
+   staying a plain inert span. */
 .status-badge {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   min-height: 28px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
   color: var(--muted);
+  cursor: pointer;
   font-size: var(--type-xs);
   font-weight: var(--weight-medium);
   font-variant-numeric: tabular-nums;
+  transition: background-color 150ms ease-out;
+}
+
+.status-badge:hover {
+  background: var(--surface);
+}
+
+.status-badge:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus);
 }
 
 .status-dot {
@@ -1464,28 +1482,10 @@ body.panels-resizing * {
   font-variant-numeric: tabular-nums;
 }
 
-.storage-note {
-  align-items: flex-start;
-  gap: 8px;
-  /* Pinned to the bottom of the right panel (a flex column). Un-boxed: a
-     hairline top rule, then small muted text with the Save icon. */
-  margin-top: auto;
-  padding: 12px 0 0;
-  border-top: 1px solid var(--line);
-  color: var(--muted);
-  font-size: var(--type-sm);
-  line-height: var(--leading-copy);
-}
-
-.storage-note svg {
-  flex: 0 0 auto;
-  margin-top: 1px;
-  color: var(--subtle);
-}
-
 /* The right panel is now a pure inspector: warnings (when present), the
-   subject heading, its fields, then the storage note pinned to the bottom
-   (margin-top:auto above). */
+   subject heading, then its fields. The storage note that used to live here,
+   pinned to the bottom, moved to the topbar's status popover (.storage-popover
+   below) — this is the sole child of .inspector's flex column now. */
 .inspector-zone {
   flex: 0 0 auto;
   padding-bottom: 18px;
@@ -3548,6 +3548,55 @@ body.panels-resizing * {
   background: var(--bg);
   color: var(--foreground);
   box-shadow: var(--shadow-overlay);
+}
+
+/* The topbar status popover (StatusBadge's trigger) — where the storage note
+   that used to be pinned to the bottom of the inspector now lives. A compact
+   heading + copy line, an inline Retry when persistence was denied, then a
+   two-action footer. */
+.storage-popover {
+  display: grid;
+  gap: 10px;
+  width: 280px;
+}
+
+.storage-popover-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--subtle);
+}
+
+.storage-popover-heading svg {
+  flex: 0 0 auto;
+}
+
+.storage-popover-heading h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
+}
+
+.storage-popover-body {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-sm);
+  line-height: var(--leading-copy);
+}
+
+.storage-popover-retry {
+  justify-self: start;
+}
+
+.storage-popover-footer {
+  display: flex;
+  gap: 8px;
+}
+
+.storage-popover-footer > * {
+  flex: 1 1 0;
 }
 
 .select-viewport {

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { forwardRef, type ComponentPropsWithoutRef, type ReactNode } from "react";
 import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
 import { CrosshairIcon } from "@phosphor-icons/react/dist/csr/Crosshair";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
@@ -279,7 +279,15 @@ export function PrecisionSelect({
   );
 }
 
-export function StatusBadge({ state }: { state: "idle" | "saving" | "saved" | "error" }) {
+// A real button (not the plain <span> this used to be) so it can double as a
+// Popover trigger for the storage-details popover in App.tsx — forwardRef +
+// spread props let `<PopoverTrigger asChild>` attach its onClick/aria-expanded/
+// aria-haspopup/ref directly to this element rather than wrapping it in an
+// extra DOM node. The dot + label visual is unchanged.
+export const StatusBadge = forwardRef<
+  HTMLButtonElement,
+  { state: "idle" | "saving" | "saved" | "error" } & ComponentPropsWithoutRef<"button">
+>(({ state, className, ...props }, ref) => {
   const label =
     state === "saving"
       ? "Saving"
@@ -290,9 +298,15 @@ export function StatusBadge({ state }: { state: "idle" | "saving" | "saved" | "e
           : "Idle";
 
   return (
-    <span className={`status-badge ${state}`}>
+    <button
+      ref={ref}
+      type="button"
+      className={["status-badge", state, className].filter(Boolean).join(" ")}
+      {...props}
+    >
       <span className="status-dot" aria-hidden="true" />
       <span className="status-badge-label">{label}</span>
-    </span>
+    </button>
   );
-}
+});
+StatusBadge.displayName = "StatusBadge";

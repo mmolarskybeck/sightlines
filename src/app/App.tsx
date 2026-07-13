@@ -86,6 +86,7 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from "./components/ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover";
 import { Toaster } from "./components/ui/sonner";
 import { toast } from "sonner";
 import { ProjectPicker } from "./components/ProjectPicker";
@@ -1109,7 +1110,40 @@ export function App() {
         </div>
 
         <div className="topbar-right" aria-label="Project actions">
-          <StatusBadge state={saveState} />
+          <Popover>
+            <PopoverTrigger asChild>
+              <StatusBadge state={saveState} />
+            </PopoverTrigger>
+            <PopoverContent side="bottom" align="end" className="storage-popover">
+              <div className="storage-popover-heading">
+                <FloppyDiskIcon aria-hidden="true" size={16} />
+                <h3>Where your work is saved</h3>
+              </div>
+              <p className="storage-popover-body">{getStorageNoteCopy(storagePersistence)}</p>
+              {storagePersistence === "denied" ? (
+                <Button
+                  className="storage-popover-retry"
+                  size="sm"
+                  variant="ghost"
+                  onClick={retryStoragePersistence}
+                >
+                  Retry
+                </Button>
+              ) : null}
+              <div className="storage-popover-footer">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void handleExportPackage("display")}
+                >
+                  Export a backup
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setIsSettingsOpen(true)}>
+                  Storage settings
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
           <div className="toolbar-group">
             <Button
               className="icon-button"
@@ -1889,11 +1923,6 @@ export function App() {
                 Select a room, wall, artwork, or opening to inspect it.
               </p>
             )}
-          </div>
-
-          <div className="storage-note">
-            <FloppyDiskIcon aria-hidden="true" size={16} />
-            <span>{getStorageNoteCopy(storagePersistence)}</span>
           </div>
         </aside>
         ) : null}
