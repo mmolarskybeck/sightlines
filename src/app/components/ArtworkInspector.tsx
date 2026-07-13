@@ -40,6 +40,7 @@ import { LengthField } from "./LengthField";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Toggle } from "./ui/toggle";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { SegmentedToggleGroup, SegmentedToggleGroupItem } from "./ui/segmented";
 import {
   Select,
@@ -141,40 +142,6 @@ export function ArtworkInspector({
   // (inches / cm), matching what the fields inside would show.
   const { displayUnit: summaryUnit } = getScopedUnitContext(unit, "artwork");
 
-  // The lock toggle only makes sense when there's an image ratio to lock
-  // to — with no linked image (or a legacy asset missing pixel dims),
-  // width/height are just independent numbers. It lives in the Dimensions
-  // section HEADER and is passed through InspectorSection's extras slot,
-  // which hides it while collapsed — a hidden section shouldn't offer a live
-  // toggle.
-  const ratio = imageAspectRatio(aspect);
-  const locked = ratio !== undefined && isAspectLocked(artwork.dimensions, aspect);
-  // The lock toggle is the only header CONTROL (extras hide while collapsed);
-  // the scale badge is pure status, so it rides inside the trigger as a
-  // titleAdornment instead — visible even collapsed, and it yields width
-  // before the title does.
-  const dimensionsExtras =
-    ratio !== undefined ? (
-      // Visible text is the accessible name; aria-pressed carries the
-      // locked/unlocked state, so the label stays constant.
-      <Toggle
-        className="artwork-dimensions-lock"
-        pressed={locked}
-        size="sm"
-        variant="ghost"
-        onPressedChange={(pressed) =>
-          onCommitDimensions({ ...artwork.dimensions, aspectLocked: pressed })
-        }
-      >
-        {locked ? (
-          <LockSimpleIcon aria-hidden="true" size={13} />
-        ) : (
-          <LockSimpleOpenIcon aria-hidden="true" size={13} />
-        )}
-        Lock ratio
-      </Toggle>
-    ) : undefined;
-
   const isOpen = (sectionId: string, fallback: boolean) =>
     sectionsOpen[sectionId] ?? fallback;
 
@@ -208,7 +175,6 @@ export function ArtworkInspector({
       <div className="inspector-sections">
         {/* Dimensions ride high — the measurement a curator reaches for most. */}
         <InspectorSection
-          headerExtras={dimensionsExtras}
           open={isOpen("dimensions", true)}
           summary={formatDimensionsSummary(artwork.dimensions, summaryUnit)}
           title="Dimensions"
@@ -495,8 +461,8 @@ function PlacementTypeRow({
   );
 }
 
-// Section BODY only — the heading, scale badge, and lock toggle live in the
-// InspectorSection header row (see dimensionsExtras above).
+// Section BODY only — the heading and scale badge live in the
+// InspectorSection header row.
 function DimensionsSection({
   aspect,
   dimensions,
@@ -512,44 +478,86 @@ function DimensionsSection({
 }) {
   const { displayUnit, parseUnit, placeholder } = getScopedUnitContext(unit, "artwork");
 
+  // The lock toggle only makes sense when there's an image ratio to lock
+  // to — with no linked image (or a legacy asset missing pixel dims),
+  // width/height are just independent numbers. It sits BETWEEN the Width and
+  // Height fields, beside the exact pair it binds; being body content, it
+  // hides with the collapsed section for free.
+  const ratio = imageAspectRatio(aspect);
+  const locked = ratio !== undefined && isAspectLocked(dimensions, aspect);
+
+  const renderAxis = (field: { key: DimensionAxisKey; label: string }) => (
+    <LengthField
+      key={field.key}
+      compact
+      clearable
+      positiveOnly
+      label={field.label}
+      valueMm={dimensions[field.key]}
+      displayUnit={displayUnit}
+      parseUnit={parseUnit}
+      placeholder={placeholder}
+      // An axis can be legitimately unmeasured even while others are
+      // known — clearing the field commits that axis as undefined.
+      onClear={() =>
+        onCommitDimensions({ ...dimensions, [field.key]: undefined })
+      }
+      // Note: committing a dimension value never touches `status` —
+      // status is the curator's own claim about how trustworthy these
+      // numbers are, not something derived from whether fields happen to
+      // be filled in.
+      //
+      // Committing width or height also auto-fills the other 2D face dim
+      // from the image's aspect ratio when the pair is locked (see
+      // applyAspectFill for the rule). Depth carries no ratio, so it
+      // commits alone. The derived value is a plain committed number —
+      // fully editable afterwards, just like a typed one.
+      onCommit={(valueMm) =>
+        onCommitDimensions(
+          field.key === "depthMm"
+            ? { ...dimensions, depthMm: valueMm }
+            : applyAspectFill(dimensions, field.key, valueMm, aspect)
+        )
+      }
+    />
+  );
+
   return (
     <>
-      <div className="artwork-dimensions-grid">
-        {DIMENSION_FIELDS.map((field) => (
-          <LengthField
-            key={field.key}
-            compact
-            clearable
-            positiveOnly
-            label={field.label}
-            valueMm={dimensions[field.key]}
-            displayUnit={displayUnit}
-            parseUnit={parseUnit}
-            placeholder={placeholder}
-            // An axis can be legitimately unmeasured even while others are
-            // known — clearing the field commits that axis as undefined.
-            onClear={() =>
-              onCommitDimensions({ ...dimensions, [field.key]: undefined })
-            }
-            // Note: committing a dimension value never touches `status` —
-            // status is the curator's own claim about how trustworthy these
-            // numbers are, not something derived from whether fields happen to
-            // be filled in.
-            //
-            // Committing width or height also auto-fills the other 2D face dim
-            // from the image's aspect ratio when the pair is locked (see
-            // applyAspectFill for the rule). Depth carries no ratio, so it
-            // commits alone. The derived value is a plain committed number —
-            // fully editable afterwards, just like a typed one.
-            onCommit={(valueMm) =>
-              onCommitDimensions(
-                field.key === "depthMm"
-                  ? { ...dimensions, depthMm: valueMm }
-                  : applyAspectFill(dimensions, field.key, valueMm, aspect)
-              )
-            }
-          />
-        ))}
+      <div className={ratio !== undefined ? "artwork-dimensions-grid has-lock" : "artwork-dimensions-grid"}>
+        {renderAxis(DIMENSION_FIELDS[0])}
+        {ratio !== undefined ? (
+          // Icon-only: the visible label is gone, so aria-label names it and
+          // aria-pressed (via Toggle) carries the state; the tooltip teaches
+          // what locking does without spending a text label's width.
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Toggle
+                aria-label="Lock ratio"
+                className="artwork-dimensions-lock-inline"
+                pressed={locked}
+                size="sm"
+                variant="ghost"
+                onPressedChange={(pressed) =>
+                  onCommitDimensions({ ...dimensions, aspectLocked: pressed })
+                }
+              >
+                {locked ? (
+                  <LockSimpleIcon aria-hidden="true" size={13} />
+                ) : (
+                  <LockSimpleOpenIcon aria-hidden="true" size={13} />
+                )}
+              </Toggle>
+            </TooltipTrigger>
+            <TooltipContent className="toolbar-tooltip" side="bottom">
+              {locked
+                ? "Ratio locked — width and height fill each other from the image"
+                : "Lock to the image ratio so width and height fill each other"}
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
+        {renderAxis(DIMENSION_FIELDS[1])}
+        {renderAxis(DIMENSION_FIELDS[2])}
       </div>
 
       <InspectorRow label="Status">

@@ -1174,7 +1174,7 @@ export function App() {
                 <PackageIcon aria-hidden="true" size={16} />
                 <span className="flex min-w-0 flex-col gap-0.5">
                   <span>Standard</span>
-                  <span className="text-[var(--type-xs)] leading-snug text-muted-foreground">
+                  <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
                     Display-quality images. Recommended for sharing and backup.
                   </span>
                 </span>
@@ -1186,7 +1186,7 @@ export function App() {
                 <ArchiveIcon aria-hidden="true" size={16} />
                 <span className="flex min-w-0 flex-col gap-0.5">
                   <span>With originals</span>
-                  <span className="text-[var(--type-xs)] leading-snug text-muted-foreground">
+                  <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
                     Adds full-resolution files. Largest export; archival handoff.
                   </span>
                 </span>
@@ -1198,7 +1198,7 @@ export function App() {
                 <FileDashedIcon aria-hidden="true" size={16} />
                 <span className="flex min-w-0 flex-col gap-0.5">
                   <span>Without images</span>
-                  <span className="text-[var(--type-xs)] leading-snug text-muted-foreground">
+                  <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
                     Checklist and layout only. Relinks images on machines that have them.
                   </span>
                 </span>

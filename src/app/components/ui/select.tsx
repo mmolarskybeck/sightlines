@@ -15,7 +15,7 @@ export const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "select-trigger inline-flex h-9 w-full items-center justify-between gap-2 rounded-sm border border-input bg-background px-2.5 text-[var(--type-sm)] font-[var(--weight-medium)] text-foreground outline-none transition-[border-color,box-shadow,color] duration-150 ease-out hover:border-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-45 [&>svg]:size-3.5 [&>svg]:shrink-0 [&>svg]:text-muted-foreground",
+      "select-trigger inline-flex h-9 w-full items-center justify-between gap-2 rounded-sm border border-input bg-background px-2.5 [font-size:var(--type-sm)] [font-weight:var(--weight-medium)] text-foreground outline-none transition-[border-color,box-shadow,color] duration-150 ease-out hover:border-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-45 [&>svg]:size-3.5 [&>svg]:shrink-0 [&>svg]:text-muted-foreground",
       className
     )}
     {...props}
@@ -60,7 +60,7 @@ export const SelectLabel = React.forwardRef<
   <SelectPrimitive.Label
     ref={ref}
     className={cn(
-      "select-label px-2 py-1.5 text-[var(--type-xs)] font-[var(--weight-semibold)] text-muted-foreground",
+      "select-label px-2 py-1.5 [font-size:var(--type-xs)] [font-weight:var(--weight-semibold)] text-muted-foreground",
       className
     )}
     {...props}
@@ -76,7 +76,7 @@ export const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      "select-item relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-lg py-1.5 pl-2 pr-8 text-[var(--type-sm)] outline-none transition-colors duration-150 ease-out data-[disabled]:pointer-events-none data-[highlighted]:bg-surface data-[disabled]:opacity-45",
+      "select-item relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-lg py-1.5 pl-2 pr-8 [font-size:var(--type-sm)] outline-none transition-colors duration-150 ease-out data-[disabled]:pointer-events-none data-[highlighted]:bg-surface data-[disabled]:opacity-45",
       className
     )}
     {...props}

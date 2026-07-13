@@ -28,7 +28,7 @@ export type WallSwitcherEntry = {
 // The trigger reuses the elevation chip's Select styling verbatim so the
 // topbar look is unchanged when the picker became a dropdown menu.
 const TRIGGER_CLASS =
-  "select-trigger inline-flex h-9 w-full items-center justify-between gap-2 rounded-sm border border-input bg-background px-2.5 text-[var(--type-sm)] font-[var(--weight-medium)] text-foreground outline-none transition-[border-color,box-shadow,color] duration-150 ease-out hover:border-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-45 [&>svg]:size-3.5 [&>svg]:shrink-0 [&>svg]:text-muted-foreground";
+  "select-trigger inline-flex h-9 w-full items-center justify-between gap-2 rounded-sm border border-input bg-background px-2.5 [font-size:var(--type-sm)] [font-weight:var(--weight-medium)] text-foreground outline-none transition-[border-color,box-shadow,color] duration-150 ease-out hover:border-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-45 [&>svg]:size-3.5 [&>svg]:shrink-0 [&>svg]:text-muted-foreground";
 
 type RoomGroup = {
   roomId: string;

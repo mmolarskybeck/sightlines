@@ -37,7 +37,7 @@ export const DropdownMenuItem = React.forwardRef<
   <DropdownMenuPrimitive.Item
     ref={ref}
     className={cn(
-      "dropdown-menu-item relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-lg px-2 py-1.5 text-[var(--type-sm)] outline-none transition-colors duration-150 ease-out data-[disabled]:pointer-events-none data-[highlighted]:bg-surface data-[disabled]:opacity-45",
+      "dropdown-menu-item relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-lg px-2 py-1.5 [font-size:var(--type-sm)] outline-none transition-colors duration-150 ease-out data-[disabled]:pointer-events-none data-[highlighted]:bg-surface data-[disabled]:opacity-45",
       className
     )}
     {...props}
@@ -79,7 +79,7 @@ export const DropdownMenuSubTrigger = React.forwardRef<
   <DropdownMenuPrimitive.SubTrigger
     ref={ref}
     className={cn(
-      "dropdown-menu-item dropdown-menu-sub-trigger relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-lg px-2 py-1.5 text-[var(--type-sm)] outline-none transition-colors duration-150 ease-out data-[disabled]:pointer-events-none data-[highlighted]:bg-surface data-[state=open]:bg-surface data-[disabled]:opacity-45",
+      "dropdown-menu-item dropdown-menu-sub-trigger relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-lg px-2 py-1.5 [font-size:var(--type-sm)] outline-none transition-colors duration-150 ease-out data-[disabled]:pointer-events-none data-[highlighted]:bg-surface data-[state=open]:bg-surface data-[disabled]:opacity-45",
       className
     )}
     {...props}
@@ -117,7 +117,7 @@ export const DropdownMenuRadioItem = React.forwardRef<
   <DropdownMenuPrimitive.RadioItem
     ref={ref}
     className={cn(
-      "dropdown-menu-item relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-lg py-1.5 pl-2 pr-8 text-[var(--type-sm)] outline-none transition-colors duration-150 ease-out data-[disabled]:pointer-events-none data-[highlighted]:bg-surface data-[disabled]:opacity-45",
+      "dropdown-menu-item relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-lg py-1.5 pl-2 pr-8 [font-size:var(--type-sm)] outline-none transition-colors duration-150 ease-out data-[disabled]:pointer-events-none data-[highlighted]:bg-surface data-[disabled]:opacity-45",
       className
     )}
     {...props}

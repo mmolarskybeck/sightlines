@@ -210,11 +210,17 @@ body {
   font-family: var(--font-display);
 }
 
-button,
-input,
-select,
-textarea {
-  font: inherit;
+/* In @layer base so Tailwind component utilities (@layer utilities) can
+   override it — unlayered, this reset silently beat every [font-size:…]/
+   [font-weight:…] utility on the ui primitives and buttons rendered at the
+   body's 16px/400. */
+@layer base {
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
 }
 
 button:focus-visible,
@@ -4652,12 +4658,34 @@ body.panels-resizing * {
 
 .artwork-dimensions-grid {
   display: grid;
-  /* Width | Height | Depth, evenly sized. The ratio lock lives in the
-     Dimensions heading row, not between the fields. minmax(0) so labels and
+  /* Width | Height across one row, Depth alone on the next: two-up cells are
+     wide enough to show a full imperial string ("15 3/8"") without clipping,
+     where the old three-across trio was not. minmax(0) so labels and
      placeholders shrink inside the track instead of blowing it out. */
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: end;
   gap: 8px;
+}
+
+/* With a linked image the ratio lock sits BETWEEN Width and Height — beside
+   the exact pair it binds (the Figma W⟷H link placement) — in a narrow auto
+   column; Depth still auto-places onto the second row's first track. Column
+   gaps tighten so the lock reads as part of the W·H pair rather than a third
+   field. */
+.artwork-dimensions-grid.has-lock {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  column-gap: 6px;
+}
+
+/* Icon-only lock, bottom-aligned to the inputs: the grid end-aligns cells, so
+   clearing the reserved message slot (1.2rem + 2px margin) parks the toggle
+   exactly on the 32px compact input row. */
+.artwork-dimensions-lock-inline {
+  align-self: end;
+  width: 26px;
+  height: 32px;
+  margin-bottom: calc(1.2rem + 2px);
+  padding: 0;
 }
 
 /* Two equal side-by-side compact fields: the Opening/Floor X·Y and
@@ -4839,8 +4867,8 @@ body.panels-resizing * {
 /* Controls inside a label-left row take the compact-field chrome the old
    .field-row.compact carried — without these a bare .select-trigger falls
    back to 16px browser sizing with no visible bounds and reads broken beside
-   the 13px bordered length fields. The quiet surface fill (Rayon-style)
-   makes the hit area legible without adding a border. */
+   the 13px bordered length fields. Bordered like the length fields (one
+   editable-value look across the panel), at the 32px compact height. */
 .inspector-row-control > .select-trigger {
   width: 100%;
   /* Explicit height: SelectTrigger's base class carries Tailwind's h-9
@@ -4849,13 +4877,15 @@ body.panels-resizing * {
   height: 32px;
   min-height: 32px;
   padding: 6px 8px;
-  border-radius: var(--radius-control);
-  background: var(--surface);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
   font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
 }
 
 .inspector-row-control > .select-trigger:hover {
-  background: var(--surface-strong);
+  border-color: var(--subtle);
 }
 
 .inspector-row-control > .select-trigger:focus-visible {
@@ -5084,6 +5114,18 @@ body.panels-resizing * {
   overflow: hidden;
 }
 
+/* Focus rings reach 4px past an input (2px outline + 2px offset), and this
+   wrapper must clip for the height animation — so let the clip box bleed 5px
+   sideways and pad the body back, keeping fields aligned with the section
+   header while their rings render whole at the panel edges. */
+.inspector-section > .collapsible-content {
+  margin-inline: -5px;
+}
+
+.inspector-section > .collapsible-content > .inspector-section-body {
+  padding-inline: 5px;
+}
+
 .collapsible-content[data-state="open"] {
   animation: collapsible-open 180ms ease-out;
 }
@@ -5191,10 +5233,13 @@ body.panels-resizing * {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  /* Unlike the field editor (180px floor → wraps under the thumbnail), the
+     one-line summary shrinks: its text ellipsizes, so it always sits BESIDE
+     the thumbnail as a compact card row, centered against it. */
   min-width: 0;
-  /* Nudge the line down to sit near where the top field's label would,
-     so the thumbnail stays optically anchored across the mode flip. */
-  padding-top: 2px;
+  flex-basis: 120px;
+  align-self: center;
+  padding-top: 0;
 }
 
 .artwork-identity-summary-text {

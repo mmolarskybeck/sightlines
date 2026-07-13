@@ -69,11 +69,11 @@ export function ImportConflictDialog({
                 className="flex items-center justify-between gap-4"
               >
                 <div className="flex min-w-0 flex-col gap-0.5">
-                  <span className="truncate text-[var(--type-sm)] font-[var(--weight-medium)]">
+                  <span className="truncate [font-size:var(--type-sm)] [font-weight:var(--weight-medium)]">
                     {artworkLabel(conflict.existing)}
                   </span>
                   {artworkLabel(conflict.incoming) !== artworkLabel(conflict.existing) ? (
-                    <span className="truncate text-[var(--type-xs)] text-muted-foreground">
+                    <span className="truncate [font-size:var(--type-xs)] text-muted-foreground">
                       Imported as: {artworkLabel(conflict.incoming)}
                     </span>
                   ) : null}
