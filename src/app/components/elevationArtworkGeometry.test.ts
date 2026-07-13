@@ -1,9 +1,42 @@
+import { createElement } from "react";
+import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
+  getElevationDropGhostSizeMm,
   getArtworkRectSvg,
   getFitSelectionBoundsSvg,
   isArtworkOutOfWallBounds
 } from "./elevationArtworkGeometry";
+import { ElevationArtwork } from "./ElevationArtwork";
+
+describe("getElevationDropGhostSizeMm", () => {
+  it("matches the outer size rendered for the framed placement after drop", () => {
+    const artwork = {
+      dimensions: { widthMm: 400, heightMm: 300, status: "known" as const },
+      matWidthMm: 75,
+      frame: { widthMm: 25, finish: "black" as const }
+    };
+    const ghostSize = getElevationDropGhostSizeMm(artwork);
+    const { container } = render(
+      createElement(
+        "svg",
+        null,
+        createElement(ElevationArtwork, {
+          center: { xMm: 1000, yMm: 1000 },
+          frame: artwork.frame,
+          matWidthMm: artwork.matWidthMm,
+          size: { widthMm: 400, heightMm: 300 },
+          wallHeightMm: 3000
+        })
+      )
+    );
+    const renderedOutline = container.querySelector(".artwork-outline");
+
+    expect(ghostSize).toEqual({ widthMm: 600, heightMm: 500 });
+    expect(renderedOutline?.getAttribute("width")).toBe(String(ghostSize.widthMm));
+    expect(renderedOutline?.getAttribute("height")).toBe(String(ghostSize.heightMm));
+  });
+});
 
 describe("getArtworkRectSvg", () => {
   it("converts a center-anchored wall-local point to a top-left SVG rect", () => {

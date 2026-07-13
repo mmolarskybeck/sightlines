@@ -32,6 +32,7 @@ import {
   type PlanRect
 } from "../../domain/geometry/planObjects";
 import { buildPlanScene, svgPolygonPoints } from "../../domain/scene2d/planScene";
+import { getArtworkOuterDimensionsMm, withArtworkFootprint } from "../../domain/framing";
 import { getDefaultOpeningSizeMm, type OpeningKind } from "../../domain/placement/createOpening";
 import {
   effectiveFloorDepthMm,
@@ -455,8 +456,9 @@ export function PlanView({
       const result = resolvePlanPlacement(proposedCenterMm, {
         walls: floorWallsForTool,
         // Do not snap to the moving object's old position.
-        wallObjects: project.wallObjects.filter((object) => object.id !== current.objectId),
+        wallObjects: snappingWallObjects.filter((object) => object.id !== current.objectId),
         movingSize: current.movingSize,
+        wallFootprintWidthMm: current.wallFootprintWidthMm,
         movingKind: current.kind,
         floatPolicy: current.floatPolicy,
         // Keep wall-capture hysteresis across pointer moves.
@@ -995,6 +997,19 @@ export function PlanView({
     [displayedProject, artworksById, wallObjectMinDepthMm]
   );
 
+  // Interaction-only geometry: snapping measures framed artwork edges without
+  // changing persisted data or the selection geometry owned by a later phase.
+  const snappingWallObjects = useMemo(
+    () =>
+      project.wallObjects.map((object) =>
+        withArtworkFootprint(
+          object,
+          object.kind === "artwork" ? artworksById?.get(object.artworkId) : undefined
+        )
+      ),
+    [project.wallObjects, artworksById]
+  );
+
   // Compute all four partition clearances from preview geometry in room-local space.
   const partitionClearancesFloor = useMemo<{
     clearances: PartitionClearances;
@@ -1074,7 +1089,7 @@ export function PlanView({
 
     const result = resolvePlanPlacement(pointerMm, {
       walls: openingToolWalls,
-      wallObjects: project.wallObjects,
+      wallObjects: snappingWallObjects,
       movingSize,
       movingKind: activeTool,
       floatPolicy: activeTool === "blocked-zone" ? "float" : "capture-any",
@@ -1385,7 +1400,7 @@ export function PlanView({
 
     const result = resolvePlanPlacement(pointerMm, {
       walls: openingToolWalls,
-      wallObjects: project.wallObjects,
+      wallObjects: snappingWallObjects,
       movingSize,
       movingKind: activeTool,
       floatPolicy: activeTool === "blocked-zone" ? "float" : "capture-any",
@@ -1705,6 +1720,7 @@ export function PlanView({
       kind: WallObject["kind"];
       startCenterMm: Vector2;
       movingSize: { widthMm: number; heightMm: number; depthMm: number };
+      wallFootprintWidthMm?: number;
       rotationDeg: number;
       currentPlacement: PlanPlacement;
       initialPlanRect: PlanRect;
@@ -1760,6 +1776,7 @@ export function PlanView({
           kind: params.kind,
           floatPolicy: floatPolicyForMovingObject(params.kind, params.objectId),
           movingSize: params.movingSize,
+          wallFootprintWidthMm: params.wallFootprintWidthMm,
           rotationDeg: params.rotationDeg,
           startPointerMm,
           startCenterMm: params.startCenterMm,
@@ -1782,6 +1799,7 @@ export function PlanView({
       kind: params.kind,
       floatPolicy: floatPolicyForMovingObject(params.kind, params.objectId),
       movingSize: params.movingSize,
+      wallFootprintWidthMm: params.wallFootprintWidthMm,
       rotationDeg: params.rotationDeg,
       startPointerMm,
       startCenterMm: params.startCenterMm,
@@ -1810,15 +1828,23 @@ export function PlanView({
     widthMm: number;
     heightMm: number;
     depthMm: number;
+    wallFootprintWidthMm?: number;
   } {
     const artwork = artworkId ? artworksById?.get(artworkId) : undefined;
     if (artwork) {
       // The aspect only applies to the artwork we actually loaded it for.
       const aspect = artworkId === draggingArtworkId ? draggingArtworkAspect : undefined;
       const { widthMm, heightMm } = getEffectivePlacementSizeMm(artwork.dimensions, aspect);
+      const wallFootprintWidthMm = getArtworkOuterDimensionsMm(
+        widthMm,
+        heightMm,
+        artwork.matWidthMm,
+        artwork.frame
+      ).widthMm;
       return {
         widthMm,
         heightMm,
+        wallFootprintWidthMm,
         // Floor footprint depth for a floor-work drop — shared with the store
         // commit and 3D via effectiveFloorDepthMm; ignored for a wall drop.
         depthMm: effectiveFloorDepthMm(artwork.dimensions)
@@ -1855,8 +1881,9 @@ export function PlanView({
   ) {
     return resolvePlanPlacement(pointerMm, {
       walls: floorWallsForTool,
-      wallObjects: project.wallObjects,
+      wallObjects: snappingWallObjects,
       movingSize: dims,
+      wallFootprintWidthMm: dims.wallFootprintWidthMm,
       movingKind: "artwork",
       floatPolicy: floatPolicyForKind("artwork", form),
       currentAnchorWallId: null,

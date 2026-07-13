@@ -4,6 +4,10 @@ import {
   type ArtworkSizeMm,
   type SvgRectMm
 } from "../../domain/scene2d/elevationScene";
+import { getArtworkOuterDimensionsMm } from "../../domain/framing";
+import { getEffectivePlacementSizeMm } from "../../domain/placement/placeArtwork";
+import type { Artwork } from "../../domain/project";
+import type { PixelAspect } from "../../domain/units/aspectFill";
 
 // The pure center/size→SVG-rect math (and the shared y-flip) moved to
 // src/domain/scene2d/elevationScene.ts so the elevation scene builder and the
@@ -25,6 +29,22 @@ export type SelectedElevationRect = {
   center: ArtworkCenterMm;
   size: ArtworkSizeMm;
 };
+
+// A checklist drop has no placement record yet. Resolve the image size exactly
+// as placement creation does, then widen it for the elevation ghost so its
+// edges match the framed work that appears after drop.
+export function getElevationDropGhostSizeMm(
+  artwork: Pick<Artwork, "dimensions" | "matWidthMm" | "frame">,
+  aspect?: PixelAspect
+): ArtworkSizeMm {
+  const imageSize = getEffectivePlacementSizeMm(artwork.dimensions, aspect);
+  return getArtworkOuterDimensionsMm(
+    imageSize.widthMm,
+    imageSize.heightMm,
+    artwork.matWidthMm,
+    artwork.frame
+  );
+}
 
 // Union of every selected object's SVG rect (via getArtworkRectSvg above),
 // padded by 20% of the larger union dimension with a 150mm floor — so a

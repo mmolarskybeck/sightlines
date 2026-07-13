@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ArtworkWallObject } from "../project";
+import { getPlacementFootprintMm, withArtworkFootprint } from "../framing";
 import { getArtworkSnapTargets, resolveArtworkSnap } from "./artworkSnapTargets";
 import { resolveSnap } from "./resolveSnap";
 
@@ -139,6 +140,31 @@ describe("resolveArtworkSnap", () => {
     thresholdMm: 20
   };
 
+  it("flush-snaps outer frame edges when the caller adapts neighbor and moving sizes", () => {
+    const framing = {
+      matWidthMm: 75,
+      frame: { widthMm: 25, finish: "black" as const }
+    };
+    const framedNeighbor = withArtworkFootprint(neighbor(), framing);
+    const moving = neighbor({ id: "moving", widthMm: 300, heightMm: 400 });
+    const movingSize = getPlacementFootprintMm(moving, framing);
+
+    const result = resolveArtworkSnap(
+      { xMm: 1542, yMm: 1100 },
+      {
+        ...baseArgs,
+        neighbors: [framedNeighbor],
+        movingSize,
+        snapToGrid: false
+      }
+    );
+
+    expect(result.point.xMm).toBe(1550);
+    expect(result.point.xMm - movingSize.widthMm / 2).toBe(
+      framedNeighbor.xMm + framedNeighbor.widthMm / 2
+    );
+  });
+
   it("excludes grid targets entirely when snapToGrid is false", () => {
     const result = resolveArtworkSnap(
       { xMm: 205, yMm: 900 },
@@ -269,6 +295,22 @@ describe("resolveArtworkSnap", () => {
       expect(result.activeGuides).toEqual([
         { id: "floor-y", axis: "y", positionMm: 200, targetId: "floor" }
       ]);
+    });
+
+    it("floor-snaps the outer framed bottom edge when passed the footprint size", () => {
+      const moving = neighbor({ id: "moving", widthMm: 300, heightMm: 400 });
+      const movingSize = getPlacementFootprintMm(moving, {
+        matWidthMm: 75,
+        frame: { widthMm: 25, finish: "black" }
+      });
+      const result = resolveArtworkSnap(
+        { xMm: 555, yMm: 308 },
+        { ...baseArgs, movingSize, snapToGrid: false }
+      );
+
+      expect(result.point.yMm).toBe(300);
+      expect(result.point.yMm - movingSize.heightMm / 2).toBe(0);
+      expect(result.snapTargetIds.y).toBe("floor");
     });
 
     it("prefers the centerline over the floor for a tall artwork with both in range", () => {

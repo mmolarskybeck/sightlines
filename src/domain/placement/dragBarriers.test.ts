@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { withArtworkFootprint } from "../framing";
+import type { ArtworkWallObject } from "../project";
+import { getWallObjectBoundsMm } from "./collision";
 import { resolveDragBarriers, type BarrierObstacle } from "./dragBarriers";
 
 // A 400×400 mover unless a test overrides it — small enough to fit the gaps and
@@ -21,6 +24,45 @@ function tallBox(id: string, leftMm: number, rightMm: number, hardness: BarrierO
 }
 
 describe("resolveDragBarriers", () => {
+  it("clamps adapted framed footprints tangent at their outer edges", () => {
+    const framing = {
+      matWidthMm: 75,
+      frame: { widthMm: 25, finish: "black" as const }
+    };
+    const placement = (id: string, xMm: number): ArtworkWallObject => ({
+      id,
+      kind: "artwork",
+      artworkId: id,
+      wallId: "wall-1",
+      xMm,
+      yMm: 500,
+      widthMm: 400,
+      heightMm: 400
+    });
+    const mover = withArtworkFootprint(placement("moving", 720), framing);
+    const neighbor = withArtworkFootprint(placement("neighbor", 1300), framing);
+
+    const result = resolveDragBarriers({
+      proposedCenterMm: { xMm: mover.xMm, yMm: mover.yMm },
+      movingSizeMm: { widthMm: mover.widthMm, heightMm: mover.heightMm },
+      obstacles: [
+        {
+          id: neighbor.id,
+          hardness: "yielding",
+          boundsMm: getWallObjectBoundsMm(neighbor)
+        }
+      ],
+      breakThresholdMm: 50,
+      brokenBarrierIds: new Set(),
+      includeYielding: true
+    });
+
+    expect(result.point.xMm).toBe(700);
+    expect(result.point.xMm + mover.widthMm / 2).toBe(
+      neighbor.xMm - neighbor.widthMm / 2
+    );
+  });
+
   it("clamps a small penetration into a yielding obstacle flush on the least-penetration axis", () => {
     // Right edge (1020) pokes 20mm into the obstacle's left face (1000); y is
     // fully engulfed (400mm deep) → x is the shallower axis and wins.

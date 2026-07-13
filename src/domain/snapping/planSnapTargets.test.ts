@@ -208,6 +208,29 @@ describe("resolvePlanPlacement — wall-local neighbor snapping", () => {
     expect(result.snapTargetIds.x).toBe("neighbor-edge:n1:left");
   });
 
+  it("aligns framed outer edges when callers provide adapted footprints", () => {
+    const framedNeighbor = wallObject({
+      id: "framed-neighbor",
+      wallId: "wall-1",
+      xMm: 1000,
+      widthMm: 600
+    });
+    const result = resolvePlanPlacement(
+      { xMm: 455, yMm: 5 },
+      {
+        ...baseArgs,
+        wallObjects: [framedNeighbor],
+        // Stored image width is 300; mat + frame make the painted width 500.
+        wallFootprintWidthMm: 500
+      }
+    );
+
+    expect(result.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 450 });
+    expect(result.snapTargetIds.x).toBe("neighbor-edge:framed-neighbor:left");
+    // moving right edge 700 is tangent to neighbor left edge 700.
+    expect(result.planRect.centerXMm + result.planRect.widthMm / 2).toBe(700);
+  });
+
   it("only considers neighbors on the captured wall", () => {
     const otherWallNeighbor = wallObject({ id: "n2", wallId: "wall-2", xMm: 1005, widthMm: 400 });
     const result = resolvePlanPlacement(
@@ -255,6 +278,26 @@ describe("resolvePlanPlacement — clamping", () => {
     const result = resolvePlanPlacement({ xMm: 4030, yMm: 5 }, baseArgs);
 
     expect(result.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 3850 });
+  });
+
+  it("clamps a framed footprint at the wall edge", () => {
+    const result = resolvePlanPlacement(
+      { xMm: -30, yMm: 5 },
+      { ...baseArgs, wallFootprintWidthMm: 500 }
+    );
+
+    expect(result.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 250 });
+    expect(result.planRect.widthMm).toBe(500);
+  });
+
+  it("uses the outer width for a wall ghost but preserves image width on the floor", () => {
+    const args = { ...baseArgs, wallFootprintWidthMm: 500 };
+    const wallGhost = resolvePlanPlacement({ xMm: 2000, yMm: 5 }, args);
+    const floorGhost = resolvePlanPlacement({ xMm: 2000, yMm: 100 }, args);
+
+    expect(wallGhost.planRect.widthMm).toBe(500);
+    expect(floorGhost.placement.anchor).toBe("floor");
+    expect(floorGhost.planRect.widthMm).toBe(300);
   });
 
   it("centers the object on a wall shorter than the object", () => {

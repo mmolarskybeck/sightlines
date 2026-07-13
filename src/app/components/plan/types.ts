@@ -82,6 +82,8 @@ export type ObjectDragState = {
   // artwork rejects (wall-only), blocked-zone floats, door/window capture-any.
   floatPolicy: FloatPolicy;
   movingSize: { widthMm: number; heightMm: number; depthMm: number };
+  // Outer wall-rendered width for framed artwork; floor previews keep movingSize.
+  wallFootprintWidthMm?: number;
   // The rotation to preview a floated result at: the wall's floor-space angle
   // for a wall object (so a wall→floor preview keeps its orientation, matching
   // commitPlanMove), or the floor object's own rotation.

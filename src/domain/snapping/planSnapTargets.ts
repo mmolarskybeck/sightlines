@@ -100,6 +100,10 @@ export function resolvePlanPlacement(
     // by the caller. Filtered to the captured wall for neighbor targets.
     wallObjects: WallObjectBase[];
     movingSize: PlanMovingSize;
+    // Optional wall-only rendered footprint. Artwork storage stays image-sized,
+    // but framing widens the edges used by wall snapping, clamping, and ghosts.
+    // The floor stage deliberately continues to use movingSize (Phase 6b).
+    wallFootprintWidthMm?: number;
     movingKind: WallObject["kind"];
     // Per-kind behavior when no wall captures — see FloatPolicy /
     // floatPolicyForKind.
@@ -239,12 +243,13 @@ function resolveOnWall(
   args: {
     wallObjects: WallObjectBase[];
     movingSize: PlanMovingSize;
+    wallFootprintWidthMm?: number;
     thresholdMm: number;
     previousSnapTargetIds?: SnapTargetIds;
   }
 ): PlanPlacementResult {
   const wall = captured.wall;
-  const { widthMm } = args.movingSize;
+  const widthMm = args.wallFootprintWidthMm ?? args.movingSize.widthMm;
 
   // Neighbor targets are wall-local x only: objects on this wall, positioned by
   // their own xMm-along-the-wall. No grid tier along the wall (floor grid is

@@ -65,7 +65,7 @@ algorithms stay `WallObjectBase`-pure and framing-agnostic.
 | Image plane render, mat bevel/opening rect, aspect-fit, inspector Image W×H | **image** (mat opening ≡ image in this model) | correct today |
 | Plan wall glyph + its click hit, elevation band painting, 3D wall meshes + raycast, single selection outline | **outer** | correct today |
 | Collision/overlap validation, bounds check, out-of-bounds | **outer** | correct |
-| Snap edge/flush targets (both views), floor-line snap, 48px drag barriers, drop ghosts | **outer** | Phase 3 |
+| Snap edge/flush targets (both views), floor-line snap, 48px drag barriers, drop ghosts | **outer** | correct |
 | Marquee (both views), group bounds/outline, fit-selected, arrange/distribute solvers, neighbor detection, spacing readouts, dimension lines | **outer** | Phase 4 |
 | Tooltips, inspector summaries | image **and** "overall" line when framed | Phase 5 |
 | 3D eye-level camera standoff | **outer** | Phase 5 |
@@ -181,7 +181,7 @@ mat 75, frame 25 → outer 600×500).
   edge now flags. Warning stays the existing non-blocking gate (overlap toggle
   policy unchanged) — existing projects may newly warn; that is the point.
 
-### Phase 3 — Snapping, barriers, ghosts
+### Phase 3 — Snapping, barriers, ghosts (complete 2026-07-13)
 
 - Elevation: `movingSize` (`ElevationView.tsx:943` solo, `:910` group) and
   neighbor boxes via adapter; floor-line target lands the outer bottom on the

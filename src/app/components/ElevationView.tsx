@@ -25,7 +25,6 @@ import {
 import { getGroupBounds, getIdsIntersectingRect } from "../../domain/placement/groupBounds";
 import { getOverlapRule } from "../../domain/placement/overlapPolicy";
 import {
-  getEffectivePlacementSizeMm,
   PLACEHOLDER_ARTWORK_HEIGHT_MM,
   PLACEHOLDER_ARTWORK_WIDTH_MM
 } from "../../domain/placement/placeArtwork";
@@ -74,7 +73,12 @@ import { ArtworkTooltipContent, OpeningTooltipContent } from "./PlacementTooltip
 import { ToolbarTooltipKbd } from "./toolbar/ToolbarTooltipKbd";
 import { marqueeRectMm, type MarqueeState } from "./marqueeRect";
 import { buildElevationScene } from "../../domain/scene2d/elevationScene";
-import { getFitSelectionBoundsSvg, isArtworkOutOfWallBounds, wallLocalYToSvgY } from "./elevationArtworkGeometry";
+import {
+  getElevationDropGhostSizeMm,
+  getFitSelectionBoundsSvg,
+  isArtworkOutOfWallBounds,
+  wallLocalYToSvgY
+} from "./elevationArtworkGeometry";
 import { GridOverlay } from "./GridOverlay";
 import { GroupDimensionLines } from "./GroupDimensionLines";
 import { Button } from "./ui/button";
@@ -531,6 +535,11 @@ export function ElevationView({
     ...elevationScene.artworks.map((entry) => entry.object),
     ...elevationScene.openings.map((entry) => entry.object)
   ];
+  const withResolvedArtworkFootprint = (object: WallObject): WallObject =>
+    withArtworkFootprint(
+      object,
+      object.kind === "artwork" ? artworksById?.get(object.artworkId) : undefined
+    );
   const assetIds = elevationScene.artworks.map((entry) => entry.artwork?.assetId);
   const imageUrlsByAssetId = useAssetImageUrls(assetIds, getBlob ?? NO_OP_GET_BLOB, "display");
 
@@ -552,7 +561,7 @@ export function ElevationView({
     if (artwork) {
       // The aspect only applies to the artwork we actually loaded it for.
       const aspect = artworkId === draggingArtworkId ? draggingArtworkAspect : undefined;
-      return getEffectivePlacementSizeMm(artwork.dimensions, aspect);
+      return getElevationDropGhostSizeMm(artwork, aspect);
     }
     return { widthMm: PLACEHOLDER_ARTWORK_WIDTH_MM, heightMm: PLACEHOLDER_ARTWORK_HEIGHT_MM };
   }
@@ -629,7 +638,11 @@ export function ElevationView({
     brokenBarrierIds: string[];
     blocked: boolean;
   } {
-    const obstacles: BarrierObstacle[] = neighbors.map((neighbor) => ({
+    // Keep the scene inventory image-sized for Phase 4 consumers. This
+    // interaction-only list widens the exact neighbor boundary shared by snap,
+    // clean-increment quantization and drag barriers.
+    const footprintNeighbors = neighbors.map(withResolvedArtworkFootprint);
+    const obstacles: BarrierObstacle[] = footprintNeighbors.map((neighbor) => ({
       id: neighbor.id,
       boundsMm: getWallObjectBoundsMm(neighbor),
       hardness: barrierHardnessFor(movingKinds, neighbor.kind)
@@ -661,7 +674,7 @@ export function ElevationView({
       wallLengthMm,
       wallHeightMm,
       gridIntervalMm: minorGridMm,
-      neighbors,
+      neighbors: footprintNeighbors,
       movingSize: sizeMm,
       movingKind,
       // Grid tier removed for elevation placement — the quantizer replaces it.
@@ -690,7 +703,7 @@ export function ElevationView({
           sizeMm,
           incrementMm,
           wallLengthMm,
-          neighbors
+          footprintNeighbors
         );
       }
     }
@@ -812,7 +825,7 @@ export function ElevationView({
   ): string[] {
     const ids: string[] = [];
     for (const neighbor of neighbors) {
-      const nb = getWallObjectBoundsMm(neighbor);
+      const nb = getWallObjectBoundsMm(withResolvedArtworkFootprint(neighbor));
       if (
         boxBoundsMm.leftMm < nb.rightMm &&
         boxBoundsMm.rightMm > nb.leftMm &&
@@ -901,7 +914,8 @@ export function ElevationView({
         selectedObjectIds.includes(object.id)
       );
       if (groupMembers.length > 1) {
-        const box = getGroupBounds(groupMembers);
+        const footprintGroupMembers = groupMembers.map(withResolvedArtworkFootprint);
+        const box = getGroupBounds(footprintGroupMembers);
         const groupCenterMm: Vector2 = { xMm: box.centerXMm, yMm: box.centerYMm };
         // Seed against the union box vs every non-member neighbor.
         const memberIds = new Set(groupMembers.map((member) => member.id));
@@ -926,25 +940,35 @@ export function ElevationView({
             },
             groupNeighbors
           ),
-          members: groupMembers.map((member) => ({
-            id: member.id,
-            kind: member.kind,
-            sizeMm: { widthMm: member.widthMm, heightMm: member.heightMm },
-            offsetFromGroupCenterMm: {
-              xMm: member.xMm - groupCenterMm.xMm,
-              yMm: member.yMm - groupCenterMm.yMm
-            }
-          })),
+          members: groupMembers.map((member) => {
+            const footprintMember = withResolvedArtworkFootprint(member);
+            return {
+              id: member.id,
+              kind: member.kind,
+              sizeMm: {
+                widthMm: footprintMember.widthMm,
+                heightMm: footprintMember.heightMm
+              },
+              offsetFromGroupCenterMm: {
+                xMm: member.xMm - groupCenterMm.xMm,
+                yMm: member.yMm - groupCenterMm.yMm
+              }
+            };
+          }),
           startGroupCenterMm: groupCenterMm
         });
         return;
       }
     }
 
+    const footprintWallObject = withResolvedArtworkFootprint(wallObject);
     beginMoveDragGesture({
       wallObjectId: wallObject.id,
       kind: wallObject.kind,
-      sizeMm: { widthMm: wallObject.widthMm, heightMm: wallObject.heightMm },
+      sizeMm: {
+        widthMm: footprintWallObject.widthMm,
+        heightMm: footprintWallObject.heightMm
+      },
       startPointerMm,
       startCenterMm: { xMm: wallObject.xMm, yMm: wallObject.yMm },
       previewCenterMm: { xMm: wallObject.xMm, yMm: wallObject.yMm },
@@ -952,7 +976,7 @@ export function ElevationView({
       activeGuides: [],
       preserveSelection: altSoloDrag,
       brokenBarrierIds: seedBrokenBarrierIds(
-        getWallObjectBoundsMm(wallObject),
+        getWallObjectBoundsMm(footprintWallObject),
         wallObjectsOnThisWall.filter((object) => object.id !== wallObject.id)
       )
     });

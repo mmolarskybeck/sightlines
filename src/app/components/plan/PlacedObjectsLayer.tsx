@@ -32,6 +32,7 @@ type BeginObjectDragParams = {
   kind: WallObject["kind"];
   startCenterMm: Vector2;
   movingSize: { widthMm: number; heightMm: number; depthMm: number };
+  wallFootprintWidthMm?: number;
   rotationDeg: number;
   currentPlacement: PlanPlacement;
   initialPlanRect: PlanRect;
@@ -131,6 +132,9 @@ export function PlacedObjectsLayer({
           (objectDrag && !objectDrag.members && objectDrag.objectId === wallObject.id
             ? objectDrag.previewPlanRect
             : restRect);
+        const isSinglePreview = Boolean(
+          objectDrag && !objectDrag.members && objectDrag.objectId === wallObject.id
+        );
         // The live single-drag preview's anchor drives the look: "floor"
         // → dashed floor object; "none" → danger token (artwork dragged
         // off every wall — a refused move). A group drag is translation-
@@ -164,7 +168,10 @@ export function PlacedObjectsLayer({
               : getRenderedWallObjectPlanRect(
                   planRect,
                   wallObject.kind,
-                  artwork,
+                  // resolvePlanPlacement already returns the outer wall
+                  // footprint for a single framed drag. Group previews remain
+                  // image-sized until Phase 4 and still need expansion here.
+                  isSinglePreview ? undefined : artwork,
                   wallObjectMinDepthMm
                 );
 
@@ -206,6 +213,7 @@ export function PlacedObjectsLayer({
                     // off the wall; unused while it stays on a wall.
                     depthMm: DEFAULT_FLOOR_OBJECT_DEPTH_MM
                   },
+                  wallFootprintWidthMm: renderedRect.widthMm,
                   // Preview a floated result at the wall's angle so a
                   // wall→floor drag keeps its orientation (matching
                   // commitPlanMove).
@@ -215,7 +223,10 @@ export function PlacedObjectsLayer({
                     wallId: wallObject.wallId,
                     xMm: wallObject.xMm
                   },
-                  initialPlanRect: restRect
+                  // The live single-drag renderer treats wall previews as
+                  // already footprint-sized. Seed that outer width before the
+                  // first pointermove so a framed work never shrinks on grab.
+                  initialPlanRect: { ...restRect, widthMm: renderedRect.widthMm }
                 },
                 event
               )
