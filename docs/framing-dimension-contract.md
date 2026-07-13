@@ -67,8 +67,8 @@ algorithms stay `WallObjectBase`-pure and framing-agnostic.
 | Collision/overlap validation, bounds check, out-of-bounds | **outer** | correct |
 | Snap edge/flush targets (both views), floor-line snap, 48px drag barriers, drop ghosts | **outer** | correct |
 | Marquee (both views), group bounds/outline, fit-selected, arrange/distribute solvers, neighbor detection, spacing readouts, dimension lines | **outer** | correct |
-| Tooltips, inspector summaries | image **and** "overall" line when framed | Phase 5 |
-| 3D eye-level camera standoff | **outer** | Phase 5 |
+| Tooltips, inspector summaries | image **and** "overall" line when framed | complete 2026-07-13 |
+| 3D eye-level camera standoff | **outer** | complete 2026-07-13 |
 | Spreadsheet import `framed`-role cells | persisted provenance, never silently stored as image dims | Phase 6a |
 | Floor artwork glyph/hit/3D | **image** — framing is wall-only geometry; floor stays framing-agnostic (see §3) | decided, Phase 6b |
 | `displayDimensionsOverride` | display/provenance metadata; geometry reads stored dims (rule above) | decided, Phase 1 documents it |
@@ -237,15 +237,36 @@ mat 75, frame 25 → outer 600×500).
   marquee grazing only a frame band selects; single and group outlines wrap
   the same edges; fit-selected contains the frame.
 
-### Phase 5 — Tooltip and camera truth
+### Phase 5 — Tooltip and camera truth (complete 2026-07-13)
 
-- Tooltip (`PlacementTooltip.tsx`): add an "overall W × H" line when
-  mat/frame present; keep image dims labeled. Inspector `formatFramingSummary`
-  gains the overall size.
-- 3D standoff: `ThreeDView.tsx:298` feeds footprint dims to
-  `eyeLevelArtworkDistanceMm`.
-- Regression tests: tooltip shows both lines for a framed work, one line for
-  unframed; standoff distance computed from outer dims.
+- Tooltip (`PlacementTooltip.tsx`, `ArtworkTooltipContent`): an "Overall W × H"
+  line renders alongside a relabeled "Image W × H" line whenever mat/frame
+  widen the outer size past the image size; an unmatted/unframed work still
+  renders exactly one, unlabeled dims line (unchanged). Both lines derive from
+  the SAME `dimensions` prop already displayed (the placement's
+  `displayDimensionsOverride` when present, else the record's own dims) so an
+  overridden tooltip states the overall of what it displays, not of some other
+  number — `displayDimensionsOverride` stays display/provenance metadata per
+  §1, never resolved by geometry.
+- Inspector `formatFramingSummary` (`artworkInspectorSummaries.ts`) takes the
+  artwork's `Dimensions` and appends "W × H overall" after the mat/frame
+  clause whenever both image axes are known; stays "None" with neither mat nor
+  frame regardless of dims. Caller updated at `ArtworkInspector.tsx:201`.
+- 3D standoff: `ThreeDView.tsx`'s `eyeLevel` action widens the focused
+  artwork's dims via `getArtworkOuterDimensionsMm` (record's mat/frame) before
+  calling `eyeLevelArtworkDistanceMm`, pulled out as the pure, unit-testable
+  `resolveEyeLevelStandoffArtwork`. Widened at this ONE call site rather than
+  in `deriveScene3d`/`WallArtwork3d`: nothing else consumes scene3d's artwork
+  dims besides `ArtworkPlane`'s own self-widening (`framingLayout`, from the
+  stored image dims + the artwork record), so scene3d stays image-sized with
+  no other consumer to serve.
+- Regression tests: `PlacementTooltip.test.tsx` (framed shows both lines,
+  unframed shows exactly one, no-overall-without-both-axes);
+  `artworkInspectorSummaries.test.ts` (framed summary carries the overall,
+  unmatted+unframed stays "None", overall omitted with an unknown axis);
+  `three/eyeLevelStandoff.test.ts` (`resolveEyeLevelStandoffArtwork` widens to
+  the outer size, is identity when unframed or when the artwork record is
+  missing).
 
 ### Phase 6a — Spreadsheet provenance
 

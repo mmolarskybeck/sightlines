@@ -3,6 +3,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Box3, MathUtils, PerspectiveCamera, Plane, TOUCH, Vector2, Vector3 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
+import { getArtworkOuterDimensionsMm } from "../../../domain/framing";
 import { parseFaceWallId } from "../../../domain/geometry/freestandingWalls";
 import {
   deriveScene3d,
@@ -709,6 +710,38 @@ function pickEyeLevelWall(
   return { wall: longest, artwork: null };
 }
 
+// The eye-level standoff (eyeLevelArtworkDistanceMm, cameraNav.ts) must clear
+// the RENDERED mesh, which ArtworkPlane widens by mat+frame at its own render
+// boundary (framingLayout) from the artwork record — scene3d's WallArtwork3d
+// stays image-sized per the framing contract (deriveScene3d does not import
+// framing.ts). So the standoff widens here, at the one place the focused
+// artwork's record is resolved for this purpose, rather than in scene3d or in
+// eyeLevelView itself: nothing else consumes scene3d's artwork dims besides
+// ArtworkPlane's own self-widening, so widening scene3d's persisted-shaped
+// data would move the seam for no other consumer. Pulled out as a pure
+// function (identity when unframed) so the widening is unit-testable without
+// a three.js/DOM harness.
+export function resolveEyeLevelStandoffArtwork(
+  artwork: WallArtwork3d | null,
+  artworksById: ReadonlyMap<string, Artwork>
+): WallArtwork3d | null {
+  if (!artwork) return null;
+
+  const record = artworksById.get(artwork.artworkId);
+  const outer = getArtworkOuterDimensionsMm(
+    artwork.widthMm,
+    artwork.heightMm,
+    record?.matWidthMm,
+    record?.frame
+  );
+
+  if (outer.widthMm === artwork.widthMm && outer.heightMm === artwork.heightMm) {
+    return artwork;
+  }
+
+  return { ...artwork, ...outer };
+}
+
 function wallFocusTarget(wall: WallPanel3d): Vector3 {
   return new Vector3(
     ((wall.start.xMm + wall.end.xMm) / 2) * MM_TO_WORLD,
@@ -894,7 +927,7 @@ export function ThreeDView({
         if (picked) {
           const ghosted = rigApi.current?.eyeLevel(
             picked.wall,
-            picked.artwork,
+            resolveEyeLevelStandoffArtwork(picked.artwork, artworksById),
             project.defaultCenterlineHeightMm
           );
           ghostSessionRef.current = true;
@@ -921,6 +954,7 @@ export function ThreeDView({
     };
   }, [
     actionsRef,
+    artworksById,
     project.defaultCenterlineHeightMm,
     scene,
     selectedArtworkId,

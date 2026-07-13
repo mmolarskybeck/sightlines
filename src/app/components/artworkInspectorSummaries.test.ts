@@ -43,24 +43,38 @@ describe("formatDimensionsSummary", () => {
 });
 
 describe("formatFramingSummary", () => {
-  it("combines mat and frame with the finish name", () => {
-    expect(formatFramingSummary(76.2, { widthMm: 25.4, finish: "gold" }, "in")).toBe(
-      '3" mat · 1" gold frame'
+  // 36" x 24" image; mat 3" + frame 1" per side round cleanly in inches.
+  const dims = { widthMm: 914.4, heightMm: 609.6, status: "known" as const };
+
+  it("combines mat and frame with the finish name, plus the overall size", () => {
+    expect(formatFramingSummary(76.2, { widthMm: 25.4, finish: "gold" }, dims, "in")).toBe(
+      '3" mat · 1" gold frame · 44" × 32" overall'
     );
   });
 
-  it("shows a mat alone", () => {
-    expect(formatFramingSummary(76.2, undefined, "in")).toBe('3" mat');
+  it("shows a mat alone, plus the overall size", () => {
+    expect(formatFramingSummary(76.2, undefined, dims, "in")).toBe('3" mat · 42" × 30" overall');
   });
 
-  it("shows a frame alone", () => {
-    expect(formatFramingSummary(undefined, { widthMm: 25.4, finish: "wood" }, "in")).toBe(
-      '1" wood frame'
+  it("shows a frame alone, plus the overall size", () => {
+    expect(formatFramingSummary(undefined, { widthMm: 25.4, finish: "wood" }, dims, "in")).toBe(
+      '1" wood frame · 38" × 26" overall'
     );
   });
 
-  it("reads None when there is neither", () => {
-    expect(formatFramingSummary(undefined, undefined, "in")).toBe("None");
+  it("reads None when there is neither, even with known dims", () => {
+    expect(formatFramingSummary(undefined, undefined, dims, "in")).toBe("None");
+  });
+
+  it("omits the overall when an image axis is unknown", () => {
+    expect(
+      formatFramingSummary(
+        76.2,
+        { widthMm: 25.4, finish: "gold" },
+        { widthMm: 914.4, status: "approximate" },
+        "in"
+      )
+    ).toBe('3" mat · 1" gold frame');
   });
 });
 

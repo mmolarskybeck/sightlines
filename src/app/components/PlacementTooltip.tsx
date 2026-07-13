@@ -2,6 +2,7 @@ import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
 import { SquareIcon } from "@phosphor-icons/react/dist/csr/Square";
 import type { Icon } from "@phosphor-icons/react";
+import { getArtworkOuterDimensionsMm } from "../../domain/framing";
 import { getOpeningKindLabel, type OpeningKind } from "../../domain/placement/createOpening";
 import type { Artwork, Dimensions, DisplayUnit } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
@@ -83,6 +84,27 @@ export function ArtworkTooltipContent({
       ? formatDims(dimensions.widthMm, dimensions.heightMm, displayUnit)
       : null;
 
+  // Curators/installers measure between FRAME edges when hanging a work, so a
+  // matted/framed piece also states the overall footprint it actually occupies
+  // on the wall — not just its image size. Derived from the SAME `dimensions`
+  // the image line above renders (the placement's displayDimensionsOverride
+  // when present, else the record's own dims — display/provenance metadata
+  // per project.ts/framing.ts, never geometry) so the two lines never disagree
+  // with each other. No overall line without the image line: an overall size
+  // alone, with no image size to anchor it, would misstate which number is
+  // which.
+  const overall =
+    dims && dimensions.widthMm !== undefined && dimensions.heightMm !== undefined
+      ? getArtworkOuterDimensionsMm(
+          dimensions.widthMm,
+          dimensions.heightMm,
+          artwork.matWidthMm,
+          artwork.frame
+        )
+      : null;
+  const isFramed =
+    overall && (overall.widthMm !== dimensions.widthMm || overall.heightMm !== dimensions.heightMm);
+
   return (
     <div className="placement-tooltip-artwork">
       {thumbnailUrl ? (
@@ -93,7 +115,14 @@ export function ArtworkTooltipContent({
         {artwork.artist ? (
           <span className="placement-tooltip-artist">{artwork.artist}</span>
         ) : null}
-        {dims ? <span className="placement-tooltip-dims">{dims}</span> : null}
+        {dims ? (
+          <span className="placement-tooltip-dims">{isFramed ? `Image ${dims}` : dims}</span>
+        ) : null}
+        {isFramed && overall ? (
+          <span className="placement-tooltip-dims">
+            {`Overall ${formatDims(overall.widthMm, overall.heightMm, displayUnit)}`}
+          </span>
+        ) : null}
       </div>
     </div>
   );

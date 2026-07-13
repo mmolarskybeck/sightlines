@@ -1,3 +1,4 @@
+import { getArtworkOuterDimensionsMm } from "../../domain/framing";
 import type { ArtworkFrame, Dimensions, DisplayUnit } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
 
@@ -26,12 +27,16 @@ export function formatDimensionsSummary(
   return parts.join(" × ");
 }
 
-// "3" mat · 1" gold frame", either half alone, or "None". Uses the finish
-// key itself ("gold", "wood"…) — the dropdown's long labels ("Silver /
-// brushed aluminum") don't fit a one-line summary.
+// "3" mat · 1" gold frame · 42" × 34" overall", either mat/frame half alone
+// (with the overall appended), or "None" when there's neither. Uses the
+// finish key itself ("gold", "wood"…) — the dropdown's long labels ("Silver /
+// brushed aluminum") don't fit a one-line summary. The overall is what a
+// curator/installer actually measures on the wall; a collapsed section still
+// has to answer "how big does this really hang" without opening it.
 export function formatFramingSummary(
   matWidthMm: number | undefined,
   frame: ArtworkFrame | undefined,
+  dimensions: Dimensions,
   displayUnit: DisplayUnit
 ): string {
   const parts: string[] = [];
@@ -44,7 +49,22 @@ export function formatFramingSummary(
     parts.push(`${formatLength(frame.widthMm, { unit: displayUnit })} ${frame.finish} frame`);
   }
 
-  return parts.length > 0 ? parts.join(" · ") : "None";
+  if (parts.length === 0) return "None";
+
+  // Both image axes must be known to state an overall size — same guard as
+  // formatDimensionsSummary/the tooltip; a mid-measurement work states only
+  // the mat/frame it has, not a guessed overall.
+  const { widthMm, heightMm } = dimensions;
+  if (widthMm !== undefined && heightMm !== undefined) {
+    const overall = getArtworkOuterDimensionsMm(widthMm, heightMm, matWidthMm, frame);
+    parts.push(
+      `${formatLength(overall.widthMm, { unit: displayUnit })} × ${formatLength(overall.heightMm, {
+        unit: displayUnit
+      })} overall`
+    );
+  }
+
+  return parts.join(" · ");
 }
 
 // Accession number when set; location/lender as the fallback scent; null

@@ -198,7 +198,12 @@ export function ArtworkInspector({
             size a work occupies on the wall. */}
         <InspectorSection
           open={isOpen("matframe", hasMatOrFrame)}
-          summary={formatFramingSummary(artwork.matWidthMm, artwork.frame, summaryUnit)}
+          summary={formatFramingSummary(
+            artwork.matWidthMm,
+            artwork.frame,
+            artwork.dimensions,
+            summaryUnit
+          )}
           title="Framing"
           onOpenChange={(open) => onSectionOpenChange("matframe", open)}
         >
