@@ -5139,6 +5139,18 @@ body.panels-resizing * {
   gap: 8px;
 }
 
+/* Equal-weight verb pairs (Apply · Cancel): two full-width centered columns,
+   the layout .arrange-actions carried before the primitives replaced it. */
+.inspector-action-group-buttons.split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.inspector-action-group-buttons.split > * {
+  width: 100%;
+  justify-content: center;
+}
+
 /* Chrome-free disclosure (InspectorDisclosure): a small ghost text-button
    trigger, no hairline/chevron, for a secondary "Edit details" reveal nested
    inside an already-open section. The negative inline margin lets the trigger's

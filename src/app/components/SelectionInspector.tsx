@@ -432,7 +432,7 @@ export function SelectionInspector({
             )}
 
             {arrange.sessionActive ? (
-              <InspectorActionGroup>
+              <InspectorActionGroup split>
                 <Button
                   className="inspector-action arrange-apply"
                   variant="primary"
