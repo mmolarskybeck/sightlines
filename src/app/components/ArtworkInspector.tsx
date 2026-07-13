@@ -198,7 +198,7 @@ export function ArtworkInspector({
         <InspectorSection
           open={isOpen("matframe", hasMatOrFrame)}
           summary={formatFramingSummary(artwork.matWidthMm, artwork.frame, summaryUnit)}
-          title="Mat & frame"
+          title="Framing"
           onOpenChange={(open) => onSectionOpenChange("matframe", open)}
         >
           {/* Keyed on the artwork id so the Overall disclosure closes when the
