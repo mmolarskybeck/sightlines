@@ -10,6 +10,10 @@ import {
   unitSystemFromDisplayUnit
 } from "../../domain/units/unitSystem";
 import { getScopedUnitContext } from "./scopedUnits";
+import { InspectorSection } from "./InspectorSection";
+import { InspectorSummaryRow } from "./InspectorSummaryRow";
+import { InspectorNotice } from "./InspectorNotice";
+import { InspectorActionGroup } from "./InspectorActionGroup";
 import { LengthField } from "./LengthField";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
@@ -65,46 +69,48 @@ export function WallInspector({
       className="inspector-form"
       onSubmit={(event) => event.preventDefault()}
     >
-      <LengthField
-        positiveOnly
-        label="Length"
-        valueMm={wallLengthMm}
-        displayUnit={wallScope.displayUnit}
-        parseUnit={wallScope.parseUnit}
-        placeholder={wallPlaceholder}
-        onCommit={onCommitLength}
-        commitErrorFallback="Could not resize this wall."
-        // Guidance while typing, not a permanent label — shows only while
-        // focused. An error, when present, takes precedence.
-        focusHint={"Accepts 28', 28 ft, 336\", 853.4 cm, or 8.53 m."}
-      />
-      <div className="artwork-dimensions">
-        <div className="artwork-dimensions-heading">
-          <h3>Room height</h3>
-        </div>
-        <LengthField
-          positiveOnly
-          label="Height"
-          valueMm={wallHeightMm}
-          displayUnit={wallScope.displayUnit}
-          parseUnit={wallScope.parseUnit}
-          placeholder={wallPlaceholder}
-          onCommit={onCommitHeight}
-          commitErrorFallback="Could not resize this room's walls."
-          focusHint={"Accepts 12', 12 ft, 144\", 365.8 cm, or 3.66 m."}
-        />
-        <p className="field-hint">
-          Applies to every wall in {roomName}.
-        </p>
+      <div className="inspector-sections">
+        {/* Length and room height are the two anchors of a wall's geometry —
+            one static (non-collapsible) section, not two separately-headed
+            blocks, so they read as a single "Size" thought with one gap
+            between them. */}
+        <InspectorSection collapsible={false} title="Size">
+          <LengthField
+            positiveOnly
+            label="Length"
+            valueMm={wallLengthMm}
+            displayUnit={wallScope.displayUnit}
+            parseUnit={wallScope.parseUnit}
+            placeholder={wallPlaceholder}
+            onCommit={onCommitLength}
+            commitErrorFallback="Could not resize this wall."
+          />
+          <LengthField
+            positiveOnly
+            label="Height"
+            valueMm={wallHeightMm}
+            displayUnit={wallScope.displayUnit}
+            parseUnit={wallScope.parseUnit}
+            placeholder={wallPlaceholder}
+            onCommit={onCommitHeight}
+            commitErrorFallback="Could not resize this room's walls."
+            // Guidance while typing, not a permanent label — shows only while
+            // focused, and stands in for both fields' accepted-format hint
+            // plus the room-wide scope note (an error, when present, still
+            // takes precedence over it).
+            focusHint={`Accepts 12', 12 ft, 144", 365.8 cm, or 3.66 m. Applies to every wall in ${roomName}.`}
+          />
+        </InspectorSection>
       </div>
+
       {dimensionLink ? (
-        <div className="constraint-panel" aria-label="Linked rectangle dimension">
-          <LinkIcon aria-hidden="true" size={17} />
-          <div>
-            <h3>{wallName} + {dimensionLink.pairedWallName}</h3>
-            <p>{dimensionLink.roomName} keeps opposing wall lengths linked.</p>
-          </div>
-        </div>
+        <InspectorNotice
+          icon={<LinkIcon aria-hidden="true" size={15} />}
+          tone="info"
+        >
+          Linked with {dimensionLink.pairedWallName} — {dimensionLink.roomName}{" "}
+          keeps opposing wall lengths linked.
+        </InspectorNotice>
       ) : null}
       {lastGeometryEdit ? (
         <p className="field-hint">
@@ -113,71 +119,64 @@ export function WallInspector({
         </p>
       ) : null}
 
-      <div className="opening-add-row">
-        <span>Add to this wall</span>
-        <div className="opening-add-buttons">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                className="opening-add-chip"
-                variant="inspector"
-                onClick={() => onAddOpening("door")}
-              >
-                <DoorIcon aria-hidden="true" size={16} />
-                <span>Door</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent className="opening-add-tooltip" side="bottom">
-              A standard doorway reaching the floor. Artwork can&rsquo;t hang
-              over it.
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                className="opening-add-chip"
-                variant="inspector"
-                onClick={() => onAddOpening("window")}
-              >
-                <SquareIcon aria-hidden="true" size={16} />
-                <span>Window</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent className="opening-add-tooltip" side="bottom">
-              A window centered on the wall&rsquo;s midline. Artwork can&rsquo;t
-              hang over it.
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                className="opening-add-chip"
-                variant="inspector"
-                onClick={() => onAddOpening("blocked-zone")}
-              >
-                <RectangleDashedIcon aria-hidden="true" size={16} />
-                <span>Blocked zone</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent className="opening-add-tooltip" side="bottom">
-              Marks a region where artwork can&rsquo;t be hung — a vent,
-              outlet, thermostat, or other obstruction.
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
+      <InspectorActionGroup label="Add to this wall">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              className="opening-add-chip"
+              variant="inspector"
+              onClick={() => onAddOpening("door")}
+            >
+              <DoorIcon aria-hidden="true" size={16} />
+              <span>Door</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent className="opening-add-tooltip" side="bottom">
+            A standard doorway reaching the floor. Artwork can&rsquo;t hang
+            over it.
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              className="opening-add-chip"
+              variant="inspector"
+              onClick={() => onAddOpening("window")}
+            >
+              <SquareIcon aria-hidden="true" size={16} />
+              <span>Window</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent className="opening-add-tooltip" side="bottom">
+            A window centered on the wall&rsquo;s midline. Artwork can&rsquo;t
+            hang over it.
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              className="opening-add-chip"
+              variant="inspector"
+              onClick={() => onAddOpening("blocked-zone")}
+            >
+              <RectangleDashedIcon aria-hidden="true" size={16} />
+              <span>Blocked zone</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent className="opening-add-tooltip" side="bottom">
+            Marks a region where artwork can&rsquo;t be hung — a vent,
+            outlet, thermostat, or other obstruction.
+          </TooltipContent>
+        </Tooltip>
+      </InspectorActionGroup>
 
-      <dl className="property-list compact">
-        <div>
-          <dt>Centerline</dt>
-          <dd>
-            {formatLength(centerlineMm, {
-              unit: centerlinePrimary,
-              secondaryUnit: centerlineSecondary
-            })}
-          </dd>
-        </div>
-      </dl>
+      <InspectorSummaryRow
+        label="Centerline"
+        value={formatLength(centerlineMm, {
+          unit: centerlinePrimary,
+          secondaryUnit: centerlineSecondary
+        })}
+      />
     </form>
   );
 }
