@@ -3676,6 +3676,75 @@ body.panels-resizing * {
    below a room's perimeter walls) plus the extra left indent that sets a
    partition face apart from a perimeter wall — structure by spacing, no pill,
    no accent stripe, matching the menu's Notion-like overlay language. */
+.wall-switcher-menu {
+  min-width: min(380px, calc(100vw - 24px));
+  padding: 4px;
+  border-radius: var(--radius-overlay);
+  box-shadow: var(--shadow-overlay);
+}
+
+.wall-switcher-columns {
+  display: grid;
+  grid-template-columns: minmax(118px, 0.72fr) minmax(190px, 1.28fr);
+  min-width: 0;
+}
+
+.wall-switcher-rooms {
+  min-width: 0;
+  border-right: 1px solid var(--line);
+}
+
+.wall-switcher-elevations {
+  min-width: 0;
+}
+
+.wall-switcher-menu .dropdown-menu-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  padding: 6px 8px 4px;
+}
+
+.wall-switcher-elevation-room {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-regular);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wall-switcher-room-item {
+  justify-content: space-between;
+  min-height: 32px;
+  padding: 0 8px;
+}
+
+.wall-switcher-room-item-current {
+  background: var(--surface);
+  font-weight: var(--weight-medium);
+}
+
+.wall-switcher-room-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wall-switcher-room-count {
+  flex: 0 0 auto;
+  color: var(--subtle);
+  font-size: var(--type-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.wall-switcher-elevations .dropdown-menu-section-label {
+  margin-top: 4px;
+}
+
 .dropdown-menu-section-label {
   padding: 5px 8px 3px 8px;
   color: var(--subtle);
@@ -3698,6 +3767,17 @@ body.panels-resizing * {
 .dropdown-menu-sub-caret {
   margin-left: auto;
   color: var(--subtle);
+}
+
+@media (max-width: 390px) {
+  .wall-switcher-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .wall-switcher-rooms {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
 }
 
 /* Menus surface from their trigger with the same quick fade + soft pop the
