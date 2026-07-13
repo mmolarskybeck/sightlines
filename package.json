@@ -66,6 +66,7 @@
     "@types/three": "^0.169.0",
     "@vitest/coverage-v8": "^4.1.9",
     "jsdom": "^25.0.1",
+    "playwright": "^1.61.1",
     "tailwindcss": "^4.3.2",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
