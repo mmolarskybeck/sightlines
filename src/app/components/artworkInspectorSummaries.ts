@@ -37,8 +37,15 @@ export function formatFramingSummary(
   matWidthMm: number | undefined,
   frame: ArtworkFrame | undefined,
   dimensions: Dimensions,
-  displayUnit: DisplayUnit
+  displayUnit: DisplayUnit,
+  // When the stored size already includes the frame (frameIncludedInImage),
+  // there is no band to add or draw — the summary says so instead of listing a
+  // mat/frame clause or "None". The flag wins over any stored mat/frame, exactly
+  // as effectiveFraming (domain/framing.ts) resolves it for geometry/render.
+  frameIncludedInImage?: boolean
 ): string {
+  if (frameIncludedInImage) return "Size includes the frame";
+
   const parts: string[] = [];
 
   if (matWidthMm !== undefined && matWidthMm > 0) {

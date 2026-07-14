@@ -28,6 +28,7 @@ export function LengthField({
   placeholder,
   compact = false,
   clearable = false,
+  disabled = false,
   onClear,
   positiveOnly = false,
   onCommit,
@@ -46,6 +47,10 @@ export function LengthField({
   placeholder: string;
   compact?: boolean;
   clearable?: boolean;
+  /** Locks the input read-only (native disabled): no focus, edit, or commit.
+   * Used when an upstream fact makes the measurement inapplicable — e.g. a
+   * frame-inclusive work has no editable mat/frame band. */
+  disabled?: boolean;
   onClear?: () => void;
   positiveOnly?: boolean;
   onCommit: (valueMm: number) => void | Promise<void>;
@@ -169,6 +174,7 @@ export function LengthField({
     <Input
       aria-describedby={message ? messageId : undefined}
       aria-invalid={error ? "true" : "false"}
+      disabled={disabled}
       className={
         stepMm !== undefined
           ? "length-field-input length-field-input-stepped"

@@ -52,4 +52,21 @@ describe("ArtworkTooltipContent", () => {
     expect(screen.queryByText('36" × 24"', { exact: false })).not.toBeInTheDocument();
     expect(screen.queryByText(/overall/i)).not.toBeInTheDocument();
   });
+
+  it("shows a single, unlabeled dims line for a frame-inclusive work despite a stored frame", () => {
+    // frameIncludedInImage collapses the overall onto the image size, so the
+    // tooltip states one number even though a mat/frame is stored on the record.
+    const framed: Artwork = {
+      ...baseArtwork,
+      matWidthMm: 76.2,
+      frame: { widthMm: 25.4, finish: "gold" },
+      frameIncludedInImage: true
+    };
+
+    render(<ArtworkTooltipContent artwork={framed} dimensions={framed.dimensions} unit="in" />);
+
+    expect(screen.getByText('36" × 24"')).toBeInTheDocument();
+    expect(screen.queryByText(/overall/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Image/)).not.toBeInTheDocument();
+  });
 });

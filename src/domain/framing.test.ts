@@ -3,6 +3,7 @@ import {
   FRAME_FINISHES,
   FRAME_FINISH_HEX,
   deriveFrameWidthFromOverallMm,
+  effectiveFraming,
   getArtworkOuterDimensionsMm,
   getPlacementFootprintMm,
   withArtworkFootprint
@@ -109,6 +110,33 @@ describe("placement footprint contract", () => {
   it("preserves identity for an unframed artwork placement", () => {
     const unframed = { ...placement, displayDimensionsOverride: undefined };
     expect(withArtworkFootprint(unframed, {})).toBe(unframed);
+  });
+
+  it("keeps a frame-inclusive work at its image size even with a stored mat/frame", () => {
+    // frameIncludedInImage ⇒ the stored size IS the footprint: no widening.
+    const framed = { ...artwork, frameIncludedInImage: true };
+    expect(getPlacementFootprintMm(placement, framed)).toEqual({
+      widthMm: placement.widthMm,
+      heightMm: placement.heightMm
+    });
+    // withArtworkFootprint returns the object by identity when no band applies.
+    expect(withArtworkFootprint(placement, framed)).toBe(placement);
+  });
+});
+
+describe("effectiveFraming (single interpreter of frameIncludedInImage)", () => {
+  const frame: ArtworkFrame = { widthMm: 25, finish: "black" };
+
+  it("returns the artwork's own mat/frame when unflagged", () => {
+    expect(effectiveFraming({ matWidthMm: 75, frame })).toEqual({ matWidthMm: 75, frame });
+  });
+
+  it("returns empty bands when the size already includes the frame", () => {
+    expect(effectiveFraming({ matWidthMm: 75, frame, frameIncludedInImage: true })).toEqual({});
+  });
+
+  it("returns empty bands for a missing artwork record", () => {
+    expect(effectiveFraming(undefined)).toEqual({});
   });
 });
 

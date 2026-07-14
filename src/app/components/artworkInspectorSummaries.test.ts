@@ -76,6 +76,12 @@ describe("formatFramingSummary", () => {
       )
     ).toBe('3" mat · 1" gold frame');
   });
+
+  it("reads 'Size includes the frame' when flagged, ignoring any stored mat/frame", () => {
+    expect(
+      formatFramingSummary(76.2, { widthMm: 25.4, finish: "gold" }, dims, "in", true)
+    ).toBe("Size includes the frame");
+  });
 });
 
 describe("formatDetailsSummary", () => {

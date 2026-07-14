@@ -295,6 +295,64 @@ mat 75, frame 25 → outer 600×500).
   keeps the image width even when handed a footprint width; a framed floor work's
   derived plan depth is the image width, not the outer width.
 
+### Phase 7 — Frame-inclusive size flag (`frameIncludedInImage`)
+
+Some works store an OUTER size in `dimensions` — usually because the uploaded
+photo itself shows the frame. Widening such a size by a mat/frame double-counts,
+and drawing a schematic band over a photo that already shows one is wrong. The
+product decision (option a) is a first-class boolean on the artwork,
+`frameIncludedInImage`, meaning **this size (and image) already includes the
+frame**. When true the footprint IS `dimensions` (no widening) and no schematic
+mat/frame band is drawn in elevation or 3D.
+
+- **Schema/type:** `frameIncludedInImage?: boolean` on `Artwork` (project.ts) and
+  `z.boolean().optional()` on `artworkSchema` — additive, no schema-version bump,
+  exactly mirroring `placementForm`. Absent on every legacy document, which
+  validates and parses to `undefined` ⇒ widen as before. Legacy behavior is
+  byte-identical.
+
+- **The single interpreter:** `effectiveFraming(artwork)` (framing.ts) is the
+  ONLY place the flag is read. It returns the work's own mat/frame when
+  unflagged and empty bands when flagged (or when the record is missing). Every
+  geometry and render reader routes through it, so they cannot drift:
+  - Geometry: `getPlacementFootprintMm` and `withArtworkFootprint` consult it, so
+    a flagged work's footprint equals its image size everywhere validation,
+    snapping, barriers, arrange, bounds, and marquee already use the adapter.
+    (`getArtworkOuterDimensionsMm`, the pure number→number function, is unchanged
+    — it has no artwork and no flag.)
+  - Render: the elevation band props (`ElevationView` → `ElevationArtwork`) and
+    the 3D band props (`WallPanel` → `ArtworkPlane`) are resolved through it, so
+    a flagged work is handed no band. The band components' internal math is
+    untouched — only what they are handed. The 3D eye-level standoff
+    (`resolveEyeLevelStandoffArtwork`) routes through it too.
+  - Display: the tooltip's "Overall" line and the inspector's Overall readout /
+    `formatFramingSummary` route through it, so a flagged work shows a single
+    size (`formatFramingSummary` reads "Size includes the frame").
+  - **Left raw (deliberate):** the inspector's Mat/Frame `LengthField`s and the
+    Finish `Select` still read the stored `matWidthMm`/`frame`, so unchecking the
+    flag restores exactly what was there. Storage is lossless — the flag is never
+    auto-cleared and never clears the stored bands. A record carrying BOTH a
+    stored frame AND the flag reads as frame-inclusive: the flag wins everywhere,
+    guaranteed because effectiveFraming is the sole interpreter.
+
+- **Store:** `frameIncludedInImage` is in `UpdateArtworkChanges` and in the
+  `framingChanged` guard, so toggling it re-runs placement validation (it flips
+  the outer footprint just like a mat/frame edit) against the parsed record that
+  carries the new flag.
+
+- **Inspector:** a "Size includes the frame" checkbox (reusing the Dimensions
+  "Approximate" checkbox-row styling — no new CSS). When on, the Mat, Frame,
+  Finish, and Overall controls disable with the note "Frame is part of the
+  photo — Sightlines won't add or draw one."
+
+- **Import:** a `framed`-role cell sets `frameIncludedInImage: true` on the
+  drafted artwork, which makes the double-count **structurally impossible**. This
+  **supersedes the Phase 6a "will double-count" warning**: that warning is
+  replaced by a calm informational note ("Size interpreted as frame-inclusive;
+  mat and frame controls are off. Uncheck … if this photo shows the bare work.")
+  carried on the same `draft.warnings` review channel. `ROLE_PRIORITY` (which
+  cells win when several sizes are offered) is orthogonal and untouched here.
+
 ## 5. Docs to update on completion
 
 - `docs/quick-todos.md:45` — retire the "deliberate limitation" sentence

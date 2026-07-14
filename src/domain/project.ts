@@ -46,6 +46,16 @@ export type Artwork = {
   // exactly as before (see getArtworkOuterDimensionsMm).
   matWidthMm?: number;
   frame?: ArtworkFrame;
+  // The stored `dimensions` (and the uploaded image) ALREADY include the frame
+  // — often because the photo itself shows the frame. When true, the footprint
+  // IS `dimensions`: geometry adds no mat/frame band and the renderer draws
+  // none, because the frame is part of the work as given. Absent/false on every
+  // legacy record ⇒ widen by mat/frame exactly as before. Additive and
+  // optional (no schema-version bump). The flag is interpreted in EXACTLY one
+  // place — effectiveFraming (domain/framing.ts) — so geometry, render,
+  // tooltip, and inspector can never disagree about what it means. A record may
+  // carry a stored mat/frame AND this flag; the flag wins everywhere.
+  frameIncludedInImage?: boolean;
   assetId?: string;
   metadata: Record<string, string | number | boolean>;
 };

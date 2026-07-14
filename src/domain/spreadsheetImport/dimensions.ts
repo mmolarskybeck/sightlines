@@ -6,6 +6,16 @@ import type { ParsedImportDimensions } from "./types";
 type DimensionRole = NonNullable<ParsedImportDimensions["role"]>;
 export type ImportDimensionUnit = DisplayUnit | "mm";
 
+// When one cell states several sizes, the FRAMED size wins. That is deliberate,
+// not a bug to "fix" back to image-first: a framed size is the work's true
+// wall footprint — the edge an installer measures to — and the framing contract
+// exists precisely so geometry reads that outer edge. Importing it is safe
+// because a framed-role pick sets frameIncludedInImage (see importPlan.ts), so
+// the stored size is read AS frame-inclusive and never widened again. The
+// unframed size, when the cell also carried one, is preserved as raw source
+// text in metadata; it just isn't the geometry. object/overall (ambiguous —
+// the legitimate size of a 3D work) and sheet come next, then a labeled image
+// size, then an unlabeled one.
 const ROLE_PRIORITY: DimensionRole[] = ["framed", "object", "sheet", "image", "unknown"];
 
 export function parseImportedDimensions(

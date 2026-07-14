@@ -2087,6 +2087,36 @@ describe("app store", () => {
 
       expect(store.getState().undoStack).toHaveLength(undoStackBefore);
     });
+
+    it("re-runs placement validation when frameIncludedInImage toggles the footprint", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("framed.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      // Image 400×300 fits near the wall's left edge; the mat+frame footprint
+      // (600×500) crosses x=0, so the framed placement is out of bounds.
+      await store.getState().updateArtwork(artworkId, {
+        dimensions: { widthMm: 400, heightMm: 300, status: "known" },
+        matWidthMm: 75,
+        frame: { widthMm: 25, finish: "black" }
+      });
+      const wallId = getSelectedWall(
+        store.getState().project!,
+        store.getState().wallContextId
+      )!.id;
+      await store.getState().placeArtwork(artworkId, wallId, 250, 1450);
+
+      const placementId = store.getState().project!.wallObjects[0].id;
+      expect(
+        store.getState().placementWarnings.some((w) => w.wallObjectId === placementId)
+      ).toBe(true);
+
+      // Declaring the size frame-inclusive drops the band: footprint == image,
+      // which now fits, so the warning must clear (guard includes the flag).
+      await store.getState().updateArtwork(artworkId, { frameIncludedInImage: true });
+
+      expect(
+        store.getState().placementWarnings.some((w) => w.wallObjectId === placementId)
+      ).toBe(false);
+    });
   });
 
   describe("placeArtwork", () => {

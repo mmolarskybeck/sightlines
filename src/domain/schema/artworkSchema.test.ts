@@ -97,6 +97,18 @@ describe("artworkSchema", () => {
     expect(migrateArtwork(artwork)).toEqual(artwork);
   });
 
+  it("round-trips frameIncludedInImage: true", () => {
+    const artwork = { ...createSampleArtwork(), frameIncludedInImage: true };
+    expect(parseArtwork(artwork).frameIncludedInImage).toBe(true);
+    expect(migrateArtwork(artwork)).toEqual(artwork);
+  });
+
+  it("accepts an artwork with no frameIncludedInImage (additive — legacy documents parse to undefined)", () => {
+    const artwork = createSampleArtwork();
+    expect("frameIncludedInImage" in artwork).toBe(false);
+    expect(parseArtwork(artwork).frameIncludedInImage).toBeUndefined();
+  });
+
   it("rejects an unknown frame finish", () => {
     const artwork = createSampleArtwork();
     // @ts-expect-error deliberately invalid finish value for the test

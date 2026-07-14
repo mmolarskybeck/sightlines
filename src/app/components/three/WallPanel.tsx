@@ -2,6 +2,7 @@ import type { ThreeEvent } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import { Path, Shape, ShapeGeometry, type Texture } from "three";
 import type { Artwork } from "../../../domain/project";
+import { effectiveFraming } from "../../../domain/framing";
 import type { WallPanel3d } from "../../../domain/geometry/scene3d";
 import { ArtworkPlane } from "./ArtworkPlane";
 import { mmToWorld, MM_TO_WORLD } from "./coordinates";
@@ -184,13 +185,16 @@ export function WallPanel({
       ))}
       {wall.artworks.map((artwork) => {
         const record = artworksById.get(artwork.artworkId);
+        // Single interpreter of frameIncludedInImage: a flagged work is handed
+        // no band, so ArtworkPlane draws none (the frame is already in the photo).
+        const framing = effectiveFraming(record);
         return (
           <ArtworkPlane
             key={artwork.objectId}
             artwork={artwork}
             texture={artwork.assetId ? texturesByAssetId.get(artwork.assetId) : undefined}
-            matWidthMm={record?.matWidthMm}
-            frame={record?.frame}
+            matWidthMm={framing.matWidthMm}
+            frame={framing.frame}
             isSelected={
               selectedObjectIds.includes(artwork.objectId) ||
               artwork.artworkId === selectedArtworkId

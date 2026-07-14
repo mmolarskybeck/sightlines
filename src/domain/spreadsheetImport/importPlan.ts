@@ -120,6 +120,26 @@ function createDraft({
     warnings.push({ field: "dimensions", message });
   }
 
+  // A "framed" role means the framed size won the ROLE_PRIORITY sort (framed
+  // ranks first — see dimensions.ts), so the OUTER size is what lands in
+  // `dimensions`. That is the size we want on the wall; marking the draft
+  // frameIncludedInImage makes it safe: effectiveFraming (domain/framing.ts)
+  // then reads the stored size AS the frame-inclusive footprint, so nothing
+  // widens it and no schematic band is drawn — the double-count is structurally
+  // impossible, not merely warned about. This supersedes the Phase 6a "will
+  // double-count" warning; the calm note below (still review-visible via
+  // draft.warnings) states the interpretation. If the cell ALSO carried an
+  // unframed size, that number stays as raw source text in metadata — the user
+  // unchecks "Size includes the frame" to fall back to widening from it.
+  const frameInclusive = dimensionResult?.role === "framed";
+  if (frameInclusive) {
+    warnings.push({
+      field: "dimensions",
+      message:
+        "Size interpreted as frame-inclusive; mat and frame controls are off. Uncheck “Size includes the frame” if this photo shows the bare work."
+    });
+  }
+
   const extraMetadata: Artwork["metadata"] = {};
   for (const [key, rawValue] of Object.entries(raw)) {
     if (!rawValue) continue;
@@ -138,6 +158,7 @@ function createDraft({
     accessionNumber: value("accessionNumber"),
     locationOrLender: value("locationOrLender"),
     dimensions: dimensionResult?.dimensions ?? { status: "unknown", displayUnit: projectUnit },
+    ...(frameInclusive ? { frameIncludedInImage: true } : {}),
     metadata: {
       ...extraMetadata,
       sourceFilename: table.sourceFilename,

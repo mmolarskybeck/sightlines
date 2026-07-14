@@ -3,7 +3,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Box3, MathUtils, PerspectiveCamera, Plane, TOUCH, Vector2, Vector3 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
-import { getArtworkOuterDimensionsMm } from "../../../domain/framing";
+import { effectiveFraming, getArtworkOuterDimensionsMm } from "../../../domain/framing";
 import { parseFaceWallId } from "../../../domain/geometry/freestandingWalls";
 import {
   deriveScene3d,
@@ -728,11 +728,15 @@ export function resolveEyeLevelStandoffArtwork(
   if (!artwork) return null;
 
   const record = artworksById.get(artwork.artworkId);
+  // effectiveFraming is the single interpreter of frameIncludedInImage: a
+  // flagged work returns empty bands, so the standoff clears the image-sized
+  // mesh ArtworkPlane actually draws for it.
+  const { matWidthMm, frame } = effectiveFraming(record);
   const outer = getArtworkOuterDimensionsMm(
     artwork.widthMm,
     artwork.heightMm,
-    record?.matWidthMm,
-    record?.frame
+    matWidthMm,
+    frame
   );
 
   if (outer.widthMm === artwork.widthMm && outer.heightMm === artwork.heightMm) {

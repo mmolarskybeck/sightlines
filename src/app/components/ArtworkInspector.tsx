@@ -130,7 +130,9 @@ export function ArtworkInspector({
   // onCommitField's metadata edits: this is a single-purpose commit ("Change
   // placement type") the segmented control fires on change.
   onChangePlacementForm: (form: PlacementForm) => void;
-  onCommitFraming: (changes: Partial<Pick<Artwork, "matWidthMm" | "frame">>) => void;
+  onCommitFraming: (
+    changes: Partial<Pick<Artwork, "matWidthMm" | "frame" | "frameIncludedInImage">>
+  ) => void;
   onRemovePlacement?: () => void;
   onSectionOpenChange: (sectionId: string, open: boolean) => void;
   unit: DisplayUnit;
@@ -202,7 +204,8 @@ export function ArtworkInspector({
             artwork.matWidthMm,
             artwork.frame,
             artwork.dimensions,
-            summaryUnit
+            summaryUnit,
+            artwork.frameIncludedInImage
           )}
           title="Framing"
           onOpenChange={(open) => onSectionOpenChange("matframe", open)}
@@ -214,6 +217,7 @@ export function ArtworkInspector({
             dimensions={artwork.dimensions}
             frame={artwork.frame}
             matWidthMm={artwork.matWidthMm}
+            frameIncludedInImage={artwork.frameIncludedInImage}
             onCommitFraming={onCommitFraming}
             unit={unit}
           />
@@ -615,16 +619,28 @@ function FramingSection({
   dimensions,
   frame,
   matWidthMm,
+  frameIncludedInImage,
   onCommitFraming,
   unit
 }: {
   dimensions: Dimensions;
   frame?: ArtworkFrame;
   matWidthMm?: number;
-  onCommitFraming: (changes: Partial<Pick<Artwork, "matWidthMm" | "frame">>) => void;
+  frameIncludedInImage?: boolean;
+  onCommitFraming: (
+    changes: Partial<Pick<Artwork, "matWidthMm" | "frame" | "frameIncludedInImage">>
+  ) => void;
   unit: DisplayUnit;
 }) {
   const { displayUnit, parseUnit, placeholder, system } = getScopedUnitContext(unit, "artwork");
+
+  // When the work's stored size already includes the frame, there is nothing to
+  // add or draw — mat/frame/finish and the Overall editor are inapplicable, so
+  // they lock. Stored matWidthMm/frame are deliberately NOT cleared (lossless:
+  // unchecking restores what was there). The flag wins everywhere regardless,
+  // because effectiveFraming (domain/framing.ts) is the sole interpreter — a
+  // record carrying both a stored frame AND the flag reads as frame-inclusive.
+  const framingLocked = frameIncludedInImage === true;
 
   // Overall reads quiet at rest; the editor is a nested disclosure, opened
   // only when a curator solves for the frame from a known framed size. Local
@@ -671,11 +687,30 @@ function FramingSection({
 
   return (
     <>
+      {/* Reuses the Dimensions "Approximate" checkbox-row styling (see
+          .artwork-dimensions-approximate) rather than adding CSS. */}
+      <label className="artwork-dimensions-approximate">
+        <Checkbox
+          aria-label="Size includes the frame"
+          checked={framingLocked}
+          onCheckedChange={(checked) =>
+            onCommitFraming({ frameIncludedInImage: checked === true ? true : undefined })
+          }
+        />
+        <span>Size includes the frame</span>
+      </label>
+      {framingLocked ? (
+        <p className="field-hint">
+          Frame is part of the photo — Sightlines won’t add or draw one.
+        </p>
+      ) : null}
+
       <div className="field-pair-grid">
         <LengthField
           compact
           clearable
           positiveOnly
+          disabled={framingLocked}
           label="Mat"
           valueMm={matWidthMm}
           displayUnit={displayUnit}
@@ -688,6 +723,7 @@ function FramingSection({
           compact
           clearable
           positiveOnly
+          disabled={framingLocked}
           label="Frame"
           valueMm={frame?.widthMm}
           displayUnit={displayUnit}
@@ -706,6 +742,7 @@ function FramingSection({
 
       <InspectorRow label="Finish">
         <Select
+          disabled={framingLocked}
           value={frame?.finish ?? "black"}
           onValueChange={(value) =>
             onCommitFraming({
@@ -729,7 +766,7 @@ function FramingSection({
         </Select>
       </InspectorRow>
 
-      {overall && dimensions.widthMm !== undefined && dimensions.heightMm !== undefined ? (
+      {!framingLocked && overall && dimensions.widthMm !== undefined && dimensions.heightMm !== undefined ? (
         // Derived footprint reads quiet at rest (InspectorSummaryRow); the
         // "Set…" disclosure reveals the editable pair, whose commit re-derives
         // the frame band (see commitOverall above).

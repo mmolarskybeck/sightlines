@@ -27,6 +27,11 @@ export const artworkSchema = z.object({
       finish: z.enum(["gold", "white", "black", "silver", "wood"])
     })
     .optional(),
+  // Additive, no schema-version bump (mirrors placementForm): absent on every
+  // legacy document, which validates and parses to undefined ⇒ widen as before.
+  // Meaning and single interpreter documented on Artwork.frameIncludedInImage
+  // (project.ts) / effectiveFraming (domain/framing.ts).
+  frameIncludedInImage: z.boolean().optional(),
   assetId: z.string().min(1).optional(),
   metadata: z.record(z.union([z.string(), z.number(), z.boolean()]))
 });

@@ -2,7 +2,7 @@ import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
 import { SquareIcon } from "@phosphor-icons/react/dist/csr/Square";
 import type { Icon } from "@phosphor-icons/react";
-import { getArtworkOuterDimensionsMm } from "../../domain/framing";
+import { effectiveFraming, getArtworkOuterDimensionsMm } from "../../domain/framing";
 import { getOpeningKindLabel, type OpeningKind } from "../../domain/placement/createOpening";
 import type { Artwork, Dimensions, DisplayUnit } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
@@ -93,13 +93,17 @@ export function ArtworkTooltipContent({
   // with each other. No overall line without the image line: an overall size
   // alone, with no image size to anchor it, would misstate which number is
   // which.
+  // effectiveFraming is the single interpreter of frameIncludedInImage: a
+  // flagged work returns empty bands, so overall collapses to the image size
+  // and the second line drops out (isFramed below is false).
+  const framing = effectiveFraming(artwork);
   const overall =
     dims && dimensions.widthMm !== undefined && dimensions.heightMm !== undefined
       ? getArtworkOuterDimensionsMm(
           dimensions.widthMm,
           dimensions.heightMm,
-          artwork.matWidthMm,
-          artwork.frame
+          framing.matWidthMm,
+          framing.frame
         )
       : null;
   const isFramed =

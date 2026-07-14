@@ -86,4 +86,62 @@ describe("createArtworkImportPlan", () => {
     expect(plan.drafts[0].artwork.dimensions.heightMm).toBeCloseTo(770);
     expect(plan.drafts[0].artwork.dimensions.displayUnit).toBe("cm");
   });
+
+  const dimensionsTable = (dimensionsCell: string): ImportTable => ({
+    sourceFilename: "metadata.csv",
+    sheetName: "Sheet1",
+    headerRowIndex: 0,
+    columns: [
+      { index: 0, label: "title" },
+      { index: 1, label: "dimensions" }
+    ],
+    rows: [{ sourceRowIndex: 2, values: ["A Work", dimensionsCell] }]
+  });
+
+  it("flags a framed-role cell as frame-inclusive and does not warn about double-counting", () => {
+    const plan = createArtworkImportPlan({
+      table: dimensionsTable("Framed: 24 x 36 in"),
+      imageFiles: [],
+      projectUnit: "in"
+    });
+
+    const draft = plan.drafts[0];
+    expect(draft.artwork.frameIncludedInImage).toBe(true);
+    // The framed size still lands in `dimensions` (both axes in mm); the flag is
+    // what keeps it from being widened again.
+    expect(draft.artwork.dimensions.widthMm).toBeCloseTo(914.4);
+    expect(draft.artwork.dimensions.heightMm).toBeCloseTo(609.6);
+    // The scary double-count warning is superseded — the flag prevents it
+    // structurally. A calm frame-inclusive note takes its place.
+    expect(draft.warnings.some((w) => /double-count/i.test(w.message))).toBe(false);
+    expect(draft.warnings.some((w) => /frame-inclusive/i.test(w.message))).toBe(true);
+  });
+
+  it("stores the framed size and flags it when a cell carries both image and framed sizes", () => {
+    const plan = createArtworkImportPlan({
+      table: dimensionsTable("Image: 20 x 30 in; Framed: 24 x 36 in"),
+      imageFiles: [],
+      projectUnit: "in"
+    });
+
+    const draft = plan.drafts[0];
+    // The framed size is the true wall footprint, so it wins over the image
+    // size — and the flag keeps it from being widened again. The image number
+    // survives only as raw source metadata, not as geometry.
+    expect(draft.artwork.frameIncludedInImage).toBe(true);
+    expect(draft.artwork.dimensions.widthMm).toBeCloseTo(914.4);
+    expect(draft.artwork.dimensions.heightMm).toBeCloseTo(609.6);
+  });
+
+  it("leaves the flag unset for an ordinary unframed cell", () => {
+    const plan = createArtworkImportPlan({
+      table: dimensionsTable("24 x 36 in"),
+      imageFiles: [],
+      projectUnit: "in"
+    });
+
+    const draft = plan.drafts[0];
+    expect(draft.artwork.frameIncludedInImage).toBeUndefined();
+    expect(draft.warnings.some((w) => /frame-inclusive/i.test(w.message))).toBe(false);
+  });
 });

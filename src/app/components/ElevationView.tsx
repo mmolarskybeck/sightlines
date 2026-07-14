@@ -30,7 +30,11 @@ import {
 } from "../../domain/placement/placeArtwork";
 import { getDefaultOpeningSizeMm, type OpeningKind } from "../../domain/placement/createOpening";
 import { effectivePlacementForm } from "../../domain/placement/artworkForm";
-import { getPlacementFootprintMm, withArtworkFootprintFromMap } from "../../domain/framing";
+import {
+  effectiveFraming,
+  getPlacementFootprintMm,
+  withArtworkFootprintFromMap
+} from "../../domain/framing";
 import type {
   Artwork,
   DisplayUnit,
@@ -1458,14 +1462,17 @@ export function ElevationView({
           // A move never resizes, so the object's own size always applies (for a
           // group, moveDrag.sizeMm is the union box, not this member's size).
           const size = sizeMm;
+          // Single interpreter of frameIncludedInImage: a flagged work is handed
+          // no band, so ElevationArtwork paints none (frame is in the photo).
+          const framing = effectiveFraming(artwork);
 
           return (
             <ElevationArtwork
               key={placement.id}
               center={center}
               dimensionStatus={artwork?.dimensions.status}
-              frame={artwork?.frame}
-              matWidthMm={artwork?.matWidthMm}
+              frame={framing.frame}
+              matWidthMm={framing.matWidthMm}
               imageUrl={artwork?.assetId ? imageUrlsByAssetId.get(artwork.assetId) : undefined}
               isOutOfBounds={
                 // The scene's flag is the at-rest answer; a live drag preview

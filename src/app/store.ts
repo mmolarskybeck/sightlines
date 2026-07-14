@@ -173,6 +173,7 @@ type UpdateArtworkChanges = Partial<
     | "placementForm"
     | "matWidthMm"
     | "frame"
+    | "frameIncludedInImage"
   >
 >;
 
@@ -2506,7 +2507,14 @@ export function createAppStore(deps: AppStoreDeps) {
         );
         if (changedKeys.length === 0) return;
         const dimensionsChanged = changedKeys.includes("dimensions");
-        const framingChanged = changedKeys.includes("matWidthMm") || changedKeys.includes("frame");
+        // frameIncludedInImage flips the outer footprint (a flagged work drops
+        // its mat/frame band via effectiveFraming), so toggling it must trigger
+        // the same placement revalidation as a mat/frame edit — otherwise a work
+        // that newly fits (or newly overflows) wouldn't re-flag.
+        const framingChanged =
+          changedKeys.includes("matWidthMm") ||
+          changedKeys.includes("frame") ||
+          changedKeys.includes("frameIncludedInImage");
 
         let parsed: Artwork;
         try {

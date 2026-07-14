@@ -3,7 +3,10 @@ import { inchesToMm } from "../units/length";
 import { detectUnitFromLabel, dimensionsFromColumns, parseImportedDimensions } from "./dimensions";
 
 describe("parseImportedDimensions", () => {
-  it("prefers framed dimensions over image dimensions", () => {
+  // The framed size is the work's true wall footprint, so it wins over an
+  // image size in the same cell — importPlan flags the draft frameIncludedInImage
+  // so the stored outer size is never widened again (see ROLE_PRIORITY).
+  it("prefers the framed size over an image size in the same cell", () => {
     const parsed = parseImportedDimensions(
       "image: 7 x 9 in.; framed: 24 x 30 in.",
       "in"
