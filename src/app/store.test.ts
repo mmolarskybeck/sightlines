@@ -25,7 +25,8 @@ import { createSampleProject } from "../domain/sample/sampleProject";
 import { MAX_IMPORT_JSON_LENGTH } from "../domain/schema/projectSchema";
 import { createSightlinesPackage } from "../domain/package/buildPackage";
 import { makeFixture } from "../domain/package/packageTestFixtures";
-import { feetToMm } from "../domain/units/length";
+import { createArtworkImportPlan } from "../domain/spreadsheetImport/importPlan";
+import { feetToMm, inchesToMm } from "../domain/units/length";
 import {
   FakeImageProcessor,
   InMemoryArtworkLibraryRepository,
@@ -1568,6 +1569,40 @@ describe("app store", () => {
         "slow-artwork"
       );
       expect(store.getState().error).toMatch(/open project changed/);
+    });
+
+    // A framed-role import stores the outer size and flags it frame-inclusive;
+    // both the flag and the dimensionRole provenance must ride the draft through
+    // importArtworkDrafts and parseArtwork into the saved record, not just the
+    // in-memory state — provenance is the fallback that outlives the wizard's
+    // transient note (docs/framing-dimension-contract.md §3).
+    it("persists framed-size provenance on the committed artwork record", async () => {
+      const plan = createArtworkImportPlan({
+        table: {
+          sourceFilename: "checklist.csv",
+          sheetName: "Sheet1",
+          headerRowIndex: 0,
+          columns: [
+            { index: 0, label: "title" },
+            { index: 1, label: "dimensions" }
+          ],
+          rows: [{ sourceRowIndex: 2, values: ["Framed Study", "Framed: 24 x 36 in"] }]
+        },
+        imageFiles: [],
+        projectUnit: "in"
+      });
+
+      await store.getState().importArtworkDrafts(plan.drafts);
+
+      const saved = store.getState().libraryArtworks[0];
+      expect(saved.dimensions.heightMm).toBeCloseTo(inchesToMm(24));
+      expect(saved.dimensions.widthMm).toBeCloseTo(inchesToMm(36));
+      expect(saved.frameIncludedInImage).toBe(true);
+      expect(saved.metadata.dimensionRole).toBe("framed");
+
+      const persisted = artworkLibraryRepository.artworks.get(saved.id);
+      expect(persisted?.frameIncludedInImage).toBe(true);
+      expect(persisted?.metadata.dimensionRole).toBe("framed");
     });
   });
 
