@@ -2,7 +2,7 @@
 
 Status: Draft for review · Written: 2026-07-14
 
-Decisions reviewed with Marina 2026-07-14 (two rounds, second incorporating
+Decisions reviewed with Marina 2026-07-14 (three rounds, incorporating
 Sol's review): image export (PNG/JPG) captures exactly one view per file and
 is a lightweight "snapshot" action — in 3D it captures the current camera
 pose and performs a clean export-resolution render, independent of the
@@ -12,12 +12,14 @@ optional per-room detail pages; elevations are chosen from a per-room wall
 list that defaults to walls holding work; 3D pages come from **Saved views**
 — first-class camera bookmarks with editable titles and a live-resolved room
 label, destined for a left-pane collection; **automatic dimension lines are
-included by default** behind a single off-switch, using gap dimensions for
-single-row hangs and datum-based coordinates for multi-row/salon walls; the
-grid is excludable/includable with default off; PDF drawing output is vector
-with embedded raster artwork images; document settings are workspace
-preferences keyed by project id, not project data; paper sizes are A4,
-Letter, A3, and Tabloid 11×17. Remaining open items are in §16.
+included by default** behind a single off-switch, using horizontal and
+vertical gaps between directly visible neighboring wall objects, exposed outer
+horizontal margins, and consolidated center heights for every arrangement from a row
+to a salon hang; the grid is excludable/includable with default off; PDF
+drawing output is vector with embedded raster artwork images; document
+settings are workspace preferences keyed by project id, not project data;
+paper sizes are A4, Letter, A3, and Tabloid 11×17. Remaining open items are
+in §16.
 
 ## 1. Goal
 
@@ -258,6 +260,13 @@ different semantics:
   how *this user on this machine* last assembled a document, not what the
   exhibition is. A collaborator opening the same package starts from §7.3's
   defaults.
+- Persisted document settings reconcile against the current project by id:
+  explicit choices are preserved for rooms, walls, and Saved views that
+  still exist; deleted ids are dropped; genuinely new ids receive §7.3's
+  normal defaults (new room plans included when appropriate, new walls with
+  work included, new empty walls unchecked, new Saved views included). A
+  pre-existing wall gaining or losing work keeps its explicit choice. When
+  a project is deleted, its workspace-preference record is deleted too.
 - **Saved views** (§8) are **project data**: they dirty, undo, and
   round-trip through backups, because a composed viewpoint is part of the
   exhibition's description.
@@ -295,9 +304,11 @@ select/deselect-all conveniences for their walls, nothing more.
   but visibly empty otherwise, with the hint **Save views from the 3D
   window to include them here.**
 
-Defaults apply on first export; thereafter §6.3's persistence wins. Walls
-that gain or lose work after the user has customized the selection do not
-silently join or leave it — the user's explicit choice is never overridden.
+Defaults apply on first export and to genuinely new ids thereafter; §6.3's
+reconciliation preserves explicit choices for everything that already
+exists. Walls that gain or lose work after the user has customized the
+selection do not silently join or leave it — the user's explicit choice is
+never overridden.
 
 ## 8. 3D views
 
@@ -322,7 +333,9 @@ From the 3D view, **Save view**:
    camera target), when one is identifiable. Optionally stores derived wall
    context (which wall face the camera predominantly faces) as
    supplementary data, never as part of the title.
-3. Assigns the default editable title **Saved view *n*** (creation order).
+3. Assigns the default editable title **Saved view *n***, where *n* is an
+   immutable, monotonically increasing creation ordinal. Deleting a view
+   never renumbers the survivors or causes a later view to reuse its number.
 4. Confirms with lightweight feedback (**Saved "Gallery 2 · Saved view
    3"**) without leaving the 3D view or opening a dialog.
 5. Appends to the project's Saved views list. Saved views are project data
@@ -367,10 +380,15 @@ planned primary home for browsing, opening at full resolution, renaming,
 downloading, and deleting, and when it lands the dialog keeps only
 inclusion.
 
-If geometry changes have made a stored pose degenerate (e.g., the space it
-looked into no longer exists), the row carries an advisory state and the
-view is excluded from export rather than rendering a void — consistent
-with the app's "flag, don't silently fix" rule.
+A stored pose is degenerate only when its camera data is numerically invalid:
+non-finite position, target, or lens values; camera and target effectively
+coincident; or invalid field-of-view/clipping parameters. Geometry edits and
+room deletion do not themselves invalidate a pose — a valid bookmark always
+renders the current project from its stored camera, even if the resulting
+view is now sparse or empty. The thumbnail makes that result visible so the
+user can exclude or delete it. A numerically invalid pose carries an
+advisory and is excluded from export, consistent with the app's "flag, don't
+silently fix" rule.
 
 ## 9. Page composition
 
@@ -427,39 +445,63 @@ The canvas's dimension lines are selection-driven: they annotate what the
 user is currently arranging. A document has no selection, and its reader's
 question is broader — "where does everything go?" Document pages therefore
 get their own dimension pass, sharing `GroupDimensionLines`' visual family
-(end ticks, formatted labels, staggered rows, the "0" touching readout)
-and, where gap chains apply, its segment derivation.
+(end ticks, formatted labels, staggered rows, the "0" touching readout).
 
-A single gap chain cannot describe every wall: the existing spacing helper
-sorts by horizontal center and measures consecutive edges, which produces
-negative or meaningless "gaps" for works stacked at similar x. The export
-pass therefore classifies each wall deterministically — **gap dimensions
-for a row, coordinate dimensions for a salon wall** — rather than guessing
-lane groupings:
+Every elevation uses one unified **orthogonal visibility-neighbor** rule;
+there is no row/salon classification and no guessed lane grouping:
 
-- **Single-row wall** — a horizontal line can pass through every placed
-  work (all works share a common horizontal band): render the conventional
-  chain — outer segment from each wall end to the nearest object and every
-  interior gap between adjacent objects (openings included as neighbors,
-  exactly as the neighbor-aware canvas segments treat them), reusing the
-  existing segment math. Additionally, the shared hang is annotated with
-  its **center height from the floor**: one common centerline dimension
-  when all works share a center height (the app's own centerline model),
-  per-work center heights otherwise.
-- **Multi-row wall** (no common band): no pairwise gap chain. Each work is
-  placed by **datum coordinates** instead — horizontal center position from
-  the wall's start, and vertical center height from the floor, with works
-  sharing a center height consolidated onto one common centerline
-  dimension. This is deterministic and reconstructs every position without
-  a tangle of crossing gap lines. Openings keep their width and
-  wall-position dimensions but never join a gap chain on such a wall.
-- **Both cases:** the wall's overall width and height render as dimension
-  lines along the wall boundary rather than only as header text.
+- Two wall objects are **horizontal neighbors** when their vertical spans
+  overlap by more than the geometry tolerance and at least one unobstructed
+  horizontal line can connect their facing edges. Their edge-to-edge
+  horizontal gap is dimensioned.
+- Two wall objects are **vertical neighbors** when their horizontal spans
+  overlap by more than the tolerance and at least one unobstructed vertical
+  line can connect their facing edges. Their edge-to-edge vertical gap is
+  dimensioned.
+- Another wall object blocks the relationship only when it blocks every
+  possible connecting corridor through the shared span. When several clear
+  corridors remain, the dimension uses the widest one. Sliver corridors at
+  or below the tolerance do not create unstable neighbor relationships.
+- Each unordered object pair receives at most one dimension per visible
+  axis. Touching neighbors receive the existing **0** readout; actually
+  overlapping objects receive no gap dimension because overlap is already
+  an in-app advisory, not a negative distance to print.
+- Works, doors, windows, and blocked zones all participate with their true
+  rendered footprints: an opening between two works prevents those works
+  from being direct neighbors and can itself be dimensioned to an adjacent
+  work.
+- The wall's left and right boundaries act as virtual horizontal neighbors
+  for works exposed directly to them, preserving useful outer margins.
+  Coincident exterior dimensions may consolidate when their meaning stays
+  unambiguous. The floor and ceiling do not create additional edge-gap
+  dimensions: center height supplies the vertical anchor, and a
+  bottom-edge-to-floor alternative remains deferred.
+- Dimension lines sit inside the widest clear corridor between the objects.
+  When the gap is too narrow for its label, the ticks remain on the measured
+  edges and the existing stagger/leader treatment moves the label into clear
+  space.
+- The wall's overall width and height render as dimension lines along its
+  boundary. Per-work width/height labels inside artwork footprints are not
+  part of v1; optional labels and the checklist PDF own that content.
+
+A conventional single-row hang naturally collapses to the familiar
+left-to-right gap chain. A salon hang gains vertical gaps between stacked
+works and horizontal gaps between side-by-side works, but never jumps across
+an intervening object.
+
+In addition to neighbor gaps, the hang is annotated with **center height
+from the floor**: one common centerline dimension when multiple works share
+a center height (the app's own centerline model), and individual center
+heights otherwise. This absolute vertical datum anchors the relative gap
+network on the wall.
 
 Center height is the default vertical datum because it is the app's
 existing centerline model and the number installers' hang math starts
 from; a bottom-edge-to-floor alternative is a possible later option, not a
 v1 switch (§16).
+
+For the other drawing pages:
+
 - **Room plan pages:** each wall's overall length, drawn outside the room
   polygon along its wall. Object-to-object plan spacing is *not* drawn —
   on a floorplan it produces a web of crossing lines that buries the
@@ -512,9 +554,11 @@ blob can also be missing or unreadable at export time. Either way, the
 work renders as a **vector placeholder**: the correct framed footprint,
 neutral fill and border, the text **Image unavailable** (omitted for
 deliberately image-less works — nothing is "unavailable"), and the work's
-best identifying metadata (title, or another stable identifier) — shown
-even though per-work labels are otherwise off, because two anonymous
-placeholders on one wall are indistinguishable. A missing-blob export
+best identifying metadata (title, accession number, then artist). When no
+identifying metadata exists, placeholders receive deterministic page-local
+labels in wall order (**Untitled work 1**, **Untitled work 2**, …) so two
+anonymous works remain distinguishable. These labels are shown even though
+per-work labels are otherwise off. A missing-blob export
 completes with a non-blocking warning naming the affected works, matching
 the backup flow's behavior; it never fails the export.
 
@@ -552,7 +596,7 @@ editorial constant, not a user option.
   an empty room is honest information in a planning document.
 - **Wall with no works, explicitly included:** exports as an empty
   elevation; never silently skipped once chosen.
-- **All Saved views degenerate or excluded:** the 3D section behaves as
+- **All Saved views numerically invalid or excluded:** the 3D section behaves as
   empty (§8.4).
 - **Very large export (10 rooms, 40 walls, many Saved views):** progress and
   cancel per §6.2; cancellation delivers nothing rather than a partial file.
@@ -601,8 +645,9 @@ editorial constant, not a user option.
 
 - The Export dialog presents exactly the §6.1 structure; a 10-room / 40-wall
   project remains navigable.
-- Defaults follow §7.3 on first export; user selections persist per project
-  and are never silently overridden by later placement changes.
+- Defaults follow §7.3 on first export and for genuinely new ids; persisted
+  settings preserve explicit choices, drop deleted ids, apply §7.3's defaults
+  to new rooms/walls/views, and are removed with the project.
 - Tri-state section checkboxes; sub-selection survives section toggling.
 - Save view records pose and room id in model space, confirms without a
   dialog, dirties the project, participates in undo, and round-trips
@@ -614,27 +659,30 @@ editorial constant, not a user option.
 - Per-view include checkboxes exclude a view from the document without
   touching project data; document settings live in workspace preferences
   keyed by project id and never dirty, undo, or travel through backups.
-- With Dimensions on (default): single-row walls carry the gap chain
-  (outer segments + every interior gap, openings as neighbors) plus center
-  height; multi-row walls carry per-work datum coordinates with shared
-  center heights consolidated; both carry overall wall width/height; room
-  plan pages carry wall lengths; the Overview carries neither. Gap values
-  match the canvas's selection-driven readings for identical geometry, and
-  the row/salon classification is deterministic.
+- With Dimensions on (default): every elevation carries horizontal and
+  vertical gaps between orthogonally visible neighbors, exposed outer
+  horizontal margins, consolidated center heights, and overall wall width/
+  height.
+  Intervening works/openings block farther relationships; each pair/axis is
+  dimensioned once; touching gaps read **0**; overlaps never print as
+  negative gaps. Room plan pages carry wall lengths; the Overview carries
+  neither.
 - With Dimensions off, and with Grid on/off, pages render accordingly.
 - Works with missing or absent images render the §10.3 vector placeholder
-  with identifying metadata; a missing blob yields a non-blocking warning,
-  never a failed export.
+  with identifying metadata or a deterministic **Untitled work n** fallback;
+  a missing blob yields a non-blocking warning, never a failed export.
 - Drawing pages are vector (text selectable, linework crisp at any zoom)
   with embedded raster artwork images.
 - All four paper sizes lay out correctly with auto-orientation.
-- Saved views re-render current project state at export time; degenerate
-  poses carry an advisory and are excluded.
+- Saved views re-render current project state at export time. Geometry edits
+  never invalidate a pose; only numerically invalid camera data carries an
+  advisory and is excluded.
 - The PDF contains exactly the chosen pages in §6.1 order; every page has
   header, title, and (for drawings) scale bar; orientation is auto-chosen
   per page; nothing is stretched or tiled.
-- Plan/elevation pages are pixel-comparable to the canvas's static drawing
-  for identical geometry (same scene derivation).
+- Plan/elevation pages are geometry-equivalent to the canvas's static
+  drawing because they consume the same scene primitives. Rasterized visual
+  comparisons at a defined DPI pass within a documented tolerance.
 - Page count in the footer matches the delivered PDF.
 - Cancel delivers nothing; failure delivers the §12 error and no file.
 
@@ -648,21 +696,24 @@ editorial constant, not a user option.
   for representative and extreme aspect ratios.
 - Scale-bar length selection produces round model lengths across scales and
   both unit systems.
-- Defaults derivation (§7.3) against projects with 1 room, empty walls, and
-  mixed placement.
+- Defaults and reconciliation (§6.3/§7.3): preserve explicit choices for
+  existing ids, drop deleted ids, apply defaults to new rooms/walls/Saved
+  views, retain choices when an existing wall gains or loses work, and
+  delete preferences with the project.
 - Saved-view schema: validation, migration, package round-trip (thumbnail
-  absent), degenerate-pose detection, room-id resolution (camera inside a
-  room, outside all rooms, room since deleted).
-- Wall classification: single-row versus multi-row band detection is
-  deterministic across stacked, staggered, touching, and mixed
-  works+openings arrangements, including near-threshold overlaps.
-- Row walls: segment coverage for 0, 1, and many objects, openings as
-  neighbors, touching works ("0" readout), value agreement with the
-  selection-driven canvas segments, and centerline consolidation
-  (shared versus differing center heights).
-- Salon walls: datum coordinates (center-x from wall start, center height
-  from floor) for every work, shared-centerline consolidation, and
-  opening width/position dimensions staying out of gap chains.
+  absent), immutable monotonic creation ordinals, numeric pose validity,
+  and room-id resolution (camera inside a room, outside all rooms, room
+  since deleted but pose still renderable).
+- Orthogonal neighbor graph: horizontal and vertical adjacency; complete
+  obstruction versus a partially open corridor; widest-corridor choice;
+  one dimension per pair/axis; tolerance-stable slivers; touching **0**;
+  overlaps omitted; and farther pairs blocked by intervening objects.
+- Mixed works/openings: true rendered footprints, openings acting as both
+  blockers and dimension neighbors, and exposed left/right wall boundaries
+  acting as virtual neighbors for exterior margins.
+- Center-height consolidation for shared versus differing center heights,
+  plus deterministic wall-order fallback labels for metadata-free missing-
+  image placeholders.
 
 ### Component and store tests
 
@@ -678,8 +729,8 @@ editorial constant, not a user option.
 - Snapshot and PDF export on iPad via share sheet.
 - A 10-room stress project: dialog usability, export time, file size, and
   400% zoom crispness.
-- Visual diff: canvas static drawing versus exported plan/elevation page
-  for the same project.
+- Toleranced visual diff at a defined DPI: canvas static drawing versus
+  exported plan/elevation page for the same project.
 
 ### UX validation
 
@@ -697,7 +748,7 @@ Task-based, with curators and one installer if possible:
 
 ## 16. Decision gates before implementation
 
-### Resolved product decisions (reviewed 2026-07-14, two rounds)
+### Resolved product decisions (reviewed 2026-07-14, three rounds)
 
 1. Two doors: snapshot (current view, no dialog) versus document (composed
    PDF). No batch image export. Quick 3D image = Export image: capture
@@ -707,16 +758,21 @@ Task-based, with curators and one installer if possible:
 3. Elevation defaults: walls with works checked, empty walls listed
    unchecked.
 4. 3D pages only from **Saved views**: project data (pose + room id +
-   editable title, default **Saved view n**), re-rendered at export time,
-   displayed as live-resolved room label · title; thumbnails are a derived
+   editable title, default **Saved view n** with an immutable monotonic
+   ordinal), re-rendered at export time, displayed as live-resolved room
+   label · title; thumbnails are a derived
    cache outside the project; per-view include checkboxes separate
    inclusion from deletion; a left-pane Saved views collection is the
    planned future management home. No frustum-derived naming in v1.
-5. Dimension lines on by default with a single off-switch; **gap chain +
-   center height for single-row walls, datum coordinates for multi-row/
-   salon walls** (center-x from wall start, center height from floor,
-   shared centerlines consolidated); wall lengths on room plans; none on
-   the Overview. Center height, not bottom-to-floor, is the v1 vertical
+5. Dimension lines on by default with a single off-switch. Every elevation
+   dimensions **horizontal and vertical gaps between orthogonally visible
+   neighbors**, exposed horizontal outer margins, overall wall size, and
+   center height from the floor (shared centerlines consolidated).
+   Intervening objects block farther relationships; touching reads **0**;
+   overlaps never print
+   as negative gaps. This one rule covers rows and salon hangs without lane
+   classification. Room plans carry wall lengths; the Overview carries no
+   dimension lines. Center height, not bottom-to-floor, is the v1 vertical
    datum.
 6. Grid excludable/includable in documents, default off; snapshots follow
    canvas grid visibility.
@@ -727,7 +783,9 @@ Task-based, with curators and one installer if possible:
 9. Reference measurements join the Options group in a later slice, after
    the Measure tool's annotation-export behavior is specified.
 10. Document settings are workspace preferences keyed by project id;
-    Saved views are project data (§6.3).
+    Saved views are project data. Preferences preserve surviving explicit
+    choices, drop deleted ids, apply defaults to new ids, and are removed
+    when their project is deleted (§6.3).
 11. PDF drawing pages are vector with embedded raster artwork images;
     missing/absent images render the §10.3 placeholder with identifying
     metadata plus a non-blocking warning.
@@ -747,16 +805,16 @@ Task-based, with curators and one installer if possible:
 
 ### Engineering questions
 
-- The single-row band test's exact definition (the shared horizontal band a
-  line must pass through) and its behavior at near-misses. Behavioral bar:
-  deterministic, stable under sub-millimeter nudges, and never a gap chain
-  containing a negative segment.
-- Salon-wall datum layout: where datum lines and labels sit so a dense
-  wall stays legible (leader lines, staggering, label collision rules) —
+- Orthogonal-neighbor tolerance and widest-corridor selection: stable under
+  sub-millimeter nudges, deterministic when a blocker leaves several clear
+  intervals, and never emits negative gaps or duplicate pair/axis readings.
+- Dense-wall dimension layout: corridor placement, leader lines, staggering,
+  consolidation of coincident exterior margins, and label-collision rules —
   design against real salon-wall output before freezing.
-- Extracting the spacing-segment derivation used by `GroupDimensionLines`
-  into a caller-agnostic form the export pass can feed with "all objects on
-  the wall" instead of a selection — reuse, not reimplementation (§9.6).
+- A pure, caller-agnostic elevation-dimension derivation that consumes the
+  same rendered footprints as `buildElevationScene`; reuse
+  `GroupDimensionLines`' formatting and visual language without forcing its
+  one-dimensional selection-segment model onto the two-axis neighbor graph.
 - 3D offscreen rendering: render target sizing, render-on-demand into an
   offscreen target (not `preserveDrawingBuffer` on the live canvas), and
   memory behavior on iPad for multiple Saved views.
