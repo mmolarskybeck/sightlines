@@ -53,7 +53,10 @@ afterEach(() => {
   useAppStore.setState(initialStoreState, true);
 });
 
-function Harness() {
+function Harness({
+  gridPrecisionFloorMm = null,
+  snapToGrid = false
+}: { gridPrecisionFloorMm?: number | null; snapToGrid?: boolean } = {}) {
   const project = createSampleProject();
   const wall = getWallsWithGeometry(project.floor.rooms[0].room)[0];
   const measurement = useMeasurementTool({ kind: "elevation", wallId: wall.id });
@@ -62,11 +65,12 @@ function Harness() {
     <output data-testid="measurement-phase">{measurement.state.phase}</output>
     <ElevationView
       centerlineMm={project.defaultCenterlineHeightMm}
-      gridPrecisionFloorMm={null}
+      gridPrecisionFloorMm={gridPrecisionFloorMm}
       gridVisible={false}
       measurementActive
       measurementState={measurement.state}
       onMeasurementDispatch={measurement.dispatch}
+      snapToGrid={snapToGrid}
       unit={project.unit}
       wallHeightMm={wall.heightMm}
       wallId={wall.id}
@@ -144,6 +148,40 @@ describe("Elevation temporary measurement", () => {
       key: "Enter"
     });
     expect(screen.getByTestId("measurement-phase").textContent).toBe("armed-complete");
+  });
+
+  it("honors the precision floor once snapToGrid is on, matching the shared canvas nudge convention", () => {
+    useAppStore.setState({ project: createSampleProject() });
+    const { container } = render(<Harness snapToGrid gridPrecisionFloorMm={25.4} />);
+    const svg = container.querySelector("svg.elevation-svg")!;
+    fireEvent.pointerDown(svg, { pointerType: "mouse", button: 0, clientX: 300, clientY: 300 });
+    fireEvent.pointerMove(svg, { pointerType: "mouse", clientX: 700, clientY: 300 });
+    fireEvent.pointerDown(svg, { pointerType: "mouse", button: 0, clientX: 700, clientY: 300 });
+    fireEvent.pointerUp(svg, { pointerType: "mouse", clientX: 700, clientY: 300 });
+
+    const end = screen.getByRole("button", { name: /Measurement end point/ });
+    const before = Number(end.getAttribute("cx"));
+    fireEvent.keyDown(end, { key: "ArrowRight" });
+
+    const after = Number(screen.getByRole("button", { name: /Measurement end point/ }).getAttribute("cx"));
+    expect(after - before).toBeCloseTo(25.4);
+  });
+
+  it("opts into an honest fine step with Alt while snapToGrid is on", () => {
+    useAppStore.setState({ project: createSampleProject() });
+    const { container } = render(<Harness snapToGrid gridPrecisionFloorMm={25.4} />);
+    const svg = container.querySelector("svg.elevation-svg")!;
+    fireEvent.pointerDown(svg, { pointerType: "mouse", button: 0, clientX: 300, clientY: 300 });
+    fireEvent.pointerMove(svg, { pointerType: "mouse", clientX: 700, clientY: 300 });
+    fireEvent.pointerDown(svg, { pointerType: "mouse", button: 0, clientX: 700, clientY: 300 });
+    fireEvent.pointerUp(svg, { pointerType: "mouse", clientX: 700, clientY: 300 });
+
+    const end = screen.getByRole("button", { name: /Measurement end point/ });
+    const before = Number(end.getAttribute("cx"));
+    fireEvent.keyDown(end, { key: "ArrowRight", altKey: true });
+
+    const after = Number(screen.getByRole("button", { name: /Measurement end point/ }).getAttribute("cx"));
+    expect(after - before).toBeCloseTo(1.5875);
   });
 
   it("does not claim secondary, additional-touch, or Space-pan presses", () => {

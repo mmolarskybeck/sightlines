@@ -108,6 +108,7 @@ import {
   type Viewport2D
 } from "../../domain/viewport/viewport2d";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
+import { getNudgeStepMm } from "../hooks/nudgeStep";
 import { useArtworkAspect } from "../hooks/useArtworkAspect";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { useContainerSize } from "../hooks/useContainerSize";
@@ -232,12 +233,12 @@ export function getPlanMeasurementNudgeDelta(
   key: string,
   unit: import("../../domain/project").DisplayUnit,
   gridPrecisionFloorMm: number | null,
-  shiftKey: boolean
+  shiftKey: boolean,
+  snapToGrid: boolean,
+  altKey: boolean
 ): MeasurePoint | null {
   if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(key)) return null;
-  const system = unitSystemFromDisplayUnit(unit);
-  const normalMm = gridPrecisionFloorMm ?? (system === "metric" ? 10 : 12.7);
-  const stepMm = shiftKey ? normalMm * 4 : normalMm;
+  const stepMm = getNudgeStepMm({ unit, snapToGrid, gridPrecisionFloorMm, shiftKey, altKey });
   return {
     xMm: key === "ArrowRight" ? stepMm : key === "ArrowLeft" ? -stepMm : 0,
     // Plan floor coordinates share SVG's downward-positive y axis.
@@ -251,11 +252,13 @@ export function getPlanMeasurementKeyActions(
   key: string,
   unit: import("../../domain/project").DisplayUnit,
   gridPrecisionFloorMm: number | null,
-  shiftKey: boolean
+  shiftKey: boolean,
+  snapToGrid: boolean,
+  altKey: boolean
 ): MeasurementToolAction[] {
   if (key === "Enter" && state.phase === "refining") return [{ type: "commit-refinement" }];
   if (key === "Escape" && state.phase === "refining") return [{ type: "cancel-refinement" }];
-  const delta = getPlanMeasurementNudgeDelta(key, unit, gridPrecisionFloorMm, shiftKey);
+  const delta = getPlanMeasurementNudgeDelta(key, unit, gridPrecisionFloorMm, shiftKey, snapToGrid, altKey);
   if (!delta || (state.phase !== "armed-complete" && state.phase !== "refining")) return [];
   const current = state[endpoint];
   return [
@@ -2348,7 +2351,9 @@ export function PlanView({
       event.key,
       project.unit,
       gridPrecisionFloorMm,
-      event.shiftKey
+      event.shiftKey,
+      snapToGrid,
+      event.altKey
     );
     if (actions.length === 0) return;
     event.preventDefault();

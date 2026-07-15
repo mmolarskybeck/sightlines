@@ -10,6 +10,7 @@ import type { Artwork, Project, WallObject } from "../../domain/project";
 import { unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
 import { getProjectWalls, type ArrangeSession, type ViewMode } from "../store";
 import { isEditableTarget } from "./isEditableTarget";
+import { getNudgeStepMm } from "./nudgeStep";
 
 export type UseArrangeNudgeShortcutsParams = {
   project: Project | null;
@@ -127,15 +128,13 @@ export function useArrangeNudgeShortcuts({
       const system = unitSystemFromDisplayUnit(project.unit);
       const autoStepMm = system === "metric" ? 10 : 12.7;
       const useQuantize = snapToGrid && !event.altKey;
-      let stepMm: number;
-      if (!snapToGrid) {
-        stepMm = event.shiftKey ? (system === "metric" ? 50 : 50.8) : autoStepMm;
-      } else if (event.altKey) {
-        stepMm = system === "metric" ? 1 : 1.5875;
-      } else {
-        const normalMm = gridPrecisionFloorMm ?? autoStepMm;
-        stepMm = event.shiftKey ? normalMm * 4 : normalMm;
-      }
+      const stepMm = getNudgeStepMm({
+        unit: project.unit,
+        snapToGrid,
+        gridPrecisionFloorMm,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey
+      });
       // The quantizer's period is always the normal (non-Shift) increment, so a
       // 4× Shift press still lands on the same clean lattice.
       const incrementMm = gridPrecisionFloorMm ?? autoStepMm;

@@ -31,16 +31,43 @@ describe("Plan measurement candidates", () => {
     });
   });
 
-  it("uses the shared clean nudge increment and a 4x Shift step", () => {
-    expect(getPlanMeasurementNudgeDelta("ArrowUp", "cm", null, false)).toEqual({
+  it("uses the shared clean nudge increment and a 4x Shift step when snapToGrid is on", () => {
+    expect(getPlanMeasurementNudgeDelta("ArrowUp", "cm", null, false, true, false)).toEqual({
       xMm: 0,
       yMm: -10
     });
-    expect(getPlanMeasurementNudgeDelta("ArrowRight", "in", 25.4, true)).toEqual({
+    expect(getPlanMeasurementNudgeDelta("ArrowRight", "in", 25.4, true, true, false)).toEqual({
       xMm: 101.6,
       yMm: 0
     });
-    expect(getPlanMeasurementNudgeDelta("Enter", "cm", null, false)).toBeNull();
+    expect(getPlanMeasurementNudgeDelta("Enter", "cm", null, false, true, false)).toBeNull();
+  });
+
+  it("honors Alt fine precision while snapToGrid is on, ignoring the precision floor", () => {
+    expect(getPlanMeasurementNudgeDelta("ArrowRight", "cm", 25.4, false, true, true)).toEqual({
+      xMm: 1,
+      yMm: 0
+    });
+    expect(getPlanMeasurementNudgeDelta("ArrowUp", "in", null, false, true, true)).toEqual({
+      xMm: 0,
+      yMm: -1.5875
+    });
+  });
+
+  it("falls back to plain raw deltas when snapToGrid is off, ignoring the precision floor", () => {
+    expect(getPlanMeasurementNudgeDelta("ArrowRight", "cm", 25.4, false, false, false)).toEqual({
+      xMm: 10,
+      yMm: 0
+    });
+    expect(getPlanMeasurementNudgeDelta("ArrowDown", "in", 25.4, true, false, false)).toEqual({
+      xMm: 0,
+      yMm: 50.8
+    });
+    // Alt is meaningless off snapToGrid — the raw step is already the "unclean" default.
+    expect(getPlanMeasurementNudgeDelta("ArrowLeft", "cm", null, false, false, true)).toEqual({
+      xMm: -10,
+      yMm: 0
+    });
   });
 
   it("starts keyboard refinement, then confirms or cancels it locally", () => {
@@ -50,7 +77,9 @@ describe("Plan measurement candidates", () => {
       start: { xMm: 100, yMm: 200 },
       end: { xMm: 300, yMm: 400 }
     } as const;
-    expect(getPlanMeasurementKeyActions(complete, "start", "ArrowLeft", "cm", null, false)).toEqual([
+    expect(
+      getPlanMeasurementKeyActions(complete, "start", "ArrowLeft", "cm", null, false, true, false)
+    ).toEqual([
       { type: "begin-refinement", endpoint: "start" },
       { type: "preview-refinement", point: { xMm: 90, yMm: 200 } }
     ]);
@@ -60,12 +89,12 @@ describe("Plan measurement candidates", () => {
       endpoint: "start",
       original: complete.start
     } as const;
-    expect(getPlanMeasurementKeyActions(refining, "start", "Enter", "cm", null, false)).toEqual([
-      { type: "commit-refinement" }
-    ]);
-    expect(getPlanMeasurementKeyActions(refining, "start", "Escape", "cm", null, false)).toEqual([
-      { type: "cancel-refinement" }
-    ]);
+    expect(
+      getPlanMeasurementKeyActions(refining, "start", "Enter", "cm", null, false, true, false)
+    ).toEqual([{ type: "commit-refinement" }]);
+    expect(
+      getPlanMeasurementKeyActions(refining, "start", "Escape", "cm", null, false, true, false)
+    ).toEqual([{ type: "cancel-refinement" }]);
   });
 
   it("yields measurement ownership to right/middle click and Space-pan", () => {

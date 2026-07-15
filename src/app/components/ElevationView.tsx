@@ -71,6 +71,7 @@ import { useArtworkAspect } from "../hooks/useArtworkAspect";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { useContainerSize } from "../hooks/useContainerSize";
 import { useDragGesture } from "../hooks/useDragGesture";
+import { getNudgeStepMm } from "../hooks/nudgeStep";
 import { useSelectSuppression } from "../hooks/useSelectSuppression";
 import { useSvgViewportGestures } from "../hooks/useSvgViewportGestures";
 import {
@@ -816,14 +817,13 @@ export function ElevationView({
     }
     event.preventDefault();
     event.stopPropagation();
-    const metric = unit === "cm" || unit === "m";
-    const normalStepMm = metric ? 10 : 12.7;
-    const fineStepMm = metric ? 1 : 1.5875;
-    const stepMm = event.altKey
-      ? fineStepMm
-      : event.shiftKey
-        ? normalStepMm * 4
-        : normalStepMm;
+    const stepMm = getNudgeStepMm({
+      unit,
+      snapToGrid,
+      gridPrecisionFloorMm,
+      shiftKey: event.shiftKey,
+      altKey: event.altKey
+    });
     const key = endpoint === "a" ? "start" : "end";
     if (measurementState.phase === "refining" && measurementState.endpoint !== key) return;
     const current = measurementState[key];
