@@ -5,7 +5,9 @@ import {
   useState,
   type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
-  type PointerEvent as ReactPointerEvent
+  type PointerEvent as ReactPointerEvent,
+  type Dispatch,
+  type KeyboardEvent as ReactKeyboardEvent
 } from "react";
 import {
   computeEdgeSnappedLengthMm,
@@ -87,6 +89,13 @@ import {
 } from "../../domain/snapping/planGroupMove";
 import { resolveSnap, type Guide, type SnapTarget, type SnapTargetIds } from "../../domain/snapping/resolveSnap";
 import {
+  buildMeasurePointCandidates,
+  constrainMeasurePointToAxis,
+  resolveMeasurePoint,
+  type MeasureCandidateSources,
+  type MeasurePoint
+} from "../../domain/measurement/measurement";
+import {
   getMajorGridIntervalMm,
   getMinorGridIntervalMm
 } from "../../domain/units/precision";
@@ -116,6 +125,11 @@ import { GridOverlay } from "./GridOverlay";
 import { marqueeRectMm, type MarqueeState } from "./marqueeRect";
 import { type ResizeHandleTarget } from "./RoomResizeHandles";
 import { ViewportZoomControls } from "./ViewportZoomControls";
+import { MeasurementOverlay } from "./MeasurementOverlay";
+import type {
+  MeasurementToolAction,
+  MeasurementToolState
+} from "../hooks/useMeasurementTool";
 import { PlanStructureLayer } from "./plan/PlanStructureLayer";
 import { PlacedObjectsLayer } from "./plan/PlacedObjectsLayer";
 import { PlanHandlesLayer } from "./plan/PlanHandlesLayer";
@@ -153,6 +167,126 @@ const PARTITION_MIN_LENGTH_MM = 100;
 const RECT_ROOM_MIN_SIZE_MM = 500;
 // Prevent fit-view from over-zooming sparse plans (~30 ft minimum extent).
 const MIN_PLAN_FIT_EXTENT_MM = 9144;
+const MEASURE_DRAG_SLOP_PX = 6;
+
+function planRectMeasureGeometry(rect: PlanRect, id: string): MeasureCandidateSources {
+  const angle = (rect.angleDeg * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const local = [
+    [-rect.widthMm / 2, -rect.depthMm / 2],
+    [rect.widthMm / 2, -rect.depthMm / 2],
+    [rect.widthMm / 2, rect.depthMm / 2],
+    [-rect.widthMm / 2, rect.depthMm / 2]
+  ] as const;
+  const corners = local.map(([x, y]) => ({
+    xMm: rect.centerXMm + x * cos - y * sin,
+    yMm: rect.centerYMm + x * sin + y * cos
+  }));
+  return {
+    points: [
+      ...corners.map((point, index) => ({ id: `${id}:corner:${index}`, kind: "vertex" as const, point })),
+      { id: `${id}:center`, kind: "center", point: { xMm: rect.centerXMm, yMm: rect.centerYMm } }
+    ],
+    segments: corners.map((point, index) => ({
+      id: `${id}:edge:${index}`,
+      kind: "edge" as const,
+      start: point,
+      end: corners[(index + 1) % corners.length]
+    }))
+  };
+}
+
+export function buildPlanMeasureSources(
+  scene: ReturnType<typeof buildPlanScene>
+): MeasureCandidateSources {
+  const points: NonNullable<MeasureCandidateSources["points"]>[number][] = [];
+  const segments: NonNullable<MeasureCandidateSources["segments"]>[number][] = [];
+  for (const room of scene.rooms) {
+    room.polygonMm.forEach((point, index) =>
+      points.push({ id: `room:${room.roomId}:vertex:${index}`, kind: "vertex", point })
+    );
+    room.walls.forEach((wall) =>
+      segments.push({
+        id: `wall:${wall.wallId}`,
+        kind: "edge",
+        start: wall.startMm,
+        end: wall.endMm
+      })
+    );
+  }
+  const rects = [
+    ...scene.partitions.map((entry) => ({ id: `partition:${entry.partition.wallId}`, rect: entry.rect })),
+    ...scene.wallObjects.map((entry) => ({ id: `wall-object:${entry.object.id}`, rect: entry.renderedRect })),
+    ...scene.floorObjects.map((entry) => ({ id: `floor-object:${entry.object.id}`, rect: entry.rect }))
+  ];
+  for (const entry of rects) {
+    const geometry = planRectMeasureGeometry(entry.rect, entry.id);
+    points.push(...(geometry.points ?? []));
+    segments.push(...(geometry.segments ?? []));
+  }
+  return { points, segments };
+}
+
+export function getPlanMeasurementNudgeDelta(
+  key: string,
+  unit: import("../../domain/project").DisplayUnit,
+  gridPrecisionFloorMm: number | null,
+  shiftKey: boolean
+): MeasurePoint | null {
+  if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(key)) return null;
+  const system = unitSystemFromDisplayUnit(unit);
+  const normalMm = gridPrecisionFloorMm ?? (system === "metric" ? 10 : 12.7);
+  const stepMm = shiftKey ? normalMm * 4 : normalMm;
+  return {
+    xMm: key === "ArrowRight" ? stepMm : key === "ArrowLeft" ? -stepMm : 0,
+    // Plan floor coordinates share SVG's downward-positive y axis.
+    yMm: key === "ArrowDown" ? stepMm : key === "ArrowUp" ? -stepMm : 0
+  };
+}
+
+export function getPlanMeasurementKeyActions(
+  state: MeasurementToolState,
+  endpoint: "start" | "end",
+  key: string,
+  unit: import("../../domain/project").DisplayUnit,
+  gridPrecisionFloorMm: number | null,
+  shiftKey: boolean
+): MeasurementToolAction[] {
+  if (key === "Enter" && state.phase === "refining") return [{ type: "commit-refinement" }];
+  if (key === "Escape" && state.phase === "refining") return [{ type: "cancel-refinement" }];
+  const delta = getPlanMeasurementNudgeDelta(key, unit, gridPrecisionFloorMm, shiftKey);
+  if (!delta || (state.phase !== "armed-complete" && state.phase !== "refining")) return [];
+  const current = state[endpoint];
+  return [
+    ...(state.phase === "armed-complete"
+      ? ([{ type: "begin-refinement", endpoint }] satisfies MeasurementToolAction[])
+      : []),
+    {
+      type: "preview-refinement",
+      point: { xMm: current.xMm + delta.xMm, yMm: current.yMm + delta.yMm }
+    }
+  ];
+}
+
+export function canPlanMeasurementClaimPointer(button: number, spaceHeld: boolean): boolean {
+  return button === 0 && !spaceHeld;
+}
+
+export function planMeasurementCancelAction(
+  state: MeasurementToolState
+): MeasurementToolAction | null {
+  if (state.phase === "refining") return { type: "cancel-refinement" };
+  if (state.phase === "drawing") return { type: "clear" };
+  return null;
+}
+
+export function shouldCancelMeasurementForViewportClaim(
+  pointerType: string,
+  hasMeasurementGesture: boolean
+): boolean {
+  return pointerType === "touch" && hasMeasurementGesture;
+}
 
 // Stable fallback avoids retriggering useAssetImageUrls.
 const NO_OP_GET_BLOB: (key: string) => Promise<Blob> = () =>
@@ -192,7 +326,10 @@ export function PlanView({
   selectedWallId,
   snapToGrid,
   viewport,
-  onViewportChange
+  onViewportChange,
+  measurementActive = false,
+  measurementState,
+  onMeasurementAction
 }: {
   // Controlled door/window/blocked-zone insertion tool.
   activeTool: OpeningKind | null;
@@ -247,6 +384,9 @@ export function PlanView({
   snapToGrid: boolean;
   viewport: Viewport2D;
   onViewportChange: (v: Viewport2D) => void;
+  measurementActive?: boolean;
+  measurementState?: MeasurementToolState;
+  onMeasurementAction?: Dispatch<MeasurementToolAction>;
 }) {
   const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -998,6 +1138,159 @@ export function PlanView({
       }),
     [displayedProject, artworksById, wallObjectMinDepthMm]
   );
+  const measureSources = useMemo(() => buildPlanMeasureSources(planScene), [planScene]);
+  const previousMeasureTargetIdRef = useRef<string | undefined>(undefined);
+  const [snappedMeasurementEndpoint, setSnappedMeasurementEndpoint] = useState<"a" | "b" | null>(null);
+  const measureGestureRef = useRef<{
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    startedDrawing: boolean;
+    refining: boolean;
+  } | null>(null);
+
+  function resolvePlanMeasurePoint(
+    proposed: MeasurePoint,
+    event: Pick<ReactPointerEvent<SVGSVGElement>, "shiftKey" | "metaKey" | "ctrlKey">
+  ): MeasurePoint {
+    const anchor =
+      measurementState?.phase === "drawing"
+        ? measurementState.start
+        : measurementState?.phase === "refining"
+          ? measurementState[measurementState.endpoint === "start" ? "end" : "start"]
+          : null;
+    const constrained = event.shiftKey && anchor
+      ? constrainMeasurePointToAxis(anchor, proposed)
+      : proposed;
+    if (event.metaKey || event.ctrlKey) {
+      previousMeasureTargetIdRef.current = undefined;
+      return constrained;
+    }
+    const points = [...(measureSources.points ?? [])];
+    if (gridVisible && snapToGrid && minorGridMm > 0) {
+      points.push({
+        id: `grid:${Math.round(constrained.xMm / minorGridMm)}:${Math.round(constrained.yMm / minorGridMm)}`,
+        kind: "grid",
+        point: {
+          xMm: Math.round(constrained.xMm / minorGridMm) * minorGridMm,
+          yMm: Math.round(constrained.yMm / minorGridMm) * minorGridMm
+        }
+      });
+    }
+    const resolved = resolveMeasurePoint(
+      constrained,
+      buildMeasurePointCandidates(constrained, { points, segments: measureSources.segments }),
+      {
+        thresholdMm: snapThresholdMm,
+        previousTargetId: previousMeasureTargetIdRef.current
+      }
+    );
+    previousMeasureTargetIdRef.current = resolved.target?.id;
+    const activeEndpoint =
+      measurementState?.phase === "refining"
+        ? measurementState.endpoint === "start" ? "a" : "b"
+        : measurementState?.phase === "drawing"
+          ? "b"
+          : "a";
+    setSnappedMeasurementEndpoint(resolved.snapped ? activeEndpoint : null);
+    return resolved.point;
+  }
+
+  function handleMeasurePointerDownCapture(event: ReactPointerEvent<SVGSVGElement>): boolean {
+    if (!measurementActive || !measurementState || !onMeasurementAction) return false;
+    if (!canPlanMeasurementClaimPointer(event.button, isSpaceDown)) return false;
+    const target = event.target as Element | null;
+    const endpoint = target?.closest(".measurement-endpoint")?.getAttribute("data-endpoint");
+    if (endpoint === "a" || endpoint === "b") {
+      onMeasurementAction({
+        type: "begin-refinement",
+        endpoint: endpoint === "a" ? "start" : "end"
+      });
+      measureGestureRef.current = {
+        pointerId: event.pointerId,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        startedDrawing: false,
+        refining: true
+      };
+    } else if (target?.closest(".measurement-overlay")) {
+      // A measurement owns clicks on its body. It is already selected, so the
+      // only required action is preventing a new endpoint from being placed.
+      event.stopPropagation();
+      return true;
+    } else {
+      const proposed = toSvgMm(event.clientX, event.clientY);
+      if (!proposed) return true;
+      const point = resolvePlanMeasurePoint(proposed, event);
+      const startedDrawing = measurementState.phase !== "drawing";
+      if (startedDrawing) onMeasurementAction({ type: "begin", point });
+      measureGestureRef.current = {
+        pointerId: event.pointerId,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        startedDrawing,
+        refining: false
+      };
+    }
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+    return true;
+  }
+
+  function handleMeasurePointerMove(event: ReactPointerEvent<SVGSVGElement>): boolean {
+    if (!measurementActive || !measurementState || !onMeasurementAction) return false;
+    if (measurementState.phase !== "drawing" && measurementState.phase !== "refining") return true;
+    const proposed = toSvgMm(event.clientX, event.clientY);
+    if (!proposed) return true;
+    const point = resolvePlanMeasurePoint(proposed, event);
+    onMeasurementAction({
+      type: measurementState.phase === "refining" ? "preview-refinement" : "preview",
+      point
+    });
+    return true;
+  }
+
+  function handleMeasurePointerUpCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    const gesture = measureGestureRef.current;
+    if (!measurementActive || !measurementState || !onMeasurementAction || !gesture) return;
+    if (gesture.pointerId !== event.pointerId) return;
+    const proposed = toSvgMm(event.clientX, event.clientY);
+    if (gesture.refining) {
+      if (proposed) onMeasurementAction({ type: "preview-refinement", point: resolvePlanMeasurePoint(proposed, event) });
+      onMeasurementAction({ type: "commit-refinement" });
+    } else if (proposed) {
+      const travelled = Math.hypot(event.clientX - gesture.clientX, event.clientY - gesture.clientY);
+      // The second click completes regardless of slop. A first press completes
+      // only when it was a genuine drag; jitter stays in click-click drawing.
+      if (!gesture.startedDrawing || travelled > MEASURE_DRAG_SLOP_PX) {
+        onMeasurementAction({ type: "complete", point: resolvePlanMeasurePoint(proposed, event) });
+      }
+    }
+    measureGestureRef.current = null;
+    previousMeasureTargetIdRef.current = undefined;
+    event.preventDefault();
+    // Touch must reach the viewport hook's window listener so its pointer
+    // bookkeeping is released; no underlying edit began because pointerdown
+    // was already captured by Measure.
+    if (event.pointerType !== "touch") event.stopPropagation();
+  }
+
+  function cancelMeasurePointerGesture() {
+    const action = measurementState ? planMeasurementCancelAction(measurementState) : null;
+    if (action) onMeasurementAction?.(action);
+    measureGestureRef.current = null;
+    previousMeasureTargetIdRef.current = undefined;
+    setSnappedMeasurementEndpoint(null);
+  }
+
+  function handleMeasurePointerCancelCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    const gesture = measureGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    cancelMeasurePointerGesture();
+    event.preventDefault();
+    if (event.pointerType !== "touch") event.stopPropagation();
+  }
 
   // Interaction-only geometry: snapping measures framed artwork edges without
   // changing persisted data or the selection geometry owned by a later phase.
@@ -1368,8 +1661,24 @@ export function PlanView({
       event.currentTarget.focus({ preventScroll: true });
     }
 
-    // A consumed pan/pinch must not reach the view's capture tail.
-    if (gestures.handlePointerDownCapture(event)) return;
+    // Pan/pinch gets first refusal. In particular the first touch is recorded
+    // before Measure sees it, so a second touch can promote the gesture to a
+    // pinch; that promotion cancels any one-finger measurement in flight.
+    if (gestures.handlePointerDownCapture(event)) {
+      if (
+        shouldCancelMeasurementForViewportClaim(
+          event.pointerType,
+          measureGestureRef.current !== null
+        )
+      ) {
+        cancelMeasurePointerGesture();
+      }
+      return;
+    }
+
+    // Measure then owns ordinary primary-button presses before geometry,
+    // selection, and marquee can interpret them.
+    if (handleMeasurePointerDownCapture(event)) return;
 
     const target = event.target as Element | null;
     // Exclude ghosts so placement clicks commit. Reassign per gesture to clear
@@ -1380,6 +1689,7 @@ export function PlanView({
   }
 
   function handleSvgClick(event: ReactMouseEvent<SVGSVGElement>) {
+    if (measurementActive) return;
     if (suppressNextToolClickRef.current) {
       suppressNextToolClickRef.current = false;
       return;
@@ -2022,6 +2332,29 @@ export function PlanView({
     : isSpaceDown
       ? "drawing-surface is-pan-ready"
       : "drawing-surface";
+  const visibleMeasurement =
+    measurementActive && measurementState && measurementState.phase !== "armed-empty"
+      ? measurementState
+      : null;
+
+  function handleMeasurementEndpointKeyDown(
+    endpoint: "a" | "b",
+    event: ReactKeyboardEvent<SVGCircleElement>
+  ) {
+    if (!measurementState || !onMeasurementAction) return;
+    const actions = getPlanMeasurementKeyActions(
+      measurementState,
+      endpoint === "a" ? "start" : "end",
+      event.key,
+      project.unit,
+      gridPrecisionFloorMm,
+      event.shiftKey
+    );
+    if (actions.length === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    actions.forEach(onMeasurementAction);
+  }
 
   return (
     <div
@@ -2043,7 +2376,7 @@ export function PlanView({
       />
       <svg
         className={
-          activeTool || drawRoomActive || partitionToolActive || drawRectActive
+          activeTool || drawRoomActive || partitionToolActive || drawRectActive || measurementActive
             ? "plan-svg tool-armed"
             : "plan-svg"
         }
@@ -2052,10 +2385,19 @@ export function PlanView({
         role="img"
         tabIndex={0}
         onClick={handleSvgClick}
+        onClickCapture={(event) => {
+          if (!measurementActive) return;
+          event.preventDefault();
+          event.stopPropagation();
+        }}
         onPointerDown={beginMarquee}
         onPointerDownCapture={handleSvgPointerDownCapture}
+        onPointerUpCapture={handleMeasurePointerUpCapture}
+        onPointerCancelCapture={handleMeasurePointerCancelCapture}
         onPointerLeave={handleToolPointerLeave}
-        onPointerMove={handleToolPointerMove}
+        onPointerMove={(event) => {
+          if (!handleMeasurePointerMove(event)) handleToolPointerMove(event);
+        }}
       >
         <title>{project.title} plan</title>
         {/* Room interiors render below the grid (the grid must stay visible
@@ -2141,7 +2483,8 @@ export function PlanView({
               roomDrag ||
               drawRoomActive ||
               drawRectActive ||
-              vertexDrag
+              vertexDrag ||
+              measurementActive
           )}
           artworksById={artworksById}
           thumbnailUrlsByAssetId={thumbnailUrlsByAssetId}
@@ -2216,6 +2559,21 @@ export function PlanView({
           beginPartitionDraw={beginPartitionDraw}
           beginRectDraw={beginRectDraw}
         />
+        {visibleMeasurement ? (
+          <MeasurementOverlay
+            a={visibleMeasurement.start}
+            b={
+              visibleMeasurement.phase === "drawing"
+                ? visibleMeasurement.preview
+                : visibleMeasurement.end
+            }
+            pixelsPerMm={pixelsPerMm}
+            selected={visibleMeasurement.phase !== "drawing"}
+            snappedEndpoint={snappedMeasurementEndpoint}
+            unit={project.unit}
+            onEndpointKeyDown={handleMeasurementEndpointKeyDown}
+          />
+        ) : null}
       </svg>
     </div>
   );

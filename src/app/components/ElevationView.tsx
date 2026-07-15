@@ -1,8 +1,10 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type DragEvent as ReactDragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent
 } from "react";
@@ -50,6 +52,13 @@ import type { Guide, SnapTargetIds } from "../../domain/snapping/resolveSnap";
 import { formatLength } from "../../domain/units/length";
 import { getMajorGridIntervalMm, getMinorGridIntervalMm } from "../../domain/units/precision";
 import {
+  buildMeasurePointCandidates,
+  constrainMeasurePointToAxis,
+  resolveMeasurePoint,
+  type MeasureCandidateSources,
+  type MeasurePoint
+} from "../../domain/measurement/measurement";
+import {
   ELEVATION_ZOOM_LIMITS,
   FIT_VIEWPORT,
   getEffectiveZoom,
@@ -64,6 +73,10 @@ import { useContainerSize } from "../hooks/useContainerSize";
 import { useDragGesture } from "../hooks/useDragGesture";
 import { useSelectSuppression } from "../hooks/useSelectSuppression";
 import { useSvgViewportGestures } from "../hooks/useSvgViewportGestures";
+import type {
+  MeasurementToolAction,
+  MeasurementToolState
+} from "../hooks/useMeasurementTool";
 import { useAppStore } from "../store";
 import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
 import {
@@ -86,6 +99,7 @@ import {
 } from "./elevationArtworkGeometry";
 import { GridOverlay } from "./GridOverlay";
 import { GroupDimensionLines } from "./GroupDimensionLines";
+import { MeasurementOverlay, type MeasurementEndpoint } from "./MeasurementOverlay";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { ViewportZoomControls } from "./ViewportZoomControls";
@@ -97,6 +111,7 @@ import { WallSwitcher, type WallSwitcherEntry } from "./WallSwitcher";
 export { wallLocalYToSvgY };
 
 const SNAP_THRESHOLD_PX = 10;
+const MEASURE_DRAG_SLOP_PX = 8;
 
 // The macOS-window "shove past a barrier" distance, in screen pixels. Set at
 // ~5× the snap threshold so the two gestures read as different intents: a snap
@@ -217,7 +232,10 @@ export function ElevationView({
   wallName,
   walls = [],
   viewport,
-  onViewportChange
+  onViewportChange,
+  measurementActive = false,
+  measurementState = null,
+  onMeasurementDispatch
 }: {
   gridPrecisionFloorMm: number | null;
   gridVisible: boolean;
@@ -294,6 +312,9 @@ export function ElevationView({
   // as a wall switcher. App-derived (wallsForSwitcher memo), so it stays a
   // prop; onSelectWall is read from the store below.
   walls?: WallSwitcherEntry[];
+  measurementActive?: boolean;
+  measurementState?: MeasurementToolState | null;
+  onMeasurementDispatch?: (action: MeasurementToolAction) => void;
 }) {
   const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -314,7 +335,17 @@ export function ElevationView({
   const onSelectWall = useAppStore((state) => state.selectWall);
   const [dropGhost, setDropGhost] = useState<DropGhostState | null>(null);
   const [openingToolGhost, setOpeningToolGhost] = useState<OpeningToolGhostState | null>(null);
+  const [measurementSnappedEndpoint, setMeasurementSnappedEndpoint] =
+    useState<MeasurementEndpoint | null>(null);
   const openingToolSnapTargetIdsRef = useRef<SnapTargetIds | undefined>(undefined);
+  const measurementSnapTargetIdRef = useRef<string | undefined>(undefined);
+  const measurementGestureRef = useRef<{
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    refining?: MeasurementEndpoint;
+  } | null>(null);
+  const canvasToolArmed = Boolean(activeTool || measurementActive);
 
   // Pad the viewBox so the wall reads as a figure on the canvas field
   // rather than bleeding edge-to-edge, and so boundary strokes (centered on
@@ -547,6 +578,86 @@ export function ElevationView({
     ...elevationScene.artworks.map((entry) => entry.object),
     ...elevationScene.openings.map((entry) => entry.object)
   ];
+
+  const measurementSources = useMemo<MeasureCandidateSources>(() => {
+    const points: Array<NonNullable<MeasureCandidateSources["points"]>[number]> = [
+      { id: "wall-top-left", kind: "vertex", point: { xMm: 0, yMm: wallHeightMm } },
+      { id: "wall-top-right", kind: "vertex", point: { xMm: wallLengthMm, yMm: wallHeightMm } },
+      { id: "wall-bottom-left", kind: "vertex", point: { xMm: 0, yMm: 0 } },
+      { id: "wall-bottom-right", kind: "vertex", point: { xMm: wallLengthMm, yMm: 0 } },
+      { id: "wall-center", kind: "center", point: { xMm: wallLengthMm / 2, yMm: wallHeightMm / 2 } }
+    ];
+    const segments: Array<NonNullable<MeasureCandidateSources["segments"]>[number]> = [
+      { id: "wall-left", kind: "edge", start: { xMm: 0, yMm: 0 }, end: { xMm: 0, yMm: wallHeightMm } },
+      { id: "wall-right", kind: "edge", start: { xMm: wallLengthMm, yMm: 0 }, end: { xMm: wallLengthMm, yMm: wallHeightMm } },
+      { id: "floorline", kind: "datum", start: { xMm: 0, yMm: 0 }, end: { xMm: wallLengthMm, yMm: 0 } },
+      { id: "wall-top", kind: "edge", start: { xMm: 0, yMm: wallHeightMm }, end: { xMm: wallLengthMm, yMm: wallHeightMm } }
+    ];
+    if (centerlineVisible) {
+      segments.push({
+        id: "centerline",
+        kind: "datum",
+        start: { xMm: 0, yMm: centerlineMm },
+        end: { xMm: wallLengthMm, yMm: centerlineMm }
+      });
+    }
+    for (const object of wallObjectsOnThisWall) {
+      const footprint = withArtworkFootprintFromMap(object, artworksById);
+      const left = footprint.xMm - footprint.widthMm / 2;
+      const right = footprint.xMm + footprint.widthMm / 2;
+      const bottom = footprint.yMm - footprint.heightMm / 2;
+      const top = footprint.yMm + footprint.heightMm / 2;
+      points.push(
+        { id: `${object.id}:bottom-left`, kind: "vertex", point: { xMm: left, yMm: bottom } },
+        { id: `${object.id}:bottom-right`, kind: "vertex", point: { xMm: right, yMm: bottom } },
+        { id: `${object.id}:top-left`, kind: "vertex", point: { xMm: left, yMm: top } },
+        { id: `${object.id}:top-right`, kind: "vertex", point: { xMm: right, yMm: top } },
+        { id: `${object.id}:center`, kind: "center", point: { xMm: footprint.xMm, yMm: footprint.yMm } }
+      );
+      segments.push(
+        { id: `${object.id}:left`, kind: "edge", start: { xMm: left, yMm: bottom }, end: { xMm: left, yMm: top } },
+        { id: `${object.id}:right`, kind: "edge", start: { xMm: right, yMm: bottom }, end: { xMm: right, yMm: top } },
+        { id: `${object.id}:bottom`, kind: "edge", start: { xMm: left, yMm: bottom }, end: { xMm: right, yMm: bottom } },
+        { id: `${object.id}:top`, kind: "edge", start: { xMm: left, yMm: top }, end: { xMm: right, yMm: top } }
+      );
+    }
+    return { points, segments };
+  }, [artworksById, centerlineMm, centerlineVisible, wallHeightMm, wallLengthMm, wallObjectsOnThisWall]);
+
+  function resolveMeasurementPoint(raw: MeasurePoint, event: Pick<PointerEvent, "shiftKey" | "metaKey" | "ctrlKey">) {
+    const anchor = measurementState?.phase === "drawing"
+      ? measurementState.start
+      : measurementState?.phase === "refining"
+        ? measurementState[measurementState.endpoint === "start" ? "end" : "start"]
+        : null;
+    const proposed = event.shiftKey && anchor ? constrainMeasurePointToAxis(anchor, raw) : raw;
+    if (event.metaKey || event.ctrlKey) {
+      measurementSnapTargetIdRef.current = undefined;
+      return { point: proposed, snapped: false };
+    }
+    const sources: MeasureCandidateSources = gridVisible && snapToGrid
+      ? {
+          ...measurementSources,
+          points: [
+            ...(measurementSources.points ?? []),
+            {
+              id: `grid:${Math.round(proposed.xMm / minorGridMm)}:${Math.round(proposed.yMm / minorGridMm)}`,
+              kind: "grid",
+              point: {
+                xMm: Math.round(proposed.xMm / minorGridMm) * minorGridMm,
+                yMm: Math.round(proposed.yMm / minorGridMm) * minorGridMm
+              }
+            }
+          ]
+        }
+      : measurementSources;
+    const result = resolveMeasurePoint(proposed, buildMeasurePointCandidates(proposed, sources), {
+      thresholdMm: snapThresholdMm,
+      previousTargetId: measurementSnapTargetIdRef.current
+    });
+    measurementSnapTargetIdRef.current = result.target?.id;
+    return result;
+  }
   const withResolvedArtworkFootprint = (object: WallObject): WallObject =>
     withArtworkFootprintFromMap(object, artworksById);
   const assetIds = elevationScene.artworks.map((entry) => entry.artwork?.assetId);
@@ -588,6 +699,152 @@ export function ElevationView({
     // self-inverse, since it's just wallHeightMm minus the value).
     return { xMm: svgPoint.xMm, yMm: wallLocalYToSvgY(wallHeightMm, svgPoint.yMm) };
   }
+
+  function resolvedMeasurementPointer(event: ReactPointerEvent<SVGElement>) {
+    const raw = toWallLocalMm(event.clientX, event.clientY);
+    if (!raw) return null;
+    const resolved = resolveMeasurementPoint(raw, event);
+    const endpoint: MeasurementEndpoint =
+      measurementState?.phase === "refining"
+        ? measurementState.endpoint === "start" ? "a" : "b"
+        : "b";
+    setMeasurementSnappedEndpoint(resolved.snapped ? endpoint : null);
+    return resolved.point;
+  }
+
+  function handleMeasurementPointerDown(event: ReactPointerEvent<SVGSVGElement>) {
+    if (
+      !measurementActive ||
+      isSpaceDown ||
+      event.isPrimary === false ||
+      (event.button !== undefined && event.button !== 0)
+    ) {
+      return false;
+    }
+    const point = resolvedMeasurementPointer(event);
+    if (!point) return true;
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (measurementState?.phase === "drawing") {
+      onMeasurementDispatch?.({ type: "complete", point });
+      measurementGestureRef.current = null;
+      return true;
+    }
+
+    onMeasurementDispatch?.({ type: "begin", point });
+    measurementGestureRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    return true;
+  }
+
+  function handleMeasurementPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
+    if (!measurementActive) return false;
+    const gesture = measurementGestureRef.current;
+    if (gesture?.refining && gesture.pointerId === event.pointerId) {
+      const point = resolvedMeasurementPointer(event);
+      if (point) onMeasurementDispatch?.({ type: "preview-refinement", point });
+      return true;
+    }
+    if (measurementState?.phase === "drawing") {
+      const point = resolvedMeasurementPointer(event);
+      if (point) onMeasurementDispatch?.({ type: "preview", point });
+      return true;
+    }
+    return Boolean(gesture);
+  }
+
+  function handleMeasurementPointerUp(event: ReactPointerEvent<SVGSVGElement>) {
+    const gesture = measurementGestureRef.current;
+    if (!measurementActive || !gesture || gesture.pointerId !== event.pointerId) return false;
+    measurementGestureRef.current = null;
+    if (gesture.refining) {
+      onMeasurementDispatch?.({ type: "commit-refinement" });
+      return true;
+    }
+    const movedPx = Math.hypot(
+      event.clientX - gesture.startClientX,
+      event.clientY - gesture.startClientY
+    );
+    if (movedPx > MEASURE_DRAG_SLOP_PX) {
+      const point = resolvedMeasurementPointer(event);
+      if (point) onMeasurementDispatch?.({ type: "complete", point });
+    }
+    return true;
+  }
+
+  function beginMeasurementRefinement(
+    endpoint: MeasurementEndpoint,
+    event: ReactPointerEvent<SVGCircleElement>
+  ) {
+    if (!measurementActive || measurementState?.phase !== "armed-complete") return;
+    const stateEndpoint = endpoint === "a" ? "start" : "end";
+    onMeasurementDispatch?.({ type: "begin-refinement", endpoint: stateEndpoint });
+    measurementGestureRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      refining: endpoint
+    };
+    svgRef.current?.setPointerCapture?.(event.pointerId);
+  }
+
+  function handleMeasurementEndpointKeyDown(
+    endpoint: MeasurementEndpoint,
+    event: ReactKeyboardEvent<SVGCircleElement>
+  ) {
+    if (!measurementActive || !measurementState || !onMeasurementDispatch) return;
+    if (event.key === "Enter" && measurementState.phase === "refining") {
+      event.preventDefault();
+      event.stopPropagation();
+      onMeasurementDispatch({ type: "commit-refinement" });
+      return;
+    }
+    if (
+      (measurementState.phase !== "armed-complete" && measurementState.phase !== "refining") ||
+      !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const metric = unit === "cm" || unit === "m";
+    const normalStepMm = metric ? 10 : 12.7;
+    const fineStepMm = metric ? 1 : 1.5875;
+    const stepMm = event.altKey
+      ? fineStepMm
+      : event.shiftKey
+        ? normalStepMm * 4
+        : normalStepMm;
+    const key = endpoint === "a" ? "start" : "end";
+    if (measurementState.phase === "refining" && measurementState.endpoint !== key) return;
+    const current = measurementState[key];
+    const point = {
+      xMm:
+        current.xMm +
+        (event.key === "ArrowRight" ? stepMm : event.key === "ArrowLeft" ? -stepMm : 0),
+      // Wall-local y grows upward, so ArrowUp is positive.
+      yMm:
+        current.yMm +
+        (event.key === "ArrowUp" ? stepMm : event.key === "ArrowDown" ? -stepMm : 0)
+    };
+    if (measurementState.phase === "armed-complete") {
+      onMeasurementDispatch({ type: "begin-refinement", endpoint: key });
+    }
+    onMeasurementDispatch({ type: "preview-refinement", point });
+  }
+
+  useEffect(() => {
+    if (!measurementActive) {
+      measurementGestureRef.current = null;
+      measurementSnapTargetIdRef.current = undefined;
+      setMeasurementSnappedEndpoint(null);
+    }
+  }, [measurementActive, wallId]);
 
   // Per-neighbor barrier hardness for a moving object/group. The barrier is only
   // as soft as the STRICTEST rule allows across every moving kind vs this
@@ -864,7 +1121,7 @@ export function ElevationView({
 
 
   function beginMarquee(event: ReactPointerEvent<SVGSVGElement>) {
-    if (activeTool) return;
+    if (canvasToolArmed) return;
     // Touch: a finger on true background pans the canvas instead of marqueeing
     // (the marquee is a mouse-only gesture on tablets). A pinch's 2nd finger was
     // already claimed (stopPropagation) in the capture handler, so it never
@@ -898,6 +1155,16 @@ export function ElevationView({
   function handleSvgPointerDownCapture(event: ReactPointerEvent<SVGSVGElement>) {
     if (event.pointerType !== "touch") {
       event.currentTarget.focus({ preventScroll: true });
+    }
+    if (measurementActive) {
+      const target = event.target as Element;
+      // Measurement handles/body own the more specific interaction. Their
+      // target handlers run after capture and must not be mistaken for a new
+      // point on the underlying wall.
+      if (target.closest(".measurement-overlay")) return;
+      if (handleMeasurementPointerDown(event)) return;
+      // Rejected measurement presses (Space-pan, secondary buttons, and
+      // additional touch pointers) still belong to the viewport engine.
     }
     handlePointerDownCapture(event);
   }
@@ -1402,7 +1669,7 @@ export function ElevationView({
         fitSelectedDisabled={selectedSvgBounds === null}
       />
       <svg
-        className={activeTool ? "elevation-svg tool-armed" : "elevation-svg"}
+        className={canvasToolArmed ? "elevation-svg tool-armed" : "elevation-svg"}
         ref={svgRef}
         viewBox={viewBox}
         role="img"
@@ -1411,7 +1678,18 @@ export function ElevationView({
         onPointerDown={beginMarquee}
         onPointerDownCapture={handleSvgPointerDownCapture}
         onPointerLeave={handleOpeningToolPointerLeave}
-        onPointerMove={handleOpeningToolPointerMove}
+        onPointerMove={(event) => {
+          if (handleMeasurementPointerMove(event)) return;
+          handleOpeningToolPointerMove(event);
+        }}
+        onPointerUp={(event) => {
+          handleMeasurementPointerUp(event);
+        }}
+        onPointerCancel={() => {
+          const gesture = measurementGestureRef.current;
+          measurementGestureRef.current = null;
+          if (gesture?.refining) onMeasurementDispatch?.({ type: "cancel-refinement" });
+        }}
       >
         <title>{wallName} elevation</title>
         <rect
@@ -1501,14 +1779,14 @@ export function ElevationView({
               tooltipDisabled={Boolean(moveDrag || dropGhost)}
               wallHeightMm={wallHeightMm}
               onPointerDown={(event) => {
-                if (activeTool) {
+                if (canvasToolArmed) {
                   event.stopPropagation();
                   return;
                 }
                 beginMoveDrag(placement, event);
               }}
               onSelect={(event) => {
-                if (activeTool) return;
+                if (canvasToolArmed) return;
                 if (consumeSelectSuppression()) return;
                 if (onSelectObject) {
                   onSelectObject(placement.id, {
@@ -1550,14 +1828,14 @@ export function ElevationView({
               wallHeightMm={wallHeightMm}
               wallObjectId={opening.id}
               onPointerDown={(event) => {
-                if (activeTool) {
+                if (canvasToolArmed) {
                   event.stopPropagation();
                   return;
                 }
                 beginMoveDrag(opening, event);
               }}
               onSelect={(event) => {
-                if (activeTool) return;
+                if (canvasToolArmed) return;
                 if (consumeSelectSuppression()) return;
                 if (onSelectObject) {
                   onSelectObject(opening.id, {
@@ -1652,6 +1930,37 @@ export function ElevationView({
             pixelsPerMm={pixelsPerMm}
             unit={unit}
             wallHeightMm={wallHeightMm}
+          />
+        ) : null}
+        {measurementActive &&
+        measurementState &&
+        measurementState.context.kind === "elevation" &&
+        measurementState.context.wallId === wallId &&
+        measurementState.phase !== "armed-empty" ? (
+          <MeasurementOverlay
+            a={{
+              xMm: measurementState.start.xMm,
+              yMm: wallLocalYToSvgY(wallHeightMm, measurementState.start.yMm)
+            }}
+            b={{
+              xMm:
+                measurementState.phase === "drawing"
+                  ? measurementState.preview.xMm
+                  : measurementState.end.xMm,
+              yMm: wallLocalYToSvgY(
+                wallHeightMm,
+                measurementState.phase === "drawing"
+                  ? measurementState.preview.yMm
+                  : measurementState.end.yMm
+              )
+            }}
+            pixelsPerMm={pixelsPerMm}
+            selected
+            snappedEndpoint={measurementSnappedEndpoint}
+            unit={unit}
+            onBodyPointerDown={() => {}}
+            onEndpointKeyDown={handleMeasurementEndpointKeyDown}
+            onEndpointPointerDown={beginMeasurementRefinement}
           />
         ) : null}
       </svg>

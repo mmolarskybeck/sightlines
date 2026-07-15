@@ -21,6 +21,7 @@ function renderHarness(
     togglePartitionTool: vi.fn(() => {}),
     toggleDrawRect: vi.fn(() => {}),
     toggleDrawRoom: vi.fn(() => {}),
+    toggleMeasure: vi.fn(() => {}),
     toggleShowGrid: vi.fn(() => {}),
     toggleSnapToGrid: vi.fn(() => {}),
     toggleAllowOverlappingPlacement: vi.fn(() => {}),
@@ -80,6 +81,16 @@ describe("useToolbarShortcuts", () => {
     expect(plan.toggleAllowOverlappingPlacement).toHaveBeenCalledTimes(1);
   });
 
+  it("maps M to Measure in both 2D views", () => {
+    const plan = renderHarness({ viewMode: "plan" });
+    press("m");
+    expect(plan.toggleMeasure).toHaveBeenCalledTimes(1);
+
+    const elevation = renderHarness({ viewMode: "elevation" });
+    press("M", { shiftKey: true });
+    expect(elevation.toggleMeasure).toHaveBeenCalledTimes(1);
+  });
+
   it("scopes Partition and the room-draw tools to plan only", () => {
     const plan = renderHarness({ viewMode: "plan" });
     press("p");
@@ -130,16 +141,20 @@ describe("useToolbarShortcuts", () => {
     const handlers = renderHarness({ viewMode: "3d" });
     press("g");
     press("w");
+    press("m");
     expect(handlers.toggleShowGrid).not.toHaveBeenCalled();
     expect(handlers.armOpeningTool).not.toHaveBeenCalled();
+    expect(handlers.toggleMeasure).not.toHaveBeenCalled();
   });
 
   it("stands down while a dialog is open", () => {
     const handlers = renderHarness({ suspended: true });
     press("g");
     press("d");
+    press("m");
     expect(handlers.toggleShowGrid).not.toHaveBeenCalled();
     expect(handlers.armOpeningTool).not.toHaveBeenCalled();
+    expect(handlers.toggleMeasure).not.toHaveBeenCalled();
   });
 
   it("ignores modifier chords, auto-repeat, and editable targets", () => {

@@ -4017,6 +4017,60 @@ body.panels-resizing * {
   pointer-events: none;
 }
 
+/* Temporary Measure result. The line and label use the active petrol family;
+   endpoint squares become diamonds while snapped, so snap state is not color
+   alone. Transparent body/endpoint geometry supplies forgiving mouse and
+   touch hit targets without enlarging the restrained visible marks. */
+.measurement-line {
+  stroke: var(--selection);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+.measurement-line-hit {
+  stroke: transparent;
+  pointer-events: stroke;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.measurement-line-hit:focus-visible,
+.measurement-handle-hit:focus-visible {
+  outline: none;
+}
+
+.measurement-overlay:has(.measurement-line-hit:focus-visible) .measurement-line,
+.measurement-overlay:has(.measurement-handle-hit:focus-visible) .measurement-line {
+  stroke-width: 2.5;
+}
+
+.measurement-label {
+  fill: var(--primary-strong);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  paint-order: stroke;
+  stroke: var(--bg);
+  pointer-events: none;
+}
+
+.measurement-handle-hit {
+  fill: transparent;
+  stroke: none;
+  cursor: grab;
+  touch-action: none;
+}
+
+.measurement-handle {
+  fill: var(--bg);
+  stroke: var(--selection);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+.measurement-endpoint[data-snapped="true"] .measurement-handle {
+  fill: var(--selection);
+}
+
 .surface-label {
   position: absolute;
   top: 14px;

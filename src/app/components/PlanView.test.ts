@@ -1,5 +1,102 @@
 import { describe, expect, it } from "vitest";
-import { clampFitExtent, getPartitionMovedAxes } from "./PlanView";
+import { buildPlanScene } from "../../domain/scene2d/planScene";
+import { createSampleProject } from "../../domain/sample/sampleProject";
+import {
+  buildPlanMeasureSources,
+  clampFitExtent,
+  getPartitionMovedAxes,
+  canPlanMeasurementClaimPointer,
+  getPlanMeasurementKeyActions,
+  getPlanMeasurementNudgeDelta,
+  planMeasurementCancelAction,
+  shouldCancelMeasurementForViewportClaim
+} from "./PlanView";
+
+describe("Plan measurement candidates", () => {
+  it("derives visible room vertices and bounded wall edges from the painted scene", () => {
+    const scene = buildPlanScene(createSampleProject());
+    const sources = buildPlanMeasureSources(scene);
+    const north = scene.rooms[0]!.walls.find((wall) => wall.wallId === "wall-north")!;
+
+    expect(sources.points).toContainEqual({
+      id: `room:${scene.rooms[0]!.roomId}:vertex:0`,
+      kind: "vertex",
+      point: scene.rooms[0]!.polygonMm[0]
+    });
+    expect(sources.segments).toContainEqual({
+      id: "wall:wall-north",
+      kind: "edge",
+      start: north.startMm,
+      end: north.endMm
+    });
+  });
+
+  it("uses the shared clean nudge increment and a 4x Shift step", () => {
+    expect(getPlanMeasurementNudgeDelta("ArrowUp", "cm", null, false)).toEqual({
+      xMm: 0,
+      yMm: -10
+    });
+    expect(getPlanMeasurementNudgeDelta("ArrowRight", "in", 25.4, true)).toEqual({
+      xMm: 101.6,
+      yMm: 0
+    });
+    expect(getPlanMeasurementNudgeDelta("Enter", "cm", null, false)).toBeNull();
+  });
+
+  it("starts keyboard refinement, then confirms or cancels it locally", () => {
+    const complete = {
+      phase: "armed-complete",
+      context: { kind: "plan" },
+      start: { xMm: 100, yMm: 200 },
+      end: { xMm: 300, yMm: 400 }
+    } as const;
+    expect(getPlanMeasurementKeyActions(complete, "start", "ArrowLeft", "cm", null, false)).toEqual([
+      { type: "begin-refinement", endpoint: "start" },
+      { type: "preview-refinement", point: { xMm: 90, yMm: 200 } }
+    ]);
+    const refining = {
+      ...complete,
+      phase: "refining",
+      endpoint: "start",
+      original: complete.start
+    } as const;
+    expect(getPlanMeasurementKeyActions(refining, "start", "Enter", "cm", null, false)).toEqual([
+      { type: "commit-refinement" }
+    ]);
+    expect(getPlanMeasurementKeyActions(refining, "start", "Escape", "cm", null, false)).toEqual([
+      { type: "cancel-refinement" }
+    ]);
+  });
+
+  it("yields measurement ownership to right/middle click and Space-pan", () => {
+    expect(canPlanMeasurementClaimPointer(0, false)).toBe(true);
+    expect(canPlanMeasurementClaimPointer(1, false)).toBe(false);
+    expect(canPlanMeasurementClaimPointer(2, false)).toBe(false);
+    expect(canPlanMeasurementClaimPointer(0, true)).toBe(false);
+    expect(shouldCancelMeasurementForViewportClaim("touch", true)).toBe(true);
+    expect(shouldCancelMeasurementForViewportClaim("mouse", true)).toBe(false);
+  });
+
+  it("cancels drawing and restores refinement when a pointer is cancelled", () => {
+    const drawing = {
+      phase: "drawing",
+      context: { kind: "plan" },
+      start: { xMm: 0, yMm: 0 },
+      preview: { xMm: 10, yMm: 10 }
+    } as const;
+    expect(planMeasurementCancelAction(drawing)).toEqual({ type: "clear" });
+    expect(
+      planMeasurementCancelAction({
+        phase: "refining",
+        context: { kind: "plan" },
+        start: { xMm: 0, yMm: 0 },
+        end: { xMm: 10, yMm: 10 },
+        endpoint: "end",
+        original: { xMm: 10, yMm: 10 }
+      })
+    ).toEqual({ type: "cancel-refinement" });
+  });
+});
 
 describe("whole-partition drag activation", () => {
   it("does not activate from click jitter below the pointer-travel threshold", () => {
