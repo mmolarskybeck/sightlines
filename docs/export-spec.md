@@ -2,18 +2,22 @@
 
 Status: Draft for review · Written: 2026-07-14
 
-Decisions reviewed with Marina 2026-07-14: image export (PNG/JPG) captures
-exactly one view per file and is a lightweight "snapshot" action — in 3D it
-saves the current render directly and never touches the saved-capture list;
-PDF export composes a multi-page document from selectable sections;
-floorplans that exceed one page get a fit-to-page overview plus optional
-per-room detail pages; elevations are chosen from a per-room wall list that
-defaults to walls holding work; 3D pages come from viewpoints the user
-deliberately captures in the 3D view, not from auto-generated orbit angles,
-and are auto-named from what the camera is looking at; **automatic dimension
-lines are included by default** on plan and elevation pages behind a single
-off-switch; the grid is excludable/includable with default off; paper sizes
-include A4, Letter, A3, and Tabloid 11×17. Remaining open items are in §16.
+Decisions reviewed with Marina 2026-07-14 (two rounds, second incorporating
+Sol's review): image export (PNG/JPG) captures exactly one view per file and
+is a lightweight "snapshot" action — in 3D it captures the current camera
+pose and performs a clean export-resolution render, independent of the
+Saved-views list; PDF export composes a multi-page document from selectable
+sections; floorplans that exceed one page get a fit-to-page overview plus
+optional per-room detail pages; elevations are chosen from a per-room wall
+list that defaults to walls holding work; 3D pages come from **Saved views**
+— first-class camera bookmarks with editable titles and a live-resolved room
+label, destined for a left-pane collection; **automatic dimension lines are
+included by default** behind a single off-switch, using gap dimensions for
+single-row hangs and datum-based coordinates for multi-row/salon walls; the
+grid is excludable/includable with default off; PDF drawing output is vector
+with embedded raster artwork images; document settings are workspace
+preferences keyed by project id, not project data; paper sizes are A4,
+Letter, A3, and Tabloid 11×17. Remaining open items are in §16.
 
 ## 1. Goal
 
@@ -61,11 +65,16 @@ Meaning: **Save what I'm looking at as an image.**
   handles* are stripped as gesture chrome, but its dimension lines are kept
   because they are informational drawing. This makes "select a grouping,
   export image" the fast path to an annotated spacing image.
-- In 3D, Export image saves the current render **directly and
-  immediately**. It is fully independent of the saved-capture list (§8):
-  grabbing a quick 3D image never creates a capture, never dirties the
-  project, and never requires visiting the Export dialog.
-- PNG is the default. JPG is offered for 3D captures where photographic
+- In 3D, Export image **captures the current camera pose and performs a
+  clean render at export resolution** — it does not read back the live
+  WebGL buffer, whose device-pixel ratio is capped for interactive
+  performance and which carries selection tinting and ghosted walls. The
+  user experiences it as immediate ("save what I'm looking at"); the
+  implementation is a one-off offscreen render from the same pose. It is
+  fully independent of Saved views (§8): grabbing a quick 3D image never
+  creates a Saved view, never dirties the project, and never requires
+  visiting the Export dialog.
+- PNG is the default. JPG is offered for 3D snapshots where photographic
   content makes JPG's smaller files worthwhile; line drawings (Plan and
   Elevation) export as PNG only, because JPG artifacts visibly degrade
   hairline geometry for no meaningful size win.
@@ -78,7 +87,7 @@ Meaning: **Assemble a printable description of this exhibition.**
   - **Overview** — the whole floorplan, fit to one page.
   - **Room plans** — one cropped, fit-to-page plan per included room.
   - **Elevations** — one page per included wall.
-  - **3D views** — one page per saved capture (§8).
+  - **3D views** — one page per included Saved view (§8).
 - Contents choices are per-section and per-room/per-wall, not per-property.
   There is no font picker, no margin control, no color theme.
 - The document is paginated for reading, not measuring. True-scale output
@@ -110,12 +119,15 @@ prompt in-app action. §10 defines the exact inclusion table.
 ### 3.2 Slice 2 — Document
 
 - **Export PDF** action opening the Export dialog (§6).
-- Overview page, per-room plan pages, per-wall elevation pages, 3D capture
-  pages, each optional.
+- Overview page, per-room plan pages, per-wall elevation pages, Saved-view
+  3D pages, each optional.
 - Per-room and per-wall inclusion (§7); defaults per §7.3.
-- Saved 3D captures: create in the 3D view, review and remove in the Export
-  dialog (§8). Captures persist with the project and round-trip through
-  `.sightlines` packages.
+- Saved views: create in the 3D view; include/exclude, retitle, and delete
+  in the Export dialog (§8). Saved views persist with the project and
+  round-trip through `.sightlines` packages; thumbnails are a derived cache
+  outside the project.
+- Document settings (contents selection, Options switches, paper size)
+  stored as workspace preferences keyed by project id (§6.3).
 - Page headers, labels, and scale notes per §9.
 - Client-side PDF assembly (pdf-lib or equivalent — engineering's choice).
 
@@ -126,7 +138,13 @@ prompt in-app action. §10 defines the exact inclusion table.
   and demands its own spec (calibration, paper handling, tick marks).
 - No PDF checklist / works-list section in these slices. The roadmap's
   checklist PDF is a sibling feature; the Document's section model (§6) must
-  leave room for it, but its content is not designed here.
+  leave room for it, but its content is not designed here. The division of
+  labor is deliberate: **elevation pages explain where things go; the
+  checklist explains what the things are** (thumbnails, full dimensions,
+  metadata). Installers work primarily from reference images plus spatial
+  dimensions, so per-work identification does not block this export; an
+  optional per-work label/key joins the Options group only once the
+  checklist establishes the shared labeling model (§16).
 - No batch image export ("every wall as a PNG zip"). The Document covers the
   many-pages need; revisit only on demonstrated demand.
 - No annotation, comment, or markup layer on exports.
@@ -139,6 +157,12 @@ prompt in-app action. §10 defines the exact inclusion table.
   it lands, a reference-measurements switch joins §6.1's Options group
   beside Dimensions and Grid; the content model here leaves that seat open.
 - No custom page templates, branding, fonts, or cover-page editors.
+- No left-pane **Saved views collection** in these slices. It is the
+  planned eventual home for browsing saved views by thumbnail, opening one
+  at full resolution, renaming, downloading, and deleting — the Export
+  dialog's management surface (§8.4) is deliberately minimal so it can
+  shrink to inclusion-only once that collection exists. The data model in
+  §8 is designed for that future, not just for PDF assembly.
 
 ## 4. Vocabulary and copy
 
@@ -147,7 +171,7 @@ prompt in-app action. §10 defines the exact inclusion table.
 | Raster export of the current view | Export image | Screenshot, snapshot (internal name only), capture |
 | Composed multi-page PDF | Export PDF | Print, report, packet, deck |
 | `.sightlines` package | Backup | Export (unqualified), save file |
-| Saved 3D viewpoint | 3D view (verb: **Save view for export**) | Camera, bookmark, perspective |
+| Saved 3D viewpoint | Saved view (verb: **Save view**) | Camera, bookmark, capture, perspective, view for export |
 | The whole-plan PDF page | Overview | Site plan, master plan |
 | Per-room cropped plan page | Room plan | Detail, zoom, crop |
 
@@ -161,9 +185,9 @@ image**, **Export PDF**, or **Export backup**. The Settings dialog's existing
   **Export image** (with the current view named, e.g. "Export image of
   elevation") and **Export PDF…**. The ellipsis signals that only the PDF
   path opens a dialog.
-- In the 3D view, **Save view for export** lives alongside Export image; it
-  is the capture action for §8 and gives immediate feedback (§8.2) rather
-  than opening the Export dialog.
+- In the 3D view, **Save view** lives alongside Export image; it is the
+  bookmark action for §8 and gives immediate feedback (§8.2) rather than
+  opening the Export dialog.
 - Export actions are disabled with an explanatory tooltip when the project
   has no rooms; an empty project has nothing to draw.
 - No keyboard shortcut ships in these slices. Export is not a repetitive
@@ -181,8 +205,10 @@ existing overlay conventions (rounded 12px overlay, shadcn/ui primitives).
   - **Overview** — checkbox only.
   - **Room plans** — checkbox plus a per-room checklist (room names).
   - **Elevations** — checkbox plus a per-room, per-wall tree (§7).
-  - **3D views** — checkbox plus the saved-capture list with thumbnails
-    and per-capture remove (§8.4).
+  - **3D views** — checkbox plus the Saved views list: thumbnail,
+    room label + title, and a **per-view include checkbox** (§8.4).
+    Excluding a view from today's document must never require deleting
+    project data.
 - **Options** — exactly two switches, applying to all plan and elevation
   pages in the document:
   - **Dimensions** — default **on**. Includes the app's automatic dimension
@@ -211,14 +237,33 @@ and degrade gracefully (scrolling sub-lists) at 10 rooms / 40 walls.
   is partially selected.
 - Unchecking a section preserves its sub-selection for the session, so
   toggling a section off and on is non-destructive.
-- Contents choices persist per project. The next export starts from the last
-  configuration, because the second export of a packet is almost always a
-  revision of the first.
+- Contents choices persist per project (§6.3). The next export starts from
+  the last configuration, because the second export of a packet is almost
+  always a revision of the first.
 - **Export PDF** shows determinate progress if assembly exceeds the app's
   standard immediate-feedback threshold, and the dialog remains cancelable
   until the file is delivered.
 - If every section is unchecked, the primary action is disabled with inline
   text: **Choose at least one section.**
+
+### 6.3 Persistence boundary
+
+Two different kinds of state live near this dialog, with deliberately
+different semantics:
+
+- **Document settings** — contents selection, per-view include flags, the
+  Dimensions and Grid switches, paper size — are **workspace preferences
+  keyed by project id**. They never dirty the project, never enter undo
+  history, and never travel through `.sightlines` backups. They describe
+  how *this user on this machine* last assembled a document, not what the
+  exhibition is. A collaborator opening the same package starts from §7.3's
+  defaults.
+- **Saved views** (§8) are **project data**: they dirty, undo, and
+  round-trip through backups, because a composed viewpoint is part of the
+  exhibition's description.
+- **Thumbnails** are a **derived cache outside the project** — never stored
+  in project JSON, undo history, or packages; regenerated lazily after
+  relevant project changes (§8.2).
 
 ## 7. Choosing rooms and walls
 
@@ -245,11 +290,12 @@ select/deselect-all conveniences for their walls, nothing more.
   one placed work**; empty walls are listed but unchecked. This is the
   strongest default lever against overwhelming output: a 10-room show
   exports the walls that matter, and adding an empty wall back is one click.
-- **3D views:** included when at least one saved capture exists; the section
-  is present but visibly empty otherwise, with the hint **Save views from
-  the 3D window to include them here.**
+- **3D views:** the section is included when at least one Saved view
+  exists, and new Saved views default to included; the section is present
+  but visibly empty otherwise, with the hint **Save views from the 3D
+  window to include them here.**
 
-Defaults apply on first export; thereafter §6.2's persistence wins. Walls
+Defaults apply on first export; thereafter §6.3's persistence wins. Walls
 that gain or lose work after the user has customized the selection do not
 silently join or leave it — the user's explicit choice is never overridden.
 
@@ -265,61 +311,66 @@ work (cursor-directed dolly, WASD, double-click focus) already makes
 composing one cheap. The export feature's job is to keep what the curator
 composed.
 
-### 8.2 Save view for export
+### 8.2 Save view
 
-From the 3D view, **Save view for export**:
+From the 3D view, **Save view**:
 
 1. Records the current camera pose (position, target, lens parameters) in
-   model space — never pixels — plus a rendered thumbnail.
-2. Derives an auto-name from what the camera is looking at (§8.3).
-3. Confirms with lightweight feedback naming the result (**Saved "Gallery 2
-   — toward north wall"**) without leaving the 3D view or opening a dialog.
-4. Appends to the project's capture list. Captures are project data: they
-   dirty the project, participate in undo, and round-trip through
-   `.sightlines` packages (thumbnail excluded from the package;
-   re-renderable from the pose).
+   model space — never pixels.
+2. Resolves and stores the **stable id of the room** containing the camera
+   (or, when the camera is outside every room, the room containing the
+   camera target), when one is identifiable. Optionally stores derived wall
+   context (which wall face the camera predominantly faces) as
+   supplementary data, never as part of the title.
+3. Assigns the default editable title **Saved view *n*** (creation order).
+4. Confirms with lightweight feedback (**Saved "Gallery 2 · Saved view
+   3"**) without leaving the 3D view or opening a dialog.
+5. Appends to the project's Saved views list. Saved views are project data
+   per §6.3: they dirty the project, participate in undo, and round-trip
+   through `.sightlines` packages.
 
-Captures are re-rendered from the stored pose at export time, at export
-resolution — the stored thumbnail is dialog UI only. A capture therefore
-always reflects the *current* state of the exhibition, not the moment of
-capture. This is deliberate: the document describes the show as it is now.
+A Saved view is a **camera bookmark, not a picture**. Its thumbnail is a
+derived cache outside the project, regenerated lazily after relevant
+project changes, and every consumer — the dialog thumbnail, the PDF page,
+the future collection's full-resolution open and download — renders the
+*current* exhibition from the stored pose. The document describes the show
+as it is now, never a stale moment of capture.
 
-### 8.3 Auto-naming from camera context
+### 8.3 Room label and title
 
-A capture's name is derived, not typed. The naming rule uses geometry the
-app already owns:
+A Saved view displays as **room label · title**, e.g. **Gallery 2 ·
+Entrance sightline**:
 
-- **Room:** the room whose floor polygon contains the camera position (or,
-  when the camera is outside every room, the room containing the camera
-  target). Contributes the room's existing name.
-- **Facing:** the wall that dominates the view — the wall face with the
-  largest visible presence in the camera frustum, using the walls' existing
-  labels. Contributes "toward *wall label*".
+- The **room label** is resolved live from the stored room id at display
+  and export time, so renaming a room can never strand a stale name on a
+  printed page. It uses the room's current name exactly as it appears
+  everywhere else in the app — no invented numbering. If the stored room id
+  no longer resolves (room deleted), the label is simply omitted.
+- The **title** is user-editable, defaulting to **Saved view *n***. The
+  default is deliberately unambitious: inferring a descriptive name from
+  the camera frustum ("toward north wall") adds guessing risk out of
+  proportion to its value, and an editable title plus a live room label
+  carries real packets. Frustum-derived naming may return as a *suggested*
+  title later if demand appears (§16).
 
-Result: **Gallery 2 — toward north wall**. When no wall clearly dominates
-(a corner view, a long axial sightline through openings), the name degrades
-gracefully to just the room (**Gallery 2**), and when even the room is
-ambiguous, to **3D view *n***. The name must never guess confidently: a
-wrong "toward north wall" on a printed page is worse than a plain fallback.
-The dominance threshold and frustum test are an engineering decision (§16);
-the behavioral bar is that the auto-name is either right or absent, and it
-matches the room and wall labels used everywhere else in the app.
+The PDF page title uses the same composed form.
 
-The auto-name is stored at capture time (renaming rooms/walls later does
-not silently rewrite existing capture names) and the page title uses it
-verbatim. A user-editable name field is deferred until demand appears —
-auto-names should carry most packets.
+### 8.4 Managing Saved views
 
-### 8.4 Managing captures
+The Export dialog's 3D section lists Saved views in creation order, each
+row showing thumbnail, room label · title, and an **include checkbox**
+(§6.1) — inclusion is a document setting; the view itself stays project
+data either way. Rows also offer retitle and delete; deletion is undoable
+through the standard project undo path. This management surface is
+intentionally minimal: the left-pane Saved views collection (§3.3) is the
+planned primary home for browsing, opening at full resolution, renaming,
+downloading, and deleting, and when it lands the dialog keeps only
+inclusion.
 
-The Export dialog's 3D section lists captures in capture order with
-thumbnail, auto-name, and remove. Renaming and reordering are deferred
-until demand appears; removal is undoable through the standard project undo
-path. If geometry changes have
-made a stored pose degenerate (e.g., its room was deleted), the capture
-row carries an advisory state and is excluded from export rather than
-rendering a void — consistent with the app's "flag, don't silently fix"
-rule.
+If geometry changes have made a stored pose degenerate (e.g., the space it
+looked into no longer exists), the row carries an advisory state and the
+view is excluded from export rather than rendering a void — consistent
+with the app's "flag, don't silently fix" rule.
 
 ## 9. Page composition
 
@@ -366,7 +417,7 @@ height. Dimension lines follow §9.6.
 
 ### 9.5 3D pages
 
-One page per capture, the render fit to page, titled with the capture name.
+One page per included Saved view, the render fit to page, titled per §8.3.
 Rendered with the canvas's standard lighting and materials — no export-only
 stylization.
 
@@ -374,20 +425,41 @@ stylization.
 
 The canvas's dimension lines are selection-driven: they annotate what the
 user is currently arranging. A document has no selection, and its reader's
-question is broader — "how far apart is everything?" So document pages get
-a **full dimension pass**: the same segment derivation and visual family as
-`GroupDimensionLines` (end ticks, formatted labels, staggered rows, the
-"0" touching readout), applied to everything rather than to a selection.
-Export must reuse the existing spacing-segment math, not reimplement it.
+question is broader — "where does everything go?" Document pages therefore
+get their own dimension pass, sharing `GroupDimensionLines`' visual family
+(end ticks, formatted labels, staggered rows, the "0" touching readout)
+and, where gap chains apply, its segment derivation.
 
-With **Dimensions** on (the default):
+A single gap chain cannot describe every wall: the existing spacing helper
+sorts by horizontal center and measures consecutive edges, which produces
+negative or meaningless "gaps" for works stacked at similar x. The export
+pass therefore classifies each wall deterministically — **gap dimensions
+for a row, coordinate dimensions for a salon wall** — rather than guessing
+lane groupings:
 
-- **Elevation pages:** one dimension row per wall covering every placed
-  object in wall order — outer segment from each wall end to the nearest
-  object, and every interior gap between adjacent objects (openings
-  included as neighbors, exactly as the neighbor-aware canvas segments
-  already treat them). The wall's overall width and height render as
-  dimension lines along the wall boundary rather than only as header text.
+- **Single-row wall** — a horizontal line can pass through every placed
+  work (all works share a common horizontal band): render the conventional
+  chain — outer segment from each wall end to the nearest object and every
+  interior gap between adjacent objects (openings included as neighbors,
+  exactly as the neighbor-aware canvas segments treat them), reusing the
+  existing segment math. Additionally, the shared hang is annotated with
+  its **center height from the floor**: one common centerline dimension
+  when all works share a center height (the app's own centerline model),
+  per-work center heights otherwise.
+- **Multi-row wall** (no common band): no pairwise gap chain. Each work is
+  placed by **datum coordinates** instead — horizontal center position from
+  the wall's start, and vertical center height from the floor, with works
+  sharing a center height consolidated onto one common centerline
+  dimension. This is deterministic and reconstructs every position without
+  a tangle of crossing gap lines. Openings keep their width and
+  wall-position dimensions but never join a gap chain on such a wall.
+- **Both cases:** the wall's overall width and height render as dimension
+  lines along the wall boundary rather than only as header text.
+
+Center height is the default vertical datum because it is the app's
+existing centerline model and the number installers' hang math starts
+from; a bottom-edge-to-floor alternative is a possible later option, not a
+v1 switch (§16).
 - **Room plan pages:** each wall's overall length, drawn outside the room
   polygon along its wall. Object-to-object plan spacing is *not* drawn —
   on a floorplan it produces a web of crossing lines that buries the
@@ -426,22 +498,40 @@ graph as the 3D view at the stored pose.
 | Temporary measurement | No |
 | Reference measurements | No — deferred by the measurement spec until annotation-export behavior is specified |
 
-### 10.3 Image tiers
+### 10.3 Images and missing images
 
 Exports draw artwork images from the **display tier**, consistent with
 `docs/plan.md` §4.5. Full-resolution originals are not touched by these
 slices; an "archival quality" export using originals is a possible later
-option, not a default.
+option, not a default. PDF cannot embed WebP, so display-tier images are
+transcoded to JPEG or PNG at embed time — a per-image conversion, never a
+reason to rasterize the surrounding page.
 
-### 10.4 Resolution
+Sightlines deliberately supports image-less artwork, and a stored image
+blob can also be missing or unreadable at export time. Either way, the
+work renders as a **vector placeholder**: the correct framed footprint,
+neutral fill and border, the text **Image unavailable** (omitted for
+deliberately image-less works — nothing is "unavailable"), and the work's
+best identifying metadata (title, or another stable identifier) — shown
+even though per-work labels are otherwise off, because two anonymous
+placeholders on one wall are indistinguishable. A missing-blob export
+completes with a non-blocking warning naming the affected works, matching
+the backup flow's behavior; it never fails the export.
 
-Raster output (snapshots, and rasterized drawings inside the PDF if
-engineering chooses raster embedding over vector) renders at a fixed
-export scale factor chosen for crisp print at the fit-to-page sizes in §9
-— an editorial constant, not a user option. Whether PDF drawings embed as
-vectors or high-resolution rasters is an engineering decision (§16); the
-behavioral requirement is that hairline geometry stays crisp when the PDF
-is zoomed to 400%.
+### 10.4 Vector output and resolution
+
+PDF drawing pages are **vector**: wall outlines, frames, dimension lines,
+labels, and scale bars are drawn as paths and text, with raster artwork
+images positioned and clipped inside the vector frames — a standard hybrid
+page. This is a decision, not an open question: a fixed-resolution raster
+that survives 400% zoom across A3/Tabloid pages would be large and
+memory-heavy, especially on iPad. Linework and text therefore stay crisp
+at any zoom; artwork images may reveal pixels at extreme zoom, which is
+expected and harmless since a work occupies only part of a page.
+
+Snapshots (§2.2) remain raster by nature and render at a fixed export
+scale factor chosen for crisp output well above screen resolution — an
+editorial constant, not a user option.
 
 ## 11. Files and naming
 
@@ -462,8 +552,9 @@ is zoomed to 400%.
   an empty room is honest information in a planning document.
 - **Wall with no works, explicitly included:** exports as an empty
   elevation; never silently skipped once chosen.
-- **All captures degenerate:** the 3D section behaves as empty (§8.4).
-- **Very large export (10 rooms, 40 walls, many captures):** progress and
+- **All Saved views degenerate or excluded:** the 3D section behaves as
+  empty (§8.4).
+- **Very large export (10 rooms, 40 walls, many Saved views):** progress and
   cancel per §6.2; cancellation delivers nothing rather than a partial file.
 - **Assembly failure:** one plain-language error (**Couldn't create the
   PDF. Your project is unchanged.**) — never a corrupt file, never a
@@ -475,9 +566,9 @@ is zoomed to 400%.
 ## 13. Accessibility
 
 - The Export dialog is fully keyboard-operable: tree traversal, checkbox
-  toggling, capture removal, and the primary action, following the app's
+  toggling, Saved-view management, and the primary action, following the app's
   existing dialog focus conventions.
-- Capture thumbnails carry accessible names (their capture names); state
+- Saved-view thumbnails carry accessible names (room label · title); state
   (included, advisory) is never conveyed by color alone.
 - Progress and completion are announced to assistive technology; the
   completion announcement names the file delivered.
@@ -495,8 +586,10 @@ is zoomed to 400%.
   "Yes" rows — verified against a canvas with active selection, hover, and
   an armed tool, none of which appear.
 - Plan/Elevation deliver PNG; 3D offers PNG and JPG.
-- In 3D, Export image delivers the current render immediately, creates no
-  capture, and does not dirty the project.
+- In 3D, Export image renders cleanly from the current pose at export
+  resolution — no selection tinting, no ghosted walls, resolution above the
+  live canvas's capped device-pixel ratio — creates no Saved view, and does
+  not dirty the project.
 - A selection's dimension lines appear in the snapshot while its outline
   and handles do not; canvas grid visibility carries through.
 - Output resolution exceeds screen resolution per §10.4; hairlines are
@@ -511,23 +604,32 @@ is zoomed to 400%.
 - Defaults follow §7.3 on first export; user selections persist per project
   and are never silently overridden by later placement changes.
 - Tri-state section checkboxes; sub-selection survives section toggling.
-- Save view for export records pose in model space, confirms without a
-  dialog, dirties the project, participates in undo, and round-trips through
-  `.sightlines`.
-- Auto-names match the app's room and wall labels, degrade to room-only and
-  then to **3D view *n*** rather than guessing, and are stored at capture
-  time.
-- With Dimensions on (default): elevation pages carry the full per-wall
-  dimension row (outer segments + every interior gap, openings as
-  neighbors) plus overall wall width/height; room plan pages carry wall
-  lengths; the Overview carries neither. Values match the canvas's
-  selection-driven readings for identical geometry, because the segment
-  derivation is shared.
-- With Dimensions off, and with Grid on/off, pages render accordingly; the
-  switches persist per project.
+- Save view records pose and room id in model space, confirms without a
+  dialog, dirties the project, participates in undo, and round-trips
+  through `.sightlines` — with thumbnails absent from project JSON, undo
+  entries, and packages.
+- Room labels resolve live: renaming a room updates every affected Saved
+  view's displayed and exported label; deleting the room omits the label.
+  Titles are editable; the default is **Saved view *n***.
+- Per-view include checkboxes exclude a view from the document without
+  touching project data; document settings live in workspace preferences
+  keyed by project id and never dirty, undo, or travel through backups.
+- With Dimensions on (default): single-row walls carry the gap chain
+  (outer segments + every interior gap, openings as neighbors) plus center
+  height; multi-row walls carry per-work datum coordinates with shared
+  center heights consolidated; both carry overall wall width/height; room
+  plan pages carry wall lengths; the Overview carries neither. Gap values
+  match the canvas's selection-driven readings for identical geometry, and
+  the row/salon classification is deterministic.
+- With Dimensions off, and with Grid on/off, pages render accordingly.
+- Works with missing or absent images render the §10.3 vector placeholder
+  with identifying metadata; a missing blob yields a non-blocking warning,
+  never a failed export.
+- Drawing pages are vector (text selectable, linework crisp at any zoom)
+  with embedded raster artwork images.
 - All four paper sizes lay out correctly with auto-orientation.
-- Captures re-render current project state at export time; degenerate
-  captures carry an advisory and are excluded.
+- Saved views re-render current project state at export time; degenerate
+  poses carry an advisory and are excluded.
 - The PDF contains exactly the chosen pages in §6.1 order; every page has
   header, title, and (for drawings) scale bar; orientation is auto-chosen
   per page; nothing is stretched or tiled.
@@ -548,20 +650,24 @@ is zoomed to 400%.
   both unit systems.
 - Defaults derivation (§7.3) against projects with 1 room, empty walls, and
   mixed placement.
-- Capture schema: validation, migration, package round-trip, degenerate-pose
-  detection.
-- Auto-name derivation: camera inside a room, outside all rooms, corner
-  views and axial sightlines degrading per §8.3, and label agreement with
-  room/wall naming.
-- Full dimension pass: segment coverage for walls with 0, 1, and many
-  objects, openings as neighbors, touching works ("0" readout), and value
-  agreement with the selection-driven canvas segments for identical
-  geometry.
+- Saved-view schema: validation, migration, package round-trip (thumbnail
+  absent), degenerate-pose detection, room-id resolution (camera inside a
+  room, outside all rooms, room since deleted).
+- Wall classification: single-row versus multi-row band detection is
+  deterministic across stacked, staggered, touching, and mixed
+  works+openings arrangements, including near-threshold overlaps.
+- Row walls: segment coverage for 0, 1, and many objects, openings as
+  neighbors, touching works ("0" readout), value agreement with the
+  selection-driven canvas segments, and centerline consolidation
+  (shared versus differing center heights).
+- Salon walls: datum coordinates (center-x from wall start, center height
+  from floor) for every work, shared-centerline consolidation, and
+  opening width/position dimensions staying out of gap chains.
 
 ### Component and store tests
 
 - Dialog tree selection, tri-state, persistence, and disabled states.
-- Save view for export: undo entry, dirty flag, feedback.
+- Save view: undo entry, dirty flag, feedback; retitle and delete paths.
 - Snapshot action produces a clean render (no chrome) with selection active.
 - Progress, cancel, and failure paths deliver per §12.
 
@@ -584,27 +690,34 @@ Task-based, with curators and one installer if possible:
 2. "Make a printout an installer could work from for rooms 2 and 3."
    (Do the defaults land close? Do they understand the wall tree?)
 3. "Include two 3D views that show the sightline from the entrance."
-   (Does Save view for export read as the path into the PDF?)
+   (Does Save view read as the path into the PDF?)
 4. Observe whether anyone attempts to measure from the printed page — if
    so, the scale-accurate export mode's priority rises and the scale bar's
    honesty framing needs review.
 
 ## 16. Decision gates before implementation
 
-### Resolved product decisions (reviewed 2026-07-14)
+### Resolved product decisions (reviewed 2026-07-14, two rounds)
 
 1. Two doors: snapshot (current view, no dialog) versus document (composed
-   PDF). No batch image export. Quick 3D image = Export image, direct,
-   independent of the capture list.
+   PDF). No batch image export. Quick 3D image = Export image: capture
+   pose, clean export-resolution render, independent of Saved views.
 2. Pagination by composition — Overview + room plan pages — with no tiling
    and no ratio claims; scale bars instead.
 3. Elevation defaults: walls with works checked, empty walls listed
    unchecked.
-4. 3D pages only from user-saved captures; captures are project data,
-   re-rendered at export time, auto-named from camera room/facing context.
-5. Dimension lines on by default with a single off-switch; full per-wall
-   pass on elevation pages, wall lengths on room plans, none on the
-   Overview.
+4. 3D pages only from **Saved views**: project data (pose + room id +
+   editable title, default **Saved view n**), re-rendered at export time,
+   displayed as live-resolved room label · title; thumbnails are a derived
+   cache outside the project; per-view include checkboxes separate
+   inclusion from deletion; a left-pane Saved views collection is the
+   planned future management home. No frustum-derived naming in v1.
+5. Dimension lines on by default with a single off-switch; **gap chain +
+   center height for single-row walls, datum coordinates for multi-row/
+   salon walls** (center-x from wall start, center height from floor,
+   shared centerlines consolidated); wall lengths on room plans; none on
+   the Overview. Center height, not bottom-to-floor, is the v1 vertical
+   datum.
 6. Grid excludable/includable in documents, default off; snapshots follow
    canvas grid visibility.
 7. Paper sizes: A4, Letter, A3, Tabloid 11×17. Orientation, margins,
@@ -613,40 +726,51 @@ Task-based, with curators and one installer if possible:
    context rendering).
 9. Reference measurements join the Options group in a later slice, after
    the Measure tool's annotation-export behavior is specified.
+10. Document settings are workspace preferences keyed by project id;
+    Saved views are project data (§6.3).
+11. PDF drawing pages are vector with embedded raster artwork images;
+    missing/absent images render the §10.3 placeholder with identifying
+    metadata plus a non-blocking warning.
+12. Per-work labels/keys are deferred to the checklist-PDF labeling model;
+    elevations explain where, the checklist explains what.
 
 ### Design questions
 
-- Per-work text labels: does a labeled elevation (numbered works keyed to a
-  small list, or titles under each work) ship as part of the future
-  checklist-PDF work or as an elevation-page option? Decide against real
-  output; excluded from v1 (§10.2).
 - Snapshot in 3D: is the format choice (PNG/JPG) a small inline choice at
   export time or a remembered preference? (Smallest possible surface wins.)
 - Does the plan-page wall-length dimensioning read clearly on non-rectilinear
   rooms, or does it need per-shape placement rules before shipping?
+- Bottom-edge-to-floor as an additional vertical datum option: revisit
+  after installer feedback on center-height-only pages.
+- Frustum-derived title *suggestions* ("toward north wall"): revisit only
+  if default titles prove insufficient in real packets.
 
 ### Engineering questions
 
-- Vector versus high-resolution raster embedding for plan/elevation pages
-  in the PDF (pdf-lib path drawing vs. canvas rasterization). Behavioral
-  bar: §10.4's 400% crispness and reasonable file size.
-- Camera-context inference for auto-names (§8.3): the point-in-polygon room
-  test is cheap; the "dominant wall" frustum test needs a definition and a
-  conservative threshold. Behavioral bar: right or absent, never a
-  confident wrong name.
+- The single-row band test's exact definition (the shared horizontal band a
+  line must pass through) and its behavior at near-misses. Behavioral bar:
+  deterministic, stable under sub-millimeter nudges, and never a gap chain
+  containing a negative segment.
+- Salon-wall datum layout: where datum lines and labels sit so a dense
+  wall stays legible (leader lines, staggering, label collision rules) —
+  design against real salon-wall output before freezing.
 - Extracting the spacing-segment derivation used by `GroupDimensionLines`
   into a caller-agnostic form the export pass can feed with "all objects on
   the wall" instead of a selection — reuse, not reimplementation (§9.6).
-- 3D offscreen rendering: render target sizing, `preserveDrawingBuffer`
-  versus render-on-demand into an offscreen target, and memory behavior on
-  iPad for multiple captures.
+- 3D offscreen rendering: render target sizing, render-on-demand into an
+  offscreen target (not `preserveDrawingBuffer` on the live canvas), and
+  memory behavior on iPad for multiple Saved views.
+- Thumbnail cache: storage location, keying, and the "relevant project
+  changes" invalidation signal for lazy regeneration.
+- Workspace-preference storage for document settings keyed by project id.
 - Where the shared "static scene → drawing commands" layer lives so SVG
   canvas, PNG rasterizer, and PDF writer consume one painter rather than
   three (the scene2d builders were built for exactly this seam).
 - Font strategy for PDF text (embedded subset vs. standard fonts) given
   project names may contain arbitrary Unicode.
-- Capture schema shape (pose + stored auto-name) and its `.sightlines`
-  migration.
+- WebP → JPEG/PNG transcode path for embedded artwork images (§10.3).
+- Saved-view schema shape (pose, room id, title, creation order/date) and
+  its `.sightlines` migration.
 
 ## 17. Ethical review
 
@@ -655,6 +779,7 @@ introduces no deceptive, coercive, or attention-extractive pattern. The
 principal trust risks are honesty risks: an export that differs from the
 canvas (§10.1 forbids second derivations), a page that invites tape-measure
 use it cannot support (§9.2 uses scale bars and refuses ratio claims), and a
-stale 3D capture presented as current (§8.2 re-renders at export time).
+stale 3D view presented as current (§8.2 re-renders at export time, and
+room labels resolve live per §8.3).
 Privacy posture is preserved: everything renders client-side, files go only
 where the user puts them, and PDF metadata carries nothing personal.
