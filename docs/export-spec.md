@@ -245,6 +245,10 @@ and degrade gracefully (scrolling sub-lists) at 10 rooms / 40 walls.
 - **Export PDF** shows determinate progress if assembly exceeds the app's
   standard immediate-feedback threshold, and the dialog remains cancelable
   until the file is delivered.
+- Assembly consumes an **immutable snapshot of project state taken at the
+  moment Export PDF is clicked**. Edits, undo, or redo that land while
+  assembly runs affect the project, never the in-flight document — the
+  delivered PDF always describes exactly one coherent state.
 - If every section is unchecked, the primary action is disabled with inline
   text: **Choose at least one section.**
 
@@ -281,7 +285,15 @@ different semantics:
 Elevations are listed as a two-level tree: room → walls, using the app's
 existing room names and wall labels so the export dialog and the canvas
 speak identically. Partition faces that can hold work appear under their
-room with their existing labels.
+room with their existing labels. Rooms and walls list in the app's existing
+room and wall order (the same order §9.1 uses for pages).
+
+**Shared walls:** a shared (coincident twin) wall appears under each of its
+rooms as that room's own face, exactly as the canvas models it, and each
+face can be included independently. Doors and windows linked across the
+pair render on **both** elevations — an opening in a shared wall belongs to
+both rooms, and either room's packet must stand alone. Exporting both faces
+of one physical wall is therefore intentional, not duplication.
 
 ### 7.2 Room plans and elevations select independently
 
@@ -395,7 +407,13 @@ silently fix" rule.
 ### 9.1 Shared rules
 
 - Every page carries a small, consistent header: project name, page title,
-  and export date. Nothing else — no logos, no watermark.
+  and export date, plus a page number (**3 of 9**) so a printed packet
+  survives being shuffled on a table. Nothing else — no logos, no watermark.
+- Pages follow §6.1's section order; within a section, rooms follow the
+  app's existing room order and walls follow each room's existing wall
+  order, so the document and the canvas agree about sequence. 3D pages
+  follow Saved-view creation order (§8.4). The page manifest is therefore
+  fully deterministic for a given contents selection.
 - Orientation is chosen per page to maximize drawing area for that page's
   aspect ratio (a long wall's elevation goes landscape; a tall room plan
   goes portrait). Users never choose orientation.
@@ -525,6 +543,11 @@ views consume. Export code must not re-derive geometry from the project, so
 the canvas and the export cannot disagree. 3D pages render the same scene
 graph as the 3D view at the stored pose.
 
+The app has a single drawing style today, and exports render it as a
+**fixed print appearance**. If canvas theming or appearance modes ever
+arrive, export output does not follow them — the printed page keeps one
+stable, light-background editorial style.
+
 ### 10.2 Inclusion table
 
 | Canvas element | In exports |
@@ -581,7 +604,17 @@ editorial constant, not a user option.
 
 - Snapshot: `<project> — <view>.png` (e.g. `Summer Rotation — North wall
   elevation.png`), with the platform's standard collision handling.
+  `<view>` is **Plan** in the plan view, the canvas's elevation heading
+  (room and wall label) in the elevation view, and **3D view** in the 3D
+  view — a quick 3D image has no Saved-view identity to name.
 - Document: `<project>.pdf`.
+- Project names are user-entered Unicode; filename construction
+  **sanitizes** them by replacing filesystem-reserved characters (`/ \ : *
+  ? " < > |` and control characters) with a hyphen, collapsing repeats,
+  trimming leading/trailing dots and spaces, and falling back to
+  `Sightlines project` if nothing printable survives. Sanitization affects
+  only filenames — the PDF title metadata and page headers carry the name
+  verbatim.
 - PDF document metadata sets title (project name) and creator
   ("Sightlines"). No metadata beyond that — no author name, no location —
   consistent with the app's privacy posture.
@@ -677,9 +710,18 @@ editorial constant, not a user option.
 - Saved views re-render current project state at export time. Geometry edits
   never invalidate a pose; only numerically invalid camera data carries an
   advisory and is excluded.
-- The PDF contains exactly the chosen pages in §6.1 order; every page has
-  header, title, and (for drawings) scale bar; orientation is auto-chosen
+- The PDF contains exactly the chosen pages in §6.1 section order, with
+  rooms and walls in the app's existing order and Saved views in creation
+  order; every page has header, title, page number (**n of N** matching the
+  delivered total), and (for drawings) scale bar; orientation is auto-chosen
   per page; nothing is stretched or tiled.
+- A shared wall's linked doors and windows appear on both twin faces'
+  elevation pages; each face is independently includable in the tree.
+- Edits or undo landing during assembly never alter the in-flight document;
+  the delivered PDF matches the project state at the moment Export PDF was
+  clicked.
+- Filenames are sanitized per §11 for reserved characters while headers and
+  PDF title metadata keep the project name verbatim.
 - Plan/elevation pages are geometry-equivalent to the canvas's static
   drawing because they consume the same scene primitives. Rasterized visual
   comparisons at a defined DPI pass within a documented tolerance.
@@ -691,7 +733,11 @@ editorial constant, not a user option.
 ### Domain tests
 
 - Page-list derivation: contents selection → ordered page manifest (pure
-  function; the assembly step consumes the manifest).
+  function; the assembly step consumes the manifest), including §9.1
+  ordering (section → app room order → app wall order → Saved-view
+  creation order) and correct **n of N** numbering.
+- Filename sanitization: reserved characters, control characters, dot/space
+  trimming, repeat collapsing, and the all-unprintable fallback.
 - Fit-to-page math: scale, centering, auto-orientation, and room-crop bounds
   for representative and extreme aspect ratios.
 - Scale-bar length selection produces round model lengths across scales and
@@ -791,6 +837,13 @@ Task-based, with curators and one installer if possible:
     metadata plus a non-blocking warning.
 12. Per-work labels/keys are deferred to the checklist-PDF labeling model;
     elevations explain where, the checklist explains what.
+13. Reviewed 2026-07-14 (fourth round): pages carry **n of N** numbers;
+    page/tree ordering follows the app's existing room and wall order
+    (Saved views by creation order); assembly consumes an immutable
+    project snapshot taken at Export click; filenames are sanitized while
+    headers/metadata keep the verbatim name; exports keep one fixed print
+    style regardless of any future canvas theming; a shared wall's linked
+    doors and windows render on both twin elevations.
 
 ### Design questions
 
