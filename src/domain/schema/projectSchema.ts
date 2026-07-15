@@ -84,6 +84,28 @@ const floorObjectSchema = z.discriminatedUnion("kind", [
   blockedZoneFloorObjectSchema
 ]);
 
+const measurementPointSchema = z.object({
+  xMm: z.number().finite(),
+  yMm: z.number().finite()
+});
+
+const referenceMeasurementBaseSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).optional(),
+  visible: z.boolean(),
+  locked: z.boolean(),
+  start: measurementPointSchema,
+  end: measurementPointSchema
+});
+
+const referenceMeasurementSchema = z.discriminatedUnion("kind", [
+  referenceMeasurementBaseSchema.extend({ kind: z.literal("plan") }),
+  referenceMeasurementBaseSchema.extend({
+    kind: z.literal("elevation"),
+    wallId: z.string().min(1)
+  })
+]);
+
 const roomVertexSchema = z.object({
   id: hashFreeIdSchema,
   xMm: z.number().finite(),
@@ -237,6 +259,7 @@ export const projectSchema = z
     checklistArtworkIds: z.array(z.string()),
     wallObjects: z.array(wallObjectSchema).default([]),
     floorObjects: z.array(floorObjectSchema).default([]),
+    referenceMeasurements: z.array(referenceMeasurementSchema).default([]),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime()
   })
@@ -246,6 +269,29 @@ export const projectSchema = z
   // deliberately still not cross-checked (dangling refs stay a runtime
   // advisory), and face ids inherit that policy.
   .superRefine((project, context) => {
+    const measurementIds = new Set<string>();
+    const elevationWallIds = new Set<string>();
+    for (const placement of project.floor.rooms) {
+      for (const wall of placement.room.walls) elevationWallIds.add(wall.id);
+      for (const partition of placement.room.freestandingWalls) {
+        elevationWallIds.add(`${partition.id}#a`);
+        elevationWallIds.add(`${partition.id}#b`);
+      }
+    }
+    for (const measurement of project.referenceMeasurements) {
+      const path = ["referenceMeasurements", measurement.id];
+      if (measurementIds.has(measurement.id)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: `Duplicate reference measurement id ${measurement.id}.`, path });
+      }
+      measurementIds.add(measurement.id);
+      if (measurement.start.xMm === measurement.end.xMm && measurement.start.yMm === measurement.end.yMm) {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: "Reference measurement endpoints cannot coincide.", path });
+      }
+      if (measurement.kind === "elevation" && !elevationWallIds.has(measurement.wallId)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: `Reference measurement points to missing wall ${measurement.wallId}.`, path: [...path, "wallId"] });
+      }
+    }
+
     const byId = new Map(project.wallObjects.map((object) => [object.id, object]));
     for (const object of project.wallObjects) {
       const partnerId =

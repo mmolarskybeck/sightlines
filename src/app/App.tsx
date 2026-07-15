@@ -95,7 +95,7 @@ import { ProjectPicker } from "./components/ProjectPicker";
 import { RoomInspector } from "./components/RoomInspector";
 import { RoomsPanel } from "./components/RoomsPanel";
 import { SelectionInspector } from "./components/SelectionInspector";
-import { MeasurementInspector } from "./components/MeasurementInspector";
+import { MeasurementInspector, ReferenceMeasurementInspector } from "./components/MeasurementInspector";
 import { MeasurementLiveRegion } from "./components/MeasurementLiveRegion";
 import {
   WallPlacementFields,
@@ -213,6 +213,9 @@ export function App() {
     selectOpening,
     selectRoom,
     selectFreestandingWall,
+    addReferenceMeasurement,
+    updateReferenceMeasurement,
+    deleteReferenceMeasurement,
     viewFreestandingFace,
     selectObject,
     setObjectSelection,
@@ -293,6 +296,9 @@ export function App() {
   const selectedFreestandingWallId = freestandingWallIdOf(selection);
   const selectedArtworkId = getSelectedArtworkId(project, selection);
   const selectedOpeningId = getSelectedOpeningId(project, selection);
+  const selectedReferenceMeasurement = selection.kind === "measurement"
+    ? project?.referenceMeasurements?.find((item) => item.id === selection.measurementId) ?? null
+    : null;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const threeDActionsRef = useRef<ThreeDViewActions | null>(null);
   const [importWizardOpen, setImportWizardOpen] = useState(false);
@@ -1690,12 +1696,12 @@ export function App() {
               </div>
             ) : null}
 
-            {measurementActive &&
+            {(measurementActive &&
             (measurement.state.phase === "armed-complete" ||
-              measurement.state.phase === "refining") ? (
-              <div className="panel-heading inspector-subject">
+              measurement.state.phase === "refining")) || selectedReferenceMeasurement ? (
+              <div className="panel-heading inspector-subject measurement-subject">
                 <h2>Measurement</h2>
-                <span>Temporary</span>
+                <span>{selectedReferenceMeasurement ? "Reference" : "Temporary"}</span>
               </div>
             ) : null}
 
@@ -1734,7 +1740,21 @@ export function App() {
               </div>
             ) : null}
 
-            {measurementActive &&
+            {selectedReferenceMeasurement ? (
+              <ReferenceMeasurementInspector
+                name={selectedReferenceMeasurement.name}
+                distanceMm={Math.hypot(
+                  selectedReferenceMeasurement.end.xMm - selectedReferenceMeasurement.start.xMm,
+                  selectedReferenceMeasurement.end.yMm - selectedReferenceMeasurement.start.yMm
+                )}
+                unit={selectedReferenceMeasurement.kind === "elevation" ? elevationUnit : project.unit}
+                visible={selectedReferenceMeasurement.visible}
+                locked={selectedReferenceMeasurement.locked}
+                outOfBounds={selectedReferenceMeasurement.kind === "elevation" && selectedWall?.id === selectedReferenceMeasurement.wallId && [selectedReferenceMeasurement.start, selectedReferenceMeasurement.end].some((point) => point.xMm < 0 || point.xMm > selectedWall.lengthMm || point.yMm < 0 || point.yMm > selectedWall.heightMm)}
+                onChange={(changes) => void updateReferenceMeasurement(selectedReferenceMeasurement.id, changes)}
+                onDelete={() => void deleteReferenceMeasurement(selectedReferenceMeasurement.id)}
+              />
+            ) : measurementActive &&
             (measurement.state.phase === "armed-complete" ||
               measurement.state.phase === "refining") ? (
               <MeasurementInspector
@@ -1743,8 +1763,16 @@ export function App() {
                   measurement.state.end.yMm - measurement.state.start.yMm
                 )}
                 unit={viewMode === "elevation" ? elevationUnit : project.unit}
-                keepDisabled
-                onKeepAsReference={() => undefined}
+                onKeepAsReference={() => {
+                  const state = measurement.state;
+                  if (state.phase !== "armed-complete" && state.phase !== "refining") return;
+                  if (state.context.kind === "plan") {
+                    void addReferenceMeasurement({ kind: "plan", start: state.start, end: state.end });
+                  } else {
+                    void addReferenceMeasurement({ kind: "elevation", wallId: state.context.wallId, start: state.start, end: state.end });
+                  }
+                  measurement.clear();
+                }}
                 onClear={measurement.clear}
               />
             ) : isMultiSelect ? (

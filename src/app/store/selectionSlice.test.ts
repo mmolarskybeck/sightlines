@@ -185,6 +185,26 @@ describe("selection transitions through the store", () => {
     expect(getSelectedOpeningId(state.project, state.selection)).toBeNull();
   });
 
+  it("keeps a hidden reference selected so it can be shown again", async () => {
+    const measurementId = await store.getState().addReferenceMeasurement({
+      kind: "plan",
+      start: { xMm: 0, yMm: 0 },
+      end: { xMm: 1000, yMm: 0 }
+    });
+    expect(measurementId).not.toBeNull();
+
+    await store.getState().updateReferenceMeasurement(measurementId!, { visible: false });
+
+    expect(store.getState().selection).toEqual({
+      kind: "measurement",
+      measurementId
+    });
+    expect(
+      store.getState().project?.referenceMeasurements?.find((item) => item.id === measurementId)
+        ?.visible
+    ).toBe(false);
+  });
+
   it("selectOpening lands in objects; dead id is a no-op", async () => {
     const openingId = await addDoor();
     store.getState().clearObjectSelection();

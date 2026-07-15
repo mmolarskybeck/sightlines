@@ -16,6 +16,9 @@ export type MeasurementOverlayProps = {
   /** Screen scale used only to keep labels, handles, and hit targets constant in pixels. */
   pixelsPerMm: number;
   selected?: boolean;
+  reference?: boolean;
+  locked?: boolean;
+  outOfBounds?: boolean;
   snappedEndpoint?: MeasurementEndpoint | null;
   onBodyPointerDown?: (event: PointerEvent<SVGLineElement>) => void;
   onEndpointPointerDown?: (
@@ -42,6 +45,9 @@ export function MeasurementOverlay({
   unit,
   pixelsPerMm,
   selected = true,
+  reference = false,
+  locked = false,
+  outOfBounds = false,
   snappedEndpoint = null,
   onBodyPointerDown,
   onEndpointPointerDown,
@@ -61,6 +67,7 @@ export function MeasurementOverlay({
   const labelY = midY + (dx / length) * labelOffsetMm;
   const arrowLengthMm = 11 / pixelsPerMm;
   const arrowHalfWidthMm = 4.5 / pixelsPerMm;
+  const lockedEndcapHalfLengthMm = 6 / pixelsPerMm;
   const haloRadiusMm = 9 / pixelsPerMm;
   const handleHitRadiusMm = 22 / pixelsPerMm;
   const bodyHitWidthMm = 14 / pixelsPerMm;
@@ -118,10 +125,26 @@ export function MeasurementOverlay({
     );
   };
 
+  const lockedEndcap = (point: MeasurementPoint) => {
+    const perpendicularX = (-dy / length) * lockedEndcapHalfLengthMm;
+    const perpendicularY = (dx / length) * lockedEndcapHalfLengthMm;
+    return (
+      <line
+        aria-hidden="true"
+        className="measurement-locked-endcap"
+        x1={point.xMm - perpendicularX}
+        y1={point.yMm - perpendicularY}
+        x2={point.xMm + perpendicularX}
+        y2={point.yMm + perpendicularY}
+        vectorEffect="non-scaling-stroke"
+      />
+    );
+  };
+
   return (
     <g
       aria-label={description}
-      className={selected ? "measurement-overlay selected" : "measurement-overlay"}
+      className={`measurement-overlay${selected ? " selected" : ""}${reference ? " reference" : ""}${locked ? " locked" : ""}${outOfBounds ? " out-of-bounds" : ""}`}
       data-selected={selected || undefined}
       role="group"
     >
@@ -133,8 +156,8 @@ export function MeasurementOverlay({
         x2={b.xMm}
         y2={b.yMm}
         role="button"
-        tabIndex={selected ? 0 : -1}
-        style={{ strokeWidth: bodyHitWidthMm, pointerEvents: selected ? "stroke" : "none" }}
+        tabIndex={selected || reference ? 0 : -1}
+        style={{ strokeWidth: bodyHitWidthMm, pointerEvents: selected || reference ? "stroke" : "none" }}
         onPointerDown={(event) => {
           event.stopPropagation();
           onBodyPointerDown?.(event);
@@ -149,6 +172,12 @@ export function MeasurementOverlay({
         y2={b.yMm}
         vectorEffect="non-scaling-stroke"
       />
+      {locked ? (
+        <>
+          {lockedEndcap(a)}
+          {lockedEndcap(b)}
+        </>
+      ) : null}
       <text
         aria-hidden="true"
         className="measurement-label"
@@ -160,7 +189,7 @@ export function MeasurementOverlay({
       >
         {distanceLabel}
       </text>
-      {selected ? (
+      {selected && !locked ? (
         <>
           {handle("a", a)}
           {handle("b", b)}

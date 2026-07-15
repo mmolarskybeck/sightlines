@@ -88,9 +88,34 @@ export type Project = {
   checklistArtworkIds: string[];
   wallObjects: WallObject[];
   floorObjects: FloorObject[];
+  referenceMeasurements?: ReferenceMeasurement[];
   createdAt: string;
   updatedAt: string;
 };
+
+export type MeasurementPoint = { xMm: number; yMm: number };
+
+type ReferenceMeasurementBase = {
+  id: string;
+  name?: string;
+  visible: boolean;
+  locked: boolean;
+  start: MeasurementPoint;
+  end: MeasurementPoint;
+};
+
+export type PlanReferenceMeasurement = ReferenceMeasurementBase & {
+  kind: "plan";
+};
+
+export type ElevationReferenceMeasurement = ReferenceMeasurementBase & {
+  kind: "elevation";
+  wallId: string;
+};
+
+export type ReferenceMeasurement =
+  | PlanReferenceMeasurement
+  | ElevationReferenceMeasurement;
 
 export type Floor = {
   rooms: RoomPlacement[];

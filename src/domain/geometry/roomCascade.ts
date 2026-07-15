@@ -64,7 +64,12 @@ export function deleteRoomFromProject(
     floor: { rooms: nextRooms },
     // Clear any surviving partner's connectsToObjectId that pointed at a
     // removed opening, so no dangling pairing ref persists.
-    wallObjects: clearOpeningPartners(survivingWallObjects, removedObjectIds)
+    wallObjects: clearOpeningPartners(survivingWallObjects, removedObjectIds),
+    referenceMeasurements: (project.referenceMeasurements ?? []).filter(
+      (measurement) =>
+        measurement.kind === "plan" ||
+        (!scope.wallIds.has(measurement.wallId) && !scope.faceIds.has(measurement.wallId))
+    )
   };
   return { project: nextProject, removedObjectIds };
 }

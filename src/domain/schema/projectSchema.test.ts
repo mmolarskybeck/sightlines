@@ -30,6 +30,37 @@ describe("projectSchema", () => {
     expect(parseProject(createSampleProject()).title).toBe("Untitled Exhibition");
   });
 
+  it("validates and defaults reference measurements", () => {
+    const project = createSampleProject();
+    project.referenceMeasurements = [{
+      id: "measure-1",
+      kind: "elevation",
+      wallId: "wall-north",
+      visible: true,
+      locked: false,
+      start: { xMm: 100, yMm: 200 },
+      end: { xMm: 900, yMm: 200 }
+    }];
+    expect(parseProject(project).referenceMeasurements).toEqual(project.referenceMeasurements);
+    const { referenceMeasurements: _references, ...legacyShape } = project;
+    expect(parseProject(legacyShape).referenceMeasurements).toEqual([]);
+  });
+
+  it("rejects degenerate, duplicate, and dangling reference measurements", () => {
+    const project = createSampleProject();
+    const reference = {
+      id: "measure-1",
+      kind: "elevation" as const,
+      wallId: "missing-wall",
+      visible: true,
+      locked: false,
+      start: { xMm: 100, yMm: 200 },
+      end: { xMm: 100, yMm: 200 }
+    };
+    project.referenceMeasurements = [reference, reference];
+    expect(() => parseProject(project)).toThrow(/reference measurement/i);
+  });
+
   it("defaults wall objects for older v1 project documents", () => {
     const { wallObjects, ...olderProject } = createSampleProject();
 

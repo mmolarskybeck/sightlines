@@ -52,6 +52,7 @@ import {
   DEFAULT_FLOOR_OBJECT_DEPTH_MM,
   type Artwork,
   type FreestandingWall,
+  type ReferenceMeasurement,
   type WallObject
 } from "../../domain/project";
 import {
@@ -320,6 +321,8 @@ export function shouldCancelMeasurementForViewportClaim(
 const NO_OP_GET_BLOB: (key: string) => Promise<Blob> = () =>
   Promise.reject(new Error("PlanView: no getBlob provided"));
 
+const EMPTY_REFERENCE_MEASUREMENTS: ReferenceMeasurement[] = [];
+
 export function PlanView({
   activeTool,
   drawRoomActive = false,
@@ -433,6 +436,12 @@ export function PlanView({
   const onSelectRoom = useAppStore((state) => state.selectRoom);
   const onSelectWall = useAppStore((state) => state.selectWall);
   const onSelectObject = useAppStore((state) => state.selectObject);
+  const selection = useAppStore((state) => state.selection);
+  const referenceMeasurements = useAppStore(
+    (state) => state.project?.referenceMeasurements ?? EMPTY_REFERENCE_MEASUREMENTS
+  );
+  const onSelectMeasurement = useAppStore((state) => state.selectMeasurement);
+  const onUpdateReferenceMeasurement = useAppStore((state) => state.updateReferenceMeasurement);
   const onClearSelection = useAppStore((state) => state.clearObjectSelection);
   // These handlers run after render, so later-declared geometry constants are initialized.
   const {
@@ -2570,6 +2579,43 @@ export function PlanView({
           onSelectArtwork={onSelectArtwork}
           onSelectOpening={onSelectOpening}
         />
+        {referenceMeasurements
+          .filter((item) => item.kind === "plan" && item.visible)
+          .map((item) => {
+            const selected = selection.kind === "measurement" && selection.measurementId === item.id;
+            return (
+              <MeasurementOverlay
+                key={item.id}
+                a={item.start}
+                b={item.end}
+                unit={project.unit}
+                pixelsPerMm={pixelsPerMm}
+                reference
+                locked={item.locked}
+                selected={selected}
+                onBodyPointerDown={() => onSelectMeasurement(item.id)}
+                onEndpointKeyDown={(endpoint, event) => {
+                  if (item.locked || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+                  event.preventDefault();
+                  const delta = getPlanMeasurementNudgeDelta(
+                    event.key,
+                    project.unit,
+                    gridPrecisionFloorMm,
+                    event.shiftKey,
+                    snapToGrid,
+                    event.altKey
+                  );
+                  if (!delta) return;
+                  const point = endpoint === "a" ? item.start : item.end;
+                  const next = {
+                    xMm: point.xMm + delta.xMm,
+                    yMm: point.yMm + delta.yMm
+                  };
+                  void onUpdateReferenceMeasurement(item.id, endpoint === "a" ? { start: next } : { end: next });
+                }}
+              />
+            );
+          })}
         {/* Selection decorations: the selected room's wash/outline/handle set
             + live length labels, then the selected partition's face labels and
             endpoint handles. Both paint above placed objects, at rest nothing.

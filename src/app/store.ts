@@ -83,6 +83,7 @@ import {
   type OpeningWallObject,
   type Project,
   type ProjectSummary,
+  type ReferenceMeasurement,
   type WallObject
 } from "../domain/project";
 import { createSightlinesPackage, packageFilename } from "../domain/package/buildPackage";
@@ -211,10 +212,21 @@ export type AppState = ArrangeSliceState &
   selectOpening: (wallObjectId: string) => void;
   selectRoom: (roomId: string) => void;
   selectFreestandingWall: (wallId: string) => void;
+  selectMeasurement: (measurementId: string) => void;
   viewFreestandingFace: (faceWallId: string) => void;
   selectObject: (id: string, opts?: { additive?: boolean }) => void;
   setObjectSelection: (ids: string[]) => void;
   clearObjectSelection: () => void;
+  addReferenceMeasurement: (
+    measurement:
+      | { kind: "plan"; name?: string; start: Point; end: Point }
+      | { kind: "elevation"; wallId: string; name?: string; start: Point; end: Point }
+  ) => Promise<string | null>;
+  updateReferenceMeasurement: (
+    measurementId: string,
+    changes: Partial<Pick<ReferenceMeasurement, "name" | "visible" | "locked" | "start" | "end">>
+  ) => Promise<void>;
+  deleteReferenceMeasurement: (measurementId: string) => Promise<void>;
   renameProject: (title: string) => Promise<void>;
   // Saved-project rename; the open document still routes through undoable renameProject.
   renameProjectById: (id: string, title: string) => Promise<void>;
@@ -1057,6 +1069,19 @@ export function createAppStore(deps: AppStoreDeps) {
         );
       },
 
+      selectMeasurement(measurementId) {
+        autoAcceptArrangeSession();
+        const project = get().project;
+        if (!project?.referenceMeasurements?.some((item) => item.id === measurementId)) return;
+        set(
+          selectionWrite(
+            project,
+            { kind: "measurement", measurementId },
+            get().wallContextId
+          )
+        );
+      },
+
       // "View side A / side B": point the sidebar/elevation at a partition face
       // (spec §6.5). Keeps the partition selected so its inspector stays up, and
       // jumps to elevation so the chosen face is what's shown.
@@ -1123,6 +1148,55 @@ export function createAppStore(deps: AppStoreDeps) {
         // across clears) is left exactly as it was.
         if (get().selection.kind === "none") return;
         set(selectionWrite(get().project, NO_SELECTION, get().wallContextId));
+      },
+
+      async addReferenceMeasurement(measurement) {
+        const project = get().project;
+        if (!project) return null;
+        const id = newId();
+        const reference = { ...measurement, id, visible: true, locked: false } as ReferenceMeasurement;
+        await applyEdit(
+          "Save reference measurement",
+          (current) => ({
+            ...current,
+            referenceMeasurements: [...(current.referenceMeasurements ?? []), reference]
+          }),
+          selectionWrite(project, { kind: "measurement", measurementId: id }, get().wallContextId)
+        );
+        return id;
+      },
+
+      async updateReferenceMeasurement(measurementId, changes) {
+        const project = get().project;
+        const current = project?.referenceMeasurements?.find((item) => item.id === measurementId);
+        if (!project || !current || current.locked && (changes.start || changes.end)) return;
+        const normalized = {
+          ...changes,
+          ...(changes.name !== undefined ? { name: changes.name.trim() || undefined } : {})
+        };
+        const next = { ...current, ...normalized };
+        if (JSON.stringify(next) === JSON.stringify(current)) return;
+        await applyEdit("Edit reference measurement", (document) => ({
+          ...document,
+          referenceMeasurements: (document.referenceMeasurements ?? []).map((item) =>
+            item.id === measurementId ? { ...item, ...normalized } : item
+          )
+        }));
+      },
+
+      async deleteReferenceMeasurement(measurementId) {
+        const project = get().project;
+        if (!project?.referenceMeasurements?.some((item) => item.id === measurementId)) return;
+        await applyEdit(
+          "Delete reference measurement",
+          (document) => ({
+            ...document,
+            referenceMeasurements: (document.referenceMeasurements ?? []).filter(
+              (item) => item.id !== measurementId
+            )
+          }),
+          selectionWrite(project, NO_SELECTION, get().wallContextId)
+        );
       },
 
       async renameProject(title) {
@@ -1523,7 +1597,10 @@ export function createAppStore(deps: AppStoreDeps) {
                 : candidate
             )
           },
-          wallObjects: nextWallObjects
+          wallObjects: nextWallObjects,
+          referenceMeasurements: (project.referenceMeasurements ?? []).filter(
+            (measurement) => measurement.kind === "plan" || !faceIds.has(measurement.wallId)
+          )
         };
 
         // Clear selection if it pointed at the deleted partition.
@@ -1531,6 +1608,11 @@ export function createAppStore(deps: AppStoreDeps) {
         const nextSelection: Selection =
           current.kind === "freestandingWall" && current.wallId === wallId
             ? NO_SELECTION
+            : current.kind === "measurement" &&
+                !(nextProject.referenceMeasurements ?? []).some(
+                  (measurement) => measurement.id === current.measurementId
+                )
+              ? NO_SELECTION
             : current;
         // If the wall context pointed at a face of the deleted partition, drop
         // it to a surviving wall.

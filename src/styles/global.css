@@ -4036,6 +4036,15 @@ body.panels-resizing * {
   pointer-events: none;
 }
 
+.measurement-overlay.reference .measurement-line {
+  stroke-dasharray: 7 5;
+  opacity: 0.78;
+}
+
+.measurement-overlay.out-of-bounds .measurement-line {
+  stroke-dasharray: 2 5;
+}
+
 .measurement-line-hit {
   stroke: transparent;
   pointer-events: stroke;
@@ -4074,6 +4083,14 @@ body.panels-resizing * {
   stroke: var(--selection);
   stroke-linejoin: miter;
   stroke-width: 1;
+  pointer-events: none;
+}
+
+.measurement-locked-endcap {
+  stroke: var(--selection);
+  stroke-linecap: square;
+  stroke-width: 1.75;
+  opacity: 0.88;
   pointer-events: none;
 }
 
@@ -5553,6 +5570,38 @@ body.panels-resizing * {
 
 .inspector-action:hover {
   background: var(--surface-strong);
+}
+
+.measurement-save-action {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+.measurement-clear-action {
+  flex: 0 0 auto;
+}
+
+.measurement-subject {
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+}
+
+.inspector-subject.measurement-subject h2 {
+  font-size: var(--type-lg);
+}
+
+.measurement-inspector {
+  gap: 12px;
+}
+
+.measurement-inspector .inspector-summary-row {
+  min-height: 24px;
+}
+
+.measurement-inspector .inspector-summary-row-value {
+  color: var(--ink);
+  font-size: var(--type-md);
+  font-weight: var(--weight-semibold);
 }
 
 .constraint-panel {

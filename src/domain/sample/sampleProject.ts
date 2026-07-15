@@ -15,6 +15,7 @@ export function createSampleProject(): Project {
     checklistArtworkIds: [],
     wallObjects: [],
     floorObjects: [],
+    referenceMeasurements: [],
     createdAt: now,
     updatedAt: now,
     floor: {

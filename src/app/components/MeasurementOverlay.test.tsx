@@ -89,6 +89,15 @@ describe("MeasurementOverlay", () => {
     expect(screen.getByRole("button", { name: "Select measurement, 5 m" })).toBeTruthy();
   });
 
+  it("shows fixed endpoint caps instead of draggable arrowheads when locked", () => {
+    const { container } = renderOverlay({ locked: true, reference: true });
+
+    expect(screen.queryByRole("button", { name: /point/ })).toBeNull();
+    expect(container.querySelectorAll(".measurement-handle")).toHaveLength(0);
+    expect(container.querySelectorAll(".measurement-locked-endcap")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Select measurement, 5 m" })).toBeTruthy();
+  });
+
   it("keeps the rubber-band hit line inert while unselected so it cannot swallow the completing click", () => {
     renderOverlay({ selected: false });
     const hitLine = screen.getByRole("button", { name: "Select measurement, 5 m" });

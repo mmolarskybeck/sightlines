@@ -115,6 +115,24 @@ describe("moveRoomVertex", () => {
   });
 });
 
+describe("reference measurements through wall splits", () => {
+  it("rehomes one-sided references and deletes cross-split references", () => {
+    const project = createSampleProject();
+    project.referenceMeasurements = [
+      { id: "left", kind: "elevation", wallId: "wall-north", visible: true, locked: false, start: { xMm: 100, yMm: 100 }, end: { xMm: 200, yMm: 100 } },
+      { id: "right", kind: "elevation", wallId: "wall-north", visible: true, locked: false, start: { xMm: 700, yMm: 100 }, end: { xMm: 900, yMm: 100 } },
+      { id: "cross", kind: "elevation", wallId: "wall-north", visible: true, locked: false, start: { xMm: 200, yMm: 100 }, end: { xMm: 800, yMm: 100 } }
+    ];
+    const result = splitWall(project, "wall-north", 500);
+    expect(result.project.referenceMeasurements?.map((item) => item.id)).toEqual(["left", "right"]);
+    expect(result.project.referenceMeasurements?.find((item) => item.id === "right")).toMatchObject({
+      wallId: result.newWallId,
+      start: { xMm: 200 },
+      end: { xMm: 400 }
+    });
+  });
+});
+
 describe("canMoveRoomVertex", () => {
   it("mirrors moveRoomVertex's accept/reject decision", () => {
     const room = createSampleProject().floor.rooms[0].room;

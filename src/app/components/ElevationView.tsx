@@ -40,6 +40,7 @@ import {
 import type {
   Artwork,
   DisplayUnit,
+  ReferenceMeasurement,
   WallObject,
   WallObjectBase
 } from "../../domain/project";
@@ -172,6 +173,7 @@ const NO_OP_GET_BLOB: (key: string) => Promise<Blob> = () =>
 // project (pre-boot) never yields a fresh [] that would defeat the selector's
 // referential-equality re-render guard.
 const EMPTY_WALL_OBJECTS: WallObject[] = [];
+const EMPTY_REFERENCE_MEASUREMENTS: ReferenceMeasurement[] = [];
 
 // A pointer-drag move of an existing placement, transient until release
 // (docs/plan.md §7: live preview, exactly one store commit on release).
@@ -367,6 +369,12 @@ export function ElevationView({
   // the old prop did, falling back to a stable module-level empty array pre-
   // boot so the selector result never changes identity spuriously.
   const wallObjects = useAppStore((state) => state.project?.wallObjects ?? EMPTY_WALL_OBJECTS);
+  const selection = useAppStore((state) => state.selection);
+  const referenceMeasurements = useAppStore(
+    (state) => state.project?.referenceMeasurements ?? EMPTY_REFERENCE_MEASUREMENTS
+  );
+  const onSelectMeasurement = useAppStore((state) => state.selectMeasurement);
+  const onUpdateReferenceMeasurement = useAppStore((state) => state.updateReferenceMeasurement);
   const onSelectArtwork = useAppStore((state) => state.selectArtwork);
   const onSelectOpening = useAppStore((state) => state.selectOpening);
   const onSelectObject = useAppStore((state) => state.selectObject);
@@ -2030,6 +2038,45 @@ export function ElevationView({
             wallHeightMm={wallHeightMm}
           />
         ) : null}
+        {referenceMeasurements
+          .filter((item) => item.kind === "elevation" && item.wallId === wallId && item.visible)
+          .map((item) => {
+            const selected = selection.kind === "measurement" && selection.measurementId === item.id;
+            const outOfBounds = [item.start, item.end].some(
+              (point) => point.xMm < 0 || point.xMm > wallLengthMm || point.yMm < 0 || point.yMm > wallHeightMm
+            );
+            return (
+              <MeasurementOverlay
+                key={item.id}
+                a={{ xMm: item.start.xMm, yMm: wallLocalYToSvgY(wallHeightMm, item.start.yMm) }}
+                b={{ xMm: item.end.xMm, yMm: wallLocalYToSvgY(wallHeightMm, item.end.yMm) }}
+                unit={unit}
+                pixelsPerMm={pixelsPerMm}
+                reference
+                locked={item.locked}
+                outOfBounds={outOfBounds}
+                selected={selected}
+                onBodyPointerDown={() => onSelectMeasurement(item.id)}
+                onEndpointKeyDown={(endpoint, event) => {
+                  if (item.locked || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+                  event.preventDefault();
+                  const step = getNudgeStepMm({
+                    unit,
+                    snapToGrid,
+                    gridPrecisionFloorMm,
+                    shiftKey: event.shiftKey,
+                    altKey: event.altKey
+                  });
+                  const point = endpoint === "a" ? item.start : item.end;
+                  const next = {
+                    xMm: point.xMm + (event.key === "ArrowRight" ? step : event.key === "ArrowLeft" ? -step : 0),
+                    yMm: point.yMm + (event.key === "ArrowUp" ? step : event.key === "ArrowDown" ? -step : 0)
+                  };
+                  void onUpdateReferenceMeasurement(item.id, endpoint === "a" ? { start: next } : { end: next });
+                }}
+              />
+            );
+          })}
         {measurementActive &&
         measurementState &&
         measurementState.context.kind === "elevation" &&
