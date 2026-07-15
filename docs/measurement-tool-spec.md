@@ -212,10 +212,16 @@ accident.
 Only one temporary measurement exists. Beginning a new one immediately clears
 the previous unkept result. No confirmation is required because the temporary
 result has not been saved and **Keep as reference** is available before
-replacement. Replacement is intentionally not undoable: temporary state never
-enters project history, and adding a second hidden history would undermine the
-single undo model. Users preserve a result by keeping it before beginning
-another.
+replacement. Temporary state never enters project history, and replacement is
+not restorable: users preserve a result by keeping it before beginning another.
+
+While Measure is armed, `⌘Z`/`Ctrl+Z` acts as a one-shot cancel/clear of the
+current temporary work — it cancels an in-progress gesture or refinement, or
+clears the completed temporary measurement — as a synonym for the Escape path
+in §13, matching the "take back the last thing I did" muscle memory. This is
+not a second history: it is never multi-step, redo never restores cleared or
+replaced temporary state, and with no temporary work present undo falls
+through to project history unchanged.
 
 ### 7.4 Degenerate measurement
 
@@ -520,7 +526,9 @@ hidden references can be selectively included.
 - Click-click and click-drag produce the same endpoint geometry.
 - Completing a measurement leaves the tool armed.
 - Beginning another replaces the one temporary result.
-- Replacing a temporary result is intentionally not undoable.
+- Replacing a temporary result is not restorable; `⌘Z`/`Ctrl+Z` while armed is
+  a one-shot cancel/clear of temporary work per §7.3, never a second history,
+  and falls through to project undo when no temporary work exists.
 - Canvas geometry places points instead of changing underlying object
   selection while Measure is armed.
 - Temporary and reference measurements retain selection precedence over point
