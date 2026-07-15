@@ -73,9 +73,10 @@ import { useContainerSize } from "../hooks/useContainerSize";
 import { useDragGesture } from "../hooks/useDragGesture";
 import { useSelectSuppression } from "../hooks/useSelectSuppression";
 import { useSvgViewportGestures } from "../hooks/useSvgViewportGestures";
-import type {
-  MeasurementToolAction,
-  MeasurementToolState
+import {
+  MEASURE_DRAG_SLOP_PX,
+  type MeasurementToolAction,
+  type MeasurementToolState
 } from "../hooks/useMeasurementTool";
 import { useAppStore } from "../store";
 import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
@@ -111,7 +112,6 @@ import { WallSwitcher, type WallSwitcherEntry } from "./WallSwitcher";
 export { wallLocalYToSvgY };
 
 const SNAP_THRESHOLD_PX = 10;
-const MEASURE_DRAG_SLOP_PX = 8;
 
 // The macOS-window "shove past a barrier" distance, in screen pixels. Set at
 // ~5× the snap threshold so the two gestures read as different intents: a snap
@@ -343,6 +343,7 @@ export function ElevationView({
     pointerId: number;
     startClientX: number;
     startClientY: number;
+    startedDrawing: boolean;
     refining?: MeasurementEndpoint;
   } | null>(null);
   const canvasToolArmed = Boolean(activeTool || measurementActive);
@@ -726,17 +727,16 @@ export function ElevationView({
     event.preventDefault();
     event.stopPropagation();
 
-    if (measurementState?.phase === "drawing") {
-      onMeasurementDispatch?.({ type: "complete", point });
-      measurementGestureRef.current = null;
-      return true;
-    }
-
-    onMeasurementDispatch?.({ type: "begin", point });
+    // A press while already drawing is the completing click of click-click;
+    // defer it to pointer-up (mirrors Plan) so the rubber band doesn't
+    // resolve before the browser delivers the matching up event.
+    const startedDrawing = measurementState?.phase !== "drawing";
+    if (startedDrawing) onMeasurementDispatch?.({ type: "begin", point });
     measurementGestureRef.current = {
       pointerId: event.pointerId,
       startClientX: event.clientX,
-      startClientY: event.clientY
+      startClientY: event.clientY,
+      startedDrawing
     };
     event.currentTarget.setPointerCapture?.(event.pointerId);
     return true;
@@ -770,7 +770,10 @@ export function ElevationView({
       event.clientX - gesture.startClientX,
       event.clientY - gesture.startClientY
     );
-    if (movedPx > MEASURE_DRAG_SLOP_PX) {
+    // The second click completes regardless of slop. A first press completes
+    // only when it was a genuine drag; jitter stays in click-click drawing
+    // (mirrors Plan's handleMeasurePointerUpCapture).
+    if (!gesture.startedDrawing || movedPx > MEASURE_DRAG_SLOP_PX) {
       const point = resolvedMeasurementPointer(event);
       if (point) onMeasurementDispatch?.({ type: "complete", point });
     }
@@ -788,6 +791,7 @@ export function ElevationView({
       pointerId: event.pointerId,
       startClientX: event.clientX,
       startClientY: event.clientY,
+      startedDrawing: false,
       refining: endpoint
     };
     svgRef.current?.setPointerCapture?.(event.pointerId);
@@ -1955,7 +1959,7 @@ export function ElevationView({
               )
             }}
             pixelsPerMm={pixelsPerMm}
-            selected
+            selected={measurementState.phase !== "drawing"}
             snappedEndpoint={measurementSnappedEndpoint}
             unit={unit}
             onBodyPointerDown={() => {}}

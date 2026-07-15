@@ -88,4 +88,20 @@ describe("MeasurementOverlay", () => {
     expect(screen.queryByRole("button", { name: /point/ })).toBeNull();
     expect(screen.getByRole("button", { name: "Select measurement, 5 m" })).toBeTruthy();
   });
+
+  it("keeps the rubber-band hit line inert while unselected so it cannot swallow the completing click", () => {
+    renderOverlay({ selected: false });
+    const hitLine = screen.getByRole("button", { name: "Select measurement, 5 m" });
+
+    expect(hitLine.style.pointerEvents).toBe("none");
+    expect(hitLine.getAttribute("tabindex")).toBe("-1");
+  });
+
+  it("keeps the completed measurement's hit line interactive once selected", () => {
+    renderOverlay({ selected: true });
+    const hitLine = screen.getByRole("button", { name: "Select measurement, 5 m" });
+
+    expect(hitLine.style.pointerEvents).toBe("stroke");
+    expect(hitLine.getAttribute("tabindex")).toBe("0");
+  });
 });

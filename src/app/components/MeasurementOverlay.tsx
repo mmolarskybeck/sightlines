@@ -133,8 +133,8 @@ export function MeasurementOverlay({
         x2={b.xMm}
         y2={b.yMm}
         role="button"
-        tabIndex={0}
-        style={{ strokeWidth: bodyHitWidthMm }}
+        tabIndex={selected ? 0 : -1}
+        style={{ strokeWidth: bodyHitWidthMm, pointerEvents: selected ? "stroke" : "none" }}
         onPointerDown={(event) => {
           event.stopPropagation();
           onBodyPointerDown?.(event);

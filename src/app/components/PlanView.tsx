@@ -126,9 +126,10 @@ import { marqueeRectMm, type MarqueeState } from "./marqueeRect";
 import { type ResizeHandleTarget } from "./RoomResizeHandles";
 import { ViewportZoomControls } from "./ViewportZoomControls";
 import { MeasurementOverlay } from "./MeasurementOverlay";
-import type {
-  MeasurementToolAction,
-  MeasurementToolState
+import {
+  MEASURE_DRAG_SLOP_PX,
+  type MeasurementToolAction,
+  type MeasurementToolState
 } from "../hooks/useMeasurementTool";
 import { PlanStructureLayer } from "./plan/PlanStructureLayer";
 import { PlacedObjectsLayer } from "./plan/PlacedObjectsLayer";
@@ -167,7 +168,6 @@ const PARTITION_MIN_LENGTH_MM = 100;
 const RECT_ROOM_MIN_SIZE_MM = 500;
 // Prevent fit-view from over-zooming sparse plans (~30 ft minimum extent).
 const MIN_PLAN_FIT_EXTENT_MM = 9144;
-const MEASURE_DRAG_SLOP_PX = 6;
 
 function planRectMeasureGeometry(rect: PlanRect, id: string): MeasureCandidateSources {
   const angle = (rect.angleDeg * Math.PI) / 180;

@@ -80,7 +80,7 @@ function Harness() {
 }
 
 describe("Elevation temporary measurement", () => {
-  it("supports click-click creation in wall-local coordinates", () => {
+  it("supports click-click creation in wall-local coordinates, completing on the second pointer-up", () => {
     useAppStore.setState({ project: createSampleProject() });
     const { container } = render(<Harness />);
     const svg = container.querySelector("svg.elevation-svg")!;
@@ -88,6 +88,10 @@ describe("Elevation temporary measurement", () => {
     fireEvent.pointerDown(svg, { pointerId: 1, pointerType: "mouse", button: 0, clientX: 300, clientY: 300 });
     fireEvent.pointerMove(svg, { pointerId: 1, pointerType: "mouse", clientX: 700, clientY: 300 });
     fireEvent.pointerDown(svg, { pointerId: 1, pointerType: "mouse", button: 0, clientX: 700, clientY: 300 });
+    // Still drawing until the completing click's pointer-up fires — a
+    // sub-slop press must not resolve the measurement on pointer-down.
+    expect(screen.getByTestId("measurement-phase").textContent).toBe("drawing");
+    fireEvent.pointerUp(svg, { pointerId: 1, pointerType: "mouse", clientX: 700, clientY: 300 });
 
     expect(screen.getByRole("group", { name: /^Measurement,/ })).toBeTruthy();
     expect(container.querySelector(".measurement-overlay" )?.getAttribute("data-selected")).toBe("true");
@@ -106,6 +110,19 @@ describe("Elevation temporary measurement", () => {
     expect(screen.getByRole("button", { name: /Measurement end point/ })).toBeTruthy();
   });
 
+  it("stays in the drawing phase when the first press releases under slop, falling through to click-click", () => {
+    useAppStore.setState({ project: createSampleProject() });
+    const { container } = render(<Harness />);
+    const svg = container.querySelector("svg.elevation-svg")!;
+
+    fireEvent.pointerDown(svg, { pointerId: 3, pointerType: "mouse", button: 0, clientX: 250, clientY: 250 });
+    fireEvent.pointerMove(svg, { pointerId: 3, pointerType: "mouse", clientX: 252, clientY: 251 });
+    fireEvent.pointerUp(svg, { pointerId: 3, pointerType: "mouse", clientX: 252, clientY: 251 });
+
+    expect(screen.getByTestId("measurement-phase").textContent).toBe("drawing");
+    expect(container.querySelector(".measurement-overlay")?.getAttribute("data-selected")).toBeNull();
+  });
+
   it("nudges a focused endpoint in wall-local direction with shared arrow steps", () => {
     useAppStore.setState({ project: createSampleProject() });
     const { container } = render(<Harness />);
@@ -113,6 +130,7 @@ describe("Elevation temporary measurement", () => {
     fireEvent.pointerDown(svg, { pointerType: "mouse", button: 0, clientX: 300, clientY: 300 });
     fireEvent.pointerMove(svg, { pointerType: "mouse", clientX: 700, clientY: 300 });
     fireEvent.pointerDown(svg, { pointerType: "mouse", button: 0, clientX: 700, clientY: 300 });
+    fireEvent.pointerUp(svg, { pointerType: "mouse", clientX: 700, clientY: 300 });
 
     const end = screen.getByRole("button", { name: /Measurement end point/ });
     const before = Number(end.getAttribute("cx"));

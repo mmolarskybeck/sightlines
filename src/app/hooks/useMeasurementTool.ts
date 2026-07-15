@@ -2,6 +2,12 @@ import { useCallback, useEffect, useReducer } from "react";
 
 import type { Point } from "../../domain/geometry/polygon";
 
+// Shared pointer-travel threshold (px) below which a press is treated as a
+// click rather than a drag, for both click-click and click-drag gestures.
+// Plan and Elevation must agree so a measurement drawn the same way reads
+// the same way in either view.
+export const MEASURE_DRAG_SLOP_PX = 6;
+
 // Coordinate ownership is explicit even for temporary work. An Elevation
 // measurement is meaningful only on the wall face where it was drawn.
 export type MeasurementContext =
