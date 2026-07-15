@@ -137,6 +137,23 @@ describe("usePlanMode", () => {
     expect(result.current.mode).toEqual({ kind: "idle" });
   });
 
+  it("arms and clears click-to-place partition duplication", () => {
+    const { result } = renderHook(() => usePlanMode("plan", null));
+
+    act(() => {
+      result.current.armDuplicatePartition("partition-1");
+    });
+    expect(result.current.mode).toEqual({
+      kind: "duplicatePartition",
+      sourceWallId: "partition-1"
+    });
+
+    act(() => {
+      result.current.armDuplicatePartition(null);
+    });
+    expect(result.current.mode).toEqual({ kind: "idle" });
+  });
+
   it("toggleReshapeRoom arms the given room, re-arming the same room disarms it, and it disarms other modes", () => {
     const { result } = renderHook(() => usePlanMode("plan", "room-1"));
 

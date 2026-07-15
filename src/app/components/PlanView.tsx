@@ -56,6 +56,7 @@ import {
   type WallObject
 } from "../../domain/project";
 import {
+  DEFAULT_FREESTANDING_THICKNESS_MM,
   parseFaceWallId,
   roomIdContainingPoint,
   type FloorPartition
@@ -68,12 +69,15 @@ import {
 } from "../../domain/geometry/drawSnapping";
 import { canMoveRoomVertex, moveRoomWall } from "../../domain/geometry/reshapeRoom";
 import { getGridSnapTargets } from "../../domain/snapping/gridSnapTargets";
-import { getPartitionMoveSnapTargets } from "../../domain/snapping/partitionSnapTargets";
 import {
-  getPartitionClearances,
+  getPartitionDrawSnapTargets,
+  getPartitionMoveSnapTargets
+} from "../../domain/snapping/partitionSnapTargets";
+import {
+  getPartitionDimensionChains,
   partitionAxisForWorldAxis,
-  type PartitionClearances,
-  type SideClearance
+  type ChainSegment,
+  type PartitionDimensionChains
 } from "../../domain/geometry/partitionSpacing";
 import {
   floatPolicyForKind,
@@ -110,6 +114,7 @@ import {
 } from "../../domain/viewport/viewport2d";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
 import { getNudgeStepMm } from "../hooks/nudgeStep";
+import { isEditableTarget } from "../hooks/isEditableTarget";
 import { useArtworkAspect } from "../hooks/useArtworkAspect";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { useContainerSize } from "../hooks/useContainerSize";
@@ -148,6 +153,7 @@ import type {
   DropGhostState,
   ObjectDragState,
   PartitionDragState,
+  PartitionDuplicateGhostState,
   PartitionDrawState,
   RectDrawState,
   RoomDragState,
@@ -174,6 +180,25 @@ const PARTITION_MIN_LENGTH_MM = 100;
 const RECT_ROOM_MIN_SIZE_MM = 500;
 // Prevent fit-view from over-zooming sparse plans (~30 ft minimum extent).
 const MIN_PLAN_FIT_EXTENT_MM = 9144;
+
+function midpointOf(a: Point, b: Point): Point {
+  return { xMm: (a.xMm + b.xMm) / 2, yMm: (a.yMm + b.yMm) / 2 };
+}
+
+function liftPartitionChains(
+  chains: PartitionDimensionChains,
+  offset: Vector2
+): PartitionDimensionChains {
+  const liftSegment = (segment: ChainSegment): ChainSegment => ({
+    ...segment,
+    aMm: { xMm: segment.aMm.xMm + offset.xMm, yMm: segment.aMm.yMm + offset.yMm },
+    bMm: { xMm: segment.bMm.xMm + offset.xMm, yMm: segment.bMm.yMm + offset.yMm }
+  });
+  return {
+    normal: chains.normal.map(liftSegment),
+    span: chains.span.map(liftSegment)
+  };
+}
 
 function planRectMeasureGeometry(rect: PlanRect, id: string): MeasureCandidateSources {
   const angle = (rect.angleDeg * Math.PI) / 180;
@@ -336,6 +361,9 @@ export function PlanView({
   partitionToolActive = false,
   onPartitionToolChange,
   onAddFreestandingWall,
+  duplicatePartitionSourceWallId = null,
+  onDuplicatePartitionChange,
+  onDuplicateFreestandingWall,
   selectedFreestandingWallId = null,
   onMoveFreestandingWall,
   onMoveFreestandingWallEndpoint,
@@ -385,6 +413,9 @@ export function PlanView({
   partitionToolActive?: boolean;
   onPartitionToolChange?: (active: boolean) => void;
   onAddFreestandingWall?: (startFloorMm: Point, endFloorMm: Point) => void;
+  duplicatePartitionSourceWallId?: string | null;
+  onDuplicatePartitionChange?: (active: boolean) => void;
+  onDuplicateFreestandingWall?: (wallId: string, centerFloorMm: Point) => void;
   selectedFreestandingWallId?: string | null;
   onMoveFreestandingWall?: (wallId: string, deltaFloorMm: Point) => void;
   onMoveFreestandingWallEndpoint?: (
@@ -733,6 +764,9 @@ export function PlanView({
     getBlob ?? NO_OP_GET_BLOB
   );
   const [toolGhost, setToolGhost] = useState<ToolGhostState | null>(null);
+  const [partitionDuplicateGhost, setPartitionDuplicateGhost] =
+    useState<PartitionDuplicateGhostState | null>(null);
+  const partitionDuplicateSnapIdsRef = useRef<SnapTargetIds | undefined>(undefined);
   const toolSnapTargetIdsRef = useRef<SnapTargetIds | undefined>(undefined);
   // Prevent a gesture's trailing native click from placing another object.
   const suppressNextToolClickRef = useRef(false);
@@ -856,7 +890,7 @@ export function PlanView({
     onMove: (current, event) => {
       const pointerMm = toSvgMm(event.clientX, event.clientY);
       if (!pointerMm) return null;
-      const endMm = snapDrawPoint(pointerMm, current.startMm, event.shiftKey);
+      const endMm = snapPartitionDrawPoint(pointerMm, current.startMm, event.shiftKey);
       return { ...current, endMm, invalid: partitionDrawInvalid(current.startMm, endMm) };
     },
     onRelease: (current) => {
@@ -930,7 +964,8 @@ export function PlanView({
                 room: placement.room,
                 placementOffsetMm: { xMm: placement.offsetXMm, yMm: placement.offsetYMm },
                 partition,
-                proposedMidFloorMm: proposedMid
+                proposedMidFloorMm: proposedMid,
+                incrementMm: minorGridMm
               })
             : [];
 
@@ -1049,6 +1084,83 @@ export function PlanView({
     minYMm: viewBoxBounds.y,
     maxYMm: viewBoxBounds.y + viewBoxBounds.height
   });
+
+  // A selected partition is keyboard-placeable just like a selected measurement
+  // endpoint. Keyboard motion intentionally bypasses snap resolution so every
+  // press has a predictable delta and creates one normal partition edit.
+  useEffect(() => {
+    if (
+      !selectedFreestandingWallId ||
+      drag ||
+      objectDrag ||
+      roomDrag ||
+      vertexDrag ||
+      wallDrag ||
+      partitionDrag ||
+      partitionDraw ||
+      rectDraw ||
+      duplicatePartitionSourceWallId
+    ) {
+      return;
+    }
+    if (
+      activeTool ||
+      drawRoomActive ||
+      drawRectActive ||
+      partitionToolActive ||
+      reshapeRoomId ||
+      measurementActive
+    ) {
+      return;
+    }
+    const wallId = selectedFreestandingWallId;
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (isEditableTarget(event.target)) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-owns-arrow-keys]") !== null
+      ) {
+        return;
+      }
+      if (event.metaKey || event.ctrlKey) return;
+      const delta = getPlanMeasurementNudgeDelta(
+        event.key,
+        project.unit,
+        gridPrecisionFloorMm,
+        event.shiftKey,
+        snapToGrid,
+        event.altKey
+      );
+      if (!delta) return;
+      event.preventDefault();
+      onMoveFreestandingWall?.(wallId, delta);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    activeTool,
+    drag,
+    drawRectActive,
+    drawRoomActive,
+    duplicatePartitionSourceWallId,
+    gridPrecisionFloorMm,
+    measurementActive,
+    objectDrag,
+    onMoveFreestandingWall,
+    partitionDrag,
+    partitionDraw,
+    partitionToolActive,
+    project.unit,
+    reshapeRoomId,
+    rectDraw,
+    roomDrag,
+    selectedFreestandingWallId,
+    snapToGrid,
+    vertexDrag,
+    wallDrag
+  ]);
 
   // The project to render during a drag — one PlanPreview layer per live
   // gesture (wall resize, room move, reshape-mode vertex drag, reshape-mode
@@ -1337,15 +1449,87 @@ export function PlanView({
     [project.wallObjects, artworksById]
   );
 
-  // Compute all four partition clearances from preview geometry in room-local space.
-  const partitionClearancesFloor = useMemo<{
-    clearances: PartitionClearances;
+  // Build complete gap/solid chains in room-local space, then lift them once
+  // for the plan overlay. A valid draw preview participates too, so its live
+  // feedback uses the exact geometry that will be committed.
+  const partitionChainsFloor = useMemo<{
+    chains: PartitionDimensionChains;
     partition: FreestandingWall;
   } | null>(() => {
+    const rooms = project.floor.rooms;
+
+    // Resolves the room a not-yet-committed partition segment sits in (by its
+    // midpoint) and hand-builds the synthetic FreestandingWall the chain
+    // functions need — shared by the draw preview and the duplicate-ghost
+    // preview below, the two cases where there's no committed wall yet to read
+    // a room id off of. `overrides` carries fields a caller wants copied from a
+    // source wall instead of defaulted off the destination room.
+    function previewPartitionChains(
+      startFloorMm: Point,
+      endFloorMm: Point,
+      thicknessMm: number,
+      id: string,
+      overrides: Partial<Pick<FreestandingWall, "heightMm" | "defaultCenterlineHeightMm">> = {}
+    ): { chains: PartitionDimensionChains; partition: FreestandingWall } | null {
+      const roomId = roomIdContainingPoint(project, midpointOf(startFloorMm, endFloorMm));
+      const placement = roomId ? rooms.find((candidate) => candidate.roomId === roomId) ?? null : null;
+      if (!placement) return null;
+      const offset = { xMm: placement.offsetXMm, yMm: placement.offsetYMm };
+      const partition: FreestandingWall = {
+        id,
+        roomId: placement.roomId,
+        name: "Partition preview",
+        startXMm: startFloorMm.xMm - offset.xMm,
+        startYMm: startFloorMm.yMm - offset.yMm,
+        endXMm: endFloorMm.xMm - offset.xMm,
+        endYMm: endFloorMm.yMm - offset.yMm,
+        thicknessMm,
+        heightMm: overrides.heightMm ?? placement.room.heightMm,
+        ...(overrides.defaultCenterlineHeightMm !== undefined
+          ? { defaultCenterlineHeightMm: overrides.defaultCenterlineHeightMm }
+          : {})
+      };
+      return {
+        chains: liftPartitionChains(getPartitionDimensionChains(placement.room, partition), offset),
+        partition
+      };
+    }
+
+    if (partitionDraw?.endMm && !partitionDraw.invalid) {
+      const result = previewPartitionChains(
+        partitionDraw.startMm,
+        partitionDraw.endMm,
+        DEFAULT_FREESTANDING_THICKNESS_MM,
+        "partition-draw-preview"
+      );
+      if (result) return result;
+    }
+
+    if (partitionDuplicateGhost && !partitionDuplicateGhost.invalid) {
+      const source = rooms
+        .flatMap((candidate) => candidate.room.freestandingWalls)
+        .find((wall) => wall.id === duplicatePartitionSourceWallId);
+      if (source) {
+        const result = previewPartitionChains(
+          partitionDuplicateGhost.startMm,
+          partitionDuplicateGhost.endMm,
+          source.thicknessMm,
+          "partition-duplicate-preview",
+          { heightMm: source.heightMm, defaultCenterlineHeightMm: source.defaultCenterlineHeightMm }
+        );
+        if (result) return result;
+      }
+    }
+
+    // The selected/dragged case keeps its room fixed to the committed wall's
+    // own placement rather than re-resolving by midpoint — an in-flight drag
+    // can pass outside the room polygon mid-gesture (near a boundary), and the
+    // dimension chain should keep reading against the room it actually belongs
+    // to, not flicker off when that happens.
     const activeWallId = partitionDrag?.wallId ?? selectedFreestandingWallId;
     if (!activeWallId) return null;
 
-    const placement = project.floor.rooms.find((candidate) =>
+    const placement = rooms.find((candidate) =>
       candidate.room.freestandingWalls.some((wall) => wall.id === activeWallId)
     );
     const committed = placement?.room.freestandingWalls.find((wall) => wall.id === activeWallId);
@@ -1363,29 +1547,18 @@ export function PlanView({
           }
         : committed;
 
-    const local = getPartitionClearances(placement.room, partition);
-    const liftSide = (side: SideClearance): SideClearance => ({
-      originMm: { xMm: side.originMm.xMm + offset.xMm, yMm: side.originMm.yMm + offset.yMm },
-      dirUnit: side.dirUnit,
-      hit: side.hit
-        ? {
-            ...side.hit,
-            pointMm: {
-              xMm: side.hit.pointMm.xMm + offset.xMm,
-              yMm: side.hit.pointMm.yMm + offset.yMm
-            }
-          }
-        : null
-    });
     return {
-      clearances: {
-        normal: { plus: liftSide(local.normal.plus), minus: liftSide(local.normal.minus) },
-        span: { plus: liftSide(local.span.plus), minus: liftSide(local.span.minus) }
-      },
-      // Direction-only mask mapping is translation-invariant.
+      chains: liftPartitionChains(getPartitionDimensionChains(placement.room, partition), offset),
       partition
     };
-  }, [partitionDrag, selectedFreestandingWallId, project.floor.rooms]);
+  }, [
+    duplicatePartitionSourceWallId,
+    partitionDraw,
+    partitionDrag,
+    partitionDuplicateGhost,
+    selectedFreestandingWallId,
+    project.floor.rooms
+  ]);
 
   function disarmTool() {
     onToolChange(null);
@@ -1438,6 +1611,77 @@ export function PlanView({
 
   function handleToolPointerLeave() {
     setToolGhost(null);
+  }
+
+  useEffect(() => {
+    setPartitionDuplicateGhost(null);
+    partitionDuplicateSnapIdsRef.current = undefined;
+  }, [duplicatePartitionSourceWallId]);
+
+  useEffect(() => {
+    if (!duplicatePartitionSourceWallId) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onDuplicatePartitionChange?.(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [duplicatePartitionSourceWallId, onDuplicatePartitionChange]);
+
+  function handlePartitionDuplicateMove(event: ReactPointerEvent<SVGRectElement>) {
+    if (!duplicatePartitionSourceWallId) return;
+    const pointerMm = toSvgMm(event.clientX, event.clientY);
+    if (!pointerMm) return;
+    const sourcePlacement = project.floor.rooms.find((candidate) =>
+      candidate.room.freestandingWalls.some((wall) => wall.id === duplicatePartitionSourceWallId)
+    );
+    const source = sourcePlacement?.room.freestandingWalls.find(
+      (wall) => wall.id === duplicatePartitionSourceWallId
+    );
+    if (!source) return;
+
+    const roomId = roomIdContainingPoint(project, pointerMm);
+    const destination = roomId
+      ? project.floor.rooms.find((candidate) => candidate.roomId === roomId) ?? null
+      : null;
+    const targets: SnapTarget[] = [
+      ...(destination
+        ? getPartitionMoveSnapTargets({
+            room: destination.room,
+            placementOffsetMm: {
+              xMm: destination.offsetXMm,
+              yMm: destination.offsetYMm
+            },
+            partition: { ...source, id: "partition-duplicate-preview" },
+            proposedMidFloorMm: pointerMm,
+            incrementMm: minorGridMm
+          })
+        : []),
+      ...(snapToGrid ? gridSnapTargets : [])
+    ];
+    const snap = resolveSnap(pointerMm, targets, {
+      thresholdMm: snapThresholdMm,
+      previousSnapTargetIds: partitionDuplicateSnapIdsRef.current
+    });
+    partitionDuplicateSnapIdsRef.current = snap.snapTargetIds;
+    const halfDx = (source.endXMm - source.startXMm) / 2;
+    const halfDy = (source.endYMm - source.startYMm) / 2;
+    setPartitionDuplicateGhost({
+      startMm: { xMm: snap.point.xMm - halfDx, yMm: snap.point.yMm - halfDy },
+      endMm: { xMm: snap.point.xMm + halfDx, yMm: snap.point.yMm + halfDy },
+      thicknessMm: source.thicknessMm,
+      invalid: roomIdContainingPoint(project, snap.point) === null,
+      activeGuides: snap.activeGuides
+    });
+  }
+
+  function handlePartitionDuplicateClick(event: ReactMouseEvent<SVGRectElement>) {
+    event.stopPropagation();
+    if (!duplicatePartitionSourceWallId || !partitionDuplicateGhost || partitionDuplicateGhost.invalid) {
+      return;
+    }
+    const center = midpointOf(partitionDuplicateGhost.startMm, partitionDuplicateGhost.endMm);
+    onDuplicateFreestandingWall?.(duplicatePartitionSourceWallId, center);
+    onDuplicatePartitionChange?.(false);
   }
 
   // Arming starts fresh; disarming discards uncommitted points.
@@ -1535,6 +1779,41 @@ export function PlanView({
       const dx = Math.abs(pointerMm.xMm - prev.xMm);
       const dy = Math.abs(pointerMm.yMm - prev.yMm);
       // Keep the snapped major axis and lock the minor axis.
+      result =
+        dx >= dy ? { xMm: result.xMm, yMm: prev.yMm } : { xMm: prev.xMm, yMm: result.yMm };
+    }
+    return result;
+  }
+
+  // Partition drawing uses the same absolute grid as other tools, augmented
+  // by room-relative clean-inset families so dimensions stay round even when
+  // the room origin or perimeter is off the floor lattice.
+  function snapPartitionDrawPoint(
+    pointerMm: Vector2,
+    prev: Vector2 | null,
+    shiftKey: boolean
+  ): Vector2 {
+    let result = pointerMm;
+    if (snapToGrid) {
+      const roomId = roomIdContainingPoint(project, pointerMm);
+      const placement = roomId
+        ? project.floor.rooms.find((candidate) => candidate.roomId === roomId) ?? null
+        : null;
+      const targets: SnapTarget[] = [
+        ...(placement ? getPartitionDrawSnapTargets(placement, pointerMm, minorGridMm) : []),
+        ...gridSnapTargets
+      ];
+      if (prev) {
+        targets.push(
+          { id: "partition-draw-prev-x", kind: "grid", axis: "x", point: { xMm: prev.xMm, yMm: 0 } },
+          { id: "partition-draw-prev-y", kind: "grid", axis: "y", point: { xMm: 0, yMm: prev.yMm } }
+        );
+      }
+      result = resolveSnap(pointerMm, targets, { thresholdMm: snapThresholdMm }).point;
+    }
+    if (shiftKey && prev) {
+      const dx = Math.abs(pointerMm.xMm - prev.xMm);
+      const dy = Math.abs(pointerMm.yMm - prev.yMm);
       result =
         dx >= dy ? { xMm: result.xMm, yMm: prev.yMm } : { xMm: prev.xMm, yMm: result.yMm };
     }
@@ -1909,7 +2188,7 @@ export function PlanView({
     }
     const startMm = toSvgMm(event.clientX, event.clientY);
     if (!startMm) return;
-    const snapped = snapDrawPoint(startMm, null, event.shiftKey);
+    const snapped = snapPartitionDrawPoint(startMm, null, event.shiftKey);
     startPartitionDraw({ startMm: snapped, endMm: null, invalid: true });
   }
 
@@ -2527,10 +2806,10 @@ export function PlanView({
         />
         {/* Live partition clearance dimension lines — shown while a partition
             is selected or being dragged; render-only, muted drafting ink. */}
-        {partitionClearancesFloor ? (
+        {partitionChainsFloor ? (
           <PartitionDimensionLines
-            clearances={partitionClearancesFloor.clearances}
-            partition={partitionClearancesFloor.partition}
+            chains={partitionChainsFloor.chains}
+            partition={partitionChainsFloor.partition}
             visibleWorldAxes={
               // At rest (no drag) or during an endpoint re-drag, show all four
               // gaps. During a MOVE drag show only the latched axes — both false
@@ -2650,6 +2929,8 @@ export function PlanView({
           draw={draw}
           partitionToolActive={partitionToolActive}
           partitionDraw={partitionDraw}
+          partitionDuplicateActive={Boolean(duplicatePartitionSourceWallId)}
+          partitionDuplicateGhost={partitionDuplicateGhost}
           drawRectActive={drawRectActive}
           rectDraw={rectDraw}
           toolGhost={toolGhost}
@@ -2661,6 +2942,7 @@ export function PlanView({
             drag?.activeGuides ??
             roomDrag?.activeGuides ??
             partitionDrag?.activeGuides ??
+            partitionDuplicateGhost?.activeGuides ??
             toolGhost?.activeGuides ??
             []
           }
@@ -2673,6 +2955,8 @@ export function PlanView({
           handleDrawClick={handleDrawClick}
           handleDrawPointerMove={handleDrawPointerMove}
           beginPartitionDraw={beginPartitionDraw}
+          handlePartitionDuplicateMove={handlePartitionDuplicateMove}
+          handlePartitionDuplicateClick={handlePartitionDuplicateClick}
           beginRectDraw={beginRectDraw}
         />
         {visibleMeasurement ? (

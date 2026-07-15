@@ -18,15 +18,18 @@ import {
 import {
   centerFreestandingWallBetweenWalls,
   createFreestandingWall,
+  duplicateFreestandingWallEdit,
   faceWallIdsOf,
   parseFaceWallId,
   moveFreestandingEndpoint as moveFreestandingEndpointEdit,
   moveFreestandingWall as moveFreestandingWallEdit,
   roomIdContainingPoint,
   rotateFreestandingWall as rotateFreestandingWallEdit,
+  setFreestandingClearanceEdit,
   setFreestandingHeight,
   setFreestandingLength,
-  setFreestandingThickness
+  setFreestandingThickness,
+  type FreestandingClearanceSide
 } from "../domain/geometry/freestandingWalls";
 import {
   deleteRoomVertex as deleteRoomVertexEdit,
@@ -244,6 +247,7 @@ export type AppState = ArrangeSliceState &
     depthMm: number;
   }) => Promise<void>;
   addFreestandingWall: (startFloorMm: Point, endFloorMm: Point) => Promise<void>;
+  duplicateFreestandingWall: (wallId: string, centerFloorMm: Point) => Promise<void>;
   moveFreestandingWall: (wallId: string, deltaFloorMm: Point) => Promise<void>;
   moveFreestandingWallEndpoint: (
     wallId: string,
@@ -259,6 +263,11 @@ export type AppState = ArrangeSliceState &
     anchor?: "start" | "end"
   ) => Promise<void>;
   setFreestandingWallHeight: (wallId: string, heightMm: number) => Promise<void>;
+  setFreestandingWallClearance: (
+    wallId: string,
+    side: FreestandingClearanceSide,
+    distanceMm: number
+  ) => Promise<void>;
   deleteFreestandingWall: (wallId: string) => Promise<void>;
   resizeRoomHeight: (roomId: string, heightMm: number) => Promise<void>;
   resizeWall: (wallId: string, lengthMm: number, anchor?: ResizeAnchor) => Promise<void>;
@@ -298,6 +307,7 @@ export type AppState = ArrangeSliceState &
   ) => Promise<ArtworkProjectMembership[]>;
   openProject: (id: string) => Promise<void>;
   createProject: (title: string) => Promise<void>;
+  duplicateProject: (id: string) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
   addArtworksFromFiles: (
     files: File[],
@@ -893,6 +903,7 @@ export function createAppStore(deps: AppStoreDeps) {
       errorFallback: string;
       compute: (project: Project) => GeometryEditResult;
       validate?: boolean;
+      extras?: (result: GeometryEditResult) => EditExtras;
     }): Promise<void> {
       const project = get().project;
       if (!project) return;
@@ -909,15 +920,17 @@ export function createAppStore(deps: AppStoreDeps) {
         return;
       }
 
-      const extras: EditExtras =
-        args.validate === false
+      const extras: EditExtras = {
+        ...(args.extras?.(result) ?? {}),
+        ...(args.validate === false
           ? {}
           : {
               placementWarnings: validateChangedWallPlacements(
                 result.project,
                 result.changedWallIds
               )
-            };
+            })
+      };
       await applyEdit(args.label, () => result.project, extras);
     }
 
@@ -1500,6 +1513,22 @@ export function createAppStore(deps: AppStoreDeps) {
         });
       },
 
+      async duplicateFreestandingWall(wallId, centerFloorMm) {
+        await runPartitionEdit({
+          label: "Duplicate partition",
+          errorFallback: "Could not duplicate that partition",
+          compute: (project) => duplicateFreestandingWallEdit(project, wallId, centerFloorMm),
+          extras: (result) => ({
+            ...selectionWrite(
+              result.project,
+              { kind: "freestandingWall", wallId: result.anchorVertexId },
+              get().wallContextId
+            ),
+            viewMode: "plan"
+          })
+        });
+      },
+
       async moveFreestandingWall(wallId, deltaFloorMm) {
         if (deltaFloorMm.xMm === 0 && deltaFloorMm.yMm === 0) return;
 
@@ -1556,6 +1585,15 @@ export function createAppStore(deps: AppStoreDeps) {
           label: "Resize partition",
           errorFallback: "Could not resize that partition",
           compute: (project) => setFreestandingHeight(project, wallId, heightMm)
+        });
+      },
+
+      async setFreestandingWallClearance(wallId, side, distanceMm) {
+        await runPartitionEdit({
+          label: "Move partition",
+          errorFallback: "Could not move that partition",
+          compute: (project) =>
+            setFreestandingClearanceEdit(project, wallId, side, distanceMm)
         });
       },
 
@@ -2114,6 +2152,31 @@ export function createAppStore(deps: AppStoreDeps) {
           set({
             saveState: "error",
             error: `Could not create the new project (${
+              error instanceof Error ? error.message : "unknown error"
+            }).`
+          });
+        }
+      },
+
+      async duplicateProject(id) {
+        set({ saveState: "saving", error: null });
+
+        try {
+          const source = await deps.projectRepository.load(id);
+          const now = new Date().toISOString();
+          const copy: Project = {
+            ...source,
+            id: newId(),
+            title: `${source.title} (copy)`,
+            createdAt: now,
+            updatedAt: now
+          };
+          await deps.projectRepository.save(copy);
+          setDocument(copy, { viewMode: "plan", saveState: "saved" });
+        } catch (error) {
+          set({
+            saveState: "error",
+            error: `Could not duplicate that project (${
               error instanceof Error ? error.message : "unknown error"
             }).`
           });

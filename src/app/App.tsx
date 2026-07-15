@@ -48,6 +48,7 @@ import type {
   ProjectSummary
 } from "../domain/project";
 import { faceWallId, parseFaceWallId } from "../domain/geometry/freestandingWalls";
+import { getPartitionClearances } from "../domain/geometry/partitionSpacing";
 import type { PackageExportMode } from "../domain/schema/packageSchema";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import {
@@ -224,6 +225,7 @@ export function App() {
     addPolygonRoom,
     addDrawnRectangleRoom,
     addFreestandingWall,
+    duplicateFreestandingWall,
     moveFreestandingWall,
     moveFreestandingWallEndpoint,
     rotateFreestandingWall,
@@ -231,6 +233,7 @@ export function App() {
     setFreestandingWallThickness,
     setFreestandingWallLength,
     setFreestandingWallHeight,
+    setFreestandingWallClearance,
     deleteFreestandingWall,
     renameProject,
     renameRoom,
@@ -256,6 +259,7 @@ export function App() {
     listArtworkProjectMemberships,
     openProject,
     createProject,
+    duplicateProject,
     renameProjectById,
     deleteProject,
     addArtworksFromFiles,
@@ -356,6 +360,7 @@ export function App() {
     toggleDrawRoom,
     toggleReshapeRoom,
     togglePartitionTool,
+    armDuplicatePartition,
     toggleMeasure,
     disarm: disarmPlanMode
   } = usePlanMode(viewMode, selectedRoomId);
@@ -365,6 +370,8 @@ export function App() {
   const drawRoomActive = planMode.kind === "drawRoom";
   const reshapeRoomId = planMode.kind === "reshapeRoom" ? planMode.roomId : null;
   const partitionToolActive = planMode.kind === "drawPartition";
+  const duplicatePartitionSourceWallId =
+    planMode.kind === "duplicatePartition" ? planMode.sourceWallId : null;
   const measurementActive = planMode.kind === "measure";
   // PlanView uses boolean setters so completion and Escape can disarm tools.
   const setDrawRectActive = (active: boolean) => {
@@ -672,6 +679,15 @@ export function App() {
         .flatMap((placement) => placement.room.freestandingWalls)
         .find((wall) => wall.id === selectedFreestandingWallId) ?? null)
     : null;
+  const selectedFreestandingWallPlacement = selectedFreestandingWallId
+    ? project.floor.rooms.find((placement) =>
+        placement.room.freestandingWalls.some((wall) => wall.id === selectedFreestandingWallId)
+      ) ?? null
+    : null;
+  const selectedFreestandingWallClearances =
+    selectedFreestandingWall && selectedFreestandingWallPlacement
+      ? getPartitionClearances(selectedFreestandingWallPlacement.room, selectedFreestandingWall)
+      : null;
   const selectedRoomDimensions = selectedRoomPlacement
     ? getRectangleRoomDimensions(selectedRoomPlacement.room)
     : null;
@@ -1068,6 +1084,7 @@ export function App() {
               listProjectSummaries={listProjectSummaries}
               onCreateProject={createProject}
               onDeleteProject={deleteProject}
+              onDuplicateProject={duplicateProject}
               onExportProject={handleExportProjectById}
               onOpenProject={openProject}
               onRenameProject={renameProjectById}
@@ -1490,6 +1507,13 @@ export function App() {
                 onPartitionToolChange={setPartitionToolActive}
                 onAddFreestandingWall={(start, end) =>
                   void addFreestandingWall(start, end)
+                }
+                duplicatePartitionSourceWallId={duplicatePartitionSourceWallId}
+                onDuplicatePartitionChange={(active) => {
+                  if (!active) armDuplicatePartition(null);
+                }}
+                onDuplicateFreestandingWall={(wallId, center) =>
+                  void duplicateFreestandingWall(wallId, center)
                 }
                 selectedFreestandingWallId={selectedFreestandingWallId}
                 onMoveFreestandingWall={(wallId, delta) =>
@@ -1933,6 +1957,7 @@ export function App() {
             <FreestandingWallInspector
               wall={selectedFreestandingWall}
               unit={project.unit}
+              clearances={selectedFreestandingWallClearances}
               onCommitLength={(lengthMm) =>
                 setFreestandingWallLength(selectedFreestandingWall.id, lengthMm)
               }
@@ -1946,6 +1971,10 @@ export function App() {
                 setFreestandingWallHeight(selectedFreestandingWall.id, heightMm)
               }
               onCenter={(axis) => centerFreestandingWall(selectedFreestandingWall.id, axis)}
+              onCommitClearance={(side, distanceMm) =>
+                setFreestandingWallClearance(selectedFreestandingWall.id, side, distanceMm)
+              }
+              onDuplicate={() => armDuplicatePartition(selectedFreestandingWall.id)}
               onViewFace={(face) =>
                 viewFreestandingFace(faceWallId(selectedFreestandingWall.id, face))
               }

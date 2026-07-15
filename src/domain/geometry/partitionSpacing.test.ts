@@ -4,6 +4,7 @@ import {
   castRay,
   collectObstacleSegments,
   getPartitionClearances,
+  getPartitionDimensionChains,
   partitionAxisForWorldAxis
 } from "./partitionSpacing";
 import type { FreestandingWall, Room } from "../project";
@@ -280,6 +281,84 @@ describe("getPartitionClearances — ray miss", () => {
     // that single ray hits; the other three escape. The centering guard needs
     // only one side to miss to refuse, which it does here.
     expect(clear.span.minus.hit).not.toBeNull();
+  });
+});
+
+describe("getPartitionDimensionChains", () => {
+  it("builds a full room-width chain through three parallel partitions", () => {
+    const subject = partition({ startYMm: 2000, endYMm: 2000 });
+    const upper = partition({
+      id: "room-1-partition-2",
+      startYMm: 1000,
+      endYMm: 1000
+    });
+    const lower = partition({
+      id: "room-1-partition-3",
+      startYMm: 3000,
+      endYMm: 3000
+    });
+    const room = withPartitions(rectRoom(4000, 4000), [subject, upper, lower]);
+    const chain = getPartitionDimensionChains(room, subject).normal;
+    expect(chain.reduce((sum, segment) => sum + segment.lengthMm, 0)).toBeCloseTo(4000);
+    expect(chain.filter((segment) => segment.kind === "solid")).toHaveLength(3);
+    expect(chain.filter((segment) => segment.kind === "solid")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ lengthMm: 100 }),
+        expect.objectContaining({ lengthMm: 100 }),
+        expect.objectContaining({ lengthMm: 100 })
+      ])
+    );
+  });
+
+  it("produces contiguous chains for a diagonal partition", () => {
+    const subject = partition({
+      startXMm: 1500,
+      startYMm: 1500,
+      endXMm: 2500,
+      endYMm: 2500
+    });
+    const room = withPartitions(rectRoom(4000, 4000), [subject]);
+    const chains = getPartitionDimensionChains(room, subject);
+    for (const chain of [chains.normal, chains.span]) {
+      expect(chain.length).toBeGreaterThanOrEqual(3);
+      for (let index = 0; index < chain.length - 1; index += 1) {
+        expect(chain[index].bMm.xMm).toBeCloseTo(chain[index + 1].aMm.xMm);
+        expect(chain[index].bMm.yMm).toBeCloseTo(chain[index + 1].aMm.yMm);
+      }
+      expect(chain.some((segment) => segment.kind === "gap")).toBe(true);
+      expect(chain.some((segment) => segment.kind === "solid")).toBe(true);
+    }
+  });
+
+  it("terminates each direction at the first perimeter hit in an L-shaped room", () => {
+    const room = createPolygonRoomPlacement({
+      roomId: "room-L",
+      name: "L Gallery",
+      heightMm: 3000,
+      pointsFloorMm: [
+        { xMm: 0, yMm: 0 },
+        { xMm: 3000, yMm: 0 },
+        { xMm: 3000, yMm: 3000 },
+        { xMm: 1500, yMm: 3000 },
+        { xMm: 1500, yMm: 1500 },
+        { xMm: 0, yMm: 1500 }
+      ]
+    }).room;
+    const subject: FreestandingWall = {
+      id: "room-L-partition-1",
+      roomId: "room-L",
+      name: "P",
+      startXMm: 500,
+      startYMm: 1000,
+      endXMm: 1000,
+      endYMm: 1000,
+      heightMm: 3000,
+      thicknessMm: 100
+    };
+    const chain = getPartitionDimensionChains(withPartitions(room, [subject]), subject).normal;
+    expect(chain[0].aMm.yMm).toBeCloseTo(0);
+    expect(chain.at(-1)?.bMm.yMm).toBeCloseTo(1500);
+    expect(chain.reduce((sum, segment) => sum + segment.lengthMm, 0)).toBeCloseTo(1500);
   });
 });
 

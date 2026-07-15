@@ -20,6 +20,7 @@ import {
 } from "../domain/placement/arrangeOnWall";
 import { withArtworkFootprint } from "../domain/framing";
 import { createRectangularRoomPlacement } from "../domain/geometry/createRoom";
+import { getPartitionClearances } from "../domain/geometry/partitionSpacing";
 import { evaluateOpeningPair } from "../domain/geometry/openingConnections";
 import { createSampleProject } from "../domain/sample/sampleProject";
 import { MAX_IMPORT_JSON_LENGTH } from "../domain/schema/projectSchema";
@@ -200,6 +201,88 @@ describe("app store", () => {
       .addFreestandingWall({ xMm: 90_000, yMm: 90_000 }, { xMm: 92_000, yMm: 90_000 });
     expect(store.getState().project!.floor.rooms[0].room.freestandingWalls).toHaveLength(0);
     expect(store.getState().error).toMatch(/inside a room/i);
+  });
+
+  it("duplicateFreestandingWall places and selects a geometry-only copy in one edit", async () => {
+    await store
+      .getState()
+      .addFreestandingWall({ xMm: 3000, yMm: 2700 }, { xMm: 5000, yMm: 2700 });
+    const source = store.getState().project!.floor.rooms[0].room.freestandingWalls[0];
+    const undoBefore = store.getState().undoStack.length;
+
+    await store.getState().duplicateFreestandingWall(source.id, { xMm: 6000, yMm: 4000 });
+
+    const state = store.getState();
+    const walls = state.project!.floor.rooms[0].room.freestandingWalls;
+    expect(walls).toHaveLength(2);
+    const copy = walls.find((wall) => wall.id !== source.id)!;
+    expect((copy.startXMm + copy.endXMm) / 2).toBeCloseTo(6000);
+    expect((copy.startYMm + copy.endYMm) / 2).toBeCloseTo(4000);
+    expect(copy.endXMm - copy.startXMm).toBeCloseTo(source.endXMm - source.startXMm);
+    expect(copy.thicknessMm).toBe(source.thicknessMm);
+    expect(freestandingWallIdOf(state.selection)).toBe(copy.id);
+    expect(state.undoStack).toHaveLength(undoBefore + 1);
+    expect(state.undoStack.at(-1)?.label).toBe("Duplicate partition");
+
+    await state.undo();
+    expect(store.getState().project!.floor.rooms[0].room.freestandingWalls).toHaveLength(1);
+  });
+
+  it("duplicateFreestandingWall reports an invalid drop without committing", async () => {
+    await store
+      .getState()
+      .addFreestandingWall({ xMm: 3000, yMm: 2700 }, { xMm: 5000, yMm: 2700 });
+    const source = store.getState().project!.floor.rooms[0].room.freestandingWalls[0];
+    const undoBefore = store.getState().undoStack.length;
+
+    await store
+      .getState()
+      .duplicateFreestandingWall(source.id, { xMm: 100_000, yMm: 100_000 });
+
+    expect(store.getState().project!.floor.rooms[0].room.freestandingWalls).toHaveLength(1);
+    expect(store.getState().undoStack).toHaveLength(undoBefore);
+    expect(store.getState().error).toMatch(/inside a room/i);
+  });
+
+  it("setFreestandingWallClearance translates the partition and is undoable", async () => {
+    await store
+      .getState()
+      .addFreestandingWall({ xMm: 3000, yMm: 2700 }, { xMm: 5000, yMm: 2700 });
+    const beforeRoom = store.getState().project!.floor.rooms[0].room;
+    const before = beforeRoom.freestandingWalls[0];
+    const current = getPartitionClearances(beforeRoom, before).normal.plus.hit!.distanceMm;
+
+    await store
+      .getState()
+      .setFreestandingWallClearance(before.id, "normal-plus", current - 200);
+
+    const state = store.getState();
+    const afterRoom = state.project!.floor.rooms[0].room;
+    const moved = afterRoom.freestandingWalls[0];
+    expect(moved.startYMm).toBeCloseTo(before.startYMm + 200);
+    expect(moved.endYMm).toBeCloseTo(before.endYMm + 200);
+    expect(getPartitionClearances(afterRoom, moved).normal.plus.hit?.distanceMm).toBeCloseTo(
+      current - 200
+    );
+    expect(state.undoStack.at(-1)?.label).toBe("Move partition");
+
+    await state.undo();
+    expect(
+      store.getState().project!.floor.rooms[0].room.freestandingWalls[0].startYMm
+    ).toBeCloseTo(before.startYMm);
+  });
+
+  it("setFreestandingWallClearance rejects a move beyond the opposite boundary", async () => {
+    await store
+      .getState()
+      .addFreestandingWall({ xMm: 3000, yMm: 2700 }, { xMm: 5000, yMm: 2700 });
+    const wall = store.getState().project!.floor.rooms[0].room.freestandingWalls[0];
+    const undoBefore = store.getState().undoStack.length;
+
+    await store.getState().setFreestandingWallClearance(wall.id, "normal-plus", 100_000);
+
+    expect(store.getState().undoStack).toHaveLength(undoBefore);
+    expect(store.getState().error).toMatch(/not enough room/i);
   });
 
   it("deleteFreestandingWall removes both faces' objects in one undo step", async () => {
@@ -1111,6 +1194,31 @@ describe("app store", () => {
       "Untitled Exhibition",
       "Winter Show"
     ]);
+  });
+
+  it("duplicateProject preserves the source and opens a freshly identified copy", async () => {
+    const source = {
+      ...store.getState().project!,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z"
+    };
+    await repository.save(source);
+    store.setState({ project: source });
+
+    await store.getState().duplicateProject(source.id);
+
+    const copy = store.getState().project!;
+    expect(copy.id).not.toBe(source.id);
+    expect(copy.title).toBe(`${source.title} (copy)`);
+    expect(copy.createdAt).toBe(copy.updatedAt);
+    expect(copy.createdAt).not.toBe(source.createdAt);
+    expect(copy.floor).toEqual(source.floor);
+    expect(copy.wallObjects).toEqual(source.wallObjects);
+    expect(copy.checklistArtworkIds).toEqual(source.checklistArtworkIds);
+    expect(repository.projects.get(source.id)).toBe(source);
+    expect(repository.projects.get(copy.id)).toEqual(copy);
+    expect(store.getState().wallContextId).toBe("wall-north");
+    expect(store.getState().undoStack).toHaveLength(0);
   });
 
   it("lists saved project memberships for library artworks and opens a referenced project", async () => {

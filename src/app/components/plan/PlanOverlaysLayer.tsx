@@ -10,6 +10,7 @@ import {
 import { formatLength } from "../../../domain/units/length";
 import type { OpeningKind } from "../../../domain/placement/createOpening";
 import type { DisplayUnit } from "../../../domain/project";
+import { DEFAULT_FREESTANDING_THICKNESS_MM } from "../../../domain/geometry/freestandingWalls";
 import type { Guide } from "../../../domain/snapping/resolveSnap";
 import { PlanObject } from "../PlanObject";
 import { marqueeRectMm, type MarqueeState } from "../marqueeRect";
@@ -17,6 +18,7 @@ import type {
   DrawState,
   DropGhostState,
   PartitionDrawState,
+  PartitionDuplicateGhostState,
   RectDrawState,
   ToolGhostState
 } from "./types";
@@ -36,6 +38,8 @@ export type PlanOverlaysLayerProps = {
   draw: DrawState | null;
   partitionToolActive: boolean;
   partitionDraw: PartitionDrawState | null;
+  partitionDuplicateActive: boolean;
+  partitionDuplicateGhost: PartitionDuplicateGhostState | null;
   drawRectActive: boolean;
   rectDraw: RectDrawState | null;
   toolGhost: ToolGhostState | null;
@@ -53,6 +57,8 @@ export type PlanOverlaysLayerProps = {
   handleDrawClick: (event: ReactMouseEvent<SVGRectElement>) => void;
   handleDrawPointerMove: (event: ReactPointerEvent<SVGRectElement>) => void;
   beginPartitionDraw: (event: ReactPointerEvent<SVGRectElement>) => void;
+  handlePartitionDuplicateMove: (event: ReactPointerEvent<SVGRectElement>) => void;
+  handlePartitionDuplicateClick: (event: ReactMouseEvent<SVGRectElement>) => void;
   beginRectDraw: (event: ReactPointerEvent<SVGRectElement>) => void;
 };
 
@@ -61,6 +67,8 @@ export function PlanOverlaysLayer({
   draw,
   partitionToolActive,
   partitionDraw,
+  partitionDuplicateActive,
+  partitionDuplicateGhost,
   drawRectActive,
   rectDraw,
   toolGhost,
@@ -76,6 +84,8 @@ export function PlanOverlaysLayer({
   handleDrawClick,
   handleDrawPointerMove,
   beginPartitionDraw,
+  handlePartitionDuplicateMove,
+  handlePartitionDuplicateClick,
   beginRectDraw
 }: PlanOverlaysLayerProps) {
   return (
@@ -224,8 +234,25 @@ export function PlanOverlaysLayer({
                 const rect = segmentPlanRect(
                   partitionDraw.startMm,
                   partitionDraw.endMm,
-                  100
+                  DEFAULT_FREESTANDING_THICKNESS_MM
                 );
+                const lengthMm = Math.hypot(
+                  partitionDraw.endMm.xMm - partitionDraw.startMm.xMm,
+                  partitionDraw.endMm.yMm - partitionDraw.startMm.yMm
+                );
+                // Offset the readout along the slab's own normal (flipped to
+                // point screen-upward) so it clears the slab at any angle —
+                // a fixed "above center" offset overlaps vertical partitions.
+                const labelNormal =
+                  lengthMm > 0
+                    ? {
+                        xMm: -(partitionDraw.endMm.yMm - partitionDraw.startMm.yMm) / lengthMm,
+                        yMm: (partitionDraw.endMm.xMm - partitionDraw.startMm.xMm) / lengthMm
+                      }
+                    : { xMm: 0, yMm: -1 };
+                const labelFlip = labelNormal.yMm > 0 ? -1 : 1;
+                const labelOffsetMm =
+                  DEFAULT_FREESTANDING_THICKNESS_MM / 2 + handleSizeMm * 1.6;
                 const color = partitionDraw.invalid ? "var(--danger)" : "var(--selection)";
                 return (
                   <g style={{ pointerEvents: "none" }}>
@@ -238,7 +265,66 @@ export function PlanOverlaysLayer({
                       style={{ fill: color, fillOpacity: 0.4, stroke: color, strokeWidth: 2 }}
                       vectorEffect="non-scaling-stroke"
                     />
+                    {handleSizeMm > 0 ? (
+                      <text
+                        className="resize-handle-label"
+                        x={rect.centerXMm + labelNormal.xMm * labelFlip * labelOffsetMm}
+                        y={rect.centerYMm + labelNormal.yMm * labelFlip * labelOffsetMm}
+                        textAnchor="middle"
+                        style={{
+                          fontSize: handleSizeMm * 1.6,
+                          strokeWidth: handleSizeMm * 0.5,
+                          pointerEvents: "none"
+                        }}
+                      >
+                        {formatLength(lengthMm, { unit: wallUnit })}
+                      </text>
+                    ) : null}
                   </g>
+                );
+              })()
+            : null}
+        </g>
+      ) : null}
+      {partitionDuplicateActive ? (
+        <g className="partition-duplicate-layer">
+          <rect
+            x={viewBox.x}
+            y={viewBox.y}
+            width={viewBox.width}
+            height={viewBox.height}
+            fill="transparent"
+            style={{ cursor: "copy" }}
+            onPointerDown={(event) => event.stopPropagation()}
+            onPointerMove={handlePartitionDuplicateMove}
+            onClick={handlePartitionDuplicateClick}
+          />
+          {partitionDuplicateGhost
+            ? (() => {
+                const rect = segmentPlanRect(
+                  partitionDuplicateGhost.startMm,
+                  partitionDuplicateGhost.endMm,
+                  partitionDuplicateGhost.thicknessMm
+                );
+                const color = partitionDuplicateGhost.invalid
+                  ? "var(--danger)"
+                  : "var(--selection)";
+                return (
+                  <rect
+                    x={rect.centerXMm - rect.widthMm / 2}
+                    y={rect.centerYMm - rect.depthMm / 2}
+                    width={rect.widthMm}
+                    height={rect.depthMm}
+                    transform={`rotate(${rect.angleDeg} ${rect.centerXMm} ${rect.centerYMm})`}
+                    style={{
+                      fill: color,
+                      fillOpacity: 0.3,
+                      stroke: color,
+                      strokeWidth: 2,
+                      pointerEvents: "none"
+                    }}
+                    vectorEffect="non-scaling-stroke"
+                  />
                 );
               })()
             : null}

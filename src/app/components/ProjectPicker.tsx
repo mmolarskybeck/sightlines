@@ -9,6 +9,7 @@ export function ProjectPicker({
   currentProjectId,
   listProjectSummaries,
   onCreateProject,
+  onDuplicateProject,
   onRenameProject,
   onDeleteProject,
   onOpenProject,
@@ -17,6 +18,7 @@ export function ProjectPicker({
   currentProjectId: string;
   listProjectSummaries: () => Promise<ProjectSummary[]>;
   onCreateProject: (title: string) => Promise<void>;
+  onDuplicateProject: (id: string) => Promise<void>;
   onRenameProject: (id: string, title: string) => Promise<void>;
   onDeleteProject: (id: string) => Promise<void>;
   onOpenProject: (id: string) => Promise<void>;
@@ -43,6 +45,7 @@ export function ProjectPicker({
         open={isOpen}
         onCreateProject={onCreateProject}
         onDeleteProject={onDeleteProject}
+        onDuplicateProject={onDuplicateProject}
         onExportProject={onExportProject}
         onOpenChange={setIsOpen}
         onOpenProject={onOpenProject}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
+import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
@@ -23,6 +24,7 @@ export function ProjectManager({
   currentProjectId,
   listProjectSummaries,
   onCreateProject,
+  onDuplicateProject,
   onRenameProject,
   onDeleteProject,
   onOpenProject,
@@ -33,6 +35,7 @@ export function ProjectManager({
   currentProjectId: string;
   listProjectSummaries: () => Promise<ProjectSummary[]>;
   onCreateProject: (title: string) => Promise<void>;
+  onDuplicateProject: (id: string) => Promise<void>;
   onRenameProject: (id: string, title: string) => Promise<void>;
   onDeleteProject: (id: string) => Promise<void>;
   onOpenProject: (id: string) => Promise<void>;
@@ -44,6 +47,7 @@ export function ProjectManager({
   const [draftTitle, setDraftTitle] = useState("");
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [exportingId, setExportingId] = useState<string | null>(null);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -137,6 +141,18 @@ export function ProjectManager({
     }
   };
 
+  const handleDuplicate = async (id: string) => {
+    setBusy(true);
+    setDuplicatingId(id);
+    try {
+      await onDuplicateProject(id);
+      onOpenChange(false);
+    } finally {
+      setDuplicatingId(null);
+      setBusy(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="project-manager-dialog">
@@ -165,6 +181,7 @@ export function ProjectManager({
               const isEditing = editingId === summary.id;
               const isConfirmingDelete = confirmingDeleteId === summary.id;
               const isExporting = exportingId === summary.id;
+              const isDuplicating = duplicatingId === summary.id;
               const draftIsValid = draftTitle.trim().length > 0;
 
               return (
@@ -263,10 +280,30 @@ export function ProjectManager({
                       ) : (
                         <div className="project-manager-actions">
                           <Button
+                            aria-busy={isDuplicating}
+                            aria-label={`Duplicate ${summary.title}`}
+                            className="icon-button compact"
+                            disabled={busy}
+                            size="icon-sm"
+                            title="Duplicate project"
+                            variant="ghost"
+                            onClick={() => void handleDuplicate(summary.id)}
+                          >
+                            {isDuplicating ? (
+                              <CircleNotchIcon
+                                aria-hidden="true"
+                                className="animate-spin"
+                                size={14}
+                              />
+                            ) : (
+                              <CopyIcon aria-hidden="true" size={14} />
+                            )}
+                          </Button>
+                          <Button
                             aria-busy={isExporting}
                             aria-label={`Export ${summary.title}`}
                             className="icon-button compact"
-                            disabled={isExporting}
+                            disabled={busy || isExporting}
                             size="icon-sm"
                             title="Export package"
                             variant="ghost"

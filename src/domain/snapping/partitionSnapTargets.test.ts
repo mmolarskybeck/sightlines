@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { createRectangularRoomPlacement } from "../geometry/createRoom";
-import { getPartitionMoveSnapTargets } from "./partitionSnapTargets";
+import { getGridSnapTargets } from "./gridSnapTargets";
+import {
+  getPartitionDrawSnapTargets,
+  getPartitionMoveSnapTargets
+} from "./partitionSnapTargets";
 import type { FreestandingWall, Room } from "../project";
+import { resolveSnap } from "./resolveSnap";
+import { feetToMm } from "../units/length";
 
 function room(): Room {
   return createRectangularRoomPlacement({
@@ -150,5 +156,126 @@ describe("getPartitionMoveSnapTargets", () => {
 
     expect(targets.some((target) => target.id === "partition-center-x")).toBe(false);
     expect(targets.some((target) => target.id === "partition-center-y")).toBe(true);
+  });
+
+  it("offers clean clear-gap targets from room walls and sibling slab faces", () => {
+    const withSibling: Room = {
+      ...room(),
+      freestandingWalls: [
+        dragged,
+        {
+          id: "room-1-partition-2",
+          roomId: "room-1",
+          name: "P2",
+          startXMm: 3000,
+          startYMm: 1000,
+          endXMm: 3000,
+          endYMm: 3000,
+          heightMm: 3000,
+          thicknessMm: 200
+        }
+      ]
+    };
+    const targets = getPartitionMoveSnapTargets({
+      room: withSibling,
+      placementOffsetMm: { xMm: 0, yMm: 0 },
+      partition: dragged,
+      proposedMidFloorMm: { xMm: 1800, yMm: 1650 },
+      incrementMm: 500
+    });
+
+    const westWall = targets.find(
+      (target) => target.id === "partition-clean-room-wall-room-1-wall-west"
+    );
+    // The horizontal partition's west end cap is 1000mm from its midpoint;
+    // midpoint x=2000 therefore leaves a clean 1000mm wall gap.
+    expect(westWall).toMatchObject({ kind: "neighbor-edge", axis: "x" });
+    expect(westWall?.point.xMm).toBe(2000);
+
+    const siblingWestFace = targets.find(
+      (target) => target.id === "partition-clean-partition-face-room-1-partition-2-0"
+    );
+    expect(siblingWestFace).toMatchObject({ kind: "neighbor-edge", axis: "x" });
+    expect(siblingWestFace?.point.xMm).toBe(1900);
+  });
+});
+
+describe("getPartitionDrawSnapTargets", () => {
+  it("snaps to an exact 22ft room-relative inset ahead of the absolute grid", () => {
+    const oddWidthMm = feetToMm(77) + 2 * 25.4;
+    const placement = createRectangularRoomPlacement({
+      roomId: "odd-room",
+      name: "Odd Gallery",
+      widthMm: oddWidthMm,
+      depthMm: feetToMm(30),
+      heightMm: 3000,
+      offsetXMm: 0,
+      offsetYMm: 0
+    });
+    // The east wall is 2in off the absolute foot lattice, so a clean 22ft
+    // inset is at 55ft 2in rather than the absolute-grid candidate at 55ft.
+    const exactInsetFloorX = oddWidthMm - feetToMm(22);
+    const pointer = { xMm: exactInsetFloorX + 8, yMm: feetToMm(10) + 5 };
+    const roomRelative = getPartitionDrawSnapTargets(placement, pointer, feetToMm(1));
+    const grid = getGridSnapTargets(feetToMm(1), {
+      minXMm: 0,
+      maxXMm: feetToMm(100),
+      minYMm: 0,
+      maxYMm: feetToMm(40)
+    });
+
+    const resolved = resolveSnap(pointer, [...grid, ...roomRelative], { thresholdMm: 100 });
+
+    expect(resolved.point.xMm).toBeCloseTo(exactInsetFloorX, 6);
+    expect(resolved.snapTargetIds.x).toBe("partition-clean-room-wall-odd-room-wall-east");
+    expect(resolved.snapTargetIds.x).not.toBe(`grid-x-${feetToMm(55)}`);
+  });
+
+  it("offers the nearest clean gap outside each face of an axis-aligned sibling slab", () => {
+    const placement = createRectangularRoomPlacement({
+      roomId: "room-1",
+      name: "Gallery",
+      widthMm: 6000,
+      depthMm: 4000,
+      heightMm: 3000,
+      offsetXMm: 100,
+      offsetYMm: 200
+    });
+    placement.room.freestandingWalls = [
+      {
+        ...dragged,
+        startXMm: 2500,
+        endXMm: 2500,
+        startYMm: 1000,
+        endYMm: 3000,
+        thicknessMm: 200
+      }
+    ];
+    const targets = getPartitionDrawSnapTargets(
+      placement,
+      { xMm: 3410, yMm: 2200 },
+      500
+    );
+
+    const eastFace = targets.find(
+      (target) => target.id === "partition-clean-partition-face-room-1-partition-1-1"
+    );
+    expect(eastFace).toMatchObject({ kind: "neighbor-edge", axis: "x" });
+    // East slab face is local x=2600; nearest outward 500mm multiple is 3100,
+    // then the room placement lifts it to floor x=3200.
+    expect(eastFace?.point.xMm).toBe(3200);
+  });
+
+  it("returns no targets for a degenerate increment", () => {
+    const placement = createRectangularRoomPlacement({
+      roomId: "room-1",
+      name: "Gallery",
+      widthMm: 4000,
+      depthMm: 4000,
+      heightMm: 3000,
+      offsetXMm: 0,
+      offsetYMm: 0
+    });
+    expect(getPartitionDrawSnapTargets(placement, { xMm: 1000, yMm: 1000 }, 0)).toEqual([]);
   });
 });

@@ -4011,7 +4011,9 @@ body.panels-resizing * {
    dimension line (the elevation .dimension-tick is a stroked cross-line, which
    a partition line at any angle can't reuse). Same muted drafting ink. */
 .plan-dimension-tick {
-  fill: var(--muted);
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  fill: none;
   pointer-events: none;
 }
 

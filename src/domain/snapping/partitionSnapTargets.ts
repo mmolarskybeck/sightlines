@@ -21,21 +21,163 @@
 // alignment ones (which are orientation-agnostic). Axis-aligned partitions —
 // the overwhelming common case — get the full treatment.
 
-import type { FreestandingWall, Room } from "../project";
-import { castRay, collectObstacleSegments } from "../geometry/partitionSpacing";
+import type { FreestandingWall, Room, RoomPlacement } from "../project";
+import {
+  castRay,
+  collectObstacleSegments,
+  partitionSlabSegments
+} from "../geometry/partitionSpacing";
+import { getWallsWithGeometry, outwardWallNormal } from "../geometry/walls";
+import { nearestDirectedIncrement } from "./cleanIncrement";
 import type { Point, SnapTarget } from "./resolveSnap";
 
 // sin(15°): how far off a world axis the span may tilt before we treat the
 // partition as "angled" and skip the equidistant targets.
 const OFF_AXIS_SIN = Math.sin((15 * Math.PI) / 180);
+const AXIS_EPSILON = 1e-6;
+
+type DirectedFace = {
+  axis: "x" | "y";
+  coordinateMm: number;
+  direction: -1 | 1;
+  id: string;
+};
+
+function axisAlignedRoomFaces(room: Room): DirectedFace[] {
+  const faces: DirectedFace[] = [];
+  for (const wall of getWallsWithGeometry(room)) {
+    const outward = outwardWallNormal(room, wall);
+    if (Math.abs(wall.start.xMm - wall.end.xMm) <= AXIS_EPSILON) {
+      faces.push({
+        axis: "x",
+        coordinateMm: wall.start.xMm,
+        direction: outward.xMm > 0 ? -1 : 1,
+        id: `room-wall-${wall.id}`
+      });
+    } else if (Math.abs(wall.start.yMm - wall.end.yMm) <= AXIS_EPSILON) {
+      faces.push({
+        axis: "y",
+        coordinateMm: wall.start.yMm,
+        direction: outward.yMm > 0 ? -1 : 1,
+        id: `room-wall-${wall.id}`
+      });
+    }
+  }
+  return faces;
+}
+
+function axisAlignedPartitionFaces(room: Room, excludedPartitionId?: string): DirectedFace[] {
+  const faces: DirectedFace[] = [];
+  for (const partition of room.freestandingWalls) {
+    if (partition.id === excludedPartitionId) continue;
+    const mid = {
+      xMm: (partition.startXMm + partition.endXMm) / 2,
+      yMm: (partition.startYMm + partition.endYMm) / 2
+    };
+    partitionSlabSegments(partition).forEach((segment, index) => {
+      if (Math.abs(segment.a.xMm - segment.b.xMm) <= AXIS_EPSILON) {
+        const coordinateMm = segment.a.xMm;
+        if (Math.abs(coordinateMm - mid.xMm) <= AXIS_EPSILON) return;
+        faces.push({
+          axis: "x",
+          coordinateMm,
+          direction: coordinateMm < mid.xMm ? -1 : 1,
+          id: `partition-face-${partition.id}-${index}`
+        });
+      } else if (Math.abs(segment.a.yMm - segment.b.yMm) <= AXIS_EPSILON) {
+        const coordinateMm = segment.a.yMm;
+        if (Math.abs(coordinateMm - mid.yMm) <= AXIS_EPSILON) return;
+        faces.push({
+          axis: "y",
+          coordinateMm,
+          direction: coordinateMm < mid.yMm ? -1 : 1,
+          id: `partition-face-${partition.id}-${index}`
+        });
+      }
+    });
+  }
+  return faces;
+}
+
+function cleanInsetTargets(args: {
+  room: Room;
+  placementOffsetMm: Point;
+  proposedFloorMm: Point;
+  incrementMm: number;
+  excludedPartitionId?: string;
+  movingExtentMm?: { xMm: number; yMm: number };
+}): SnapTarget[] {
+  const {
+    room,
+    placementOffsetMm,
+    proposedFloorMm,
+    incrementMm,
+    excludedPartitionId,
+    movingExtentMm = { xMm: 0, yMm: 0 }
+  } = args;
+  if (!Number.isFinite(incrementMm) || incrementMm <= 0) return [];
+
+  const proposedLocal = {
+    xMm: proposedFloorMm.xMm - placementOffsetMm.xMm,
+    yMm: proposedFloorMm.yMm - placementOffsetMm.yMm
+  };
+  const faces = [
+    ...axisAlignedRoomFaces(room),
+    ...axisAlignedPartitionFaces(room, excludedPartitionId)
+  ];
+
+  return faces.map((face): SnapTarget => {
+    const proposedCoordinate = face.axis === "x" ? proposedLocal.xMm : proposedLocal.yMm;
+    const extent = face.axis === "x" ? movingExtentMm.xMm : movingExtentMm.yMm;
+    const base = face.coordinateMm + face.direction * extent;
+    const snappedLocal = nearestDirectedIncrement(
+      proposedCoordinate,
+      base,
+      face.direction,
+      incrementMm
+    );
+    return {
+      id: `partition-clean-${face.id}`,
+      kind: "neighbor-edge",
+      axis: face.axis,
+      point: {
+        xMm:
+          face.axis === "x"
+            ? snappedLocal + placementOffsetMm.xMm
+            : proposedFloorMm.xMm,
+        yMm:
+          face.axis === "y"
+            ? snappedLocal + placementOffsetMm.yMm
+            : proposedFloorMm.yMm
+      }
+    };
+  });
+}
+
+// Room-relative draw targets keep readable wall and sibling-partition gaps
+// even when the room itself is offset from the absolute floor grid. Each face
+// contributes only the nearest member of its half-lattice.
+export function getPartitionDrawSnapTargets(
+  placement: RoomPlacement,
+  pointerFloorMm: Point,
+  incrementMm: number
+): SnapTarget[] {
+  return cleanInsetTargets({
+    room: placement.room,
+    placementOffsetMm: { xMm: placement.offsetXMm, yMm: placement.offsetYMm },
+    proposedFloorMm: pointerFloorMm,
+    incrementMm
+  });
+}
 
 export function getPartitionMoveSnapTargets(args: {
   room: Room;
   placementOffsetMm: Point; // lift room-local → floor space
   partition: FreestandingWall; // the dragged partition (self excluded)
   proposedMidFloorMm: Point;
+  incrementMm?: number;
 }): SnapTarget[] {
-  const { room, placementOffsetMm, partition, proposedMidFloorMm } = args;
+  const { room, placementOffsetMm, partition, proposedMidFloorMm, incrementMm } = args;
   const targets: SnapTarget[] = [];
 
   const proposedMidLocal: Point = {
@@ -130,6 +272,23 @@ export function getPartitionMoveSnapTargets(args: {
       axis: "y",
       point: midFloor
     });
+  }
+
+  if (incrementMm !== undefined) {
+    // Bounding extents make the clean multiple describe the visible clear gap
+    // from the moved slab edge, rather than its centerline, to an obstacle.
+    const halfExtentX = Math.abs(spanUnitX) * halfLen + Math.abs(spanUnitY) * halfThick;
+    const halfExtentY = Math.abs(spanUnitY) * halfLen + Math.abs(spanUnitX) * halfThick;
+    targets.push(
+      ...cleanInsetTargets({
+        room,
+        placementOffsetMm,
+        proposedFloorMm: proposedMidFloorMm,
+        incrementMm,
+        excludedPartitionId: partition.id,
+        movingExtentMm: { xMm: halfExtentX, yMm: halfExtentY }
+      })
+    );
   }
 
   return targets;
