@@ -627,12 +627,18 @@ export function ElevationView({
   }, [artworksById, centerlineMm, centerlineVisible, wallHeightMm, wallLengthMm, wallObjectsOnThisWall]);
 
   function resolveMeasurementPoint(raw: MeasurePoint, event: Pick<PointerEvent, "shiftKey" | "metaKey" | "ctrlKey">) {
+    // Clamp to wall face: xMm into [0, wallLengthMm], yMm into [0, wallHeightMm]
+    const clamped: MeasurePoint = {
+      xMm: Math.min(Math.max(raw.xMm, 0), wallLengthMm),
+      yMm: Math.min(Math.max(raw.yMm, 0), wallHeightMm)
+    };
+
     const anchor = measurementState?.phase === "drawing"
       ? measurementState.start
       : measurementState?.phase === "refining"
         ? measurementState[measurementState.endpoint === "start" ? "end" : "start"]
         : null;
-    const proposed = event.shiftKey && anchor ? constrainMeasurePointToAxis(anchor, raw) : raw;
+    const proposed = event.shiftKey && anchor ? constrainMeasurePointToAxis(anchor, clamped) : clamped;
     if (event.metaKey || event.ctrlKey) {
       measurementSnapTargetIdRef.current = undefined;
       return { point: proposed, snapped: false };
@@ -836,10 +842,15 @@ export function ElevationView({
         current.yMm +
         (event.key === "ArrowUp" ? stepMm : event.key === "ArrowDown" ? -stepMm : 0)
     };
+    // Clamp to wall face before dispatching
+    const clampedPoint: MeasurePoint = {
+      xMm: Math.min(Math.max(point.xMm, 0), wallLengthMm),
+      yMm: Math.min(Math.max(point.yMm, 0), wallHeightMm)
+    };
     if (measurementState.phase === "armed-complete") {
       onMeasurementDispatch({ type: "begin-refinement", endpoint: key });
     }
-    onMeasurementDispatch({ type: "preview-refinement", point });
+    onMeasurementDispatch({ type: "preview-refinement", point: clampedPoint });
   }
 
   useEffect(() => {

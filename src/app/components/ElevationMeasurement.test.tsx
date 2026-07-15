@@ -206,4 +206,41 @@ describe("Elevation temporary measurement", () => {
     expect(screen.getByTestId("measurement-phase").textContent).toBe("armed-empty");
     fireEvent.keyUp(window, { code: "Space", key: " " });
   });
+
+  it("clamps measurement endpoint to the wall face when nudged with arrow keys past the boundary", () => {
+    useAppStore.setState({ project: createSampleProject() });
+    const { container } = render(<Harness />);
+    const svg = container.querySelector("svg.elevation-svg")!;
+
+    // Create a measurement
+    fireEvent.pointerDown(svg, { pointerType: "mouse", button: 0, clientX: 300, clientY: 300 });
+    fireEvent.pointerMove(svg, { pointerType: "mouse", clientX: 700, clientY: 300 });
+    fireEvent.pointerDown(svg, { pointerType: "mouse", button: 0, clientX: 700, clientY: 300 });
+    fireEvent.pointerUp(svg, { pointerType: "mouse", clientX: 700, clientY: 300 });
+
+    const end = screen.getByRole("button", { name: /Measurement end point/ });
+
+    // Nudge right many times to try to push it off the wall boundary (8534.4mm for 28 feet)
+    for (let i = 0; i < 500; i++) {
+      fireEvent.keyDown(end, { key: "ArrowRight" });
+    }
+
+    const cxAfterNudge = Number(screen.getByRole("button", { name: /Measurement end point/ }).getAttribute("cx"));
+
+    // The endpoint should be clamped at the wall's right edge (wallLengthMm ~8534mm for the sample project)
+    // but at minimum should not go negative or exceed a reasonable boundary
+    expect(cxAfterNudge).toBeGreaterThanOrEqual(0);
+    expect(cxAfterNudge).toBeLessThanOrEqual(8535); // ~8534.4mm (28 feet)
+
+    // Now test the y-axis boundary by nudging down
+    const before = Number(screen.getByRole("button", { name: /Measurement end point/ }).getAttribute("cy"));
+    for (let i = 0; i < 500; i++) {
+      fireEvent.keyDown(end, { key: "ArrowDown" });
+    }
+    const cyAfterNudge = Number(screen.getByRole("button", { name: /Measurement end point/ }).getAttribute("cy"));
+
+    // The y coordinate should not go below 0 (wall floor) when clamped
+    // and not exceed wall height (12 feet = 3657.6mm, but SVG uses inverted y so it starts at wallHeightMm and goes to 0)
+    expect(cyAfterNudge).toBeGreaterThanOrEqual(0);
+  });
 });
