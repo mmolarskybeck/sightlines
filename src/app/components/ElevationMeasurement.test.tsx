@@ -145,6 +145,7 @@ describe("Elevation temporary measurement", () => {
 
     fireEvent.pointerEnter(svg);
     fireEvent.keyDown(window, { code: "Space", key: " " });
+    expect(svg.closest(".drawing-surface")?.classList.contains("is-pan-ready")).toBe(true);
     fireEvent.pointerDown(svg, { pointerType: "mouse", button: 0, clientX: 300, clientY: 300 });
     expect(screen.getByTestId("measurement-phase").textContent).toBe("armed-empty");
     fireEvent.keyUp(window, { code: "Space", key: " " });

@@ -25,6 +25,9 @@ test("creates and clears a temporary measurement while Measure stays armed", asy
   await page.keyboard.press("m");
   const measure = page.getByRole("button", { name: "Measure", exact: true });
   await expect(measure).toHaveAttribute("aria-pressed", "true");
+  await expect(plan).toHaveCSS("cursor", "crosshair");
+  const roomHit = plan.locator(".room-hit").first();
+  if (await roomHit.count()) await expect(roomHit).toHaveCSS("cursor", "crosshair");
 
   await clickCanvasAt(plan, 0.4, 0.5);
   await clickCanvasAt(plan, 0.6, 0.5);
@@ -34,12 +37,22 @@ test("creates and clears a temporary measurement while Measure stays armed", asy
   await expect(inspector).toContainText("Measurement");
   await expect(inspector).toContainText("Distance");
   await expect(inspector.locator(".inspector-summary-row-value")).not.toHaveText("");
+  await expect(plan.locator(".measurement-handle")).toHaveCount(2);
+  await expect(plan.locator(".measurement-handle-hit").first()).toHaveCSS("cursor", "grab");
 
-  // Escape clears the completed temporary result before it disarms the tool.
-  await page.keyboard.press("Escape");
+  // Local undo clears temporary work without touching project history.
+  await page.keyboard.press("Control+z");
   await expect(page.getByRole("group", { name: /^Measurement,/ })).toHaveCount(0);
   await expect(measure).toHaveAttribute("aria-pressed", "true");
 
+  // Delete owns the selected temporary result as well.
+  await clickCanvasAt(plan, 0.4, 0.5);
+  await clickCanvasAt(plan, 0.6, 0.5);
+  await page.keyboard.press("Delete");
+  await expect(page.getByRole("group", { name: /^Measurement,/ })).toHaveCount(0);
+  await expect(measure).toHaveAttribute("aria-pressed", "true");
+
+  // With no temporary work left, Escape disarms Measure.
   await page.keyboard.press("Escape");
   await expect(measure).toHaveAttribute("aria-pressed", "false");
 });

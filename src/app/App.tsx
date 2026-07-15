@@ -118,6 +118,7 @@ import {
   escapeMeasurementState,
   useMeasurementTool
 } from "./hooks/useMeasurementTool";
+import { useTemporaryMeasurementShortcuts } from "./hooks/useTemporaryMeasurementShortcuts";
 import {
   useViewPreferences,
   LEFT_PANEL_MIN_WIDTH,
@@ -549,6 +550,14 @@ export function App() {
       ? ({ kind: "elevation", wallId: selectedWall?.id ?? "" } as const)
       : ({ kind: "plan" } as const);
   const measurement = useMeasurementTool(measurementContext);
+
+  useTemporaryMeasurementShortcuts({
+    active: measurementActive,
+    suspended:
+      isHelpOpen || isSettingsOpen || importWizardOpen || confirmDeleteRoomId !== null,
+    state: measurement.state,
+    dispatch: measurement.dispatch
+  });
 
   useEffect(() => {
     if (!measurementActive) measurement.clear();

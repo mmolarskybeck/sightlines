@@ -59,7 +59,9 @@ export function MeasurementOverlay({
   const labelOffsetMm = 14 / pixelsPerMm;
   const labelX = midX + (-dy / length) * labelOffsetMm;
   const labelY = midY + (dx / length) * labelOffsetMm;
-  const visibleHandleRadiusMm = 4 / pixelsPerMm;
+  const arrowLengthMm = 11 / pixelsPerMm;
+  const arrowHalfWidthMm = 4.5 / pixelsPerMm;
+  const haloRadiusMm = 9 / pixelsPerMm;
   const handleHitRadiusMm = 22 / pixelsPerMm;
   const bodyHitWidthMm = 14 / pixelsPerMm;
   const fontSizeMm = 11 / pixelsPerMm;
@@ -68,8 +70,29 @@ export function MeasurementOverlay({
   const handle = (endpoint: MeasurementEndpoint, point: MeasurementPoint) => {
     const snapped = snappedEndpoint === endpoint;
     const endpointName = endpoint === "a" ? "start" : "end";
+    // The tip is the stored endpoint exactly. Its wings sit inside the
+    // measured span, so both arrows face outward without shortening or
+    // visually shifting the measurement line.
+    const inwardX = endpoint === "a" ? dx / length : -dx / length;
+    const inwardY = endpoint === "a" ? dy / length : -dy / length;
+    const baseX = point.xMm + inwardX * arrowLengthMm;
+    const baseY = point.yMm + inwardY * arrowLengthMm;
+    const perpendicularX = -inwardY * arrowHalfWidthMm;
+    const perpendicularY = inwardX * arrowHalfWidthMm;
+    const arrowPoints = [
+      `${point.xMm},${point.yMm}`,
+      `${baseX + perpendicularX},${baseY + perpendicularY}`,
+      `${baseX - perpendicularX},${baseY - perpendicularY}`
+    ].join(" ");
     return (
       <g className="measurement-endpoint" data-endpoint={endpoint} data-snapped={snapped || undefined}>
+        <circle
+          aria-hidden="true"
+          className="measurement-handle-halo"
+          cx={point.xMm}
+          cy={point.yMm}
+          r={haloRadiusMm}
+        />
         <circle
           aria-label={`Measurement ${endpointName} point, ${distanceLabel}`}
           className="measurement-handle-hit"
@@ -85,14 +108,10 @@ export function MeasurementOverlay({
             onEndpointPointerDown?.(endpoint, event);
           }}
         />
-        <rect
+        <polygon
           aria-hidden="true"
           className="measurement-handle"
-          x={point.xMm - visibleHandleRadiusMm}
-          y={point.yMm - visibleHandleRadiusMm}
-          width={visibleHandleRadiusMm * 2}
-          height={visibleHandleRadiusMm * 2}
-          transform={snapped ? `rotate(45 ${point.xMm} ${point.yMm})` : undefined}
+          points={arrowPoints}
           vectorEffect="non-scaling-stroke"
         />
       </g>

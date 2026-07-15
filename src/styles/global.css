@@ -3807,6 +3807,15 @@ body.panels-resizing * {
   cursor: crosshair;
 }
 
+/* SVG descendants frequently carry their own resting selection/drag cursors.
+   While a point-placement tool is armed, every painted/hit-tested geometry
+   surface instead advertises point placement. Measurement chrome opts back
+   into its own select/refine cursors below. */
+.plan-svg.tool-armed *:not(.measurement-overlay):not(.measurement-overlay *),
+.elevation-svg.tool-armed *:not(.measurement-overlay):not(.measurement-overlay *) {
+  cursor: crosshair !important;
+}
+
 .room-fill {
   fill: var(--bg);
 }
@@ -4030,7 +4039,7 @@ body.panels-resizing * {
 .measurement-line-hit {
   stroke: transparent;
   pointer-events: stroke;
-  cursor: pointer;
+  cursor: pointer !important;
   touch-action: none;
 }
 
@@ -4056,19 +4065,54 @@ body.panels-resizing * {
 .measurement-handle-hit {
   fill: transparent;
   stroke: none;
-  cursor: grab;
+  cursor: grab !important;
   touch-action: none;
 }
 
 .measurement-handle {
-  fill: var(--bg);
+  fill: var(--selection);
   stroke: var(--selection);
-  stroke-width: 1.5;
+  stroke-linejoin: miter;
+  stroke-width: 1;
   pointer-events: none;
 }
 
+.measurement-handle-halo {
+  fill: var(--primary-soft);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.measurement-endpoint:has(.measurement-handle-hit:focus-visible) .measurement-handle-halo,
+.measurement-endpoint:has(.measurement-handle-hit:active) .measurement-handle-halo {
+  opacity: 0.72;
+}
+
+.measurement-endpoint:has(.measurement-handle-hit:active) .measurement-handle-hit {
+  cursor: grabbing !important;
+}
+
+/* Snapping changes the arrowhead itself from solid to hollow/outlined. This
+   supplies a non-color cue without introducing a second endpoint symbol; the
+   arrow tip and the measurement line still terminate at the stored point. */
 .measurement-endpoint[data-snapped="true"] .measurement-handle {
-  fill: var(--selection);
+  fill: var(--bg);
+  stroke: var(--selection);
+  stroke-width: 1.75;
+}
+
+/* Pan is the most local pointer intent. These descendant overrides come after
+   both armed-tool and measurement cursor rules so Space/middle-button pan
+   remains legible when the pointer is over any SVG child, including a
+   measurement line or endpoint handle. */
+.drawing-surface.is-pan-ready .plan-svg *,
+.drawing-surface.is-pan-ready .elevation-svg * {
+  cursor: grab !important;
+}
+
+.drawing-surface.is-panning .plan-svg *,
+.drawing-surface.is-panning .elevation-svg * {
+  cursor: grabbing !important;
 }
 
 .surface-label {

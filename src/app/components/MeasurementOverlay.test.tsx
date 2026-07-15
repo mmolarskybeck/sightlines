@@ -26,15 +26,38 @@ describe("MeasurementOverlay", () => {
     expect(screen.getByRole("button", { name: "Measurement end point, 5 m" })).toBeTruthy();
   });
 
-  it("marks snapped endpoints with a non-color diamond and sizes hit targets in screen pixels", () => {
+  it("terminates outward-facing arrowheads exactly at endpoints with bases inside the span", () => {
+    const { container } = renderOverlay();
+    const start = container.querySelector('[data-endpoint="a"]')!;
+    const end = container.querySelector('[data-endpoint="b"]')!;
+
+    expect(start.querySelector(".measurement-handle")?.getAttribute("points")?.split(" ")[0]).toBe("10,20");
+    expect(end.querySelector(".measurement-handle")?.getAttribute("points")?.split(" ")[0]).toBe("3010,4020");
+    const startBaseX = Number(start.querySelector(".measurement-handle")?.getAttribute("points")?.split(" ")[1].split(",")[0]);
+    const endBaseX = Number(end.querySelector(".measurement-handle")?.getAttribute("points")?.split(" ")[1].split(",")[0]);
+    expect(startBaseX).toBeGreaterThan(10);
+    expect(endBaseX).toBeLessThan(3010);
+    const startPoints = start.querySelector(".measurement-handle")!.getAttribute("points")!.split(" ").map((pair) => pair.split(",").map(Number));
+    const baseCenter = {
+      x: (startPoints[1][0] + startPoints[2][0]) / 2,
+      y: (startPoints[1][1] + startPoints[2][1]) / 2
+    };
+    expect(Math.hypot(baseCenter.x - 10, baseCenter.y - 20) * 2).toBeCloseTo(11);
+    const line = container.querySelector(".measurement-line")!;
+    expect([line.getAttribute("x1"), line.getAttribute("y1")]).toEqual(["10", "20"]);
+    expect([line.getAttribute("x2"), line.getAttribute("y2")]).toEqual(["3010", "4020"]);
+    expect(start.querySelector(".measurement-handle-hit")?.getAttribute("r")).toBe("11");
+  });
+
+  it("marks snapped state on the arrowhead itself without adding or moving endpoint geometry", () => {
     const { container } = renderOverlay({ snappedEndpoint: "b" });
     const snapped = container.querySelector('[data-endpoint="b"]');
     const hit = snapped?.querySelector(".measurement-handle-hit");
 
     expect(snapped?.getAttribute("data-snapped")).toBe("true");
-    expect(snapped?.querySelector(".measurement-handle")?.getAttribute("transform")).toContain(
-      "rotate(45"
-    );
+    expect(snapped?.querySelector(".measurement-snap-marker")).toBeNull();
+    expect(snapped?.querySelectorAll(".measurement-handle")).toHaveLength(1);
+    expect(snapped?.querySelector(".measurement-handle")?.getAttribute("points")?.split(" ")[0]).toBe("3010,4020");
     expect(hit?.getAttribute("r")).toBe("11");
   });
 
