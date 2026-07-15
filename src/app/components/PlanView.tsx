@@ -132,6 +132,10 @@ import {
   type MeasurementToolAction,
   type MeasurementToolState
 } from "../hooks/useMeasurementTool";
+import {
+  getMeasurementCreationKeyAction,
+  isMeasurementCreationArrowKey
+} from "../hooks/measurementCreationKey";
 import { PlanStructureLayer } from "./plan/PlanStructureLayer";
 import { PlacedObjectsLayer } from "./plan/PlacedObjectsLayer";
 import { PlanHandlesLayer } from "./plan/PlanHandlesLayer";
@@ -270,6 +274,27 @@ export function getPlanMeasurementKeyActions(
       point: { xMm: current.xMm + delta.xMm, yMm: current.yMm + delta.yMm }
     }
   ];
+}
+
+// Keyboard-only creation: Enter begins at `origin` (the view supplies the
+// visible-viewport centre), arrows nudge the live preview by the shared canvas
+// step, Enter completes. Keyboard-moved points intentionally skip snap
+// resolution so an arrow nudge is never yanked to a snap target — the same
+// predictability trade the ⌘-bypass makes for the pointer path.
+export function getPlanMeasurementCreationKeyAction(
+  state: MeasurementToolState,
+  key: string,
+  origin: MeasurePoint,
+  unit: import("../../domain/project").DisplayUnit,
+  gridPrecisionFloorMm: number | null,
+  shiftKey: boolean,
+  snapToGrid: boolean,
+  altKey: boolean
+): MeasurementToolAction | null {
+  return getMeasurementCreationKeyAction(state, key, {
+    origin,
+    delta: getPlanMeasurementNudgeDelta(key, unit, gridPrecisionFloorMm, shiftKey, snapToGrid, altKey)
+  });
 }
 
 export function canPlanMeasurementClaimPointer(button: number, spaceHeld: boolean): boolean {
@@ -2361,6 +2386,45 @@ export function PlanView({
     actions.forEach(onMeasurementAction);
   }
 
+  // Keyboard-only creation lives on the SVG itself. It must ignore keys that
+  // bubble up from a focused child (the measurement handles own their own
+  // arrow/Enter refinement), and it never touches Escape — App.tsx owns that.
+  function handleMeasureSurfaceKeyDown(event: ReactKeyboardEvent<SVGSVGElement>) {
+    if (!measurementActive || !measurementState || !onMeasurementAction) return;
+    if (event.target !== event.currentTarget) return;
+    if (event.key !== "Enter" && !isMeasurementCreationArrowKey(event.key)) return;
+    const origin: MeasurePoint = {
+      xMm: viewBoxBounds.x + viewBoxBounds.width / 2,
+      yMm: viewBoxBounds.y + viewBoxBounds.height / 2
+    };
+    const action = getPlanMeasurementCreationKeyAction(
+      measurementState,
+      event.key,
+      origin,
+      project.unit,
+      gridPrecisionFloorMm,
+      event.shiftKey,
+      snapToGrid,
+      event.altKey
+    );
+    if (!action) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const completing = action.type === "complete";
+    onMeasurementAction(action);
+    // After a keyboard completion the "b" handle becomes focusable; move focus
+    // onto it so refinement is immediately reachable. Deferred a frame so the
+    // re-rendered, now-tabbable handle exists before we focus it.
+    if (completing) {
+      requestAnimationFrame(() => {
+        const handle = svgRef.current?.querySelector<SVGCircleElement>(
+          '.measurement-endpoint[data-endpoint="b"] .measurement-handle-hit'
+        );
+        handle?.focus();
+      });
+    }
+  }
+
   return (
     <div
       className={surfaceClassName}
@@ -2389,6 +2453,7 @@ export function PlanView({
         viewBox={viewBox}
         role="img"
         tabIndex={0}
+        onKeyDown={handleMeasureSurfaceKeyDown}
         onClick={handleSvgClick}
         onClickCapture={(event) => {
           if (!measurementActive) return;

@@ -79,6 +79,10 @@ import {
   type MeasurementToolAction,
   type MeasurementToolState
 } from "../hooks/useMeasurementTool";
+import {
+  getMeasurementCreationKeyAction,
+  isMeasurementCreationArrowKey
+} from "../hooks/measurementCreationKey";
 import { useAppStore } from "../store";
 import { ARTWORK_DRAG_MIME } from "./ChecklistPanel";
 import {
@@ -111,6 +115,40 @@ import { WallSwitcher, type WallSwitcherEntry } from "./WallSwitcher";
 // and nothing outside this file depends on the distinction between "defined
 // here" and "defined in elevationArtworkGeometry.ts and re-exported."
 export { wallLocalYToSvgY };
+
+// Keyboard-only creation for Elevation. Wall-local y grows upward (ArrowUp is
+// positive, mirroring the endpoint-refinement handler), and the nudged preview
+// is clamped to the wall face so arrows can never walk an endpoint off the
+// surface. Keyboard-moved points skip snap resolution for predictable nudges,
+// matching the Plan surface path and the ⌘-bypass precedent.
+export function getElevationMeasurementCreationKeyAction(
+  state: MeasurementToolState,
+  key: string,
+  origin: { xMm: number; yMm: number },
+  wallLengthMm: number,
+  wallHeightMm: number,
+  unit: import("../../domain/project").DisplayUnit,
+  gridPrecisionFloorMm: number | null,
+  shiftKey: boolean,
+  snapToGrid: boolean,
+  altKey: boolean
+): MeasurementToolAction | null {
+  const stepMm = getNudgeStepMm({ unit, snapToGrid, gridPrecisionFloorMm, shiftKey, altKey });
+  const delta = isMeasurementCreationArrowKey(key)
+    ? {
+        xMm: key === "ArrowRight" ? stepMm : key === "ArrowLeft" ? -stepMm : 0,
+        yMm: key === "ArrowUp" ? stepMm : key === "ArrowDown" ? -stepMm : 0
+      }
+    : null;
+  return getMeasurementCreationKeyAction(state, key, {
+    origin,
+    delta,
+    clamp: (point) => ({
+      xMm: Math.min(Math.max(point.xMm, 0), wallLengthMm),
+      yMm: Math.min(Math.max(point.yMm, 0), wallHeightMm)
+    })
+  });
+}
 
 const SNAP_THRESHOLD_PX = 10;
 
@@ -851,6 +889,50 @@ export function ElevationView({
       onMeasurementDispatch({ type: "begin-refinement", endpoint: key });
     }
     onMeasurementDispatch({ type: "preview-refinement", point: clampedPoint });
+  }
+
+  // Keyboard-only creation on the SVG surface. Ignores keys bubbling from a
+  // focused child (the endpoint handles own their refinement keys) and never
+  // touches Escape (App.tsx owns that).
+  function handleMeasureSurfaceKeyDown(event: ReactKeyboardEvent<SVGSVGElement>) {
+    if (!measurementActive || !measurementState || !onMeasurementDispatch) return;
+    if (event.target !== event.currentTarget) return;
+    if (event.key !== "Enter" && !isMeasurementCreationArrowKey(event.key)) return;
+    // Begin at the visible-viewport centre in wall-local coordinates, clamped
+    // to the wall face so the origin is always a valid endpoint.
+    const centreSvg = {
+      xMm: viewBoxBounds.x + viewBoxBounds.width / 2,
+      yMm: viewBoxBounds.y + viewBoxBounds.height / 2
+    };
+    const origin = {
+      xMm: Math.min(Math.max(centreSvg.xMm, 0), wallLengthMm),
+      yMm: Math.min(Math.max(wallLocalYToSvgY(wallHeightMm, centreSvg.yMm), 0), wallHeightMm)
+    };
+    const action = getElevationMeasurementCreationKeyAction(
+      measurementState,
+      event.key,
+      origin,
+      wallLengthMm,
+      wallHeightMm,
+      unit,
+      gridPrecisionFloorMm,
+      event.shiftKey,
+      snapToGrid,
+      event.altKey
+    );
+    if (!action) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const completing = action.type === "complete";
+    onMeasurementDispatch(action);
+    if (completing) {
+      requestAnimationFrame(() => {
+        const handle = svgRef.current?.querySelector<SVGCircleElement>(
+          '.measurement-endpoint[data-endpoint="b"] .measurement-handle-hit'
+        );
+        handle?.focus();
+      });
+    }
   }
 
   useEffect(() => {
@@ -1689,6 +1771,7 @@ export function ElevationView({
         viewBox={viewBox}
         role="img"
         tabIndex={0}
+        onKeyDown={handleMeasureSurfaceKeyDown}
         onClick={handleOpeningToolClick}
         onPointerDown={beginMarquee}
         onPointerDownCapture={handleSvgPointerDownCapture}

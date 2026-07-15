@@ -6,6 +6,7 @@ import {
   clampFitExtent,
   getPartitionMovedAxes,
   canPlanMeasurementClaimPointer,
+  getPlanMeasurementCreationKeyAction,
   getPlanMeasurementKeyActions,
   getPlanMeasurementNudgeDelta,
   planMeasurementCancelAction,
@@ -95,6 +96,34 @@ describe("Plan measurement candidates", () => {
     expect(
       getPlanMeasurementKeyActions(refining, "start", "Escape", "cm", null, false, true, false)
     ).toEqual([{ type: "cancel-refinement" }]);
+  });
+
+  it("drives keyboard-only creation: begin at origin, nudge preview (y-down), complete at preview", () => {
+    const origin = { xMm: 1000, yMm: 2000 };
+    const empty = { phase: "armed-empty", context: { kind: "plan" } } as const;
+    // Enter from armed-empty begins at the supplied viewport-centre origin.
+    expect(
+      getPlanMeasurementCreationKeyAction(empty, "Enter", origin, "cm", null, false, true, false)
+    ).toEqual({ type: "begin", point: origin });
+    // Arrow keys do nothing until a measurement is in progress.
+    expect(
+      getPlanMeasurementCreationKeyAction(empty, "ArrowDown", origin, "cm", null, false, true, false)
+    ).toBeNull();
+
+    const drawing = {
+      phase: "drawing",
+      context: { kind: "plan" },
+      start: origin,
+      preview: origin
+    } as const;
+    // Plan y grows downward, so ArrowDown adds to y by the shared clean step.
+    expect(
+      getPlanMeasurementCreationKeyAction(drawing, "ArrowDown", origin, "cm", null, false, true, false)
+    ).toEqual({ type: "preview", point: { xMm: 1000, yMm: 2010 } });
+    // Enter completes at the current preview; the reducer rejects coincidence.
+    expect(
+      getPlanMeasurementCreationKeyAction(drawing, "Enter", origin, "cm", null, false, true, false)
+    ).toEqual({ type: "complete", point: origin });
   });
 
   it("yields measurement ownership to right/middle click and Space-pan", () => {

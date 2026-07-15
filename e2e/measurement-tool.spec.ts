@@ -76,3 +76,34 @@ test("switching 2D surfaces clears temporary work but keeps Measure armed", asyn
     "true"
   );
 });
+
+test("creates a temporary measurement with keyboard only, keeping Measure armed", async ({
+  page
+}) => {
+  await page.goto("/");
+  await expect(page.locator(".app-main")).toBeVisible();
+  await hideFontLab(page);
+
+  const plan = page.locator("svg.plan-svg");
+  await expect(plan).toBeVisible();
+  await page.keyboard.press("m");
+  const measure = page.getByRole("button", { name: "Measure", exact: true });
+  await expect(measure).toHaveAttribute("aria-pressed", "true");
+
+  // Focus the drawing surface itself, then drive the whole flow from the
+  // keyboard: Enter begins at the viewport centre, arrows separate the
+  // endpoints, Enter completes.
+  await plan.focus();
+  await page.keyboard.press("Enter");
+  for (let i = 0; i < 6; i++) await page.keyboard.press("ArrowRight");
+  for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+
+  // The completed measurement and its inspector appear, and Measure is still armed.
+  await expect(page.getByRole("group", { name: /^Measurement,/ })).toBeVisible();
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  await expect(inspector).toContainText("Measurement");
+  await expect(inspector).toContainText("Distance");
+  await expect(plan.locator(".measurement-handle")).toHaveCount(2);
+  await expect(measure).toHaveAttribute("aria-pressed", "true");
+});

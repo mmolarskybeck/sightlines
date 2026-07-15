@@ -5,7 +5,8 @@ import { getWallsWithGeometry } from "../../domain/geometry/walls";
 import { FIT_VIEWPORT } from "../../domain/viewport/viewport2d";
 import { useMeasurementTool } from "../hooks/useMeasurementTool";
 import { useAppStore } from "../store";
-import { ElevationView } from "./ElevationView";
+import { ElevationView, getElevationMeasurementCreationKeyAction } from "./ElevationView";
+import type { MeasurementToolState } from "../hooks/useMeasurementTool";
 
 class MockResizeObserver {
   constructor(private callback: ResizeObserverCallback) {}
@@ -242,5 +243,85 @@ describe("Elevation temporary measurement", () => {
     // The y coordinate should not go below 0 (wall floor) when clamped
     // and not exceed wall height (12 feet = 3657.6mm, but SVG uses inverted y so it starts at wallHeightMm and goes to 0)
     expect(cyAfterNudge).toBeGreaterThanOrEqual(0);
+  });
+
+  it("supports keyboard-only creation: Enter begins, arrows move preview, Enter completes", () => {
+    useAppStore.setState({ project: createSampleProject() });
+    const { container } = render(<Harness />);
+    const svg = container.querySelector("svg.elevation-svg")!;
+
+    expect(screen.getByTestId("measurement-phase").textContent).toBe("armed-empty");
+
+    fireEvent.keyDown(svg, { key: "Enter" });
+    expect(screen.getByTestId("measurement-phase").textContent).toBe("drawing");
+
+    fireEvent.keyDown(svg, { key: "ArrowUp" });
+    fireEvent.keyDown(svg, { key: "ArrowRight" });
+
+    fireEvent.keyDown(svg, { key: "Enter" });
+    expect(screen.getByTestId("measurement-phase").textContent).toBe("armed-complete");
+    expect(screen.getByRole("group", { name: /^Measurement,/ })).toBeTruthy();
+  });
+
+  it("keeps drawing when Enter fires on a coincident keyboard preview", () => {
+    useAppStore.setState({ project: createSampleProject() });
+    const { container } = render(<Harness />);
+    const svg = container.querySelector("svg.elevation-svg")!;
+
+    fireEvent.keyDown(svg, { key: "Enter" });
+    fireEvent.keyDown(svg, { key: "Enter" });
+    expect(screen.getByTestId("measurement-phase").textContent).toBe("drawing");
+  });
+});
+
+describe("getElevationMeasurementCreationKeyAction", () => {
+  const origin = { xMm: 1000, yMm: 1200 };
+  const wallLengthMm = 8534.4;
+  const wallHeightMm = 3657.6;
+  const armedEmpty: MeasurementToolState = {
+    phase: "armed-empty",
+    context: { kind: "elevation", wallId: "w" }
+  };
+
+  it("begins at the origin on Enter while armed-empty", () => {
+    expect(
+      getElevationMeasurementCreationKeyAction(
+        armedEmpty,
+        "Enter",
+        origin,
+        wallLengthMm,
+        wallHeightMm,
+        "in",
+        null,
+        false,
+        false,
+        false
+      )
+    ).toEqual({ type: "begin", point: origin });
+  });
+
+  it("nudges the preview upward for ArrowUp (wall-local y grows upward) and clamps to the face", () => {
+    const drawing: MeasurementToolState = {
+      phase: "drawing",
+      context: { kind: "elevation", wallId: "w" },
+      start: origin,
+      preview: { xMm: wallLengthMm - 5, yMm: wallHeightMm - 5 }
+    };
+    // ArrowUp adds the raw step (12.7mm imperial) to y but the clamp holds it
+    // at the wall top.
+    expect(
+      getElevationMeasurementCreationKeyAction(
+        drawing,
+        "ArrowUp",
+        origin,
+        wallLengthMm,
+        wallHeightMm,
+        "in",
+        null,
+        false,
+        false,
+        false
+      )
+    ).toEqual({ type: "preview", point: { xMm: wallLengthMm - 5, yMm: wallHeightMm } });
   });
 });
