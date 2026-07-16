@@ -18,15 +18,18 @@ import {
 import {
   centerFreestandingWallBetweenWalls,
   createFreestandingWall,
+  duplicateFreestandingWallEdit,
   faceWallIdsOf,
   parseFaceWallId,
   moveFreestandingEndpoint as moveFreestandingEndpointEdit,
   moveFreestandingWall as moveFreestandingWallEdit,
   roomIdContainingPoint,
   rotateFreestandingWall as rotateFreestandingWallEdit,
+  setFreestandingClearanceEdit,
   setFreestandingHeight,
   setFreestandingLength,
-  setFreestandingThickness
+  setFreestandingThickness,
+  type FreestandingClearanceSide
 } from "../domain/geometry/freestandingWalls";
 import {
   deleteRoomVertex as deleteRoomVertexEdit,
@@ -83,6 +86,7 @@ import {
   type OpeningWallObject,
   type Project,
   type ProjectSummary,
+  type ReferenceMeasurement,
   type WallObject
 } from "../domain/project";
 import { createSightlinesPackage, packageFilename } from "../domain/package/buildPackage";
@@ -211,10 +215,21 @@ export type AppState = ArrangeSliceState &
   selectOpening: (wallObjectId: string) => void;
   selectRoom: (roomId: string) => void;
   selectFreestandingWall: (wallId: string) => void;
+  selectMeasurement: (measurementId: string) => void;
   viewFreestandingFace: (faceWallId: string) => void;
   selectObject: (id: string, opts?: { additive?: boolean }) => void;
   setObjectSelection: (ids: string[]) => void;
   clearObjectSelection: () => void;
+  addReferenceMeasurement: (
+    measurement:
+      | { kind: "plan"; name?: string; start: Point; end: Point }
+      | { kind: "elevation"; wallId: string; name?: string; start: Point; end: Point }
+  ) => Promise<string | null>;
+  updateReferenceMeasurement: (
+    measurementId: string,
+    changes: Partial<Pick<ReferenceMeasurement, "name" | "visible" | "locked" | "start" | "end">>
+  ) => Promise<void>;
+  deleteReferenceMeasurement: (measurementId: string) => Promise<void>;
   renameProject: (title: string) => Promise<void>;
   // Saved-project rename; the open document still routes through undoable renameProject.
   renameProjectById: (id: string, title: string) => Promise<void>;
@@ -232,6 +247,7 @@ export type AppState = ArrangeSliceState &
     depthMm: number;
   }) => Promise<void>;
   addFreestandingWall: (startFloorMm: Point, endFloorMm: Point) => Promise<void>;
+  duplicateFreestandingWall: (wallId: string, centerFloorMm: Point) => Promise<void>;
   moveFreestandingWall: (wallId: string, deltaFloorMm: Point) => Promise<void>;
   moveFreestandingWallEndpoint: (
     wallId: string,
@@ -247,6 +263,11 @@ export type AppState = ArrangeSliceState &
     anchor?: "start" | "end"
   ) => Promise<void>;
   setFreestandingWallHeight: (wallId: string, heightMm: number) => Promise<void>;
+  setFreestandingWallClearance: (
+    wallId: string,
+    side: FreestandingClearanceSide,
+    distanceMm: number
+  ) => Promise<void>;
   deleteFreestandingWall: (wallId: string) => Promise<void>;
   resizeRoomHeight: (roomId: string, heightMm: number) => Promise<void>;
   resizeWall: (wallId: string, lengthMm: number, anchor?: ResizeAnchor) => Promise<void>;
@@ -286,6 +307,7 @@ export type AppState = ArrangeSliceState &
   ) => Promise<ArtworkProjectMembership[]>;
   openProject: (id: string) => Promise<void>;
   createProject: (title: string) => Promise<void>;
+  duplicateProject: (id: string) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
   addArtworksFromFiles: (
     files: File[],
@@ -881,6 +903,7 @@ export function createAppStore(deps: AppStoreDeps) {
       errorFallback: string;
       compute: (project: Project) => GeometryEditResult;
       validate?: boolean;
+      extras?: (result: GeometryEditResult) => EditExtras;
     }): Promise<void> {
       const project = get().project;
       if (!project) return;
@@ -897,15 +920,17 @@ export function createAppStore(deps: AppStoreDeps) {
         return;
       }
 
-      const extras: EditExtras =
-        args.validate === false
+      const extras: EditExtras = {
+        ...(args.extras?.(result) ?? {}),
+        ...(args.validate === false
           ? {}
           : {
               placementWarnings: validateChangedWallPlacements(
                 result.project,
                 result.changedWallIds
               )
-            };
+            })
+      };
       await applyEdit(args.label, () => result.project, extras);
     }
 
@@ -1057,6 +1082,19 @@ export function createAppStore(deps: AppStoreDeps) {
         );
       },
 
+      selectMeasurement(measurementId) {
+        autoAcceptArrangeSession();
+        const project = get().project;
+        if (!project?.referenceMeasurements?.some((item) => item.id === measurementId)) return;
+        set(
+          selectionWrite(
+            project,
+            { kind: "measurement", measurementId },
+            get().wallContextId
+          )
+        );
+      },
+
       // "View side A / side B": point the sidebar/elevation at a partition face
       // (spec §6.5). Keeps the partition selected so its inspector stays up, and
       // jumps to elevation so the chosen face is what's shown.
@@ -1123,6 +1161,55 @@ export function createAppStore(deps: AppStoreDeps) {
         // across clears) is left exactly as it was.
         if (get().selection.kind === "none") return;
         set(selectionWrite(get().project, NO_SELECTION, get().wallContextId));
+      },
+
+      async addReferenceMeasurement(measurement) {
+        const project = get().project;
+        if (!project) return null;
+        const id = newId();
+        const reference = { ...measurement, id, visible: true, locked: false } as ReferenceMeasurement;
+        await applyEdit(
+          "Save reference measurement",
+          (current) => ({
+            ...current,
+            referenceMeasurements: [...(current.referenceMeasurements ?? []), reference]
+          }),
+          selectionWrite(project, { kind: "measurement", measurementId: id }, get().wallContextId)
+        );
+        return id;
+      },
+
+      async updateReferenceMeasurement(measurementId, changes) {
+        const project = get().project;
+        const current = project?.referenceMeasurements?.find((item) => item.id === measurementId);
+        if (!project || !current || current.locked && (changes.start || changes.end)) return;
+        const normalized = {
+          ...changes,
+          ...(changes.name !== undefined ? { name: changes.name.trim() || undefined } : {})
+        };
+        const next = { ...current, ...normalized };
+        if (JSON.stringify(next) === JSON.stringify(current)) return;
+        await applyEdit("Edit reference measurement", (document) => ({
+          ...document,
+          referenceMeasurements: (document.referenceMeasurements ?? []).map((item) =>
+            item.id === measurementId ? { ...item, ...normalized } : item
+          )
+        }));
+      },
+
+      async deleteReferenceMeasurement(measurementId) {
+        const project = get().project;
+        if (!project?.referenceMeasurements?.some((item) => item.id === measurementId)) return;
+        await applyEdit(
+          "Delete reference measurement",
+          (document) => ({
+            ...document,
+            referenceMeasurements: (document.referenceMeasurements ?? []).filter(
+              (item) => item.id !== measurementId
+            )
+          }),
+          selectionWrite(project, NO_SELECTION, get().wallContextId)
+        );
       },
 
       async renameProject(title) {
@@ -1426,6 +1513,22 @@ export function createAppStore(deps: AppStoreDeps) {
         });
       },
 
+      async duplicateFreestandingWall(wallId, centerFloorMm) {
+        await runPartitionEdit({
+          label: "Duplicate partition",
+          errorFallback: "Could not duplicate that partition",
+          compute: (project) => duplicateFreestandingWallEdit(project, wallId, centerFloorMm),
+          extras: (result) => ({
+            ...selectionWrite(
+              result.project,
+              { kind: "freestandingWall", wallId: result.anchorVertexId },
+              get().wallContextId
+            ),
+            viewMode: "plan"
+          })
+        });
+      },
+
       async moveFreestandingWall(wallId, deltaFloorMm) {
         if (deltaFloorMm.xMm === 0 && deltaFloorMm.yMm === 0) return;
 
@@ -1485,6 +1588,15 @@ export function createAppStore(deps: AppStoreDeps) {
         });
       },
 
+      async setFreestandingWallClearance(wallId, side, distanceMm) {
+        await runPartitionEdit({
+          label: "Move partition",
+          errorFallback: "Could not move that partition",
+          compute: (project) =>
+            setFreestandingClearanceEdit(project, wallId, side, distanceMm)
+        });
+      },
+
       async deleteFreestandingWall(wallId) {
         const project = get().project;
         if (!project) return;
@@ -1523,7 +1635,10 @@ export function createAppStore(deps: AppStoreDeps) {
                 : candidate
             )
           },
-          wallObjects: nextWallObjects
+          wallObjects: nextWallObjects,
+          referenceMeasurements: (project.referenceMeasurements ?? []).filter(
+            (measurement) => measurement.kind === "plan" || !faceIds.has(measurement.wallId)
+          )
         };
 
         // Clear selection if it pointed at the deleted partition.
@@ -1531,6 +1646,11 @@ export function createAppStore(deps: AppStoreDeps) {
         const nextSelection: Selection =
           current.kind === "freestandingWall" && current.wallId === wallId
             ? NO_SELECTION
+            : current.kind === "measurement" &&
+                !(nextProject.referenceMeasurements ?? []).some(
+                  (measurement) => measurement.id === current.measurementId
+                )
+              ? NO_SELECTION
             : current;
         // If the wall context pointed at a face of the deleted partition, drop
         // it to a surviving wall.
@@ -2032,6 +2152,31 @@ export function createAppStore(deps: AppStoreDeps) {
           set({
             saveState: "error",
             error: `Could not create the new project (${
+              error instanceof Error ? error.message : "unknown error"
+            }).`
+          });
+        }
+      },
+
+      async duplicateProject(id) {
+        set({ saveState: "saving", error: null });
+
+        try {
+          const source = await deps.projectRepository.load(id);
+          const now = new Date().toISOString();
+          const copy: Project = {
+            ...source,
+            id: newId(),
+            title: `${source.title} (copy)`,
+            createdAt: now,
+            updatedAt: now
+          };
+          await deps.projectRepository.save(copy);
+          setDocument(copy, { viewMode: "plan", saveState: "saved" });
+        } catch (error) {
+          set({
+            saveState: "error",
+            error: `Could not duplicate that project (${
               error instanceof Error ? error.message : "unknown error"
             }).`
           });

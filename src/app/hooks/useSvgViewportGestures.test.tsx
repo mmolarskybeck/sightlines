@@ -9,9 +9,11 @@ import {
 import {
   clampZoom,
   FIT_VIEWPORT,
+  getViewBox2D,
   panBy,
   PLAN_ZOOM_LIMITS,
   WHEEL_ZOOM_SENSITIVITY,
+  ZOOM_STEP,
   zoomAtPoint,
   type Size,
   type ViewBox,
@@ -211,6 +213,83 @@ describe("useSvgViewportGestures — Space / ⌘0 keyboard", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "0", ctrlKey: true, cancelable: true }));
     });
     expect(onViewportChange).toHaveBeenCalledWith(FIT_VIEWPORT);
+  });
+
+  it("⌘= zooms in around the viewBox center and prevents default", () => {
+    const onViewportChange = vi.fn();
+    const viewport: Viewport2D = { mode: "manual", centerXMm: 5, centerYMm: 5, zoom: 4 };
+    renderGestures({ viewport, onViewportChange });
+    const { viewBox } = getViewBox2D(viewport, DEFAULT_BOUNDS, DEFAULT_SIZE);
+    const center = { xMm: viewBox.x + viewBox.width / 2, yMm: viewBox.y + viewBox.height / 2 };
+
+    const event = new KeyboardEvent("keydown", { key: "=", metaKey: true, cancelable: true });
+    act(() => {
+      window.dispatchEvent(event);
+    });
+    expect(onViewportChange).toHaveBeenCalledWith(
+      zoomAtPoint(viewport, center, ZOOM_STEP, DEFAULT_BOUNDS, DEFAULT_SIZE, PLAN_ZOOM_LIMITS)
+    );
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("⌘- zooms out around the viewBox center and prevents default", () => {
+    const onViewportChange = vi.fn();
+    const viewport: Viewport2D = { mode: "manual", centerXMm: 5, centerYMm: 5, zoom: 4 };
+    renderGestures({ viewport, onViewportChange });
+    const { viewBox } = getViewBox2D(viewport, DEFAULT_BOUNDS, DEFAULT_SIZE);
+    const center = { xMm: viewBox.x + viewBox.width / 2, yMm: viewBox.y + viewBox.height / 2 };
+
+    const event = new KeyboardEvent("keydown", { key: "-", metaKey: true, cancelable: true });
+    act(() => {
+      window.dispatchEvent(event);
+    });
+    expect(onViewportChange).toHaveBeenCalledWith(
+      zoomAtPoint(viewport, center, 1 / ZOOM_STEP, DEFAULT_BOUNDS, DEFAULT_SIZE, PLAN_ZOOM_LIMITS)
+    );
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("Ctrl+= also zooms in", () => {
+    const onViewportChange = vi.fn();
+    const viewport: Viewport2D = { mode: "manual", centerXMm: 5, centerYMm: 5, zoom: 4 };
+    renderGestures({ viewport, onViewportChange });
+    const { viewBox } = getViewBox2D(viewport, DEFAULT_BOUNDS, DEFAULT_SIZE);
+    const center = { xMm: viewBox.x + viewBox.width / 2, yMm: viewBox.y + viewBox.height / 2 };
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "+", ctrlKey: true, cancelable: true }));
+    });
+    expect(onViewportChange).toHaveBeenCalledWith(
+      zoomAtPoint(viewport, center, ZOOM_STEP, DEFAULT_BOUNDS, DEFAULT_SIZE, PLAN_ZOOM_LIMITS)
+    );
+  });
+
+  it("⌘= is ignored when the target is an editable element", () => {
+    const onViewportChange = vi.fn();
+    renderGestures({ viewport: { mode: "manual", centerXMm: 5, centerYMm: 5, zoom: 4 }, onViewportChange });
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+
+    act(() => {
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "=", metaKey: true, bubbles: true, cancelable: true })
+      );
+    });
+    expect(onViewportChange).not.toHaveBeenCalled();
+  });
+
+  it("⌘- is ignored when the target is an editable element", () => {
+    const onViewportChange = vi.fn();
+    renderGestures({ viewport: { mode: "manual", centerXMm: 5, centerYMm: 5, zoom: 4 }, onViewportChange });
+    const textarea = document.createElement("textarea");
+    document.body.appendChild(textarea);
+
+    act(() => {
+      textarea.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "-", metaKey: true, bubbles: true, cancelable: true })
+      );
+    });
+    expect(onViewportChange).not.toHaveBeenCalled();
   });
 });
 

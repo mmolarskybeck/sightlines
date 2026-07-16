@@ -15,6 +15,9 @@ export type UseToolbarShortcutsParams = {
   togglePartitionTool: () => void;
   toggleDrawRect: () => void;
   toggleDrawRoom: () => void;
+  // Optional during the staged canvas integration; once App supplies it, M
+  // participates in the same guarded shortcut system as the existing tools.
+  toggleMeasure?: () => void;
   toggleShowGrid: () => void;
   toggleSnapToGrid: () => void;
   toggleAllowOverlappingPlacement: () => void;
@@ -32,6 +35,7 @@ export function useToolbarShortcuts({
   togglePartitionTool,
   toggleDrawRect,
   toggleDrawRoom,
+  toggleMeasure,
   toggleShowGrid,
   toggleSnapToGrid,
   toggleAllowOverlappingPlacement,
@@ -67,6 +71,10 @@ export function useToolbarShortcuts({
           if (viewMode !== "plan") return;
           event.preventDefault();
           togglePartitionTool();
+          break;
+        case "m":
+          event.preventDefault();
+          toggleMeasure?.();
           break;
         case "r":
           if (viewMode !== "plan") return;
@@ -108,6 +116,7 @@ export function useToolbarShortcuts({
     togglePartitionTool,
     toggleDrawRect,
     toggleDrawRoom,
+    toggleMeasure,
     toggleShowGrid,
     toggleSnapToGrid,
     toggleAllowOverlappingPlacement,

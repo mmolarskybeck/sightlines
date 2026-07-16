@@ -42,6 +42,17 @@ export function zoomFactorFromDelta(normalizedDeltaY: number): number {
   return Math.exp(normalizedDeltaY * ZOOM_SENSITIVITY);
 }
 
+// Cmd/Ctrl +/- keyboard dolly step — one keypress, one 2D-ZOOM_STEP-sized
+// hop (~1.25x), matching how the buttons/shortcut feel in the SVG viewport
+// (useSvgViewportGestures.ts's ZOOM_STEP).
+export const KEYBOARD_ZOOM_STEP = 1.25;
+
+// Same >1-dollies-out/<1-dollies-in convention as zoomFactorFromDelta, keyed
+// off keyboard intent rather than a wheel delta.
+export function keyboardZoomFactor(direction: "in" | "out"): number {
+  return direction === "out" ? KEYBOARD_ZOOM_STEP : 1 / KEYBOARD_ZOOM_STEP;
+}
+
 export function clampFocusDistance(currentDistance: number): number {
   return MathUtils.clamp(currentDistance, FOCUS_MIN_DISTANCE, FOCUS_MAX_DISTANCE);
 }

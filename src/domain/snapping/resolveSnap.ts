@@ -13,6 +13,21 @@ export type SnapTarget = {
   // (0, above centerline) for a door, just below the centerline for
   // everything else — a static per-kind map can't express that.
   priority?: number;
+  // The natural extent, in floor space along the guide's cross axis, of the
+  // geometry being aligned to (e.g. the wall or slab span producing this
+  // target) — same shape as Guide.extentMm. When set, resolveSnap copies it
+  // onto the winning Guide so the rendered guide can be clipped to exactly
+  // the geometry it represents instead of drawing full-viewport.
+  extentMm?: { startMm: number; endMm: number };
+  // Whether a winning guide should actually be drawn. Defaults to true.
+  // Set false for targets that are continuous quantizations rather than a
+  // discrete, rare alignment — e.g. a partition's "round this gap to a clean
+  // increment" target is within capture range almost everywhere, so drawing
+  // a guide for it reads as constant noise rather than a meaningful signal.
+  // The target still competes and wins normally; only the guide line is
+  // suppressed. Contrast with artwork's `neighbor-edge`, a single fixed point
+  // (flush with one specific neighbor) where a guide IS meaningful.
+  showGuide?: boolean;
 };
 
 export type Guide = {
@@ -27,6 +42,8 @@ export type Guide = {
   // containing room. Producers that leave it undefined keep full-viewport
   // rendering; resolveSnap itself never sets it (the drag stamps it afterward).
   extentMm?: { startMm: number; endMm: number };
+  // Copied from the winning SnapTarget's showGuide (default true) — see there.
+  showGuide?: boolean;
 };
 
 // The ids of the targets that won each axis on a previous resolve, so the
@@ -113,7 +130,9 @@ export function resolveSnap(
       id: `${best.id}-${axis}`,
       axis,
       positionMm,
-      targetId: best.id
+      targetId: best.id,
+      extentMm: best.extentMm,
+      showGuide: best.showGuide
     });
     snapTargetIds[axis] = best.id;
   }

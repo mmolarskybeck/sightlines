@@ -1,48 +1,33 @@
 import type { DisplayUnit, FreestandingWall } from "../../../domain/project";
 import {
   partitionAxisForWorldAxis,
-  type PartitionClearances,
-  type SideClearance
+  type ChainSegment,
+  type PartitionDimensionChains
 } from "../../../domain/geometry/partitionSpacing";
 import { formatLength } from "../../../domain/units/length";
+import { staggerLabelRow } from "./labelStagger";
 
-// Live clearance dimension lines for a selected (or actively dragged) partition
-// in plan mode: up to FOUR face-accurate clearances — the two normal (face) gaps
-// AND the two span (end-cap) gaps — each drawn from the side's own origin (a
-// slab face point or an end cap) out to the nearest obstacle it hit, with a
-// tick square at each end and the measured true clear gap labelled at the
-// segment midpoint. Sides that missed draw nothing. At rest (selected, no drag)
-// all four show; during a MOVE drag `visibleWorldAxes` masks to just the gaps
-// on the axes the partition is actually travelling on (so a pure x-move shows
-// only its x-relevant pair), all reading true clear distances that update live.
-// Render-only — the caller casts the rays
-// (memoized) and lifts the result to floor space; this just paints it. Muted
-// drafting ink via the shared .dimension-* classes, deliberately quieter than
-// the petrol selection color. Sizes divide by nothing here — they are scaled
-// off handleSizeMm (already px/mm-derived) so ticks and label hold a constant
-// on-screen size at any zoom, the same trick RoomResizeHandles/GroupDimension-
-// Lines use.
+const LABEL_GLYPH_WIDTH_RATIO = 0.62;
+const LABEL_FIT_SLACK = 0.8;
+const MAX_STAGGER_ROW = 3;
+
+type ChainName = keyof PartitionDimensionChains;
+
 export function PartitionDimensionLines({
-  clearances,
+  chains,
   partition,
   visibleWorldAxes = { x: true, y: true },
   handleSizeMm,
   unit
 }: {
-  clearances: PartitionClearances; // floor-space
+  chains: PartitionDimensionChains;
   partition: FreestandingWall;
-  // Which world axes' gaps to draw. Defaults to both (at rest / endpoint drag,
-  // all four). During a MOVE drag the caller passes the latched mask, so only
-  // the gaps on the axes the partition is actually travelling on are shown.
   visibleWorldAxes?: { x: boolean; y: boolean };
   handleSizeMm: number;
   unit: DisplayUnit;
 }) {
   if (handleSizeMm <= 0) return null;
 
-  // A clearance pair (normal or span) is visible when EITHER world axis in the
-  // mask maps to it — partitionAxisForWorldAxis is the single source of truth
-  // for the world-axis → direction mapping, shared with the centering buttons.
   const showNormal =
     (visibleWorldAxes.x && partitionAxisForWorldAxis(partition, "x") === "normal") ||
     (visibleWorldAxes.y && partitionAxisForWorldAxis(partition, "y") === "normal");
@@ -50,55 +35,189 @@ export function PartitionDimensionLines({
     (visibleWorldAxes.x && partitionAxisForWorldAxis(partition, "x") === "axis") ||
     (visibleWorldAxes.y && partitionAxisForWorldAxis(partition, "y") === "axis");
 
-  const sides: Array<{ key: string; side: SideClearance }> = [
-    { key: "normal-plus", side: clearances.normal.plus },
-    { key: "normal-minus", side: clearances.normal.minus },
-    { key: "span-plus", side: clearances.span.plus },
-    { key: "span-minus", side: clearances.span.minus }
-  ]
-    .filter((entry) => (entry.key.startsWith("normal") ? showNormal : showSpan))
-    .filter((entry) => entry.side.hit !== null);
-  if (sides.length === 0) return null;
-
-  const tickHalfMm = handleSizeMm * 0.4;
-  const fontSizeMm = handleSizeMm * 1.6;
+  const visible: Array<{ name: ChainName; segments: ChainSegment[] }> = [
+    ...(showNormal ? [{ name: "normal" as const, segments: chains.normal }] : []),
+    ...(showSpan ? [{ name: "span" as const, segments: chains.span }] : [])
+  ].filter((entry) => entry.segments.length > 0);
 
   return (
     <g pointerEvents="none">
-      {sides.map(({ key, side }) => {
-        const hit = side.hit!;
-        const originMm = side.originMm;
-        const midXMm = (originMm.xMm + hit.pointMm.xMm) / 2;
-        const midYMm = (originMm.yMm + hit.pointMm.yMm) / 2;
+      {visible.map(({ name, segments }) => (
+        <DimensionChain
+          key={name}
+          name={name}
+          segments={segments}
+          handleSizeMm={handleSizeMm}
+          unit={unit}
+        />
+      ))}
+    </g>
+  );
+}
+
+function DimensionChain({
+  name,
+  segments,
+  handleSizeMm,
+  unit
+}: {
+  name: ChainName;
+  segments: ChainSegment[];
+  handleSizeMm: number;
+  unit: DisplayUnit;
+}) {
+  const first = segments[0]?.aMm;
+  const last = segments.at(-1)?.bMm;
+  if (!first || !last) return null;
+  const length = Math.hypot(last.xMm - first.xMm, last.yMm - first.yMm);
+  if (length <= 1e-6) return null;
+  const dir = { xMm: (last.xMm - first.xMm) / length, yMm: (last.yMm - first.yMm) / length };
+  // Put the two chains on opposite drafting sides so their labels do not pile
+  // up over the selected slab at the crossing.
+  const side = name === "normal" ? 1 : -1;
+  const normal = { xMm: -dir.yMm * side, yMm: dir.xMm * side };
+  const offsetMm = handleSizeMm * 2.5;
+  const shifted = (point: { xMm: number; yMm: number }) => ({
+    xMm: point.xMm + normal.xMm * offsetMm,
+    yMm: point.yMm + normal.yMm * offsetMm
+  });
+  const fontSizeMm = handleSizeMm * 1.6;
+  const tickHalfMm = handleSizeMm * 0.45;
+  const rowSpacingMm = handleSizeMm * 1.8;
+  // Drafting conventions: witness lines stand off the measured geometry and
+  // overshoot slightly past the dimension line.
+  const witnessGapMm = handleSizeMm * 0.6;
+  const witnessOvershootMm = handleSizeMm * 0.5;
+  const gapSegments = segments.filter((segment) => segment.kind === "gap");
+  const rowEnd: number[] = [];
+  const labels = gapSegments.map((segment) => {
+    const label = formatLength(Math.max(0, segment.lengthMm), { unit });
+    const startAlong =
+      (segment.aMm.xMm - first.xMm) * dir.xMm +
+      (segment.aMm.yMm - first.yMm) * dir.yMm;
+    const endAlong = startAlong + segment.lengthMm;
+    const labelWidth = label.length * fontSizeMm * LABEL_GLYPH_WIDTH_RATIO;
+    const midAlong = (startAlong + endAlong) / 2;
+    const row = staggerLabelRow(rowEnd, {
+      fits: segment.lengthMm >= labelWidth + handleSizeMm * LABEL_FIT_SLACK,
+      mid: midAlong,
+      halfWidth: labelWidth / 2,
+      gap: handleSizeMm * 0.5,
+      maxRow: MAX_STAGGER_ROW
+    });
+    return { segment, label, row, labelWidth };
+  });
+  const stations = [segments[0].aMm, ...segments.map((segment) => segment.bMm)];
+  // Row-0 labels sit on the dimension line itself, so the line breaks behind
+  // them; the break spans the label's extent projected onto the line.
+  const lineBreaks = new Map(
+    labels
+      .filter(({ row }) => row === 0)
+      .map(({ segment, labelWidth }) => [
+        segment,
+        (Math.abs(dir.xMm) * labelWidth + Math.abs(dir.yMm) * fontSizeMm * 1.4) / 2 +
+          handleSizeMm * 0.4
+      ])
+  );
+
+  return (
+    <g>
+      {segments.map((segment, index) => {
+        const a = shifted(segment.aMm);
+        const b = shifted(segment.bMm);
+        const halfBreakMm = lineBreaks.get(segment);
+        const halfLengthMm = segment.lengthMm / 2;
+        if (halfBreakMm !== undefined && halfBreakMm < halfLengthMm) {
+          const mid = { xMm: (a.xMm + b.xMm) / 2, yMm: (a.yMm + b.yMm) / 2 };
+          return (
+            <g key={`segment-${index}`}>
+              <line
+                className="dimension-line"
+                x1={a.xMm}
+                y1={a.yMm}
+                x2={mid.xMm - dir.xMm * halfBreakMm}
+                y2={mid.yMm - dir.yMm * halfBreakMm}
+                vectorEffect="non-scaling-stroke"
+              />
+              <line
+                className="dimension-line"
+                x1={mid.xMm + dir.xMm * halfBreakMm}
+                y1={mid.yMm + dir.yMm * halfBreakMm}
+                x2={b.xMm}
+                y2={b.yMm}
+                vectorEffect="non-scaling-stroke"
+              />
+            </g>
+          );
+        }
         return (
-          <g key={key}>
+          <line
+            key={`segment-${index}`}
+            className="dimension-line"
+            x1={a.xMm}
+            y1={a.yMm}
+            x2={b.xMm}
+            y2={b.yMm}
+            vectorEffect="non-scaling-stroke"
+          />
+        );
+      })}
+      {stations.map((station, index) => {
+        const point = shifted(station);
+        return (
+          <g key={`station-${index}`}>
             <line
               className="dimension-line"
-              x1={originMm.xMm}
-              y1={originMm.yMm}
-              x2={hit.pointMm.xMm}
-              y2={hit.pointMm.yMm}
+              x1={station.xMm + normal.xMm * witnessGapMm}
+              y1={station.yMm + normal.yMm * witnessGapMm}
+              x2={point.xMm + normal.xMm * witnessOvershootMm}
+              y2={point.yMm + normal.yMm * witnessOvershootMm}
               vectorEffect="non-scaling-stroke"
             />
-            {[originMm, hit.pointMm].map((corner, index) => (
-              <rect
-                key={index}
-                className="plan-dimension-tick"
-                x={corner.xMm - tickHalfMm}
-                y={corner.yMm - tickHalfMm}
-                width={tickHalfMm * 2}
-                height={tickHalfMm * 2}
+            <line
+              className="dimension-tick"
+              x1={point.xMm - normal.xMm * tickHalfMm}
+              y1={point.yMm - normal.yMm * tickHalfMm}
+              x2={point.xMm + normal.xMm * tickHalfMm}
+              y2={point.yMm + normal.yMm * tickHalfMm}
+              vectorEffect="non-scaling-stroke"
+            />
+          </g>
+        );
+      })}
+      {labels.map(({ segment, label, row }, index) => {
+        const midpoint = shifted({
+          xMm: (segment.aMm.xMm + segment.bMm.xMm) / 2,
+          yMm: (segment.aMm.yMm + segment.bMm.yMm) / 2
+        });
+        // Row 0 sits in the break of the dimension line itself; staggered
+        // rows step outward and keep a leader back to the line.
+        const labelOffsetMm = row === 0 ? 0 : handleSizeMm * 1.2 + row * rowSpacingMm;
+        const labelPoint = {
+          xMm: midpoint.xMm + normal.xMm * labelOffsetMm,
+          yMm: midpoint.yMm + normal.yMm * labelOffsetMm
+        };
+        return (
+          <g key={`label-${index}`}>
+            {row > 0 ? (
+              <line
+                className="dimension-line"
+                x1={midpoint.xMm}
+                y1={midpoint.yMm}
+                x2={labelPoint.xMm}
+                y2={labelPoint.yMm}
+                vectorEffect="non-scaling-stroke"
               />
-            ))}
+            ) : null}
             <text
               className="dimension-label"
-              x={midXMm}
-              y={midYMm}
+              x={labelPoint.xMm}
+              y={labelPoint.yMm}
               textAnchor="middle"
               dominantBaseline="central"
               style={{ fontSize: fontSizeMm, strokeWidth: fontSizeMm * 0.3 }}
             >
-              {formatLength(hit.distanceMm, { unit })}
+              {label}
             </text>
           </g>
         );

@@ -1,11 +1,21 @@
 import { useEffect, useState } from "react";
+import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import type { DisplayUnit, FreestandingWall } from "../../domain/project";
 import {
   getFreestandingAngleDeg,
   getFreestandingLengthMm
 } from "../../domain/geometry/freestandingWalls";
-import { partitionAxisForWorldAxis } from "../../domain/geometry/partitionSpacing";
+import {
+  partitionAxisForWorldAxis,
+  type PartitionClearances,
+  type SideClearance
+} from "../../domain/geometry/partitionSpacing";
+import {
+  FREESTANDING_CLEARANCE_SIDES,
+  parseClearanceSide,
+  type FreestandingClearanceSide
+} from "../../domain/geometry/freestandingWalls";
 import { getScopedUnitContext } from "./scopedUnits";
 import { LengthField } from "./LengthField";
 import { InspectorSection } from "./InspectorSection";
@@ -27,7 +37,10 @@ export function FreestandingWallInspector({
   onCommitThickness,
   onCommitHeight,
   onCenter,
+  clearances,
+  onCommitClearance,
   onViewFace,
+  onDuplicate,
   onDelete
 }: {
   wall: FreestandingWall;
@@ -37,7 +50,13 @@ export function FreestandingWallInspector({
   onCommitThickness: (thicknessMm: number) => Promise<void> | void;
   onCommitHeight: (heightMm: number) => Promise<void> | void;
   onCenter: (axis: "normal" | "axis") => Promise<void> | void;
+  clearances: PartitionClearances | null;
+  onCommitClearance: (
+    side: FreestandingClearanceSide,
+    distanceMm: number
+  ) => Promise<void> | void;
   onViewFace: (face: "a" | "b") => void;
+  onDuplicate: () => Promise<void> | void;
   onDelete: () => void;
 }) {
   const { displayUnit, parseUnit, placeholder } = getScopedUnitContext(unit, "wall");
@@ -117,12 +136,71 @@ export function FreestandingWallInspector({
         </InspectorFieldGrid>
       </InspectorSection>
 
+      {clearances ? (
+        <InspectorSection collapsible={false} title="Distances">
+          <InspectorFieldGrid columns={2}>
+            {clearanceFields(clearances).map(({ side, clearance, fallbackLabel }) =>
+              clearance.hit ? (
+                <LengthField
+                  key={`${wall.id}-${side}`}
+                  label={clearanceLabel(clearance, fallbackLabel)}
+                  valueMm={clearance.hit.distanceMm}
+                  displayUnit={wallScope.displayUnit}
+                  parseUnit={wallScope.parseUnit}
+                  placeholder={wallPlaceholder}
+                  onCommit={(distanceMm) => {
+                    if (distanceMm < 0) throw new Error("Distance cannot be negative.");
+                    return onCommitClearance(side, distanceMm);
+                  }}
+                  commitErrorFallback="Could not move this partition."
+                />
+              ) : null
+            )}
+          </InspectorFieldGrid>
+        </InspectorSection>
+      ) : null}
+
+      <Button className="inspector-action" variant="inspector" onClick={() => void onDuplicate()}>
+        <CopyIcon aria-hidden="true" size={15} />
+        Duplicate partition
+      </Button>
+
       <Button className="inspector-action inspector-danger" variant="destructive-ghost" onClick={onDelete}>
         <TrashIcon aria-hidden="true" size={15} />
         Delete partition
       </Button>
     </form>
   );
+}
+
+const CLEARANCE_FALLBACK_LABELS: Record<FreestandingClearanceSide, string> = {
+  "normal-plus": "Side A",
+  "normal-minus": "Side B",
+  "span-minus": "End A",
+  "span-plus": "End B"
+};
+
+function clearanceFields(clearances: PartitionClearances): {
+  side: FreestandingClearanceSide;
+  clearance: SideClearance;
+  fallbackLabel: string;
+}[] {
+  return FREESTANDING_CLEARANCE_SIDES.map((side) => {
+    const { axis, sign } = parseClearanceSide(side);
+    return { side, clearance: clearances[axis][sign], fallbackLabel: CLEARANCE_FALLBACK_LABELS[side] };
+  });
+}
+
+function clearanceLabel(clearance: SideClearance, fallback: string): string {
+  const { xMm, yMm } = clearance.dirUnit;
+  const axisEpsilon = 1e-6;
+  if (Math.abs(yMm) <= axisEpsilon && Math.abs(xMm) > axisEpsilon) {
+    return xMm > 0 ? "To right" : "To left";
+  }
+  if (Math.abs(xMm) <= axisEpsilon && Math.abs(yMm) > axisEpsilon) {
+    return yMm > 0 ? "To down" : "To up";
+  }
+  return fallback;
 }
 
 // Degrees are unit-agnostic, so this is a plain number field (not a LengthField)

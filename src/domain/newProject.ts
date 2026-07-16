@@ -19,6 +19,7 @@ export function createBlankProject(title: string): Project {
     checklistArtworkIds: [],
     wallObjects: [],
     floorObjects: [],
+    referenceMeasurements: [],
     createdAt: now,
     updatedAt: now,
     floor: {

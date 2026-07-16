@@ -86,6 +86,38 @@ describe("resolveSnap", () => {
     expect(result.snapTargetIds).toEqual({ y: "centerline" });
   });
 
+  it("copies a winning target's extentMm onto its guide, and omits it when the target left it undefined", () => {
+    const result = resolveSnap(
+      { xMm: 98, yMm: 1450 },
+      [
+        { ...centerline, extentMm: { startMm: 300, endMm: 900 } },
+        { id: "grid-x-100", kind: "grid", axis: "x", point: { xMm: 100, yMm: 0 } }
+      ],
+      { thresholdMm: 10 }
+    );
+
+    const yGuide = result.activeGuides.find((guide) => guide.axis === "y");
+    const xGuide = result.activeGuides.find((guide) => guide.axis === "x");
+    expect(yGuide?.extentMm).toEqual({ startMm: 300, endMm: 900 });
+    expect(xGuide?.extentMm).toBeUndefined();
+  });
+
+  it("copies a winning target's showGuide onto its guide, defaulting to undefined (shown) when unset", () => {
+    const result = resolveSnap(
+      { xMm: 98, yMm: 1450 },
+      [
+        { ...centerline, showGuide: false },
+        { id: "grid-x-100", kind: "grid", axis: "x", point: { xMm: 100, yMm: 0 } }
+      ],
+      { thresholdMm: 10 }
+    );
+
+    const yGuide = result.activeGuides.find((guide) => guide.axis === "y");
+    const xGuide = result.activeGuides.find((guide) => guide.axis === "x");
+    expect(yGuide?.showGuide).toBe(false);
+    expect(xGuide?.showGuide).toBeUndefined();
+  });
+
   it("returns the proposed point, no guides, and empty ids when nothing is in range", () => {
     const result = resolveSnap(
       { xMm: 500, yMm: 500 },

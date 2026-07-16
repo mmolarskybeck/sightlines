@@ -52,6 +52,22 @@ function nearestDescending(proposed: number, base: number, step: number): number
   return base - index * step;
 }
 
+// Nearest member of the directed half-lattice
+//   { base + direction * k * increment : k >= 0 }.
+// Partition snapping uses this same clean-distance primitive for room-wall
+// insets and partition-to-partition gaps. Callers validate the increment so a
+// bad value cannot accidentally create a sticky target at the pointer.
+export function nearestDirectedIncrement(
+  proposed: number,
+  base: number,
+  direction: -1 | 1,
+  incrementMm: number
+): number {
+  return direction === 1
+    ? nearestAscending(proposed, base, incrementMm)
+    : nearestDescending(proposed, base, incrementMm);
+}
+
 // Quantize a proposed CENTER x so one of the horizontal measurements a
 // dimension line reports lands on a multiple of `incrementMm`. Four candidate
 // families, each a half-lattice of period `incrementMm` (so its correction is

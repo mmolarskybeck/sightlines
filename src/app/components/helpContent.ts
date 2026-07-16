@@ -44,6 +44,7 @@ function toolbarKeyboardGroup(view: "plan" | "elevation"): HelpGroup {
       { action: "Insert a door", inputs: [[k("D")]] },
       { action: "Insert a window", inputs: [[k("W")]] },
       { action: "Mark a blocked zone", inputs: [[k("B")]] },
+      { action: "Measure distance", inputs: [[k("M")]] },
       ...(view === "plan"
         ? [
             { action: "Draw a partition", inputs: [[k("P")]] },

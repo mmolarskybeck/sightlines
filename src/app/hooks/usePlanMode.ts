@@ -17,7 +17,9 @@ export type PlanMode =
   | { kind: "drawRect" }
   | { kind: "drawRoom" }
   | { kind: "reshapeRoom"; roomId: string }
-  | { kind: "drawPartition" };
+  | { kind: "drawPartition" }
+  | { kind: "duplicatePartition"; sourceWallId: string }
+  | { kind: "measure" };
 
 export interface UsePlanModeResult {
   mode: PlanMode;
@@ -36,6 +38,11 @@ export interface UsePlanModeResult {
   toggleReshapeRoom: (roomId: string | null) => void;
   // Real toggle, same family as toggleDrawRoom.
   togglePartitionTool: () => void;
+  // Arms a click-to-place copy ghost for one existing partition, or clears it.
+  armDuplicatePartition: (sourceWallId: string | null) => void;
+  // Shared by Plan and Elevation. Like opening placement, Measure remains
+  // armed when moving between the two 2D coordinate surfaces.
+  toggleMeasure: () => void;
   // Unconditionally returns to "idle".
   disarm: () => void;
 }
@@ -76,6 +83,14 @@ export function usePlanMode(viewMode: ViewMode, selectedRoomId: string | null): 
     setMode((current) => (current.kind === "drawPartition" ? IDLE : { kind: "drawPartition" }));
   }, []);
 
+  const armDuplicatePartition = useCallback((sourceWallId: string | null) => {
+    setMode(sourceWallId ? { kind: "duplicatePartition", sourceWallId } : IDLE);
+  }, []);
+
+  const toggleMeasure = useCallback(() => {
+    setMode((current) => (current.kind === "measure" ? IDLE : { kind: "measure" }));
+  }, []);
+
   const disarm = useCallback(() => setMode(IDLE), []);
 
   // Opening placement works in both 2D views. Disarm only when the workspace
@@ -84,7 +99,12 @@ export function usePlanMode(viewMode: ViewMode, selectedRoomId: string | null): 
   useEffect(() => {
     setMode((current) => {
       if (viewMode === "plan") return current;
-      if (viewMode === "elevation" && current.kind === "placeOpening") return current;
+      if (
+        viewMode === "elevation" &&
+        (current.kind === "placeOpening" || current.kind === "measure")
+      ) {
+        return current;
+      }
       return IDLE;
     });
   }, [viewMode]);
@@ -107,6 +127,8 @@ export function usePlanMode(viewMode: ViewMode, selectedRoomId: string | null): 
     toggleDrawRoom,
     toggleReshapeRoom,
     togglePartitionTool,
+    armDuplicatePartition,
+    toggleMeasure,
     disarm
   };
 }

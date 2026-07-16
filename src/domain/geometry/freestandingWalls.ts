@@ -10,13 +10,14 @@ import type {
   RoomPlacement,
   RoomVertex
 } from "../project";
+import { newId } from "../id";
 import type { GeometryEditResult } from "./editRoom";
 import { getPartitionClearances } from "./partitionSpacing";
 import { isPointInPolygon, type Point } from "./polygon";
 import { unitLeftNormalOrZero } from "./vector";
 import type { WallWithGeometry } from "./walls";
 
-export const DEFAULT_FREESTANDING_THICKNESS_MM = 100;
+export const DEFAULT_FREESTANDING_THICKNESS_MM = 304.8;
 
 // A partition endpoint this close (or closer) to its partner collapses the
 // segment to zero length — rejected, same floor as the polygon constructors.
@@ -267,6 +268,50 @@ export function createFreestandingWall(
   };
 }
 
+// Clone a partition's geometry and recenter it at a floor-space point. The
+// destination room is resolved from the point rather than inherited from the
+// source, so copies can be placed across rooms while retaining their length,
+// angle, thickness, and height.
+export function duplicateFreestandingWallEdit(
+  project: Project,
+  wallId: string,
+  centerFloorMm: Point
+): GeometryEditResult & { wallId: string } {
+  const sourcePlacement = findPlacementByPartitionId(project, wallId);
+  const source = sourcePlacement.room.freestandingWalls.find((wall) => wall.id === wallId);
+  if (!source) throw new Error(`Partition not found: ${wallId}`);
+
+  const destinationRoomId = roomIdContainingPoint(project, centerFloorMm);
+  if (!destinationRoomId) throw new Error("Place the copy inside a room.");
+  const destination = findPlacementByRoomId(project, destinationRoomId);
+  const copyId = newId();
+  const halfDx = (source.endXMm - source.startXMm) / 2;
+  const halfDy = (source.endYMm - source.startYMm) / 2;
+  const centerLocalX = centerFloorMm.xMm - destination.offsetXMm;
+  const centerLocalY = centerFloorMm.yMm - destination.offsetYMm;
+  const number = getNextPartitionNumber(destination.room);
+  const copy: FreestandingWall = {
+    ...source,
+    id: copyId,
+    roomId: destinationRoomId,
+    name: `Partition ${number}`,
+    startXMm: centerLocalX - halfDx,
+    startYMm: centerLocalY - halfDy,
+    endXMm: centerLocalX + halfDx,
+    endYMm: centerLocalY + halfDy
+  };
+  const nextRoom: Room = {
+    ...destination.room,
+    freestandingWalls: [...destination.room.freestandingWalls, copy]
+  };
+  return {
+    project: replaceRoom(project, destinationRoomId, nextRoom),
+    changedWallIds: faceWallIdsOf(copyId),
+    anchorVertexId: copyId,
+    wallId: copyId
+  };
+}
+
 // Translate both endpoints by a floor-space delta (delta is a vector, so the
 // placement offset cancels — room-local delta equals floor delta).
 export function moveFreestandingWall(
@@ -343,6 +388,73 @@ export function centerFreestandingWallBetweenWalls(
     endXMm: wall.endXMm + dx,
     endYMm: wall.endYMm + dy
   }));
+}
+
+export type FreestandingClearanceSide =
+  | "normal-plus"
+  | "normal-minus"
+  | "span-plus"
+  | "span-minus";
+
+// The four sides in the inspector's display order (spec §8): the two faces,
+// then the two end caps. Consumers that need "all sides" (the inspector's
+// clearanceFields) should derive from this array rather than re-enumerating
+// the literals, so a union change here can't silently go stale there.
+export const FREESTANDING_CLEARANCE_SIDES: FreestandingClearanceSide[] = [
+  "normal-plus",
+  "normal-minus",
+  "span-minus",
+  "span-plus"
+];
+
+// Parsed form of a FreestandingClearanceSide — an explicit exhaustive switch
+// rather than `side.split("-") as [...]`, so adding a member to the union
+// fails the build here instead of silently mis-parsing at the call site.
+export function parseClearanceSide(
+  side: FreestandingClearanceSide
+): { axis: "normal" | "span"; sign: "plus" | "minus" } {
+  switch (side) {
+    case "normal-plus":
+      return { axis: "normal", sign: "plus" };
+    case "normal-minus":
+      return { axis: "normal", sign: "minus" };
+    case "span-plus":
+      return { axis: "span", sign: "plus" };
+    case "span-minus":
+      return { axis: "span", sign: "minus" };
+  }
+}
+
+// Set one face/end clearance by translating the whole partition. Length and
+// angle stay fixed. Movement toward the selected obstacle reduces that gap;
+// the opposite gap limits how far the partition may move away from it.
+export function setFreestandingClearanceEdit(
+  project: Project,
+  wallId: string,
+  side: FreestandingClearanceSide,
+  distanceMm: number
+): GeometryEditResult {
+  if (!Number.isFinite(distanceMm) || distanceMm < 0) {
+    throw new Error("Partition clearance must be zero or greater.");
+  }
+  const placement = findPlacementByPartitionId(project, wallId);
+  const partition = placement.room.freestandingWalls.find((wall) => wall.id === wallId);
+  if (!partition) throw new Error(`Partition not found: ${wallId}`);
+  const clearances = getPartitionClearances(placement.room, partition);
+  const { axis: axisName, sign } = parseClearanceSide(side);
+  const axis = clearances[axisName];
+  const selected = axis[sign];
+  if (!selected.hit) throw new Error("Nothing on that side to measure from.");
+
+  const opposite = axis[sign === "plus" ? "minus" : "plus"];
+  const shiftMm = selected.hit.distanceMm - distanceMm;
+  if (opposite.hit && opposite.hit.distanceMm + shiftMm < -1e-6) {
+    throw new Error("Not enough room for that clearance.");
+  }
+  return moveFreestandingWall(project, wallId, {
+    xMm: selected.dirUnit.xMm * shiftMm,
+    yMm: selected.dirUnit.yMm * shiftMm
+  });
 }
 
 // Rotate to an absolute angle (degrees) about the centerline midpoint,

@@ -17,6 +17,7 @@ import { FileDashedIcon } from "@phosphor-icons/react/dist/csr/FileDashed";
 import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { GridFourIcon } from "@phosphor-icons/react/dist/csr/GridFour";
 import { MagnetIcon } from "@phosphor-icons/react/dist/csr/Magnet";
+import { RulerIcon } from "@phosphor-icons/react/dist/csr/Ruler";
 import { MapTrifoldIcon } from "@phosphor-icons/react/dist/csr/MapTrifold";
 import { PackageIcon } from "@phosphor-icons/react/dist/csr/Package";
 import { PresentationIcon } from "@phosphor-icons/react/dist/csr/Presentation";
@@ -47,6 +48,7 @@ import type {
   ProjectSummary
 } from "../domain/project";
 import { faceWallId, parseFaceWallId } from "../domain/geometry/freestandingWalls";
+import { getPartitionClearances } from "../domain/geometry/partitionSpacing";
 import type { PackageExportMode } from "../domain/schema/packageSchema";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import {
@@ -94,6 +96,8 @@ import { ProjectPicker } from "./components/ProjectPicker";
 import { RoomInspector } from "./components/RoomInspector";
 import { RoomsPanel } from "./components/RoomsPanel";
 import { SelectionInspector } from "./components/SelectionInspector";
+import { MeasurementInspector, ReferenceMeasurementInspector } from "./components/MeasurementInspector";
+import { MeasurementLiveRegion } from "./components/MeasurementLiveRegion";
 import {
   WallPlacementFields,
   getWallPlacementCenterTarget,
@@ -111,6 +115,11 @@ import {
 import { Input } from "./components/ui/input";
 import { UnderlineToggleGroup, UnderlineToggleGroupItem } from "./components/ui/segmented";
 import { useStoragePersistence, getStorageNoteCopy } from "./hooks/useStoragePersistence";
+import {
+  escapeMeasurementState,
+  useMeasurementTool
+} from "./hooks/useMeasurementTool";
+import { useTemporaryMeasurementShortcuts } from "./hooks/useTemporaryMeasurementShortcuts";
 import {
   useViewPreferences,
   LEFT_PANEL_MIN_WIDTH,
@@ -205,6 +214,9 @@ export function App() {
     selectOpening,
     selectRoom,
     selectFreestandingWall,
+    addReferenceMeasurement,
+    updateReferenceMeasurement,
+    deleteReferenceMeasurement,
     viewFreestandingFace,
     selectObject,
     setObjectSelection,
@@ -213,6 +225,7 @@ export function App() {
     addPolygonRoom,
     addDrawnRectangleRoom,
     addFreestandingWall,
+    duplicateFreestandingWall,
     moveFreestandingWall,
     moveFreestandingWallEndpoint,
     rotateFreestandingWall,
@@ -220,6 +233,7 @@ export function App() {
     setFreestandingWallThickness,
     setFreestandingWallLength,
     setFreestandingWallHeight,
+    setFreestandingWallClearance,
     deleteFreestandingWall,
     renameProject,
     renameRoom,
@@ -245,6 +259,7 @@ export function App() {
     listArtworkProjectMemberships,
     openProject,
     createProject,
+    duplicateProject,
     renameProjectById,
     deleteProject,
     addArtworksFromFiles,
@@ -285,6 +300,9 @@ export function App() {
   const selectedFreestandingWallId = freestandingWallIdOf(selection);
   const selectedArtworkId = getSelectedArtworkId(project, selection);
   const selectedOpeningId = getSelectedOpeningId(project, selection);
+  const selectedReferenceMeasurement = selection.kind === "measurement"
+    ? project?.referenceMeasurements?.find((item) => item.id === selection.measurementId) ?? null
+    : null;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const threeDActionsRef = useRef<ThreeDViewActions | null>(null);
   const [importWizardOpen, setImportWizardOpen] = useState(false);
@@ -342,6 +360,8 @@ export function App() {
     toggleDrawRoom,
     toggleReshapeRoom,
     togglePartitionTool,
+    armDuplicatePartition,
+    toggleMeasure,
     disarm: disarmPlanMode
   } = usePlanMode(viewMode, selectedRoomId);
   // Compatibility aliases derived from planMode.
@@ -350,6 +370,9 @@ export function App() {
   const drawRoomActive = planMode.kind === "drawRoom";
   const reshapeRoomId = planMode.kind === "reshapeRoom" ? planMode.roomId : null;
   const partitionToolActive = planMode.kind === "drawPartition";
+  const duplicatePartitionSourceWallId =
+    planMode.kind === "duplicatePartition" ? planMode.sourceWallId : null;
+  const measurementActive = planMode.kind === "measure";
   // PlanView uses boolean setters so completion and Escape can disarm tools.
   const setDrawRectActive = (active: boolean) => {
     if (!active) {
@@ -475,6 +498,11 @@ export function App() {
 
   useUndoRedoShortcuts({ undo, redo });
 
+  const toggleMeasureWhenAvailable = () => {
+    if (viewMode === "elevation" && !selectedWall) return;
+    toggleMeasure();
+  };
+
   useDeleteAndEscapeShortcuts({
     project,
     selection,
@@ -523,11 +551,68 @@ export function App() {
     togglePartitionTool,
     toggleDrawRect,
     toggleDrawRoom,
+    toggleMeasure: toggleMeasureWhenAvailable,
     toggleShowGrid,
     toggleSnapToGrid,
     toggleAllowOverlappingPlacement,
     toggleShowCenterline
   });
+
+  const measurementContext =
+    viewMode === "elevation"
+      ? ({ kind: "elevation", wallId: selectedWall?.id ?? "" } as const)
+      : ({ kind: "plan" } as const);
+  const measurement = useMeasurementTool(measurementContext);
+
+  useTemporaryMeasurementShortcuts({
+    active: measurementActive,
+    suspended:
+      isHelpOpen || isSettingsOpen || importWizardOpen || confirmDeleteRoomId !== null,
+    state: measurement.state,
+    dispatch: measurement.dispatch
+  });
+
+  useEffect(() => {
+    if (!measurementActive) measurement.clear();
+  }, [measurementActive, measurement.clear]);
+
+  useEffect(() => {
+    if (!measurementActive) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (
+        isHelpOpen ||
+        isSettingsOpen ||
+        importWizardOpen ||
+        confirmDeleteRoomId !== null ||
+        isEditableTarget(event.target) ||
+        (event.target instanceof Element &&
+          event.target.closest('[role="dialog"], [role="menu"], [role="listbox"]'))
+      ) {
+        return;
+      }
+      const next = escapeMeasurementState(measurement.state);
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (next.disarm) disarmPlanMode();
+      else if (measurement.state.phase === "refining") {
+        measurement.dispatch({ type: "cancel-refinement" });
+      } else {
+        measurement.dispatch({ type: "clear" });
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [
+    measurementActive,
+    measurement.state,
+    measurement.dispatch,
+    disarmPlanMode,
+    isHelpOpen,
+    isSettingsOpen,
+    importWizardOpen,
+    confirmDeleteRoomId
+  ]);
 
   const selectedWallRoomPlacement =
     project && selectedWall
@@ -594,6 +679,15 @@ export function App() {
         .flatMap((placement) => placement.room.freestandingWalls)
         .find((wall) => wall.id === selectedFreestandingWallId) ?? null)
     : null;
+  const selectedFreestandingWallPlacement = selectedFreestandingWallId
+    ? project.floor.rooms.find((placement) =>
+        placement.room.freestandingWalls.some((wall) => wall.id === selectedFreestandingWallId)
+      ) ?? null
+    : null;
+  const selectedFreestandingWallClearances =
+    selectedFreestandingWall && selectedFreestandingWallPlacement
+      ? getPartitionClearances(selectedFreestandingWallPlacement.room, selectedFreestandingWall)
+      : null;
   const selectedRoomDimensions = selectedRoomPlacement
     ? getRectangleRoomDimensions(selectedRoomPlacement.room)
     : null;
@@ -961,6 +1055,12 @@ export function App() {
     // Disable hoverable content: the grace polygon can swallow adjacent 32px triggers.
     <TooltipProvider delayDuration={400} disableHoverableContent>
     <Toaster />
+    {measurementActive ? (
+      <MeasurementLiveRegion
+        state={measurement.state}
+        unit={viewMode === "elevation" ? elevationUnit : project.unit}
+      />
+    ) : null}
     <main className="app-shell">
       <AppRail
         leftPanel={visibleLeftPanel}
@@ -984,6 +1084,7 @@ export function App() {
               listProjectSummaries={listProjectSummaries}
               onCreateProject={createProject}
               onDeleteProject={deleteProject}
+              onDuplicateProject={duplicateProject}
               onExportProject={handleExportProjectById}
               onOpenProject={openProject}
               onRenameProject={renameProjectById}
@@ -1300,6 +1401,16 @@ export function App() {
                       disabled={viewMode === "elevation" && !selectedWall}
                       onToolChange={armOpeningTool}
                     />
+                    <ViewOptionButton
+                      active={measurementActive}
+                      disabled={viewMode === "elevation" && !selectedWall}
+                      icon={<RulerIcon aria-hidden="true" size={16} />}
+                      label="Measure"
+                      labelPriority
+                      title={measurementActive ? "Stop measuring" : "Measure distance"}
+                      kbd="M"
+                      onClick={toggleMeasureWhenAvailable}
+                    />
                   </>
                 ) : null}
               </div>
@@ -1397,6 +1508,13 @@ export function App() {
                 onAddFreestandingWall={(start, end) =>
                   void addFreestandingWall(start, end)
                 }
+                duplicatePartitionSourceWallId={duplicatePartitionSourceWallId}
+                onDuplicatePartitionChange={(active) => {
+                  if (!active) armDuplicatePartition(null);
+                }}
+                onDuplicateFreestandingWall={(wallId, center) =>
+                  void duplicateFreestandingWall(wallId, center)
+                }
                 selectedFreestandingWallId={selectedFreestandingWallId}
                 onMoveFreestandingWall={(wallId, delta) =>
                   void moveFreestandingWall(wallId, delta)
@@ -1416,6 +1534,11 @@ export function App() {
                 snapToGrid={snapToGrid}
                 viewport={planViewport}
                 onViewportChange={setPlanViewport}
+                measurementActive={measurementActive}
+                measurementState={
+                  measurement.state.context.kind === "plan" ? measurement.state : undefined
+                }
+                onMeasurementAction={measurement.dispatch}
                 onCommitPlanMove={(objectId, placement) =>
                   void commitPlanMove(objectId, placement, allowOverlappingPlacement)
                 }
@@ -1472,6 +1595,11 @@ export function App() {
                   walls={wallsForSwitcher}
                   viewport={elevationViewport}
                   onViewportChange={setElevationViewport}
+                  measurementActive={measurementActive}
+                  measurementState={
+                    measurement.state.context.kind === "elevation" ? measurement.state : undefined
+                  }
+                  onMeasurementDispatch={measurement.dispatch}
                   previewPositionsById={arrangeSession?.previewById}
                   arrangeSessionMode={arrangeSession?.mode ?? null}
                   onMoveOpening={(wallObjectId, xMm, yMm) => {
@@ -1592,7 +1720,16 @@ export function App() {
               </div>
             ) : null}
 
-            {!isMultiSelect &&
+            {(measurementActive &&
+            (measurement.state.phase === "armed-complete" ||
+              measurement.state.phase === "refining")) || selectedReferenceMeasurement ? (
+              <div className="panel-heading inspector-subject measurement-subject">
+                <h2>Measurement</h2>
+                <span>{selectedReferenceMeasurement ? "Reference" : "Temporary"}</span>
+              </div>
+            ) : null}
+
+            {!measurementActive && !isMultiSelect &&
             (selectedArtwork ||
               selectedOpening ||
               selectedFloorBlockedZone ||
@@ -1627,7 +1764,42 @@ export function App() {
               </div>
             ) : null}
 
-            {isMultiSelect ? (
+            {selectedReferenceMeasurement ? (
+              <ReferenceMeasurementInspector
+                name={selectedReferenceMeasurement.name}
+                distanceMm={Math.hypot(
+                  selectedReferenceMeasurement.end.xMm - selectedReferenceMeasurement.start.xMm,
+                  selectedReferenceMeasurement.end.yMm - selectedReferenceMeasurement.start.yMm
+                )}
+                unit={selectedReferenceMeasurement.kind === "elevation" ? elevationUnit : project.unit}
+                visible={selectedReferenceMeasurement.visible}
+                locked={selectedReferenceMeasurement.locked}
+                outOfBounds={selectedReferenceMeasurement.kind === "elevation" && selectedWall?.id === selectedReferenceMeasurement.wallId && [selectedReferenceMeasurement.start, selectedReferenceMeasurement.end].some((point) => point.xMm < 0 || point.xMm > selectedWall.lengthMm || point.yMm < 0 || point.yMm > selectedWall.heightMm)}
+                onChange={(changes) => void updateReferenceMeasurement(selectedReferenceMeasurement.id, changes)}
+                onDelete={() => void deleteReferenceMeasurement(selectedReferenceMeasurement.id)}
+              />
+            ) : measurementActive &&
+            (measurement.state.phase === "armed-complete" ||
+              measurement.state.phase === "refining") ? (
+              <MeasurementInspector
+                distanceMm={Math.hypot(
+                  measurement.state.end.xMm - measurement.state.start.xMm,
+                  measurement.state.end.yMm - measurement.state.start.yMm
+                )}
+                unit={viewMode === "elevation" ? elevationUnit : project.unit}
+                onKeepAsReference={() => {
+                  const state = measurement.state;
+                  if (state.phase !== "armed-complete" && state.phase !== "refining") return;
+                  if (state.context.kind === "plan") {
+                    void addReferenceMeasurement({ kind: "plan", start: state.start, end: state.end });
+                  } else {
+                    void addReferenceMeasurement({ kind: "elevation", wallId: state.context.wallId, start: state.start, end: state.end });
+                  }
+                  measurement.clear();
+                }}
+                onClear={measurement.clear}
+              />
+            ) : isMultiSelect ? (
               // Multi-selection replaces the single-subject inspector chain.
               <SelectionInspector
                 arrange={arrangeReadout}
@@ -1785,6 +1957,7 @@ export function App() {
             <FreestandingWallInspector
               wall={selectedFreestandingWall}
               unit={project.unit}
+              clearances={selectedFreestandingWallClearances}
               onCommitLength={(lengthMm) =>
                 setFreestandingWallLength(selectedFreestandingWall.id, lengthMm)
               }
@@ -1798,6 +1971,10 @@ export function App() {
                 setFreestandingWallHeight(selectedFreestandingWall.id, heightMm)
               }
               onCenter={(axis) => centerFreestandingWall(selectedFreestandingWall.id, axis)}
+              onCommitClearance={(side, distanceMm) =>
+                setFreestandingWallClearance(selectedFreestandingWall.id, side, distanceMm)
+              }
+              onDuplicate={() => armDuplicatePartition(selectedFreestandingWall.id)}
               onViewFace={(face) =>
                 viewFreestandingFace(faceWallId(selectedFreestandingWall.id, face))
               }

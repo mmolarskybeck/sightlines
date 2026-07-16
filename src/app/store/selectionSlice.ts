@@ -13,6 +13,7 @@ export type Selection =
   | { kind: "objects"; ids: string[] }
   | { kind: "libraryArtwork"; artworkId: string }
   | { kind: "room"; roomId: string }
+  | { kind: "measurement"; measurementId: string }
   // Partitions are selected by centerline id, never face id.
   | { kind: "freestandingWall"; wallId: string };
 

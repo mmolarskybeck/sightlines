@@ -5,7 +5,9 @@ import {
   useState,
   type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
-  type PointerEvent as ReactPointerEvent
+  type PointerEvent as ReactPointerEvent,
+  type Dispatch,
+  type KeyboardEvent as ReactKeyboardEvent
 } from "react";
 import {
   computeEdgeSnappedLengthMm,
@@ -50,9 +52,11 @@ import {
   DEFAULT_FLOOR_OBJECT_DEPTH_MM,
   type Artwork,
   type FreestandingWall,
+  type ReferenceMeasurement,
   type WallObject
 } from "../../domain/project";
 import {
+  DEFAULT_FREESTANDING_THICKNESS_MM,
   parseFaceWallId,
   roomIdContainingPoint,
   type FloorPartition
@@ -65,12 +69,15 @@ import {
 } from "../../domain/geometry/drawSnapping";
 import { canMoveRoomVertex, moveRoomWall } from "../../domain/geometry/reshapeRoom";
 import { getGridSnapTargets } from "../../domain/snapping/gridSnapTargets";
-import { getPartitionMoveSnapTargets } from "../../domain/snapping/partitionSnapTargets";
 import {
-  getPartitionClearances,
+  getPartitionDrawSnapTargets,
+  getPartitionMoveSnapTargets
+} from "../../domain/snapping/partitionSnapTargets";
+import {
+  getPartitionDimensionChains,
   partitionAxisForWorldAxis,
-  type PartitionClearances,
-  type SideClearance
+  type ChainSegment,
+  type PartitionDimensionChains
 } from "../../domain/geometry/partitionSpacing";
 import {
   floatPolicyForKind,
@@ -87,6 +94,13 @@ import {
 } from "../../domain/snapping/planGroupMove";
 import { resolveSnap, type Guide, type SnapTarget, type SnapTargetIds } from "../../domain/snapping/resolveSnap";
 import {
+  buildMeasurePointCandidates,
+  constrainMeasurePointToAxis,
+  resolveMeasurePoint,
+  type MeasureCandidateSources,
+  type MeasurePoint
+} from "../../domain/measurement/measurement";
+import {
   getMajorGridIntervalMm,
   getMinorGridIntervalMm
 } from "../../domain/units/precision";
@@ -99,9 +113,12 @@ import {
   type Viewport2D
 } from "../../domain/viewport/viewport2d";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
+import { getNudgeStepMm } from "../hooks/nudgeStep";
+import { isEditableTarget } from "../hooks/isEditableTarget";
 import { useArtworkAspect } from "../hooks/useArtworkAspect";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { useContainerSize } from "../hooks/useContainerSize";
+import { useDisarmOnEscape } from "../hooks/useDisarmOnEscape";
 import { useDragGesture } from "../hooks/useDragGesture";
 import { useSelectSuppression } from "../hooks/useSelectSuppression";
 import { useSvgViewportGestures } from "../hooks/useSvgViewportGestures";
@@ -116,6 +133,16 @@ import { GridOverlay } from "./GridOverlay";
 import { marqueeRectMm, type MarqueeState } from "./marqueeRect";
 import { type ResizeHandleTarget } from "./RoomResizeHandles";
 import { ViewportZoomControls } from "./ViewportZoomControls";
+import { MeasurementOverlay } from "./MeasurementOverlay";
+import {
+  MEASURE_DRAG_SLOP_PX,
+  type MeasurementToolAction,
+  type MeasurementToolState
+} from "../hooks/useMeasurementTool";
+import {
+  getMeasurementCreationKeyAction,
+  isMeasurementCreationArrowKey
+} from "../hooks/measurementCreationKey";
 import { PlanStructureLayer } from "./plan/PlanStructureLayer";
 import { PlacedObjectsLayer } from "./plan/PlacedObjectsLayer";
 import { PlanHandlesLayer } from "./plan/PlanHandlesLayer";
@@ -127,6 +154,7 @@ import type {
   DropGhostState,
   ObjectDragState,
   PartitionDragState,
+  PartitionDuplicateGhostState,
   PartitionDrawState,
   RectDrawState,
   RoomDragState,
@@ -154,9 +182,172 @@ const RECT_ROOM_MIN_SIZE_MM = 500;
 // Prevent fit-view from over-zooming sparse plans (~30 ft minimum extent).
 const MIN_PLAN_FIT_EXTENT_MM = 9144;
 
+function midpointOf(a: Point, b: Point): Point {
+  return { xMm: (a.xMm + b.xMm) / 2, yMm: (a.yMm + b.yMm) / 2 };
+}
+
+function liftPartitionChains(
+  chains: PartitionDimensionChains,
+  offset: Vector2
+): PartitionDimensionChains {
+  const liftSegment = (segment: ChainSegment): ChainSegment => ({
+    ...segment,
+    aMm: { xMm: segment.aMm.xMm + offset.xMm, yMm: segment.aMm.yMm + offset.yMm },
+    bMm: { xMm: segment.bMm.xMm + offset.xMm, yMm: segment.bMm.yMm + offset.yMm }
+  });
+  return {
+    normal: chains.normal.map(liftSegment),
+    span: chains.span.map(liftSegment)
+  };
+}
+
+function planRectMeasureGeometry(rect: PlanRect, id: string): MeasureCandidateSources {
+  const angle = (rect.angleDeg * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const local = [
+    [-rect.widthMm / 2, -rect.depthMm / 2],
+    [rect.widthMm / 2, -rect.depthMm / 2],
+    [rect.widthMm / 2, rect.depthMm / 2],
+    [-rect.widthMm / 2, rect.depthMm / 2]
+  ] as const;
+  const corners = local.map(([x, y]) => ({
+    xMm: rect.centerXMm + x * cos - y * sin,
+    yMm: rect.centerYMm + x * sin + y * cos
+  }));
+  return {
+    points: [
+      ...corners.map((point, index) => ({ id: `${id}:corner:${index}`, kind: "vertex" as const, point })),
+      { id: `${id}:center`, kind: "center", point: { xMm: rect.centerXMm, yMm: rect.centerYMm } }
+    ],
+    segments: corners.map((point, index) => ({
+      id: `${id}:edge:${index}`,
+      kind: "edge" as const,
+      start: point,
+      end: corners[(index + 1) % corners.length]
+    }))
+  };
+}
+
+export function buildPlanMeasureSources(
+  scene: ReturnType<typeof buildPlanScene>
+): MeasureCandidateSources {
+  const points: NonNullable<MeasureCandidateSources["points"]>[number][] = [];
+  const segments: NonNullable<MeasureCandidateSources["segments"]>[number][] = [];
+  for (const room of scene.rooms) {
+    room.polygonMm.forEach((point, index) =>
+      points.push({ id: `room:${room.roomId}:vertex:${index}`, kind: "vertex", point })
+    );
+    room.walls.forEach((wall) =>
+      segments.push({
+        id: `wall:${wall.wallId}`,
+        kind: "edge",
+        start: wall.startMm,
+        end: wall.endMm
+      })
+    );
+  }
+  const rects = [
+    ...scene.partitions.map((entry) => ({ id: `partition:${entry.partition.wallId}`, rect: entry.rect })),
+    ...scene.wallObjects.map((entry) => ({ id: `wall-object:${entry.object.id}`, rect: entry.renderedRect })),
+    ...scene.floorObjects.map((entry) => ({ id: `floor-object:${entry.object.id}`, rect: entry.rect }))
+  ];
+  for (const entry of rects) {
+    const geometry = planRectMeasureGeometry(entry.rect, entry.id);
+    points.push(...(geometry.points ?? []));
+    segments.push(...(geometry.segments ?? []));
+  }
+  return { points, segments };
+}
+
+export function getPlanMeasurementNudgeDelta(
+  key: string,
+  unit: import("../../domain/project").DisplayUnit,
+  gridPrecisionFloorMm: number | null,
+  shiftKey: boolean,
+  snapToGrid: boolean,
+  altKey: boolean
+): MeasurePoint | null {
+  if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(key)) return null;
+  const stepMm = getNudgeStepMm({ unit, snapToGrid, gridPrecisionFloorMm, shiftKey, altKey });
+  return {
+    xMm: key === "ArrowRight" ? stepMm : key === "ArrowLeft" ? -stepMm : 0,
+    // Plan floor coordinates share SVG's downward-positive y axis.
+    yMm: key === "ArrowDown" ? stepMm : key === "ArrowUp" ? -stepMm : 0
+  };
+}
+
+export function getPlanMeasurementKeyActions(
+  state: MeasurementToolState,
+  endpoint: "start" | "end",
+  key: string,
+  unit: import("../../domain/project").DisplayUnit,
+  gridPrecisionFloorMm: number | null,
+  shiftKey: boolean,
+  snapToGrid: boolean,
+  altKey: boolean
+): MeasurementToolAction[] {
+  if (key === "Enter" && state.phase === "refining") return [{ type: "commit-refinement" }];
+  if (key === "Escape" && state.phase === "refining") return [{ type: "cancel-refinement" }];
+  const delta = getPlanMeasurementNudgeDelta(key, unit, gridPrecisionFloorMm, shiftKey, snapToGrid, altKey);
+  if (!delta || (state.phase !== "armed-complete" && state.phase !== "refining")) return [];
+  const current = state[endpoint];
+  return [
+    ...(state.phase === "armed-complete"
+      ? ([{ type: "begin-refinement", endpoint }] satisfies MeasurementToolAction[])
+      : []),
+    {
+      type: "preview-refinement",
+      point: { xMm: current.xMm + delta.xMm, yMm: current.yMm + delta.yMm }
+    }
+  ];
+}
+
+// Keyboard-only creation: Enter begins at `origin` (the view supplies the
+// visible-viewport centre), arrows nudge the live preview by the shared canvas
+// step, Enter completes. Keyboard-moved points intentionally skip snap
+// resolution so an arrow nudge is never yanked to a snap target — the same
+// predictability trade the ⌘-bypass makes for the pointer path.
+export function getPlanMeasurementCreationKeyAction(
+  state: MeasurementToolState,
+  key: string,
+  origin: MeasurePoint,
+  unit: import("../../domain/project").DisplayUnit,
+  gridPrecisionFloorMm: number | null,
+  shiftKey: boolean,
+  snapToGrid: boolean,
+  altKey: boolean
+): MeasurementToolAction | null {
+  return getMeasurementCreationKeyAction(state, key, {
+    origin,
+    delta: getPlanMeasurementNudgeDelta(key, unit, gridPrecisionFloorMm, shiftKey, snapToGrid, altKey)
+  });
+}
+
+export function canPlanMeasurementClaimPointer(button: number, spaceHeld: boolean): boolean {
+  return button === 0 && !spaceHeld;
+}
+
+export function planMeasurementCancelAction(
+  state: MeasurementToolState
+): MeasurementToolAction | null {
+  if (state.phase === "refining") return { type: "cancel-refinement" };
+  if (state.phase === "drawing") return { type: "clear" };
+  return null;
+}
+
+export function shouldCancelMeasurementForViewportClaim(
+  pointerType: string,
+  hasMeasurementGesture: boolean
+): boolean {
+  return pointerType === "touch" && hasMeasurementGesture;
+}
+
 // Stable fallback avoids retriggering useAssetImageUrls.
 const NO_OP_GET_BLOB: (key: string) => Promise<Blob> = () =>
   Promise.reject(new Error("PlanView: no getBlob provided"));
+
+const EMPTY_REFERENCE_MEASUREMENTS: ReferenceMeasurement[] = [];
 
 export function PlanView({
   activeTool,
@@ -171,6 +362,9 @@ export function PlanView({
   partitionToolActive = false,
   onPartitionToolChange,
   onAddFreestandingWall,
+  duplicatePartitionSourceWallId = null,
+  onDuplicatePartitionChange,
+  onDuplicateFreestandingWall,
   selectedFreestandingWallId = null,
   onMoveFreestandingWall,
   onMoveFreestandingWallEndpoint,
@@ -192,7 +386,10 @@ export function PlanView({
   selectedWallId,
   snapToGrid,
   viewport,
-  onViewportChange
+  onViewportChange,
+  measurementActive = false,
+  measurementState,
+  onMeasurementAction
 }: {
   // Controlled door/window/blocked-zone insertion tool.
   activeTool: OpeningKind | null;
@@ -217,6 +414,9 @@ export function PlanView({
   partitionToolActive?: boolean;
   onPartitionToolChange?: (active: boolean) => void;
   onAddFreestandingWall?: (startFloorMm: Point, endFloorMm: Point) => void;
+  duplicatePartitionSourceWallId?: string | null;
+  onDuplicatePartitionChange?: (active: boolean) => void;
+  onDuplicateFreestandingWall?: (wallId: string, centerFloorMm: Point) => void;
   selectedFreestandingWallId?: string | null;
   onMoveFreestandingWall?: (wallId: string, deltaFloorMm: Point) => void;
   onMoveFreestandingWallEndpoint?: (
@@ -247,6 +447,9 @@ export function PlanView({
   snapToGrid: boolean;
   viewport: Viewport2D;
   onViewportChange: (v: Viewport2D) => void;
+  measurementActive?: boolean;
+  measurementState?: MeasurementToolState;
+  onMeasurementAction?: Dispatch<MeasurementToolAction>;
 }) {
   const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -265,6 +468,12 @@ export function PlanView({
   const onSelectRoom = useAppStore((state) => state.selectRoom);
   const onSelectWall = useAppStore((state) => state.selectWall);
   const onSelectObject = useAppStore((state) => state.selectObject);
+  const selection = useAppStore((state) => state.selection);
+  const referenceMeasurements = useAppStore(
+    (state) => state.project?.referenceMeasurements ?? EMPTY_REFERENCE_MEASUREMENTS
+  );
+  const onSelectMeasurement = useAppStore((state) => state.selectMeasurement);
+  const onUpdateReferenceMeasurement = useAppStore((state) => state.updateReferenceMeasurement);
   const onClearSelection = useAppStore((state) => state.clearObjectSelection);
   // These handlers run after render, so later-declared geometry constants are initialized.
   const {
@@ -556,6 +765,9 @@ export function PlanView({
     getBlob ?? NO_OP_GET_BLOB
   );
   const [toolGhost, setToolGhost] = useState<ToolGhostState | null>(null);
+  const [partitionDuplicateGhost, setPartitionDuplicateGhost] =
+    useState<PartitionDuplicateGhostState | null>(null);
+  const partitionDuplicateSnapIdsRef = useRef<SnapTargetIds | undefined>(undefined);
   const toolSnapTargetIdsRef = useRef<SnapTargetIds | undefined>(undefined);
   // Prevent a gesture's trailing native click from placing another object.
   const suppressNextToolClickRef = useRef(false);
@@ -679,7 +891,7 @@ export function PlanView({
     onMove: (current, event) => {
       const pointerMm = toSvgMm(event.clientX, event.clientY);
       if (!pointerMm) return null;
-      const endMm = snapDrawPoint(pointerMm, current.startMm, event.shiftKey);
+      const endMm = snapPartitionDrawPoint(pointerMm, current.startMm, event.shiftKey);
       return { ...current, endMm, invalid: partitionDrawInvalid(current.startMm, endMm) };
     },
     onRelease: (current) => {
@@ -753,7 +965,8 @@ export function PlanView({
                 room: placement.room,
                 placementOffsetMm: { xMm: placement.offsetXMm, yMm: placement.offsetYMm },
                 partition,
-                proposedMidFloorMm: proposedMid
+                proposedMidFloorMm: proposedMid,
+                incrementMm: minorGridMm
               })
             : [];
 
@@ -766,18 +979,26 @@ export function PlanView({
           xMm: snap.point.xMm - origMid.xMm,
           yMm: snap.point.yMm - origMid.yMm
         };
-        // Clip guides to the room bounds with a small overhang.
-        const guidePadMm = 200;
+        // Most targets now supply their own tight extentMm (see
+        // partitionSnapTargets.ts); only fall back to the room bbox — with a
+        // small cosmetic margin, not the old 200mm overshoot — for a guide
+        // whose target left extentMm undefined (e.g. a plain grid snap).
+        const guidePadMm = handleSizeMm > 0 ? handleSizeMm : 40;
         const roomBox = placement ? getPlacedRoomBounds(placement) : null;
-        const activeGuides = roomBox
-          ? snap.activeGuides.map((guide) => ({
-              ...guide,
-              extentMm:
-                guide.axis === "x"
-                  ? { startMm: roomBox.minY - guidePadMm, endMm: roomBox.maxY + guidePadMm }
-                  : { startMm: roomBox.minX - guidePadMm, endMm: roomBox.maxX + guidePadMm }
-            }))
-          : snap.activeGuides;
+        const activeGuides =
+          roomBox
+            ? snap.activeGuides.map((guide) =>
+                guide.extentMm
+                  ? guide
+                  : {
+                      ...guide,
+                      extentMm:
+                        guide.axis === "x"
+                          ? { startMm: roomBox.minY - guidePadMm, endMm: roomBox.maxY + guidePadMm }
+                          : { startMm: roomBox.minX - guidePadMm, endMm: roomBox.maxX + guidePadMm }
+                    }
+              )
+            : snap.activeGuides;
         return {
           ...current,
           previewStartFloorMm: {
@@ -872,6 +1093,71 @@ export function PlanView({
     minYMm: viewBoxBounds.y,
     maxYMm: viewBoxBounds.y + viewBoxBounds.height
   });
+
+  // Single source of truth for "is any plan gesture or tool armed right now."
+  // New drag states and tool modes must be added HERE (and nowhere else) —
+  // every consumer below derives from this one predicate, so a mode that
+  // forgets to register itself fails closed (blocks the nudge) instead of
+  // silently letting arrow keys steal focus from an in-flight interaction.
+  const planInteractionActive = Boolean(
+    drag ||
+      objectDrag ||
+      roomDrag ||
+      vertexDrag ||
+      wallDrag ||
+      partitionDrag ||
+      partitionDraw ||
+      rectDraw ||
+      duplicatePartitionSourceWallId ||
+      activeTool ||
+      drawRoomActive ||
+      drawRectActive ||
+      partitionToolActive ||
+      reshapeRoomId ||
+      measurementActive
+  );
+
+  // A selected partition is keyboard-placeable just like a selected measurement
+  // endpoint. Keyboard motion intentionally bypasses snap resolution so every
+  // press has a predictable delta and creates one normal partition edit.
+  useEffect(() => {
+    if (!selectedFreestandingWallId || planInteractionActive) {
+      return;
+    }
+    const wallId = selectedFreestandingWallId;
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (isEditableTarget(event.target)) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-owns-arrow-keys]") !== null
+      ) {
+        return;
+      }
+      if (event.metaKey || event.ctrlKey) return;
+      const delta = getPlanMeasurementNudgeDelta(
+        event.key,
+        project.unit,
+        gridPrecisionFloorMm,
+        event.shiftKey,
+        snapToGrid,
+        event.altKey
+      );
+      if (!delta) return;
+      event.preventDefault();
+      onMoveFreestandingWall?.(wallId, delta);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    gridPrecisionFloorMm,
+    onMoveFreestandingWall,
+    planInteractionActive,
+    project.unit,
+    selectedFreestandingWallId,
+    snapToGrid
+  ]);
 
   // The project to render during a drag — one PlanPreview layer per live
   // gesture (wall resize, room move, reshape-mode vertex drag, reshape-mode
@@ -998,6 +1284,159 @@ export function PlanView({
       }),
     [displayedProject, artworksById, wallObjectMinDepthMm]
   );
+  const measureSources = useMemo(() => buildPlanMeasureSources(planScene), [planScene]);
+  const previousMeasureTargetIdRef = useRef<string | undefined>(undefined);
+  const [snappedMeasurementEndpoint, setSnappedMeasurementEndpoint] = useState<"a" | "b" | null>(null);
+  const measureGestureRef = useRef<{
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    startedDrawing: boolean;
+    refining: boolean;
+  } | null>(null);
+
+  function resolvePlanMeasurePoint(
+    proposed: MeasurePoint,
+    event: Pick<ReactPointerEvent<SVGSVGElement>, "shiftKey" | "metaKey" | "ctrlKey">
+  ): MeasurePoint {
+    const anchor =
+      measurementState?.phase === "drawing"
+        ? measurementState.start
+        : measurementState?.phase === "refining"
+          ? measurementState[measurementState.endpoint === "start" ? "end" : "start"]
+          : null;
+    const constrained = event.shiftKey && anchor
+      ? constrainMeasurePointToAxis(anchor, proposed)
+      : proposed;
+    if (event.metaKey || event.ctrlKey) {
+      previousMeasureTargetIdRef.current = undefined;
+      return constrained;
+    }
+    const points = [...(measureSources.points ?? [])];
+    if (gridVisible && snapToGrid && minorGridMm > 0) {
+      points.push({
+        id: `grid:${Math.round(constrained.xMm / minorGridMm)}:${Math.round(constrained.yMm / minorGridMm)}`,
+        kind: "grid",
+        point: {
+          xMm: Math.round(constrained.xMm / minorGridMm) * minorGridMm,
+          yMm: Math.round(constrained.yMm / minorGridMm) * minorGridMm
+        }
+      });
+    }
+    const resolved = resolveMeasurePoint(
+      constrained,
+      buildMeasurePointCandidates(constrained, { points, segments: measureSources.segments }),
+      {
+        thresholdMm: snapThresholdMm,
+        previousTargetId: previousMeasureTargetIdRef.current
+      }
+    );
+    previousMeasureTargetIdRef.current = resolved.target?.id;
+    const activeEndpoint =
+      measurementState?.phase === "refining"
+        ? measurementState.endpoint === "start" ? "a" : "b"
+        : measurementState?.phase === "drawing"
+          ? "b"
+          : "a";
+    setSnappedMeasurementEndpoint(resolved.snapped ? activeEndpoint : null);
+    return resolved.point;
+  }
+
+  function handleMeasurePointerDownCapture(event: ReactPointerEvent<SVGSVGElement>): boolean {
+    if (!measurementActive || !measurementState || !onMeasurementAction) return false;
+    if (!canPlanMeasurementClaimPointer(event.button, isSpaceDown)) return false;
+    const target = event.target as Element | null;
+    const endpoint = target?.closest(".measurement-endpoint")?.getAttribute("data-endpoint");
+    if (endpoint === "a" || endpoint === "b") {
+      onMeasurementAction({
+        type: "begin-refinement",
+        endpoint: endpoint === "a" ? "start" : "end"
+      });
+      measureGestureRef.current = {
+        pointerId: event.pointerId,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        startedDrawing: false,
+        refining: true
+      };
+    } else if (target?.closest(".measurement-overlay")) {
+      // A measurement owns clicks on its body. It is already selected, so the
+      // only required action is preventing a new endpoint from being placed.
+      event.stopPropagation();
+      return true;
+    } else {
+      const proposed = toSvgMm(event.clientX, event.clientY);
+      if (!proposed) return true;
+      const point = resolvePlanMeasurePoint(proposed, event);
+      const startedDrawing = measurementState.phase !== "drawing";
+      if (startedDrawing) onMeasurementAction({ type: "begin", point });
+      measureGestureRef.current = {
+        pointerId: event.pointerId,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        startedDrawing,
+        refining: false
+      };
+    }
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+    return true;
+  }
+
+  function handleMeasurePointerMove(event: ReactPointerEvent<SVGSVGElement>): boolean {
+    if (!measurementActive || !measurementState || !onMeasurementAction) return false;
+    if (measurementState.phase !== "drawing" && measurementState.phase !== "refining") return true;
+    const proposed = toSvgMm(event.clientX, event.clientY);
+    if (!proposed) return true;
+    const point = resolvePlanMeasurePoint(proposed, event);
+    onMeasurementAction({
+      type: measurementState.phase === "refining" ? "preview-refinement" : "preview",
+      point
+    });
+    return true;
+  }
+
+  function handleMeasurePointerUpCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    const gesture = measureGestureRef.current;
+    if (!measurementActive || !measurementState || !onMeasurementAction || !gesture) return;
+    if (gesture.pointerId !== event.pointerId) return;
+    const proposed = toSvgMm(event.clientX, event.clientY);
+    if (gesture.refining) {
+      if (proposed) onMeasurementAction({ type: "preview-refinement", point: resolvePlanMeasurePoint(proposed, event) });
+      onMeasurementAction({ type: "commit-refinement" });
+    } else if (proposed) {
+      const travelled = Math.hypot(event.clientX - gesture.clientX, event.clientY - gesture.clientY);
+      // The second click completes regardless of slop. A first press completes
+      // only when it was a genuine drag; jitter stays in click-click drawing.
+      if (!gesture.startedDrawing || travelled > MEASURE_DRAG_SLOP_PX) {
+        onMeasurementAction({ type: "complete", point: resolvePlanMeasurePoint(proposed, event) });
+      }
+    }
+    measureGestureRef.current = null;
+    previousMeasureTargetIdRef.current = undefined;
+    event.preventDefault();
+    // Touch must reach the viewport hook's window listener so its pointer
+    // bookkeeping is released; no underlying edit began because pointerdown
+    // was already captured by Measure.
+    if (event.pointerType !== "touch") event.stopPropagation();
+  }
+
+  function cancelMeasurePointerGesture() {
+    const action = measurementState ? planMeasurementCancelAction(measurementState) : null;
+    if (action) onMeasurementAction?.(action);
+    measureGestureRef.current = null;
+    previousMeasureTargetIdRef.current = undefined;
+    setSnappedMeasurementEndpoint(null);
+  }
+
+  function handleMeasurePointerCancelCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    const gesture = measureGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    cancelMeasurePointerGesture();
+    event.preventDefault();
+    if (event.pointerType !== "touch") event.stopPropagation();
+  }
 
   // Interaction-only geometry: snapping measures framed artwork edges without
   // changing persisted data or the selection geometry owned by a later phase.
@@ -1007,15 +1446,87 @@ export function PlanView({
     [project.wallObjects, artworksById]
   );
 
-  // Compute all four partition clearances from preview geometry in room-local space.
-  const partitionClearancesFloor = useMemo<{
-    clearances: PartitionClearances;
+  // Build complete gap/solid chains in room-local space, then lift them once
+  // for the plan overlay. A valid draw preview participates too, so its live
+  // feedback uses the exact geometry that will be committed.
+  const partitionChainsFloor = useMemo<{
+    chains: PartitionDimensionChains;
     partition: FreestandingWall;
   } | null>(() => {
+    const rooms = project.floor.rooms;
+
+    // Resolves the room a not-yet-committed partition segment sits in (by its
+    // midpoint) and hand-builds the synthetic FreestandingWall the chain
+    // functions need — shared by the draw preview and the duplicate-ghost
+    // preview below, the two cases where there's no committed wall yet to read
+    // a room id off of. `overrides` carries fields a caller wants copied from a
+    // source wall instead of defaulted off the destination room.
+    function previewPartitionChains(
+      startFloorMm: Point,
+      endFloorMm: Point,
+      thicknessMm: number,
+      id: string,
+      overrides: Partial<Pick<FreestandingWall, "heightMm" | "defaultCenterlineHeightMm">> = {}
+    ): { chains: PartitionDimensionChains; partition: FreestandingWall } | null {
+      const roomId = roomIdContainingPoint(project, midpointOf(startFloorMm, endFloorMm));
+      const placement = roomId ? rooms.find((candidate) => candidate.roomId === roomId) ?? null : null;
+      if (!placement) return null;
+      const offset = { xMm: placement.offsetXMm, yMm: placement.offsetYMm };
+      const partition: FreestandingWall = {
+        id,
+        roomId: placement.roomId,
+        name: "Partition preview",
+        startXMm: startFloorMm.xMm - offset.xMm,
+        startYMm: startFloorMm.yMm - offset.yMm,
+        endXMm: endFloorMm.xMm - offset.xMm,
+        endYMm: endFloorMm.yMm - offset.yMm,
+        thicknessMm,
+        heightMm: overrides.heightMm ?? placement.room.heightMm,
+        ...(overrides.defaultCenterlineHeightMm !== undefined
+          ? { defaultCenterlineHeightMm: overrides.defaultCenterlineHeightMm }
+          : {})
+      };
+      return {
+        chains: liftPartitionChains(getPartitionDimensionChains(placement.room, partition), offset),
+        partition
+      };
+    }
+
+    if (partitionDraw?.endMm && !partitionDraw.invalid) {
+      const result = previewPartitionChains(
+        partitionDraw.startMm,
+        partitionDraw.endMm,
+        DEFAULT_FREESTANDING_THICKNESS_MM,
+        "partition-draw-preview"
+      );
+      if (result) return result;
+    }
+
+    if (partitionDuplicateGhost && !partitionDuplicateGhost.invalid) {
+      const source = rooms
+        .flatMap((candidate) => candidate.room.freestandingWalls)
+        .find((wall) => wall.id === duplicatePartitionSourceWallId);
+      if (source) {
+        const result = previewPartitionChains(
+          partitionDuplicateGhost.startMm,
+          partitionDuplicateGhost.endMm,
+          source.thicknessMm,
+          "partition-duplicate-preview",
+          { heightMm: source.heightMm, defaultCenterlineHeightMm: source.defaultCenterlineHeightMm }
+        );
+        if (result) return result;
+      }
+    }
+
+    // The selected/dragged case keeps its room fixed to the committed wall's
+    // own placement rather than re-resolving by midpoint — an in-flight drag
+    // can pass outside the room polygon mid-gesture (near a boundary), and the
+    // dimension chain should keep reading against the room it actually belongs
+    // to, not flicker off when that happens.
     const activeWallId = partitionDrag?.wallId ?? selectedFreestandingWallId;
     if (!activeWallId) return null;
 
-    const placement = project.floor.rooms.find((candidate) =>
+    const placement = rooms.find((candidate) =>
       candidate.room.freestandingWalls.some((wall) => wall.id === activeWallId)
     );
     const committed = placement?.room.freestandingWalls.find((wall) => wall.id === activeWallId);
@@ -1033,29 +1544,18 @@ export function PlanView({
           }
         : committed;
 
-    const local = getPartitionClearances(placement.room, partition);
-    const liftSide = (side: SideClearance): SideClearance => ({
-      originMm: { xMm: side.originMm.xMm + offset.xMm, yMm: side.originMm.yMm + offset.yMm },
-      dirUnit: side.dirUnit,
-      hit: side.hit
-        ? {
-            ...side.hit,
-            pointMm: {
-              xMm: side.hit.pointMm.xMm + offset.xMm,
-              yMm: side.hit.pointMm.yMm + offset.yMm
-            }
-          }
-        : null
-    });
     return {
-      clearances: {
-        normal: { plus: liftSide(local.normal.plus), minus: liftSide(local.normal.minus) },
-        span: { plus: liftSide(local.span.plus), minus: liftSide(local.span.minus) }
-      },
-      // Direction-only mask mapping is translation-invariant.
+      chains: liftPartitionChains(getPartitionDimensionChains(placement.room, partition), offset),
       partition
     };
-  }, [partitionDrag, selectedFreestandingWallId, project.floor.rooms]);
+  }, [
+    duplicatePartitionSourceWallId,
+    partitionDraw,
+    partitionDrag,
+    partitionDuplicateGhost,
+    selectedFreestandingWallId,
+    project.floor.rooms
+  ]);
 
   function disarmTool() {
     onToolChange(null);
@@ -1067,16 +1567,7 @@ export function PlanView({
     toolSnapTargetIdsRef.current = undefined;
   }, [activeTool]);
 
-  useEffect(() => {
-    if (!activeTool) return;
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") disarmTool();
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeTool]);
+  useDisarmOnEscape(activeTool, disarmTool);
 
   function handleToolPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
     if (!activeTool || !movingSize || drag || roomDrag) return;
@@ -1108,6 +1599,70 @@ export function PlanView({
 
   function handleToolPointerLeave() {
     setToolGhost(null);
+  }
+
+  useEffect(() => {
+    setPartitionDuplicateGhost(null);
+    partitionDuplicateSnapIdsRef.current = undefined;
+  }, [duplicatePartitionSourceWallId]);
+
+  useDisarmOnEscape(duplicatePartitionSourceWallId, () => onDuplicatePartitionChange?.(false));
+
+  function handlePartitionDuplicateMove(event: ReactPointerEvent<SVGRectElement>) {
+    if (!duplicatePartitionSourceWallId) return;
+    const pointerMm = toSvgMm(event.clientX, event.clientY);
+    if (!pointerMm) return;
+    const sourcePlacement = project.floor.rooms.find((candidate) =>
+      candidate.room.freestandingWalls.some((wall) => wall.id === duplicatePartitionSourceWallId)
+    );
+    const source = sourcePlacement?.room.freestandingWalls.find(
+      (wall) => wall.id === duplicatePartitionSourceWallId
+    );
+    if (!source) return;
+
+    const roomId = roomIdContainingPoint(project, pointerMm);
+    const destination = roomId
+      ? project.floor.rooms.find((candidate) => candidate.roomId === roomId) ?? null
+      : null;
+    const targets: SnapTarget[] = [
+      ...(destination
+        ? getPartitionMoveSnapTargets({
+            room: destination.room,
+            placementOffsetMm: {
+              xMm: destination.offsetXMm,
+              yMm: destination.offsetYMm
+            },
+            partition: { ...source, id: "partition-duplicate-preview" },
+            proposedMidFloorMm: pointerMm,
+            incrementMm: minorGridMm
+          })
+        : []),
+      ...(snapToGrid ? gridSnapTargets : [])
+    ];
+    const snap = resolveSnap(pointerMm, targets, {
+      thresholdMm: snapThresholdMm,
+      previousSnapTargetIds: partitionDuplicateSnapIdsRef.current
+    });
+    partitionDuplicateSnapIdsRef.current = snap.snapTargetIds;
+    const halfDx = (source.endXMm - source.startXMm) / 2;
+    const halfDy = (source.endYMm - source.startYMm) / 2;
+    setPartitionDuplicateGhost({
+      startMm: { xMm: snap.point.xMm - halfDx, yMm: snap.point.yMm - halfDy },
+      endMm: { xMm: snap.point.xMm + halfDx, yMm: snap.point.yMm + halfDy },
+      thicknessMm: source.thicknessMm,
+      invalid: roomIdContainingPoint(project, snap.point) === null,
+      activeGuides: snap.activeGuides
+    });
+  }
+
+  function handlePartitionDuplicateClick(event: ReactMouseEvent<SVGRectElement>) {
+    event.stopPropagation();
+    if (!duplicatePartitionSourceWallId || !partitionDuplicateGhost || partitionDuplicateGhost.invalid) {
+      return;
+    }
+    const center = midpointOf(partitionDuplicateGhost.startMm, partitionDuplicateGhost.endMm);
+    onDuplicateFreestandingWall?.(duplicatePartitionSourceWallId, center);
+    onDuplicatePartitionChange?.(false);
   }
 
   // Arming starts fresh; disarming discards uncommitted points.
@@ -1169,24 +1724,10 @@ export function PlanView({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [reshapeRoomId, onReshapeRoomChange, onDeleteRoomVertex]);
 
-  useEffect(() => {
-    if (!partitionToolActive) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onPartitionToolChange?.(false);
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [partitionToolActive, onPartitionToolChange]);
+  useDisarmOnEscape(partitionToolActive, () => onPartitionToolChange?.(false));
 
   // The release gate skips an in-flight rectangle after Escape.
-  useEffect(() => {
-    if (!drawRectActive) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onDrawRectChange?.(false);
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [drawRectActive, onDrawRectChange]);
+  useDisarmOnEscape(drawRectActive, () => onDrawRectChange?.(false));
 
   // Snap to grid/previous axes; Shift forces an exact horizontal or vertical segment.
   function snapDrawPoint(pointerMm: Vector2, prev: Vector2 | null, shiftKey: boolean): Vector2 {
@@ -1205,6 +1746,41 @@ export function PlanView({
       const dx = Math.abs(pointerMm.xMm - prev.xMm);
       const dy = Math.abs(pointerMm.yMm - prev.yMm);
       // Keep the snapped major axis and lock the minor axis.
+      result =
+        dx >= dy ? { xMm: result.xMm, yMm: prev.yMm } : { xMm: prev.xMm, yMm: result.yMm };
+    }
+    return result;
+  }
+
+  // Partition drawing uses the same absolute grid as other tools, augmented
+  // by room-relative clean-inset families so dimensions stay round even when
+  // the room origin or perimeter is off the floor lattice.
+  function snapPartitionDrawPoint(
+    pointerMm: Vector2,
+    prev: Vector2 | null,
+    shiftKey: boolean
+  ): Vector2 {
+    let result = pointerMm;
+    if (snapToGrid) {
+      const roomId = roomIdContainingPoint(project, pointerMm);
+      const placement = roomId
+        ? project.floor.rooms.find((candidate) => candidate.roomId === roomId) ?? null
+        : null;
+      const targets: SnapTarget[] = [
+        ...(placement ? getPartitionDrawSnapTargets(placement, pointerMm, minorGridMm) : []),
+        ...gridSnapTargets
+      ];
+      if (prev) {
+        targets.push(
+          { id: "partition-draw-prev-x", kind: "grid", axis: "x", point: { xMm: prev.xMm, yMm: 0 } },
+          { id: "partition-draw-prev-y", kind: "grid", axis: "y", point: { xMm: 0, yMm: prev.yMm } }
+        );
+      }
+      result = resolveSnap(pointerMm, targets, { thresholdMm: snapThresholdMm }).point;
+    }
+    if (shiftKey && prev) {
+      const dx = Math.abs(pointerMm.xMm - prev.xMm);
+      const dy = Math.abs(pointerMm.yMm - prev.yMm);
       result =
         dx >= dy ? { xMm: result.xMm, yMm: prev.yMm } : { xMm: prev.xMm, yMm: result.yMm };
     }
@@ -1368,8 +1944,24 @@ export function PlanView({
       event.currentTarget.focus({ preventScroll: true });
     }
 
-    // A consumed pan/pinch must not reach the view's capture tail.
-    if (gestures.handlePointerDownCapture(event)) return;
+    // Pan/pinch gets first refusal. In particular the first touch is recorded
+    // before Measure sees it, so a second touch can promote the gesture to a
+    // pinch; that promotion cancels any one-finger measurement in flight.
+    if (gestures.handlePointerDownCapture(event)) {
+      if (
+        shouldCancelMeasurementForViewportClaim(
+          event.pointerType,
+          measureGestureRef.current !== null
+        )
+      ) {
+        cancelMeasurePointerGesture();
+      }
+      return;
+    }
+
+    // Measure then owns ordinary primary-button presses before geometry,
+    // selection, and marquee can interpret them.
+    if (handleMeasurePointerDownCapture(event)) return;
 
     const target = event.target as Element | null;
     // Exclude ghosts so placement clicks commit. Reassign per gesture to clear
@@ -1380,6 +1972,7 @@ export function PlanView({
   }
 
   function handleSvgClick(event: ReactMouseEvent<SVGSVGElement>) {
+    if (measurementActive) return;
     if (suppressNextToolClickRef.current) {
       suppressNextToolClickRef.current = false;
       return;
@@ -1562,7 +2155,7 @@ export function PlanView({
     }
     const startMm = toSvgMm(event.clientX, event.clientY);
     if (!startMm) return;
-    const snapped = snapDrawPoint(startMm, null, event.shiftKey);
+    const snapped = snapPartitionDrawPoint(startMm, null, event.shiftKey);
     startPartitionDraw({ startMm: snapped, endMm: null, invalid: true });
   }
 
@@ -2022,6 +2615,70 @@ export function PlanView({
     : isSpaceDown
       ? "drawing-surface is-pan-ready"
       : "drawing-surface";
+  const visibleMeasurement =
+    measurementActive && measurementState && measurementState.phase !== "armed-empty"
+      ? measurementState
+      : null;
+
+  function handleMeasurementEndpointKeyDown(
+    endpoint: "a" | "b",
+    event: ReactKeyboardEvent<SVGCircleElement>
+  ) {
+    if (!measurementState || !onMeasurementAction) return;
+    const actions = getPlanMeasurementKeyActions(
+      measurementState,
+      endpoint === "a" ? "start" : "end",
+      event.key,
+      project.unit,
+      gridPrecisionFloorMm,
+      event.shiftKey,
+      snapToGrid,
+      event.altKey
+    );
+    if (actions.length === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    actions.forEach(onMeasurementAction);
+  }
+
+  // Keyboard-only creation lives on the SVG itself. It must ignore keys that
+  // bubble up from a focused child (the measurement handles own their own
+  // arrow/Enter refinement), and it never touches Escape — App.tsx owns that.
+  function handleMeasureSurfaceKeyDown(event: ReactKeyboardEvent<SVGSVGElement>) {
+    if (!measurementActive || !measurementState || !onMeasurementAction) return;
+    if (event.target !== event.currentTarget) return;
+    if (event.key !== "Enter" && !isMeasurementCreationArrowKey(event.key)) return;
+    const origin: MeasurePoint = {
+      xMm: viewBoxBounds.x + viewBoxBounds.width / 2,
+      yMm: viewBoxBounds.y + viewBoxBounds.height / 2
+    };
+    const action = getPlanMeasurementCreationKeyAction(
+      measurementState,
+      event.key,
+      origin,
+      project.unit,
+      gridPrecisionFloorMm,
+      event.shiftKey,
+      snapToGrid,
+      event.altKey
+    );
+    if (!action) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const completing = action.type === "complete";
+    onMeasurementAction(action);
+    // After a keyboard completion the "b" handle becomes focusable; move focus
+    // onto it so refinement is immediately reachable. Deferred a frame so the
+    // re-rendered, now-tabbable handle exists before we focus it.
+    if (completing) {
+      requestAnimationFrame(() => {
+        const handle = svgRef.current?.querySelector<SVGCircleElement>(
+          '.measurement-endpoint[data-endpoint="b"] .measurement-handle-hit'
+        );
+        handle?.focus();
+      });
+    }
+  }
 
   return (
     <div
@@ -2043,7 +2700,7 @@ export function PlanView({
       />
       <svg
         className={
-          activeTool || drawRoomActive || partitionToolActive || drawRectActive
+          activeTool || drawRoomActive || partitionToolActive || drawRectActive || measurementActive
             ? "plan-svg tool-armed"
             : "plan-svg"
         }
@@ -2051,11 +2708,21 @@ export function PlanView({
         viewBox={viewBox}
         role="img"
         tabIndex={0}
+        onKeyDown={handleMeasureSurfaceKeyDown}
         onClick={handleSvgClick}
+        onClickCapture={(event) => {
+          if (!measurementActive) return;
+          event.preventDefault();
+          event.stopPropagation();
+        }}
         onPointerDown={beginMarquee}
         onPointerDownCapture={handleSvgPointerDownCapture}
+        onPointerUpCapture={handleMeasurePointerUpCapture}
+        onPointerCancelCapture={handleMeasurePointerCancelCapture}
         onPointerLeave={handleToolPointerLeave}
-        onPointerMove={handleToolPointerMove}
+        onPointerMove={(event) => {
+          if (!handleMeasurePointerMove(event)) handleToolPointerMove(event);
+        }}
       >
         <title>{project.title} plan</title>
         {/* Room interiors render below the grid (the grid must stay visible
@@ -2106,10 +2773,10 @@ export function PlanView({
         />
         {/* Live partition clearance dimension lines — shown while a partition
             is selected or being dragged; render-only, muted drafting ink. */}
-        {partitionClearancesFloor ? (
+        {partitionChainsFloor ? (
           <PartitionDimensionLines
-            clearances={partitionClearancesFloor.clearances}
-            partition={partitionClearancesFloor.partition}
+            chains={partitionChainsFloor.chains}
+            partition={partitionChainsFloor.partition}
             visibleWorldAxes={
               // At rest (no drag) or during an endpoint re-drag, show all four
               // gaps. During a MOVE drag show only the latched axes — both false
@@ -2141,7 +2808,8 @@ export function PlanView({
               roomDrag ||
               drawRoomActive ||
               drawRectActive ||
-              vertexDrag
+              vertexDrag ||
+              measurementActive
           )}
           artworksById={artworksById}
           thumbnailUrlsByAssetId={thumbnailUrlsByAssetId}
@@ -2157,6 +2825,43 @@ export function PlanView({
           onSelectArtwork={onSelectArtwork}
           onSelectOpening={onSelectOpening}
         />
+        {referenceMeasurements
+          .filter((item) => item.kind === "plan" && item.visible)
+          .map((item) => {
+            const selected = selection.kind === "measurement" && selection.measurementId === item.id;
+            return (
+              <MeasurementOverlay
+                key={item.id}
+                a={item.start}
+                b={item.end}
+                unit={project.unit}
+                pixelsPerMm={pixelsPerMm}
+                reference
+                locked={item.locked}
+                selected={selected}
+                onBodyPointerDown={() => onSelectMeasurement(item.id)}
+                onEndpointKeyDown={(endpoint, event) => {
+                  if (item.locked || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+                  event.preventDefault();
+                  const delta = getPlanMeasurementNudgeDelta(
+                    event.key,
+                    project.unit,
+                    gridPrecisionFloorMm,
+                    event.shiftKey,
+                    snapToGrid,
+                    event.altKey
+                  );
+                  if (!delta) return;
+                  const point = endpoint === "a" ? item.start : item.end;
+                  const next = {
+                    xMm: point.xMm + delta.xMm,
+                    yMm: point.yMm + delta.yMm
+                  };
+                  void onUpdateReferenceMeasurement(item.id, endpoint === "a" ? { start: next } : { end: next });
+                }}
+              />
+            );
+          })}
         {/* Selection decorations: the selected room's wash/outline/handle set
             + live length labels, then the selected partition's face labels and
             endpoint handles. Both paint above placed objects, at rest nothing.
@@ -2191,6 +2896,8 @@ export function PlanView({
           draw={draw}
           partitionToolActive={partitionToolActive}
           partitionDraw={partitionDraw}
+          partitionDuplicateActive={Boolean(duplicatePartitionSourceWallId)}
+          partitionDuplicateGhost={partitionDuplicateGhost}
           drawRectActive={drawRectActive}
           rectDraw={rectDraw}
           toolGhost={toolGhost}
@@ -2202,6 +2909,7 @@ export function PlanView({
             drag?.activeGuides ??
             roomDrag?.activeGuides ??
             partitionDrag?.activeGuides ??
+            partitionDuplicateGhost?.activeGuides ??
             toolGhost?.activeGuides ??
             []
           }
@@ -2214,8 +2922,25 @@ export function PlanView({
           handleDrawClick={handleDrawClick}
           handleDrawPointerMove={handleDrawPointerMove}
           beginPartitionDraw={beginPartitionDraw}
+          handlePartitionDuplicateMove={handlePartitionDuplicateMove}
+          handlePartitionDuplicateClick={handlePartitionDuplicateClick}
           beginRectDraw={beginRectDraw}
         />
+        {visibleMeasurement ? (
+          <MeasurementOverlay
+            a={visibleMeasurement.start}
+            b={
+              visibleMeasurement.phase === "drawing"
+                ? visibleMeasurement.preview
+                : visibleMeasurement.end
+            }
+            pixelsPerMm={pixelsPerMm}
+            selected={visibleMeasurement.phase !== "drawing"}
+            snappedEndpoint={snappedMeasurementEndpoint}
+            unit={project.unit}
+            onEndpointKeyDown={handleMeasurementEndpointKeyDown}
+          />
+        ) : null}
       </svg>
     </div>
   );

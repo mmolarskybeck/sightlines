@@ -191,6 +191,14 @@ export type PartitionDrawState = {
   invalid: boolean;
 };
 
+export type PartitionDuplicateGhostState = {
+  startMm: Vector2;
+  endMm: Vector2;
+  thicknessMm: number;
+  invalid: boolean;
+  activeGuides: Guide[];
+};
+
 // A rectangle-room create drag: the two grid-snapped corners, transient until
 // release (no store write until then, so undo removes the room in one step).
 // Floor-space mm.

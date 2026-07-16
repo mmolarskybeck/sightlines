@@ -51,7 +51,7 @@ Meaning: **How far is this right now?**
 
 Meaning: **Keep this position and distance as a planning benchmark.**
 
-- Is created only through the explicit **Keep as reference** action.
+- Is created only through the explicit **Save reference** action.
 - Persists in the project and participates in undo/redo.
 - Remains fixed when nearby artworks, openings, walls, or other objects move.
 - Is positioned in model space, never screen pixels.
@@ -84,7 +84,7 @@ designed after demonstrated user demand.
 
 ### 3.2 Slice 2 — Reference measurements
 
-- **Keep as reference** from a completed temporary measurement.
+- **Save reference** from a completed temporary measurement.
 - Project persistence and `.sightlines` round-trip.
 - Optional name.
 - Select, inspect, show/hide, lock/unlock, edit endpoints, and delete.
@@ -111,7 +111,7 @@ designed after demonstrated user demand.
 | Toolbar action | Measure | Ruler |
 | Temporary result | Measurement | Dimension line |
 | Persisted fixed result | Reference measurement | Pinned span, guide |
-| Persistence action | Keep as reference | Save measurement |
+| Persistence action | Save reference | Save measurement |
 | Editing protection | Locked / Unlocked | Fixed (ambiguous with reference behavior) |
 
 "Dimension lines" remains reserved for Sightlines' automatic derived
@@ -139,7 +139,7 @@ drawing
 
 armed-complete
   ├─ drag endpoint → refining
-  ├─ Keep as reference → armed-reference-selected
+  ├─ Save reference → armed-reference-selected
   ├─ new canvas point → drawing, replacing the temporary result
   ├─ Clear / Escape → armed-empty
   └─ second Escape / press M / choose another tool → inactive
@@ -211,11 +211,17 @@ accident.
 
 Only one temporary measurement exists. Beginning a new one immediately clears
 the previous unkept result. No confirmation is required because the temporary
-result has not been saved and **Keep as reference** is available before
-replacement. Replacement is intentionally not undoable: temporary state never
-enters project history, and adding a second hidden history would undermine the
-single undo model. Users preserve a result by keeping it before beginning
-another.
+result has not been saved and **Save reference** is available before
+replacement. Temporary state never enters project history, and replacement is
+not restorable: users preserve a result by keeping it before beginning another.
+
+While Measure is armed, `⌘Z`/`Ctrl+Z` acts as a one-shot cancel/clear of the
+current temporary work — it cancels an in-progress gesture or refinement, or
+clears the completed temporary measurement — as a synonym for the Escape path
+in §13, matching the "take back the last thing I did" muscle memory. This is
+not a second history: it is never multi-step, redo never restores cleared or
+replaced temporary state, and with no temporary work present undo falls
+through to project history unchanged.
 
 ### 7.4 Degenerate measurement
 
@@ -248,7 +254,7 @@ Temporary and persisted results share a visual family:
 | Temporary complete/selected | Petrol active treatment, solid line, visible handles |
 | Reference at rest | Neutral or muted treatment plus a non-color reference marker or line pattern |
 | Reference selected | Selection treatment and handles when editable |
-| Locked reference selected | Selection treatment without draggable handles; inspector states Locked |
+| Locked reference selected | Selection treatment with perpendicular endpoint caps instead of draggable arrowheads; inspector states Locked |
 
 Exact tokens and dimensions follow `DESIGN.md`; this spec does not create a new
 color system.
@@ -345,7 +351,7 @@ Inspector content:
 
 - Heading: **Measurement**
 - Read-only direct distance
-- Primary action: **Keep as reference**
+- Primary action: **Save reference**
 - Secondary action: **Clear**
 
 The inspector does not show name, visibility, lock, or type controls before
@@ -392,7 +398,7 @@ The exact schema shape belongs to Slice 2 engineering design, but it must make
 the coordinate space explicit and support project validation, migration,
 package round-trip, and stable identity.
 
-### 12.2 Keep as reference
+### 12.2 Save reference
 
 Keeping a completed temporary measurement:
 
@@ -403,7 +409,7 @@ Keeping a completed temporary measurement:
 5. Opens the reference inspector.
 
 Undo reverses the conversion, not merely the persisted half of it. If Measure
-is still armed in the same view and wall context, undoing **Keep as reference**
+is still armed in the same view and wall context, undoing **Save reference**
 removes the reference and restores its endpoints as the selected temporary
 measurement. If the user has moved to a coordinate context where those points
 cannot be represented safely, undo removes the reference without restoring
@@ -421,8 +427,9 @@ the current context.
 ### 12.4 Visibility and deletion
 
 - Hidden references do not render on the canvas but remain project data.
-- A hidden selected reference cannot remain selected once it is no longer
-  rendered; the inspector returns to the normal empty-selection state.
+- A reference hidden from its own inspector remains selected so the user can
+  immediately show it again. Selection clears when the user leaves that
+  inspector through ordinary canvas or navigation actions.
 - Delete uses the app's existing reversible deletion convention and enters
   undo history. No confirmation is required when undo is available and clear.
 
@@ -520,7 +527,9 @@ hidden references can be selectively included.
 - Click-click and click-drag produce the same endpoint geometry.
 - Completing a measurement leaves the tool armed.
 - Beginning another replaces the one temporary result.
-- Replacing a temporary result is intentionally not undoable.
+- Replacing a temporary result is not restorable; `⌘Z`/`Ctrl+Z` while armed is
+  a one-shot cancel/clear of temporary work per §7.3, never a second history,
+  and falls through to project undo when no temporary work exists.
 - Canvas geometry places points instead of changing underlying object
   selection while Measure is armed.
 - Temporary and reference measurements retain selection precedence over point
@@ -536,9 +545,9 @@ hidden references can be selectively included.
 
 ### 16.2 Slice 2
 
-- Keep as reference preserves the displayed points and creates one undoable
+- Save reference preserves the displayed points and creates one undoable
   project edit.
-- Undoing Keep restores the selected temporary measurement when its coordinate
+- Undoing Save restores the selected temporary measurement when its coordinate
   context remains safely representable.
 - References remain stationary when surrounding objects move.
 - References are not placement or measurement snap targets.
@@ -595,6 +604,17 @@ Before persistence work, write and approve a topology cascade table for:
 Default principle: preserve the same physical location when that meaning is
 unambiguous; otherwise surface an explicit advisory or delete through the same
 undoable cascade. Never guess silently.
+
+Implementation cascade table:
+
+| Change | Deterministic behavior |
+|---|---|
+| Resize/move wall or change height | Keep stored wall-local points unchanged; show the out-of-bounds advisory when necessary. |
+| Split perimeter wall | Keep a reference wholly on the first segment; rehome one wholly on the second and subtract the split distance from both x values; delete one that crosses the split because cross-wall Elevation references are unsupported. A point exactly on the split follows its other endpoint. |
+| Merge/delete vertex | Preserve only when both endpoint floor positions lie on the merged segment; reproject to its local x. Delete otherwise rather than silently moving the benchmark. |
+| Reverse perimeter wall | Keep the wall id and mirror both x values with `newX = oldLength - oldX`. |
+| Reverse partition centerline / flip sides | Preserve the physical face by swapping `#a` and `#b`; mirror x only when the operation reverses that physical face's local direction. |
+| Delete perimeter wall, room, or partition | Delete owned Elevation references in the same undoable cascade. Plan references remain because they use project-floor coordinates. |
 
 ## 18. Verification plan
 

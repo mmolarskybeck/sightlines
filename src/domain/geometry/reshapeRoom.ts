@@ -304,7 +304,20 @@ export function splitWall(
 
   const nextProject: Project = {
     ...replaceRoom(project, placement.roomId, nextRoom),
-    wallObjects: nextWallObjects
+    wallObjects: nextWallObjects,
+    referenceMeasurements: (project.referenceMeasurements ?? []).flatMap((measurement) => {
+      if (measurement.kind !== "elevation" || measurement.wallId !== wallId) return [measurement];
+      const aLeft = measurement.start.xMm <= xAlongMm;
+      const bLeft = measurement.end.xMm <= xAlongMm;
+      if (aLeft !== bLeft) return [];
+      if (aLeft) return [measurement];
+      return [{
+        ...measurement,
+        wallId: newWallId,
+        start: { ...measurement.start, xMm: measurement.start.xMm - xAlongMm },
+        end: { ...measurement.end, xMm: measurement.end.xMm - xAlongMm }
+      }];
+    })
   };
 
   return {

@@ -2,6 +2,7 @@ import { getGroupBounds } from "../../domain/placement/groupBounds";
 import type { DisplayUnit, WallObjectBase } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
 import { wallLocalYToSvgY } from "./elevationArtworkGeometry";
+import { staggerLabelRow } from "./plan/labelStagger";
 
 // On-canvas dimension lines for a selection on one wall: an outer segment on
 // each side, every actual interior gap between members, each with end ticks and
@@ -104,19 +105,13 @@ export function GroupDimensionLines({
     const labelWidthPx = label.length * LABEL_FONT_PX * LABEL_GLYPH_WIDTH_RATIO;
     const fits = segmentPx >= labelWidthPx + LABEL_FIT_SLACK_PX;
 
-    let row = 0;
-    if (!fits) {
-      const midPx = midMm * pixelsPerMm;
-      const leftPx = midPx - labelWidthPx / 2;
-      row = 1;
-      while (
-        row < MAX_STAGGER_ROW &&
-        (rowRightPx[row] ?? -Infinity) > leftPx - LABEL_ROW_GAP_PX
-      ) {
-        row += 1;
-      }
-      rowRightPx[row] = midPx + labelWidthPx / 2;
-    }
+    const row = staggerLabelRow(rowRightPx, {
+      fits,
+      mid: midMm * pixelsPerMm,
+      halfWidth: labelWidthPx / 2,
+      gap: LABEL_ROW_GAP_PX,
+      maxRow: MAX_STAGGER_ROW
+    });
 
     return { segment, index, midMm, label, isTiny, isOverlap, row };
   });

@@ -3807,6 +3807,15 @@ body.panels-resizing * {
   cursor: crosshair;
 }
 
+/* SVG descendants frequently carry their own resting selection/drag cursors.
+   While a point-placement tool is armed, every painted/hit-tested geometry
+   surface instead advertises point placement. Measurement chrome opts back
+   into its own select/refine cursors below. */
+.plan-svg.tool-armed *:not(.measurement-overlay):not(.measurement-overlay *),
+.elevation-svg.tool-armed *:not(.measurement-overlay):not(.measurement-overlay *) {
+  cursor: crosshair !important;
+}
+
 .room-fill {
   fill: var(--bg);
 }
@@ -3998,14 +4007,6 @@ body.panels-resizing * {
   pointer-events: none;
 }
 
-/* Plan-mode partition clearance ticks: small filled squares at each end of a
-   dimension line (the elevation .dimension-tick is a stroked cross-line, which
-   a partition line at any angle can't reuse). Same muted drafting ink. */
-.plan-dimension-tick {
-  fill: var(--muted);
-  pointer-events: none;
-}
-
 .dimension-label {
   fill: var(--muted);
   font-weight: var(--weight-semibold);
@@ -4015,6 +4016,112 @@ body.panels-resizing * {
   paint-order: stroke;
   stroke: var(--bg);
   pointer-events: none;
+}
+
+/* Temporary Measure result. The line and label use the active petrol family;
+   endpoint squares become diamonds while snapped, so snap state is not color
+   alone. Transparent body/endpoint geometry supplies forgiving mouse and
+   touch hit targets without enlarging the restrained visible marks. */
+.measurement-line {
+  stroke: var(--selection);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+.measurement-overlay.reference .measurement-line {
+  stroke-dasharray: 7 5;
+  opacity: 0.78;
+}
+
+.measurement-overlay.out-of-bounds .measurement-line {
+  stroke-dasharray: 2 5;
+}
+
+.measurement-line-hit {
+  stroke: transparent;
+  pointer-events: stroke;
+  cursor: pointer !important;
+  touch-action: none;
+}
+
+.measurement-line-hit:focus-visible,
+.measurement-handle-hit:focus-visible {
+  outline: none;
+}
+
+.measurement-overlay:has(.measurement-line-hit:focus-visible) .measurement-line,
+.measurement-overlay:has(.measurement-handle-hit:focus-visible) .measurement-line {
+  stroke-width: 2.5;
+}
+
+.measurement-label {
+  fill: var(--primary-strong);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  paint-order: stroke;
+  stroke: var(--bg);
+  pointer-events: none;
+}
+
+.measurement-handle-hit {
+  fill: transparent;
+  stroke: none;
+  cursor: grab !important;
+  touch-action: none;
+}
+
+.measurement-handle {
+  fill: var(--selection);
+  stroke: var(--selection);
+  stroke-linejoin: miter;
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+.measurement-locked-endcap {
+  stroke: var(--selection);
+  stroke-linecap: square;
+  stroke-width: 1.75;
+  opacity: 0.88;
+  pointer-events: none;
+}
+
+.measurement-handle-halo {
+  fill: var(--primary-soft);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.measurement-endpoint:has(.measurement-handle-hit:focus-visible) .measurement-handle-halo,
+.measurement-endpoint:has(.measurement-handle-hit:active) .measurement-handle-halo {
+  opacity: 0.72;
+}
+
+.measurement-endpoint:has(.measurement-handle-hit:active) .measurement-handle-hit {
+  cursor: grabbing !important;
+}
+
+/* Snapping changes the arrowhead itself from solid to hollow/outlined. This
+   supplies a non-color cue without introducing a second endpoint symbol; the
+   arrow tip and the measurement line still terminate at the stored point. */
+.measurement-endpoint[data-snapped="true"] .measurement-handle {
+  fill: var(--bg);
+  stroke: var(--selection);
+  stroke-width: 1.75;
+}
+
+/* Pan is the most local pointer intent. These descendant overrides come after
+   both armed-tool and measurement cursor rules so Space/middle-button pan
+   remains legible when the pointer is over any SVG child, including a
+   measurement line or endpoint handle. */
+.drawing-surface.is-pan-ready .plan-svg *,
+.drawing-surface.is-pan-ready .elevation-svg * {
+  cursor: grab !important;
+}
+
+.drawing-surface.is-panning .plan-svg *,
+.drawing-surface.is-panning .elevation-svg * {
+  cursor: grabbing !important;
 }
 
 .surface-label {
@@ -5455,6 +5562,38 @@ body.panels-resizing * {
 
 .inspector-action:hover {
   background: var(--surface-strong);
+}
+
+.measurement-save-action {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+.measurement-clear-action {
+  flex: 0 0 auto;
+}
+
+.measurement-subject {
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+}
+
+.inspector-subject.measurement-subject h2 {
+  font-size: var(--type-lg);
+}
+
+.measurement-inspector {
+  gap: 12px;
+}
+
+.measurement-inspector .inspector-summary-row {
+  min-height: 24px;
+}
+
+.measurement-inspector .inspector-summary-row-value {
+  color: var(--ink);
+  font-size: var(--type-md);
+  font-weight: var(--weight-semibold);
 }
 
 .constraint-panel {

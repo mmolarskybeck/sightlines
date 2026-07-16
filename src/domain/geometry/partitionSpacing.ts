@@ -35,6 +35,18 @@ export type RayHit = {
   obstacleId: string;
 };
 
+export type ChainSegment = {
+  aMm: Point;
+  bMm: Point;
+  lengthMm: number;
+  kind: "gap" | "solid";
+};
+
+export type PartitionDimensionChains = {
+  normal: ChainSegment[];
+  span: ChainSegment[];
+};
+
 // A single clearance ray: where it starts (a slab face point or an end cap),
 // the unit direction it was cast, and its nearest hit (null when it misses).
 export type SideClearance = {
@@ -169,6 +181,39 @@ export function castRay(
   return best;
 }
 
+// All positive intersections in travel order. Coincident hits (commonly the
+// two segments meeting at a rectangle corner) collapse to one station so
+// downstream dimension chains never contain spurious zero-width intervals.
+export function castRayAll(
+  segments: ObstacleSegment[],
+  originMm: Point,
+  dirUnit: Point
+): RayHit[] {
+  if (Math.abs(dirUnit.xMm) < EPS && Math.abs(dirUnit.yMm) < EPS) return [];
+
+  const hits: RayHit[] = [];
+  for (const segment of segments) {
+    const ex = segment.b.xMm - segment.a.xMm;
+    const ey = segment.b.yMm - segment.a.yMm;
+    const denom = cross(dirUnit.xMm, dirUnit.yMm, ex, ey);
+    if (Math.abs(denom) < EPS) continue;
+    const oax = segment.a.xMm - originMm.xMm;
+    const oay = segment.a.yMm - originMm.yMm;
+    const distanceMm = cross(oax, oay, ex, ey) / denom;
+    const u = cross(oax, oay, dirUnit.xMm, dirUnit.yMm) / denom;
+    if (distanceMm <= EPS || u < -EPS || u > 1 + EPS) continue;
+    hits.push({
+      distanceMm,
+      pointMm: add(originMm, scale(dirUnit, distanceMm)),
+      obstacleId: segment.id
+    });
+  }
+  hits.sort((a, b) => a.distanceMm - b.distanceMm);
+  return hits.filter(
+    (hit, index) => index === 0 || Math.abs(hit.distanceMm - hits[index - 1].distanceMm) > EPS
+  );
+}
+
 function pointInOrOnOutline(point: Point, outline: ObstacleSegment[]): boolean {
   let inside = false;
   for (const edge of outline) {
@@ -235,6 +280,89 @@ export function getPartitionClearances(
       plus: side(end, spanDir),
       minus: side(start, negSpan)
     }
+  };
+}
+
+function rayChainToPerimeter(
+  segments: ObstacleSegment[],
+  perimeterIds: Set<string>,
+  originMm: Point,
+  dirUnit: Point
+): ChainSegment[] {
+  const hits = castRayAll(segments, originMm, dirUnit);
+  const perimeterIndex = hits.findIndex((hit) => perimeterIds.has(hit.obstacleId));
+  if (perimeterIndex < 0) return [];
+  const stations = [{ distanceMm: 0, pointMm: originMm }, ...hits.slice(0, perimeterIndex + 1)];
+  const solidSegments = segments.filter((segment) => segment.solid);
+  const solidIds = new Set(solidSegments.map((segment) => segment.id));
+  const result: ChainSegment[] = [];
+  for (let index = 0; index < stations.length - 1; index += 1) {
+    const a = stations[index];
+    const b = stations[index + 1];
+    const midpoint = add(originMm, scale(dirUnit, (a.distanceMm + b.distanceMm) / 2));
+    const insideSolid = [...solidIds].some((id) =>
+      pointInOrOnOutline(
+        midpoint,
+        solidSegments.filter((segment) => segment.id === id)
+      )
+    );
+    result.push({
+      aMm: a.pointMm,
+      bMm: b.pointMm,
+      lengthMm: b.distanceMm - a.distanceMm,
+      kind: insideSolid ? "solid" : "gap"
+    });
+  }
+  return result;
+}
+
+// A complete dimension chain across each partition axis, ordered from the
+// minus-side room boundary to the plus-side boundary. Sibling slabs and the
+// selected slab are represented as unlabeled solid intervals; open intervals
+// are gaps. Concave rooms terminate at the first perimeter hit on each ray.
+export function getPartitionDimensionChains(
+  room: Room,
+  partition: FreestandingWall
+): PartitionDimensionChains {
+  const start: Point = { xMm: partition.startXMm, yMm: partition.startYMm };
+  const end: Point = { xMm: partition.endXMm, yMm: partition.endYMm };
+  const normalDir = unitLeftNormalOrZero(start, end);
+  const spanDir = safeDirection(start, end);
+  const half = partition.thicknessMm / 2;
+  const midpoint: Point = {
+    xMm: (start.xMm + end.xMm) / 2,
+    yMm: (start.yMm + end.yMm) / 2
+  };
+  const plusNormal = add(midpoint, scale(normalDir, half));
+  const minusNormal = add(midpoint, scale(normalDir, -half));
+  const segments = collectObstacleSegments(room, partition.id);
+  const perimeterIds = new Set(getWallsWithGeometry(room).map((wall) => wall.id));
+
+  const combine = (
+    minusOrigin: Point,
+    plusOrigin: Point,
+    minusDir: Point,
+    plusDir: Point
+  ): ChainSegment[] => {
+    const minus = rayChainToPerimeter(segments, perimeterIds, minusOrigin, minusDir)
+      .reverse()
+      .map((segment) => ({ ...segment, aMm: segment.bMm, bMm: segment.aMm }));
+    const subject: ChainSegment = {
+      aMm: minusOrigin,
+      bMm: plusOrigin,
+      lengthMm: Math.hypot(plusOrigin.xMm - minusOrigin.xMm, plusOrigin.yMm - minusOrigin.yMm),
+      kind: "solid"
+    };
+    return [
+      ...minus,
+      subject,
+      ...rayChainToPerimeter(segments, perimeterIds, plusOrigin, plusDir)
+    ];
+  };
+
+  return {
+    normal: combine(minusNormal, plusNormal, scale(normalDir, -1), normalDir),
+    span: combine(start, end, scale(spanDir, -1), spanDir)
   };
 }
 

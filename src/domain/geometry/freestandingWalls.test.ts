@@ -3,6 +3,7 @@ import { createRectangularRoomPlacement } from "./createRoom";
 import {
   centerFreestandingWallBetweenWalls,
   createFreestandingWall,
+  duplicateFreestandingWallEdit,
   faceWallId,
   faceWallIdsOf,
   getFloorPartitions,
@@ -13,10 +14,12 @@ import {
   parseFaceWallId,
   roomIdContainingPoint,
   rotateFreestandingWall,
+  setFreestandingClearanceEdit,
   setFreestandingLength,
   setFreestandingThickness
 } from "./freestandingWalls";
 import { getFloorWalls, findNearestWall } from "./planObjects";
+import { getPartitionClearances } from "./partitionSpacing";
 import type { FreestandingWall, Project, Room } from "../project";
 
 function roomWithPartition(partition?: Partial<FreestandingWall>): {
@@ -248,7 +251,7 @@ describe("operations", () => {
     );
     const partition = result.project.floor.rooms[0].room.freestandingWalls[0];
     expect(partition.id).toBe("room-1-partition-1");
-    expect(partition.thicknessMm).toBe(100);
+    expect(partition.thicknessMm).toBe(304.8);
     expect(partition.heightMm).toBe(3000);
     expect(partition.startXMm).toBe(1000);
     expect(getFreestandingLengthMm(partition)).toBeCloseTo(1000);
@@ -312,6 +315,123 @@ describe("operations", () => {
     const [faceA, faceB] = getFreestandingFaces(room);
     expect(faceA.start.yMm).toBeCloseTo(1650); // +150
     expect(faceB.start.yMm).toBeCloseTo(1350); // -150
+  });
+
+  it("duplicates and recenters a partition with a new id", () => {
+    const { project } = roomWithPartition({ thicknessMm: 240, heightMm: 2600 });
+    const result = duplicateFreestandingWallEdit(project, "room-1-partition-1", {
+      xMm: 1500,
+      yMm: 800
+    });
+    const walls = result.project.floor.rooms[0].room.freestandingWalls;
+    const copy = walls.find((wall) => wall.id === result.wallId)!;
+    expect(result.wallId).not.toBe("room-1-partition-1");
+    expect(copy.roomId).toBe("room-1");
+    expect(copy.startXMm).toBeCloseTo(500);
+    expect(copy.endXMm).toBeCloseTo(2500);
+    expect(copy.startYMm).toBeCloseTo(800);
+    expect(copy.endYMm).toBeCloseTo(800);
+    expect(copy.thicknessMm).toBe(240);
+    expect(copy.heightMm).toBe(2600);
+    expect(result.changedWallIds).toEqual([`${result.wallId}#a`, `${result.wallId}#b`]);
+  });
+
+  it("resolves a duplicated partition's owning room from the drop point", () => {
+    const { project } = roomWithPartition({});
+    const second = createRectangularRoomPlacement({
+      roomId: "room-2",
+      name: "Gallery 2",
+      widthMm: 4000,
+      depthMm: 3000,
+      heightMm: 3000,
+      offsetXMm: 5000,
+      offsetYMm: 1000
+    });
+    const twoRoomProject: Project = {
+      ...project,
+      floor: { rooms: [...project.floor.rooms, second] }
+    };
+    const result = duplicateFreestandingWallEdit(twoRoomProject, "room-1-partition-1", {
+      xMm: 7000,
+      yMm: 2500
+    });
+    const copy = result.project.floor.rooms[1].room.freestandingWalls[0];
+    expect(copy.roomId).toBe("room-2");
+    expect((copy.startXMm + copy.endXMm) / 2).toBeCloseTo(2000);
+    expect((copy.startYMm + copy.endYMm) / 2).toBeCloseTo(1500);
+  });
+
+  it("rejects a duplicate drop outside every room", () => {
+    const { project } = roomWithPartition({});
+    expect(() =>
+      duplicateFreestandingWallEdit(project, "room-1-partition-1", {
+        xMm: 9000,
+        yMm: 9000
+      })
+    ).toThrow("Place the copy inside a room.");
+  });
+});
+
+describe("setFreestandingClearanceEdit", () => {
+  it("moves perpendicular to set a normal clearance and shrinks the opposite side", () => {
+    const { project } = roomWithPartition({});
+    const result = setFreestandingClearanceEdit(
+      project,
+      "room-1-partition-1",
+      "normal-plus",
+      1000
+    );
+    const moved = result.project.floor.rooms[0].room.freestandingWalls[0];
+    expect(moved.startYMm).toBeCloseTo(1950);
+    const clearances = getPartitionClearances(result.project.floor.rooms[0].room, moved);
+    expect(clearances.normal.plus.hit?.distanceMm).toBeCloseTo(1000);
+    expect(clearances.normal.minus.hit?.distanceMm).toBeCloseTo(1900);
+  });
+
+  it("sets a span clearance without changing length", () => {
+    const { project } = roomWithPartition({});
+    const result = setFreestandingClearanceEdit(
+      project,
+      "room-1-partition-1",
+      "span-plus",
+      500
+    );
+    const moved = result.project.floor.rooms[0].room.freestandingWalls[0];
+    expect(moved.startXMm).toBeCloseTo(1500);
+    expect(moved.endXMm).toBeCloseTo(3500);
+    expect(getFreestandingLengthMm(moved)).toBeCloseTo(2000);
+  });
+
+  it("rejects negative or physically impossible clearances", () => {
+    const { project } = roomWithPartition({});
+    expect(() =>
+      setFreestandingClearanceEdit(project, "room-1-partition-1", "span-plus", -1)
+    ).toThrow("Partition clearance must be zero or greater.");
+    expect(() =>
+      setFreestandingClearanceEdit(project, "room-1-partition-1", "span-plus", 2500)
+    ).toThrow("Not enough room for that clearance.");
+  });
+
+  it("moves an angled partition along the selected side's direction", () => {
+    const { project } = roomWithPartition({
+      startXMm: 1500,
+      startYMm: 1000,
+      endXMm: 2500,
+      endYMm: 2000
+    });
+    const room = project.floor.rooms[0].room;
+    const before = getPartitionClearances(room, room.freestandingWalls[0]);
+    const target = (before.normal.plus.hit?.distanceMm ?? 0) - 100;
+    const result = setFreestandingClearanceEdit(
+      project,
+      "room-1-partition-1",
+      "normal-plus",
+      target
+    );
+    const moved = result.project.floor.rooms[0].room.freestandingWalls[0];
+    expect(moved.startXMm).toBeCloseTo(1500 - 100 / Math.sqrt(2));
+    expect(moved.startYMm).toBeCloseTo(1000 + 100 / Math.sqrt(2));
+    expect(getFreestandingLengthMm(moved)).toBeCloseTo(Math.sqrt(2) * 1000);
   });
 });
 

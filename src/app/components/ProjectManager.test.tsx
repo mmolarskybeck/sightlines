@@ -26,6 +26,7 @@ function renderManager(overrides: Partial<Parameters<typeof ProjectManager>[0]> 
   const handlers = {
     onOpenChange: vi.fn(),
     onCreateProject: vi.fn().mockResolvedValue(undefined),
+    onDuplicateProject: vi.fn().mockResolvedValue(undefined),
     onRenameProject: vi.fn().mockResolvedValue(undefined),
     onDeleteProject: vi.fn().mockResolvedValue(undefined),
     onOpenProject: vi.fn().mockResolvedValue(undefined),
@@ -144,5 +145,15 @@ describe("ProjectManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "Export Summer Rotation" }));
 
     await waitFor(() => expect(onExportProject).toHaveBeenCalledWith("project-2"));
+  });
+
+  it("duplicates a row, opens the copy, and closes the modal", async () => {
+    const { onDuplicateProject, onOpenChange } = renderManager();
+    await screen.findByText("Summer Rotation");
+
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate Summer Rotation" }));
+
+    await waitFor(() => expect(onDuplicateProject).toHaveBeenCalledWith("project-2"));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
