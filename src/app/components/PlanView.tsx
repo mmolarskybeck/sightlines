@@ -118,6 +118,7 @@ import { isEditableTarget } from "../hooks/isEditableTarget";
 import { useArtworkAspect } from "../hooks/useArtworkAspect";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
 import { useContainerSize } from "../hooks/useContainerSize";
+import { useDisarmOnEscape } from "../hooks/useDisarmOnEscape";
 import { useDragGesture } from "../hooks/useDragGesture";
 import { useSelectSuppression } from "../hooks/useSelectSuppression";
 import { useSvgViewportGestures } from "../hooks/useSvgViewportGestures";
@@ -1085,13 +1086,13 @@ export function PlanView({
     maxYMm: viewBoxBounds.y + viewBoxBounds.height
   });
 
-  // A selected partition is keyboard-placeable just like a selected measurement
-  // endpoint. Keyboard motion intentionally bypasses snap resolution so every
-  // press has a predictable delta and creates one normal partition edit.
-  useEffect(() => {
-    if (
-      !selectedFreestandingWallId ||
-      drag ||
+  // Single source of truth for "is any plan gesture or tool armed right now."
+  // New drag states and tool modes must be added HERE (and nowhere else) —
+  // every consumer below derives from this one predicate, so a mode that
+  // forgets to register itself fails closed (blocks the nudge) instead of
+  // silently letting arrow keys steal focus from an in-flight interaction.
+  const planInteractionActive = Boolean(
+    drag ||
       objectDrag ||
       roomDrag ||
       vertexDrag ||
@@ -1099,18 +1100,20 @@ export function PlanView({
       partitionDrag ||
       partitionDraw ||
       rectDraw ||
-      duplicatePartitionSourceWallId
-    ) {
-      return;
-    }
-    if (
+      duplicatePartitionSourceWallId ||
       activeTool ||
       drawRoomActive ||
       drawRectActive ||
       partitionToolActive ||
       reshapeRoomId ||
       measurementActive
-    ) {
+  );
+
+  // A selected partition is keyboard-placeable just like a selected measurement
+  // endpoint. Keyboard motion intentionally bypasses snap resolution so every
+  // press has a predictable delta and creates one normal partition edit.
+  useEffect(() => {
+    if (!selectedFreestandingWallId || planInteractionActive) {
       return;
     }
     const wallId = selectedFreestandingWallId;
@@ -1140,26 +1143,12 @@ export function PlanView({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
-    activeTool,
-    drag,
-    drawRectActive,
-    drawRoomActive,
-    duplicatePartitionSourceWallId,
     gridPrecisionFloorMm,
-    measurementActive,
-    objectDrag,
     onMoveFreestandingWall,
-    partitionDrag,
-    partitionDraw,
-    partitionToolActive,
+    planInteractionActive,
     project.unit,
-    reshapeRoomId,
-    rectDraw,
-    roomDrag,
     selectedFreestandingWallId,
-    snapToGrid,
-    vertexDrag,
-    wallDrag
+    snapToGrid
   ]);
 
   // The project to render during a drag — one PlanPreview layer per live
@@ -1570,16 +1559,7 @@ export function PlanView({
     toolSnapTargetIdsRef.current = undefined;
   }, [activeTool]);
 
-  useEffect(() => {
-    if (!activeTool) return;
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") disarmTool();
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeTool]);
+  useDisarmOnEscape(activeTool, disarmTool);
 
   function handleToolPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
     if (!activeTool || !movingSize || drag || roomDrag) return;
@@ -1618,14 +1598,7 @@ export function PlanView({
     partitionDuplicateSnapIdsRef.current = undefined;
   }, [duplicatePartitionSourceWallId]);
 
-  useEffect(() => {
-    if (!duplicatePartitionSourceWallId) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onDuplicatePartitionChange?.(false);
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [duplicatePartitionSourceWallId, onDuplicatePartitionChange]);
+  useDisarmOnEscape(duplicatePartitionSourceWallId, () => onDuplicatePartitionChange?.(false));
 
   function handlePartitionDuplicateMove(event: ReactPointerEvent<SVGRectElement>) {
     if (!duplicatePartitionSourceWallId) return;
@@ -1743,24 +1716,10 @@ export function PlanView({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [reshapeRoomId, onReshapeRoomChange, onDeleteRoomVertex]);
 
-  useEffect(() => {
-    if (!partitionToolActive) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onPartitionToolChange?.(false);
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [partitionToolActive, onPartitionToolChange]);
+  useDisarmOnEscape(partitionToolActive, () => onPartitionToolChange?.(false));
 
   // The release gate skips an in-flight rectangle after Escape.
-  useEffect(() => {
-    if (!drawRectActive) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onDrawRectChange?.(false);
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [drawRectActive, onDrawRectChange]);
+  useDisarmOnEscape(drawRectActive, () => onDrawRectChange?.(false));
 
   // Snap to grid/previous axes; Shift forces an exact horizontal or vertical segment.
   function snapDrawPoint(pointerMm: Vector2, prev: Vector2 | null, shiftKey: boolean): Vector2 {
