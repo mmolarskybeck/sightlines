@@ -2,6 +2,8 @@ import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
 import { LinkIcon } from "@phosphor-icons/react/dist/csr/Link";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
 import { SquareIcon } from "@phosphor-icons/react/dist/csr/Square";
+import { useId, useState } from "react";
+import type { ResizeAnchor } from "../../domain/geometry/editRoom";
 import type { OpeningKind } from "../../domain/placement/createOpening";
 import type { DisplayUnit } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
@@ -16,6 +18,10 @@ import { InspectorNotice } from "./InspectorNotice";
 import { InspectorActionGroup } from "./InspectorActionGroup";
 import { LengthField } from "./LengthField";
 import { Button } from "./ui/button";
+import {
+  SegmentedToggleGroup,
+  SegmentedToggleGroupItem
+} from "./ui/segmented";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export type WallDimensionLink = {
@@ -31,6 +37,7 @@ export function WallInspector({
   onAddOpening,
   onCommitHeight,
   onCommitLength,
+  polygonLengthEditing = false,
   roomName,
   unit,
   wallHeightMm,
@@ -46,13 +53,16 @@ export function WallInspector({
   } | null;
   onAddOpening: (kind: OpeningKind) => void;
   onCommitHeight: (heightMm: number) => Promise<void>;
-  onCommitLength: (lengthMm: number) => Promise<void>;
+  onCommitLength: (lengthMm: number, anchor: ResizeAnchor) => Promise<void>;
+  polygonLengthEditing?: boolean;
   roomName: string;
   unit: DisplayUnit;
   wallHeightMm: number;
   wallLengthMm: number;
   wallName: string;
 }) {
+  const [lengthAnchor, setLengthAnchor] = useState<ResizeAnchor>("start");
+  const lengthAnchorLabelId = useId();
   const wall = getScopedUnitContext(unit, "wall");
   const system = wall.system;
   const otherSystem = system === "imperial" ? "metric" : "imperial";
@@ -82,9 +92,30 @@ export function WallInspector({
             displayUnit={wallScope.displayUnit}
             parseUnit={wallScope.parseUnit}
             placeholder={wallPlaceholder}
-            onCommit={onCommitLength}
+            onCommit={(lengthMm) => onCommitLength(lengthMm, lengthAnchor)}
             commitErrorFallback="Could not resize this wall."
           />
+          {polygonLengthEditing ? (
+            <div className="inspector-row">
+              <span className="inspector-row-label" id={lengthAnchorLabelId}>
+                Keep fixed
+              </span>
+              <div className="inspector-row-control">
+                <SegmentedToggleGroup
+                  aria-labelledby={lengthAnchorLabelId}
+                  className="wall-length-anchor-toggle"
+                  type="single"
+                  value={lengthAnchor}
+                  onValueChange={(value) => {
+                    if (value === "start" || value === "end") setLengthAnchor(value);
+                  }}
+                >
+                  <SegmentedToggleGroupItem value="start">Start</SegmentedToggleGroupItem>
+                  <SegmentedToggleGroupItem value="end">End</SegmentedToggleGroupItem>
+                </SegmentedToggleGroup>
+              </div>
+            </div>
+          ) : null}
           <LengthField
             positiveOnly
             label="Height"

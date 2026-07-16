@@ -5343,6 +5343,16 @@ body.panels-resizing * {
   background: var(--track);
 }
 
+.wall-length-anchor-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+}
+
+.wall-length-anchor-toggle .seg-item {
+  min-width: 0;
+}
+
 .placement-form-toggle .placement-form-option {
   display: flex;
   align-items: center;

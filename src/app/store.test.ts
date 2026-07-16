@@ -19,7 +19,10 @@ import {
   solveEqualArrangementInZone
 } from "../domain/placement/arrangeOnWall";
 import { withArtworkFootprint } from "../domain/framing";
-import { createRectangularRoomPlacement } from "../domain/geometry/createRoom";
+import {
+  createPolygonRoomPlacement,
+  createRectangularRoomPlacement
+} from "../domain/geometry/createRoom";
 import { getPartitionClearances } from "../domain/geometry/partitionSpacing";
 import { evaluateOpeningPair } from "../domain/geometry/openingConnections";
 import { createSampleProject } from "../domain/sample/sampleProject";
@@ -163,6 +166,78 @@ describe("app store", () => {
 
       const after = store.getState().project!.floor.rooms[0].room;
       expect(after).toEqual(before);
+    });
+  });
+
+  describe("setPolygonWallLength", () => {
+    function installPolygonRoom() {
+      const project = store.getState().project!;
+      const placement = createPolygonRoomPlacement({
+        roomId: "room-l",
+        name: "Gallery L",
+        heightMm: feetToMm(12),
+        pointsFloorMm: [
+          { xMm: 0, yMm: 0 },
+          { xMm: 5000, yMm: 0 },
+          { xMm: 5000, yMm: 4000 },
+          { xMm: 3000, yMm: 4000 },
+          { xMm: 3000, yMm: 2000 },
+          { xMm: 0, yMm: 2000 }
+        ]
+      });
+      store.setState({ project: { ...project, floor: { rooms: [placement] } } });
+      return placement.room.walls[0];
+    }
+
+    it("commits an irregular length edit with geometry metadata", async () => {
+      const wall = installPolygonRoom();
+
+      await store.getState().setPolygonWallLength(wall.id, 4200, "end");
+
+      const state = store.getState();
+      expect(getSelectedWall(state.project!, wall.id)?.lengthMm).toBeCloseTo(4200, 8);
+      expect(state.undoStack.at(-1)?.label).toBe("Resize wall");
+      expect(state.lastGeometryEdit?.anchorVertexId).toBe(wall.endVertexId);
+      expect(state.lastGeometryEdit?.changedWallIds).toContain(wall.id);
+    });
+
+    it("commits an exact sub-millimetre irregular length edit", async () => {
+      const wall = installPolygonRoom();
+
+      await store.getState().setPolygonWallLength(wall.id, 5000.4, "start");
+
+      const state = store.getState();
+      expect(getSelectedWall(state.project!, wall.id)?.lengthMm).toBeCloseTo(5000.4, 8);
+      expect(state.undoStack.at(-1)?.label).toBe("Resize wall");
+    });
+
+    it("surfaces placement warnings without moving wall objects", async () => {
+      const wall = installPolygonRoom();
+      const project = store.getState().project!;
+      store.setState({
+        project: {
+          ...project,
+          wallObjects: [
+            {
+              id: "art-polygon",
+              wallId: wall.id,
+              kind: "artwork",
+              artworkId: "artwork-1",
+              xMm: 4700,
+              yMm: 1000,
+              widthMm: 600,
+              heightMm: 800
+            }
+          ]
+        }
+      });
+
+      await store.getState().setPolygonWallLength(wall.id, 3500, "start");
+
+      const state = store.getState();
+      expect(state.placementWarnings.some((warning) => warning.wallObjectId === "art-polygon"))
+        .toBe(true);
+      expect(state.project!.wallObjects[0].xMm).toBe(4700);
     });
   });
 

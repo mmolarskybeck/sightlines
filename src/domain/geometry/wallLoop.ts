@@ -27,7 +27,11 @@ export function findVertex(room: Room, vertexId: string): RoomVertex {
 // counts as changed: a project-level diff can span an edit that adds or
 // splits a wall, not just a single drag preview's length delta, so "no
 // baseline to compare against" has to read as "changed," not "ignore."
-export function changedWallLengthIdsForProject(previous: Project, next: Project): string[] {
+export function changedWallLengthIdsForProject(
+  previous: Project,
+  next: Project,
+  epsilonMm = 0.5
+): string[] {
   const previousLengthsById = new Map(
     previous.floor.rooms.flatMap((placement) =>
       getWallsWithGeometry(placement.room).map((wall) => [wall.id, wall.lengthMm] as const)
@@ -38,7 +42,10 @@ export function changedWallLengthIdsForProject(previous: Project, next: Project)
     .flatMap((placement) => getWallsWithGeometry(placement.room))
     .filter((wall) => {
       const previousLengthMm = previousLengthsById.get(wall.id);
-      return previousLengthMm === undefined || Math.abs(previousLengthMm - wall.lengthMm) > 0.5;
+      return (
+        previousLengthMm === undefined ||
+        Math.abs(previousLengthMm - wall.lengthMm) > epsilonMm
+      );
     })
     .map((wall) => wall.id);
 }

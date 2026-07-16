@@ -12,6 +12,7 @@ import {
 import type { Point } from "../domain/geometry/polygon";
 import {
   resizeWallPreservingAngles,
+  setPolygonWallLength as setPolygonWallLengthEdit,
   type GeometryEditResult,
   type ResizeAnchor
 } from "../domain/geometry/editRoom";
@@ -271,6 +272,11 @@ export type AppState = ArrangeSliceState &
   deleteFreestandingWall: (wallId: string) => Promise<void>;
   resizeRoomHeight: (roomId: string, heightMm: number) => Promise<void>;
   resizeWall: (wallId: string, lengthMm: number, anchor?: ResizeAnchor) => Promise<void>;
+  setPolygonWallLength: (
+    wallId: string,
+    lengthMm: number,
+    anchor?: ResizeAnchor
+  ) => Promise<void>;
   resizeSelectedWall: (lengthMm: number) => Promise<void>;
   moveRoomVertex: (roomId: string, vertexId: string, nextLocalMm: Point) => Promise<void>;
   moveRoomWall: (roomId: string, wallId: string, offsetMm: number) => Promise<void>;
@@ -1731,6 +1737,27 @@ export function createAppStore(deps: AppStoreDeps) {
         if (!project) return;
 
         const result = resizeWallPreservingAngles(project, wallId, lengthMm, anchor);
+        if (result.changedWallIds.length === 0) return;
+
+        const placementWarnings = validateChangedWallPlacements(
+          result.project,
+          result.changedWallIds
+        );
+
+        await applyEdit("Resize wall", () => result.project, {
+          placementWarnings,
+          lastGeometryEdit: {
+            anchorVertexId: result.anchorVertexId,
+            changedWallIds: result.changedWallIds
+          }
+        });
+      },
+
+      async setPolygonWallLength(wallId, lengthMm, anchor = "start") {
+        const project = get().project;
+        if (!project) return;
+
+        const result = setPolygonWallLengthEdit(project, wallId, lengthMm, anchor);
         if (result.changedWallIds.length === 0) return;
 
         const placementWarnings = validateChangedWallPlacements(

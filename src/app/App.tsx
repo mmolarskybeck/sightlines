@@ -242,6 +242,7 @@ export function App() {
     resizeSelectedWall,
     resizeRoomHeight,
     resizeWall,
+    setPolygonWallLength,
     moveRoomVertex,
     moveRoomWall,
     splitWall,
@@ -1982,6 +1983,7 @@ export function App() {
             />
           ) : selectedWall ? (
             <WallInspector
+              key={selectedWall.id}
               centerlineMm={project.defaultCenterlineHeightMm}
               changedWallNames={getWallNames(
                 project,
@@ -1995,7 +1997,16 @@ export function App() {
                   ? resizeRoomHeight(selectedWallRoomPlacement.roomId, heightMm)
                   : Promise.resolve()
               }
-              onCommitLength={resizeSelectedWall}
+              onCommitLength={(lengthMm, anchor) =>
+                selectedWallRoomPlacement &&
+                !getRectangleRoomDimensions(selectedWallRoomPlacement.room)
+                  ? setPolygonWallLength(selectedWall.id, lengthMm, anchor)
+                  : resizeSelectedWall(lengthMm)
+              }
+              polygonLengthEditing={Boolean(
+                selectedWallRoomPlacement &&
+                  !getRectangleRoomDimensions(selectedWallRoomPlacement.room)
+              )}
               roomName={selectedWallRoomPlacement?.room.name ?? "this room"}
               unit={project.unit}
               wallHeightMm={selectedWall.heightMm}

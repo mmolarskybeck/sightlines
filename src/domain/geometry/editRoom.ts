@@ -17,6 +17,84 @@ export type GeometryEditResult = {
   anchorVertexId: string;
 };
 
+// Sets one wall's exact length while pinning either endpoint. The selected
+// wall stays on its existing infinite line; its neighbour at the free end is
+// translated parallel to itself until their intersection lands at the target
+// distance from the anchor. Because a translated line's intersection with a
+// fixed line moves affinely, the required moveRoomWall offset is a single dot
+// product rather than an iterative solve.
+export function setPolygonWallLength(
+  project: Project,
+  wallId: string,
+  nextLengthMm: number,
+  anchor: ResizeAnchor = "start"
+): GeometryEditResult {
+  if (!Number.isFinite(nextLengthMm) || nextLengthMm <= 0) {
+    throw new Error("Wall length must be greater than zero.");
+  }
+
+  const placement = project.floor.rooms.find((candidate) =>
+    candidate.room.walls.some((wall) => wall.id === wallId)
+  );
+  if (!placement) {
+    throw new Error(`Wall not found: ${wallId}`);
+  }
+
+  const room = placement.room;
+  const wallIndex = room.walls.findIndex((candidate) => candidate.id === wallId);
+  if (!hasLoopingWallOrder(room, wallIndex)) {
+    throw new Error("Numeric wall length editing requires a continuous room boundary.");
+  }
+
+  const wall = room.walls[wallIndex];
+  const wallGeometry = getWallGeometry(room, wall);
+  if (wallGeometry.lengthMm === 0) {
+    throw new Error("Cannot resize a zero-length wall.");
+  }
+
+  const n = room.walls.length;
+  const movedWall =
+    anchor === "end"
+      ? room.walls[(wallIndex - 1 + n) % n]
+      : room.walls[(wallIndex + 1) % n];
+  const movedGeometry = getWallGeometry(room, movedWall);
+  if (movedGeometry.lengthMm === 0) {
+    throw new Error("Cannot move a zero-length wall.");
+  }
+
+  const wallAxis = {
+    xMm: (wallGeometry.end.xMm - wallGeometry.start.xMm) / wallGeometry.lengthMm,
+    yMm: (wallGeometry.end.yMm - wallGeometry.start.yMm) / wallGeometry.lengthMm
+  };
+  const desiredFreeVertex =
+    anchor === "end"
+      ? {
+          xMm: wallGeometry.end.xMm - wallAxis.xMm * nextLengthMm,
+          yMm: wallGeometry.end.yMm - wallAxis.yMm * nextLengthMm
+        }
+      : {
+          xMm: wallGeometry.start.xMm + wallAxis.xMm * nextLengthMm,
+          yMm: wallGeometry.start.yMm + wallAxis.yMm * nextLengthMm
+        };
+  const originalFreeVertex = anchor === "end" ? wallGeometry.start : wallGeometry.end;
+  const movedLeftNormal = {
+    xMm: -(movedGeometry.end.yMm - movedGeometry.start.yMm) / movedGeometry.lengthMm,
+    yMm: (movedGeometry.end.xMm - movedGeometry.start.xMm) / movedGeometry.lengthMm
+  };
+  const offsetMm =
+    (desiredFreeVertex.xMm - originalFreeVertex.xMm) * movedLeftNormal.xMm +
+    (desiredFreeVertex.yMm - originalFreeVertex.yMm) * movedLeftNormal.yMm;
+
+  const moved = moveRoomWall(project, placement.roomId, movedWall.id, offsetMm);
+  return {
+    project: moved.project,
+    // Numeric entry is exact, so do not reuse the 0.5 mm visual-drag noise
+    // threshold. Preserve only a tiny floating-point tolerance here.
+    changedWallIds: changedWallLengthIdsForProject(project, moved.project, 1e-6),
+    anchorVertexId: anchor === "end" ? wall.endVertexId : wall.startVertexId
+  };
+}
+
 // Rectangle-only numeric wall resize, expressed as a delegation into the
 // general polygon wall-move core (reshapeRoom.moveRoomWall). The rectangle
 // gate is load-bearing, not just UI gating: rectangles are the only shape

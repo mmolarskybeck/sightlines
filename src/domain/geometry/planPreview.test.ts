@@ -77,6 +77,19 @@ describe("applyPlanPreview", () => {
     });
   });
 
+  describe("rectangle wallResize path", () => {
+    it("keeps the rectangle wallResize layer on its existing operation", () => {
+      const project = createSampleProject();
+      const target = feetToMm(30);
+
+      expect(
+        applyPlanPreview(project, {
+          wallResize: { wallId: "wall-north", lengthMm: target, anchor: "end" }
+        })
+      ).toEqual(resizeWallPreservingAngles(project, "wall-north", target, "end").project);
+    });
+  });
+
   describe("roomMove layer alone", () => {
     it("overrides the room's offset and leaves everything else untouched", () => {
       const project = createSampleProject();
