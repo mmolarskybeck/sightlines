@@ -110,8 +110,14 @@ export function WallInspector({
                     if (value === "start" || value === "end") setLengthAnchor(value);
                   }}
                 >
-                  <SegmentedToggleGroupItem value="start">Start</SegmentedToggleGroupItem>
-                  <SegmentedToggleGroupItem value="end">End</SegmentedToggleGroupItem>
+                  <SegmentedToggleGroupItem value="start">
+                    <WallLengthAnchorIcon anchor="start" />
+                    <span>Start</span>
+                  </SegmentedToggleGroupItem>
+                  <SegmentedToggleGroupItem value="end">
+                    <WallLengthAnchorIcon anchor="end" />
+                    <span>End</span>
+                  </SegmentedToggleGroupItem>
                 </SegmentedToggleGroup>
               </div>
             </div>
@@ -209,5 +215,26 @@ export function WallInspector({
         })}
       />
     </form>
+  );
+}
+
+// A compact diagram keeps the anchor choice spatial without asking an icon to
+// carry the meaning alone: the filled endpoint stays fixed, the outlined one
+// is the end that moves when the length changes.
+function WallLengthAnchorIcon({ anchor }: { anchor: ResizeAnchor }) {
+  const fixedX = anchor === "start" ? 3 : 17;
+  const movingX = anchor === "start" ? 17 : 3;
+
+  return (
+    <svg
+      aria-hidden="true"
+      className="wall-length-anchor-icon"
+      focusable="false"
+      viewBox="0 0 20 10"
+    >
+      <line x1="3" x2="17" y1="5" y2="5" />
+      <circle className="wall-length-anchor-fixed" cx={fixedX} cy="5" r="2.25" />
+      <circle className="wall-length-anchor-moving" cx={movingX} cy="5" r="1.75" />
+    </svg>
   );
 }
