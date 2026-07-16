@@ -23,6 +23,7 @@ import {
   eyeLevelWallDistanceMm,
   sightlineOccluders,
   type SightlineSegment,
+  keyboardZoomFactor,
   normalizeWheelDeltaY,
   travelStepDistance,
   updateCameraClipping,
@@ -551,6 +552,50 @@ function CursorZoom() {
   return null;
 }
 
+// Cmd/Ctrl +/- dolly the camera in/out around the orbit target — the 3D
+// analogue of the 2D SVG viewport's Cmd/Ctrl +/- zoom (useSvgViewportGestures.ts).
+// There's no cursor to anchor a keyboard shortcut on, so it anchors on
+// controls.target instead of CursorZoom's raycast hit: with point ===
+// target the target lerp below is a no-op and the camera simply slides
+// along the view ray, which is the "zoom at center" read for an orbit rig.
+function KeyboardZoom() {
+  const camera = useThree((state) => state.camera);
+  const controls = useThree((state) => state.controls) as OrbitControlsImpl | null;
+  const invalidate = useThree((state) => state.invalidate);
+
+  useEffect(() => {
+    if (!controls) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      if (event.key !== "=" && event.key !== "+" && event.key !== "-") return;
+      if (isEditableTarget(event.target)) return;
+      // Block the browser's own page zoom in/out.
+      event.preventDefault();
+
+      // Same >1-dollies-out/<1-dollies-in convention as CursorZoom.
+      let factor = keyboardZoomFactor(event.key === "-" ? "out" : "in");
+      const currentDistance = camera.position.distanceTo(controls.target);
+      // Clamp the resulting orbit radius to the dolly envelope; scale the
+      // step to land exactly on the bound rather than skipping past it.
+      const desired = currentDistance * factor;
+      const clamped = MathUtils.clamp(desired, ORBIT_MIN_DISTANCE, ORBIT_MAX_DISTANCE);
+      if (clamped !== desired && currentDistance > 0) factor = clamped / currentDistance;
+      if (Math.abs(factor - 1) < 1e-6) return;
+
+      camera.position.lerp(controls.target, 1 - factor);
+      updateCameraClipping(camera, camera.position.distanceTo(controls.target));
+      controls.update();
+      invalidate();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [camera, controls, invalidate]);
+
+  return null;
+}
+
 // Continuous WASD / arrow travel (spec §4.2): pure translation of camera and
 // target together, so orbit radius is unchanged. Speed scales with zoom — a
 // walk when close, a glide when zoomed out (envelope in cameraNav.ts).
@@ -898,6 +943,24 @@ export function ThreeDView({
     setGhostedWallIds((current) => (current.size === 0 ? current : new Set()));
   };
 
+  // Cmd/Ctrl+0: same "reclaim framing" action as the Overview toolbar button
+  // (viewControls.tsx) — the 3D counterpart of the 2D SVG viewport's Cmd/Ctrl+0
+  // fit (useSvgViewportGestures.ts). Lives outside the Canvas since it only
+  // needs the imperative rig API, not any R3F/useThree state.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key !== "0") return;
+      if (isEditableTarget(event.target)) return;
+      // Block the browser's own zoom reset.
+      event.preventDefault();
+      endGhostSession();
+      rigApi.current?.overview();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (!benchmarkEnabled) return;
     window.__sightlinesRendererBenchmark = {
@@ -1090,6 +1153,7 @@ export function ThreeDView({
           screenSpacePanning={false}
         />
         <CursorZoom />
+        <KeyboardZoom />
         <KeyboardTravel />
         {benchmarkEnabled ? <BenchmarkFrameProbe /> : null}
         <CameraRig scene={scene} fitKey={project.id} apiRef={rigApi} />

@@ -13,6 +13,8 @@ import {
   eyeLevelWallDistanceMm,
   sightlineOccluders,
   clampFocusDistance,
+  KEYBOARD_ZOOM_STEP,
+  keyboardZoomFactor,
   normalizeWheelDeltaY,
   travelStepDistance,
   zoomFactorFromDelta
@@ -52,6 +54,20 @@ describe("zoomFactorFromDelta", () => {
 
   it("is symmetric: zoom in then out returns to the start", () => {
     expect(zoomFactorFromDelta(120) * zoomFactorFromDelta(-120)).toBeCloseTo(1, 10);
+  });
+});
+
+describe("keyboardZoomFactor", () => {
+  it("dollies in (<1) for 'in'", () => {
+    expect(keyboardZoomFactor("in")).toBeCloseTo(1 / KEYBOARD_ZOOM_STEP, 10);
+  });
+
+  it("dollies out (>1) for 'out'", () => {
+    expect(keyboardZoomFactor("out")).toBe(KEYBOARD_ZOOM_STEP);
+  });
+
+  it("is symmetric: in then out returns to the start", () => {
+    expect(keyboardZoomFactor("in") * keyboardZoomFactor("out")).toBeCloseTo(1, 10);
   });
 });
 
