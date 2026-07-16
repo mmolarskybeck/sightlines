@@ -139,6 +139,9 @@ export function useSvgViewportGestures(options: {
       )
     );
   }
+  // Fresh zoomAtCenter for the once-mounted Cmd/Ctrl +/- keydown handler.
+  const zoomAtCenterRef = useRef(zoomAtCenter);
+  zoomAtCenterRef.current = zoomAtCenter;
 
   // Disable step controls when clamping would produce no change.
   const canZoomIn =
@@ -211,6 +214,18 @@ export function useSvgViewportGestures(options: {
         // Block the browser's own zoom reset.
         event.preventDefault();
         onViewportChangeRef.current(FIT_VIEWPORT);
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && (event.key === "=" || event.key === "+")) {
+        // Block the browser's own page zoom-in.
+        event.preventDefault();
+        zoomAtCenterRef.current(ZOOM_STEP);
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key === "-") {
+        // Block the browser's own page zoom-out.
+        event.preventDefault();
+        zoomAtCenterRef.current(1 / ZOOM_STEP);
         return;
       }
       if (event.code === "Space" || event.key === " ") {
