@@ -156,6 +156,13 @@ const ImportWizard = lazy(() => import("./components/ImportWizard"));
 const SettingsDialog = lazy(() =>
   import("./components/SettingsDialog").then((module) => ({ default: module.SettingsDialog }))
 );
+const ExportPdfDialog = import.meta.env.DEV
+  ? lazy(() =>
+      import("./components/ExportPdfDialog").then((module) => ({
+        default: module.ExportPdfDialog
+      }))
+    )
+  : null;
 const ElevationView = lazy(() =>
   import("./components/ElevationView").then((module) => ({ default: module.ElevationView }))
 );
@@ -221,6 +228,8 @@ export function App() {
     updateReferenceMeasurement,
     deleteReferenceMeasurement,
     saveView,
+    renameSavedView,
+    deleteSavedView,
     viewFreestandingFace,
     selectObject,
     setObjectSelection,
@@ -322,6 +331,14 @@ export function App() {
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  // Phase 3 has no production PDF entry point until assembly lands in Phase 4.
+  // This query-only preview keeps the real dialog inspectable in its actual app
+  // shell without shipping a dead Export PDF action.
+  const [isExportPdfOpen, setIsExportPdfOpen] = useState(
+    () =>
+      import.meta.env.DEV &&
+      new URLSearchParams(window.location.search).get("export-dialog") === "1"
+  );
   // Prevent re-entry while package assets are hashed and zipped.
   const [isExportingPackage, setIsExportingPackage] = useState(false);
 
@@ -552,7 +569,11 @@ export function App() {
     // Any open workspace dialog owns the keyboard — stand down so a toolbar
     // letter never fires behind it.
     suspended:
-      isHelpOpen || isSettingsOpen || importWizardOpen || confirmDeleteRoomId !== null,
+      isHelpOpen ||
+      isSettingsOpen ||
+      isExportPdfOpen ||
+      importWizardOpen ||
+      confirmDeleteRoomId !== null,
     insertDisabled: viewMode === "elevation" && !selectedWall,
     activeTool,
     armOpeningTool,
@@ -575,7 +596,11 @@ export function App() {
   useTemporaryMeasurementShortcuts({
     active: measurementActive,
     suspended:
-      isHelpOpen || isSettingsOpen || importWizardOpen || confirmDeleteRoomId !== null,
+      isHelpOpen ||
+      isSettingsOpen ||
+      isExportPdfOpen ||
+      importWizardOpen ||
+      confirmDeleteRoomId !== null,
     state: measurement.state,
     dispatch: measurement.dispatch
   });
@@ -591,6 +616,7 @@ export function App() {
       if (
         isHelpOpen ||
         isSettingsOpen ||
+        isExportPdfOpen ||
         importWizardOpen ||
         confirmDeleteRoomId !== null ||
         isEditableTarget(event.target) ||
@@ -618,6 +644,7 @@ export function App() {
     disarmPlanMode,
     isHelpOpen,
     isSettingsOpen,
+    isExportPdfOpen,
     importWizardOpen,
     confirmDeleteRoomId
   ]);
@@ -2175,6 +2202,17 @@ export function App() {
           onImport={() => fileInputRef.current?.click()}
           onOpenHelp={() => { setIsSettingsOpen(false); setIsHelpOpen(true); }}
         />
+        {ExportPdfDialog ? (
+          <ExportPdfDialog
+            open={isExportPdfOpen}
+            project={project}
+            onOpenChange={setIsExportPdfOpen}
+            onExport={() => setIsExportPdfOpen(false)}
+            onRenameSavedView={renameSavedView}
+            onDeleteSavedView={deleteSavedView}
+            onPersistenceError={(message) => toast.error(message)}
+          />
+        ) : null}
       </Suspense>
       <ArtworkLibraryPicker
         open={libraryPickerOpen}

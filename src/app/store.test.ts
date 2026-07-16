@@ -1524,6 +1524,17 @@ describe("app store", () => {
     expect(store.getState().project?.id).toBe(original.id);
   });
 
+  it("deleteProject removes its workspace export preferences after repository deletion", async () => {
+    const onProjectDeleted = vi.fn();
+    store = createAppStore(makeDeps({ onProjectDeleted }));
+    await store.getState().boot();
+    const deletedId = store.getState().project!.id;
+
+    await store.getState().deleteProject(deletedId);
+
+    expect(onProjectDeleted).toHaveBeenCalledWith(deletedId);
+  });
+
   it("deleteProject falls back to another saved project when the open one is deleted", async () => {
     const original = store.getState().project!;
     await store.getState().createProject("Winter Show");

@@ -414,6 +414,7 @@ export type AppStoreDeps = {
   artworkLibraryRepository: ArtworkLibraryRepository;
   assetRepository: AssetRepository;
   imageProcessor: ImageProcessor;
+  onProjectDeleted?: (projectId: string) => void | Promise<void>;
 };
 
 export function createAppStore(deps: AppStoreDeps) {
@@ -2278,6 +2279,16 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
+        // Workspace-only records are outside project persistence and packages,
+        // but still need to follow project lifecycle (§6.3). Best effort: a
+        // localStorage failure must not resurrect a project that was already
+        // deleted successfully from IndexedDB.
+        try {
+          await deps.onProjectDeleted?.(id);
+        } catch {
+          // The export-preference hook reports ordinary persistence failures.
+        }
+
         if (!wasOpen) return;
 
         // The open project just disappeared out from under the user —
@@ -3769,7 +3780,13 @@ export const useAppStore = createAppStore({
   projectRepository: new IndexedDbProjectRepository(),
   artworkLibraryRepository: new IndexedDbArtworkLibraryRepository(),
   assetRepository: new IndexedDbAssetRepository(),
-  imageProcessor: createBrowserImageProcessor()
+  imageProcessor: createBrowserImageProcessor(),
+  onProjectDeleted: async (projectId) => {
+    const { deleteStoredDocumentExportPreferences } = await import(
+      "./hooks/useDocumentExportPreferences"
+    );
+    deleteStoredDocumentExportPreferences(projectId);
+  }
 });
 
 export function exportProjectJson(project: Project): string {

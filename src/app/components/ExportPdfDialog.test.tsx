@@ -1,0 +1,267 @@
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor
+} from "@testing-library/react";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createSampleProject } from "../../domain/sample/sampleProject";
+import type { Project } from "../../domain/project";
+import { TooltipProvider } from "./ui/tooltip";
+import { ExportPdfDialog } from "./ExportPdfDialog";
+
+vi.mock("./ui/select", async () => {
+  const { createContext, useContext } = await import("react");
+  const Context = createContext<{
+    value?: string;
+    onValueChange?: (value: string) => void;
+  }>({});
+  return {
+    Select: ({
+      value,
+      onValueChange,
+      children
+    }: {
+      value?: string;
+      onValueChange?: (value: string) => void;
+      children: React.ReactNode;
+    }) => (
+      <Context.Provider value={{ value, onValueChange }}>
+        {children}
+      </Context.Provider>
+    ),
+    SelectTrigger: ({ children, ...props }: React.ComponentProps<"button">) => (
+      <button type="button" role="combobox" {...props}>
+        {children}
+      </button>
+    ),
+    SelectValue: () => <span>{useContext(Context).value}</span>,
+    SelectContent: ({ children }: { children: React.ReactNode }) => (
+      <div role="listbox">{children}</div>
+    ),
+    SelectItem: ({
+      children,
+      value
+    }: {
+      children: React.ReactNode;
+      value: string;
+    }) => {
+      const context = useContext(Context);
+      return (
+        <button
+          role="option"
+          type="button"
+          onClick={() => context.onValueChange?.(value)}
+        >
+          {children}
+        </button>
+      );
+    }
+  };
+});
+
+beforeAll(() => {
+  const proto = window.HTMLElement.prototype;
+  proto.hasPointerCapture = vi.fn();
+  proto.setPointerCapture = vi.fn();
+  proto.releasePointerCapture = vi.fn();
+  proto.scrollIntoView = vi.fn();
+});
+
+beforeEach(() => {
+  window.localStorage.clear();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+function projectWithExportContent(): Project {
+  const project = createSampleProject();
+  project.wallObjects = [
+    {
+      id: "work-1",
+      kind: "artwork",
+      artworkId: "art-1",
+      wallId: "wall-north",
+      xMm: 1000,
+      yMm: 1500,
+      widthMm: 500,
+      heightMm: 700
+    }
+  ];
+  project.savedViews = [
+    {
+      id: "view-1",
+      ordinal: 1,
+      title: "Entrance sightline",
+      roomId: "room-main",
+      pose: {
+        position: { x: 1, y: 1.5, z: 2 },
+        target: { x: 1, y: 1.5, z: 0 }
+      },
+      createdAt: "2026-07-16T00:00:00.000Z"
+    }
+  ];
+  return project;
+}
+
+function renderDialog(project: Project = projectWithExportContent()) {
+  const handlers = {
+    onOpenChange: vi.fn(),
+    onExport: vi.fn(),
+    onRenameSavedView: vi.fn().mockResolvedValue(undefined),
+    onDeleteSavedView: vi.fn().mockResolvedValue(undefined)
+  };
+  render(
+    <TooltipProvider>
+      <ExportPdfDialog open project={project} {...handlers} />
+    </TooltipProvider>
+  );
+  return handlers;
+}
+
+describe("ExportPdfDialog", () => {
+  it("renders the specified sections, defaults, live page count, and Saved view placeholder", () => {
+    renderDialog();
+
+    expect(screen.getByRole("heading", { name: "Export PDF" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Contents" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Options" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Page setup" })).toBeInTheDocument();
+
+    expect(screen.getByRole("checkbox", { name: "Include Overview" })).toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "Include Room plans" })
+    ).not.toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "Include Elevations" })
+    ).toHaveAttribute("data-state", "indeterminate");
+    expect(screen.getByRole("checkbox", { name: "Include 3D views" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Dimensions" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Grid" })).not.toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Paper size" })).toHaveTextContent(
+      "letter"
+    );
+
+    expect(screen.getByText("Main Gallery · Entrance sightline")).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", {
+        name: "Main Gallery · Entrance sightline"
+      })
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Exports/).parentElement).toHaveTextContent(
+      "Exports 3 pages"
+    );
+  });
+
+  it("uses tri-state select-all and preserves child choices while a section is off", () => {
+    renderDialog();
+    const elevations = screen.getByRole("checkbox", {
+      name: "Include Elevations"
+    });
+
+    fireEvent.click(elevations);
+    expect(elevations).toBeChecked();
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Include Main Gallery, East wall elevation"
+      })
+    ).toBeChecked();
+    expect(screen.getByText(/Exports/).parentElement).toHaveTextContent(
+      "Exports 6 pages"
+    );
+
+    fireEvent.click(elevations);
+    expect(elevations).not.toBeChecked();
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Include Main Gallery, East wall elevation"
+      })
+    ).toBeChecked();
+    expect(screen.getByText(/Exports/).parentElement).toHaveTextContent(
+      "Exports 2 pages"
+    );
+
+    fireEvent.click(elevations);
+    expect(elevations).toBeChecked();
+    expect(screen.getByText(/Exports/).parentElement).toHaveTextContent(
+      "Exports 6 pages"
+    );
+  });
+
+  it("lets a single-room project opt into its room plan independently", () => {
+    renderDialog();
+    const roomPlans = screen.getByRole("checkbox", {
+      name: "Include Room plans"
+    });
+
+    fireEvent.click(roomPlans);
+
+    expect(roomPlans).toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "Include Main Gallery room plan" })
+    ).toBeChecked();
+    expect(screen.getByText(/Exports/).parentElement).toHaveTextContent(
+      "Exports 4 pages"
+    );
+  });
+
+  it("renames and deletes Saved views through project-data callbacks", async () => {
+    const { onRenameSavedView, onDeleteSavedView } = renderDialog();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Rename Main Gallery · Entrance sightline"
+      })
+    );
+    const input = screen.getByRole("textbox", {
+      name: "Rename Main Gallery · Entrance sightline"
+    });
+    fireEvent.change(input, { target: { value: "Doorway reveal" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save view title" }));
+
+    await waitFor(() =>
+      expect(onRenameSavedView).toHaveBeenCalledWith(
+        "view-1",
+        "Doorway reveal"
+      )
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Delete Main Gallery · Entrance sightline"
+      })
+    );
+    expect(onDeleteSavedView).toHaveBeenCalledWith("view-1");
+  });
+
+  it("disables export and shows guidance when every section is off", () => {
+    renderDialog(createSampleProject());
+
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Include Overview" })
+    );
+
+    expect(screen.getByText("Choose at least one section.")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Export PDF" })
+    ).toBeDisabled();
+  });
+
+  it("passes current effective settings to the export callback", () => {
+    const { onExport } = renderDialog();
+    fireEvent.click(screen.getByRole("switch", { name: "Grid" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export PDF" }));
+
+    expect(onExport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        grid: true,
+        dimensions: true,
+        paperSize: "letter"
+      })
+    );
+  });
+});
