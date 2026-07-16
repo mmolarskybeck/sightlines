@@ -174,7 +174,15 @@ function cleanInsetTargets(args: {
             ? snappedLocal + placementOffsetMm.yMm
             : proposedFloorMm.yMm
       },
-      extentMm
+      extentMm,
+      // This is a continuous quantization (nearest clean increment to
+      // wherever the pointer currently is), not a discrete alignment — it is
+      // within capture range almost everywhere, so a guide for it would be
+      // on-screen for nearly the entire drag and wouldn't signal anything the
+      // dimension-line label doesn't already show. Unlike artwork's
+      // neighbor-edge (a single fixed point flush with one real neighbor),
+      // a guide here is noise, not signal.
+      showGuide: false
     };
   });
 }

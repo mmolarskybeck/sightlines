@@ -207,6 +207,8 @@ describe("getPartitionMoveSnapTargets", () => {
     // The west wall's own extent (its full run in y, i.e. the room's depth),
     // not the whole room bbox padded by 200mm.
     expect(westWall?.extentMm).toEqual({ startMm: 0, endMm: 4000 });
+    // Continuous quantization, not a discrete alignment — no guide line.
+    expect(westWall?.showGuide).toBe(false);
 
     const siblingWestFace = targets.find(
       (target) => target.id === "partition-clean-partition-face-room-1-partition-2-0"
@@ -215,6 +217,7 @@ describe("getPartitionMoveSnapTargets", () => {
     expect(siblingWestFace?.point.xMm).toBe(1900);
     // The sibling slab face's own run in y (1000 to 3000), not the room bbox.
     expect(siblingWestFace?.extentMm).toEqual({ startMm: 1000, endMm: 3000 });
+    expect(siblingWestFace?.showGuide).toBe(false);
   });
 });
 

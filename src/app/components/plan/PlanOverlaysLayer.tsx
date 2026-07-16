@@ -421,7 +421,13 @@ export function PlanOverlaysLayer({
           }
         />
       ) : null}
-      {activeGuides.map((guide) => {
+      {/* Some guides win but are continuous quantizations rather than a rare,
+          discrete alignment (see SnapTarget.showGuide) — those resolve the
+          position normally but draw no line, since a guide that's in range
+          almost everywhere is noise, not signal. */}
+      {activeGuides
+        .filter((guide) => guide.showGuide !== false)
+        .map((guide) => {
         // A bounded guide (extentMm set, e.g. a partition drag clipped to its
         // room) draws as a segment over that range along its length; an
         // unbounded guide spans the full viewBox. For an x-guide (vertical) the
