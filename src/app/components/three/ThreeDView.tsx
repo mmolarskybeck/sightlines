@@ -13,7 +13,7 @@ import {
   type WallArtwork3d,
   type WallPanel3d
 } from "../../../domain/geometry/scene3d";
-import type { Artwork, Project } from "../../../domain/project";
+import type { Artwork, Project, SavedViewPose } from "../../../domain/project";
 import { fitDistance } from "./cameraFit";
 import {
   ORBIT_MAX_DISTANCE,
@@ -178,6 +178,10 @@ export type ThreeDViewActions = {
   // (spec §2.2) — never a readback of the live (dpr-capped, selection-tinted)
   // canvas, never a store write, never a Saved view.
   captureSnapshot: (format: SnapshotFormat) => Promise<Blob>;
+  // The live camera pose as plain world-space numbers, for the Save view action
+  // (spec §8.2). Null when no camera is active yet. The caller persists it via
+  // the store; this reads, it never writes.
+  getCurrentPose: () => SavedViewPose | null;
 };
 
 // World-space bounding box of one room's floor + wall heights, including its
@@ -1094,7 +1098,20 @@ export function ThreeDView({
               reject(error);
             }
           });
-        })
+        }),
+      getCurrentPose: () => {
+        const camera = liveCameraRef.current;
+        if (!camera) return null;
+        // Same live refs captureSnapshot reads (the actual mutable three.js
+        // objects), so the pose can never lag what's on screen.
+        const target = liveControlsRef.current
+          ? liveControlsRef.current.target
+          : camera.getWorldDirection(new Vector3()).add(camera.position);
+        return {
+          position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+          target: { x: target.x, y: target.y, z: target.z }
+        };
+      }
     };
 
     return () => {

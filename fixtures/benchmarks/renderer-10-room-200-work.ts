@@ -99,6 +99,7 @@ export const rendererBenchmarkProject: Project = {
   wallObjects: rendererBenchmarkWallObjects,
   floorObjects: [],
   referenceMeasurements: [],
+  savedViews: [],
   createdAt: "2026-07-11T00:00:00.000Z",
   updatedAt: "2026-07-11T00:00:00.000Z",
   floor: {

@@ -61,6 +61,52 @@ describe("projectSchema", () => {
     expect(() => parseProject(project)).toThrow(/reference measurement/i);
   });
 
+  it("validates and defaults saved views", () => {
+    const project = createSampleProject();
+    project.savedViews = [
+      {
+        id: "view-1",
+        ordinal: 1,
+        title: "Entrance sightline",
+        roomId: "room-main",
+        pose: {
+          position: { x: 1, y: 1.6, z: 3 },
+          target: { x: 1, y: 1.6, z: 0 }
+        },
+        createdAt: "2026-07-16T00:00:00.000Z"
+      }
+    ];
+    expect(parseProject(project).savedViews).toEqual(project.savedViews);
+    const { savedViews: _views, ...legacyShape } = project;
+    expect(parseProject(legacyShape).savedViews).toEqual([]);
+  });
+
+  it("rejects saved views with duplicate ids", () => {
+    const project = createSampleProject();
+    const view = {
+      id: "view-1",
+      ordinal: 1,
+      title: "Saved view 1",
+      pose: { position: { x: 0, y: 0, z: 1 }, target: { x: 0, y: 0, z: 0 } },
+      createdAt: "2026-07-16T00:00:00.000Z"
+    };
+    project.savedViews = [view, { ...view, ordinal: 2 }];
+    expect(() => parseProject(project)).toThrow(/duplicate saved view id/i);
+  });
+
+  it("rejects saved views with duplicate ordinals", () => {
+    const project = createSampleProject();
+    const view = {
+      id: "view-1",
+      ordinal: 1,
+      title: "Saved view 1",
+      pose: { position: { x: 0, y: 0, z: 1 }, target: { x: 0, y: 0, z: 0 } },
+      createdAt: "2026-07-16T00:00:00.000Z"
+    };
+    project.savedViews = [view, { ...view, id: "view-2" }];
+    expect(() => parseProject(project)).toThrow(/duplicate saved view ordinal/i);
+  });
+
   it("defaults wall objects for older v1 project documents", () => {
     const { wallObjects, ...olderProject } = createSampleProject();
 

@@ -68,6 +68,43 @@ describe("export → import round trip", () => {
     expect(commit.warnings).toEqual([]);
   });
 
+  it("saved views survive a display-mode round trip", async () => {
+    const { project: base, library, getAsset, getBlob } = makeFixture();
+    const project = {
+      ...base,
+      savedViews: [
+        {
+          id: "view-1",
+          ordinal: 1,
+          title: "Entrance sightline",
+          roomId: "room-main",
+          pose: {
+            position: { x: 1, y: 1.6, z: 3 },
+            target: { x: 1, y: 1.6, z: 0 }
+          },
+          createdAt: "2026-07-16T00:00:00.000Z"
+        }
+      ]
+    };
+
+    const { zip } = await createSightlinesPackage({
+      project,
+      libraryArtworks: library,
+      mode: "display",
+      getAsset,
+      getBlob
+    });
+
+    const opened = await openSightlinesPackage(zip);
+    const validated = await validatePackageAssets(opened.manifest, opened.files);
+    const commit = finalizePackageImport(
+      planPackageImport(opened.manifest, validated, emptyLibrary),
+      {}
+    );
+
+    expect(commit.project.savedViews).toEqual(project.savedViews);
+  });
+
   it("originals mode: original bytes round-trip exactly", async () => {
     const { project, library, assets, blobs, getAsset, getBlob } = makeFixture();
 

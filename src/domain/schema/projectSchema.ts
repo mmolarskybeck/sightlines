@@ -106,6 +106,27 @@ const referenceMeasurementSchema = z.discriminatedUnion("kind", [
   })
 ]);
 
+// Plain-number pose (world units). Deliberately NOT `.finite()`: a numerically
+// invalid pose is an export-time advisory (spec §8.4), not a load-time
+// rejection — and JSON can't carry non-finite values anyway.
+const savedViewVec3Schema = z.object({
+  x: z.number(),
+  y: z.number(),
+  z: z.number()
+});
+
+const savedViewSchema = z.object({
+  id: z.string().min(1),
+  ordinal: z.number().int().nonnegative(),
+  title: z.string().min(1),
+  roomId: z.string().min(1).optional(),
+  pose: z.object({
+    position: savedViewVec3Schema,
+    target: savedViewVec3Schema
+  }),
+  createdAt: z.string().datetime()
+});
+
 const roomVertexSchema = z.object({
   id: hashFreeIdSchema,
   xMm: z.number().finite(),
@@ -260,6 +281,7 @@ export const projectSchema = z
     wallObjects: z.array(wallObjectSchema).default([]),
     floorObjects: z.array(floorObjectSchema).default([]),
     referenceMeasurements: z.array(referenceMeasurementSchema).default([]),
+    savedViews: z.array(savedViewSchema).default([]),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime()
   })
@@ -290,6 +312,20 @@ export const projectSchema = z
       if (measurement.kind === "elevation" && !elevationWallIds.has(measurement.wallId)) {
         context.addIssue({ code: z.ZodIssueCode.custom, message: `Reference measurement points to missing wall ${measurement.wallId}.`, path: [...path, "wallId"] });
       }
+    }
+
+    const savedViewIds = new Set<string>();
+    const savedViewOrdinals = new Set<number>();
+    for (const view of project.savedViews) {
+      const path = ["savedViews", view.id];
+      if (savedViewIds.has(view.id)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: `Duplicate saved view id ${view.id}.`, path });
+      }
+      savedViewIds.add(view.id);
+      if (savedViewOrdinals.has(view.ordinal)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: `Duplicate saved view ordinal ${view.ordinal}.`, path: [...path, "ordinal"] });
+      }
+      savedViewOrdinals.add(view.ordinal);
     }
 
     const byId = new Map(project.wallObjects.map((object) => [object.id, object]));

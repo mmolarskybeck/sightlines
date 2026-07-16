@@ -9,6 +9,7 @@ import {
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import { ArchiveIcon } from "@phosphor-icons/react/dist/csr/Archive";
+import { BookmarkSimpleIcon } from "@phosphor-icons/react/dist/csr/BookmarkSimple";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
@@ -47,6 +48,7 @@ import type {
   Project,
   ProjectSummary
 } from "../domain/project";
+import { resolveSavedViewRoomLabel } from "../domain/savedViews";
 import { faceWallId, parseFaceWallId } from "../domain/geometry/freestandingWalls";
 import { getPartitionClearances } from "../domain/geometry/partitionSpacing";
 import type { PackageExportMode } from "../domain/schema/packageSchema";
@@ -218,6 +220,7 @@ export function App() {
     addReferenceMeasurement,
     updateReferenceMeasurement,
     deleteReferenceMeasurement,
+    saveView,
     viewFreestandingFace,
     selectObject,
     setObjectSelection,
@@ -1062,6 +1065,20 @@ export function App() {
     }
   };
 
+  // Save view: a single-click camera bookmark for the 3D view (spec §8.2). No
+  // dialog — the store persists it (undoable, round-tripped) and we confirm with
+  // an inline toast composing the LIVE room label with the default title.
+  const handleSaveView = async () => {
+    if (!project || !threeDActionsRef.current) return;
+    const pose = threeDActionsRef.current.getCurrentPose();
+    if (!pose) return;
+    const saved = await saveView(pose);
+    if (!saved) return;
+    const roomLabel = resolveSavedViewRoomLabel(project, saved);
+    const composed = roomLabel ? `${roomLabel} · ${saved.title}` : saved.title;
+    toast.success(`Saved "${composed}"`);
+  };
+
   // Detect package vs. project JSON by zip magic, not file extension.
   const handleImportFile = async (file: File) => {
     const buffer = await file.arrayBuffer();
@@ -1279,6 +1296,19 @@ export function App() {
                           <span>Export image (JPG)</span>
                           <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
                             Export image of 3D view
+                          </span>
+                        </span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="dropdown-menu-item-stacked"
+                        disabled={project.floor.rooms.length === 0}
+                        onSelect={() => void handleSaveView()}
+                      >
+                        <BookmarkSimpleIcon aria-hidden="true" size={16} />
+                        <span className="flex min-w-0 flex-col gap-0.5">
+                          <span>Save view</span>
+                          <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
+                            Bookmark this camera for the PDF
                           </span>
                         </span>
                       </DropdownMenuItem>

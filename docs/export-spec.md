@@ -120,6 +120,40 @@ prompt in-app action. §10 defines the exact inclusion table.
 
 ### 3.2 Slice 2 — Document
 
+Slice 2 is implemented in phases, each independently mergeable and testable:
+
+- **Phase 1 — Saved views foundation.** The `SavedView` data model (pose,
+  room id, title, immutable creation ordinal), schema/type addition
+  (additive/optional, no schema-version bump — mirrors
+  `referenceMeasurements`), store CRUD (`saveView`/`renameSavedView`/
+  `deleteSavedView`) through `applyEdit` so undo and `.sightlines` round-trip
+  come for free, live room-id resolution (point-in-polygon against
+  `room.floorPolygon`, falling back to the room containing the camera
+  target), degenerate-pose validation (§8.4), and the **Save view** action
+  wired into the 3D view with lightweight toast feedback (§8.2). No dialog,
+  no PDF, no thumbnails yet — this phase only makes Saved views exist,
+  persist, and undo correctly. Camera pose is stored as plain
+  `{position:{x,y,z}, target:{x,y,z}}`; lens parameters (FOV/near/far) are
+  not stored per-view because they are fixed app-wide constants
+  (`sceneConstants.ts`), never varied per camera instance — so the §8.4
+  "invalid field-of-view/clipping" degenerate case can't currently occur and
+  isn't a stored field.
+- **Phase 2 — Orthogonal-neighbor dimension engine.** The pure §9.6
+  two-axis neighbor-graph derivation, independent of the dialog/PDF work and
+  therefore parallelizable with Phase 3.
+- **Phase 3 — Export dialog + workspace preferences.** The dialog shell
+  (§6), tri-state contents tree (§7), per-project document-settings
+  persistence and reconciliation (§6.3), Saved-views management rows (§8.4).
+  Depends on Phase 1 (views to list).
+- **Phase 4 — Page composition + PDF assembly.** Fit-to-page math, scale
+  bars, page-manifest derivation, the vector PDF writer, image
+  transcoding/placeholders (§9, §10). Depends on Phases 1–3.
+- **Phase 5 — Wire-up and verification.** Export PDF entry point, progress/
+  cancel, error handling, accessibility pass, browser/device verification
+  (§12, §13, §15).
+
+Phase 1 is in progress as of 2026-07-16.
+
 - **Export PDF** action opening the Export dialog (§6).
 - Overview page, per-room plan pages, per-wall elevation pages, Saved-view
   3D pages, each optional.

@@ -89,8 +89,46 @@ export type Project = {
   wallObjects: WallObject[];
   floorObjects: FloorObject[];
   referenceMeasurements?: ReferenceMeasurement[];
+  savedViews?: SavedView[];
   createdAt: string;
   updatedAt: string;
+};
+
+// Plain-serializable 3D point (world units, 1 unit = 1 metre). Stored on Saved
+// views instead of a three.js Vector3 so poses survive JSON/`.sightlines`
+// round-trips unchanged.
+export type SavedViewVec3 = { x: number; y: number; z: number };
+
+// A stored camera pose in world space (spec §8.2 "model space — never pixels").
+// Lens parameters (FOV/near/far) are deliberately absent: they are fixed
+// app-wide constants (three/sceneConstants.ts), never varied per camera, so the
+// §8.4 "invalid field-of-view/clipping" degenerate case cannot arise.
+export type SavedViewPose = {
+  position: SavedViewVec3;
+  target: SavedViewVec3;
+};
+
+// A curator-composed 3D viewpoint (spec §8). A camera bookmark, not a picture:
+// its thumbnail is a derived cache outside the project and every consumer
+// re-renders the CURRENT exhibition from the stored pose. Saved views are
+// project data — they dirty, undo, and round-trip through `.sightlines`.
+export type SavedView = {
+  id: string;
+  // Immutable, monotonically increasing creation index (spec §8.2). Deleting a
+  // view never renumbers survivors nor lets a later view reuse a number; the
+  // store computes it as (max existing ordinal, or 0) + 1. Also the source of
+  // the default title `Saved view ${ordinal}`.
+  ordinal: number;
+  // User-editable, defaulting to `Saved view ${ordinal}`.
+  title: string;
+  // Stable id of the room containing the camera at capture (or the room
+  // containing the target when the camera sits outside every room); absent when
+  // no room is identifiable. The display label is re-resolved LIVE from this id
+  // (see resolveSavedViewRoomLabel), never cached here, so room renames/deletes
+  // are always reflected (spec §8.3).
+  roomId?: string;
+  pose: SavedViewPose;
+  createdAt: string;
 };
 
 export type MeasurementPoint = { xMm: number; yMm: number };

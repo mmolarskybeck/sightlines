@@ -126,6 +126,70 @@ describe("app store", () => {
     expect(getSelectedWall(persisted, "wall-north")!.lengthMm).toBeCloseTo(10_000);
   });
 
+  describe("saved views", () => {
+    // The sample room-main spans 0..28ft × 0..18ft in floor mm at a zero-offset
+    // placement, so world (x, z) = floor mm / 1000; (4, 2.5) sits inside it.
+    const insidePose = {
+      position: { x: 4, y: 1.6, z: 2.5 },
+      target: { x: 4, y: 1.6, z: 0 }
+    };
+
+    it("saveView appends a view, resolves its room, and round-trips through undo/redo", async () => {
+      const saved = await store.getState().saveView(insidePose);
+      expect(saved).not.toBeNull();
+      expect(saved!.ordinal).toBe(1);
+      expect(saved!.title).toBe("Saved view 1");
+      expect(saved!.roomId).toBe("room-main");
+      expect(store.getState().project!.savedViews).toHaveLength(1);
+      expect(store.getState().undoStack).toHaveLength(1);
+      expect(store.getState().undoStack.at(-1)?.label).toBe("Save view");
+
+      await store.getState().undo();
+      expect(store.getState().project!.savedViews ?? []).toEqual([]);
+
+      await store.getState().redo();
+      expect(store.getState().project!.savedViews).toHaveLength(1);
+      expect(store.getState().project!.savedViews![0].id).toBe(saved!.id);
+    });
+
+    it("assigns monotonic ordinals that survive deleting an earlier view", async () => {
+      const first = await store.getState().saveView(insidePose);
+      const second = await store.getState().saveView(insidePose);
+      const third = await store.getState().saveView(insidePose);
+      expect([first!.ordinal, second!.ordinal, third!.ordinal]).toEqual([1, 2, 3]);
+
+      await store.getState().deleteSavedView(second!.id);
+      const fourth = await store.getState().saveView(insidePose);
+      // Never fills the gap left by ordinal 2, and survivors keep their numbers.
+      expect(fourth!.ordinal).toBe(4);
+      expect(
+        store.getState().project!.savedViews!.map((view) => view.ordinal)
+      ).toEqual([1, 3, 4]);
+    });
+
+    it("renameSavedView trims, and no-ops on empty or unchanged titles", async () => {
+      const saved = await store.getState().saveView(insidePose);
+      await store.getState().renameSavedView(saved!.id, "  Gallery entrance  ");
+      expect(store.getState().project!.savedViews![0].title).toBe("Gallery entrance");
+
+      const undoDepth = store.getState().undoStack.length;
+      await store.getState().renameSavedView(saved!.id, "   ");
+      await store.getState().renameSavedView(saved!.id, "Gallery entrance");
+      expect(store.getState().undoStack).toHaveLength(undoDepth);
+    });
+
+    it("deleteSavedView is undoable", async () => {
+      const saved = await store.getState().saveView(insidePose);
+      await store.getState().deleteSavedView(saved!.id);
+      expect(store.getState().project!.savedViews).toEqual([]);
+      expect(store.getState().undoStack.at(-1)?.label).toBe("Delete saved view");
+
+      await store.getState().undo();
+      expect(store.getState().project!.savedViews).toHaveLength(1);
+      expect(store.getState().project!.savedViews![0].id).toBe(saved!.id);
+    });
+  });
+
   it("resizeWall edits a wall other than the current selection", async () => {
     await store.getState().resizeWall("wall-east", 6_000);
 

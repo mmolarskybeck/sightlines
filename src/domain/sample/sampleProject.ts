@@ -16,6 +16,7 @@ export function createSampleProject(): Project {
     wallObjects: [],
     floorObjects: [],
     referenceMeasurements: [],
+    savedViews: [],
     createdAt: now,
     updatedAt: now,
     floor: {
