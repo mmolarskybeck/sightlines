@@ -152,7 +152,7 @@ Slice 2 is implemented in phases, each independently mergeable and testable:
   cancel, error handling, accessibility pass, browser/device verification
   (§12, §13, §15).
 
-Phase 1 is in progress as of 2026-07-16.
+Phases 1 and 2 landed 2026-07-16; Phase 3 is next.
 
 - **Export PDF** action opening the Export dialog (§6).
 - Overview page, per-room plan pages, per-wall elevation pages, Saved-view
