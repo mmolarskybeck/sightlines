@@ -73,6 +73,7 @@ import {
 } from "./components/OpeningInspector";
 import { PlanEmptyState } from "./components/PlanEmptyState";
 import { PlanView } from "./components/PlanView";
+import { captureSvgSnapshot } from "./export/captureSnapshot";
 import {
   DrawPicker,
   InsertPicker,
@@ -306,6 +307,9 @@ export function App() {
     : null;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const threeDActionsRef = useRef<ThreeDViewActions | null>(null);
+  const planSvgElementRef = useRef<SVGSVGElement | null>(null);
+  const elevationSvgElementRef = useRef<SVGSVGElement | null>(null);
+  const [snapshotExportMode, setSnapshotExportMode] = useState(false);
   const [importWizardOpen, setImportWizardOpen] = useState(false);
   const [importDestination, setImportDestination] = useState<"library" | "checklist">("checklist");
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
@@ -1023,6 +1027,41 @@ export function App() {
     }
   };
 
+  const handleExportImage = async (format: "png" | "jpeg" = "png") => {
+    if (!project) return;
+    try {
+      let blob: Blob;
+      let viewLabel: string;
+      if (viewMode === "3d") {
+        if (!threeDActionsRef.current) return;
+        blob = await threeDActionsRef.current.captureSnapshot(format);
+        viewLabel = "3D view";
+      } else if (viewMode === "elevation") {
+        if (!elevationSvgElementRef.current || !selectedWall) return;
+        setSnapshotExportMode(true);
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        blob = await captureSvgSnapshot(elevationSvgElementRef.current, { format: "png" });
+        setSnapshotExportMode(false);
+        viewLabel = `${selectedWall.name} elevation`;
+      } else if (viewMode === "plan") {
+        if (!planSvgElementRef.current) return;
+        setSnapshotExportMode(true);
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        blob = await captureSvgSnapshot(planSvgElementRef.current, { format: "png" });
+        setSnapshotExportMode(false);
+        viewLabel = "Plan";
+      } else {
+        return;
+      }
+      const extension = format === "jpeg" ? "jpg" : "png";
+      triggerDownload(blob, `${project.title} — ${viewLabel}.${extension}`);
+      toast.success(`Exported ${project.title} — ${viewLabel}.${extension}`);
+    } catch (error) {
+      setSnapshotExportMode(false);
+      toast.error(`Export failed: ${error instanceof Error ? error.message : "the image could not be created."}`);
+    }
+  };
+
   // Detect package vs. project JSON by zip magic, not file extension.
   const handleImportFile = async (file: File) => {
     const buffer = await file.arrayBuffer();
@@ -1212,6 +1251,55 @@ export function App() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-80">
+              {viewMode === "library" ? null : (
+                <>
+                  <DropdownMenuLabel>Export image</DropdownMenuLabel>
+                  {viewMode === "3d" ? (
+                    <>
+                      <DropdownMenuItem
+                        className="dropdown-menu-item-stacked"
+                        disabled={project.floor.rooms.length === 0}
+                        onSelect={() => void handleExportImage("png")}
+                      >
+                        <DownloadSimpleIcon aria-hidden="true" size={16} />
+                        <span className="flex min-w-0 flex-col gap-0.5">
+                          <span>Export image (PNG)</span>
+                          <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
+                            Export image of 3D view
+                          </span>
+                        </span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="dropdown-menu-item-stacked"
+                        disabled={project.floor.rooms.length === 0}
+                        onSelect={() => void handleExportImage("jpeg")}
+                      >
+                        <DownloadSimpleIcon aria-hidden="true" size={16} />
+                        <span className="flex min-w-0 flex-col gap-0.5">
+                          <span>Export image (JPG)</span>
+                          <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
+                            Export image of 3D view
+                          </span>
+                        </span>
+                      </DropdownMenuItem>
+                    </>
+                  ) : (
+                    <DropdownMenuItem
+                      className="dropdown-menu-item-stacked"
+                      disabled={project.floor.rooms.length === 0 || (viewMode === "elevation" && !selectedWall)}
+                      onSelect={() => void handleExportImage("png")}
+                    >
+                      <DownloadSimpleIcon aria-hidden="true" size={16} />
+                      <span className="flex min-w-0 flex-col gap-0.5">
+                        <span>Export image</span>
+                        <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
+                          Export image of {viewMode === "plan" ? "plan" : selectedWall ? `${selectedWall.name} elevation` : "elevation"}
+                        </span>
+                      </span>
+                    </DropdownMenuItem>
+                  )}
+                </>
+              )}
               <DropdownMenuLabel>Export package (.sightlines)</DropdownMenuLabel>
               <DropdownMenuItem
                 className="dropdown-menu-item-stacked"
@@ -1562,6 +1650,10 @@ export function App() {
                     additive ? [...new Set([...selectedObjectIds, ...ids])] : ids
                   )
                 }
+                exportMode={snapshotExportMode}
+                onSvgElementChange={(el) => {
+                  planSvgElementRef.current = el;
+                }}
               />
             )
           ) : null}
@@ -1648,6 +1740,10 @@ export function App() {
                       additive ? [...new Set([...selectedObjectIds, ...ids])] : ids
                     )
                   }
+                  exportMode={snapshotExportMode}
+                  onSvgElementChange={(el) => {
+                    elevationSvgElementRef.current = el;
+                  }}
                 />
               </Suspense>
             ) : (

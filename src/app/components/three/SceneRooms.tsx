@@ -1,6 +1,6 @@
 import type { ThreeEvent } from "@react-three/fiber";
 import { useMemo } from "react";
-import type { Vector3 } from "three";
+import type { Texture, Vector3 } from "three";
 import type { Artwork } from "../../../domain/project";
 import type { Scene3d } from "../../../domain/geometry/scene3d";
 import { FloorObjectBox } from "./FloorObjectBox";
@@ -9,11 +9,28 @@ import { PartitionSlab } from "./PartitionSlab";
 import { useArtworkTextures } from "./useArtworkTextures";
 import { WallPanel } from "./WallPanel";
 
+// Every assetId drawn by the scene: wall/partition-face artworks plus floor
+// objects. Exported so a caller that already owns a texture map (the offscreen
+// snapshot renderer) can build it from the identical id list rather than
+// re-deriving a slightly different one.
+export function sceneArtworkAssetIds(scene: Scene3d): (string | undefined)[] {
+  return [
+    ...scene.rooms.flatMap((room) => [
+      ...room.walls.flatMap((wall) => wall.artworks.map((artwork) => artwork.assetId)),
+      ...room.freestandingWalls.flatMap((partition) =>
+        partition.faces.flatMap((face) => face.artworks.map((artwork) => artwork.assetId))
+      )
+    ]),
+    ...scene.floorObjects.map((object) => object.assetId)
+  ];
+}
+
 // Dumb mapper from the derived scene to meshes: one floor + one panel per wall
 // per room, plus floor objects. No coordinate math lives here — it's all in
 // scene3d.ts. Owns the texture lifecycle for every artwork visible in the
 // scene — wall planes and floor-placed artwork boxes share one texture per
-// assetId.
+// assetId — unless a caller passes its own prebuilt map (texturesByAssetId),
+// in which case that map is used verbatim and no second load is started.
 export function SceneRooms({
   scene,
   getBlob,
@@ -25,7 +42,8 @@ export function SceneRooms({
   onSelectObject,
   onClearSelection,
   onFocusPoint,
-  ghostedWallIds
+  ghostedWallIds,
+  texturesByAssetId: providedTextures
 }: {
   scene: Scene3d;
   getBlob: (key: string) => Promise<Blob>;
@@ -43,20 +61,12 @@ export function SceneRooms({
   // active eye-level sightline — rendered ghosted so the viewed wall stays
   // readable behind them (spec §4.2).
   ghostedWallIds: ReadonlySet<string>;
+  // Optional caller-owned texture map (see sceneArtworkAssetIds above).
+  texturesByAssetId?: ReadonlyMap<string, Texture>;
 }) {
-  const assetIds = useMemo(
-    () => [
-      ...scene.rooms.flatMap((room) => [
-        ...room.walls.flatMap((wall) => wall.artworks.map((artwork) => artwork.assetId)),
-        ...room.freestandingWalls.flatMap((partition) =>
-          partition.faces.flatMap((face) => face.artworks.map((artwork) => artwork.assetId))
-        )
-      ]),
-      ...scene.floorObjects.map((object) => object.assetId)
-    ],
-    [scene]
-  );
-  const texturesByAssetId = useArtworkTextures(assetIds, getBlob);
+  const assetIds = useMemo(() => sceneArtworkAssetIds(scene), [scene]);
+  const ownTextures = useArtworkTextures(providedTextures ? [] : assetIds, getBlob);
+  const texturesByAssetId = providedTextures ?? ownTextures;
 
   // Clicking bare floor settles/clears the object selection, same semantics
   // as Plan (spec §4.3). Floor objects consume their own clicks first; an

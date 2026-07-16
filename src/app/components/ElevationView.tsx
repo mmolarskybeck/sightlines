@@ -276,7 +276,9 @@ export function ElevationView({
   onViewportChange,
   measurementActive = false,
   measurementState = null,
-  onMeasurementDispatch
+  onMeasurementDispatch,
+  exportMode = false,
+  onSvgElementChange
 }: {
   gridPrecisionFloorMm: number | null;
   gridVisible: boolean;
@@ -356,9 +358,18 @@ export function ElevationView({
   measurementActive?: boolean;
   measurementState?: MeasurementToolState | null;
   onMeasurementDispatch?: (action: MeasurementToolAction) => void;
+  // Snapshot rendering mode (docs/export-spec.md §10.2): suppresses selection
+  // outlines, hover, ghosts, snap guides, marquee, and temporary/reference
+  // measurements, while keeping structure, placements, and dimension lines
+  // exactly as displayed. Strictly additive — default false changes nothing.
+  exportMode?: boolean;
+  onSvgElementChange?: (element: SVGSVGElement | null) => void;
 }) {
   const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
+  useEffect(() => {
+    onSvgElementChange?.(svgRef.current);
+  }, [onSvgElementChange]);
   const previousWallButtonRef = useRef<HTMLButtonElement>(null);
   const nextWallButtonRef = useRef<HTMLButtonElement>(null);
   // Store-connected passthroughs. App forwarded each of these verbatim (a bare
@@ -1870,7 +1881,10 @@ export function ElevationView({
                     )
                   : outOfBounds
               }
-              isSelected={selectedArtworkId === placement.artworkId || selectedObjectIds.includes(placement.id)}
+              isSelected={
+                !exportMode &&
+                (selectedArtworkId === placement.artworkId || selectedObjectIds.includes(placement.id))
+              }
               size={size}
               tooltip={
                 artwork ? (
@@ -1882,7 +1896,7 @@ export function ElevationView({
                   />
                 ) : undefined
               }
-              tooltipDisabled={Boolean(moveDrag || dropGhost)}
+              tooltipDisabled={exportMode || Boolean(moveDrag || dropGhost)}
               wallHeightMm={wallHeightMm}
               onPointerDown={(event) => {
                 if (canvasToolArmed) {
@@ -1919,7 +1933,10 @@ export function ElevationView({
                   ? isArtworkOutOfWallBounds(wallLengthMm, wallHeightMm, center, size)
                   : outOfBounds
               }
-              isSelected={selectedOpeningId === opening.id || selectedObjectIds.includes(opening.id)}
+              isSelected={
+                !exportMode &&
+                (selectedOpeningId === opening.id || selectedObjectIds.includes(opening.id))
+              }
               kind={opening.kind}
               size={size}
               tooltip={
@@ -1930,7 +1947,7 @@ export function ElevationView({
                   widthMm={opening.widthMm}
                 />
               }
-              tooltipDisabled={Boolean(moveDrag || dropGhost)}
+              tooltipDisabled={exportMode || Boolean(moveDrag || dropGhost)}
               wallHeightMm={wallHeightMm}
               wallObjectId={opening.id}
               onPointerDown={(event) => {
@@ -1954,7 +1971,7 @@ export function ElevationView({
             />
           );
         })}
-        {dropGhost ? (
+        {!exportMode && dropGhost ? (
           <ElevationArtwork
             center={dropGhost.centerMm}
             isGhost
@@ -1962,7 +1979,7 @@ export function ElevationView({
             wallHeightMm={wallHeightMm}
           />
         ) : null}
-        {openingToolGhost && activeTool ? (
+        {!exportMode && openingToolGhost && activeTool ? (
           <ElevationOpening
             center={openingToolGhost.centerMm}
             isGhost
@@ -1972,7 +1989,7 @@ export function ElevationView({
             wallObjectId="opening-tool-ghost"
           />
         ) : null}
-        {isGroupOutlineEligible && pixelsPerMm > 0
+        {!exportMode && isGroupOutlineEligible && pixelsPerMm > 0
           ? (() => {
               // Persistent group identity: a quiet SOLID outline around the
               // union bounds (visually distinct from the dashed in-progress
@@ -1995,7 +2012,7 @@ export function ElevationView({
               );
             })()
           : null}
-        {marquee
+        {!exportMode && marquee
           ? (() => {
               const rect = marqueeRectMm(marquee);
               // Wall-local y is up; svg y is down. The rect's top edge (maxYMm)
@@ -2016,19 +2033,20 @@ export function ElevationView({
               );
             })()
           : null}
-        {activeGuides.map((guide) => (
-          <line
-            className="snap-guide"
-            key={guide.id}
-            x1={guide.axis === "x" ? guide.positionMm : 0}
-            y1={guide.axis === "y" ? wallLocalYToSvgY(wallHeightMm, guide.positionMm) : 0}
-            x2={guide.axis === "x" ? guide.positionMm : wallLengthMm}
-            y2={
-              guide.axis === "y" ? wallLocalYToSvgY(wallHeightMm, guide.positionMm) : wallHeightMm
-            }
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
+        {!exportMode &&
+          activeGuides.map((guide) => (
+            <line
+              className="snap-guide"
+              key={guide.id}
+              x1={guide.axis === "x" ? guide.positionMm : 0}
+              y1={guide.axis === "y" ? wallLocalYToSvgY(wallHeightMm, guide.positionMm) : 0}
+              x2={guide.axis === "x" ? guide.positionMm : wallLengthMm}
+              y2={
+                guide.axis === "y" ? wallLocalYToSvgY(wallHeightMm, guide.positionMm) : wallHeightMm
+              }
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
         {isDimensionLinesEligible ? (
           <GroupDimensionLines
             members={effectiveDimensionMembers}
@@ -2038,9 +2056,10 @@ export function ElevationView({
             wallHeightMm={wallHeightMm}
           />
         ) : null}
-        {referenceMeasurements
-          .filter((item) => item.kind === "elevation" && item.wallId === wallId && item.visible)
-          .map((item) => {
+        {!exportMode &&
+          referenceMeasurements
+            .filter((item) => item.kind === "elevation" && item.wallId === wallId && item.visible)
+            .map((item) => {
             const selected = selection.kind === "measurement" && selection.measurementId === item.id;
             const outOfBounds = [item.start, item.end].some(
               (point) => point.xMm < 0 || point.xMm > wallLengthMm || point.yMm < 0 || point.yMm > wallHeightMm
@@ -2077,7 +2096,8 @@ export function ElevationView({
               />
             );
           })}
-        {measurementActive &&
+        {!exportMode &&
+        measurementActive &&
         measurementState &&
         measurementState.context.kind === "elevation" &&
         measurementState.context.wallId === wallId &&

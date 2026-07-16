@@ -57,6 +57,11 @@ export type PlanHandlesLayerProps = {
     mode: "move" | "start" | "end",
     event: ReactPointerEvent<SVGElement>
   ) => void;
+  // Snapshot rendering mode (docs/export-spec.md §10.2): suppresses the
+  // room's wash/outline/handle set and the selected partition's face labels
+  // + endpoint handles (pure selection chrome), while keeping the live wall
+  // length labels — the dimension content this layer draws for a selection.
+  exportMode?: boolean;
 };
 
 export function PlanHandlesLayer({
@@ -78,7 +83,8 @@ export function PlanHandlesLayer({
   beginWallDrag,
   beginVertexDrag,
   handleSplitWallClick,
-  beginPartitionDrag
+  beginPartitionDrag,
+  exportMode = false
 }: PlanHandlesLayerProps) {
   return (
     <>
@@ -124,57 +130,64 @@ export function PlanHandlesLayer({
 
         return (
           <g>
-            <polygon
-              className="room-selection-wash"
-              points={svgPolygonPoints(selectedSceneRoom.polygonMm)}
-            />
-            <polygon
-              className="room-selection-outline"
-              points={svgPolygonPoints(selectedSceneRoom.polygonMm)}
-              vectorEffect="non-scaling-stroke"
-              style={vertexDragInvalid || wallDragInvalid ? { stroke: "var(--danger)" } : undefined}
-            />
-            {/* Three-way handle fork, mutually exclusive per the invariant:
-                edit-shape armed → corner/split handles only; else a rectangle
-                keeps its resize chips; else a non-rectangle gets wall-slide
-                chips. Exactly one control set ever renders for a room. */}
-            {isReshaping ? (
-              <RoomReshapeHandles
-                activeVertexId={vertexDrag?.roomId === selectedPlacement.roomId ? vertexDrag.vertexId : null}
-                handleSizeMm={handleSizeMm}
-                invalid={vertexDragInvalid}
-                placement={selectedPlacement}
-                selectedVertexId={selectedVertexId}
-                onBeginVertexDrag={(vertexId, event) =>
-                  beginVertexDrag(selectedPlacement.roomId, vertexId, event)
-                }
-                onSplitWallClick={handleSplitWallClick}
-              />
-            ) : isRectangleRoom(selectedPlacement.room) ? (
-              <RoomResizeHandles
-                activeDrag={
-                  drag && drag.roomId === selectedPlacement.roomId
-                    ? { targetWallId: drag.targetWallId, anchor: drag.anchor }
-                    : null
-                }
-                handleSizeMm={handleSizeMm}
-                placement={selectedPlacement}
-                onBeginDrag={beginDrag}
-              />
-            ) : (
-              <WallSlideHandles
-                activeDrag={
-                  wallDrag?.roomId === selectedPlacement.roomId
-                    ? { wallId: wallDrag.wallId, valid: wallDrag.valid }
-                    : null
-                }
-                handleSizeMm={handleSizeMm}
-                highlightedWallId={hoveredWallId}
-                placement={selectedPlacement}
-                onBeginWallDrag={(wallId, event) =>
-                  beginWallDrag(selectedPlacement.roomId, wallId, event)
-                }
-              />
+            {/* Wash/outline/handle-fork are pure selection chrome — suppressed
+                in exportMode. WallLengthLabels below is the dimension content
+                a snapshot must keep, so it renders regardless. */}
+            {exportMode ? null : (
+              <>
+                <polygon
+                  className="room-selection-wash"
+                  points={svgPolygonPoints(selectedSceneRoom.polygonMm)}
+                />
+                <polygon
+                  className="room-selection-outline"
+                  points={svgPolygonPoints(selectedSceneRoom.polygonMm)}
+                  vectorEffect="non-scaling-stroke"
+                  style={vertexDragInvalid || wallDragInvalid ? { stroke: "var(--danger)" } : undefined}
+                />
+                {/* Three-way handle fork, mutually exclusive per the invariant:
+                    edit-shape armed → corner/split handles only; else a rectangle
+                    keeps its resize chips; else a non-rectangle gets wall-slide
+                    chips. Exactly one control set ever renders for a room. */}
+                {isReshaping ? (
+                  <RoomReshapeHandles
+                    activeVertexId={vertexDrag?.roomId === selectedPlacement.roomId ? vertexDrag.vertexId : null}
+                    handleSizeMm={handleSizeMm}
+                    invalid={vertexDragInvalid}
+                    placement={selectedPlacement}
+                    selectedVertexId={selectedVertexId}
+                    onBeginVertexDrag={(vertexId, event) =>
+                      beginVertexDrag(selectedPlacement.roomId, vertexId, event)
+                    }
+                    onSplitWallClick={handleSplitWallClick}
+                  />
+                ) : isRectangleRoom(selectedPlacement.room) ? (
+                  <RoomResizeHandles
+                    activeDrag={
+                      drag && drag.roomId === selectedPlacement.roomId
+                        ? { targetWallId: drag.targetWallId, anchor: drag.anchor }
+                        : null
+                    }
+                    handleSizeMm={handleSizeMm}
+                    placement={selectedPlacement}
+                    onBeginDrag={beginDrag}
+                  />
+                ) : (
+                  <WallSlideHandles
+                    activeDrag={
+                      wallDrag?.roomId === selectedPlacement.roomId
+                        ? { wallId: wallDrag.wallId, valid: wallDrag.valid }
+                        : null
+                    }
+                    handleSizeMm={handleSizeMm}
+                    highlightedWallId={hoveredWallId}
+                    placement={selectedPlacement}
+                    onBeginWallDrag={(wallId, event) =>
+                      beginWallDrag(selectedPlacement.roomId, wallId, event)
+                    }
+                  />
+                )}
+              </>
             )}
             {/* Live length labels compose as a sibling layer over whichever
                 handle set is active — the handle components never label
@@ -191,8 +204,10 @@ export function PlanHandlesLayer({
       })()}
       {/* Selected partition: A/B face labels and the two endpoint handles
           (resize/re-angle), painted above placed objects so they stay
-          grabbable. The body itself is the move affordance (slab rect above). */}
-      {selectedFreestandingWallId && handleSizeMm > 0
+          grabbable. The body itself is the move affordance (slab rect above).
+          Both are selection chrome (not dimension content — PartitionDimensionLines
+          owns that), so exportMode suppresses this whole block. */}
+      {!exportMode && selectedFreestandingWallId && handleSizeMm > 0
         ? (() => {
             const partition = partitions.find(
               (candidate) => candidate.partition.wallId === selectedFreestandingWallId

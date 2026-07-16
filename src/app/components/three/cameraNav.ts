@@ -1,4 +1,10 @@
 import { MathUtils } from "three";
+import type { Vector3 } from "three";
+
+// A camera position + orbit target, in world space (spec §5.2 scale). Shared
+// by the interactive rig and the offscreen snapshot renderer so a capture can
+// apply exactly the pose the user was looking at.
+export type CameraPose = { position: Vector3; target: Vector3 };
 
 // OrbitControls dolly envelope (meters), shared by the controls props and the
 // cursor-directed wheel dolly so both clamp to the same bounds (spec §4.2).

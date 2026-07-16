@@ -22,6 +22,7 @@ import {
   eyeLevelArtworkDistanceMm,
   eyeLevelWallDistanceMm,
   sightlineOccluders,
+  type CameraPose,
   type SightlineSegment,
   keyboardZoomFactor,
   normalizeWheelDeltaY,
@@ -30,14 +31,22 @@ import {
   zoomFactorFromDelta
 } from "./cameraNav";
 import { MM_TO_WORLD } from "./coordinates";
+import {
+  AMBIENT_LIGHT_INTENSITY,
+  CAMERA_FAR,
+  CAMERA_FOV_DEG,
+  CAMERA_NEAR,
+  KEY_LIGHT_INTENSITY,
+  KEY_LIGHT_POSITION
+} from "./sceneConstants";
 import { SceneRooms } from "./SceneRooms";
+import { SnapshotStage, snapshotPixelSize, type SnapshotFormat, type SnapshotRequest } from "./SnapshotStage";
 import { SCENE_BACKGROUND_COLOR } from "./tokens";
 
 // Entry framing: above and outside the room, looking down at ~40° elevation
 // from a corner (spec §4.2).
 const FIT_ELEVATION_DEG = 40;
 const FIT_AZIMUTH_DEG = 45;
-const CAMERA_FOV_DEG = 50;
 
 // Preset flights are quick enough to stay an instrument, slow enough to keep
 // spatial continuity.
@@ -48,8 +57,6 @@ const FLIGHT_MS = 600;
 const CLICK_DRAG_TOLERANCE_PX = 6;
 const ACTIVE_FRAME_GAP_MAX_MS = 100;
 const FRAME_SAMPLE_LIMIT = 256;
-
-type CameraPose = { position: Vector3; target: Vector3 };
 
 export type RendererBenchmarkMetrics = {
   sceneDerivationMs: number;
@@ -167,6 +174,10 @@ export type ThreeDViewActions = {
   overview: () => void;
   eyeLevel: () => void;
   focusSelection: () => void;
+  // A clean, offscreen, export-resolution render from the CURRENT camera pose
+  // (spec §2.2) — never a readback of the live (dpr-capped, selection-tinted)
+  // canvas, never a store write, never a Saved view.
+  captureSnapshot: (format: SnapshotFormat) => Promise<Blob>;
 };
 
 // World-space bounding box of one room's floor + wall heights, including its
@@ -871,6 +882,30 @@ function ThreeDEmptyState() {
   );
 }
 
+// Publishes the live camera, its controls, and the canvas's CSS pixel size to
+// refs owned by ThreeDView — read once, at the moment captureSnapshot is
+// called, rather than tracked frame-by-frame. camera.position and
+// controls.target are the actual mutable three.js objects OrbitControls/
+// CameraRig write into every frame, so reading them directly (not a cloned
+// snapshot kept in sync via useFrame) can never lag behind what's on screen.
+function LiveCameraTracker({
+  cameraRef,
+  controlsRef,
+  sizeRef
+}: {
+  cameraRef: React.MutableRefObject<PerspectiveCamera | null>;
+  controlsRef: React.MutableRefObject<OrbitControlsImpl | null>;
+  sizeRef: React.MutableRefObject<{ width: number; height: number }>;
+}) {
+  const camera = useThree((state) => state.camera);
+  const controls = useThree((state) => state.controls) as OrbitControlsImpl | null;
+  const size = useThree((state) => state.size);
+  cameraRef.current = camera instanceof PerspectiveCamera ? camera : null;
+  controlsRef.current = controls;
+  sizeRef.current = size;
+  return null;
+}
+
 export function ThreeDView({
   project,
   artworksById,
@@ -928,6 +963,17 @@ export function ThreeDView({
     [project, artworksById]
   );
   const rigApi = useRef<CameraRigApi | null>(null);
+  // The live camera/controls/size, kept current by LiveCameraTracker below —
+  // captureSnapshot reads these directly (they're the actual mutable three.js
+  // objects, so there is no lag versus what the user is looking at).
+  const liveCameraRef = useRef<PerspectiveCamera | null>(null);
+  const liveControlsRef = useRef<OrbitControlsImpl | null>(null);
+  const liveSizeRef = useRef<{ width: number; height: number }>({ width: 1, height: 1 });
+  const [snapshotRequest, setSnapshotRequest] = useState<SnapshotRequest | null>(null);
+  // Synchronous guard (state is async) so a second captureSnapshot call while
+  // one is in flight fails fast instead of silently orphaning the first
+  // request's promise.
+  const snapshotInFlightRef = useRef(false);
   // Where the pointer went down, to tell a click from an orbit-drag release
   // in onPointerMissed (mesh handlers get the same guard via event.delta).
   const pointerDownAt = useRef<{ x: number; y: number } | null>(null);
@@ -1013,7 +1059,42 @@ export function ThreeDView({
         endGhostSession();
         if (selection.kind === "room") rigApi.current?.frameRoom(selection.room);
         else rigApi.current?.focus(selection.point);
-      }
+      },
+      captureSnapshot: (format) =>
+        new Promise<Blob>((resolve, reject) => {
+          if (snapshotInFlightRef.current) {
+            reject(new Error("A 3D snapshot capture is already in progress."));
+            return;
+          }
+          const camera = liveCameraRef.current;
+          if (!camera) {
+            reject(new Error("The 3D view has no active camera to capture."));
+            return;
+          }
+          const target = liveControlsRef.current
+            ? liveControlsRef.current.target.clone()
+            : camera.getWorldDirection(new Vector3()).add(camera.position);
+          const pose: CameraPose = { position: camera.position.clone(), target };
+          const { width, height } = snapshotPixelSize(
+            liveSizeRef.current.width,
+            liveSizeRef.current.height
+          );
+          snapshotInFlightRef.current = true;
+          setSnapshotRequest({
+            format,
+            pose,
+            widthPx: width,
+            heightPx: height,
+            resolve: (blob) => {
+              snapshotInFlightRef.current = false;
+              resolve(blob);
+            },
+            reject: (error) => {
+              snapshotInFlightRef.current = false;
+              reject(error);
+            }
+          });
+        })
     };
 
     return () => {
@@ -1034,7 +1115,7 @@ export function ThreeDView({
     return <ThreeDEmptyState />;
   }
 
-  return (
+  const viewport = (
     // The 3D viewport carries its own quiet grey ground (SCENE_BACKGROUND_COLOR,
     // set on the three.js scene below) so near-white walls read as lit volumes.
     // The surrounding workspace chrome stays white — this greys only the WebGL
@@ -1058,7 +1139,7 @@ export function ThreeDView({
         // the linear->sRGB-only pipeline (no face may exceed 1.0 or it clips).
         flat
         gl={{ alpha: true, antialias: true }}
-        camera={{ fov: CAMERA_FOV_DEG, near: 0.01, far: 1000, position: [4, 4, 4] }}
+        camera={{ fov: CAMERA_FOV_DEG, near: CAMERA_NEAR, far: CAMERA_FAR, position: [4, 4, 4] }}
         onCreated={(state) => {
           if (benchmarkEnabled) benchmarkMetrics.canvasCreatedAt = performance.now();
           if (import.meta.env.DEV) {
@@ -1098,8 +1179,8 @@ export function ThreeDView({
             wall face lands ~0.93 sRGB (white but readable as a shaded plane)
             and a key-facing wall ~0.97 — one clear value step so depth reads
             without shadows. */}
-        <ambientLight intensity={2.9} />
-        <directionalLight intensity={0.4} position={[-6, 8, 6]} />
+        <ambientLight intensity={AMBIENT_LIGHT_INTENSITY} />
+        <directionalLight intensity={KEY_LIGHT_INTENSITY} position={KEY_LIGHT_POSITION} />
         <SceneRooms
           scene={scene}
           getBlob={getBlob}
@@ -1157,7 +1238,25 @@ export function ThreeDView({
         <KeyboardTravel />
         {benchmarkEnabled ? <BenchmarkFrameProbe /> : null}
         <CameraRig scene={scene} fitKey={project.id} apiRef={rigApi} />
+        <LiveCameraTracker
+          cameraRef={liveCameraRef}
+          controlsRef={liveControlsRef}
+          sizeRef={liveSizeRef}
+        />
       </Canvas>
     </div>
+  );
+
+  return (
+    <>
+      {viewport}
+      <SnapshotStage
+        derivedScene={scene}
+        artworksById={artworksById}
+        getBlob={getBlob}
+        request={snapshotRequest}
+        onSettled={() => setSnapshotRequest(null)}
+      />
+    </>
   );
 }

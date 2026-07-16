@@ -389,7 +389,9 @@ export function PlanView({
   onViewportChange,
   measurementActive = false,
   measurementState,
-  onMeasurementAction
+  onMeasurementAction,
+  exportMode = false,
+  onSvgElementChange
 }: {
   // Controlled door/window/blocked-zone insertion tool.
   activeTool: OpeningKind | null;
@@ -450,9 +452,20 @@ export function PlanView({
   measurementActive?: boolean;
   measurementState?: MeasurementToolState;
   onMeasurementAction?: Dispatch<MeasurementToolAction>;
+  // Snapshot rendering mode (docs/export-spec.md §10.2): suppresses hover/
+  // selection chrome, ghosts, snap guides, marquee, opening-connection
+  // glyphs, and temporary/reference measurements, while keeping structure,
+  // placed objects, and dimension lines (partition clearances, wall length
+  // labels) exactly as displayed. Strictly additive — default false changes
+  // nothing.
+  exportMode?: boolean;
+  onSvgElementChange?: (element: SVGSVGElement | null) => void;
 }) {
   const [containerRef, containerSize] = useContainerSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
+  useEffect(() => {
+    onSvgElementChange?.(svgRef.current);
+  }, [onSvgElementChange]);
   // Store-owned actions are read here; App-owned compositions remain props.
   const project = useAppStore((state) => state.project)!;
   const onMoveRoomVertex = useAppStore((state) => state.moveRoomVertex);
@@ -2700,7 +2713,8 @@ export function PlanView({
       />
       <svg
         className={
-          activeTool || drawRoomActive || partitionToolActive || drawRectActive || measurementActive
+          !exportMode &&
+          (activeTool || drawRoomActive || partitionToolActive || drawRectActive || measurementActive)
             ? "plan-svg tool-armed"
             : "plan-svg"
         }
@@ -2753,10 +2767,10 @@ export function PlanView({
           rooms={planScene.rooms}
           partitions={planScene.partitions}
           selectedRoomId={selectedRoomId}
-          reshapeRoomId={reshapeRoomId}
-          selectedWallId={selectedWallId}
-          hoveredWallId={hoveredWallId}
-          selectedFreestandingWallId={selectedFreestandingWallId}
+          reshapeRoomId={exportMode ? null : reshapeRoomId}
+          selectedWallId={exportMode ? null : selectedWallId}
+          hoveredWallId={exportMode ? null : hoveredWallId}
+          selectedFreestandingWallId={exportMode ? null : selectedFreestandingWallId}
           activeTool={activeTool}
           drawRoomActive={drawRoomActive}
           drawRectActive={drawRectActive}
@@ -2795,39 +2809,43 @@ export function PlanView({
             preview + selection ids; tooltipsDisabled is derived here from the
             in-flight gesture/armed-tool state this component owns. */}
         <PlacedObjectsLayer
-          openingConnections={planScene.openingConnections}
+          openingConnections={exportMode ? [] : planScene.openingConnections}
           wallObjects={planScene.wallObjects}
           floorObjects={planScene.floorObjects}
           pixelsPerMm={pixelsPerMm}
           objectDrag={objectDrag}
-          tooltipsDisabled={Boolean(
-            drag ||
-              objectDrag ||
-              dropGhost ||
-              activeTool ||
-              roomDrag ||
-              drawRoomActive ||
-              drawRectActive ||
-              vertexDrag ||
-              measurementActive
-          )}
+          tooltipsDisabled={
+            exportMode ||
+            Boolean(
+              drag ||
+                objectDrag ||
+                dropGhost ||
+                activeTool ||
+                roomDrag ||
+                drawRoomActive ||
+                drawRectActive ||
+                vertexDrag ||
+                measurementActive
+            )
+          }
           artworksById={artworksById}
           thumbnailUrlsByAssetId={thumbnailUrlsByAssetId}
           unit={project.unit}
           wallObjectMinDepthMm={wallObjectMinDepthMm}
           objectHitMinMm={objectHitMinMm}
-          selectedArtworkId={selectedArtworkId}
-          selectedOpeningId={selectedOpeningId}
-          selectedObjectIds={selectedObjectIds}
+          selectedArtworkId={exportMode ? null : selectedArtworkId}
+          selectedOpeningId={exportMode ? null : selectedOpeningId}
+          selectedObjectIds={exportMode ? [] : selectedObjectIds}
           consumeSelectSuppression={consumeSelectSuppression}
           beginObjectDrag={beginObjectDrag}
           onSelectObject={onSelectObject}
           onSelectArtwork={onSelectArtwork}
           onSelectOpening={onSelectOpening}
         />
-        {referenceMeasurements
-          .filter((item) => item.kind === "plan" && item.visible)
-          .map((item) => {
+        {!exportMode &&
+          referenceMeasurements
+            .filter((item) => item.kind === "plan" && item.visible)
+            .map((item) => {
             const selected = selection.kind === "measurement" && selection.measurementId === item.id;
             return (
               <MeasurementOverlay
@@ -2886,47 +2904,50 @@ export function PlanView({
           beginVertexDrag={beginVertexDrag}
           handleSplitWallClick={handleSplitWallClick}
           beginPartitionDrag={beginPartitionDrag}
+          exportMode={exportMode}
         />
         {/* Gestural overlays: the polygon-room draw preview + capture rect, the
             partition- and rectangle-draw previews, the armed-tool/drop ghosts,
             the snap guides, and the in-progress marquee. activeGuides picks the
             single live gesture's guides in the same precedence as before. */}
-        <PlanOverlaysLayer
-          drawRoomActive={drawRoomActive}
-          draw={draw}
-          partitionToolActive={partitionToolActive}
-          partitionDraw={partitionDraw}
-          partitionDuplicateActive={Boolean(duplicatePartitionSourceWallId)}
-          partitionDuplicateGhost={partitionDuplicateGhost}
-          drawRectActive={drawRectActive}
-          rectDraw={rectDraw}
-          toolGhost={toolGhost}
-          dropGhost={dropGhost}
-          marquee={marquee}
-          activeGuides={
-            objectDrag?.activeGuides ??
-            dropGhost?.activeGuides ??
-            drag?.activeGuides ??
-            roomDrag?.activeGuides ??
-            partitionDrag?.activeGuides ??
-            partitionDuplicateGhost?.activeGuides ??
-            toolGhost?.activeGuides ??
-            []
-          }
-          activeTool={activeTool}
-          viewBox={viewBoxBounds}
-          handleSizeMm={handleSizeMm}
-          wallUnit={wallUnit}
-          wallObjectMinDepthMm={wallObjectMinDepthMm}
-          floorWalls={floorWallsForTool}
-          handleDrawClick={handleDrawClick}
-          handleDrawPointerMove={handleDrawPointerMove}
-          beginPartitionDraw={beginPartitionDraw}
-          handlePartitionDuplicateMove={handlePartitionDuplicateMove}
-          handlePartitionDuplicateClick={handlePartitionDuplicateClick}
-          beginRectDraw={beginRectDraw}
-        />
-        {visibleMeasurement ? (
+        {exportMode ? null : (
+          <PlanOverlaysLayer
+            drawRoomActive={drawRoomActive}
+            draw={draw}
+            partitionToolActive={partitionToolActive}
+            partitionDraw={partitionDraw}
+            partitionDuplicateActive={Boolean(duplicatePartitionSourceWallId)}
+            partitionDuplicateGhost={partitionDuplicateGhost}
+            drawRectActive={drawRectActive}
+            rectDraw={rectDraw}
+            toolGhost={toolGhost}
+            dropGhost={dropGhost}
+            marquee={marquee}
+            activeGuides={
+              objectDrag?.activeGuides ??
+              dropGhost?.activeGuides ??
+              drag?.activeGuides ??
+              roomDrag?.activeGuides ??
+              partitionDrag?.activeGuides ??
+              partitionDuplicateGhost?.activeGuides ??
+              toolGhost?.activeGuides ??
+              []
+            }
+            activeTool={activeTool}
+            viewBox={viewBoxBounds}
+            handleSizeMm={handleSizeMm}
+            wallUnit={wallUnit}
+            wallObjectMinDepthMm={wallObjectMinDepthMm}
+            floorWalls={floorWallsForTool}
+            handleDrawClick={handleDrawClick}
+            handleDrawPointerMove={handleDrawPointerMove}
+            beginPartitionDraw={beginPartitionDraw}
+            handlePartitionDuplicateMove={handlePartitionDuplicateMove}
+            handlePartitionDuplicateClick={handlePartitionDuplicateClick}
+            beginRectDraw={beginRectDraw}
+          />
+        )}
+        {!exportMode && visibleMeasurement ? (
           <MeasurementOverlay
             a={visibleMeasurement.start}
             b={
