@@ -2,7 +2,7 @@ import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
 import { LinkIcon } from "@phosphor-icons/react/dist/csr/Link";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
 import { SquareIcon } from "@phosphor-icons/react/dist/csr/Square";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ResizeAnchor } from "../../domain/geometry/editRoom";
 import type { OpeningKind } from "../../domain/placement/createOpening";
 import type { DisplayUnit } from "../../domain/project";
@@ -61,8 +61,12 @@ export function WallInspector({
   wallLengthMm: number;
   wallName: string;
 }) {
-  const [lengthAnchor, setLengthAnchor] = useState<ResizeAnchor>("start");
+  const [fixedLengthAnchor, setFixedLengthAnchor] = useState<ResizeAnchor>("start");
+  const fixedLengthAnchorRef = useRef<ResizeAnchor>("start");
+  const [lengthGroupFocused, setLengthGroupFocused] = useState(false);
+  const [lengthDirty, setLengthDirty] = useState(false);
   const lengthAnchorLabelId = useId();
+  const lengthAnchorHintId = useId();
   const wall = getScopedUnitContext(unit, "wall");
   const system = wall.system;
   const otherSystem = system === "imperial" ? "metric" : "imperial";
@@ -73,6 +77,20 @@ export function WallInspector({
   // metric shows cm (ft-in).
   const centerlinePrimary = getScopedUnitContext(unit, "openingSize").displayUnit;
   const centerlineSecondary = getScopeUnits(otherSystem, "openingSize").displayUnit;
+  const formattedWallLength = formatLength(wallLengthMm, {
+    unit: wallScope.displayUnit
+  });
+  const movingEndpoint: ResizeAnchor =
+    fixedLengthAnchor === "start" ? "end" : "start";
+  const selectMovingEndpoint = (endpoint: ResizeAnchor) => {
+    const fixedAnchor = endpoint === "start" ? "end" : "start";
+    fixedLengthAnchorRef.current = fixedAnchor;
+    setFixedLengthAnchor(fixedAnchor);
+  };
+
+  useEffect(() => {
+    setLengthDirty(false);
+  }, [wallLengthMm, wallName, wallScope.displayUnit]);
 
   return (
     <form
@@ -85,43 +103,76 @@ export function WallInspector({
             blocks, so they read as a single "Size" thought with one gap
             between them. */}
         <InspectorSection collapsible={false} title="Size">
-          <LengthField
-            positiveOnly
-            label="Length"
-            valueMm={wallLengthMm}
-            displayUnit={wallScope.displayUnit}
-            parseUnit={wallScope.parseUnit}
-            placeholder={wallPlaceholder}
-            onCommit={(lengthMm) => onCommitLength(lengthMm, lengthAnchor)}
-            commitErrorFallback="Could not resize this wall."
-          />
-          {polygonLengthEditing ? (
-            <div className="inspector-row">
-              <span className="inspector-row-label" id={lengthAnchorLabelId}>
-                Keep fixed
-              </span>
-              <div className="inspector-row-control">
-                <SegmentedToggleGroup
-                  aria-labelledby={lengthAnchorLabelId}
-                  className="wall-length-anchor-toggle"
-                  type="single"
-                  value={lengthAnchor}
-                  onValueChange={(value) => {
-                    if (value === "start" || value === "end") setLengthAnchor(value);
-                  }}
-                >
-                  <SegmentedToggleGroupItem value="start">
-                    <WallLengthAnchorIcon anchor="start" />
-                    <span>Start</span>
-                  </SegmentedToggleGroupItem>
-                  <SegmentedToggleGroupItem value="end">
-                    <WallLengthAnchorIcon anchor="end" />
-                    <span>End</span>
-                  </SegmentedToggleGroupItem>
-                </SegmentedToggleGroup>
+          <div
+            className="wall-length-edit-group"
+            onBlurCapture={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setLengthGroupFocused(false);
+              }
+            }}
+            onChangeCapture={(event) => {
+              if (event.target instanceof HTMLInputElement) {
+                setLengthDirty(event.target.value !== formattedWallLength);
+              }
+            }}
+            onFocusCapture={() => setLengthGroupFocused(true)}
+            onKeyDownCapture={(event) => {
+              if (event.key === "Escape") setLengthDirty(false);
+            }}
+          >
+            <LengthField
+              positiveOnly
+              label="Length"
+              valueMm={wallLengthMm}
+              displayUnit={wallScope.displayUnit}
+              parseUnit={wallScope.parseUnit}
+              placeholder={wallPlaceholder}
+              onCommit={async (lengthMm) => {
+                await onCommitLength(lengthMm, fixedLengthAnchorRef.current);
+                setLengthDirty(false);
+              }}
+              commitErrorFallback="Could not resize this wall."
+            />
+            {polygonLengthEditing && (lengthGroupFocused || lengthDirty) ? (
+              <div className="inspector-row wall-length-anchor-row">
+                <span className="inspector-row-label" id={lengthAnchorLabelId}>
+                  Move endpoint
+                </span>
+                <div className="inspector-row-control">
+                  <SegmentedToggleGroup
+                    aria-describedby={lengthAnchorHintId}
+                    aria-labelledby={lengthAnchorLabelId}
+                    className="wall-length-anchor-toggle"
+                    type="single"
+                    value={movingEndpoint}
+                    onValueChange={(value) => {
+                      if (value === "start" || value === "end") {
+                        selectMovingEndpoint(value);
+                      }
+                    }}
+                  >
+                    <SegmentedToggleGroupItem
+                      value="start"
+                      onPointerDown={() => selectMovingEndpoint("start")}
+                    >
+                      <WallLengthAnchorIcon movingEndpoint="start" />
+                      <span>Start</span>
+                    </SegmentedToggleGroupItem>
+                    <SegmentedToggleGroupItem
+                      value="end"
+                      onPointerDown={() => selectMovingEndpoint("end")}
+                    >
+                      <WallLengthAnchorIcon movingEndpoint="end" />
+                      <span>End</span>
+                    </SegmentedToggleGroupItem>
+                  </SegmentedToggleGroup>
+                  <p className="field-hint wall-length-anchor-hint" id={lengthAnchorHintId}>
+                    The other endpoint stays in place.
+                  </p>
+                </div>
               </div>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
           <LengthField
             positiveOnly
             label="Height"
@@ -218,12 +269,12 @@ export function WallInspector({
   );
 }
 
-// A compact diagram keeps the anchor choice spatial without asking an icon to
-// carry the meaning alone: the filled endpoint stays fixed, the outlined one
-// is the end that moves when the length changes.
-function WallLengthAnchorIcon({ anchor }: { anchor: ResizeAnchor }) {
-  const fixedX = anchor === "start" ? 3 : 17;
-  const movingX = anchor === "start" ? 17 : 3;
+// A compact diagram keeps the choice spatial without asking an icon to carry
+// the meaning alone: the outlined endpoint is the one that moves, while the
+// filled endpoint stays in place.
+function WallLengthAnchorIcon({ movingEndpoint }: { movingEndpoint: ResizeAnchor }) {
+  const movingX = movingEndpoint === "start" ? 3 : 17;
+  const fixedX = movingEndpoint === "start" ? 17 : 3;
 
   return (
     <svg

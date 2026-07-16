@@ -5351,6 +5351,16 @@ body.panels-resizing * {
   width: 100%;
 }
 
+.wall-length-edit-group {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.wall-length-anchor-row {
+  align-items: start;
+}
+
 .wall-length-anchor-toggle .seg-chip {
   top: 2px;
   bottom: 2px;
@@ -5387,6 +5397,10 @@ body.panels-resizing * {
   fill: var(--track);
   stroke: currentColor;
   stroke-width: 1.25;
+}
+
+.wall-length-anchor-hint {
+  padding-top: 1px;
 }
 
 .placement-form-toggle .placement-form-option {

@@ -30,36 +30,81 @@ function renderInspector(polygonLengthEditing: boolean) {
 }
 
 describe("WallInspector wall length anchor", () => {
-  it("shows an explicit start/end choice for an irregular room and defaults to start", async () => {
+  it("reveals the moving-endpoint choice while editing an irregular wall", async () => {
     const onCommitLength = renderInspector(true);
+    const lengthInput = screen.getByRole("textbox", { name: "Length" });
 
-    expect(screen.getByRole("radio", { name: "Start", checked: true })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "End" })).toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup", { name: "Move endpoint" })).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Length" }), {
-      target: { value: "2 m" }
-    });
-    fireEvent.blur(screen.getByRole("textbox", { name: "Length" }));
+    fireEvent.focus(lengthInput);
+
+    expect(screen.getByRole("radio", { name: "Start" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "End", checked: true })).toBeInTheDocument();
+    expect(screen.getByText("The other endpoint stays in place.")).toBeInTheDocument();
+
+    fireEvent.change(lengthInput, { target: { value: "2 m" } });
+    fireEvent.blur(lengthInput);
 
     await waitFor(() => expect(onCommitLength).toHaveBeenCalledWith(2000, "start"));
+    expect(screen.queryByRole("radiogroup", { name: "Move endpoint" })).not.toBeInTheDocument();
   });
 
-  it("commits with the selected end anchor", async () => {
+  it("maps the selected moving endpoint to the opposite fixed anchor", async () => {
     const onCommitLength = renderInspector(true);
+    const lengthInput = screen.getByRole("textbox", { name: "Length" });
 
-    fireEvent.click(screen.getByRole("radio", { name: "End" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Length" }), {
-      target: { value: "2 m" }
-    });
-    fireEvent.blur(screen.getByRole("textbox", { name: "Length" }));
+    fireEvent.focus(lengthInput);
+    fireEvent.click(screen.getByRole("radio", { name: "Start" }));
+    fireEvent.change(lengthInput, { target: { value: "2 m" } });
+    fireEvent.blur(lengthInput);
 
     await waitFor(() => expect(onCommitLength).toHaveBeenCalledWith(2000, "end"));
+  });
+
+  it("keeps the choice available while focus moves from Length to an endpoint", () => {
+    renderInspector(true);
+    const lengthInput = screen.getByRole("textbox", { name: "Length" });
+
+    fireEvent.focus(lengthInput);
+    const startOption = screen.getByRole("radio", { name: "Start" });
+    fireEvent.blur(lengthInput, { relatedTarget: startOption });
+    fireEvent.focus(startOption);
+
+    expect(screen.getByRole("radiogroup", { name: "Move endpoint" })).toBeInTheDocument();
+  });
+
+  it("uses an endpoint chosen as the dirty Length field loses focus", async () => {
+    const onCommitLength = renderInspector(true);
+    const lengthInput = screen.getByRole("textbox", { name: "Length" });
+
+    fireEvent.focus(lengthInput);
+    fireEvent.change(lengthInput, { target: { value: "2 m" } });
+    const startOption = screen.getByRole("radio", { name: "Start" });
+    fireEvent.pointerDown(startOption);
+    fireEvent.blur(lengthInput, { relatedTarget: startOption });
+    fireEvent.click(startOption);
+
+    await waitFor(() => expect(onCommitLength).toHaveBeenCalledWith(2000, "end"));
+  });
+
+  it("keeps the choice visible for a dirty value and a validation error", async () => {
+    renderInspector(true);
+    const lengthInput = screen.getByRole("textbox", { name: "Length" });
+
+    fireEvent.focus(lengthInput);
+    fireEvent.change(lengthInput, { target: { value: "not a length" } });
+    fireEvent.blur(lengthInput);
+
+    expect(screen.getByRole("radiogroup", { name: "Move endpoint" })).toBeInTheDocument();
+    await waitFor(() => expect(lengthInput).toHaveAttribute("aria-invalid", "true"));
+    expect(screen.getByRole("radiogroup", { name: "Move endpoint" })).toBeInTheDocument();
   });
 
   it("retains rectangle behavior without showing an anchor choice", async () => {
     const onCommitLength = renderInspector(false);
 
-    expect(screen.queryByRole("radiogroup", { name: "Keep fixed" })).not.toBeInTheDocument();
+    fireEvent.focus(screen.getByRole("textbox", { name: "Length" }));
+    expect(screen.queryByRole("radiogroup", { name: "Move endpoint" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Length" }), {
       target: { value: "2 m" }
     });
