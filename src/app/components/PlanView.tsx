@@ -979,18 +979,26 @@ export function PlanView({
           xMm: snap.point.xMm - origMid.xMm,
           yMm: snap.point.yMm - origMid.yMm
         };
-        // Clip guides to the room bounds with a small overhang.
-        const guidePadMm = 200;
+        // Most targets now supply their own tight extentMm (see
+        // partitionSnapTargets.ts); only fall back to the room bbox — with a
+        // small cosmetic margin, not the old 200mm overshoot — for a guide
+        // whose target left extentMm undefined (e.g. a plain grid snap).
+        const guidePadMm = handleSizeMm > 0 ? handleSizeMm : 40;
         const roomBox = placement ? getPlacedRoomBounds(placement) : null;
-        const activeGuides = roomBox
-          ? snap.activeGuides.map((guide) => ({
-              ...guide,
-              extentMm:
-                guide.axis === "x"
-                  ? { startMm: roomBox.minY - guidePadMm, endMm: roomBox.maxY + guidePadMm }
-                  : { startMm: roomBox.minX - guidePadMm, endMm: roomBox.maxX + guidePadMm }
-            }))
-          : snap.activeGuides;
+        const activeGuides =
+          roomBox
+            ? snap.activeGuides.map((guide) =>
+                guide.extentMm
+                  ? guide
+                  : {
+                      ...guide,
+                      extentMm:
+                        guide.axis === "x"
+                          ? { startMm: roomBox.minY - guidePadMm, endMm: roomBox.maxY + guidePadMm }
+                          : { startMm: roomBox.minX - guidePadMm, endMm: roomBox.maxX + guidePadMm }
+                    }
+              )
+            : snap.activeGuides;
         return {
           ...current,
           previewStartFloorMm: {

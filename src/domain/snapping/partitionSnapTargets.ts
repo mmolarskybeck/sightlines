@@ -41,6 +41,11 @@ type DirectedFace = {
   coordinateMm: number;
   direction: -1 | 1;
   id: string;
+  // The producing wall's/slab segment's own two endpoints (room-local space,
+  // same frame as coordinateMm) — carried through so the emitted SnapTarget
+  // can offer its natural extent instead of the whole room bbox.
+  start: Point;
+  end: Point;
 };
 
 function axisAlignedRoomFaces(room: Room): DirectedFace[] {
@@ -52,14 +57,18 @@ function axisAlignedRoomFaces(room: Room): DirectedFace[] {
         axis: "x",
         coordinateMm: wall.start.xMm,
         direction: outward.xMm > 0 ? -1 : 1,
-        id: `room-wall-${wall.id}`
+        id: `room-wall-${wall.id}`,
+        start: wall.start,
+        end: wall.end
       });
     } else if (Math.abs(wall.start.yMm - wall.end.yMm) <= AXIS_EPSILON) {
       faces.push({
         axis: "y",
         coordinateMm: wall.start.yMm,
         direction: outward.yMm > 0 ? -1 : 1,
-        id: `room-wall-${wall.id}`
+        id: `room-wall-${wall.id}`,
+        start: wall.start,
+        end: wall.end
       });
     }
   }
@@ -82,7 +91,9 @@ function axisAlignedPartitionFaces(room: Room, excludedPartitionId?: string): Di
           axis: "x",
           coordinateMm,
           direction: coordinateMm < mid.xMm ? -1 : 1,
-          id: `partition-face-${partition.id}-${index}`
+          id: `partition-face-${partition.id}-${index}`,
+          start: segment.a,
+          end: segment.b
         });
       } else if (Math.abs(segment.a.yMm - segment.b.yMm) <= AXIS_EPSILON) {
         const coordinateMm = segment.a.yMm;
@@ -91,7 +102,9 @@ function axisAlignedPartitionFaces(room: Room, excludedPartitionId?: string): Di
           axis: "y",
           coordinateMm,
           direction: coordinateMm < mid.yMm ? -1 : 1,
-          id: `partition-face-${partition.id}-${index}`
+          id: `partition-face-${partition.id}-${index}`,
+          start: segment.a,
+          end: segment.b
         });
       }
     });
@@ -136,6 +149,17 @@ function cleanInsetTargets(args: {
       face.direction,
       incrementMm
     );
+    // The guide's cross axis is the OTHER world axis from the face itself: an
+    // x-axis face (a vertical wall/slab edge) has its natural extent along y,
+    // and vice versa. Lift the producing wall's/slab's own two endpoints by
+    // the same placement offset the point above already uses.
+    const crossStartLocal = face.axis === "x" ? face.start.yMm : face.start.xMm;
+    const crossEndLocal = face.axis === "x" ? face.end.yMm : face.end.xMm;
+    const crossOffsetMm = face.axis === "x" ? placementOffsetMm.yMm : placementOffsetMm.xMm;
+    const extentMm = {
+      startMm: Math.min(crossStartLocal, crossEndLocal) + crossOffsetMm,
+      endMm: Math.max(crossStartLocal, crossEndLocal) + crossOffsetMm
+    };
     return {
       id: `partition-clean-${face.id}`,
       kind: "neighbor-edge",
@@ -149,7 +173,8 @@ function cleanInsetTargets(args: {
           face.axis === "y"
             ? snappedLocal + placementOffsetMm.yMm
             : proposedFloorMm.yMm
-      }
+      },
+      extentMm
     };
   });
 }
@@ -240,11 +265,28 @@ export function getPartitionMoveSnapTargets(args: {
         axis === "x"
           ? { xMm: (plus.pointMm.xMm + minus.pointMm.xMm) / 2, yMm: proposedMidLocal.yMm }
           : { xMm: proposedMidLocal.xMm, yMm: (plus.pointMm.yMm + minus.pointMm.yMm) / 2 };
+      // The guide's cross-axis extent can't come from plus/minus themselves:
+      // both rays travel purely along `axis`, so plus.pointMm and
+      // minus.pointMm are mathematically guaranteed to share the exact same
+      // cross-axis coordinate (the ray's perpendicular position never
+      // changes) — using them directly would always collapse to a
+      // zero-length, invisible guide. Use the partition's own already-computed
+      // cross-axis half-extent instead (extentY/extentX, i.e. halfThick/
+      // halfLen), centered on the resolved midpoint, so the guide stays a
+      // short, visible segment hugging the partition rather than sweeping
+      // the room.
+      const crossExtentMm = axis === "x" ? extentY : extentX;
+      const crossLocalMm = axis === "x" ? midLocal.yMm : midLocal.xMm;
+      const crossFloorMm = axis === "x" ? toFloorY(crossLocalMm) : toFloorX(crossLocalMm);
       targets.push({
         id,
         kind: "centerline",
         axis,
-        point: { xMm: toFloorX(midLocal.xMm), yMm: toFloorY(midLocal.yMm) }
+        point: { xMm: toFloorX(midLocal.xMm), yMm: toFloorY(midLocal.yMm) },
+        extentMm: {
+          startMm: crossFloorMm - crossExtentMm,
+          endMm: crossFloorMm + crossExtentMm
+        }
       });
     };
 
@@ -260,17 +302,28 @@ export function getPartitionMoveSnapTargets(args: {
       xMm: toFloorX((sibling.startXMm + sibling.endXMm) / 2),
       yMm: toFloorY((sibling.startYMm + sibling.endYMm) / 2)
     };
+    // Span between the dragged partition's own (live, pre-snap) midpoint and
+    // the sibling's midpoint, so the guide visibly connects the two
+    // partitions it's aligning rather than sweeping the whole room.
     targets.push({
       id: `partition-sibling-${sibling.id}-x`,
       kind: "neighbor-center",
       axis: "x",
-      point: midFloor
+      point: midFloor,
+      extentMm: {
+        startMm: Math.min(proposedMidFloorMm.yMm, midFloor.yMm),
+        endMm: Math.max(proposedMidFloorMm.yMm, midFloor.yMm)
+      }
     });
     targets.push({
       id: `partition-sibling-${sibling.id}-y`,
       kind: "neighbor-center",
       axis: "y",
-      point: midFloor
+      point: midFloor,
+      extentMm: {
+        startMm: Math.min(proposedMidFloorMm.xMm, midFloor.xMm),
+        endMm: Math.max(proposedMidFloorMm.xMm, midFloor.xMm)
+      }
     });
   }
 

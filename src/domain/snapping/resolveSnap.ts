@@ -13,6 +13,12 @@ export type SnapTarget = {
   // (0, above centerline) for a door, just below the centerline for
   // everything else — a static per-kind map can't express that.
   priority?: number;
+  // The natural extent, in floor space along the guide's cross axis, of the
+  // geometry being aligned to (e.g. the wall or slab span producing this
+  // target) — same shape as Guide.extentMm. When set, resolveSnap copies it
+  // onto the winning Guide so the rendered guide can be clipped to exactly
+  // the geometry it represents instead of drawing full-viewport.
+  extentMm?: { startMm: number; endMm: number };
 };
 
 export type Guide = {
@@ -113,7 +119,8 @@ export function resolveSnap(
       id: `${best.id}-${axis}`,
       axis,
       positionMm,
-      targetId: best.id
+      targetId: best.id,
+      extentMm: best.extentMm
     });
     snapTargetIds[axis] = best.id;
   }

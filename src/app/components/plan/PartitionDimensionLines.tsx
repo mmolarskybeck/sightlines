@@ -85,15 +85,9 @@ function DimensionChain({
   const tickHalfMm = handleSizeMm * 0.45;
   const rowSpacingMm = handleSizeMm * 1.8;
   // Drafting conventions: witness lines stand off the measured geometry and
-  // overshoot slightly past the dimension line; ticks are oblique 45° slashes
-  // so they stay legible at low zoom where a perpendicular tick would merge
-  // into the witness line.
+  // overshoot slightly past the dimension line.
   const witnessGapMm = handleSizeMm * 0.6;
   const witnessOvershootMm = handleSizeMm * 0.5;
-  const tickDir = {
-    xMm: (dir.xMm + normal.xMm) * Math.SQRT1_2,
-    yMm: (dir.yMm + normal.yMm) * Math.SQRT1_2
-  };
   const gapSegments = segments.filter((segment) => segment.kind === "gap");
   const rowEnd: number[] = [];
   const labels = gapSegments.map((segment) => {
@@ -181,11 +175,11 @@ function DimensionChain({
               vectorEffect="non-scaling-stroke"
             />
             <line
-              className="plan-dimension-tick"
-              x1={point.xMm - tickDir.xMm * tickHalfMm}
-              y1={point.yMm - tickDir.yMm * tickHalfMm}
-              x2={point.xMm + tickDir.xMm * tickHalfMm}
-              y2={point.yMm + tickDir.yMm * tickHalfMm}
+              className="dimension-tick"
+              x1={point.xMm - normal.xMm * tickHalfMm}
+              y1={point.yMm - normal.yMm * tickHalfMm}
+              x2={point.xMm + normal.xMm * tickHalfMm}
+              y2={point.yMm + normal.yMm * tickHalfMm}
               vectorEffect="non-scaling-stroke"
             />
           </g>

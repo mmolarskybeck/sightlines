@@ -48,6 +48,14 @@ describe("getPartitionMoveSnapTargets", () => {
     expect(centerX?.point.xMm).toBeCloseTo(2000, 6);
     expect(centerY).toMatchObject({ kind: "centerline", axis: "y" });
     expect(centerY?.point.yMm).toBeCloseTo(2000, 6);
+    // Each guide's cross-axis extent hugs the dragged partition's own
+    // half-thickness (100mm thick → 50mm) / half-length (2000mm long → 1000mm)
+    // footprint, centered on its live (pre-snap) position — tight, not the
+    // whole room.
+    expect(centerX?.extentMm?.startMm).toBeCloseTo(1850, 6); // 1900 (mid y) - 50
+    expect(centerX?.extentMm?.endMm).toBeCloseTo(1950, 6);
+    expect(centerY?.extentMm?.startMm).toBeCloseTo(800, 6); // 1800 (mid x) - 1000
+    expect(centerY?.extentMm?.endMm).toBeCloseTo(2800, 6);
   });
 
   it("lifts targets to floor space by the placement offset", () => {
@@ -95,6 +103,11 @@ describe("getPartitionMoveSnapTargets", () => {
     expect(sibX?.point.xMm).toBeCloseTo(1000, 6); // sibling midpoint x
     expect(sibY).toMatchObject({ kind: "neighbor-center", axis: "y" });
     expect(sibY?.point.yMm).toBeCloseTo(500, 6); // sibling midpoint y
+    // Extent spans between the dragged partition's live position (2000, 2000)
+    // and the sibling's midpoint (1000, 500) — connecting the two partitions,
+    // not the whole room.
+    expect(sibX?.extentMm).toEqual({ startMm: 500, endMm: 2000 });
+    expect(sibY?.extentMm).toEqual({ startMm: 1000, endMm: 2000 });
   });
 
   it("bounds an equidistant axis on a neighboring partition, not the far wall", () => {
@@ -191,12 +204,17 @@ describe("getPartitionMoveSnapTargets", () => {
     // midpoint x=2000 therefore leaves a clean 1000mm wall gap.
     expect(westWall).toMatchObject({ kind: "neighbor-edge", axis: "x" });
     expect(westWall?.point.xMm).toBe(2000);
+    // The west wall's own extent (its full run in y, i.e. the room's depth),
+    // not the whole room bbox padded by 200mm.
+    expect(westWall?.extentMm).toEqual({ startMm: 0, endMm: 4000 });
 
     const siblingWestFace = targets.find(
       (target) => target.id === "partition-clean-partition-face-room-1-partition-2-0"
     );
     expect(siblingWestFace).toMatchObject({ kind: "neighbor-edge", axis: "x" });
     expect(siblingWestFace?.point.xMm).toBe(1900);
+    // The sibling slab face's own run in y (1000 to 3000), not the room bbox.
+    expect(siblingWestFace?.extentMm).toEqual({ startMm: 1000, endMm: 3000 });
   });
 });
 
