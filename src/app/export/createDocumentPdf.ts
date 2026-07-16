@@ -1,0 +1,1446 @@
+import fontkit from "@pdf-lib/fontkit";
+import {
+  PDFDocument,
+  PDFFont,
+  PDFImage,
+  PDFPage,
+  StandardFonts,
+  degrees,
+  rgb
+} from "pdf-lib";
+import {
+  FRAME_FINISH_HEX,
+  MAT_BEVEL_HAIRLINE_HEX,
+  MAT_FILL_HEX,
+  effectiveFraming
+} from "../../domain/framing";
+import { getRoomPlaceableWalls } from "../../domain/geometry/placeableWalls";
+import type { PlanRect } from "../../domain/geometry/planObjects";
+import { isPointInPolygon } from "../../domain/geometry/polygon";
+import type {
+  Artwork,
+  Asset,
+  DisplayUnit,
+  Project,
+  SavedView
+} from "../../domain/project";
+import {
+  deriveElevationSceneDimensions,
+  elevationSceneToDimensionParticipants
+} from "../../domain/dimensions/elevationDimensions";
+import type {
+  BoundaryDimension,
+  GapDimension
+} from "../../domain/dimensions/orthogonalNeighbors";
+import {
+  buildElevationScene,
+  getArtworkRectSvg,
+  type ElevationScene
+} from "../../domain/scene2d/elevationScene";
+import {
+  buildPlanScene,
+  type PlanScene,
+  type PlanSceneRoom
+} from "../../domain/scene2d/planScene";
+import { formatLength } from "../../domain/units/length";
+import {
+  getMajorGridIntervalMm,
+  getMinorGridIntervalMm
+} from "../../domain/units/precision";
+import type { EffectiveDocumentSettings } from "../../domain/export/documentSettings";
+import {
+  chooseScaleBarLengthMm,
+  deriveDocumentPageManifest,
+  fitBoundsToRect,
+  getPageDrawingRectPt,
+  getPageSizePt,
+  planRectCorners,
+  type DocumentBoundsMm,
+  type DocumentPageManifest,
+  type FitToPageResult,
+  type PageRectPt
+} from "../../domain/export/pageComposition";
+import { prepareImageForPdf } from "./pdfImage";
+
+export type RenderSavedView = (
+  view: SavedView,
+  size: { widthPx: number; heightPx: number }
+) => Promise<Blob>;
+
+export type CreateDocumentPdfInput = {
+  project: Project;
+  settings: EffectiveDocumentSettings;
+  artworks: readonly Artwork[];
+  getAsset?: (assetId: string) => Promise<Asset>;
+  getBlob?: (key: string) => Promise<Blob>;
+  renderSavedView?: RenderSavedView;
+  exportedAt?: Date;
+  locale?: string;
+  fontBytes?:
+    | Uint8Array
+    | { regular: Uint8Array; strong?: Uint8Array };
+};
+
+export type CreateDocumentPdfResult = {
+  bytes: Uint8Array;
+  pageCount: number;
+  warnings: string[];
+  manifest: DocumentPageManifest[];
+};
+
+type PdfFonts = {
+  regular: PDFFont;
+  strong: PDFFont;
+  supportedCodePoints: ReadonlySet<number>;
+  substitutedUnsupportedText: boolean;
+};
+
+type PlanTransform = {
+  scalePtPerMm: number;
+  point: (point: { xMm: number; yMm: number }) => { x: number; y: number };
+};
+
+type ElevationTransform = {
+  scalePtPerMm: number;
+  point: (point: { xMm: number; yMm: number }) => { x: number; y: number };
+};
+
+type EmbeddedArtworkImage =
+  | { status: "ready"; image: PDFImage }
+  | { status: "absent" }
+  | { status: "missing" };
+
+type LabelBox = {
+  left: number;
+  right: number;
+  bottom: number;
+  top: number;
+};
+
+const COLORS = {
+  ink: rgb(0.1, 0.11, 0.12),
+  muted: rgb(0.38, 0.4, 0.42),
+  subtle: rgb(0.58, 0.6, 0.62),
+  surface: rgb(0.96, 0.965, 0.97),
+  surfaceStrong: rgb(0.91, 0.92, 0.93),
+  gridMinor: rgb(0.88, 0.89, 0.9),
+  gridMajor: rgb(0.73, 0.75, 0.77),
+  white: rgb(1, 1, 1)
+};
+
+const HEADER_PROJECT_SIZE_PT = 9;
+const HEADER_TITLE_SIZE_PT = 14;
+const HEADER_DATE_SIZE_PT = 8;
+const BODY_SIZE_PT = 8;
+const SMALL_SIZE_PT = 7;
+const DIMENSION_SIZE_PT = 7;
+const DRAWING_INSET_PT = 22;
+const DIMENSION_DRAWING_INSET_PT = 38;
+const GRID_TARGET_PT = 8;
+const THREE_D_RENDER_DPI = 144;
+
+function colorFromHex(hex: string) {
+  const normalized = hex.replace("#", "");
+  const value = Number.parseInt(normalized, 16);
+  return rgb(
+    ((value >> 16) & 255) / 255,
+    ((value >> 8) & 255) / 255,
+    (value & 255) / 255
+  );
+}
+
+function fontText(fonts: PdfFonts, text: string): string {
+  return [...text]
+    .map((character) => {
+      if (fonts.supportedCodePoints.has(character.codePointAt(0)!)) {
+        return character;
+      }
+      fonts.substitutedUnsupportedText = true;
+      return "?";
+    })
+    .join("");
+}
+
+function textWidth(fonts: PdfFonts, text: string, size: number, strong = false): number {
+  const font = strong ? fonts.strong : fonts.regular;
+  return font.widthOfTextAtSize(fontText(fonts, text), size);
+}
+
+function drawText(
+  page: PDFPage,
+  fonts: PdfFonts,
+  text: string,
+  options: {
+    x: number;
+    y: number;
+    size: number;
+    strong?: boolean;
+    color?: ReturnType<typeof rgb>;
+    rotate?: number;
+  }
+) {
+  page.drawText(fontText(fonts, text), {
+    x: options.x,
+    y: options.y,
+    size: options.size,
+    font: options.strong ? fonts.strong : fonts.regular,
+    color: options.color ?? COLORS.ink,
+    ...(options.rotate !== undefined ? { rotate: degrees(options.rotate) } : {})
+  });
+}
+
+function drawCenteredLabel(
+  page: PDFPage,
+  fonts: PdfFonts,
+  text: string,
+  x: number,
+  y: number,
+  size = DIMENSION_SIZE_PT,
+  rotate?: number
+) {
+  const width = textWidth(fonts, text, size, true);
+  if (rotate === 90) {
+    page.drawRectangle({
+      x: x - size * 0.25,
+      y: y - width / 2 - 2,
+      width: size + 3,
+      height: width + 4,
+      color: COLORS.white
+    });
+    drawText(page, fonts, text, {
+      x: x + size * 0.65,
+      y: y - width / 2,
+      size,
+      strong: true,
+      color: COLORS.muted,
+      rotate: 90
+    });
+    return;
+  }
+  page.drawRectangle({
+    x: x - width / 2 - 2,
+    y: y - 1,
+    width: width + 4,
+    height: size + 3,
+    color: COLORS.white
+  });
+  drawText(page, fonts, text, {
+    x: x - width / 2,
+    y: y + 1,
+    size,
+    strong: true,
+    color: COLORS.muted
+  });
+}
+
+function insetRect(rect: PageRectPt, amountPt: number): PageRectPt {
+  return {
+    xPt: rect.xPt + amountPt,
+    yPt: rect.yPt + amountPt,
+    widthPt: Math.max(1, rect.widthPt - amountPt * 2),
+    heightPt: Math.max(1, rect.heightPt - amountPt * 2)
+  };
+}
+
+function createPlanTransform(
+  bounds: DocumentBoundsMm,
+  fit: FitToPageResult
+): PlanTransform {
+  return {
+    scalePtPerMm: fit.scalePtPerMm,
+    point: ({ xMm, yMm }) => ({
+      x: fit.xPt + (xMm - bounds.minXMm) * fit.scalePtPerMm,
+      y: fit.yPt + (bounds.maxYMm - yMm) * fit.scalePtPerMm
+    })
+  };
+}
+
+function createElevationTransform(
+  bounds: DocumentBoundsMm,
+  fit: FitToPageResult
+): ElevationTransform {
+  return {
+    scalePtPerMm: fit.scalePtPerMm,
+    point: ({ xMm, yMm }) => ({
+      x: fit.xPt + (xMm - bounds.minXMm) * fit.scalePtPerMm,
+      y: fit.yPt + (yMm - bounds.minYMm) * fit.scalePtPerMm
+    })
+  };
+}
+
+function polygonPath(points: readonly { x: number; y: number }[]): string {
+  if (points.length === 0) return "";
+  return [
+    `M ${points[0]!.x} ${points[0]!.y}`,
+    ...points.slice(1).map((point) => `L ${point.x} ${point.y}`),
+    "Z"
+  ].join(" ");
+}
+
+function planRectWorldPoint(
+  rect: PlanRect,
+  local: { xMm: number; yMm: number }
+): { xMm: number; yMm: number } {
+  const angle = (rect.angleDeg * Math.PI) / 180;
+  return {
+    xMm:
+      rect.centerXMm +
+      local.xMm * Math.cos(angle) -
+      local.yMm * Math.sin(angle),
+    yMm:
+      rect.centerYMm +
+      local.xMm * Math.sin(angle) +
+      local.yMm * Math.cos(angle)
+  };
+}
+
+function drawLine(
+  page: PDFPage,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  thickness: number,
+  color = COLORS.ink,
+  dashArray?: number[]
+) {
+  page.drawLine({
+    start: from,
+    end: to,
+    thickness,
+    color,
+    ...(dashArray ? { dashArray } : {})
+  });
+}
+
+function drawHeader(
+  page: PDFPage,
+  fonts: PdfFonts,
+  projectTitle: string,
+  pageTitle: string,
+  exportedAt: Date,
+  locale: string
+) {
+  const { width, height } = page.getSize();
+  const left = 36;
+  const right = width - 36;
+  const date = new Intl.DateTimeFormat(locale, {
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  }).format(exportedAt);
+
+  drawText(page, fonts, projectTitle, {
+    x: left,
+    y: height - 48,
+    size: HEADER_PROJECT_SIZE_PT,
+    strong: true
+  });
+  drawText(page, fonts, pageTitle, {
+    x: left,
+    y: height - 66,
+    size: HEADER_TITLE_SIZE_PT,
+    strong: true
+  });
+  drawText(page, fonts, date, {
+    x: right - textWidth(fonts, date, HEADER_DATE_SIZE_PT),
+    y: height - 48,
+    size: HEADER_DATE_SIZE_PT,
+    color: COLORS.muted
+  });
+}
+
+function drawScaleBar(
+  page: PDFPage,
+  fonts: PdfFonts,
+  unit: DisplayUnit,
+  scalePtPerMm: number
+) {
+  const lengthMm = chooseScaleBarLengthMm(scalePtPerMm, unit);
+  const widthPt = lengthMm * scalePtPerMm;
+  const x = 36;
+  const y = 47;
+  drawLine(page, { x, y }, { x: x + widthPt, y }, 1, COLORS.ink);
+  drawLine(page, { x, y: y - 3 }, { x, y: y + 3 }, 1, COLORS.ink);
+  drawLine(
+    page,
+    { x: x + widthPt, y: y - 3 },
+    { x: x + widthPt, y: y + 3 },
+    1,
+    COLORS.ink
+  );
+  drawText(page, fonts, formatLength(lengthMm, { unit }), {
+    x,
+    y: y + 6,
+    size: SMALL_SIZE_PT,
+    strong: true,
+    color: COLORS.muted
+  });
+}
+
+function gridStart(min: number, spacing: number): number {
+  return Math.ceil(min / spacing) * spacing;
+}
+
+function drawPlanGrid(
+  page: PDFPage,
+  bounds: DocumentBoundsMm,
+  transform: PlanTransform,
+  unit: DisplayUnit
+) {
+  const minor = getMinorGridIntervalMm(unit, transform.scalePtPerMm, {
+    targetMinorPx: GRID_TARGET_PT
+  });
+  const major = getMajorGridIntervalMm(unit, minor);
+  const maxLines = 3_000;
+  let count = 0;
+
+  for (
+    let x = gridStart(bounds.minXMm, minor);
+    x <= bounds.maxXMm && count < maxLines;
+    x += minor, count += 1
+  ) {
+    const isMajor = Math.abs(x / major - Math.round(x / major)) < 1e-6;
+    drawLine(
+      page,
+      transform.point({ xMm: x, yMm: bounds.minYMm }),
+      transform.point({ xMm: x, yMm: bounds.maxYMm }),
+      isMajor ? 0.45 : 0.25,
+      isMajor ? COLORS.gridMajor : COLORS.gridMinor
+    );
+  }
+  for (
+    let y = gridStart(bounds.minYMm, minor);
+    y <= bounds.maxYMm && count < maxLines;
+    y += minor, count += 1
+  ) {
+    const isMajor = Math.abs(y / major - Math.round(y / major)) < 1e-6;
+    drawLine(
+      page,
+      transform.point({ xMm: bounds.minXMm, yMm: y }),
+      transform.point({ xMm: bounds.maxXMm, yMm: y }),
+      isMajor ? 0.45 : 0.25,
+      isMajor ? COLORS.gridMajor : COLORS.gridMinor
+    );
+  }
+}
+
+function drawElevationGrid(
+  page: PDFPage,
+  scene: ElevationScene,
+  transform: ElevationTransform,
+  unit: DisplayUnit
+) {
+  const minor = getMinorGridIntervalMm(unit, transform.scalePtPerMm, {
+    targetMinorPx: GRID_TARGET_PT
+  });
+  const major = getMajorGridIntervalMm(unit, minor);
+  const maxLines = 2_000;
+  let count = 0;
+
+  for (let x = 0; x <= scene.wallLengthMm && count < maxLines; x += minor, count += 1) {
+    const isMajor = Math.abs(x / major - Math.round(x / major)) < 1e-6;
+    drawLine(
+      page,
+      transform.point({ xMm: x, yMm: 0 }),
+      transform.point({ xMm: x, yMm: scene.wallHeightMm }),
+      isMajor ? 0.45 : 0.25,
+      isMajor ? COLORS.gridMajor : COLORS.gridMinor
+    );
+  }
+  for (let y = 0; y <= scene.wallHeightMm && count < maxLines; y += minor, count += 1) {
+    const isMajor = Math.abs(y / major - Math.round(y / major)) < 1e-6;
+    drawLine(
+      page,
+      transform.point({ xMm: 0, yMm: y }),
+      transform.point({ xMm: scene.wallLengthMm, yMm: y }),
+      isMajor ? 0.45 : 0.25,
+      isMajor ? COLORS.gridMajor : COLORS.gridMinor
+    );
+  }
+}
+
+function roomScene(
+  scene: PlanScene,
+  project: Project,
+  roomId: string
+): PlanScene {
+  const room = scene.rooms.find((candidate) => candidate.roomId === roomId);
+  const placement = project.floor.rooms.find(
+    (candidate) => candidate.roomId === roomId
+  );
+  if (!room || !placement) {
+    return {
+      rooms: [],
+      partitions: [],
+      openingConnections: [],
+      wallObjects: [],
+      floorObjects: []
+    };
+  }
+  const wallIds = new Set(
+    getRoomPlaceableWalls(placement.room).map((wall) => wall.id)
+  );
+  return {
+    rooms: [room],
+    partitions: scene.partitions.filter(
+      (partition) => partition.partition.roomId === roomId
+    ),
+    openingConnections: [],
+    wallObjects: scene.wallObjects.filter((entry) =>
+      wallIds.has(entry.object.wallId)
+    ),
+    floorObjects: scene.floorObjects.filter((entry) =>
+      isPointInPolygon(
+        { xMm: entry.rect.centerXMm, yMm: entry.rect.centerYMm },
+        room.polygonMm
+      )
+    )
+  };
+}
+
+function drawPlanObject(
+  page: PDFPage,
+  transform: PlanTransform,
+  rect: PlanRect,
+  kind: "artwork" | "door" | "window" | "blocked-zone",
+  isFloorPlaced: boolean
+) {
+  const corners = planRectCorners(rect).map(transform.point);
+  page.drawSvgPath(polygonPath(corners), {
+    color: kind === "blocked-zone" ? COLORS.surfaceStrong : COLORS.white,
+    borderColor: COLORS.muted,
+    borderWidth: 0.8,
+    ...(isFloorPlaced ? { borderDashArray: [3, 2] } : {})
+  });
+
+  const halfW = rect.widthMm / 2;
+  const halfD = rect.depthMm / 2;
+  const world = (xMm: number, yMm: number) =>
+    transform.point(planRectWorldPoint(rect, { xMm, yMm }));
+
+  if (kind === "artwork") {
+    const inset = Math.min(rect.widthMm, rect.depthMm) * 0.22;
+    const insetRect: PlanRect = {
+      ...rect,
+      widthMm: Math.max(0, rect.widthMm - inset * 2),
+      depthMm: Math.max(0, rect.depthMm - inset * 2)
+    };
+    page.drawSvgPath(
+      polygonPath(planRectCorners(insetRect).map(transform.point)),
+      { borderColor: COLORS.subtle, borderWidth: 0.5 }
+    );
+  } else if (kind === "door") {
+    drawLine(page, world(-halfW, halfD), world(-halfW, -halfD), 0.5, COLORS.subtle);
+    drawLine(page, world(-halfW, -halfD), world(halfW, halfD), 0.5, COLORS.subtle);
+  } else if (kind === "window") {
+    drawLine(page, world(-halfW, 0), world(halfW, 0), 0.5, COLORS.subtle);
+    drawLine(page, world(0, -halfD), world(0, halfD), 0.5, COLORS.subtle);
+  } else {
+    for (const x of [-halfW, 0, halfW]) {
+      drawLine(
+        page,
+        world(Math.max(-halfW, x - halfD), halfD),
+        world(Math.min(halfW, x + halfD), -halfD),
+        0.45,
+        COLORS.subtle
+      );
+    }
+  }
+}
+
+function drawPlanScene(
+  page: PDFPage,
+  scene: PlanScene,
+  bounds: DocumentBoundsMm,
+  drawingRect: PageRectPt,
+  unit: DisplayUnit,
+  grid: boolean
+): PlanTransform {
+  const fit = fitBoundsToRect(bounds, drawingRect);
+  const transform = createPlanTransform(bounds, fit);
+  if (grid) drawPlanGrid(page, bounds, transform, unit);
+
+  for (const room of scene.rooms) {
+    page.drawSvgPath(
+      polygonPath(room.polygonMm.map(transform.point)),
+      { color: COLORS.white }
+    );
+  }
+  for (const room of scene.rooms) {
+    for (const wall of room.walls) {
+      drawLine(
+        page,
+        transform.point(wall.startMm),
+        transform.point(wall.endMm),
+        1.8,
+        COLORS.ink
+      );
+    }
+  }
+  for (const partition of scene.partitions) {
+    page.drawSvgPath(
+      polygonPath(planRectCorners(partition.rect).map(transform.point)),
+      { color: COLORS.ink, opacity: 0.72 }
+    );
+  }
+  for (const entry of scene.wallObjects) {
+    drawPlanObject(
+      page,
+      transform,
+      entry.renderedRect,
+      entry.object.kind,
+      false
+    );
+  }
+  for (const entry of scene.floorObjects) {
+    drawPlanObject(page, transform, entry.rect, entry.object.kind, true);
+  }
+  return transform;
+}
+
+function roomCentroid(room: PlanSceneRoom): { xMm: number; yMm: number } {
+  return {
+    xMm:
+      room.polygonMm.reduce((sum, point) => sum + point.xMm, 0) /
+      room.polygonMm.length,
+    yMm:
+      room.polygonMm.reduce((sum, point) => sum + point.yMm, 0) /
+      room.polygonMm.length
+  };
+}
+
+function drawRoomWallDimensions(
+  page: PDFPage,
+  fonts: PdfFonts,
+  room: PlanSceneRoom,
+  transform: PlanTransform,
+  unit: DisplayUnit
+) {
+  const centroid = transform.point(roomCentroid(room));
+  for (const wall of room.walls) {
+    const start = transform.point(wall.startMm);
+    const end = transform.point(wall.endMm);
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const length = Math.hypot(dx, dy);
+    if (length <= 0) continue;
+    const left = { x: -dy / length, y: dx / length };
+    const mid = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+    const towardCentroid = {
+      x: centroid.x - mid.x,
+      y: centroid.y - mid.y
+    };
+    const normal =
+      left.x * towardCentroid.x + left.y * towardCentroid.y > 0
+        ? { x: -left.x, y: -left.y }
+        : left;
+    const offset = 12;
+    const a = { x: start.x + normal.x * offset, y: start.y + normal.y * offset };
+    const b = { x: end.x + normal.x * offset, y: end.y + normal.y * offset };
+    drawLine(page, a, b, 0.55, COLORS.muted);
+    drawLine(
+      page,
+      { x: a.x - normal.x * 3, y: a.y - normal.y * 3 },
+      { x: a.x + normal.x * 3, y: a.y + normal.y * 3 },
+      0.55,
+      COLORS.muted
+    );
+    drawLine(
+      page,
+      { x: b.x - normal.x * 3, y: b.y - normal.y * 3 },
+      { x: b.x + normal.x * 3, y: b.y + normal.y * 3 },
+      0.55,
+      COLORS.muted
+    );
+    const lengthMm = Math.hypot(
+      wall.endMm.xMm - wall.startMm.xMm,
+      wall.endMm.yMm - wall.startMm.yMm
+    );
+    drawCenteredLabel(
+      page,
+      fonts,
+      formatLength(lengthMm, { unit }),
+      (a.x + b.x) / 2,
+      (a.y + b.y) / 2 - DIMENSION_SIZE_PT / 2
+    );
+  }
+}
+
+export function artworkPlaceholderLabel(
+  artwork: Artwork | undefined,
+  ordinal: number
+): string {
+  return (
+    artwork?.title?.trim() ||
+    artwork?.accessionNumber?.trim() ||
+    artwork?.artist?.trim() ||
+    `Untitled work ${ordinal}`
+  );
+}
+
+function drawWrappedCenteredText(
+  page: PDFPage,
+  fonts: PdfFonts,
+  lines: string[],
+  rect: { x: number; y: number; width: number; height: number }
+) {
+  if (rect.width < 28 || rect.height < 18) return;
+  const size = Math.min(BODY_SIZE_PT, Math.max(5, rect.height / (lines.length + 2)));
+  const lineHeight = size + 2;
+  const totalHeight = lines.length * lineHeight;
+  let y = rect.y + (rect.height + totalHeight) / 2 - lineHeight;
+  for (const line of lines) {
+    const width = textWidth(fonts, line, size, line === lines.at(-1));
+    const clipped =
+      width <= rect.width - 8
+        ? line
+        : `${line.slice(0, Math.max(1, Math.floor((line.length * (rect.width - 14)) / width)))}…`;
+    const clippedWidth = textWidth(fonts, clipped, size, line === lines.at(-1));
+    drawText(page, fonts, clipped, {
+      x: rect.x + (rect.width - clippedWidth) / 2,
+      y,
+      size,
+      strong: line === lines.at(-1),
+      color: COLORS.muted
+    });
+    y -= lineHeight;
+  }
+}
+
+function imageRectInside(
+  container: { x: number; y: number; width: number; height: number },
+  image: PDFImage
+) {
+  const scale = Math.min(
+    container.width / image.width,
+    container.height / image.height
+  );
+  const width = image.width * scale;
+  const height = image.height * scale;
+  return {
+    x: container.x + (container.width - width) / 2,
+    y: container.y + (container.height - height) / 2,
+    width,
+    height
+  };
+}
+
+function elevationRect(
+  transform: ElevationTransform,
+  xMm: number,
+  yMm: number,
+  widthMm: number,
+  heightMm: number
+) {
+  const bottomLeft = transform.point({ xMm, yMm });
+  return {
+    x: bottomLeft.x,
+    y: bottomLeft.y,
+    width: widthMm * transform.scalePtPerMm,
+    height: heightMm * transform.scalePtPerMm
+  };
+}
+
+function drawArtworkPlaceholder(
+  page: PDFPage,
+  fonts: PdfFonts,
+  rect: { x: number; y: number; width: number; height: number },
+  label: string,
+  unavailable: boolean
+) {
+  page.drawRectangle({
+    ...rect,
+    color: COLORS.surface,
+    borderColor: COLORS.muted,
+    borderWidth: 0.7
+  });
+  drawWrappedCenteredText(
+    page,
+    fonts,
+    unavailable ? ["Image unavailable", label] : [label],
+    rect
+  );
+}
+
+function drawElevationOpening(
+  page: PDFPage,
+  transform: ElevationTransform,
+  opening: ElevationScene["openings"][number]
+) {
+  const xMm = opening.centerMm.xMm - opening.sizeMm.widthMm / 2;
+  const yMm = opening.centerMm.yMm - opening.sizeMm.heightMm / 2;
+  const rect = elevationRect(
+    transform,
+    xMm,
+    yMm,
+    opening.sizeMm.widthMm,
+    opening.sizeMm.heightMm
+  );
+  page.drawRectangle({
+    ...rect,
+    borderColor: COLORS.muted,
+    borderWidth: 0.7,
+    ...(opening.object.kind === "blocked-zone"
+      ? { color: COLORS.surfaceStrong }
+      : {})
+  });
+  if (opening.object.kind === "window") {
+    drawLine(
+      page,
+      { x: rect.x + rect.width / 2, y: rect.y },
+      { x: rect.x + rect.width / 2, y: rect.y + rect.height },
+      0.5,
+      COLORS.muted
+    );
+    drawLine(
+      page,
+      { x: rect.x, y: rect.y + rect.height / 2 },
+      { x: rect.x + rect.width, y: rect.y + rect.height / 2 },
+      0.5,
+      COLORS.muted
+    );
+  } else if (opening.object.kind === "door") {
+    const radius = Math.min(rect.width, rect.height);
+    drawLine(
+      page,
+      { x: rect.x, y: rect.y },
+      { x: rect.x, y: rect.y + radius },
+      0.45,
+      COLORS.subtle
+    );
+    drawLine(
+      page,
+      { x: rect.x, y: rect.y },
+      { x: rect.x + radius, y: rect.y },
+      0.45,
+      COLORS.subtle
+    );
+  } else {
+    const step = 7;
+    for (let x = rect.x - rect.height; x < rect.x + rect.width; x += step) {
+      const startX = Math.max(rect.x, x);
+      const startY = rect.y + Math.max(0, rect.x - x);
+      const endX = Math.min(rect.x + rect.width, x + rect.height);
+      const endY = rect.y + Math.min(rect.height, rect.x + rect.width - x);
+      if (endX > startX) {
+        drawLine(
+          page,
+          { x: startX, y: startY },
+          { x: endX, y: endY },
+          0.35,
+          COLORS.subtle
+        );
+      }
+    }
+  }
+}
+
+function labelBoxesIntersect(a: LabelBox, b: LabelBox, gap = 2): boolean {
+  return !(
+    a.right + gap < b.left ||
+    a.left - gap > b.right ||
+    a.top + gap < b.bottom ||
+    a.bottom - gap > b.top
+  );
+}
+
+function chooseUnoccupiedLabel<T extends { box: LabelBox }>(
+  candidates: T[],
+  occupied: LabelBox[]
+): T {
+  const available = candidates.find((candidate) =>
+    occupied.every((box) => !labelBoxesIntersect(candidate.box, box))
+  );
+  return available ?? candidates[candidates.length - 1]!;
+}
+
+function drawGapDimension(
+  page: PDFPage,
+  fonts: PdfFonts,
+  transform: ElevationTransform,
+  dimension: GapDimension | BoundaryDimension,
+  unit: DisplayUnit,
+  index: number,
+  occupied: LabelBox[]
+) {
+  const label = formatLength(dimension.gapMm, { unit });
+  if ("axis" in dimension && dimension.axis === "vertical") {
+    const xMm =
+      (dimension.corridorLoMm + dimension.corridorHiMm) / 2;
+    const a = transform.point({ xMm, yMm: dimension.fromMm });
+    const b = transform.point({ xMm, yMm: dimension.toMm });
+    drawLine(page, a, b, 0.5, COLORS.muted);
+    drawLine(page, { x: a.x - 3, y: a.y }, { x: a.x + 3, y: a.y }, 0.5, COLORS.muted);
+    drawLine(page, { x: b.x - 3, y: b.y }, { x: b.x + 3, y: b.y }, 0.5, COLORS.muted);
+    const available = Math.abs(b.y - a.y);
+    const labelHeight = textWidth(fonts, label, DIMENSION_SIZE_PT, true);
+    const baseX = available >= labelHeight + 6 ? a.x : a.x + 8;
+    const midY = (a.y + b.y) / 2;
+    const labelPosition = chooseUnoccupiedLabel(
+      [0, 8, 16, -8, -16, 24, -24].map((offset) => {
+        const x = baseX + offset + (index % 2) * 2;
+        return {
+          x,
+          box: {
+            left: x - DIMENSION_SIZE_PT * 0.25,
+            right: x + DIMENSION_SIZE_PT + 3,
+            bottom: midY - labelHeight / 2 - 2,
+            top: midY + labelHeight / 2 + 2
+          }
+        };
+      }),
+      occupied
+    );
+    const labelX = labelPosition.x;
+    occupied.push(labelPosition.box);
+    if (labelX !== a.x) {
+      drawLine(
+        page,
+        { x: a.x, y: midY },
+        { x: labelX, y: midY },
+        0.4,
+        COLORS.muted
+      );
+    }
+    drawCenteredLabel(page, fonts, label, labelX, midY, DIMENSION_SIZE_PT, 90);
+    return;
+  }
+
+  const yMm =
+    (dimension.corridorLoMm + dimension.corridorHiMm) / 2;
+  const a = transform.point({ xMm: dimension.fromMm, yMm });
+  const b = transform.point({ xMm: dimension.toMm, yMm });
+  drawLine(page, a, b, 0.5, COLORS.muted);
+  drawLine(page, { x: a.x, y: a.y - 3 }, { x: a.x, y: a.y + 3 }, 0.5, COLORS.muted);
+  drawLine(page, { x: b.x, y: b.y - 3 }, { x: b.x, y: b.y + 3 }, 0.5, COLORS.muted);
+  const available = Math.abs(b.x - a.x);
+  const labelWidth = textWidth(fonts, label, DIMENSION_SIZE_PT, true);
+  const baseY = available >= labelWidth + 6 ? a.y + 2 : a.y + 9;
+  const midX = (a.x + b.x) / 2;
+  const labelPosition = chooseUnoccupiedLabel(
+    [0, 8, 16, -8, -16, 24, -24].map((offset) => {
+      const y = baseY + offset + (index % 2) * 2;
+      return {
+        y,
+        box: {
+          left: midX - labelWidth / 2 - 2,
+          right: midX + labelWidth / 2 + 2,
+          bottom: y - 1,
+          top: y + DIMENSION_SIZE_PT + 3
+        }
+      };
+    }),
+    occupied
+  );
+  const labelY = labelPosition.y;
+  occupied.push(labelPosition.box);
+  if (Math.abs(labelY - a.y) > 3) {
+    drawLine(
+      page,
+      { x: midX, y: a.y },
+      { x: midX, y: labelY },
+      0.4,
+      COLORS.muted
+    );
+  }
+  drawCenteredLabel(page, fonts, label, midX, labelY);
+}
+
+function drawElevationDimensions(
+  page: PDFPage,
+  fonts: PdfFonts,
+  scene: ElevationScene,
+  transform: ElevationTransform,
+  unit: DisplayUnit
+) {
+  const dimensions = deriveElevationSceneDimensions(scene);
+  const occupiedLabels: LabelBox[] = [];
+  const wallBottomLeft = transform.point({ xMm: 0, yMm: 0 });
+  const wallTopRight = transform.point({
+    xMm: scene.wallLengthMm,
+    yMm: scene.wallHeightMm
+  });
+
+  const overallY = wallBottomLeft.y - 16;
+  drawLine(
+    page,
+    { x: wallBottomLeft.x, y: overallY },
+    { x: wallTopRight.x, y: overallY },
+    0.65,
+    COLORS.muted
+  );
+  drawLine(
+    page,
+    { x: wallBottomLeft.x, y: overallY - 4 },
+    { x: wallBottomLeft.x, y: overallY + 4 },
+    0.65,
+    COLORS.muted
+  );
+  drawLine(
+    page,
+    { x: wallTopRight.x, y: overallY - 4 },
+    { x: wallTopRight.x, y: overallY + 4 },
+    0.65,
+    COLORS.muted
+  );
+  drawCenteredLabel(
+    page,
+    fonts,
+    formatLength(dimensions.overallWidthMm, { unit }),
+    (wallBottomLeft.x + wallTopRight.x) / 2,
+    overallY - 3
+  );
+
+  const overallX = wallBottomLeft.x - 17;
+  drawLine(
+    page,
+    { x: overallX, y: wallBottomLeft.y },
+    { x: overallX, y: wallTopRight.y },
+    0.65,
+    COLORS.muted
+  );
+  drawLine(
+    page,
+    { x: overallX - 4, y: wallBottomLeft.y },
+    { x: overallX + 4, y: wallBottomLeft.y },
+    0.65,
+    COLORS.muted
+  );
+  drawLine(
+    page,
+    { x: overallX - 4, y: wallTopRight.y },
+    { x: overallX + 4, y: wallTopRight.y },
+    0.65,
+    COLORS.muted
+  );
+  drawCenteredLabel(
+    page,
+    fonts,
+    formatLength(dimensions.overallHeightMm, { unit }),
+    overallX,
+    (wallBottomLeft.y + wallTopRight.y) / 2,
+    DIMENSION_SIZE_PT,
+    90
+  );
+
+  const allGaps = [...dimensions.boundaryGaps, ...dimensions.neighborGaps];
+  allGaps.forEach((dimension, index) =>
+    drawGapDimension(
+      page,
+      fonts,
+      transform,
+      dimension,
+      unit,
+      index,
+      occupiedLabels
+    )
+  );
+
+  const participants = new Map(
+    elevationSceneToDimensionParticipants(scene).map((entry) => [
+      entry.id,
+      { id: entry.id, xMm: entry.rect.xMm }
+    ])
+  );
+  dimensions.centerHeights.forEach((dimension, index) => {
+    const memberXs = dimension.participantIds
+      .map((id) => participants.get(id)?.xMm)
+      .filter((value): value is number => value !== undefined);
+    const xMm = Math.max(
+      0,
+      (memberXs.length > 0 ? Math.min(...memberXs) : 0) -
+        (12 + (index % 3) * 8) / transform.scalePtPerMm
+    );
+    const floor = transform.point({ xMm, yMm: 0 });
+    const center = transform.point({ xMm, yMm: dimension.centerHeightMm });
+    drawLine(page, floor, center, 0.5, COLORS.muted);
+    drawLine(
+      page,
+      { x: center.x - 3, y: center.y },
+      { x: center.x + 3, y: center.y },
+      0.5,
+      COLORS.muted
+    );
+    const label = formatLength(dimension.centerHeightMm, { unit });
+    const labelHeight = textWidth(fonts, label, DIMENSION_SIZE_PT, true);
+    const midY = (floor.y + center.y) / 2;
+    const position = chooseUnoccupiedLabel(
+      [0, 8, 16, -8, -16, 24].map((offset) => {
+        const x = center.x + offset;
+        return {
+          x,
+          box: {
+            left: x - DIMENSION_SIZE_PT * 0.25,
+            right: x + DIMENSION_SIZE_PT + 3,
+            bottom: midY - labelHeight / 2 - 2,
+            top: midY + labelHeight / 2 + 2
+          }
+        };
+      }),
+      occupiedLabels
+    );
+    occupiedLabels.push(position.box);
+    if (position.x !== center.x) {
+      drawLine(
+        page,
+        { x: center.x, y: midY },
+        { x: position.x, y: midY },
+        0.4,
+        COLORS.muted
+      );
+    }
+    drawCenteredLabel(
+      page,
+      fonts,
+      label,
+      position.x,
+      midY,
+      DIMENSION_SIZE_PT,
+      90
+    );
+  });
+}
+
+async function loadPdfFonts(
+  pdf: PDFDocument,
+  fontBytes?: CreateDocumentPdfInput["fontBytes"]
+): Promise<PdfFonts> {
+  if (fontBytes) {
+    pdf.registerFontkit(fontkit);
+    const regularBytes =
+      fontBytes instanceof Uint8Array ? fontBytes : fontBytes.regular;
+    const strongBytes =
+      fontBytes instanceof Uint8Array ? undefined : fontBytes.strong;
+    const regular = await pdf.embedFont(regularBytes, { subset: true });
+    const strong = strongBytes
+      ? await pdf.embedFont(strongBytes, { subset: true })
+      : regular;
+    return {
+      regular,
+      strong,
+      supportedCodePoints: new Set(regular.getCharacterSet()),
+      substitutedUnsupportedText: false
+    };
+  }
+  const [regular, strong] = await Promise.all([
+    pdf.embedFont(StandardFonts.Helvetica),
+    pdf.embedFont(StandardFonts.HelveticaBold)
+  ]);
+  return {
+    regular,
+    strong,
+    supportedCodePoints: new Set(regular.getCharacterSet()),
+    substitutedUnsupportedText: false
+  };
+}
+
+async function embedBlob(pdf: PDFDocument, blob: Blob): Promise<PDFImage> {
+  const prepared = await prepareImageForPdf(blob);
+  return prepared.format === "png"
+    ? pdf.embedPng(prepared.bytes)
+    : pdf.embedJpg(prepared.bytes);
+}
+
+function warningName(artwork: Artwork | undefined, fallback: string): string {
+  return (
+    artwork?.title?.trim() ||
+    artwork?.accessionNumber?.trim() ||
+    artwork?.artist?.trim() ||
+    fallback
+  );
+}
+
+export async function createDocumentPdf(
+  input: CreateDocumentPdfInput
+): Promise<CreateDocumentPdfResult> {
+  const exportedAt = input.exportedAt ?? new Date();
+  const locale = input.locale ?? "en-US";
+  const artworksById = new Map(input.artworks.map((artwork) => [artwork.id, artwork]));
+  const manifest = deriveDocumentPageManifest(
+    input.project,
+    input.settings,
+    artworksById
+  );
+  const pdf = await PDFDocument.create();
+  const fonts = await loadPdfFonts(pdf, input.fontBytes);
+  const warnings = new Set<string>();
+  const imageCache = new Map<string, Promise<EmbeddedArtworkImage>>();
+
+  pdf.setTitle(input.project.title);
+  pdf.setCreator("Sightlines");
+  pdf.setLanguage(locale);
+  pdf.setCreationDate(exportedAt);
+  pdf.setModificationDate(exportedAt);
+
+  const artworkImage = (artwork: Artwork | undefined): Promise<EmbeddedArtworkImage> => {
+    if (!artwork?.assetId) return Promise.resolve({ status: "absent" });
+    const cached = imageCache.get(artwork.assetId);
+    if (cached) return cached;
+    const pending = (async (): Promise<EmbeddedArtworkImage> => {
+      if (!input.getAsset || !input.getBlob) return { status: "missing" };
+      try {
+        const asset = await input.getAsset(artwork.assetId!);
+        const blob = await input.getBlob(asset.displayKey);
+        return { status: "ready", image: await embedBlob(pdf, blob) };
+      } catch {
+        return { status: "missing" };
+      }
+    })();
+    imageCache.set(artwork.assetId, pending);
+    return pending;
+  };
+
+  const fullPlanScene = buildPlanScene(input.project, { artworksById });
+
+  for (const manifestPage of manifest) {
+    const size = getPageSizePt(input.settings.paperSize, manifestPage.orientation);
+    const page = pdf.addPage([size.widthPt, size.heightPt]);
+    drawHeader(
+      page,
+      fonts,
+      input.project.title,
+      manifestPage.title,
+      exportedAt,
+      locale
+    );
+    const baseRect = getPageDrawingRectPt(
+      input.settings.paperSize,
+      manifestPage.orientation
+    );
+
+    if (manifestPage.kind === "overview") {
+      const transform = drawPlanScene(
+        page,
+        fullPlanScene,
+        manifestPage.boundsMm,
+        insetRect(baseRect, DRAWING_INSET_PT),
+        input.project.unit,
+        input.settings.grid
+      );
+      drawScaleBar(page, fonts, input.project.unit, transform.scalePtPerMm);
+      continue;
+    }
+
+    if (manifestPage.kind === "room-plan") {
+      const scene = roomScene(fullPlanScene, input.project, manifestPage.roomId);
+      const transform = drawPlanScene(
+        page,
+        scene,
+        manifestPage.boundsMm,
+        insetRect(
+          baseRect,
+          input.settings.dimensions
+            ? DIMENSION_DRAWING_INSET_PT
+            : DRAWING_INSET_PT
+        ),
+        input.project.unit,
+        input.settings.grid
+      );
+      if (input.settings.dimensions && scene.rooms[0]) {
+        drawRoomWallDimensions(
+          page,
+          fonts,
+          scene.rooms[0],
+          transform,
+          input.project.unit
+        );
+      }
+      drawScaleBar(page, fonts, input.project.unit, transform.scalePtPerMm);
+      continue;
+    }
+
+    if (manifestPage.kind === "elevation") {
+      const placement = input.project.floor.rooms.find(
+        (candidate) => candidate.roomId === manifestPage.roomId
+      );
+      const wall = placement
+        ? getRoomPlaceableWalls(placement.room).find(
+            (candidate) => candidate.id === manifestPage.wallId
+          )
+        : undefined;
+      if (!placement || !wall) continue;
+      const scene = buildElevationScene(input.project.wallObjects, {
+        wallId: wall.id,
+        wallLengthMm: wall.lengthMm,
+        wallHeightMm: wall.heightMm,
+        centerlineMm:
+          wall.defaultCenterlineHeightMm ??
+          input.project.defaultCenterlineHeightMm,
+        artworksById
+      });
+      const drawingRect = insetRect(
+        baseRect,
+        input.settings.dimensions
+          ? DIMENSION_DRAWING_INSET_PT
+          : DRAWING_INSET_PT
+      );
+      const fit = fitBoundsToRect(manifestPage.boundsMm, drawingRect);
+      const transform = createElevationTransform(manifestPage.boundsMm, fit);
+
+      page.drawRectangle({
+        x: fit.xPt,
+        y: fit.yPt,
+        width: fit.widthPt,
+        height: fit.heightPt,
+        color: COLORS.white,
+        borderColor: COLORS.muted,
+        borderWidth: 0.75
+      });
+      if (input.settings.grid) {
+        drawElevationGrid(page, scene, transform, input.project.unit);
+      }
+      drawLine(
+        page,
+        transform.point({ xMm: 0, yMm: 0 }),
+        transform.point({ xMm: scene.wallLengthMm, yMm: 0 }),
+        1.4,
+        COLORS.ink
+      );
+
+      let anonymousOrdinal = 0;
+      for (const entry of scene.artworks) {
+        const artwork = entry.artwork;
+        const framing = effectiveFraming(artwork);
+        const imageRectSvg = getArtworkRectSvg(
+          scene.wallHeightMm,
+          entry.centerMm,
+          entry.sizeMm
+        );
+        const imageYUp =
+          scene.wallHeightMm -
+          imageRectSvg.yMm -
+          imageRectSvg.heightMm;
+        const matBand = framing.matWidthMm ?? 0;
+        const frameBand = framing.frame?.widthMm ?? 0;
+        const matRect = elevationRect(
+          transform,
+          imageRectSvg.xMm - matBand,
+          imageYUp - matBand,
+          imageRectSvg.widthMm + matBand * 2,
+          imageRectSvg.heightMm + matBand * 2
+        );
+        const outerRect = {
+          x: matRect.x - frameBand * transform.scalePtPerMm,
+          y: matRect.y - frameBand * transform.scalePtPerMm,
+          width: matRect.width + frameBand * 2 * transform.scalePtPerMm,
+          height: matRect.height + frameBand * 2 * transform.scalePtPerMm
+        };
+        const imageRect = elevationRect(
+          transform,
+          imageRectSvg.xMm,
+          imageYUp,
+          imageRectSvg.widthMm,
+          imageRectSvg.heightMm
+        );
+
+        if (frameBand > 0 && framing.frame) {
+          page.drawRectangle({
+            ...outerRect,
+            color: colorFromHex(FRAME_FINISH_HEX[framing.frame.finish]),
+            borderColor: colorFromHex(MAT_BEVEL_HAIRLINE_HEX),
+            borderWidth: 0.45
+          });
+        }
+        if (matBand > 0) {
+          page.drawRectangle({
+            ...matRect,
+            color: colorFromHex(MAT_FILL_HEX),
+            borderColor: colorFromHex(MAT_BEVEL_HAIRLINE_HEX),
+            borderWidth: 0.45
+          });
+        }
+
+        const embedded = await artworkImage(artwork);
+        if (embedded.status === "ready") {
+          page.drawImage(embedded.image, imageRectInside(imageRect, embedded.image));
+          page.drawRectangle({
+            ...imageRect,
+            borderColor: COLORS.muted,
+            borderWidth: 0.65
+          });
+        } else {
+          if (!artwork?.title && !artwork?.accessionNumber && !artwork?.artist) {
+            anonymousOrdinal += 1;
+          }
+          const label = artworkPlaceholderLabel(
+            artwork,
+            Math.max(1, anonymousOrdinal)
+          );
+          drawArtworkPlaceholder(
+            page,
+            fonts,
+            imageRect,
+            label,
+            embedded.status === "missing"
+          );
+          if (embedded.status === "missing") {
+            warnings.add(
+              `Image unavailable for ${warningName(
+                artwork,
+                `work ${entry.object.id}`
+              )}.`
+            );
+          }
+        }
+        page.drawRectangle({
+          ...outerRect,
+          borderColor: COLORS.muted,
+          borderWidth: 0.75
+        });
+      }
+
+      for (const opening of scene.openings) {
+        drawElevationOpening(page, transform, opening);
+      }
+      if (input.settings.dimensions) {
+        drawElevationDimensions(
+          page,
+          fonts,
+          scene,
+          transform,
+          input.project.unit
+        );
+      }
+      drawScaleBar(page, fonts, input.project.unit, transform.scalePtPerMm);
+      continue;
+    }
+
+    const savedView = input.project.savedViews?.find(
+      (view) => view.id === manifestPage.savedViewId
+    );
+    if (!savedView || !input.renderSavedView) {
+      throw new Error("A selected Saved view could not be rendered.");
+    }
+    const renderRect = insetRect(baseRect, DRAWING_INSET_PT);
+    const renderScale = THREE_D_RENDER_DPI / 72;
+    const blob = await input.renderSavedView(savedView, {
+      widthPx: Math.max(1, Math.round(renderRect.widthPt * renderScale)),
+      heightPx: Math.max(1, Math.round(renderRect.heightPt * renderScale))
+    });
+    const image = await embedBlob(pdf, blob);
+    page.drawImage(
+      image,
+      imageRectInside(
+        {
+          x: renderRect.xPt,
+          y: renderRect.yPt,
+          width: renderRect.widthPt,
+          height: renderRect.heightPt
+        },
+        image
+      )
+    );
+  }
+
+  if (fonts.substitutedUnsupportedText) {
+    warnings.add(
+      "Some text used fallback characters because the PDF font did not include every glyph."
+    );
+  }
+  const bytes = await pdf.save();
+  return {
+    bytes,
+    pageCount: manifest.length,
+    warnings: [...warnings],
+    manifest
+  };
+}
