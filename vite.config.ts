@@ -18,8 +18,14 @@ export default defineConfig({
           if (/node_modules\/(three|@react-three|three-stdlib|react-reconciler|its-fine|suspend-react|maath)\//.test(id)) {
             return "three";
           }
-          // Same for the PDF stack: reachable only through the dynamic
-          // import in handleExportPdf.
+          // Fontkit is independently large. Keep it beside, rather than inside,
+          // the PDF writer chunk; Vite can preload both in parallel when export
+          // begins while the global warning still catches eager-chunk growth.
+          if (id.includes("node_modules/@pdf-lib/fontkit/")) {
+            return "fontkit";
+          }
+          // The PDF stack is reachable only through the dynamic import in
+          // handleExportPdf.
           if (/node_modules\/(pdf-lib|@pdf-lib)\//.test(id)) {
             return "pdf";
           }

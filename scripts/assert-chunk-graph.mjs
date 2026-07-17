@@ -1,4 +1,4 @@
-// Build invariant: the eager chunk graph must never reach the three or pdf
+// Build invariant: the eager chunk graph must never reach the three, pdf, or fontkit
 // chunks. Three.js must remain reachable only through the lazy ThreeDView
 // import; pdf-lib/fontkit only through handleExportPdf's dynamic import.
 import { readFileSync, readdirSync } from "node:fs";
@@ -14,7 +14,7 @@ if (!entryMatch) {
 }
 
 // Fail if naming changes instead of silently asserting nothing.
-const LAZY_CHUNKS = ["three", "pdf"];
+const LAZY_CHUNKS = ["three", "pdf", "fontkit"];
 const assetFiles = readdirSync(path.join(dist, "assets"));
 for (const name of LAZY_CHUNKS) {
   if (!assetFiles.some((file) => new RegExp(`^${name}-.*\\.js$`).test(file))) {
@@ -50,7 +50,7 @@ const offenders = [...eager].filter((file) =>
 if (offenders.length > 0) {
   console.error(
     `assert-chunk-graph: FAIL — the eager chunk graph statically reaches a lazy-only chunk: ${offenders.join(", ")}\n` +
-      "The 3D stack must load only via the lazy ThreeDView import and the PDF stack only via handleExportPdf's dynamic import. See vite.config.ts manualChunks."
+      "The 3D stack must load only via the lazy ThreeDView import and the PDF/fontkit stacks only via handleExportPdf's dynamic import. See vite.config.ts manualChunks."
   );
   process.exit(1);
 }
