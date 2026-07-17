@@ -12,8 +12,8 @@ import type { OpeningKind } from "../../../domain/placement/createOpening";
 import type { DisplayUnit } from "../../../domain/project";
 import { DEFAULT_FREESTANDING_THICKNESS_MM } from "../../../domain/geometry/freestandingWalls";
 import type { Guide } from "../../../domain/snapping/resolveSnap";
-import { PlanObject } from "../PlanObject";
-import { marqueeRectMm, type MarqueeState } from "../marqueeRect";
+import { PlanObject } from "./PlanObject";
+import { marqueeRectMm, type MarqueeState } from "../shared/marqueeRect";
 import type {
   DrawState,
   DropGhostState,

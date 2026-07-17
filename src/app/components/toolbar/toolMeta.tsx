@@ -3,7 +3,7 @@ import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
 import { PolygonIcon } from "@phosphor-icons/react/dist/csr/Polygon";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
 import type { OpeningKind } from "../../../domain/placement/createOpening";
-import { PartitionGlyph, RectangleRoomGlyph, WindowGlyph } from "../toolbarGlyphs";
+import { PartitionGlyph, RectangleRoomGlyph, WindowGlyph } from "./toolbarGlyphs";
 
 // Shared descriptors for the insert tools, so the full segmented picker and
 // the compact menu/trigger agree on every icon, label, resting hint, and

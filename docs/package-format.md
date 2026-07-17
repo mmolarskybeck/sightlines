@@ -164,7 +164,7 @@ Relevant code: `src/domain/package/extractPackage.ts` (zip safety),
 `readPackageManifest` in `packageSchema.ts` (staged manifest parse),
 `src/domain/package/importPackage.ts` (asset validation, merge planning,
 finalize), `importSightlinesPackage` in `src/app/store.ts` (wiring + persistence),
-`src/app/components/ImportConflictDialog.tsx` (one-step conflict review).
+`src/app/components/imports/ImportConflictDialog.tsx` (one-step conflict review).
 
 ### Zip safety caps (enforced on declared sizes, BEFORE inflation)
 

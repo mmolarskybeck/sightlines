@@ -4,8 +4,8 @@ import { createSampleProject } from "../../domain/sample/sampleProject";
 import { getWallsWithGeometry } from "../../domain/geometry/walls";
 import { FIT_VIEWPORT } from "../../domain/viewport/viewport2d";
 import { useAppStore } from "../store";
-import { ElevationView } from "./ElevationView";
-import { PlanView } from "./PlanView";
+import { ElevationView } from "./elevation/ElevationView";
+import { PlanView } from "./plan/PlanView";
 import { TooltipProvider } from "./ui/tooltip";
 
 class MockResizeObserver {

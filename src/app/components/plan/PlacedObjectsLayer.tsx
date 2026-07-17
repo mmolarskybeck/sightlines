@@ -15,8 +15,8 @@ import {
 import type { PlanPlacement } from "../../../domain/snapping/planSnapTargets";
 import type { PlanRect } from "../../../domain/geometry/planObjects";
 import type { Vector2 } from "../../../domain/geometry/dragResize";
-import { PlanObject } from "../PlanObject";
-import { ArtworkTooltipContent, OpeningTooltipContent } from "../PlacementTooltip";
+import { PlanObject } from "./PlanObject";
+import { ArtworkTooltipContent, OpeningTooltipContent } from "../shared/PlacementTooltip";
 import type { ObjectDragState } from "./types";
 
 // Render-only placed-objects layer: the advisory opening-connection glyphs, the

@@ -10,10 +10,10 @@ import {
   type PlanSceneRoom
 } from "../../../domain/scene2d/planScene";
 import type { DisplayUnit, RoomPlacement } from "../../../domain/project";
-import { RoomResizeHandles, type ResizeHandleTarget } from "../RoomResizeHandles";
-import { RoomReshapeHandles } from "../RoomReshapeHandles";
-import { WallSlideHandles } from "../WallSlideHandles";
-import { WallLengthLabels } from "../WallLengthLabels";
+import { RoomResizeHandles, type ResizeHandleTarget } from "./RoomResizeHandles";
+import { RoomReshapeHandles } from "./RoomReshapeHandles";
+import { WallSlideHandles } from "./WallSlideHandles";
+import { WallLengthLabels } from "./WallLengthLabels";
 import type { DragState, PartitionDragState, VertexDragState, WallDragState } from "./types";
 
 // Render-only selection-decoration layer: the selected room's wash/outline plus

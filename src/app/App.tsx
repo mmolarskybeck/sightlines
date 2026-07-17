@@ -34,7 +34,7 @@ import {
   getOrthogonalQuadWallPair,
 } from "../domain/geometry/walls";
 import { getRoomPlaceableWalls } from "../domain/geometry/placeableWalls";
-import type { WallSwitcherEntry } from "./components/WallSwitcher";
+import type { WallSwitcherEntry } from "./components/elevation/WallSwitcher";
 import { evaluateOpeningPair } from "../domain/geometry/openingConnections";
 import { getOpeningKindLabel, type OpeningKind } from "../domain/placement/createOpening";
 import { withArtworkFootprintFromMap } from "../domain/framing";
@@ -62,22 +62,22 @@ import {
   type UnitSystem
 } from "../domain/units/unitSystem";
 import { AppRail } from "./components/AppRail";
-import { ArtworkInspector } from "./components/ArtworkInspector";
-import { ArtworkLibraryPicker, ArtworkLibraryView } from "./components/ArtworkLibrary";
-import { PanelResizeHandle } from "./components/PanelResizeHandle";
-import { ChecklistPanel } from "./components/ChecklistPanel";
-import { DeleteRoomDialog } from "./components/DeleteRoomDialog";
-import { ImportConflictDialog } from "./components/ImportConflictDialog";
-import { HelpDialog } from "./components/HelpDialog";
-import { ElevationEmptyState } from "./components/ElevationEmptyState";
-import { FloorObjectInspector, FloorPlacementFields } from "./components/FloorObjectInspector";
-import { FreestandingWallInspector } from "./components/FreestandingWallInspector";
+import { ArtworkInspector } from "./components/inspectors/ArtworkInspector";
+import { ArtworkLibraryPicker, ArtworkLibraryView } from "./components/library/ArtworkLibrary";
+import { PanelResizeHandle } from "./components/shared/PanelResizeHandle";
+import { ChecklistPanel } from "./components/panels/ChecklistPanel";
+import { DeleteRoomDialog } from "./components/dialogs/DeleteRoomDialog";
+import { ImportConflictDialog } from "./components/imports/ImportConflictDialog";
+import { HelpDialog } from "./components/dialogs/HelpDialog";
+import { ElevationEmptyState } from "./components/elevation/ElevationEmptyState";
+import { FloorObjectInspector, FloorPlacementFields } from "./components/inspectors/FloorObjectInspector";
+import { FreestandingWallInspector } from "./components/inspectors/FreestandingWallInspector";
 import {
   OpeningInspector,
   type OpeningConnectionCandidate
-} from "./components/OpeningInspector";
-import { PlanEmptyState } from "./components/PlanEmptyState";
-import { PlanView } from "./components/PlanView";
+} from "./components/inspectors/OpeningInspector";
+import { PlanEmptyState } from "./components/plan/PlanEmptyState";
+import { PlanView } from "./components/plan/PlanView";
 import { captureSvgSnapshot } from "./export/captureSnapshot";
 import {
   DrawPicker,
@@ -99,19 +99,19 @@ import { ToolbarTooltipKbd } from "./components/toolbar/ToolbarTooltipKbd";
 import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover";
 import { Toaster } from "./components/ui/sonner";
 import { toast } from "sonner";
-import { ProjectPicker } from "./components/ProjectPicker";
-import { RoomInspector } from "./components/RoomInspector";
-import { RoomsPanel } from "./components/RoomsPanel";
-import { SavedViewsPanel } from "./components/SavedViewsPanel";
-import { SelectionInspector } from "./components/SelectionInspector";
-import { MeasurementInspector, ReferenceMeasurementInspector } from "./components/MeasurementInspector";
-import { MeasurementLiveRegion } from "./components/MeasurementLiveRegion";
+import { ProjectPicker } from "./components/library/ProjectPicker";
+import { RoomInspector } from "./components/inspectors/RoomInspector";
+import { RoomsPanel } from "./components/panels/RoomsPanel";
+import { SavedViewsPanel } from "./components/panels/SavedViewsPanel";
+import { SelectionInspector } from "./components/inspectors/SelectionInspector";
+import { MeasurementInspector, ReferenceMeasurementInspector } from "./components/inspectors/MeasurementInspector";
+import { MeasurementLiveRegion } from "./components/measurement/MeasurementLiveRegion";
 import {
   WallPlacementFields,
   getWallPlacementCenterTarget,
   getWallPlacementNeighborEdges
-} from "./components/WallPlacementFields";
-import { WallInspector, type WallDimensionLink } from "./components/WallInspector";
+} from "./components/inspectors/WallPlacementFields";
+import { WallInspector, type WallDimensionLink } from "./components/inspectors/WallInspector";
 import { Button } from "./components/ui/button";
 import {
   DropdownMenu,
@@ -162,12 +162,12 @@ import type { SavedViewRenderHandle } from "./components/three/SavedViewRenderHo
 import { useSavedViewThumbnails } from "./hooks/useSavedViewThumbnails";
 import type { EffectiveDocumentSettings } from "../domain/export/documentSettings";
 
-const ImportWizard = lazy(() => import("./components/ImportWizard"));
+const ImportWizard = lazy(() => import("./components/imports/ImportWizard"));
 const SettingsDialog = lazy(() =>
-  import("./components/SettingsDialog").then((module) => ({ default: module.SettingsDialog }))
+  import("./components/dialogs/SettingsDialog").then((module) => ({ default: module.SettingsDialog }))
 );
 const ExportPdfDialog = lazy(() =>
-  import("./components/ExportPdfDialog").then((module) => ({
+  import("./components/dialogs/ExportPdfDialog").then((module) => ({
     default: module.ExportPdfDialog
   }))
 );
@@ -181,7 +181,7 @@ const SavedViewRenderHost = lazy(() =>
   }))
 );
 const ElevationView = lazy(() =>
-  import("./components/ElevationView").then((module) => ({ default: module.ElevationView }))
+  import("./components/elevation/ElevationView").then((module) => ({ default: module.ElevationView }))
 );
 const ThreeDView = lazy(() =>
   import("./components/three/ThreeDView").then((module) => ({ default: module.ThreeDView }))

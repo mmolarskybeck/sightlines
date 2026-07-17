@@ -8,7 +8,7 @@ import type {
 import { buildElevationScene, wallLocalYToSvgY } from "./elevationScene";
 
 // wallLocalYToSvgY / getArtworkRectSvg / isArtworkOutOfWallBounds moved here
-// from app/components/elevationArtworkGeometry.ts, which still owns their
+// from app/components/elevation/elevationArtworkGeometry.ts, which still owns their
 // characterization tests via its re-exports — this file covers only the
 // scene builder itself.
 

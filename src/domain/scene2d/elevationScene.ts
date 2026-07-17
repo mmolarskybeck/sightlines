@@ -19,7 +19,7 @@ import { getPlacementFootprintMm } from "../framing";
 
 // Wall-local coordinates are y-up from the floor (docs/plan.md §2); SVG is
 // y-down from the top. Every elevation drawing goes through this one flip.
-// (Moved here from app/components/elevationArtworkGeometry.ts so the export
+// (Moved here from app/components/elevation/elevationArtworkGeometry.ts so the export
 // builders can share it without importing app code; that module re-exports
 // it for the existing component imports.)
 export function wallLocalYToSvgY(wallHeightMm: number, yMm: number): number {
