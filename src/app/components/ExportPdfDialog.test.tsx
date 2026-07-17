@@ -3,7 +3,6 @@ import {
   fireEvent,
   render,
   screen,
-  waitFor,
   within
 } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -121,9 +120,7 @@ function projectWithDefaultSavedViewTitle(): Project {
 function renderDialog(project: Project = projectWithExportContent()) {
   const handlers = {
     onOpenChange: vi.fn(),
-    onExport: vi.fn(),
-    onRenameSavedView: vi.fn().mockResolvedValue(undefined),
-    onDeleteSavedView: vi.fn().mockResolvedValue(undefined)
+    onExport: vi.fn()
   };
   render(
     <TooltipProvider>
@@ -165,6 +162,26 @@ describe("ExportPdfDialog", () => {
     expect(screen.getByText(/Exports/).parentElement).toHaveTextContent(
       "Exports 3 pages"
     );
+  });
+
+  it("keeps the 3D views rows to inclusion only — no rename or delete actions", () => {
+    renderDialog();
+
+    expect(
+      screen.queryByRole("button", {
+        name: "Rename Main Gallery · Entrance sightline"
+      })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "Delete Main Gallery · Entrance sightline"
+      })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("textbox", {
+        name: "Rename Main Gallery · Entrance sightline"
+      })
+    ).not.toBeInTheDocument();
   });
 
   it("uses tri-state select-all and preserves child choices while a section is off", () => {
@@ -245,35 +262,6 @@ describe("ExportPdfDialog", () => {
     );
   });
 
-  it("renames and deletes Saved views through project-data callbacks", async () => {
-    const { onRenameSavedView, onDeleteSavedView } = renderDialog();
-
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Rename Main Gallery · Entrance sightline"
-      })
-    );
-    const input = screen.getByRole("textbox", {
-      name: "Rename Main Gallery · Entrance sightline"
-    });
-    fireEvent.change(input, { target: { value: "Doorway reveal" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save view title" }));
-
-    await waitFor(() =>
-      expect(onRenameSavedView).toHaveBeenCalledWith(
-        "view-1",
-        "Doorway reveal"
-      )
-    );
-
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Delete Main Gallery · Entrance sightline"
-      })
-    );
-    expect(onDeleteSavedView).toHaveBeenCalledWith("view-1");
-  });
-
   it("omits the redundant saved-view subtitle for a default title, shows it once renamed", () => {
     renderDialog(projectWithDefaultSavedViewTitle());
 
@@ -328,8 +316,6 @@ describe("ExportPdfDialog", () => {
           project={projectWithExportContent()}
           onOpenChange={vi.fn()}
           onExport={vi.fn()}
-          onRenameSavedView={vi.fn().mockResolvedValue(undefined)}
-          onDeleteSavedView={vi.fn().mockResolvedValue(undefined)}
           exportState={{ done: 2, total: 5 }}
           onCancelExport={onCancelExport}
         />
@@ -361,8 +347,6 @@ describe("ExportPdfDialog", () => {
           project={projectWithExportContent()}
           onOpenChange={onOpenChange}
           onExport={vi.fn()}
-          onRenameSavedView={vi.fn().mockResolvedValue(undefined)}
-          onDeleteSavedView={vi.fn().mockResolvedValue(undefined)}
           exportState={{ done: 0, total: 4 }}
           onCancelExport={onCancelExport}
         />

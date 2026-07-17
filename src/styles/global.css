@@ -1024,7 +1024,7 @@ input:focus-visible {
 
 .export-saved-view-row {
   display: grid;
-  grid-template-columns: 20px 74px minmax(0, 1fr) auto;
+  grid-template-columns: 20px 74px minmax(0, 1fr);
   min-height: 58px;
   align-items: center;
   gap: 8px;
@@ -1099,21 +1099,6 @@ input:focus-visible {
 
 .export-saved-view-row[data-invalid] .export-saved-view-copy span {
   color: var(--caution);
-}
-
-.export-saved-view-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  transition: opacity 120ms var(--ease-soft);
-}
-
-.export-saved-view-rename {
-  display: grid;
-  grid-column: 3 / -1;
-  grid-template-columns: minmax(0, 1fr) 32px 32px;
-  align-items: center;
-  gap: 2px;
 }
 
 .export-empty-hint {
@@ -1220,17 +1205,6 @@ input:focus-visible {
   margin: 0 2px;
   color: var(--ink);
   font-weight: var(--weight-semibold);
-}
-
-@media (pointer: fine) {
-  .export-saved-view-actions {
-    opacity: 0;
-  }
-
-  .export-saved-view-row:hover .export-saved-view-actions,
-  .export-saved-view-row:focus-within .export-saved-view-actions {
-    opacity: 1;
-  }
 }
 
 .export-page-error {
@@ -7413,11 +7387,6 @@ body.panels-resizing * {
   .export-saved-view-thumbnail {
     width: 60px;
     height: 40px;
-  }
-
-  .export-saved-view-actions {
-    grid-column: 3;
-    justify-content: flex-start;
   }
 }
 

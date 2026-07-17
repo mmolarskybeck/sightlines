@@ -1,12 +1,8 @@
 import { useMemo, useState } from "react";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
-import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
 import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
-import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
-import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
-import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import {
   countDocumentPages,
   selectionState,
@@ -15,7 +11,7 @@ import {
   type DocumentSectionId,
   type EffectiveDocumentSettings
 } from "../../domain/export/documentSettings";
-import type { Project, SavedView } from "../../domain/project";
+import type { Project } from "../../domain/project";
 import { composeSavedViewLabel } from "../../domain/savedViews";
 import { useDocumentExportPreferences } from "../hooks/useDocumentExportPreferences";
 import { Button } from "./ui/button";
@@ -33,7 +29,6 @@ import {
   DialogHeader,
   DialogTitle
 } from "./ui/dialog";
-import { Input } from "./ui/input";
 import { Progress } from "./ui/progress";
 import {
   Select,
@@ -43,11 +38,6 @@ import {
   SelectValue
 } from "./ui/select";
 import { Switch } from "./ui/switch";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger
-} from "./ui/tooltip";
 
 const PAPER_SIZE_OPTIONS: {
   value: DocumentPaperSize;
@@ -64,8 +54,6 @@ type ExportPdfDialogProps = {
   project: Project;
   onOpenChange: (open: boolean) => void;
   onExport: (settings: EffectiveDocumentSettings) => void;
-  onRenameSavedView: (viewId: string, title: string) => Promise<void>;
-  onDeleteSavedView: (viewId: string) => Promise<void>;
   onPersistenceError?: (message: string) => void;
   thumbnailUrls?: Readonly<Record<string, string>>;
   // Determinate progress while App assembles the PDF; null/undefined = idle.
@@ -79,8 +67,6 @@ export function ExportPdfDialog({
   project,
   onOpenChange,
   onExport,
-  onRenameSavedView,
-  onDeleteSavedView,
   onPersistenceError,
   thumbnailUrls = {},
   exportState,
@@ -93,8 +79,6 @@ export function ExportPdfDialog({
     elevations: true,
     threeDViews: true
   });
-  const [editingViewId, setEditingViewId] = useState<string | null>(null);
-  const [draftTitle, setDraftTitle] = useState("");
   const pageCount = countDocumentPages(settings);
   const isExporting = exportState != null;
 
@@ -158,26 +142,6 @@ export function ExportPdfDialog({
     } else {
       setSection(sectionId, false);
     }
-  };
-
-  const startRename = (view: SavedView) => {
-    setEditingViewId(view.id);
-    setDraftTitle(view.title);
-  };
-
-  const cancelRename = () => {
-    setEditingViewId(null);
-    setDraftTitle("");
-  };
-
-  const commitRename = async (view: SavedView) => {
-    const title = draftTitle.trim();
-    if (!title) {
-      setDraftTitle(view.title);
-      return;
-    }
-    cancelRename();
-    await onRenameSavedView(view.id, title);
   };
 
   const roomPlanValues = settings.rooms.map((room) => room.planIncluded);
@@ -435,7 +399,6 @@ export function ExportPdfDialog({
                     {settings.savedViews.map((choice) => {
                       const { composedLabel, defaultTitle, isRenamed } =
                         composeSavedViewLabel(project, choice.view);
-                      const isEditing = editingViewId === choice.view.id;
                       return (
                         <div
                           className="export-saved-view-row"
@@ -457,106 +420,24 @@ export function ExportPdfDialog({
                             label={composedLabel}
                             src={thumbnailUrls[choice.view.id]}
                           />
-                          {isEditing ? (
-                            <form
-                              className="export-saved-view-rename"
-                              onSubmit={(event) => {
-                                event.preventDefault();
-                                void commitRename(choice.view);
-                              }}
-                            >
-                              <Input
-                                aria-label={`Rename ${composedLabel}`}
-                                autoFocus
-                                size="compact"
-                                value={draftTitle}
-                                onChange={(event) =>
-                                  setDraftTitle(event.target.value)
-                                }
-                                onKeyDown={(event) => {
-                                  if (event.key === "Escape") {
-                                    event.preventDefault();
-                                    cancelRename();
-                                  }
-                                }}
-                              />
-                              <Button
-                                aria-label="Save view title"
-                                className="icon-button compact"
-                                disabled={!draftTitle.trim()}
-                                size="icon-sm"
-                                type="submit"
-                                variant="ghost"
-                              >
-                                <CheckIcon aria-hidden="true" size={14} />
-                              </Button>
-                              <Button
-                                aria-label="Cancel rename"
-                                className="icon-button compact"
-                                size="icon-sm"
-                                variant="ghost"
-                                onClick={cancelRename}
-                              >
-                                <XIcon aria-hidden="true" size={14} />
-                              </Button>
-                            </form>
-                          ) : (
-                            <>
-                              <div className="export-saved-view-copy">
-                                <strong>{composedLabel}</strong>
-                                {choice.valid ? (
-                                  isRenamed && <span>{defaultTitle}</span>
-                                ) : (
-                                  <span>
-                                    <WarningIcon
-                                      aria-hidden="true"
-                                      size={13}
-                                    />
-                                    Invalid camera pose. Excluded from export.
-                                  </span>
-                                )}
-                              </div>
-                              <div className="export-saved-view-actions">
-                                <IconTooltip label={`Rename ${composedLabel}`}>
-                                  <Button
-                                    aria-label={`Rename ${composedLabel}`}
-                                    className="icon-button compact"
-                                    size="icon-sm"
-                                    variant="ghost"
-                                    onClick={() => startRename(choice.view)}
-                                  >
-                                    <PencilSimpleIcon
-                                      aria-hidden="true"
-                                      size={14}
-                                    />
-                                  </Button>
-                                </IconTooltip>
-                                <IconTooltip label={`Delete ${composedLabel}`}>
-                                  <Button
-                                    aria-label={`Delete ${composedLabel}`}
-                                    className="icon-button compact"
-                                    size="icon-sm"
-                                    variant="ghost"
-                                    onClick={() =>
-                                      void onDeleteSavedView(choice.view.id)
-                                    }
-                                  >
-                                    <TrashIcon
-                                      aria-hidden="true"
-                                      size={14}
-                                    />
-                                  </Button>
-                                </IconTooltip>
-                              </div>
-                            </>
-                          )}
+                          <div className="export-saved-view-copy">
+                            <strong>{composedLabel}</strong>
+                            {choice.valid ? (
+                              isRenamed && <span>{defaultTitle}</span>
+                            ) : (
+                              <span>
+                                <WarningIcon aria-hidden="true" size={13} />
+                                Invalid camera pose. Excluded from export.
+                              </span>
+                            )}
+                          </div>
                         </div>
                       );
                     })}
                   </div>
                 ) : (
                   <p className="export-empty-hint">
-                    Save views from the 3D window to include them here.
+                    Save views from the 3D view to include them here.
                   </p>
                 )}
               </ExportSection>
@@ -791,20 +672,5 @@ function SavedViewThumbnail({
     >
       <CubeIcon aria-hidden="true" size={22} />
     </span>
-  );
-}
-
-function IconTooltip({
-  children,
-  label
-}: {
-  children: React.ReactElement;
-  label: string;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
   );
 }

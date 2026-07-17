@@ -2397,8 +2397,6 @@ export function App() {
           project={project}
           onOpenChange={handleExportPdfOpenChange}
           onExport={(settings) => void handleExportPdf(settings)}
-          onRenameSavedView={renameSavedView}
-          onDeleteSavedView={deleteSavedView}
           onPersistenceError={(message) => toast.error(message)}
           thumbnailUrls={savedViewThumbnailUrls}
           exportState={pdfExportProgress}
