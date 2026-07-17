@@ -4,7 +4,7 @@
 // in one place.
 
 export const DB_NAME = "sightlines";
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 
 export const PROJECT_STORE = "projects";
 export const ARTWORK_STORE = "artworks";
@@ -13,6 +13,11 @@ export const ASSET_STORE = "assets";
 // `${assetId}:thumbnail` (see assetRepository.ts's assetBlobKey), not under
 // a keyPath on the blob itself.
 export const ASSET_BLOB_STORE = "assetBlobs";
+// Derived cache of rendered Saved-view previews (saved-views spec §3.2). Keyed
+// out-of-line by `${projectId}:${viewId}` (see savedViewThumbnailRepository.ts),
+// value `{ blob, projectUpdatedAt }`. Lives outside project persistence — never
+// in project JSON, undo history, or `.sightlines` packages.
+export const SAVED_VIEW_THUMBNAIL_STORE = "savedViewThumbnails";
 
 let databasePromise: Promise<IDBDatabase> | undefined;
 
@@ -44,6 +49,12 @@ export function openDatabase(): Promise<IDBDatabase> {
 
       if (!db.objectStoreNames.contains(ASSET_BLOB_STORE)) {
         db.createObjectStore(ASSET_BLOB_STORE);
+      }
+
+      // v2 → v3: the Saved-view thumbnail cache. Out-of-line string keys, same
+      // as ASSET_BLOB_STORE.
+      if (!db.objectStoreNames.contains(SAVED_VIEW_THUMBNAIL_STORE)) {
+        db.createObjectStore(SAVED_VIEW_THUMBNAIL_STORE);
       }
     };
 

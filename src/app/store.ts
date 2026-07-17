@@ -3786,6 +3786,13 @@ export const useAppStore = createAppStore({
       "./hooks/useDocumentExportPreferences"
     );
     deleteStoredDocumentExportPreferences(projectId);
+    // A project's Saved-view thumbnails are a derived cache outside the project;
+    // they follow its lifecycle alongside the workspace-preference record
+    // (saved-views spec §3.2, export-spec §6.3).
+    const { IndexedDbSavedViewThumbnailRepository } = await import(
+      "../domain/repositories/indexedDbSavedViewThumbnailRepository"
+    );
+    await new IndexedDbSavedViewThumbnailRepository().deleteByProject(projectId);
   }
 });
 

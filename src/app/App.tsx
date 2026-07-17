@@ -153,6 +153,7 @@ import {
 import { getArrangeEligibility } from "./store/arrangeEligibility";
 import type { ThreeDViewActions } from "./components/three/ThreeDView";
 import type { SavedViewRenderHandle } from "./components/three/SavedViewRenderHost";
+import { useSavedViewThumbnails } from "./hooks/useSavedViewThumbnails";
 import type { EffectiveDocumentSettings } from "../domain/export/documentSettings";
 
 const ImportWizard = lazy(() => import("./components/ImportWizard"));
@@ -165,8 +166,9 @@ const ExportPdfDialog = lazy(() =>
   }))
 );
 // Lazy so the three.js it pulls in (via SnapshotStage) stays out of the initial
-// bundle, like ThreeDView. Mounted only while the Export PDF flow is engaged, so
-// the chunk loads when the user opens the dialog from any view — never at boot.
+// bundle, like ThreeDView. Mounted only while a thumbnail consumer is visible or
+// thumbnail work is pending (Export dialog, or a just-saved view's seed render),
+// so the chunk loads on demand — never at boot, and never for an idle project.
 const SavedViewRenderHost = lazy(() =>
   import("./components/three/SavedViewRenderHost").then((module) => ({
     default: module.SavedViewRenderHost
@@ -348,7 +350,24 @@ export function App() {
   // Aborts the in-flight PDF export; a cancel or a mid-export dialog dismissal
   // trips it, delivering nothing (§12).
   const pdfExportAbortRef = useRef<AbortController | null>(null);
-  const savedViewRenderRef = useRef<SavedViewRenderHandle | null>(null);
+  // The render host's handle. Exposed both as a live ref (the PDF export path
+  // reads `.current` synchronously) and as state (so useSavedViewThumbnails's
+  // processing loop re-runs when the host mounts and the handle attaches). The
+  // memoized wrapper mirrors every write into both.
+  const [savedViewRenderHandle, setSavedViewRenderHandle] =
+    useState<SavedViewRenderHandle | null>(null);
+  const savedViewRenderRef = useMemo(() => {
+    let value: SavedViewRenderHandle | null = null;
+    return {
+      get current() {
+        return value;
+      },
+      set current(next: SavedViewRenderHandle | null) {
+        value = next;
+        setSavedViewRenderHandle(next);
+      }
+    };
+  }, []);
   // Prevent re-entry while package assets are hashed and zipped.
   const [isExportingPackage, setIsExportingPackage] = useState(false);
 
@@ -673,6 +692,20 @@ export function App() {
     () => new Map(libraryArtworks.map((artwork) => [artwork.id, artwork])),
     [libraryArtworks]
   );
+
+  // Saved-view thumbnail cache (saved-views spec §3). The Export dialog is the
+  // only consumer in Phase A, so it drives regeneration; `seedThumbnail` renders
+  // a just-saved view immediately. `thumbnailsPending` keeps the render host
+  // mounted while any thumbnail is queued or rendering.
+  const {
+    urls: savedViewThumbnailUrls,
+    hasPendingWork: thumbnailsPending,
+    seed: seedThumbnail
+  } = useSavedViewThumbnails({
+    project,
+    renderHandle: savedViewRenderHandle,
+    active: isExportPdfOpen
+  });
 
   // Elevation navigation includes perimeter walls and partition faces in room order.
   const wallsForSwitcher = useMemo<WallSwitcherEntry[]>(
@@ -1111,6 +1144,9 @@ export function App() {
     if (!pose) return;
     const saved = await saveView(pose);
     if (!saved) return;
+    // Seed its first render now (§3.4) so the thumbnail exists before the user
+    // next opens the dialog or pane — no wait for the visible-consumer gate.
+    seedThumbnail(saved);
     const roomLabel = resolveSavedViewRoomLabel(project, saved);
     const composed = roomLabel ? `${roomLabel} · ${saved.title}` : saved.title;
     toast.success(`Saved "${composed}"`);
@@ -2316,11 +2352,12 @@ export function App() {
           onRenameSavedView={renameSavedView}
           onDeleteSavedView={deleteSavedView}
           onPersistenceError={(message) => toast.error(message)}
+          thumbnailUrls={savedViewThumbnailUrls}
           exportState={pdfExportProgress}
           onCancelExport={handleCancelExportPdf}
         />
       </Suspense>
-      {isExportPdfOpen || pdfExportProgress ? (
+      {isExportPdfOpen || pdfExportProgress || thumbnailsPending ? (
         <Suspense fallback={null}>
           <SavedViewRenderHost
             project={project}
