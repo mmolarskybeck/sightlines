@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { z } from "zod";
-import { toast } from "sonner";
 import { createBrowserImageProcessor } from "../domain/assets/browserImageProcessor";
 import { titleFromFilename, type ImageProcessor } from "../domain/assets/imageIntake";
 import { buildImageAsset, processImageFile } from "../domain/assets/intakeImageFile";
@@ -38,26 +37,16 @@ import {
   moveRoomWall as moveRoomWallEdit,
   splitWall as splitWallEdit
 } from "../domain/geometry/reshapeRoom";
-import type { WallWithGeometry } from "../domain/geometry/walls";
 import {
   deleteRoomFromProject,
   getRoomCascadeScope
 } from "../domain/geometry/roomCascade";
 import { getFloorWalls } from "../domain/geometry/planObjects";
-import { evaluateOpeningPair } from "../domain/geometry/openingConnections";
-import {
-  findSharedWallCounterpart,
-  mirrorOpeningXMm
-} from "../domain/geometry/sharedWalls";
 import type { PlanPlacement } from "../domain/snapping/planSnapTargets";
-import { createBlankProject } from "../domain/newProject";
 import { newId } from "../domain/id";
 import {
-  createOpeningPlacement,
-  findFreeOpeningCenterXMm,
   getDefaultOpeningCenterYMm,
   getDefaultOpeningSizeMm,
-  getOpeningKindLabel,
   type OpeningKind
 } from "../domain/placement/createOpening";
 import {
@@ -84,34 +73,19 @@ import {
   type DisplayUnit,
   type FloorObject,
   type FloorObjectBase,
-  type OpeningWallObject,
   type Project,
   type ProjectSummary,
-  type ReferenceMeasurement,
-  type SavedView,
-  type SavedViewPose,
   type WallObject
 } from "../domain/project";
-import { resolveSavedViewRoomId } from "../domain/savedViews";
-import { createSightlinesPackage, packageFilename } from "../domain/package/buildPackage";
-import {
-  finalizePackageImport,
-  openSightlinesPackage,
-  planPackageImport,
-  validatePackageAssets,
-  type ConflictResolution,
-  type ImportPlan
-} from "../domain/package/importPackage";
-import type { PackageExportMode } from "../domain/schema/packageSchema";
+import { type ImportPlan } from "../domain/package/importPackage";
 import type { ArtworkLibraryRepository } from "../domain/repositories/artworkLibraryRepository";
-import { AssetNotFoundError, type AssetRepository } from "../domain/repositories/assetRepository";
+import type { AssetRepository } from "../domain/repositories/assetRepository";
 import { IndexedDbArtworkLibraryRepository } from "../domain/repositories/indexedDbArtworkLibraryRepository";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import { IndexedDbProjectRepository } from "../domain/repositories/indexedDbProjectRepository";
 import type { ProjectRepository } from "../domain/repositories/projectRepository";
 import { createSampleProject } from "../domain/sample/sampleProject";
 import { parseArtwork } from "../domain/schema/artworkSchema";
-import { migrateProjectJson } from "../domain/schema/projectSchema";
 import { getFirstWall, getProjectWalls } from "./projectWalls";
 export { getProjectWalls, getSelectedWall } from "./projectWalls";
 import {
@@ -122,11 +96,33 @@ import {
 } from "./store/arrangeSlice";
 export type { ArrangeSession } from "./store/arrangeSlice";
 import {
+  createDocumentMetaSlice,
+  type DocumentMetaSliceActions
+} from "./store/documentMetaSlice";
+import {
+  buildOpeningWithMirror,
+  moveObjectNoun,
+  openingNoun,
+  resolveFreeOpeningXMm,
+  syncPartnerMove,
+  syncPartnerResize
+} from "./store/openingEdits";
+import {
+  createPackageSlice,
+  type PackageSliceActions
+} from "./store/packageSlice";
+import {
+  createProjectManagerSlice,
+  type ProjectManagerSliceActions
+} from "./store/projectManagerSlice";
+import {
+  createSelectionSlice,
   freestandingWallIdOf,
   NO_SELECTION,
   objectIdsOf,
   selectionWrite,
-  type Selection
+  type Selection,
+  type SelectionSliceActions
 } from "./store/selectionSlice";
 export {
   objectIdsOf,
@@ -195,7 +191,11 @@ type UpdateArtworkChanges = Partial<
 type BulkMatFrameChanges = Partial<Pick<Artwork, "matWidthMm" | "frame">>;
 
 export type AppState = ArrangeSliceState &
-  ArrangeSliceActions & {
+  ArrangeSliceActions &
+  DocumentMetaSliceActions &
+  PackageSliceActions &
+  ProjectManagerSliceActions &
+  SelectionSliceActions & {
   project: Project | null;
   // Sole selection state; write through selectionWrite and derive via helpers.
   selection: Selection;
@@ -222,32 +222,6 @@ export type AppState = ArrangeSliceState &
   boot: () => Promise<void>;
   /** Dev-only, non-persisting document swap used by renderer benchmarks. */
   loadBenchmarkFixture: (project: Project, artworks: Artwork[]) => void;
-  setViewMode: (viewMode: ViewMode) => void;
-  selectWall: (wallId: string) => void;
-  selectArtwork: (artworkId: string) => void;
-  selectOpening: (wallObjectId: string) => void;
-  selectRoom: (roomId: string) => void;
-  selectFreestandingWall: (wallId: string) => void;
-  selectMeasurement: (measurementId: string) => void;
-  viewFreestandingFace: (faceWallId: string) => void;
-  selectObject: (id: string, opts?: { additive?: boolean }) => void;
-  setObjectSelection: (ids: string[]) => void;
-  clearObjectSelection: () => void;
-  addReferenceMeasurement: (
-    measurement:
-      | { kind: "plan"; name?: string; start: Point; end: Point }
-      | { kind: "elevation"; wallId: string; name?: string; start: Point; end: Point }
-  ) => Promise<string | null>;
-  updateReferenceMeasurement: (
-    measurementId: string,
-    changes: Partial<Pick<ReferenceMeasurement, "name" | "visible" | "locked" | "start" | "end">>
-  ) => Promise<void>;
-  deleteReferenceMeasurement: (measurementId: string) => Promise<void>;
-  // Captures the current 3D camera pose as a Saved view (spec §8.2). Returns the
-  // created view (for inline feedback) or null when there's no open project.
-  saveView: (pose: SavedViewPose) => Promise<SavedView | null>;
-  renameSavedView: (viewId: string, title: string) => Promise<void>;
-  deleteSavedView: (viewId: string) => Promise<void>;
   renameProject: (title: string) => Promise<void>;
   // Saved-project rename; the open document still routes through undoable renameProject.
   renameProjectById: (id: string, title: string) => Promise<void>;
@@ -302,36 +276,6 @@ export type AppState = ArrangeSliceState &
   moveRoom: (roomId: string, offsetXMm: number, offsetYMm: number) => Promise<void>;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
-  importProjectJson: (text: string) => Promise<void>;
-  // Builds a self-contained .sightlines package (docs/plan.md §6) for the
-  // current project. Pure derivation lives in the domain layer; this action
-  // wires it to the repositories and surfaces failures on the error banner,
-  // returning the zip bytes + filename for the thin UI to download (no DOM here).
-  exportProjectPackage: (
-    mode: PackageExportMode
-  ) => Promise<{ filename: string; zip: Uint8Array; warnings: string[] } | null>;
-  // Same package build, for a project manager row that isn't necessarily the
-  // open document — loads it via the repository instead of reading get().project.
-  exportProjectPackageById: (
-    id: string,
-    mode: PackageExportMode
-  ) => Promise<{ filename: string; zip: Uint8Array; warnings: string[] } | null>;
-  // Runs the untrusted-file pipeline (docs/plan.md §13) over .sightlines
-  // bytes. If §6 artwork conflicts need a decision, the import parks in
-  // pendingPackageImport for the review dialog; otherwise it commits directly.
-  importSightlinesPackage: (bytes: ArrayBuffer) => Promise<void>;
-  resolvePackageImportConflicts: (
-    resolutions: Record<string, ConflictResolution>
-  ) => Promise<void>;
-  dismissPackageImport: () => void;
-  listProjectSummaries: () => Promise<ProjectSummary[]>;
-  listArtworkProjectMemberships: (
-    artworkIds: string[]
-  ) => Promise<ArtworkProjectMembership[]>;
-  openProject: (id: string) => Promise<void>;
-  createProject: (title: string) => Promise<void>;
-  duplicateProject: (id: string) => Promise<void>;
-  deleteProject: (id: string) => Promise<void>;
   addArtworksFromFiles: (
     files: File[],
     opts?: { skipDuplicateCheck?: boolean; destination?: ArtworkImportDestination }
@@ -553,91 +497,6 @@ export function createAppStore(deps: AppStoreDeps) {
         return { widthPx: asset.widthPx, heightPx: asset.heightPx };
       } catch {
         return undefined;
-      }
-    }
-
-    // Shared by exportProjectPackage (the open document) and
-    // exportProjectPackageById (any saved project, via the repository) — the
-    // only difference between the two call sites is which Project they hand
-    // in. No DOM here; the thin UI turns the returned zip into a download.
-    async function buildPackageZip(
-      project: Project,
-      libraryArtworks: Artwork[],
-      mode: PackageExportMode
-    ): Promise<{ filename: string; zip: Uint8Array; warnings: string[] } | null> {
-      try {
-        const { zip, warnings } = await createSightlinesPackage({
-          project,
-          libraryArtworks,
-          mode,
-          getAsset: (assetId) => deps.assetRepository.getAsset(assetId),
-          getBlob: (key) => deps.assetRepository.getBlob(key)
-        });
-        set({ error: null });
-        return { filename: packageFilename(project), zip, warnings };
-      } catch (error) {
-        set({
-          error: `Export failed: ${
-            error instanceof Error ? error.message : "the package could not be built."
-          }`
-        });
-        return null;
-      }
-    }
-
-    // Copy into a fresh ArrayBuffer-backed part so Blob's part type is
-    // satisfied regardless of what pooled buffer the zip inflated into.
-    function bytesToBlob(bytes: Uint8Array, mimeType: string): Blob {
-      const copy = new Uint8Array(bytes.byteLength);
-      copy.set(bytes);
-      return new Blob([copy], { type: mimeType });
-    }
-
-    // The persistence half of a package import: only runs after the whole
-    // untrusted-file pipeline has succeeded and any conflicts are resolved
-    // (docs/plan.md §13 — nothing is written before then). Shared by the
-    // no-conflict fast path and the dialog resolution path.
-    async function commitPackageImport(
-      plan: ImportPlan,
-      resolutions: Record<string, ConflictResolution>
-    ) {
-      const commit = finalizePackageImport(plan, resolutions);
-
-      // Persist the project first and let failures reject. This keeps a failed
-      // project save from writing library data or opening a document that will
-      // disappear on reload. Later repository failures remain visible to the
-      // caller and leave a recoverable project with potentially missing images.
-      if (!(await persist(commit.project))) {
-        throw new Error(get().error ?? "The imported project could not be saved.");
-      }
-
-      for (const prepared of commit.assetsToSave) {
-        await deps.assetRepository.saveAsset(prepared.asset, {
-          original: bytesToBlob(prepared.blobs.original.bytes, prepared.blobs.original.mimeType),
-          display: bytesToBlob(prepared.blobs.display.bytes, prepared.blobs.display.mimeType),
-          thumbnail: bytesToBlob(prepared.blobs.thumbnail.bytes, prepared.blobs.thumbnail.mimeType)
-        });
-      }
-      for (const artwork of commit.artworksToSave) {
-        await deps.artworkLibraryRepository.save(artwork);
-      }
-
-      const libraryArtworks = await deps.artworkLibraryRepository.list();
-      setDocument(commit.project, { viewMode: "plan", libraryArtworks });
-
-      // A successful import — even a degraded one — is not an error, so it
-      // no longer rides the red `error` banner (see docs/status.md). Both
-      // outcomes get a one-shot toast instead; degradations also surface via
-      // the standing missing-image placeholder state on the affected
-      // checklist rows, so the toast doesn't need to be permanent.
-      if (commit.warnings.length > 0) {
-        toast.warning(
-          `Imported “${commit.project.title}” with ${commit.warnings.length} warning${
-            commit.warnings.length === 1 ? "" : "s"
-          }: ${commit.warnings.join(" ")}`
-        );
-      } else {
-        toast.success(`Imported “${commit.project.title}”`);
       }
     }
 
@@ -983,6 +842,14 @@ export function createAppStore(deps: AppStoreDeps) {
     });
     const { settleArrangeSession, autoAcceptArrangeSession } = arrange;
 
+    const documentMeta = createDocumentMetaSlice(set, get, { applyEdit });
+
+    const selectionSlice = createSelectionSlice(set, get, { autoAcceptArrangeSession });
+
+    const projectManager = createProjectManagerSlice(set, get, { setDocument, deps });
+
+    const packageSlice = createPackageSlice(set, get, { persist, setDocument, deps });
+
     return {
       project: null,
       selection: NO_SELECTION,
@@ -1053,250 +920,9 @@ export function createAppStore(deps: AppStoreDeps) {
         });
       },
 
-      setViewMode(viewMode) {
-        autoAcceptArrangeSession();
-        set({ viewMode });
-      },
+      ...selectionSlice.actions,
 
-      selectWall(wallId) {
-        autoAcceptArrangeSession();
-        // Wall focus clears the selection but keeps the wall as sidebar
-        // context — a wall click is a fresh focus gesture, not an addition to
-        // a group of placements, and it drops room focus (a selected room's
-        // handles are a different, exclusive canvas mode).
-        set(selectionWrite(get().project, NO_SELECTION, wallId));
-      },
-
-      selectArtwork(artworkId) {
-        autoAcceptArrangeSession();
-        const project = get().project;
-        // Prefer the first wall placement, then floor placement; unplaced picks stay library-only.
-        const placement =
-          project?.wallObjects.find(
-            (object) => object.kind === "artwork" && object.artworkId === artworkId
-          ) ??
-          project?.floorObjects.find(
-            (object) => object.kind === "artwork" && object.artworkId === artworkId
-          );
-        const selection: Selection = placement
-          ? { kind: "objects", ids: [placement.id] }
-          : { kind: "libraryArtwork", artworkId };
-        set(selectionWrite(project, selection, get().wallContextId));
-      },
-
-      selectOpening(wallObjectId) {
-        autoAcceptArrangeSession();
-        const project = get().project;
-        if (!project) return;
-        // Dead opening ids are inert rather than clearing selection.
-        const exists =
-          project.wallObjects.some((object) => object.id === wallObjectId) ||
-          project.floorObjects.some((object) => object.id === wallObjectId);
-        if (!exists) return;
-        set(
-          selectionWrite(project, { kind: "objects", ids: [wallObjectId] }, get().wallContextId)
-        );
-      },
-
-      // Room focus for plan view's selection-scoped handles/wash — mutually
-      // exclusive with every other selection (see the union's "room" kind), so
-      // this is the one action, besides clearObjectSelection, that also drops
-      // the wall context other selects leave untouched.
-      selectRoom(roomId) {
-        autoAcceptArrangeSession();
-        set(selectionWrite(get().project, { kind: "room", roomId }, null));
-      },
-
-      // Selecting a partition (by its CENTERLINE id) drives the partition
-      // inspector's move/rotate/resize. Wall context persists so the Side A/B
-      // buttons (viewFreestandingFace) can hand a face to the elevation.
-      selectFreestandingWall(wallId) {
-        autoAcceptArrangeSession();
-        const project = get().project;
-        if (!project) return;
-        const exists = project.floor.rooms.some((placement) =>
-          placement.room.freestandingWalls.some((wall) => wall.id === wallId)
-        );
-        if (!exists) return;
-        set(
-          selectionWrite(project, { kind: "freestandingWall", wallId }, get().wallContextId)
-        );
-      },
-
-      selectMeasurement(measurementId) {
-        autoAcceptArrangeSession();
-        const project = get().project;
-        if (!project?.referenceMeasurements?.some((item) => item.id === measurementId)) return;
-        set(
-          selectionWrite(
-            project,
-            { kind: "measurement", measurementId },
-            get().wallContextId
-          )
-        );
-      },
-
-      // "View side A / side B": point the sidebar/elevation at a partition face
-      // (spec §6.5). Keeps the partition selected so its inspector stays up, and
-      // jumps to elevation so the chosen face is what's shown.
-      viewFreestandingFace(faceWallId) {
-        autoAcceptArrangeSession();
-        const project = get().project;
-        if (!project) return;
-        set({
-          ...selectionWrite(project, get().selection, faceWallId),
-          viewMode: "elevation"
-        });
-      },
-
-      // Placement multi-select: id must be a live wallObject/floorObject id,
-      // else the click is a no-op rather than selecting nothing (docs/
-      // plan.md's plan/elevation views only ever call this with an id they
-      // just rendered, but a stale id from a race should be inert, not
-      // clear the selection out from under the user).
-      selectObject(id, opts = {}) {
-        // Auto-accept FIRST, before the selection changes: a plain click on a
-        // group member commits the pending arrangement and then collapses the
-        // selection — intended UX (see the settle table).
-        autoAcceptArrangeSession();
-
-        const project = get().project;
-        if (!project) return;
-
-        const exists =
-          project.wallObjects.some((object) => object.id === id) ||
-          project.floorObjects.some((object) => object.id === id);
-        if (!exists) return;
-
-        const current = objectIdsOf(get().selection);
-        const next = opts.additive
-          ? current.includes(id)
-            ? current.filter((existingId) => existingId !== id)
-            : [...current, id]
-          : [id];
-
-        set(selectionWrite(project, { kind: "objects", ids: next }, get().wallContextId));
-      },
-
-      // Bulk replace (e.g. a marquee-drag selection from the plan view).
-      // Silently drops any id that isn't a live placement, the same
-      // tolerance selectObject has for a single stale id.
-      setObjectSelection(ids) {
-        autoAcceptArrangeSession();
-
-        const project = get().project;
-        if (!project) return;
-
-        const next = ids.filter(
-          (id) =>
-            project.wallObjects.some((object) => object.id === id) ||
-            project.floorObjects.some((object) => object.id === id)
-        );
-
-        set(selectionWrite(project, { kind: "objects", ids: next }, get().wallContextId));
-      },
-
-      clearObjectSelection() {
-        autoAcceptArrangeSession();
-        // Already-empty selection is a no-op — but wall context (which persists
-        // across clears) is left exactly as it was.
-        if (get().selection.kind === "none") return;
-        set(selectionWrite(get().project, NO_SELECTION, get().wallContextId));
-      },
-
-      async addReferenceMeasurement(measurement) {
-        const project = get().project;
-        if (!project) return null;
-        const id = newId();
-        const reference = { ...measurement, id, visible: true, locked: false } as ReferenceMeasurement;
-        await applyEdit(
-          "Save reference measurement",
-          (current) => ({
-            ...current,
-            referenceMeasurements: [...(current.referenceMeasurements ?? []), reference]
-          }),
-          selectionWrite(project, { kind: "measurement", measurementId: id }, get().wallContextId)
-        );
-        return id;
-      },
-
-      async updateReferenceMeasurement(measurementId, changes) {
-        const project = get().project;
-        const current = project?.referenceMeasurements?.find((item) => item.id === measurementId);
-        if (!project || !current || current.locked && (changes.start || changes.end)) return;
-        const normalized = {
-          ...changes,
-          ...(changes.name !== undefined ? { name: changes.name.trim() || undefined } : {})
-        };
-        const next = { ...current, ...normalized };
-        if (JSON.stringify(next) === JSON.stringify(current)) return;
-        await applyEdit("Edit reference measurement", (document) => ({
-          ...document,
-          referenceMeasurements: (document.referenceMeasurements ?? []).map((item) =>
-            item.id === measurementId ? { ...item, ...normalized } : item
-          )
-        }));
-      },
-
-      async deleteReferenceMeasurement(measurementId) {
-        const project = get().project;
-        if (!project?.referenceMeasurements?.some((item) => item.id === measurementId)) return;
-        await applyEdit(
-          "Delete reference measurement",
-          (document) => ({
-            ...document,
-            referenceMeasurements: (document.referenceMeasurements ?? []).filter(
-              (item) => item.id !== measurementId
-            )
-          }),
-          selectionWrite(project, NO_SELECTION, get().wallContextId)
-        );
-      },
-
-      async saveView(pose) {
-        const project = get().project;
-        if (!project) return null;
-        // Immutable, monotonic ordinal: (max existing, or 0) + 1, so deleting a
-        // view never renumbers survivors nor reuses its number (spec §8.2).
-        const ordinal =
-          (project.savedViews ?? []).reduce((max, view) => Math.max(max, view.ordinal), 0) + 1;
-        const savedView: SavedView = {
-          id: newId(),
-          ordinal,
-          title: `Saved view ${ordinal}`,
-          roomId: resolveSavedViewRoomId(pose, project.floor.rooms),
-          pose,
-          createdAt: new Date().toISOString()
-        };
-        await applyEdit("Save view", (current) => ({
-          ...current,
-          savedViews: [...(current.savedViews ?? []), savedView]
-        }));
-        return savedView;
-      },
-
-      async renameSavedView(viewId, title) {
-        const project = get().project;
-        const current = project?.savedViews?.find((view) => view.id === viewId);
-        if (!project || !current) return;
-        const trimmed = title.trim();
-        if (!trimmed || trimmed === current.title) return;
-        await applyEdit("Rename saved view", (document) => ({
-          ...document,
-          savedViews: (document.savedViews ?? []).map((view) =>
-            view.id === viewId ? { ...view, title: trimmed } : view
-          )
-        }));
-      },
-
-      async deleteSavedView(viewId) {
-        const project = get().project;
-        if (!project?.savedViews?.some((view) => view.id === viewId)) return;
-        await applyEdit("Delete saved view", (document) => ({
-          ...document,
-          savedViews: (document.savedViews ?? []).filter((view) => view.id !== viewId)
-        }));
-      },
+      ...documentMeta.actions,
 
       async renameProject(title) {
         const project = get().project;
@@ -2070,266 +1696,9 @@ export function createAppStore(deps: AppStoreDeps) {
         if (entry.artworks) await saveArtworkHalves(entry.artworks.map((half) => half.after));
       },
 
-      async importProjectJson(text) {
-        let project: Project;
+      ...packageSlice.actions,
 
-        // migrateProjectJson owns the whole parse → validate-shape →
-        // migrate → validate pipeline (docs/plan.md §2) and throws a
-        // specific, human-readable reason for every way an externally
-        // authored file can be bad — oversized, not JSON, not a Sightlines
-        // project, a newer schema version than this app knows, or a
-        // Sightlines project whose data fails validation. The current
-        // project is never touched until that pipeline has fully succeeded.
-        try {
-          project = migrateProjectJson(text);
-        } catch (error) {
-          const message = `Import failed: ${
-            error instanceof Error ? error.message : "the file could not be read."
-          }`;
-          set({ error: message });
-          toast.error(message);
-          return;
-        }
-
-        setDocument(project, { viewMode: "plan" });
-        await persist(project);
-      },
-
-      async exportProjectPackage(mode) {
-        const { project, libraryArtworks } = get();
-        if (!project) return null;
-
-        return buildPackageZip(project, libraryArtworks, mode);
-      },
-
-      async exportProjectPackageById(id, mode) {
-        const liveProject = get().project;
-        if (liveProject?.id === id) {
-          return buildPackageZip(liveProject, get().libraryArtworks, mode);
-        }
-        let project: Project;
-        try {
-          project = await deps.projectRepository.load(id);
-        } catch (error) {
-          set({
-            error: `Export failed: ${
-              error instanceof Error ? error.message : "that project could not be loaded."
-            }`
-          });
-          return null;
-        }
-
-        return buildPackageZip(project, get().libraryArtworks, mode);
-      },
-
-      async importSightlinesPackage(bytes) {
-        set({ intakeState: "processing" });
-        try {
-          // 1-2. Zip safety + staged manifest pipeline (extract enforces the
-          // caps pre-inflation; readPackageManifest migrates embedded docs).
-          const { manifest, files } = await openSightlinesPackage(new Uint8Array(bytes));
-
-          // 3. Asset intake validation: re-hash, MIME allowlist, decode guards.
-          const validated = await validatePackageAssets(manifest, files);
-
-          // Existing-library snapshot the pure planner merges against.
-          const libraryArtworks = get().libraryArtworks;
-          const assetShaById = new Map<string, string>();
-          for (const artwork of libraryArtworks) {
-            if (!artwork.assetId || assetShaById.has(artwork.assetId)) continue;
-            try {
-              const asset = await deps.assetRepository.getAsset(artwork.assetId);
-              if (asset.sha256) assetShaById.set(asset.id, asset.sha256);
-            } catch (error) {
-              // Missing assets skip dedupe; operational read failures fail closed.
-              if (!(error instanceof AssetNotFoundError)) throw error;
-            }
-          }
-          // Collision detection must fail closed. The project-manager list is
-          // intentionally tolerant, but treating a failed read as an empty
-          // repository here could overwrite an existing project.
-          const summaries = await deps.projectRepository.list();
-
-          // 4-5. §6 merge rules + project identity, as one pure plan.
-          const plan = planPackageImport(manifest, validated, {
-            artworks: libraryArtworks,
-            assetShaById,
-            projectIds: summaries.map((summary) => summary.id)
-          });
-
-          if (plan.conflicts.length > 0) {
-            // Park for ONE review step in the conflict dialog — nothing has
-            // been persisted yet, so dismissing discards the import cleanly.
-            set({ pendingPackageImport: plan });
-            return;
-          }
-
-          await commitPackageImport(plan, {});
-        } catch (error) {
-          const message = `Import failed: ${
-            error instanceof Error ? error.message : "the package could not be read."
-          }`;
-          set({ error: message });
-          toast.error(message);
-        } finally {
-          set({ intakeState: "idle" });
-        }
-      },
-
-      async resolvePackageImportConflicts(resolutions) {
-        const plan = get().pendingPackageImport;
-        if (!plan) return;
-        set({ pendingPackageImport: null });
-        try {
-          await commitPackageImport(plan, resolutions);
-        } catch (error) {
-          const message = `Import failed: ${
-            error instanceof Error ? error.message : "the package could not be saved."
-          }`;
-          set({ error: message });
-          toast.error(message);
-        }
-      },
-
-      dismissPackageImport() {
-        set({ pendingPackageImport: null });
-      },
-
-      async listProjectSummaries() {
-        try {
-          return await deps.projectRepository.list();
-        } catch {
-          return [];
-        }
-      },
-
-      async listArtworkProjectMemberships(artworkIds) {
-        const uniqueArtworkIds = [...new Set(artworkIds)];
-        if (uniqueArtworkIds.length === 0) return [];
-
-        try {
-          const summaries = await deps.projectRepository.list();
-          const loadedProjects = await Promise.all(
-            summaries.map(async (summary) => {
-              try {
-                return { summary, project: await deps.projectRepository.load(summary.id) };
-              } catch {
-                // A project may disappear between list and load. Skip that
-                // stale summary without making the whole library query fail.
-                return null;
-              }
-            })
-          );
-
-          return uniqueArtworkIds.map((artworkId) => ({
-            artworkId,
-            projects: loadedProjects.flatMap((entry) =>
-              entry?.project.checklistArtworkIds.includes(artworkId) ? [entry.summary] : []
-            )
-          }));
-        } catch {
-          return uniqueArtworkIds.map((artworkId) => ({ artworkId, projects: [] }));
-        }
-      },
-
-      async openProject(id) {
-        if (get().project?.id === id) return;
-
-        set({ saveState: "saving", error: null });
-
-        try {
-          const project = await deps.projectRepository.load(id);
-          setDocument(project, { viewMode: "plan", saveState: "saved" });
-        } catch (error) {
-          set({
-            saveState: "error",
-            error: `Could not open that project (${
-              error instanceof Error ? error.message : "unknown error"
-            }).`
-          });
-        }
-      },
-
-      async createProject(title) {
-        const project = createBlankProject(title);
-        set({ saveState: "saving", error: null });
-
-        try {
-          await deps.projectRepository.save(project);
-          setDocument(project, { viewMode: "plan", saveState: "saved" });
-        } catch (error) {
-          set({
-            saveState: "error",
-            error: `Could not create the new project (${
-              error instanceof Error ? error.message : "unknown error"
-            }).`
-          });
-        }
-      },
-
-      async duplicateProject(id) {
-        set({ saveState: "saving", error: null });
-
-        try {
-          const source = await deps.projectRepository.load(id);
-          const now = new Date().toISOString();
-          const copy: Project = {
-            ...source,
-            id: newId(),
-            title: `${source.title} (copy)`,
-            createdAt: now,
-            updatedAt: now
-          };
-          await deps.projectRepository.save(copy);
-          setDocument(copy, { viewMode: "plan", saveState: "saved" });
-        } catch (error) {
-          set({
-            saveState: "error",
-            error: `Could not duplicate that project (${
-              error instanceof Error ? error.message : "unknown error"
-            }).`
-          });
-        }
-      },
-
-      async deleteProject(id) {
-        const wasOpen = get().project?.id === id;
-
-        try {
-          await deps.projectRepository.delete(id);
-        } catch (error) {
-          set({
-            saveState: "error",
-            error: `Could not delete that project (${
-              error instanceof Error ? error.message : "unknown error"
-            }).`
-          });
-          return;
-        }
-
-        // Workspace-only records are outside project persistence and packages,
-        // but still need to follow project lifecycle (§6.3). Best effort: a
-        // localStorage failure must not resurrect a project that was already
-        // deleted successfully from IndexedDB.
-        try {
-          await deps.onProjectDeleted?.(id);
-        } catch {
-          // The export-preference hook reports ordinary persistence failures.
-        }
-
-        if (!wasOpen) return;
-
-        // The open project just disappeared out from under the user —
-        // fall back to another saved project, or start a fresh one so the
-        // app never sits on a document that no longer exists.
-        const summaries = await deps.projectRepository.list();
-
-        if (summaries[0]) {
-          await get().openProject(summaries[0].id);
-        } else {
-          await get().createProject("Untitled Exhibition");
-        }
-      },
+      ...projectManager.actions,
 
       async addArtworksFromFiles(files, opts = {}) {
         const project = get().project;
@@ -3645,251 +3014,6 @@ export function createAppStore(deps: AppStoreDeps) {
         );
       }
     };
-  });
-}
-
-// Lowercase noun for undo-stack labels ("Add door", "Move blocked zone"),
-// matching the "Add artwork"/"Move artwork" label casing already in use —
-// getOpeningKindLabel's Title Case is for UI headings/subjects instead.
-function openingNoun(kind: OpeningKind): string {
-  return getOpeningKindLabel(kind).toLowerCase();
-}
-
-// Lowercase noun for any placeable object (wall or floor), so a plan move's
-// label reads "Move artwork" / "Move door" / "Move blocked zone" the same way
-// whether the object is wall-anchored or floor-placed.
-function moveObjectNoun(kind: WallObject["kind"]): string {
-  return kind === "artwork" ? "artwork" : openingNoun(kind);
-}
-
-// Shared by addOpening (centers on the wall) and placeOpeningFromPlan (places
-// at the plan-chosen xMm): builds the opening record with the wall's
-// centerline default for y. The only thing that differs between the two
-// callers is xMm, so the record construction lives in one place.
-function buildOpeningOnWall(
-  project: Project,
-  wall: WallWithGeometry,
-  kind: OpeningKind,
-  xMm: number,
-  centerYMm?: number
-): OpeningWallObject {
-  const centerlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
-  const opening = createOpeningPlacement(kind, wall.id, xMm, centerlineYMm);
-  return centerYMm === undefined ? opening : { ...opening, yMm: centerYMm };
-}
-
-// Builds the wallObjects for adding an opening on `wall`, mirroring it onto a
-// coincident twin wall (shared-wall pairing, spec §5.5) when `wall` has one.
-// The primary opening always exists; when a twin is present the result also
-// either connects to an alignable existing opening there or carries a fresh
-// paired twin — all in one array so the caller commits it as a single edit
-// (one undo step). Selection stays on the primary (its id is returned).
-function buildOpeningWithMirror(
-  project: Project,
-  wall: WallWithGeometry,
-  kind: OpeningKind,
-  xMm: number,
-  centerYMm?: number
-): { nextWallObjects: WallObject[]; primaryId: string; validateIds: string[] } {
-  const primary = buildOpeningOnWall(project, wall, kind, xMm, centerYMm);
-  const unpaired = {
-    nextWallObjects: [...project.wallObjects, primary],
-    primaryId: primary.id,
-    validateIds: [primary.id]
-  };
-
-  // Blocked zones never pair (spec §5.5); only doors and windows mirror. This
-  // also narrows `primary` to a connectable opening for the pointer writes.
-  if (primary.kind !== "door" && primary.kind !== "window") return unpaired;
-
-  const counterpart = findSharedWallCounterpart(project, wall.id, xMm, primary.widthMm);
-  if (!counterpart) return unpaired;
-
-  // Prefer connecting to an existing, unpaired, same-kind opening already on
-  // the twin wall when the pair would read as aligned — one shared opening
-  // rather than a duplicate stacked over it.
-  const withPrimary: Project = { ...project, wallObjects: [...project.wallObjects, primary] };
-  const connectable = project.wallObjects
-    .filter(
-      (object): object is ConnectableOpeningWallObject =>
-        (object.kind === "door" || object.kind === "window") &&
-        object.kind === primary.kind &&
-        object.wallId === counterpart.wallId &&
-        object.connectsToObjectId === undefined
-    )
-    .sort((a, b) => a.id.localeCompare(b.id))
-    .find(
-      (object) => evaluateOpeningPair(withPrimary, primary.id, object.id).status === "aligned"
-    );
-
-  if (connectable) {
-    const nextWallObjects = withPrimary.wallObjects.map((object) => {
-      if (object.id === primary.id) return { ...primary, connectsToObjectId: connectable.id };
-      if (object.id === connectable.id) return { ...connectable, connectsToObjectId: primary.id };
-      return object;
-    });
-    return { nextWallObjects, primaryId: primary.id, validateIds: [primary.id] };
-  }
-
-  // Otherwise mirror a fresh twin at the mirrored x — but only when that slot is
-  // clear of a forbidden opening×opening overlap. An occupied slot (or a twin
-  // wall that vanished) falls through to placing the primary alone, exactly as
-  // without a shared wall.
-  const twinWall = getProjectWalls(project).find((candidate) => candidate.id === counterpart.wallId);
-  if (twinWall && isTwinSlotFree(project, twinWall, kind, counterpart.xMm, centerYMm)) {
-    const twin = buildOpeningOnWall(project, twinWall, kind, counterpart.xMm, centerYMm);
-    // buildOpeningOnWall with a door/window kind returns a connectable opening;
-    // the guard narrows the union so the symmetric pointer writes typecheck.
-    if (twin.kind === "door" || twin.kind === "window") {
-      return {
-        nextWallObjects: [
-          ...project.wallObjects,
-          { ...primary, connectsToObjectId: twin.id },
-          { ...twin, connectsToObjectId: primary.id }
-        ],
-        primaryId: primary.id,
-        validateIds: [primary.id, twin.id]
-      };
-    }
-  }
-
-  return unpaired;
-}
-
-// Whether an opening of the given `size` centered at (`xMm`, `centerYMm`) on
-// `wall` would sit clear of a forbidden opening×opening overlap
-// (overlapPolicy.ts). Reuses the creation-time free-slot search: the preferred x
-// is returned unchanged only when it's already free, so an exact-match result
-// means "no overlap here." `ignoreOpeningId` excludes an opening being
-// moved/resized (its own current slot) from the blockers.
-function isOpeningSlotFree(
-  project: Project,
-  wall: WallWithGeometry,
-  size: { widthMm: number; heightMm: number },
-  centerYMm: number,
-  xMm: number,
-  ignoreOpeningId: string | null
-): boolean {
-  const sameWallOpenings = project.wallObjects.filter(
-    (object) =>
-      object.wallId === wall.id &&
-      object.kind !== "artwork" &&
-      object.id !== ignoreOpeningId
-  );
-  const freeXMm = findFreeOpeningCenterXMm({
-    preferredXMm: xMm,
-    sizeMm: size,
-    centerYMm,
-    wallLengthMm: wall.lengthMm,
-    sameWallOpenings
-  });
-  return freeXMm !== null && Math.abs(freeXMm - xMm) < 1;
-}
-
-// Test a fresh mirrored twin using its resolved default size and centerline.
-function isTwinSlotFree(
-  project: Project,
-  wall: WallWithGeometry,
-  kind: OpeningKind,
-  xMm: number,
-  centerYMm?: number
-): boolean {
-  const { widthMm, heightMm } = getDefaultOpeningSizeMm(kind);
-  const defaultCenterlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
-  const resolvedCenterYMm =
-    centerYMm ?? getDefaultOpeningCenterYMm(kind, heightMm, defaultCenterlineYMm);
-  return isOpeningSlotFree(project, wall, { widthMm, heightMm }, resolvedCenterYMm, xMm, null);
-}
-
-// Mirror a paired opening move across rooms. Return null when no live partner
-// or legal mirrored slot exists; the alignment advisory then reports the drift.
-function syncPartnerMove(
-  project: Project,
-  movedWallObjects: WallObject[],
-  target: ConnectableOpeningWallObject,
-  targetXMm: number,
-  targetYMm: number
-): { nextWallObjects: WallObject[]; partnerId: string } | null {
-  const partnerId = target.connectsToObjectId;
-  if (partnerId === undefined) return null;
-  const partner = project.wallObjects.find((object) => object.id === partnerId);
-  if (!partner || (partner.kind !== "door" && partner.kind !== "window")) return null;
-
-  const partnerXMm = mirrorOpeningXMm(project, target.wallId, partner.wallId, targetXMm);
-  if (partnerXMm === null) return null;
-
-  const twinWall = getProjectWalls(project).find((candidate) => candidate.id === partner.wallId);
-  if (!twinWall) return null;
-  if (
-    !isOpeningSlotFree(
-      project,
-      twinWall,
-      { widthMm: partner.widthMm, heightMm: partner.heightMm },
-      targetYMm,
-      partnerXMm,
-      partner.id
-    )
-  ) {
-    return null;
-  }
-
-  return {
-    nextWallObjects: movedWallObjects.map((object) =>
-      object.id === partner.id ? { ...object, xMm: partnerXMm, yMm: targetYMm } : object
-    ),
-    partnerId
-  };
-}
-
-// Mirror size onto a paired twin only when its current slot remains legal.
-function syncPartnerResize(
-  project: Project,
-  resizedWallObjects: WallObject[],
-  target: ConnectableOpeningWallObject,
-  widthMm: number,
-  heightMm: number
-): { nextWallObjects: WallObject[]; partnerId: string } | null {
-  const partnerId = target.connectsToObjectId;
-  if (partnerId === undefined) return null;
-  const partner = project.wallObjects.find((object) => object.id === partnerId);
-  if (!partner || (partner.kind !== "door" && partner.kind !== "window")) return null;
-
-  const twinWall = getProjectWalls(project).find((candidate) => candidate.id === partner.wallId);
-  if (!twinWall) return null;
-  if (!isOpeningSlotFree(project, twinWall, { widthMm, heightMm }, partner.yMm, partner.xMm, partner.id)) {
-    return null;
-  }
-
-  return {
-    nextWallObjects: resizedWallObjects.map((object) =>
-      object.id === partner.id ? { ...object, widthMm, heightMm } : object
-    ),
-    partnerId
-  };
-}
-
-// Resolve the nearest legal x using the opening's exact default geometry.
-// Same-wall openings block; artwork overlaps remain separately overridable.
-function resolveFreeOpeningXMm(
-  project: Project,
-  wall: WallWithGeometry,
-  kind: OpeningKind,
-  preferredXMm: number,
-  centerYMm?: number
-): number | null {
-  const { widthMm, heightMm } = getDefaultOpeningSizeMm(kind);
-  const centerlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
-  const resolvedCenterYMm =
-    centerYMm ?? getDefaultOpeningCenterYMm(kind, heightMm, centerlineYMm);
-  const sameWallOpenings = project.wallObjects.filter(
-    (object) => object.wallId === wall.id && object.kind !== "artwork"
-  );
-  return findFreeOpeningCenterXMm({
-    preferredXMm,
-    sizeMm: { widthMm, heightMm },
-    centerYMm: resolvedCenterYMm,
-    wallLengthMm: wall.lengthMm,
-    sameWallOpenings
   });
 }
 
