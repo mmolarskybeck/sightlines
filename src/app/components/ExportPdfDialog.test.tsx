@@ -264,4 +264,70 @@ describe("ExportPdfDialog", () => {
       })
     );
   });
+
+  it("shows determinate progress and disables controls while exporting", () => {
+    const onCancelExport = vi.fn();
+    render(
+      <TooltipProvider>
+        <ExportPdfDialog
+          open
+          project={projectWithExportContent()}
+          onOpenChange={vi.fn()}
+          onExport={vi.fn()}
+          onRenameSavedView={vi.fn().mockResolvedValue(undefined)}
+          onDeleteSavedView={vi.fn().mockResolvedValue(undefined)}
+          exportState={{ done: 2, total: 5 }}
+          onCancelExport={onCancelExport}
+        />
+      </TooltipProvider>
+    );
+
+    const primary = screen.getByRole("button", { name: /Exporting/ });
+    expect(primary).toBeDisabled();
+
+    const bar = screen.getByRole("progressbar", { name: "Export progress" });
+    expect(bar).toHaveAttribute("aria-valuenow", "2");
+    expect(bar).toHaveAttribute("aria-valuemax", "5");
+
+    // Content controls go non-interactive via the disabled fieldset.
+    expect(screen.getByRole("checkbox", { name: "Include Overview" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Dimensions" })).toBeDisabled();
+
+    // The page-count summary is replaced by the live progress status.
+    expect(screen.queryByText(/Exports/)).not.toBeInTheDocument();
+  });
+
+  it("routes Cancel to onCancelExport while exporting", () => {
+    const onOpenChange = vi.fn();
+    const onCancelExport = vi.fn();
+    render(
+      <TooltipProvider>
+        <ExportPdfDialog
+          open
+          project={projectWithExportContent()}
+          onOpenChange={onOpenChange}
+          onExport={vi.fn()}
+          onRenameSavedView={vi.fn().mockResolvedValue(undefined)}
+          onDeleteSavedView={vi.fn().mockResolvedValue(undefined)}
+          exportState={{ done: 0, total: 4 }}
+          onCancelExport={onCancelExport}
+        />
+      </TooltipProvider>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancelExport).toHaveBeenCalledTimes(1);
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("stays idle — no progressbar, controls live — when exportState is absent", () => {
+    renderDialog();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: "Include Overview" })
+    ).not.toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Export PDF" })
+    ).toBeInTheDocument();
+  });
 });

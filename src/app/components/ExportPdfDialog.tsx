@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
+import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
 import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
@@ -33,6 +34,7 @@ import {
   DialogTitle
 } from "./ui/dialog";
 import { Input } from "./ui/input";
+import { Progress } from "./ui/progress";
 import {
   Select,
   SelectContent,
@@ -66,6 +68,10 @@ type ExportPdfDialogProps = {
   onDeleteSavedView: (viewId: string) => Promise<void>;
   onPersistenceError?: (message: string) => void;
   thumbnailUrls?: Readonly<Record<string, string>>;
+  // Determinate progress while App assembles the PDF; null/undefined = idle.
+  // App owns the async export, so this component only reflects its state.
+  exportState?: { done: number; total: number } | null;
+  onCancelExport?: () => void;
 };
 
 export function ExportPdfDialog({
@@ -76,7 +82,9 @@ export function ExportPdfDialog({
   onRenameSavedView,
   onDeleteSavedView,
   onPersistenceError,
-  thumbnailUrls = {}
+  thumbnailUrls = {},
+  exportState,
+  onCancelExport
 }: ExportPdfDialogProps) {
   const { preferences, settings, updatePreferences } =
     useDocumentExportPreferences(project, onPersistenceError);
@@ -88,6 +96,7 @@ export function ExportPdfDialog({
   const [editingViewId, setEditingViewId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const pageCount = countDocumentPages(settings);
+  const isExporting = exportState != null;
 
   const setPreferences = (
     update: (current: DocumentExportPreferences) => DocumentExportPreferences
@@ -188,7 +197,7 @@ export function ExportPdfDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="export-pdf-body">
+        <fieldset className="export-pdf-body" disabled={isExporting}>
           <section className="export-contents" aria-labelledby="export-contents-title">
             <h3 id="export-contents-title" className="export-group-title">
               Contents
@@ -601,31 +610,61 @@ export function ExportPdfDialog({
               </p>
             </section>
           </aside>
-        </div>
+        </fieldset>
 
         <DialogFooter className="export-pdf-footer">
-          <div className="export-page-summary" aria-live="polite">
-            {pageCount > 0 ? (
-              <>
-                Exports <strong>{pageCount}</strong>{" "}
-                {pageCount === 1 ? "page" : "pages"}
-              </>
-            ) : (
-              <span className="export-page-error">
-                Choose at least one section.
-              </span>
-            )}
-          </div>
+          {isExporting ? (
+            <div className="export-progress">
+              <Progress
+                aria-label="Export progress"
+                className="export-progress-bar"
+                max={exportState.total}
+                value={exportState.done}
+              />
+              <p className="export-progress-status" aria-live="polite">
+                Composing your document…
+              </p>
+            </div>
+          ) : (
+            <div className="export-page-summary" aria-live="polite">
+              {pageCount > 0 ? (
+                <>
+                  Exports <strong>{pageCount}</strong>{" "}
+                  {pageCount === 1 ? "page" : "pages"}
+                </>
+              ) : (
+                <span className="export-page-error">
+                  Choose at least one section.
+                </span>
+              )}
+            </div>
+          )}
           <div className="export-footer-actions">
-            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            <Button
+              variant="ghost"
+              onClick={() =>
+                isExporting ? onCancelExport?.() : onOpenChange(false)
+              }
+            >
               Cancel
             </Button>
             <Button
-              disabled={pageCount === 0}
+              disabled={isExporting || pageCount === 0}
               variant="primary"
               onClick={() => onExport(settings)}
             >
-              Export PDF
+              {isExporting ? (
+                <>
+                  <CircleNotchIcon
+                    aria-hidden="true"
+                    className="animate-spin"
+                    size={15}
+                  />
+                  Exporting…
+                </>
+              ) : (
+                "Export PDF"
+              )}
             </Button>
           </div>
         </DialogFooter>

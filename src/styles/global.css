@@ -1243,6 +1243,37 @@ input:focus-visible {
   gap: 8px;
 }
 
+/* The body is a fieldset only so its :disabled state can make every content
+   control non-interactive during export (no layout shift); it carries no
+   chrome of its own. */
+fieldset.export-pdf-body {
+  border: 0;
+  margin: 0;
+  min-inline-size: 0;
+}
+
+fieldset.export-pdf-body:disabled {
+  opacity: 0.55;
+}
+
+.export-progress {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.export-progress-bar {
+  max-width: 260px;
+}
+
+.export-progress-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-sm);
+}
+
 .project-manager-toolbar {
   display: flex;
   flex: 0 0 auto;

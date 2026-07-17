@@ -12,6 +12,7 @@ import { ArchiveIcon } from "@phosphor-icons/react/dist/csr/Archive";
 import { BookmarkSimpleIcon } from "@phosphor-icons/react/dist/csr/BookmarkSimple";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
+import { FilePdfIcon } from "@phosphor-icons/react/dist/csr/FilePdf";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import { FileDashedIcon } from "@phosphor-icons/react/dist/csr/FileDashed";
@@ -76,6 +77,7 @@ import {
 import { PlanEmptyState } from "./components/PlanEmptyState";
 import { PlanView } from "./components/PlanView";
 import { captureSvgSnapshot } from "./export/captureSnapshot";
+import { exportDocumentPdf } from "./export/exportDocumentPdf";
 import {
   DrawPicker,
   InsertPicker,
@@ -151,18 +153,26 @@ import {
 } from "./store";
 import { getArrangeEligibility } from "./store/arrangeEligibility";
 import type { ThreeDViewActions } from "./components/three/ThreeDView";
+import type { SavedViewRenderHandle } from "./components/three/SavedViewRenderHost";
+import type { EffectiveDocumentSettings } from "../domain/export/documentSettings";
 
 const ImportWizard = lazy(() => import("./components/ImportWizard"));
 const SettingsDialog = lazy(() =>
   import("./components/SettingsDialog").then((module) => ({ default: module.SettingsDialog }))
 );
-const ExportPdfDialog = import.meta.env.DEV
-  ? lazy(() =>
-      import("./components/ExportPdfDialog").then((module) => ({
-        default: module.ExportPdfDialog
-      }))
-    )
-  : null;
+const ExportPdfDialog = lazy(() =>
+  import("./components/ExportPdfDialog").then((module) => ({
+    default: module.ExportPdfDialog
+  }))
+);
+// Lazy so the three.js it pulls in (via SnapshotStage) stays out of the initial
+// bundle, like ThreeDView. Mounted only while the Export PDF flow is engaged, so
+// the chunk loads when the user opens the dialog from any view — never at boot.
+const SavedViewRenderHost = lazy(() =>
+  import("./components/three/SavedViewRenderHost").then((module) => ({
+    default: module.SavedViewRenderHost
+  }))
+);
 const ElevationView = lazy(() =>
   import("./components/ElevationView").then((module) => ({ default: module.ElevationView }))
 );
@@ -331,14 +341,15 @@ export function App() {
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  // Phase 3 has no production PDF entry point until assembly lands in Phase 4.
-  // This query-only preview keeps the real dialog inspectable in its actual app
-  // shell without shipping a dead Export PDF action.
-  const [isExportPdfOpen, setIsExportPdfOpen] = useState(
-    () =>
-      import.meta.env.DEV &&
-      new URLSearchParams(window.location.search).get("export-dialog") === "1"
-  );
+  const [isExportPdfOpen, setIsExportPdfOpen] = useState(false);
+  // Determinate progress for the in-flight PDF export; null when idle (§6.2).
+  const [pdfExportProgress, setPdfExportProgress] = useState<
+    { done: number; total: number } | null
+  >(null);
+  // Aborts the in-flight PDF export; a cancel or a mid-export dialog dismissal
+  // trips it, delivering nothing (§12).
+  const pdfExportAbortRef = useRef<AbortController | null>(null);
+  const savedViewRenderRef = useRef<SavedViewRenderHandle | null>(null);
   // Prevent re-entry while package assets are hashed and zipped.
   const [isExportingPackage, setIsExportingPackage] = useState(false);
 
@@ -1106,6 +1117,78 @@ export function App() {
     toast.success(`Saved "${composed}"`);
   };
 
+  // Compose and deliver the document PDF (spec §5, §12, §13). App owns the async
+  // so the dialog can reflect progress and cancel synchronously; exportDocumentPdf
+  // owns the abort contract and the determinate progress arithmetic.
+  const handleExportPdf = async (settings: EffectiveDocumentSettings) => {
+    // Re-entry guard: a live controller means an export is already in flight.
+    if (!project || pdfExportAbortRef.current) return;
+    const controller = new AbortController();
+    pdfExportAbortRef.current = controller;
+    setPdfExportProgress({ done: 0, total: 1 });
+    try {
+      const result = await exportDocumentPdf({
+        project,
+        settings,
+        artworks: libraryArtworks,
+        getAsset: (assetId) => assetRepository.getAsset(assetId),
+        getBlob: getAssetBlob,
+        renderSavedView: (view, size) => {
+          const handle = savedViewRenderRef.current;
+          if (!handle) {
+            return Promise.reject(
+              new Error("The 3D renderer is not ready to render Saved views.")
+            );
+          }
+          return handle.renderSavedView(view, size);
+        },
+        signal: controller.signal,
+        onProgress: setPdfExportProgress
+      });
+      const filename = `${project.title}.pdf`;
+      triggerDownload(
+        new Blob([result.bytes.slice()], { type: "application/pdf" }),
+        filename
+      );
+      setIsExportPdfOpen(false);
+      if (result.warnings.length > 0) {
+        toast.warning(
+          `Exported ${filename} with ${result.warnings.length} warning${
+            result.warnings.length === 1 ? "" : "s"
+          }: ${result.warnings.join(" ")}`
+        );
+      } else {
+        toast.success(`Exported ${filename}`);
+      }
+    } catch (error) {
+      // A cancel leaves the dialog open in its ready state — no file, no error
+      // toast (§12). Any other failure surfaces the one plain-language message;
+      // the cause goes to the console because the toast copy deliberately
+      // carries no diagnostics.
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        console.error("Export PDF failed:", error);
+        toast.error("Couldn't create the PDF. Your project is unchanged.");
+      }
+    } finally {
+      pdfExportAbortRef.current = null;
+      setPdfExportProgress(null);
+    }
+  };
+
+  const handleCancelExportPdf = () => {
+    pdfExportAbortRef.current?.abort();
+  };
+
+  // Esc/overlay dismissal while exporting aborts and keeps the dialog open (it
+  // returns to its ready state once the abort settles); otherwise it closes.
+  const handleExportPdfOpenChange = (open: boolean) => {
+    if (!open && pdfExportAbortRef.current) {
+      pdfExportAbortRef.current.abort();
+      return;
+    }
+    setIsExportPdfOpen(open);
+  };
+
   // Detect package vs. project JSON by zip magic, not file extension.
   const handleImportFile = async (file: File) => {
     const buffer = await file.arrayBuffer();
@@ -1357,6 +1440,20 @@ export function App() {
                   )}
                 </>
               )}
+              <DropdownMenuLabel>Export document</DropdownMenuLabel>
+              <DropdownMenuItem
+                className="dropdown-menu-item-stacked"
+                disabled={project.floor.rooms.length === 0}
+                onSelect={() => setIsExportPdfOpen(true)}
+              >
+                <FilePdfIcon aria-hidden="true" size={16} />
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span>Export PDF…</span>
+                  <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
+                    Composed pages: overview, room plans, elevations, 3D views
+                  </span>
+                </span>
+              </DropdownMenuItem>
               <DropdownMenuLabel>Export package (.sightlines)</DropdownMenuLabel>
               <DropdownMenuItem
                 className="dropdown-menu-item-stacked"
@@ -2202,18 +2299,28 @@ export function App() {
           onImport={() => fileInputRef.current?.click()}
           onOpenHelp={() => { setIsSettingsOpen(false); setIsHelpOpen(true); }}
         />
-        {ExportPdfDialog ? (
-          <ExportPdfDialog
-            open={isExportPdfOpen}
-            project={project}
-            onOpenChange={setIsExportPdfOpen}
-            onExport={() => setIsExportPdfOpen(false)}
-            onRenameSavedView={renameSavedView}
-            onDeleteSavedView={deleteSavedView}
-            onPersistenceError={(message) => toast.error(message)}
-          />
-        ) : null}
+        <ExportPdfDialog
+          open={isExportPdfOpen}
+          project={project}
+          onOpenChange={handleExportPdfOpenChange}
+          onExport={(settings) => void handleExportPdf(settings)}
+          onRenameSavedView={renameSavedView}
+          onDeleteSavedView={deleteSavedView}
+          onPersistenceError={(message) => toast.error(message)}
+          exportState={pdfExportProgress}
+          onCancelExport={handleCancelExportPdf}
+        />
       </Suspense>
+      {isExportPdfOpen || pdfExportProgress ? (
+        <Suspense fallback={null}>
+          <SavedViewRenderHost
+            project={project}
+            artworksById={artworksById}
+            getBlob={getAssetBlob}
+            actionsRef={savedViewRenderRef}
+          />
+        </Suspense>
+      ) : null}
       <ArtworkLibraryPicker
         open={libraryPickerOpen}
         artworks={libraryArtworks}
