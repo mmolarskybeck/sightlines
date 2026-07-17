@@ -1525,28 +1525,35 @@ export async function createDocumentPdf(
     const savedView = input.project.savedViews?.find(
       (view) => view.id === manifestPage.savedViewId
     );
-    if (!savedView || !input.renderSavedView) {
-      throw new Error("A selected Saved view could not be rendered.");
-    }
     const renderRect = insetRect(baseRect, DRAWING_INSET_PT);
-    const renderScale = THREE_D_RENDER_DPI / 72;
-    const blob = await input.renderSavedView(savedView, {
-      widthPx: Math.max(1, Math.round(renderRect.widthPt * renderScale)),
-      heightPx: Math.max(1, Math.round(renderRect.heightPt * renderScale))
-    });
-    const image = await embedBlob(pdf, blob);
-    page.drawImage(
-      image,
-      imageRectInside(
-        {
-          x: renderRect.xPt,
-          y: renderRect.yPt,
-          width: renderRect.widthPt,
-          height: renderRect.heightPt
-        },
-        image
-      )
-    );
+    // A failed 3D render degrades to a placeholder page instead of discarding
+    // the whole document, matching the missing-artwork-image behavior.
+    let image: PDFImage | null = null;
+    if (savedView && input.renderSavedView) {
+      const renderScale = THREE_D_RENDER_DPI / 72;
+      try {
+        const blob = await input.renderSavedView(savedView, {
+          widthPx: Math.max(1, Math.round(renderRect.widthPt * renderScale)),
+          heightPx: Math.max(1, Math.round(renderRect.heightPt * renderScale))
+        });
+        image = await embedBlob(pdf, blob);
+      } catch {
+        image = null;
+      }
+    }
+    const savedViewRect = {
+      x: renderRect.xPt,
+      y: renderRect.yPt,
+      width: renderRect.widthPt,
+      height: renderRect.heightPt
+    };
+    if (image) {
+      page.drawImage(image, imageRectInside(savedViewRect, image));
+    } else {
+      const title = savedView?.title ?? manifestPage.title;
+      drawArtworkPlaceholder(page, fonts, savedViewRect, title, true);
+      warnings.add(`Saved view "${title}" could not be rendered.`);
+    }
   }
 
   if (fonts.substitutedUnsupportedText) {

@@ -226,6 +226,44 @@ describe("createDocumentPdf", () => {
     expect(size.heightPx).toBeGreaterThan(700);
   });
 
+  it("keeps the document and warns when a Saved view fails to render", async () => {
+    const project = createSampleProject();
+    const view: SavedView = {
+      id: "view-1",
+      ordinal: 1,
+      title: "Entrance",
+      roomId: "room-main",
+      pose: {
+        position: { x: 4, y: 3, z: 4 },
+        target: { x: 0, y: 1, z: 0 }
+      },
+      createdAt: "2026-07-16T00:00:00.000Z"
+    };
+    project.savedViews = [view];
+    const settings = settingsFor(project);
+    settings.sections = {
+      overview: true,
+      roomPlans: false,
+      elevations: false,
+      threeDViews: true
+    };
+    const renderSavedView = vi.fn<RenderSavedView>(async () => {
+      throw new Error("The 3D renderer is not ready to render Saved views.");
+    });
+
+    const result = await createDocumentPdf({
+      project,
+      settings,
+      artworks: [],
+      renderSavedView
+    });
+
+    expect(result.pageCount).toBe(2);
+    expect(result.warnings).toContain(
+      'Saved view "Entrance" could not be rendered.'
+    );
+  });
+
   it("embeds a valid display PNG when repositories resolve it", async () => {
     const project = createSampleProject();
     const artwork: Artwork = {
