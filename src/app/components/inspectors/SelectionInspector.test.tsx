@@ -29,6 +29,7 @@ function renderPanel(
   const props: ComponentProps<typeof SelectionInspector> = {
     arrange: baseArrange,
     count: 2,
+    selectionKey: "obj-1\nobj-2",
     unit: "cm",
     wallName: "North wall",
     onSetMode: vi.fn(),
@@ -190,6 +191,24 @@ describe("SelectionInspector arrange body", () => {
       matWidthMm: expect.closeTo(50, 5),
       frame: undefined
     });
+  });
+
+  it("Mat & frame drops the draft when a same-size selection swaps identity", () => {
+    const onApply = vi.fn();
+    const { props, rerender } = renderPanel({
+      matFrame: { targetCount: 2, skippedCount: 0, onApply }
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Mat . frame/ }));
+    const matField = screen.getByRole("textbox", { name: "Mat" });
+    fireEvent.change(matField, { target: { value: "5" } });
+    fireEvent.blur(matField);
+
+    // Same count, different works: the drafted band must not survive to be
+    // applied against artworks the curator never typed it for.
+    rerender(<SelectionInspector {...props} selectionKey="obj-3\nobj-4" />);
+
+    expect(screen.queryByRole("textbox", { name: "Mat" })).toBeNull();
   });
 
   it("Mat & frame disables Apply and explains when every work is frame-inclusive", () => {

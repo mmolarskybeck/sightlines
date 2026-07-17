@@ -87,6 +87,7 @@ export function SelectionInspector({
   arrangeDisabledReason,
   arrangeIgnoredNote,
   count,
+  selectionKey,
   unit,
   wallName,
   onSetMode,
@@ -99,6 +100,10 @@ export function SelectionInspector({
   onRemoveAll
 }: {
   count: number;
+  // Order-insensitive identity of the selected ids. Draft state (mat/frame
+  // values, the remove confirmation) must reset when the selection changes to
+  // a *different* set of the same size, so count alone is not enough.
+  selectionKey: string;
   unit: DisplayUnit;
   // null falls back to the generic "Arrange on wall" heading.
   wallName: string | null;
@@ -154,7 +159,7 @@ export function SelectionInspector({
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   useEffect(() => {
     setConfirmingRemove(false);
-  }, [count]);
+  }, [selectionKey]);
 
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
@@ -409,7 +414,9 @@ export function SelectionInspector({
           inspector's section of the same name — closed at rest so the arrange
           controls stay the panel's lead. Only rendered when the selection
           holds at least one artwork placement. */}
-      {matFrame ? <MatFrameSection count={count} matFrame={matFrame} unit={unit} /> : null}
+      {matFrame ? (
+        <MatFrameSection selectionKey={selectionKey} matFrame={matFrame} unit={unit} />
+      ) : null}
 
       <div className="inspector-placement">
         {confirmingRemove ? (
@@ -468,11 +475,11 @@ const DEFAULT_FRAME_WIDTH_MM = 25.4;
 // treatment. Applying always sets BOTH bands — an empty band means "none" —
 // so one apply can set or strip framing across the whole selection.
 function MatFrameSection({
-  count,
+  selectionKey,
   matFrame,
   unit
 }: {
-  count: number;
+  selectionKey: string;
   matFrame: {
     targetCount: number;
     skippedCount: number;
@@ -487,13 +494,13 @@ function MatFrameSection({
   const [frame, setFrame] = useState<ArtworkFrame | undefined>(undefined);
 
   // A new selection is a new draft: stale band values from the previous pick
-  // must never ride into an apply against different works. Same count-keyed
-  // reset the remove confirmation uses.
+  // must never ride into an apply against different works — including a
+  // different set of the same size, hence identity-keyed, not count-keyed.
   useEffect(() => {
     setOpen(false);
     setMatWidthMm(undefined);
     setFrame(undefined);
-  }, [count]);
+  }, [selectionKey]);
 
   const resetDraft = () => {
     setMatWidthMm(undefined);

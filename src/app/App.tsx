@@ -2296,6 +2296,7 @@ export function App() {
                 arrangeDisabledReason={arrangeDisabledReason}
                 arrangeIgnoredNote={arrangeIgnoredNote}
                 count={selectedObjectIds.length}
+                selectionKey={[...selectedObjectIds].sort().join("\n")}
                 unit={project.unit}
                 wallName={arrangeWall?.name ?? null}
                 onSetMode={(mode) => {
