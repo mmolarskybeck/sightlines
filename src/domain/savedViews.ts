@@ -97,3 +97,39 @@ export function resolveSavedViewRoomLabel(
   );
   return placement?.room.name;
 }
+
+// The default title a Saved view carries until renamed (spec §8.2): `Saved
+// view ${ordinal}`. Also the discriminator the collection pane and the Export
+// dialog share for the "show a subtitle only once renamed" rule.
+export function defaultSavedViewTitle(savedView: SavedView): string {
+  return `Saved view ${savedView.ordinal}`;
+}
+
+// The composed presentation of a Saved view, resolved LIVE against the current
+// project — the one place every consumer (Export dialog, PDF, collection pane)
+// derives the "room label · title" line, the default-title fallback, and the
+// "renamed away from default" flag from, so they can never drift.
+export function composeSavedViewLabel(
+  project: Project,
+  savedView: SavedView
+): {
+  roomLabel: string | undefined;
+  // "room label · title" when a room resolves, otherwise the bare title.
+  composedLabel: string;
+  defaultTitle: string;
+  // True once the user has renamed the view away from its default title — the
+  // gate for showing the redundant "Saved view n" subtitle.
+  isRenamed: boolean;
+} {
+  const roomLabel = resolveSavedViewRoomLabel(project, savedView);
+  const composedLabel = roomLabel
+    ? `${roomLabel} · ${savedView.title}`
+    : savedView.title;
+  const defaultTitle = defaultSavedViewTitle(savedView);
+  return {
+    roomLabel,
+    composedLabel,
+    defaultTitle,
+    isRenamed: savedView.title.trim() !== defaultTitle
+  };
+}

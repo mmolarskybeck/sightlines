@@ -16,7 +16,7 @@ import {
   type EffectiveDocumentSettings
 } from "../../domain/export/documentSettings";
 import type { Project, SavedView } from "../../domain/project";
-import { resolveSavedViewRoomLabel } from "../../domain/savedViews";
+import { composeSavedViewLabel } from "../../domain/savedViews";
 import { useDocumentExportPreferences } from "../hooks/useDocumentExportPreferences";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
@@ -433,13 +433,8 @@ export function ExportPdfDialog({
                 {settings.savedViews.length > 0 ? (
                   <div className="export-saved-view-list">
                     {settings.savedViews.map((choice) => {
-                      const roomLabel = resolveSavedViewRoomLabel(
-                        project,
-                        choice.view
-                      );
-                      const composedLabel = roomLabel
-                        ? `${roomLabel} · ${choice.view.title}`
-                        : choice.view.title;
+                      const { composedLabel, defaultTitle, isRenamed } =
+                        composeSavedViewLabel(project, choice.view);
                       const isEditing = editingViewId === choice.view.id;
                       return (
                         <div
@@ -510,12 +505,7 @@ export function ExportPdfDialog({
                               <div className="export-saved-view-copy">
                                 <strong>{composedLabel}</strong>
                                 {choice.valid ? (
-                                  choice.view.title.trim() !==
-                                    `Saved view ${choice.view.ordinal}` && (
-                                    <span>
-                                      {`Saved view ${choice.view.ordinal}`}
-                                    </span>
-                                  )
+                                  isRenamed && <span>{defaultTitle}</span>
                                 ) : (
                                   <span>
                                     <WarningIcon

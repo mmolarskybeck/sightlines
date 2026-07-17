@@ -47,9 +47,11 @@ import type {
   FreestandingWall,
   OpeningWallObject,
   Project,
-  ProjectSummary
+  ProjectSummary,
+  SavedView,
+  SavedViewPose
 } from "../domain/project";
-import { resolveSavedViewRoomLabel } from "../domain/savedViews";
+import { isDegeneratePose, resolveSavedViewRoomLabel } from "../domain/savedViews";
 import { faceWallId, parseFaceWallId } from "../domain/geometry/freestandingWalls";
 import { getPartitionClearances } from "../domain/geometry/partitionSpacing";
 import type { PackageExportMode } from "../domain/schema/packageSchema";
@@ -99,6 +101,7 @@ import { toast } from "sonner";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { RoomInspector } from "./components/RoomInspector";
 import { RoomsPanel } from "./components/RoomsPanel";
+import { SavedViewsPanel } from "./components/SavedViewsPanel";
 import { SelectionInspector } from "./components/SelectionInspector";
 import { MeasurementInspector, ReferenceMeasurementInspector } from "./components/MeasurementInspector";
 import { MeasurementLiveRegion } from "./components/MeasurementLiveRegion";
@@ -343,6 +346,13 @@ export function App() {
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isExportPdfOpen, setIsExportPdfOpen] = useState(false);
+  // A Saved view's pose, staged to become the 3D view's INITIAL camera when the
+  // pane opens a view while 3D isn't the active mode yet (saved-views spec §4.3
+  // handoff). CameraRig captures it at mount, so the lingering value is inert;
+  // an effect clears it on leaving 3D to keep a later re-entry from reusing it.
+  const [pendingViewPose, setPendingViewPose] = useState<SavedViewPose | null>(
+    null
+  );
   // Determinate progress for the in-flight PDF export; null when idle (§6.2).
   const [pdfExportProgress, setPdfExportProgress] = useState<
     { done: number; total: number } | null
@@ -552,6 +562,13 @@ export function App() {
 
   useUndoRedoShortcuts({ undo, redo });
 
+  // The staged Saved-view pose is a one-shot handoff for a 3D mount (spec §4.3);
+  // clear it on leaving 3D so a later re-entry frames the overview, not a stale
+  // bookmark. CameraRig has already captured it by mount, so this is safe.
+  useEffect(() => {
+    if (viewMode !== "3d") setPendingViewPose(null);
+  }, [viewMode]);
+
   const toggleMeasureWhenAvailable = () => {
     if (viewMode === "elevation" && !selectedWall) return;
     toggleMeasure();
@@ -693,10 +710,15 @@ export function App() {
     [libraryArtworks]
   );
 
-  // Saved-view thumbnail cache (saved-views spec §3). The Export dialog is the
-  // only consumer in Phase A, so it drives regeneration; `seedThumbnail` renders
-  // a just-saved view immediately. `thumbnailsPending` keeps the render host
-  // mounted while any thumbnail is queued or rendering.
+  // The Saved views collection pane is a thumbnail consumer alongside the
+  // Export dialog (saved-views spec §3.4): its rows show the same cached
+  // previews, so it drives regeneration while visible.
+  const savedViewsPaneVisible = visibleLeftPanel === "savedViews";
+
+  // Saved-view thumbnail cache (saved-views spec §3). The Export dialog and the
+  // collection pane are the visible consumers that drive regeneration;
+  // `seedThumbnail` renders a just-saved view immediately. `thumbnailsPending`
+  // keeps the render host mounted while any thumbnail is queued or rendering.
   const {
     urls: savedViewThumbnailUrls,
     hasPendingWork: thumbnailsPending,
@@ -704,7 +726,7 @@ export function App() {
   } = useSavedViewThumbnails({
     project,
     renderHandle: savedViewRenderHandle,
-    active: isExportPdfOpen
+    active: isExportPdfOpen || savedViewsPaneVisible
   });
 
   // Elevation navigation includes perimeter walls and partition faces in room order.
@@ -1021,7 +1043,7 @@ export function App() {
   // Rail toggle semantic: clicking the active panel's icon collapses the
   // column (null), clicking the other switches to it. In the compact layout,
   // selecting a left pane also makes it the visible side of the workspace.
-  const selectLeftPanel = (panel: "checklist" | "rooms") => {
+  const selectLeftPanel = (panel: "checklist" | "rooms" | "savedViews") => {
     if (viewMode === "library") setViewMode("plan");
     if (isCompactWorkspace) {
       const shouldCollapse = visibleLeftPanel === panel && compactWorkspaceSide === "left";
@@ -1150,6 +1172,23 @@ export function App() {
     const roomLabel = resolveSavedViewRoomLabel(project, saved);
     const composed = roomLabel ? `${roomLabel} · ${saved.title}` : saved.title;
     toast.success(`Saved "${composed}"`);
+  };
+
+  // Open a Saved view from the collection pane (saved-views spec §4.3): switch
+  // to the 3D mode if needed, then move the camera to the stored pose. When 3D
+  // is already live we drive its actions directly; otherwise the pose is staged
+  // as the initial camera and handed to the freshly-mounted view — not a race
+  // against mount. Read-only: opening never writes the project.
+  const openSavedView = (view: SavedView) => {
+    // An invalid pose has no camera to fly to (the pane leaves its row inert);
+    // guard here too so a stray call can't drive the rig with bad numbers.
+    if (isDegeneratePose(view.pose)) return;
+    if (viewMode === "3d" && threeDActionsRef.current) {
+      threeDActionsRef.current.flyToPose(view.pose);
+      return;
+    }
+    setPendingViewPose(view.pose);
+    if (viewMode !== "3d") setViewMode("3d");
   };
 
   // Compose and deliver the document PDF (spec §5, §12, §13). App owns the async
@@ -1638,6 +1677,14 @@ export function App() {
             onResizeWall={resizeWall}
             onSelectWall={selectWall}
           />
+        ) : visibleLeftPanel === "savedViews" ? (
+          <SavedViewsPanel
+            project={project}
+            thumbnailUrls={savedViewThumbnailUrls}
+            onOpenView={openSavedView}
+            onRenameSavedView={renameSavedView}
+            onDeleteSavedView={deleteSavedView}
+          />
         ) : null}
 
         <section className="canvas-column">
@@ -1988,6 +2035,7 @@ export function App() {
                 onSelectObject={selectObject}
                 onClearSelection={clearObjectSelection}
                 actionsRef={threeDActionsRef}
+                initialPose={pendingViewPose ?? undefined}
               />
             </Suspense>
           ) : null}
@@ -2357,7 +2405,7 @@ export function App() {
           onCancelExport={handleCancelExportPdf}
         />
       </Suspense>
-      {isExportPdfOpen || pdfExportProgress || thumbnailsPending ? (
+      {isExportPdfOpen || savedViewsPaneVisible || pdfExportProgress || thumbnailsPending ? (
         <Suspense fallback={null}>
           <SavedViewRenderHost
             project={project}

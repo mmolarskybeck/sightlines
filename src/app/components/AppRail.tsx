@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { BookmarksSimpleIcon } from "@phosphor-icons/react/dist/csr/BookmarksSimple";
 import { BoundingBoxIcon } from "@phosphor-icons/react/dist/csr/BoundingBox";
 import { ListChecksIcon } from "@phosphor-icons/react/dist/csr/ListChecks";
 import { ImagesSquareIcon } from "@phosphor-icons/react/dist/csr/ImagesSquare";
@@ -23,10 +24,10 @@ export function AppRail({
   issueCount,
   onSelectFirstIssue
 }: {
-  leftPanel: "checklist" | "rooms" | null;
+  leftPanel: "checklist" | "rooms" | "savedViews" | null;
   // Toggle semantic: the active panel's icon collapses to null, the other
   // switches. App owns that logic; the rail just reports which was clicked.
-  onSelectLeftPanel: (panel: "checklist" | "rooms") => void;
+  onSelectLeftPanel: (panel: "checklist" | "rooms" | "savedViews") => void;
   isLibraryView: boolean;
   onOpenLibrary: () => void;
   onOpenSettings: () => void;
@@ -57,6 +58,14 @@ export function AppRail({
           label={leftPanel === "rooms" ? "Hide rooms & walls" : "Show rooms & walls"}
           pressed={leftPanel === "rooms"}
           onClick={() => onSelectLeftPanel("rooms")}
+        />
+
+        <RailButton
+          active={leftPanel === "savedViews"}
+          icon={<BookmarksSimpleIcon aria-hidden="true" size={22} />}
+          label={leftPanel === "savedViews" ? "Hide saved views" : "Show saved views"}
+          pressed={leftPanel === "savedViews"}
+          onClick={() => onSelectLeftPanel("savedViews")}
         />
 
         <RailButton

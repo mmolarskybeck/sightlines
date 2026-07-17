@@ -168,12 +168,19 @@ type CameraRigApi = {
   focus: (target: Vector3) => void;
   frameRoom: (room: Room3d) => void;
   focusFloorUnderCursor: (clientX: number, clientY: number) => void;
+  // Move to an explicit stored pose (Saved views open-in-3D, spec §4.3):
+  // animated by default, an instant cut when `immediate` (reduced motion).
+  flyToPose: (pose: CameraPose, options?: { immediate?: boolean }) => void;
 };
 
 export type ThreeDViewActions = {
   overview: () => void;
   eyeLevel: () => void;
   focusSelection: () => void;
+  // Open a Saved view: move the live camera to its stored pose (saved-views
+  // spec §4.3). Animated flight, or an instant cut under reduced motion.
+  // Read-only — it never writes the project.
+  flyToPose: (pose: SavedViewPose) => void;
   // A clean, offscreen, export-resolution render from the CURRENT camera pose
   // (spec §2.2) — never a readback of the live (dpr-capped, selection-tinted)
   // canvas, never a store write, never a Saved view.
@@ -362,6 +369,23 @@ function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
+// A stored Saved-view pose (plain world-space numbers) as a live CameraPose.
+function toCameraPose(pose: SavedViewPose): CameraPose {
+  return {
+    position: new Vector3(pose.position.x, pose.position.y, pose.position.z),
+    target: new Vector3(pose.target.x, pose.target.y, pose.target.z)
+  };
+}
+
+// Honour the app's motion rules: a pose open is a cut, not a flight, when the
+// user prefers reduced motion (spec §4.3).
+function prefersReducedMotion(): boolean {
+  return (
+    typeof matchMedia !== "undefined" &&
+    matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
 const FLOOR_PLANE = new Plane(new Vector3(0, 1, 0), 0);
 
 // Cursor position -> NDC on the canvas, for raycasts driven by native events.
@@ -379,11 +403,18 @@ function cursorNdc(canvas: HTMLCanvasElement, clientX: number, clientY: number):
 function CameraRig({
   scene,
   fitKey,
-  apiRef
+  apiRef,
+  initialPose
 }: {
   scene: Scene3d;
   fitKey: string;
   apiRef: React.MutableRefObject<CameraRigApi | null>;
+  // A Saved-view pose to seat as the INITIAL camera instead of the fitted
+  // overview, when 3D mounts to open a view (saved-views spec §4.3 handoff).
+  // Captured once at mount so later prop churn can't re-fire it; consumed on
+  // the controls-ready fit run so a subsequent project switch reclaims the
+  // overview framing as usual.
+  initialPose?: SavedViewPose;
 }) {
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as OrbitControlsImpl | null;
@@ -395,6 +426,13 @@ function CameraRig({
   // geometry when a fit/preset runs, but never re-runs the entry fit on edits.
   const sceneRef = useRef(scene);
   sceneRef.current = scene;
+
+  // Captured once at mount: the fit effect seats this instead of the overview,
+  // then nulls it once controls register so a later refit falls through to the
+  // overview.
+  const initialPoseRef = useRef<CameraPose | null>(
+    initialPose ? toCameraPose(initialPose) : null
+  );
 
   const flightRef = useRef<{
     startedAt: number;
@@ -492,13 +530,27 @@ function CameraRig({
         const view = eyeLevelView(sceneRef.current, wall, artwork, eyeHeightMm, aspect());
         flyTo(view.pose);
         return view.ghostedIds;
+      },
+      flyToPose: (pose, options) => {
+        if (options?.immediate) applyPose(pose);
+        else flyTo(pose);
       }
     };
   });
 
   useEffect(() => {
-    const pose = overviewPose(sceneRef.current, aspect());
-    if (pose) applyPose(pose);
+    // A pending Saved-view open seats its pose as the initial camera instead
+    // of the overview (spec §4.3 handoff). Consume it only once controls are
+    // live, so the controls-registration re-run of this effect doesn't fall
+    // through to the overview and clobber the handoff.
+    const initial = initialPoseRef.current;
+    if (initial) {
+      applyPose(initial);
+      if (controls) initialPoseRef.current = null;
+    } else {
+      const pose = overviewPose(sceneRef.current, aspect());
+      if (pose) applyPose(pose);
+    }
     // fitKey / controls only: refit on entry + project switch, and once when
     // OrbitControls first registers. Not on scene edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -921,7 +973,8 @@ export function ThreeDView({
   onSelectWall,
   onSelectObject,
   onClearSelection,
-  actionsRef
+  actionsRef,
+  initialPose
 }: {
   project: Project;
   artworksById: ReadonlyMap<string, Artwork>;
@@ -934,6 +987,9 @@ export function ThreeDView({
   onSelectObject: (objectId: string, opts: { additive: boolean }) => void;
   onClearSelection: () => void;
   actionsRef?: { current: ThreeDViewActions | null };
+  // A Saved-view pose to seat as the initial camera when this view mounts to
+  // open a view while 3D wasn't yet the active mode (spec §4.3 handoff).
+  initialPose?: SavedViewPose;
 }) {
   const benchmarkProjectId = useRef<string | null>(null);
   if (benchmarkEnabled && benchmarkProjectId.current !== project.id) {
@@ -1111,6 +1167,14 @@ export function ThreeDView({
           position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
           target: { x: target.x, y: target.y, z: target.z }
         };
+      },
+      flyToPose: (pose) => {
+        // Opening a Saved view ends any live eye-level ghost session, then
+        // moves to the stored pose — a flight, or a cut under reduced motion.
+        endGhostSession();
+        rigApi.current?.flyToPose(toCameraPose(pose), {
+          immediate: prefersReducedMotion()
+        });
       }
     };
 
@@ -1254,7 +1318,12 @@ export function ThreeDView({
         <KeyboardZoom />
         <KeyboardTravel />
         {benchmarkEnabled ? <BenchmarkFrameProbe /> : null}
-        <CameraRig scene={scene} fitKey={project.id} apiRef={rigApi} />
+        <CameraRig
+          scene={scene}
+          fitKey={project.id}
+          apiRef={rigApi}
+          initialPose={initialPose}
+        />
         <LiveCameraTracker
           cameraRef={liveCameraRef}
           controlsRef={liveControlsRef}

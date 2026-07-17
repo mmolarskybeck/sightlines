@@ -21,7 +21,7 @@ type ViewPreferences = {
   // Explicit opt-in to bypass the default collision rejection.
   allowOverlappingPlacement: boolean;
   // null means the left column is collapsed.
-  leftPanel: "checklist" | "rooms" | null;
+  leftPanel: "checklist" | "rooms" | "savedViews" | null;
   // Workspace-only pixel widths, clamped to the bounds above.
   leftPanelWidth: number;
   inspectorWidth: number;
@@ -94,6 +94,7 @@ function readStoredPreferences(): ViewPreferences {
       leftPanel:
         parsed.leftPanel === "checklist" ||
         parsed.leftPanel === "rooms" ||
+        parsed.leftPanel === "savedViews" ||
         parsed.leftPanel === null
           ? parsed.leftPanel
           : DEFAULT_PREFERENCES.leftPanel,
