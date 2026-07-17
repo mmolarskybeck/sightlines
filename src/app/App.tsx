@@ -173,8 +173,8 @@ const ExportPdfDialog = lazy(() =>
 );
 // Lazy so the three.js it pulls in (via SnapshotStage) stays out of the initial
 // bundle, like ThreeDView. Mounted only while a thumbnail consumer is visible or
-// thumbnail work is pending (Export dialog, or a just-saved view's seed render),
-// so the chunk loads on demand — never at boot, and never for an idle project.
+// thumbnail work is pending (Export dialog, or a just-saved view's seed render);
+// the code itself is usually already warm via the idle prefetch below.
 const SavedViewRenderHost = lazy(() =>
   import("./components/three/SavedViewRenderHost").then((module) => ({
     default: module.SavedViewRenderHost
@@ -189,6 +189,26 @@ const ThreeDView = lazy(() =>
 const FontLab = import.meta.env.DEV
   ? lazy(() => import("./components/FontLab"))
   : null;
+
+// Warm the lazy 3D chunks (three.js download + parse) once the main thread is
+// idle after boot: the initial bundle and time-to-first-paint are untouched,
+// but by the time the user first switches to 3D, saves a view, or opens the
+// Export dialog, the code is already in memory instead of costing a ~800 kB
+// fetch + parse at that moment. A failed prefetch is silent — the lazy()
+// mounts above retry the import on real demand. Skipped under test so
+// rendering App doesn't drag three.js into jsdom.
+if (typeof window !== "undefined" && !import.meta.env.TEST) {
+  const warmThreeChunks = () => {
+    import("./components/three/ThreeDView").catch(() => {});
+    import("./components/three/SavedViewRenderHost").catch(() => {});
+  };
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(warmThreeChunks, { timeout: 5000 });
+  } else {
+    // Safari (iPad included) has no requestIdleCallback.
+    window.setTimeout(warmThreeChunks, 3000);
+  }
+}
 
 // Stable read-only asset lookup; the repository wrapper is stateless.
 const assetRepository = new IndexedDbAssetRepository();

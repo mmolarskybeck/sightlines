@@ -94,6 +94,12 @@ function SnapshotRenderer({
   const readyRef = useRef(false);
   readyRef.current = texturesByAssetId.size >= uniqueAssetIdCount;
 
+  // Callers may pass an inline onSettled (ThreeDView does); read it through a
+  // ref so a parent re-render mid-capture can't restart the effect below and
+  // abort the capture.
+  const onSettledRef = useRef(onSettled);
+  onSettledRef.current = onSettled;
+
   useEffect(() => {
     camera.position.copy(request.pose.position);
     camera.lookAt(request.pose.target);
@@ -104,6 +110,14 @@ function SnapshotRenderer({
     let frames = 0;
     const startedAt = performance.now();
 
+    // With dpr={1}, the drawing buffer should land exactly on the requested
+    // CSS-pixel size once r3f's ResizeObserver has applied it; a small
+    // tolerance absorbs sub-pixel rounding under page zoom. The texture
+    // timeout below backstops a mismatch so a capture can never hang on this.
+    const sizeSettled = () =>
+      Math.abs(gl.domElement.width - request.widthPx) <= 2 &&
+      Math.abs(gl.domElement.height - request.heightPx) <= 2;
+
     const finish = () => {
       if (settledRef.current) return;
       settledRef.current = true;
@@ -113,7 +127,7 @@ function SnapshotRenderer({
         (blob) => {
           if (blob) request.resolve(blob);
           else request.reject(new Error("3D snapshot render produced no image data."));
-          onSettled();
+          onSettledRef.current();
         },
         mimeType,
         request.format === "jpeg" ? SNAPSHOT_JPEG_QUALITY : undefined
@@ -123,9 +137,11 @@ function SnapshotRenderer({
     const poll = () => {
       frames += 1;
       const timedOut = performance.now() - startedAt >= SNAPSHOT_TEXTURE_TIMEOUT_MS;
-      // At least two ticks even when nothing is loading, so the canvas's
-      // ResizeObserver-driven size has settled before the render.
-      if (frames > 1 && (readyRef.current || timedOut)) {
+      // At least two ticks even when nothing is loading, and the drawing
+      // buffer must have picked up this request's size — consecutive requests
+      // in one mount (the render host's queue) can differ in size, and the
+      // ResizeObserver applies the new size asynchronously.
+      if (frames > 1 && ((readyRef.current && sizeSettled()) || timedOut)) {
         finish();
         return;
       }
@@ -138,14 +154,15 @@ function SnapshotRenderer({
       if (!settledRef.current) {
         settledRef.current = true;
         request.reject(new Error("3D snapshot capture was interrupted."));
-        onSettled();
+        onSettledRef.current();
       }
     };
-    // Pose/format/size belong to `request`, which is only ever swapped by
-    // remounting this component (ThreeDView keys the mount on the request) —
-    // re-running this effect for any other reason would restart the capture.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // Each request runs exactly one capture: a new request object (the render
+    // host advancing its queue within one mount, or ThreeDView mounting a
+    // fresh stage) restarts this effect; the cleanup rejects the old request
+    // if it hadn't settled. camera/scene/gl are stable per Canvas mount, and
+    // onSettled is read through a ref, so nothing else can restart a capture.
+  }, [request, camera, threeScene, gl]);
 
   return (
     <SceneRooms
@@ -175,9 +192,11 @@ function SnapshotRenderer({
 // target resolution exactly while nothing is ever visible or takes layout
 // space in the surrounding page.
 //
-// Mounted only while a request is in flight (keyed on the request identity)
-// and torn down immediately after, so no GPU memory for this stage persists
-// between captures.
+// Mounted only while work is in flight, so no GPU memory for this stage
+// persists while idle. ThreeDView mounts it per capture; SavedViewRenderHost
+// keeps it mounted for the lifetime of its queue and swaps `request` in
+// place, so a batch of Saved-view renders shares one WebGL context and one
+// set of decoded textures instead of paying context + decode per view.
 export function SnapshotStage({
   derivedScene,
   artworksById,

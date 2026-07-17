@@ -75,6 +75,9 @@ export function SavedViewRenderHost({
     if (activeRef.current) return;
     const next = queueRef.current.shift();
     if (!next) {
+      // Queue drained: unmount the stage (and release its WebGL context) only
+      // now — it stays mounted between requests so a batch shares one context.
+      setActiveRequest(null);
       setHasWork(false);
       return;
     }
@@ -133,14 +136,13 @@ export function SavedViewRenderHost({
 
   const handleSettled = useCallback(() => {
     activeRef.current = false;
-    // Drop the current request first so SnapshotStage remounts fresh for the
-    // next one (its capture effect runs once per mount); the effect below then
-    // pumps the queue.
-    setActiveRequest(null);
-  }, []);
+    // Advance in place: swapping `request` on the still-mounted stage restarts
+    // its capture effect, so consecutive renders reuse one WebGL context and
+    // the already-decoded textures instead of remounting per view.
+    pump();
+  }, [pump]);
 
-  // Advance the queue whenever nothing is in flight (covers both the initial
-  // idle state and each settle).
+  // Cover the initial idle state (first enqueue arrives before any settle).
   useEffect(() => {
     if (activeRequest === null) pump();
   }, [activeRequest, pump]);
