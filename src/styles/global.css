@@ -3708,15 +3708,20 @@ body.panels-resizing * {
   transition: color 150ms ease-out;
 }
 
+/* ARIA variants alongside data-state: a Radix TooltipTrigger wrapped around a
+   trigger overwrites data-state with the tooltip's open/closed, while
+   aria-selected/aria-checked stay owned by Tabs/ToggleGroup. */
 .tab-button:hover:not(:disabled),
 .tab-button[data-state="active"],
-.tab-button[data-state="on"] {
+.tab-button[data-state="on"],
+.tab-button[aria-selected="true"],
+.tab-button[aria-checked="true"] {
   color: var(--ink);
 }
 
 /* First-paint fallback before the underline is measured. */
 .tabs-underline:not([data-seg-ready])
-  .tab-button:is([data-state="active"], [data-state="on"]) {
+  .tab-button:is([data-state="active"], [data-state="on"], [aria-selected="true"], [aria-checked="true"]) {
   box-shadow: inset 0 -3px 0 var(--primary);
 }
 
@@ -7535,6 +7540,13 @@ body.panels-resizing * {
 .artwork-picker-identity strong { font-size: var(--type-sm); font-weight: 600; }
 .artwork-picker-identity span { color: var(--muted-foreground); font-size: var(--type-xs); }
 .artwork-picker-empty { padding: 2.5rem 1rem; color: var(--muted-foreground); font-size: var(--type-sm); text-align: center; }
+.artwork-picker-selectall { display: flex; align-items: center; gap: 0.7rem; padding: 0.2rem 0.7rem; color: var(--muted-foreground); cursor: pointer; font-size: var(--type-xs); }
+.artwork-picker-selectall:has(.checkbox-control:focus-visible) { outline: 2px solid var(--ring); outline-offset: -2px; }
+
+/* Bulk mat/frame dialog: the mat/frame width pair, finish, and notes stack with
+   the same rhythm as the picker's body rows. */
+.bulk-matframe-dialog { width: min(26rem, calc(100vw - 2rem)); }
+.bulk-matframe-fields { display: flex; flex-direction: column; gap: 12px; }
 
 @media (max-width: 720px) {
   .artwork-library-table th:nth-child(4),

@@ -148,6 +148,10 @@ type EditEntry = {
   label: string;
   project?: { before: Project; after: Project };
   artwork?: { before: Artwork; after: Artwork };
+  // A batch of artwork halves committed under one undo entry (bulk mat/frame),
+  // so undo/redo restores the whole batch as a single step. Distinct from the
+  // singular `artwork` half a plain updateArtwork records.
+  artworks?: { before: Artwork; after: Artwork }[];
 };
 
 const UNDO_STACK_LIMIT = 100;
@@ -184,6 +188,11 @@ type UpdateArtworkChanges = Partial<
     | "frameIncludedInImage"
   >
 >;
+
+// The subset a bulk mat/frame apply can write across many works at once. Narrower
+// than UpdateArtworkChanges: identity/dimension/placement metadata is per-work,
+// so the batch dialog only ever sets or clears the mat band and the frame.
+type BulkMatFrameChanges = Partial<Pick<Artwork, "matWidthMm" | "frame">>;
 
 export type AppState = ArrangeSliceState &
   ArrangeSliceActions & {
@@ -337,6 +346,14 @@ export type AppState = ArrangeSliceState &
   removeArtworkFromChecklist: (artworkId: string) => Promise<void>;
   deleteLibraryArtworks: (artworkIds: string[]) => Promise<void>;
   updateArtwork: (artworkId: string, changes: UpdateArtworkChanges) => Promise<void>;
+  // Applies one mat/frame change to many library works in a single undo entry.
+  // Skips works whose stored size already includes the frame
+  // (frameIncludedInImage) — the single inspector locks their mat/frame too —
+  // and reports how many were skipped so the caller can say so.
+  updateArtworksMatFrame: (
+    artworkIds: string[],
+    changes: BulkMatFrameChanges
+  ) => Promise<{ updated: number; skipped: number }>;
   placeArtwork: (
     artworkId: string,
     wallId: string,
@@ -388,7 +405,7 @@ export type AppState = ArrangeSliceState &
     allowOverlap?: boolean
   ) => Promise<void>;
   movePlanObjectsGroup: (
-    moves: { id: string; xMm: number; yMm?: number }[],
+    moves: { id: string; xMm: number; yMm?: number; wallId?: string }[],
     allowOverlap?: boolean
   ) => Promise<void>;
   removeSelectedPlacements: () => Promise<void>;
@@ -505,8 +522,17 @@ export function createAppStore(deps: AppStoreDeps) {
     // side of the artwork to the library and refresh libraryArtworks from
     // it, the same shape as a forward updateArtwork commit.
     async function saveArtworkHalf(artwork: Artwork) {
+      await saveArtworkHalves([artwork]);
+    }
+
+    // Batch variant of saveArtworkHalf: persist several artwork records, then
+    // refresh libraryArtworks once. Shared by the bulk mat/frame apply and by
+    // undo/redo reapplying a batched entry's halves.
+    async function saveArtworkHalves(artworks: Artwork[]) {
       try {
-        await deps.artworkLibraryRepository.save(artwork);
+        for (const artwork of artworks) {
+          await deps.artworkLibraryRepository.save(artwork);
+        }
         set({ libraryArtworks: await deps.artworkLibraryRepository.list() });
       } catch (error) {
         set({
@@ -2023,6 +2049,7 @@ export function createAppStore(deps: AppStoreDeps) {
 
         if (entry.project) await persist(entry.project.before);
         if (entry.artwork) await saveArtworkHalf(entry.artwork.before);
+        if (entry.artworks) await saveArtworkHalves(entry.artworks.map((half) => half.before));
       },
 
       async redo() {
@@ -2040,6 +2067,7 @@ export function createAppStore(deps: AppStoreDeps) {
 
         if (entry.project) await persist(entry.project.after);
         if (entry.artwork) await saveArtworkHalf(entry.artwork.after);
+        if (entry.artworks) await saveArtworkHalves(entry.artworks.map((half) => half.after));
       },
 
       async importProjectJson(text) {
@@ -2840,6 +2868,97 @@ export function createAppStore(deps: AppStoreDeps) {
         if (projectEdit) await persist(projectEdit.after);
       },
 
+      async updateArtworksMatFrame(artworkIds, changes) {
+        const library = get().libraryArtworks;
+        const project = get().project;
+
+        // Distinct ids only: a placement-derived id list can name one artwork
+        // twice (a work placed on two walls resolves to the same record).
+        const distinctIds = [...new Set(artworkIds)];
+
+        let skipped = 0;
+        const halves: { before: Artwork; after: Artwork }[] = [];
+        const affectedIds = new Set<string>();
+
+        for (const artworkId of distinctIds) {
+          const before = library.find((artwork) => artwork.id === artworkId);
+          if (!before) continue;
+
+          // A frame-inclusive work's stored size already contains the frame, so
+          // there is no mat/frame band to set — the single inspector locks it,
+          // and a bulk apply skips it the same way (counted for the UI note).
+          if (before.frameIncludedInImage === true) {
+            skipped += 1;
+            continue;
+          }
+
+          const next: Artwork = { ...before, ...changes };
+          // Only mat/frame can move here; a no-op work drops out so a batch
+          // that changes nothing for it doesn't churn persistence or undo.
+          const changed =
+            JSON.stringify(before.matWidthMm) !== JSON.stringify(next.matWidthMm) ||
+            JSON.stringify(before.frame) !== JSON.stringify(next.frame);
+          if (!changed) continue;
+
+          let parsed: Artwork;
+          try {
+            parsed = parseArtwork(next);
+          } catch (error) {
+            // Validate before mutating persistence, state, or undo history —
+            // one bad value aborts the whole batch, mirroring updateArtwork.
+            set({
+              error: `Could not save that change (${
+                error instanceof z.ZodError ? formatZodIssue(error) : "invalid value."
+              }).`
+            });
+            return { updated: 0, skipped };
+          }
+
+          halves.push({ before, after: parsed });
+
+          // Framing is a read-time expansion (no placement is resized), but the
+          // footprint change still needs the same placement revalidation as a
+          // single-work mat/frame edit.
+          if (project) {
+            for (const wallObject of project.wallObjects) {
+              if (wallObject.kind === "artwork" && wallObject.artworkId === artworkId) {
+                affectedIds.add(wallObject.id);
+              }
+            }
+          }
+        }
+
+        if (halves.length === 0) {
+          return { updated: 0, skipped };
+        }
+
+        let placementWarnings: PlacementWarning[] = [];
+        if (project && affectedIds.size > 0) {
+          const parsedById = new Map(halves.map((half) => [half.after.id, half.after]));
+          const validationArtworks = get().libraryArtworks.map(
+            (artwork) => parsedById.get(artwork.id) ?? artwork
+          );
+          placementWarnings = validateWallObjectPlacements(
+            project,
+            [...affectedIds],
+            validationArtworks
+          );
+        }
+
+        pushEditEntry(
+          {
+            // Singular batch still reads as a plain artwork edit in the history.
+            label: halves.length === 1 ? "Edit artwork" : "Set mat & frame",
+            artworks: halves
+          },
+          { placementWarnings }
+        );
+
+        await saveArtworkHalves(halves.map((half) => half.after));
+
+        return { updated: halves.length, skipped };
+      },
+
       async placeArtwork(artworkId, wallId, xMm, yMm, allowOverlap = false) {
         const project = get().project;
         if (!project) return;
@@ -3450,13 +3569,17 @@ export function createAppStore(deps: AppStoreDeps) {
         const movedWallIds: string[] = [];
         const nextWallObjects = project.wallObjects.map((wallObject) => {
           const move = wallMoveById.get(wallObject.id);
-          // Wall-anchored members slide along their wall only — the plan
-          // view has no notion of hang height, so yMm (if present on the
-          // move) is ignored for these, same as commitPlanMove's same-wall
-          // branch.
-          if (!move || wallObject.xMm === move.xMm) return wallObject;
+          if (!move) return wallObject;
+          // A move.wallId re-anchors an artwork member onto a different wall
+          // (group drag onto a foreign wall); absent, the member slides along
+          // its own wall. Either way the hang height and size carry over
+          // unchanged — the plan view has no notion of hang height, so yMm (if
+          // present on the move) is ignored — mirroring commitPlanMove's
+          // wall→wall branch. The collision gate below validates the new wall.
+          const nextWallId = move.wallId ?? wallObject.wallId;
+          if (wallObject.wallId === nextWallId && wallObject.xMm === move.xMm) return wallObject;
           movedWallIds.push(wallObject.id);
-          return { ...wallObject, xMm: move.xMm };
+          return { ...wallObject, wallId: nextWallId, xMm: move.xMm };
         });
 
         const movedFloorIds: string[] = [];

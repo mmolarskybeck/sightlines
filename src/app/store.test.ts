@@ -1489,6 +1489,112 @@ describe("app store", () => {
     });
   });
 
+  describe("updateArtworksMatFrame", () => {
+    async function seedLibrary() {
+      await store.getState().addArtworksFromFiles(
+        [makeImageFile("a.jpg"), makeImageFile("b.jpg"), makeImageFile("c.jpg")],
+        { destination: "library" }
+      );
+      return store.getState().libraryArtworks.map((artwork) => artwork.id);
+    }
+
+    it("applies mat & frame to many works in one undo entry and reports skipped 0", async () => {
+      const [a, b] = await seedLibrary();
+
+      const result = await store
+        .getState()
+        .updateArtworksMatFrame([a, b], {
+          matWidthMm: 50,
+          frame: { widthMm: 25, finish: "gold" }
+        });
+
+      expect(result).toEqual({ updated: 2, skipped: 0 });
+      const byId = new Map(store.getState().libraryArtworks.map((art) => [art.id, art]));
+      expect(byId.get(a)?.matWidthMm).toBe(50);
+      expect(byId.get(a)?.frame).toEqual({ widthMm: 25, finish: "gold" });
+      expect(byId.get(b)?.frame).toEqual({ widthMm: 25, finish: "gold" });
+      // One entry for the whole batch, and each record is persisted.
+      expect(store.getState().undoStack).toHaveLength(1);
+      expect(artworkLibraryRepository.artworks.get(a)?.matWidthMm).toBe(50);
+      expect(artworkLibraryRepository.artworks.get(b)?.matWidthMm).toBe(50);
+    });
+
+    it("skips works whose size already includes the frame and counts them", async () => {
+      const [a, b, c] = await seedLibrary();
+      // Flag c as frame-inclusive directly in the repository.
+      const cRecord = store.getState().libraryArtworks.find((art) => art.id === c)!;
+      await artworkLibraryRepository.save({ ...cRecord, frameIncludedInImage: true });
+      store.setState({ libraryArtworks: await artworkLibraryRepository.list() });
+
+      const result = await store
+        .getState()
+        .updateArtworksMatFrame([a, b, c], { matWidthMm: 30 });
+
+      expect(result).toEqual({ updated: 2, skipped: 1 });
+      const byId = new Map(store.getState().libraryArtworks.map((art) => [art.id, art]));
+      expect(byId.get(a)?.matWidthMm).toBe(30);
+      expect(byId.get(b)?.matWidthMm).toBe(30);
+      // The skipped work is untouched.
+      expect(byId.get(c)?.matWidthMm).toBeUndefined();
+    });
+
+    it("clears mat and frame when passed undefined", async () => {
+      const [a] = await seedLibrary();
+      await store
+        .getState()
+        .updateArtworksMatFrame([a], { matWidthMm: 40, frame: { widthMm: 20, finish: "black" } });
+
+      const result = await store
+        .getState()
+        .updateArtworksMatFrame([a], { matWidthMm: undefined, frame: undefined });
+
+      expect(result).toEqual({ updated: 1, skipped: 0 });
+      const record = store.getState().libraryArtworks.find((art) => art.id === a)!;
+      expect(record.matWidthMm).toBeUndefined();
+      expect(record.frame).toBeUndefined();
+    });
+
+    it("records no undo entry when nothing changes", async () => {
+      const [a] = await seedLibrary();
+
+      const result = await store
+        .getState()
+        .updateArtworksMatFrame([a], { matWidthMm: undefined });
+
+      expect(result).toEqual({ updated: 0, skipped: 0 });
+      expect(store.getState().undoStack).toHaveLength(0);
+    });
+
+    it("undo and redo round-trip the whole batch", async () => {
+      const [a, b] = await seedLibrary();
+      await store
+        .getState()
+        .updateArtworksMatFrame([a, b], { matWidthMm: 60 });
+
+      await store.getState().undo();
+      let byId = new Map(store.getState().libraryArtworks.map((art) => [art.id, art]));
+      expect(byId.get(a)?.matWidthMm).toBeUndefined();
+      expect(byId.get(b)?.matWidthMm).toBeUndefined();
+      expect(artworkLibraryRepository.artworks.get(a)?.matWidthMm).toBeUndefined();
+
+      await store.getState().redo();
+      byId = new Map(store.getState().libraryArtworks.map((art) => [art.id, art]));
+      expect(byId.get(a)?.matWidthMm).toBe(60);
+      expect(byId.get(b)?.matWidthMm).toBe(60);
+      expect(artworkLibraryRepository.artworks.get(b)?.matWidthMm).toBe(60);
+    });
+
+    it("dedupes repeated ids so a work placed twice applies once", async () => {
+      const [a] = await seedLibrary();
+
+      const result = await store
+        .getState()
+        .updateArtworksMatFrame([a, a, a], { matWidthMm: 35 });
+
+      expect(result).toEqual({ updated: 1, skipped: 0 });
+    });
+  });
+
   it("openProject switches the current document and resets edit history", async () => {
     const original = store.getState().project!;
     await store.getState().createProject("Winter Show");
@@ -3978,6 +4084,34 @@ describe("app store", () => {
         expect(wallObject.yMm).toBe(1450);
         expect(floorObject.xMm).toBe(1500);
         expect(floorObject.yMm).toBe(2500);
+      });
+
+      it("re-anchors an artwork member onto another wall (wallId), keeping hang height, in one undo entry", async () => {
+        const art = await placeArtworkOnWall(500, 1450);
+        const otherWall = store
+          .getState()
+          .project!.floor.rooms[0].room.walls.find((wall) => wall.id !== art.wall.id)!;
+        const undoStackBefore = store.getState().undoStack.length;
+
+        await store
+          .getState()
+          .movePlanObjectsGroup([{ id: art.placementId, xMm: 700, wallId: otherWall.id }]);
+
+        let state = store.getState();
+        expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+        let wallObject = state.project!.wallObjects.find((o) => o.id === art.placementId)!;
+        expect(wallObject.wallId).toBe(otherWall.id);
+        expect(wallObject.xMm).toBe(700);
+        // Hang height carries over unchanged across the wall change.
+        expect(wallObject.yMm).toBe(1450);
+
+        await store.getState().undo();
+
+        state = store.getState();
+        wallObject = state.project!.wallObjects.find((o) => o.id === art.placementId)!;
+        expect(wallObject.wallId).toBe(art.wall.id);
+        expect(wallObject.xMm).toBe(500);
+        expect(wallObject.yMm).toBe(1450);
       });
 
       it("filters out stale/unknown ids without throwing, and is a no-op when nothing remains", async () => {

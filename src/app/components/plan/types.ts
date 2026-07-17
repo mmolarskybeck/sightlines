@@ -1,6 +1,6 @@
 import type { Vector2 } from "../../../domain/geometry/dragResize";
 import type { ResizeAnchor } from "../../../domain/geometry/editRoom";
-import type { PlanRect } from "../../../domain/geometry/planObjects";
+import type { FloorWall, PlanRect } from "../../../domain/geometry/planObjects";
 import type { FloatPolicy, ResolvedPlacement } from "../../../domain/snapping/planSnapTargets";
 import type { Guide, SnapTargetIds } from "../../../domain/snapping/resolveSnap";
 import type { PlanGroupMember } from "../../../domain/snapping/planGroupMove";
@@ -100,18 +100,25 @@ export type ObjectDragState = {
   previewPlacement: ResolvedPlacement;
   previousSnapTargetIds?: SnapTargetIds;
   activeGuides: Guide[];
-  // Group drag: a rigid, translation-only move of a multi-selection.
-  // resolvePlanPlacement is skipped entirely (no mid-group wall re-anchoring —
-  // deliberate); the pointer delta is optionally grid-snapped on the group's
-  // box center, then applied to every member. Wall members stay glued to their
-  // own wall, floor members translate. Absent for a single-object drag — that
-  // path (previewPlanRect/previewPlacement/currentAnchorWallId) is untouched.
+  // Group drag: a rigid, translation-only move of a multi-selection, with one
+  // exception — resolvePlanPlacement is still skipped, but wall-anchored ARTWORK
+  // re-anchors onto a foreign wall the group is dragged near (see
+  // resolvePlanGroupReanchorWall). The pointer delta is optionally grid-snapped
+  // on the group's box center, then applied to every member. Openings/blocked
+  // zones stay glued to their own wall, floor members translate, artwork projects
+  // onto the resolved target wall. Absent for a single-object drag — that path
+  // (previewPlanRect/previewPlacement/currentAnchorWallId) is untouched.
   members?: PlanGroupMember[];
   startGroupCenterMm?: Vector2;
   previewGroupCenterMm?: Vector2;
   // Per-member preview rects, id → PlanRect, recomputed each move — the group
   // counterpart to the single object's previewPlanRect.
   previewRectById?: Map<string, PlanRect>;
+  // The foreign wall the group's artwork is currently re-anchored onto (null
+  // when none is near — the rigid-slide default). Threaded back in each move as
+  // the sticky target for break-free hysteresis, and read on release so the
+  // commit re-anchors onto exactly the wall the preview last showed.
+  previewReanchorWall?: FloorWall | null;
 };
 
 // The HTML5-drop preview for an artwork dragged in from the checklist —

@@ -3,6 +3,7 @@ import { ArrowsHorizontalIcon } from "@phosphor-icons/react/dist/csr/ArrowsHoriz
 import { ArrowsInLineHorizontalIcon } from "@phosphor-icons/react/dist/csr/ArrowsInLineHorizontal";
 import { ArrowsOutLineHorizontalIcon } from "@phosphor-icons/react/dist/csr/ArrowsOutLineHorizontal";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
+import { FrameCornersIcon } from "@phosphor-icons/react/dist/csr/FrameCorners";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import type { DisplayUnit, WallObject } from "../../domain/project";
@@ -94,6 +95,7 @@ export function SelectionInspector({
   onArrangeValue,
   onAcceptArrange,
   onCancelArrange,
+  onSetMatFrame,
   onRemoveAll
 }: {
   count: number;
@@ -131,6 +133,10 @@ export function SelectionInspector({
   ) => void;
   onAcceptArrange: () => void;
   onCancelArrange: () => void;
+  // Opens the bulk mat/frame dialog. Undefined when no selected object resolves
+  // to an artwork placement (openings/blocked zones have no framing), which is
+  // what hides the affordance.
+  onSetMatFrame?: () => void;
   onRemoveAll: () => void;
 }) {
   const { displayUnit, parseUnit, placeholder, stepMm } = getScopedUnitContext(unit, "openingPosition");
@@ -393,6 +399,21 @@ export function SelectionInspector({
       </InspectorSection>
 
       <div className="inspector-placement">
+        {/* Bulk mat/frame rides above the destructive Remove all: it edits the
+            selected works' framing everywhere, so it stays a plain action. Only
+            shown when the selection holds at least one artwork placement. */}
+        {onSetMatFrame && !confirmingRemove ? (
+          <InspectorActionGroup>
+            <Button
+              className="inspector-action"
+              variant="inspector"
+              onClick={onSetMatFrame}
+            >
+              <FrameCornersIcon aria-hidden="true" size={15} />
+              Set mat &amp; frame…
+            </Button>
+          </InspectorActionGroup>
+        ) : null}
         {confirmingRemove ? (
           <div className="remove-all-confirm">
             <span className="remove-all-confirm-label">

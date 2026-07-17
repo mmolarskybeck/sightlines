@@ -113,6 +113,29 @@ describe("LengthField", () => {
     expect(screen.getByText(/Accepts 12'/)).toBeInTheDocument();
   });
 
+  it("suppresses the focus-only accepted-formats hint under hideFocusHint", () => {
+    // The hint is the one message that toggles purely on focus/blur; a
+    // content-sized centered container (e.g. a compact dialog) suppresses it so
+    // the box doesn't resize mid-click and slide action buttons off the pointer.
+    const { input, container } = renderField({ valueMm: 304.8, hideFocusHint: true });
+
+    fireEvent.focus(input);
+
+    expect(screen.queryByText(/Accepts 12'/)).not.toBeInTheDocument();
+    // No message row means no reserved height to appear or vanish on blur.
+    expect(container.querySelector(".field-hint, .length-field-hint, .field-error")).toBeNull();
+  });
+
+  it("still shows a conversion hint under hideFocusHint (only the focus hint is gated)", () => {
+    const { input } = renderField({ hideFocusHint: true });
+
+    // A cm value in an inch field yields a live conversion hint, which is not
+    // focus-gated and must survive the suppression.
+    fireEvent.change(input, { target: { value: "5 cm" } });
+
+    expect(screen.getByText(/→/)).toBeInTheDocument();
+  });
+
   it("keeps the placeholder available to return after focus guidance closes", () => {
     const { input } = renderField({ placeholder: "e.g. 24" });
 

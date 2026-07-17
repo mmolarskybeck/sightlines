@@ -33,6 +33,7 @@ export function LengthField({
   positiveOnly = false,
   onCommit,
   focusHint,
+  hideFocusHint = false,
   commitErrorFallback = "Could not save this measurement.",
   stepMm,
   onEnterWhenClean
@@ -56,6 +57,12 @@ export function LengthField({
   onCommit: (valueMm: number) => void | Promise<void>;
   /** Optional context appended to the standard accepted-format guidance. */
   focusHint?: string;
+  /** Suppresses the focus-only accepted-formats hint. The hint is the one
+   * message that toggles purely on focus/blur, so in a content-sized, centered
+   * container (e.g. a compact dialog) its appear/disappear resizes the box and
+   * shifts action buttons out from under the pointer mid-click. Set true where
+   * the placeholder already conveys the format and layout stability matters. */
+  hideFocusHint?: boolean;
   commitErrorFallback?: string;
   /** Enables the chevron stepper column + ArrowUp/ArrowDown nudge, stepping by this many mm. */
   stepMm?: number;
@@ -156,7 +163,7 @@ export function LengthField({
   const conversionHint = error
     ? null
     : getConversionHint(input, { parseUnit, displayUnit });
-  const showFocusHint = focused && !error && !conversionHint;
+  const showFocusHint = focused && !error && !conversionHint && !hideFocusHint;
 
   let message: string | null = null;
   let messageTone: "hint" | "conversion" | "error" = "hint";

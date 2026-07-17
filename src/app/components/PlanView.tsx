@@ -90,6 +90,7 @@ import {
 import {
   getPlanGroupCenterMm,
   resolvePlanGroupMemberMove,
+  resolvePlanGroupReanchorWall,
   type PlanGroupMember
 } from "../../domain/snapping/planGroupMove";
 import { resolveSnap, type Guide, type SnapTarget, type SnapTargetIds } from "../../domain/snapping/resolveSnap";
@@ -482,8 +483,12 @@ export function PlanView({
   gridVisible: boolean;
   // Atomically handles same-wall moves, re-anchoring, and wall/floor conversion.
   onCommitPlanMove?: (objectId: string, placement: PlanPlacement) => void;
-  // Wall moves omit yMm; floor moves include their new center.
-  onCommitPlanMoveGroup?: (moves: { id: string; xMm: number; yMm?: number }[]) => void;
+  // Wall moves omit yMm; floor moves include their new center. A wallId marks a
+  // wall member re-anchored onto a different wall (artwork dragged onto another
+  // wall); absent, the member stays on its own wall.
+  onCommitPlanMoveGroup?: (
+    moves: { id: string; xMm: number; yMm?: number; wallId?: string }[]
+  ) => void;
   onPlaceArtwork?: (artworkId: string, wallId: string, xMm: number, yMm: number) => void;
   onPlaceArtworkOnFloor?: (artworkId: string, xMm: number, yMm: number) => void;
   // IDs are placements, never artwork-library records.
@@ -671,10 +676,14 @@ export function PlanView({
       const pointerMm = toSvgMm(event.clientX, event.clientY);
       if (!pointerMm) return null;
 
-      // Group drag: rigid translation, no per-object re-anchoring. Snap the
-      // whole group's box center to the grid (grid tier only), then apply the
-      // snapped delta to every member — wall members reproject onto their own
-      // wall, floor members translate.
+      // Group drag: rigid translation, with one exception — wall-anchored
+      // ARTWORK re-anchors onto a foreign wall the group is dragged near
+      // (resolvePlanGroupReanchorWall, driven by the snapped group center, with
+      // break-free hysteresis off the currently-held target). Snap the whole
+      // group's box center to the grid (grid tier only), apply the snapped delta
+      // to every member — floor members translate, openings/blocked zones slide
+      // on their own wall, artwork projects onto the resolved target wall (or its
+      // own wall when none is near).
       if (current.members && current.startGroupCenterMm) {
         const rawDeltaMm: Vector2 = {
           xMm: pointerMm.xMm - current.startPointerMm.xMm,
@@ -703,10 +712,22 @@ export function PlanView({
           xMm: snappedGroupCenterMm.xMm - current.startGroupCenterMm.xMm,
           yMm: snappedGroupCenterMm.yMm - current.startGroupCenterMm.yMm
         };
+
+        // Which foreign wall (if any) the group's artwork re-anchors onto this
+        // frame. memberWallIds are the walls the artwork already sits on, so
+        // those never count as "foreign"; the previous target stays sticky.
+        const reanchorWall = resolvePlanGroupReanchorWall({
+          groupCenterMm: snappedGroupCenterMm,
+          walls: floorWallsForTool,
+          memberWallIds: artworkMemberWallIds(current.members),
+          captureDistanceMm,
+          previousTargetWallId: current.previewReanchorWall?.id ?? null
+        });
+
         const previewRectById = new Map<string, PlanRect>(
           current.members.map((member) => [
             member.id,
-            resolvePlanGroupMemberMove(member, deltaMm).rect
+            resolvePlanGroupMemberMove(member, deltaMm, reanchorWall).rect
           ])
         );
 
@@ -714,6 +735,7 @@ export function PlanView({
           ...current,
           previewGroupCenterMm: snappedGroupCenterMm,
           previewRectById,
+          previewReanchorWall: reanchorWall,
           previousSnapTargetIds: snapTargetIds,
           activeGuides
         };
@@ -764,8 +786,11 @@ export function PlanView({
 
         // Prevent the trailing click from collapsing the multi-selection.
         suppressNextSelect();
+        // Same target wall the last preview frame resolved, so the committed
+        // re-anchor matches exactly what the user saw glued to the wall.
+        const reanchorWall = current.previewReanchorWall ?? null;
         const moves = current.members.map(
-          (member) => resolvePlanGroupMemberMove(member, deltaMm).commit
+          (member) => resolvePlanGroupMemberMove(member, deltaMm, reanchorWall).commit
         );
         onCommitPlanMoveGroup?.(moves);
         return;
@@ -2481,6 +2506,7 @@ export function PlanView({
         members.push({
           id: object.id,
           anchor: "wall",
+          kind: object.kind,
           wall,
           worldCenterMm: { xMm: rest.centerXMm, yMm: rest.centerYMm },
           widthMm: object.widthMm,

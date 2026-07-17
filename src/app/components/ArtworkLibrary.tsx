@@ -7,10 +7,11 @@ import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/csr/MagnifyingGl
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { ACCEPTED_IMAGE_MIME_TYPES } from "../../domain/assets/imageIntake";
-import type { Artwork, DisplayUnit, Project, ProjectSummary } from "../../domain/project";
+import type { ArtworkFrame, Artwork, DisplayUnit, Project, ProjectSummary } from "../../domain/project";
 import { formatLength } from "../../domain/units/length";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
 import { useAssetImageUrls } from "../hooks/useAssetImageUrls";
+import { BulkMatFrameDialog } from "./BulkMatFrameDialog";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import {
@@ -41,6 +42,7 @@ export function ArtworkLibraryView({
   getBlob,
   onAddToChecklist,
   onDeleteArtworks,
+  onApplyMatFrame,
   onAddFiles,
   onOpenImportWizard,
   pendingDuplicateUploads = [],
@@ -52,6 +54,12 @@ export function ArtworkLibraryView({
 }: LibraryCommonProps & {
   onAddToChecklist: (artworkIds: string[]) => void | Promise<void>;
   onDeleteArtworks?: (artworkIds: string[]) => void | Promise<void>;
+  // Bulk mat/frame apply for the current selection; the store skips
+  // frame-inclusive works and the dialog counts them.
+  onApplyMatFrame?: (
+    artworkIds: string[],
+    changes: { matWidthMm?: number; frame?: ArtworkFrame }
+  ) => void | Promise<void>;
   onAddFiles?: (files: File[]) => void | Promise<void>;
   onOpenImportWizard: () => void;
   pendingDuplicateUploads?: { file: File; existingArtworkTitle: string }[];
@@ -66,6 +74,9 @@ export function ArtworkLibraryView({
   const [sort, setSort] = useState<{ key: LibrarySort; direction: SortDirection }>({ key: "title", direction: "ascending" });
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
+  // Ids the Set-mat-&-frame dialog is open for (null = closed). Snapshotted on
+  // open so the dialog keeps its targets even if the selection list churns.
+  const [matFrameIds, setMatFrameIds] = useState<string[] | null>(null);
   const quickAddInputRef = useRef<HTMLInputElement>(null);
   // Deleted/absent artworks must never linger in the selection (they'd let a
   // stale id ride into a bulk add or delete). Prune whenever the device-level
@@ -169,7 +180,7 @@ export function ArtworkLibraryView({
               </span>
             </div>
           </div>
-          {selected.size > 0 ? <div className="artwork-library-selection" role="status"><span>{selected.size} selected</span><Button size="sm" variant="primary" onClick={() => { void onAddToChecklist([...selected]); setSelected(new Set()); }}>Add selected to checklist</Button>{onDeleteArtworks ? <Button size="sm" variant="destructive-ghost" onClick={() => setPendingDeleteIds([...selected])}><TrashIcon aria-hidden="true" size={14} /> Delete</Button> : null}<Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Clear</Button></div> : null}
+          {selected.size > 0 ? <div className="artwork-library-selection" role="status"><span>{selected.size} selected</span><Button size="sm" variant="primary" onClick={() => { void onAddToChecklist([...selected]); setSelected(new Set()); }}>Add selected to checklist</Button>{onApplyMatFrame ? <Button size="sm" variant="outline" onClick={() => setMatFrameIds([...selected])}>Set mat &amp; frame</Button> : null}{onDeleteArtworks ? <Button size="sm" variant="destructive-ghost" onClick={() => setPendingDeleteIds([...selected])}><TrashIcon aria-hidden="true" size={14} /> Delete</Button> : null}<Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Clear</Button></div> : null}
           {rows.length === 0 ? (
             <div className="artwork-library-no-results">
               <p>{query.trim() ? `No artworks match “${query}”.` : filter === "in-project" ? "No library artworks are in this checklist." : "Every library artwork is already in this checklist."}</p>
@@ -193,6 +204,24 @@ export function ArtworkLibraryView({
           )}
         </>
       )}
+      {onApplyMatFrame ? (
+        <BulkMatFrameDialog
+          open={matFrameIds !== null}
+          // The store skips frame-inclusive works, so the count and note here
+          // split the picked ids the same way it will.
+          targetCount={(matFrameIds ?? []).filter((id) => !isFrameInclusive(artworks, id)).length}
+          skippedCount={(matFrameIds ?? []).filter((id) => isFrameInclusive(artworks, id)).length}
+          unit={project.unit}
+          onOpenChange={(open) => {
+            if (!open) setMatFrameIds(null);
+          }}
+          onApply={(changes) => {
+            void onApplyMatFrame(matFrameIds ?? [], changes);
+            setSelected(new Set());
+            setMatFrameIds(null);
+          }}
+        />
+      ) : null}
       <DeleteArtworksDialog
         pendingIds={pendingDeleteIds}
         artworks={artworks}
@@ -301,6 +330,20 @@ export function ArtworkLibraryPicker({
   const checklistIds = useMemo(() => new Set(project.checklistArtworkIds), [project.checklistArtworkIds]);
   const thumbnails = useAssetImageUrls(artworks.map((artwork) => artwork.assetId), getBlob);
 
+  // Select-all scopes to the visible (search-filtered) rows not already in the
+  // checklist; already-added rows are disabled and never join the selection.
+  const selectableIds = rows.filter((artwork) => !checklistIds.has(artwork.id)).map((artwork) => artwork.id);
+  const allSelectableSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+  const someSelectableSelected = selectableIds.some((id) => selected.has(id));
+  const toggleAllSelectable = () => setSelected((current) => {
+    const next = new Set(current);
+    for (const id of selectableIds) {
+      if (allSelectableSelected) next.delete(id);
+      else next.add(id);
+    }
+    return next;
+  });
+
   const addSelected = async () => {
     if (selected.size === 0) return;
     await onAddToChecklist([...selected]);
@@ -316,6 +359,16 @@ export function ArtworkLibraryPicker({
           <DialogDescription>Select works to include in this project. Library records stay available to other projects.</DialogDescription>
         </DialogHeader>
         <SearchField value={query} onChange={setQuery} autoFocus />
+        {selectableIds.length > 0 ? (
+          <label className="artwork-picker-selectall">
+            <Checkbox
+              aria-label="Select all shown artworks"
+              checked={allSelectableSelected ? true : someSelectableSelected ? "indeterminate" : false}
+              onCheckedChange={toggleAllSelectable}
+            />
+            <span>Select all{query.trim() ? " matching" : ""} ({selectableIds.length})</span>
+          </label>
+        ) : null}
         <div className="artwork-picker-list" role="list" aria-label="Artwork Library">
           {rows.length === 0 ? <p className="artwork-picker-empty">{query.trim() ? `No artworks match “${query}”.` : "The Artwork Library is empty."}</p> : rows.map((artwork) => {
             const alreadyAdded = checklistIds.has(artwork.id);
@@ -397,5 +450,7 @@ function useArtworkMatches(artworks: Artwork[], query: string) {
 
 function sortArtworks(artworks: Artwork[], sort: LibrarySort, direction: SortDirection) { return [...artworks].sort((a, b) => { const value = (artwork: Artwork) => sort === "artist" ? artwork.artist : sort === "date" ? artwork.date : artwork.title; const result = (value(a)?.trim() || "\uffff").localeCompare(value(b)?.trim() || "\uffff", undefined, { sensitivity: "base", numeric: true }); return direction === "ascending" ? result : -result; }); }
 
+// A work whose stored size already includes the frame — the bulk apply skips it.
+function isFrameInclusive(artworks: Artwork[], id: string) { return artworks.find((artwork) => artwork.id === id)?.frameIncludedInImage === true; }
 function artworkDisplayUnit(projectUnit: DisplayUnit) { return getScopeUnits(unitSystemFromDisplayUnit(projectUnit), "artwork").displayUnit; }
 function formatDimensions(artwork: Artwork, unit: DisplayUnit) { const { widthMm, heightMm } = artwork.dimensions; if (widthMm === undefined || heightMm === undefined) return "—"; return `${formatLength(widthMm, { unit })} × ${formatLength(heightMm, { unit })}`; }

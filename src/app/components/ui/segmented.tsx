@@ -38,8 +38,12 @@ function useSlidingIndicator(listRef: React.RefObject<HTMLDivElement | null>) {
     if (!list || !chip) return;
 
     const measure = () => {
+      // Match on ARIA state, not data-state: wrapping a trigger in a Radix
+      // TooltipTrigger (topbar tooltips) makes Tooltip clobber data-state
+      // with "closed"/"open", while aria-selected/aria-checked stay owned by
+      // Tabs/ToggleGroup.
       const active = list.querySelector<HTMLElement>(
-        ':scope > [data-state="active"], :scope > [data-state="on"]'
+        ':scope > [aria-selected="true"], :scope > [aria-checked="true"], :scope > [data-state="active"], :scope > [data-state="on"]'
       );
       if (!active) {
         // Nothing selected (possible in a type="single" toggle group):
@@ -62,7 +66,7 @@ function useSlidingIndicator(listRef: React.RefObject<HTMLDivElement | null>) {
       typeof MutationObserver !== "undefined" ? new MutationObserver(measure) : null;
     mutations?.observe(list, {
       attributes: true,
-      attributeFilter: ["data-state"],
+      attributeFilter: ["data-state", "aria-selected", "aria-checked"],
       subtree: true
     });
     const resizes =

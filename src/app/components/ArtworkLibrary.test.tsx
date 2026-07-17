@@ -166,4 +166,24 @@ describe("ArtworkLibraryPicker", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add 1 to checklist" }));
     expect(onAddToChecklist).toHaveBeenCalledWith(["art-2"]);
   });
+
+  it("select-all picks every not-yet-added work in one click", () => {
+    const onAddToChecklist = vi.fn();
+    const emptyChecklist = { ...project, checklistArtworkIds: [] } satisfies Project;
+    render(<ArtworkLibraryPicker open artworks={artworks} project={emptyChecklist} getBlob={getBlob} onOpenChange={vi.fn()} onAddToChecklist={onAddToChecklist} />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all shown artworks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add 2 to checklist" }));
+    expect(onAddToChecklist).toHaveBeenCalledWith(["art-1", "art-2"]);
+  });
+
+  it("select-all excludes works already in the checklist", () => {
+    const onAddToChecklist = vi.fn();
+    // art-1 is already a member, so only art-2 is selectable.
+    render(<ArtworkLibraryPicker open artworks={artworks} project={project} getBlob={getBlob} onOpenChange={vi.fn()} onAddToChecklist={onAddToChecklist} />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all shown artworks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add 1 to checklist" }));
+    expect(onAddToChecklist).toHaveBeenCalledWith(["art-2"]);
+  });
 });

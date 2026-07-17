@@ -164,6 +164,19 @@ describe("SelectionInspector arrange body", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
+  it("hides the Set mat & frame affordance when onSetMatFrame is absent", () => {
+    renderPanel();
+    expect(screen.queryByRole("button", { name: /Set mat . frame/ })).toBeNull();
+  });
+
+  it("Set mat & frame fires onSetMatFrame when the selection holds an artwork", () => {
+    const onSetMatFrame = vi.fn();
+    renderPanel({ onSetMatFrame });
+
+    fireEvent.click(screen.getByRole("button", { name: /Set mat . frame/ }));
+    expect(onSetMatFrame).toHaveBeenCalledTimes(1);
+  });
+
   it("Remove all takes the two-step confirm before firing onRemoveAll", () => {
     const onRemoveAll = vi.fn();
     renderPanel({ onRemoveAll });
