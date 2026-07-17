@@ -60,6 +60,10 @@ import {
   type FitToPageResult,
   type PageRectPt
 } from "../../domain/export/pageComposition";
+import {
+  choosePdfLabelCandidate,
+  type PdfLabelBox
+} from "./pdfDimensionLayout";
 import { prepareImageForPdf } from "./pdfImage";
 
 export type RenderSavedView = (
@@ -110,16 +114,10 @@ type EmbeddedArtworkImage =
   | { status: "absent" }
   | { status: "missing" };
 
-type LabelBox = {
-  left: number;
-  right: number;
-  bottom: number;
-  top: number;
-};
-
 const COLORS = {
   ink: rgb(0.1, 0.11, 0.12),
   muted: rgb(0.38, 0.4, 0.42),
+  dimension: rgb(0.48, 0.5, 0.52),
   subtle: rgb(0.58, 0.6, 0.62),
   surface: rgb(0.96, 0.965, 0.97),
   surfaceStrong: rgb(0.91, 0.92, 0.93),
@@ -136,6 +134,12 @@ const SMALL_SIZE_PT = 7;
 const DIMENSION_SIZE_PT = 7;
 const DRAWING_INSET_PT = 22;
 const DIMENSION_DRAWING_INSET_PT = 38;
+const ELEVATION_DIMENSION_INSETS_PT = {
+  left: 30,
+  right: 72,
+  bottom: 34,
+  top: 22
+};
 const GRID_TARGET_PT = 8;
 const THREE_D_RENDER_DPI = 144;
 
@@ -240,6 +244,30 @@ function insetRect(rect: PageRectPt, amountPt: number): PageRectPt {
     widthPt: Math.max(1, rect.widthPt - amountPt * 2),
     heightPt: Math.max(1, rect.heightPt - amountPt * 2)
   };
+}
+
+function insetRectByEdges(
+  rect: PageRectPt,
+  insets: { left: number; right: number; bottom: number; top: number }
+): PageRectPt {
+  return {
+    xPt: rect.xPt + insets.left,
+    yPt: rect.yPt + insets.bottom,
+    widthPt: Math.max(1, rect.widthPt - insets.left - insets.right),
+    heightPt: Math.max(1, rect.heightPt - insets.bottom - insets.top)
+  };
+}
+
+export function formatDocumentDimension(
+  mm: number,
+  unit: DisplayUnit
+): string {
+  return formatLength(mm, {
+    unit,
+    ...(unit === "ft" || unit === "in"
+      ? { fractionDenominator: 8 as const }
+      : {})
+  });
 }
 
 function createPlanTransform(
@@ -834,23 +862,26 @@ function drawElevationOpening(
   }
 }
 
-function labelBoxesIntersect(a: LabelBox, b: LabelBox, gap = 2): boolean {
-  return !(
-    a.right + gap < b.left ||
-    a.left - gap > b.right ||
-    a.top + gap < b.bottom ||
-    a.bottom - gap > b.top
-  );
-}
-
-function chooseUnoccupiedLabel<T extends { box: LabelBox }>(
-  candidates: T[],
-  occupied: LabelBox[]
-): T {
-  const available = candidates.find((candidate) =>
-    occupied.every((box) => !labelBoxesIntersect(candidate.box, box))
-  );
-  return available ?? candidates[candidates.length - 1]!;
+function participantObstacleBoxes(
+  scene: ElevationScene,
+  transform: ElevationTransform
+): PdfLabelBox[] {
+  return elevationSceneToDimensionParticipants(scene).map((participant) => {
+    const bottomLeft = transform.point({
+      xMm: participant.rect.xMm,
+      yMm: participant.rect.yMm
+    });
+    const topRight = transform.point({
+      xMm: participant.rect.xMm + participant.rect.widthMm,
+      yMm: participant.rect.yMm + participant.rect.heightMm
+    });
+    return {
+      left: bottomLeft.x - 3,
+      right: topRight.x + 3,
+      bottom: bottomLeft.y - 3,
+      top: topRight.y + 3
+    };
+  });
 }
 
 function drawGapDimension(
@@ -860,48 +891,113 @@ function drawGapDimension(
   dimension: GapDimension | BoundaryDimension,
   unit: DisplayUnit,
   index: number,
-  occupied: LabelBox[]
+  occupied: PdfLabelBox[]
 ) {
-  const label = formatLength(dimension.gapMm, { unit });
+  const label = formatDocumentDimension(dimension.gapMm, unit);
+  const isBoundary = !("axis" in dimension);
+  const lineColor = isBoundary ? COLORS.subtle : COLORS.dimension;
+  const lineWidth = isBoundary ? 0.3 : 0.4;
   if ("axis" in dimension && dimension.axis === "vertical") {
     const xMm =
       (dimension.corridorLoMm + dimension.corridorHiMm) / 2;
     const a = transform.point({ xMm, yMm: dimension.fromMm });
     const b = transform.point({ xMm, yMm: dimension.toMm });
-    drawLine(page, a, b, 0.5, COLORS.muted);
-    drawLine(page, { x: a.x - 3, y: a.y }, { x: a.x + 3, y: a.y }, 0.5, COLORS.muted);
-    drawLine(page, { x: b.x - 3, y: b.y }, { x: b.x + 3, y: b.y }, 0.5, COLORS.muted);
+    drawLine(page, a, b, lineWidth, lineColor);
+    drawLine(
+      page,
+      { x: a.x - 2.5, y: a.y },
+      { x: a.x + 2.5, y: a.y },
+      lineWidth,
+      lineColor
+    );
+    drawLine(
+      page,
+      { x: b.x - 2.5, y: b.y },
+      { x: b.x + 2.5, y: b.y },
+      lineWidth,
+      lineColor
+    );
     const available = Math.abs(b.y - a.y);
     const labelHeight = textWidth(fonts, label, DIMENSION_SIZE_PT, true);
-    const baseX = available >= labelHeight + 6 ? a.x : a.x + 8;
     const midY = (a.y + b.y) / 2;
-    const labelPosition = chooseUnoccupiedLabel(
-      [0, 8, 16, -8, -16, 24, -24].map((offset) => {
-        const x = baseX + offset + (index % 2) * 2;
+    if (available >= labelHeight + 8) {
+      const labelPosition = choosePdfLabelCandidate(
+        [0, 8, -8, 16, -16, 24, -24].map((offset) => {
+          const x = a.x + offset + (index % 2) * 2;
+          return {
+            x,
+            box: {
+              left: x - DIMENSION_SIZE_PT * 0.25,
+              right: x + DIMENSION_SIZE_PT + 3,
+              bottom: midY - labelHeight / 2 - 2,
+              top: midY + labelHeight / 2 + 2
+            }
+          };
+        }),
+        occupied
+      );
+      const labelX = labelPosition.x;
+      occupied.push(labelPosition.box);
+      if (Math.abs(labelX - a.x) > 3) {
+        drawLine(
+          page,
+          { x: a.x, y: midY },
+          { x: labelX, y: midY },
+          0.3,
+          COLORS.subtle
+        );
+      }
+      drawCenteredLabel(
+        page,
+        fonts,
+        label,
+        labelX,
+        midY,
+        DIMENSION_SIZE_PT,
+        90
+      );
+      return;
+    }
+
+    const labelWidth = textWidth(fonts, label, DIMENSION_SIZE_PT, true);
+    const labelPosition = choosePdfLabelCandidate(
+      [
+        { x: a.x + labelWidth / 2 + 9, y: midY - DIMENSION_SIZE_PT / 2 },
+        { x: a.x - labelWidth / 2 - 9, y: midY - DIMENSION_SIZE_PT / 2 },
+        { x: a.x + labelWidth / 2 + 17, y: midY + 8 },
+        { x: a.x - labelWidth / 2 - 17, y: midY + 8 },
+        { x: a.x + labelWidth / 2 + 17, y: midY - 12 },
+        { x: a.x - labelWidth / 2 - 17, y: midY - 12 }
+      ].map((candidate) => {
+        const x = candidate.x + (index % 2) * 2;
         return {
           x,
+          y: candidate.y,
           box: {
-            left: x - DIMENSION_SIZE_PT * 0.25,
-            right: x + DIMENSION_SIZE_PT + 3,
-            bottom: midY - labelHeight / 2 - 2,
-            top: midY + labelHeight / 2 + 2
+            left: x - labelWidth / 2 - 2,
+            right: x + labelWidth / 2 + 2,
+            bottom: candidate.y - 1,
+            top: candidate.y + DIMENSION_SIZE_PT + 3
           }
         };
       }),
       occupied
     );
-    const labelX = labelPosition.x;
     occupied.push(labelPosition.box);
-    if (labelX !== a.x) {
-      drawLine(
-        page,
-        { x: a.x, y: midY },
-        { x: labelX, y: midY },
-        0.4,
-        COLORS.muted
-      );
-    }
-    drawCenteredLabel(page, fonts, label, labelX, midY, DIMENSION_SIZE_PT, 90);
+    drawLine(
+      page,
+      { x: a.x, y: midY },
+      { x: labelPosition.x, y: labelPosition.y + DIMENSION_SIZE_PT / 2 },
+      0.3,
+      COLORS.subtle
+    );
+    drawCenteredLabel(
+      page,
+      fonts,
+      label,
+      labelPosition.x,
+      labelPosition.y
+    );
     return;
   }
 
@@ -909,14 +1005,26 @@ function drawGapDimension(
     (dimension.corridorLoMm + dimension.corridorHiMm) / 2;
   const a = transform.point({ xMm: dimension.fromMm, yMm });
   const b = transform.point({ xMm: dimension.toMm, yMm });
-  drawLine(page, a, b, 0.5, COLORS.muted);
-  drawLine(page, { x: a.x, y: a.y - 3 }, { x: a.x, y: a.y + 3 }, 0.5, COLORS.muted);
-  drawLine(page, { x: b.x, y: b.y - 3 }, { x: b.x, y: b.y + 3 }, 0.5, COLORS.muted);
+  drawLine(page, a, b, lineWidth, lineColor);
+  drawLine(
+    page,
+    { x: a.x, y: a.y - 2.5 },
+    { x: a.x, y: a.y + 2.5 },
+    lineWidth,
+    lineColor
+  );
+  drawLine(
+    page,
+    { x: b.x, y: b.y - 2.5 },
+    { x: b.x, y: b.y + 2.5 },
+    lineWidth,
+    lineColor
+  );
   const available = Math.abs(b.x - a.x);
   const labelWidth = textWidth(fonts, label, DIMENSION_SIZE_PT, true);
   const baseY = available >= labelWidth + 6 ? a.y + 2 : a.y + 9;
   const midX = (a.x + b.x) / 2;
-  const labelPosition = chooseUnoccupiedLabel(
+  const labelPosition = choosePdfLabelCandidate(
     [0, 8, 16, -8, -16, 24, -24].map((offset) => {
       const y = baseY + offset + (index % 2) * 2;
       return {
@@ -938,8 +1046,8 @@ function drawGapDimension(
       page,
       { x: midX, y: a.y },
       { x: midX, y: labelY },
-      0.4,
-      COLORS.muted
+      0.3,
+      COLORS.subtle
     );
   }
   drawCenteredLabel(page, fonts, label, midX, labelY);
@@ -953,7 +1061,7 @@ function drawElevationDimensions(
   unit: DisplayUnit
 ) {
   const dimensions = deriveElevationSceneDimensions(scene);
-  const occupiedLabels: LabelBox[] = [];
+  const occupiedLabels = participantObstacleBoxes(scene, transform);
   const wallBottomLeft = transform.point({ xMm: 0, yMm: 0 });
   const wallTopRight = transform.point({
     xMm: scene.wallLengthMm,
@@ -985,7 +1093,7 @@ function drawElevationDimensions(
   drawCenteredLabel(
     page,
     fonts,
-    formatLength(dimensions.overallWidthMm, { unit }),
+    formatDocumentDimension(dimensions.overallWidthMm, unit),
     (wallBottomLeft.x + wallTopRight.x) / 2,
     overallY - 3
   );
@@ -1015,14 +1123,14 @@ function drawElevationDimensions(
   drawCenteredLabel(
     page,
     fonts,
-    formatLength(dimensions.overallHeightMm, { unit }),
+    formatDocumentDimension(dimensions.overallHeightMm, unit),
     overallX,
     (wallBottomLeft.y + wallTopRight.y) / 2,
     DIMENSION_SIZE_PT,
     90
   );
 
-  const allGaps = [...dimensions.boundaryGaps, ...dimensions.neighborGaps];
+  const allGaps = [...dimensions.neighborGaps, ...dimensions.boundaryGaps];
   allGaps.forEach((dimension, index) =>
     drawGapDimension(
       page,
@@ -1035,57 +1143,72 @@ function drawElevationDimensions(
     )
   );
 
-  const participants = new Map(
-    elevationSceneToDimensionParticipants(scene).map((entry) => [
-      entry.id,
-      { id: entry.id, xMm: entry.rect.xMm }
-    ])
+  if (dimensions.centerHeights.length === 0) return;
+  const datumX = wallTopRight.x + 12;
+  const centerHeights = [...dimensions.centerHeights].sort(
+    (a, b) => a.centerHeightMm - b.centerHeightMm
   );
-  dimensions.centerHeights.forEach((dimension, index) => {
-    const memberXs = dimension.participantIds
-      .map((id) => participants.get(id)?.xMm)
-      .filter((value): value is number => value !== undefined);
-    const xMm = Math.max(
-      0,
-      (memberXs.length > 0 ? Math.min(...memberXs) : 0) -
-        (12 + (index % 3) * 8) / transform.scalePtPerMm
-    );
-    const floor = transform.point({ xMm, yMm: 0 });
-    const center = transform.point({ xMm, yMm: dimension.centerHeightMm });
-    drawLine(page, floor, center, 0.5, COLORS.muted);
+  const highestDatumY = transform.point({
+    xMm: scene.wallLengthMm,
+    yMm: centerHeights[centerHeights.length - 1]!.centerHeightMm
+  }).y;
+  drawLine(
+    page,
+    { x: datumX, y: wallBottomLeft.y },
+    { x: datumX, y: highestDatumY },
+    0.4,
+    COLORS.subtle
+  );
+  drawLine(
+    page,
+    { x: datumX - 3, y: wallBottomLeft.y },
+    { x: datumX + 3, y: wallBottomLeft.y },
+    0.4,
+    COLORS.subtle
+  );
+
+  const datumLabels: PdfLabelBox[] = [];
+  centerHeights.forEach((dimension, index) => {
+    const datumY = transform.point({
+      xMm: scene.wallLengthMm,
+      yMm: dimension.centerHeightMm
+    }).y;
     drawLine(
       page,
-      { x: center.x - 3, y: center.y },
-      { x: center.x + 3, y: center.y },
-      0.5,
-      COLORS.muted
+      { x: wallTopRight.x + 3, y: datumY },
+      { x: datumX + 3, y: datumY },
+      0.3,
+      COLORS.subtle
     );
-    const label = formatLength(dimension.centerHeightMm, { unit });
-    const labelHeight = textWidth(fonts, label, DIMENSION_SIZE_PT, true);
-    const midY = (floor.y + center.y) / 2;
-    const position = chooseUnoccupiedLabel(
-      [0, 8, 16, -8, -16, 24].map((offset) => {
-        const x = center.x + offset;
+    const label = formatDocumentDimension(dimension.centerHeightMm, unit);
+    const labelWidth = textWidth(fonts, label, DIMENSION_SIZE_PT, true);
+    const labelX = datumX + 8 + labelWidth / 2;
+    const position = choosePdfLabelCandidate(
+      [0, 9, -9, 18, -18, 27, -27].map((offset) => {
+        const y =
+          datumY - DIMENSION_SIZE_PT / 2 + offset + (index % 2) * 0.5;
         return {
-          x,
+          x: labelX,
+          y,
           box: {
-            left: x - DIMENSION_SIZE_PT * 0.25,
-            right: x + DIMENSION_SIZE_PT + 3,
-            bottom: midY - labelHeight / 2 - 2,
-            top: midY + labelHeight / 2 + 2
+            left: labelX - labelWidth / 2 - 2,
+            right: labelX + labelWidth / 2 + 2,
+            bottom: y - 1,
+            top: y + DIMENSION_SIZE_PT + 3
           }
         };
       }),
-      occupiedLabels
+      datumLabels
     );
-    occupiedLabels.push(position.box);
-    if (position.x !== center.x) {
+    datumLabels.push(position.box);
+    const labelMidY = position.y + DIMENSION_SIZE_PT / 2;
+    if (Math.abs(labelMidY - datumY) > 2) {
       drawLine(
         page,
-        { x: center.x, y: midY },
-        { x: position.x, y: midY },
-        0.4,
-        COLORS.muted
+        { x: datumX + 3, y: datumY },
+        { x: position.box.left, y: labelMidY },
+        0.3,
+        COLORS.subtle
       );
     }
     drawCenteredLabel(
@@ -1093,9 +1216,7 @@ function drawElevationDimensions(
       fonts,
       label,
       position.x,
-      midY,
-      DIMENSION_SIZE_PT,
-      90
+      position.y
     );
   });
 }
@@ -1267,12 +1388,9 @@ export async function createDocumentPdf(
           input.project.defaultCenterlineHeightMm,
         artworksById
       });
-      const drawingRect = insetRect(
-        baseRect,
-        input.settings.dimensions
-          ? DIMENSION_DRAWING_INSET_PT
-          : DRAWING_INSET_PT
-      );
+      const drawingRect = input.settings.dimensions
+        ? insetRectByEdges(baseRect, ELEVATION_DIMENSION_INSETS_PT)
+        : insetRect(baseRect, DRAWING_INSET_PT);
       const fit = fitBoundsToRect(manifestPage.boundsMm, drawingRect);
       const transform = createElevationTransform(manifestPage.boundsMm, fit);
 

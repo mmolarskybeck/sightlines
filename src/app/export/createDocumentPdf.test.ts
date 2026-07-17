@@ -13,6 +13,7 @@ import {
 import {
   artworkPlaceholderLabel,
   createDocumentPdf,
+  formatDocumentDimension,
   type RenderSavedView
 } from "./createDocumentPdf";
 
@@ -33,6 +34,14 @@ function settingsFor(project = createSampleProject()): EffectiveDocumentSettings
 }
 
 describe("createDocumentPdf", () => {
+  it("uses document-friendly eighth-inch precision for imperial dimensions", () => {
+    expect(formatDocumentDimension(41.0625 * 25.4, "ft")).toBe(
+      "3' 5 1/8\""
+    );
+    expect(formatDocumentDimension(3.0625 * 25.4, "in")).toBe("3 1/8\"");
+    expect(formatDocumentDimension(1_234, "cm")).toBe("123.4 cm");
+  });
+
   it("uses deterministic page-local labels for metadata-free placeholders", () => {
     expect(artworkPlaceholderLabel(undefined, 1)).toBe("Untitled work 1");
     expect(
