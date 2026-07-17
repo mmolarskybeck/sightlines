@@ -1554,7 +1554,8 @@ describe("app store", () => {
       expect(record.frame).toBeUndefined();
     });
 
-    it("records no undo entry when nothing changes", async () => {
+    it("records no undo entry and shows no toast when nothing changes", async () => {
+      const successToast = vi.spyOn(toast, "success");
       const [a] = await seedLibrary();
 
       const result = await store
@@ -1563,6 +1564,20 @@ describe("app store", () => {
 
       expect(result).toEqual({ updated: 0, skipped: 0 });
       expect(store.getState().undoStack).toHaveLength(0);
+      expect(successToast).not.toHaveBeenCalled();
+    });
+
+    it("confirms a bulk apply with a quiet toast naming the work count", async () => {
+      const successToast = vi.spyOn(toast, "success");
+      const [a, b] = await seedLibrary();
+
+      await store.getState().updateArtworksMatFrame([a, b], { matWidthMm: 45 });
+      expect(successToast).toHaveBeenCalledWith("Mat & frame applied to 2 works");
+
+      // Singular copy for a one-work apply.
+      successToast.mockClear();
+      await store.getState().updateArtworksMatFrame([a], { matWidthMm: 50 });
+      expect(successToast).toHaveBeenCalledWith("Mat & frame applied to 1 work");
     });
 
     it("undo and redo round-trip the whole batch", async () => {
