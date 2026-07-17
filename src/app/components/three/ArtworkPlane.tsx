@@ -2,7 +2,11 @@ import { useCursor } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
 import { useMemo, useState } from "react";
 import type { Texture } from "three";
-import { FRAME_FINISH_HEX, MAT_BEVEL_HAIRLINE_HEX } from "../../../domain/framing";
+import {
+  FRAME_EDGE_HAIRLINE_HEX,
+  FRAME_FINISH_HEX,
+  MAT_BEVEL_HAIRLINE_HEX
+} from "../../../domain/framing";
 import type { ArtworkFrame } from "../../../domain/project";
 import type { WallArtwork3d } from "../../../domain/geometry/scene3d";
 import { fitArtworkImageSizeMm, textureNativeAspect } from "./artworkFit";
@@ -25,9 +29,18 @@ const OUTLINE_OFFSET_MM = 5;
 const HAIRLINE_OFFSET_MM = 2;
 
 // One hairline rectangle, centered in the local xy-plane — the 3D analogue of
-// elevation's frame-edge hairlines (same MAT_BEVEL_HAIRLINE_HEX), so a white
-// frame on a white wall (or over a white mat) still reads as its own ring.
-function FrameEdgeHairline({ widthMm, heightMm }: { widthMm: number; heightMm: number }) {
+// elevation's frame-edge hairlines, so a white frame on a white wall (or over
+// a white mat) still reads as its own ring. Color is finish-aware: the light
+// mat-bevel grey would shout against a dark frame.
+function FrameEdgeHairline({
+  widthMm,
+  heightMm,
+  color
+}: {
+  widthMm: number;
+  heightMm: number;
+  color: string;
+}) {
   const positions = useMemo(() => {
     const halfW = mmToWorld(widthMm) / 2;
     const halfH = mmToWorld(heightMm) / 2;
@@ -44,7 +57,7 @@ function FrameEdgeHairline({ widthMm, heightMm }: { widthMm: number; heightMm: n
       <bufferGeometry>
         <bufferAttribute attach="attributes-position" args={[positions, 3]} />
       </bufferGeometry>
-      <lineBasicMaterial color={MAT_BEVEL_HAIRLINE_HEX} />
+      <lineBasicMaterial color={color} />
     </lineLoop>
   );
 }
@@ -171,22 +184,39 @@ export function ArtworkPlane({
           ))}
         </group>
       ) : null}
-      {layout.hasFrame && !ghosted ? (
-        // Frame edge hairlines, mirroring elevation's: one loop at the frame's
-        // outer edge, one at its inner boundary (frame/mat when matted, else
-        // frame/image opening), seated just proud of the frame's front face.
-        <group
-          position={[0, 0, mmToWorld((layout.frameFrontZMm as number) + HAIRLINE_OFFSET_MM)]}
-        >
-          <FrameEdgeHairline
-            widthMm={layout.outerWidthMm}
-            heightMm={layout.outerHeightMm}
-          />
-          <FrameEdgeHairline
-            widthMm={layout.openingWidthMm}
-            heightMm={layout.openingHeightMm}
-          />
-        </group>
+      {layout.hasFrame && !ghosted && frame ? (
+        <>
+          {/* Frame edge hairlines, mirroring elevation's: one loop at the
+              frame's outer edge, one at its inner boundary (frame/mat when
+              matted, else frame/image opening), seated just proud of the
+              frame's front face. Finish-aware color so the line stays quiet
+              on dark finishes. */}
+          <group
+            position={[0, 0, mmToWorld((layout.frameFrontZMm as number) + HAIRLINE_OFFSET_MM)]}
+          >
+            <FrameEdgeHairline
+              widthMm={layout.outerWidthMm}
+              heightMm={layout.outerHeightMm}
+              color={FRAME_EDGE_HAIRLINE_HEX[frame.finish]}
+            />
+            <FrameEdgeHairline
+              widthMm={layout.openingWidthMm}
+              heightMm={layout.openingHeightMm}
+              color={FRAME_EDGE_HAIRLINE_HEX[frame.finish]}
+            />
+          </group>
+          {/* Wall-contact loop: the frame's footprint traced on the wall
+              itself, so from an oblique angle the frame's side faces still
+              end at a visible seam instead of dissolving into the wall fill.
+              Mat-bevel grey (it reads against the wall, not the frame). */}
+          <group position={[0, 0, mmToWorld(HAIRLINE_OFFSET_MM)]}>
+            <FrameEdgeHairline
+              widthMm={layout.outerWidthMm}
+              heightMm={layout.outerHeightMm}
+              color={MAT_BEVEL_HAIRLINE_HEX}
+            />
+          </group>
+        </>
       ) : null}
       {layout.hasMat ? (
         // Mat: an off-white board covering the frame's inner opening (image +

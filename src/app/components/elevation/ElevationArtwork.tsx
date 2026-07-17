@@ -4,7 +4,12 @@ import type {
   ReactNode
 } from "react";
 import type { ArtworkFrame, Dimensions } from "../../../domain/project";
-import { FRAME_FINISH_HEX, MAT_BEVEL_HAIRLINE_HEX, MAT_FILL_HEX } from "../../../domain/framing";
+import {
+  FRAME_EDGE_HAIRLINE_HEX,
+  FRAME_FINISH_HEX,
+  MAT_BEVEL_HAIRLINE_HEX,
+  MAT_FILL_HEX
+} from "../../../domain/framing";
 import { getArtworkRectSvg, type ArtworkCenterMm, type ArtworkSizeMm, type SvgRectMm } from "./elevationArtworkGeometry";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 
@@ -136,19 +141,20 @@ export function ElevationArtwork({
           y={rect.yMm}
         />
       ) : null}
-      {frameBandMm > 0 ? (
-        // Frame edge hairlines (same color/weight as the mat bevel) so the
+      {frameBandMm > 0 && frame ? (
+        // Frame edge hairlines (mat-bevel weight, finish-aware color) so the
         // frame band always reads as its own ring — a white frame against a
-        // white mat (or the wall fill) would otherwise run together. One at
-        // the frame's outer edge, one at its inner boundary: the frame/mat
-        // edge when a mat exists, else the frame/image opening (matRect
-        // collapses to the image rect when matBandMm is 0). Kept subtle:
-        // hairline weight, non-scaling.
+        // white mat (or the wall fill) would otherwise run together, while the
+        // light bevel grey would shout against a dark frame. One at the
+        // frame's outer edge, one at its inner boundary: the frame/mat edge
+        // when a mat exists, else the frame/image opening (matRect collapses
+        // to the image rect when matBandMm is 0). Kept subtle: hairline
+        // weight, non-scaling.
         <g className="elevation-artwork-frame-edges">
           <rect
             fill="none"
             height={outerRect.heightMm}
-            stroke={MAT_BEVEL_HAIRLINE_HEX}
+            stroke={FRAME_EDGE_HAIRLINE_HEX[frame.finish]}
             strokeWidth={0.75}
             vectorEffect="non-scaling-stroke"
             width={outerRect.widthMm}
@@ -158,7 +164,7 @@ export function ElevationArtwork({
           <rect
             fill="none"
             height={matRect.heightMm}
-            stroke={MAT_BEVEL_HAIRLINE_HEX}
+            stroke={FRAME_EDGE_HAIRLINE_HEX[frame.finish]}
             strokeWidth={0.75}
             vectorEffect="non-scaling-stroke"
             width={matRect.widthMm}

@@ -9,6 +9,7 @@ import {
   rgb
 } from "pdf-lib";
 import {
+  FRAME_EDGE_HAIRLINE_HEX,
   FRAME_FINISH_HEX,
   MAT_BEVEL_HAIRLINE_HEX,
   MAT_FILL_HEX,
@@ -1454,7 +1455,7 @@ export async function createDocumentPdf(
           page.drawRectangle({
             ...outerRect,
             color: colorFromHex(FRAME_FINISH_HEX[framing.frame.finish]),
-            borderColor: colorFromHex(MAT_BEVEL_HAIRLINE_HEX),
+            borderColor: colorFromHex(FRAME_EDGE_HAIRLINE_HEX[framing.frame.finish]),
             borderWidth: 0.45
           });
         }

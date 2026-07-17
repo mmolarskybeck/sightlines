@@ -34,6 +34,17 @@ export const FRAME_FINISHES: { value: FrameFinish; label: string }[] = [
 export const MAT_FILL_HEX = "#F5F5F2";
 export const MAT_BEVEL_HAIRLINE_HEX = "#B8B8B4";
 
+// Hairline delineating a frame band's edges, per finish. Light finishes share
+// the mat-bevel grey; the dark finishes (black, wood) get a quieter mid-grey —
+// the near-white bevel line reads too loud against them.
+export const FRAME_EDGE_HAIRLINE_HEX: Record<FrameFinish, string> = {
+  gold: MAT_BEVEL_HAIRLINE_HEX,
+  white: MAT_BEVEL_HAIRLINE_HEX,
+  black: "#6B6B68",
+  silver: MAT_BEVEL_HAIRLINE_HEX,
+  wood: "#6B6B68"
+};
+
 export type OuterDimensionsMm = {
   widthMm: number;
   heightMm: number;
