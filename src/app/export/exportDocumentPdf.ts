@@ -6,6 +6,7 @@
 
 import { createDocumentPdf } from "./createDocumentPdf";
 import type {
+  CreateDocumentPdfInput,
   CreateDocumentPdfResult,
   RenderSavedView
 } from "./createDocumentPdf";
@@ -30,6 +31,7 @@ export type ExportDocumentPdfOptions = {
   getAsset?: (assetId: string) => Promise<Asset>;
   getBlob?: (key: string) => Promise<Blob>;
   renderSavedView?: RenderSavedView;
+  fontBytes?: CreateDocumentPdfInput["fontBytes"];
   signal?: AbortSignal;
   onProgress?: (progress: ExportProgress) => void;
   // Injectable so tests can drive the wrapped callbacks without the real
@@ -92,6 +94,7 @@ export async function exportDocumentPdf(
     getAsset,
     getBlob,
     renderSavedView,
+    fontBytes,
     signal,
     onProgress,
     createPdf = createDocumentPdf
@@ -152,9 +155,11 @@ export async function exportDocumentPdf(
     artworks,
     getAsset: wrappedGetAsset,
     getBlob: wrappedGetBlob,
-    renderSavedView: wrappedRenderSavedView
-    // No fontBytes: v1 uses the standard Helvetica fallback (spec §16); the
-    // writer emits its own substitution warning for unsupported glyphs.
+    renderSavedView: wrappedRenderSavedView,
+    // Callers pass the bundled Geist bytes (pdfFonts.ts); when absent the
+    // writer falls back to standard Helvetica and emits its own substitution
+    // warning for unsupported glyphs.
+    fontBytes
   });
 
   // An abort that lands mid-assembly must still deliver nothing (§6.2, §12).

@@ -155,9 +155,11 @@ Slice 2 is implemented in phases, each independently mergeable and testable:
 Phases 1–3 landed 2026-07-16; Phase 4 is implemented and awaiting review.
 Phase 5 wire-up landed 2026-07-16 (entry point, progress/cancel, delivery,
 error handling, accessibility; desktop browser verification done — iPad share
-sheet and print checks from §15 remain outstanding, and a bundled
-Unicode-capable TTF for PDF text is an open follow-up: v1 uses the standard
-Helvetica fallback with the writer's substitution warning).
+sheet and print checks from §15 remain outstanding). PDF text embeds bundled
+Geist Regular/SemiBold subsets (SIL OFL 1.1, license shipped beside the TTFs
+in public/fonts/), fetched lazily at export time and failing open to the
+writer's standard-Helvetica fallback; glyphs outside Geist's Latin coverage
+still substitute with the writer's warning.
 
 - **Export PDF** action opening the Export dialog (§6).
 - Overview page, per-room plan pages, per-wall elevation pages, Saved-view

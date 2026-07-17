@@ -1,5 +1,6 @@
-// Build invariant: the eager chunk graph must never reach the three chunk.
-// Three.js must remain reachable only through the lazy ThreeDView import.
+// Build invariant: the eager chunk graph must never reach the three or pdf
+// chunks. Three.js must remain reachable only through the lazy ThreeDView
+// import; pdf-lib/fontkit only through handleExportPdf's dynamic import.
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
@@ -13,10 +14,13 @@ if (!entryMatch) {
 }
 
 // Fail if naming changes instead of silently asserting nothing.
-const threeChunks = readdirSync(path.join(dist, "assets")).filter((file) => /^three-.*\.js$/.test(file));
-if (threeChunks.length === 0) {
-  console.error("assert-chunk-graph: no three-*.js chunk in dist/assets — chunk naming changed; update this script.");
-  process.exit(1);
+const LAZY_CHUNKS = ["three", "pdf"];
+const assetFiles = readdirSync(path.join(dist, "assets"));
+for (const name of LAZY_CHUNKS) {
+  if (!assetFiles.some((file) => new RegExp(`^${name}-.*\\.js$`).test(file))) {
+    console.error(`assert-chunk-graph: no ${name}-*.js chunk in dist/assets — chunk naming changed; update this script.`);
+    process.exit(1);
+  }
 }
 
 // Mask dynamic imports before extracting static import/export edges.
@@ -40,13 +44,17 @@ while (queue.length > 0) {
   queue.push(...staticImports(file));
 }
 
-const offenders = [...eager].filter((file) => /(^|\/)three-[^/]*\.js$/.test(file));
+const offenders = [...eager].filter((file) =>
+  LAZY_CHUNKS.some((name) => new RegExp(`(^|/)${name}-[^/]*\\.js$`).test(file))
+);
 if (offenders.length > 0) {
   console.error(
-    `assert-chunk-graph: FAIL — the eager chunk graph statically reaches the three chunk: ${offenders.join(", ")}\n` +
-      "The 3D stack must load only via the lazy ThreeDView import. See vite.config.ts manualChunks."
+    `assert-chunk-graph: FAIL — the eager chunk graph statically reaches a lazy-only chunk: ${offenders.join(", ")}\n` +
+      "The 3D stack must load only via the lazy ThreeDView import and the PDF stack only via handleExportPdf's dynamic import. See vite.config.ts manualChunks."
   );
   process.exit(1);
 }
 
-console.log(`assert-chunk-graph: OK — entry closure (${eager.size} js file${eager.size === 1 ? "" : "s"}) does not reach three-*.js`);
+console.log(
+  `assert-chunk-graph: OK — entry closure (${eager.size} js file${eager.size === 1 ? "" : "s"}) reaches none of: ${LAZY_CHUNKS.map((name) => `${name}-*.js`).join(", ")}`
+);

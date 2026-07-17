@@ -18,6 +18,11 @@ export default defineConfig({
           if (/node_modules\/(three|@react-three|three-stdlib|react-reconciler|its-fine|suspend-react|maath)\//.test(id)) {
             return "three";
           }
+          // Same for the PDF stack: reachable only through the dynamic
+          // import in handleExportPdf.
+          if (/node_modules\/(pdf-lib|@pdf-lib)\//.test(id)) {
+            return "pdf";
+          }
           return "vendor";
         }
       }

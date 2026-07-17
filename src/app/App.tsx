@@ -77,7 +77,6 @@ import {
 import { PlanEmptyState } from "./components/PlanEmptyState";
 import { PlanView } from "./components/PlanView";
 import { captureSvgSnapshot } from "./export/captureSnapshot";
-import { exportDocumentPdf } from "./export/exportDocumentPdf";
 import {
   DrawPicker,
   InsertPicker,
@@ -1127,12 +1126,22 @@ export function App() {
     pdfExportAbortRef.current = controller;
     setPdfExportProgress({ done: 0, total: 1 });
     try {
+      // Dynamic imports keep pdf-lib/fontkit (the "pdf" manual chunk) out of
+      // the entry closure — they load on first export, like three does for
+      // the 3D view. assert-chunk-graph enforces this.
+      const [{ exportDocumentPdf }, { loadPdfFontBytes }] = await Promise.all([
+        import("./export/exportDocumentPdf"),
+        import("./export/pdfFonts")
+      ]);
       const result = await exportDocumentPdf({
         project,
         settings,
         artworks: libraryArtworks,
         getAsset: (assetId) => assetRepository.getAsset(assetId),
         getBlob: getAssetBlob,
+        // Bundled Geist for PDF text; undefined on fetch failure, which falls
+        // back to the writer's standard-Helvetica path (see pdfFonts.ts).
+        fontBytes: await loadPdfFontBytes(),
         renderSavedView: (view, size) => {
           const handle = savedViewRenderRef.current;
           if (!handle) {

@@ -133,6 +133,23 @@ describe("exportDocumentPdf", () => {
     expect(result.warnings).toEqual(["Image unavailable for Study."]);
   });
 
+  it("forwards fontBytes to the writer unchanged", async () => {
+    const fontBytes = {
+      regular: new Uint8Array([1, 2]),
+      strong: new Uint8Array([3, 4])
+    };
+    let received: unknown;
+    await exportDocumentPdf({
+      ...baseOptions([]),
+      fontBytes,
+      createPdf: async (input) => {
+        received = input.fontBytes;
+        return successResult();
+      }
+    });
+    expect(received).toBe(fontBytes);
+  });
+
   it("rejects with AbortError and never resolves bytes when aborted before starting", async () => {
     const controller = new AbortController();
     controller.abort();
