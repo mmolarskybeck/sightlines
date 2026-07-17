@@ -1441,7 +1441,12 @@ export function App() {
           >
             <UploadSimpleIcon aria-hidden="true" size={18} />
           </Button>
-          <DropdownMenu>
+          {/* modal={false}: this menu launches the Export PDF dialog, and a
+              modal menu's body pointer-events lock can be captured as the
+              dialog's "restore" value while the menu's exit animation overlaps
+              the dialog mount — cancelling the dialog then re-applies
+              pointer-events:none to body and freezes the app. */}
+          <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
               <Button
                 className="topbar-button"
