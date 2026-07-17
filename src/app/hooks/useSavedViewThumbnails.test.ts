@@ -81,7 +81,10 @@ function fakeRepository(seed: Record<string, SavedViewThumbnailRecord> = {}) {
 
 function handleReturning(blob = new Blob(["png"], { type: "image/png" })) {
   return {
-    renderSavedView: vi.fn(async () => blob)
+    renderSavedView: vi.fn(async () => blob),
+    // Thumbnail regeneration is a non-batch caller; it never opens a hold, so
+    // this is only here to satisfy the handle type.
+    beginRenderBatch: vi.fn(() => vi.fn())
   } satisfies SavedViewRenderHandle;
 }
 
@@ -185,7 +188,8 @@ describe("useSavedViewThumbnails", () => {
     const handle: SavedViewRenderHandle = {
       renderSavedView: vi.fn(async () => {
         throw new Error("webgl unavailable");
-      })
+      }),
+      beginRenderBatch: vi.fn(() => vi.fn())
     };
 
     const { result } = renderHook(() =>

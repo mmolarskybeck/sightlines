@@ -277,6 +277,54 @@ export function getPlanMeasurementNudgeDelta(
   };
 }
 
+// The commit a plan keyboard nudge produces from the already-resolved live
+// members of a placed-object selection, kept pure so the single/group split and
+// the along-wall projection are unit-testable without the component. Every
+// member's new spot comes from resolvePlanGroupMemberMove (the same helper the
+// pointer group drag uses), so a wall member reprojects onto its OWN wall — a
+// perpendicular arrow slides it along the wall, never re-capturing another wall
+// or dropping it off the line — and a floor member translates freely. A lone
+// selection commits one placement (per-press undo entry) via onCommitPlanMove;
+// a multi-selection commits a rigid group translate via onCommitPlanMoveGroup.
+// Snap resolution is bypassed entirely: the caller feeds the raw nudge delta so
+// every press lands a predictable amount, the same trade the partition and
+// measurement-endpoint nudges make.
+export type PlanObjectNudgeCommit =
+  | { kind: "single"; objectId: string; placement: PlanPlacement }
+  | { kind: "group"; moves: { id: string; xMm: number; yMm?: number }[] };
+
+export function resolvePlanObjectNudge(
+  members: PlanGroupMember[],
+  delta: MeasurePoint
+): PlanObjectNudgeCommit | null {
+  if (members.length === 0) return null;
+  if (members.length === 1) {
+    const member = members[0];
+    const { commit } = resolvePlanGroupMemberMove(member, delta);
+    const placement: PlanPlacement =
+      member.anchor === "wall"
+        ? { anchor: "wall", wallId: member.wall.id, xMm: commit.xMm }
+        : { anchor: "floor", xMm: commit.xMm, yMm: commit.yMm ?? member.centerMm.yMm };
+    return { kind: "single", objectId: member.id, placement };
+  }
+  return {
+    kind: "group",
+    moves: members.map((member) => resolvePlanGroupMemberMove(member, delta).commit)
+  };
+}
+
+// The set of walls the group's ARTWORK members currently sit on — the walls a
+// group re-anchor must treat as "home" (not foreign) so a group already on a
+// wall never re-captures it. Openings/blocked zones are excluded: they never
+// re-anchor, so their walls don't shield an artwork from re-anchoring there.
+function artworkMemberWallIds(members: PlanGroupMember[]): Set<string> {
+  const wallIds = new Set<string>();
+  for (const member of members) {
+    if (member.anchor === "wall" && member.kind === "artwork") wallIds.add(member.wall.id);
+  }
+  return wallIds;
+}
+
 export function getPlanMeasurementKeyActions(
   state: MeasurementToolState,
   endpoint: "start" | "end",
@@ -1241,7 +1289,8 @@ export function PlanView({
       if (info.kind === "mouse-pan" || !info.isTap) armSuppressNextToolClick();
     }
   });
-  const { isSpaceDown, panning, zoomAtCenter, canZoomIn, canZoomOut, beginTouchPan } = gestures;
+  const { isSpaceDown, panning, zoomAtCenter, canZoomIn, canZoomOut, beginTouchPan, beginMousePan } =
+    gestures;
   // The hook's toSvgPoint is byte-identical to the old local toSvgMm; alias it
   // so every existing call site stays untouched.
   const toSvgMm = gestures.toSvgPoint;
@@ -1287,6 +1336,108 @@ export function PlanView({
   const wallObjectMinDepthMm =
     pixelsPerMm > 0 ? MIN_WALL_OBJECT_DEPTH_PX / pixelsPerMm : 0;
   const objectHitMinMm = pixelsPerMm > 0 ? MIN_OBJECT_HIT_PX / pixelsPerMm : 0;
+
+  // A selected placed object (or a whole multi-selection) is keyboard-nudgeable
+  // in plan, just like a selected partition or measurement endpoint. A selected
+  // freestanding wall is owned by the partition effect above, which wins
+  // outright — this effect stands down whenever one is selected, so the two can
+  // never both claim a single press (pointer selection treats them as separate
+  // modes; keeping partition the deterministic winner covers the case a stale
+  // object id lingers alongside a partition selection). Keyboard motion bypasses
+  // snap resolution so every press is a predictable delta and lands one store
+  // commit (per-press undo entries): a single object goes through
+  // onCommitPlanMove, a multi-selection through onCommitPlanMoveGroup, mirroring
+  // the pointer object-drag split. Both derive each member's new spot from
+  // resolvePlanGroupMemberMove, so keyboard nudges and pointer group drags share
+  // one geometry — a wall member reprojects along its OWN wall (a perpendicular
+  // arrow slides it along the wall and never re-captures onto another wall or
+  // falls off it), a floor member translates freely.
+  useEffect(() => {
+    if (
+      selectedFreestandingWallId ||
+      selectedObjectIds.length === 0 ||
+      planInteractionActive
+    ) {
+      return;
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (isEditableTarget(event.target)) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-owns-arrow-keys]") !== null
+      ) {
+        return;
+      }
+      if (event.metaKey || event.ctrlKey) return;
+      const delta = getPlanMeasurementNudgeDelta(
+        event.key,
+        project.unit,
+        gridPrecisionFloorMm,
+        event.shiftKey,
+        snapToGrid,
+        event.altKey
+      );
+      if (!delta) return;
+
+      // Resolve the live members of the selection in the exact shape the pointer
+      // drag builds: a wall object whose wall vanished drops out, a floor object
+      // carries its own center. Stale ids simply don't resolve.
+      const selectedSet = new Set(selectedObjectIds);
+      const wallsById = new Map(floorWallsForTool.map((wall) => [wall.id, wall]));
+      const members: PlanGroupMember[] = [];
+      for (const object of project.wallObjects) {
+        if (!selectedSet.has(object.id)) continue;
+        const wall = wallsById.get(object.wallId);
+        if (!wall) continue;
+        const rest = getWallObjectPlanRect(wall, object);
+        members.push({
+          id: object.id,
+          anchor: "wall",
+          kind: object.kind,
+          wall,
+          worldCenterMm: { xMm: rest.centerXMm, yMm: rest.centerYMm },
+          widthMm: object.widthMm,
+          depthMm: WALL_OBJECT_PLAN_DEPTH_MM
+        });
+      }
+      for (const object of project.floorObjects) {
+        if (!selectedSet.has(object.id)) continue;
+        members.push({
+          id: object.id,
+          anchor: "floor",
+          centerMm: { xMm: object.xMm, yMm: object.yMm },
+          widthMm: object.widthMm,
+          depthMm: object.depthMm,
+          rotationDeg: object.rotationDeg
+        });
+      }
+      const nudge = resolvePlanObjectNudge(members, delta);
+      if (!nudge) return;
+
+      event.preventDefault();
+      if (nudge.kind === "single") {
+        onCommitPlanMove?.(nudge.objectId, nudge.placement);
+      } else {
+        onCommitPlanMoveGroup?.(nudge.moves);
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    floorWallsForTool,
+    gridPrecisionFloorMm,
+    onCommitPlanMove,
+    onCommitPlanMoveGroup,
+    planInteractionActive,
+    project.floorObjects,
+    project.unit,
+    project.wallObjects,
+    selectedFreestandingWallId,
+    selectedObjectIds,
+    snapToGrid
+  ]);
 
   // Shared with exports; displayedProject includes geometry drag previews.
   const planScene = useMemo(
@@ -2240,6 +2391,23 @@ export function PlanView({
     // for touch so a finger never falls through into the marquee path below.
     if (event.pointerType === "touch") {
       beginTouchPan(event.clientX, event.clientY);
+      return;
+    }
+
+    // ⌘/Ctrl + primary-button background drag pans the canvas — the modifier-
+    // click sibling of Space/middle-mouse pan, which the user asked for. This
+    // deliberately claims the gesture away from the replace-marquee it would
+    // otherwise start (that marquee is redundant: a plain background drag
+    // already does it, and a plain click still clears). ⌘/Ctrl on an OBJECT
+    // press stays the precision/additive-select modifier — those never reach
+    // here (they stopPropagation). Shift-background-drag stays the additive
+    // marquee. On macOS a Ctrl-click is button 2 / contextmenu, so it never
+    // matches button 0; ctrlKey serves Windows/Linux. onGestureEnd arms
+    // suppressNextToolClick for the trailing click this pan fires, so a
+    // stationary ⌘-press is a zero-move pan that leaves the selection intact.
+    if ((event.metaKey || event.ctrlKey) && event.button === 0) {
+      beginMousePan(event.clientX, event.clientY);
+      event.preventDefault();
       return;
     }
 

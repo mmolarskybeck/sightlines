@@ -75,7 +75,7 @@ function canvas2dNavigation(inputMode: HelpInputMode, mod: string): HelpGroup {
   return {
     title: "Navigate",
     hints: [
-      { action: "Pan", inputs: [[k("Space"), t("drag")], [t("scroll")]] },
+      { action: "Pan", inputs: [[k("Space"), t("drag")], [k(mod), t("drag")], [t("scroll")]] },
       { action: "Zoom", inputs: [[k(mod), t("scroll")]] },
       { action: "Zoom to fit", inputs: [[k(mod), k("0")]] }
     ]
@@ -96,6 +96,14 @@ function planGroups(inputMode: HelpInputMode, mod: string): HelpGroup[] {
     {
       title: "Edit",
       hints: [
+        // Arrow-key nudging works on a selected placed object (or a whole
+        // multi-selection) in plan too, not just elevation — a non-discoverable
+        // keyboard command, so it earns a row. A wall work slides along its wall,
+        // a floor work translates; there is no Enter-to-apply because each press
+        // commits on its own (unlike elevation's group arrange session).
+        { action: "Nudge a selected object", inputs: [arrowKeys()] },
+        { action: "Nudge in larger steps", inputs: [[k("⇧"), t("arrow")]] },
+        { action: "Nudge in fine steps", inputs: [[k("⌥"), t("arrow")]] },
         {
           action: "Select several",
           inputs: [[t("drag empty floor")], [k("⇧"), t("keeps existing")]]

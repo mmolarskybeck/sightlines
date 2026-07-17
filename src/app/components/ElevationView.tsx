@@ -589,7 +589,8 @@ export function ElevationView({
     canZoomIn,
     canZoomOut,
     handlePointerDownCapture,
-    beginTouchPan
+    beginTouchPan,
+    beginMousePan
   } = useSvgViewportGestures({
     svgRef,
     viewport,
@@ -1246,6 +1247,23 @@ export function ElevationView({
     // path below.
     if (event.pointerType === "touch") {
       beginTouchPan(event.clientX, event.clientY);
+      return;
+    }
+
+    // ⌘/Ctrl + primary-button background drag pans the canvas — the modifier-
+    // click sibling of Space/middle-mouse pan, which the user asked for. This
+    // deliberately claims the gesture away from the replace-marquee it would
+    // otherwise start (that marquee is redundant: a plain background drag
+    // already does it, and a plain click still clears). ⌘/Ctrl on an OBJECT
+    // press stays the precision/additive-select modifier — those never reach
+    // here (they stopPropagation). Shift-background-drag stays the additive
+    // marquee. On macOS a Ctrl-click is button 2 / contextmenu, so it never
+    // matches button 0; ctrlKey serves Windows/Linux. The trailing click a
+    // (even zero-move) pan fires is inert here — elevation has no svg click
+    // handler, so a stationary ⌘-press simply leaves the selection intact.
+    if ((event.metaKey || event.ctrlKey) && event.button === 0) {
+      beginMousePan(event.clientX, event.clientY);
+      event.preventDefault();
       return;
     }
 

@@ -149,7 +149,24 @@ function SnapshotRenderer({
     };
     rafId = requestAnimationFrame(poll);
 
+    // A lost context (GPU reset, or the browser evicting a context under the
+    // ~8–16 live-context cap) would leave the poll above spinning on a canvas
+    // that can never produce a frame. There's nothing to recover mid-capture
+    // here — an offscreen one-shot has no user watching it — so reject this
+    // request cleanly and let the queue move on. preventDefault keeps the
+    // canvas element reusable for the next request if the context returns.
+    const onContextLost = (event: Event) => {
+      event.preventDefault();
+      if (settledRef.current) return;
+      settledRef.current = true;
+      cancelAnimationFrame(rafId);
+      request.reject(new Error("3D snapshot lost its WebGL context before rendering."));
+      onSettledRef.current();
+    };
+    gl.domElement.addEventListener("webglcontextlost", onContextLost, false);
+
     return () => {
+      gl.domElement.removeEventListener("webglcontextlost", onContextLost, false);
       cancelAnimationFrame(rafId);
       if (!settledRef.current) {
         settledRef.current = true;

@@ -152,6 +152,48 @@ function BenchmarkFrameProbe() {
   return null;
 }
 
+// Recover from WebGL context loss (GPU reset, OS sleep/wake, or the browser
+// evicting a context when too many live at once — a real risk here since a
+// many-view PDF export briefly stands up an offscreen stage alongside this
+// live canvas). Without handling, the browser discards the lost context and
+// the viewport freezes until a full page reload.
+//
+// Two non-obvious requirements:
+//   1. preventDefault() on `webglcontextlost` is REQUIRED — the spec only
+//      fires `webglcontextrestored` if the default (permanent loss) is
+//      cancelled. three@0.169 rebuilds its own GL resources on restore, so
+//      no manual reinit is needed beyond letting it hear the event.
+//   2. This Canvas runs frameloop="demand", so the browser won't repaint on
+//      its own after restore — we must call invalidate() or the recovered
+//      context stays blank (the project's documented demand-frameloop
+//      silent-freeze trap).
+function ContextLossRecovery() {
+  const gl = useThree((state) => state.gl);
+  const invalidate = useThree((state) => state.invalidate);
+
+  useEffect(() => {
+    const canvas = gl.domElement;
+
+    const onLost = (event: Event) => {
+      // Cancel the default permanent-loss behavior so `restored` can fire.
+      event.preventDefault();
+    };
+    const onRestored = () => {
+      // Demand frameloop: nothing repaints without an explicit nudge.
+      invalidate();
+    };
+
+    canvas.addEventListener("webglcontextlost", onLost, false);
+    canvas.addEventListener("webglcontextrestored", onRestored, false);
+    return () => {
+      canvas.removeEventListener("webglcontextlost", onLost, false);
+      canvas.removeEventListener("webglcontextrestored", onRestored, false);
+    };
+  }, [gl, invalidate]);
+
+  return null;
+}
+
 // Every selectable wall surface in a room: perimeter walls plus partition
 // faces (spec §7.1). Eye-level lookup and camera framing both scan this.
 function roomWallPanels(room: Room3d): WallPanel3d[] {
@@ -1314,6 +1356,7 @@ export function ThreeDView({
           // the floorplan-under-your-finger feel and height-preserving travel.
           screenSpacePanning={false}
         />
+        <ContextLossRecovery />
         <CursorZoom />
         <KeyboardZoom />
         <KeyboardTravel />

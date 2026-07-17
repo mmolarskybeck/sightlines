@@ -56,6 +56,7 @@ export function useSvgViewportGestures(options: {
   canZoomOut: boolean;
   handlePointerDownCapture: (e: ReactPointerEvent<SVGSVGElement>) => boolean;
   beginTouchPan: (clientX: number, clientY: number) => void;
+  beginMousePan: (clientX: number, clientY: number) => void;
 } {
   const { svgRef, viewport, onViewportChange, contentBounds, containerSize, zoomLimits } = options;
 
@@ -350,6 +351,18 @@ export function useSvgViewportGestures(options: {
     touchPanTapCandidateRef.current = true;
   }
 
+  // Begin a mouse/pen canvas pan (view-called entry point), the modifier-click
+  // sibling of the capture-phase space/middle-mouse branch below. A view calls
+  // this from its bubble-phase background handler for a primary-button press it
+  // wants to treat as a pan (e.g. ⌘/Ctrl-drag) instead of a marquee. It does
+  // exactly what that capture branch does — seed the last position and flip
+  // `panning`, which subscribes the once-per-gesture pointermove/up effect that
+  // reports a "mouse-pan" onGestureEnd on release for trailing-click suppression.
+  function beginMousePan(clientX: number, clientY: number) {
+    panLastRef.current = { x: clientX, y: clientY };
+    setPanning(true);
+  }
+
   // Touch move/up/cancel/blur, subscribed once while ≥1 touch is tracked
   // (keyed on `touchTracking`), reading live state via the touch refs — the
   // same discipline the mouse-pan effect uses. viewport is read fresh via
@@ -539,6 +552,7 @@ export function useSvgViewportGestures(options: {
     canZoomIn,
     canZoomOut,
     handlePointerDownCapture,
-    beginTouchPan
+    beginTouchPan,
+    beginMousePan
   };
 }

@@ -43,6 +43,32 @@ describe("SavedViewRenderHost", () => {
     );
     expect(actionsRef.current).not.toBeNull();
     expect(typeof actionsRef.current!.renderSavedView).toBe("function");
+    expect(typeof actionsRef.current!.beginRenderBatch).toBe("function");
+  });
+
+  it("returns an idempotent release from beginRenderBatch", () => {
+    // The real payoff of the batch hold (stage stays mounted across the queue's
+    // empty gaps) needs a live WebGL context, so it's a driver-level check. Here
+    // we cover the jsdom-testable half of the state machine: acquiring a hold
+    // hands back a release, and the exporter's finally can call it more than
+    // once (abort races, double-cleanup) without throwing or over-releasing.
+    const actionsRef: { current: SavedViewRenderHandle | null } = {
+      current: null
+    };
+    render(
+      <SavedViewRenderHost
+        project={createSampleProject()}
+        artworksById={new Map()}
+        getBlob={async () => new Blob()}
+        actionsRef={actionsRef}
+      />
+    );
+    const release = actionsRef.current!.beginRenderBatch();
+    expect(typeof release).toBe("function");
+    expect(() => {
+      release();
+      release();
+    }).not.toThrow();
   });
 
   it("rejects a numerically invalid pose without rendering", async () => {

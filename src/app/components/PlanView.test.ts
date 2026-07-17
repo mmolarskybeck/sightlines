@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { FloorWall } from "../../domain/geometry/planObjects";
 import { buildPlanScene } from "../../domain/scene2d/planScene";
 import { createSampleProject } from "../../domain/sample/sampleProject";
+import type { PlanGroupMember } from "../../domain/snapping/planGroupMove";
 import {
   buildPlanMeasureSources,
   clampFitExtent,
@@ -10,8 +12,33 @@ import {
   getPlanMeasurementKeyActions,
   getPlanMeasurementNudgeDelta,
   planMeasurementCancelAction,
+  resolvePlanObjectNudge,
   shouldCancelMeasurementForViewportClaim
 } from "./PlanView";
+
+// Same FloorWall builder shape as planGroupMove.test.ts (offset 0 baked in).
+function makeWall(
+  id: string,
+  startMm: { xMm: number; yMm: number },
+  endMm: { xMm: number; yMm: number }
+): FloorWall {
+  const dx = endMm.xMm - startMm.xMm;
+  const dy = endMm.yMm - startMm.yMm;
+  return {
+    id,
+    roomId: "room-1",
+    name: id,
+    startVertexId: `${id}-a`,
+    endVertexId: `${id}-b`,
+    heightMm: 3000,
+    start: { id: `${id}-a`, ...startMm },
+    end: { id: `${id}-b`, ...endMm },
+    lengthMm: Math.hypot(dx, dy),
+    angleRad: Math.atan2(dy, dx),
+    startFloorMm: startMm,
+    endFloorMm: endMm
+  };
+}
 
 describe("Plan measurement candidates", () => {
   it("derives visible room vertices and bounded wall edges from the painted scene", () => {
@@ -153,6 +180,105 @@ describe("Plan measurement candidates", () => {
         original: { xMm: 10, yMm: 10 }
       })
     ).toEqual({ type: "cancel-refinement" });
+  });
+});
+
+describe("resolvePlanObjectNudge", () => {
+  const horizontalWall = makeWall("wall-1", { xMm: 0, yMm: 0 }, { xMm: 4000, yMm: 0 });
+
+  it("slides a single wall member along its own wall and commits a wall placement", () => {
+    const members: PlanGroupMember[] = [
+      {
+        id: "obj-1",
+        anchor: "wall",
+        kind: "artwork",
+        wall: horizontalWall,
+        worldCenterMm: { xMm: 1000, yMm: 0 },
+        widthMm: 300,
+        depthMm: 100
+      }
+    ];
+
+    expect(resolvePlanObjectNudge(members, { xMm: 200, yMm: 0 })).toEqual({
+      kind: "single",
+      objectId: "obj-1",
+      placement: { anchor: "wall", wallId: "wall-1", xMm: 1200 }
+    });
+  });
+
+  it("keeps a wall member on its wall for a perpendicular nudge (never falls off)", () => {
+    const members: PlanGroupMember[] = [
+      {
+        id: "obj-1",
+        anchor: "wall",
+        kind: "artwork",
+        wall: horizontalWall,
+        worldCenterMm: { xMm: 1000, yMm: 0 },
+        widthMm: 300,
+        depthMm: 100
+      }
+    ];
+
+    // A purely perpendicular delta projects to zero along-wall travel: the
+    // object stays put on its wall rather than being re-captured or dropped.
+    expect(resolvePlanObjectNudge(members, { xMm: 0, yMm: 300 })).toEqual({
+      kind: "single",
+      objectId: "obj-1",
+      placement: { anchor: "wall", wallId: "wall-1", xMm: 1000 }
+    });
+  });
+
+  it("translates a single floor member freely by the raw delta (snap bypassed)", () => {
+    const members: PlanGroupMember[] = [
+      {
+        id: "floor-1",
+        anchor: "floor",
+        centerMm: { xMm: 1000, yMm: 500 },
+        widthMm: 300,
+        depthMm: 400,
+        rotationDeg: 0
+      }
+    ];
+
+    expect(resolvePlanObjectNudge(members, { xMm: 10, yMm: -10 })).toEqual({
+      kind: "single",
+      objectId: "floor-1",
+      placement: { anchor: "floor", xMm: 1010, yMm: 490 }
+    });
+  });
+
+  it("translates a multi-selection rigidly: wall members reproject, floor members slide", () => {
+    const members: PlanGroupMember[] = [
+      {
+        id: "wall-obj",
+        anchor: "wall",
+        kind: "artwork",
+        wall: horizontalWall,
+        worldCenterMm: { xMm: 1000, yMm: 0 },
+        widthMm: 300,
+        depthMm: 100
+      },
+      {
+        id: "floor-obj",
+        anchor: "floor",
+        centerMm: { xMm: 2000, yMm: 700 },
+        widthMm: 300,
+        depthMm: 400,
+        rotationDeg: 0
+      }
+    ];
+
+    expect(resolvePlanObjectNudge(members, { xMm: 50, yMm: 0 })).toEqual({
+      kind: "group",
+      moves: [
+        { id: "wall-obj", xMm: 1050 },
+        { id: "floor-obj", xMm: 2050, yMm: 700 }
+      ]
+    });
+  });
+
+  it("returns null when no live members resolve", () => {
+    expect(resolvePlanObjectNudge([], { xMm: 10, yMm: 0 })).toBeNull();
   });
 });
 

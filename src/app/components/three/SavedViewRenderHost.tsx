@@ -22,6 +22,17 @@ const RENDER_MAX_DIMENSION_PX = 4096;
 
 export type SavedViewRenderHandle = {
   renderSavedView: RenderSavedView;
+  // Hold the offscreen stage mounted across a whole batch of renders. The PDF
+  // exporter renders Saved views one at a time and awaits each, so the queue
+  // is empty in the gap between views — without a hold, pump() would unmount
+  // the stage (destroying its WebGL context) after every view and stand up a
+  // fresh one for the next. Stacked on the live main canvas, that per-view
+  // context churn can trip the browser's ~8–16 context cap and evict the main
+  // canvas's context. Call once before the batch; invoke the returned release
+  // (idempotent) when the batch finishes, in a finally so an error still frees
+  // the stage. Non-batch callers (e.g. thumbnail regeneration) never call this
+  // and keep the original mount-per-request behavior.
+  beginRenderBatch: () => () => void;
 };
 
 type QueueItem = {
@@ -61,6 +72,9 @@ export function SavedViewRenderHost({
   const queueRef = useRef<QueueItem[]>([]);
   const activeRef = useRef(false);
   const unmountedRef = useRef(false);
+  // Number of active batch holds (counted, not boolean, so nested/overlapping
+  // holds all have to release before the stage unmounts).
+  const batchHoldsRef = useRef(0);
   const [activeRequest, setActiveRequest] = useState<SnapshotRequest | null>(null);
   const [hasWork, setHasWork] = useState(false);
 
@@ -75,8 +89,15 @@ export function SavedViewRenderHost({
     if (activeRef.current) return;
     const next = queueRef.current.shift();
     if (!next) {
-      // Queue drained: unmount the stage (and release its WebGL context) only
-      // now — it stays mounted between requests so a batch shares one context.
+      // Queue drained. While a batch hold is active, keep the stage mounted on
+      // its last request so the whole batch shares one WebGL context — the
+      // exporter's per-view gaps empty the queue but must not tear the context
+      // down. The stage sits idle: SnapshotRenderer's capture effect is keyed
+      // on the request object, so leaving `activeRequest` unchanged doesn't
+      // trigger a re-capture. The hold's release drains us to null.
+      if (batchHoldsRef.current > 0) return;
+      // Unmount the stage (and release its WebGL context) only now — between
+      // requests it stays mounted so consecutive renders share one context.
       setActiveRequest(null);
       setHasWork(false);
       return;
@@ -134,6 +155,23 @@ export function SavedViewRenderHost({
     [pump]
   );
 
+  const beginRenderBatch = useCallback(() => {
+    batchHoldsRef.current += 1;
+    let released = false;
+    return () => {
+      // Idempotent: a finally that runs after an early return must be safe to
+      // call more than once.
+      if (released) return;
+      released = true;
+      batchHoldsRef.current = Math.max(0, batchHoldsRef.current - 1);
+      // Last hold gone: if we're at rest with an empty queue, pump() drains the
+      // stage to null now. If a capture is still in flight (activeRef), pump()
+      // is a no-op and the settle that follows drains it — either way the
+      // context is released once the batch is truly done.
+      if (batchHoldsRef.current === 0) pump();
+    };
+  }, [pump]);
+
   const handleSettled = useCallback(() => {
     activeRef.current = false;
     // Advance in place: swapping `request` on the still-mounted stage restarts
@@ -149,11 +187,11 @@ export function SavedViewRenderHost({
 
   useEffect(() => {
     if (!actionsRef) return;
-    actionsRef.current = { renderSavedView };
+    actionsRef.current = { renderSavedView, beginRenderBatch };
     return () => {
       actionsRef.current = null;
     };
-  }, [actionsRef, renderSavedView]);
+  }, [actionsRef, renderSavedView, beginRenderBatch]);
 
   useEffect(() => {
     // Reset on the effect body, not just cleanup: StrictMode's dev-only

@@ -59,6 +59,27 @@ describe("viewHelpGroups", () => {
     expect(pcKeys).not.toContain("⌘");
   });
 
+  it("documents the modifier-drag pan alternative alongside Space-drag and scroll", () => {
+    for (const view of ["plan", "elevation"] as const) {
+      const pan = viewHelpGroups(view, "keyboard", true)
+        .find((group) => group.title === "Navigate")
+        ?.hints.find((hint) => hint.action === "Pan");
+      expect(pan?.inputs).toEqual([
+        [{ kind: "key", label: "Space" }, { kind: "text", label: "drag" }],
+        [{ kind: "key", label: "⌘" }, { kind: "text", label: "drag" }],
+        [{ kind: "text", label: "scroll" }]
+      ]);
+      // Windows/Linux spell the same modifier as Ctrl.
+      const pcPan = viewHelpGroups(view, "keyboard", false)
+        .find((group) => group.title === "Navigate")
+        ?.hints.find((hint) => hint.action === "Pan");
+      expect(pcPan?.inputs[1]).toEqual([
+        { kind: "key", label: "Ctrl" },
+        { kind: "text", label: "drag" }
+      ]);
+    }
+  });
+
   it("renders gesture words as plain text, not key chips", () => {
     const planText = textLabels(viewHelpGroups("plan", "keyboard", true));
     // "Space + drag": Space is a chip, "drag" is a plain-text token.
@@ -111,6 +132,16 @@ describe("viewHelpGroups", () => {
 
     const touchTitles = viewHelpGroups("plan", "touch", true).map((group) => group.title);
     expect(touchTitles).not.toContain("Toolbar");
+  });
+
+  it("documents arrow-key object nudging in plan too, not just elevation", () => {
+    const groups = viewHelpGroups("plan", "keyboard", true);
+    const actions = groups.flatMap((group) => group.hints).map((hint) => hint.action);
+    expect(actions).toContain("Nudge a selected object");
+    expect(actions).toContain("Nudge in larger steps");
+    // Per-press commits, so there is no group-apply row like elevation has.
+    expect(actions).not.toContain("Apply a group nudge");
+    expect(keyLabels(groups)).toEqual(expect.arrayContaining(["←", "↑", "↓", "→", "⌥"]));
   });
 
   it("keeps the elevation nudge family together on keyboard", () => {

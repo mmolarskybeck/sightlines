@@ -331,6 +331,46 @@ describe("useSvgViewportGestures — mouse pan", () => {
     expect(claimed).toBe(false);
     expect(holder.api!.panning).toBe(false);
   });
+
+  it("beginMousePan (⌘-drag entry) starts a pan, moves pan, and ends via mouse-pan onGestureEnd", () => {
+    const onViewportChange = vi.fn();
+    const onGestureEnd = vi.fn();
+    const { holder } = renderGestures({ viewport: FIT_VIEWPORT, onViewportChange, onGestureEnd });
+
+    act(() => {
+      holder.api!.beginMousePan(100, 100);
+    });
+    expect(holder.api!.panning).toBe(true);
+
+    act(() => {
+      window.dispatchEvent(pointerEvent("pointermove", { clientX: 150, clientY: 130 }));
+    });
+    // Same math as the space/middle-mouse engine: inverted client delta.
+    expect(onViewportChange).toHaveBeenCalledWith(
+      panBy(FIT_VIEWPORT, { x: -50, y: -30 }, DEFAULT_BOUNDS, DEFAULT_SIZE)
+    );
+
+    act(() => {
+      window.dispatchEvent(pointerEvent("pointerup", {}));
+    });
+    expect(holder.api!.panning).toBe(false);
+    expect(onGestureEnd).toHaveBeenCalledTimes(1);
+    expect(onGestureEnd.mock.calls[0][0]).toMatchObject({ kind: "mouse-pan", movedPx: 0, isTap: false });
+  });
+
+  it("beginMousePan with no move still reports a mouse-pan gesture-end (stationary ⌘-click suppresses its trailing click)", () => {
+    const onGestureEnd = vi.fn();
+    const { holder } = renderGestures({ viewport: FIT_VIEWPORT, onGestureEnd });
+
+    act(() => {
+      holder.api!.beginMousePan(40, 40);
+    });
+    act(() => {
+      window.dispatchEvent(pointerEvent("pointerup", {}));
+    });
+    expect(onGestureEnd).toHaveBeenCalledTimes(1);
+    expect(onGestureEnd.mock.calls[0][0]).toMatchObject({ kind: "mouse-pan" });
+  });
 });
 
 describe("useSvgViewportGestures — pinch claim", () => {

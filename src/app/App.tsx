@@ -1223,6 +1223,14 @@ export function App() {
     const controller = new AbortController();
     pdfExportAbortRef.current = controller;
     setPdfExportProgress({ done: 0, total: 1 });
+    // Hold the Saved-view render stage mounted for the whole export. The
+    // exporter renders any 3D Saved views sequentially, emptying the host's
+    // queue between each; without this hold the stage would drop and recreate
+    // its WebGL context per view, and a many-view document could exhaust the
+    // browser's context budget and evict the live 3D canvas. Released in the
+    // finally below so an abort or error frees it too.
+    const releaseRenderBatch =
+      savedViewRenderRef.current?.beginRenderBatch() ?? null;
     try {
       // Dynamic imports keep pdf-lib/fontkit (the "pdf" manual chunk) out of
       // the entry closure — they load on first export, like three does for
@@ -1277,6 +1285,7 @@ export function App() {
         toast.error("Couldn't create the PDF. Your project is unchanged.");
       }
     } finally {
+      releaseRenderBatch?.();
       pdfExportAbortRef.current = null;
       setPdfExportProgress(null);
     }
