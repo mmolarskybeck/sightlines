@@ -216,18 +216,17 @@ dialog without ever having opened the pane.
 4. **Rail icon.** `BookmarksSimpleIcon` proposed; alternatives (`CameraIcon`,
    `StackIcon`) read more literal but break the pairing with the Save view
    menu item.
-5. **Save view's home.** Today it lives in the Export dropdown (export-spec
-   §8.2 wanted it reachable without leaving 3D), but it is the menu's one
-   non-export. Once the pane exists, the 3D camera cluster (Overview / Eye
-   level / Focus selection) is a natural sibling home — camera actions
-   together, and the pane becomes where saved views are *found*. Moving it
-   is part of the wider Export-menu restructure (§9), not decided here.
+5. **Save view's home.** Resolved: moved to the 3D camera toolbar
+   (`ThreeDCameraTools`), joining Overview / Eye level / Focus selection
+   behind a hairline divider. Camera actions now live together, and the
+   pane is where saved views are *found*. See §9 for the full restructure.
 
-## 9. Export menu restructure (recommendation, not decided)
+## 9. Export menu restructure (decided and implemented)
 
-Recorded here because §8.5 depends on it. The question on the table was
+Recorded here because §8.5 depended on it. The question on the table was
 whether the Export button should split into two topbar buttons (outputs vs
-package). **Recommendation: no — one Export button, restructured menu.**
+package). **Decision: no — one Export button, restructured menu**, plus a
+separate move that the original framing didn't anticipate (see below).
 
 Three reasons against splitting:
 
@@ -259,4 +258,18 @@ restructure:
 3. **Move Save view out** to the 3D camera cluster, per §8.5 — camera actions
    together, now that the pane (§4) is where saved views are found.
 
-Status: awaiting review; no implementation slice exists for this.
+**What actually shipped — a hybrid, not the plan above.** Rather than
+"keep the image group in this menu, trimmed" (point 1), the current-view
+snapshot action became its own topbar button (`CameraIcon`, beside Export;
+a caret-triggered PNG/JPG split in 3D) and left the menu entirely. This is
+not the outputs-vs-package split this section argued against — that split
+was rejected because it forces the user to learn *which button owns which
+output* before clicking, organized around the word "export." This split
+instead separates by verb: "capture what's on screen right now" (snapshot
+button) vs. "produce a project-level document or file" (Export menu). The
+Export menu is now project-level only: Export PDF… first, then a "Project
+backup (.sightlines)" submenu holding Standard / With originals / Without
+images (point 2, collapsed to a submenu as proposed). Save view moved to
+the 3D camera toolbar per point 3 and §8.5.
+
+Status: implemented (feat/export).

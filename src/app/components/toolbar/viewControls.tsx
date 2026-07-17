@@ -1,4 +1,5 @@
 import { forwardRef, type ComponentPropsWithoutRef, type ReactNode } from "react";
+import { BookmarkSimpleIcon } from "@phosphor-icons/react/dist/csr/BookmarkSimple";
 import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
 import { CrosshairIcon } from "@phosphor-icons/react/dist/csr/Crosshair";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
@@ -86,10 +87,12 @@ export function ViewOptionButton({
 
 export function ThreeDCameraTools({
   actionsRef,
-  canFocus
+  canFocus,
+  onSaveView
 }: {
   actionsRef: { current: ThreeDViewActions | null };
   canFocus: boolean;
+  onSaveView?: () => void;
 }) {
   const focusButton = (
     <Button
@@ -146,6 +149,26 @@ export function ThreeDCameraTools({
         // Disabled buttons drop pointer events, so the hint rides a span.
         <span title="Focus the selected room, wall, or artwork">{focusButton}</span>
       )}
+      {onSaveView ? (
+        <>
+          <span className="three-camera-divider" aria-hidden="true" />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                className="view-option-button"
+                variant="inspector"
+                onClick={onSaveView}
+              >
+                <BookmarkSimpleIcon aria-hidden="true" size={16} />
+                <span className="view-option-label view-option-label-priority">Save view</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="toolbar-tooltip" side="bottom">
+              Bookmark this camera for the PDF and Saved views
+            </TooltipContent>
+          </Tooltip>
+        </>
+      ) : null}
     </div>
   );
 }

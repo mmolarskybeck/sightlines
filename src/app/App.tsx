@@ -9,7 +9,7 @@ import {
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import { ArchiveIcon } from "@phosphor-icons/react/dist/csr/Archive";
-import { BookmarkSimpleIcon } from "@phosphor-icons/react/dist/csr/BookmarkSimple";
+import { CameraIcon } from "@phosphor-icons/react/dist/csr/Camera";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
 import { FilePdfIcon } from "@phosphor-icons/react/dist/csr/FilePdf";
@@ -116,7 +116,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger
 } from "./components/ui/dropdown-menu";
 import { Input } from "./components/ui/input";
@@ -1441,6 +1443,68 @@ export function App() {
           >
             <UploadSimpleIcon aria-hidden="true" size={18} />
           </Button>
+          {viewMode === "library" ? null : viewMode === "3d" ? (
+            <div className="snapshot-split">
+              <Button
+                className="icon-button"
+                title="Export image of 3D view (PNG)"
+                aria-label="Export image of 3D view (PNG)"
+                disabled={project.floor.rooms.length === 0}
+                size="icon"
+                variant="ghost"
+                onClick={() => void handleExportImage("png")}
+              >
+                <CameraIcon aria-hidden="true" size={18} />
+              </Button>
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    className="icon-button compact"
+                    title="Image format options"
+                    aria-label="Image format options"
+                    disabled={project.floor.rooms.length === 0}
+                    size="icon"
+                    variant="ghost"
+                  >
+                    <CaretDownIcon aria-hidden="true" size={14} />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    disabled={project.floor.rooms.length === 0}
+                    onSelect={() => void handleExportImage("jpeg")}
+                  >
+                    Download as JPG
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          ) : (
+            (() => {
+              const disabledReason =
+                project.floor.rooms.length === 0
+                  ? "Add a room first"
+                  : viewMode === "elevation" && !selectedWall
+                    ? "Select a wall first"
+                    : null;
+              const label = `Export image of ${viewMode === "plan" ? "plan" : "elevation"} (PNG)`;
+              const button = (
+                <Button
+                  className="icon-button"
+                  title={disabledReason ?? label}
+                  aria-label={label}
+                  disabled={disabledReason !== null}
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => void handleExportImage("png")}
+                >
+                  <CameraIcon aria-hidden="true" size={18} />
+                </Button>
+              );
+              // Disabled buttons drop pointer events, so the hint rides a span.
+              return disabledReason ? <span title={disabledReason}>{button}</span> : button;
+            })()
+          )}
           {/* modal={false}: this menu launches the Export PDF dialog, and a
               modal menu's body pointer-events lock can be captured as the
               dialog's "restore" value while the menu's exit animation overlaps
@@ -1466,70 +1530,7 @@ export function App() {
                 <CaretDownIcon aria-hidden="true" className="topbar-button-caret" size={14} />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80">
-              {viewMode === "library" ? null : (
-                <>
-                  <DropdownMenuLabel>Export image</DropdownMenuLabel>
-                  {viewMode === "3d" ? (
-                    <>
-                      <DropdownMenuItem
-                        className="dropdown-menu-item-stacked"
-                        disabled={project.floor.rooms.length === 0}
-                        onSelect={() => void handleExportImage("png")}
-                      >
-                        <DownloadSimpleIcon aria-hidden="true" size={16} />
-                        <span className="flex min-w-0 flex-col gap-0.5">
-                          <span>Export image (PNG)</span>
-                          <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
-                            Export image of 3D view
-                          </span>
-                        </span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        className="dropdown-menu-item-stacked"
-                        disabled={project.floor.rooms.length === 0}
-                        onSelect={() => void handleExportImage("jpeg")}
-                      >
-                        <DownloadSimpleIcon aria-hidden="true" size={16} />
-                        <span className="flex min-w-0 flex-col gap-0.5">
-                          <span>Export image (JPG)</span>
-                          <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
-                            Export image of 3D view
-                          </span>
-                        </span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        className="dropdown-menu-item-stacked"
-                        disabled={project.floor.rooms.length === 0}
-                        onSelect={() => void handleSaveView()}
-                      >
-                        <BookmarkSimpleIcon aria-hidden="true" size={16} />
-                        <span className="flex min-w-0 flex-col gap-0.5">
-                          <span>Save view</span>
-                          <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
-                            Bookmark this camera for the PDF
-                          </span>
-                        </span>
-                      </DropdownMenuItem>
-                    </>
-                  ) : (
-                    <DropdownMenuItem
-                      className="dropdown-menu-item-stacked"
-                      disabled={project.floor.rooms.length === 0 || (viewMode === "elevation" && !selectedWall)}
-                      onSelect={() => void handleExportImage("png")}
-                    >
-                      <DownloadSimpleIcon aria-hidden="true" size={16} />
-                      <span className="flex min-w-0 flex-col gap-0.5">
-                        <span>Export image</span>
-                        <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
-                          Export image of {viewMode === "plan" ? "plan" : selectedWall ? `${selectedWall.name} elevation` : "elevation"}
-                        </span>
-                      </span>
-                    </DropdownMenuItem>
-                  )}
-                </>
-              )}
-              <DropdownMenuLabel>Export document</DropdownMenuLabel>
+            <DropdownMenuContent align="end" className="w-72">
               <DropdownMenuItem
                 className="dropdown-menu-item-stacked"
                 disabled={project.floor.rooms.length === 0}
@@ -1543,43 +1544,55 @@ export function App() {
                   </span>
                 </span>
               </DropdownMenuItem>
-              <DropdownMenuLabel>Export package (.sightlines)</DropdownMenuLabel>
-              <DropdownMenuItem
-                className="dropdown-menu-item-stacked"
-                onSelect={() => void handleExportPackage("display")}
-              >
-                <PackageIcon aria-hidden="true" size={16} />
-                <span className="flex min-w-0 flex-col gap-0.5">
-                  <span>Standard</span>
-                  <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
-                    Display-quality images. Recommended for sharing and backup.
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger className="dropdown-menu-item-stacked">
+                  <PackageIcon aria-hidden="true" size={16} />
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span>Project backup (.sightlines)</span>
+                    <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
+                      Portable project file for backup or handoff
+                    </span>
                   </span>
-                </span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="dropdown-menu-item-stacked"
-                onSelect={() => void handleExportPackage("originals")}
-              >
-                <ArchiveIcon aria-hidden="true" size={16} />
-                <span className="flex min-w-0 flex-col gap-0.5">
-                  <span>With originals</span>
-                  <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
-                    Adds full-resolution files. Largest export; archival handoff.
-                  </span>
-                </span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="dropdown-menu-item-stacked"
-                onSelect={() => void handleExportPackage("metadata-only")}
-              >
-                <FileDashedIcon aria-hidden="true" size={16} />
-                <span className="flex min-w-0 flex-col gap-0.5">
-                  <span>Without images</span>
-                  <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
-                    Checklist and layout only. Relinks images on machines that have them.
-                  </span>
-                </span>
-              </DropdownMenuItem>
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuItem
+                    className="dropdown-menu-item-stacked"
+                    onSelect={() => void handleExportPackage("display")}
+                  >
+                    <PackageIcon aria-hidden="true" size={16} />
+                    <span className="flex min-w-0 flex-col gap-0.5">
+                      <span>Standard</span>
+                      <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
+                        Display-quality images. Recommended for sharing and backup.
+                      </span>
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="dropdown-menu-item-stacked"
+                    onSelect={() => void handleExportPackage("originals")}
+                  >
+                    <ArchiveIcon aria-hidden="true" size={16} />
+                    <span className="flex min-w-0 flex-col gap-0.5">
+                      <span>With originals</span>
+                      <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
+                        Adds full-resolution files. Largest export; archival handoff.
+                      </span>
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="dropdown-menu-item-stacked"
+                    onSelect={() => void handleExportPackage("metadata-only")}
+                  >
+                    <FileDashedIcon aria-hidden="true" size={16} />
+                    <span className="flex min-w-0 flex-col gap-0.5">
+                      <span>Without images</span>
+                      <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
+                        Checklist and layout only. Relinks images on machines that have them.
+                      </span>
+                    </span>
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
             </DropdownMenuContent>
           </DropdownMenu>
           <input
@@ -1760,6 +1773,7 @@ export function App() {
                     <ThreeDCameraTools
                       actionsRef={threeDActionsRef}
                       canFocus={Boolean(selectedRoomId || selectedWall || selectedObjectIds.length)}
+                      onSaveView={() => void handleSaveView()}
                     />
                   ) : null
                 ) : (

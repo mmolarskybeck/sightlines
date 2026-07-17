@@ -888,8 +888,11 @@ Task-based, with curators and one installer if possible:
 
 ### Design questions
 
-- Snapshot in 3D: is the format choice (PNG/JPG) a small inline choice at
-  export time or a remembered preference? (Smallest possible surface wins.)
+- ~~Snapshot in 3D: is the format choice (PNG/JPG) a small inline choice at
+  export time or a remembered preference?~~ Resolved (feat/export, see
+  saved-views-collection-spec §9): PNG fires on a single click of the
+  topbar snapshot button; JPG is demoted to a narrow caret beside it in 3D,
+  not a remembered preference.
 - Does the plan-page wall-length dimensioning read clearly on non-rectilinear
   rooms, or does it need per-shape placement rules before shipping?
 - Bottom-edge-to-floor as an additional vertical datum option: revisit

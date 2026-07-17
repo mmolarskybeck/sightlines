@@ -580,6 +580,14 @@ input:focus-visible {
   background: var(--line);
 }
 
+/* Pairs the plan/elevation snapshot icon-button with its 3D-only JPG-format
+   caret so they read as one control rather than two loose buttons. */
+.snapshot-split {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
 /* Labeled bordered action (Export) — outlined, white bg, never a solid primary
    button (the one solid CTA is Add Artwork in the checklist). */
 .topbar-button {
@@ -3166,6 +3174,16 @@ body.panels-resizing * {
   min-width: 0;
   flex: 0 0 auto;
   flex-wrap: nowrap;
+}
+
+/* Separates Save view from the framing/focus actions in ThreeDCameraTools —
+   same hairline idiom as .toolbar-divider, sized to the 30px view-option-button row. */
+.three-camera-divider {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 1px;
+  margin: 4px 0;
+  background: var(--border);
 }
 
 .view-tools-primary > *,
