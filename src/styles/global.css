@@ -2729,9 +2729,20 @@ body.panels-resizing * {
 }
 
 .import-map-toolbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 160px;
+  /* Sheet flexes to fill; the header-row, dimension-order, and units selects
+     are fixed-width and wrap onto a second line only when they run out of
+     room, so the toolbar absorbs 2–4 controls without a layout rewrite. */
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
+}
+
+.import-map-toolbar > .import-field {
+  flex: 0 0 170px;
+}
+
+.import-map-toolbar > .import-field:first-child {
+  flex: 1 1 200px;
 }
 
 .import-field,

@@ -25,6 +25,52 @@ describe("parseImportedDimensions", () => {
     expect(parsed?.dimensions.heightMm).toBeCloseTo(inchesToMm(24));
     expect(parsed?.dimensions.widthMm).toBeCloseTo(inchesToMm(30));
   });
+
+  it("parses a MoMA dual-unit cell with a parenthesized metric alternate", () => {
+    // `9 5/16 × 2 1/2" (23.6 × 6.3 cm)` — the naive full-string split strands a
+    // piece like `2 1/2" (23.6`; the paren-aware split reads the imperial size.
+    const parsed = parseImportedDimensions('9 5/16 × 2 1/2" (23.6 × 6.3 cm)', "in");
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.dimensions.heightMm).toBeCloseTo(inchesToMm(9 + 5 / 16));
+    expect(parsed?.dimensions.widthMm).toBeCloseTo(inchesToMm(2.5));
+  });
+
+  it("prefers the explicit-unit variant when only the parenthetical carries a unit", () => {
+    // Bare imperial outside, cm inside the parens — the cm reading wins because
+    // it is the only variant with an explicit unit.
+    const dual = parseImportedDimensions("9 5/16 × 2 1/2 (23.6 × 6.3 cm)", "in");
+    expect(dual?.dimensions.displayUnit).toBe("cm");
+    expect(dual?.dimensions.heightMm).toBeCloseTo(236);
+    expect(dual?.dimensions.widthMm).toBeCloseTo(63);
+  });
+
+  it("applies a manual unit override to a bare combined cell (high confidence, no warning)", () => {
+    const parsed = parseImportedDimensions("24 x 30", "in", "height-first", "cm");
+
+    expect(parsed?.dimensions.heightMm).toBeCloseTo(240);
+    expect(parsed?.dimensions.widthMm).toBeCloseTo(300);
+    expect(parsed?.dimensions.displayUnit).toBe("cm");
+    expect(parsed?.confidence).toBe("high");
+    expect(parsed?.warnings.some((warning) => /No unit found/.test(warning))).toBe(false);
+  });
+
+  it("lets an inline unit in a combined cell win over a manual override", () => {
+    const parsed = parseImportedDimensions("24 x 30 in", "cm", "height-first", "cm");
+
+    expect(parsed?.dimensions.heightMm).toBeCloseTo(inchesToMm(24));
+    expect(parsed?.dimensions.widthMm).toBeCloseTo(inchesToMm(30));
+  });
+
+  it("swaps to width-first when the order option requests it", () => {
+    const heightFirst = parseImportedDimensions("12 x 13 in", "in", "height-first");
+    expect(heightFirst?.dimensions.heightMm).toBeCloseTo(inchesToMm(12));
+    expect(heightFirst?.dimensions.widthMm).toBeCloseTo(inchesToMm(13));
+
+    const widthFirst = parseImportedDimensions("12 x 13 in", "in", "width-first");
+    expect(widthFirst?.dimensions.heightMm).toBeCloseTo(inchesToMm(13));
+    expect(widthFirst?.dimensions.widthMm).toBeCloseTo(inchesToMm(12));
+  });
 });
 
 describe("dimensionsFromColumns", () => {
@@ -85,6 +131,43 @@ describe("dimensionsFromColumns", () => {
     expect(parsed?.dimensions.widthMm).toBeCloseTo(inchesToMm(30));
     expect(parsed?.warnings.some((warning) => /No unit found/.test(warning))).toBe(true);
     expect(parsed?.confidence).toBe("medium");
+  });
+
+  it("applies a manual unit override to bare numbers with no warning and high confidence", () => {
+    const parsed = dimensionsFromColumns({
+      height: "24",
+      width: "30",
+      defaultUnit: "in",
+      unitOverride: "cm"
+    });
+
+    expect(parsed?.dimensions.heightMm).toBeCloseTo(240);
+    expect(parsed?.dimensions.widthMm).toBeCloseTo(300);
+    expect(parsed?.dimensions.displayUnit).toBe("cm");
+    expect(parsed?.warnings.some((warning) => /No unit found/.test(warning))).toBe(false);
+    expect(parsed?.confidence).toBe("high");
+  });
+
+  it("lets an inline cell unit win over a manual override", () => {
+    const parsed = dimensionsFromColumns({
+      height: "30 in",
+      defaultUnit: "cm",
+      unitOverride: "cm"
+    });
+
+    expect(parsed?.dimensions.heightMm).toBeCloseTo(inchesToMm(30));
+  });
+
+  it("lets a column-header hint win over a manual override", () => {
+    const parsed = dimensionsFromColumns({
+      height: "77",
+      heightUnitHint: "cm",
+      defaultUnit: "in",
+      unitOverride: "mm"
+    });
+
+    // The header says cm, so 77 is 770mm — not 77mm from the override.
+    expect(parsed?.dimensions.heightMm).toBeCloseTo(770);
   });
 });
 

@@ -290,6 +290,49 @@ describe("guessColumnMapping", () => {
     }
   });
 
+  it("maps bare H/W/D headers when the columns hold numeric values (CAD report)", () => {
+    const table: ImportTable = {
+      sourceFilename: "cad-report.xls",
+      sheetName: "Sheet1",
+      headerRowIndex: 0,
+      columns: [
+        { index: 0, label: "H" },
+        { index: 1, label: "W" },
+        { index: 2, label: "D" },
+        { index: 3, label: "Title" }
+      ],
+      rows: [
+        { sourceRowIndex: 2, values: ["12.5", "9.75", "1.5", "Study I"] },
+        { sourceRowIndex: 3, values: ["30", "24", "2", "Study II"] }
+      ]
+    };
+
+    const { mapping, guesses } = guessColumnMapping(table);
+
+    expect(mapping.height).toBe(0);
+    expect(mapping.width).toBe(1);
+    expect(mapping.depth).toBe(2);
+    for (const field of ["height", "width", "depth"] as const) {
+      expect(guesses.find((guess) => guess.field === field)?.confidence).toBe("medium");
+    }
+  });
+
+  it("does not map a bare 'H res' header (guard against non-axis single-letter matches)", () => {
+    const table: ImportTable = {
+      sourceFilename: "metadata.csv",
+      sheetName: "Sheet1",
+      headerRowIndex: 0,
+      columns: [{ index: 0, label: "H res" }],
+      rows: [
+        { sourceRowIndex: 1, values: ["300"] },
+        { sourceRowIndex: 2, values: ["300"] }
+      ]
+    };
+
+    const { mapping } = guessColumnMapping(table);
+    expect(mapping.height).toBeUndefined();
+  });
+
   it("never maps pixel/hash/mime/url/checksum columns to any field", () => {
     const table: ImportTable = {
       sourceFilename: "metadata.csv",

@@ -417,7 +417,13 @@ export function ChecklistPanel({
       )}
 
       <div className="checklist-actions">
-        <DropdownMenu>
+        {/* modal={false}: this menu launches the Import Wizard and Artwork
+            Library dialogs, and a modal menu's body pointer-events lock can be
+            captured as the dialog's "restore" value while the menu's exit
+            animation overlaps the dialog mount — cancelling the dialog then
+            re-applies pointer-events:none to body and freezes the app. Same
+            bug and fix as the topbar Export menu (e954cb2). */}
+        <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
             <Button className="checklist-add" variant="primary">
               <ImageSquareIcon aria-hidden="true" size={16} />

@@ -62,7 +62,11 @@ export function guessColumnMapping(table: ImportTable): {
       if (isDisqualified(field, column.label)) continue;
 
       const headerScore = scoreHeader(field, column.label);
-      const valueScore = scoreValues(field, table.rows.map((row) => row.values[column.index] ?? ""));
+      const valueScore = scoreValues(
+        field,
+        table.rows.map((row) => row.values[column.index] ?? ""),
+        column.label
+      );
       const score = headerScore.score + valueScore.score;
       if (score < MIN_SCORE) continue;
 
@@ -168,7 +172,13 @@ function scoreHeader(field: ImportField, label: string): { score: number; reason
 
     let score = 0;
     if (tokenSetsEqual(labelTokens, aliasTokens)) {
-      score = 60;
+      const [onlyAliasToken] = aliasTokens;
+      const isSingleCharAlias = aliasTokens.size === 1 && onlyAliasToken.length === 1;
+      // A header that is JUST a single letter ("H") is too weak to trust on the
+      // header alone — a stray "W" column could be anything. It earns a score
+      // only when its VALUES look like measurements (see scoreValues), so the
+      // strong exact-match score is withheld here.
+      score = isSingleCharAlias ? 0 : 60;
     } else if (compactLabel === [...aliasTokens].join("")) {
       // Some exports flatten identifiers completely (ARTISTNAME, imagefile).
       // Requiring the whole compacted header to equal a known alias keeps this
@@ -263,12 +273,40 @@ function isDisqualified(field: ImportField, label: string): boolean {
   return false;
 }
 
-function scoreValues(field: ImportField, values: string[]): { score: number; reason?: string } {
+// A header that is EXACTLY one of these single letters carries no unit token
+// to lean on ("H (cm)" would), so it can only earn a score when its column's
+// VALUES look like measurements — see the scoreValues branch below.
+const BARE_AXIS_LETTER: Partial<Record<ImportField, string>> = {
+  height: "h",
+  width: "w",
+  depth: "d"
+};
+
+function scoreValues(
+  field: ImportField,
+  values: string[],
+  label: string
+): { score: number; reason?: string } {
   const sample = values.filter((value) => value.trim().length > 0).slice(0, 25);
   if (sample.length === 0) return { score: 0 };
 
   const ratio = (predicate: (value: string) => boolean) =>
     sample.filter(predicate).length / sample.length;
+
+  // Legacy exports (e.g. CAD reports) label their size columns just "H"/"W"/"D".
+  // A bare letter is too weak to score on the header alone, but when the token
+  // set is EXACTLY that letter — so "h res" and "H (cm)" are both excluded —
+  // and most values parse as measurements, a medium score is warranted.
+  const axisLetter = BARE_AXIS_LETTER[field];
+  if (axisLetter) {
+    const labelTokens = tokensOf(label);
+    if (labelTokens.size === 1 && labelTokens.has(axisLetter)) {
+      const measurementRatio = ratio(looksLikeMeasurementValue);
+      if (measurementRatio >= 0.6) {
+        return { score: 22, reason: `bare "${axisLetter.toUpperCase()}" column with numeric values` };
+      }
+    }
+  }
 
   if (field === "imageFilename") {
     const imageRatio = ratio((value) => /\.(jpe?g|png|webp|tiff?)$/i.test(value.trim()));
@@ -313,6 +351,23 @@ function looksLikeAccessionValue(value: string): boolean {
   if (/^[A-Z]{1,6}\s+\d/.test(trimmed)) return true;
   const dotCount = (trimmed.match(/\./g) ?? []).length;
   return dotCount >= 2 && /^\d/.test(trimmed);
+}
+
+// A cell "looks like a measurement" if it's a bare positive decimal ("12",
+// "12.5") or a number carrying a length unit, fraction, or inch/foot mark
+// ("12 cm", "9 5/16\"", "2 1/2\""). Deliberately narrow so a numeric column of
+// pixel counts or years can't masquerade as a bare-letter size column.
+function looksLikeMeasurementValue(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (/^\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed) > 0;
+  if (
+    /^\d/.test(trimmed) &&
+    /(\d\s*\d+\/\d+|\/|["']|\b(?:cm|mm|in|ft|m|inch|inches|feet)\b)/i.test(trimmed)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function confidenceForScore(score: number): ImportConfidence {

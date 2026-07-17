@@ -10,9 +10,11 @@ import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { useFileImageUrls } from "../hooks/useFileImageUrls";
 import { ACCEPTED_IMAGE_MIME_TYPES, isAcceptedImageType } from "../../domain/assets/imageIntake";
 import { createArtworkImportPlan } from "../../domain/spreadsheetImport/importPlan";
+import type { ImportDimensionUnit } from "../../domain/spreadsheetImport/dimensions";
 import type {
   ArtworkImportDraft,
   ColumnMapping,
+  DimensionOrder,
   ImportField,
   ImportPlan,
   ImportTable,
@@ -72,6 +74,16 @@ const SPREADSHEET_NAME_PATTERN = /\.(csv|tsv|xlsx|xls)$/i;
 // image types this app accepts) would silently drop a valid file.
 const IMAGE_NAME_PATTERN = /\.(jpe?g|png|webp)$/i;
 
+// Full-word unit names for the dimension-unit override control.
+const UNIT_WORD: Record<ImportDimensionUnit, string> = {
+  in: "inches",
+  ft: "feet",
+  cm: "centimeters",
+  mm: "millimeters",
+  m: "meters"
+};
+const UNIT_OVERRIDE_OPTIONS: ImportDimensionUnit[] = ["in", "cm", "mm", "ft", "m"];
+
 const FIELD_LABELS: Record<ImportField, string> = {
   artist: "Artist",
   title: "Title",
@@ -126,6 +138,17 @@ export default function ImportWizard({
   const [headerRowIndex, setHeaderRowIndex] = useState<number | undefined>(undefined);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [mapping, setMapping] = useState<ColumnMapping>({});
+  const [dimensionOrder, setDimensionOrder] = useState<DimensionOrder>("auto");
+  // "auto" defers to the project default; any other value manually forces the
+  // unit for bare (unit-less) dimension numbers. Inline units and column-header
+  // hints still take precedence over this override.
+  const [unitOverride, setUnitOverride] = useState<ImportDimensionUnit | "auto">("auto");
+  // Filename → width/height ratio, filled asynchronously from the uploaded
+  // image bitmaps. "auto" dimension order consults this to settle whether a
+  // combined "12 x 13" cell is H x W or W x H.
+  const [imageAspectByName, setImageAspectByName] = useState<ReadonlyMap<string, number>>(
+    new Map()
+  );
   const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(new Set());
   const [imageChoiceByDraftId, setImageChoiceByDraftId] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -140,6 +163,12 @@ export default function ImportWizard({
 
   const imageUrls = useFileImageUrls(imageFiles);
   const stepCopy = STEP_COPY[step];
+  // The unit "Auto" falls back to — shown in the override control's default
+  // label so the user can see what leaving it on Auto actually means.
+  const projectParseUnit = getScopeUnits(
+    unitSystemFromDisplayUnit(projectUnit),
+    "artwork"
+  ).parseUnit;
 
   const currentStepIndex = STEP_ORDER.indexOf(step);
   function stepState(target: Step): StepState {
@@ -161,15 +190,55 @@ export default function ImportWizard({
     }
   }, [workbook, selectedSheet, headerRowIndex]);
 
+  // Measure each uploaded image's aspect ratio off the main thread. Keyed on
+  // the file identity list so re-runs only happen when the set changes; cached
+  // by name so adding one file doesn't re-decode the rest. Failures are
+  // swallowed — a row simply keeps the height-first default when its image
+  // can't be measured.
+  useEffect(() => {
+    let cancelled = false;
+    const known = imageAspectByName;
+    const pending = imageFiles.filter(
+      (file) => isImportImageFile(file) && !known.has(file.name)
+    );
+    if (pending.length === 0) return;
+
+    void (async () => {
+      const measured = new Map<string, number>();
+      for (const file of pending) {
+        try {
+          const bitmap = await createImageBitmap(file);
+          if (bitmap.height > 0) measured.set(file.name, bitmap.width / bitmap.height);
+          bitmap.close();
+        } catch {
+          // Unreadable image — leave it out; the row falls back to height-first.
+        }
+      }
+      if (cancelled || measured.size === 0) return;
+      setImageAspectByName((current) => {
+        const next = new Map(current);
+        for (const [name, ratio] of measured) next.set(name, ratio);
+        return next;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [imageFiles]);
+
   const plan = useMemo<ImportPlan | null>(() => {
     if (!table) return null;
     return createArtworkImportPlan({
       table,
       imageFiles,
       projectUnit,
-      mapping
+      mapping,
+      dimensionOrder,
+      imageAspectByName,
+      unitOverride: unitOverride === "auto" ? undefined : unitOverride
     });
-  }, [table, imageFiles, projectUnit, mapping]);
+  }, [table, imageFiles, projectUnit, mapping, dimensionOrder, imageAspectByName, unitOverride]);
   const planSignature = useMemo(
     () =>
       plan
@@ -327,6 +396,9 @@ export default function ImportWizard({
     setHeaderRowIndex(undefined);
     setImageFiles([]);
     setMapping({});
+    setDimensionOrder("auto");
+    setUnitOverride("auto");
+    setImageAspectByName(new Map());
     setSelectedDraftIds(new Set());
     setImageChoiceByDraftId({});
     setError(null);
@@ -589,6 +661,52 @@ export default function ImportWizard({
                     </SelectContent>
                   </Select>
                 </label>
+                {mapping.dimensions !== undefined ? (
+                  <label className="import-field">
+                    <span>Dimension order</span>
+                    <Select
+                      value={dimensionOrder}
+                      onValueChange={(value) => setDimensionOrder(value as DimensionOrder)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">Auto (from image)</SelectItem>
+                        <SelectItem value="height-first">Height × Width</SelectItem>
+                        <SelectItem value="width-first">Width × Height</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </label>
+                ) : null}
+                {mapping.dimensions !== undefined ||
+                mapping.height !== undefined ||
+                mapping.width !== undefined ||
+                mapping.depth !== undefined ? (
+                  <label className="import-field">
+                    <span>Units</span>
+                    <Select
+                      value={unitOverride}
+                      onValueChange={(value) =>
+                        setUnitOverride(value as ImportDimensionUnit | "auto")
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">
+                          Auto (project — {UNIT_WORD[projectParseUnit]})
+                        </SelectItem>
+                        {UNIT_OVERRIDE_OPTIONS.map((unit) => (
+                          <SelectItem key={unit} value={unit}>
+                            {unit}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </label>
+                ) : null}
               </div>
 
               <div className="import-map-grid">

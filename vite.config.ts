@@ -23,6 +23,13 @@ export default defineConfig({
           if (/node_modules\/(pdf-lib|@pdf-lib)\//.test(id)) {
             return "pdf";
           }
+          // SheetJS is only reached through the dynamic import in
+          // parseImportWorkbook. Force it into its own chunk so it isn't
+          // pulled into the eager vendor bundle — the spreadsheet parser
+          // should download only when someone imports an Excel file.
+          if (/node_modules\/xlsx\//.test(id)) {
+            return "xlsx";
+          }
           return "vendor";
         }
       }

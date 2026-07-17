@@ -15,6 +15,12 @@ export type ImportField =
 
 export type ImportConfidence = "high" | "medium" | "low";
 
+// Reading order for a single combined dimensions cell like "12 x 13".
+// "height-first" is the museum default (H x W); "width-first" swaps it; "auto"
+// starts height-first and lets a matched image's orientation settle ambiguous
+// cases (see importPlan.ts). Per-axis height/width columns are never reordered.
+export type DimensionOrder = "auto" | "height-first" | "width-first";
+
 export type ImportColumn = {
   index: number;
   label: string;

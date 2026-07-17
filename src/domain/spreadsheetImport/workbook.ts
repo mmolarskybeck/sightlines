@@ -1,4 +1,3 @@
-import readXlsxFile from "read-excel-file/browser";
 import type { ImportSheetPreview, ImportTable, ImportWorkbookPreview } from "./types";
 
 export async function parseImportWorkbook(
@@ -17,16 +16,26 @@ export async function parseImportWorkbook(
     };
   }
 
-  const sheets = await readXlsxFile(data);
+  // SheetJS handles both .xlsx and legacy BIFF .xls (read-excel-file only did
+  // .xlsx). Loaded dynamically so its parser stays out of the main bundle —
+  // it's only reached the first time someone opens an Excel file in the wizard.
+  const XLSX = await import("xlsx");
+  // cellDates lets SheetJS hand us real Date objects; normalizeCell then turns
+  // them into the same ISO date string the delimited-text path never has to.
+  const workbook = XLSX.read(new Uint8Array(data), { type: "array", cellDates: true });
 
   return {
     sourceFilename,
-    sheets: sheets
-      .map((sheet) => ({
-        name: sheet.sheet,
-        rows: sheet.data.map((row) => row.map((cell) => normalizeCell(cell)))
-      }))
-      .filter((sheet) => sheet.rows.some((row) => row.some((cell) => cell.trim().length > 0)))
+    sheets: workbook.SheetNames.map((name) => {
+      const sheet = workbook.Sheets[name];
+      // header:1 gives us positional string[][] rows (not keyed records), matching
+      // the delimited path's shape; defval:"" keeps empty cells as "" so column
+      // indices stay aligned across rows with trailing blanks.
+      const rows = XLSX.utils
+        .sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", blankrows: false })
+        .map((row) => row.map((cell) => normalizeCell(cell)));
+      return { name, rows };
+    }).filter((sheet) => sheet.rows.some((row) => row.some((cell) => cell.trim().length > 0)))
   };
 }
 

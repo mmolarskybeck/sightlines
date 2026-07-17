@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { inchesToMm } from "../units/length";
 import { createArtworkImportPlan } from "./importPlan";
 import type { ImportTable } from "./types";
 
@@ -143,5 +144,141 @@ describe("createArtworkImportPlan", () => {
     const draft = plan.drafts[0];
     expect(draft.artwork.frameIncludedInImage).toBeUndefined();
     expect(draft.warnings.some((w) => /frame-inclusive/i.test(w.message))).toBe(false);
+  });
+
+  const orderTable = (dimensionsCell: string, imageCell: string): ImportTable => ({
+    sourceFilename: "metadata.csv",
+    sheetName: "Sheet1",
+    headerRowIndex: 0,
+    columns: [
+      { index: 0, label: "title" },
+      { index: 1, label: "dimensions" },
+      { index: 2, label: "image_path" }
+    ],
+    rows: [{ sourceRowIndex: 2, values: ["A Work", dimensionsCell, imageCell] }]
+  });
+
+  it("reads a combined cell width-first when the order option asks for it", () => {
+    const plan = createArtworkImportPlan({
+      table: orderTable("12 x 13 in", ""),
+      imageFiles: [],
+      projectUnit: "in",
+      dimensionOrder: "width-first"
+    });
+
+    const dims = plan.drafts[0].artwork.dimensions;
+    expect(dims.heightMm).toBeCloseTo(inchesToMm(13));
+    expect(dims.widthMm).toBeCloseTo(inchesToMm(12));
+  });
+
+  it("auto-swaps a combined cell to agree with a portrait matched image", () => {
+    const image = new File([new Uint8Array([1])], "art.jpg", { type: "image/jpeg" });
+    const plan = createArtworkImportPlan({
+      table: orderTable("12 x 13 in", "art.jpg"),
+      imageFiles: [image],
+      projectUnit: "in",
+      dimensionOrder: "auto",
+      // 0.5 = portrait; the default H x W reading (12 x 13) is landscape, so
+      // the orientations disagree and the axes swap.
+      imageAspectByName: new Map([["art.jpg", 0.5]])
+    });
+
+    const draft = plan.drafts[0];
+    expect(draft.imageMatch.status).toBe("matched");
+    expect(draft.artwork.dimensions.heightMm).toBeCloseTo(inchesToMm(13));
+    expect(draft.artwork.dimensions.widthMm).toBeCloseTo(inchesToMm(12));
+    expect(draft.warnings.some((w) => /inferred from image orientation/i.test(w.message))).toBe(true);
+  });
+
+  it("does not auto-swap when the image orientation already agrees", () => {
+    const image = new File([new Uint8Array([1])], "art.jpg", { type: "image/jpeg" });
+    const plan = createArtworkImportPlan({
+      table: orderTable("12 x 13 in", "art.jpg"),
+      imageFiles: [image],
+      projectUnit: "in",
+      dimensionOrder: "auto",
+      imageAspectByName: new Map([["art.jpg", 1.4]]) // landscape, like 12 x 13 H x W
+    });
+
+    const draft = plan.drafts[0];
+    expect(draft.artwork.dimensions.heightMm).toBeCloseTo(inchesToMm(12));
+    expect(draft.artwork.dimensions.widthMm).toBeCloseTo(inchesToMm(13));
+    expect(draft.warnings.some((w) => /inferred from image orientation/i.test(w.message))).toBe(false);
+  });
+
+  it("never auto-swaps per-axis height/width columns even against a conflicting image", () => {
+    const image = new File([new Uint8Array([1])], "art.jpg", { type: "image/jpeg" });
+    const table: ImportTable = {
+      sourceFilename: "metadata.csv",
+      sheetName: "Sheet1",
+      headerRowIndex: 0,
+      columns: [
+        { index: 0, label: "title" },
+        { index: 1, label: "height_in" },
+        { index: 2, label: "width_in" },
+        { index: 3, label: "image_path" }
+      ],
+      rows: [{ sourceRowIndex: 2, values: ["A Work", "12", "13", "art.jpg"] }]
+    };
+
+    const plan = createArtworkImportPlan({
+      table,
+      imageFiles: [image],
+      projectUnit: "in",
+      dimensionOrder: "auto",
+      imageAspectByName: new Map([["art.jpg", 0.5]])
+    });
+
+    const dims = plan.drafts[0].artwork.dimensions;
+    expect(dims.heightMm).toBeCloseTo(inchesToMm(12));
+    expect(dims.widthMm).toBeCloseTo(inchesToMm(13));
+  });
+
+  it("threads a manual unit override to bare height/width columns", () => {
+    const table: ImportTable = {
+      sourceFilename: "cad-report.xls",
+      sheetName: "Sheet1",
+      headerRowIndex: 0,
+      columns: [
+        { index: 0, label: "title" },
+        { index: 1, label: "H" },
+        { index: 2, label: "W" }
+      ],
+      rows: [{ sourceRowIndex: 2, values: ["A Work", "2.9375", "3.9"] }]
+    };
+
+    const asInches = createArtworkImportPlan({ table, imageFiles: [], projectUnit: "in" });
+    const asCm = createArtworkImportPlan({
+      table,
+      imageFiles: [],
+      projectUnit: "in",
+      unitOverride: "cm"
+    });
+
+    // Same bare numbers, two readings: default inches vs. the cm override.
+    expect(asInches.drafts[0].artwork.dimensions.heightMm).toBeCloseTo(inchesToMm(2.9375));
+    expect(asCm.drafts[0].artwork.dimensions.heightMm).toBeCloseTo(29.375);
+    expect(asCm.drafts[0].artwork.dimensions.displayUnit).toBe("cm");
+  });
+
+  it("matches an image whose filename cell is a full Windows path", () => {
+    const table: ImportTable = {
+      sourceFilename: "cad-report.xls",
+      sheetName: "Sheet1",
+      headerRowIndex: 0,
+      columns: [
+        { index: 0, label: "title" },
+        { index: 1, label: "File" }
+      ],
+      rows: [
+        { sourceRowIndex: 2, values: ["A Work", "X:\\Size3\\Images\\425_1997_CCCR.jpg"] }
+      ]
+    };
+    const image = new File([new Uint8Array([1])], "425_1997_CCCR.jpg", { type: "image/jpeg" });
+
+    const plan = createArtworkImportPlan({ table, imageFiles: [image], projectUnit: "in" });
+
+    expect(plan.drafts[0].imageMatch.status).toBe("matched");
+    expect(plan.drafts[0].imageFile?.name).toBe("425_1997_CCCR.jpg");
   });
 });

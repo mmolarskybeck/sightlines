@@ -6,29 +6,49 @@ import {
 import { newId } from "../id";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../units/unitSystem";
 import { guessColumnMapping } from "./columnMapping";
-import { detectUnitFromLabel, dimensionsFromColumns, parseImportedDimensions } from "./dimensions";
+import {
+  detectUnitFromLabel,
+  dimensionsFromColumns,
+  parseImportedDimensions,
+  swapDimensionAxes
+} from "./dimensions";
 import type { ImportDimensionUnit } from "./dimensions";
 import { flagImageConflicts, filterImportImageFiles, matchImageFile } from "./imageMatching";
 import type {
   ArtworkImportDraft,
   ColumnMapping,
+  DimensionOrder,
   ImportField,
   ImportPlan,
   ImportRow,
   ImportTable,
-  ImportWarning
+  ImportWarning,
+  ParsedImportDimensions
 } from "./types";
 
 export function createArtworkImportPlan({
   table,
   imageFiles,
   projectUnit,
-  mapping
+  mapping,
+  dimensionOrder = "auto",
+  imageAspectByName,
+  unitOverride
 }: {
   table: ImportTable;
   imageFiles: File[];
   projectUnit: DisplayUnit;
   mapping?: ColumnMapping;
+  dimensionOrder?: DimensionOrder;
+  // Filename → width/height ratio for uploaded images, computed asynchronously
+  // by the caller (createImageBitmap). Absent until it arrives, which is why
+  // "auto" order simply falls back to height-first when a row's aspect is
+  // unknown — the plan recomputes once the map is populated.
+  imageAspectByName?: ReadonlyMap<string, number>;
+  // Manual unit for bare (unit-less) dimension values. Replaces the project
+  // default ONLY where no inline unit or column-header hint is present — those
+  // still win. Undefined leaves the project default in charge.
+  unitOverride?: ImportDimensionUnit;
 }): ImportPlan {
   const guessed = guessColumnMapping(table);
   const resolvedMapping = mapping ?? guessed.mapping;
@@ -45,7 +65,10 @@ export function createArtworkImportPlan({
       mapping: resolvedMapping,
       projectUnit,
       defaultArtworkUnit,
-      imageFiles: importImageFiles
+      imageFiles: importImageFiles,
+      dimensionOrder,
+      imageAspectByName,
+      unitOverride
     })
   );
   const flaggedMatches = flagImageConflicts(draftsWithoutConflict.map((draft) => draft.imageMatch));
@@ -78,7 +101,10 @@ function createDraft({
   mapping,
   projectUnit,
   defaultArtworkUnit,
-  imageFiles
+  imageFiles,
+  dimensionOrder,
+  imageAspectByName,
+  unitOverride
 }: {
   row: ImportRow;
   table: ImportTable;
@@ -86,6 +112,9 @@ function createDraft({
   projectUnit: DisplayUnit;
   defaultArtworkUnit: DisplayUnit;
   imageFiles: File[];
+  dimensionOrder: DimensionOrder;
+  imageAspectByName?: ReadonlyMap<string, number>;
+  unitOverride?: ImportDimensionUnit;
 }): ArtworkImportDraft {
   const raw = rowToRecord(table, row);
   const value = (field: ImportField) => {
@@ -102,19 +131,29 @@ function createDraft({
     return column ? detectUnitFromLabel(column.label) : undefined;
   };
   const warnings: ImportWarning[] = [];
-  const dimensionResult =
-    dimensionsFromColumns({
-      width: value("width"),
-      height: value("height"),
-      depth: value("depth"),
-      widthUnitHint: unitHint("width"),
-      heightUnitHint: unitHint("height"),
-      depthUnitHint: unitHint("depth"),
-      defaultUnit: defaultArtworkUnit
-    }) ??
-    (value("dimensions")
-      ? parseImportedDimensions(value("dimensions") ?? "", defaultArtworkUnit)
-      : null);
+  const columnDimensions = dimensionsFromColumns({
+    width: value("width"),
+    height: value("height"),
+    depth: value("depth"),
+    widthUnitHint: unitHint("width"),
+    heightUnitHint: unitHint("height"),
+    depthUnitHint: unitHint("depth"),
+    defaultUnit: defaultArtworkUnit,
+    unitOverride
+  });
+  const combinedDimensions =
+    !columnDimensions && value("dimensions")
+      ? parseImportedDimensions(
+          value("dimensions") ?? "",
+          defaultArtworkUnit,
+          dimensionOrder,
+          unitOverride
+        )
+      : null;
+  // Only a single combined cell's H/W order is ever inferred from the image —
+  // per-axis columns carry their own unambiguous roles and must never swap.
+  let dimensionResult = columnDimensions ?? combinedDimensions;
+  const dimensionsFromCombinedColumn = combinedDimensions !== null;
 
   for (const message of dimensionResult?.warnings ?? []) {
     warnings.push({ field: "dimensions", message });
@@ -191,6 +230,27 @@ function createDraft({
     warnings.push({ field: "image", message: "Image match needs review." });
   }
 
+  // "auto" order: a combined "12 x 13" cell defaults to H x W, but if the row's
+  // matched image and the parsed dims are both convincingly non-square and
+  // disagree on orientation (image landscape vs. dims portrait, or vice versa),
+  // trust the image and swap. Runs here because the match is only known now.
+  if (
+    dimensionOrder === "auto" &&
+    dimensionsFromCombinedColumn &&
+    dimensionResult &&
+    imageMatch.status === "matched"
+  ) {
+    const imageAspect = imageAspectByName?.get(imageMatch.file.name);
+    if (imageAspect !== undefined && shouldSwapForImageOrientation(dimensionResult, imageAspect)) {
+      dimensionResult = swapDimensionAxes(dimensionResult);
+      artwork.dimensions = dimensionResult.dimensions;
+      warnings.push({
+        field: "dimensions",
+        message: "Width/height order inferred from image orientation."
+      });
+    }
+  }
+
   return {
     id: `${table.sourceFilename}:${table.sheetName}:${row.sourceRowIndex}`,
     row,
@@ -201,6 +261,25 @@ function createDraft({
     raw,
     selected: true
   };
+}
+
+// True when the parsed dims and the matched image are each clearly non-square
+// (their w/h ratio differs from 1 by more than 5%) AND their orientations
+// disagree. A 5% dead band keeps near-square works — where "landscape vs.
+// portrait" is meaningless — from triggering a spurious swap.
+const ORIENTATION_DEAD_BAND = 0.05;
+function shouldSwapForImageOrientation(
+  dimensionResult: ParsedImportDimensions,
+  imageAspect: number
+): boolean {
+  const { widthMm, heightMm } = dimensionResult.dimensions;
+  if (!widthMm || !heightMm) return false;
+  const dimsAspect = widthMm / heightMm;
+  if (Math.abs(dimsAspect - 1) <= ORIENTATION_DEAD_BAND) return false;
+  if (Math.abs(imageAspect - 1) <= ORIENTATION_DEAD_BAND) return false;
+  const dimsLandscape = dimsAspect > 1;
+  const imageLandscape = imageAspect > 1;
+  return dimsLandscape !== imageLandscape;
 }
 
 function rowToRecord(table: ImportTable, row: ImportRow): Record<string, string> {
