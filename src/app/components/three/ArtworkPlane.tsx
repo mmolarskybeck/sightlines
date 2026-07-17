@@ -1,8 +1,8 @@
 import { useCursor } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { Texture } from "three";
-import { FRAME_FINISH_HEX } from "../../../domain/framing";
+import { FRAME_FINISH_HEX, MAT_BEVEL_HAIRLINE_HEX } from "../../../domain/framing";
 import type { ArtworkFrame } from "../../../domain/project";
 import type { WallArtwork3d } from "../../../domain/geometry/scene3d";
 import { fitArtworkImageSizeMm, textureNativeAspect } from "./artworkFit";
@@ -18,6 +18,36 @@ import { GHOST_OPACITY, MAT_FILL_COLOR, PLACEHOLDER_COLOR } from "./tokens";
 // Outlines sit slightly proud of whatever face they wrap (the image plane, or
 // the frame's front face when framed) so they never z-fight it.
 const OUTLINE_OFFSET_MM = 5;
+
+// Frame-edge hairlines sit just off the frame's front face — proud enough not
+// to z-fight the boxes, but below OUTLINE_OFFSET_MM so they never share a
+// depth with the uncertainty/selection outlines on the same rect.
+const HAIRLINE_OFFSET_MM = 2;
+
+// One hairline rectangle, centered in the local xy-plane — the 3D analogue of
+// elevation's frame-edge hairlines (same MAT_BEVEL_HAIRLINE_HEX), so a white
+// frame on a white wall (or over a white mat) still reads as its own ring.
+function FrameEdgeHairline({ widthMm, heightMm }: { widthMm: number; heightMm: number }) {
+  const positions = useMemo(() => {
+    const halfW = mmToWorld(widthMm) / 2;
+    const halfH = mmToWorld(heightMm) / 2;
+    return new Float32Array([
+      -halfW, -halfH, 0,
+      halfW, -halfH, 0,
+      halfW, halfH, 0,
+      -halfW, halfH, 0
+    ]);
+  }, [widthMm, heightMm]);
+
+  return (
+    <lineLoop>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
+      </bufferGeometry>
+      <lineBasicMaterial color={MAT_BEVEL_HAIRLINE_HEX} />
+    </lineLoop>
+  );
+}
 
 // One placed wall artwork, in WALL-LOCAL coordinates: the parent WallPanel
 // group maps local +x along the wall, +y up from the floor, +z inward, so
@@ -139,6 +169,23 @@ export function ArtworkPlane({
               />
             </mesh>
           ))}
+        </group>
+      ) : null}
+      {layout.hasFrame && !ghosted ? (
+        // Frame edge hairlines, mirroring elevation's: one loop at the frame's
+        // outer edge, one at its inner boundary (frame/mat when matted, else
+        // frame/image opening), seated just proud of the frame's front face.
+        <group
+          position={[0, 0, mmToWorld((layout.frameFrontZMm as number) + HAIRLINE_OFFSET_MM)]}
+        >
+          <FrameEdgeHairline
+            widthMm={layout.outerWidthMm}
+            heightMm={layout.outerHeightMm}
+          />
+          <FrameEdgeHairline
+            widthMm={layout.openingWidthMm}
+            heightMm={layout.openingHeightMm}
+          />
         </group>
       ) : null}
       {layout.hasMat ? (
