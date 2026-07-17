@@ -95,6 +95,7 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from "./components/ui/tooltip";
+import { ToolbarTooltipKbd } from "./components/toolbar/ToolbarTooltipKbd";
 import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover";
 import { Toaster } from "./components/ui/sonner";
 import { toast } from "sonner";
@@ -1358,26 +1359,54 @@ export function App() {
               }
             }}
           >
-            <UnderlineToggleGroupItem value="plan">
-              <MapTrifoldIcon aria-hidden="true" size={16} />
-              <span>Plan</span>
-            </UnderlineToggleGroupItem>
-            <UnderlineToggleGroupItem value="elevation">
-              <PresentationIcon aria-hidden="true" size={16} />
-              <span>Elevation</span>
-            </UnderlineToggleGroupItem>
-            <UnderlineToggleGroupItem value="3d">
-              <CubeIcon aria-hidden="true" size={16} />
-              <span>3D</span>
-            </UnderlineToggleGroupItem>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <UnderlineToggleGroupItem value="plan">
+                  <MapTrifoldIcon aria-hidden="true" size={16} />
+                  <span>Plan</span>
+                </UnderlineToggleGroupItem>
+              </TooltipTrigger>
+              <TooltipContent className="toolbar-tooltip" side="bottom">
+                See the room from above
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <UnderlineToggleGroupItem value="elevation">
+                  <PresentationIcon aria-hidden="true" size={16} />
+                  <span>Elevation</span>
+                </UnderlineToggleGroupItem>
+              </TooltipTrigger>
+              <TooltipContent className="toolbar-tooltip" side="bottom">
+                See one wall straight on
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <UnderlineToggleGroupItem value="3d">
+                  <CubeIcon aria-hidden="true" size={16} />
+                  <span>3D</span>
+                </UnderlineToggleGroupItem>
+              </TooltipTrigger>
+              <TooltipContent className="toolbar-tooltip" side="bottom">
+                Preview the exhibition in 3D
+              </TooltipContent>
+            </Tooltip>
           </UnderlineToggleGroup>
         </div>
 
         <div className="topbar-right" aria-label="Project actions">
           <Popover>
-            <PopoverTrigger asChild>
-              <StatusBadge state={saveState} />
-            </PopoverTrigger>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <StatusBadge state={saveState} />
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent className="toolbar-tooltip" side="bottom">
+                Your work saves automatically on this device. Click for details.
+              </TooltipContent>
+            </Tooltip>
             <PopoverContent side="bottom" align="end" className="storage-popover">
               <div className="storage-popover-heading">
                 <FloppyDiskIcon aria-hidden="true" size={16} />
@@ -1409,66 +1438,98 @@ export function App() {
             </PopoverContent>
           </Popover>
           <div className="toolbar-group">
-            <Button
-              className="icon-button"
-              title="Undo"
-              aria-label="Undo"
-              disabled={undoStack.length === 0}
-              size="icon"
-              variant="ghost"
-              onClick={() => void undo()}
-            >
-              <ArrowCounterClockwiseIcon aria-hidden="true" size={18} />
-            </Button>
-            <Button
-              className="icon-button"
-              title="Redo"
-              aria-label="Redo"
-              disabled={redoStack.length === 0}
-              size="icon"
-              variant="ghost"
-              onClick={() => void redo()}
-            >
-              <ArrowClockwiseIcon aria-hidden="true" size={18} />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  className="icon-button"
+                  aria-label="Undo"
+                  disabled={undoStack.length === 0}
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => void undo()}
+                >
+                  <ArrowCounterClockwiseIcon aria-hidden="true" size={18} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className="toolbar-tooltip" side="bottom">
+                Undo
+                <ToolbarTooltipKbd hint="⌘Z" />
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  className="icon-button"
+                  aria-label="Redo"
+                  disabled={redoStack.length === 0}
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => void redo()}
+                >
+                  <ArrowClockwiseIcon aria-hidden="true" size={18} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className="toolbar-tooltip" side="bottom">
+                Redo
+                <ToolbarTooltipKbd hint="⇧⌘Z" />
+              </TooltipContent>
+            </Tooltip>
           </div>
           <div className="toolbar-divider" aria-hidden="true" />
-          <Button
-            className="icon-button"
-            title="Import project (.sightlines or JSON)"
-            aria-label="Import project (.sightlines or JSON)"
-            size="icon"
-            variant="ghost"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <UploadSimpleIcon aria-hidden="true" size={18} />
-          </Button>
-          {viewMode === "library" ? null : viewMode === "3d" ? (
-            <div className="snapshot-split">
+          <Tooltip>
+            <TooltipTrigger asChild>
               <Button
                 className="icon-button"
-                title="Export image of 3D view (PNG)"
-                aria-label="Export image of 3D view (PNG)"
-                disabled={project.floor.rooms.length === 0}
+                aria-label="Import a project file (.sightlines)"
                 size="icon"
                 variant="ghost"
-                onClick={() => void handleExportImage("png")}
+                onClick={() => fileInputRef.current?.click()}
               >
-                <CameraIcon aria-hidden="true" size={18} />
+                <UploadSimpleIcon aria-hidden="true" size={18} />
               </Button>
-              <DropdownMenu modal={false}>
-                <DropdownMenuTrigger asChild>
+            </TooltipTrigger>
+            <TooltipContent className="toolbar-tooltip" side="bottom">
+              Import a project file (.sightlines)
+            </TooltipContent>
+          </Tooltip>
+          {viewMode === "library" ? null : viewMode === "3d" ? (
+            <div className="snapshot-split">
+              <Tooltip>
+                <TooltipTrigger asChild>
                   <Button
-                    className="icon-button compact"
-                    title="Image format options"
-                    aria-label="Image format options"
+                    className="icon-button"
+                    aria-label="Export image of 3D view (PNG)"
                     disabled={project.floor.rooms.length === 0}
                     size="icon"
                     variant="ghost"
+                    onClick={() => void handleExportImage("png")}
                   >
-                    <CaretDownIcon aria-hidden="true" size={14} />
+                    <CameraIcon aria-hidden="true" size={18} />
                   </Button>
-                </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent className="toolbar-tooltip" side="bottom">
+                  Download an image of this view (PNG)
+                </TooltipContent>
+              </Tooltip>
+              <DropdownMenu modal={false}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        className="icon-button compact"
+                        aria-label="Choose image format"
+                        disabled={project.floor.rooms.length === 0}
+                        size="icon"
+                        variant="ghost"
+                      >
+                        <CaretDownIcon aria-hidden="true" size={14} />
+                      </Button>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent className="toolbar-tooltip" side="bottom">
+                    Choose image format
+                  </TooltipContent>
+                </Tooltip>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem
                     disabled={project.floor.rooms.length === 0}
@@ -1491,7 +1552,6 @@ export function App() {
               const button = (
                 <Button
                   className="icon-button"
-                  title={disabledReason ?? label}
                   aria-label={label}
                   disabled={disabledReason !== null}
                   size="icon"
@@ -1501,8 +1561,19 @@ export function App() {
                   <CameraIcon aria-hidden="true" size={18} />
                 </Button>
               );
-              // Disabled buttons drop pointer events, so the hint rides a span.
-              return disabledReason ? <span title={disabledReason}>{button}</span> : button;
+              // Disabled buttons drop pointer events, so the hint rides a span
+              // under the Tooltip (asChild on a plain span keeps them reachable
+              // on hover AND focus, replacing the old pointer-only title hack).
+              return (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    {disabledReason ? <span>{button}</span> : button}
+                  </TooltipTrigger>
+                  <TooltipContent className="toolbar-tooltip" side="bottom">
+                    {disabledReason ?? "Download an image of this view (PNG)"}
+                  </TooltipContent>
+                </Tooltip>
+              );
             })()
           )}
           {/* modal={false}: this menu launches the Export PDF dialog, and a
@@ -1511,25 +1582,31 @@ export function App() {
               the dialog mount — cancelling the dialog then re-applies
               pointer-events:none to body and freezes the app. */}
           <DropdownMenu modal={false}>
-            <DropdownMenuTrigger asChild>
-              <Button
-                className="topbar-button"
-                title="Export"
-                aria-label="Export"
-                aria-busy={isExportingPackage}
-                disabled={isExportingPackage}
-                size="default"
-                variant="outline"
-              >
-                {isExportingPackage ? (
-                  <CircleNotchIcon aria-hidden="true" className="animate-spin" size={18} />
-                ) : (
-                  <DownloadSimpleIcon aria-hidden="true" size={18} />
-                )}
-                <span>{isExportingPackage ? "Exporting…" : "Export"}</span>
-                <CaretDownIcon aria-hidden="true" className="topbar-button-caret" size={14} />
-              </Button>
-            </DropdownMenuTrigger>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    className="topbar-button"
+                    aria-label="Export"
+                    aria-busy={isExportingPackage}
+                    disabled={isExportingPackage}
+                    size="default"
+                    variant="outline"
+                  >
+                    {isExportingPackage ? (
+                      <CircleNotchIcon aria-hidden="true" className="animate-spin" size={18} />
+                    ) : (
+                      <DownloadSimpleIcon aria-hidden="true" size={18} />
+                    )}
+                    <span>{isExportingPackage ? "Exporting…" : "Export"}</span>
+                    <CaretDownIcon aria-hidden="true" className="topbar-button-caret" size={14} />
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent className="toolbar-tooltip" side="bottom">
+                Export a PDF or back up your project
+              </TooltipContent>
+            </Tooltip>
             <DropdownMenuContent align="end" className="w-72">
               <DropdownMenuItem
                 className="dropdown-menu-item-stacked"
@@ -1597,7 +1674,7 @@ export function App() {
           </DropdownMenu>
           <input
             ref={fileInputRef}
-            aria-label="Import project (.sightlines or JSON)"
+            aria-label="Import a project file (.sightlines)"
             className="visually-hidden"
             type="file"
             accept="application/json,.json,.sightlines,application/zip"

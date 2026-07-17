@@ -8,6 +8,7 @@ import { SlidersHorizontalIcon } from "@phosphor-icons/react/dist/csr/SlidersHor
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
 import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 // The full-height icon rail — the layout's left anchor, spanning beside both
 // the topbar and the workspace. Its top 80×80 cell is the brand cell (the "S"
@@ -71,7 +72,7 @@ export function AppRail({
         <RailButton
           active={isLibraryView}
           icon={<ImagesSquareIcon aria-hidden="true" size={22} />}
-          label="Artwork Library"
+          label="Artwork library"
           onClick={onOpenLibrary}
         />
 
@@ -80,7 +81,7 @@ export function AppRail({
           icon={<WarningIcon aria-hidden="true" size={22} />}
           label={
             hasIssues
-              ? `${issueCount} placement issue${issueCount === 1 ? "" : "s"}`
+              ? `${issueCount} placement issue${issueCount === 1 ? "" : "s"} — click to review`
               : "No placement issues"
           }
           onClick={onSelectFirstIssue}
@@ -101,7 +102,7 @@ export function AppRail({
         />
         <RailButton
           icon={<QuestionIcon aria-hidden="true" size={22} />}
-          label="Help and product info"
+          label="Help"
           onClick={onOpenHelp}
         />
       </div>
@@ -128,7 +129,7 @@ function RailButton({
   pressed?: boolean;
   onClick?: () => void;
 }) {
-  return (
+  const control =
     pressed !== undefined ? (
       <Toggle
         aria-label={label}
@@ -136,7 +137,6 @@ function RailButton({
         disabled={disabled}
         pressed={pressed}
         size="rail"
-        title={label}
         variant="rail"
         onPressedChange={() => onClick?.()}
       >
@@ -150,13 +150,22 @@ function RailButton({
         className={active ? "rail-button active" : "rail-button"}
         disabled={disabled}
         size="rail"
-        title={label}
         variant="rail"
         onClick={onClick}
       >
         {icon}
         {children}
       </Button>
-    )
+    );
+
+  return (
+    <Tooltip>
+      {/* Disabled controls drop pointer events, so the hint rides a
+          pointer-events-keeping span under the Tooltip trigger. */}
+      <TooltipTrigger asChild>{disabled ? <span>{control}</span> : control}</TooltipTrigger>
+      <TooltipContent className="toolbar-tooltip" side="right">
+        {label}
+      </TooltipContent>
+    </Tooltip>
   );
 }

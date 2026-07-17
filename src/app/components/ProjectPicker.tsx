@@ -2,6 +2,7 @@ import { useState } from "react";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import type { ProjectSummary } from "../../domain/project";
 import { Button } from "./ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { ProjectManager } from "./ProjectManager";
 
 // Topbar project caret opens the project manager modal.
@@ -28,16 +29,22 @@ export function ProjectPicker({
 
   return (
     <>
-      <Button
-        aria-label="Manage projects"
-        className="icon-button project-switcher-trigger"
-        size="icon"
-        title="Manage projects"
-        variant="ghost"
-        onClick={() => setIsOpen(true)}
-      >
-        <CaretDownIcon aria-hidden="true" size={18} />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            aria-label="Manage projects"
+            className="icon-button project-switcher-trigger"
+            size="icon"
+            variant="ghost"
+            onClick={() => setIsOpen(true)}
+          >
+            <CaretDownIcon aria-hidden="true" size={18} />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent className="toolbar-tooltip" side="bottom">
+          Switch or manage projects
+        </TooltipContent>
+      </Tooltip>
 
       <ProjectManager
         currentProjectId={currentProjectId}
