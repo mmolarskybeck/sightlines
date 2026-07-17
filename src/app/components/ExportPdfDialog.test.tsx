@@ -3,7 +3,8 @@ import {
   fireEvent,
   render,
   screen,
-  waitFor
+  waitFor,
+  within
 } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSampleProject } from "../../domain/sample/sampleProject";
@@ -108,6 +109,15 @@ function projectWithExportContent(): Project {
   return project;
 }
 
+function projectWithDefaultSavedViewTitle(): Project {
+  const project = projectWithExportContent();
+  project.savedViews = (project.savedViews ?? []).map((view) => ({
+    ...view,
+    title: `Saved view ${view.ordinal}`
+  }));
+  return project;
+}
+
 function renderDialog(project: Project = projectWithExportContent()) {
   const handlers = {
     onOpenChange: vi.fn(),
@@ -192,6 +202,32 @@ describe("ExportPdfDialog", () => {
     );
   });
 
+  it("shows the effective (zero) count while a section is off, remembering leaf selections", () => {
+    renderDialog();
+    const elevations = screen.getByRole("checkbox", {
+      name: "Include Elevations"
+    });
+    const elevationsRow = elevations.closest(".export-section-row");
+    if (!elevationsRow) throw new Error("Elevations row not found");
+
+    fireEvent.click(elevations);
+    expect(elevations).toBeChecked();
+    expect(
+      within(elevationsRow as HTMLElement).getByText("4 of 4")
+    ).toBeInTheDocument();
+
+    fireEvent.click(elevations);
+    expect(elevations).not.toBeChecked();
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Include Main Gallery, East wall elevation"
+      })
+    ).toBeChecked();
+    expect(
+      within(elevationsRow as HTMLElement).getByText("0 of 4")
+    ).toBeInTheDocument();
+  });
+
   it("lets a single-room project opt into its room plan independently", () => {
     renderDialog();
     const roomPlans = screen.getByRole("checkbox", {
@@ -238,6 +274,24 @@ describe("ExportPdfDialog", () => {
     expect(onDeleteSavedView).toHaveBeenCalledWith("view-1");
   });
 
+  it("omits the redundant saved-view subtitle for a default title, shows it once renamed", () => {
+    renderDialog(projectWithDefaultSavedViewTitle());
+
+    expect(
+      screen.getByText("Main Gallery · Saved view 1")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Saved view 1")).not.toBeInTheDocument();
+  });
+
+  it("shows the saved-view subtitle when the title differs from the default", () => {
+    renderDialog();
+
+    expect(
+      screen.getByText("Main Gallery · Entrance sightline")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Saved view 1")).toBeInTheDocument();
+  });
+
   it("disables export and shows guidance when every section is off", () => {
     renderDialog(createSampleProject());
 
@@ -245,7 +299,7 @@ describe("ExportPdfDialog", () => {
       screen.getByRole("checkbox", { name: "Include Overview" })
     );
 
-    expect(screen.getByText("Choose at least one section.")).toBeInTheDocument();
+    expect(screen.getByText("Select at least one page.")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Export PDF" })
     ).toBeDisabled();

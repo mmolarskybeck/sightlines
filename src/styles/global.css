@@ -1204,7 +1204,8 @@ input:focus-visible {
   margin: 0;
 }
 
-.export-pdf-footer {
+/* Compound selector needed to outrank the later .dialog-footer base rule (source order). */
+.dialog-footer.export-pdf-footer {
   align-items: center;
   justify-content: space-between;
 }
@@ -7221,7 +7222,7 @@ body.panels-resizing * {
     border-left: 1px solid var(--line);
   }
 
-  .export-pdf-footer {
+  .dialog-footer.export-pdf-footer {
     padding-inline: 16px;
   }
 }
@@ -7237,7 +7238,7 @@ body.panels-resizing * {
     border-left: 0;
   }
 
-  .export-pdf-footer {
+  .dialog-footer.export-pdf-footer {
     align-items: stretch;
     flex-direction: column;
   }

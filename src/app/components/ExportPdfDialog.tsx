@@ -224,7 +224,12 @@ export function ExportPdfDialog({
               </div>
 
               <ExportSection
-                count={settings.rooms.length}
+                count={
+                  settings.sections.roomPlans
+                    ? roomPlanValues.filter(Boolean).length
+                    : 0
+                }
+                countTotal={settings.rooms.length}
                 label="Room plans"
                 open={openSections.roomPlans}
                 sectionState={
@@ -273,7 +278,11 @@ export function ExportPdfDialog({
               </ExportSection>
 
               <ExportSection
-                count={wallValues.filter(Boolean).length}
+                count={
+                  settings.sections.elevations
+                    ? wallValues.filter(Boolean).length
+                    : 0
+                }
                 countTotal={wallValues.length}
                 label="Elevations"
                 open={openSections.elevations}
@@ -389,7 +398,12 @@ export function ExportPdfDialog({
               </ExportSection>
 
               <ExportSection
-                count={validSavedViews.length}
+                count={
+                  settings.sections.threeDViews
+                    ? savedViewValues.filter(Boolean).length
+                    : 0
+                }
+                countTotal={validSavedViews.length}
                 disabled={validSavedViews.length === 0}
                 label="3D views"
                 open={openSections.threeDViews}
@@ -495,19 +509,22 @@ export function ExportPdfDialog({
                             <>
                               <div className="export-saved-view-copy">
                                 <strong>{composedLabel}</strong>
-                                <span>
-                                  {choice.valid ? (
-                                    `Saved view ${choice.view.ordinal}`
-                                  ) : (
-                                    <>
-                                      <WarningIcon
-                                        aria-hidden="true"
-                                        size={13}
-                                      />
-                                      Invalid camera pose. Excluded from export.
-                                    </>
-                                  )}
-                                </span>
+                                {choice.valid ? (
+                                  choice.view.title.trim() !==
+                                    `Saved view ${choice.view.ordinal}` && (
+                                    <span>
+                                      {`Saved view ${choice.view.ordinal}`}
+                                    </span>
+                                  )
+                                ) : (
+                                  <span>
+                                    <WarningIcon
+                                      aria-hidden="true"
+                                      size={13}
+                                    />
+                                    Invalid camera pose. Excluded from export.
+                                  </span>
+                                )}
                               </div>
                               <div className="export-saved-view-actions">
                                 <IconTooltip label={`Rename ${composedLabel}`}>
@@ -634,7 +651,7 @@ export function ExportPdfDialog({
                 </>
               ) : (
                 <span className="export-page-error">
-                  Choose at least one section.
+                  Select at least one page.
                 </span>
               )}
             </div>
