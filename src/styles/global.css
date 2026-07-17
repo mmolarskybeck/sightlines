@@ -5356,11 +5356,12 @@ body.panels-resizing * {
   gap: 8px;
 }
 
-/* A finish select rides the Frame column of the pair grid (bulk mat & frame
-   surfaces): width + finish describe the same band, and inheriting the column
-   keeps the select exactly as wide as the Frame input above it. */
+/* The finish select spans the pair grid as its own full row (bulk mat & frame
+   surfaces): with its label stacked like Mat/Frame's, a full-width second row
+   reads cleaner than half-width under Frame (no dead cell under Mat), and the
+   grid edges keep it flush with the pair above. */
 .field-pair-grid .matframe-finish {
-  grid-column: 2;
+  grid-column: 1 / -1;
 }
 
 /* Placeholders are worked examples ("e.g. 3\""), not values — the "e.g."

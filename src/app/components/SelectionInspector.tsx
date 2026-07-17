@@ -536,9 +536,8 @@ function MatFrameSection({
             setFrame((current) => ({ widthMm: valueMm, finish: current?.finish ?? "black" }))
           }
         />
-        {/* Finish rides the Frame column (width + finish describe the same
-            band), inheriting its exact width so the stack reads as one field
-            group: Mat | Frame-then-finish. */}
+        {/* Finish spans the grid as its own full row below the Mat | Frame
+            pair — same stacked-label treatment, edges flush with the pair. */}
         <Field compact className="matframe-finish" label="Finish">
           <Select
             value={frame?.finish ?? "black"}
