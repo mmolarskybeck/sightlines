@@ -3,10 +3,10 @@ import { ArrowsHorizontalIcon } from "@phosphor-icons/react/dist/csr/ArrowsHoriz
 import { ArrowsInLineHorizontalIcon } from "@phosphor-icons/react/dist/csr/ArrowsInLineHorizontal";
 import { ArrowsOutLineHorizontalIcon } from "@phosphor-icons/react/dist/csr/ArrowsOutLineHorizontal";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
-import { FrameCornersIcon } from "@phosphor-icons/react/dist/csr/FrameCorners";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
-import type { DisplayUnit, WallObject } from "../../domain/project";
+import type { ArtworkFrame, DisplayUnit, WallObject } from "../../domain/project";
+import { FRAME_FINISHES } from "../../domain/framing";
 import { formatLength } from "../../domain/units/length";
 import type { ArrangeBoundary } from "../hooks/arrangeReadout";
 import { LengthField } from "./LengthField";
@@ -95,7 +95,7 @@ export function SelectionInspector({
   onArrangeValue,
   onAcceptArrange,
   onCancelArrange,
-  onSetMatFrame,
+  matFrame,
   onRemoveAll
 }: {
   count: number;
@@ -133,10 +133,17 @@ export function SelectionInspector({
   ) => void;
   onAcceptArrange: () => void;
   onCancelArrange: () => void;
-  // Opens the bulk mat/frame dialog. Undefined when no selected object resolves
-  // to an artwork placement (openings/blocked zones have no framing), which is
-  // what hides the affordance.
-  onSetMatFrame?: () => void;
+  // Bulk mat & frame for the selected works, rendered as an inline collapsible
+  // section (same grammar as the single-artwork inspector's Mat & frame).
+  // Undefined when no selected object resolves to an artwork placement
+  // (openings/blocked zones have no framing), which is what hides the section.
+  matFrame?: {
+    // Works the apply will actually change; skipped are frame-inclusive ones
+    // the store refuses (their stored size already contains the frame).
+    targetCount: number;
+    skippedCount: number;
+    onApply: (changes: { matWidthMm?: number; frame?: ArtworkFrame }) => void;
+  };
   onRemoveAll: () => void;
 }) {
   const { displayUnit, parseUnit, placeholder, stepMm } = getScopedUnitContext(unit, "openingPosition");
@@ -398,22 +405,13 @@ export function SelectionInspector({
         )}
       </InspectorSection>
 
+      {/* Bulk mat & frame lives inline, mirroring the single-artwork
+          inspector's section of the same name — closed at rest so the arrange
+          controls stay the panel's lead. Only rendered when the selection
+          holds at least one artwork placement. */}
+      {matFrame ? <MatFrameSection count={count} matFrame={matFrame} unit={unit} /> : null}
+
       <div className="inspector-placement">
-        {/* Bulk mat/frame rides above the destructive Remove all: it edits the
-            selected works' framing everywhere, so it stays a plain action. Only
-            shown when the selection holds at least one artwork placement. */}
-        {onSetMatFrame && !confirmingRemove ? (
-          <InspectorActionGroup>
-            <Button
-              className="inspector-action"
-              variant="inspector"
-              onClick={onSetMatFrame}
-            >
-              <FrameCornersIcon aria-hidden="true" size={15} />
-              Set mat &amp; frame…
-            </Button>
-          </InspectorActionGroup>
-        ) : null}
         {confirmingRemove ? (
           <div className="remove-all-confirm">
             <span className="remove-all-confirm-label">
@@ -453,6 +451,158 @@ export function SelectionInspector({
         )}
       </div>
     </form>
+  );
+}
+
+// Sensible default frame face width (~1 in) when a curator picks a finish
+// before typing a width — same rule as the single inspector's FramingSection:
+// the frame is only ever created with a real width.
+const DEFAULT_FRAME_WIDTH_MM = 25.4;
+
+// Bulk mat & frame as an inline disclosure — the multi-selection counterpart
+// of ArtworkInspector's Mat & frame section, sharing its field vocabulary
+// (Mat/Frame pair, Finish row). Unlike the single inspector it edits a local
+// DRAFT, not live values (the picked works may differ), and commits through
+// one explicit Apply so a half-typed band never touches N works. Open ≈ the
+// arrange session: the Apply/Cancel pair uses the same split action-group
+// treatment. Applying always sets BOTH bands — an empty band means "none" —
+// so one apply can set or strip framing across the whole selection.
+function MatFrameSection({
+  count,
+  matFrame,
+  unit
+}: {
+  count: number;
+  matFrame: {
+    targetCount: number;
+    skippedCount: number;
+    onApply: (changes: { matWidthMm?: number; frame?: ArtworkFrame }) => void;
+  };
+  unit: DisplayUnit;
+}) {
+  const { displayUnit, parseUnit, system } = getScopedUnitContext(unit, "artwork");
+
+  const [open, setOpen] = useState(false);
+  const [matWidthMm, setMatWidthMm] = useState<number | undefined>(undefined);
+  const [frame, setFrame] = useState<ArtworkFrame | undefined>(undefined);
+
+  // A new selection is a new draft: stale band values from the previous pick
+  // must never ride into an apply against different works. Same count-keyed
+  // reset the remove confirmation uses.
+  useEffect(() => {
+    setOpen(false);
+    setMatWidthMm(undefined);
+    setFrame(undefined);
+  }, [count]);
+
+  const resetDraft = () => {
+    setMatWidthMm(undefined);
+    setFrame(undefined);
+  };
+
+  // Band-width examples, not conversions — same concrete examples as the
+  // single inspector (the fields take the width of the BAND).
+  const matPlaceholder = system === "imperial" ? 'e.g. 3"' : "e.g. 75 mm";
+  const framePlaceholder = system === "imperial" ? 'e.g. 1"' : "e.g. 25 mm";
+
+  return (
+    <InspectorSection open={open} title="Mat & frame" onOpenChange={setOpen}>
+      <div className="field-pair-grid">
+        <LengthField
+          compact
+          clearable
+          positiveOnly
+          label="Mat"
+          valueMm={matWidthMm}
+          displayUnit={displayUnit}
+          parseUnit={parseUnit}
+          placeholder={matPlaceholder}
+          onClear={() => setMatWidthMm(undefined)}
+          onCommit={(valueMm) => setMatWidthMm(valueMm)}
+        />
+        <LengthField
+          compact
+          clearable
+          positiveOnly
+          label="Frame"
+          valueMm={frame?.widthMm}
+          displayUnit={displayUnit}
+          parseUnit={parseUnit}
+          placeholder={framePlaceholder}
+          // Clearing the frame width removes the frame entirely; setting it
+          // keeps (or defaults) the finish — same rule as the inspector.
+          onClear={() => setFrame(undefined)}
+          onCommit={(valueMm) =>
+            setFrame((current) => ({ widthMm: valueMm, finish: current?.finish ?? "black" }))
+          }
+        />
+        {/* Finish rides the Frame column (width + finish describe the same
+            band), inheriting its exact width so the stack reads as one field
+            group: Mat | Frame-then-finish. */}
+        <Field compact className="matframe-finish" label="Finish">
+          <Select
+            value={frame?.finish ?? "black"}
+            onValueChange={(value) =>
+              setFrame((current) => ({
+                widthMm: current?.widthMm ?? DEFAULT_FRAME_WIDTH_MM,
+                finish: value as ArtworkFrame["finish"]
+              }))
+            }
+          >
+            <SelectTrigger aria-label="Frame finish">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {FRAME_FINISHES.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+
+      <p className="field-hint">
+        Leave a band empty to remove it. Changes apply everywhere these works are used.
+      </p>
+
+      {matFrame.skippedCount > 0 ? (
+        <p className="field-hint">
+          {matFrame.skippedCount === 1
+            ? "1 selected work includes the frame in its size and will be skipped."
+            : `${matFrame.skippedCount} selected works include the frame in their size and will be skipped.`}
+        </p>
+      ) : null}
+
+      {/* Content-width chips, not the arrange pair's equal split: the apply
+          label carries the live work count ("Apply to 12 works"), so it must
+          be free to grow — and when an arrange session is active both pairs
+          are on screen, so the count is also what disambiguates the two
+          Applies. */}
+      <InspectorActionGroup>
+        <Button
+          className="inspector-action arrange-apply"
+          disabled={matFrame.targetCount === 0}
+          variant="primary"
+          onClick={() => matFrame.onApply({ matWidthMm, frame })}
+        >
+          <CheckIcon aria-hidden="true" size={15} />
+          Apply to {matFrame.targetCount} work{matFrame.targetCount === 1 ? "" : "s"}
+        </Button>
+        <Button
+          className="inspector-action arrange-cancel"
+          variant="inspector"
+          onClick={() => {
+            resetDraft();
+            setOpen(false);
+          }}
+        >
+          <XIcon aria-hidden="true" size={15} />
+          Cancel
+        </Button>
+      </InspectorActionGroup>
+    </InspectorSection>
   );
 }
 

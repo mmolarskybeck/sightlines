@@ -5356,6 +5356,13 @@ body.panels-resizing * {
   gap: 8px;
 }
 
+/* A finish select rides the Frame column of the pair grid (bulk mat & frame
+   surfaces): width + finish describe the same band, and inheriting the column
+   keeps the select exactly as wide as the Frame input above it. */
+.field-pair-grid .matframe-finish {
+  grid-column: 2;
+}
+
 /* Placeholders are worked examples ("e.g. 3\""), not values — the "e.g."
    prefix disambiguates, so they can take the full muted ink and clear WCAG
    4.5:1 against white (the lighter --subtle token measures just under it at
@@ -7543,10 +7550,12 @@ body.panels-resizing * {
 .artwork-picker-selectall { display: flex; align-items: center; gap: 0.7rem; padding: 0.2rem 0.7rem; color: var(--muted-foreground); cursor: pointer; font-size: var(--type-xs); }
 .artwork-picker-selectall:has(.checkbox-control:focus-visible) { outline: 2px solid var(--ring); outline-offset: -2px; }
 
-/* Bulk mat/frame dialog: the mat/frame width pair, finish, and notes stack with
-   the same rhythm as the picker's body rows. */
+/* Bulk mat/frame dialog (Artwork Library entry point; the plan/elevation
+   multi-select edits inline in its inspector instead). The body carries the
+   same 24px inline padding as .dialog-header so fields align with the title,
+   with enough bottom padding that the hints clear the footer hairline. */
 .bulk-matframe-dialog { width: min(26rem, calc(100vw - 2rem)); }
-.bulk-matframe-fields { display: flex; flex-direction: column; gap: 12px; }
+.bulk-matframe-fields { display: flex; flex-direction: column; gap: 14px; padding: 14px 24px 20px; }
 
 @media (max-width: 720px) {
   .artwork-library-table th:nth-child(4),

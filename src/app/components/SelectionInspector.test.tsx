@@ -164,17 +164,43 @@ describe("SelectionInspector arrange body", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  it("hides the Set mat & frame affordance when onSetMatFrame is absent", () => {
+  it("hides the Mat & frame section when the selection holds no artwork", () => {
     renderPanel();
-    expect(screen.queryByRole("button", { name: /Set mat . frame/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Mat . frame/ })).toBeNull();
   });
 
-  it("Set mat & frame fires onSetMatFrame when the selection holds an artwork", () => {
-    const onSetMatFrame = vi.fn();
-    renderPanel({ onSetMatFrame });
+  it("Mat & frame opens inline and applies the drafted bands to the selection", () => {
+    const onApply = vi.fn();
+    renderPanel({ matFrame: { targetCount: 2, skippedCount: 0, onApply } });
 
-    fireEvent.click(screen.getByRole("button", { name: /Set mat . frame/ }));
-    expect(onSetMatFrame).toHaveBeenCalledTimes(1);
+    // Closed at rest: the disclosure is present, its fields are not.
+    const trigger = screen.getByRole("button", { name: /Mat . frame/ });
+    expect(screen.queryByRole("textbox", { name: "Mat" })).toBeNull();
+
+    fireEvent.click(trigger);
+
+    // Draft a mat band, then apply — the whole draft goes out in one call.
+    const matField = screen.getByRole("textbox", { name: "Mat" });
+    fireEvent.change(matField, { target: { value: "5" } });
+    fireEvent.blur(matField);
+    fireEvent.click(screen.getByRole("button", { name: "Apply to 2 works" }));
+
+    expect(onApply).toHaveBeenCalledTimes(1);
+    expect(onApply).toHaveBeenCalledWith({
+      matWidthMm: expect.closeTo(50, 5),
+      frame: undefined
+    });
+  });
+
+  it("Mat & frame disables Apply and explains when every work is frame-inclusive", () => {
+    renderPanel({ matFrame: { targetCount: 0, skippedCount: 2, onApply: vi.fn() } });
+
+    fireEvent.click(screen.getByRole("button", { name: /Mat . frame/ }));
+
+    expect(
+      screen.getByText(/2 selected works include the frame in their size/)
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Apply to 0 works" })).toBeDisabled();
   });
 
   it("Remove all takes the two-step confirm before firing onRemoveAll", () => {

@@ -104,7 +104,6 @@ import { RoomInspector } from "./components/RoomInspector";
 import { RoomsPanel } from "./components/RoomsPanel";
 import { SavedViewsPanel } from "./components/SavedViewsPanel";
 import { SelectionInspector } from "./components/SelectionInspector";
-import { BulkMatFrameDialog } from "./components/BulkMatFrameDialog";
 import { MeasurementInspector, ReferenceMeasurementInspector } from "./components/MeasurementInspector";
 import { MeasurementLiveRegion } from "./components/MeasurementLiveRegion";
 import {
@@ -364,10 +363,6 @@ export function App() {
   const [importWizardOpen, setImportWizardOpen] = useState(false);
   const [importDestination, setImportDestination] = useState<"library" | "checklist">("checklist");
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
-  // Bulk mat/frame dialog for the plan/elevation multi-selection (the library
-  // grid owns its own copy). Snapshots nothing — App resolves the target ids
-  // live from the selection while it's open.
-  const [bulkMatFrameOpen, setBulkMatFrameOpen] = useState(false);
   const [projectMembershipsByArtworkId, setProjectMembershipsByArtworkId] = useState<
     Map<string, ProjectSummary[]>
   >(() => new Map());
@@ -2323,8 +2318,14 @@ export function App() {
                   commitArrangeSession(allowOverlappingPlacement)
                 }
                 onCancelArrange={cancelArrangeSession}
-                onSetMatFrame={
-                  selectedArtworkIds.length > 0 ? () => setBulkMatFrameOpen(true) : undefined
+                matFrame={
+                  selectedArtworkIds.length > 0
+                    ? {
+                        targetCount: bulkMatFrameTargetCount,
+                        skippedCount: bulkMatFrameSkippedCount,
+                        onApply: (changes) => void updateArtworksMatFrame(selectedArtworkIds, changes)
+                      }
+                    : undefined
                 }
                 onRemoveAll={() => void removeSelectedPlacements()}
               />
@@ -2574,14 +2575,6 @@ export function App() {
         getBlob={getAssetBlob}
         onOpenChange={setLibraryPickerOpen}
         onAddToChecklist={addExistingArtworksToChecklist}
-      />
-      <BulkMatFrameDialog
-        open={bulkMatFrameOpen}
-        targetCount={bulkMatFrameTargetCount}
-        skippedCount={bulkMatFrameSkippedCount}
-        unit={project.unit}
-        onOpenChange={setBulkMatFrameOpen}
-        onApply={(changes) => void updateArtworksMatFrame(selectedArtworkIds, changes)}
       />
       <DeleteRoomDialog
         roomName={confirmDeleteRoomPlacement?.room.name ?? ""}

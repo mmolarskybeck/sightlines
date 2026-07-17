@@ -112,35 +112,37 @@ export function BulkMatFrameDialog({
                 setFrame((current) => ({ widthMm: valueMm, finish: current?.finish ?? "black" }))
               }
             />
+            {/* Finish rides the Frame column (width + finish describe the same
+                band), inheriting its exact width so the stack reads as one
+                field group: Mat | Frame-then-finish. */}
+            <Field compact className="matframe-finish" label="Finish">
+              <Select
+                // No frame yet: picking a finish first defaults the width, just
+                // like the single inspector's finish dropdown.
+                value={frame?.finish ?? "black"}
+                onValueChange={(value) =>
+                  setFrame((current) => ({
+                    widthMm: current?.widthMm ?? DEFAULT_FRAME_WIDTH_MM,
+                    finish: value as ArtworkFrame["finish"]
+                  }))
+                }
+              >
+                <SelectTrigger aria-label="Frame finish">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FRAME_FINISHES.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
           </div>
 
-          <Field label="Finish">
-            <Select
-              // No frame yet: picking a finish first defaults the width, just
-              // like the single inspector's finish dropdown.
-              value={frame?.finish ?? "black"}
-              onValueChange={(value) =>
-                setFrame((current) => ({
-                  widthMm: current?.widthMm ?? DEFAULT_FRAME_WIDTH_MM,
-                  finish: value as ArtworkFrame["finish"]
-                }))
-              }
-            >
-              <SelectTrigger aria-label="Frame finish">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {FRAME_FINISHES.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-
           <p className="field-hint">
-            Leave a field empty to remove that band from every selected work.
+            Leave a band empty to remove it from every selected work.
           </p>
 
           {skippedCount > 0 ? (
