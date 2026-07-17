@@ -6,37 +6,21 @@ import {
   useRef,
   useState
 } from "react";
-import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
-import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
-import { ArchiveIcon } from "@phosphor-icons/react/dist/csr/Archive";
-import { CameraIcon } from "@phosphor-icons/react/dist/csr/Camera";
-import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
-import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
-import { FilePdfIcon } from "@phosphor-icons/react/dist/csr/FilePdf";
-import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
-import { FileDashedIcon } from "@phosphor-icons/react/dist/csr/FileDashed";
-import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { GridFourIcon } from "@phosphor-icons/react/dist/csr/GridFour";
 import { MagnetIcon } from "@phosphor-icons/react/dist/csr/Magnet";
 import { RulerIcon } from "@phosphor-icons/react/dist/csr/Ruler";
-import { MapTrifoldIcon } from "@phosphor-icons/react/dist/csr/MapTrifold";
-import { PackageIcon } from "@phosphor-icons/react/dist/csr/Package";
-import { PresentationIcon } from "@phosphor-icons/react/dist/csr/Presentation";
-import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
 import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { StackIcon } from "@phosphor-icons/react/dist/csr/Stack";
-import { UploadSimpleIcon } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
 import {
   getPlacedRoomBounds,
   getRectangleRoomDimensions,
-  getOrthogonalQuadWallPair,
 } from "../domain/geometry/walls";
 import { getRoomPlaceableWalls } from "../domain/geometry/placeableWalls";
 import type { WallSwitcherEntry } from "./components/elevation/WallSwitcher";
 import { evaluateOpeningPair } from "../domain/geometry/openingConnections";
-import { getOpeningKindLabel, type OpeningKind } from "../domain/placement/createOpening";
+import { getOpeningKindLabel } from "../domain/placement/createOpening";
 import { withArtworkFootprintFromMap } from "../domain/framing";
 import type {
   Artwork,
@@ -46,7 +30,6 @@ import type {
   DisplayUnit,
   FreestandingWall,
   OpeningWallObject,
-  Project,
   ProjectSummary,
   SavedView,
   SavedViewPose
@@ -58,17 +41,14 @@ import type { PackageExportMode } from "../domain/schema/packageSchema";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import {
   displayUnitForSystem,
-  unitSystemFromDisplayUnit,
-  type UnitSystem
+  unitSystemFromDisplayUnit
 } from "../domain/units/unitSystem";
+import { AppDialogs } from "./components/AppDialogs";
 import { AppRail } from "./components/AppRail";
 import { ArtworkInspector } from "./components/inspectors/ArtworkInspector";
-import { ArtworkLibraryPicker, ArtworkLibraryView } from "./components/library/ArtworkLibrary";
+import { ArtworkLibraryView } from "./components/library/ArtworkLibrary";
 import { PanelResizeHandle } from "./components/shared/PanelResizeHandle";
 import { ChecklistPanel } from "./components/panels/ChecklistPanel";
-import { DeleteRoomDialog } from "./components/dialogs/DeleteRoomDialog";
-import { ImportConflictDialog } from "./components/imports/ImportConflictDialog";
-import { HelpDialog } from "./components/dialogs/HelpDialog";
 import { ElevationEmptyState } from "./components/elevation/ElevationEmptyState";
 import { FloorObjectInspector, FloorPlacementFields } from "./components/inspectors/FloorObjectInspector";
 import { FreestandingWallInspector } from "./components/inspectors/FreestandingWallInspector";
@@ -79,27 +59,20 @@ import {
 import { PlanEmptyState } from "./components/plan/PlanEmptyState";
 import { PlanView } from "./components/plan/PlanView";
 import { captureSvgSnapshot } from "./export/captureSnapshot";
+import { triggerDownload } from "./export/triggerDownload";
 import {
   DrawPicker,
   InsertPicker,
   PrecisionSelect,
-  StatusBadge,
   ThreeDCameraTools,
   UnitSystemToggle,
   useResponsiveToolbarDensity,
   ViewOptionButton
 } from "./components/toolbar";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger
-} from "./components/ui/tooltip";
-import { ToolbarTooltipKbd } from "./components/toolbar/ToolbarTooltipKbd";
-import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover";
+import { TooltipProvider } from "./components/ui/tooltip";
 import { Toaster } from "./components/ui/sonner";
 import { toast } from "sonner";
-import { ProjectPicker } from "./components/library/ProjectPicker";
+import { TopBar } from "./components/topbar/TopBar";
 import { RoomInspector } from "./components/inspectors/RoomInspector";
 import { RoomsPanel } from "./components/panels/RoomsPanel";
 import { SavedViewsPanel } from "./components/panels/SavedViewsPanel";
@@ -111,20 +84,8 @@ import {
   getWallPlacementCenterTarget,
   getWallPlacementNeighborEdges
 } from "./components/inspectors/WallPlacementFields";
-import { WallInspector, type WallDimensionLink } from "./components/inspectors/WallInspector";
-import { Button } from "./components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger
-} from "./components/ui/dropdown-menu";
-import { Input } from "./components/ui/input";
-import { UnderlineToggleGroup, UnderlineToggleGroupItem } from "./components/ui/segmented";
-import { useStoragePersistence, getStorageNoteCopy } from "./hooks/useStoragePersistence";
+import { WallInspector } from "./components/inspectors/WallInspector";
+import { useStoragePersistence } from "./hooks/useStoragePersistence";
 import {
   escapeMeasurementState,
   useMeasurementTool
@@ -145,7 +106,7 @@ import { useArrangeNudgeShortcuts } from "./hooks/useArrangeNudgeShortcuts";
 import { useDeleteAndEscapeShortcuts } from "./hooks/useDeleteAndEscapeShortcuts";
 import { useToolbarShortcuts } from "./hooks/useToolbarShortcuts";
 import { deriveArrangeReadout } from "./hooks/arrangeReadout";
-import { shouldDeleteRoomOnKey, summarizeRoomContents } from "./roomDeletion";
+import { summarizeRoomContents } from "./roomDeletion";
 import {
   freestandingWallIdOf,
   getProjectWalls,
@@ -156,39 +117,19 @@ import {
   roomIdOf,
   useAppStore
 } from "./store";
+import { getWallDimensionLink, getWallNames } from "./projectWalls";
 import { getArrangeEligibility } from "./store/arrangeEligibility";
 import type { ThreeDViewActions } from "./components/three/ThreeDView";
 import type { SavedViewRenderHandle } from "./components/three/SavedViewRenderHost";
 import { useSavedViewThumbnails } from "./hooks/useSavedViewThumbnails";
 import type { EffectiveDocumentSettings } from "../domain/export/documentSettings";
 
-const ImportWizard = lazy(() => import("./components/imports/ImportWizard"));
-const SettingsDialog = lazy(() =>
-  import("./components/dialogs/SettingsDialog").then((module) => ({ default: module.SettingsDialog }))
-);
-const ExportPdfDialog = lazy(() =>
-  import("./components/dialogs/ExportPdfDialog").then((module) => ({
-    default: module.ExportPdfDialog
-  }))
-);
-// Lazy so the three.js it pulls in (via SnapshotStage) stays out of the initial
-// bundle, like ThreeDView. Mounted only while a thumbnail consumer is visible or
-// thumbnail work is pending (Export dialog, or a just-saved view's seed render);
-// the code itself is usually already warm via the idle prefetch below.
-const SavedViewRenderHost = lazy(() =>
-  import("./components/three/SavedViewRenderHost").then((module) => ({
-    default: module.SavedViewRenderHost
-  }))
-);
 const ElevationView = lazy(() =>
   import("./components/elevation/ElevationView").then((module) => ({ default: module.ElevationView }))
 );
 const ThreeDView = lazy(() =>
   import("./components/three/ThreeDView").then((module) => ({ default: module.ThreeDView }))
 );
-const FontLab = import.meta.env.DEV
-  ? lazy(() => import("./components/FontLab"))
-  : null;
 
 // Warm the lazy 3D chunks (three.js download + parse) once the main thread is
 // idle after boot: the initial bundle and time-to-first-paint are untouched,
@@ -259,8 +200,6 @@ export function App() {
     selectWall,
     selectArtwork,
     selectOpening,
-    selectRoom,
-    selectFreestandingWall,
     addReferenceMeasurement,
     updateReferenceMeasurement,
     deleteReferenceMeasurement,
@@ -293,11 +232,6 @@ export function App() {
     resizeRoomHeight,
     resizeWall,
     setPolygonWallLength,
-    moveRoomVertex,
-    moveRoomWall,
-    splitWall,
-    deleteRoomVertex,
-    moveRoom,
     undo,
     redo,
     importProjectJson,
@@ -331,7 +265,6 @@ export function App() {
     resizeOpening,
     connectOpenings,
     disconnectOpening,
-    placeOpeningFromPlan,
     placeOpeningOnElevation,
     commitPlanMove,
     updateFloorObject,
@@ -1376,366 +1309,34 @@ export function App() {
         onSelectFirstIssue={selectFirstWarningObject}
       />
       <div className="app-main">
-      <header className="topbar">
-        <div className="topbar-left">
-          <p className="app-name">Sightlines</p>
-          <div className="brand-divider" aria-hidden="true" />
-          <div className="project-switcher">
-            <ProjectTitleInput title={project.title} onCommit={renameProject} />
-            <ProjectPicker
-              currentProjectId={project.id}
-              listProjectSummaries={listProjectSummaries}
-              onCreateProject={createProject}
-              onDeleteProject={deleteProject}
-              onDuplicateProject={duplicateProject}
-              onExportProject={handleExportProjectById}
-              onOpenProject={openProject}
-              onRenameProject={renameProjectById}
-            />
-          </div>
-        </div>
-
-        <div className="view-tabs topbar-center">
-          <UnderlineToggleGroup
-            aria-label="Workspace view"
-            className="view-tabs"
-            orientation="horizontal"
-            type="single"
-            value={viewMode}
-            onValueChange={(value) => {
-              if (value === "plan" || value === "elevation" || value === "3d") {
-                setViewMode(value);
-              }
-            }}
-          >
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <UnderlineToggleGroupItem value="plan">
-                  <MapTrifoldIcon aria-hidden="true" size={16} />
-                  <span>Plan</span>
-                </UnderlineToggleGroupItem>
-              </TooltipTrigger>
-              <TooltipContent className="toolbar-tooltip" side="bottom">
-                See the room from above
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <UnderlineToggleGroupItem value="elevation">
-                  <PresentationIcon aria-hidden="true" size={16} />
-                  <span>Elevation</span>
-                </UnderlineToggleGroupItem>
-              </TooltipTrigger>
-              <TooltipContent className="toolbar-tooltip" side="bottom">
-                See one wall straight on
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <UnderlineToggleGroupItem value="3d">
-                  <CubeIcon aria-hidden="true" size={16} />
-                  <span>3D</span>
-                </UnderlineToggleGroupItem>
-              </TooltipTrigger>
-              <TooltipContent className="toolbar-tooltip" side="bottom">
-                Preview the exhibition in 3D
-              </TooltipContent>
-            </Tooltip>
-          </UnderlineToggleGroup>
-        </div>
-
-        <div className="topbar-right" aria-label="Project actions">
-          <Popover>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <PopoverTrigger asChild>
-                  <StatusBadge state={saveState} />
-                </PopoverTrigger>
-              </TooltipTrigger>
-              <TooltipContent className="toolbar-tooltip" side="bottom">
-                Your work saves automatically on this device. Click for details.
-              </TooltipContent>
-            </Tooltip>
-            <PopoverContent side="bottom" align="end" className="storage-popover">
-              <div className="storage-popover-heading">
-                <FloppyDiskIcon aria-hidden="true" size={16} />
-                <h3>Where your work is saved</h3>
-              </div>
-              <p className="storage-popover-body">{getStorageNoteCopy(storagePersistence)}</p>
-              {storagePersistence === "denied" ? (
-                <Button
-                  className="storage-popover-retry"
-                  size="sm"
-                  variant="ghost"
-                  onClick={retryStoragePersistence}
-                >
-                  Retry
-                </Button>
-              ) : null}
-              <div className="storage-popover-footer">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => void handleExportPackage("display")}
-                >
-                  Export a backup
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setIsSettingsOpen(true)}>
-                  Storage settings
-                </Button>
-              </div>
-            </PopoverContent>
-          </Popover>
-          <div className="toolbar-group">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  className="icon-button"
-                  aria-label="Undo"
-                  disabled={undoStack.length === 0}
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => void undo()}
-                >
-                  <ArrowCounterClockwiseIcon aria-hidden="true" size={18} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent className="toolbar-tooltip" side="bottom">
-                Undo
-                <ToolbarTooltipKbd hint="⌘Z" />
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  className="icon-button"
-                  aria-label="Redo"
-                  disabled={redoStack.length === 0}
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => void redo()}
-                >
-                  <ArrowClockwiseIcon aria-hidden="true" size={18} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent className="toolbar-tooltip" side="bottom">
-                Redo
-                <ToolbarTooltipKbd hint="⇧⌘Z" />
-              </TooltipContent>
-            </Tooltip>
-          </div>
-          <div className="toolbar-divider" aria-hidden="true" />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                className="icon-button"
-                aria-label="Import a project file (.sightlines)"
-                size="icon"
-                variant="ghost"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <UploadSimpleIcon aria-hidden="true" size={18} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent className="toolbar-tooltip" side="bottom">
-              Import a project file (.sightlines)
-            </TooltipContent>
-          </Tooltip>
-          {viewMode === "library" ? null : viewMode === "3d" ? (
-            <div className="snapshot-split">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    className="icon-button"
-                    aria-label="Export image of 3D view (PNG)"
-                    disabled={project.floor.rooms.length === 0}
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => void handleExportImage("png")}
-                  >
-                    <CameraIcon aria-hidden="true" size={18} />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent className="toolbar-tooltip" side="bottom">
-                  Download an image of this view (PNG)
-                </TooltipContent>
-              </Tooltip>
-              <DropdownMenu modal={false}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        className="icon-button compact"
-                        aria-label="Choose image format"
-                        disabled={project.floor.rooms.length === 0}
-                        size="icon"
-                        variant="ghost"
-                      >
-                        <CaretDownIcon aria-hidden="true" size={14} />
-                      </Button>
-                    </DropdownMenuTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent className="toolbar-tooltip" side="bottom">
-                    Choose image format
-                  </TooltipContent>
-                </Tooltip>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    disabled={project.floor.rooms.length === 0}
-                    onSelect={() => void handleExportImage("jpeg")}
-                  >
-                    Download as JPG
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          ) : (
-            (() => {
-              const disabledReason =
-                project.floor.rooms.length === 0
-                  ? "Add a room first"
-                  : viewMode === "elevation" && !selectedWall
-                    ? "Select a wall first"
-                    : null;
-              const label = `Export image of ${viewMode === "plan" ? "plan" : "elevation"} (PNG)`;
-              const button = (
-                <Button
-                  className="icon-button"
-                  aria-label={label}
-                  disabled={disabledReason !== null}
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => void handleExportImage("png")}
-                >
-                  <CameraIcon aria-hidden="true" size={18} />
-                </Button>
-              );
-              // Disabled buttons drop pointer events, so the hint rides a span
-              // under the Tooltip (asChild on a plain span keeps them reachable
-              // on hover AND focus, replacing the old pointer-only title hack).
-              return (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    {disabledReason ? <span>{button}</span> : button}
-                  </TooltipTrigger>
-                  <TooltipContent className="toolbar-tooltip" side="bottom">
-                    {disabledReason ?? "Download an image of this view (PNG)"}
-                  </TooltipContent>
-                </Tooltip>
-              );
-            })()
-          )}
-          {/* modal={false}: this menu launches the Export PDF dialog, and a
-              modal menu's body pointer-events lock can be captured as the
-              dialog's "restore" value while the menu's exit animation overlaps
-              the dialog mount — cancelling the dialog then re-applies
-              pointer-events:none to body and freezes the app. */}
-          <DropdownMenu modal={false}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    className="topbar-button"
-                    aria-label="Export"
-                    aria-busy={isExportingPackage}
-                    disabled={isExportingPackage}
-                    size="default"
-                    variant="outline"
-                  >
-                    {isExportingPackage ? (
-                      <CircleNotchIcon aria-hidden="true" className="animate-spin" size={18} />
-                    ) : (
-                      <DownloadSimpleIcon aria-hidden="true" size={18} />
-                    )}
-                    <span>{isExportingPackage ? "Exporting…" : "Export"}</span>
-                    <CaretDownIcon aria-hidden="true" className="topbar-button-caret" size={14} />
-                  </Button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent className="toolbar-tooltip" side="bottom">
-                Export a PDF or back up your project
-              </TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="end" className="w-72">
-              <DropdownMenuItem
-                className="dropdown-menu-item-stacked"
-                disabled={project.floor.rooms.length === 0}
-                onSelect={() => setIsExportPdfOpen(true)}
-              >
-                <FilePdfIcon aria-hidden="true" size={16} />
-                <span className="flex min-w-0 flex-col gap-0.5">
-                  <span>Export PDF…</span>
-                  <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
-                    Composed pages: overview, room plans, elevations, 3D views
-                  </span>
-                </span>
-              </DropdownMenuItem>
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger className="dropdown-menu-item-stacked">
-                  <PackageIcon aria-hidden="true" size={16} />
-                  <span className="flex min-w-0 flex-col gap-0.5">
-                    <span>Project backup (.sightlines)</span>
-                    <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
-                      Portable project file for backup or handoff
-                    </span>
-                  </span>
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent>
-                  <DropdownMenuItem
-                    className="dropdown-menu-item-stacked"
-                    onSelect={() => void handleExportPackage("display")}
-                  >
-                    <PackageIcon aria-hidden="true" size={16} />
-                    <span className="flex min-w-0 flex-col gap-0.5">
-                      <span>Standard</span>
-                      <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
-                        Display-quality images. Recommended for sharing and backup.
-                      </span>
-                    </span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="dropdown-menu-item-stacked"
-                    onSelect={() => void handleExportPackage("originals")}
-                  >
-                    <ArchiveIcon aria-hidden="true" size={16} />
-                    <span className="flex min-w-0 flex-col gap-0.5">
-                      <span>With originals</span>
-                      <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
-                        Adds full-resolution files. Largest export; archival handoff.
-                      </span>
-                    </span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="dropdown-menu-item-stacked"
-                    onSelect={() => void handleExportPackage("metadata-only")}
-                  >
-                    <FileDashedIcon aria-hidden="true" size={16} />
-                    <span className="flex min-w-0 flex-col gap-0.5">
-                      <span>Without images</span>
-                      <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
-                        Checklist and layout only. Relinks images on machines that have them.
-                      </span>
-                    </span>
-                  </DropdownMenuItem>
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <input
-            ref={fileInputRef}
-            aria-label="Import a project file (.sightlines)"
-            className="visually-hidden"
-            type="file"
-            accept="application/json,.json,.sightlines,application/zip"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (!file) return;
-              void handleImportFile(file);
-              event.target.value = "";
-            }}
-          />
-        </div>
-      </header>
+      <TopBar
+        project={project}
+        viewMode={viewMode}
+        setViewMode={setViewMode}
+        selectedWall={selectedWall}
+        saveState={saveState}
+        undoStack={undoStack}
+        redoStack={redoStack}
+        undo={undo}
+        redo={redo}
+        renameProject={renameProject}
+        listProjectSummaries={listProjectSummaries}
+        createProject={createProject}
+        deleteProject={deleteProject}
+        duplicateProject={duplicateProject}
+        openProject={openProject}
+        renameProjectById={renameProjectById}
+        storagePersistence={storagePersistence}
+        retryStoragePersistence={retryStoragePersistence}
+        isExportingPackage={isExportingPackage}
+        handleExportPackage={handleExportPackage}
+        handleExportProjectById={handleExportProjectById}
+        handleExportImage={handleExportImage}
+        handleImportFile={handleImportFile}
+        setIsSettingsOpen={setIsSettingsOpen}
+        setIsExportPdfOpen={setIsExportPdfOpen}
+        fileInputRef={fileInputRef}
+      />
 
       {error ? <p className="error-banner">{error}</p> : null}
 
@@ -2522,169 +2123,49 @@ export function App() {
         ) : null}
       </section>
       </div>
-      {FontLab ? (
-        <Suspense fallback={null}>
-          <FontLab />
-        </Suspense>
-      ) : null}
-      <HelpDialog open={isHelpOpen} viewMode={viewMode} onOpenChange={setIsHelpOpen} />
-      <Suspense fallback={null}>
-        <ImportWizard
-          intakeState={intakeState}
-          open={importWizardOpen}
-          projectUnit={project.unit}
-          destination={importDestination}
-          onImportDrafts={(drafts) => importArtworkDrafts(drafts, { destination: importDestination })}
-          onImportImages={(files) => addArtworksFromFiles(files, { destination: importDestination })}
-          onOpenChange={setImportWizardOpen}
-        />
-        <SettingsDialog
-          open={isSettingsOpen}
-          onOpenChange={setIsSettingsOpen}
-          storageState={storagePersistence}
-          onRetryStorage={retryStoragePersistence}
-          resetPreferences={resetPreferences}
-          onExport={() => void handleExportPackage("display")}
-          onImport={() => fileInputRef.current?.click()}
-          onOpenHelp={() => { setIsSettingsOpen(false); setIsHelpOpen(true); }}
-        />
-        <ExportPdfDialog
-          open={isExportPdfOpen}
-          project={project}
-          onOpenChange={handleExportPdfOpenChange}
-          onExport={(settings) => void handleExportPdf(settings)}
-          onPersistenceError={(message) => toast.error(message)}
-          thumbnailUrls={savedViewThumbnailUrls}
-          exportState={pdfExportProgress}
-          onCancelExport={handleCancelExportPdf}
-        />
-      </Suspense>
-      {isExportPdfOpen || savedViewsPaneVisible || pdfExportProgress || thumbnailsPending ? (
-        <Suspense fallback={null}>
-          <SavedViewRenderHost
-            project={project}
-            artworksById={artworksById}
-            getBlob={getAssetBlob}
-            actionsRef={savedViewRenderRef}
-          />
-        </Suspense>
-      ) : null}
-      <ArtworkLibraryPicker
-        open={libraryPickerOpen}
-        artworks={libraryArtworks}
+      <AppDialogs
         project={project}
-        getBlob={getAssetBlob}
-        onOpenChange={setLibraryPickerOpen}
-        onAddToChecklist={addExistingArtworksToChecklist}
-      />
-      <DeleteRoomDialog
-        roomName={confirmDeleteRoomPlacement?.room.name ?? ""}
-        summary={confirmDeleteRoomSummary}
-        onConfirm={() => {
-          const roomId = confirmDeleteRoomId;
-          setConfirmDeleteRoomId(null);
-          if (roomId) void deleteRoom(roomId);
-        }}
-        onOpenChange={(open) => {
-          if (!open) setConfirmDeleteRoomId(null);
-        }}
-      />
-      <ImportConflictDialog
-        conflicts={pendingPackageImport?.conflicts ?? null}
-        onResolve={(resolutions) => void resolvePackageImportConflicts(resolutions)}
-        onDismiss={dismissPackageImport}
+        viewMode={viewMode}
+        isHelpOpen={isHelpOpen}
+        setIsHelpOpen={setIsHelpOpen}
+        importWizardOpen={importWizardOpen}
+        setImportWizardOpen={setImportWizardOpen}
+        importDestination={importDestination}
+        intakeState={intakeState}
+        importArtworkDrafts={importArtworkDrafts}
+        addArtworksFromFiles={addArtworksFromFiles}
+        isSettingsOpen={isSettingsOpen}
+        setIsSettingsOpen={setIsSettingsOpen}
+        storagePersistence={storagePersistence}
+        retryStoragePersistence={retryStoragePersistence}
+        resetPreferences={resetPreferences}
+        handleExportPackage={handleExportPackage}
+        fileInputRef={fileInputRef}
+        isExportPdfOpen={isExportPdfOpen}
+        handleExportPdfOpenChange={handleExportPdfOpenChange}
+        handleExportPdf={handleExportPdf}
+        savedViewThumbnailUrls={savedViewThumbnailUrls}
+        pdfExportProgress={pdfExportProgress}
+        handleCancelExportPdf={handleCancelExportPdf}
+        savedViewsPaneVisible={savedViewsPaneVisible}
+        thumbnailsPending={thumbnailsPending}
+        artworksById={artworksById}
+        getAssetBlob={getAssetBlob}
+        savedViewRenderRef={savedViewRenderRef}
+        libraryPickerOpen={libraryPickerOpen}
+        setLibraryPickerOpen={setLibraryPickerOpen}
+        libraryArtworks={libraryArtworks}
+        addExistingArtworksToChecklist={addExistingArtworksToChecklist}
+        confirmDeleteRoomId={confirmDeleteRoomId}
+        setConfirmDeleteRoomId={setConfirmDeleteRoomId}
+        confirmDeleteRoomPlacement={confirmDeleteRoomPlacement}
+        confirmDeleteRoomSummary={confirmDeleteRoomSummary}
+        deleteRoom={deleteRoom}
+        pendingPackageImport={pendingPackageImport}
+        resolvePackageImportConflicts={resolvePackageImportConflicts}
+        dismissPackageImport={dismissPackageImport}
       />
     </main>
     </TooltipProvider>
   );
-}
-
-function ProjectTitleInput({
-  title,
-  onCommit
-}: {
-  title: string;
-  onCommit: (title: string) => Promise<void>;
-}) {
-  const [value, setValue] = useState(title);
-
-  useEffect(() => {
-    setValue(title);
-  }, [title]);
-
-  const commit = () => {
-    if (value.trim().length === 0) {
-      setValue(title);
-      return;
-    }
-
-    void onCommit(value);
-  };
-
-  return (
-    <Input
-      className="project-title"
-      value={value}
-      aria-label="Project title"
-      size="title"
-      // Sized to the text so the picker chevron sits right beside the title
-      // instead of at the far end of a fixed-width field. The CSS clamp
-      // still bounds it on both ends.
-      style={{ width: `${Math.max(value.length, 8) + 2}ch` }}
-      variant="title"
-      onChange={(event) => setValue(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key !== "Enter") return;
-        event.preventDefault();
-        event.currentTarget.blur();
-      }}
-    />
-  );
-}
-
-function getWallDimensionLink(
-  project: Project,
-  wallId: string
-): WallDimensionLink | null {
-  for (const placement of project.floor.rooms) {
-    const pair = getOrthogonalQuadWallPair(placement.room, wallId);
-    if (!pair) continue;
-
-    return {
-      pairedWallName: pair.pairedWall.name,
-      roomName: placement.room.name
-    };
-  }
-
-  return null;
-}
-
-function getWallNames(project: Project, wallIds: string[]): string[] {
-  if (wallIds.length === 0) return [];
-
-  const namesById = new Map(
-    project.floor.rooms.flatMap((placement) =>
-      placement.room.walls.map((wall) => [wall.id, wall.name])
-    )
-  );
-
-  return wallIds.map((wallId) => namesById.get(wallId) ?? wallId);
-}
-
-// Turns raw bytes into a browser download. The only DOM-bound step in the
-// package export path — the manifest/zip derivation is pure domain code.
-function triggerDownload(data: Blob | Uint8Array, filename: string) {
-  const blob =
-    data instanceof Blob
-      ? data
-      : // Fresh copy: Blob wants a plain ArrayBuffer, and a fflate Uint8Array
-        // may be a view into a larger pooled buffer.
-        new Blob([data.slice()], { type: "application/octet-stream" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
 }
