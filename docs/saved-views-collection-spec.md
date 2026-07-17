@@ -221,5 +221,42 @@ dialog without ever having opened the pane.
    non-export. Once the pane exists, the 3D camera cluster (Overview / Eye
    level / Focus selection) is a natural sibling home — camera actions
    together, and the pane becomes where saved views are *found*. Moving it
-   is part of the wider Export-menu restructure discussion, not decided
-   here.
+   is part of the wider Export-menu restructure (§9), not decided here.
+
+## 9. Export menu restructure (recommendation, not decided)
+
+Recorded here because §8.5 depends on it. The question on the table was
+whether the Export button should split into two topbar buttons (outputs vs
+package). **Recommendation: no — one Export button, restructured menu.**
+
+Three reasons against splitting:
+
+- Topbar space is already contested (the toolbar has five density tiers
+  fighting for it).
+- Two sibling buttons split around the word "export" force the user to learn
+  which button owns which output *before* clicking; a grouped menu teaches at
+  the point of choice.
+- Frequency: image and PDF are recurring deliverables; the `.sightlines`
+  package is occasional backup/handoff, and occasional actions don't earn
+  top-level chrome.
+
+The real problem isn't button count — the menu mixes three altitudes (*a
+picture of this view*, *a document of the project*, *the project file
+itself*) plus one item that isn't an export at all (Save view). Proposed
+restructure:
+
+1. **Keep the image and PDF groups as the menu's core.** Trim the redundant
+   copy: today "Export image" (group label) + "Export image (PNG)" (item) +
+   "Export image of 3D view" (subtitle) says the same thing three times. The
+   PNG/JPG pair could collapse to one item — that is literally export-spec
+   §16's one open item (inline format choice vs. remembered preference).
+2. **Reframe the package group as what it is** — project backup/portability,
+   not another output. Retitle to "Project backup," possibly collapsing
+   Standard/With originals into a submenu. Keep it *in* this menu rather than
+   exiling it: PRODUCT.md principle 5 wants portability visible in the
+   experience, and it's already double-homed (Settings has a package-export
+   affordance too).
+3. **Move Save view out** to the 3D camera cluster, per §8.5 — camera actions
+   together, now that the pane (§4) is where saved views are found.
+
+Status: awaiting review; no implementation slice exists for this.
