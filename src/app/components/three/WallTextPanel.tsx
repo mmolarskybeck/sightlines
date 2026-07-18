@@ -13,12 +13,17 @@ import {
   WALL_TEXT_PANEL_COLOR
 } from "./tokens";
 
-// The white panel, its skeleton bars, and the selection outline are stacked a
-// hair apart in z so they never z-fight; all are well under WALL_TEXT_OFFSET_MM
-// so the whole panel still sits proud of the wall.
-const BAR_Z_MM = 1.5;
-const OUTLINE_Z_MM = 3;
-const BORDER_Z_MM = 0.5;
+// The white panel, its skeleton bars, and the selection outline are stacked
+// in z so they never z-fight. The steps must be several millimetres, not
+// fractions of one: with CAMERA_NEAR = 0.01 the depth buffer resolves only
+// ~0.6mm at 10m and ~2.4mm at 20m viewing distance, so the original 0.5mm
+// steps shimmered against each other during camera motion at room scale.
+// 4mm steps stay comfortably above depth precision across the whole room
+// while still reading as one flush panel.
+const BORDER_Z_MM = 0;
+const PANEL_Z_MM = 4;
+const BAR_Z_MM = 8;
+const OUTLINE_Z_MM = 12;
 
 // A wall-mounted didactic text panel in 3D: a white plane with a subtle border
 // and light-grey skeleton bars (no real text, matching the 2D elevation and
@@ -81,7 +86,7 @@ export function WallTextPanel({
         />
       </mesh>
       {/* White panel face; also the click/hover target. */}
-      <mesh onClick={handleClick} position={[0, 0, mmToWorld(BORDER_Z_MM + 0.5)]}>
+      <mesh onClick={handleClick} position={[0, 0, mmToWorld(PANEL_Z_MM)]}>
         <planeGeometry args={[widthWorld * 0.985, heightWorld * 0.978]} />
         <meshBasicMaterial
           color={WALL_TEXT_PANEL_COLOR}
