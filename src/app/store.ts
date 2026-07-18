@@ -47,6 +47,7 @@ import type { AssetRepository } from "../domain/repositories/assetRepository";
 import { IndexedDbArtworkLibraryRepository } from "../domain/repositories/indexedDbArtworkLibraryRepository";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import { IndexedDbProjectRepository } from "../domain/repositories/indexedDbProjectRepository";
+import { IndexedDbSavedViewThumbnailRepository } from "../domain/repositories/indexedDbSavedViewThumbnailRepository";
 import type { ProjectRepository } from "../domain/repositories/projectRepository";
 import { createSampleProject } from "../domain/sample/sampleProject";
 import { parseArtwork } from "../domain/schema/artworkSchema";
@@ -1892,9 +1893,6 @@ export const useAppStore = createAppStore({
     // A project's Saved-view thumbnails are a derived cache outside the project;
     // they follow its lifecycle alongside the workspace-preference record
     // (saved-views spec §3.2, export-spec §6.3).
-    const { IndexedDbSavedViewThumbnailRepository } = await import(
-      "../domain/repositories/indexedDbSavedViewThumbnailRepository"
-    );
     await new IndexedDbSavedViewThumbnailRepository().deleteByProject(projectId);
   }
 });
