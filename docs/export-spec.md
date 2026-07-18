@@ -567,7 +567,11 @@ In addition to neighbor gaps, the hang is annotated with **center height
 from the floor**: one common centerline dimension when multiple works share
 a center height (the app's own centerline model), and individual center
 heights otherwise. This absolute vertical datum anchors the relative gap
-network on the wall.
+network on the wall. It renders as a floor-anchored datum rail just beyond
+the wall's far end; each height's leader back to the wall edge is dashed,
+because a work's boundary margin arrives at that edge at this exact height
+(its own centerline) and a solid leader would fuse the two into one
+apparent measurement.
 
 Center height is the default vertical datum because it is the app's
 existing centerline model and the number installers' hang math starts

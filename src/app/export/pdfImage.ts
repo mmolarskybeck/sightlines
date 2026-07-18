@@ -1,7 +1,44 @@
+import { readImageDimensions } from "../../domain/assets/imageDimensions";
+
 export type PdfEmbeddableImage = {
   bytes: Uint8Array;
   format: "png" | "jpeg";
 };
+
+export type PdfImageOptions = {
+  // Longest side of an embedded raster. Elevation artworks print at a few
+  // inches and 3D renders are generated near this size, so anything larger
+  // only inflates the file (a full-res display image embedded untouched put
+  // multi-megabyte PNGs behind inch-wide frames).
+  maxDimensionPx?: number;
+};
+
+const DEFAULT_MAX_DIMENSION_PX = 1400;
+const JPEG_QUALITY = 0.85;
+
+// The passthrough decision, kept pure for testing: bytes already in a
+// pdf-lib-embeddable format keep their original encoding when they are
+// within the size budget. Unsniffable bytes also pass through — pdf-lib is
+// the authority on true malformation, and re-encoding can only lose data.
+export function passThroughFormat(
+  bytes: Uint8Array,
+  mimeType: string,
+  maxDimensionPx: number
+): "png" | "jpeg" | null {
+  const normalizedType = mimeType.toLowerCase();
+  const format =
+    normalizedType === "image/png"
+      ? ("png" as const)
+      : normalizedType === "image/jpeg" || normalizedType === "image/jpg"
+        ? ("jpeg" as const)
+        : null;
+  if (!format) return null;
+  const sniffed = readImageDimensions(bytes);
+  if (sniffed && Math.max(sniffed.widthPx, sniffed.heightPx) > maxDimensionPx) {
+    return null;
+  }
+  return format;
+}
 
 function blobBytes(blob: Blob): Promise<Uint8Array> {
   if (typeof blob.arrayBuffer === "function") {
@@ -16,12 +53,20 @@ function blobBytes(blob: Blob): Promise<Uint8Array> {
   });
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement, type: string): Promise<Blob> {
+function canvasToBlob(
+  canvas: HTMLCanvasElement,
+  type: string,
+  quality?: number
+): Promise<Blob> {
   return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) resolve(blob);
-      else reject(new Error("Image transcoding produced no data."));
-    }, type);
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("Image transcoding produced no data."));
+      },
+      type,
+      quality
+    );
   });
 }
 
@@ -39,16 +84,35 @@ async function decodeWithImageElement(blob: Blob): Promise<HTMLImageElement> {
   }
 }
 
-// pdf-lib embeds PNG and JPEG directly. Display-tier assets are normally WebP,
-// so convert only those unsupported inputs to PNG at assembly time; the vector
-// page around the image stays vector (docs/export-spec.md §10.3–10.4).
-export async function prepareImageForPdf(blob: Blob): Promise<PdfEmbeddableImage> {
-  const normalizedType = blob.type.toLowerCase();
-  if (normalizedType === "image/png") {
-    return { bytes: await blobBytes(blob), format: "png" };
+// Sampled alpha scan on the drawn canvas: JPEG re-encoding is only safe for
+// fully opaque images. Every 16th pixel is enough — transparency in real
+// artwork/matting assets is never confined to isolated pixels.
+function isFullyOpaque(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number
+): boolean {
+  const data = context.getImageData(0, 0, width, height).data;
+  for (let i = 3; i < data.length; i += 64) {
+    if (data[i] < 255) return false;
   }
-  if (normalizedType === "image/jpeg" || normalizedType === "image/jpg") {
-    return { bytes: await blobBytes(blob), format: "jpeg" };
+  return true;
+}
+
+// pdf-lib embeds PNG and JPEG directly. Display-tier assets are normally WebP,
+// so those (and any oversized PNG/JPEG, including full-page 3D renders) are
+// decoded, downscaled to the size budget, and re-encoded — JPEG for opaque
+// images, PNG when transparency must survive. The vector page around the
+// image stays vector (docs/export-spec.md §10.3–10.4).
+export async function prepareImageForPdf(
+  blob: Blob,
+  options: PdfImageOptions = {}
+): Promise<PdfEmbeddableImage> {
+  const maxDimensionPx = options.maxDimensionPx ?? DEFAULT_MAX_DIMENSION_PX;
+  const originalBytes = await blobBytes(blob);
+  const direct = passThroughFormat(originalBytes, blob.type, maxDimensionPx);
+  if (direct) {
+    return { bytes: originalBytes, format: direct };
   }
   if (typeof document === "undefined") {
     throw new Error(`Cannot transcode ${blob.type || "unknown image type"} outside a browser.`);
@@ -72,16 +136,25 @@ export async function prepareImageForPdf(blob: Blob): Promise<PdfEmbeddableImage
     height = image.naturalHeight;
   }
 
-  canvas.width = Math.max(1, width);
-  canvas.height = Math.max(1, height);
+  const scale = Math.min(1, maxDimensionPx / Math.max(1, width, height));
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
   const context = canvas.getContext("2d");
   if (!context) {
     bitmap?.close();
     throw new Error("2D canvas context unavailable for image transcoding.");
   }
-  context.drawImage(source, 0, 0);
+  context.drawImage(source, 0, 0, canvas.width, canvas.height);
   bitmap?.close();
 
-  const png = await canvasToBlob(canvas, "image/png");
-  return { bytes: await blobBytes(png), format: "png" };
+  const opaque = isFullyOpaque(context, canvas.width, canvas.height);
+  const encoded = await canvasToBlob(
+    canvas,
+    opaque ? "image/jpeg" : "image/png",
+    opaque ? JPEG_QUALITY : undefined
+  );
+  return {
+    bytes: await blobBytes(encoded),
+    format: opaque ? "jpeg" : "png"
+  };
 }

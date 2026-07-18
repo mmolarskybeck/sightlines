@@ -907,7 +907,8 @@ function drawGapDimension(
   dimension: GapDimension | BoundaryDimension,
   unit: DisplayUnit,
   occupied: PdfLabelBox[],
-  obstacles: readonly PdfLabelBox[]
+  obstacles: readonly PdfLabelBox[],
+  wallFrame: { topY: number; bottomY: number }
 ) {
   const label = formatDocumentDimension(dimension.gapMm, unit);
   const isBoundary = !("axis" in dimension);
@@ -1134,7 +1135,15 @@ function drawGapDimension(
         crowdBottom = Math.min(crowdBottom, box.bottom);
       }
     }
-    const upward = a.y >= (crowdTop + crowdBottom) / 2;
+    let upward = a.y >= (crowdTop + crowdBottom) / 2;
+    // Never leave the wall: a downward lane that would land on or below the
+    // floor line (into the overall-width dimension) flips upward, and vice
+    // versa — the wall interior is the only space these labels may use.
+    if (!upward && crowdBottom - DIMENSION_SIZE_PT - 4 < wallFrame.bottomY + 4) {
+      upward = true;
+    } else if (upward && crowdTop + 3 + DIMENSION_SIZE_PT > wallFrame.topY - 4) {
+      upward = false;
+    }
     baseY = upward ? crowdTop + 3 : crowdBottom - DIMENSION_SIZE_PT - 4;
     offsets = upward ? [0, 9, 18, 27] : [0, -9, -18, -27];
   }
@@ -1278,7 +1287,8 @@ function drawElevationDimensions(
       dimension,
       unit,
       occupiedLabels,
-      obstacleBoxes
+      obstacleBoxes,
+      { topY: wallTopRight.y, bottomY: wallBottomLeft.y }
     )
   );
 
@@ -1311,12 +1321,17 @@ function drawElevationDimensions(
       xMm: scene.wallLengthMm,
       yMm: dimension.centerHeightMm
     }).y;
+    // Dashed leader: a work's boundary margin arrives at the wall edge at
+    // this exact height (its own centerline), and a solid leader would fuse
+    // the two into one apparent measurement running past the corner. The
+    // dash break keeps the anchor without the fusion.
     drawLine(
       page,
       { x: wallTopRight.x + 3, y: datumY },
       { x: datumX + 3, y: datumY },
       0.3,
-      COLORS.subtle
+      COLORS.subtle,
+      [2, 2]
     );
     const label = formatDocumentDimension(dimension.centerHeightMm, unit);
     const labelWidth = textWidth(fonts, label, DIMENSION_SIZE_PT, true);
