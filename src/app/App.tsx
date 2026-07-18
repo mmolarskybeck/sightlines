@@ -1930,9 +1930,7 @@ export function App() {
                           frame
                         })),
                         onApply: (changes) =>
-                          updateArtworksMatFrame(selectedArtworkIds, changes, {
-                            showSuccessToast: false
-                          })
+                          updateArtworksMatFrame(selectedArtworkIds, changes)
                       }
                     : undefined
                 }

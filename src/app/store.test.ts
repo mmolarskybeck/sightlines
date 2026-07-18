@@ -1567,31 +1567,12 @@ describe("app store", () => {
       expect(successToast).not.toHaveBeenCalled();
     });
 
-    it("confirms a bulk apply with a quiet toast naming the work count", async () => {
+    it("does not toast after a successful bulk apply", async () => {
       const successToast = vi.spyOn(toast, "success");
       const [a, b] = await seedLibrary();
+      successToast.mockClear();
 
       await store.getState().updateArtworksMatFrame([a, b], { matWidthMm: 45 });
-      expect(successToast).toHaveBeenCalledWith("Mat & frame applied to 2 works");
-
-      // Singular copy for a one-work apply.
-      successToast.mockClear();
-      await store.getState().updateArtworksMatFrame([a], { matWidthMm: 50 });
-      expect(successToast).toHaveBeenCalledWith("Mat & frame applied to 1 work");
-    });
-
-    it("allows an inline caller to suppress the success toast", async () => {
-      const successToast = vi.spyOn(toast, "success");
-      const [a, b] = await seedLibrary();
-      successToast.mockClear();
-
-      const result = await store.getState().updateArtworksMatFrame(
-        [a, b],
-        { matWidthMm: 45 },
-        { showSuccessToast: false }
-      );
-
-      expect(result).toEqual({ updated: 2, skipped: 0 });
       expect(successToast).not.toHaveBeenCalled();
     });
 
