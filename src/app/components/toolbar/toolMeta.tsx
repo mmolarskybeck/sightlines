@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
 import { PolygonIcon } from "@phosphor-icons/react/dist/csr/Polygon";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
-import type { OpeningKind } from "../../../domain/placement/createOpening";
+import { TextAlignLeftIcon } from "@phosphor-icons/react/dist/csr/TextAlignLeft";
+import type { InsertToolKind } from "../../../domain/placement/createOpening";
 import { PartitionGlyph, RectangleRoomGlyph, WindowGlyph } from "./toolbarGlyphs";
 
 // Shared descriptors for the insert tools, so the full segmented picker and
@@ -20,9 +21,14 @@ export type InsertToolMeta = {
   icon: ReactNode;
 };
 
-export const OPENING_TOOL_ORDER: OpeningKind[] = ["door", "window", "blocked-zone"];
+export const OPENING_TOOL_ORDER: InsertToolKind[] = [
+  "door",
+  "window",
+  "blocked-zone",
+  "wall-text"
+];
 
-export const OPENING_TOOL_META: Record<OpeningKind, InsertToolMeta> = {
+export const OPENING_TOOL_META: Record<InsertToolKind, InsertToolMeta> = {
   door: {
     key: "door",
     label: "Door",
@@ -46,6 +52,14 @@ export const OPENING_TOOL_META: Record<OpeningKind, InsertToolMeta> = {
     armed: "Marking a blocked zone",
     kbd: "B",
     icon: <RectangleDashedIcon aria-hidden="true" size={16} />
+  },
+  "wall-text": {
+    key: "wall-text",
+    label: "Wall text",
+    hint: "Insert a wall text",
+    armed: "Placing a wall text",
+    kbd: "T",
+    icon: <TextAlignLeftIcon aria-hidden="true" size={16} />
   }
 };
 
@@ -82,7 +96,7 @@ export const PARTITION_TOOL_META: InsertToolMeta = {
 
 // The descriptor for whatever insert tool is armed, or null when idle — drives
 // the compact trigger's icon/name swap and its armed tooltip.
-export function armedInsertMeta(activeTool: OpeningKind | null): InsertToolMeta | null {
+export function armedInsertMeta(activeTool: InsertToolKind | null): InsertToolMeta | null {
   return activeTool ? OPENING_TOOL_META[activeTool] : null;
 }
 

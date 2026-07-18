@@ -1,6 +1,6 @@
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { OpeningKind } from "../../domain/placement/createOpening";
+import type { InsertToolKind } from "../../domain/placement/createOpening";
 import type { ViewMode } from "../store";
 import { useToolbarShortcuts } from "./useToolbarShortcuts";
 
@@ -9,7 +9,7 @@ function renderHarness(
     viewMode?: ViewMode;
     suspended?: boolean;
     insertDisabled?: boolean;
-    activeTool?: OpeningKind | null;
+    activeTool?: InsertToolKind | null;
   } = {}
 ) {
   // One harness at a time: each keydown is dispatched once and the handler
@@ -17,7 +17,7 @@ function renderHarness(
   // press via event.defaultPrevented. cleanup() keeps every render isolated.
   cleanup();
   const handlers = {
-    armOpeningTool: vi.fn((_tool: OpeningKind | null) => {}),
+    armOpeningTool: vi.fn((_tool: InsertToolKind | null) => {}),
     togglePartitionTool: vi.fn(() => {}),
     toggleDrawRect: vi.fn(() => {}),
     toggleDrawRoom: vi.fn(() => {}),

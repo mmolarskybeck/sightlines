@@ -37,7 +37,8 @@ import {
   svgPolygonPoints
 } from "../../../domain/scene2d/planScene";
 import { getArtworkOuterDimensionsMm, withArtworkFootprintFromMap } from "../../../domain/framing";
-import { getDefaultOpeningSizeMm, type OpeningKind } from "../../../domain/placement/createOpening";
+import { type InsertToolKind } from "../../../domain/placement/createOpening";
+import { getDefaultInsertToolSizeMm } from "../../../domain/placement/createWallText";
 import {
   effectiveFloorDepthMm,
   effectivePlacementForm,
@@ -443,7 +444,7 @@ export function PlanView({
   onSvgElementChange
 }: {
   // Controlled door/window/blocked-zone insertion tool.
-  activeTool: OpeningKind | null;
+  activeTool: InsertToolKind | null;
   // App owns the mode; transient polygon points and snapping stay local.
   drawRoomActive?: boolean;
   onDrawRoomChange?: (active: boolean) => void;
@@ -493,7 +494,7 @@ export function PlanView({
   onPlaceArtworkOnFloor?: (artworkId: string, xMm: number, yMm: number) => void;
   // IDs are placements, never artwork-library records.
   onMarqueeSelect?: (ids: string[], additive: boolean) => void;
-  onToolChange: (tool: OpeningKind | null) => void;
+  onToolChange: (tool: InsertToolKind | null) => void;
   selectedArtworkId?: string | null;
   selectedOpeningId?: string | null;
   selectedObjectIds?: string[];
@@ -1343,15 +1344,17 @@ export function PlanView({
   // keep the full set. Object drags/group moves keep faces regardless.
   const openingToolWalls = useMemo(
     () =>
-      activeTool === "blocked-zone"
-        ? floorWallsForTool
-        : floorWallsForTool.filter((wall) => parseFaceWallId(wall.id) === null),
+      // Only doors/windows are barred from partition faces (spec §6.1); blocked
+      // zones AND wall text may sit on either face.
+      activeTool === "door" || activeTool === "window"
+        ? floorWallsForTool.filter((wall) => parseFaceWallId(wall.id) === null)
+        : floorWallsForTool,
     [floorWallsForTool, activeTool]
   );
 
   const movingSize = useMemo(() => {
     if (!activeTool) return null;
-    const { widthMm, heightMm } = getDefaultOpeningSizeMm(activeTool);
+    const { widthMm, heightMm } = getDefaultInsertToolSizeMm(activeTool);
     const depthMm =
       activeTool === "blocked-zone" ? DEFAULT_FLOOR_OBJECT_DEPTH_MM : WALL_OBJECT_PLAN_DEPTH_MM;
     return { widthMm, heightMm, depthMm };

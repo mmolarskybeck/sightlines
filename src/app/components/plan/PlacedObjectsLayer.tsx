@@ -16,7 +16,12 @@ import type { PlanPlacement } from "../../../domain/snapping/planSnapTargets";
 import type { PlanRect } from "../../../domain/geometry/planObjects";
 import type { Vector2 } from "../../../domain/geometry/dragResize";
 import { PlanObject } from "./PlanObject";
-import { ArtworkTooltipContent, OpeningTooltipContent } from "../shared/PlacementTooltip";
+import {
+  ArtworkTooltipContent,
+  OpeningTooltipContent,
+  WallTextTooltipContent
+} from "../shared/PlacementTooltip";
+import { WALL_TEXT_DEFAULT_NAME } from "../../../domain/placement/createWallText";
 import type { ObjectDragState } from "./types";
 
 // Render-only placed-objects layer: the advisory opening-connection glyphs, the
@@ -192,6 +197,13 @@ export function PlacedObjectsLayer({
             tooltip={
               wallObject.kind === "artwork" ? (
                 artworkTooltip(wallObject.artworkId, wallObject.displayDimensionsOverride)
+              ) : wallObject.kind === "wall-text" ? (
+                <WallTextTooltipContent
+                  name={wallObject.name ?? WALL_TEXT_DEFAULT_NAME}
+                  widthMm={wallObject.widthMm}
+                  heightMm={wallObject.heightMm}
+                  unit={unit}
+                />
               ) : (
                 <OpeningTooltipContent
                   kind={wallObject.kind}

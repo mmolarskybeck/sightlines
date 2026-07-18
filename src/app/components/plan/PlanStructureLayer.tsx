@@ -12,7 +12,7 @@ import {
   type PlanScenePartition,
   type PlanSceneRoom
 } from "../../../domain/scene2d/planScene";
-import type { OpeningKind } from "../../../domain/placement/createOpening";
+import type { InsertToolKind } from "../../../domain/placement/createOpening";
 import type { FloorPartition } from "../../../domain/geometry/freestandingWalls";
 import type { PartitionDragState } from "./types";
 
@@ -31,7 +31,7 @@ export type PlanStructureLayerProps = {
   selectedWallId: string | null;
   hoveredWallId: string | null;
   selectedFreestandingWallId: string | null;
-  activeTool: OpeningKind | null;
+  activeTool: InsertToolKind | null;
   drawRoomActive: boolean;
   drawRectActive: boolean;
   partitionToolActive: boolean;

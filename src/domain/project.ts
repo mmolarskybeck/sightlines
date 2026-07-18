@@ -249,7 +249,16 @@ export type BlockedZoneWallObject = WallObjectBase & {
 
 export type OpeningWallObject = ConnectableOpeningWallObject | BlockedZoneWallObject;
 
-export type WallObject = ArtworkWallObject | OpeningWallObject;
+// A wall-mounted didactic text panel (museum label). Wall-only, like doors and
+// windows it has no FloorObject variant. It never blocks placement (it is not
+// an opening) and carries only an optional name — every wall text renders the
+// same skeleton-bar panel regardless of its name.
+export type WallTextWallObject = WallObjectBase & {
+  kind: "wall-text";
+  name?: string;
+};
+
+export type WallObject = ArtworkWallObject | OpeningWallObject | WallTextWallObject;
 
 // Editable default depth for floor-placed objects (doors/windows have a
 // fixed nominal wall-object thickness instead; see WALL_OBJECT_PLAN_DEPTH_MM).

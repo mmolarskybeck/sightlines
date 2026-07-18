@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import type { OpeningKind } from "../../domain/placement/createOpening";
+import type { InsertToolKind } from "../../domain/placement/createOpening";
 import type { ViewMode } from "../store";
 import { isEditableTarget } from "./isEditableTarget";
 
@@ -10,8 +10,8 @@ export type UseToolbarShortcutsParams = {
   suspended: boolean;
   // Mirrors disabled insert buttons, such as Elevation without a selected wall.
   insertDisabled: boolean;
-  activeTool: OpeningKind | null;
-  armOpeningTool: (tool: OpeningKind | null) => void;
+  activeTool: InsertToolKind | null;
+  armOpeningTool: (tool: InsertToolKind | null) => void;
   togglePartitionTool: () => void;
   toggleDrawRect: () => void;
   toggleDrawRoom: () => void;
@@ -50,7 +50,7 @@ export function useToolbarShortcuts({
       if (event.repeat) return;
       if (isEditableTarget(event.target)) return;
 
-      const armOpening = (kind: OpeningKind) => {
+      const armOpening = (kind: InsertToolKind) => {
         // Match disabled insert buttons.
         if (insertDisabled) return;
         event.preventDefault();
@@ -66,6 +66,9 @@ export function useToolbarShortcuts({
           break;
         case "b":
           armOpening("blocked-zone");
+          break;
+        case "t":
+          armOpening("wall-text");
           break;
         case "p":
           if (viewMode !== "plan") return;

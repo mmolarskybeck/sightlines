@@ -5,6 +5,7 @@ import type { Artwork } from "../../../domain/project";
 import { effectiveFraming } from "../../../domain/framing";
 import type { WallPanel3d } from "../../../domain/geometry/scene3d";
 import { ArtworkPlane } from "./ArtworkPlane";
+import { WallTextPanel } from "./WallTextPanel";
 import { mmToWorld, MM_TO_WORLD } from "./coordinates";
 import {
   BLOCKED_ZONE_COLOR,
@@ -182,6 +183,15 @@ export function WallPanel({
             depthWrite={false}
           />
         </mesh>
+      ))}
+      {wall.wallTexts.map((wallText) => (
+        <WallTextPanel
+          key={wallText.objectId}
+          wallText={wallText}
+          isSelected={selectedObjectIds.includes(wallText.objectId)}
+          onSelect={onSelectObject}
+          ghosted={ghosted}
+        />
       ))}
       {wall.artworks.map((artwork) => {
         const record = artworksById.get(artwork.artworkId);

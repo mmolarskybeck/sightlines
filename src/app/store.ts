@@ -13,8 +13,13 @@ import { newId } from "../domain/id";
 import {
   getDefaultOpeningCenterYMm,
   getDefaultOpeningSizeMm,
+  type InsertToolKind,
   type OpeningKind
 } from "../domain/placement/createOpening";
+import {
+  createWallTextPlacement,
+  WALL_TEXT_DEFAULT_NAME
+} from "../domain/placement/createWallText";
 import {
   clearOpeningPartners,
   includePairedOpenings
@@ -104,7 +109,8 @@ export {
   roomIdOf,
   freestandingWallIdOf,
   getSelectedArtworkId,
-  getSelectedOpeningId
+  getSelectedOpeningId,
+  getSelectedWallTextId
 } from "./store/selectionSlice";
 
 export type ViewMode = "plan" | "elevation" | "3d" | "library";
@@ -241,9 +247,15 @@ export type AppState = ArrangeSliceState &
   ) => Promise<void>;
   connectOpenings: (aId: string, bId: string) => Promise<void>;
   disconnectOpening: (id: string) => Promise<void>;
-  placeOpeningFromPlan: (kind: OpeningKind, placement: PlanPlacement) => Promise<void>;
+  // Rename a wall text (the only editable field it carries). An empty/blank
+  // name resets it to the default label.
+  renameWallText: (wallObjectId: string, name: string) => Promise<void>;
+  // The two Insert-cluster placement paths accept the widened InsertToolKind:
+  // wall text is armed and placed here alongside openings, then branches to its
+  // own (non-pairing, non-blocking) constructor at the creation step.
+  placeOpeningFromPlan: (kind: InsertToolKind, placement: PlanPlacement) => Promise<void>;
   placeOpeningOnElevation: (
-    kind: OpeningKind,
+    kind: InsertToolKind,
     wallId: string,
     xMm: number,
     yMm: number
@@ -1360,7 +1372,7 @@ export function createAppStore(deps: AppStoreDeps) {
         // Same shape as moveArtworkPlacement: the UI previews the drag
         // locally and calls this exactly once on release.
         await commitWallObjectEdit(
-          `Move ${openingNoun(target.kind)}`,
+          `Move ${moveObjectNoun(target.kind)}`,
           project,
           nextWallObjects,
           validateIds,
@@ -1399,7 +1411,7 @@ export function createAppStore(deps: AppStoreDeps) {
         }
 
         await commitWallObjectEdit(
-          `Resize ${openingNoun(target.kind)}`,
+          `Resize ${moveObjectNoun(target.kind)}`,
           project,
           nextWallObjects,
           validateIds,
@@ -1493,9 +1505,54 @@ export function createAppStore(deps: AppStoreDeps) {
         }));
       },
 
+      async renameWallText(wallObjectId, name) {
+        const project = get().project;
+        if (!project) return;
+        const target = project.wallObjects.find((object) => object.id === wallObjectId);
+        if (!target || target.kind !== "wall-text") return;
+
+        const trimmed = name.trim();
+        const nextName = trimmed.length > 0 ? trimmed : WALL_TEXT_DEFAULT_NAME;
+        if ((target.name ?? WALL_TEXT_DEFAULT_NAME) === nextName) return;
+
+        await applyEdit("Rename wall text", (current) => ({
+          ...current,
+          wallObjects: current.wallObjects.map((object) =>
+            object.id === wallObjectId && object.kind === "wall-text"
+              ? { ...object, name: nextName }
+              : object
+          )
+        }));
+      },
+
       async placeOpeningFromPlan(kind, placement) {
         const project = get().project;
         if (!project) return;
+
+        // Wall text is placed here alongside openings but is wall-only and
+        // never pairs/mirrors, so it takes its own simple path: land at the
+        // clicked wall x, centered on the wall's centerline.
+        if (kind === "wall-text") {
+          if (placement.anchor !== "wall") {
+            throw new Error("Wall text can only be placed on a wall.");
+          }
+          const wall = getProjectWalls(project).find(
+            (candidate) => candidate.id === placement.wallId
+          );
+          if (!wall) return;
+          const centerlineYMm =
+            wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
+          const wallText = createWallTextPlacement(placement.wallId, placement.xMm, centerlineYMm);
+          const nextWallObjects = [...project.wallObjects, wallText];
+          await commitWallObjectEdit("Add wall text", project, nextWallObjects, [wallText.id], true, {
+            extras: selectionWrite(
+              { ...project, wallObjects: nextWallObjects },
+              { kind: "objects", ids: [wallText.id] },
+              get().wallContextId
+            )
+          });
+          return;
+        }
 
         if (placement.anchor === "floor") {
           // Only blocked zones can float. Doors and windows are excluded from
@@ -1595,6 +1652,22 @@ export function createAppStore(deps: AppStoreDeps) {
 
         const wall = getProjectWalls(project).find((candidate) => candidate.id === wallId);
         if (!wall) return;
+
+        // Wall text lands at the clicked point (the elevation resolver already
+        // keeps the pointer on the wall). It never pairs, mirrors, or blocks, so
+        // it skips the opening free-slot search and takes the pointer's y.
+        if (kind === "wall-text") {
+          const wallText = createWallTextPlacement(wallId, xMm, yMm);
+          const nextWallObjects = [...project.wallObjects, wallText];
+          await commitWallObjectEdit("Add wall text", project, nextWallObjects, [wallText.id], true, {
+            extras: selectionWrite(
+              { ...project, wallObjects: nextWallObjects },
+              { kind: "objects", ids: [wallText.id] },
+              get().wallContextId
+            )
+          });
+          return;
+        }
 
         // Doors and windows remain disallowed on partition faces in elevation,
         // matching the plan insertion rules. Blocked zones are annotations and

@@ -5149,6 +5149,46 @@ describe("app store", () => {
       expect(moved.xMm).toBe(6000);
     });
   });
+
+  describe("wall text", () => {
+    it("places a wall text on a wall via the elevation insert path and selects it", async () => {
+      await store.getState().placeOpeningOnElevation("wall-text", "wall-north", 1500, 1400);
+
+      const state = store.getState();
+      expect(state.error).toBeNull();
+      const wallText = state.project!.wallObjects.find((o) => o.kind === "wall-text");
+      expect(wallText).toBeDefined();
+      expect(wallText!.wallId).toBe("wall-north");
+      // Default size and a name, no blocksPlacement flag.
+      expect(wallText!.widthMm).toBe(600);
+      expect(wallText!.heightMm).toBe(400);
+      expect("blocksPlacement" in wallText!).toBe(false);
+      expect(state.selection).toEqual({ kind: "objects", ids: [wallText!.id] });
+    });
+
+    it("renames a wall text and resets a blank name to the default", async () => {
+      await store.getState().placeOpeningOnElevation("wall-text", "wall-north", 1500, 1400);
+      const id = store.getState().project!.wallObjects.find((o) => o.kind === "wall-text")!.id;
+
+      await store.getState().renameWallText(id, "Intro panel");
+      let wallText = store.getState().project!.wallObjects.find((o) => o.id === id)!;
+      expect(wallText.kind === "wall-text" && wallText.name).toBe("Intro panel");
+
+      await store.getState().renameWallText(id, "   ");
+      wallText = store.getState().project!.wallObjects.find((o) => o.id === id)!;
+      expect(wallText.kind === "wall-text" && wallText.name).toBe("Wall text");
+    });
+
+    it("resizes a wall text through the shared resizeOpening machinery", async () => {
+      await store.getState().placeOpeningOnElevation("wall-text", "wall-north", 1500, 1400);
+      const id = store.getState().project!.wallObjects.find((o) => o.kind === "wall-text")!.id;
+
+      await store.getState().resizeOpening(id, 900, 500, false);
+      const wallText = store.getState().project!.wallObjects.find((o) => o.id === id)!;
+      expect(wallText.widthMm).toBe(900);
+      expect(wallText.heightMm).toBe(500);
+    });
+  });
 });
 
 // Bypass applyEdit to construct a dangling-placement fixture.

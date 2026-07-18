@@ -62,7 +62,8 @@ function resolveBoundary(
       name: artworksById.get(object.artworkId)?.title || "Untitled artwork"
     };
   }
-  return { type: "object", kind: object.kind, name: getOpeningKindLabel(object.kind) };
+  const name = object.kind === "wall-text" ? "Wall text" : getOpeningKindLabel(object.kind);
+  return { type: "object", kind: object.kind, name };
 }
 
 // Derives the current arrange readout, including live preview positions.

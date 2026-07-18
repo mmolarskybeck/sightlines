@@ -2,7 +2,8 @@ import type {
   Artwork,
   ArtworkWallObject,
   OpeningWallObject,
-  WallObject
+  WallObject,
+  WallTextWallObject
 } from "../project";
 import { getPlacementFootprintMm } from "../framing";
 
@@ -99,6 +100,13 @@ export type ElevationSceneOpening = {
   outOfBounds: boolean;
 };
 
+export type ElevationSceneWallText = {
+  object: WallTextWallObject;
+  centerMm: ArtworkCenterMm;
+  sizeMm: ArtworkSizeMm;
+  outOfBounds: boolean;
+};
+
 export type ElevationScene = {
   wallLengthMm: number;
   wallHeightMm: number;
@@ -111,6 +119,7 @@ export type ElevationScene = {
   centerlineSvgY: number;
   artworks: ElevationSceneArtwork[];
   openings: ElevationSceneOpening[];
+  wallTexts: ElevationSceneWallText[];
 };
 
 export type ElevationSceneOptions = {
@@ -131,10 +140,11 @@ export function buildElevationScene(
 
   const artworks: ElevationSceneArtwork[] = [];
   const openings: ElevationSceneOpening[] = [];
+  const wallTexts: ElevationSceneWallText[] = [];
 
   // One pass, split by kind — preserving each kind's stored order (the view
-  // paints artworks then openings, so relative paint order within a kind is
-  // exactly the array order).
+  // paints artworks then openings then wall texts, so relative paint order
+  // within a kind is exactly the array order).
   for (const object of wallObjects) {
     if (object.wallId !== wallId) continue;
     const centerMm = { xMm: object.xMm, yMm: object.yMm };
@@ -156,6 +166,14 @@ export function buildElevationScene(
         sizeMm,
         outOfBounds
       });
+    } else if (object.kind === "wall-text") {
+      const outOfBounds = isArtworkOutOfWallBounds(
+        wallLengthMm,
+        wallHeightMm,
+        centerMm,
+        sizeMm
+      );
+      wallTexts.push({ object, centerMm, sizeMm, outOfBounds });
     } else {
       const outOfBounds = isArtworkOutOfWallBounds(
         wallLengthMm,
@@ -173,6 +191,7 @@ export function buildElevationScene(
     floorLineSvgY: wallHeightMm,
     centerlineSvgY: wallLocalYToSvgY(wallHeightMm, centerlineMm),
     artworks,
-    openings
+    openings,
+    wallTexts
   };
 }

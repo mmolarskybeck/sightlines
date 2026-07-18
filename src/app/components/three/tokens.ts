@@ -92,6 +92,19 @@ export const MAT_FILL_COLOR = "#F5F5F2";
 export const BLOCKED_ZONE_COLOR = "#565b60";
 
 // ============================================================================
+// Wall text (didactic label panels)
+// ============================================================================
+
+// A crisp white didactic panel, its skeleton "text" a light grey (~#d4d4d4,
+// the shadcn Skeleton look), separated from the white by a subtle hairline
+// border. Kept off the wall by a small standoff so it reads as mounted, less
+// than the artworks' projection so a panel never looks like it covers a work.
+export const WALL_TEXT_PANEL_COLOR = "#ffffff";
+export const WALL_TEXT_BORDER_COLOR = "#b8bcc0";
+export const WALL_TEXT_BAR_COLOR = "#d4d4d4";
+export const WALL_TEXT_OFFSET_MM = 12;
+
+// ============================================================================
 // Eye-level ghosting
 // ============================================================================
 

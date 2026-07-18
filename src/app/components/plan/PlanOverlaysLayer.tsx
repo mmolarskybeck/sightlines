@@ -8,7 +8,7 @@ import {
   type FloorWall
 } from "../../../domain/geometry/planObjects";
 import { formatLength } from "../../../domain/units/length";
-import type { OpeningKind } from "../../../domain/placement/createOpening";
+import type { InsertToolKind } from "../../../domain/placement/createOpening";
 import type { DisplayUnit } from "../../../domain/project";
 import { DEFAULT_FREESTANDING_THICKNESS_MM } from "../../../domain/geometry/freestandingWalls";
 import type { Guide } from "../../../domain/snapping/resolveSnap";
@@ -48,7 +48,7 @@ export type PlanOverlaysLayerProps = {
   // The active gesture's snap guides, already resolved by PlanView (the same
   // objectDrag ?? dropGhost ?? drag ?? roomDrag ?? toolGhost precedence).
   activeGuides: Guide[];
-  activeTool: OpeningKind | null;
+  activeTool: InsertToolKind | null;
   viewBox: ViewBoxRect;
   handleSizeMm: number;
   wallUnit: DisplayUnit;

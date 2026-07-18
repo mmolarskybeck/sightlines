@@ -30,7 +30,11 @@ import {
   PLACEHOLDER_ARTWORK_HEIGHT_MM,
   PLACEHOLDER_ARTWORK_WIDTH_MM
 } from "../../../domain/placement/placeArtwork";
-import { getDefaultOpeningSizeMm, type OpeningKind } from "../../../domain/placement/createOpening";
+import { type InsertToolKind } from "../../../domain/placement/createOpening";
+import {
+  getDefaultInsertToolSizeMm,
+  WALL_TEXT_DEFAULT_NAME
+} from "../../../domain/placement/createWallText";
 import { effectivePlacementForm } from "../../../domain/placement/artworkForm";
 import {
   effectiveFraming,
@@ -93,7 +97,8 @@ import {
 } from "../library/artworkDragSession";
 import { ElevationArtwork } from "./ElevationArtwork";
 import { ElevationOpening } from "./ElevationOpening";
-import { ArtworkTooltipContent, OpeningTooltipContent } from "../shared/PlacementTooltip";
+import { ElevationWallText } from "./ElevationWallText";
+import { ArtworkTooltipContent, OpeningTooltipContent, WallTextTooltipContent } from "../shared/PlacementTooltip";
 import { ToolbarTooltipKbd } from "../toolbar/ToolbarTooltipKbd";
 import { marqueeRectMm, type MarqueeState } from "../shared/marqueeRect";
 import { buildElevationScene } from "../../../domain/scene2d/elevationScene";
@@ -287,7 +292,7 @@ export function ElevationView({
 }: {
   gridPrecisionFloorMm: number | null;
   gridVisible: boolean;
-  activeTool?: OpeningKind | null;
+  activeTool?: InsertToolKind | null;
   wallName: string;
   wallLengthMm: number;
   wallHeightMm: number;
@@ -344,9 +349,9 @@ export function ElevationView({
   // and openings alike (the single-object drag keeps its onMovePlacement/
   // onMoveOpening split; this is the multi-select path only).
   onMoveWallObjects?: (moves: { id: string; xMm: number; yMm: number }[]) => void;
-  onToolChange?: (tool: OpeningKind | null) => void;
+  onToolChange?: (tool: InsertToolKind | null) => void;
   onPlaceOpeningOnElevation?: (
-    kind: OpeningKind,
+    kind: InsertToolKind,
     wallId: string,
     xMm: number,
     yMm: number
@@ -1118,7 +1123,7 @@ export function ElevationView({
     };
   }
 
-  const openingToolSize = activeTool ? getDefaultOpeningSizeMm(activeTool) : null;
+  const openingToolSize = activeTool ? getDefaultInsertToolSizeMm(activeTool) : null;
 
   // Opening insertion uses the same live snap/barrier resolver as an elevation
   // move. The only difference is that the preview starts from the pointer and
@@ -2019,6 +2024,53 @@ export function ElevationView({
             />
           );
         })}
+        {elevationScene.wallTexts.map(({ object: wallText, centerMm, sizeMm, outOfBounds }) => {
+          const previewCenter = previewCenterById.get(wallText.id);
+          const center = previewCenter ?? centerMm;
+          const size = sizeMm;
+
+          return (
+            <ElevationWallText
+              key={wallText.id}
+              center={center}
+              isOutOfBounds={
+                previewCenter
+                  ? isArtworkOutOfWallBounds(wallLengthMm, wallHeightMm, center, size)
+                  : outOfBounds
+              }
+              isSelected={!exportMode && selectedObjectIds.includes(wallText.id)}
+              size={size}
+              tooltip={
+                <WallTextTooltipContent
+                  name={wallText.name ?? WALL_TEXT_DEFAULT_NAME}
+                  widthMm={wallText.widthMm}
+                  heightMm={wallText.heightMm}
+                  unit={unit}
+                />
+              }
+              tooltipDisabled={exportMode || Boolean(moveDrag || dropGhost)}
+              wallHeightMm={wallHeightMm}
+              onPointerDown={(event) => {
+                if (canvasToolArmed) {
+                  event.stopPropagation();
+                  return;
+                }
+                beginMoveDrag(wallText, event);
+              }}
+              onSelect={(event) => {
+                if (canvasToolArmed) return;
+                if (consumeSelectSuppression()) return;
+                if (onSelectObject) {
+                  onSelectObject(wallText.id, {
+                    additive: event.shiftKey || event.metaKey || event.ctrlKey
+                  });
+                } else {
+                  onSelectOpening?.(wallText.id);
+                }
+              }}
+            />
+          );
+        })}
         {!exportMode && dropGhost ? (
           <ElevationArtwork
             center={dropGhost.centerMm}
@@ -2028,14 +2080,23 @@ export function ElevationView({
           />
         ) : null}
         {!exportMode && openingToolGhost && activeTool ? (
-          <ElevationOpening
-            center={openingToolGhost.centerMm}
-            isGhost
-            kind={activeTool}
-            size={openingToolGhost.sizeMm}
-            wallHeightMm={wallHeightMm}
-            wallObjectId="opening-tool-ghost"
-          />
+          activeTool === "wall-text" ? (
+            <ElevationWallText
+              center={openingToolGhost.centerMm}
+              isGhost
+              size={openingToolGhost.sizeMm}
+              wallHeightMm={wallHeightMm}
+            />
+          ) : (
+            <ElevationOpening
+              center={openingToolGhost.centerMm}
+              isGhost
+              kind={activeTool}
+              size={openingToolGhost.sizeMm}
+              wallHeightMm={wallHeightMm}
+              wallObjectId="opening-tool-ghost"
+            />
+          )
         ) : null}
         {!exportMode && isGroupOutlineEligible && pixelsPerMm > 0
           ? (() => {

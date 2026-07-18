@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
-import type { OpeningKind } from "../../../domain/placement/createOpening";
+import type { InsertToolKind } from "../../../domain/placement/createOpening";
 import { Button } from "../ui/button";
 import {
   DropdownMenu,
@@ -216,10 +216,10 @@ export function InsertPicker({
   onToolChange
 }: {
   variant: ClusterVariant;
-  activeTool: OpeningKind | null;
+  activeTool: InsertToolKind | null;
   disabled: boolean;
   disabledReason?: string;
-  onToolChange: (tool: OpeningKind | null) => void;
+  onToolChange: (tool: InsertToolKind | null) => void;
 }) {
   const entries: ClusterEntry[] = OPENING_TOOL_ORDER.map((kind) => ({
     ...OPENING_TOOL_META[kind],

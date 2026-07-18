@@ -38,6 +38,7 @@ import {
   getArtworkRectSvg,
   type ElevationScene
 } from "../../domain/scene2d/elevationScene";
+import { computeWallTextSkeleton } from "../../domain/scene2d/wallTextSkeleton";
 import {
   buildPlanScene,
   type PlanScene,
@@ -125,6 +126,8 @@ const COLORS = {
   surfaceStrong: rgb(0.91, 0.92, 0.93),
   gridMinor: rgb(0.88, 0.89, 0.9),
   gridMajor: rgb(0.73, 0.75, 0.77),
+  // Light grey skeleton bars on the white wall-text panel (~#d4d4d4).
+  skeletonBar: rgb(0.83, 0.835, 0.84),
   white: rgb(1, 1, 1)
 };
 
@@ -539,7 +542,7 @@ function drawPlanObject(
   page: PDFPage,
   transform: PlanTransform,
   rect: PlanRect,
-  kind: "artwork" | "door" | "window" | "blocked-zone",
+  kind: "artwork" | "door" | "window" | "blocked-zone" | "wall-text",
   isFloorPlaced: boolean
 ) {
   const corners = planRectCorners(rect).map(transform.point);
@@ -572,6 +575,11 @@ function drawPlanObject(
   } else if (kind === "window") {
     drawLine(page, world(-halfW, 0), world(halfW, 0), 0.5, COLORS.subtle);
     drawLine(page, world(0, -halfD), world(0, halfD), 0.5, COLORS.subtle);
+  } else if (kind === "wall-text") {
+    // A couple of short "text lines" — the plan echo of the elevation panel.
+    const inset = Math.min(rect.widthMm, rect.depthMm) * 0.22;
+    drawLine(page, world(-halfW + inset, -halfD * 0.3), world(halfW - inset, -halfD * 0.3), 0.5, COLORS.subtle);
+    drawLine(page, world(-halfW + inset, halfD * 0.3), world(halfW - inset * 3, halfD * 0.3), 0.5, COLORS.subtle);
   } else {
     for (const x of [-halfW, 0, halfW]) {
       drawLine(
@@ -876,6 +884,42 @@ function drawElevationOpening(
         );
       }
     }
+  }
+}
+
+// A white didactic panel with a subtle border and light-grey skeleton bars —
+// the export twin of ElevationWallText / the 3D wall-text panel, all three
+// sharing computeWallTextSkeleton so the bar layout is identical everywhere.
+function drawElevationWallText(
+  page: PDFPage,
+  transform: ElevationTransform,
+  wallText: ElevationScene["wallTexts"][number]
+) {
+  const xMm = wallText.centerMm.xMm - wallText.sizeMm.widthMm / 2;
+  const yMm = wallText.centerMm.yMm - wallText.sizeMm.heightMm / 2;
+  const rect = elevationRect(
+    transform,
+    xMm,
+    yMm,
+    wallText.sizeMm.widthMm,
+    wallText.sizeMm.heightMm
+  );
+  page.drawRectangle({
+    ...rect,
+    color: COLORS.white,
+    borderColor: COLORS.muted,
+    borderWidth: 0.7
+  });
+  const skeleton = computeWallTextSkeleton(wallText.sizeMm.widthMm, wallText.sizeMm.heightMm);
+  for (const bar of skeleton.bars) {
+    page.drawRectangle({
+      // Bars are normalized top-left/y-down; PDF is y-up, so flip the top.
+      x: rect.x + bar.xFrac * rect.width,
+      y: rect.y + rect.height - (bar.yFrac + bar.heightFrac) * rect.height,
+      width: bar.widthFrac * rect.width,
+      height: bar.heightFrac * rect.height,
+      color: COLORS.skeletonBar
+    });
   }
 }
 
@@ -1735,6 +1779,9 @@ export async function createDocumentPdf(
 
       for (const opening of scene.openings) {
         drawElevationOpening(page, transform, opening);
+      }
+      for (const wallText of scene.wallTexts) {
+        drawElevationWallText(page, transform, wallText);
       }
       if (input.settings.dimensions) {
         drawElevationDimensions(

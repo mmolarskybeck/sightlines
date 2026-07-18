@@ -1,6 +1,7 @@
 import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
 import { SquareIcon } from "@phosphor-icons/react/dist/csr/Square";
+import { TextAlignLeftIcon } from "@phosphor-icons/react/dist/csr/TextAlignLeft";
 import type { Icon } from "@phosphor-icons/react";
 import { effectiveFraming, getArtworkOuterDimensionsMm } from "../../../domain/framing";
 import { getOpeningKindLabel, type OpeningKind } from "../../../domain/placement/createOpening";
@@ -56,6 +57,32 @@ export function OpeningTooltipContent({
         {getOpeningKindLabel(kind)}
       </span>
       <span className="placement-tooltip-dims">{formatDims(widthMm, secondaryMm, displayUnit)}</span>
+    </div>
+  );
+}
+
+// A wall text's hover body: its name (default "Wall text") and footprint. It
+// carries no artwork metadata, so it reuses the compact opening layout.
+export function WallTextTooltipContent({
+  name,
+  widthMm,
+  heightMm,
+  unit
+}: {
+  name: string;
+  widthMm: number;
+  heightMm: number;
+  unit: DisplayUnit;
+}) {
+  const { displayUnit } = getScopeUnits(unitSystemFromDisplayUnit(unit), "openingSize");
+
+  return (
+    <div className="placement-tooltip-opening">
+      <span className="placement-tooltip-heading">
+        <TextAlignLeftIcon aria-hidden="true" size={15} />
+        {name}
+      </span>
+      <span className="placement-tooltip-dims">{formatDims(widthMm, heightMm, displayUnit)}</span>
     </div>
   );
 }

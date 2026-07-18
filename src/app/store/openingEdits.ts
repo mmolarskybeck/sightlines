@@ -31,7 +31,9 @@ export function openingNoun(kind: OpeningKind): string {
 // label reads "Move artwork" / "Move door" / "Move blocked zone" the same way
 // whether the object is wall-anchored or floor-placed.
 export function moveObjectNoun(kind: WallObject["kind"]): string {
-  return kind === "artwork" ? "artwork" : openingNoun(kind);
+  if (kind === "artwork") return "artwork";
+  if (kind === "wall-text") return "wall text";
+  return openingNoun(kind);
 }
 
 // Shared by addOpening (centers on the wall) and placeOpeningFromPlan (places

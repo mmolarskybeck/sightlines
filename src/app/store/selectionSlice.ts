@@ -49,11 +49,22 @@ export function getSelectedArtworkId(project: Project | null, selection: Selecti
   return placement?.kind === "artwork" ? placement.artworkId : null;
 }
 
-// Resolve a single selected opening or blocked zone for the inspector.
+// Resolve a single selected opening or blocked zone for the inspector. Wall
+// text is a non-artwork wall object too, but it has its own inspector, so it is
+// excluded here (see getSelectedWallTextId).
 export function getSelectedOpeningId(project: Project | null, selection: Selection): string | null {
   if (!project || selection.kind !== "objects" || selection.ids.length !== 1) return null;
   const placement = findPlacement(project, selection.ids[0]);
-  return placement && placement.kind !== "artwork" ? selection.ids[0] : null;
+  return placement && placement.kind !== "artwork" && placement.kind !== "wall-text"
+    ? selection.ids[0]
+    : null;
+}
+
+// Resolve a single selected wall text for its inspector.
+export function getSelectedWallTextId(project: Project | null, selection: Selection): string | null {
+  if (!project || selection.kind !== "objects" || selection.ids.length !== 1) return null;
+  const placement = findPlacement(project, selection.ids[0]);
+  return placement?.kind === "wall-text" ? selection.ids[0] : null;
 }
 
 // Centralizes selection writes and normalizes an empty object selection to none.

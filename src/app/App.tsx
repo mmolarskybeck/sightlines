@@ -32,7 +32,8 @@ import type {
   OpeningWallObject,
   ProjectSummary,
   SavedView,
-  SavedViewPose
+  SavedViewPose,
+  WallTextWallObject
 } from "../domain/project";
 import { isDegeneratePose, resolveSavedViewRoomLabel } from "../domain/savedViews";
 import { faceWallId, parseFaceWallId } from "../domain/geometry/freestandingWalls";
@@ -85,6 +86,7 @@ import {
   getWallPlacementNeighborEdges
 } from "./components/inspectors/WallPlacementFields";
 import { WallInspector } from "./components/inspectors/WallInspector";
+import { WallTextInspector } from "./components/inspectors/WallTextInspector";
 import { useStoragePersistence } from "./hooks/useStoragePersistence";
 import {
   escapeMeasurementState,
@@ -112,6 +114,7 @@ import {
   getProjectWalls,
   getSelectedArtworkId,
   getSelectedOpeningId,
+  getSelectedWallTextId,
   getSelectedWall,
   objectIdsOf,
   roomIdOf,
@@ -264,6 +267,7 @@ export function App() {
   const resizeOpening = useAppStore((state) => state.resizeOpening);
   const connectOpenings = useAppStore((state) => state.connectOpenings);
   const disconnectOpening = useAppStore((state) => state.disconnectOpening);
+  const renameWallText = useAppStore((state) => state.renameWallText);
   const placeOpeningOnElevation = useAppStore((state) => state.placeOpeningOnElevation);
   const commitPlanMove = useAppStore((state) => state.commitPlanMove);
   const updateFloorObject = useAppStore((state) => state.updateFloorObject);
@@ -283,6 +287,7 @@ export function App() {
   const selectedFreestandingWallId = freestandingWallIdOf(selection);
   const selectedArtworkId = getSelectedArtworkId(project, selection);
   const selectedOpeningId = getSelectedOpeningId(project, selection);
+  const selectedWallTextId = getSelectedWallTextId(project, selection);
   const selectedReferenceMeasurement = selection.kind === "measurement"
     ? project?.referenceMeasurements?.find((item) => item.id === selection.measurementId) ?? null
     : null;
@@ -834,13 +839,35 @@ export function App() {
         )
       : { xMm: 0, boundaryKind: "wall" as const };
 
-  // Deleted opening selections resolve to null.
+  // Deleted opening selections resolve to null. Wall text is a non-artwork
+  // wall object too, so it is excluded here (it has its own inspector).
   const selectedOpening: OpeningWallObject | null = selectedOpeningId
     ? (project.wallObjects.find(
         (wallObject): wallObject is OpeningWallObject =>
-          wallObject.kind !== "artwork" && wallObject.id === selectedOpeningId
+          wallObject.kind !== "artwork" &&
+          wallObject.kind !== "wall-text" &&
+          wallObject.id === selectedOpeningId
       ) ?? null)
     : null;
+
+  // Deleted wall-text selections resolve to null.
+  const selectedWallText: WallTextWallObject | null = selectedWallTextId
+    ? (project.wallObjects.find(
+        (wallObject): wallObject is WallTextWallObject =>
+          wallObject.kind === "wall-text" && wallObject.id === selectedWallTextId
+      ) ?? null)
+    : null;
+  const selectedWallTextWall = selectedWallText
+    ? (getProjectWalls(project).find((wall) => wall.id === selectedWallText.wallId) ?? null)
+    : null;
+  const wallTextCenterTarget =
+    selectedWallText && selectedWallTextWall
+      ? getWallPlacementCenterTarget(
+          selectedWallText as unknown as ArtworkWallObject,
+          project.wallObjects,
+          selectedWallTextWall.lengthMm
+        )
+      : { xMm: 0, boundaryKind: "wall" as const };
   const openingConnectionCandidates: OpeningConnectionCandidate[] =
     selectedOpening && (selectedOpening.kind === "door" || selectedOpening.kind === "window")
       ? project.wallObjects
@@ -967,7 +994,9 @@ export function App() {
       wallObject?.kind === "artwork"
         ? (artworksById.get(wallObject.artworkId)?.title ?? "Untitled artwork")
         : wallObject
-          ? getOpeningKindLabel(wallObject.kind)
+          ? wallObject.kind === "wall-text"
+            ? "Wall text"
+            : getOpeningKindLabel(wallObject.kind)
           : undefined;
     return { ...warning, subject };
   });
@@ -2018,6 +2047,35 @@ export function App() {
                 void updateFloorObject(selectedFloorBlockedZone.id, { widthMm, depthMm })
               }
               onDelete={() => void removePlacement(selectedFloorBlockedZone.id)}
+            />
+          ) : selectedWallText ? (
+            <WallTextInspector
+              wallText={selectedWallText}
+              unit={project.unit}
+              onRename={(name) => void renameWallText(selectedWallText.id, name)}
+              onCommitSize={(widthMm, heightMm) =>
+                void resizeOpening(selectedWallText.id, widthMm, heightMm, allowOverlappingPlacement)
+              }
+              onDelete={() => void removePlacement(selectedWallText.id)}
+              placementSection={
+                selectedWallTextWall ? (
+                  <WallPlacementFields
+                    placement={selectedWallText}
+                    wallLengthMm={selectedWallTextWall.lengthMm}
+                    centerTargetXMm={wallTextCenterTarget.xMm}
+                    centerBoundaryKind={wallTextCenterTarget.boundaryKind}
+                    unit={project.unit}
+                    onCommit={(xMm, yMm) =>
+                      void moveOpening(
+                        selectedWallText.id,
+                        xMm,
+                        yMm,
+                        allowOverlappingPlacement
+                      )
+                    }
+                  />
+                ) : null
+              }
             />
           ) : selectedOpening ? (
             <OpeningInspector

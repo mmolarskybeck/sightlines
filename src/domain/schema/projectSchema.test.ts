@@ -241,6 +241,66 @@ describe("projectSchema", () => {
   });
 });
 
+describe("WallTextWallObject", () => {
+  it("accepts a wall text with a name and one without", () => {
+    const project = createSampleProject();
+    project.wallObjects = [
+      {
+        id: "wall-text-1",
+        kind: "wall-text",
+        name: "Gallery intro",
+        wallId: "wall-north",
+        xMm: feetToMm(4),
+        yMm: inchesToMm(40),
+        widthMm: 600,
+        heightMm: 400
+      },
+      {
+        id: "wall-text-2",
+        kind: "wall-text",
+        wallId: "wall-north",
+        xMm: feetToMm(8),
+        yMm: inchesToMm(40),
+        widthMm: 600,
+        heightMm: 400
+      }
+    ];
+
+    const parsed = parseProject(project);
+    expect(parsed.wallObjects.map((object) => object.kind)).toEqual(["wall-text", "wall-text"]);
+    const [first, second] = parsed.wallObjects;
+    expect(first.kind === "wall-text" && first.name).toBe("Gallery intro");
+    // Optional name is absent, not blanked, on a nameless wall text.
+    expect(second.kind === "wall-text" && second.name).toBeUndefined();
+  });
+
+  it("rejects a wall text carrying blocksPlacement (it is not an opening)", () => {
+    const project = createSampleProject();
+    project.wallObjects = [
+      {
+        id: "wall-text-1",
+        kind: "wall-text",
+        blocksPlacement: true,
+        wallId: "wall-north",
+        xMm: feetToMm(4),
+        yMm: inchesToMm(40),
+        widthMm: 600,
+        heightMm: 400
+      } as unknown as OpeningWallObject
+    ];
+
+    // The discriminated union's wall-text branch has no blocksPlacement key, so
+    // strict parsing strips it — the parsed record must not carry it.
+    const parsed = parseProject(project);
+    expect("blocksPlacement" in parsed.wallObjects[0]).toBe(false);
+  });
+
+  it("round-trips a v1 project (no wall texts) with wall texts naturally absent", () => {
+    const { wallObjects: _wallObjects, ...olderProject } = createSampleProject();
+    expect(migrateProject(olderProject).wallObjects).toEqual([]);
+  });
+});
+
 describe("migrateProject", () => {
   it("rejects input with no recognizable schemaVersion as not a Sightlines project", () => {
     expect(() => migrateProject({ hello: 1 })).toThrow(/not a Sightlines project/);

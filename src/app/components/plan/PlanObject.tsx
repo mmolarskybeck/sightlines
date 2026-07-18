@@ -36,7 +36,7 @@ export function PlanObject({
   // strokes — the refusal must read regardless of the object's other state.
   isInvalid?: boolean;
   isSelected?: boolean;
-  kind: "door" | "window" | "blocked-zone" | "artwork";
+  kind: "door" | "window" | "blocked-zone" | "artwork" | "wall-text";
   // Starts a pointer-drag move of this object (PlanView owns the live preview
   // + commit-on-release). A click without real movement still falls through to
   // onSelect — the drag release is a no-op below its movement threshold.
@@ -122,6 +122,26 @@ export function PlanObject({
           x={x + insetMm}
           y={y + insetMm}
         />
+      ) : null}
+      {kind === "wall-text" ? (
+        // A couple of short horizontal "text lines" — the plan echo of the
+        // elevation skeleton panel, reusing the generic mark stroke.
+        <g className="plan-object-mark plan-object-mark--wall-text">
+          <line
+            vectorEffect="non-scaling-stroke"
+            x1={x + insetMm}
+            x2={rightX - insetMm}
+            y1={midY - insetMm * 0.4}
+            y2={midY - insetMm * 0.4}
+          />
+          <line
+            vectorEffect="non-scaling-stroke"
+            x1={x + insetMm}
+            x2={rightX - insetMm - insetWidthMm * 0.35}
+            y1={midY + insetMm * 0.4}
+            y2={midY + insetMm * 0.4}
+          />
+        </g>
       ) : null}
       {kind === "door" ? (
         <path

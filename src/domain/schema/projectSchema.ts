@@ -52,10 +52,19 @@ const blockedZoneWallObjectSchema = wallObjectBaseSchema.extend({
   blocksPlacement: z.literal(true)
 });
 
+// A wall text is additive (a new union member): older projects simply carry no
+// wall-text entries, so no schema-version bump is needed — a v3 document with
+// no wall texts is byte-identical to one written before this branch existed.
+const wallTextWallObjectSchema = wallObjectBaseSchema.extend({
+  kind: z.literal("wall-text"),
+  name: z.string().min(1).optional()
+});
+
 const wallObjectSchema = z.discriminatedUnion("kind", [
   artworkWallObjectSchema,
   connectableOpeningWallObjectSchema,
-  blockedZoneWallObjectSchema
+  blockedZoneWallObjectSchema,
+  wallTextWallObjectSchema
 ]);
 
 const floorObjectBaseSchema = z.object({

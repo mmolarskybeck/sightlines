@@ -80,6 +80,16 @@ export type FloorObject3d = {
   rotationDeg: number;
 };
 
+// Wall-local, center-anchored didactic text panel. Like artworks it rides the
+// wall face; the render layer draws the shared skeleton look (no real text).
+export type WallText3d = {
+  objectId: string;
+  xMm: number; // wall-local center along the wall, from `start`
+  yMm: number; // wall-local center, 0 = floor
+  widthMm: number;
+  heightMm: number;
+};
+
 export type WallPanel3d = {
   wallId: string;
   // Floor-space endpoints. ORIENTATION CONVENTION: walls are wound so the room
@@ -92,6 +102,7 @@ export type WallPanel3d = {
   holes: Hole3d[];
   artworks: WallArtwork3d[];
   blockedZones: Rect3d[];
+  wallTexts: WallText3d[];
 };
 
 // A partition slab (spec §7.1): two single-sided face panels (reusing
@@ -328,10 +339,16 @@ function derivePanelContents(
   artworksById: ReadonlyMap<string, Artwork>,
   allowHoles: boolean,
   openConnectionsByObjectId: ReadonlyMap<string, OpenConnection3d>
-): { holes: Hole3d[]; artworks: WallArtwork3d[]; blockedZones: Rect3d[] } {
+): {
+  holes: Hole3d[];
+  artworks: WallArtwork3d[];
+  blockedZones: Rect3d[];
+  wallTexts: WallText3d[];
+} {
   const artworks: WallArtwork3d[] = [];
   const blockedZones: Rect3d[] = [];
   const holes: Hole3d[] = [];
+  const wallTexts: WallText3d[] = [];
   for (const object of objects) {
     if (object.kind === "artwork") {
       const artwork = artworksById.get(object.artworkId);
@@ -340,6 +357,14 @@ function derivePanelContents(
         artworkId: object.artworkId,
         assetId: artwork?.assetId,
         status: artwork?.dimensions.status,
+        xMm: toLocalX(object.xMm),
+        yMm: object.yMm,
+        widthMm: object.widthMm,
+        heightMm: object.heightMm
+      });
+    } else if (object.kind === "wall-text") {
+      wallTexts.push({
+        objectId: object.id,
         xMm: toLocalX(object.xMm),
         yMm: object.yMm,
         widthMm: object.widthMm,
@@ -395,7 +420,7 @@ function derivePanelContents(
       });
     }
   }
-  return { holes, artworks, blockedZones };
+  return { holes, artworks, blockedZones, wallTexts };
 }
 
 function openingVerticalExtent(

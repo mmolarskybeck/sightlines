@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { OpeningKind } from "../../domain/placement/createOpening";
+import type { InsertToolKind } from "../../domain/placement/createOpening";
 import type { ViewMode } from "../store";
 
 // The 2D canvas's armed-tool state, collapsed into one discriminated union
@@ -13,7 +13,7 @@ import type { ViewMode } from "../store";
 // that enforces mutual exclusion across those tool modes.
 export type PlanMode =
   | { kind: "idle" }
-  | { kind: "placeOpening"; tool: OpeningKind }
+  | { kind: "placeOpening"; tool: InsertToolKind }
   | { kind: "drawRect" }
   | { kind: "drawRoom" }
   | { kind: "reshapeRoom"; roomId: string }
@@ -26,7 +26,7 @@ export interface UsePlanModeResult {
   // Sets (or clears, on null) the placeOpening tool — not itself a toggle;
   // callers (InsertPicker) compute null-vs-tool by comparing against the
   // current armed tool before calling this, exactly as App did before.
-  armOpeningTool: (tool: OpeningKind | null) => void;
+  armOpeningTool: (tool: InsertToolKind | null) => void;
   // Real toggle, same family as toggleDrawRoom: arms the rectangle-room tool
   // (drag corner-to-corner), disarming whatever else was armed.
   toggleDrawRect: () => void;
@@ -59,7 +59,7 @@ const IDLE: PlanMode = { kind: "idle" };
 export function usePlanMode(viewMode: ViewMode, selectedRoomId: string | null): UsePlanModeResult {
   const [mode, setMode] = useState<PlanMode>(IDLE);
 
-  const armOpeningTool = useCallback((tool: OpeningKind | null) => {
+  const armOpeningTool = useCallback((tool: InsertToolKind | null) => {
     setMode(tool ? { kind: "placeOpening", tool } : IDLE);
   }, []);
 
