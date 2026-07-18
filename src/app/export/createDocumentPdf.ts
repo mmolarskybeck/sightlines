@@ -975,21 +975,95 @@ function drawGapDimension(
       return;
     }
 
-    // Prefer keeping the label at the line's mid-height and sliding sideways
-    // (a straight horizontal leader) before any diagonal-leader fallback.
+    // The label keeps the line's mid-height and escapes sideways past the
+    // contiguous cluster around the gap, on the side the gap's own column
+    // is on — a 2x2 block's left-column gap labels to the block's left, the
+    // right-column gap to its right, so position names the column. The
+    // flood joins footprints separated by less than a label-sized gap; a
+    // real inter-group gap breaks the chain and the label stays adjacent.
     const labelWidth = textWidth(fonts, label, DIMENSION_SIZE_PT, true);
+    const labelY = midY - DIMENSION_SIZE_PT / 2;
+    // Footprints sharing the gap's vertical extent — the works the label
+    // must escape past to stay unambiguous.
+    const bandLo = Math.min(a.y, b.y) - 2;
+    const bandHi = Math.max(a.y, b.y) + 2;
+    const band = obstacles.filter(
+      (box) => box.top > bandLo && box.bottom < bandHi
+    );
+    // Contiguous crowd around the gap: footprints separated by less than 8pt
+    // read as one block the label must not sit inside.
+    let crowdLeft = a.x - 6;
+    let crowdRight = a.x + 6;
+    for (let changed = true; changed; ) {
+      changed = false;
+      for (const box of band) {
+        if (
+          box.left < crowdRight + 8 &&
+          box.right > crowdLeft - 8 &&
+          (box.left < crowdLeft || box.right > crowdRight)
+        ) {
+          crowdLeft = Math.min(crowdLeft, box.left);
+          crowdRight = Math.max(crowdRight, box.right);
+          changed = true;
+        }
+      }
+    }
+    // Escape toward the block's nearer outside edge, judged over the crowd
+    // plus its immediate ring — so a 2x2 block's left-column gap labels to
+    // the block's left and the right column to its right, and the position
+    // itself names the column.
+    let contextLeft = crowdLeft;
+    let contextRight = crowdRight;
+    for (const box of band) {
+      if (box.left < crowdRight + 24 && box.right > crowdLeft - 24) {
+        contextLeft = Math.min(contextLeft, box.left);
+        contextRight = Math.max(contextRight, box.right);
+      }
+    }
+    const rightward = a.x - contextLeft >= contextRight - a.x;
+    // Nearest x on the given side where the label clears every band
+    // footprint (monotone outward walk, so it terminates). A label stranded
+    // more than a cap from its own gap no longer reads as belonging to it
+    // (and its leader crosses other works), so those sides are dropped in
+    // favor of a close diagonal inside the gap's corridor instead.
+    const SLIDE_CAP_PT = 55;
+    const slideClear = (direction: 1 | -1): number | null => {
+      let x =
+        (direction === 1 ? crowdRight : crowdLeft) +
+        direction * (labelWidth / 2 + 6);
+      for (let moved = true; moved; ) {
+        moved = false;
+        for (const box of band) {
+          if (
+            box.right > x - labelWidth / 2 - 2 &&
+            box.left < x + labelWidth / 2 + 2
+          ) {
+            x =
+              direction === 1
+                ? box.right + labelWidth / 2 + 4
+                : box.left - labelWidth / 2 - 4;
+            moved = true;
+          }
+        }
+      }
+      return Math.abs(x - a.x) > SLIDE_CAP_PT ? null : x;
+    };
+    const nearX = slideClear(rightward ? 1 : -1);
+    const farX = slideClear(rightward ? -1 : 1);
+    const step = rightward ? 9 : -9;
+    const diagonalX = a.x + (rightward ? 1 : -1) * (labelWidth / 2 + 9);
     const labelPosition = choosePdfLabelCandidate(
       [
-        { x: a.x + labelWidth / 2 + 9, y: midY - DIMENSION_SIZE_PT / 2 },
-        { x: a.x - labelWidth / 2 - 9, y: midY - DIMENSION_SIZE_PT / 2 },
-        { x: a.x + labelWidth / 2 + 17, y: midY - DIMENSION_SIZE_PT / 2 },
-        { x: a.x - labelWidth / 2 - 17, y: midY - DIMENSION_SIZE_PT / 2 },
-        { x: a.x + labelWidth / 2 + 25, y: midY - DIMENSION_SIZE_PT / 2 },
-        { x: a.x - labelWidth / 2 - 25, y: midY - DIMENSION_SIZE_PT / 2 },
-        { x: a.x + labelWidth / 2 + 17, y: midY + 8 },
-        { x: a.x - labelWidth / 2 - 17, y: midY + 8 },
-        { x: a.x + labelWidth / 2 + 17, y: midY - 12 },
-        { x: a.x - labelWidth / 2 - 17, y: midY - 12 }
+        ...(nearX !== null
+          ? [
+              { x: nearX, y: labelY },
+              { x: nearX + step, y: labelY }
+            ]
+          : []),
+        ...(farX !== null ? [{ x: farX, y: labelY }] : []),
+        { x: diagonalX, y: midY + 8 },
+        { x: diagonalX, y: midY - 12 },
+        { x: a.x, y: midY + 8 }
       ].map((candidate) => ({
         x: candidate.x,
         y: candidate.y,
@@ -1046,19 +1120,24 @@ function drawGapDimension(
   const labelRight = midX + labelWidth / 2 + 2;
   const fitsInGap = available >= labelWidth + 6;
   // A label wider than its gap must clear the flanking artworks anyway, so
-  // place it in a lane just above the local footprint tops instead of
-  // walking up in per-artwork increments — neighboring pushed labels land
-  // at a consistent height and read as one dimension row.
-  let laneY = a.y + 9;
+  // it escapes to a lane just past the local footprints — on the side its
+  // own line is on, so a stacked block's top-row dims read above the block
+  // and bottom-row dims below it, and the position names the row.
+  let baseY = a.y + 2;
+  let offsets = [0, 8, 16, -8, -16, 24, -24];
   if (!fitsInGap) {
+    let crowdTop = a.y + 6;
+    let crowdBottom = a.y - 6;
     for (const box of obstacles) {
       if (box.right > labelLeft && box.left < labelRight) {
-        laneY = Math.max(laneY, box.top + 3);
+        crowdTop = Math.max(crowdTop, box.top);
+        crowdBottom = Math.min(crowdBottom, box.bottom);
       }
     }
+    const upward = a.y >= (crowdTop + crowdBottom) / 2;
+    baseY = upward ? crowdTop + 3 : crowdBottom - DIMENSION_SIZE_PT - 4;
+    offsets = upward ? [0, 9, 18, 27] : [0, -9, -18, -27];
   }
-  const baseY = fitsInGap ? a.y + 2 : laneY;
-  const offsets = fitsInGap ? [0, 8, 16, -8, -16, 24, -24] : [0, 9, 18, 27];
   const labelPosition = choosePdfLabelCandidate(
     offsets.map((offset) => {
       const y = baseY + offset;
@@ -1227,7 +1306,6 @@ function drawElevationDimensions(
     COLORS.subtle
   );
 
-  const datumLabels: PdfLabelBox[] = [];
   centerHeights.forEach((dimension, index) => {
     const datumY = transform.point({
       xMm: scene.wallLengthMm,
@@ -1258,9 +1336,9 @@ function drawElevationDimensions(
           }
         };
       }),
-      datumLabels
+      occupiedLabels
     );
-    datumLabels.push(position.box);
+    occupiedLabels.push(position.box);
     const labelMidY = position.y + DIMENSION_SIZE_PT / 2;
     if (Math.abs(labelMidY - datumY) > 2) {
       drawLine(
