@@ -65,7 +65,7 @@ import {
   choosePdfLabelCandidate,
   type PdfLabelBox
 } from "./pdfDimensionLayout";
-import { prepareImageForPdf } from "./pdfImage";
+import { prepareImageForPdf, type PdfImageOptions } from "./pdfImage";
 
 export type RenderSavedView = (
   view: SavedView,
@@ -1407,11 +1407,26 @@ async function loadPdfFonts(
   };
 }
 
-async function embedBlob(pdf: PDFDocument, blob: Blob): Promise<PDFImage> {
-  const prepared = await prepareImageForPdf(blob);
+async function embedBlob(
+  pdf: PDFDocument,
+  blob: Blob,
+  options?: PdfImageOptions
+): Promise<PDFImage> {
+  const prepared = await prepareImageForPdf(blob, options);
   return prepared.format === "png"
     ? pdf.embedPng(prepared.bytes)
     : pdf.embedJpg(prepared.bytes);
+}
+
+// Raster budget for an artwork image from the rect it actually prints in:
+// 300dpi at the drawn size with headroom for a slightly larger appearance on
+// another wall (the first draw sizes the shared embed). Most works print at
+// an inch or two, so this lands far below the global 1400px ceiling.
+const ARTWORK_PRINT_DPI = 300;
+function artworkImageBudgetPx(drawnRect: { width: number; height: number }): number {
+  const drawnPt = Math.max(drawnRect.width, drawnRect.height);
+  const target = Math.ceil(drawnPt * (ARTWORK_PRINT_DPI / 72) * 1.25);
+  return Math.min(1400, Math.max(220, target));
 }
 
 function warningName(artwork: Artwork | undefined, fallback: string): string {
@@ -1445,7 +1460,10 @@ export async function createDocumentPdf(
   pdf.setCreationDate(exportedAt);
   pdf.setModificationDate(exportedAt);
 
-  const artworkImage = (artwork: Artwork | undefined): Promise<EmbeddedArtworkImage> => {
+  const artworkImage = (
+    artwork: Artwork | undefined,
+    maxDimensionPx: number
+  ): Promise<EmbeddedArtworkImage> => {
     if (!artwork?.assetId) return Promise.resolve({ status: "absent" });
     const cached = imageCache.get(artwork.assetId);
     if (cached) return cached;
@@ -1454,7 +1472,10 @@ export async function createDocumentPdf(
       try {
         const asset = await input.getAsset(artwork.assetId!);
         const blob = await input.getBlob(asset.displayKey);
-        return { status: "ready", image: await embedBlob(pdf, blob) };
+        return {
+          status: "ready",
+          image: await embedBlob(pdf, blob, { maxDimensionPx })
+        };
       } catch {
         return { status: "missing" };
       }
@@ -1620,7 +1641,10 @@ export async function createDocumentPdf(
           });
         }
 
-        const embedded = await artworkImage(artwork);
+        const embedded = await artworkImage(
+          artwork,
+          artworkImageBudgetPx(imageRect)
+        );
         if (embedded.status === "ready") {
           page.drawImage(embedded.image, imageRectInside(imageRect, embedded.image));
           page.drawRectangle({
@@ -1684,12 +1708,18 @@ export async function createDocumentPdf(
     let image: PDFImage | null = null;
     if (savedView && input.renderSavedView) {
       const renderScale = THREE_D_RENDER_DPI / 72;
+      const renderPx = {
+        widthPx: Math.max(1, Math.round(renderRect.widthPt * renderScale)),
+        heightPx: Math.max(1, Math.round(renderRect.heightPt * renderScale))
+      };
       try {
-        const blob = await input.renderSavedView(savedView, {
-          widthPx: Math.max(1, Math.round(renderRect.widthPt * renderScale)),
-          heightPx: Math.max(1, Math.round(renderRect.heightPt * renderScale))
+        const blob = await input.renderSavedView(savedView, renderPx);
+        // Already rendered at exactly the needed resolution; preferCompact
+        // routes the canvas PNG through the opaque->JPEG re-encode.
+        image = await embedBlob(pdf, blob, {
+          maxDimensionPx: Math.max(renderPx.widthPx, renderPx.heightPx),
+          preferCompact: true
         });
-        image = await embedBlob(pdf, blob);
       } catch {
         image = null;
       }

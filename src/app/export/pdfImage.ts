@@ -11,6 +11,11 @@ export type PdfImageOptions = {
   // only inflates the file (a full-res display image embedded untouched put
   // multi-megabyte PNGs behind inch-wide frames).
   maxDimensionPx?: number;
+  // Route a within-budget PNG through the opaque->JPEG re-encode instead of
+  // passing it through. For canvas-generated PNGs (3D renders) the PNG
+  // encoding is an accident of toBlob, not a fidelity choice, and JPEG is an
+  // order of magnitude smaller. JPEG inputs still pass through untouched.
+  preferCompact?: boolean;
 };
 
 const DEFAULT_MAX_DIMENSION_PX = 1400;
@@ -112,7 +117,16 @@ export async function prepareImageForPdf(
   const originalBytes = await blobBytes(blob);
   const direct = passThroughFormat(originalBytes, blob.type, maxDimensionPx);
   if (direct) {
-    return { bytes: originalBytes, format: direct };
+    // preferCompact is an optimization, not a requirement: without a real
+    // decode pipeline (createImageBitmap), embeddable bytes pass through
+    // rather than fail — only genuinely unembeddable formats hard-require
+    // transcoding below.
+    const canRecompress =
+      typeof document !== "undefined" &&
+      typeof createImageBitmap === "function";
+    if (!(options.preferCompact && direct === "png" && canRecompress)) {
+      return { bytes: originalBytes, format: direct };
+    }
   }
   if (typeof document === "undefined") {
     throw new Error(`Cannot transcode ${blob.type || "unknown image type"} outside a browser.`);
