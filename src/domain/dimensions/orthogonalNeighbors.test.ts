@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   deriveElevationDimensions,
+  deriveVerticalNeighborGaps,
   NEIGHBOR_TOLERANCE_MM,
   type DimensionAxis,
   type DimensionParticipant,
@@ -333,5 +334,54 @@ describe("deriveElevationDimensions — degenerate inputs", () => {
     expect(dims.boundaryGaps).toHaveLength(2);
     expect(dims.centerHeights).toHaveLength(1);
     expect(dims.centerHeights[0].common).toBe(false);
+  });
+});
+
+describe("deriveVerticalNeighborGaps — vertical-only slice", () => {
+  it("emits the gap between stacked works with a corridor over their x-overlap", () => {
+    const gaps = deriveVerticalNeighborGaps([
+      part("upper", 1000, 2000, 1800, 2400),
+      part("lower", 1100, 1900, 1200, 1600)
+    ]);
+
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0]).toMatchObject({
+      axis: "vertical",
+      aId: "lower",
+      bId: "upper",
+      gapMm: 200,
+      fromMm: 1600,
+      toMm: 1800
+    });
+    // Corridor spans the pair's shared x-extent.
+    expect(gaps[0].corridorLoMm).toBe(1100);
+    expect(gaps[0].corridorHiMm).toBe(1900);
+  });
+
+  it("emits nothing for a side-by-side row and never emits horizontal gaps", () => {
+    const gaps = deriveVerticalNeighborGaps([
+      part("w1", 0, 1000, 1000, 2000),
+      part("w2", 1500, 2500, 1000, 2000)
+    ]);
+    expect(gaps).toHaveLength(0);
+  });
+
+  it("chains a three-high column without a top-to-bottom jump", () => {
+    const gaps = deriveVerticalNeighborGaps([
+      part("a", 1000, 2000, 400, 800),
+      part("b", 1000, 2000, 1100, 1500),
+      part("c", 1000, 2000, 1800, 2200)
+    ]);
+    const pairs = gaps.map((g) => `${g.aId}:${g.bId}`).sort();
+    expect(pairs).toEqual(["a:b", "b:c"]);
+  });
+
+  it("reads touching works as a clean 0", () => {
+    const gaps = deriveVerticalNeighborGaps([
+      part("upper", 1000, 2000, 1500, 2000),
+      part("lower", 1000, 2000, 1000, 1500)
+    ]);
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0].gapMm).toBe(0);
   });
 });

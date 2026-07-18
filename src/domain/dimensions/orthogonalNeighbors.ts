@@ -414,6 +414,28 @@ export function selectNearestNeighborGaps(
   );
 }
 
+// Vertical-axis slice of the §9.6 pass for the in-app canvas. The canvas's
+// GroupDimensionLines stays one-dimensional along the wall; stacked works get
+// their vertical spacing from this instead — the same corridor engine and
+// nearest-neighbor pruning the document page uses, restricted to one axis so
+// the caller pays nothing for boundaries or center heights it won't render.
+export function deriveVerticalNeighborGaps(
+  participants: DimensionParticipant[],
+  toleranceMm = NEIGHBOR_TOLERANCE_MM
+): GapDimension[] {
+  const gaps: GapDimension[] = [];
+  for (let i = 0; i < participants.length; i += 1) {
+    for (let j = i + 1; j < participants.length; j += 1) {
+      const others = participants.filter((_, k) => k !== i && k !== j);
+      const gap = pairGap(participants[i], participants[j], others, "vertical", toleranceMm);
+      if (gap) gaps.push(gap);
+    }
+  }
+  return selectNearestNeighborGaps(participants, gaps, toleranceMm).sort(
+    (x, y) => x.aId.localeCompare(y.aId) || x.bId.localeCompare(y.bId)
+  );
+}
+
 export function deriveElevationDimensions(input: DimensionInput): ElevationDimensions {
   const tol = input.toleranceMm ?? NEIGHBOR_TOLERANCE_MM;
   const { participants, wallLengthMm, wallHeightMm } = input;

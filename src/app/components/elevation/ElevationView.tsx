@@ -106,6 +106,11 @@ import {
 } from "./elevationArtworkGeometry";
 import { GridOverlay } from "../shared/GridOverlay";
 import { GroupDimensionLines } from "./GroupDimensionLines";
+import {
+  deriveVerticalNeighborGaps,
+  type DimensionParticipant
+} from "../../../domain/dimensions/orthogonalNeighbors";
+import { VerticalGapDimensionLines } from "./VerticalGapDimensionLines";
 import { MeasurementOverlay, type MeasurementEndpoint } from "../measurement/MeasurementOverlay";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
@@ -1684,6 +1689,31 @@ export function ElevationView({
           effectiveDimensionOthers,
           wallLengthMm
         );
+  // Vertical spacing for stacked works — the same §9.6 corridor engine the
+  // document PDF uses. Every wall object participates (an unselected neighbor
+  // above/below still bounds and blocks, exactly like the horizontal
+  // neighbour-aware segments), then only gaps touching a dimension member
+  // render, keeping the display selection-driven. `kind` is irrelevant to the
+  // vertical pass (it only drives boundary margins and center heights, which
+  // this caller never derives), so all participants pass as "artwork".
+  const verticalGapDimensions = isDimensionLinesEligible
+    ? deriveVerticalNeighborGaps(
+        [...effectiveDimensionMembers, ...effectiveDimensionOthers].map(
+          (wallObject): DimensionParticipant => ({
+            id: wallObject.id,
+            kind: "artwork",
+            rect: {
+              xMm: wallObject.xMm - wallObject.widthMm / 2,
+              yMm: wallObject.yMm - wallObject.heightMm / 2,
+              widthMm: wallObject.widthMm,
+              heightMm: wallObject.heightMm
+            }
+          })
+        )
+      ).filter(
+        (gap) => dimensionMemberIds.has(gap.aId) || dimensionMemberIds.has(gap.bId)
+      )
+    : [];
 
   // Wall switcher wiring for the chip. Prev/next cycle through every placeable
   // surface in room order (each room's perimeter walls then its partition
@@ -2072,6 +2102,15 @@ export function ElevationView({
             pixelsPerMm={pixelsPerMm}
             unit={unit}
             wallHeightMm={wallHeightMm}
+          />
+        ) : null}
+        {isDimensionLinesEligible ? (
+          <VerticalGapDimensionLines
+            gaps={verticalGapDimensions}
+            wallLengthMm={wallLengthMm}
+            wallHeightMm={wallHeightMm}
+            pixelsPerMm={pixelsPerMm}
+            unit={unit}
           />
         ) : null}
         {!exportMode &&
