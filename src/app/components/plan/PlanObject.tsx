@@ -4,7 +4,26 @@ import type {
   ReactNode
 } from "react";
 import type { PlanRect } from "../../../domain/geometry/planObjects";
+import {
+  CASE_LEG_INSET_MM,
+  CASE_LEG_SIZE_MM,
+  CASE_WALL_THICKNESS_MM
+} from "../../../domain/project";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
+
+// px → mm at the current zoom, or 0 with no zoom context (pixelsPerMm
+// absent/0) — callers then skip the floor/ceiling clamp entirely and use the
+// real mm value, which is what export/test rendering (no live zoom) wants.
+function mmForPx(pixelsPerMm: number, px: number): number {
+  return pixelsPerMm > 0 ? px / pixelsPerMm : 0;
+}
+
+// Clamp a real-world mm construction constant to stay legible on screen: at
+// least `minPx` screen pixels, but never past `maxMm` (so a tiny case's
+// "20mm wall" doesn't balloon to look like a thick frame).
+function clampMm(pixelsPerMm: number, realMm: number, minPx: number, maxMm: number): number {
+  return Math.min(Math.max(realMm, mmForPx(pixelsPerMm, minPx)), maxMm);
+}
 
 // Renders one placed object (wall-anchored door/window/blocked-zone, or a
 // floor-placed artwork/blocked-zone) as a thin rect in plan view — the plan
@@ -20,6 +39,7 @@ export function PlanObject({
   kind,
   onBeginDrag,
   onSelect,
+  pixelsPerMm = 0,
   planRect,
   tooltip,
   tooltipDisabled = false
@@ -44,6 +64,11 @@ export function PlanObject({
   // Receives the click event so the caller can read modifier keys (shift/
   // cmd/ctrl) for additive multi-select.
   onSelect?: (event: ReactMouseEvent<SVGGElement>) => void;
+  // Current plan zoom (screen px per model mm) — used only by the `case`
+  // glyph to clamp its honest-3D-geometry inset/legs to stay legible at any
+  // zoom. Absent/0 (export paths, tests with no live zoom) means "use real mm,
+  // no clamping."
+  pixelsPerMm?: number;
   planRect: PlanRect;
   // Hover-tooltip body (see PlacementTooltip). Ghosts never get one.
   tooltip?: ReactNode;
@@ -169,36 +194,105 @@ export function PlanObject({
         </g>
       ) : null}
       {kind === "case" ? (
-        // A vitrine glyph: the outer outline is the glass box footprint, the
-        // thin inner inset reads as the glass line, and (for a freestanding
-        // floor case) four small corner dots mark the legs. A wall case has no
-        // legs, so it draws only the inset — leaving the outline's wall-side
-        // edge as its orientation cue against the wall line it sits flush on.
+        // A vitrine glyph echoing the true 3D construction (CaseMesh.tsx)
+        // rather than an arbitrary inset: the glass box sits inside a
+        // CASE_WALL_THICKNESS_MM tray wall, and (for a freestanding floor
+        // case) four CASE_LEG_SIZE_MM legs sit CASE_LEG_INSET_MM in from the
+        // footprint edge — the same offsets FloorCaseMesh uses. A wall case
+        // has no legs, so it draws only the glass inset — leaving the
+        // outline's wall-side edge as its orientation cue against the wall
+        // line it sits flush on.
         <g className="plan-object-mark plan-object-mark--case">
-          <rect
-            className="plan-object-case-glass"
-            height={insetDepthMm}
-            vectorEffect="non-scaling-stroke"
-            width={insetWidthMm}
-            x={x + insetMm}
-            y={y + insetMm}
-          />
-          {isFloorPlaced
-            ? [
-                { cx: x + insetMm, cy: y + insetMm },
-                { cx: rightX - insetMm, cy: y + insetMm },
-                { cx: rightX - insetMm, cy: bottomY - insetMm },
-                { cx: x + insetMm, cy: bottomY - insetMm }
-              ].map((leg, index) => (
-                <circle
-                  className="plan-object-case-leg"
-                  cx={leg.cx}
-                  cy={leg.cy}
-                  key={index}
-                  r={insetMm * 0.28}
+          {(() => {
+            const wallInsetMm = clampMm(
+              pixelsPerMm,
+              CASE_WALL_THICKNESS_MM,
+              3,
+              Math.min(planRect.widthMm, planRect.depthMm) * 0.35
+            );
+            const glassWidthMm = planRect.widthMm - wallInsetMm * 2;
+            const glassDepthMm = planRect.depthMm - wallInsetMm * 2;
+            if (glassWidthMm <= 0 || glassDepthMm <= 0) return null;
+            const gx0 = x + wallInsetMm;
+            const gy0 = y + wallInsetMm;
+            const gx1 = gx0 + glassWidthMm;
+            const gy1 = gy0 + glassDepthMm;
+            // Loose 45° glazing hatch: a few sparse strokes marking the glass
+            // surface. Deliberately the OPPOSITE diagonal from the blocked-zone
+            // hatch (which rises left→right) so glass and blocked never share
+            // a symbol, and wide-spaced so it stays quiet at small sizes.
+            // Lines run y = x + c; c indexes the diagonals, centered in range.
+            const hatchSpacingMm = Math.max(Math.min(glassWidthMm, glassDepthMm) * 1.2, 300);
+            const cMin = gy0 - gx1;
+            const cMax = gy1 - gx0;
+            const hatchCount = Math.floor((cMax - cMin) / hatchSpacingMm);
+            const hatchStartC = cMin + (cMax - cMin - (hatchCount - 1) * hatchSpacingMm) / 2;
+            const hatchLines = [];
+            for (let i = 0; i < hatchCount; i++) {
+              const c = hatchStartC + i * hatchSpacingMm;
+              const xa = Math.max(gx0, gy0 - c);
+              const xb = Math.min(gx1, gy1 - c);
+              if (xb <= xa) continue;
+              hatchLines.push(
+                <line
+                  className="plan-object-case-hatch"
+                  key={i}
                   vectorEffect="non-scaling-stroke"
+                  x1={xa}
+                  x2={xb}
+                  y1={xa + c}
+                  y2={xb + c}
                 />
-              ))
+              );
+            }
+            return (
+              <>
+                <rect
+                  className="plan-object-case-glass"
+                  height={glassDepthMm}
+                  vectorEffect="non-scaling-stroke"
+                  width={glassWidthMm}
+                  x={gx0}
+                  y={gy0}
+                />
+                {hatchLines}
+              </>
+            );
+          })()}
+          {isFloorPlaced
+            ? (() => {
+                const legSizeMm = clampMm(
+                  pixelsPerMm,
+                  CASE_LEG_SIZE_MM,
+                  2.5,
+                  Math.min(planRect.widthMm, planRect.depthMm) * 0.18
+                );
+                // Below this footprint the two legs on an edge would collide
+                // (or straddle the edge itself) — matches FloorCaseMesh's own
+                // Math.max clamp, which pins legs to the center once the
+                // footprint is too small for a true CASE_LEG_INSET_MM offset.
+                if (Math.min(planRect.widthMm, planRect.depthMm) < 2 * (CASE_LEG_INSET_MM + CASE_LEG_SIZE_MM)) {
+                  return null;
+                }
+                const legOffsetXMm = Math.max(planRect.widthMm / 2 - CASE_LEG_INSET_MM, legSizeMm / 2);
+                const legOffsetDMm = Math.max(planRect.depthMm / 2 - CASE_LEG_INSET_MM, legSizeMm / 2);
+                return [
+                  { cx: midX - legOffsetXMm, cy: midY - legOffsetDMm },
+                  { cx: midX + legOffsetXMm, cy: midY - legOffsetDMm },
+                  { cx: midX - legOffsetXMm, cy: midY + legOffsetDMm },
+                  { cx: midX + legOffsetXMm, cy: midY + legOffsetDMm }
+                ].map((leg, index) => (
+                  <rect
+                    className="plan-object-case-leg"
+                    height={legSizeMm}
+                    key={index}
+                    vectorEffect="non-scaling-stroke"
+                    width={legSizeMm}
+                    x={leg.cx - legSizeMm / 2}
+                    y={leg.cy - legSizeMm / 2}
+                  />
+                ));
+              })()
             : null}
         </g>
       ) : null}

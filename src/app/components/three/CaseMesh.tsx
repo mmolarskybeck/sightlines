@@ -3,7 +3,14 @@ import type { ThreeEvent } from "@react-three/fiber";
 import { useState } from "react";
 import { MathUtils } from "three";
 import type { FloorObject3d, WallCase3d } from "../../../domain/geometry/scene3d";
-import { FLOOR_CASE_BOX_HEIGHT_MM } from "../../../domain/project";
+import {
+  CASE_BASE_SLAB_THICKNESS_MM,
+  CASE_GLASS_THICKNESS_MM,
+  CASE_LEG_INSET_MM,
+  CASE_LEG_SIZE_MM,
+  CASE_WALL_THICKNESS_MM,
+  FLOOR_CASE_BOX_HEIGHT_MM
+} from "../../../domain/project";
 import { mmToWorld } from "./coordinates";
 import { WALL_OFFSET_MM } from "./framingGeometry";
 import { SelectionBoxOutline } from "./UncertaintyOutline";
@@ -39,16 +46,8 @@ function planRotationToYaw(rotationDeg: number): number {
   return -MathUtils.degToRad(rotationDeg);
 }
 
-const LEG_SIZE_MM = 40;
-const LEG_INSET_MM = 40; // distance from the footprint edge to a leg's center
-const BASE_SLAB_THICKNESS_MM = 24;
 // Never let legs invert to a negative height on a very short case.
 const MIN_LEG_HEIGHT_MM = 20;
-
-// Tray wall/bottom-slab thickness shared by both case types.
-const CASE_WALL_THICKNESS_MM = 20;
-// Inset glass cap thickness.
-const CASE_GLASS_THICKNESS_MM = 6;
 
 const GLASS_MATERIAL_PROPS = {
   color: CASE_GLASS_COLOR,
@@ -86,10 +85,10 @@ export function FloorCaseMesh({
   };
 
   const legHeightMm = Math.max(
-    object.heightMm - FLOOR_CASE_BOX_HEIGHT_MM - BASE_SLAB_THICKNESS_MM,
+    object.heightMm - FLOOR_CASE_BOX_HEIGHT_MM - CASE_BASE_SLAB_THICKNESS_MM,
     MIN_LEG_HEIGHT_MM
   );
-  const slabTopMm = legHeightMm + BASE_SLAB_THICKNESS_MM;
+  const slabTopMm = legHeightMm + CASE_BASE_SLAB_THICKNESS_MM;
   const boxHeightMm = FLOOR_CASE_BOX_HEIGHT_MM;
   // The ring walls span the full case-body height (slab top to overall top —
   // the same vertical extent the old single box occupied); the glass cap
@@ -98,8 +97,8 @@ export function FloorCaseMesh({
   const trayTopMm = slabTopMm + boxHeightMm;
   const trayWallCenterYMm = slabTopMm + boxHeightMm / 2;
 
-  const legOffsetXMm = Math.max(object.widthMm / 2 - LEG_INSET_MM, LEG_SIZE_MM / 2);
-  const legOffsetZMm = Math.max(object.depthMm / 2 - LEG_INSET_MM, LEG_SIZE_MM / 2);
+  const legOffsetXMm = Math.max(object.widthMm / 2 - CASE_LEG_INSET_MM, CASE_LEG_SIZE_MM / 2);
+  const legOffsetZMm = Math.max(object.depthMm / 2 - CASE_LEG_INSET_MM, CASE_LEG_SIZE_MM / 2);
   const legCorners: [number, number][] = [
     [-legOffsetXMm, -legOffsetZMm],
     [legOffsetXMm, -legOffsetZMm],
@@ -131,13 +130,13 @@ export function FloorCaseMesh({
           onClick={handleClick}
           position={[mmToWorld(legX), mmToWorld(legHeightMm / 2), mmToWorld(legZ)]}
         >
-          <boxGeometry args={[mmToWorld(LEG_SIZE_MM), mmToWorld(legHeightMm), mmToWorld(LEG_SIZE_MM)]} />
+          <boxGeometry args={[mmToWorld(CASE_LEG_SIZE_MM), mmToWorld(legHeightMm), mmToWorld(CASE_LEG_SIZE_MM)]} />
           <meshLambertMaterial color={CASE_FRAME_COLOR} />
         </mesh>
       ))}
-      <mesh onClick={handleClick} position={[0, mmToWorld(legHeightMm + BASE_SLAB_THICKNESS_MM / 2), 0]}>
+      <mesh onClick={handleClick} position={[0, mmToWorld(legHeightMm + CASE_BASE_SLAB_THICKNESS_MM / 2), 0]}>
         <boxGeometry
-          args={[mmToWorld(object.widthMm), mmToWorld(BASE_SLAB_THICKNESS_MM), mmToWorld(object.depthMm)]}
+          args={[mmToWorld(object.widthMm), mmToWorld(CASE_BASE_SLAB_THICKNESS_MM), mmToWorld(object.depthMm)]}
         />
         <meshLambertMaterial color={CASE_FRAME_COLOR} />
       </mesh>

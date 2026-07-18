@@ -3179,6 +3179,7 @@ export function PlanView({
             activeTool={activeTool}
             viewBox={viewBoxBounds}
             handleSizeMm={handleSizeMm}
+            pixelsPerMm={pixelsPerMm}
             wallUnit={wallUnit}
             wallObjectMinDepthMm={wallObjectMinDepthMm}
             floorWalls={floorWallsForTool}

@@ -135,6 +135,8 @@
   --surface: oklch(0.975 0.004 230);
   --surface-strong: oklch(0.925 0.006 230);
   --subtle: oklch(0.55 0.008 230);
+  /* Near-invisible cool wash echoing 3D's CASE_GLASS_COLOR (#eef2f3) for the
+     case glass fill/tint — must read as barely-there under --muted strokes. */
   --focus: var(--ring);
   --grid-minor: oklch(0.78 0.008 240 / 0.42);
   --grid-major: oklch(0.62 0.01 240 / 0.5);
@@ -6704,7 +6706,11 @@ body.panels-resizing * {
 
 .case-outline {
   fill: var(--bg);
-  fill-opacity: 0.85;
+  /* Opaque on purpose: glass is symbolic, not optical. Anything sharing the
+     case's screen area (e.g. a floor-case ghost passing behind it) is masked
+     rather than reading as "visible through the glass". Ghost previews keep
+     their own translucent fill via the later .ghost rule. */
+  fill-opacity: 1;
   stroke: var(--muted);
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
@@ -6714,6 +6720,16 @@ body.panels-resizing * {
 }
 
 .case-glass {
+  fill: none;
+  stroke: var(--subtle);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+/* Bottom slab line — same pattern as .case-glass, a different construction
+   line rather than a new color vocabulary. */
+.case-slab {
   fill: none;
   stroke: var(--subtle);
   stroke-width: 1;
@@ -6745,21 +6761,34 @@ body.panels-resizing * {
   stroke-width: 2.5;
 }
 
-.elevation-case.selected .case-glass {
+.elevation-case.selected .case-glass,
+.elevation-case.selected .case-slab {
   stroke: var(--selection);
 }
 
 /* The elevation shadow of a freestanding floor case: a low-opacity dashed
-   outline standing in front of the wall, non-interactive, painted behind the
-   wall objects purely as an alignment aid. */
+   silhouette standing in front of the wall, non-interactive, painted behind
+   the wall objects purely as an alignment aid. Now a <g> (glass box + base
+   slab + two legs, ElevationCase.tsx's ElevationFloorCaseGhost) rather than a
+   single rect — dash/opacity/stroke live on the group, every child is fill:
+   none so only the group's own stroke shows. vector-effect is repeated on
+   each child in the component itself (it doesn't reliably inherit from the
+   group), not here. */
 .elevation-floor-case-ghost {
+  /* Covers the degenerate fallback, a bare <rect> carrying this class
+     directly rather than as a <g> ancestor (SVG fill is inherited, but the
+     descendant rule below is kept as well to match every child explicitly). */
   fill: none;
   stroke: var(--subtle);
   stroke-width: 1;
   stroke-dasharray: 6 5;
   opacity: 0.55;
-  vector-effect: non-scaling-stroke;
   pointer-events: none;
+}
+
+.elevation-floor-case-ghost rect,
+.elevation-floor-case-ghost line {
+  fill: none;
 }
 
 /* Plan-view placements — PlanObject.tsx. The outline is a little clearer than
@@ -6809,6 +6838,25 @@ body.panels-resizing * {
   stroke-dasharray: 5 4;
 }
 
+/* Kind-specific override: a floor case's outline is the true glass-box
+   footprint, not a "floating" object — draw it solid. Same specificity as the
+   dash rule above (three classes each) so source order decides; declared
+   after it deliberately. Ghosts/invalid states never carry is-floor at the
+   same time as this selector's other class, so their own dash rules
+   (declared later, .is-ghost/.is-invalid) still apply unaffected. */
+.plan-object--case.is-floor .plan-object-outline {
+  stroke-dasharray: none;
+}
+
+/* Glass is symbolic, not optical — and so is stacking. Cases paint below
+   artworks (PlacedObjectsLayer's cases-first partition: the art hangs above
+   the case's glass top, so from above the artwork covers the case), and BOTH
+   fills are opaque so neither ever reads as visible "through" the other. */
+.plan-object--case .plan-object-outline,
+.plan-object--artwork .plan-object-outline {
+  fill-opacity: 1;
+}
+
 .plan-object:not(.is-ghost) {
   cursor: grab;
 }
@@ -6824,6 +6872,13 @@ body.panels-resizing * {
   fill-opacity: 0.72;
   stroke: var(--selection);
   stroke-width: 2.5;
+}
+
+/* Selection must not turn a case or artwork footprint see-through — the
+   opaque-fill rule above keeps holding, only the fill color changes. */
+.plan-object--case.is-selected .plan-object-outline,
+.plan-object--artwork.is-selected .plan-object-outline {
+  fill-opacity: 1;
 }
 
 .plan-object-mark {
@@ -6846,6 +6901,13 @@ body.panels-resizing * {
 .plan-object-case-leg {
   fill: var(--subtle);
   stroke: none;
+}
+
+/* Loose glazing hatch on the glass area — lighter than the glass line so it
+   reads as surface, not structure. Stroke color rides the group's
+   .plan-object-mark rules, so selection/invalid recolor comes for free. */
+.plan-object-case-hatch {
+  opacity: 0.6;
 }
 
 .plan-object.is-selected .plan-object-mark {

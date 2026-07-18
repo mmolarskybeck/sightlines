@@ -253,6 +253,7 @@ function resolveOnWall(
     wallObjects: WallObjectBase[];
     movingSize: PlanMovingSize;
     wallFootprintWidthMm?: number;
+    movingKind: WallObject["kind"];
     thresholdMm: number;
     previousSnapTargetIds?: SnapTargetIds;
   }
@@ -283,7 +284,15 @@ function resolveOnWall(
 
   return {
     placement: { anchor: "wall", wallId: wall.id, xMm },
-    planRect: getWallObjectPlanRect(wall, { xMm, widthMm }, WALL_OBJECT_PLAN_DEPTH_MM),
+    // A case protrudes its real depth into the room, so its wall-anchored
+    // preview must carry movingSize.depthMm — mirroring buildPlanScene, which
+    // passes object.depthMm for cases, and resolvePlanGroupMemberMove's
+    // member.depthMm. Every other kind renders the thin through-wall band.
+    planRect: getWallObjectPlanRect(
+      wall,
+      { xMm, widthMm },
+      args.movingKind === "case" ? args.movingSize.depthMm : WALL_OBJECT_PLAN_DEPTH_MM
+    ),
     snapTargetIds: resolved.snapTargetIds,
     // Wall-local guides are omitted in v1: the resolve above ran in wall-local
     // coordinates, so its guides are in the wrong space to draw over the

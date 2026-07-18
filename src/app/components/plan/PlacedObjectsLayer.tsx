@@ -103,6 +103,14 @@ export function PlacedObjectsLayer({
       />
     );
   };
+  // Paint order: cases first, then everything else, across BOTH the wall and
+  // floor groups. An artwork hangs above a case's glass top, so seen from
+  // above the artwork rect must cover the case wherever their footprints
+  // overlap — never the reverse, and (both fills being opaque) never "through"
+  // either one. The partition crosses the two groups because a wall artwork
+  // can sit over a wall case or over a floor case pushed flush to the wall.
+  const isCase = (entry: { object: { kind: WallObject["kind"] } }) =>
+    entry.object.kind === "case";
   return (
     <>
       {openingConnections.map((connection) => (
@@ -126,7 +134,13 @@ export function PlacedObjectsLayer({
           />
         </g>
       ))}
-      {wallObjects.map(({ object: wallObject, artwork, restRect, renderedRect }) => {
+      {(() => {
+        const renderWallObject = ({
+          object: wallObject,
+          artwork,
+          restRect,
+          renderedRect
+        }: PlanSceneWallObject) => {
         // Preview position, generalized over single and group drags: a
         // group member reads its own rect from previewRectById, a single
         // dragged object reads previewPlanRect, everything else rests.
@@ -194,6 +208,7 @@ export function PlacedObjectsLayer({
             isSelected={isSelected}
             key={wallObject.id}
             kind={wallObject.kind}
+            pixelsPerMm={pixelsPerMm}
             planRect={renderedPlanRect}
             tooltip={
               wallObject.kind === "artwork" ? (
@@ -233,9 +248,15 @@ export function PlacedObjectsLayer({
                   movingSize: {
                     widthMm: wallObject.widthMm,
                     heightMm: wallObject.heightMm,
-                    // The eventual floor footprint depth if this drags
-                    // off the wall; unused while it stays on a wall.
-                    depthMm: DEFAULT_FLOOR_OBJECT_DEPTH_MM
+                    // A case's depth is its real wall protrusion — resolveOnWall
+                    // keeps the wall-anchored preview that deep (without it the
+                    // case collapses to the thin through-wall band mid-drag).
+                    // For every other kind this is the eventual floor footprint
+                    // depth if it drags off the wall; unused while on a wall.
+                    depthMm:
+                      wallObject.kind === "case"
+                        ? wallObject.depthMm
+                        : DEFAULT_FLOOR_OBJECT_DEPTH_MM
                   },
                   wallFootprintWidthMm: renderedRect.widthMm,
                   // Preview a floated result at the wall's angle so a
@@ -269,8 +290,8 @@ export function PlacedObjectsLayer({
             }}
           />
         );
-      })}
-      {floorObjects.map(({ object: floorObject, rect: restRect }) => {
+        };
+        const renderFloorObject = ({ object: floorObject, rect: restRect }: PlanSceneFloorObject) => {
         const groupPreviewRect = objectDrag?.members
           ? objectDrag.previewRectById?.get(floorObject.id)
           : undefined;
@@ -304,6 +325,7 @@ export function PlacedObjectsLayer({
             isSelected={isSelected}
             key={floorObject.id}
             kind={floorObject.kind}
+            pixelsPerMm={pixelsPerMm}
             planRect={planRect}
             tooltip={
               floorObject.kind === "artwork" ? (
@@ -362,7 +384,14 @@ export function PlacedObjectsLayer({
             }}
           />
         );
-      })}
+        };
+        return [
+          ...wallObjects.filter(isCase).map(renderWallObject),
+          ...floorObjects.filter(isCase).map(renderFloorObject),
+          ...wallObjects.filter((entry) => !isCase(entry)).map(renderWallObject),
+          ...floorObjects.filter((entry) => !isCase(entry)).map(renderFloorObject)
+        ];
+      })()}
     </>
   );
 }

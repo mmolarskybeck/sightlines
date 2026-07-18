@@ -4,14 +4,32 @@ import type {
   ReactNode
 } from "react";
 import { getArtworkRectSvg, type ArtworkCenterMm, type ArtworkSizeMm } from "./elevationArtworkGeometry";
+import {
+  CASE_BASE_SLAB_THICKNESS_MM,
+  CASE_GLASS_THICKNESS_MM,
+  CASE_LEG_INSET_MM,
+  CASE_WALL_THICKNESS_MM,
+  FLOOR_CASE_BOX_HEIGHT_MM
+} from "../../../domain/project";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
+
+// px → mm at the current zoom, or 0 with no zoom context (pixelsPerMm
+// absent/0) — see PlanObject.tsx's identical helper for the rationale.
+function mmForPx(pixelsPerMm: number, px: number): number {
+  return pixelsPerMm > 0 ? px / pixelsPerMm : 0;
+}
+
+function clampMm(pixelsPerMm: number, realMm: number, minPx: number, maxMm: number): number {
+  return Math.min(Math.max(realMm, mmForPx(pixelsPerMm, minPx)), maxMm);
+}
 
 // Renders one wall display case (vitrine) in elevation — the case counterpart
 // to ElevationOpening, reusing the same rect-geometry helper so a case and an
 // opening can never disagree about how a center+size maps to an SVG rect. The
-// wall-face view is a solid side-profile box: an outer outline plus a thin
-// inner inset that reads as the glass line, matching the restrained mark
-// vocabulary the plan-view case glyph uses (PlanObject's plan-object--case).
+// wall-face view echoes the true 3D construction (CaseMesh.tsx's wall-case
+// tray) instead of a generic concentric double-rect: a glass-lid line inset
+// between the side walls and a bottom slab line — matching the honest-geometry
+// plan glyph (PlanObject's plan-object--case).
 export function ElevationCase({
   center,
   isGhost = false,
@@ -19,6 +37,7 @@ export function ElevationCase({
   isSelected = false,
   onPointerDown,
   onSelect,
+  pixelsPerMm = 0,
   size,
   tooltip,
   tooltipDisabled = false,
@@ -32,6 +51,9 @@ export function ElevationCase({
   // Receives the click event so the caller can read modifier keys (shift/
   // cmd/ctrl) for additive multi-select, mirroring ElevationOpening.
   onSelect?: (event: ReactMouseEvent<SVGGElement>) => void;
+  // Current elevation zoom (screen px per model mm) — clamps the construction
+  // marks to stay legible. Absent/0 (export paths, tests) means real mm.
+  pixelsPerMm?: number;
   size: ArtworkSizeMm;
   // Hover-tooltip body (see PlacementTooltip's CaseTooltipContent).
   tooltip?: ReactNode;
@@ -42,11 +64,20 @@ export function ElevationCase({
 }) {
   const rect = getArtworkRectSvg(wallHeightMm, center, size);
 
-  // The glass inset is a fixed fraction of the smaller edge, the same 0.22
-  // ratio the plan-view case glyph uses, clamped so a thin case never inverts.
-  const insetMm = Math.min(rect.widthMm, rect.heightMm) * 0.22;
-  const insetWidthMm = Math.max(0, rect.widthMm - insetMm * 2);
-  const insetHeightMm = Math.max(0, rect.heightMm - insetMm * 2);
+  // Side-wall thickness the glass lid is inset within — stopping short of the
+  // corners (rather than a full-width line) is what kills the double-rect
+  // read the old concentric inset had.
+  const wallT = clampMm(pixelsPerMm, CASE_WALL_THICKNESS_MM, 2, rect.widthMm * 0.35);
+  const glassBandMm = clampMm(pixelsPerMm, CASE_GLASS_THICKNESS_MM, 1.5, rect.heightMm * 0.25);
+  const slabBandMm = clampMm(pixelsPerMm, CASE_WALL_THICKNESS_MM, 2, rect.heightMm * 0.25);
+  const glassLidYMm = rect.yMm + glassBandMm;
+  const slabLineYMm = rect.yMm + rect.heightMm - slabBandMm;
+  const lidX1Mm = rect.xMm + wallT;
+  const lidX2Mm = rect.xMm + rect.widthMm - wallT;
+  // Too small for the lid line and slab line to fit without crossing (or the
+  // inset to leave any span at all) — skip every inner mark, keep just the
+  // outline.
+  const showMarks = lidX2Mm > lidX1Mm && slabLineYMm > glassLidYMm;
 
   const classNames = ["elevation-case"];
   if (isGhost) classNames.push("ghost");
@@ -67,14 +98,26 @@ export function ElevationCase({
         x={rect.xMm}
         y={rect.yMm}
       />
-      <rect
-        className="case-glass"
-        height={insetHeightMm}
-        vectorEffect="non-scaling-stroke"
-        width={insetWidthMm}
-        x={rect.xMm + insetMm}
-        y={rect.yMm + insetMm}
-      />
+      {showMarks ? (
+        <>
+          <line
+            className="case-glass"
+            vectorEffect="non-scaling-stroke"
+            x1={lidX1Mm}
+            x2={lidX2Mm}
+            y1={glassLidYMm}
+            y2={glassLidYMm}
+          />
+          <line
+            className="case-slab"
+            vectorEffect="non-scaling-stroke"
+            x1={rect.xMm}
+            x2={rect.xMm + rect.widthMm}
+            y1={slabLineYMm}
+            y2={slabLineYMm}
+          />
+        </>
+      ) : null}
     </g>
   );
 
@@ -110,14 +153,66 @@ export function ElevationFloorCaseGhost({
   // smaller SVG y after the shared flip, its bottom edge sits on the floor line.
   const topSvgYMm = wallHeightMm - heightMm;
 
+  // Below this, the glass box + base slab alone would meet or pass the
+  // floor — there's no room left for legs. Fall back to the plain silhouette
+  // rect exactly as before rather than drawing degenerate/overlapping marks.
+  if (heightMm <= FLOOR_CASE_BOX_HEIGHT_MM + CASE_BASE_SLAB_THICKNESS_MM) {
+    return (
+      <rect
+        className="elevation-floor-case-ghost"
+        height={heightMm}
+        vectorEffect="non-scaling-stroke"
+        width={widthMm}
+        x={xMinMm}
+        y={topSvgYMm}
+      />
+    );
+  }
+
+  const glassBoxHeightMm = Math.min(FLOOR_CASE_BOX_HEIGHT_MM, heightMm);
+  const slabLineYMm = topSvgYMm + FLOOR_CASE_BOX_HEIGHT_MM + CASE_BASE_SLAB_THICKNESS_MM;
+  // Only two legs (not four): the projected extent from
+  // projectFloorCaseOntoWall is a 1D along-wall range, so a rotated case's
+  // exact leg x-positions aren't recoverable here — these two lines are an
+  // alignment approximation, inset CASE_LEG_INSET_MM from each edge of the
+  // projected extent (clamped inside it on a narrow projection).
+  const legXStartMm = Math.min(xMinMm + CASE_LEG_INSET_MM, xMaxMm);
+  const legXEndMm = Math.max(xMaxMm - CASE_LEG_INSET_MM, xMinMm);
+
   return (
-    <rect
-      className="elevation-floor-case-ghost"
-      height={heightMm}
-      vectorEffect="non-scaling-stroke"
-      width={widthMm}
-      x={xMinMm}
-      y={topSvgYMm}
-    />
+    <g className="elevation-floor-case-ghost">
+      <rect
+        className="floor-case-ghost-glass-box"
+        height={glassBoxHeightMm}
+        vectorEffect="non-scaling-stroke"
+        width={widthMm}
+        x={xMinMm}
+        y={topSvgYMm}
+      />
+      <line
+        className="floor-case-ghost-slab"
+        vectorEffect="non-scaling-stroke"
+        x1={xMinMm}
+        x2={xMaxMm}
+        y1={slabLineYMm}
+        y2={slabLineYMm}
+      />
+      <line
+        className="floor-case-ghost-leg"
+        vectorEffect="non-scaling-stroke"
+        x1={legXStartMm}
+        x2={legXStartMm}
+        y1={slabLineYMm}
+        y2={wallHeightMm}
+      />
+      <line
+        className="floor-case-ghost-leg"
+        vectorEffect="non-scaling-stroke"
+        x1={legXEndMm}
+        x2={legXEndMm}
+        y1={slabLineYMm}
+        y2={wallHeightMm}
+      />
+    </g>
   );
 }

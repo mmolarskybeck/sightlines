@@ -51,6 +51,9 @@ export type PlanOverlaysLayerProps = {
   activeTool: InsertToolKind | null;
   viewBox: ViewBoxRect;
   handleSizeMm: number;
+  // Current plan zoom, threaded to PlanObject for the `case` tool ghost's
+  // honest-3D-geometry clamps (see PlanObject.tsx pixelsPerMm).
+  pixelsPerMm: number;
   wallUnit: DisplayUnit;
   wallObjectMinDepthMm: number;
   floorWalls: FloorWall[];
@@ -78,6 +81,7 @@ export function PlanOverlaysLayer({
   activeTool,
   viewBox,
   handleSizeMm,
+  pixelsPerMm,
   wallUnit,
   wallObjectMinDepthMm,
   floorWalls,
@@ -391,6 +395,7 @@ export function PlanOverlaysLayer({
         <PlanObject
           isGhost
           kind={activeTool ?? "door"}
+          pixelsPerMm={pixelsPerMm}
           planRect={
             toolGhost.placement.anchor === "wall"
               ? {
@@ -408,6 +413,7 @@ export function PlanOverlaysLayer({
           // danger token so the refusal reads before release.
           isInvalid={dropGhost.placement.anchor === "none"}
           kind="artwork"
+          pixelsPerMm={pixelsPerMm}
           planRect={
             dropGhost.placement.anchor === "wall"
               ? {

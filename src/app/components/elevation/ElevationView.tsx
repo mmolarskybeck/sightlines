@@ -2154,6 +2154,7 @@ export function ElevationView({
                 !exportMode &&
                 (selectedOpeningId === displayCase.id || selectedObjectIds.includes(displayCase.id))
               }
+              pixelsPerMm={pixelsPerMm}
               size={size}
               tooltip={
                 <CaseTooltipContent
@@ -2205,6 +2206,7 @@ export function ElevationView({
             <ElevationCase
               center={openingToolGhost.centerMm}
               isGhost
+              pixelsPerMm={pixelsPerMm}
               size={openingToolGhost.sizeMm}
               wallHeightMm={wallHeightMm}
             />
