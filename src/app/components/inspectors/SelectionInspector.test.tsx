@@ -68,6 +68,23 @@ describe("SelectionInspector arrange body", () => {
     expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
   });
 
+  it("inset/both, a stacked (vertically overlapping) selection: overlap magnitude readout, no Calculated tag", () => {
+    renderPanel({
+      arrange: {
+        ...baseArrange,
+        // Stacked works share a column, so their x-extents overlap and the
+        // averaged interior gap goes negative — the panel should show the
+        // overlap magnitude, not a nonsensical negative distance.
+        gapMm: -60,
+        gapIsMixed: false
+      }
+    });
+
+    expect(screen.getByText("Distance between works")).toBeTruthy();
+    expect(screen.getByText(/^Overlapping /)).toBeTruthy();
+    expect(screen.queryByText("Calculated")).toBeNull();
+  });
+
   it("inset/left, a neighbouring artwork: field label, Neighbor tag, and caption name the artwork", () => {
     renderPanel({
       arrange: {

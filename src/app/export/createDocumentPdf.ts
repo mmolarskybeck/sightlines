@@ -63,6 +63,7 @@ import {
 } from "../../domain/export/pageComposition";
 import {
   choosePdfLabelCandidate,
+  findPdfLeaderRoute,
   type PdfLabelBox
 } from "./pdfDimensionLayout";
 import { prepareImageForPdf, type PdfImageOptions } from "./pdfImage";
@@ -880,7 +881,8 @@ function drawElevationOpening(
 
 function participantObstacleBoxes(
   scene: ElevationScene,
-  transform: ElevationTransform
+  transform: ElevationTransform,
+  paddingPt = 3
 ): PdfLabelBox[] {
   return elevationSceneToDimensionParticipants(scene).map((participant) => {
     const bottomLeft = transform.point({
@@ -892,10 +894,10 @@ function participantObstacleBoxes(
       yMm: participant.rect.yMm + participant.rect.heightMm
     });
     return {
-      left: bottomLeft.x - 3,
-      right: topRight.x + 3,
-      bottom: bottomLeft.y - 3,
-      top: topRight.y + 3
+      left: bottomLeft.x - paddingPt,
+      right: topRight.x + paddingPt,
+      bottom: bottomLeft.y - paddingPt,
+      top: topRight.y + paddingPt
     };
   });
 }
@@ -908,7 +910,8 @@ function drawGapDimension(
   unit: DisplayUnit,
   occupied: PdfLabelBox[],
   obstacles: readonly PdfLabelBox[],
-  wallFrame: { topY: number; bottomY: number }
+  leaderObstacles: readonly PdfLabelBox[],
+  wallFrame: { leftX: number; rightX: number; topY: number; bottomY: number }
 ) {
   const label = formatDocumentDimension(dimension.gapMm, unit);
   const isBoundary = !("axis" in dimension);
@@ -951,8 +954,10 @@ function drawGapDimension(
             }
           };
         }),
-        occupied
+        occupied,
+        obstacles
       );
+      if (!labelPosition) return;
       const labelX = labelPosition.x;
       occupied.push(labelPosition.box);
       if (Math.abs(labelX - a.x) > 3) {
@@ -1023,11 +1028,8 @@ function drawGapDimension(
     }
     const rightward = a.x - contextLeft >= contextRight - a.x;
     // Nearest x on the given side where the label clears every band
-    // footprint (monotone outward walk, so it terminates). A label stranded
-    // more than a cap from its own gap no longer reads as belonging to it
-    // (and its leader crosses other works), so those sides are dropped in
-    // favor of a close diagonal inside the gap's corridor instead.
-    const SLIDE_CAP_PT = 55;
+    // footprint (monotone outward walk, so it terminates). Distance is a
+    // preference, not a reason to place a knockout over artwork.
     const slideClear = (direction: 1 | -1): number | null => {
       let x =
         (direction === 1 ? crowdRight : crowdLeft) +
@@ -1047,43 +1049,80 @@ function drawGapDimension(
           }
         }
       }
-      return Math.abs(x - a.x) > SLIDE_CAP_PT ? null : x;
+      return x;
     };
     const nearX = slideClear(rightward ? 1 : -1);
     const farX = slideClear(rightward ? -1 : 1);
     const step = rightward ? 9 : -9;
     const diagonalX = a.x + (rightward ? 1 : -1) * (labelWidth / 2 + 9);
+    const leaderStart = { x: a.x, y: midY };
+    const candidates = [
+      ...(nearX !== null
+        ? [
+            { x: nearX, y: labelY },
+            { x: nearX + step, y: labelY },
+            { x: nearX, y: labelY + 10 },
+            { x: nearX, y: labelY - 10 },
+            { x: nearX + step, y: labelY + 10 },
+            { x: nearX + step, y: labelY - 10 }
+          ]
+        : []),
+      ...(farX !== null
+        ? [
+            { x: farX, y: labelY },
+            { x: farX, y: labelY + 10 },
+            { x: farX, y: labelY - 10 }
+          ]
+        : []),
+      { x: diagonalX, y: midY + 8 },
+      { x: diagonalX, y: midY - 12 },
+      { x: a.x, y: midY + 8 }
+    ].map((candidate) => {
+        const leaderRoute = findPdfLeaderRoute(
+          leaderStart,
+          {
+            x: candidate.x,
+            y: candidate.y + DIMENSION_SIZE_PT / 2
+          },
+          leaderObstacles
+        );
+        return {
+          x: candidate.x,
+          y: candidate.y,
+          leaderRoute,
+          box: {
+            left: candidate.x - labelWidth / 2 - 2,
+            right: candidate.x + labelWidth / 2 + 2,
+            bottom: candidate.y - 1,
+            top: candidate.y + DIMENSION_SIZE_PT + 3
+          }
+        };
+      })
+      // A close diagonal is only acceptable when its path actually clears
+      // the artwork. Otherwise leave the label on a clear exterior lane.
+      .filter(
+        (candidate) =>
+          candidate.leaderRoute !== null &&
+          candidate.box.left >= wallFrame.leftX + 4 &&
+          candidate.box.right <= wallFrame.rightX - 4 &&
+          candidate.box.bottom >= wallFrame.bottomY + 4 &&
+          candidate.box.top <= wallFrame.topY - 4
+      );
     const labelPosition = choosePdfLabelCandidate(
-      [
-        ...(nearX !== null
-          ? [
-              { x: nearX, y: labelY },
-              { x: nearX + step, y: labelY }
-            ]
-          : []),
-        ...(farX !== null ? [{ x: farX, y: labelY }] : []),
-        { x: diagonalX, y: midY + 8 },
-        { x: diagonalX, y: midY - 12 },
-        { x: a.x, y: midY + 8 }
-      ].map((candidate) => ({
-        x: candidate.x,
-        y: candidate.y,
-        box: {
-          left: candidate.x - labelWidth / 2 - 2,
-          right: candidate.x + labelWidth / 2 + 2,
-          bottom: candidate.y - 1,
-          top: candidate.y + DIMENSION_SIZE_PT + 3
-        }
-      })),
-      occupied
+      candidates,
+      occupied,
+      obstacles
     );
+    if (!labelPosition) return;
     occupied.push(labelPosition.box);
-    drawLine(
-      page,
-      { x: a.x, y: midY },
-      { x: labelPosition.x, y: labelPosition.y + DIMENSION_SIZE_PT / 2 },
-      0.3,
-      COLORS.subtle
+    labelPosition.leaderRoute!.slice(1).forEach((point, index) =>
+      drawLine(
+        page,
+        labelPosition.leaderRoute![index]!,
+        point,
+        0.3,
+        COLORS.subtle
+      )
     );
     drawCenteredLabel(
       page,
@@ -1160,8 +1199,10 @@ function drawGapDimension(
         }
       };
     }),
-    occupied
+    occupied,
+    obstacles
   );
+  if (!labelPosition) return;
   const labelY = labelPosition.y;
   occupied.push(labelPosition.box);
   if (Math.abs(labelY - a.y) > 3) {
@@ -1184,10 +1225,11 @@ function drawElevationDimensions(
   unit: DisplayUnit
 ) {
   const dimensions = deriveElevationSceneDimensions(scene);
-  // Participant footprints stay frozen (they seed the label lane); the
-  // occupied list grows as labels land so later labels avoid earlier ones.
+  // Participant footprints are hard obstacles; the occupied list contains
+  // only labels, so later annotations still prefer their own clear lanes.
   const obstacleBoxes = participantObstacleBoxes(scene, transform);
-  const occupiedLabels = [...obstacleBoxes];
+  const leaderObstacleBoxes = participantObstacleBoxes(scene, transform, 0);
+  const occupiedLabels: PdfLabelBox[] = [];
   const wallBottomLeft = transform.point({ xMm: 0, yMm: 0 });
   const wallTopRight = transform.point({
     xMm: scene.wallLengthMm,
@@ -1288,7 +1330,13 @@ function drawElevationDimensions(
       unit,
       occupiedLabels,
       obstacleBoxes,
-      { topY: wallTopRight.y, bottomY: wallBottomLeft.y }
+      leaderObstacleBoxes,
+      {
+        leftX: wallBottomLeft.x,
+        rightX: wallTopRight.x,
+        topY: wallTopRight.y,
+        bottomY: wallBottomLeft.y
+      }
     )
   );
 
@@ -1351,8 +1399,10 @@ function drawElevationDimensions(
           }
         };
       }),
-      occupiedLabels
+      occupiedLabels,
+      obstacleBoxes
     );
+    if (!position) return;
     occupiedLabels.push(position.box);
     const labelMidY = position.y + DIMENSION_SIZE_PT / 2;
     if (Math.abs(labelMidY - datumY) > 2) {

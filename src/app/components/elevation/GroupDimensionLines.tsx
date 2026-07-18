@@ -44,6 +44,13 @@ const MAX_STAGGER_ROW = 3;
 // Segments narrower than this get no connecting line (a flush edge would draw a
 // zero-length or backwards span) — but they are still LABELED: a "0"" readout
 // tells the curator the works are touching, which is real information.
+//
+// Segments narrower than -MIN_SEGMENT_MM are OVERLAPS (e.g. members of the same
+// column in a stacked/salon selection) and are filtered out before rendering
+// entirely — no line, no ticks, no label, no stagger row. Overlap is an in-app
+// advisory (handled elsewhere via highlighting), not a distance worth printing;
+// this matches the document PDF pass in orthogonalNeighbors.ts (§9.6), which
+// also emits no gap for overlapping pairs.
 const MIN_SEGMENT_MM = 0.5;
 
 export function GroupDimensionLines({
@@ -91,38 +98,40 @@ export function GroupDimensionLines({
   // rowRightPx[row] tracks the right screen-x extent of the last label in that
   // staggered row.
   const rowRightPx: number[] = [];
-  const placements = segments.map((segment, index) => {
-    const widthMm = segment.toMm - segment.fromMm;
-    const isTiny = Math.abs(widthMm) < MIN_SEGMENT_MM;
-    // A negative segment means neighbors overlap: the connecting line would be
-    // misleading (it'd span backwards), so keep just the ticks. Sign is applied
-    // by hand because formatLength's fraction paths aren't negative-safe.
-    const isOverlap = widthMm < 0;
-    const label = (isOverlap ? "-" : "") + formatLength(Math.abs(widthMm), { unit });
-    const midMm = (segment.fromMm + segment.toMm) / 2;
+  // Overlap segments (width < -MIN_SEGMENT_MM) are dropped before layout so
+  // they draw nothing and never consume a stagger row — see MIN_SEGMENT_MM.
+  const placements = segments
+    .filter((segment) => segment.toMm - segment.fromMm >= -MIN_SEGMENT_MM)
+    .map((segment, index) => {
+      const widthMm = segment.toMm - segment.fromMm;
+      const isTiny = Math.abs(widthMm) < MIN_SEGMENT_MM;
+      // Widths are >= -MIN_SEGMENT_MM here, so a tiny negative reading (e.g.
+      // -0.3mm) is clamped to 0 rather than printing "-0".
+      const label = formatLength(Math.max(0, widthMm), { unit });
+      const midMm = (segment.fromMm + segment.toMm) / 2;
 
-    const segmentPx = Math.abs(widthMm) * pixelsPerMm;
-    const labelWidthPx = label.length * LABEL_FONT_PX * LABEL_GLYPH_WIDTH_RATIO;
-    const fits = segmentPx >= labelWidthPx + LABEL_FIT_SLACK_PX;
+      const segmentPx = Math.abs(widthMm) * pixelsPerMm;
+      const labelWidthPx = label.length * LABEL_FONT_PX * LABEL_GLYPH_WIDTH_RATIO;
+      const fits = segmentPx >= labelWidthPx + LABEL_FIT_SLACK_PX;
 
-    const row = staggerLabelRow(rowRightPx, {
-      fits,
-      mid: midMm * pixelsPerMm,
-      halfWidth: labelWidthPx / 2,
-      gap: LABEL_ROW_GAP_PX,
-      maxRow: MAX_STAGGER_ROW
+      const row = staggerLabelRow(rowRightPx, {
+        fits,
+        mid: midMm * pixelsPerMm,
+        halfWidth: labelWidthPx / 2,
+        gap: LABEL_ROW_GAP_PX,
+        maxRow: MAX_STAGGER_ROW
+      });
+
+      return { segment, index, midMm, label, isTiny, row };
     });
-
-    return { segment, index, midMm, label, isTiny, isOverlap, row };
-  });
 
   return (
     <g pointerEvents="none">
-      {placements.map(({ segment, index, midMm, label, isTiny, isOverlap, row }) => {
+      {placements.map(({ segment, index, midMm, label, isTiny, row }) => {
         const labelY = lineSvgY + labelOffsetMm + row * rowSpacingMm;
         return (
           <g key={index}>
-            {isOverlap || isTiny ? null : (
+            {isTiny ? null : (
               <line
                 className="dimension-line"
                 x1={segment.fromMm}

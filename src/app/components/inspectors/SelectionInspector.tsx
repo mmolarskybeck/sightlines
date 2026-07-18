@@ -293,8 +293,19 @@ export function SelectionInspector({
                     />
                     <ArrangeCalculatedReadout
                       label="Distance between works"
-                      value={arrange.gapIsMixed ? "Mixed" : formatValue(arrange.gapMm)}
+                      value={
+                        arrange.gapIsMixed
+                          ? "Mixed"
+                          : // A negative average gap means the selection's members overlap
+                            // along x (e.g. a stacked/salon column) — print the overlap
+                            // magnitude instead of a negative distance, matching the canvas
+                            // dimension lines, which drop overlap segments entirely.
+                            arrange.gapMm < -0.5
+                            ? `Overlapping ${formatValue(-arrange.gapMm)}`
+                            : formatValue(arrange.gapMm)
+                      }
                       isMixed={arrange.gapIsMixed}
+                      hideTag={!arrange.gapIsMixed && arrange.gapMm < -0.5}
                     />
                     <p className="field-hint">
                       {bothEdgeCaption(arrange.leftBoundary, arrange.rightBoundary)}
@@ -621,19 +632,23 @@ function ArrangeCalculatedReadout({
   label,
   value,
   isMixed,
-  isNeighbor = false
+  isNeighbor = false,
+  hideTag = false
 }: {
   label: string;
   value: string;
   isMixed: boolean;
   isNeighbor?: boolean;
+  // Suppresses the "Calculated" tag for states where the value isn't a
+  // single calculated distance, e.g. the "Overlapping <length>" readout.
+  hideTag?: boolean;
 }) {
   return (
     <div className="arrange-readout">
       <span className="arrange-readout-label">{label}</span>
       <span className="arrange-readout-value-row">
         <span className="arrange-readout-value">{value}</span>
-        {isMixed ? null : <span className="arrange-tag">Calculated</span>}
+        {isMixed || hideTag ? null : <span className="arrange-tag">Calculated</span>}
         {isNeighbor ? <NeighborTag /> : null}
       </span>
     </div>
