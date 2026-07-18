@@ -183,7 +183,11 @@ Implemented or substantially underway:
 * Cross-project artwork library view and a settings dialog with durable-storage request.
 * Focus-aware keyboard guards so text fields, selects, SVG workspace focus, and panel resize handles keep their own shortcuts.
 * Static About, Privacy, Security, IT, `security.txt`, sitemap, robots, manifest, and `llms.txt` trust surfaces.
-* JSON import/export for development backup.
+* `.sightlines` project package export/import with schema versioning and content-addressed assets.
+* Saved views collection with editable titles, live room labels, and thumbnail caching.
+* PNG/JPG image snapshots (one-click export of the current view).
+* PDF document export with configurable contents (overview plan, room details, wall elevations, 3D views), automatic dimension lines, and vector output with embedded artwork.
+* Bulk mat/frame editing for artwork selections with live preview.
 
 ## Deployment
 
@@ -195,7 +199,7 @@ The detailed roadmap lives in `docs/plan.md` §9 (source of truth); the current 
 
 * **MVP 1 — Spatial editor + checklist core: shipped.** Geometry spine, artwork library/checklist, placement with snapping and collision flagging, multi-select/group/arrange, simple derived 3D preview.
 * **MVP 2 — Room shape tools + multi-room flow: shipped** (a benchmark-triggered renderer-scalability gate remains open). Polygon rooms and reshaping, partitions, paired door/window connections with honest 3D see-through/capped treatment, multi-room placement, 3D navigation.
-* **MVP 3 — Project packages, sharing, polish: next.** `.sightlines` export/import with the untrusted-file safety pipeline, prominent backup flow, PNG/PDF exports, readiness reporting.
+* **MVP 3 — Project packages, sharing, polish: shipping.** `.sightlines` export/import with the untrusted-file safety pipeline (shipped 2026-07-12), PNG/PDF snapshot and document exports with automatic dimension lines (shipped 2026-07-17), saved views collection, bulk mat/frame editing, and readiness reporting.
 * **MVP 4/5 — Tablet depth, then phone tier.** iPad-adapted layout, Dropbox-folder sync, richer checklist workflows, command palette; phone viewing later.
 * **Backlog (real demand only):** hosted accounts/cloud, real-time collaboration, registrar-level collections management, full 3D editing, curved walls.
 

@@ -270,6 +270,12 @@ mat 75, frame 25 → outer 600×500).
 
 ### Phase 6a — Spreadsheet provenance
 
+Note: Phase 7 (shipped) sets `frameIncludedInImage: true` on a `framed`-role
+import cell, making the double-count structurally impossible and **superseding
+this phase's "will double-count" warning** with a calm informational note (see
+Phase 7's Import bullet). The persisted-provenance goal below is subsumed by
+that flag; a standalone Phase 6a warning is no longer planned.
+
 - Promote `dimensionRole: "overall"`/`"framed"` provenance to a
   review-visible, persisted flag per §3; import-review surfaces "framed/
   overall size stored as image dims — adding mat/frame will double-count."
@@ -295,7 +301,12 @@ mat 75, frame 25 → outer 600×500).
   keeps the image width even when handed a footprint width; a framed floor work's
   derived plan depth is the image width, not the outer width.
 
-### Phase 7 — Frame-inclusive size flag (`frameIncludedInImage`)
+### Phase 7 — Frame-inclusive size flag (`frameIncludedInImage`) (complete 2026-07-14, 3d6b40f; extended by bulk mat/frame apply ff908a9 2026-07-17)
+
+`effectiveFraming(artwork)` (`src/domain/framing.ts`) is the sole interpreter as
+specified below; the flag is wired through the store, tooltip, inspector, 3D
+(`WallPanel`/`ArtworkPlane`), and elevation readers, and the bulk mat/frame apply
+flow (ff908a9) carries it too.
 
 Some works store an OUTER size in `dimensions` — usually because the uploaded
 photo itself shows the frame. Widening such a size by a mat/frame double-counts,

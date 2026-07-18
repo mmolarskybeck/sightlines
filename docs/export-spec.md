@@ -1,6 +1,8 @@
 # PDF and Image Export — Behavior Spec
 
-Status: Draft for review · Written: 2026-07-14
+Status: Shipped (Slices 1 + 2) · Written: 2026-07-14 · Implemented 2026-07-16→17
+(feat/export). Outstanding: iPad share-sheet + print device verification (§15)
+and the design/engineering follow-ups still listed in §16.
 
 Decisions reviewed with Marina 2026-07-14 (three rounds, incorporating
 Sol's review): image export (PNG/JPG) captures exactly one view per file and
@@ -152,10 +154,17 @@ Slice 2 is implemented in phases, each independently mergeable and testable:
   cancel, error handling, accessibility pass, browser/device verification
   (§12, §13, §15).
 
-Phases 1–3 landed 2026-07-16; Phase 4 is implemented and awaiting review.
-Phase 5 wire-up landed 2026-07-16 (entry point, progress/cancel, delivery,
-error handling, accessibility; desktop browser verification done — iPad share
-sheet and print checks from §15 remain outstanding). PDF text embeds bundled
+Phases 1–3 landed 2026-07-16. Phase 2's orthogonal-neighbor dimension engine
+landed 2026-07-16 (3145982) and was completed 2026-07-17 with vertical gaps
+for stacked works (c015992), nearest-neighbor pruning of the raw visibility
+graph (7da9c5b), and overlap detection plus leader routing (58e2344). Phase 4
+(page composition, PDF assembly, label-candidate selection, image transcode)
+landed 2026-07-16 (499ac2f page composition, 4b1e656 label candidates, 0ac5395
+Geist embedding) and gained compact/passthrough image encoding 2026-07-17
+(407f922, a1a4df3). Phase 5 wire-up landed 2026-07-16 (entry point,
+progress/cancel, delivery, error handling, accessibility; a failed Saved-view
+render no longer aborts the export, 6708dc7); desktop browser verification is
+done — iPad share sheet and print checks from §15 remain outstanding. PDF text embeds bundled
 Geist Regular/SemiBold subsets (SIL OFL 1.1, license shipped beside the TTFs
 in public/fonts/), fetched lazily at export time and failing open to the
 writer's standard-Helvetica fallback; glyphs outside Geist's Latin coverage
@@ -205,7 +214,11 @@ still substitute with the writer's warning.
   at full resolution, renaming, downloading, and deleting — the Export
   dialog's management surface (§8.4) is deliberately minimal so it can
   shrink to inclusion-only once that collection exists. The data model in
-  §8 is designed for that future, not just for PDF assembly.
+  §8 is designed for that future, not just for PDF assembly. (The collection
+  has since shipped in `docs/saved-views-collection-spec.md` — Phases A–C,
+  2026-07-17 — and the dialog's management surface duly shrank to
+  inclusion-only, per that spec's Phase C. Full-resolution open/download from
+  a row remains deferred there.)
 
 ## 4. Vocabulary and copy
 
@@ -920,6 +933,21 @@ Task-based, with curators and one installer if possible:
   if default titles prove insufficient in real packets.
 
 ### Engineering questions
+
+All of the questions below were **resolved by the shipped feat/export
+implementation** (2026-07-16→17); they are kept here as the record of what the
+implementation had to satisfy. The orthogonal-neighbor engine lives in
+`src/domain/dimensions/orthogonalNeighbors.ts` (horizontal + vertical gaps,
+tolerance/widest-corridor, nearest-neighbor pruning — 3145982, c015992,
+7da9c5b); dense-wall layout, leader routing, and label-collision handling in
+`src/app/export/pdfDimensionLayout.ts` (58e2344, 665a1dd); offscreen 3D render
+in `SavedViewRenderHost`; the thumbnail cache in the saved-views-collection
+spec (DB v3); document-settings workspace prefs in
+`src/domain/export/documentSettings.ts`; the shared static-scene painter via the
+scene2d builders + `src/domain/export/pageComposition.ts`; Geist PDF font
+embedding (0ac5395); WebP→JPEG/PNG transcode in `src/app/export/pdfImage.ts`
+(with passthrough/compact encoding, 407f922/a1a4df3); and the Saved-view schema
+in Phase 1.
 
 - Orthogonal-neighbor tolerance and widest-corridor selection: stable under
   sub-millimeter nudges, deterministic when a blocker leaves several clear

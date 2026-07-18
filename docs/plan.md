@@ -228,7 +228,7 @@ type Wall = {
 
 **Room shape tools are a dedicated floorplan mode, not an extension of ordinary selection.** The fast rectangle path stays because most rooms are rectangles and should remain easy. Irregular galleries are created through a polygon-drawing mode: click corner by corner in Plan view, preview the next segment as the pointer moves, then close by clicking the first point or pressing Enter. Reshape is designed around real non-rectangular rooms rather than bolted onto the rectangle resize handles: drag vertices, split/delete vertices, and slide whole walls while preserving neighboring wall lines where possible. Outside room-shape mode, clicks keep their current meanings: select walls, select placements, or use an armed placement tool.
 
-**Free-standing partition walls are room-owned, double-sided placement surfaces.** They are not stored as extra loop walls because they do not participate in the closed perimeter invariant. A partition stores inline room-local endpoints, height, and thickness; the app derives two stable face wall IDs from that centerline so existing placement, elevation, validation, and 3D code can treat each side as a wall-like surface without duplicating geometry. See `docs/room-shapes-spec.md` for the detailed schema v3 contract.
+**Free-standing partition walls are room-owned, double-sided placement surfaces.** They are not stored as extra loop walls because they do not participate in the closed perimeter invariant. A partition stores inline room-local endpoints, height, and thickness; the app derives two stable face wall IDs from that centerline so existing placement, elevation, validation, and 3D code can treat each side as a wall-like surface without duplicating geometry. See `docs/archive/room-shapes-spec.md` for the detailed schema v3 contract.
 
 **Validate the structural invariants at the boundary, not deep in geometry math.** The geometry code assumes a room's walls form a closed loop in vertex order (`wall[i].endVertexId === wall[i+1].startVertexId`), and the model carries two redundant identity fields (`RoomPlacement.roomId` vs `placement.room.id`, `Wall.roomId` vs containment in `room.walls`). The schema should assert loop closure and identity agreement, so a hand-edited or corrupted file fails at import with a clear message instead of producing a wall-not-found error three function calls into a resize.
 
@@ -439,14 +439,12 @@ MVP1 bundles a lot — geometry, artwork/checklist, snapping/collision/undo, and
 - **Shipped:** 3D navigation overhaul — cursor-directed wheel dolly, WASD travel, double-click focus flights, touch pan (tunables in `cameraNav.ts`).
 - **Open, benchmark-triggered renderer scalability:** validate whole-floor 3D with the deterministic 10-room / 200-work fixture in `fixtures/benchmarks/renderer-10-room-200-work.ts` on desktop and tablet. Keep Overview whole-floor; if eye-level navigation or texture pressure becomes material, scope eye-level rendering to the camera's containing room plus one-hop rooms visible through aligned connected openings. Treat this as render-layer filtering only — no project-schema change.
 
-### MVP 3 — Project packages, sharing, polish [NEXT]
-- `.sightlines` export/import as a self-contained `SightlinesPackage` (§6) — embeds the artwork snapshot the project actually needs, not just references into the local library — including library-wide `exportAll()`/`importAll()` alongside per-project export (§8)
-- Import safety pipeline (§13) applied to every import path
-- Prominent "Save backup" UX, `navigator.storage.persist()`, and a visible storage-status message — IndexedDB/OPFS are caches, not archives (§11)
-- Saved camera views
-- PNG export: elevation, floor plan, 3D screenshot
-- PDF checklist export (client-side, pdf-lib)
-- Missing/approximate-data readiness report
+### MVP 3 — Project packages, sharing, polish [IN PROGRESS]
+- **Shipped (2026-07-12):** `.sightlines` export/import as a self-contained `SightlinesPackage` (§6) — embeds the artwork snapshot the project actually needs, not just references into the local library — and the import safety pipeline (§13) applied to that path. Library-wide `exportAll()`/`importAll()` (§8) alongside per-project export is not yet built.
+- **Shipped (2026-07-16 → 17):** Saved camera views (create in 3D, thumbnail cache, left-rail collection pane); PNG export (Export image) for plan, elevation, and 3D view; Export PDF — multi-page document (Overview, room plans, per-wall elevations, Saved-view 3D pages) with automatic dimension lines and bundled-font text, per `docs/export-spec.md`.
+- `navigator.storage.persist()` and Settings' "Export backup" ship; a prominent, always-visible storage-status message ("this project is saved locally...") is still open (§11).
+- PDF checklist export (client-side, pdf-lib) — a deliberate sibling slice to the elevation document above, not yet built (`docs/export-spec.md` §3.3).
+- Missing/approximate-data readiness report — not yet built.
 
 ### MVP 4 — Tablet + professional workflow depth
 - **Responsive/touch-adapted layout for iPad** (§3.5): touch-sized handles, gesture disambiguation, bottom-sheet panels, on-screen shortcut equivalents, 3D validated on real tablet hardware

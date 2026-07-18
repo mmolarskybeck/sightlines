@@ -1,6 +1,8 @@
 # Saved views collection & thumbnails
 
-**Status: draft, for review.** This spec closes two deferrals from
+**Status: shipped (Phases A–C, feat/export, 2026-07-17).** Outstanding: open
+questions 2 (per-row Export image) and 3 (iPad regeneration cadence) below, and
+the full-resolution open/download non-goal (§7). This spec closes two deferrals from
 `docs/export-spec.md`: the saved-view **thumbnail cache** (§8.2 there defined
 its contract but no slice built it — the Export dialog renders placeholder
 tiles today) and the **left-pane Saved views collection** (§3.3 there named it
@@ -176,13 +178,16 @@ dialog without ever having opened the pane.
 
 ## 6. Phases
 
-- **Phase A — Thumbnail cache + dialog wiring.** DB v3 store, host mount
-  generalization, save-time seed, `useSavedViewThumbnails`, pass
-  `thumbnailUrls` to the dialog. Ships alone as a visible win (the dialog's
-  placeholders become previews).
-- **Phase B — Rail + pane.** The `savedViews` left panel: rows, open-in-3D
+- **Phase A — Thumbnail cache + dialog wiring (shipped d15e71d).** DB v3 store
+  (`DB_VERSION = 3`, `savedViewThumbnails`, `IndexedDbSavedViewThumbnailRepository`,
+  wired 2c9a192), host mount generalization, save-time seed,
+  `useSavedViewThumbnails`, pass `thumbnailUrls` to the dialog. Ships alone as a
+  visible win (the dialog's placeholders become previews).
+- **Phase B — Rail + pane (shipped 0aef712).** The `savedViews` left panel
+  (`SavedViewsPanel`, `BookmarksSimpleIcon` on the rail): rows, open-in-3D
   (`flyToPose`), rename, delete, empty state. Depends on A for thumbnails.
-- **Phase C — Dialog slimming.** Remove dialog row rename/delete; copy
+- **Phase C — Dialog slimming (shipped 1555c5e).** Removed dialog row
+  rename/delete (the dialog's Saved-view rows are now inclusion-only); copy
   alignment pass across pane/dialog/menu. Depends on B (never remove the only
   management surface before its replacement exists).
 
@@ -204,18 +209,20 @@ dialog without ever having opened the pane.
 
 ## 8. Open questions for review
 
-1. **Dialog section title.** The Export dialog section stays "3D views"
-   (naming the *page type*) while the pane is "Saved views" (naming the
-   *objects*). Defensible — but if the split reads as two features, renaming
-   the dialog section "Saved views" is a one-string change; the page-type
-   framing would then live only in the PDF itself.
+1. **Dialog section title.** Resolved as proposed: the Export dialog section
+   stays **"3D views"** (naming the *page type*) while the pane is "Saved
+   views" (naming the *objects*) — the shipped dialog keeps the "3D views"
+   label. The one-string rename to "Saved views" remains available if the
+   split ever reads as two features; the page-type framing would then live
+   only in the PDF itself.
 2. **Per-row Export image.** Pull the deferred download action into Phase B
    after all? It's the only §3.3 capability this spec doesn't deliver.
 3. **Regeneration cadence.** Is ~2s edit-quiet debounce right on iPad, or
    should the pane regenerate only on open/focus (never live during edits)?
-4. **Rail icon.** `BookmarksSimpleIcon` proposed; alternatives (`CameraIcon`,
-   `StackIcon`) read more literal but break the pairing with the Save view
-   menu item.
+4. **Rail icon.** Resolved: shipped with `BookmarksSimpleIcon` (the proposed
+   option), preserving the pairing with the `BookmarkSimpleIcon` on the Save
+   view action. Alternatives (`CameraIcon`, `StackIcon`) read more literal but
+   would have broken that pairing.
 5. **Save view's home.** Resolved: moved to the 3D camera toolbar
    (`ThreeDCameraTools`), joining Overview / Eye level / Focus selection
    behind a hairline divider. Camera actions now live together, and the

@@ -98,14 +98,16 @@ excluded.
 
 ## Export modes (docs/plan.md §4.5)
 
-Three modes, chosen from the topbar Export menu (and Settings → "Export backup",
-which uses `display`):
+Three modes, chosen from the topbar Export menu's **Project backup
+(.sightlines)** submenu (and Settings → "Export backup", which uses `display`).
+Since the 2026-07-17 Export-menu restructure (saved-views-collection-spec §9),
+those modes carry the user-facing submenu labels below:
 
-| Mode            | Tiers in the zip                     | Use |
-|-----------------|--------------------------------------|-----|
-| `originals`     | `original` + `display` + `thumbnail` | Archival fidelity — final venue handoff, press kit. Largest file. Re-import never has to regenerate derivatives. |
-| `display`       | `display` + `thumbnail`              | **Default.** Good balance for backup and sharing. |
-| `metadata-only` | none                                 | Checklist + layout only. Lightest possible file. |
+| Mode            | Menu label       | Tiers in the zip                     | Use |
+|-----------------|------------------|--------------------------------------|-----|
+| `originals`     | With originals   | `original` + `display` + `thumbnail` | Archival fidelity — final venue handoff, press kit. Largest file. Re-import never has to regenerate derivatives. |
+| `display`       | Standard         | `display` + `thumbnail`              | **Default.** Good balance for backup and sharing. |
+| `metadata-only` | Without images   | none                                 | Checklist + layout only. Lightest possible file. |
 
 In every mode the manifest records a `PackageAssetEntry` for each referenced
 asset, including its original `sha256`. In `metadata-only` mode `tiers` is empty
