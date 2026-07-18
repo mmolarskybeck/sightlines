@@ -2,9 +2,10 @@ import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
 import { LinkIcon } from "@phosphor-icons/react/dist/csr/Link";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
 import { SquareIcon } from "@phosphor-icons/react/dist/csr/Square";
+import { TextAlignLeftIcon } from "@phosphor-icons/react/dist/csr/TextAlignLeft";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ResizeAnchor } from "../../../domain/geometry/editRoom";
-import type { OpeningKind } from "../../../domain/placement/createOpening";
+import type { InsertToolKind } from "../../../domain/placement/createOpening";
 import type { DisplayUnit } from "../../../domain/project";
 import { formatLength } from "../../../domain/units/length";
 import {
@@ -51,7 +52,7 @@ export function WallInspector({
     anchorVertexId: string;
     changedWallIds: string[];
   } | null;
-  onAddOpening: (kind: OpeningKind) => void;
+  onAddOpening: (kind: InsertToolKind) => void;
   onCommitHeight: (heightMm: number) => Promise<void>;
   onCommitLength: (lengthMm: number, anchor: ResizeAnchor) => Promise<void>;
   polygonLengthEditing?: boolean;
@@ -254,6 +255,22 @@ export function WallInspector({
           <TooltipContent className="opening-add-tooltip" side="bottom">
             Marks a region where artwork can&rsquo;t be hung: a vent,
             outlet, thermostat, or other obstruction.
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              className="opening-add-chip"
+              variant="inspector"
+              onClick={() => onAddOpening("wall-text")}
+            >
+              <TextAlignLeftIcon aria-hidden="true" size={16} />
+              <span>Wall text</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent className="opening-add-tooltip" side="bottom">
+            A didactic text panel centered on the wall. It doesn&rsquo;t
+            block artwork.
           </TooltipContent>
         </Tooltip>
       </InspectorActionGroup>

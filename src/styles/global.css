@@ -5652,9 +5652,11 @@ body.panels-resizing * {
   justify-content: center;
 }
 
+/* Four verbs, two balanced columns: every chip keeps the primitive's fixed
+   control height, so the group reads as one even block with no wrapping. */
 .wall-opening-actions .inspector-action-group-buttons {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .wall-opening-actions .opening-add-chip {
@@ -6832,20 +6834,15 @@ body.panels-resizing * {
 
 .opening-add-chip {
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 6px;
   min-width: 0;
-  /* Override the primitive's fixed height for wrapped labels. */
-  height: auto;
-  min-height: 52px;
-  padding: 8px 6px;
+  padding: 0 6px;
   font-size: var(--type-xs);
   font-weight: var(--weight-semibold);
-  line-height: 1.2;
-  text-align: center;
-  white-space: normal;
+  line-height: var(--leading-ui);
+  white-space: nowrap;
 }
 
 .opening-add-chip svg {

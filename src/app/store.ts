@@ -232,7 +232,7 @@ export type AppState = ArrangeSliceState &
     allowOverlap?: boolean
   ) => Promise<void>;
   removePlacement: (wallObjectId: string) => Promise<void>;
-  addOpening: (wallId: string, kind: OpeningKind) => Promise<void>;
+  addOpening: (wallId: string, kind: InsertToolKind) => Promise<void>;
   moveOpening: (
     wallObjectId: string,
     xMm: number,
@@ -1292,6 +1292,24 @@ export function createAppStore(deps: AppStoreDeps) {
 
         const wall = getProjectWalls(project).find((candidate) => candidate.id === wallId);
         if (!wall) return;
+
+        // Wall text starts at the wall's midpoint on the centerline — same
+        // landing spot as placeOpeningFromPlan's wall-text branch, and no
+        // free-slot search since it never blocks or pairs.
+        if (kind === "wall-text") {
+          const centerlineYMm =
+            wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
+          const wallText = createWallTextPlacement(wallId, wall.lengthMm / 2, centerlineYMm);
+          const nextWallObjects = [...project.wallObjects, wallText];
+          await commitWallObjectEdit("Add wall text", project, nextWallObjects, [wallText.id], true, {
+            extras: selectionWrite(
+              { ...project, wallObjects: nextWallObjects },
+              { kind: "objects", ids: [wallText.id] },
+              get().wallContextId
+            )
+          });
+          return;
+        }
 
         // Doors/windows can't be placed on a partition face in v1 (spec §2/§6.1);
         // blocked zones can. This guard backs up the plan tool's candidate filter.
