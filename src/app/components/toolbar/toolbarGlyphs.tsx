@@ -63,3 +63,16 @@ export function WindowGlyph(props: GlyphProps) {
     </Glyph>
   );
 }
+
+// A display case (vitrine): a glass box on thin legs, so it reads as a
+// freestanding case distinct from the blocked zone's dashed rectangle and the
+// window's mullioned pane.
+export function CaseGlyph(props: GlyphProps) {
+  return (
+    <Glyph {...props}>
+      <rect x="3" y="3.5" width="10" height="7" />
+      <line x1="4.75" y1="10.5" x2="4.75" y2="13.25" />
+      <line x1="11.25" y1="10.5" x2="11.25" y2="13.25" />
+    </Glyph>
+  );
+}

@@ -24,6 +24,7 @@ import {
   clearOpeningPartners,
   includePairedOpenings
 } from "../domain/placement/openingPairs";
+import { createFloorCase, createWallCase } from "../domain/placement/createCase";
 import { createArtworkPlacement, getEffectivePlacementSizeMm } from "../domain/placement/placeArtwork";
 import { effectiveFloorDepthMm } from "../domain/placement/artworkForm";
 import { withArtworkFootprintFromMap } from "../domain/framing";
@@ -38,6 +39,7 @@ import {
   type Artwork,
   type ArtworkFloorObject,
   type BlockedZoneFloorObject,
+  type CaseWallObject,
   type ConnectableOpeningWallObject,
   type DisplayUnit,
   type FloorObject,
@@ -261,6 +263,17 @@ export type AppState = ArrangeSliceState &
     yMm: number
   ) => Promise<void>;
   placeArtworkOnFloor: (artworkId: string, xMm: number, yMm: number) => Promise<void>;
+  // The single armed "Case" insert tool: a wall anchor creates a wall case, a
+  // floor anchor creates a freestanding floor case (capture-any at the plan
+  // layer decides which). Selects the new object; one undo step.
+  placeCaseFromPlan: (placement: PlanPlacement) => Promise<void>;
+  // Numeric edits to a wall case (its own fields, including the new depthMm
+  // protrusion). Separate from resizeOpening because a case carries depthMm and
+  // is never an opening/does not pair.
+  updateWallCase: (
+    wallObjectId: string,
+    changes: Partial<Pick<CaseWallObject, "xMm" | "yMm" | "widthMm" | "heightMm" | "depthMm">>
+  ) => Promise<void>;
   commitPlanMove: (
     objectId: string,
     placement: PlanPlacement,
@@ -268,7 +281,7 @@ export type AppState = ArrangeSliceState &
   ) => Promise<void>;
   updateFloorObject: (
     objectId: string,
-    changes: Partial<Pick<FloorObjectBase, "xMm" | "yMm" | "widthMm" | "depthMm">>
+    changes: Partial<Pick<FloorObjectBase, "xMm" | "yMm" | "widthMm" | "depthMm" | "heightMm">>
   ) => Promise<void>;
   moveWallObjectsGroup: (
     moves: { id: string; xMm: number; yMm: number }[],
@@ -634,6 +647,13 @@ export function createAppStore(deps: AppStoreDeps) {
       placement: Extract<PlanPlacement, { anchor: "wall" }>,
       allowOverlap: boolean
     ): Promise<void> {
+      // Cases never convert between wall and floor (that machinery is
+      // artwork-specific): a floor case that captures a wall must not become a
+      // wall object. Refuse the conversion — the case stays on the floor.
+      if (floorObject.kind === "case") {
+        throw new Error("A display case cannot be moved onto a wall.");
+      }
+
       const base = {
         id: floorObject.id,
         wallId: placement.wallId,
@@ -1311,6 +1331,14 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
+        // Display cases are never added through this opening path — they are
+        // placed from plan via placeCaseFromPlan, which decides wall vs floor
+        // from the click. Guarding here also narrows `kind` to OpeningKind for
+        // the opening builders below.
+        if (kind === "case") {
+          throw new Error("Display cases are placed via placeCaseFromPlan, not addOpening.");
+        }
+
         // Doors/windows can't be placed on a partition face in v1 (spec §2/§6.1);
         // blocked zones can. This guard backs up the plan tool's candidate filter.
         if (kind !== "blocked-zone" && parseFaceWallId(wallId) !== null) {
@@ -1572,6 +1600,12 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
+        // Display cases have their own plan placement action; guarding here keeps
+        // them off the opening builders and narrows `kind` to OpeningKind.
+        if (kind === "case") {
+          throw new Error("Display cases are placed via placeCaseFromPlan, not placeOpeningFromPlan.");
+        }
+
         if (placement.anchor === "floor") {
           // Only blocked zones can float. Doors and windows are excluded from
           // floor placement by the domain (FloorObject has no door/window
@@ -1687,6 +1721,12 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
+        // Display cases are plan-only (they never reach the elevation canvas);
+        // guarding here narrows `kind` to OpeningKind for the builders below.
+        if (kind === "case") {
+          throw new Error("Display cases cannot be placed from elevation.");
+        }
+
         // Doors and windows remain disallowed on partition faces in elevation,
         // matching the plan insertion rules. Blocked zones are annotations and
         // can be placed on either face.
@@ -1787,6 +1827,69 @@ export function createAppStore(deps: AppStoreDeps) {
         );
       },
 
+      async placeCaseFromPlan(placement) {
+        const project = get().project;
+        if (!project) return;
+
+        // Wall anchor → wall case; floor anchor → freestanding floor case. Both
+        // ride the shared commit path (floor objects and cases carry no wall
+        // bounds/collision to validate in v1, so an empty validate-ids list
+        // keeps the gate a no-op) and select the new object.
+        if (placement.anchor === "wall") {
+          const wallCase = createWallCase(placement.wallId, placement.xMm);
+          const nextWallObjects = [...project.wallObjects, wallCase];
+          await commitWallObjectEdit("Add display case", project, nextWallObjects, [], true, {
+            extras: selectionWrite(
+              { ...project, wallObjects: nextWallObjects },
+              { kind: "objects", ids: [wallCase.id] },
+              get().wallContextId
+            )
+          });
+          return;
+        }
+
+        const floorCase = createFloorCase(placement.xMm, placement.yMm);
+        await commitWallObjectEdit("Add display case", project, project.wallObjects, [], true, {
+          nextFloorObjects: [...project.floorObjects, floorCase],
+          extras: selectionWrite(
+            { ...project, floorObjects: [...project.floorObjects, floorCase] },
+            { kind: "objects", ids: [floorCase.id] },
+            get().wallContextId
+          )
+        });
+      },
+
+      async updateWallCase(wallObjectId, changes) {
+        const project = get().project;
+        if (!project) return;
+
+        const target = project.wallObjects.find((object) => object.id === wallObjectId);
+        if (!target || target.kind !== "case") return;
+
+        const keys = ["xMm", "yMm", "widthMm", "heightMm", "depthMm"] as const;
+        const hasChange = keys.some(
+          (key) => changes[key] !== undefined && changes[key] !== target[key]
+        );
+        if (!hasChange) return;
+
+        const nextWallObjects = project.wallObjects.map((object) =>
+          object.id === wallObjectId && object.kind === "case"
+            ? { ...object, ...changes }
+            : object
+        );
+
+        // Cases never block placement and never pair, so there is nothing to
+        // mirror; the collision gate still runs (a case can overlap other wall
+        // objects, treated blocked-zone-style) via the shared commit path.
+        await commitWallObjectEdit(
+          "Edit display case",
+          project,
+          nextWallObjects,
+          [wallObjectId],
+          true
+        );
+      },
+
       async commitPlanMove(objectId, placement, allowOverlap = false) {
         const project = get().project;
         if (!project) return;
@@ -1826,7 +1929,10 @@ export function createAppStore(deps: AppStoreDeps) {
         const target = project.floorObjects.find((object) => object.id === objectId);
         if (!target) return;
 
-        const keys = ["xMm", "yMm", "widthMm", "depthMm"] as const;
+        // heightMm is editable for cases (their overall floor-to-top height);
+        // for artwork/blocked-zone the inspector never sends it, so including it
+        // here is harmless — the equality guard drops any no-op change.
+        const keys = ["xMm", "yMm", "widthMm", "depthMm", "heightMm"] as const;
         const hasChange = keys.some(
           (key) => changes[key] !== undefined && changes[key] !== target[key]
         );

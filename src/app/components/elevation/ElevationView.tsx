@@ -43,11 +43,16 @@ import {
 } from "../../../domain/framing";
 import type {
   Artwork,
+  CaseFloorObject,
   DisplayUnit,
+  FloorObject,
   ReferenceMeasurement,
   WallObject,
   WallObjectBase
 } from "../../../domain/project";
+import { getFloorWalls } from "../../../domain/geometry/planObjects";
+import { getRoomPlaceableWalls } from "../../../domain/geometry/placeableWalls";
+import { isPointInPolygon } from "../../../domain/geometry/polygon";
 import { resolveArtworkSnap } from "../../../domain/snapping/artworkSnapTargets";
 import {
   quantizeXToCleanIncrement,
@@ -97,8 +102,14 @@ import {
 } from "../library/artworkDragSession";
 import { ElevationArtwork } from "./ElevationArtwork";
 import { ElevationOpening } from "./ElevationOpening";
+import { ElevationCase, ElevationFloorCaseGhost } from "./ElevationCase";
 import { ElevationWallText } from "./ElevationWallText";
-import { ArtworkTooltipContent, OpeningTooltipContent, WallTextTooltipContent } from "../shared/PlacementTooltip";
+import {
+  ArtworkTooltipContent,
+  CaseTooltipContent,
+  OpeningTooltipContent,
+  WallTextTooltipContent
+} from "../shared/PlacementTooltip";
 import { ToolbarTooltipKbd } from "../toolbar/ToolbarTooltipKbd";
 import { marqueeRectMm, type MarqueeState } from "../shared/marqueeRect";
 import { buildElevationScene } from "../../../domain/scene2d/elevationScene";
@@ -184,6 +195,10 @@ const NO_OP_GET_BLOB: (key: string) => Promise<Blob> = () =>
 // referential-equality re-render guard.
 const EMPTY_WALL_OBJECTS: WallObject[] = [];
 const EMPTY_REFERENCE_MEASUREMENTS: ReferenceMeasurement[] = [];
+// Stable empty fallback for the store-connected floorObjects slice (see the
+// wallObjects rationale above) — floor cases in front of this wall become the
+// elevation ghost outlines.
+const EMPTY_FLOOR_OBJECTS: FloorObject[] = [];
 
 // A pointer-drag move of an existing placement, transient until release
 // (docs/plan.md §7: live preview, exactly one store commit on release).
@@ -390,6 +405,11 @@ export function ElevationView({
   // the old prop did, falling back to a stable module-level empty array pre-
   // boot so the selector result never changes identity spuriously.
   const wallObjects = useAppStore((state) => state.project?.wallObjects ?? EMPTY_WALL_OBJECTS);
+  // Floor objects + the floor plan feed the freestanding-case ghosts: cases in
+  // the room this wall bounds project onto the wall face as alignment outlines.
+  // Read from the store for the same reason as wallObjects (the store owns them).
+  const floorObjects = useAppStore((state) => state.project?.floorObjects ?? EMPTY_FLOOR_OBJECTS);
+  const floorRooms = useAppStore((state) => state.project?.floor.rooms ?? null);
   const selection = useAppStore((state) => state.selection);
   const referenceMeasurements = useAppStore(
     (state) => state.project?.referenceMeasurements ?? EMPTY_REFERENCE_MEASUREMENTS
@@ -627,6 +647,39 @@ export function ElevationView({
     return preview ? { ...object, xMm: preview.xMm, yMm: preview.yMm } : object;
   });
 
+  // Freestanding floor cases whose ghost may project onto THIS wall: the
+  // wall's floor-space endpoints (from getFloorWalls, which lifts room/partition
+  // walls into floor coordinates) plus the case floor objects in the room this
+  // wall bounds. The room filter (point-in-polygon on the room this wall belongs
+  // to) keeps a case behind the wall in a neighbouring room from ghosting through
+  // it — the builder's projection then drops any case not actually overlapping
+  // the wall extent. undefined/absent inputs simply yield no ghosts.
+  const floorCaseGhostInputs = useMemo(() => {
+    if (!wallId || !floorRooms) return null;
+    const floorWall = getFloorWalls({ rooms: floorRooms }).find((wall) => wall.id === wallId);
+    if (!floorWall) return null;
+    const room = floorRooms.find((placement) =>
+      getRoomPlaceableWalls(placement.room).some((wall) => wall.id === wallId)
+    );
+    const polygonMm = room
+      ? room.room.vertices.map((vertex) => ({
+          xMm: vertex.xMm + room.offsetXMm,
+          yMm: vertex.yMm + room.offsetYMm
+        }))
+      : null;
+    const floorCases = floorObjects.filter(
+      (object): object is CaseFloorObject =>
+        object.kind === "case" &&
+        (!polygonMm || isPointInPolygon({ xMm: object.xMm, yMm: object.yMm }, polygonMm))
+    );
+    if (floorCases.length === 0) return null;
+    return {
+      floorCases,
+      wallStartFloorMm: floorWall.startFloorMm,
+      wallEndFloorMm: floorWall.endFloorMm
+    };
+  }, [wallId, floorRooms, floorObjects]);
+
   // The static drawing (this-wall filter/kind split, out-of-bounds flags,
   // artwork joins, floor/centerline positions) — ONE derivation, shared with
   // the PNG/PDF export builders, so an export can never disagree with the
@@ -638,7 +691,8 @@ export function ElevationView({
     wallLengthMm,
     wallHeightMm,
     centerlineMm,
-    artworksById
+    artworksById,
+    ...(floorCaseGhostInputs ?? {})
   });
   // Every wall object on this wall is a valid snap neighbor for any other —
   // an artwork can align to a door's edge just as readily as to another
@@ -1904,6 +1958,17 @@ export function ElevationView({
           y2={elevationScene.floorLineSvgY}
           vectorEffect="non-scaling-stroke"
         />
+        {/* Freestanding-case ghosts paint first (behind the wall objects) so
+            they never occlude wall-hung work — non-interactive alignment aids. */}
+        {elevationScene.floorCaseGhosts.map((ghost) => (
+          <ElevationFloorCaseGhost
+            key={ghost.object.id}
+            heightMm={ghost.heightMm}
+            wallHeightMm={wallHeightMm}
+            xMaxMm={ghost.xMaxMm}
+            xMinMm={ghost.xMinMm}
+          />
+        ))}
         {elevationScene.artworks.map(({ object: placement, artwork, centerMm, sizeMm, outOfBounds }) => {
           const previewCenter = previewCenterById.get(placement.id);
           const center = previewCenter ?? centerMm;
@@ -2071,6 +2136,55 @@ export function ElevationView({
             />
           );
         })}
+        {elevationScene.cases.map(({ object: displayCase, centerMm, sizeMm, outOfBounds }) => {
+          const previewCenter = previewCenterById.get(displayCase.id);
+          const center = previewCenter ?? centerMm;
+          const size = sizeMm;
+
+          return (
+            <ElevationCase
+              key={displayCase.id}
+              center={center}
+              isOutOfBounds={
+                previewCenter
+                  ? isArtworkOutOfWallBounds(wallLengthMm, wallHeightMm, center, size)
+                  : outOfBounds
+              }
+              isSelected={
+                !exportMode &&
+                (selectedOpeningId === displayCase.id || selectedObjectIds.includes(displayCase.id))
+              }
+              size={size}
+              tooltip={
+                <CaseTooltipContent
+                  secondaryMm={displayCase.heightMm}
+                  unit={unit}
+                  widthMm={displayCase.widthMm}
+                />
+              }
+              tooltipDisabled={exportMode || Boolean(moveDrag || dropGhost)}
+              wallHeightMm={wallHeightMm}
+              onPointerDown={(event) => {
+                if (canvasToolArmed) {
+                  event.stopPropagation();
+                  return;
+                }
+                beginMoveDrag(displayCase, event);
+              }}
+              onSelect={(event) => {
+                if (canvasToolArmed) return;
+                if (consumeSelectSuppression()) return;
+                if (onSelectObject) {
+                  onSelectObject(displayCase.id, {
+                    additive: event.shiftKey || event.metaKey || event.ctrlKey
+                  });
+                } else {
+                  onSelectOpening?.(displayCase.id);
+                }
+              }}
+            />
+          );
+        })}
         {!exportMode && dropGhost ? (
           <ElevationArtwork
             center={dropGhost.centerMm}
@@ -2082,6 +2196,13 @@ export function ElevationView({
         {!exportMode && openingToolGhost && activeTool ? (
           activeTool === "wall-text" ? (
             <ElevationWallText
+              center={openingToolGhost.centerMm}
+              isGhost
+              size={openingToolGhost.sizeMm}
+              wallHeightMm={wallHeightMm}
+            />
+          ) : activeTool === "case" ? (
+            <ElevationCase
               center={openingToolGhost.centerMm}
               isGhost
               size={openingToolGhost.sizeMm}

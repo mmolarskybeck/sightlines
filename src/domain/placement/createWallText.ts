@@ -1,4 +1,8 @@
-import type { WallTextWallObject } from "../project";
+import {
+  DEFAULT_FLOOR_CASE_HEIGHT_MM,
+  DEFAULT_FLOOR_CASE_WIDTH_MM,
+  type WallTextWallObject
+} from "../project";
 import { newId } from "../id";
 import {
   getDefaultOpeningSizeMm,
@@ -24,9 +28,14 @@ export function getDefaultInsertToolSizeMm(kind: InsertToolKind): {
   widthMm: number;
   heightMm: number;
 } {
-  return kind === "wall-text"
-    ? getDefaultWallTextSizeMm()
-    : getDefaultOpeningSizeMm(kind as OpeningKind);
+  if (kind === "wall-text") return getDefaultWallTextSizeMm();
+  // The armed case ghost defaults to the freestanding footprint (widthMm along,
+  // heightMm carried for completeness); the plan preview shrinks to the wall
+  // footprint only when the pointer captures a wall (see PlanView).
+  if (kind === "case") {
+    return { widthMm: DEFAULT_FLOOR_CASE_WIDTH_MM, heightMm: DEFAULT_FLOOR_CASE_HEIGHT_MM };
+  }
+  return getDefaultOpeningSizeMm(kind as OpeningKind);
 }
 
 // Wall text does not pair, mirror, or block placement, so its constructor is a

@@ -18,6 +18,7 @@ import type { Vector2 } from "../../../domain/geometry/dragResize";
 import { PlanObject } from "./PlanObject";
 import {
   ArtworkTooltipContent,
+  CaseTooltipContent,
   OpeningTooltipContent,
   WallTextTooltipContent
 } from "../shared/PlacementTooltip";
@@ -204,6 +205,12 @@ export function PlacedObjectsLayer({
                   heightMm={wallObject.heightMm}
                   unit={unit}
                 />
+              ) : wallObject.kind === "case" ? (
+                <CaseTooltipContent
+                  secondaryMm={wallObject.heightMm}
+                  unit={unit}
+                  widthMm={wallObject.widthMm}
+                />
               ) : (
                 <OpeningTooltipContent
                   kind={wallObject.kind}
@@ -301,6 +308,12 @@ export function PlacedObjectsLayer({
             tooltip={
               floorObject.kind === "artwork" ? (
                 artworkTooltip(floorObject.artworkId, floorObject.displayDimensionsOverride)
+              ) : floorObject.kind === "case" ? (
+                <CaseTooltipContent
+                  secondaryMm={floorObject.depthMm}
+                  unit={unit}
+                  widthMm={floorObject.widthMm}
+                />
               ) : (
                 // A floor blocked zone's footprint reads width × depth
                 // (its plan axes), not width × height.

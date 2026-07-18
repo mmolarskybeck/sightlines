@@ -5,6 +5,7 @@ import type { Artwork } from "../../../domain/project";
 import { effectiveFraming } from "../../../domain/framing";
 import type { WallPanel3d } from "../../../domain/geometry/scene3d";
 import { ArtworkPlane } from "./ArtworkPlane";
+import { WallCaseMesh } from "./CaseMesh";
 import { WallTextPanel } from "./WallTextPanel";
 import { mmToWorld, MM_TO_WORLD } from "./coordinates";
 import {
@@ -189,6 +190,15 @@ export function WallPanel({
           key={wallText.objectId}
           wallText={wallText}
           isSelected={selectedObjectIds.includes(wallText.objectId)}
+          onSelect={onSelectObject}
+          ghosted={ghosted}
+        />
+      ))}
+      {wall.cases.map((wallCase) => (
+        <WallCaseMesh
+          key={wallCase.objectId}
+          wallCase={wallCase}
+          isSelected={selectedObjectIds.includes(wallCase.objectId)}
           onSelect={onSelectObject}
           ghosted={ghosted}
         />

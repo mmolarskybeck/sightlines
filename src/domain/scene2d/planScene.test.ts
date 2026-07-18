@@ -4,6 +4,8 @@ import type {
   Artwork,
   ArtworkFloorObject,
   ArtworkWallObject,
+  CaseFloorObject,
+  CaseWallObject,
   ConnectableOpeningWallObject,
   Project
 } from "../project";
@@ -231,6 +233,59 @@ describe("buildPlanScene wall objects", () => {
     expect(scene.wallObjects.map((entry) => entry.object.id)).toEqual(["wo-door"]);
     expect(scene.wallObjects[0]!.renderedRect.depthMm).toBe(WALL_OBJECT_PLAN_DEPTH_MM);
   });
+
+  it("emits a wall case with its real protrusion depth rather than the nominal plan depth", () => {
+    const project = createSampleProject();
+    const wallCase: CaseWallObject = {
+      id: "wo-case",
+      kind: "case",
+      wallId: "wall-north",
+      xMm: 2000,
+      yMm: 950,
+      widthMm: 1500,
+      heightMm: 180,
+      depthMm: 450
+    };
+    project.wallObjects.push(wallCase);
+
+    const scene = buildPlanScene(project);
+
+    const caseEntry = scene.wallObjects.find((entry) => entry.object.id === "wo-case");
+    expect(caseEntry).toBeDefined();
+    expect(caseEntry!.restRect.widthMm).toBe(1500);
+    // The case's depthMm (protrusion), not WALL_OBJECT_PLAN_DEPTH_MM.
+    expect(caseEntry!.restRect.depthMm).toBe(450);
+  });
+
+  it("offsets a wall case's rendered rect to the viewer side (flush against the wall), keeping the anchor centered", () => {
+    const project = createSampleProject();
+    const wallCase: CaseWallObject = {
+      id: "wo-case",
+      kind: "case",
+      wallId: "wall-north",
+      xMm: 2000,
+      yMm: 950,
+      widthMm: 1500,
+      heightMm: 180,
+      depthMm: 450
+    };
+    project.wallObjects.push(wallCase);
+
+    const scene = buildPlanScene(project);
+    const caseEntry = scene.wallObjects.find((entry) => entry.object.id === "wo-case")!;
+
+    // Width/depth are unchanged (no mat/frame widening for a case)...
+    expect(caseEntry.renderedRect.widthMm).toBe(1500);
+    expect(caseEntry.renderedRect.depthMm).toBe(450);
+    // ...but the rendered center is shifted off the wall-centered anchor by
+    // exactly half the protrusion depth (the box now sits flush ON the wall
+    // line, protruding into the room), unlike a door which stays centered.
+    const shiftMm = Math.hypot(
+      caseEntry.renderedRect.centerXMm - caseEntry.restRect.centerXMm,
+      caseEntry.renderedRect.centerYMm - caseEntry.restRect.centerYMm
+    );
+    expect(shiftMm).toBeCloseTo(225, 6);
+  });
 });
 
 describe("getPlanSceneObjectIdsIntersectingRect", () => {
@@ -296,6 +351,35 @@ describe("buildPlanScene floor objects", () => {
       widthMm: 600,
       depthMm: 400,
       angleDeg: 30
+    });
+  });
+
+  it("emits a freestanding floor case with its own center/footprint/rotation", () => {
+    const project = createSampleProject();
+    const floorCase: CaseFloorObject = {
+      id: "fo-case",
+      kind: "case",
+      xMm: 3000,
+      yMm: 2000,
+      widthMm: 1800,
+      depthMm: 600,
+      heightMm: 950,
+      rotationDeg: 0,
+      wallYMm: 950
+    };
+    project.floorObjects.push(floorCase);
+
+    const scene = buildPlanScene(project);
+
+    const caseEntry = scene.floorObjects.find((entry) => entry.object.id === "fo-case");
+    expect(caseEntry).toBeDefined();
+    expect(caseEntry!.artwork).toBeUndefined();
+    expect(caseEntry!.rect).toEqual({
+      centerXMm: 3000,
+      centerYMm: 2000,
+      widthMm: 1800,
+      depthMm: 600,
+      angleDeg: 0
     });
   });
 });

@@ -3,7 +3,14 @@ import { toast } from "sonner";
 import {
   CURRENT_ARTWORK_SCHEMA_VERSION,
   CURRENT_SCHEMA_VERSION,
-  DEFAULT_FLOOR_OBJECT_DEPTH_MM
+  DEFAULT_FLOOR_CASE_DEPTH_MM,
+  DEFAULT_FLOOR_CASE_HEIGHT_MM,
+  DEFAULT_FLOOR_CASE_WIDTH_MM,
+  DEFAULT_FLOOR_OBJECT_DEPTH_MM,
+  DEFAULT_WALL_CASE_CENTER_Y_MM,
+  DEFAULT_WALL_CASE_DEPTH_MM,
+  DEFAULT_WALL_CASE_HEIGHT_MM,
+  DEFAULT_WALL_CASE_WIDTH_MM
 } from "../domain/project";
 import type { Project } from "../domain/project";
 import type { ArtworkImportDraft } from "../domain/spreadsheetImport/types";
@@ -3532,6 +3539,86 @@ describe("app store", () => {
         store.getState().placeOpeningFromPlan("window", { anchor: "floor", xMm: 0, yMm: 0 })
       ).rejects.toThrow(/floor/);
       expect(store.getState().project!.floorObjects).toHaveLength(0);
+    });
+  });
+
+  describe("placeCaseFromPlan", () => {
+    it("creates a wall case at the plan xMm with the wall-case defaults and selects it", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+
+      await store.getState().placeCaseFromPlan({ anchor: "wall", wallId: wall.id, xMm: 1234 });
+
+      const state = store.getState();
+      expect(state.undoStack.at(-1)?.label).toBe("Add display case");
+      expect(state.project!.floorObjects).toHaveLength(0);
+      const wallCase = state.project!.wallObjects[0];
+      expect(wallCase.kind).toBe("case");
+      expect(wallCase.wallId).toBe(wall.id);
+      expect(wallCase.xMm).toBe(1234);
+      expect(wallCase.yMm).toBe(DEFAULT_WALL_CASE_CENTER_Y_MM);
+      expect(wallCase.widthMm).toBe(DEFAULT_WALL_CASE_WIDTH_MM);
+      expect(wallCase.heightMm).toBe(DEFAULT_WALL_CASE_HEIGHT_MM);
+      expect((wallCase as { depthMm: number }).depthMm).toBe(DEFAULT_WALL_CASE_DEPTH_MM);
+      expect(getSelectedOpeningId(state.project, state.selection)).toBe(wallCase.id);
+    });
+
+    it("creates a freestanding floor case at the plan xy with the floor-case defaults and selects it", async () => {
+      await store.getState().placeCaseFromPlan({ anchor: "floor", xMm: 2000, yMm: 3000 });
+
+      const state = store.getState();
+      expect(state.undoStack.at(-1)?.label).toBe("Add display case");
+      expect(state.project!.wallObjects).toHaveLength(0);
+      const floorCase = state.project!.floorObjects[0];
+      expect(floorCase.kind).toBe("case");
+      expect(floorCase.xMm).toBe(2000);
+      expect(floorCase.yMm).toBe(3000);
+      expect(floorCase.widthMm).toBe(DEFAULT_FLOOR_CASE_WIDTH_MM);
+      expect(floorCase.depthMm).toBe(DEFAULT_FLOOR_CASE_DEPTH_MM);
+      expect(floorCase.heightMm).toBe(DEFAULT_FLOOR_CASE_HEIGHT_MM);
+      expect(floorCase.rotationDeg).toBe(0);
+      expect(getSelectedOpeningId(state.project, state.selection)).toBe(floorCase.id);
+    });
+
+    it("updateWallCase edits width/height/depth/position and updateFloorObject edits floor-case height", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+      await store.getState().placeCaseFromPlan({ anchor: "wall", wallId: wall.id, xMm: 1000 });
+      const wallCaseId = store.getState().project!.wallObjects[0].id;
+
+      await store.getState().updateWallCase(wallCaseId, {
+        widthMm: 1200,
+        heightMm: 220,
+        depthMm: 500,
+        yMm: 1050,
+        xMm: 1100
+      });
+
+      const wallCase = store.getState().project!.wallObjects[0];
+      expect(wallCase.widthMm).toBe(1200);
+      expect(wallCase.heightMm).toBe(220);
+      expect((wallCase as { depthMm: number }).depthMm).toBe(500);
+      expect(wallCase.yMm).toBe(1050);
+      expect(wallCase.xMm).toBe(1100);
+
+      await store.getState().placeCaseFromPlan({ anchor: "floor", xMm: 500, yMm: 500 });
+      const floorCaseId = store.getState().project!.floorObjects[0].id;
+
+      await store.getState().updateFloorObject(floorCaseId, { heightMm: 1200 });
+      expect(store.getState().project!.floorObjects[0].heightMm).toBe(1200);
+    });
+
+    it("refuses to convert a floor case onto a wall (no case wall↔floor conversion)", async () => {
+      await store.getState().placeCaseFromPlan({ anchor: "floor", xMm: 500, yMm: 500 });
+      const floorCaseId = store.getState().project!.floorObjects[0].id;
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+
+      await expect(
+        store
+          .getState()
+          .commitPlanMove(floorCaseId, { anchor: "wall", wallId: wall.id, xMm: 1000 })
+      ).rejects.toThrow(/display case cannot be moved onto a wall/);
+      // The case stays on the floor, unconverted.
+      expect(store.getState().project!.floorObjects).toHaveLength(1);
+      expect(store.getState().project!.wallObjects).toHaveLength(0);
     });
   });
 

@@ -50,7 +50,11 @@ import {
   PLACEHOLDER_ARTWORK_WIDTH_MM
 } from "../../../domain/placement/placeArtwork";
 import {
+  DEFAULT_FLOOR_CASE_DEPTH_MM,
   DEFAULT_FLOOR_OBJECT_DEPTH_MM,
+  DEFAULT_WALL_CASE_DEPTH_MM,
+  DEFAULT_WALL_CASE_HEIGHT_MM,
+  DEFAULT_WALL_CASE_WIDTH_MM,
   type Artwork,
   type FreestandingWall,
   type ReferenceMeasurement,
@@ -530,6 +534,7 @@ export function PlanView({
   const onCommitWallLength = useAppStore((state) => state.resizeWall);
   const onMoveRoom = useAppStore((state) => state.moveRoom);
   const onPlaceOpeningFromPlan = useAppStore((state) => state.placeOpeningFromPlan);
+  const onPlaceCaseFromPlan = useAppStore((state) => state.placeCaseFromPlan);
   const onSelectArtwork = useAppStore((state) => state.selectArtwork);
   const onSelectOpening = useAppStore((state) => state.selectOpening);
   const onSelectRoom = useAppStore((state) => state.selectRoom);
@@ -1355,10 +1360,28 @@ export function PlanView({
   const movingSize = useMemo(() => {
     if (!activeTool) return null;
     const { widthMm, heightMm } = getDefaultInsertToolSizeMm(activeTool);
+    // Floor-footprinted tools (blocked zone, and the case's open-floor default)
+    // carry their own front-back depth; wall openings use the thin plan depth.
     const depthMm =
-      activeTool === "blocked-zone" ? DEFAULT_FLOOR_OBJECT_DEPTH_MM : WALL_OBJECT_PLAN_DEPTH_MM;
+      activeTool === "blocked-zone"
+        ? DEFAULT_FLOOR_OBJECT_DEPTH_MM
+        : activeTool === "case"
+          ? DEFAULT_FLOOR_CASE_DEPTH_MM
+          : WALL_OBJECT_PLAN_DEPTH_MM;
     return { widthMm, heightMm, depthMm };
   }, [activeTool]);
+
+  // The wall-case footprint the armed case ghost switches to once the pointer
+  // captures a wall — narrower than the open-floor default and protruding by the
+  // case's wall depth, so the preview matches what a wall case will actually be.
+  const caseWallToolSize = useMemo(
+    () => ({
+      widthMm: DEFAULT_WALL_CASE_WIDTH_MM,
+      heightMm: DEFAULT_WALL_CASE_HEIGHT_MM,
+      depthMm: DEFAULT_WALL_CASE_DEPTH_MM
+    }),
+    []
+  );
 
   const captureDistanceMm = pixelsPerMm > 0 ? WALL_CAPTURE_PX / pixelsPerMm : 0;
   const wallObjectMinDepthMm =
@@ -1761,25 +1784,45 @@ export function PlanView({
 
   useDisarmOnEscape(activeTool, disarmTool);
 
-  function handleToolPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
-    if (!activeTool || !movingSize || drag || roomDrag) return;
-
-    const pointerMm = toSvgMm(event.clientX, event.clientY);
-    if (!pointerMm) return;
-
-    const result = resolvePlanPlacement(pointerMm, {
+  // Resolve the armed insert tool's placement under the pointer. The case tool
+  // is the one kind whose footprint depends on the resolved anchor: its default
+  // ghost is the open-floor footprint, but once it captures a wall we re-resolve
+  // with the (narrower, protruding) wall-case footprint so the preview matches
+  // what placeCaseFromPlan will actually create. Every other tool is single-pass.
+  function resolveToolPlacement(pointerMm: Vector2, size: typeof movingSize) {
+    if (!activeTool || !size) return null;
+    const options = {
       walls: openingToolWalls,
       wallObjects: snappingWallObjects,
-      movingSize,
       movingKind: activeTool,
-      floatPolicy: activeTool === "blocked-zone" ? "float" : "capture-any",
+      // Blocked zones and cases float (wall capture only within capture
+      // distance, open floor otherwise); doors/windows/wall text always
+      // capture the nearest wall.
+      floatPolicy: (activeTool === "blocked-zone" || activeTool === "case"
+        ? "float"
+        : "capture-any") as FloatPolicy,
       currentAnchorWallId: null,
       captureDistanceMm,
       gridTargets: gridSnapTargets,
       snapToGrid,
       thresholdMm: snapThresholdMm,
       previousSnapTargetIds: toolSnapTargetIdsRef.current
-    });
+    };
+    const first = resolvePlanPlacement(pointerMm, { ...options, movingSize: size });
+    if (activeTool === "case" && first.placement.anchor === "wall") {
+      return resolvePlanPlacement(pointerMm, { ...options, movingSize: caseWallToolSize });
+    }
+    return first;
+  }
+
+  function handleToolPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
+    if (!activeTool || !movingSize || drag || roomDrag) return;
+
+    const pointerMm = toSvgMm(event.clientX, event.clientY);
+    if (!pointerMm) return;
+
+    const result = resolveToolPlacement(pointerMm, movingSize);
+    if (!result) return;
 
     toolSnapTargetIdsRef.current = result.snapTargetIds;
     setToolGhost({
@@ -2180,19 +2223,8 @@ export function PlanView({
     const pointerMm = toSvgMm(event.clientX, event.clientY);
     if (!pointerMm) return;
 
-    const result = resolvePlanPlacement(pointerMm, {
-      walls: openingToolWalls,
-      wallObjects: snappingWallObjects,
-      movingSize,
-      movingKind: activeTool,
-      floatPolicy: activeTool === "blocked-zone" ? "float" : "capture-any",
-      currentAnchorWallId: null,
-      captureDistanceMm,
-      gridTargets: gridSnapTargets,
-      snapToGrid,
-      thresholdMm: snapThresholdMm,
-      previousSnapTargetIds: toolSnapTargetIdsRef.current
-    });
+    const result = resolveToolPlacement(pointerMm, movingSize);
+    if (!result) return;
 
     // Tool policies make "none" unreachable; this narrows the store call type.
     if (result.placement.anchor === "none") return;
@@ -2200,6 +2232,12 @@ export function PlanView({
     const kind = activeTool;
     // Placement tools are single-shot.
     disarmTool();
+    // One armed case tool routes to its own store action, which decides
+    // wall-case vs floor-case from the resolved anchor (capture-any).
+    if (kind === "case") {
+      void onPlaceCaseFromPlan(result.placement);
+      return;
+    }
     void onPlaceOpeningFromPlan(kind, result.placement);
   }
 
@@ -2470,6 +2508,14 @@ export function PlanView({
   // artworkId (wall or floor object) and read the form. An unresolved artwork
   // falls back to the wall-only default (floatPolicyForKind's own fallback).
   function floatPolicyForMovingObject(kind: WallObject["kind"], objectId: string): FloatPolicy {
+    // A case never converts between wall and floor (that machinery is
+    // artwork-only; planMoveFloorToWall throws for a case). So a floor case must
+    // drag floor-only — it can never capture a wall and hit that throw — while a
+    // wall case keeps capture-any and slides along walls like an opening.
+    if (kind === "case") {
+      const isFloorCase = project.floorObjects.some((object) => object.id === objectId);
+      return isFloorCase ? "floor-only" : "capture-any";
+    }
     if (kind !== "artwork") return floatPolicyForKind(kind);
     const placed =
       project.wallObjects.find((object) => object.id === objectId) ??

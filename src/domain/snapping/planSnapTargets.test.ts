@@ -378,6 +378,10 @@ describe("resolvePlanPlacement — artwork reject policy (wall-only)", () => {
     expect(floatPolicyForKind("blocked-zone")).toBe("float");
     expect(floatPolicyForKind("door")).toBe("capture-any");
     expect(floatPolicyForKind("window")).toBe("capture-any");
+    // A case floats: wall capture only within capture distance, so an
+    // open-floor click yields a floor case rather than grabbing the nearest
+    // wall at any distance (which would make floor cases unreachable).
+    expect(floatPolicyForKind("case")).toBe("float");
   });
 
   it("rejects (anchor 'none') when no wall captures, with a cursor-tracking rect and no guides", () => {

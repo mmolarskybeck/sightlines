@@ -21,6 +21,7 @@ import { isPointInPolygon } from "../../domain/geometry/polygon";
 import type {
   Artwork,
   Asset,
+  CaseFloorObject,
   DisplayUnit,
   Project,
   SavedView
@@ -542,7 +543,7 @@ function drawPlanObject(
   page: PDFPage,
   transform: PlanTransform,
   rect: PlanRect,
-  kind: "artwork" | "door" | "window" | "blocked-zone" | "wall-text",
+  kind: "artwork" | "door" | "window" | "blocked-zone" | "wall-text" | "case",
   isFloorPlaced: boolean
 ) {
   const corners = planRectCorners(rect).map(transform.point);
@@ -580,6 +581,34 @@ function drawPlanObject(
     const inset = Math.min(rect.widthMm, rect.depthMm) * 0.22;
     drawLine(page, world(-halfW + inset, -halfD * 0.3), world(halfW - inset, -halfD * 0.3), 0.5, COLORS.subtle);
     drawLine(page, world(-halfW + inset, halfD * 0.3), world(halfW - inset * 3, halfD * 0.3), 0.5, COLORS.subtle);
+  } else if (kind === "case") {
+    // A vitrine glyph matching PlanObject.tsx: the outline (drawn above) is the
+    // glass box, an inner inset reads as the glass line, and a freestanding
+    // floor case adds four small corner leg dots (a wall case has none).
+    const inset = Math.min(rect.widthMm, rect.depthMm) * 0.22;
+    const insetRect: PlanRect = {
+      ...rect,
+      widthMm: Math.max(0, rect.widthMm - inset * 2),
+      depthMm: Math.max(0, rect.depthMm - inset * 2)
+    };
+    page.drawSvgPath(
+      polygonPath(planRectCorners(insetRect).map(transform.point)),
+      { borderColor: COLORS.subtle, borderWidth: 0.5 }
+    );
+    if (isFloorPlaced) {
+      const legX = halfW - inset;
+      const legD = halfD - inset;
+      const legRadius = Math.max(0.5, inset * 0.28 * transform.scalePtPerMm);
+      for (const [lx, ly] of [
+        [-legX, -legD],
+        [legX, -legD],
+        [legX, legD],
+        [-legX, legD]
+      ] as const) {
+        const p = world(lx, ly);
+        page.drawCircle({ x: p.x, y: p.y, size: legRadius, color: COLORS.subtle });
+      }
+    }
   } else {
     for (const x of [-halfW, 0, halfW]) {
       drawLine(
@@ -921,6 +950,64 @@ function drawElevationWallText(
       color: COLORS.skeletonBar
     });
   }
+}
+
+// A wall display case in elevation: a solid side-profile box (outline) with a
+// thin inner glass inset — the export twin of ElevationCase.tsx / the plan-view
+// case glyph.
+function drawElevationCase(
+  page: PDFPage,
+  transform: ElevationTransform,
+  displayCase: ElevationScene["cases"][number]
+) {
+  const xMm = displayCase.centerMm.xMm - displayCase.sizeMm.widthMm / 2;
+  const yMm = displayCase.centerMm.yMm - displayCase.sizeMm.heightMm / 2;
+  const rect = elevationRect(
+    transform,
+    xMm,
+    yMm,
+    displayCase.sizeMm.widthMm,
+    displayCase.sizeMm.heightMm
+  );
+  page.drawRectangle({
+    ...rect,
+    color: COLORS.white,
+    borderColor: COLORS.muted,
+    borderWidth: 0.7
+  });
+  const insetPt = Math.min(rect.width, rect.height) * 0.22;
+  page.drawRectangle({
+    x: rect.x + insetPt,
+    y: rect.y + insetPt,
+    width: Math.max(0, rect.width - insetPt * 2),
+    height: Math.max(0, rect.height - insetPt * 2),
+    borderColor: COLORS.subtle,
+    borderWidth: 0.5
+  });
+}
+
+// The elevation shadow of a freestanding floor case standing in front of the
+// wall: a light dashed outline from the floor line up to the case height,
+// spanning the along-wall range its footprint projects onto. Non-structural —
+// drawn before the wall objects (an alignment aid, never an occluder).
+function drawElevationFloorCaseGhost(
+  page: PDFPage,
+  transform: ElevationTransform,
+  ghost: ElevationScene["floorCaseGhosts"][number]
+) {
+  const rect = elevationRect(
+    transform,
+    ghost.xMinMm,
+    0,
+    Math.max(0, ghost.xMaxMm - ghost.xMinMm),
+    ghost.heightMm
+  );
+  page.drawRectangle({
+    ...rect,
+    borderColor: COLORS.subtle,
+    borderWidth: 0.5,
+    borderDashArray: [3, 2]
+  });
 }
 
 function participantObstacleBoxes(
@@ -1647,6 +1734,19 @@ export async function createDocumentPdf(
           )
         : undefined;
       if (!placement || !wall) continue;
+      // Freestanding cases in this room project onto the wall face as ghost
+      // outlines. The wall's floor-space endpoints lift its room-local geometry
+      // by the placement offset; the room polygon filters out cases in other
+      // rooms (the builder then drops any that don't overlap this wall's extent).
+      const roomPolygonMm = placement.room.vertices.map((vertex) => ({
+        xMm: vertex.xMm + placement.offsetXMm,
+        yMm: vertex.yMm + placement.offsetYMm
+      }));
+      const elevationFloorCases = input.project.floorObjects.filter(
+        (object): object is CaseFloorObject =>
+          object.kind === "case" &&
+          isPointInPolygon({ xMm: object.xMm, yMm: object.yMm }, roomPolygonMm)
+      );
       const scene = buildElevationScene(input.project.wallObjects, {
         wallId: wall.id,
         wallLengthMm: wall.lengthMm,
@@ -1654,7 +1754,16 @@ export async function createDocumentPdf(
         centerlineMm:
           wall.defaultCenterlineHeightMm ??
           input.project.defaultCenterlineHeightMm,
-        artworksById
+        artworksById,
+        floorCases: elevationFloorCases,
+        wallStartFloorMm: {
+          xMm: wall.start.xMm + placement.offsetXMm,
+          yMm: wall.start.yMm + placement.offsetYMm
+        },
+        wallEndFloorMm: {
+          xMm: wall.end.xMm + placement.offsetXMm,
+          yMm: wall.end.yMm + placement.offsetYMm
+        }
       });
       const drawingRect = input.settings.dimensions
         ? insetRectByEdges(baseRect, ELEVATION_DIMENSION_INSETS_PT)
@@ -1681,6 +1790,11 @@ export async function createDocumentPdf(
         1.4,
         COLORS.ink
       );
+
+      // Freestanding-case ghosts first, behind the wall objects.
+      for (const ghost of scene.floorCaseGhosts) {
+        drawElevationFloorCaseGhost(page, transform, ghost);
+      }
 
       let anonymousOrdinal = 0;
       for (const entry of scene.artworks) {
@@ -1782,6 +1896,9 @@ export async function createDocumentPdf(
       }
       for (const wallText of scene.wallTexts) {
         drawElevationWallText(page, transform, wallText);
+      }
+      for (const displayCase of scene.cases) {
+        drawElevationCase(page, transform, displayCase);
       }
       if (input.settings.dimensions) {
         drawElevationDimensions(

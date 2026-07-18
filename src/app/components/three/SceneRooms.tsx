@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import type { Texture, Vector3 } from "three";
 import type { Artwork } from "../../../domain/project";
 import type { Scene3d } from "../../../domain/geometry/scene3d";
+import { FloorCaseMesh } from "./CaseMesh";
 import { FloorObjectBox } from "./FloorObjectBox";
 import { FloorSurface } from "./FloorSurface";
 import { PartitionSlab } from "./PartitionSlab";
@@ -120,20 +121,32 @@ export function SceneRooms({
           ))}
         </group>
       ))}
-      {scene.floorObjects.map((object) => (
-        <FloorObjectBox
-          key={object.objectId}
-          object={object}
-          texture={
-            object.assetId ? texturesByAssetId.get(object.assetId) : undefined
-          }
-          isSelected={
-            selectedObjectIds.includes(object.objectId) ||
-            (object.artworkId !== undefined && object.artworkId === selectedArtworkId)
-          }
-          onSelect={onSelectObject}
-        />
-      ))}
+      {scene.floorObjects.map((object) => {
+        const isSelected =
+          selectedObjectIds.includes(object.objectId) ||
+          (object.artworkId !== undefined && object.artworkId === selectedArtworkId);
+        if (object.kind === "case") {
+          return (
+            <FloorCaseMesh
+              key={object.objectId}
+              object={object}
+              isSelected={isSelected}
+              onSelect={onSelectObject}
+            />
+          );
+        }
+        return (
+          <FloorObjectBox
+            key={object.objectId}
+            object={object}
+            texture={
+              object.assetId ? texturesByAssetId.get(object.assetId) : undefined
+            }
+            isSelected={isSelected}
+            onSelect={onSelectObject}
+          />
+        );
+      })}
     </group>
   );
 }

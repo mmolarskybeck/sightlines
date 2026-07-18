@@ -47,6 +47,8 @@ function nearestNounFor(kind: WallObject["kind"]): string {
       return "blocked zone";
     case "wall-text":
       return "wall text";
+    case "case":
+      return "display case";
   }
 }
 

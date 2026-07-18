@@ -4,7 +4,7 @@ import { PolygonIcon } from "@phosphor-icons/react/dist/csr/Polygon";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
 import { TextAlignLeftIcon } from "@phosphor-icons/react/dist/csr/TextAlignLeft";
 import type { InsertToolKind } from "../../../domain/placement/createOpening";
-import { PartitionGlyph, RectangleRoomGlyph, WindowGlyph } from "./toolbarGlyphs";
+import { CaseGlyph, PartitionGlyph, RectangleRoomGlyph, WindowGlyph } from "./toolbarGlyphs";
 
 // Shared descriptors for the insert tools, so the full segmented picker and
 // the compact menu/trigger agree on every icon, label, resting hint, and
@@ -26,7 +26,8 @@ export const OPENING_TOOL_ORDER: InsertToolKind[] = [
   "door",
   "window",
   "blocked-zone",
-  "wall-text"
+  "wall-text",
+  "case"
 ];
 
 export const OPENING_TOOL_META: Record<InsertToolKind, InsertToolMeta> = {
@@ -61,6 +62,14 @@ export const OPENING_TOOL_META: Record<InsertToolKind, InsertToolMeta> = {
     armed: "Click to place wall text",
     kbd: "T",
     icon: <TextAlignLeftIcon aria-hidden="true" size={16} />
+  },
+  case: {
+    key: "case",
+    label: "Case",
+    hint: "Insert a display case",
+    armed: "Placing a display case",
+    kbd: "C",
+    icon: <CaseGlyph aria-hidden="true" size={16} />
   }
 };
 

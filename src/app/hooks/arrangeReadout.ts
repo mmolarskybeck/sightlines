@@ -62,7 +62,12 @@ function resolveBoundary(
       name: artworksById.get(object.artworkId)?.title || "Untitled artwork"
     };
   }
-  const name = object.kind === "wall-text" ? "Wall text" : getOpeningKindLabel(object.kind);
+  const name =
+    object.kind === "wall-text"
+      ? "Wall text"
+      : object.kind === "case"
+        ? "Display case"
+        : getOpeningKindLabel(object.kind);
   return { type: "object", kind: object.kind, name };
 }
 

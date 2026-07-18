@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 export const CURRENT_ARTWORK_SCHEMA_VERSION = 1;
 export const CURRENT_ASSET_SCHEMA_VERSION = 1;
 
@@ -258,7 +258,38 @@ export type WallTextWallObject = WallObjectBase & {
   name?: string;
 };
 
-export type WallObject = ArtworkWallObject | OpeningWallObject | WallTextWallObject;
+// A wall-mounted display case (vitrine): a glass box cantilevered off the wall
+// at an adjustable mount height. Like wall text it is a NEW union member, so
+// older projects simply carry no case entries — but unlike wall text it adds a
+// required field (`depthMm`, the box's protrusion from the wall face), so it is
+// NOT purely additive to the stored shape and DOES ride a schema-version bump
+// (v3→v4). `heightMm` (inherited from WallObjectBase) is the box's vertical
+// thickness; `yMm` is the mount center height (waist height by default — see
+// DEFAULT_WALL_CASE_* below). It never blocks placement and never pairs.
+export type CaseWallObject = WallObjectBase & {
+  kind: "case";
+  // Protrusion from the wall face — a genuinely new stored field with no
+  // WallObjectBase analogue, unique to cases among wall objects. Floor cases
+  // and every other floor object express depth via FloorObjectBase.depthMm;
+  // openings/artwork/wall-text have no depth at all.
+  depthMm: number;
+};
+
+export type WallObject =
+  | ArtworkWallObject
+  | OpeningWallObject
+  | WallTextWallObject
+  | CaseWallObject;
+
+// Display-case defaults (curatorial, not code minimums — a first placement a
+// curator immediately adjusts numerically, same spirit as the opening
+// defaults). Wall cases sit at waist height (a fixed 950mm mount center, kept
+// deliberately below the artwork centerline: real wall vitrines are lower than
+// hung work), and are shallow, wide boxes.
+export const DEFAULT_WALL_CASE_WIDTH_MM = 1500;
+export const DEFAULT_WALL_CASE_HEIGHT_MM = 180; // vertical box thickness
+export const DEFAULT_WALL_CASE_DEPTH_MM = 450; // protrusion from the wall
+export const DEFAULT_WALL_CASE_CENTER_Y_MM = 950; // waist-height mount center
 
 // Editable default depth for floor-placed objects (doors/windows have a
 // fixed nominal wall-object thickness instead; see WALL_OBJECT_PLAN_DEPTH_MM).
@@ -290,9 +321,29 @@ export type BlockedZoneFloorObject = FloorObjectBase & {
   kind: "blocked-zone";
 };
 
+// A freestanding display case (vitrine): a glass box sitting on four legs.
+// A NEW member of the FloorObject union (v3→v4 schema bump — see
+// CaseWallObject for the wall twin). `heightMm` (inherited from
+// FloorObjectBase) is the overall height, floor to the top of the glass box;
+// the glass box occupies FLOOR_CASE_BOX_HEIGHT_MM at the top and the legs fill
+// the remainder below. wallYMm/rotationDeg are inherited but unused for cases
+// (there is no case↔wall conversion — that machinery is artwork-specific);
+// they carry harmless defaults so the shared FloorObjectBase shape holds.
+export type CaseFloorObject = FloorObjectBase & {
+  kind: "case";
+};
+
 // Doors/windows are excluded from floor placement by the type system —
 // they only ever exist as WallObjects.
-export type FloorObject = ArtworkFloorObject | BlockedZoneFloorObject;
+export type FloorObject = ArtworkFloorObject | BlockedZoneFloorObject | CaseFloorObject;
+
+// Floor-case defaults (curatorial, adjusted numerically after placement, same
+// spirit as the opening/wall-case defaults). A tall, table-like vitrine.
+export const DEFAULT_FLOOR_CASE_WIDTH_MM = 1800;
+export const DEFAULT_FLOOR_CASE_DEPTH_MM = 600;
+export const DEFAULT_FLOOR_CASE_HEIGHT_MM = 950; // overall, floor to box top
+// The glass box portion at the top; the legs fill (heightMm − this) below it.
+export const FLOOR_CASE_BOX_HEIGHT_MM = 300;
 
 export type ProjectSummary = {
   id: string;

@@ -6689,6 +6689,79 @@ body.panels-resizing * {
   pointer-events: none;
 }
 
+/* Wall display case (vitrine) in elevation — ElevationCase.tsx. A solid
+   side-profile box (outline) plus a thin inner glass inset, echoing the plan
+   glyph. Selection mirrors .elevation-opening so a case reads as the same
+   selectable object across plan and elevation. */
+.elevation-case {
+  cursor: grab;
+  touch-action: none;
+}
+
+.elevation-case:active {
+  cursor: grabbing;
+}
+
+.case-outline {
+  fill: var(--bg);
+  fill-opacity: 0.85;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  /* Same reasoning as .opening-outline: with a light fill the whole box is the
+     drag/click target rather than only the hairline stroke. */
+  pointer-events: all;
+}
+
+.case-glass {
+  fill: none;
+  stroke: var(--subtle);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.elevation-case.ghost {
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+.elevation-case.ghost .case-outline {
+  pointer-events: none;
+  fill: var(--primary-soft);
+  fill-opacity: 0.4;
+  stroke: var(--selection);
+  stroke-dasharray: 6 5;
+}
+
+.elevation-case.out-of-bounds .case-outline {
+  stroke: var(--danger);
+  stroke-dasharray: 4 4;
+  stroke-width: 2;
+}
+
+.elevation-case.selected .case-outline {
+  stroke: var(--selection);
+  stroke-width: 2.5;
+}
+
+.elevation-case.selected .case-glass {
+  stroke: var(--selection);
+}
+
+/* The elevation shadow of a freestanding floor case: a low-opacity dashed
+   outline standing in front of the wall, non-interactive, painted behind the
+   wall objects purely as an alignment aid. */
+.elevation-floor-case-ghost {
+  fill: none;
+  stroke: var(--subtle);
+  stroke-width: 1;
+  stroke-dasharray: 6 5;
+  opacity: 0.55;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
 /* Plan-view placements — PlanObject.tsx. The outline is a little clearer than
    the elevation hairline because these objects sit on top of room geometry at
    plan scale. Kind-specific interior marks add recognition without adding a
@@ -6767,9 +6840,25 @@ body.panels-resizing * {
   opacity: 0.75;
 }
 
+/* Display case: the glass-line inset inherits the mark stroke (fill:none), and
+   the leg dots (floor case only) are small filled marks in the same neutral
+   ink so the legs read without a new color. */
+.plan-object-case-leg {
+  fill: var(--subtle);
+  stroke: none;
+}
+
 .plan-object.is-selected .plan-object-mark {
   stroke: var(--selection);
   opacity: 1;
+}
+
+.plan-object.is-selected .plan-object-case-leg {
+  fill: var(--selection);
+}
+
+.plan-object.is-invalid .plan-object-case-leg {
+  fill: var(--danger);
 }
 
 .plan-object.is-ghost {

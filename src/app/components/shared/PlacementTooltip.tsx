@@ -1,3 +1,4 @@
+import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
 import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
 import { SquareIcon } from "@phosphor-icons/react/dist/csr/Square";
@@ -83,6 +84,33 @@ export function WallTextTooltipContent({
         {name}
       </span>
       <span className="placement-tooltip-dims">{formatDims(widthMm, heightMm, displayUnit)}</span>
+    </div>
+  );
+}
+
+// A display case's hover body. v1 has no case contents, so it reuses the
+// compact opening/wall-text layout to state its footprint. `unit` reads in the
+// opening-size scope like the other structural objects.
+export function CaseTooltipContent({
+  widthMm,
+  secondaryMm,
+  unit
+}: {
+  widthMm: number;
+  // Wall case passes its height; a floor case passes its depth — the plan
+  // footprint's second axis, matching OpeningTooltipContent's convention.
+  secondaryMm: number;
+  unit: DisplayUnit;
+}) {
+  const { displayUnit } = getScopeUnits(unitSystemFromDisplayUnit(unit), "openingSize");
+
+  return (
+    <div className="placement-tooltip-opening">
+      <span className="placement-tooltip-heading">
+        <CubeIcon aria-hidden="true" size={15} />
+        Display case
+      </span>
+      <span className="placement-tooltip-dims">{formatDims(widthMm, secondaryMm, displayUnit)}</span>
     </div>
   );
 }

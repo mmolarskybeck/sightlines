@@ -203,25 +203,32 @@ function ClusterPicker({
   );
 }
 
-// The view-toolbar's Insert cluster: door/window/blocked-zone, identical
-// membership in both 2D views (Insert decorates existing geometry; Draw creates
-// new structure, so the partition tool lives in the Draw cluster). A thin call
-// site over ClusterPicker — planMode's discriminated union keeps every armed
-// tool mutually exclusive. `variant` picks the segmented or compact rendering.
+// The view-toolbar's Insert cluster: door/window/blocked-zone/wall-text plus the
+// display case. Membership is nearly identical in both 2D views (Insert
+// decorates existing geometry; Draw creates new structure, so the partition
+// tool lives in the Draw cluster) — the one exception is the display case, which
+// is plan-only (its floor-vs-wall decision needs the open floor elevation lacks)
+// and so is filtered out via `excludedTools`. A thin call site over
+// ClusterPicker — planMode's discriminated union keeps every armed tool mutually
+// exclusive. `variant` picks the segmented or compact rendering.
 export function InsertPicker({
   variant,
   activeTool,
   disabled,
   disabledReason = "Select a wall first",
+  excludedTools,
   onToolChange
 }: {
   variant: ClusterVariant;
   activeTool: InsertToolKind | null;
   disabled: boolean;
   disabledReason?: string;
+  excludedTools?: InsertToolKind[];
   onToolChange: (tool: InsertToolKind | null) => void;
 }) {
-  const entries: ClusterEntry[] = OPENING_TOOL_ORDER.map((kind) => ({
+  const entries: ClusterEntry[] = OPENING_TOOL_ORDER.filter(
+    (kind) => !excludedTools?.includes(kind)
+  ).map((kind) => ({
     ...OPENING_TOOL_META[kind],
     active: activeTool === kind,
     onToggle: () => onToolChange(activeTool === kind ? null : kind)

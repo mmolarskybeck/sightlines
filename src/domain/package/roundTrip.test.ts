@@ -68,6 +68,60 @@ describe("export → import round trip", () => {
     expect(commit.warnings).toEqual([]);
   });
 
+  it("display cases (wall + floor) survive a display-mode round trip", async () => {
+    const { project: base, library, getAsset, getBlob } = makeFixture();
+    const wallId = base.floor.rooms[0].room.walls[0].id;
+    const project = {
+      ...base,
+      wallObjects: [
+        ...base.wallObjects,
+        {
+          id: "wall-case-1",
+          kind: "case" as const,
+          wallId,
+          xMm: 1200,
+          yMm: 950,
+          widthMm: 1500,
+          heightMm: 180,
+          depthMm: 450
+        }
+      ],
+      floorObjects: [
+        {
+          id: "floor-case-1",
+          kind: "case" as const,
+          xMm: 3000,
+          yMm: 2000,
+          widthMm: 1800,
+          depthMm: 600,
+          rotationDeg: 0,
+          heightMm: 950,
+          wallYMm: 950
+        }
+      ]
+    };
+
+    const { zip } = await createSightlinesPackage({
+      project,
+      libraryArtworks: library,
+      mode: "display",
+      getAsset,
+      getBlob
+    });
+
+    const opened = await openSightlinesPackage(zip);
+    const validated = await validatePackageAssets(opened.manifest, opened.files);
+    const commit = finalizePackageImport(
+      planPackageImport(opened.manifest, validated, emptyLibrary),
+      {}
+    );
+
+    expect(commit.project.wallObjects).toEqual(project.wallObjects);
+    expect(commit.project.floorObjects).toEqual(project.floorObjects);
+    // The version-4 project schema round-trips intact through the package.
+    expect(commit.project.schemaVersion).toBe(project.schemaVersion);
+  });
+
   it("saved views survive a display-mode round trip", async () => {
     const { project: base, library, getAsset, getBlob } = makeFixture();
     const project = {

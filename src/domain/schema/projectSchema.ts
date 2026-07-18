@@ -60,11 +60,20 @@ const wallTextWallObjectSchema = wallObjectBaseSchema.extend({
   name: z.string().min(1).optional()
 });
 
+// A wall display case (vitrine): a new union member that adds a required
+// `depthMm` (protrusion from the wall). Because it adds a stored field it is
+// NOT purely additive and rides the v3→v4 schema-version bump (see MIGRATIONS).
+const caseWallObjectSchema = wallObjectBaseSchema.extend({
+  kind: z.literal("case"),
+  depthMm: z.number().positive()
+});
+
 const wallObjectSchema = z.discriminatedUnion("kind", [
   artworkWallObjectSchema,
   connectableOpeningWallObjectSchema,
   blockedZoneWallObjectSchema,
-  wallTextWallObjectSchema
+  wallTextWallObjectSchema,
+  caseWallObjectSchema
 ]);
 
 const floorObjectBaseSchema = z.object({
@@ -88,9 +97,16 @@ const blockedZoneFloorObjectSchema = floorObjectBaseSchema.extend({
   kind: z.literal("blocked-zone")
 });
 
+// A freestanding display case (vitrine): carries only the FloorObjectBase
+// shape — its overall height is `heightMm`, no extra stored fields. New in v4.
+const caseFloorObjectSchema = floorObjectBaseSchema.extend({
+  kind: z.literal("case")
+});
+
 const floorObjectSchema = z.discriminatedUnion("kind", [
   artworkFloorObjectSchema,
-  blockedZoneFloorObjectSchema
+  blockedZoneFloorObjectSchema,
+  caseFloorObjectSchema
 ]);
 
 const measurementPointSchema = z.object({
@@ -428,7 +444,12 @@ const MIGRATIONS: Record<number, (doc: Doc) => Doc> = {
   // v1 had no floor objects.
   1: (doc) => ({ ...doc, floorObjects: [], schemaVersion: 2 }),
   // v3 adds partitions and replaces the never-written connectsToWallId field.
-  2: (doc) => migrateV2ToV3(doc)
+  2: (doc) => migrateV2ToV3(doc),
+  // v4 adds display cases (floor + wall). A v3 project contains no cases, so
+  // like the v1→v2 floorObjects passthrough this is a pure version-stamp — the
+  // new union members are absent from every existing document and nothing in
+  // the stored shape needs rewriting.
+  3: (doc) => ({ ...doc, schemaVersion: 4 })
 };
 
 function migrateV2ToV3(doc: Doc): Doc {

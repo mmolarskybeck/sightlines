@@ -33,6 +33,7 @@ export function openingNoun(kind: OpeningKind): string {
 export function moveObjectNoun(kind: WallObject["kind"]): string {
   if (kind === "artwork") return "artwork";
   if (kind === "wall-text") return "wall text";
+  if (kind === "case") return "display case";
   return openingNoun(kind);
 }
 

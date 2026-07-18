@@ -83,6 +83,31 @@ export const FRAME_DEPTH_MM = 38;
 export const MAT_FILL_COLOR = "#F5F5F2";
 
 // ============================================================================
+// Display cases (vitrines)
+// ============================================================================
+
+// Opaque legs/base-slab — a light warm-neutral gray, one notch darker than
+// BOX_COLOR so the leg/slab furniture reads as distinct from the case body.
+export const CASE_FRAME_COLOR = "#d7d7d3";
+
+// Opaque case body (all sides + bottom of the display box) — reads as a
+// painted-white wood box with only the top glazed (spec: MoMA vitrine
+// reference photos). Pure white, matching WALL_TEXT_PANEL_COLOR's precedent:
+// against the cool-tinted WALL_COLOR (#f5f6f7) a true white face is what
+// actually reads as "white like the walls", while a near-wall gray
+// (#eef0f0, the first attempt) lit identically to the wall behind it
+// dissolved into an edgeless patch that users read as transparent.
+export const CASE_BODY_COLOR = "#ffffff";
+
+// Glass pane: meshLambertMaterial, transparent, low opacity, depthWrite off
+// (spec: flat/simple look, no MeshTransmissionMaterial). Used ONLY on the
+// top face of each case now — sides/front/back/bottom are opaque
+// CASE_BODY_COLOR. A faint cool white so it still separates from
+// WALL_COLOR/BOX_COLOR when opaque geometry sits behind it.
+export const CASE_GLASS_COLOR = "#eef2f3";
+export const CASE_GLASS_OPACITY = 0.25;
+
+// ============================================================================
 // Blocked zones (planning annotations, not physical)
 // ============================================================================
 

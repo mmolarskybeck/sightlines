@@ -27,6 +27,8 @@ import type {
   ArtworkFloorObject,
   ArtworkWallObject,
   BlockedZoneFloorObject,
+  CaseFloorObject,
+  CaseWallObject,
   DisplayUnit,
   FreestandingWall,
   OpeningWallObject,
@@ -51,6 +53,7 @@ import { ArtworkLibraryView } from "./components/library/ArtworkLibrary";
 import { PanelResizeHandle } from "./components/shared/PanelResizeHandle";
 import { ChecklistPanel } from "./components/panels/ChecklistPanel";
 import { ElevationEmptyState } from "./components/elevation/ElevationEmptyState";
+import { FloorCaseInspector, WallCaseInspector } from "./components/inspectors/CaseInspector";
 import { FloorObjectInspector, FloorPlacementFields } from "./components/inspectors/FloorObjectInspector";
 import { FreestandingWallInspector } from "./components/inspectors/FreestandingWallInspector";
 import {
@@ -276,6 +279,7 @@ export function App() {
   const placeOpeningOnElevation = useAppStore((state) => state.placeOpeningOnElevation);
   const commitPlanMove = useAppStore((state) => state.commitPlanMove);
   const updateFloorObject = useAppStore((state) => state.updateFloorObject);
+  const updateWallCase = useAppStore((state) => state.updateWallCase);
   const moveWallObjectsGroup = useAppStore((state) => state.moveWallObjectsGroup);
   const movePlanObjectsGroup = useAppStore((state) => state.movePlanObjectsGroup);
   const removeSelectedPlacements = useAppStore((state) => state.removeSelectedPlacements);
@@ -851,7 +855,36 @@ export function App() {
         (wallObject): wallObject is OpeningWallObject =>
           wallObject.kind !== "artwork" &&
           wallObject.kind !== "wall-text" &&
+          wallObject.kind !== "case" &&
           wallObject.id === selectedOpeningId
+      ) ?? null)
+    : null;
+
+  // Display cases share the opening-selection id space (ids are globally unique),
+  // but have their own inspector, so they are resolved out of `selectedOpening`
+  // above and derived separately here. A wall case lives in wallObjects; a floor
+  // case in floorObjects. Deleted selections resolve to null.
+  const selectedWallCase: CaseWallObject | null = selectedOpeningId
+    ? (project.wallObjects.find(
+        (wallObject): wallObject is CaseWallObject =>
+          wallObject.kind === "case" && wallObject.id === selectedOpeningId
+      ) ?? null)
+    : null;
+  const selectedWallCaseWall = selectedWallCase
+    ? (getProjectWalls(project).find((wall) => wall.id === selectedWallCase.wallId) ?? null)
+    : null;
+  const wallCaseCenterTarget =
+    selectedWallCase && selectedWallCaseWall
+      ? getWallPlacementCenterTarget(
+          selectedWallCase as unknown as ArtworkWallObject,
+          project.wallObjects,
+          selectedWallCaseWall.lengthMm
+        )
+      : { xMm: 0, boundaryKind: "wall" as const };
+  const selectedFloorCase: CaseFloorObject | null = selectedOpeningId
+    ? (project.floorObjects.find(
+        (floorObject): floorObject is CaseFloorObject =>
+          floorObject.kind === "case" && floorObject.id === selectedOpeningId
       ) ?? null)
     : null;
 
@@ -1001,7 +1034,9 @@ export function App() {
         : wallObject
           ? wallObject.kind === "wall-text"
             ? "Wall text"
-            : getOpeningKindLabel(wallObject.kind)
+            : wallObject.kind === "case"
+              ? "Display case" // TODO(case-ui): dedicated label source
+              : getOpeningKindLabel(wallObject.kind)
           : undefined;
     return { ...warning, subject };
   });
@@ -1513,12 +1548,14 @@ export function App() {
                       variant="full"
                       activeTool={activeTool}
                       disabled={viewMode === "elevation" && !selectedWall}
+                      excludedTools={viewMode === "elevation" ? ["case"] : undefined}
                       onToolChange={armOpeningTool}
                     />
                     <InsertPicker
                       variant="compact"
                       activeTool={activeTool}
                       disabled={viewMode === "elevation" && !selectedWall}
+                      excludedTools={viewMode === "elevation" ? ["case"] : undefined}
                       onToolChange={armOpeningTool}
                     />
                     <ViewOptionButton
@@ -1704,7 +1741,9 @@ export function App() {
                   getBlob={getAssetBlob}
                   gridPrecisionFloorMm={gridPrecisionFloorMm}
                   gridVisible={showGrid}
-                  activeTool={activeTool}
+                  // The display case is plan-only (its floor-vs-wall decision
+                  // needs open floor); never hand it to the elevation canvas.
+                  activeTool={activeTool === "case" ? null : activeTool}
                   onToolChange={armOpeningTool}
                   onPlaceOpeningOnElevation={(kind, wallId, xMm, yMm) =>
                     void placeOpeningOnElevation(kind, wallId, xMm, yMm)
@@ -1864,6 +1903,8 @@ export function App() {
             (selectedArtwork ||
               selectedOpening ||
               selectedFloorBlockedZone ||
+              selectedFloorCase ||
+              selectedWallCase ||
               selectedRoomPlacement ||
               selectedFreestandingWall ||
               selectedWall) ? (
@@ -1875,22 +1916,28 @@ export function App() {
                       ? getOpeningKindLabel(selectedOpening.kind)
                       : selectedFloorBlockedZone
                         ? getOpeningKindLabel(selectedFloorBlockedZone.kind)
-                        : selectedRoomPlacement
-                          ? selectedRoomPlacement.room.name
-                          : selectedFreestandingWall
-                            ? selectedFreestandingWall.name
-                            : selectedWall?.name}
+                        : selectedFloorCase || selectedWallCase
+                          ? "Display case"
+                          : selectedRoomPlacement
+                            ? selectedRoomPlacement.room.name
+                            : selectedFreestandingWall
+                              ? selectedFreestandingWall.name
+                              : selectedWall?.name}
                 </h2>
                 {!selectedArtwork ? <span>
                   {selectedOpening
                       ? "Opening"
                       : selectedFloorBlockedZone
                         ? "Floor object"
-                        : selectedRoomPlacement
-                          ? "Room"
-                          : selectedFreestandingWall
-                            ? "Partition"
-                            : "Wall"}
+                        : selectedFloorCase
+                          ? "Floor object"
+                          : selectedWallCase
+                            ? "Wall object"
+                            : selectedRoomPlacement
+                              ? "Room"
+                              : selectedFreestandingWall
+                                ? "Partition"
+                                : "Wall"}
                 </span> : null}
               </div>
             ) : null}
@@ -2087,6 +2134,36 @@ export function App() {
                   />
                 ) : null
               }
+            />
+          ) : selectedFloorCase ? (
+            <FloorCaseInspector
+              floorCase={selectedFloorCase}
+              unit={project.unit}
+              onCommitPosition={(xMm, yMm) =>
+                void updateFloorObject(selectedFloorCase.id, { xMm, yMm })
+              }
+              onCommitSize={(widthMm, depthMm) =>
+                void updateFloorObject(selectedFloorCase.id, { widthMm, depthMm })
+              }
+              onCommitHeight={(heightMm) =>
+                void updateFloorObject(selectedFloorCase.id, { heightMm })
+              }
+              onDelete={() => void removePlacement(selectedFloorCase.id)}
+            />
+          ) : selectedWallCase ? (
+            <WallCaseInspector
+              wallCase={selectedWallCase}
+              wallLengthMm={selectedWallCaseWall?.lengthMm ?? 0}
+              centerTargetXMm={wallCaseCenterTarget.xMm}
+              centerBoundaryKind={wallCaseCenterTarget.boundaryKind}
+              unit={project.unit}
+              onCommitPosition={(xMm, yMm) =>
+                void updateWallCase(selectedWallCase.id, { xMm, yMm })
+              }
+              onCommitSize={(widthMm, heightMm, depthMm) =>
+                void updateWallCase(selectedWallCase.id, { widthMm, heightMm, depthMm })
+              }
+              onDelete={() => void removePlacement(selectedWallCase.id)}
             />
           ) : selectedOpening ? (
             <OpeningInspector

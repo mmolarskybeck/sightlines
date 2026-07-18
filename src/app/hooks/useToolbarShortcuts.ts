@@ -70,6 +70,12 @@ export function useToolbarShortcuts({
         case "t":
           armOpening("wall-text");
           break;
+        case "c":
+          // The display case is plan-only (it decides wall-vs-floor from where
+          // the click lands, which elevation's single wall can't offer).
+          if (viewMode !== "plan") return;
+          armOpening("case");
+          break;
         case "p":
           if (viewMode !== "plan") return;
           event.preventDefault();

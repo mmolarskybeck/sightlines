@@ -71,6 +71,16 @@ describe("useToolbarShortcuts", () => {
     expect(handlers.armOpeningTool).toHaveBeenNthCalledWith(2, "blocked-zone");
   });
 
+  it("scopes the Case tool (C) to plan only", () => {
+    const plan = renderHarness({ viewMode: "plan" });
+    press("c");
+    expect(plan.armOpeningTool).toHaveBeenCalledWith("case");
+
+    const elevation = renderHarness({ viewMode: "elevation" });
+    press("c");
+    expect(elevation.armOpeningTool).not.toHaveBeenCalled();
+  });
+
   it("toggles the view options in both 2D views", () => {
     const plan = renderHarness({ viewMode: "plan" });
     press("g");

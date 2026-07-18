@@ -66,7 +66,13 @@ export function floatPolicyForKind(
 ): FloatPolicy {
   if (kind === "artwork") return artworkForm === "floor" ? "floor-only" : "reject";
   if (kind === "blocked-zone") return "float";
-  return "capture-any"; // door | window
+  // A case floats like a blocked zone: it captures a wall only within capture
+  // distance and otherwise resolves a free floor-space center. placeCaseFromPlan
+  // decides wall-case vs floor-case from the resolved anchor, so a case near a
+  // wall becomes a wall case and one on open floor becomes a floor case.
+  if (kind === "case") return "float";
+  // door | window | wall-text: capture the nearest wall at any distance.
+  return "capture-any";
 }
 
 export type PlanPlacementResult = {

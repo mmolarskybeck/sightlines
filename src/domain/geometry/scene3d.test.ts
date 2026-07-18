@@ -210,6 +210,74 @@ describe("deriveScene3d — floor-space placement", () => {
   });
 });
 
+describe("deriveScene3d — display cases", () => {
+  it("emits a wall case onto its wall panel with wall-local center + size + protrusion", () => {
+    const wallCase: WallObject = {
+      id: "wo-case",
+      kind: "case",
+      wallId: "room-a-wall-0",
+      xMm: 1000,
+      yMm: 950,
+      widthMm: 1500,
+      heightMm: 180,
+      depthMm: 450
+    };
+    const scene = deriveScene3d(
+      makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))], {
+        wallObjects: [wallCase]
+      })
+    );
+
+    const panel = scene.rooms[0].walls.find((wall) => wall.wallId === "room-a-wall-0")!;
+    expect(panel.cases).toHaveLength(1);
+    expect(panel.cases[0]).toEqual({
+      objectId: "wo-case",
+      xMm: 1000,
+      yMm: 950,
+      widthMm: 1500,
+      heightMm: 180,
+      depthMm: 450
+    });
+    // Not misclassified as artwork/blocked-zone/hole.
+    expect(panel.artworks).toHaveLength(0);
+    expect(panel.blockedZones).toHaveLength(0);
+    expect(panel.holes).toHaveLength(0);
+  });
+
+  it("emits a floor case as a floor object carrying kind 'case' and its dimensions", () => {
+    const floorCase: FloorObject = {
+      id: "fo-case",
+      kind: "case",
+      xMm: 2000,
+      yMm: 1500,
+      widthMm: 1800,
+      depthMm: 600,
+      heightMm: 950,
+      rotationDeg: 0,
+      wallYMm: 950
+    };
+    const scene = deriveScene3d(
+      makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))], {
+        floorObjects: [floorCase]
+      })
+    );
+
+    expect(scene.floorObjects).toHaveLength(1);
+    expect(scene.floorObjects[0]).toMatchObject({
+      objectId: "fo-case",
+      kind: "case",
+      xMm: 2000,
+      yMm: 1500,
+      widthMm: 1800,
+      depthMm: 600,
+      heightMm: 950,
+      rotationDeg: 0
+    });
+    // No artwork join for a case.
+    expect(scene.floorObjects[0]!.artworkId).toBeUndefined();
+  });
+});
+
 describe("wallInwardNormal — winding / orientation", () => {
   it("points every wall of a CCW room inward toward the floor", () => {
     const scene = deriveScene3d(

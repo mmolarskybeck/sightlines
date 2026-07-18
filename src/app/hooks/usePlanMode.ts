@@ -101,7 +101,10 @@ export function usePlanMode(viewMode: ViewMode, selectedRoomId: string | null): 
       if (viewMode === "plan") return current;
       if (
         viewMode === "elevation" &&
-        (current.kind === "placeOpening" || current.kind === "measure")
+        // The display case is plan-only, so it does NOT survive the hop to
+        // elevation the way doors/windows/wall-text/measure do.
+        ((current.kind === "placeOpening" && current.tool !== "case") ||
+          current.kind === "measure")
       ) {
         return current;
       }

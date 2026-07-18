@@ -148,8 +148,11 @@ export function svgPolygonPoints(polygonMm: Point[]): string {
 //   a simple dim change; the off-wall depth stays the schematic face width,
 //   not a projection), then shifts to the viewer's side of the wall line
 //   (spec §5.3) so back-to-back works on a shared wall's two faces don't
-//   overlap. Doors/windows/blocked-zones pass through the wall, so they stay
-//   centered on it.
+//   overlap. A CASE isn't widened (no mat/frame) but is likewise shifted to
+//   the viewer's side: its box is cantilevered off the wall and protrudes
+//   into the room, so its rest rect's long edge lands flush ON the wall line
+//   with its depth protruding inward. Doors/windows/blocked-zones pass through
+//   the wall, so they stay centered on it.
 // - Every kind then gets the min-depth floor. The viewer-side offset is
 //   deliberately computed from the PRE-clamp depth (the model's
 //   WALL_OBJECT_PLAN_DEPTH_MM), so zoom never moves an artwork's center.
@@ -179,8 +182,9 @@ export function getRenderedWallObjectPlanRect(
         ).widthMm
       : planRect.widthMm;
 
+  const offsetToViewerSide = kind === "artwork" || kind === "case";
   return {
-    ...(kind === "artwork"
+    ...(offsetToViewerSide
       ? offsetPlanRectToViewerSide({ ...planRect, widthMm: framedWidthMm })
       : planRect),
     depthMm: Math.max(planRect.depthMm, minDepthMm)
@@ -281,7 +285,16 @@ export function buildPlanScene(project: Project, options: PlanSceneOptions = {})
     if (!wall) return [];
 
     const artwork = object.kind === "artwork" ? artworksById?.get(object.artworkId) : undefined;
-    const restRect = getWallObjectPlanRect(wall, object);
+    // A wall case protrudes from the wall by its real depthMm; every other
+    // wall object uses the fixed nominal plan depth. The restRect stays the
+    // geometric anchor centered ON the wall line (drag math reads its
+    // center/angle); getRenderedWallObjectPlanRect then shifts the CASE (like
+    // artwork) to the viewer's side so its box protrudes into the room flush
+    // against the wall, rather than straddling the line.
+    const restRect =
+      object.kind === "case"
+        ? getWallObjectPlanRect(wall, object, object.depthMm)
+        : getWallObjectPlanRect(wall, object);
     return [
       {
         object,

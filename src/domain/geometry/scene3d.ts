@@ -68,7 +68,9 @@ export type WallArtwork3d = {
 // the render layer owns the single plan->three yaw mapping.
 export type FloorObject3d = {
   objectId: string;
-  kind: "artwork" | "blocked-zone";
+  // "case" is a freestanding vitrine: the render layer draws a glass box
+  // (FLOOR_CASE_BOX_HEIGHT_MM tall at the top) on legs filling the remainder.
+  kind: "artwork" | "blocked-zone" | "case";
   artworkId?: string;
   assetId?: string;
   status?: Dimensions["status"];
@@ -90,6 +92,19 @@ export type WallText3d = {
   heightMm: number;
 };
 
+// A wall-mounted display case (vitrine) riding the wall face: a box
+// cantilevered off the wall, protruding into the room by `depthMm`. Wall-local
+// center coordinates like the artwork/wall-text entries, plus the protrusion
+// the render layer extrudes into the room along the wall's inward normal.
+export type WallCase3d = {
+  objectId: string;
+  xMm: number; // wall-local center along the wall, from `start`
+  yMm: number; // wall-local mount center, 0 = floor
+  widthMm: number;
+  heightMm: number;
+  depthMm: number; // protrusion from the wall face into the room
+};
+
 export type WallPanel3d = {
   wallId: string;
   // Floor-space endpoints. ORIENTATION CONVENTION: walls are wound so the room
@@ -103,6 +118,7 @@ export type WallPanel3d = {
   artworks: WallArtwork3d[];
   blockedZones: Rect3d[];
   wallTexts: WallText3d[];
+  cases: WallCase3d[];
 };
 
 // A partition slab (spec §7.1): two single-sided face panels (reusing
@@ -344,11 +360,13 @@ function derivePanelContents(
   artworks: WallArtwork3d[];
   blockedZones: Rect3d[];
   wallTexts: WallText3d[];
+  cases: WallCase3d[];
 } {
   const artworks: WallArtwork3d[] = [];
   const blockedZones: Rect3d[] = [];
   const holes: Hole3d[] = [];
   const wallTexts: WallText3d[] = [];
+  const cases: WallCase3d[] = [];
   for (const object of objects) {
     if (object.kind === "artwork") {
       const artwork = artworksById.get(object.artworkId);
@@ -369,6 +387,15 @@ function derivePanelContents(
         yMm: object.yMm,
         widthMm: object.widthMm,
         heightMm: object.heightMm
+      });
+    } else if (object.kind === "case") {
+      cases.push({
+        objectId: object.id,
+        xMm: toLocalX(object.xMm),
+        yMm: object.yMm,
+        widthMm: object.widthMm,
+        heightMm: object.heightMm,
+        depthMm: object.depthMm
       });
     } else if (object.kind === "blocked-zone") {
       const centerX = toLocalX(object.xMm);
@@ -420,7 +447,7 @@ function derivePanelContents(
       });
     }
   }
-  return { holes, artworks, blockedZones, wallTexts };
+  return { holes, artworks, blockedZones, wallTexts, cases };
 }
 
 function openingVerticalExtent(

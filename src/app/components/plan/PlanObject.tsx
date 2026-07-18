@@ -36,7 +36,7 @@ export function PlanObject({
   // strokes — the refusal must read regardless of the object's other state.
   isInvalid?: boolean;
   isSelected?: boolean;
-  kind: "door" | "window" | "blocked-zone" | "artwork" | "wall-text";
+  kind: "door" | "window" | "blocked-zone" | "artwork" | "wall-text" | "case";
   // Starts a pointer-drag move of this object (PlanView owns the live preview
   // + commit-on-release). A click without real movement still falls through to
   // onSelect — the drag release is a no-op below its movement threshold.
@@ -166,6 +166,40 @@ export function PlanObject({
             y1={y}
             y2={bottomY}
           />
+        </g>
+      ) : null}
+      {kind === "case" ? (
+        // A vitrine glyph: the outer outline is the glass box footprint, the
+        // thin inner inset reads as the glass line, and (for a freestanding
+        // floor case) four small corner dots mark the legs. A wall case has no
+        // legs, so it draws only the inset — leaving the outline's wall-side
+        // edge as its orientation cue against the wall line it sits flush on.
+        <g className="plan-object-mark plan-object-mark--case">
+          <rect
+            className="plan-object-case-glass"
+            height={insetDepthMm}
+            vectorEffect="non-scaling-stroke"
+            width={insetWidthMm}
+            x={x + insetMm}
+            y={y + insetMm}
+          />
+          {isFloorPlaced
+            ? [
+                { cx: x + insetMm, cy: y + insetMm },
+                { cx: rightX - insetMm, cy: y + insetMm },
+                { cx: rightX - insetMm, cy: bottomY - insetMm },
+                { cx: x + insetMm, cy: bottomY - insetMm }
+              ].map((leg, index) => (
+                <circle
+                  className="plan-object-case-leg"
+                  cx={leg.cx}
+                  cy={leg.cy}
+                  key={index}
+                  r={insetMm * 0.28}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))
+            : null}
         </g>
       ) : null}
       {kind === "blocked-zone" ? (

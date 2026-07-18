@@ -331,7 +331,7 @@ describe("migrateProject", () => {
     expect(migrateProject(olderProject).wallObjects).toEqual([]);
   });
 
-  it("walks a real v1 document 1→2→3, landing at v3 and parsing", () => {
+  it("walks a real v1 document 1→2→3→4, landing at the current version and parsing", () => {
     // A genuine v1 doc predates BOTH floorObjects (v2) and freestandingWalls
     // (v3), so strip them from the current-shape sample before stamping v1.
     const { floorObjects: _floorObjects, ...currentShape } = createSampleProject();
@@ -348,12 +348,12 @@ describe("migrateProject", () => {
 
     const migrated = migrateProject(v1Document);
 
-    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(migrated.floorObjects).toEqual([]);
     expect(migrated.floor.rooms[0].room.freestandingWalls).toEqual([]);
   });
 
-  it("migrates a v2 document to v3, adding freestandingWalls and dropping connectsToWallId", () => {
+  it("migrates a v2 document forward, adding freestandingWalls and dropping connectsToWallId", () => {
     const sample = createSampleProject();
     const v2Document = {
       ...sample,
@@ -382,11 +382,23 @@ describe("migrateProject", () => {
 
     const migrated = migrateProject(v2Document);
 
-    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(migrated.floor.rooms[0].room.freestandingWalls).toEqual([]);
     expect(
       (migrated.wallObjects[0] as Record<string, unknown>).connectsToWallId
     ).toBeUndefined();
+  });
+
+  it("migrates a v3 document to v4 as a pure version-stamp (v3 has no cases)", () => {
+    const sample = createSampleProject();
+    const v3Document = { ...sample, schemaVersion: 3 };
+
+    const migrated = migrateProject(v3Document);
+
+    expect(migrated.schemaVersion).toBe(4);
+    // Nothing else changes: a v3 project carries no cases, so the only edit is
+    // the version stamp (mirrors the v1→v2 floorObjects passthrough).
+    expect(migrated).toEqual({ ...sample, schemaVersion: 4 });
   });
 
   it("round-trips a v2 document that already has floor objects", () => {
@@ -410,7 +422,10 @@ describe("migrateProject", () => {
   });
 
   it("rejects a document from a newer schema version than this app supports", () => {
-    const fromTheFuture = { ...createSampleProject(), schemaVersion: 4 };
+    const fromTheFuture = {
+      ...createSampleProject(),
+      schemaVersion: CURRENT_SCHEMA_VERSION + 1
+    };
 
     expect(() => migrateProject(fromTheFuture)).toThrow(/newer version of Sightlines/);
   });

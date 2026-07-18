@@ -90,7 +90,7 @@ export const rendererBenchmarkWallObjects: WallObject[] = Array.from(
 
 export const rendererBenchmarkProject: Project = {
   id: "renderer-benchmark-10-room-200-work",
-  schemaVersion: 3,
+  schemaVersion: 4,
   title: "Renderer benchmark — 10 rooms / 200 works",
   unit: "m",
   defaultWallHeightMm: wallHeightMm,

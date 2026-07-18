@@ -460,6 +460,7 @@ MVP1 bundles a lot — geometry, artwork/checklist, snapping/collision/undo, and
 - Room-visibility-scoped 3D rendering refinements for larger multi-room floors, only after the benchmark demonstrates a material need
 
 ### Backlog (not scheduled — revisit only on real demand)
+- Objects inside display cases — v1 (schema v4, 2026-07-18) ships floor and wall vitrines empty; placing artworks/ephemera flat inside a case would need per-case slot layout, a top-down mini-arrangement UI, and texture mapping onto the case floor
 - Accounts, Supabase/RLS, hosted cloud projects, public snapshot links
 - Real-time multiplayer co-editing (explicitly distinct from file sync — see §6)
 - Standalone zero-install viewer export + lightweight annotation pins (§6) — clean to add later, not needed while sharing is file-based
