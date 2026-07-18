@@ -1,6 +1,33 @@
+import type { ReactElement } from "react";
 import { MinusIcon } from "@phosphor-icons/react/dist/csr/Minus";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { Button } from "../ui/button";
+import { ToolbarTooltipKbd } from "../toolbar/ToolbarTooltipKbd";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
+
+function ZoomTooltip({
+  children,
+  disabled = false,
+  kbd,
+  label
+}: {
+  children: ReactElement;
+  disabled?: boolean;
+  kbd?: string;
+  label: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {disabled ? <span className="disabled-tooltip-trigger">{children}</span> : children}
+      </TooltipTrigger>
+      <TooltipContent className="toolbar-tooltip" side="top">
+        {label}
+        {kbd ? <ToolbarTooltipKbd hint={kbd} /> : null}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 // Floating zoom cluster for the 2D drawing surfaces — anchored bottom-right
 // inside the canvas. Reads
@@ -36,77 +63,82 @@ export function ViewportZoomControls({
   return (
     <div className="viewport-zoom" role="toolbar" aria-label="Zoom">
       {onFitSelected ? (
+        <ZoomTooltip disabled={fitSelectedDisabled} label="Fit selection">
+          <Button
+            aria-label="Fit selection"
+            className="plan-toolbar-button"
+            disabled={fitSelectedDisabled}
+            type="button"
+            variant="inspector"
+            onClick={(event) => {
+              blur(event);
+              onFitSelected();
+            }}
+          >
+            Fit selected
+          </Button>
+        </ZoomTooltip>
+      ) : null}
+      <ZoomTooltip disabled={isFit} kbd="⌘0" label="Fit to view">
         <Button
-          aria-label="Fit selected"
-          title="Fit selected"
+          aria-label="Fit to view"
           className="plan-toolbar-button"
-          disabled={fitSelectedDisabled}
+          disabled={isFit}
           type="button"
           variant="inspector"
           onClick={(event) => {
             blur(event);
-            onFitSelected();
+            onFit();
           }}
         >
-          Fit selected
+          Fit
         </Button>
-      ) : null}
-      <Button
-        aria-label="Fit to view"
-        title="Fit to view (⌘0)"
-        className="plan-toolbar-button"
-        disabled={isFit}
-        type="button"
-        variant="inspector"
-        onClick={(event) => {
-          blur(event);
-          onFit();
-        }}
-      >
-        Fit
-      </Button>
-      <Button
-        aria-label="Zoom out"
-        title="Zoom out"
-        className="viewport-zoom-step"
-        disabled={!canZoomOut}
-        size="icon-sm"
-        type="button"
-        variant="inspector"
-        onClick={(event) => {
-          blur(event);
-          onZoomOut();
-        }}
-      >
-        <MinusIcon aria-hidden="true" size={14} />
-      </Button>
-      <button
-        className="viewport-zoom-value"
-        aria-label={`Zoom level ${Math.round(zoom * 100)} percent — reset to fit`}
-        title="Reset to fit"
-        type="button"
-        onClick={(event) => {
-          blur(event);
-          onFit();
-        }}
-      >
-        {Math.round(zoom * 100)}%
-      </button>
-      <Button
-        aria-label="Zoom in"
-        title="Zoom in"
-        className="viewport-zoom-step"
-        disabled={!canZoomIn}
-        size="icon-sm"
-        type="button"
-        variant="inspector"
-        onClick={(event) => {
-          blur(event);
-          onZoomIn();
-        }}
-      >
-        <PlusIcon aria-hidden="true" size={14} />
-      </Button>
+      </ZoomTooltip>
+      <ZoomTooltip disabled={!canZoomOut} label="Zoom out">
+        <Button
+          aria-label="Zoom out"
+          className="viewport-zoom-step"
+          disabled={!canZoomOut}
+          size="icon-sm"
+          type="button"
+          variant="inspector"
+          onClick={(event) => {
+            blur(event);
+            onZoomOut();
+          }}
+        >
+          <MinusIcon aria-hidden="true" size={14} />
+        </Button>
+      </ZoomTooltip>
+      <ZoomTooltip label="Reset zoom">
+        <button
+          className="viewport-zoom-value"
+          aria-label={`Zoom level ${Math.round(zoom * 100)} percent. Reset zoom`}
+          type="button"
+          onClick={(event) => {
+            blur(event);
+            onFit();
+          }}
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+      </ZoomTooltip>
+      <ZoomTooltip disabled={!canZoomIn} label="Zoom in">
+        <Button
+          aria-label="Zoom in"
+          className="viewport-zoom-step"
+          disabled={!canZoomIn}
+          size="icon-sm"
+          type="button"
+          variant="inspector"
+          onClick={(event) => {
+            blur(event);
+            onZoomIn();
+          }}
+        >
+          <PlusIcon aria-hidden="true" size={14} />
+        </Button>
+      </ZoomTooltip>
     </div>
   );
 }

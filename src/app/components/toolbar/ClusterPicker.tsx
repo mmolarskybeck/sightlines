@@ -167,7 +167,7 @@ function ClusterPicker({
           // reason rides the SAME styled Tooltip, firing on hover AND focus.
           // The click is a no-op while disabled; the fogged look ports to
           // [aria-disabled] in global.css. Pressed → the tooltip teaches the
-          // exit ("Esc cancels"); resting → it echoes the accelerator ("— D").
+          // exit ("Esc cancels"); resting → it echoes the accelerator in a key chip.
           <Tooltip key={entry.key}>
             <TooltipTrigger asChild>
               <button
@@ -212,7 +212,7 @@ export function InsertPicker({
   variant,
   activeTool,
   disabled,
-  disabledReason = "Select a wall to place an opening",
+  disabledReason = "Select a wall first",
   onToolChange
 }: {
   variant: ClusterVariant;
@@ -234,7 +234,7 @@ export function InsertPicker({
       entries={entries}
       armed={armedInsertMeta(activeTool)}
       idleIcon={<PlusIcon aria-hidden="true" size={16} />}
-      idleTooltip="Insert an opening"
+      idleTooltip="Choose insert tool"
       disabled={disabled}
       disabledReason={disabledReason}
     />
@@ -274,7 +274,7 @@ export function DrawPicker({
       entries={entries}
       armed={armedDrawMeta(rectActive, outlineActive, partitionActive)}
       idleIcon={<PencilSimpleIcon aria-hidden="true" size={16} />}
-      idleTooltip="Draw a room or partition"
+      idleTooltip="Choose draw tool"
     />
   );
 }

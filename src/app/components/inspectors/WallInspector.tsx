@@ -221,8 +221,7 @@ export function WallInspector({
             </Button>
           </TooltipTrigger>
           <TooltipContent className="opening-add-tooltip" side="bottom">
-            A standard doorway reaching the floor. Artwork can&rsquo;t hang
-            over it.
+            Doorway reaches the floor. Blocks artwork placement.
           </TooltipContent>
         </Tooltip>
         <Tooltip>
@@ -237,8 +236,7 @@ export function WallInspector({
             </Button>
           </TooltipTrigger>
           <TooltipContent className="opening-add-tooltip" side="bottom">
-            A window centered on the wall&rsquo;s midline. Artwork can&rsquo;t
-            hang over it.
+            Window is centered on the wall. Blocks artwork placement.
           </TooltipContent>
         </Tooltip>
         <Tooltip>
@@ -253,8 +251,7 @@ export function WallInspector({
             </Button>
           </TooltipTrigger>
           <TooltipContent className="opening-add-tooltip" side="bottom">
-            Marks a region where artwork can&rsquo;t be hung: a vent,
-            outlet, thermostat, or other obstruction.
+            Marks an area that blocks artwork placement, such as a vent or outlet.
           </TooltipContent>
         </Tooltip>
         <Tooltip>
@@ -269,8 +266,7 @@ export function WallInspector({
             </Button>
           </TooltipTrigger>
           <TooltipContent className="opening-add-tooltip" side="bottom">
-            A didactic text panel centered on the wall. It doesn&rsquo;t
-            block artwork.
+            Text panel is centered on the wall. Does not block artwork placement.
           </TooltipContent>
         </Tooltip>
       </InspectorActionGroup>

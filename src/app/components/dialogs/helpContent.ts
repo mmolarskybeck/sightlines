@@ -41,15 +41,15 @@ function toolbarKeyboardGroup(view: "plan" | "elevation"): HelpGroup {
   return {
     title: "Toolbar",
     hints: [
-      { action: "Insert a door", inputs: [[k("D")]] },
-      { action: "Insert a window", inputs: [[k("W")]] },
-      { action: "Mark a blocked zone", inputs: [[k("B")]] },
+      { action: "Insert door", inputs: [[k("D")]] },
+      { action: "Insert window", inputs: [[k("W")]] },
+      { action: "Mark blocked zone", inputs: [[k("B")]] },
       { action: "Measure distance", inputs: [[k("M")]] },
       ...(view === "plan"
         ? [
-            { action: "Draw a partition", inputs: [[k("P")]] },
+            { action: "Draw partition", inputs: [[k("P")]] },
             { action: "Draw a rectangular room", inputs: [[k("R")]] },
-            { action: "Draw a room outline", inputs: [[k("⇧"), k("R")]] }
+            { action: "Draw room outline", inputs: [[k("⇧"), k("R")]] }
           ]
         : []),
       { action: "Toggle grid", inputs: [[k("G")]] },
@@ -109,7 +109,7 @@ function planGroups(inputMode: HelpInputMode, mod: string): HelpGroup[] {
           inputs: [[t("drag empty floor")], [k("⇧"), t("keeps existing")]]
         },
         {
-          action: "Draw a room outline",
+          action: "Draw room outline",
           inputs: [
             [t("click corners")],
             [k("Enter"), t("closes")],

@@ -115,7 +115,7 @@ describe("viewHelpGroups", () => {
     expect(actions).not.toContain("Move a room or object");
     // Non-discoverable rows stay.
     expect(actions).toContain("Select several");
-    expect(actions).toContain("Draw a room outline");
+    expect(actions).toContain("Draw room outline");
     expect(actions).toContain("Edit a room's shape");
   });
 

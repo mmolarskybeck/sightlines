@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProjectSummary } from "../../../domain/project";
+import { TooltipProvider } from "../ui/tooltip";
 import { ProjectManager } from "./ProjectManager";
 
 afterEach(cleanup);
@@ -35,13 +36,15 @@ function renderManager(overrides: Partial<Parameters<typeof ProjectManager>[0]> 
   const listProjectSummaries = vi.fn().mockResolvedValue(summaries);
 
   render(
-    <ProjectManager
-      currentProjectId="project-1"
-      listProjectSummaries={listProjectSummaries}
-      open
-      {...handlers}
-      {...overrides}
-    />
+    <TooltipProvider>
+      <ProjectManager
+        currentProjectId="project-1"
+        listProjectSummaries={listProjectSummaries}
+        open
+        {...handlers}
+        {...overrides}
+      />
+    </TooltipProvider>
   );
 
   return { ...handlers, listProjectSummaries };

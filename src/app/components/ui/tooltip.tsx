@@ -14,7 +14,7 @@ export const TooltipContent = React.forwardRef<
     <TooltipPrimitive.Content
       ref={ref}
       className={cn(
-        "placement-tooltip z-50 max-w-64 rounded-sm border border-border bg-popover px-3 py-2 text-popover-foreground shadow-[var(--shadow-panel)] outline-none",
+        "placement-tooltip z-50 max-w-64 rounded-sm border border-transparent bg-foreground px-3 py-2 text-background shadow-[var(--shadow-panel)] outline-none",
         className
       )}
       sideOffset={sideOffset}

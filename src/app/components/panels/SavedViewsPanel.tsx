@@ -282,7 +282,7 @@ function IconTooltip({
   return (
     <Tooltip>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
+      <TooltipContent className="toolbar-tooltip">{label}</TooltipContent>
     </Tooltip>
   );
 }

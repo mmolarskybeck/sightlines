@@ -7,6 +7,7 @@ import { RoomDimensionFields } from "./RoomDimensionFields";
 import { InspectorSection } from "./InspectorSection";
 import { InspectorActionGroup } from "./InspectorActionGroup";
 import { Button } from "../ui/button";
+import { Kbd } from "../ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 
 export function RoomInspector({
@@ -46,10 +47,7 @@ export function RoomInspector({
   // ArtworkInspector's "Keep proportions" lock toggle for the same split).
   const reshapeHint = reshapeActive
     ? "Drag corners to reshape."
-    : "Drag a wall's handle to move that wall.";
-  const reshapeGuidance = reshapeActive
-    ? "Drag corners to reshape. Use + to split a wall. Select a corner and press Delete to remove it. Escape to finish."
-    : "Drag a wall's handle to move that wall. Edit shape to move corners or split walls.";
+    : "Drag a wall handle to move the wall.";
 
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
@@ -71,7 +69,14 @@ export function RoomInspector({
             </Button>
           </TooltipTrigger>
           <TooltipContent className="toolbar-tooltip" side="bottom">
-            {reshapeGuidance}
+            {reshapeActive ? (
+              <span>
+                Drag corners to reshape. Use <Kbd>+</Kbd> to split walls. Select a corner and
+                press <Kbd>Delete</Kbd> to remove it. Press <Kbd>Esc</Kbd> to finish.
+              </span>
+            ) : (
+              "Drag a wall handle to move the wall. Choose Edit shape to move corners or split walls."
+            )}
           </TooltipContent>
         </Tooltip>
       </div>

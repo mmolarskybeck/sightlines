@@ -75,12 +75,12 @@ describe("ArtworkInspector identity", () => {
     expect(screen.getByText("50 cm × 70 cm")).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit artwork details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
 
     expect(screen.getByRole("textbox", { name: "Title" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Artist" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Date" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Close artwork details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close details" }));
 
     expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
     expect(screen.getByText("Jane Doe · 1990")).toBeInTheDocument();
@@ -116,7 +116,7 @@ describe("ArtworkInspector identity", () => {
   it("resets the explicit-edit latch when the artwork id changes", () => {
     const { rerender, props } = renderInspector(); // complete, starts compact
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit artwork details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
     expect(screen.getByRole("textbox", { name: "Title" })).toBeInTheDocument();
 
     // A different artwork id (also complete) — ArtworkIdentity is keyed on
@@ -125,7 +125,7 @@ describe("ArtworkInspector identity", () => {
     rerender(<ArtworkInspector {...props} artwork={otherArtwork} />);
 
     expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Edit artwork details" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit details" })).toBeInTheDocument();
   });
 });
 

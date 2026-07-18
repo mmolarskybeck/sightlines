@@ -65,7 +65,7 @@ describe("RoomInspector Edit shape button", () => {
   it("teaches wall-slide when not armed, corner editing when armed", () => {
     const { rerender, props } = renderInspector({ reshapeActive: false });
     expect(
-      screen.getByText(/Drag a wall's handle to move that wall/)
+      screen.getByText(/Drag a wall handle to move the wall/)
     ).toBeTruthy();
     // The pre-standardization hint is gone.
     expect(screen.queryByText(/Drag a corner or a wall to reshape/)).toBeNull();

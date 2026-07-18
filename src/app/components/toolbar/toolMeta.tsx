@@ -10,8 +10,9 @@ import { PartitionGlyph, RectangleRoomGlyph, WindowGlyph } from "./toolbarGlyphs
 // the compact menu/trigger agree on every icon, label, resting hint, and
 // keyboard accelerator. Icons are the two custom glyphs (window as a mullioned
 // pane, partition as a solid wall bar) plus phosphor for the rest; the resting
-// hint and the armed phrase feed the tooltips — unpressed reads "Insert a
-// door — D", pressed reads "Placing a door — Esc cancels".
+// hint and the armed phrase feed the tooltips: unpressed reads "Insert door"
+// with the D key hint, while pressed reads "Click to place door" with the
+// escape hint.
 export type InsertToolMeta = {
   key: string;
   label: string;
@@ -32,32 +33,32 @@ export const OPENING_TOOL_META: Record<InsertToolKind, InsertToolMeta> = {
   door: {
     key: "door",
     label: "Door",
-    hint: "Insert a door",
-    armed: "Placing a door",
+    hint: "Insert door",
+    armed: "Click to place door",
     kbd: "D",
     icon: <DoorIcon aria-hidden="true" size={16} />
   },
   window: {
     key: "window",
     label: "Window",
-    hint: "Insert a window",
-    armed: "Placing a window",
+    hint: "Insert window",
+    armed: "Click to place window",
     kbd: "W",
     icon: <WindowGlyph aria-hidden="true" size={16} />
   },
   "blocked-zone": {
     key: "blocked-zone",
     label: "Blocked zone",
-    hint: "Mark a blocked zone",
-    armed: "Marking a blocked zone",
+    hint: "Mark blocked zone",
+    armed: "Click to place blocked zone",
     kbd: "B",
     icon: <RectangleDashedIcon aria-hidden="true" size={16} />
   },
   "wall-text": {
     key: "wall-text",
     label: "Wall text",
-    hint: "Insert a wall text",
-    armed: "Placing a wall text",
+    hint: "Insert wall text",
+    armed: "Click to place wall text",
     kbd: "T",
     icon: <TextAlignLeftIcon aria-hidden="true" size={16} />
   }
@@ -79,7 +80,7 @@ export const RECT_ROOM_TOOL_META: InsertToolMeta = {
 export const OUTLINE_ROOM_TOOL_META: InsertToolMeta = {
   key: "outline-room",
   label: "Room outline",
-  hint: "Draw a room outline",
+  hint: "Draw room outline",
   armed: "Click to place corners",
   kbd: "⇧R",
   icon: <PolygonIcon aria-hidden="true" size={16} />
@@ -88,7 +89,7 @@ export const OUTLINE_ROOM_TOOL_META: InsertToolMeta = {
 export const PARTITION_TOOL_META: InsertToolMeta = {
   key: "partition",
   label: "Partition",
-  hint: "Draw a free-standing partition",
+  hint: "Draw partition",
   armed: "Drag to draw a partition",
   kbd: "P",
   icon: <PartitionGlyph aria-hidden="true" size={16} />

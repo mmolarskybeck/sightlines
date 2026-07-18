@@ -343,17 +343,23 @@ function ArtworkIdentity({
         </span>
         <span className="artwork-tombstone-dimensions">{dimensions}</span>
         {complete ? (
-          <Button
-            aria-expanded={editing}
-            aria-label={editing ? "Close artwork details" : "Edit artwork details"}
-            className="artwork-tombstone-edit"
-            size="icon-sm"
-            title={editing ? "Close artwork details" : "Edit artwork details"}
-            variant="ghost"
-            onClick={() => setUserEditing((open) => !open)}
-          >
-            <PencilSimpleIcon aria-hidden="true" size={14} />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-expanded={editing}
+                aria-label={editing ? "Close details" : "Edit details"}
+                className="artwork-tombstone-edit"
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => setUserEditing((open) => !open)}
+              >
+                <PencilSimpleIcon aria-hidden="true" size={14} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="toolbar-tooltip" side="bottom">
+              {editing ? "Close details" : "Edit details"}
+            </TooltipContent>
+          </Tooltip>
         ) : null}
       </div>
 
@@ -566,7 +572,7 @@ function DimensionsSection({
                 </Toggle>
               </TooltipTrigger>
               <TooltipContent className="toolbar-tooltip" side="bottom">
-                Keep proportions
+                {locked ? "Unlock proportions" : "Keep proportions"}
               </TooltipContent>
             </Tooltip>
           ) : null}

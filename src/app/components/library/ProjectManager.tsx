@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type ReactElement, useEffect, useState } from "react";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
 import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
@@ -11,6 +11,7 @@ import type { ProjectSummary } from "../../../domain/project";
 import { Button } from "../ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 
 // The project switcher's list role, upgraded from a caret dropdown into a
 // modal: same open/rename/delete verbs as before, plus per-project counts and
@@ -212,27 +213,29 @@ export function ProjectManager({
                           }
                         }}
                       />
-                      <Button
-                        aria-label="Save project name"
-                        className="icon-button compact"
-                        disabled={!draftIsValid}
-                        size="icon-sm"
-                        title="Save project name"
-                        type="submit"
-                        variant="ghost"
-                      >
-                        <CheckIcon aria-hidden="true" size={14} />
-                      </Button>
-                      <Button
-                        aria-label="Cancel rename"
-                        className="icon-button compact"
-                        size="icon-sm"
-                        title="Cancel rename"
-                        variant="ghost"
-                        onClick={cancelRename}
-                      >
-                        <XIcon aria-hidden="true" size={14} />
-                      </Button>
+                      <IconTooltip disabled={!draftIsValid} label="Save name">
+                        <Button
+                          aria-label="Save project name"
+                          className="icon-button compact"
+                          disabled={!draftIsValid}
+                          size="icon-sm"
+                          type="submit"
+                          variant="ghost"
+                        >
+                          <CheckIcon aria-hidden="true" size={14} />
+                        </Button>
+                      </IconTooltip>
+                      <IconTooltip label="Cancel">
+                        <Button
+                          aria-label="Cancel rename"
+                          className="icon-button compact"
+                          size="icon-sm"
+                          variant="ghost"
+                          onClick={cancelRename}
+                        >
+                          <XIcon aria-hidden="true" size={14} />
+                        </Button>
+                      </IconTooltip>
                     </form>
                   ) : (
                     <>
@@ -266,84 +269,89 @@ export function ProjectManager({
                           >
                             Delete
                           </Button>
-                          <Button
-                            aria-label="Cancel delete"
-                            className="icon-button compact"
-                            size="icon-sm"
-                            title="Cancel delete"
-                            variant="ghost"
-                            onClick={() => setConfirmingDeleteId(null)}
-                          >
-                            <XIcon aria-hidden="true" size={14} />
-                          </Button>
+                          <IconTooltip label="Cancel">
+                            <Button
+                              aria-label="Cancel delete"
+                              className="icon-button compact"
+                              size="icon-sm"
+                              variant="ghost"
+                              onClick={() => setConfirmingDeleteId(null)}
+                            >
+                              <XIcon aria-hidden="true" size={14} />
+                            </Button>
+                          </IconTooltip>
                         </div>
                       ) : (
                         <div className="project-manager-actions">
-                          <Button
-                            aria-busy={isDuplicating}
-                            aria-label={`Duplicate ${summary.title}`}
-                            className="icon-button compact"
-                            disabled={busy}
-                            size="icon-sm"
-                            title="Duplicate project"
-                            variant="ghost"
-                            onClick={() => void handleDuplicate(summary.id)}
-                          >
-                            {isDuplicating ? (
-                              <CircleNotchIcon
-                                aria-hidden="true"
-                                className="animate-spin"
-                                size={14}
-                              />
-                            ) : (
-                              <CopyIcon aria-hidden="true" size={14} />
-                            )}
-                          </Button>
-                          <Button
-                            aria-busy={isExporting}
-                            aria-label={`Export ${summary.title}`}
-                            className="icon-button compact"
-                            disabled={busy || isExporting}
-                            size="icon-sm"
-                            title="Export package"
-                            variant="ghost"
-                            onClick={() => void handleExport(summary.id)}
-                          >
-                            {isExporting ? (
-                              <CircleNotchIcon
-                                aria-hidden="true"
-                                className="animate-spin"
-                                size={14}
-                              />
-                            ) : (
-                              <DownloadSimpleIcon aria-hidden="true" size={14} />
-                            )}
-                          </Button>
-                          <Button
-                            aria-label={`Rename ${summary.title}`}
-                            className="icon-button compact"
-                            disabled={busy}
-                            size="icon-sm"
-                            title="Rename project"
-                            variant="ghost"
-                            onClick={() => startRename(summary)}
-                          >
-                            <PencilSimpleIcon aria-hidden="true" size={14} />
-                          </Button>
-                          <Button
-                            aria-label={`Delete ${summary.title}`}
-                            className="icon-button compact"
-                            disabled={busy}
-                            size="icon-sm"
-                            title="Delete project"
-                            variant="ghost"
-                            onClick={() => {
-                              setEditingId(null);
-                              setConfirmingDeleteId(summary.id);
-                            }}
-                          >
-                            <TrashIcon aria-hidden="true" size={14} />
-                          </Button>
+                          <IconTooltip disabled={busy} label="Duplicate project">
+                            <Button
+                              aria-busy={isDuplicating}
+                              aria-label={`Duplicate ${summary.title}`}
+                              className="icon-button compact"
+                              disabled={busy}
+                              size="icon-sm"
+                              variant="ghost"
+                              onClick={() => void handleDuplicate(summary.id)}
+                            >
+                              {isDuplicating ? (
+                                <CircleNotchIcon
+                                  aria-hidden="true"
+                                  className="animate-spin"
+                                  size={14}
+                                />
+                              ) : (
+                                <CopyIcon aria-hidden="true" size={14} />
+                              )}
+                            </Button>
+                          </IconTooltip>
+                          <IconTooltip disabled={busy || isExporting} label="Export project backup">
+                            <Button
+                              aria-busy={isExporting}
+                              aria-label={`Export ${summary.title}`}
+                              className="icon-button compact"
+                              disabled={busy || isExporting}
+                              size="icon-sm"
+                              variant="ghost"
+                              onClick={() => void handleExport(summary.id)}
+                            >
+                              {isExporting ? (
+                                <CircleNotchIcon
+                                  aria-hidden="true"
+                                  className="animate-spin"
+                                  size={14}
+                                />
+                              ) : (
+                                <DownloadSimpleIcon aria-hidden="true" size={14} />
+                              )}
+                            </Button>
+                          </IconTooltip>
+                          <IconTooltip disabled={busy} label="Rename project">
+                            <Button
+                              aria-label={`Rename ${summary.title}`}
+                              className="icon-button compact"
+                              disabled={busy}
+                              size="icon-sm"
+                              variant="ghost"
+                              onClick={() => startRename(summary)}
+                            >
+                              <PencilSimpleIcon aria-hidden="true" size={14} />
+                            </Button>
+                          </IconTooltip>
+                          <IconTooltip disabled={busy} label="Delete project">
+                            <Button
+                              aria-label={`Delete ${summary.title}`}
+                              className="icon-button compact"
+                              disabled={busy}
+                              size="icon-sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setEditingId(null);
+                                setConfirmingDeleteId(summary.id);
+                              }}
+                            >
+                              <TrashIcon aria-hidden="true" size={14} />
+                            </Button>
+                          </IconTooltip>
                         </div>
                       )}
                     </>
@@ -355,6 +363,27 @@ export function ProjectManager({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function IconTooltip({
+  children,
+  disabled = false,
+  label
+}: {
+  children: ReactElement;
+  disabled?: boolean;
+  label: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {disabled ? <span className="inline-flex">{children}</span> : children}
+      </TooltipTrigger>
+      <TooltipContent className="toolbar-tooltip" side="bottom">
+        {label}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

@@ -5,6 +5,7 @@ import { getWallsWithGeometry } from "../../../domain/geometry/walls";
 import { FIT_VIEWPORT } from "../../../domain/viewport/viewport2d";
 import { useMeasurementTool } from "../../hooks/useMeasurementTool";
 import { useAppStore } from "../../store";
+import { TooltipProvider } from "../ui/tooltip";
 import { ElevationView, getElevationMeasurementCreationKeyAction } from "./ElevationView";
 import type { MeasurementToolState } from "../../hooks/useMeasurementTool";
 
@@ -62,25 +63,25 @@ function Harness({
   const wall = getWallsWithGeometry(project.floor.rooms[0].room)[0];
   const measurement = useMeasurementTool({ kind: "elevation", wallId: wall.id });
   return (
-    <>
-    <output data-testid="measurement-phase">{measurement.state.phase}</output>
-    <ElevationView
-      centerlineMm={project.defaultCenterlineHeightMm}
-      gridPrecisionFloorMm={gridPrecisionFloorMm}
-      gridVisible={false}
-      measurementActive
-      measurementState={measurement.state}
-      onMeasurementDispatch={measurement.dispatch}
-      snapToGrid={snapToGrid}
-      unit={project.unit}
-      wallHeightMm={wall.heightMm}
-      wallId={wall.id}
-      wallLengthMm={wall.lengthMm}
-      wallName={wall.name}
-      viewport={FIT_VIEWPORT}
-      onViewportChange={() => {}}
-    />
-    </>
+    <TooltipProvider>
+      <output data-testid="measurement-phase">{measurement.state.phase}</output>
+      <ElevationView
+        centerlineMm={project.defaultCenterlineHeightMm}
+        gridPrecisionFloorMm={gridPrecisionFloorMm}
+        gridVisible={false}
+        measurementActive
+        measurementState={measurement.state}
+        onMeasurementDispatch={measurement.dispatch}
+        snapToGrid={snapToGrid}
+        unit={project.unit}
+        wallHeightMm={wall.heightMm}
+        wallId={wall.id}
+        wallLengthMm={wall.lengthMm}
+        wallName={wall.name}
+        viewport={FIT_VIEWPORT}
+        onViewportChange={() => {}}
+      />
+    </TooltipProvider>
   );
 }
 

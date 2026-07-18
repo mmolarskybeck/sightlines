@@ -8,6 +8,7 @@ import {
 import { createSampleProject } from "../../../domain/sample/sampleProject";
 import { FIT_VIEWPORT } from "../../../domain/viewport/viewport2d";
 import { useAppStore } from "../../store";
+import { TooltipProvider } from "../ui/tooltip";
 import { PlanView } from "./PlanView";
 
 class MockResizeObserver {
@@ -94,7 +95,7 @@ function renderPlan(props: {
   const onCommitPlanMoveGroup =
     vi.fn<NonNullable<PlanViewProps["onCommitPlanMoveGroup"]>>();
   const { container } = render(
-    <>
+    <TooltipProvider>
       <input data-testid="text-field" />
       <PlanView
         activeTool={props.activeTool ?? null}
@@ -110,7 +111,7 @@ function renderPlan(props: {
         onToolChange={() => {}}
         onViewportChange={() => {}}
       />
-    </>
+    </TooltipProvider>
   );
   const svg = container.querySelector("svg.plan-svg")!;
   return { svg, container, onCommitPlanMove, onCommitPlanMoveGroup };

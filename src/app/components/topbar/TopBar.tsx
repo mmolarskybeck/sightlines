@@ -144,7 +144,7 @@ export function TopBar({
               </UnderlineToggleGroupItem>
             </TooltipTrigger>
             <TooltipContent className="toolbar-tooltip" side="bottom">
-              See the room from above
+              View rooms from above
             </TooltipContent>
           </Tooltip>
           <Tooltip>
@@ -155,7 +155,7 @@ export function TopBar({
               </UnderlineToggleGroupItem>
             </TooltipTrigger>
             <TooltipContent className="toolbar-tooltip" side="bottom">
-              See one wall straight on
+              View one wall straight on
             </TooltipContent>
           </Tooltip>
           <Tooltip>
@@ -166,7 +166,7 @@ export function TopBar({
               </UnderlineToggleGroupItem>
             </TooltipTrigger>
             <TooltipContent className="toolbar-tooltip" side="bottom">
-              Preview the exhibition in 3D
+              Preview exhibition in 3D
             </TooltipContent>
           </Tooltip>
         </UnderlineToggleGroup>
@@ -181,7 +181,7 @@ export function TopBar({
               </PopoverTrigger>
             </TooltipTrigger>
             <TooltipContent className="toolbar-tooltip" side="bottom">
-              Your work saves automatically on this device. Click for details.
+              Saved automatically on this device. Open for details.
             </TooltipContent>
           </Tooltip>
           <PopoverContent side="bottom" align="end" className="storage-popover">
@@ -266,7 +266,7 @@ export function TopBar({
             </Button>
           </TooltipTrigger>
           <TooltipContent className="toolbar-tooltip" side="bottom">
-            Import a project file (.sightlines)
+            Import project (.sightlines)
           </TooltipContent>
         </Tooltip>
         {viewMode === "library" ? null : viewMode === "3d" ? (
@@ -285,7 +285,7 @@ export function TopBar({
                 </Button>
               </TooltipTrigger>
               <TooltipContent className="toolbar-tooltip" side="bottom">
-                Download an image of this view (PNG)
+                Download view as PNG
               </TooltipContent>
             </Tooltip>
             <DropdownMenu modal={false}>
@@ -304,7 +304,7 @@ export function TopBar({
                   </DropdownMenuTrigger>
                 </TooltipTrigger>
                 <TooltipContent className="toolbar-tooltip" side="bottom">
-                  Choose image format
+                  Choose download format
                 </TooltipContent>
               </Tooltip>
               <DropdownMenuContent align="end">
@@ -347,7 +347,7 @@ export function TopBar({
                   {disabledReason ? <span>{button}</span> : button}
                 </TooltipTrigger>
                 <TooltipContent className="toolbar-tooltip" side="bottom">
-                  {disabledReason ?? "Download an image of this view (PNG)"}
+                  {disabledReason ?? "Download view as PNG"}
                 </TooltipContent>
               </Tooltip>
             );
@@ -381,7 +381,7 @@ export function TopBar({
               </DropdownMenuTrigger>
             </TooltipTrigger>
             <TooltipContent className="toolbar-tooltip" side="bottom">
-              Export a PDF or back up your project
+              Export PDF or project backup
             </TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-72">

@@ -68,15 +68,11 @@ export function ViewOptionButton({
     </Toggle>
   );
 
-  // toggleVariants applies `disabled:pointer-events-none`, so a disabled
-  // Toggle never receives the hover that would open a Radix tooltip. A
-  // wrapping span keeps receiving pointer events, so the disabled-state
-  // title stays reachable on hover instead of silently going dark.
-  if (disabled) return <span title={title}>{toggle}</span>;
-
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{toggle}</TooltipTrigger>
+      <TooltipTrigger asChild>
+        {disabled ? <span className="disabled-tooltip-trigger">{toggle}</span> : toggle}
+      </TooltipTrigger>
       <TooltipContent className="toolbar-tooltip" side="bottom">
         {title}
         {kbd ? <ToolbarTooltipKbd hint={kbd} /> : null}
@@ -120,7 +116,7 @@ export function ThreeDCameraTools({
           </Button>
         </TooltipTrigger>
         <TooltipContent className="toolbar-tooltip" side="bottom">
-          Frame the whole layout
+          Frame whole layout
         </TooltipContent>
       </Tooltip>
       <Tooltip>
@@ -135,19 +131,25 @@ export function ThreeDCameraTools({
           </Button>
         </TooltipTrigger>
         <TooltipContent className="toolbar-tooltip" side="bottom">
-          View the selected wall at eye level
+          View selected wall at eye level
         </TooltipContent>
       </Tooltip>
       {canFocus ? (
         <Tooltip>
           <TooltipTrigger asChild>{focusButton}</TooltipTrigger>
           <TooltipContent className="toolbar-tooltip" side="bottom">
-            Focus the selected room, wall, or artwork
+            Focus selection
           </TooltipContent>
         </Tooltip>
       ) : (
-        // Disabled buttons drop pointer events, so the hint rides a span.
-        <span title="Focus the selected room, wall, or artwork">{focusButton}</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="disabled-tooltip-trigger">{focusButton}</span>
+          </TooltipTrigger>
+          <TooltipContent className="toolbar-tooltip" side="bottom">
+            Select a room, wall, or artwork first
+          </TooltipContent>
+        </Tooltip>
       )}
       {onSaveView ? (
         <>
@@ -164,7 +166,7 @@ export function ThreeDCameraTools({
               </Button>
             </TooltipTrigger>
             <TooltipContent className="toolbar-tooltip" side="bottom">
-              Bookmark this camera for the PDF and Saved views
+              Save camera for PDF export and Saved views
             </TooltipContent>
           </Tooltip>
         </>
@@ -286,7 +288,7 @@ export function PrecisionSelect({
             </SelectTrigger>
           </TooltipTrigger>
           <TooltipContent className="toolbar-tooltip" side="bottom">
-            Grid precision
+            Set minimum grid spacing
           </TooltipContent>
         </Tooltip>
         <SelectContent>

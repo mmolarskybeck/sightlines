@@ -57,10 +57,10 @@ const COARSE_POINTER =
 const LONG_PRESS_MS = 300;
 const TOUCH_DRAG_SLOP_PX = 10;
 
-// Shared with the row's `title` tooltip below — one placement per artwork
-// per project, so a placed row can't be dragged out again (spec 2026-07-07).
+// One placement per artwork per project, so a placed row can't be dragged out
+// again (spec 2026-07-07).
 const ALREADY_PLACED_DRAG_MESSAGE =
-  "Already placed. Drag is disabled. Duplicate the project to try another arrangement.";
+  "Already placed. Remove the current placement before dragging again.";
 
 type ChecklistFilter = "all" | "placed" | "unplaced";
 export type ChecklistSort = "project" | "title" | "artist" | "status";
@@ -717,7 +717,6 @@ function ChecklistRow({
       // Coarse pointers use our long-press drag (below); native draggable would
       // race iPadOS's own long-press, so it's suppressed there.
       draggable={isDraggable && !COARSE_POINTER}
-      title={isPlaced ? ALREADY_PLACED_DRAG_MESSAGE : undefined}
       role="button"
       tabIndex={0}
       onClick={onSelect}
@@ -941,19 +940,25 @@ function ChecklistRow({
           </span>
         ) : null}
       </div>
-      <Button
-        aria-label={isPlaced ? "Remove placement" : "Remove from checklist"}
-        className="icon-button compact checklist-remove"
-        size="icon-sm"
-        title={isPlaced ? "Remove placement" : "Remove from checklist"}
-        variant="outline"
-        onClick={(event) => {
-          event.stopPropagation();
-          onRemove();
-        }}
-      >
-        <XIcon aria-hidden="true" size={14} />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            aria-label={isPlaced ? "Remove placement" : "Remove from checklist"}
+            className="icon-button compact checklist-remove"
+            size="icon-sm"
+            variant="outline"
+            onClick={(event) => {
+              event.stopPropagation();
+              onRemove();
+            }}
+          >
+            <XIcon aria-hidden="true" size={14} />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent className="toolbar-tooltip" side="left">
+          {isPlaced ? "Remove placement" : "Remove from checklist"}
+        </TooltipContent>
+      </Tooltip>
     </li>
     {isTouchDragging && touchPreviewPos
       ? createPortal(

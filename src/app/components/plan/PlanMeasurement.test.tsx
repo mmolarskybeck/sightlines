@@ -4,6 +4,7 @@ import { createSampleProject } from "../../../domain/sample/sampleProject";
 import { FIT_VIEWPORT } from "../../../domain/viewport/viewport2d";
 import { useMeasurementTool } from "../../hooks/useMeasurementTool";
 import { useAppStore } from "../../store";
+import { TooltipProvider } from "../ui/tooltip";
 import { PlanView } from "./PlanView";
 
 class MockResizeObserver {
@@ -60,7 +61,7 @@ afterEach(() => {
 function Harness() {
   const measurement = useMeasurementTool({ kind: "plan" });
   return (
-    <>
+    <TooltipProvider>
       <output data-testid="measurement-phase">{measurement.state.phase}</output>
       <PlanView
         activeTool={null}
@@ -77,7 +78,7 @@ function Harness() {
         onToolChange={() => {}}
         onViewportChange={() => {}}
       />
-    </>
+    </TooltipProvider>
   );
 }
 

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSampleProject } from "../../../domain/sample/sampleProject";
 import { FIT_VIEWPORT } from "../../../domain/viewport/viewport2d";
 import { useAppStore } from "../../store";
+import { TooltipProvider } from "../ui/tooltip";
 import { PlanView } from "./PlanView";
 
 // Covers the plan background pointerdown branch (beginMarquee): a ⌘/Ctrl
@@ -65,18 +66,20 @@ function renderPlan(overrides: {
   onMarqueeSelect?: (ids: string[], additive: boolean) => void;
 }) {
   return render(
-    <PlanView
-      activeTool={null}
-      gridPrecisionFloorMm={null}
-      gridVisible={false}
-      selectedWallId={null}
-      snapToGrid={false}
-      viewport={FIT_VIEWPORT}
-      onToolChange={() => {}}
-      onViewportChange={overrides.onViewportChange ?? (() => {})}
-      onMarqueeSelect={overrides.onMarqueeSelect ?? (() => {})}
-      selectedObjectIds={[]}
-    />
+    <TooltipProvider>
+      <PlanView
+        activeTool={null}
+        gridPrecisionFloorMm={null}
+        gridVisible={false}
+        selectedWallId={null}
+        snapToGrid={false}
+        viewport={FIT_VIEWPORT}
+        onToolChange={() => {}}
+        onViewportChange={overrides.onViewportChange ?? (() => {})}
+        onMarqueeSelect={overrides.onMarqueeSelect ?? (() => {})}
+        selectedObjectIds={[]}
+      />
+    </TooltipProvider>
   );
 }
 

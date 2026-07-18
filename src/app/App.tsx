@@ -70,7 +70,12 @@ import {
   useResponsiveToolbarDensity,
   ViewOptionButton
 } from "./components/toolbar";
-import { TooltipProvider } from "./components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from "./components/ui/tooltip";
 import { Toaster } from "./components/ui/sonner";
 import { toast } from "sonner";
 import { TopBar } from "./components/topbar/TopBar";
@@ -1406,20 +1411,26 @@ export function App() {
             deliberately does not own the inspector — this floating chip is
             the only affordance for it, keeping the inspector's own cramped
             pane free of chrome. */}
-        <button
-          type="button"
-          className="inspector-toggle"
-          title={visibleInspectorCollapsed ? "Show inspector" : "Hide inspector"}
-          aria-label={visibleInspectorCollapsed ? "Show inspector" : "Hide inspector"}
-          aria-expanded={!visibleInspectorCollapsed}
-          onClick={handleInspectorToggle}
-        >
-          <SidebarSimpleIcon
-            aria-hidden="true"
-            size={18}
-            style={{ transform: "scaleX(-1)" }}
-          />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="inspector-toggle"
+              aria-label={visibleInspectorCollapsed ? "Show inspector" : "Hide inspector"}
+              aria-expanded={!visibleInspectorCollapsed}
+              onClick={handleInspectorToggle}
+            >
+              <SidebarSimpleIcon
+                aria-hidden="true"
+                size={18}
+                style={{ transform: "scaleX(-1)" }}
+              />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="toolbar-tooltip" side="left">
+            {visibleInspectorCollapsed ? "Show inspector" : "Hide inspector"}
+          </TooltipContent>
+        </Tooltip>
         {visibleLeftPanel === "checklist" ? (
           <ChecklistPanel
             getBlob={getAssetBlob}

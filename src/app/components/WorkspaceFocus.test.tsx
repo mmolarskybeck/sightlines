@@ -47,7 +47,7 @@ describe("workspace focus handoff", () => {
     const project = createSampleProject();
     useAppStore.setState({ project });
     const { container } = render(
-      <>
+      <TooltipProvider>
         <button type="button">Focused control</button>
         <PlanView
           activeTool={null}
@@ -59,7 +59,7 @@ describe("workspace focus handoff", () => {
           onToolChange={() => {}}
           onViewportChange={() => {}}
         />
-      </>
+      </TooltipProvider>
     );
 
     const button = container.querySelector("button");
@@ -79,7 +79,7 @@ describe("workspace focus handoff", () => {
     useAppStore.setState({ project });
     const wall = getWallsWithGeometry(project.floor.rooms[0].room)[0];
     const { container } = render(
-      <>
+      <TooltipProvider>
         <button type="button">Focused control</button>
         <ElevationView
           centerlineMm={project.defaultCenterlineHeightMm}
@@ -93,7 +93,7 @@ describe("workspace focus handoff", () => {
           viewport={FIT_VIEWPORT}
           onViewportChange={() => {}}
         />
-      </>
+      </TooltipProvider>
     );
 
     const button = container.querySelector("button");

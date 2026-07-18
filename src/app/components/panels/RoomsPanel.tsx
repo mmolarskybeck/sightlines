@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactElement, useState } from "react";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
@@ -15,6 +15,7 @@ import { getScopeUnits, unitSystemFromDisplayUnit } from "../../../domain/units/
 import { RoomDimensionFields } from "../inspectors/RoomDimensionFields";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 
 // The left workspace pane when the rail's Rooms & Walls selector is active —
 // the room/wall inventory that used to live atop the right panel. Same idioms
@@ -56,16 +57,17 @@ export function RoomsPanel({
         <h2>Rooms</h2>
         <div className="panel-heading-actions">
           <span>{pluralize(project.floor.rooms.length, "room")}</span>
-          <Button
-            aria-label="Add rectangular room"
-            className="icon-button compact"
-            size="icon-sm"
-            title="Add rectangular room"
-            variant="ghost"
-            onClick={onAddRectangleRoom}
-          >
-            <PlusIcon aria-hidden="true" size={16} />
-          </Button>
+          <IconTooltip label="Add rectangle room">
+            <Button
+              aria-label="Add rectangle room"
+              className="icon-button compact"
+              size="icon-sm"
+              variant="ghost"
+              onClick={onAddRectangleRoom}
+            >
+              <PlusIcon aria-hidden="true" size={16} />
+            </Button>
+          </IconTooltip>
         </div>
       </div>
 
@@ -124,31 +126,40 @@ export function RoomsPanel({
                         }
                       }}
                     />
-                    <Button
-                      aria-label="Save room name"
-                      className="icon-button compact"
-                      disabled={!draftIsValid}
-                      size="icon-sm"
-                      title="Save room name"
-                      type="submit"
-                      variant="ghost"
-                    >
-                      <CheckIcon aria-hidden="true" size={14} />
-                    </Button>
-                    <Button
-                      aria-label="Cancel rename"
-                      className="icon-button compact"
-                      size="icon-sm"
-                      title="Cancel rename"
-                      variant="ghost"
-                      onClick={cancelRename}
-                    >
-                      <XIcon aria-hidden="true" size={14} />
-                    </Button>
+                    <IconTooltip disabled={!draftIsValid} label="Save name">
+                      <Button
+                        aria-label="Save room name"
+                        className="icon-button compact"
+                        disabled={!draftIsValid}
+                        size="icon-sm"
+                        type="submit"
+                        variant="ghost"
+                      >
+                        <CheckIcon aria-hidden="true" size={14} />
+                      </Button>
+                    </IconTooltip>
+                    <IconTooltip label="Cancel">
+                      <Button
+                        aria-label="Cancel rename"
+                        className="icon-button compact"
+                        size="icon-sm"
+                        variant="ghost"
+                        onClick={cancelRename}
+                      >
+                        <XIcon aria-hidden="true" size={14} />
+                      </Button>
+                    </IconTooltip>
                   </form>
                 ) : (
                   <>
-                    <h3 title={placement.room.name}>{placement.room.name}</h3>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <h3>{placement.room.name}</h3>
+                      </TooltipTrigger>
+                      <TooltipContent className="toolbar-tooltip" side="bottom">
+                        {placement.room.name}
+                      </TooltipContent>
+                    </Tooltip>
                     {isConfirmingDelete ? (
                       <div className="room-delete-confirmation">
                         <span>Delete?</span>
@@ -162,43 +173,46 @@ export function RoomsPanel({
                         >
                           Delete
                         </Button>
-                        <Button
-                          aria-label="Cancel delete"
-                          className="icon-button compact"
-                          size="icon-sm"
-                          title="Cancel delete"
-                          variant="ghost"
-                          onClick={() => setConfirmingDeleteRoomId(null)}
-                        >
-                          <XIcon aria-hidden="true" size={14} />
-                        </Button>
+                        <IconTooltip label="Cancel">
+                          <Button
+                            aria-label="Cancel delete"
+                            className="icon-button compact"
+                            size="icon-sm"
+                            variant="ghost"
+                            onClick={() => setConfirmingDeleteRoomId(null)}
+                          >
+                            <XIcon aria-hidden="true" size={14} />
+                          </Button>
+                        </IconTooltip>
                       </div>
                     ) : (
                       <div className="room-heading-actions">
                         <span>{pluralize(roomWalls.length, "wall")}</span>
-                        <Button
-                          aria-label={`Rename ${placement.room.name}`}
-                          className="icon-button compact"
-                          size="icon-sm"
-                          title="Rename room"
-                          variant="ghost"
-                          onClick={startRename}
-                        >
-                          <PencilSimpleIcon aria-hidden="true" size={14} />
-                        </Button>
-                        <Button
-                          aria-label={`Delete ${placement.room.name}`}
-                          className="icon-button compact"
-                          size="icon-sm"
-                          title="Delete room"
-                          variant="ghost"
-                          onClick={() => {
-                            setEditingRoomId(null);
-                            setConfirmingDeleteRoomId(placement.roomId);
-                          }}
-                        >
-                          <TrashIcon aria-hidden="true" size={14} />
-                        </Button>
+                        <IconTooltip label="Rename room">
+                          <Button
+                            aria-label={`Rename ${placement.room.name}`}
+                            className="icon-button compact"
+                            size="icon-sm"
+                            variant="ghost"
+                            onClick={startRename}
+                          >
+                            <PencilSimpleIcon aria-hidden="true" size={14} />
+                          </Button>
+                        </IconTooltip>
+                        <IconTooltip label="Delete room">
+                          <Button
+                            aria-label={`Delete ${placement.room.name}`}
+                            className="icon-button compact"
+                            size="icon-sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setEditingRoomId(null);
+                              setConfirmingDeleteRoomId(placement.roomId);
+                            }}
+                          >
+                            <TrashIcon aria-hidden="true" size={14} />
+                          </Button>
+                        </IconTooltip>
                       </div>
                     )}
                   </>
@@ -251,6 +265,27 @@ export function RoomsPanel({
         })}
       </nav>
     </section>
+  );
+}
+
+function IconTooltip({
+  children,
+  disabled = false,
+  label
+}: {
+  children: ReactElement;
+  disabled?: boolean;
+  label: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {disabled ? <span className="inline-flex">{children}</span> : children}
+      </TooltipTrigger>
+      <TooltipContent className="toolbar-tooltip" side="bottom">
+        {label}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

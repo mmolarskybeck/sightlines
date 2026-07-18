@@ -17,7 +17,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 export type ScaleState = "missing" | "estimated" | "true";
 
 const TITLES: Record<ScaleState, string> = {
-  missing: "Dimensions missing. Scale is approximate.",
+  missing: "Missing dimensions. Scale is approximate.",
   estimated: "Approximate dimensions. Scale is estimated.",
   true: "Dimensions known. Artwork is shown at true scale."
 };

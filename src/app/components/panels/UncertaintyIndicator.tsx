@@ -1,4 +1,5 @@
 import type { Dimensions } from "../../../domain/project";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 
 export type UncertaintyStatus = Dimensions["status"];
 
@@ -18,19 +19,23 @@ export function UncertaintyIndicator({
   if (status === "known") return null;
 
   const label = status === "approximate" ? "Approx." : "No dims";
-  const title =
+  const tooltip =
     status === "approximate"
-      ? "Dimensions are approximate"
-      : "Dimensions are unknown";
+      ? "Approximate dimensions"
+      : "Missing dimensions";
 
   return (
-    <span
-      className={
-        compact ? `uncertainty-badge ${status} compact` : `uncertainty-badge ${status}`
-      }
-      title={title}
-    >
-      {label}
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={
+            compact ? `uncertainty-badge ${status} compact` : `uncertainty-badge ${status}`
+          }
+        >
+          {label}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="toolbar-tooltip">{tooltip}</TooltipContent>
+    </Tooltip>
   );
 }
