@@ -6135,6 +6135,15 @@ body.panels-resizing * {
   background: var(--primary-strong);
 }
 
+/* A completed inline commit settles into a quieter persistent state. The
+   label + check carry meaning without relying on the petrol-soft color alone. */
+.inspector-action.arrange-apply[data-applied="true"],
+.inspector-action.arrange-apply[data-applied="true"]:hover {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
 .inspector-action.arrange-cancel {
   border-color: transparent;
   background: var(--surface);

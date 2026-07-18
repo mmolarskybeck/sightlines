@@ -188,8 +188,10 @@ describe("SelectionInspector arrange body", () => {
   });
 
   it("Mat & frame opens inline and applies the drafted bands to the selection", () => {
-    const onApply = vi.fn();
-    renderPanel({ matFrame: { targetCount: 2, skippedCount: 0, onApply } });
+    const onApply = vi.fn().mockResolvedValue({ updated: 2, skipped: 0 });
+    renderPanel({
+      matFrame: { targetCount: 2, skippedCount: 0, currentValues: [{}, {}], onApply }
+    });
 
     // Closed at rest: the disclosure is present, its fields are not.
     const trigger = screen.getByRole("button", { name: /Mat . frame/ });
@@ -210,10 +212,40 @@ describe("SelectionInspector arrange body", () => {
     });
   });
 
-  it("Mat & frame drops the draft when a same-size selection swaps identity", () => {
-    const onApply = vi.fn();
+  it("Mat & frame confirms an applied draft at the button and re-enables after an edit", async () => {
+    const onApply = vi.fn().mockResolvedValue({ updated: 2, skipped: 0 });
     const { props, rerender } = renderPanel({
-      matFrame: { targetCount: 2, skippedCount: 0, onApply }
+      matFrame: { targetCount: 2, skippedCount: 0, currentValues: [{}, {}], onApply }
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Mat . frame/ }));
+    const matField = screen.getByRole("textbox", { name: "Mat" });
+    fireEvent.change(matField, { target: { value: "5" } });
+    fireEvent.blur(matField);
+    fireEvent.click(screen.getByRole("button", { name: "Apply to 2 works" }));
+    rerender(
+      <SelectionInspector
+        {...props}
+        matFrame={{
+          targetCount: 2,
+          skippedCount: 0,
+          currentValues: [{ matWidthMm: 50 }, { matWidthMm: 50 }],
+          onApply
+        }}
+      />
+    );
+    await screen.findByRole("button", { name: "Applied to 2 works" });
+    expect(screen.getByRole("button", { name: "Applied to 2 works" })).toBeDisabled();
+
+    fireEvent.change(matField, { target: { value: "6" } });
+    fireEvent.blur(matField);
+    expect(screen.getByRole("button", { name: "Apply to 2 works" })).toBeEnabled();
+  });
+
+  it("Mat & frame drops the draft when a same-size selection swaps identity", () => {
+    const onApply = vi.fn().mockResolvedValue({ updated: 2, skipped: 0 });
+    const { props, rerender } = renderPanel({
+      matFrame: { targetCount: 2, skippedCount: 0, currentValues: [{}, {}], onApply }
     });
 
     fireEvent.click(screen.getByRole("button", { name: /Mat . frame/ }));
@@ -229,7 +261,14 @@ describe("SelectionInspector arrange body", () => {
   });
 
   it("Mat & frame disables Apply and explains when every work is frame-inclusive", () => {
-    renderPanel({ matFrame: { targetCount: 0, skippedCount: 2, onApply: vi.fn() } });
+    renderPanel({
+      matFrame: {
+        targetCount: 0,
+        skippedCount: 2,
+        currentValues: [],
+        onApply: vi.fn().mockResolvedValue({ updated: 0, skipped: 2 })
+      }
+    });
 
     fireEvent.click(screen.getByRole("button", { name: /Mat . frame/ }));
 

@@ -210,7 +210,8 @@ export type AppState = ArrangeSliceState &
   // and reports how many were skipped so the caller can say so.
   updateArtworksMatFrame: (
     artworkIds: string[],
-    changes: BulkMatFrameChanges
+    changes: BulkMatFrameChanges,
+    options?: { showSuccessToast?: boolean }
   ) => Promise<{ updated: number; skipped: number }>;
   placeArtwork: (
     artworkId: string,
@@ -1085,7 +1086,7 @@ export function createAppStore(deps: AppStoreDeps) {
         if (projectEdit) await persist(projectEdit.after);
       },
 
-      async updateArtworksMatFrame(artworkIds, changes) {
+      async updateArtworksMatFrame(artworkIds, changes, options) {
         const library = get().libraryArtworks;
         const project = get().project;
 
@@ -1173,14 +1174,13 @@ export function createAppStore(deps: AppStoreDeps) {
 
         await saveArtworkHalves(halves.map((half) => half.after));
 
-        // Both bulk surfaces (the inspector's Mat & frame section and the
-        // library's dialog) otherwise finish silently — framing is a read-time
-        // expansion, so nothing visibly moves near the Apply button. A quiet
-        // one-shot toast confirms the landing, in the same voice as
-        // export/import success.
-        toast.success(
-          `Mat & frame applied to ${halves.length} work${halves.length === 1 ? "" : "s"}`
-        );
+        // The library dialog closes after Apply, so it still needs a toast.
+        // Inline surfaces can suppress it and confirm success at the button.
+        if (options?.showSuccessToast !== false) {
+          toast.success(
+            `Mat & frame applied to ${halves.length} work${halves.length === 1 ? "" : "s"}`
+          );
+        }
 
         return { updated: halves.length, skipped };
       },

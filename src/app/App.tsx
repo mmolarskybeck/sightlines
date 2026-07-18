@@ -935,10 +935,12 @@ export function App() {
   ];
   // The store skips frame-inclusive works; split the ids the same way so the
   // dialog's count and note match what it will actually apply.
-  const bulkMatFrameSkippedCount = selectedArtworkIds.filter(
-    (id) => artworksById.get(id)?.frameIncludedInImage === true
-  ).length;
-  const bulkMatFrameTargetCount = selectedArtworkIds.length - bulkMatFrameSkippedCount;
+  const bulkMatFrameTargets = selectedArtworkIds.flatMap((id) => {
+    const artwork = artworksById.get(id);
+    return artwork && artwork.frameIncludedInImage !== true ? [artwork] : [];
+  });
+  const bulkMatFrameSkippedCount = selectedArtworkIds.length - bulkMatFrameTargets.length;
+  const bulkMatFrameTargetCount = bulkMatFrameTargets.length;
 
   // Branch order mirrors arrange eligibility so the hint names the first blocker.
   const arrangeDisabledReason = arrangeEligibility.eligible
@@ -1923,7 +1925,14 @@ export function App() {
                     ? {
                         targetCount: bulkMatFrameTargetCount,
                         skippedCount: bulkMatFrameSkippedCount,
-                        onApply: (changes) => void updateArtworksMatFrame(selectedArtworkIds, changes)
+                        currentValues: bulkMatFrameTargets.map(({ matWidthMm, frame }) => ({
+                          matWidthMm,
+                          frame
+                        })),
+                        onApply: (changes) =>
+                          updateArtworksMatFrame(selectedArtworkIds, changes, {
+                            showSuccessToast: false
+                          })
                       }
                     : undefined
                 }

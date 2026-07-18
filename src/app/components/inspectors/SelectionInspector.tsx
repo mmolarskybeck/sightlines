@@ -147,7 +147,10 @@ export function SelectionInspector({
     // the store refuses (their stored size already contains the frame).
     targetCount: number;
     skippedCount: number;
-    onApply: (changes: { matWidthMm?: number; frame?: ArtworkFrame }) => void;
+    currentValues: { matWidthMm?: number; frame?: ArtworkFrame }[];
+    onApply: (
+      changes: { matWidthMm?: number; frame?: ArtworkFrame }
+    ) => Promise<{ updated: number; skipped: number }>;
   };
   onRemoveAll: () => void;
 }) {
@@ -494,7 +497,10 @@ function MatFrameSection({
   matFrame: {
     targetCount: number;
     skippedCount: number;
-    onApply: (changes: { matWidthMm?: number; frame?: ArtworkFrame }) => void;
+    currentValues: { matWidthMm?: number; frame?: ArtworkFrame }[];
+    onApply: (
+      changes: { matWidthMm?: number; frame?: ArtworkFrame }
+    ) => Promise<{ updated: number; skipped: number }>;
   };
   unit: DisplayUnit;
 }) {
@@ -503,6 +509,7 @@ function MatFrameSection({
   const [open, setOpen] = useState(false);
   const [matWidthMm, setMatWidthMm] = useState<number | undefined>(undefined);
   const [frame, setFrame] = useState<ArtworkFrame | undefined>(undefined);
+  const [applyState, setApplyState] = useState<"idle" | "applying" | "applied">("idle");
 
   // A new selection is a new draft: stale band values from the previous pick
   // must never ride into an apply against different works — including a
@@ -511,11 +518,43 @@ function MatFrameSection({
     setOpen(false);
     setMatWidthMm(undefined);
     setFrame(undefined);
+    setApplyState("idle");
   }, [selectionKey]);
 
   const resetDraft = () => {
     setMatWidthMm(undefined);
     setFrame(undefined);
+    setApplyState("idle");
+  };
+
+  // Blank is a real batch value (remove the band), so dirty state compares
+  // the proposed result with every target instead of merely tracking whether
+  // a field was touched. This also disables a true no-op apply.
+  const isDirty = matFrame.currentValues.some(
+    (current) =>
+      current.matWidthMm !== matWidthMm ||
+      current.frame?.widthMm !== frame?.widthMm ||
+      current.frame?.finish !== frame?.finish
+  );
+  const isApplying = applyState === "applying";
+  const isApplied = applyState === "applied" && !isDirty;
+  const workLabel = `${matFrame.targetCount} work${matFrame.targetCount === 1 ? "" : "s"}`;
+  const applyLabel = isApplying
+    ? `Applying to ${workLabel}`
+    : isApplied
+      ? `Applied to ${workLabel}`
+      : `Apply to ${workLabel}`;
+
+  const applyDraft = async () => {
+    setApplyState("applying");
+    try {
+      const result = await matFrame.onApply({ matWidthMm, frame });
+      setApplyState(result.updated > 0 ? "applied" : "idle");
+    } catch {
+      // The store owns the error message; restore the actionable state here so
+      // a failed persistence attempt never strands the control at Applying.
+      setApplyState("idle");
+    }
   };
 
   // Band-width examples, not conversions — same concrete examples as the
@@ -599,13 +638,14 @@ function MatFrameSection({
           Applies. */}
       <InspectorActionGroup>
         <Button
-          className="inspector-action arrange-apply"
-          disabled={matFrame.targetCount === 0}
+          className={`inspector-action arrange-apply${isApplied ? " disabled:opacity-100" : ""}`}
+          data-applied={isApplied || undefined}
+          disabled={matFrame.targetCount === 0 || !isDirty || isApplying}
           variant="primary"
-          onClick={() => matFrame.onApply({ matWidthMm, frame })}
+          onClick={() => void applyDraft()}
         >
-          <CheckIcon aria-hidden="true" size={15} />
-          Apply to {matFrame.targetCount} work{matFrame.targetCount === 1 ? "" : "s"}
+          {isApplied ? <CheckIcon aria-hidden="true" size={15} /> : null}
+          <span aria-live="polite">{applyLabel}</span>
         </Button>
         <Button
           className="inspector-action arrange-cancel"

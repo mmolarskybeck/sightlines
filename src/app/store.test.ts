@@ -1580,6 +1580,21 @@ describe("app store", () => {
       expect(successToast).toHaveBeenCalledWith("Mat & frame applied to 1 work");
     });
 
+    it("allows an inline caller to suppress the success toast", async () => {
+      const successToast = vi.spyOn(toast, "success");
+      const [a, b] = await seedLibrary();
+      successToast.mockClear();
+
+      const result = await store.getState().updateArtworksMatFrame(
+        [a, b],
+        { matWidthMm: 45 },
+        { showSuccessToast: false }
+      );
+
+      expect(result).toEqual({ updated: 2, skipped: 0 });
+      expect(successToast).not.toHaveBeenCalled();
+    });
+
     it("undo and redo round-trip the whole batch", async () => {
       const [a, b] = await seedLibrary();
       await store
