@@ -263,6 +263,17 @@ describe("ArtworkInspector framing auto-collapse", () => {
     expect(screen.getByRole("textbox", { name: "Mat" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Frame" })).toBeInTheDocument();
   });
+
+  it("keeps frame-inclusive controls disabled without an extra notice", () => {
+    renderInspector({
+      artwork: { ...baseArtwork, frameIncludedInImage: true },
+      sectionsOpen: { matframe: true }
+    });
+
+    expect(screen.getByRole("checkbox", { name: "Size includes the frame" })).toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Frame finish" })).toBeDisabled();
+    expect(screen.queryByText(/Frame is part of the photo/)).not.toBeInTheDocument();
+  });
 });
 
 describe("ArtworkInspector placement", () => {

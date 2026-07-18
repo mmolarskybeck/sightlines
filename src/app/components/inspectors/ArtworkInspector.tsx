@@ -705,11 +705,6 @@ function FramingSection({
         />
         <span>Size includes the frame</span>
       </label>
-      {framingLocked ? (
-        <p className="field-hint">
-          Frame is part of the photo — Sightlines won’t add or draw one.
-        </p>
-      ) : null}
 
       <div className="field-pair-grid">
         <LengthField
@@ -746,7 +741,9 @@ function FramingSection({
         />
       </div>
 
-      <InspectorRow label="Finish">
+      {/* Keep Finish on its own full-width row with the compact stacked label
+          used by the other inspector fields. */}
+      <Field compact label="Finish">
         <Select
           disabled={framingLocked}
           value={frame?.finish ?? "black"}
@@ -770,7 +767,7 @@ function FramingSection({
             ))}
           </SelectContent>
         </Select>
-      </InspectorRow>
+      </Field>
 
       {!framingLocked && overall && dimensions.widthMm !== undefined && dimensions.heightMm !== undefined ? (
         // Derived footprint reads quiet at rest (InspectorSummaryRow); the
