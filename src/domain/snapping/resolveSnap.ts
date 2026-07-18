@@ -19,6 +19,14 @@ export type SnapTarget = {
   // onto the winning Guide so the rendered guide can be clipped to exactly
   // the geometry it represents instead of drawing full-viewport.
   extentMm?: { startMm: number; endMm: number };
+  // Where to DRAW the winning guide on the constrained axis, when that differs
+  // from where the moving point snaps to. An edge-align target snaps the
+  // moving object's CENTER to `point` (center = neighborEdge ∓ movingHalf),
+  // but the meaningful line to show runs through the aligned EDGE — without
+  // this, the guide renders through the middle of the moving object and reads
+  // as a center snap. Only meaningful for single-axis targets; defaults to the
+  // snap position itself.
+  guidePositionMm?: number;
   // Whether a winning guide should actually be drawn. Defaults to true.
   // Set false for targets that are continuous quantizations rather than a
   // discrete, rare alignment — e.g. a partition's "round this gap to a clean
@@ -129,7 +137,7 @@ export function resolveSnap(
     activeGuides.push({
       id: `${best.id}-${axis}`,
       axis,
-      positionMm,
+      positionMm: best.guidePositionMm ?? positionMm,
       targetId: best.id,
       extentMm: best.extentMm,
       showGuide: best.showGuide

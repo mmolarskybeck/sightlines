@@ -705,7 +705,15 @@ export function PlanView({
         let activeGuides: Guide[] = [];
         if (snapToGrid) {
           // gridSnapTargets are already all kind:"grid" — no filtering needed.
-          const snap = resolveSnap(proposedGroupCenterMm, gridSnapTargets, {
+          // showGuide:false suppresses the drawn guide line for grid snaps (the
+          // grid itself is the visual reference); this is center-based group
+          // snapping, not the edge-based single-object snap in
+          // resolvePlanPlacement — group edge-snapping is a follow-up.
+          const hiddenGridTargets = gridSnapTargets.map((target) => ({
+            ...target,
+            showGuide: false
+          }));
+          const snap = resolveSnap(proposedGroupCenterMm, hiddenGridTargets, {
             thresholdMm: snapThresholdMm,
             previousSnapTargetIds: current.previousSnapTargetIds
           });
@@ -753,6 +761,7 @@ export function PlanView({
         yMm: current.startCenterMm.yMm + (pointerMm.yMm - current.startPointerMm.yMm)
       };
 
+      const proposedRoomId = roomIdContainingPoint(project, proposedCenterMm);
       const result = resolvePlanPlacement(proposedCenterMm, {
         walls: floorWallsForTool,
         // Do not snap to the moving object's old position.
@@ -768,7 +777,15 @@ export function PlanView({
         snapToGrid,
         thresholdMm: snapThresholdMm,
         previousSnapTargetIds: current.previousSnapTargetIds,
-        rotationDeg: current.rotationDeg
+        rotationDeg: current.rotationDeg,
+        floorAlign: {
+          roomId: proposedRoomId,
+          floorObjects: project.floorObjects.filter(
+            (object) =>
+              object.id !== current.objectId &&
+              floorObjectRoomIds.get(object.id) === proposedRoomId
+          )
+        }
       });
 
       return {
@@ -1661,6 +1678,21 @@ export function PlanView({
     [project.wallObjects, artworksById]
   );
 
+  // Room membership per floor object, for floorAlign filtering (Phase 4):
+  // resolvePlanPlacement's alignment targets only want floor objects sharing
+  // the moving object's room, so every call site can filter by comparing this
+  // map's value to the proposed center's own roomIdContainingPoint result.
+  const floorObjectRoomIds = useMemo(
+    () =>
+      new Map(
+        project.floorObjects.map((object) => [
+          object.id,
+          roomIdContainingPoint(project, { xMm: object.xMm, yMm: object.yMm })
+        ])
+      ),
+    [project]
+  );
+
   // Build complete gap/solid chains in room-local space, then lift them once
   // for the plan overlay. A valid draw preview participates too, so its live
   // feedback uses the exact geometry that will be committed.
@@ -1791,6 +1823,7 @@ export function PlanView({
   // what placeCaseFromPlan will actually create. Every other tool is single-pass.
   function resolveToolPlacement(pointerMm: Vector2, size: typeof movingSize) {
     if (!activeTool || !size) return null;
+    const roomId = roomIdContainingPoint(project, pointerMm);
     const options = {
       walls: openingToolWalls,
       wallObjects: snappingWallObjects,
@@ -1806,7 +1839,15 @@ export function PlanView({
       gridTargets: gridSnapTargets,
       snapToGrid,
       thresholdMm: snapThresholdMm,
-      previousSnapTargetIds: toolSnapTargetIdsRef.current
+      previousSnapTargetIds: toolSnapTargetIdsRef.current,
+      // Not yet placed — nothing to exclude, just filter to the room under the
+      // pointer.
+      floorAlign: {
+        roomId,
+        floorObjects: project.floorObjects.filter(
+          (object) => floorObjectRoomIds.get(object.id) === roomId
+        )
+      }
     };
     const first = resolvePlanPlacement(pointerMm, { ...options, movingSize: size });
     if (activeTool === "case" && first.placement.anchor === "wall") {
@@ -2694,6 +2735,7 @@ export function PlanView({
     // floor stage and never captures a wall (floor-only).
     form: PlacementForm
   ) {
+    const roomId = roomIdContainingPoint(project, pointerMm);
     return resolvePlanPlacement(pointerMm, {
       walls: floorWallsForTool,
       wallObjects: snappingWallObjects,
@@ -2706,7 +2748,15 @@ export function PlanView({
       gridTargets: gridSnapTargets,
       snapToGrid: bypassSnap ? false : snapToGrid,
       thresholdMm: bypassSnap ? 0 : snapThresholdMm,
-      previousSnapTargetIds: dropSnapTargetIdsRef.current
+      previousSnapTargetIds: dropSnapTargetIdsRef.current,
+      // Not yet placed — nothing to exclude, just filter to the room under the
+      // pointer.
+      floorAlign: {
+        roomId,
+        floorObjects: project.floorObjects.filter(
+          (object) => floorObjectRoomIds.get(object.id) === roomId
+        )
+      }
     });
   }
 

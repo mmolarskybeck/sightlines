@@ -1134,7 +1134,7 @@ export function ElevationView({
     // only. Either way `point` then feeds the barrier pass below.
     const point: Vector2 = { ...snapResult.point };
     if (snapToGrid) {
-      const incrementMm = gridPrecisionFloorMm ?? minorGridMm;
+      const incrementMm = minorGridMm;
       // Quantize y first so the (band-filtered) x pass reads the object's settled
       // vertical position; an axis a snap captured is left exactly as snapped.
       if (snapResult.snapTargetIds.y === undefined) {

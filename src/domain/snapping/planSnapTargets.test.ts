@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { OpeningWallObject, WallObjectBase } from "../project";
+import type { CaseFloorObject, OpeningWallObject, WallObjectBase } from "../project";
 import { WALL_OBJECT_PLAN_DEPTH_MM, type FloorWall } from "../geometry/planObjects";
 import { unitLeftNormal } from "../geometry/vector";
 import { getGridSnapTargets } from "./gridSnapTargets";
@@ -153,14 +153,29 @@ describe("resolvePlanPlacement — floor stage grid snapping", () => {
     maxYMm: 6000
   });
 
-  it("grid-snaps both axes when snapToGrid is on", () => {
+  it("grid-snaps an EDGE (not the center) to the lattice when snapToGrid is on", () => {
+    // movingSize is 300×400 (width×depth), rotation 0 (unrotated) → halfW=150,
+    // halfD=200. Proposed (45, 5105) sits within threshold of the edge-hi
+    // candidates of grid lines x=200 (200−150=50) and y=5300 (5300−200=5100) —
+    // the object's right/bottom edge lands on the line, not its center.
     const result = resolvePlanPlacement(
-      { xMm: 205, yMm: 5305 },
+      { xMm: 45, yMm: 5105 },
       { ...baseArgs, gridTargets, snapToGrid: true }
     );
 
-    expect(result.placement).toEqual({ anchor: "floor", xMm: 200, yMm: 5300 });
+    expect(result.placement).toEqual({ anchor: "floor", xMm: 50, yMm: 5100 });
+  });
+
+  it("never draws guide lines for grid snaps (showGuide false)", () => {
+    const result = resolvePlanPlacement(
+      { xMm: 45, yMm: 5105 },
+      { ...baseArgs, gridTargets, snapToGrid: true }
+    );
+
     expect(result.activeGuides.length).toBeGreaterThan(0);
+    for (const guide of result.activeGuides) {
+      expect(guide.showGuide).toBe(false);
+    }
   });
 
   it("does not grid-snap when snapToGrid is off", () => {
@@ -171,6 +186,28 @@ describe("resolvePlanPlacement — floor stage grid snapping", () => {
 
     expect(result.placement).toEqual({ anchor: "floor", xMm: 205, yMm: 5305 });
     expect(result.activeGuides).toEqual([]);
+  });
+
+  it("swaps width/depth for the edge half-extent at a 90° rotation", () => {
+    // At 90°, the object's stored width (300) runs along floor-y and its depth
+    // (400) runs along floor-x, so the x-edge offset becomes halfD (200) and
+    // the y-edge offset becomes halfW (150) — the reverse of the unrotated case.
+    // Uses its own coarser (1000mm) grid so the edge-candidate arithmetic below
+    // stays unambiguous relative to neighboring lines.
+    const rotatedGridTargets = getGridSnapTargets(1000, {
+      minXMm: 0,
+      maxXMm: 6000,
+      minYMm: 0,
+      maxYMm: 6000
+    });
+    const result = resolvePlanPlacement(
+      { xMm: 1795, yMm: 1845 },
+      { ...baseArgs, gridTargets: rotatedGridTargets, snapToGrid: true, rotationDeg: 90 }
+    );
+
+    // edge-hi of line x=2000 with halfW(swapped)=200 → center 1800.
+    // edge-hi of line y=2000 with halfD(swapped)=150 → center 1850.
+    expect(result.placement).toEqual({ anchor: "floor", xMm: 1800, yMm: 1850 });
   });
 
   it("passes the moving rotation through to the floor planRect", () => {
@@ -455,7 +492,10 @@ describe("resolvePlanPlacement — floor-only policy (floor artwork)", () => {
     expect(result.placement).toEqual({ anchor: "floor", xMm: 2000, yMm: 80 });
   });
 
-  it("grid-snaps on the floor stage like any floated placement", () => {
+  it("grid-snaps an edge on the floor stage like any floated placement", () => {
+    // movingSize (from floorOnlyArgs/baseArgs) is 300×400 → halfW=150, halfD=200.
+    // Proposed (1845, 205) lands near the edge-hi candidate of line x=2000
+    // (2000−150=1850) and the edge-lo candidate of line y=0 (0+200=200).
     const gridTargets = getGridSnapTargets(1000, {
       minXMm: 0,
       maxXMm: 4000,
@@ -463,10 +503,10 @@ describe("resolvePlanPlacement — floor-only policy (floor artwork)", () => {
       maxYMm: 1000
     });
     const result = resolvePlanPlacement(
-      { xMm: 1990, yMm: 10 },
+      { xMm: 1845, yMm: 205 },
       { ...floorOnlyArgs, gridTargets, snapToGrid: true }
     );
-    expect(result.placement).toEqual({ anchor: "floor", xMm: 2000, yMm: 0 });
+    expect(result.placement).toEqual({ anchor: "floor", xMm: 1850, yMm: 200 });
   });
 
   it("leaves the wall work's reject policy unchanged (regression guard)", () => {
@@ -475,6 +515,185 @@ describe("resolvePlanPlacement — floor-only policy (floor artwork)", () => {
       { ...baseArgs, floatPolicy: floatPolicyForKind("artwork", "wall") }
     );
     expect(wallWork.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 2000 });
+  });
+});
+
+function caseFloorObject(overrides: Partial<CaseFloorObject> = {}): CaseFloorObject {
+  return {
+    id: "floor-case-1",
+    kind: "case",
+    xMm: 2500,
+    yMm: 1500,
+    widthMm: 500,
+    depthMm: 500,
+    rotationDeg: 0,
+    heightMm: 900,
+    wallYMm: 0,
+    ...overrides
+  };
+}
+
+describe("resolvePlanPlacement — floor stage alignment (Phase 3)", () => {
+  // A rectangular room, walls tagged with the same roomId as HORIZONTAL_WALL
+  // (south), so all four are picked up as the room by getFloorAlignSnapTargets.
+  // Room bounds: x in [0, 4000], y in [0, 3000] → centerlines at x=2000, y=1500.
+  const NORTH_WALL = makeWall("wall-north", { xMm: 4000, yMm: 3000 }, { xMm: 0, yMm: 3000 });
+  const WEST_WALL = makeWall("wall-west", { xMm: 0, yMm: 3000 }, { xMm: 0, yMm: 0 });
+  const EAST_WALL = makeWall("wall-east", { xMm: 4000, yMm: 0 }, { xMm: 4000, yMm: 3000 });
+  const ROOM_WALLS = [HORIZONTAL_WALL, NORTH_WALL, WEST_WALL, EAST_WALL];
+
+  const alignArgs = {
+    ...baseArgs,
+    walls: ROOM_WALLS,
+    movingKind: "case" as const,
+    floatPolicy: "float" as const,
+    floorAlign: { roomId: "room-1", floorObjects: [] as CaseFloorObject[] }
+  };
+
+  it("snaps a proposed center near the room centerline to it, beating grid, with a bounded visible guide", () => {
+    const gridTargets = getGridSnapTargets(100, {
+      minXMm: 0,
+      maxXMm: 4000,
+      minYMm: 0,
+      maxYMm: 3000
+    });
+    const result = resolvePlanPlacement(
+      { xMm: 2005, yMm: 1490 },
+      { ...alignArgs, gridTargets, snapToGrid: true }
+    );
+
+    // y (1490) is also within threshold of the y-centerline (1500), so both
+    // axes snap independently — expected, per resolveSnap's per-axis policy.
+    expect(result.placement).toEqual({ anchor: "floor", xMm: 2000, yMm: 1500 });
+    expect(result.snapTargetIds.x).toBe("room-center:room-1:x");
+    const xGuide = result.activeGuides.find((guide) => guide.axis === "x");
+    expect(xGuide).toBeDefined();
+    expect(xGuide?.showGuide).not.toBe(false);
+    expect(xGuide?.extentMm).toBeDefined();
+    // Bounded to the room's y-span (0..3000) padded by the overshoot, not a
+    // full-viewport line.
+    expect(xGuide!.extentMm!.startMm).toBeGreaterThan(-1000);
+    expect(xGuide!.extentMm!.endMm).toBeLessThan(4000);
+  });
+
+  it("snaps to a wall object's projected center on the along-wall axis", () => {
+    const wallCase = wallObject({ id: "wall-case-1", wallId: "wall-1", xMm: 1000, widthMm: 400 });
+    const result = resolvePlanPlacement(
+      { xMm: 1005, yMm: 500 },
+      { ...alignArgs, wallObjects: [wallCase] }
+    );
+
+    expect(result.placement).toEqual({ anchor: "floor", xMm: 1000, yMm: 500 });
+    expect(result.snapTargetIds.x).toBe("wall-neighbor-center:wall-case-1:x");
+  });
+
+  it("lets edge-align beat center-align when the edge target is nearer (equal priority)", () => {
+    // Wall object center 1000, width 400 → edges at 800/1200. Moving width 600
+    // (halfW 300) → edge-lo align center = 1100, edge-hi = 900, center = 1000.
+    // Proposing 1090 is nearest the edge-lo target; with neighbor-center and
+    // neighbor-edge at equal priority the NEAREST relationship must capture.
+    const wallCase = wallObject({ id: "wall-case-1", wallId: "wall-1", xMm: 1000, widthMm: 400 });
+    const result = resolvePlanPlacement(
+      { xMm: 1090, yMm: 500 },
+      {
+        ...alignArgs,
+        wallObjects: [wallCase],
+        movingSize: { widthMm: 600, heightMm: 900, depthMm: 500 }
+      }
+    );
+
+    expect(result.snapTargetIds.x).toBe("wall-neighbor-edge:wall-case-1:x:lo");
+    expect(result.placement).toEqual({ anchor: "floor", xMm: 1100, yMm: 500 });
+    // The guide draws through the ALIGNED EDGE (wall object's left edge at
+    // 800), not through the moving object's snapped center (1100) — a line
+    // through the mover's middle would read as a center snap.
+    const xGuide = result.activeGuides.find((guide) => guide.axis === "x");
+    expect(xGuide?.positionMm).toBe(800);
+  });
+
+  it("keeps alignment active even with snapToGrid:false", () => {
+    const result = resolvePlanPlacement(
+      { xMm: 2005, yMm: 1490 },
+      { ...alignArgs, snapToGrid: false }
+    );
+
+    expect(result.placement).toEqual({ anchor: "floor", xMm: 2000, yMm: 1500 });
+    expect(result.snapTargetIds.x).toBe("room-center:room-1:x");
+  });
+
+  it("draws no alignment guides on the rejected path (floorAlign stripped)", () => {
+    const rejectArgs = {
+      ...alignArgs,
+      movingKind: "artwork" as const,
+      floatPolicy: floatPolicyForKind("artwork")
+    };
+    // Far from every wall so nothing captures, and near the room centerline
+    // so alignment WOULD fire if it leaked through.
+    const result = resolvePlanPlacement({ xMm: 2005, yMm: 1490 }, rejectArgs);
+
+    expect(result.placement).toEqual({ anchor: "none" });
+    expect(result.activeGuides).toEqual([]);
+  });
+});
+
+describe("resolvePlanPlacement — wall-anchored grid snap (Phase 5a)", () => {
+  // widthMm 600 (not 500) so halfW=300 ≠ interval/2 (250): edge-hi of line
+  // 2000 (1700) and edge-lo of line 1500 (1800) land on distinct points,
+  // avoiding a tie between two representations of the same crossing.
+  const wallCaseArgs = {
+    ...baseArgs,
+    movingKind: "case" as const,
+    floatPolicy: "float" as const,
+    movingSize: { widthMm: 600, heightMm: 900, depthMm: 500 }
+  };
+
+  it("snaps a wall case's edge to a grid crossing when snapToGrid is on", () => {
+    // halfW = 300. Grid line x=2000 → edge-hi candidate center = 2000-300=1700.
+    const gridTargets = getGridSnapTargets(500, {
+      minXMm: 0,
+      maxXMm: 4000,
+      minYMm: -10,
+      maxYMm: 10
+    });
+    const result = resolvePlanPlacement(
+      { xMm: 1705, yMm: 5 },
+      { ...wallCaseArgs, gridTargets, snapToGrid: true }
+    );
+
+    expect(result.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 1700 });
+    expect(result.snapTargetIds.x).toBe("wall-grid:grid-x-2000:edge-hi");
+  });
+
+  it("is continuous (no grid snap) when snapToGrid is off", () => {
+    const gridTargets = getGridSnapTargets(500, {
+      minXMm: 0,
+      maxXMm: 4000,
+      minYMm: -10,
+      maxYMm: 10
+    });
+    const result = resolvePlanPlacement(
+      { xMm: 1705, yMm: 5 },
+      { ...wallCaseArgs, gridTargets, snapToGrid: false }
+    );
+
+    expect(result.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 1705 });
+  });
+
+  it("prefers a nearby same-wall neighbor over a coincident grid crossing", () => {
+    const gridTargets = getGridSnapTargets(500, {
+      minXMm: 0,
+      maxXMm: 4000,
+      minYMm: -10,
+      maxYMm: 10
+    });
+    const neighbor = wallObject({ id: "n-grid", wallId: "wall-1", xMm: 1700, widthMm: 400 });
+    const result = resolvePlanPlacement(
+      { xMm: 1705, yMm: 5 },
+      { ...wallCaseArgs, gridTargets, snapToGrid: true, wallObjects: [neighbor] }
+    );
+
+    expect(result.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 1700 });
+    expect(result.snapTargetIds.x).toBe("neighbor-center:n-grid:x");
   });
 });
 

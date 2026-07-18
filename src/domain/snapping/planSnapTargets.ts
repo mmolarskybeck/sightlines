@@ -1,4 +1,4 @@
-import type { WallObject, WallObjectBase } from "../project";
+import type { FloorObject, WallObject, WallObjectBase } from "../project";
 import type { PlacementForm } from "../placement/artworkForm";
 import {
   getWallObjectPlanRect,
@@ -10,6 +10,7 @@ import {
 import { clamp } from "../geometry/scalar";
 import { cross, subtract } from "../geometry/vector";
 import { getNeighborXSnapTargets } from "./artworkSnapTargets";
+import { getFloorAlignSnapTargets } from "./floorSnapTargets";
 import {
   resolveSnap,
   type Guide,
@@ -131,6 +132,16 @@ export function resolvePlanPlacement(
     // the preview matches the rendered object (wall placements take the wall's
     // angle instead). Defaults to 0 for fresh placements.
     rotationDeg?: number;
+    // Floor alignment targets (Phase 3): room centerlines + wall-object/
+    // floor-object alignment, from getFloorAlignSnapTargets. Only consulted on
+    // the genuine floor stage (resolveOnFloor) — resolveRejected explicitly
+    // strips this so a wall-only work that lost capture never draws alignment
+    // guides for a placement that isn't actually committing anywhere.
+    floorAlign?: {
+      roomId: string | null;
+      // Moving object already excluded + filtered to the same room by the caller.
+      floorObjects: FloorObject[];
+    };
   }
 ): PlanPlacementResult {
   // A floor work never hangs (USER DECISION): skip wall capture entirely and
@@ -246,6 +257,87 @@ function cursorOnInteriorSide(wall: FloorWall, pointMm: Point): boolean {
   );
 }
 
+// How close a wall's delta must be to zero on one axis to count as
+// axis-aligned for wall-grid purposes — mirrors floorSnapTargets'
+// AXIS_EPSILON_MM policy (floats lifted through a room offset are floats, not
+// exact integers).
+const WALL_GRID_AXIS_EPSILON_MM = 1e-6;
+
+// Cap on wall-grid candidates kept after range-filtering, so a long wall at a
+// fine grid interval doesn't flood resolveSnap with candidates far from the
+// cursor — the nearest N to the proposed along-wall position win.
+const MAX_WALL_GRID_CANDIDATES = 40;
+
+// Wall-anchored grid snap (Phase 5a): a wall-anchored object (case, door,
+// window, artwork, wall text) never had a grid tier before this — only
+// same-wall neighbors. This projects the floor-space grid lines PERPENDICULAR
+// to an axis-aligned wall into wall-local along-wall crossings, then expands
+// each crossing into two edge-based CENTER candidates (the moving object's
+// left/right edge lands on the crossing) — the same edge-based policy as the
+// floor stage's buildFloorGridCandidates. An angled wall has no well-defined
+// perpendicular grid family (its along-wall axis isn't parallel to either
+// world axis) and is skipped entirely, keeping the pre-existing behavior
+// there. Every candidate carries showGuide:false — grid never draws a guide.
+function buildWallGridCandidates(
+  wall: FloorWall,
+  gridTargets: SnapTarget[],
+  widthMm: number,
+  proposedXAlongMm: number
+): SnapTarget[] {
+  const dx = wall.endFloorMm.xMm - wall.startFloorMm.xMm;
+  const dy = wall.endFloorMm.yMm - wall.startFloorMm.yMm;
+  const isHorizontal =
+    Math.abs(dy) <= WALL_GRID_AXIS_EPSILON_MM && Math.abs(dx) > WALL_GRID_AXIS_EPSILON_MM;
+  const isVertical =
+    Math.abs(dx) <= WALL_GRID_AXIS_EPSILON_MM && Math.abs(dy) > WALL_GRID_AXIS_EPSILON_MM;
+  if (!isHorizontal && !isVertical) return [];
+
+  // A horizontal wall (constant y) crosses vertical grid lines (x-axis
+  // targets); a vertical wall crosses horizontal grid lines (y-axis targets).
+  const relevantAxis: "x" | "y" = isHorizontal ? "x" : "y";
+  const dirSign = isHorizontal ? Math.sign(dx) : Math.sign(dy);
+  const startCoordMm = isHorizontal ? wall.startFloorMm.xMm : wall.startFloorMm.yMm;
+
+  const halfWMm = widthMm / 2;
+  const minAlongMm = halfWMm;
+  const maxAlongMm = wall.lengthMm - halfWMm;
+  if (maxAlongMm < minAlongMm) return [];
+
+  const candidates: { target: SnapTarget; distanceMm: number }[] = [];
+  for (const gridTarget of gridTargets) {
+    if (gridTarget.axis !== relevantAxis) continue;
+    const gridCoordMm = relevantAxis === "x" ? gridTarget.point.xMm : gridTarget.point.yMm;
+    // xAlong = (gridCoord - start) / dir, dir = ±1 (wall's direction sign on
+    // the relevant axis) — the wall-local distance from start at which the
+    // wall crosses this grid line.
+    const crossingAlongMm = (gridCoordMm - startCoordMm) / dirSign;
+
+    // Edge-lo: center = crossing + halfW (moving object's LEFT edge on the
+    // line). Edge-hi: center = crossing − halfW (RIGHT edge on the line) —
+    // same convention as buildFloorGridCandidates.
+    for (const suffix of ["lo", "hi"] as const) {
+      const centerAlongMm =
+        suffix === "lo" ? crossingAlongMm + halfWMm : crossingAlongMm - halfWMm;
+      if (centerAlongMm < minAlongMm || centerAlongMm > maxAlongMm) continue;
+      candidates.push({
+        target: {
+          id: `wall-grid:${gridTarget.id}:edge-${suffix}`,
+          kind: "grid",
+          axis: "x",
+          point: { xMm: centerAlongMm, yMm: 0 },
+          showGuide: false
+        },
+        distanceMm: Math.abs(centerAlongMm - proposedXAlongMm)
+      });
+    }
+  }
+
+  return candidates
+    .sort((a, b) => a.distanceMm - b.distanceMm)
+    .slice(0, MAX_WALL_GRID_CANDIDATES)
+    .map((entry) => entry.target);
+}
+
 function resolveOnWall(
   proposedCenterFloorMm: Point,
   captured: { wall: FloorWall; xAlongMm: number },
@@ -256,16 +348,24 @@ function resolveOnWall(
     movingKind: WallObject["kind"];
     thresholdMm: number;
     previousSnapTargetIds?: SnapTargetIds;
+    // Floor-space grid targets from getGridSnapTargets, reused here (Phase 5a)
+    // to derive wall-local crossings for an axis-aligned wall — see
+    // buildWallGridCandidates. Only consulted when snapToGrid.
+    gridTargets: SnapTarget[];
+    snapToGrid: boolean;
   }
 ): PlanPlacementResult {
   const wall = captured.wall;
   const widthMm = args.wallFootprintWidthMm ?? args.movingSize.widthMm;
 
   // Neighbor targets are wall-local x only: objects on this wall, positioned by
-  // their own xMm-along-the-wall. No grid tier along the wall (floor grid is
-  // meaningless projected onto an angled wall) and no y candidates.
+  // their own xMm-along-the-wall. No y candidates (there is no cross-wall axis
+  // in wall-local space).
   const neighbors = args.wallObjects.filter((object) => object.wallId === wall.id);
-  const candidates = getNeighborXSnapTargets(neighbors, widthMm);
+  const gridCandidates = args.snapToGrid
+    ? buildWallGridCandidates(wall, args.gridTargets, widthMm, captured.xAlongMm)
+    : [];
+  const candidates = [...getNeighborXSnapTargets(neighbors, widthMm), ...gridCandidates];
 
   const resolved = resolveSnap(
     { xMm: captured.xAlongMm, yMm: 0 },
@@ -301,6 +401,82 @@ function resolveOnWall(
   };
 }
 
+// Grid snapping on the floor stage snaps the moving object's EDGE onto a grid
+// line, not its center (USER DECISION — Phase 1 of the grid-snap plan): an
+// object's outer boundary landing on the lattice is what reads as "aligned to
+// the grid" in plan view, not its centroid landing on it. Each raw grid target
+// (one per visible line, center-on-line) expands into two edge candidates —
+// center shifted by the moving object's half-extent so one edge or the other
+// coincides with the line. A rotated object (not a multiple of 90°) has no
+// axis-aligned edges to align, so it falls back to the original center-on-line
+// candidate. Every returned candidate carries showGuide:false: grid snapping
+// must never draw a guide line in the floor stage (the grid itself IS the
+// visual reference), only the wall/neighbor tiers draw guides.
+function buildFloorGridCandidates(
+  gridTargets: SnapTarget[],
+  movingSize: PlanMovingSize | undefined,
+  rotationDeg: number | undefined
+): SnapTarget[] {
+  const asHidden = (target: SnapTarget): SnapTarget => ({ ...target, showGuide: false });
+
+  if (!movingSize) {
+    return gridTargets.map(asHidden);
+  }
+
+  const normalizedDeg = (((rotationDeg ?? 0) % 360) + 360) % 360;
+  const nearestQuarterTurn = Math.round(normalizedDeg / 90);
+  const deviationDeg = Math.abs(normalizedDeg - nearestQuarterTurn * 90);
+  const isAxisAligned = deviationDeg < 0.5;
+
+  if (!isAxisAligned) {
+    // A rotated rect has no axis-aligned edges to snap — fall back to
+    // center-on-line, same as the old raw-target behavior, just guide-free.
+    return gridTargets.map(asHidden);
+  }
+
+  // At 90°/270° the object's width and depth are swapped relative to the
+  // floor axes (a quarter-turn rect's "width" now runs along floor-y).
+  const swapped = (((nearestQuarterTurn % 4) + 4) % 4) % 2 === 1;
+  const halfWMm = (swapped ? movingSize.depthMm : movingSize.widthMm) / 2;
+  const halfDMm = (swapped ? movingSize.widthMm : movingSize.depthMm) / 2;
+
+  const candidates: SnapTarget[] = [];
+  for (const target of gridTargets) {
+    if (target.axis === "x") {
+      // Center = line + half-extent → the object's LEFT edge sits on the line.
+      candidates.push({
+        ...target,
+        id: `${target.id}:edge-lo`,
+        point: { xMm: target.point.xMm + halfWMm, yMm: target.point.yMm },
+        showGuide: false
+      });
+      // Center = line − half-extent → the object's RIGHT edge sits on the line.
+      candidates.push({
+        ...target,
+        id: `${target.id}:edge-hi`,
+        point: { xMm: target.point.xMm - halfWMm, yMm: target.point.yMm },
+        showGuide: false
+      });
+    } else if (target.axis === "y") {
+      candidates.push({
+        ...target,
+        id: `${target.id}:edge-lo`,
+        point: { xMm: target.point.xMm, yMm: target.point.yMm + halfDMm },
+        showGuide: false
+      });
+      candidates.push({
+        ...target,
+        id: `${target.id}:edge-hi`,
+        point: { xMm: target.point.xMm, yMm: target.point.yMm - halfDMm },
+        showGuide: false
+      });
+    } else {
+      candidates.push(asHidden(target));
+    }
+  }
+  return candidates;
+}
+
 // The floor stage. movingSize is the image size and stays that way: floor
 // geometry never expands by mat/frame (Phase 6b decision — a floor work has no
 // settled physical orientation, so an outer height cannot be mapped onto plan
@@ -314,11 +490,40 @@ function resolveOnFloor(
     thresholdMm: number;
     previousSnapTargetIds?: SnapTargetIds;
     rotationDeg?: number;
+    // Only present when the caller opted into alignment (see
+    // resolvePlanPlacement's floorAlign) — walls/wallObjects are optional here
+    // (rather than required) so resolveRejected, which never supplies
+    // floorAlign, doesn't need to supply these either.
+    walls?: FloorWall[];
+    wallObjects?: WallObjectBase[];
+    floorAlign?: {
+      roomId: string | null;
+      floorObjects: FloorObject[];
+    };
   }
 ): PlanPlacementResult {
-  // Grid is the only floor tier and is preference-gated; with snap off there
-  // are no candidates and the proposed center passes through unchanged.
-  const candidates = args.snapToGrid ? args.gridTargets : [];
+  // Alignment targets (room centerlines + wall-/floor-object alignment) are
+  // NOT preference-gated — they're always active when floorAlign is present,
+  // same as resolveArtworkSnap's centerline/neighbor tiers, and keep their
+  // visible guides. Grid is the only floor tier gated by snapToGrid and is
+  // always guide-free (see buildFloorGridCandidates); the raw per-line targets
+  // are expanded into edge-based candidates. Alignment (priority 1-3 via
+  // KIND_PRIORITY) naturally outranks grid (4).
+  const alignCandidates = args.floorAlign
+    ? getFloorAlignSnapTargets({
+        proposedCenterMm: proposedCenterFloorMm,
+        roomId: args.floorAlign.roomId,
+        walls: args.walls ?? [],
+        wallObjects: args.wallObjects ?? [],
+        floorObjects: args.floorAlign.floorObjects,
+        movingSize: args.movingSize,
+        rotationDeg: args.rotationDeg ?? 0
+      })
+    : [];
+  const gridCandidates = args.snapToGrid
+    ? buildFloorGridCandidates(args.gridTargets, args.movingSize, args.rotationDeg)
+    : [];
+  const candidates = [...alignCandidates, ...gridCandidates];
 
   const resolved = resolveSnap(proposedCenterFloorMm, candidates, {
     thresholdMm: args.thresholdMm,
@@ -370,7 +575,12 @@ function resolveRejected(
     rotationDeg?: number;
   }
 ): PlanPlacementResult {
-  const floor = resolveOnFloor(proposedCenterFloorMm, args);
+  // Explicitly omit floorAlign even though resolvePlanPlacement forwards its
+  // whole args object here (which may still carry it at runtime) — a rejected
+  // drop commits nothing, so it must never draw alignment guides that imply a
+  // placement that isn't happening. This type's args never declares
+  // floorAlign, but the spread below is the actual enforcement.
+  const floor = resolveOnFloor(proposedCenterFloorMm, { ...args, floorAlign: undefined });
   return {
     ...floor,
     placement: { anchor: "none" },

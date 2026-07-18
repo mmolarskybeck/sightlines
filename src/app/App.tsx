@@ -1595,7 +1595,7 @@ export function App() {
                       active={snapToGrid}
                       disabled={false}
                       icon={<MagnetIcon aria-hidden="true" size={16} />}
-                      label="Snap"
+                      label="Grid snap"
                       title={snapToGrid ? "Disable snap to grid" : "Enable snap to grid"}
                       kbd="S"
                       onClick={toggleSnapToGrid}
