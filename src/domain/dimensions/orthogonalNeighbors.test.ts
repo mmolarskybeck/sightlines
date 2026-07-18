@@ -24,9 +24,15 @@ function part(
 function derive(
   participants: DimensionParticipant[],
   wallLengthMm = 4000,
-  wallHeightMm = 3000
+  wallHeightMm = 3000,
+  nearestNeighborsOnly?: boolean
 ): ElevationDimensions {
-  return deriveElevationDimensions({ wallLengthMm, wallHeightMm, participants });
+  return deriveElevationDimensions({
+    wallLengthMm,
+    wallHeightMm,
+    participants,
+    ...(nearestNeighborsOnly === undefined ? {} : { nearestNeighborsOnly })
+  });
 }
 
 function findGap(dims: ElevationDimensions, id1: string, id2: string, axis: DimensionAxis) {
@@ -85,11 +91,18 @@ describe("deriveElevationDimensions — neighbor gaps", () => {
   });
 
   it("keeps a relationship through a partial block and uses the widest corridor", () => {
-    const dims = derive([
-      part("w1", 0, 500, 0, 3000),
-      part("w2", 2000, 2500, 0, 3000),
-      part("blk", 1000, 1500, 0, 1000, "blocked-zone")
-    ]);
+    // Full-graph mode: the pruned default drops w1<->w2 in favor of each
+    // work's nearer gap to the blocker (covered separately below).
+    const dims = derive(
+      [
+        part("w1", 0, 500, 0, 3000),
+        part("w2", 2000, 2500, 0, 3000),
+        part("blk", 1000, 1500, 0, 1000, "blocked-zone")
+      ],
+      4000,
+      3000,
+      false
+    );
 
     const gap = findGap(dims, "w1", "w2", "horizontal");
     expect(gap?.gapMm).toBe(1500);
@@ -99,12 +112,17 @@ describe("deriveElevationDimensions — neighbor gaps", () => {
   });
 
   it("selects the widest of several remaining corridors", () => {
-    const dims = derive([
-      part("w1", 0, 500, 0, 3000),
-      part("w2", 2000, 2500, 0, 3000),
-      part("b1", 1000, 1500, 0, 1000, "blocked-zone"),
-      part("b2", 1000, 1500, 1200, 1600, "blocked-zone")
-    ]);
+    const dims = derive(
+      [
+        part("w1", 0, 500, 0, 3000),
+        part("w2", 2000, 2500, 0, 3000),
+        part("b1", 1000, 1500, 0, 1000, "blocked-zone"),
+        part("b2", 1000, 1500, 1200, 1600, "blocked-zone")
+      ],
+      4000,
+      3000,
+      false
+    );
 
     const gap = findGap(dims, "w1", "w2", "horizontal");
     // Clear spans are [1000,1200] (200) and [1600,3000] (1400) -> widest wins.
@@ -173,6 +191,53 @@ describe("deriveElevationDimensions — neighbor gaps", () => {
     // Ids are sorted lexically within the pair.
     expect(horizontal[0].aId).toBe("w1");
     expect(horizontal[0].bId).toBe("w2");
+  });
+});
+
+describe("deriveElevationDimensions — nearest-neighbor pruning (default)", () => {
+  it("drops a long-range gap that survives through a corridor over the row", () => {
+    // w1 and w3 are tall; short w2 between them leaves a clear band above
+    // itself, so the full graph connects w1<->w3 across the wall. The printed
+    // set keeps only the chain: w1-w2, w2-w3.
+    const dims = derive([
+      part("w1", 0, 500, 0, 3000),
+      part("w2", 1000, 1500, 0, 1000),
+      part("w3", 2500, 3000, 0, 3000)
+    ]);
+
+    expect(findGap(dims, "w1", "w3", "horizontal")).toBeUndefined();
+    expect(findGap(dims, "w1", "w2", "horizontal")?.gapMm).toBe(500);
+    expect(findGap(dims, "w2", "w3", "horizontal")?.gapMm).toBe(1000);
+  });
+
+  it("keeps a tall work's gap to each member of a flanking stacked pair", () => {
+    // Both stacked members' nearest-left gap is the tall work, so both
+    // survive even though only one can be the tall work's own nearest-right.
+    const dims = derive([
+      part("tall", 0, 500, 0, 3000),
+      part("top", 1000, 1500, 2000, 3000),
+      part("bottom", 1200, 1700, 0, 1000)
+    ]);
+
+    expect(findGap(dims, "tall", "top", "horizontal")?.gapMm).toBe(500);
+    expect(findGap(dims, "bottom", "tall", "horizontal")?.gapMm).toBe(700);
+  });
+
+  it("suppresses a wall margin when the work keeps a neighbor gap on that side", () => {
+    const dims = derive(
+      [part("w1", 500, 1000, 1000, 2000), part("w2", 1500, 2000, 1000, 2000)],
+      3000,
+      3000
+    );
+
+    // Outer margins stay; the shared interior edges are covered by the gap.
+    expect(
+      dims.boundaryGaps.find((b) => b.side === "left")?.participantIds
+    ).toEqual(["w1"]);
+    expect(
+      dims.boundaryGaps.find((b) => b.side === "right")?.participantIds
+    ).toEqual(["w2"]);
+    expect(dims.boundaryGaps).toHaveLength(2);
   });
 });
 

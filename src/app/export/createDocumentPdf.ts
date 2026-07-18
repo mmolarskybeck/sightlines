@@ -142,6 +142,10 @@ const ELEVATION_DIMENSION_INSETS_PT = {
   top: 22
 };
 const GRID_TARGET_PT = 8;
+// Print analog of PlanView's MIN_WALL_OBJECT_DEPTH_PX: doors/windows/artworks
+// are thin along their off-wall axis and would collapse to hairlines at
+// document scale. The floor is applied in page units after the fit is known.
+const MIN_PLAN_OBJECT_DEPTH_PT = 3;
 const THREE_D_RENDER_DPI = 144;
 
 function colorFromHex(hex: string) {
@@ -297,11 +301,15 @@ function createElevationTransform(
   };
 }
 
+// pdf-lib's drawSvgPath interprets the path in SVG y-DOWN space relative to
+// the (x, y) origin option (default 0,0), so page-space y must be negated or
+// the shape lands below the page and never prints. Inputs here are page
+// coordinates (y-up); the negation makes drawSvgPath render them in place.
 function polygonPath(points: readonly { x: number; y: number }[]): string {
   if (points.length === 0) return "";
   return [
-    `M ${points[0]!.x} ${points[0]!.y}`,
-    ...points.slice(1).map((point) => `L ${point.x} ${point.y}`),
+    `M ${points[0]!.x} ${-points[0]!.y}`,
+    ...points.slice(1).map((point) => `L ${point.x} ${-point.y}`),
     "Z"
   ].join(" ");
 }
@@ -611,11 +619,18 @@ function drawPlanScene(
       { color: COLORS.ink, opacity: 0.72 }
     );
   }
+  // Same semantics as getRenderedWallObjectPlanRect's min-depth clamp: the
+  // viewer-side offset upstream was computed from the pre-clamp depth, so
+  // growing depth around the center here never moves an object's center.
+  const minDepthMm = MIN_PLAN_OBJECT_DEPTH_PT / transform.scalePtPerMm;
   for (const entry of scene.wallObjects) {
     drawPlanObject(
       page,
       transform,
-      entry.renderedRect,
+      {
+        ...entry.renderedRect,
+        depthMm: Math.max(entry.renderedRect.depthMm, minDepthMm)
+      },
       entry.object.kind,
       false
     );
@@ -891,8 +906,8 @@ function drawGapDimension(
   transform: ElevationTransform,
   dimension: GapDimension | BoundaryDimension,
   unit: DisplayUnit,
-  index: number,
-  occupied: PdfLabelBox[]
+  occupied: PdfLabelBox[],
+  obstacles: readonly PdfLabelBox[]
 ) {
   const label = formatDocumentDimension(dimension.gapMm, unit);
   const isBoundary = !("axis" in dimension);
@@ -924,7 +939,7 @@ function drawGapDimension(
     if (available >= labelHeight + 8) {
       const labelPosition = choosePdfLabelCandidate(
         [0, 8, -8, 16, -16, 24, -24].map((offset) => {
-          const x = a.x + offset + (index % 2) * 2;
+          const x = a.x + offset;
           return {
             x,
             box: {
@@ -960,28 +975,31 @@ function drawGapDimension(
       return;
     }
 
+    // Prefer keeping the label at the line's mid-height and sliding sideways
+    // (a straight horizontal leader) before any diagonal-leader fallback.
     const labelWidth = textWidth(fonts, label, DIMENSION_SIZE_PT, true);
     const labelPosition = choosePdfLabelCandidate(
       [
         { x: a.x + labelWidth / 2 + 9, y: midY - DIMENSION_SIZE_PT / 2 },
         { x: a.x - labelWidth / 2 - 9, y: midY - DIMENSION_SIZE_PT / 2 },
+        { x: a.x + labelWidth / 2 + 17, y: midY - DIMENSION_SIZE_PT / 2 },
+        { x: a.x - labelWidth / 2 - 17, y: midY - DIMENSION_SIZE_PT / 2 },
+        { x: a.x + labelWidth / 2 + 25, y: midY - DIMENSION_SIZE_PT / 2 },
+        { x: a.x - labelWidth / 2 - 25, y: midY - DIMENSION_SIZE_PT / 2 },
         { x: a.x + labelWidth / 2 + 17, y: midY + 8 },
         { x: a.x - labelWidth / 2 - 17, y: midY + 8 },
         { x: a.x + labelWidth / 2 + 17, y: midY - 12 },
         { x: a.x - labelWidth / 2 - 17, y: midY - 12 }
-      ].map((candidate) => {
-        const x = candidate.x + (index % 2) * 2;
-        return {
-          x,
-          y: candidate.y,
-          box: {
-            left: x - labelWidth / 2 - 2,
-            right: x + labelWidth / 2 + 2,
-            bottom: candidate.y - 1,
-            top: candidate.y + DIMENSION_SIZE_PT + 3
-          }
-        };
-      }),
+      ].map((candidate) => ({
+        x: candidate.x,
+        y: candidate.y,
+        box: {
+          left: candidate.x - labelWidth / 2 - 2,
+          right: candidate.x + labelWidth / 2 + 2,
+          bottom: candidate.y - 1,
+          top: candidate.y + DIMENSION_SIZE_PT + 3
+        }
+      })),
       occupied
     );
     occupied.push(labelPosition.box);
@@ -1023,16 +1041,32 @@ function drawGapDimension(
   );
   const available = Math.abs(b.x - a.x);
   const labelWidth = textWidth(fonts, label, DIMENSION_SIZE_PT, true);
-  const baseY = available >= labelWidth + 6 ? a.y + 2 : a.y + 9;
   const midX = (a.x + b.x) / 2;
+  const labelLeft = midX - labelWidth / 2 - 2;
+  const labelRight = midX + labelWidth / 2 + 2;
+  const fitsInGap = available >= labelWidth + 6;
+  // A label wider than its gap must clear the flanking artworks anyway, so
+  // place it in a lane just above the local footprint tops instead of
+  // walking up in per-artwork increments — neighboring pushed labels land
+  // at a consistent height and read as one dimension row.
+  let laneY = a.y + 9;
+  if (!fitsInGap) {
+    for (const box of obstacles) {
+      if (box.right > labelLeft && box.left < labelRight) {
+        laneY = Math.max(laneY, box.top + 3);
+      }
+    }
+  }
+  const baseY = fitsInGap ? a.y + 2 : laneY;
+  const offsets = fitsInGap ? [0, 8, 16, -8, -16, 24, -24] : [0, 9, 18, 27];
   const labelPosition = choosePdfLabelCandidate(
-    [0, 8, 16, -8, -16, 24, -24].map((offset) => {
-      const y = baseY + offset + (index % 2) * 2;
+    offsets.map((offset) => {
+      const y = baseY + offset;
       return {
         y,
         box: {
-          left: midX - labelWidth / 2 - 2,
-          right: midX + labelWidth / 2 + 2,
+          left: labelLeft,
+          right: labelRight,
           bottom: y - 1,
           top: y + DIMENSION_SIZE_PT + 3
         }
@@ -1062,7 +1096,10 @@ function drawElevationDimensions(
   unit: DisplayUnit
 ) {
   const dimensions = deriveElevationSceneDimensions(scene);
-  const occupiedLabels = participantObstacleBoxes(scene, transform);
+  // Participant footprints stay frozen (they seed the label lane); the
+  // occupied list grows as labels land so later labels avoid earlier ones.
+  const obstacleBoxes = participantObstacleBoxes(scene, transform);
+  const occupiedLabels = [...obstacleBoxes];
   const wallBottomLeft = transform.point({ xMm: 0, yMm: 0 });
   const wallTopRight = transform.point({
     xMm: scene.wallLengthMm,
@@ -1131,16 +1168,38 @@ function drawElevationDimensions(
     90
   );
 
-  const allGaps = [...dimensions.neighborGaps, ...dimensions.boundaryGaps];
-  allGaps.forEach((dimension, index) =>
+  // Parallel gaps with the same printed value and the same facing edges (a
+  // stacked row's top and bottom both offset equally from a flanking work,
+  // or a 2x2 block's two column gaps) collapse to one printed dimension —
+  // the second line restates the first. The widest corridor draws it.
+  const uniqueGaps = new Map<string, GapDimension>();
+  for (const gap of dimensions.neighborGaps) {
+    const key = [
+      gap.axis,
+      formatDocumentDimension(gap.gapMm, unit),
+      Math.round(gap.fromMm),
+      Math.round(gap.toMm)
+    ].join("|");
+    const existing = uniqueGaps.get(key);
+    if (
+      !existing ||
+      gap.corridorHiMm - gap.corridorLoMm >
+        existing.corridorHiMm - existing.corridorLoMm
+    ) {
+      uniqueGaps.set(key, gap);
+    }
+  }
+
+  const allGaps = [...uniqueGaps.values(), ...dimensions.boundaryGaps];
+  allGaps.forEach((dimension) =>
     drawGapDimension(
       page,
       fonts,
       transform,
       dimension,
       unit,
-      index,
-      occupiedLabels
+      occupiedLabels,
+      obstacleBoxes
     )
   );
 

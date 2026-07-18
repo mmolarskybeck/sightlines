@@ -543,6 +543,21 @@ there is no row/salon classification and no guessed lane grouping:
   boundary. Per-work width/height labels inside artwork footprints are not
   part of v1; optional labels and the checklist PDF own that content.
 
+The raw visibility graph still connects distant pairs whenever a thin clear
+corridor survives over or under the intervening row, which floods a dense
+hang with long-range dimensions nobody hangs from. The **printed set is
+pruned to nearest neighbors**: each participant keeps only its smallest gap
+per axis direction (ties within tolerance all survive), and a gap prints
+when it is nearest for at least one of its two endpoints — so a tall work
+flanked by a stacked pair keeps the gap to each stacked member via that
+member's own nearest slot. A wall margin is likewise suppressed for any work
+that keeps a printed neighbor gap on that side: margins remain only at the
+outer ends of the chain, where they are the work's horizontal anchor.
+Parallel gaps with the same printed value and the same facing edges (a
+stacked row's top and bottom members equally offset from a flanking work)
+print once, in the widest corridor — the same consolidation-when-unambiguous
+rule the exterior margins use.
+
 A conventional single-row hang naturally collapses to the familiar
 left-to-right gap chain. A salon hang gains vertical gaps between stacked
 works and horizontal gaps between side-by-side works, but never jumps across

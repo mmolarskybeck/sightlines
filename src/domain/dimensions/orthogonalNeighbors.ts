@@ -38,6 +38,11 @@ export type DimensionInput = {
   // Defaults to NEIGHBOR_TOLERANCE_MM. Spans overlapping by <= this are not
   // neighbors; gaps within this read 0; corridors at or below this are slivers.
   toleranceMm?: number;
+  // Default true: prune the visibility graph to each participant's nearest
+  // gap per axis direction and suppress wall margins made redundant by a
+  // kept neighbor (see selectNearestNeighborGaps). False returns the full
+  // §9.6 visibility graph and every exposed boundary margin.
+  nearestNeighborsOnly?: boolean;
 };
 
 export type DimensionAxis = "horizontal" | "vertical";
@@ -356,11 +361,64 @@ function centerHeights(
   return result;
 }
 
+// The visibility-neighbor graph alone still connects distant pairs whenever a
+// thin clear band survives over or under the intervening row, which floods a
+// dense hang with long-range dimensions nobody hangs from. The printed set
+// keeps, for each participant and each axis direction, only its nearest gap
+// (ties within tolerance all survive); a gap is kept when it is nearest for
+// at least one of its two endpoints, so a tall work flanked by a stacked pair
+// keeps the gap to each stacked member via that member's own nearest slot.
+export function selectNearestNeighborGaps(
+  participants: DimensionParticipant[],
+  gaps: GapDimension[],
+  toleranceMm = NEIGHBOR_TOLERANCE_MM
+): GapDimension[] {
+  const centers = new Map(
+    participants.map((participant) => [
+      participant.id,
+      {
+        x: participant.rect.xMm + participant.rect.widthMm / 2,
+        y: participant.rect.yMm + participant.rect.heightMm / 2
+      }
+    ])
+  );
+  // "id:axis:side" -> smallest gap on that side of that participant, where
+  // side is which direction the partner lies along the gap's axis.
+  const slotFor = (gap: GapDimension, id: string): string | null => {
+    const a = centers.get(gap.aId);
+    const b = centers.get(gap.bId);
+    if (!a || !b) return null;
+    const axisA = gap.axis === "horizontal" ? a.x : a.y;
+    const axisB = gap.axis === "horizontal" ? b.x : b.y;
+    const idIsLower = (id === gap.aId) === (axisA <= axisB);
+    return `${id}:${gap.axis}:${idIsLower ? "hi" : "lo"}`;
+  };
+  const best = new Map<string, number>();
+  for (const gap of gaps) {
+    for (const id of [gap.aId, gap.bId]) {
+      const slot = slotFor(gap, id);
+      if (!slot) continue;
+      const current = best.get(slot);
+      if (current === undefined || gap.gapMm < current) {
+        best.set(slot, gap.gapMm);
+      }
+    }
+  }
+  return gaps.filter((gap) =>
+    [gap.aId, gap.bId].some((id) => {
+      const slot = slotFor(gap, id);
+      return (
+        slot !== null && gap.gapMm <= (best.get(slot) ?? Infinity) + toleranceMm
+      );
+    })
+  );
+}
+
 export function deriveElevationDimensions(input: DimensionInput): ElevationDimensions {
   const tol = input.toleranceMm ?? NEIGHBOR_TOLERANCE_MM;
   const { participants, wallLengthMm, wallHeightMm } = input;
 
-  const neighborGaps: GapDimension[] = [];
+  const allGaps: GapDimension[] = [];
   for (let i = 0; i < participants.length; i += 1) {
     for (let j = i + 1; j < participants.length; j += 1) {
       const a = participants[i];
@@ -368,10 +426,14 @@ export function deriveElevationDimensions(input: DimensionInput): ElevationDimen
       const others = participants.filter((_, k) => k !== i && k !== j);
       for (const axis of ["horizontal", "vertical"] as const) {
         const gap = pairGap(a, b, others, axis, tol);
-        if (gap) neighborGaps.push(gap);
+        if (gap) allGaps.push(gap);
       }
     }
   }
+  const nearestOnly = input.nearestNeighborsOnly !== false;
+  const neighborGaps = nearestOnly
+    ? selectNearestNeighborGaps(participants, allGaps, tol)
+    : allGaps;
   neighborGaps.sort(
     (x, y) =>
       x.axis.localeCompare(y.axis) ||
@@ -384,10 +446,28 @@ export function deriveElevationDimensions(input: DimensionInput): ElevationDimen
   // a work correctly suppresses that work's margin. Openings and blocked zones
   // sit flush to edges by nature and don't want their own exterior margins.
   const works = participants.filter((p) => p.kind === "artwork");
+  // A work that keeps a printed neighbor gap on a side is already anchored
+  // through the chain on that side; its wall margin there is redundant noise.
+  // Boundary margins remain only where the chain has no partner — the outer
+  // ends of a row, or a work nothing else faces on that side.
+  const centersById = new Map(
+    participants.map((p) => [p.id, p.rect.xMm + p.rect.widthMm / 2])
+  );
+  const hasNeighborOnSide = new Set<string>();
+  for (const gap of nearestOnly ? neighborGaps : []) {
+    if (gap.axis !== "horizontal") continue;
+    const aCenter = centersById.get(gap.aId) ?? 0;
+    const bCenter = centersById.get(gap.bId) ?? 0;
+    const [lower, higher] =
+      aCenter <= bCenter ? [gap.aId, gap.bId] : [gap.bId, gap.aId];
+    hasNeighborOnSide.add(`${lower}:right`);
+    hasNeighborOnSide.add(`${higher}:left`);
+  }
   const rawBoundary: BoundaryDimension[] = [];
   for (const work of works) {
     const others = participants.filter((p) => p.id !== work.id);
     for (const side of ["left", "right"] as const) {
+      if (hasNeighborOnSide.has(`${work.id}:${side}`)) continue;
       const gap = boundaryGap(work, side, wallLengthMm, others, tol);
       if (gap) rawBoundary.push(gap);
     }
