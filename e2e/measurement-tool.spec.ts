@@ -1,22 +1,7 @@
-import { expect, test, type Locator, type Page } from "playwright/test";
-
-async function hideFontLab(page: Page) {
-  const hide = page.getByRole("button", { name: "Hide", exact: true });
-  if (await hide.count()) await hide.first().click();
-}
-
-async function clickCanvasAt(svg: Locator, xRatio: number, yRatio: number) {
-  const bounds = await svg.boundingBox();
-  if (!bounds) throw new Error("The drawing surface has no bounding box.");
-  await svg.click({
-    position: { x: bounds.width * xRatio, y: bounds.height * yRatio }
-  });
-}
+import { expect, test, clickCanvasAt, gotoApp } from "./fixtures";
 
 test("creates and clears a temporary measurement while Measure stays armed", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.locator(".app-main")).toBeVisible();
-  await hideFontLab(page);
+  await gotoApp(page);
 
   await expect(page.getByRole("radio", { name: "Plan", exact: true })).toBeChecked();
   const plan = page.locator("svg.plan-svg");
@@ -58,9 +43,7 @@ test("creates and clears a temporary measurement while Measure stays armed", asy
 });
 
 test("switching 2D surfaces clears temporary work but keeps Measure armed", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.locator(".app-main")).toBeVisible();
-  await hideFontLab(page);
+  await gotoApp(page);
 
   const plan = page.locator("svg.plan-svg");
   await page.keyboard.press("m");
@@ -80,9 +63,7 @@ test("switching 2D surfaces clears temporary work but keeps Measure armed", asyn
 test("creates a temporary measurement with keyboard only, keeping Measure armed", async ({
   page
 }) => {
-  await page.goto("/");
-  await expect(page.locator(".app-main")).toBeVisible();
-  await hideFontLab(page);
+  await gotoApp(page);
 
   const plan = page.locator("svg.plan-svg");
   await expect(plan).toBeVisible();

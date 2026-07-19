@@ -91,6 +91,10 @@ import {
 } from "../../hooks/useMeasurementTool";
 import { isMeasurementCreationArrowKey } from "../../hooks/measurementCreationKey";
 import { getElevationMeasurementCreationKeyAction } from "../../hooks/elevationMeasurementPolicy";
+import {
+  planMeasurementCancelAction,
+  shouldCancelMeasurementForViewportClaim
+} from "../../hooks/planMeasurementPolicy";
 import { useAppStore } from "../../store";
 import {
   ARTWORK_DRAG_MIME,
@@ -879,6 +883,21 @@ export function ElevationView({
     return true;
   }
 
+  // Mirror of PlanView's cancelMeasurePointerGesture. When a second touch
+  // promotes the viewport gesture to a pinch, drop the one-finger measurement
+  // in flight: clear the transient gesture ref, release the captured pointer,
+  // and dispatch the phase-appropriate clear so no stray measurement is
+  // committed on the trailing pointerup.
+  function cancelMeasurementPointerGesture() {
+    const gesture = measurementGestureRef.current;
+    const action = measurementState ? planMeasurementCancelAction(measurementState) : null;
+    if (action) onMeasurementDispatch?.(action);
+    measurementGestureRef.current = null;
+    measurementSnapTargetIdRef.current = undefined;
+    setMeasurementSnappedEndpoint(null);
+    if (gesture) svgRef.current?.releasePointerCapture?.(gesture.pointerId);
+  }
+
   function beginMeasurementRefinement(
     endpoint: MeasurementEndpoint,
     event: ReactPointerEvent<SVGCircleElement>
@@ -1324,6 +1343,24 @@ export function ElevationView({
     if (event.pointerType !== "touch") {
       event.currentTarget.focus({ preventScroll: true });
     }
+
+    // Pan/pinch gets first refusal, mirroring PlanView. The first touch is
+    // recorded before Measure sees it, so a second touch can promote the
+    // gesture to a pinch; that promotion cancels any one-finger measurement in
+    // flight (touch only — mouse/pen keep their existing behavior via
+    // shouldCancelMeasurementForViewportClaim's pointer-type guard).
+    if (handlePointerDownCapture(event)) {
+      if (
+        shouldCancelMeasurementForViewportClaim(
+          event.pointerType,
+          measurementGestureRef.current !== null
+        )
+      ) {
+        cancelMeasurementPointerGesture();
+      }
+      return;
+    }
+
     if (measurementActive) {
       const target = event.target as Element;
       // Measurement handles/body own the more specific interaction. Their
@@ -1331,10 +1368,9 @@ export function ElevationView({
       // point on the underlying wall.
       if (target.closest(".measurement-overlay")) return;
       if (handleMeasurementPointerDown(event)) return;
-      // Rejected measurement presses (Space-pan, secondary buttons, and
-      // additional touch pointers) still belong to the viewport engine.
+      // Rejected measurement presses (Space-pan, secondary buttons) already
+      // went through the viewport engine above.
     }
-    handlePointerDownCapture(event);
   }
 
   function beginMoveDrag(wallObject: WallObject, event: ReactPointerEvent<SVGGElement>) {
