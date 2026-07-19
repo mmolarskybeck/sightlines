@@ -45,10 +45,10 @@ import {
   InMemoryProjectRepository,
   makeImageFile
 } from "../test/inMemoryRepositories";
+import { exportProjectJson } from "../test/exportProjectJson";
 import type { AppStoreDeps } from "./store";
 import {
   createAppStore,
-  exportProjectJson,
   FORBIDDEN_OVERLAP_MESSAGE,
   freestandingWallIdOf,
   getSelectedArtworkId,

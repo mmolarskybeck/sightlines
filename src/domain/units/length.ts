@@ -35,10 +35,6 @@ export function mmToInches(mm: number): number {
   return mm / MM_PER_INCH;
 }
 
-export function mmToFeet(mm: number): number {
-  return mm / MM_PER_FOOT;
-}
-
 export function parseLength(
   input: string,
   contextUnit: DisplayUnit

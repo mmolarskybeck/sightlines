@@ -94,8 +94,8 @@ import {
   isMeasurementCreationArrowKey
 } from "../../hooks/measurementCreationKey";
 import { useAppStore } from "../../store";
-import { ARTWORK_DRAG_MIME } from "../panels/ChecklistPanel";
 import {
+  ARTWORK_DRAG_MIME,
   consumeArtworkDragSession,
   peekArtworkDragSession,
   subscribeArtworkTouchDrag

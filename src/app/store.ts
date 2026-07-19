@@ -2084,7 +2084,3 @@ export const useAppStore = createAppStore({
     await new IndexedDbSavedViewThumbnailRepository().deleteByProject(projectId);
   }
 });
-
-export function exportProjectJson(project: Project): string {
-  return JSON.stringify(project, null, 2);
-}

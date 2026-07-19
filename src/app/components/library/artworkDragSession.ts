@@ -47,6 +47,9 @@ export function consumeArtworkDragSession(): void {
 // approach dnd-kit-style libraries take). ChecklistPanel arms a long-press,
 // emits pointer coordinates here, and the drop-target views subscribe. This
 // coordinator carries the coordinates; it deliberately holds no DOM.
+
+// The dataTransfer MIME type used for the HTML5 drag-and-drop protocol above.
+export const ARTWORK_DRAG_MIME = "application/x-sightlines-artwork";
 //
 // The existing HTML5 session above is untouched — but every emit keeps
 // peekArtworkDragSession() coherent (begin on first move, consume on

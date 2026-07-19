@@ -47,12 +47,6 @@ export type DimensionInput = {
 
 export type DimensionAxis = "horizontal" | "vertical";
 
-// Sentinels for the wall's left/right boundaries acting as virtual horizontal
-// neighbors (§9.6). Boundary margins carry them via BoundaryDimension.side, so
-// these never appear as participant ids and cannot collide with real ids.
-export const WALL_LEFT_SENTINEL = "wall:left" as const;
-export const WALL_RIGHT_SENTINEL = "wall:right" as const;
-
 export type GapDimension = {
   axis: DimensionAxis;
   // Unordered pair, ids sorted lexically so a pair is emitted once per axis.

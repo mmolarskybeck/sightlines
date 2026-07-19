@@ -10,10 +10,13 @@ import {
   reconcileDocumentExportPreferences,
   type EffectiveDocumentSettings
 } from "../../domain/export/documentSettings";
+import { createPolygonRoomPlacement } from "../../domain/geometry/createRoom";
+import { buildPlanScene } from "../../domain/scene2d/planScene";
 import {
   artworkPlaceholderLabel,
   createDocumentPdf,
   formatDocumentDimension,
+  resolveWallDimensionOutwardMm,
   type RenderSavedView
 } from "./createDocumentPdf";
 
@@ -337,5 +340,80 @@ describe("createDocumentPdf", () => {
       "Some text used fallback characters because the PDF font did not include every glyph."
     );
     await expect(PDFDocument.load(result.bytes)).resolves.toBeDefined();
+  });
+
+  describe("resolveWallDimensionOutwardMm", () => {
+    // A concave L: the six-vertex loop bites a rectangular notch out of the
+    // bottom-right corner, so the notch's two inner walls meet at a reflex
+    // angle. A bbox/vertex-average centroid sits inside the rectangle the
+    // notch was cut from — on the wrong side of both inner walls — which is
+    // exactly the bug class this room shape catches (mirrors the fixture in
+    // domain/geometry/walls.test.ts's outwardWallNormal coverage).
+    function lShapeProject() {
+      const project = createSampleProject();
+      const placement = createPolygonRoomPlacement({
+        roomId: "room-l",
+        name: "L Room",
+        heightMm: 3000,
+        pointsFloorMm: [
+          { xMm: 0, yMm: 0 },
+          { xMm: 6000, yMm: 0 },
+          { xMm: 6000, yMm: 3000 },
+          { xMm: 3000, yMm: 3000 },
+          { xMm: 3000, yMm: 6000 },
+          { xMm: 0, yMm: 6000 }
+        ]
+      });
+      project.floor.rooms = [placement];
+      return project;
+    }
+
+    it("puts the notch's inner walls on the true outward side, not the centroid side", () => {
+      const project = lShapeProject();
+      const scene = buildPlanScene(project);
+      const room = scene.rooms[0]!;
+
+      // Vertex-average centroid of the L is (3000, 3000) — sitting exactly on
+      // the notch's inner corner and inside the rectangle the notch was cut
+      // from. The old heuristic compared each wall's midpoint to that
+      // centroid, which mis-signs both inner walls (indices 2 and 3, matching
+      // pointsFloorMm above: wall i runs vertex i -> vertex i+1).
+      const innerHorizontal = room.walls[2]!; // (6000,3000) -> (3000,3000)
+      const innerVertical = room.walls[3]!; // (3000,3000) -> (3000,6000)
+
+      const outwardHorizontal = resolveWallDimensionOutwardMm(room, innerHorizontal);
+      const outwardVertical = resolveWallDimensionOutwardMm(room, innerVertical);
+
+      expect(outwardHorizontal).not.toBeNull();
+      expect(outwardVertical).not.toBeNull();
+      // Outward from the inner horizontal wall is +y (away from the room,
+      // toward the notch) — the centroid heuristic would instead pick -y,
+      // pointing back into the room's interior.
+      expect(outwardHorizontal!.xMm).toBeCloseTo(0);
+      expect(outwardHorizontal!.yMm).toBeCloseTo(1);
+      // Outward from the inner vertical wall is +x, for the same reason.
+      expect(outwardVertical!.xMm).toBeCloseTo(1);
+      expect(outwardVertical!.yMm).toBeCloseTo(0);
+    });
+
+    it("still renders an L-shaped room plan page without warnings", async () => {
+      const project = lShapeProject();
+      const settings = settingsFor(project);
+      settings.sections = {
+        overview: false,
+        roomPlans: true,
+        elevations: false,
+        threeDViews: false
+      };
+
+      const result = await createDocumentPdf({
+        project,
+        settings,
+        artworks: []
+      });
+
+      expect(result.warnings).toEqual([]);
+      await expect(PDFDocument.load(result.bytes)).resolves.toBeDefined();
+    });
   });
 });

@@ -134,6 +134,7 @@ import type { ThreeDViewActions } from "./components/three/ThreeDView";
 import type { SavedViewRenderHandle } from "./components/three/SavedViewRenderHost";
 import { useSavedViewThumbnails } from "./hooks/useSavedViewThumbnails";
 import type { EffectiveDocumentSettings } from "../domain/export/documentSettings";
+import { rendererBenchmarkEnabled } from "./rendererBenchmarkFlag";
 
 const ElevationView = lazy(() =>
   import("./components/elevation/ElevationView").then((module) => ({ default: module.ElevationView }))
@@ -164,9 +165,6 @@ if (typeof window !== "undefined" && !import.meta.env.TEST) {
 
 // Stable read-only asset lookup; the repository wrapper is stateless.
 const assetRepository = new IndexedDbAssetRepository();
-const rendererBenchmarkEnabled =
-  typeof window !== "undefined" &&
-  new URLSearchParams(window.location.search).get("benchmark") === "renderer";
 let rendererBenchmarkBlobLoader:
   | ((key: string) => Promise<Blob | null>)
   | null = null;

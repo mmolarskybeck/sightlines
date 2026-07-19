@@ -14,6 +14,7 @@ import { formatLength } from "../../../domain/units/length";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../../domain/units/unitSystem";
 import { useAssetImageUrls } from "../../hooks/useAssetImageUrls";
 import {
+  ARTWORK_DRAG_MIME,
   beginArtworkDragSession,
   emitArtworkTouchDrag,
   endArtworkDragSession
@@ -38,11 +39,6 @@ import {
   SegmentedToggleGroupItem
 } from "../ui/segmented";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
-
-// MIME key for the HTML5 drag payload carrying an artworkId — a later task
-// wires the elevation view's drop target to read this same constant, so the
-// drag source and drop target can't drift out of sync on the string value.
-export const ARTWORK_DRAG_MIME = "application/x-sightlines-artwork";
 
 // Coarse pointers (touch) run our long-press drag instead of HTML5 DnD; on
 // those devices native `draggable` would race our long-press (iPadOS has its

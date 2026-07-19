@@ -18,6 +18,7 @@ import {
 import { getRoomPlaceableWalls } from "../../domain/geometry/placeableWalls";
 import type { PlanRect } from "../../domain/geometry/planObjects";
 import { isPointInPolygon } from "../../domain/geometry/polygon";
+import { getWallGeometry, outwardWallNormal } from "../../domain/geometry/walls";
 import type {
   Artwork,
   Asset,
@@ -43,7 +44,8 @@ import { computeWallTextSkeleton } from "../../domain/scene2d/wallTextSkeleton";
 import {
   buildPlanScene,
   type PlanScene,
-  type PlanSceneRoom
+  type PlanSceneRoom,
+  type PlanSceneWall
 } from "../../domain/scene2d/planScene";
 import { formatLength } from "../../domain/units/length";
 import {
@@ -679,15 +681,23 @@ function drawPlanScene(
   return transform;
 }
 
-function roomCentroid(room: PlanSceneRoom): { xMm: number; yMm: number } {
-  return {
-    xMm:
-      room.polygonMm.reduce((sum, point) => sum + point.xMm, 0) /
-      room.polygonMm.length,
-    yMm:
-      room.polygonMm.reduce((sum, point) => sum + point.yMm, 0) /
-      room.polygonMm.length
-  };
+// The canonical "which perpendicular points OUT of the room" for a wall
+// dimension line, via the same in-polygon probe outwardWallNormal uses
+// elsewhere (WallLengthLabels, WallSlideHandles) — a centroid-vs-midpoint
+// comparison flips on concave rooms (an L's inner walls can sit on the far
+// side of the centroid from the room's actual interior), so this PDF path
+// must use the same probe-based helper rather than its own heuristic.
+// Returns a unit vector in mm-space (room-local direction, translation- and
+// scale-invariant), or null if the wall can't be matched back to the room's
+// domain geometry. Exported for direct testing of the side choice.
+export function resolveWallDimensionOutwardMm(
+  room: PlanSceneRoom,
+  wall: PlanSceneWall
+): { xMm: number; yMm: number } | null {
+  const domainWall = room.placement.room.walls.find((candidate) => candidate.id === wall.wallId);
+  if (!domainWall) return null;
+  const wallGeometry = getWallGeometry(room.placement.room, domainWall);
+  return outwardWallNormal(room.placement.room, wallGeometry);
 }
 
 function drawRoomWallDimensions(
@@ -697,7 +707,6 @@ function drawRoomWallDimensions(
   transform: PlanTransform,
   unit: DisplayUnit
 ) {
-  const centroid = transform.point(roomCentroid(room));
   for (const wall of room.walls) {
     const start = transform.point(wall.startMm);
     const end = transform.point(wall.endMm);
@@ -705,16 +714,13 @@ function drawRoomWallDimensions(
     const dy = end.y - start.y;
     const length = Math.hypot(dx, dy);
     if (length <= 0) continue;
-    const left = { x: -dy / length, y: dx / length };
-    const mid = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
-    const towardCentroid = {
-      x: centroid.x - mid.x,
-      y: centroid.y - mid.y
-    };
-    const normal =
-      left.x * towardCentroid.x + left.y * towardCentroid.y > 0
-        ? { x: -left.x, y: -left.y }
-        : left;
+    const outwardMm = resolveWallDimensionOutwardMm(room, wall);
+    // The plan transform flips y (mm-up vs. page-down) but scales x/y
+    // uniformly with no rotation, so a direction vector only needs its y
+    // component negated to move from mm-space to page-point-space.
+    const normal = outwardMm
+      ? { x: outwardMm.xMm, y: -outwardMm.yMm }
+      : { x: -dy / length, y: dx / length };
     const offset = 12;
     const a = { x: start.x + normal.x * offset, y: start.y + normal.y * offset };
     const b = { x: end.x + normal.x * offset, y: end.y + normal.y * offset };

@@ -71,8 +71,6 @@ export function titleFromFilename(filename: string): string {
   return trimmedStem.length > 0 ? trimmedStem : trimmed;
 }
 
-export type ImageTier = "original" | "display" | "thumbnail";
-
 export type ProcessedImage = {
   widthPx: number;
   heightPx: number;
