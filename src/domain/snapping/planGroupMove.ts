@@ -7,6 +7,8 @@ import {
   type PlanRect
 } from "../geometry/planObjects";
 import type { WallObject } from "../project";
+import type { MeasurePoint } from "../measurement/measurement";
+import type { PlanPlacement } from "./planSnapTargets";
 
 // Plan-view group drag is translation-only for everything EXCEPT wall-anchored
 // artwork: the whole multi-selection moves rigidly by a floor-space delta, and
@@ -179,5 +181,53 @@ export function resolvePlanGroupMemberMove(
       // a pure x update (and the store's no-op detection is unaffected).
       ...(targetWall.id !== member.wall.id ? { wallId: targetWall.id } : {})
     }
+  };
+}
+
+// The set of walls the group's ARTWORK members currently sit on — the walls a
+// group re-anchor must treat as "home" (not foreign) so a group already on a
+// wall never re-captures it. Openings/blocked zones are excluded: they never
+// re-anchor, so their walls don't shield an artwork from re-anchoring there.
+export function artworkMemberWallIds(members: PlanGroupMember[]): Set<string> {
+  const wallIds = new Set<string>();
+  for (const member of members) {
+    if (member.anchor === "wall" && member.kind === "artwork") wallIds.add(member.wall.id);
+  }
+  return wallIds;
+}
+
+// The commit a plan keyboard nudge produces from the already-resolved live
+// members of a placed-object selection, kept pure so the single/group split and
+// the along-wall projection are unit-testable without the component. Every
+// member's new spot comes from resolvePlanGroupMemberMove (the same helper the
+// pointer group drag uses), so a wall member reprojects onto its OWN wall — a
+// perpendicular arrow slides it along the wall, never re-capturing another wall
+// or dropping it off the line — and a floor member translates freely. A lone
+// selection commits one placement (per-press undo entry) via onCommitPlanMove;
+// a multi-selection commits a rigid group translate via onCommitPlanMoveGroup.
+// Snap resolution is bypassed entirely: the caller feeds the raw nudge delta so
+// every press lands a predictable amount, the same trade the partition and
+// measurement-endpoint nudges make.
+export type PlanObjectNudgeCommit =
+  | { kind: "single"; objectId: string; placement: PlanPlacement }
+  | { kind: "group"; moves: { id: string; xMm: number; yMm?: number }[] };
+
+export function resolvePlanObjectNudge(
+  members: PlanGroupMember[],
+  delta: MeasurePoint
+): PlanObjectNudgeCommit | null {
+  if (members.length === 0) return null;
+  if (members.length === 1) {
+    const member = members[0];
+    const { commit } = resolvePlanGroupMemberMove(member, delta);
+    const placement: PlanPlacement =
+      member.anchor === "wall"
+        ? { anchor: "wall", wallId: member.wall.id, xMm: commit.xMm }
+        : { anchor: "floor", xMm: commit.xMm, yMm: commit.yMm ?? member.centerMm.yMm };
+    return { kind: "single", objectId: member.id, placement };
+  }
+  return {
+    kind: "group",
+    moves: members.map((member) => resolvePlanGroupMemberMove(member, delta).commit)
   };
 }

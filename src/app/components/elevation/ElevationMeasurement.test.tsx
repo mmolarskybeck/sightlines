@@ -6,7 +6,8 @@ import { FIT_VIEWPORT } from "../../../domain/viewport/viewport2d";
 import { useMeasurementTool } from "../../hooks/useMeasurementTool";
 import { useAppStore } from "../../store";
 import { TooltipProvider } from "../ui/tooltip";
-import { ElevationView, getElevationMeasurementCreationKeyAction } from "./ElevationView";
+import { ElevationView } from "./ElevationView";
+import { getElevationMeasurementCreationKeyAction } from "../../hooks/elevationMeasurementPolicy";
 import type { MeasurementToolState } from "../../hooks/useMeasurementTool";
 
 class MockResizeObserver {

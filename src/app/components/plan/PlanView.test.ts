@@ -3,18 +3,17 @@ import type { FloorWall } from "../../../domain/geometry/planObjects";
 import { buildPlanScene } from "../../../domain/scene2d/planScene";
 import { createSampleProject } from "../../../domain/sample/sampleProject";
 import type { PlanGroupMember } from "../../../domain/snapping/planGroupMove";
+import { resolvePlanObjectNudge } from "../../../domain/snapping/planGroupMove";
+import { buildPlanMeasureSources } from "../../../domain/measurement/planMeasurementGeometry";
 import {
-  buildPlanMeasureSources,
-  clampFitExtent,
-  getPartitionMovedAxes,
   canPlanMeasurementClaimPointer,
   getPlanMeasurementCreationKeyAction,
   getPlanMeasurementKeyActions,
   getPlanMeasurementNudgeDelta,
   planMeasurementCancelAction,
-  resolvePlanObjectNudge,
   shouldCancelMeasurementForViewportClaim
-} from "./PlanView";
+} from "../../hooks/planMeasurementPolicy";
+import { clampFitExtent, getPartitionMovedAxes } from "./PlanView";
 
 // Same FloorWall builder shape as planGroupMove.test.ts (offset 0 baked in).
 function makeWall(

@@ -93,9 +93,11 @@ import {
   type ResolvedPlacement
 } from "../../../domain/snapping/planSnapTargets";
 import {
+  artworkMemberWallIds,
   getPlanGroupCenterMm,
   resolvePlanGroupMemberMove,
   resolvePlanGroupReanchorWall,
+  resolvePlanObjectNudge,
   type PlanGroupMember
 } from "../../../domain/snapping/planGroupMove";
 import { resolveSnap, type Guide, type SnapTarget, type SnapTargetIds } from "../../../domain/snapping/resolveSnap";
@@ -103,9 +105,9 @@ import {
   buildMeasurePointCandidates,
   constrainMeasurePointToAxis,
   resolveMeasurePoint,
-  type MeasureCandidateSources,
   type MeasurePoint
 } from "../../../domain/measurement/measurement";
+import { buildPlanMeasureSources } from "../../../domain/measurement/planMeasurementGeometry";
 import {
   getMajorGridIntervalMm,
   getMinorGridIntervalMm
@@ -119,7 +121,6 @@ import {
   type Viewport2D
 } from "../../../domain/viewport/viewport2d";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../../domain/units/unitSystem";
-import { getNudgeStepMm } from "../../hooks/nudgeStep";
 import { isEditableTarget } from "../../hooks/isEditableTarget";
 import { useArtworkAspect } from "../../hooks/useArtworkAspect";
 import { useAssetImageUrls } from "../../hooks/useAssetImageUrls";
@@ -145,10 +146,15 @@ import {
   type MeasurementToolAction,
   type MeasurementToolState
 } from "../../hooks/useMeasurementTool";
+import { isMeasurementCreationArrowKey } from "../../hooks/measurementCreationKey";
 import {
-  getMeasurementCreationKeyAction,
-  isMeasurementCreationArrowKey
-} from "../../hooks/measurementCreationKey";
+  canPlanMeasurementClaimPointer,
+  getPlanMeasurementCreationKeyAction,
+  getPlanMeasurementKeyActions,
+  getPlanMeasurementNudgeDelta,
+  planMeasurementCancelAction,
+  shouldCancelMeasurementForViewportClaim
+} from "../../hooks/planMeasurementPolicy";
 import { PlanStructureLayer } from "./PlanStructureLayer";
 import { PlacedObjectsLayer } from "./PlacedObjectsLayer";
 import { PlanHandlesLayer } from "./PlanHandlesLayer";
@@ -211,196 +217,6 @@ function liftPartitionChains(
     normal: chains.normal.map(liftSegment),
     span: chains.span.map(liftSegment)
   };
-}
-
-function planRectMeasureGeometry(rect: PlanRect, id: string): MeasureCandidateSources {
-  const angle = (rect.angleDeg * Math.PI) / 180;
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  const local = [
-    [-rect.widthMm / 2, -rect.depthMm / 2],
-    [rect.widthMm / 2, -rect.depthMm / 2],
-    [rect.widthMm / 2, rect.depthMm / 2],
-    [-rect.widthMm / 2, rect.depthMm / 2]
-  ] as const;
-  const corners = local.map(([x, y]) => ({
-    xMm: rect.centerXMm + x * cos - y * sin,
-    yMm: rect.centerYMm + x * sin + y * cos
-  }));
-  return {
-    points: [
-      ...corners.map((point, index) => ({ id: `${id}:corner:${index}`, kind: "vertex" as const, point })),
-      { id: `${id}:center`, kind: "center", point: { xMm: rect.centerXMm, yMm: rect.centerYMm } }
-    ],
-    segments: corners.map((point, index) => ({
-      id: `${id}:edge:${index}`,
-      kind: "edge" as const,
-      start: point,
-      end: corners[(index + 1) % corners.length]
-    }))
-  };
-}
-
-export function buildPlanMeasureSources(
-  scene: ReturnType<typeof buildPlanScene>
-): MeasureCandidateSources {
-  const points: NonNullable<MeasureCandidateSources["points"]>[number][] = [];
-  const segments: NonNullable<MeasureCandidateSources["segments"]>[number][] = [];
-  for (const room of scene.rooms) {
-    room.polygonMm.forEach((point, index) =>
-      points.push({ id: `room:${room.roomId}:vertex:${index}`, kind: "vertex", point })
-    );
-    room.walls.forEach((wall) =>
-      segments.push({
-        id: `wall:${wall.wallId}`,
-        kind: "edge",
-        start: wall.startMm,
-        end: wall.endMm
-      })
-    );
-  }
-  const rects = [
-    ...scene.partitions.map((entry) => ({ id: `partition:${entry.partition.wallId}`, rect: entry.rect })),
-    ...scene.wallObjects.map((entry) => ({ id: `wall-object:${entry.object.id}`, rect: entry.renderedRect })),
-    ...scene.floorObjects.map((entry) => ({ id: `floor-object:${entry.object.id}`, rect: entry.rect }))
-  ];
-  for (const entry of rects) {
-    const geometry = planRectMeasureGeometry(entry.rect, entry.id);
-    points.push(...(geometry.points ?? []));
-    segments.push(...(geometry.segments ?? []));
-  }
-  return { points, segments };
-}
-
-export function getPlanMeasurementNudgeDelta(
-  key: string,
-  unit: import("../../../domain/project").DisplayUnit,
-  gridPrecisionFloorMm: number | null,
-  shiftKey: boolean,
-  snapToGrid: boolean,
-  altKey: boolean
-): MeasurePoint | null {
-  if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(key)) return null;
-  const stepMm = getNudgeStepMm({ unit, snapToGrid, gridPrecisionFloorMm, shiftKey, altKey });
-  return {
-    xMm: key === "ArrowRight" ? stepMm : key === "ArrowLeft" ? -stepMm : 0,
-    // Plan floor coordinates share SVG's downward-positive y axis.
-    yMm: key === "ArrowDown" ? stepMm : key === "ArrowUp" ? -stepMm : 0
-  };
-}
-
-// The commit a plan keyboard nudge produces from the already-resolved live
-// members of a placed-object selection, kept pure so the single/group split and
-// the along-wall projection are unit-testable without the component. Every
-// member's new spot comes from resolvePlanGroupMemberMove (the same helper the
-// pointer group drag uses), so a wall member reprojects onto its OWN wall — a
-// perpendicular arrow slides it along the wall, never re-capturing another wall
-// or dropping it off the line — and a floor member translates freely. A lone
-// selection commits one placement (per-press undo entry) via onCommitPlanMove;
-// a multi-selection commits a rigid group translate via onCommitPlanMoveGroup.
-// Snap resolution is bypassed entirely: the caller feeds the raw nudge delta so
-// every press lands a predictable amount, the same trade the partition and
-// measurement-endpoint nudges make.
-export type PlanObjectNudgeCommit =
-  | { kind: "single"; objectId: string; placement: PlanPlacement }
-  | { kind: "group"; moves: { id: string; xMm: number; yMm?: number }[] };
-
-export function resolvePlanObjectNudge(
-  members: PlanGroupMember[],
-  delta: MeasurePoint
-): PlanObjectNudgeCommit | null {
-  if (members.length === 0) return null;
-  if (members.length === 1) {
-    const member = members[0];
-    const { commit } = resolvePlanGroupMemberMove(member, delta);
-    const placement: PlanPlacement =
-      member.anchor === "wall"
-        ? { anchor: "wall", wallId: member.wall.id, xMm: commit.xMm }
-        : { anchor: "floor", xMm: commit.xMm, yMm: commit.yMm ?? member.centerMm.yMm };
-    return { kind: "single", objectId: member.id, placement };
-  }
-  return {
-    kind: "group",
-    moves: members.map((member) => resolvePlanGroupMemberMove(member, delta).commit)
-  };
-}
-
-// The set of walls the group's ARTWORK members currently sit on — the walls a
-// group re-anchor must treat as "home" (not foreign) so a group already on a
-// wall never re-captures it. Openings/blocked zones are excluded: they never
-// re-anchor, so their walls don't shield an artwork from re-anchoring there.
-function artworkMemberWallIds(members: PlanGroupMember[]): Set<string> {
-  const wallIds = new Set<string>();
-  for (const member of members) {
-    if (member.anchor === "wall" && member.kind === "artwork") wallIds.add(member.wall.id);
-  }
-  return wallIds;
-}
-
-export function getPlanMeasurementKeyActions(
-  state: MeasurementToolState,
-  endpoint: "start" | "end",
-  key: string,
-  unit: import("../../../domain/project").DisplayUnit,
-  gridPrecisionFloorMm: number | null,
-  shiftKey: boolean,
-  snapToGrid: boolean,
-  altKey: boolean
-): MeasurementToolAction[] {
-  if (key === "Enter" && state.phase === "refining") return [{ type: "commit-refinement" }];
-  if (key === "Escape" && state.phase === "refining") return [{ type: "cancel-refinement" }];
-  const delta = getPlanMeasurementNudgeDelta(key, unit, gridPrecisionFloorMm, shiftKey, snapToGrid, altKey);
-  if (!delta || (state.phase !== "armed-complete" && state.phase !== "refining")) return [];
-  const current = state[endpoint];
-  return [
-    ...(state.phase === "armed-complete"
-      ? ([{ type: "begin-refinement", endpoint }] satisfies MeasurementToolAction[])
-      : []),
-    {
-      type: "preview-refinement",
-      point: { xMm: current.xMm + delta.xMm, yMm: current.yMm + delta.yMm }
-    }
-  ];
-}
-
-// Keyboard-only creation: Enter begins at `origin` (the view supplies the
-// visible-viewport centre), arrows nudge the live preview by the shared canvas
-// step, Enter completes. Keyboard-moved points intentionally skip snap
-// resolution so an arrow nudge is never yanked to a snap target — the same
-// predictability trade the ⌘-bypass makes for the pointer path.
-export function getPlanMeasurementCreationKeyAction(
-  state: MeasurementToolState,
-  key: string,
-  origin: MeasurePoint,
-  unit: import("../../../domain/project").DisplayUnit,
-  gridPrecisionFloorMm: number | null,
-  shiftKey: boolean,
-  snapToGrid: boolean,
-  altKey: boolean
-): MeasurementToolAction | null {
-  return getMeasurementCreationKeyAction(state, key, {
-    origin,
-    delta: getPlanMeasurementNudgeDelta(key, unit, gridPrecisionFloorMm, shiftKey, snapToGrid, altKey)
-  });
-}
-
-export function canPlanMeasurementClaimPointer(button: number, spaceHeld: boolean): boolean {
-  return button === 0 && !spaceHeld;
-}
-
-export function planMeasurementCancelAction(
-  state: MeasurementToolState
-): MeasurementToolAction | null {
-  if (state.phase === "refining") return { type: "cancel-refinement" };
-  if (state.phase === "drawing") return { type: "clear" };
-  return null;
-}
-
-export function shouldCancelMeasurementForViewportClaim(
-  pointerType: string,
-  hasMeasurementGesture: boolean
-): boolean {
-  return pointerType === "touch" && hasMeasurementGesture;
 }
 
 // Stable fallback avoids retriggering useAssetImageUrls.
