@@ -1,6 +1,6 @@
 # Sightlines Status
 
-Last refreshed: 2026-07-18 (architecture audit + refactor pass)
+Last refreshed: 2026-07-19 (benchmark run + onboarding/feedback plan)
 
 This is the single living status doc: current state, what shipped recently, and what comes next. The full product/architecture plan and roadmap live in `docs/plan.md`; small scraps live in `docs/quick-todos.md`; the chronological build log through 2026-07-10 is frozen at `docs/archive/progress.md`.
 
@@ -117,9 +117,19 @@ Four-agent audit (geometry contracts, dead code, coupling, test coverage) of the
 
 ## Near-Term Order
 
-1. MVP package/export work: `.sightlines` **export and import** shipped 2026-07-12 (format + import behavior in `docs/package-format.md`); **Export image (PNG) and Export PDF** shipped 2026-07-16 → 17 (see above, `docs/export-spec.md`) — next, PDF checklist/works-list export (a deliberately separate slice per spec §3.3), missing/approximate-data readiness reporting, library-wide `exportAll()`/`importAll()`, and the still-open iPad share-sheet/print checks.
-2. Multi-room placement and management polish around the shared floor coordinate space.
-3. Run the 10-room / 200-work renderer benchmark fixture on desktop and tablet; defer room-visibility filtering until measurements show a material whole-floor 3D cost. Overview remains whole-floor; any future scope belongs to eye-level rendering and the render layer only.
+1. **Storage-safety net before wider sharing**: the always-visible "saved locally in your browser — export a backup" status message (open since MVP3, §11) and a cheap last-N-document-snapshots safety net. Priority raised 2026-07-19 — real show layouts (the user's own, and soon curator friends') live in browser storage, and Safari can evict script-writable storage after ~7 days without a site visit. Land this before curator friends start putting real working files into the app.
+2. MVP package/export work: `.sightlines` **export and import** shipped 2026-07-12 (format + import behavior in `docs/package-format.md`); **Export image (PNG) and Export PDF** shipped 2026-07-16 → 17 (see above, `docs/export-spec.md`) — next, PDF checklist/works-list export (a deliberately separate slice per spec §3.3), missing/approximate-data readiness reporting, library-wide `exportAll()`/`importAll()`, and the still-open iPad share-sheet/print checks.
+3. Multi-room placement and management polish around the shared floor coordinate space.
+4. Tablet leg of the 10-room / 200-work renderer benchmark (desktop leg run 2026-07-19, 2D and 3D both OK); defer room-visibility filtering until measurements show a material whole-floor 3D cost. Overview remains whole-floor; any future scope belongs to eye-level rendering and the render layer only.
+
+## Onboarding & Feedback (as of 2026-07-19)
+
+The app is dogfooded by its author, a working curator, on real exhibitions — feature work is driven by real layout needs encountered along the way, not speculative roadmap items. Wider sharing is starting deliberately gradually:
+
+- **Non-curators** (partner, family) have seen the app first, as comprehension testers — watching where a cold user stalls surfaces missing labels/tooltips/onboarding beats before anything else does.
+- **Curator friends** are next: screen-recorded sessions using both a sample project and their own real working files. Their spreadsheets/images double as a real-world import-robustness corpus (messier than the Rijksmuseum/AIC fixtures) — files that import wrong or confusingly are worth keeping as new test fixtures. This tier should not start until the storage-safety net above lands, since it puts real files from other people's machines at eviction risk.
+- **A supervisor demo** is planned during an upcoming work trip, on a real shared exhibition the two are co-curating — currently laid out in PowerPoint, the tool's actual real-world competitor. Watching what she reflexively tries to do that has no equivalent in Sightlines is high-value signal.
+- **Guided onboarding** (planned, not yet built): a sample project with preloaded images and a basic layout, walking a new user through hanging one room, arranging art, and adding a second room — skippable straight to a blank project. Should teach the Insert-decorates/Draw-creates grammar, not just a click sequence, and the sample project must stay clearly disposable/regenerable per the "boot never silently substitutes a fresh sample" rule (plan.md §8).
 
 ## Known Follow-Ups
 
