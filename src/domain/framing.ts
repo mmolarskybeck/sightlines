@@ -156,6 +156,53 @@ export function withArtworkFootprintFromMap<T extends WallObject>(
 // through mm).
 const DERIVE_EPSILON_MM = 0.001;
 
+// A rect in millimeters, in whatever mm coordinate space the caller is
+// already working in (elevation SVG mm, or the PDF exporter's y-up mm before
+// its own pt scaling). getArtworkRingRectsMm is coordinate-space agnostic —
+// it only adds/subtracts bands — so both callers can hand it their native mm
+// rect without translating axes first.
+export type RingRectMm = {
+  xMm: number;
+  yMm: number;
+  widthMm: number;
+  heightMm: number;
+};
+
+// Grow a mm rect outward by an equal band on every side. A non-positive band
+// returns the rect unchanged (by identity), matching the "absent band adds
+// nothing" contract used throughout this module.
+function expandRingRectMm(rect: RingRectMm, bandMm: number): RingRectMm {
+  if (bandMm <= 0) return rect;
+  return {
+    xMm: rect.xMm - bandMm,
+    yMm: rect.yMm - bandMm,
+    widthMm: rect.widthMm + bandMm * 2,
+    heightMm: rect.heightMm + bandMm * 2
+  };
+}
+
+// The mat/frame ring nesting shared by both renderers of an artwork's
+// schematic framing (ElevationArtwork.tsx and createDocumentPdf.ts): the mat
+// sits directly around the image, the frame sits outside the mat, and each
+// band is a uniform width on every side. Bands ≤0 contribute nothing, so an
+// unmatted/unframed image's matRect and outerRect both equal imageRect.
+//
+// Coordinate-space agnostic and unscaled (pure mm in, pure mm out) so a
+// caller working in points (the PDF path) can apply its own scale/transform
+// to the returned mm rects afterward — for an affine transform with a single
+// scale factor, expanding in mm then scaling gives the identical result as
+// expanding in already-scaled units (scale · (a − band) = scale · a − scale ·
+// band), so the two calls sites cannot visually diverge.
+export function getArtworkRingRectsMm(
+  imageRectMm: RingRectMm,
+  matWidthMm: number,
+  frameWidthMm: number
+): { matRect: RingRectMm; outerRect: RingRectMm } {
+  const matRect = expandRingRectMm(imageRectMm, matWidthMm);
+  const outerRect = expandRingRectMm(matRect, frameWidthMm);
+  return { matRect, outerRect };
+}
+
 export type OverallFrameDerivation =
   // frameWidthMm === undefined means the overall equals image + 2·mat
   // exactly: clear the frame. Typing the matted size back is the natural way

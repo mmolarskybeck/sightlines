@@ -5,6 +5,7 @@ import {
   deriveFrameWidthFromOverallMm,
   effectiveFraming,
   getArtworkOuterDimensionsMm,
+  getArtworkRingRectsMm,
   getPlacementFootprintMm,
   withArtworkFootprint
 } from "./framing";
@@ -202,6 +203,54 @@ describe("deriveFrameWidthFromOverallMm", () => {
       ok: false,
       minOverallMm: 600
     });
+  });
+});
+
+describe("getArtworkRingRectsMm", () => {
+  const imageRect = { xMm: 100, yMm: 200, widthMm: 600, heightMm: 400 };
+
+  it("returns the image rect for both rings with zero bands (degenerate case)", () => {
+    const { matRect, outerRect } = getArtworkRingRectsMm(imageRect, 0, 0);
+    expect(matRect).toEqual(imageRect);
+    expect(outerRect).toEqual(imageRect);
+  });
+
+  it("expands only the mat ring when there is no frame", () => {
+    const { matRect, outerRect } = getArtworkRingRectsMm(imageRect, 50, 0);
+    expect(matRect).toEqual({ xMm: 50, yMm: 150, widthMm: 700, heightMm: 500 });
+    expect(outerRect).toEqual(matRect);
+  });
+
+  it("expands only the outer ring when there is no mat", () => {
+    const { matRect, outerRect } = getArtworkRingRectsMm(imageRect, 0, 20);
+    expect(matRect).toEqual(imageRect);
+    expect(outerRect).toEqual({ xMm: 80, yMm: 180, widthMm: 640, heightMm: 440 });
+  });
+
+  it("nests the frame ring outside the mat ring when both are present", () => {
+    const { matRect, outerRect } = getArtworkRingRectsMm(imageRect, 50, 30);
+    expect(matRect).toEqual({ xMm: 50, yMm: 150, widthMm: 700, heightMm: 500 });
+    expect(outerRect).toEqual({ xMm: 20, yMm: 120, widthMm: 760, heightMm: 560 });
+  });
+
+  it("agrees with getArtworkOuterDimensionsMm on the outer size for the same bands", () => {
+    const matWidthMm = 50;
+    const frame = { widthMm: 30, finish: "gold" as const };
+    const { outerRect } = getArtworkRingRectsMm(imageRect, matWidthMm, frame.widthMm);
+    const outerDims = getArtworkOuterDimensionsMm(
+      imageRect.widthMm,
+      imageRect.heightMm,
+      matWidthMm,
+      frame
+    );
+    expect(outerRect.widthMm).toBe(outerDims.widthMm);
+    expect(outerRect.heightMm).toBe(outerDims.heightMm);
+  });
+
+  it("treats negative bands as absent, matching the outer-dimensions contract", () => {
+    const { matRect, outerRect } = getArtworkRingRectsMm(imageRect, -10, -5);
+    expect(matRect).toEqual(imageRect);
+    expect(outerRect).toEqual(imageRect);
   });
 });
 

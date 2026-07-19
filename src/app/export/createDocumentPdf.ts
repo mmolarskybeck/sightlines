@@ -13,7 +13,8 @@ import {
   FRAME_FINISH_HEX,
   MAT_BEVEL_HAIRLINE_HEX,
   MAT_FILL_HEX,
-  effectiveFraming
+  effectiveFraming,
+  getArtworkRingRectsMm
 } from "../../domain/framing";
 import { getRoomPlaceableWalls } from "../../domain/geometry/placeableWalls";
 import type { PlanRect } from "../../domain/geometry/planObjects";
@@ -1889,19 +1890,30 @@ export async function createDocumentPdf(
           imageRectSvg.heightMm;
         const matBand = framing.matWidthMm ?? 0;
         const frameBand = framing.frame?.widthMm ?? 0;
+        const { matRect: matRectMm, outerRect: outerRectMm } = getArtworkRingRectsMm(
+          {
+            xMm: imageRectSvg.xMm,
+            yMm: imageYUp,
+            widthMm: imageRectSvg.widthMm,
+            heightMm: imageRectSvg.heightMm
+          },
+          matBand,
+          frameBand
+        );
         const matRect = elevationRect(
           transform,
-          imageRectSvg.xMm - matBand,
-          imageYUp - matBand,
-          imageRectSvg.widthMm + matBand * 2,
-          imageRectSvg.heightMm + matBand * 2
+          matRectMm.xMm,
+          matRectMm.yMm,
+          matRectMm.widthMm,
+          matRectMm.heightMm
         );
-        const outerRect = {
-          x: matRect.x - frameBand * transform.scalePtPerMm,
-          y: matRect.y - frameBand * transform.scalePtPerMm,
-          width: matRect.width + frameBand * 2 * transform.scalePtPerMm,
-          height: matRect.height + frameBand * 2 * transform.scalePtPerMm
-        };
+        const outerRect = elevationRect(
+          transform,
+          outerRectMm.xMm,
+          outerRectMm.yMm,
+          outerRectMm.widthMm,
+          outerRectMm.heightMm
+        );
         const imageRect = elevationRect(
           transform,
           imageRectSvg.xMm,

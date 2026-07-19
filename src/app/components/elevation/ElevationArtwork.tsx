@@ -8,20 +8,11 @@ import {
   FRAME_EDGE_HAIRLINE_HEX,
   FRAME_FINISH_HEX,
   MAT_BEVEL_HAIRLINE_HEX,
-  MAT_FILL_HEX
+  MAT_FILL_HEX,
+  getArtworkRingRectsMm
 } from "../../../domain/framing";
 import { getArtworkRectSvg, type ArtworkCenterMm, type ArtworkSizeMm, type SvgRectMm } from "./elevationArtworkGeometry";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
-
-// Grow an SVG rect outward by an equal band on every side (mat/frame ring).
-function expandRect(rect: SvgRectMm, bandMm: number): SvgRectMm {
-  return {
-    xMm: rect.xMm - bandMm,
-    yMm: rect.yMm - bandMm,
-    widthMm: rect.widthMm + bandMm * 2,
-    heightMm: rect.heightMm + bandMm * 2
-  };
-}
 
 // One placement's visual, reused for both a real (persisted) placement and
 // the transient drop/drag ghost — a ghost is just a non-interactive instance
@@ -86,8 +77,7 @@ export function ElevationArtwork({
   // selection outline wraps.
   const matBandMm = matWidthMm && matWidthMm > 0 ? matWidthMm : 0;
   const frameBandMm = frame && frame.widthMm > 0 ? frame.widthMm : 0;
-  const matRect = matBandMm > 0 ? expandRect(rect, matBandMm) : rect;
-  const outerRect = frameBandMm > 0 ? expandRect(matRect, frameBandMm) : matRect;
+  const { matRect, outerRect } = getArtworkRingRectsMm(rect, matBandMm, frameBandMm);
   const frameFill = frame ? FRAME_FINISH_HEX[frame.finish] : undefined;
 
   const classNames = ["elevation-artwork"];
