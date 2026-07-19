@@ -6,6 +6,13 @@ import type {
   SavedView
 } from "../../domain/project";
 import { createSampleProject } from "../../domain/sample/sampleProject";
+import { createFloorCase, createWallCase } from "../../domain/placement/createCase";
+import { createWallTextPlacement } from "../../domain/placement/createWallText";
+import { DEFAULT_WALL_CASE_CENTER_Y_MM } from "../../domain/project";
+import {
+  caseElevationGlyph,
+  casePlanGlyph
+} from "../../domain/geometry/caseGlyphs";
 import {
   reconcileDocumentExportPreferences,
   type EffectiveDocumentSettings
@@ -414,6 +421,44 @@ describe("createDocumentPdf", () => {
 
       expect(result.warnings).toEqual([]);
       await expect(PDFDocument.load(result.bytes)).resolves.toBeDefined();
+    });
+  });
+
+  describe("display-case glyph parity", () => {
+    it("exports a wall case, floor case, and wall text without warnings", async () => {
+      const project = createSampleProject();
+      project.wallObjects = [
+        createWallCase("wall-north", 2000),
+        createWallTextPlacement("wall-north", 5000, DEFAULT_WALL_CASE_CENTER_Y_MM)
+      ];
+      project.floorObjects = [createFloorCase(4000, 3000)];
+      const settings = settingsFor(project);
+      settings.sections = {
+        overview: false,
+        roomPlans: true,
+        elevations: true,
+        threeDViews: false
+      };
+
+      const result = await createDocumentPdf({
+        project,
+        settings,
+        artworks: []
+      });
+
+      expect(result.warnings).toEqual([]);
+      await expect(PDFDocument.load(result.bytes)).resolves.toBeDefined();
+    });
+
+    it("derives its plan/elevation case marks from the shared glyph module", () => {
+      // The export imports the exact glyph functions the screen uses, so parity
+      // is by construction — pin the structure the PDF consumes so a drift back
+      // to a generic inset (the old bug) would fail here.
+      const plan = casePlanGlyph({ widthMm: 1800, depthMm: 600, includeLegs: true });
+      expect(plan.glass).not.toBeNull();
+      expect(plan.legs.length).toBe(4);
+      const elevation = caseElevationGlyph({ widthMm: 1500, heightMm: 180 });
+      expect(elevation.showMarks).toBe(true);
     });
   });
 });

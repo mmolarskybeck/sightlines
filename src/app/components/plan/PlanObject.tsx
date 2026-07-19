@@ -5,10 +5,10 @@ import type {
 } from "react";
 import type { PlanRect } from "../../../domain/geometry/planObjects";
 import {
-  CASE_LEG_INSET_MM,
   CASE_LEG_SIZE_MM,
   CASE_WALL_THICKNESS_MM
 } from "../../../domain/project";
+import { casePlanGlyph, wallTextPlanGlyph } from "../../../domain/geometry/caseGlyphs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 
 // px → mm at the current zoom, or 0 with no zoom context (pixelsPerMm
@@ -152,20 +152,19 @@ export function PlanObject({
         // A couple of short horizontal "text lines" — the plan echo of the
         // elevation skeleton panel, reusing the generic mark stroke.
         <g className="plan-object-mark plan-object-mark--wall-text">
-          <line
-            vectorEffect="non-scaling-stroke"
-            x1={x + insetMm}
-            x2={rightX - insetMm}
-            y1={midY - insetMm * 0.4}
-            y2={midY - insetMm * 0.4}
-          />
-          <line
-            vectorEffect="non-scaling-stroke"
-            x1={x + insetMm}
-            x2={rightX - insetMm - insetWidthMm * 0.35}
-            y1={midY + insetMm * 0.4}
-            y2={midY + insetMm * 0.4}
-          />
+          {wallTextPlanGlyph({
+            widthMm: planRect.widthMm,
+            depthMm: planRect.depthMm
+          }).lines.map((textLine, index) => (
+            <line
+              key={index}
+              vectorEffect="non-scaling-stroke"
+              x1={midX + textLine.x1Mm}
+              x2={midX + textLine.x2Mm}
+              y1={midY + textLine.yMm}
+              y2={midY + textLine.yMm}
+            />
+          ))}
         </g>
       ) : null}
       {kind === "door" ? (
@@ -204,96 +203,67 @@ export function PlanObject({
         // line it sits flush on.
         <g className="plan-object-mark plan-object-mark--case">
           {(() => {
+            // The construction (glass inset, glazing hatch, leg placement and
+            // the legs-appear threshold) lives in the shared glyph module, in
+            // local-centered mm. The zoom-clamped wall inset and leg size are
+            // passed in so the screen stays legible; the module returns the raw
+            // structure, which the PDF export reuses at true mm.
             const wallInsetMm = clampMm(
               pixelsPerMm,
               CASE_WALL_THICKNESS_MM,
               3,
               Math.min(planRect.widthMm, planRect.depthMm) * 0.35
             );
-            const glassWidthMm = planRect.widthMm - wallInsetMm * 2;
-            const glassDepthMm = planRect.depthMm - wallInsetMm * 2;
-            if (glassWidthMm <= 0 || glassDepthMm <= 0) return null;
-            const gx0 = x + wallInsetMm;
-            const gy0 = y + wallInsetMm;
-            const gx1 = gx0 + glassWidthMm;
-            const gy1 = gy0 + glassDepthMm;
-            // Loose 45° glazing hatch: a few sparse strokes marking the glass
-            // surface. Deliberately the OPPOSITE diagonal from the blocked-zone
-            // hatch (which rises left→right) so glass and blocked never share
-            // a symbol, and wide-spaced so it stays quiet at small sizes.
-            // Lines run y = x + c; c indexes the diagonals, centered in range.
-            const hatchSpacingMm = Math.max(Math.min(glassWidthMm, glassDepthMm) * 1.2, 300);
-            const cMin = gy0 - gx1;
-            const cMax = gy1 - gx0;
-            const hatchCount = Math.floor((cMax - cMin) / hatchSpacingMm);
-            const hatchStartC = cMin + (cMax - cMin - (hatchCount - 1) * hatchSpacingMm) / 2;
-            const hatchLines = [];
-            for (let i = 0; i < hatchCount; i++) {
-              const c = hatchStartC + i * hatchSpacingMm;
-              const xa = Math.max(gx0, gy0 - c);
-              const xb = Math.min(gx1, gy1 - c);
-              if (xb <= xa) continue;
-              hatchLines.push(
-                <line
-                  className="plan-object-case-hatch"
-                  key={i}
-                  vectorEffect="non-scaling-stroke"
-                  x1={xa}
-                  x2={xb}
-                  y1={xa + c}
-                  y2={xb + c}
-                />
-              );
-            }
+            const legSizeMm = clampMm(
+              pixelsPerMm,
+              CASE_LEG_SIZE_MM,
+              2.5,
+              Math.min(planRect.widthMm, planRect.depthMm) * 0.18
+            );
+            const glyph = casePlanGlyph({
+              widthMm: planRect.widthMm,
+              depthMm: planRect.depthMm,
+              includeLegs: isFloorPlaced,
+              wallInsetMm,
+              legSizeMm
+            });
             return (
               <>
-                <rect
-                  className="plan-object-case-glass"
-                  height={glassDepthMm}
-                  vectorEffect="non-scaling-stroke"
-                  width={glassWidthMm}
-                  x={gx0}
-                  y={gy0}
-                />
-                {hatchLines}
+                {glyph.glass ? (
+                  <rect
+                    className="plan-object-case-glass"
+                    height={glyph.glass.y1Mm - glyph.glass.y0Mm}
+                    vectorEffect="non-scaling-stroke"
+                    width={glyph.glass.x1Mm - glyph.glass.x0Mm}
+                    x={midX + glyph.glass.x0Mm}
+                    y={midY + glyph.glass.y0Mm}
+                  />
+                ) : null}
+                {glyph.hatch.map((line, index) => (
+                  <line
+                    className="plan-object-case-hatch"
+                    key={index}
+                    vectorEffect="non-scaling-stroke"
+                    x1={midX + line.x1Mm}
+                    x2={midX + line.x2Mm}
+                    y1={midY + line.y1Mm}
+                    y2={midY + line.y2Mm}
+                  />
+                ))}
+                {glyph.legs.map((leg, index) => (
+                  <rect
+                    className="plan-object-case-leg"
+                    height={leg.sizeMm}
+                    key={`leg-${index}`}
+                    vectorEffect="non-scaling-stroke"
+                    width={leg.sizeMm}
+                    x={midX + leg.cxMm - leg.sizeMm / 2}
+                    y={midY + leg.cyMm - leg.sizeMm / 2}
+                  />
+                ))}
               </>
             );
           })()}
-          {isFloorPlaced
-            ? (() => {
-                const legSizeMm = clampMm(
-                  pixelsPerMm,
-                  CASE_LEG_SIZE_MM,
-                  2.5,
-                  Math.min(planRect.widthMm, planRect.depthMm) * 0.18
-                );
-                // Below this footprint the two legs on an edge would collide
-                // (or straddle the edge itself) — matches FloorCaseMesh's own
-                // Math.max clamp, which pins legs to the center once the
-                // footprint is too small for a true CASE_LEG_INSET_MM offset.
-                if (Math.min(planRect.widthMm, planRect.depthMm) < 2 * (CASE_LEG_INSET_MM + CASE_LEG_SIZE_MM)) {
-                  return null;
-                }
-                const legOffsetXMm = Math.max(planRect.widthMm / 2 - CASE_LEG_INSET_MM, legSizeMm / 2);
-                const legOffsetDMm = Math.max(planRect.depthMm / 2 - CASE_LEG_INSET_MM, legSizeMm / 2);
-                return [
-                  { cx: midX - legOffsetXMm, cy: midY - legOffsetDMm },
-                  { cx: midX + legOffsetXMm, cy: midY - legOffsetDMm },
-                  { cx: midX - legOffsetXMm, cy: midY + legOffsetDMm },
-                  { cx: midX + legOffsetXMm, cy: midY + legOffsetDMm }
-                ].map((leg, index) => (
-                  <rect
-                    className="plan-object-case-leg"
-                    height={legSizeMm}
-                    key={index}
-                    vectorEffect="non-scaling-stroke"
-                    width={legSizeMm}
-                    x={leg.cx - legSizeMm / 2}
-                    y={leg.cy - legSizeMm / 2}
-                  />
-                ));
-              })()
-            : null}
         </g>
       ) : null}
       {kind === "blocked-zone" ? (

@@ -17,6 +17,12 @@ import {
 } from "../../domain/framing";
 import { getRoomPlaceableWalls } from "../../domain/geometry/placeableWalls";
 import type { PlanRect } from "../../domain/geometry/planObjects";
+import {
+  caseElevationGlyph,
+  caseFloorGhostGlyph,
+  casePlanGlyph,
+  wallTextPlanGlyph
+} from "../../domain/geometry/caseGlyphs";
 import { isPointInPolygon } from "../../domain/geometry/polygon";
 import { getWallGeometry, outwardWallNormal } from "../../domain/geometry/walls";
 import type {
@@ -528,6 +534,9 @@ function roomScene(
     partitions: scene.partitions.filter(
       (partition) => partition.partition.roomId === roomId
     ),
+    // Intentionally omitted: opening-connection status dots are a live editing
+    // aid (they flag mis-aligned door/window pairs while you work), not part of
+    // the static exported document. Left [] by decision, not oversight.
     openingConnections: [],
     wallObjects: scene.wallObjects.filter((entry) =>
       wallIds.has(entry.object.wallId)
@@ -579,37 +588,48 @@ function drawPlanObject(
     drawLine(page, world(-halfW, 0), world(halfW, 0), 0.5, COLORS.subtle);
     drawLine(page, world(0, -halfD), world(0, halfD), 0.5, COLORS.subtle);
   } else if (kind === "wall-text") {
-    // A couple of short "text lines" — the plan echo of the elevation panel.
-    const inset = Math.min(rect.widthMm, rect.depthMm) * 0.22;
-    drawLine(page, world(-halfW + inset, -halfD * 0.3), world(halfW - inset, -halfD * 0.3), 0.5, COLORS.subtle);
-    drawLine(page, world(-halfW + inset, halfD * 0.3), world(halfW - inset * 3, halfD * 0.3), 0.5, COLORS.subtle);
+    // A couple of short "text lines" — the plan echo of the elevation panel,
+    // via the shared glyph so the export matches the on-screen construction
+    // (midline ± inset·0.4, second line shortened) rather than a drifted copy.
+    const glyph = wallTextPlanGlyph({ widthMm: rect.widthMm, depthMm: rect.depthMm });
+    for (const line of glyph.lines) {
+      drawLine(page, world(line.x1Mm, line.yMm), world(line.x2Mm, line.yMm), 0.5, COLORS.subtle);
+    }
   } else if (kind === "case") {
-    // A vitrine glyph matching PlanObject.tsx: the outline (drawn above) is the
-    // glass box, an inner inset reads as the glass line, and a freestanding
-    // floor case adds four small corner leg dots (a wall case has none).
-    const inset = Math.min(rect.widthMm, rect.depthMm) * 0.22;
-    const insetRect: PlanRect = {
-      ...rect,
-      widthMm: Math.max(0, rect.widthMm - inset * 2),
-      depthMm: Math.max(0, rect.depthMm - inset * 2)
-    };
-    page.drawSvgPath(
-      polygonPath(planRectCorners(insetRect).map(transform.point)),
-      { borderColor: COLORS.subtle, borderWidth: 0.5 }
-    );
-    if (isFloorPlaced) {
-      const legX = halfW - inset;
-      const legD = halfD - inset;
-      const legRadius = Math.max(0.5, inset * 0.28 * transform.scalePtPerMm);
-      for (const [lx, ly] of [
-        [-legX, -legD],
-        [legX, -legD],
-        [legX, legD],
-        [-legX, legD]
-      ] as const) {
-        const p = world(lx, ly);
-        page.drawCircle({ x: p.x, y: p.y, size: legRadius, color: COLORS.subtle });
-      }
+    // A vitrine glyph from the shared construction (caseGlyphs.ts) so the
+    // export shows the REAL geometry — a glass inset with a 45° glazing hatch,
+    // plus square legs for a freestanding floor case — instead of the old
+    // generic 0.22 inset + leg dots. No live zoom here, so the raw mm case
+    // constants drive the inset/leg size directly.
+    const glyph = casePlanGlyph({
+      widthMm: rect.widthMm,
+      depthMm: rect.depthMm,
+      includeLegs: isFloorPlaced
+    });
+    if (glyph.glass) {
+      const glassCorners = [
+        world(glyph.glass.x0Mm, glyph.glass.y0Mm),
+        world(glyph.glass.x1Mm, glyph.glass.y0Mm),
+        world(glyph.glass.x1Mm, glyph.glass.y1Mm),
+        world(glyph.glass.x0Mm, glyph.glass.y1Mm)
+      ];
+      page.drawSvgPath(polygonPath(glassCorners), {
+        borderColor: COLORS.subtle,
+        borderWidth: 0.5
+      });
+    }
+    for (const line of glyph.hatch) {
+      drawLine(page, world(line.x1Mm, line.y1Mm), world(line.x2Mm, line.y2Mm), 0.45, COLORS.subtle);
+    }
+    for (const leg of glyph.legs) {
+      const half = leg.sizeMm / 2;
+      const legCorners = [
+        world(leg.cxMm - half, leg.cyMm - half),
+        world(leg.cxMm + half, leg.cyMm - half),
+        world(leg.cxMm + half, leg.cyMm + half),
+        world(leg.cxMm - half, leg.cyMm + half)
+      ];
+      page.drawSvgPath(polygonPath(legCorners), { color: COLORS.subtle });
     }
   } else {
     for (const x of [-halfW, 0, halfW]) {
@@ -981,15 +1001,33 @@ function drawElevationCase(
     borderColor: COLORS.muted,
     borderWidth: 0.7
   });
-  const insetPt = Math.min(rect.width, rect.height) * 0.22;
-  page.drawRectangle({
-    x: rect.x + insetPt,
-    y: rect.y + insetPt,
-    width: Math.max(0, rect.width - insetPt * 2),
-    height: Math.max(0, rect.height - insetPt * 2),
-    borderColor: COLORS.subtle,
-    borderWidth: 0.5
-  });
+  // Real front-face construction from the shared glyph (glass-lid line inset
+  // between the tray walls + a base-slab line) instead of the old generic
+  // 0.22 concentric inset. No live zoom, so the raw mm case constants apply;
+  // the glyph is in local mm, y-DOWN from the box top — the model space here is
+  // y-up, so the box top sits at (yMm + heightMm) and local y subtracts down.
+  const widthMm = displayCase.sizeMm.widthMm;
+  const heightMm = displayCase.sizeMm.heightMm;
+  const glyph = caseElevationGlyph({ widthMm, heightMm });
+  if (glyph.showMarks) {
+    const topYMm = yMm + heightMm;
+    const glassY = topYMm - glyph.glassLid.yMm;
+    const slabY = topYMm - glyph.slab.yMm;
+    drawLine(
+      page,
+      transform.point({ xMm: xMm + glyph.glassLid.x1Mm, yMm: glassY }),
+      transform.point({ xMm: xMm + glyph.glassLid.x2Mm, yMm: glassY }),
+      0.5,
+      COLORS.subtle
+    );
+    drawLine(
+      page,
+      transform.point({ xMm: xMm + glyph.slab.x1Mm, yMm: slabY }),
+      transform.point({ xMm: xMm + glyph.slab.x2Mm, yMm: slabY }),
+      0.5,
+      COLORS.subtle
+    );
+  }
 }
 
 // The elevation shadow of a freestanding floor case standing in front of the
@@ -1001,19 +1039,53 @@ function drawElevationFloorCaseGhost(
   transform: ElevationTransform,
   ghost: ElevationScene["floorCaseGhosts"][number]
 ) {
-  const rect = elevationRect(
-    transform,
-    ghost.xMinMm,
-    0,
-    Math.max(0, ghost.xMaxMm - ghost.xMinMm),
-    ghost.heightMm
-  );
+  const widthMm = Math.max(0, ghost.xMaxMm - ghost.xMinMm);
+  const glyph = caseFloorGhostGlyph({ widthMm, heightMm: ghost.heightMm });
+  const dash = { borderColor: COLORS.subtle, borderWidth: 0.5, borderDashArray: [3, 2] };
+
+  if (!glyph.hasLegs) {
+    // Too short for legs — a plain dashed silhouette, exactly as before.
+    page.drawRectangle({
+      ...elevationRect(transform, ghost.xMinMm, 0, widthMm, ghost.heightMm),
+      ...dash
+    });
+    return;
+  }
+
+  // The real ghost construction (glass box + base slab line + two legs to the
+  // floor), all kept dashed/subtle since the whole ghost is an alignment aid.
+  // Model space is y-up (floor at 0); the glyph is local y-down from the top,
+  // so a local y maps to model (heightMm − localY).
+  const glassBox = glyph.glassBox;
   page.drawRectangle({
-    ...rect,
-    borderColor: COLORS.subtle,
-    borderWidth: 0.5,
-    borderDashArray: [3, 2]
+    ...elevationRect(
+      transform,
+      ghost.xMinMm,
+      ghost.heightMm - glassBox.heightMm,
+      glassBox.widthMm,
+      glassBox.heightMm
+    ),
+    ...dash
   });
+  const slabY = ghost.heightMm - glyph.slabYMm;
+  drawLine(
+    page,
+    transform.point({ xMm: ghost.xMinMm, yMm: slabY }),
+    transform.point({ xMm: ghost.xMinMm + widthMm, yMm: slabY }),
+    0.5,
+    COLORS.subtle,
+    [3, 2]
+  );
+  for (const leg of glyph.legs) {
+    drawLine(
+      page,
+      transform.point({ xMm: ghost.xMinMm + leg.xMm, yMm: slabY }),
+      transform.point({ xMm: ghost.xMinMm + leg.xMm, yMm: ghost.heightMm - glyph.floorYMm }),
+      0.5,
+      COLORS.subtle,
+      [3, 2]
+    );
+  }
 }
 
 function participantObstacleBoxes(

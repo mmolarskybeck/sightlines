@@ -5,12 +5,13 @@ import type {
 } from "react";
 import { getArtworkRectSvg, type ArtworkCenterMm, type ArtworkSizeMm } from "./elevationArtworkGeometry";
 import {
-  CASE_BASE_SLAB_THICKNESS_MM,
   CASE_GLASS_THICKNESS_MM,
-  CASE_LEG_INSET_MM,
-  CASE_WALL_THICKNESS_MM,
-  FLOOR_CASE_BOX_HEIGHT_MM
+  CASE_WALL_THICKNESS_MM
 } from "../../../domain/project";
+import {
+  caseElevationGlyph,
+  caseFloorGhostGlyph
+} from "../../../domain/geometry/caseGlyphs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 
 // px → mm at the current zoom, or 0 with no zoom context (pixelsPerMm
@@ -70,14 +71,21 @@ export function ElevationCase({
   const wallT = clampMm(pixelsPerMm, CASE_WALL_THICKNESS_MM, 2, rect.widthMm * 0.35);
   const glassBandMm = clampMm(pixelsPerMm, CASE_GLASS_THICKNESS_MM, 1.5, rect.heightMm * 0.25);
   const slabBandMm = clampMm(pixelsPerMm, CASE_WALL_THICKNESS_MM, 2, rect.heightMm * 0.25);
-  const glassLidYMm = rect.yMm + glassBandMm;
-  const slabLineYMm = rect.yMm + rect.heightMm - slabBandMm;
-  const lidX1Mm = rect.xMm + wallT;
-  const lidX2Mm = rect.xMm + rect.widthMm - wallT;
-  // Too small for the lid line and slab line to fit without crossing (or the
-  // inset to leave any span at all) — skip every inner mark, keep just the
-  // outline.
-  const showMarks = lidX2Mm > lidX1Mm && slabLineYMm > glassLidYMm;
+  // The construction (which marks exist, where) lives in the shared glyph
+  // module in local mm; the zoom-clamped insets above are passed in so the
+  // screen stays legible while the PDF export can reuse the same structure.
+  const glyph = caseElevationGlyph({
+    widthMm: rect.widthMm,
+    heightMm: rect.heightMm,
+    sideInsetMm: wallT,
+    glassBandMm,
+    slabBandMm
+  });
+  const glassLidYMm = rect.yMm + glyph.glassLid.yMm;
+  const slabLineYMm = rect.yMm + glyph.slab.yMm;
+  const lidX1Mm = rect.xMm + glyph.glassLid.x1Mm;
+  const lidX2Mm = rect.xMm + glyph.glassLid.x2Mm;
+  const showMarks = glyph.showMarks;
 
   const classNames = ["elevation-case"];
   if (isGhost) classNames.push("ghost");
@@ -153,10 +161,14 @@ export function ElevationFloorCaseGhost({
   // smaller SVG y after the shared flip, its bottom edge sits on the floor line.
   const topSvgYMm = wallHeightMm - heightMm;
 
-  // Below this, the glass box + base slab alone would meet or pass the
-  // floor — there's no room left for legs. Fall back to the plain silhouette
-  // rect exactly as before rather than drawing degenerate/overlapping marks.
-  if (heightMm <= FLOOR_CASE_BOX_HEIGHT_MM + CASE_BASE_SLAB_THICKNESS_MM) {
+  // The shared glyph module owns the box/slab/leg structure incl. the
+  // legs-appear threshold; y is local (down from the ghost's top), mapped into
+  // SVG space by adding topSvgYMm below.
+  const glyph = caseFloorGhostGlyph({ widthMm, heightMm });
+
+  // Below the legs threshold there's no room for legs: fall back to the plain
+  // silhouette rect exactly as before rather than drawing degenerate marks.
+  if (!glyph.hasLegs) {
     return (
       <rect
         className="elevation-floor-case-ghost"
@@ -169,15 +181,15 @@ export function ElevationFloorCaseGhost({
     );
   }
 
-  const glassBoxHeightMm = Math.min(FLOOR_CASE_BOX_HEIGHT_MM, heightMm);
-  const slabLineYMm = topSvgYMm + FLOOR_CASE_BOX_HEIGHT_MM + CASE_BASE_SLAB_THICKNESS_MM;
+  const glassBoxHeightMm = glyph.glassBox.heightMm;
+  const slabLineYMm = topSvgYMm + glyph.slabYMm;
   // Only two legs (not four): the projected extent from
   // projectFloorCaseOntoWall is a 1D along-wall range, so a rotated case's
   // exact leg x-positions aren't recoverable here — these two lines are an
   // alignment approximation, inset CASE_LEG_INSET_MM from each edge of the
   // projected extent (clamped inside it on a narrow projection).
-  const legXStartMm = Math.min(xMinMm + CASE_LEG_INSET_MM, xMaxMm);
-  const legXEndMm = Math.max(xMaxMm - CASE_LEG_INSET_MM, xMinMm);
+  const legXStartMm = xMinMm + glyph.legs[0]!.xMm;
+  const legXEndMm = xMinMm + glyph.legs[1]!.xMm;
 
   return (
     <g className="elevation-floor-case-ghost">
