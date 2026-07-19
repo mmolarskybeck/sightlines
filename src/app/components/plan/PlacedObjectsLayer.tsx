@@ -1,6 +1,7 @@
 import { type PointerEvent as ReactPointerEvent } from "react";
 import {
   getRenderedWallObjectPlanRect,
+  planScenePaintOrder,
   type PlanSceneFloorObject,
   type PlanSceneOpeningConnection,
   type PlanSceneWallObject
@@ -103,14 +104,10 @@ export function PlacedObjectsLayer({
       />
     );
   };
-  // Paint order: cases first, then everything else, across BOTH the wall and
-  // floor groups. An artwork hangs above a case's glass top, so seen from
-  // above the artwork rect must cover the case wherever their footprints
-  // overlap — never the reverse, and (both fills being opaque) never "through"
-  // either one. The partition crosses the two groups because a wall artwork
-  // can sit over a wall case or over a floor case pushed flush to the wall.
-  const isCase = (entry: { object: { kind: WallObject["kind"] } }) =>
-    entry.object.kind === "case";
+  // Paint order (cases first across both groups) comes from the shared
+  // planScenePaintOrder contract in planScene.ts — the PDF export consumes
+  // the same ordering, so overlap resolution can never drift between screen
+  // and print. Rationale lives with the helper.
   return (
     <>
       {openingConnections.map((connection) => (
@@ -385,12 +382,11 @@ export function PlacedObjectsLayer({
           />
         );
         };
-        return [
-          ...wallObjects.filter(isCase).map(renderWallObject),
-          ...floorObjects.filter(isCase).map(renderFloorObject),
-          ...wallObjects.filter((entry) => !isCase(entry)).map(renderWallObject),
-          ...floorObjects.filter((entry) => !isCase(entry)).map(renderFloorObject)
-        ];
+        return planScenePaintOrder(wallObjects, floorObjects).map((painted) =>
+          painted.group === "wall"
+            ? renderWallObject(painted.entry)
+            : renderFloorObject(painted.entry)
+        );
       })()}
     </>
   );

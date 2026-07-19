@@ -108,6 +108,32 @@ export type PlanSceneOptions = {
   minWallObjectDepthMm?: number;
 };
 
+export type PlanScenePaintEntry<W, F> =
+  | { group: "wall"; entry: W }
+  | { group: "floor"; entry: F };
+
+// Paint order for plan-scene objects: cases first, then everything else,
+// across BOTH the wall and floor groups. An artwork hangs above a case's
+// glass top, so seen from above the artwork rect must cover the case wherever
+// their footprints overlap — never the reverse, and (both fills being opaque)
+// never "through" either one. The partition crosses the two groups because a
+// wall artwork can sit over a wall case or over a floor case pushed flush to
+// the wall. Every surface that paints a plan scene (SVG canvas, PDF export)
+// must consume this one ordering so overlap resolution can never drift
+// between screen and print. Order within each phase is stable.
+export function planScenePaintOrder<
+  W extends { object: { kind: string } },
+  F extends { object: { kind: string } }
+>(wallObjects: readonly W[], floorObjects: readonly F[]): PlanScenePaintEntry<W, F>[] {
+  const isCase = (entry: { object: { kind: string } }) => entry.object.kind === "case";
+  return [
+    ...wallObjects.filter(isCase).map((entry): PlanScenePaintEntry<W, F> => ({ group: "wall", entry })),
+    ...floorObjects.filter(isCase).map((entry): PlanScenePaintEntry<W, F> => ({ group: "floor", entry })),
+    ...wallObjects.filter((entry) => !isCase(entry)).map((entry): PlanScenePaintEntry<W, F> => ({ group: "wall", entry })),
+    ...floorObjects.filter((entry) => !isCase(entry)).map((entry): PlanScenePaintEntry<W, F> => ({ group: "floor", entry }))
+  ];
+}
+
 export type PlanMarqueeRect = {
   minXMm: number;
   maxXMm: number;

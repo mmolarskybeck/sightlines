@@ -15,6 +15,7 @@ import {
   buildPlanScene,
   getPlanSceneObjectIdsIntersectingRect,
   getRenderedWallObjectPlanRect,
+  planScenePaintOrder,
   svgPolygonPoints
 } from "./planScene";
 
@@ -414,5 +415,38 @@ describe("buildPlanScene opening connections", () => {
     project.wallObjects = project.wallObjects.filter((object) => object.id !== "wo-b");
 
     expect(buildPlanScene(project).openingConnections).toHaveLength(0);
+  });
+});
+
+describe("planScenePaintOrder", () => {
+  const wall = (id: string, kind: string) => ({ object: { id, kind } });
+  const floor = (id: string, kind: string) => ({ object: { id, kind } });
+
+  it("paints cases first across both groups, then everything else", () => {
+    // Stored order deliberately interleaves: an artwork stored BEFORE the
+    // case it overlaps must still paint after it (the artwork hangs above
+    // the case's glass top, so its rect covers the case seen from above).
+    const wallObjects = [wall("art-1", "artwork"), wall("case-w", "case"), wall("door-1", "door")];
+    const floorObjects = [floor("ped-1", "pedestal"), floor("case-f", "case")];
+
+    const order = planScenePaintOrder(wallObjects, floorObjects).map(
+      (painted) => `${painted.group}:${painted.entry.object.id}`
+    );
+
+    expect(order).toEqual([
+      "wall:case-w",
+      "floor:case-f",
+      "wall:art-1",
+      "wall:door-1",
+      "floor:ped-1"
+    ]);
+  });
+
+  it("is stable within each phase and handles empty groups", () => {
+    const wallObjects = [wall("a", "artwork"), wall("b", "artwork")];
+    expect(
+      planScenePaintOrder(wallObjects, []).map((painted) => painted.entry.object.id)
+    ).toEqual(["a", "b"]);
+    expect(planScenePaintOrder([], [])).toEqual([]);
   });
 });

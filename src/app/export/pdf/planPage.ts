@@ -8,10 +8,11 @@ import {
 import { isPointInPolygon } from "../../../domain/geometry/polygon";
 import { getWallGeometry, outwardWallNormal } from "../../../domain/geometry/walls";
 import type { DisplayUnit, Project } from "../../../domain/project";
-import type {
-  PlanScene,
-  PlanSceneRoom,
-  PlanSceneWall
+import {
+  planScenePaintOrder,
+  type PlanScene,
+  type PlanSceneRoom,
+  type PlanSceneWall
 } from "../../../domain/scene2d/planScene";
 import { formatLength } from "../../../domain/units/length";
 import {
@@ -263,20 +264,25 @@ export function drawPlanScene(
   // viewer-side offset upstream was computed from the pre-clamp depth, so
   // growing depth around the center here never moves an object's center.
   const minDepthMm = MIN_PLAN_OBJECT_DEPTH_PT / transform.scalePtPerMm;
-  for (const entry of scene.wallObjects) {
-    drawPlanObject(
-      page,
-      transform,
-      {
-        ...entry.renderedRect,
-        depthMm: Math.max(entry.renderedRect.depthMm, minDepthMm)
-      },
-      entry.object.kind,
-      false
-    );
-  }
-  for (const entry of scene.floorObjects) {
-    drawPlanObject(page, transform, entry.rect, entry.object.kind, true);
+  // Shared paint order (cases first across wall + floor groups) so an artwork
+  // overlapping a case covers it here exactly as it does on the SVG canvas.
+  for (const painted of planScenePaintOrder(scene.wallObjects, scene.floorObjects)) {
+    if (painted.group === "wall") {
+      const entry = painted.entry;
+      drawPlanObject(
+        page,
+        transform,
+        {
+          ...entry.renderedRect,
+          depthMm: Math.max(entry.renderedRect.depthMm, minDepthMm)
+        },
+        entry.object.kind,
+        false
+      );
+    } else {
+      const entry = painted.entry;
+      drawPlanObject(page, transform, entry.rect, entry.object.kind, true);
+    }
   }
   return transform;
 }
