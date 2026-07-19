@@ -33,6 +33,7 @@ import { getNeighborAwareSegments } from "../placement/arrangeOnWall";
 import type { Point } from "../geometry/polygon";
 import type { FloorWall, PlanRect } from "../geometry/planObjects";
 import type { WallObjectBase } from "../project";
+import type { buildPlanScene } from "../scene2d/planScene";
 import {
   deriveElevationDimensions,
   NEIGHBOR_TOLERANCE_MM,
@@ -313,6 +314,73 @@ function participantsBounds(participants: DimensionParticipant[]): {
 // Segments gates neighbors by vertical band overlap, so every participant is
 // given one shared full-height band here (yMm 0, a large heightMm) to disable
 // that gate — the result is pure 1-D along-wall spacing.
+// Selection-driven plan dimension lines (the top-down twin of elevation's
+// GroupDimensionLines): floor-object clearances to same-room neighbors and
+// room walls, plus a wall-hung object's along-wall clearances. Static
+// (committed) geometry only — the mount hides these during any active gesture
+// rather than tracking a live preview, matching how dims read the rest scene.
+export function computePlanGapLines(args: {
+  exportMode: boolean;
+  selectedObjectIds: string[];
+  planScene: ReturnType<typeof buildPlanScene>;
+  floorObjectRoomIds: ReadonlyMap<string, string | null>;
+  floorWallsForTool: FloorWall[];
+}): PlanGapLine[] {
+  const { exportMode, selectedObjectIds, planScene, floorObjectRoomIds, floorWallsForTool } = args;
+  if (exportMode) return [];
+  const selectedIds = new Set(selectedObjectIds);
+  if (selectedIds.size === 0) return [];
+
+  // Floor-object gaps: every same-room floor object plus the room's wall
+  // strips form the neighbor graph; only gaps touching a selected object show.
+  const floorGaps = derivePlanFloorGaps({
+    selectedIds,
+    floorObjects: planScene.floorObjects.map((entry) => ({
+      id: entry.object.id,
+      rect: entry.rect,
+      roomId: floorObjectRoomIds.get(entry.object.id) ?? null
+    })),
+    walls: floorWallsForTool
+  });
+
+  // Wall-hung gaps: per selected wall object, its along-wall clearance to the
+  // nearest neighbor on the same wall per side (falling back to the wall end).
+  // Widths come from renderedRect — the framed/painted along-wall extent — so
+  // the gap edges match what the plan actually draws.
+  const wallObjectsByWall = new Map<
+    string,
+    Array<{ id: string; xMm: number; widthMm: number }>
+  >();
+  for (const entry of planScene.wallObjects) {
+    const bucket = wallObjectsByWall.get(entry.object.wallId) ?? [];
+    bucket.push({
+      id: entry.object.id,
+      xMm: entry.object.xMm,
+      widthMm: entry.renderedRect.widthMm
+    });
+    wallObjectsByWall.set(entry.object.wallId, bucket);
+  }
+  const wallsById = new Map(floorWallsForTool.map((wall) => [wall.id, wall]));
+  const wallGaps: PlanGapLine[] = [];
+  for (const entry of planScene.wallObjects) {
+    if (!selectedIds.has(entry.object.id)) continue;
+    const wall = wallsById.get(entry.object.wallId);
+    if (!wall) continue;
+    const onWall = wallObjectsByWall.get(entry.object.wallId) ?? [];
+    const self = onWall.find((object) => object.id === entry.object.id);
+    if (!self) continue;
+    wallGaps.push(
+      ...derivePlanWallGaps({
+        selectedObject: self,
+        others: onWall.filter((object) => object.id !== entry.object.id),
+        wall
+      })
+    );
+  }
+
+  return [...floorGaps, ...wallGaps];
+}
+
 export function derivePlanWallGaps(args: {
   selectedObject: { id: string; xMm: number; widthMm: number };
   others: ReadonlyArray<{ id: string; xMm: number; widthMm: number }>;
