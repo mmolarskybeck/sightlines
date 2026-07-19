@@ -4,7 +4,7 @@
 // in one place.
 
 export const DB_NAME = "sightlines";
-export const DB_VERSION = 3;
+export const DB_VERSION = 4;
 
 export const PROJECT_STORE = "projects";
 export const ARTWORK_STORE = "artworks";
@@ -18,6 +18,12 @@ export const ASSET_BLOB_STORE = "assetBlobs";
 // value `{ blob, projectUpdatedAt }`. Lives outside project persistence — never
 // in project JSON, undo history, or `.sightlines` packages.
 export const SAVED_VIEW_THUMBNAIL_STORE = "savedViewThumbnails";
+// Silent local recovery snapshots of the project document. Out-of-line keys like
+// `${projectId}:${createdAtISO}:${id}` (see projectSnapshotRepository.ts), value
+// `{ projectId, createdAt, projectTitle, fingerprint, project }`. Shares the
+// IndexedDB origin, so it guards against a malformed record or a bad migration —
+// not eviction — and is surfaced only when a project fails to load.
+export const PROJECT_SNAPSHOT_STORE = "projectSnapshots";
 
 let databasePromise: Promise<IDBDatabase> | undefined;
 
@@ -55,6 +61,12 @@ export function openDatabase(): Promise<IDBDatabase> {
       // as ASSET_BLOB_STORE.
       if (!db.objectStoreNames.contains(SAVED_VIEW_THUMBNAIL_STORE)) {
         db.createObjectStore(SAVED_VIEW_THUMBNAIL_STORE);
+      }
+
+      // v3 → v4: silent recovery snapshots. Out-of-line string keys, same
+      // pattern as the two stores above.
+      if (!db.objectStoreNames.contains(PROJECT_SNAPSHOT_STORE)) {
+        db.createObjectStore(PROJECT_SNAPSHOT_STORE);
       }
     };
 

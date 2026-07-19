@@ -10,6 +10,7 @@ import {
   InMemoryArtworkLibraryRepository,
   InMemoryAssetRepository,
   InMemoryProjectRepository,
+  InMemoryProjectSnapshotRepository,
   makeImageFile
 } from "../../test/inMemoryRepositories";
 import { createAppStore } from "../store";
@@ -111,7 +112,8 @@ function makeStore() {
     projectRepository: new InMemoryProjectRepository(),
     artworkLibraryRepository: new InMemoryArtworkLibraryRepository(),
     assetRepository: new InMemoryAssetRepository(),
-    imageProcessor: new FakeImageProcessor()
+    imageProcessor: new FakeImageProcessor(),
+    projectSnapshotRepository: new InMemoryProjectSnapshotRepository()
   });
 }
 

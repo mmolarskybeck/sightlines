@@ -1,6 +1,7 @@
 import { newId } from "../../domain/id";
 import { createBlankProject } from "../../domain/newProject";
 import type { Project, ProjectSummary } from "../../domain/project";
+import { ProjectValidationError } from "../../domain/repositories/indexedDbProjectRepository";
 import type { AppState, AppStoreDeps, ArtworkProjectMembership } from "../store";
 
 export type ProjectManagerSliceActions = {
@@ -17,6 +18,10 @@ export type ProjectManagerSliceActions = {
 export type ProjectManagerSliceInternals = {
   setDocument: (project: Project, extras?: Partial<AppState>) => void;
   deps: AppStoreDeps;
+  // Once-per-session recovery snapshot when a project becomes the open document.
+  snapshotOnOpen: (project: Project) => void;
+  // Populate recoveryOffer from the newest schema-valid snapshot, if any.
+  offerRecovery: (projectId: string) => Promise<boolean>;
 };
 
 export function createProjectManagerSlice(
@@ -24,7 +29,7 @@ export function createProjectManagerSlice(
   get: () => AppState,
   internals: ProjectManagerSliceInternals
 ): { actions: ProjectManagerSliceActions } {
-  const { setDocument, deps } = internals;
+  const { setDocument, deps, snapshotOnOpen, offerRecovery } = internals;
 
   const actions: ProjectManagerSliceActions = {
     async listProjectSummaries() {
@@ -72,56 +77,81 @@ export function createProjectManagerSlice(
       try {
         const project = await deps.projectRepository.load(id);
         setDocument(project, { viewMode: "plan", saveState: "saved" });
+        snapshotOnOpen(project);
       } catch (error) {
+        const message = `Could not open that project (${
+          error instanceof Error ? error.message : "unknown error"
+        }).`;
         set({
           saveState: "error",
-          error: `Could not open that project (${
-            error instanceof Error ? error.message : "unknown error"
-          }).`
+          error: message,
+          // Retry re-runs the same open.
+          saveError: {
+            scope: "projectLoad",
+            message,
+            retry: async () => {
+              await actions.openProject(id);
+            }
+          }
         });
+        // Only a typed corruption error can be answered by an earlier snapshot;
+        // a transient read error must not substitute a copy for a fine document.
+        if (error instanceof ProjectValidationError) {
+          await offerRecovery(id);
+        }
       }
     },
 
     async createProject(title) {
       const project = createBlankProject(title);
-      set({ saveState: "saving", error: null });
-
-      try {
-        await deps.projectRepository.save(project);
-        setDocument(project, { viewMode: "plan", saveState: "saved" });
-      } catch (error) {
-        set({
-          saveState: "error",
-          error: `Could not create the new project (${
+      // Named so a failed create can retry the save of this exact project.
+      const save = async () => {
+        set({ saveState: "saving", error: null });
+        try {
+          await deps.projectRepository.save(project);
+          setDocument(project, { viewMode: "plan", saveState: "saved" });
+        } catch (error) {
+          const message = `Could not create the new project (${
             error instanceof Error ? error.message : "unknown error"
-          }).`
-        });
-      }
+          }).`;
+          set({
+            saveState: "error",
+            error: message,
+            saveError: { scope: "projectCreate", message, retry: save }
+          });
+        }
+      };
+      await save();
     },
 
     async duplicateProject(id) {
-      set({ saveState: "saving", error: null });
-
-      try {
-        const source = await deps.projectRepository.load(id);
-        const now = new Date().toISOString();
-        const copy: Project = {
-          ...source,
-          id: newId(),
-          title: `${source.title} (copy)`,
-          createdAt: now,
-          updatedAt: now
-        };
-        await deps.projectRepository.save(copy);
-        setDocument(copy, { viewMode: "plan", saveState: "saved" });
-      } catch (error) {
-        set({
-          saveState: "error",
-          error: `Could not duplicate that project (${
+      // Named so a failed duplicate can retry the whole load-copy-save.
+      const run = async () => {
+        set({ saveState: "saving", error: null });
+        try {
+          const source = await deps.projectRepository.load(id);
+          const now = new Date().toISOString();
+          const copy: Project = {
+            ...source,
+            id: newId(),
+            title: `${source.title} (copy)`,
+            createdAt: now,
+            updatedAt: now
+          };
+          await deps.projectRepository.save(copy);
+          setDocument(copy, { viewMode: "plan", saveState: "saved" });
+        } catch (error) {
+          const message = `Could not duplicate that project (${
             error instanceof Error ? error.message : "unknown error"
-          }).`
-        });
-      }
+          }).`;
+          set({
+            saveState: "error",
+            error: message,
+            saveError: { scope: "projectDuplicate", message, retry: run }
+          });
+        }
+      };
+      await run();
     },
 
     async deleteProject(id) {
@@ -130,11 +160,20 @@ export function createProjectManagerSlice(
       try {
         await deps.projectRepository.delete(id);
       } catch (error) {
+        const message = `Could not delete that project (${
+          error instanceof Error ? error.message : "unknown error"
+        }).`;
         set({
           saveState: "error",
-          error: `Could not delete that project (${
-            error instanceof Error ? error.message : "unknown error"
-          }).`
+          error: message,
+          // Retry re-runs the same delete.
+          saveError: {
+            scope: "projectDelete",
+            message,
+            retry: async () => {
+              await actions.deleteProject(id);
+            }
+          }
         });
         return;
       }
@@ -147,6 +186,14 @@ export function createProjectManagerSlice(
         await deps.onProjectDeleted?.(id);
       } catch {
         // The export-preference hook reports ordinary persistence failures.
+      }
+
+      // Recovery snapshots follow the project's lifecycle too — drop them so a
+      // deleted project leaves no restorable copies behind. Best-effort.
+      try {
+        await deps.projectSnapshotRepository.deleteByProject(id);
+      } catch {
+        // A snapshot-store failure must not resurrect an already-deleted project.
       }
 
       if (!wasOpen) return;

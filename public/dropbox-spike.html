@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dropbox PKCE spike (throwaway — do not commit)</title>
+<style>
+  body { font: 14px/1.5 -apple-system, system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.2rem; }
+  fieldset { border: 1px solid #ccc; margin-bottom: 1rem; padding: 0.75rem 1rem; }
+  legend { font-weight: 600; }
+  button { margin: 0.15rem 0.25rem 0.15rem 0; padding: 0.35rem 0.7rem; }
+  input[type=text] { width: 100%; box-sizing: border-box; padding: 0.35rem; }
+  #log { white-space: pre-wrap; background: #f6f6f6; border: 1px solid #ddd; padding: 0.75rem; font-family: ui-monospace, monospace; font-size: 12px; max-height: 420px; overflow: auto; }
+  .ok { color: #0a7a2f; } .err { color: #b00020; }
+</style>
+</head>
+<body>
+<h1>Dropbox PKCE spike — serverless refresh feasibility</h1>
+<p>Goal: prove in <strong>real Safari and Chrome</strong> that a pure browser app gets an offline refresh token via PKCE (no secret) and can refresh, upload, list, and delete via CORS.</p>
+
+<fieldset>
+  <legend>0. Setup</legend>
+  <p>Create an app at <a href="https://www.dropbox.com/developers/apps" target="_blank" rel="noreferrer">dropbox.com/developers/apps</a>: <em>Scoped access</em> → <em>App folder</em>. Permissions tab: enable <code>files.content.write</code>, <code>files.metadata.read</code>, <code>account_info.read</code> (then re-authorize if you change them). Settings tab → OAuth2 redirect URIs: add exactly <code id="redirect-uri-display"></code>. Paste the App key below.</p>
+  <input type="text" id="client-id" placeholder="Dropbox App key (client_id)" />
+</fieldset>
+
+<fieldset>
+  <legend>1. Authorize (PKCE redirect, offline)</legend>
+  <button id="connect">Connect Dropbox</button>
+  <span id="auth-status"></span>
+</fieldset>
+
+<fieldset>
+  <legend>2. Exercises</legend>
+  <button id="refresh">Refresh access token (client_id only)</button>
+  <button id="account">Get account info</button>
+  <button id="upload-small">Upload small file</button>
+  <button id="upload-big">Upload 30 MB file</button>
+  <button id="list">List app folder</button>
+  <button id="delete-oldest">Delete oldest spike file</button>
+  <button id="expire">Simulate expired access token</button>
+  <button id="reset">Forget tokens</button>
+</fieldset>
+
+<div id="log"></div>
+
+<script>
+const LS_KEY = "dropboxSpikeAuth";
+const logEl = document.getElementById("log");
+const clientIdInput = document.getElementById("client-id");
+const redirectUri = location.origin + location.pathname;
+document.getElementById("redirect-uri-display").textContent = redirectUri;
+clientIdInput.value = localStorage.getItem("dropboxSpikeClientId") || "";
+clientIdInput.addEventListener("input", () => localStorage.setItem("dropboxSpikeClientId", clientIdInput.value.trim()));
+
+function log(message, cls) {
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = `[${new Date().toISOString().slice(11, 19)}] ${message}`;
+  logEl.prepend(line);
+}
+
+function getAuth() { try { return JSON.parse(localStorage.getItem(LS_KEY)) || null; } catch { return null; } }
+function setAuth(auth) { localStorage.setItem(LS_KEY, JSON.stringify(auth)); renderAuthStatus(); }
+function renderAuthStatus() {
+  const auth = getAuth();
+  document.getElementById("auth-status").textContent = auth
+    ? ` connected — refresh token ${auth.refresh_token ? "PRESENT" : "MISSING"}, access token expires ${new Date(auth.expires_at).toISOString().slice(11, 19)}`
+    : " not connected";
+}
+
+function base64Url(bytes) {
+  return btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function randomString() {
+  const bytes = new Uint8Array(48);
+  crypto.getRandomValues(bytes);
+  return base64Url(bytes);
+}
+async function sha256Challenge(verifier) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  return base64Url(digest);
+}
+
+document.getElementById("connect").addEventListener("click", async () => {
+  const clientId = clientIdInput.value.trim();
+  if (!clientId) return log("Paste the App key first.", "err");
+  const verifier = randomString();
+  const state = randomString();
+  sessionStorage.setItem("dropboxSpikeVerifier", verifier);
+  sessionStorage.setItem("dropboxSpikeState", state);
+  const challenge = await sha256Challenge(verifier);
+  const url = new URL("https://www.dropbox.com/oauth2/authorize");
+  url.search = new URLSearchParams({
+    client_id: clientId,
+    response_type: "code",
+    redirect_uri: redirectUri,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    token_access_type: "offline",
+    state
+  }).toString();
+  location.assign(url);
+});
+
+async function tokenRequest(params) {
+  const response = await fetch("https://api.dropboxapi.com/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(params)
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(`token endpoint ${response.status}: ${JSON.stringify(body)}`);
+  return body;
+}
+
+async function handleRedirect() {
+  const params = new URLSearchParams(location.search);
+  if (!params.has("code")) return;
+  const expectedState = sessionStorage.getItem("dropboxSpikeState");
+  const verifier = sessionStorage.getItem("dropboxSpikeVerifier");
+  history.replaceState(null, "", location.pathname);
+  if (!expectedState || params.get("state") !== expectedState) return log("STATE MISMATCH — aborting exchange.", "err");
+  if (!verifier) return log("Missing PKCE verifier in sessionStorage.", "err");
+  try {
+    const body = await tokenRequest({
+      code: params.get("code"),
+      grant_type: "authorization_code",
+      client_id: clientIdInput.value.trim(),
+      redirect_uri: redirectUri,
+      code_verifier: verifier
+    });
+    setAuth({
+      access_token: body.access_token,
+      refresh_token: body.refresh_token || null,
+      expires_at: Date.now() + (body.expires_in || 0) * 1000
+    });
+    log(`Code exchange OK. refresh_token ${body.refresh_token ? "RECEIVED (offline works serverless!)" : "NOT returned"}; access expires_in=${body.expires_in}s; scopes=${body.scope || "?"}`, body.refresh_token ? "ok" : "err");
+  } catch (error) {
+    log(`Code exchange failed: ${error.message}`, "err");
+  }
+}
+
+async function refreshAccessToken() {
+  const auth = getAuth();
+  if (!auth?.refresh_token) throw new Error("No refresh token stored.");
+  const body = await tokenRequest({
+    grant_type: "refresh_token",
+    refresh_token: auth.refresh_token,
+    client_id: clientIdInput.value.trim()
+  });
+  setAuth({ ...auth, access_token: body.access_token, expires_at: Date.now() + (body.expires_in || 0) * 1000 });
+  return body;
+}
+
+async function withToken() {
+  const auth = getAuth();
+  if (!auth) throw new Error("Not connected.");
+  if (Date.now() > auth.expires_at - 30_000) {
+    log("Access token expired — refreshing first…");
+    await refreshAccessToken();
+  }
+  return getAuth().access_token;
+}
+
+document.getElementById("refresh").addEventListener("click", async () => {
+  try {
+    const body = await refreshAccessToken();
+    log(`Refresh OK via direct POST with client_id only. New access token, expires_in=${body.expires_in}s`, "ok");
+  } catch (error) { log(`Refresh FAILED: ${error.message}`, "err"); }
+});
+
+document.getElementById("account").addEventListener("click", async () => {
+  try {
+    const token = await withToken();
+    const response = await fetch("https://api.dropboxapi.com/2/users/get_current_account", {
+      method: "POST", headers: { Authorization: `Bearer ${token}` }
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(JSON.stringify(body));
+    log(`Account: ${body.name?.display_name} <${body.email}>`, "ok");
+  } catch (error) { log(`Account FAILED: ${error.message}`, "err"); }
+});
+
+async function upload(sizeBytes) {
+  const token = await withToken();
+  const data = new Uint8Array(sizeBytes);
+  for (let i = 0; i < sizeBytes; i += 65536) crypto.getRandomValues(data.subarray(i, Math.min(i + 65536, sizeBytes)));
+  const path = `/spike/spike-${Date.now()}.bin`;
+  const started = performance.now();
+  const response = await fetch("https://content.dropboxapi.com/2/files/upload", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/octet-stream",
+      "Dropbox-API-Arg": JSON.stringify({ path, mode: "add", autorename: true, mute: true })
+    },
+    body: data
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(JSON.stringify(body));
+  log(`Upload OK: ${body.path_display} (${(sizeBytes / 1e6).toFixed(1)} MB in ${((performance.now() - started) / 1000).toFixed(1)}s)`, "ok");
+}
+document.getElementById("upload-small").addEventListener("click", () => upload(50_000).catch((e) => log(`Upload FAILED: ${e.message}`, "err")));
+document.getElementById("upload-big").addEventListener("click", () => upload(30_000_000).catch((e) => log(`Upload FAILED: ${e.message}`, "err")));
+
+async function listSpikeFolder() {
+  const token = await withToken();
+  let entries = [];
+  let response = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ path: "/spike" })
+  });
+  let body = await response.json();
+  if (!response.ok) throw new Error(JSON.stringify(body));
+  entries = entries.concat(body.entries);
+  while (body.has_more) {
+    response = await fetch("https://api.dropboxapi.com/2/files/list_folder/continue", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ cursor: body.cursor })
+    });
+    body = await response.json();
+    if (!response.ok) throw new Error(JSON.stringify(body));
+    entries = entries.concat(body.entries);
+  }
+  return entries.filter((entry) => entry[".tag"] === "file").sort((a, b) => a.server_modified.localeCompare(b.server_modified));
+}
+
+document.getElementById("list").addEventListener("click", async () => {
+  try {
+    const files = await listSpikeFolder();
+    log(`List OK — ${files.length} file(s):\n${files.map((f) => `  ${f.server_modified}  ${f.name}`).join("\n")}`, "ok");
+  } catch (error) { log(`List FAILED: ${error.message}`, "err"); }
+});
+
+document.getElementById("delete-oldest").addEventListener("click", async () => {
+  try {
+    const files = await listSpikeFolder();
+    if (!files.length) return log("Nothing to delete.");
+    const token = await withToken();
+    const response = await fetch("https://api.dropboxapi.com/2/files/delete_v2", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ path: files[0].path_lower })
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(JSON.stringify(body));
+    log(`Deleted oldest: ${files[0].name}`, "ok");
+  } catch (error) { log(`Delete FAILED: ${error.message}`, "err"); }
+});
+
+document.getElementById("expire").addEventListener("click", () => {
+  const auth = getAuth();
+  if (!auth) return log("Not connected.", "err");
+  setAuth({ ...auth, expires_at: 0 });
+  log("Access token marked expired — next API call must auto-refresh.");
+});
+
+document.getElementById("reset").addEventListener("click", () => {
+  localStorage.removeItem(LS_KEY);
+  renderAuthStatus();
+  log("Tokens forgotten (simulates Safari eviction — reconnect should be the only recovery step).");
+});
+
+renderAuthStatus();
+handleRedirect();
+</script>
+</body>
+</html>

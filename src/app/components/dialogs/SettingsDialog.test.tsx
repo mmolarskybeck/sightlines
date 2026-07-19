@@ -109,12 +109,24 @@ function renderDialog({ open = true, storageState = "granted", store = {} }: Ren
   const handlers = {
     onOpenChange: vi.fn(),
     onRetryStorage: vi.fn(),
+    onConnectCloudBackup: vi.fn(async () => {}),
+    onDisconnectCloudBackup: vi.fn(),
     resetPreferences: vi.fn(),
     onExport: vi.fn(),
     onImport: vi.fn(),
     onOpenHelp: vi.fn()
   };
-  render(<SettingsDialog open={open} storageState={storageState} {...handlers} />);
+  render(
+    <SettingsDialog
+      open={open}
+      storageState={storageState}
+      cloudBackupConfigured={false}
+      cloudBackupProviderStatus="disconnected"
+      cloudBackupAccountLabel={null}
+      lastCloudBackupAt={null}
+      {...handlers}
+    />
+  );
   return { ...actions, ...handlers };
 }
 

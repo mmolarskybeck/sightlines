@@ -54,8 +54,15 @@ import type { AssetRepository } from "../domain/repositories/assetRepository";
 import { IndexedDbArtworkLibraryRepository } from "../domain/repositories/indexedDbArtworkLibraryRepository";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import { IndexedDbProjectRepository } from "../domain/repositories/indexedDbProjectRepository";
+import { IndexedDbProjectSnapshotRepository } from "../domain/repositories/indexedDbProjectSnapshotRepository";
 import { IndexedDbSavedViewThumbnailRepository } from "../domain/repositories/indexedDbSavedViewThumbnailRepository";
 import type { ProjectRepository } from "../domain/repositories/projectRepository";
+import { ProjectValidationError } from "../domain/repositories/indexedDbProjectRepository";
+import type { ProjectSnapshotRepository } from "../domain/repositories/projectSnapshotRepository";
+import { SNAPSHOT_MIN_INTERVAL_MS } from "../domain/repositories/projectSnapshotRepository";
+import { selectReferencedArtworks } from "../domain/package/buildPackage";
+import { collectReferencedAssetIds, computeBackupFingerprint } from "../domain/backup/fingerprint";
+import { migrateProject } from "../domain/schema/projectSchema";
 import { createSampleProject } from "../domain/sample/sampleProject";
 import { parseArtwork } from "../domain/schema/artworkSchema";
 import { getFirstWall, getProjectWalls } from "./projectWalls";
@@ -89,6 +96,14 @@ import {
   createPackageSlice,
   type PackageSliceActions
 } from "./store/packageSlice";
+import {
+  CLOUD_BACKUP_SLICE_INITIAL,
+  createCloudBackupSlice,
+  type CloudBackupSliceActions,
+  type CloudBackupSliceState
+} from "./store/cloudBackupSlice";
+import type { CloudBackupProvider } from "./cloud/provider";
+import { createDropboxProvider } from "./cloud/dropbox";
 import {
   createProjectManagerSlice,
   type ProjectManagerSliceActions
@@ -173,10 +188,32 @@ type UpdateArtworkChanges = Partial<
 // so the batch dialog only ever sets or clears the mat band and the frame.
 type BulkMatFrameChanges = Partial<Pick<Artwork, "matWidthMm" | "frame">>;
 
+// Which boundary a save failure came from, so its Retry re-runs the right work.
+// "project" = the open document's persist; "artworkLibrary" = an artwork-library
+// write; the rest are project-management/restore boundaries that also drive the
+// error badge.
+export type SaveErrorScope =
+  | "project"
+  | "artworkLibrary"
+  | "projectLoad"
+  | "projectCreate"
+  | "projectDuplicate"
+  | "projectDelete"
+  | "restore";
+
+export type SaveError = {
+  scope: SaveErrorScope;
+  message: string;
+  // Re-runs exactly what failed; a successful retry clears the error state.
+  retry: () => Promise<void>;
+};
+
 export type AppState = ArrangeSliceState &
   ArrangeSliceActions &
   ArtworkIntakeSliceState &
   ArtworkIntakeSliceActions &
+  CloudBackupSliceState &
+  CloudBackupSliceActions &
   DocumentMetaSliceActions &
   PackageSliceActions &
   ProjectManagerSliceActions &
@@ -191,6 +228,13 @@ export type AppState = ArrangeSliceState &
   viewMode: ViewMode;
   saveState: "idle" | "saving" | "saved" | "error";
   error: string | null;
+  // Scoped provenance for the current save failure (null when not erroring).
+  // `saveState === "error"` alone can't tell a failed project save from a failed
+  // artwork-library save (or a failed load/restore) — so a generic retry would
+  // re-run the wrong thing. Each failing boundary records what failed and a
+  // closure that re-runs exactly that. Cleared on a real recovery, not per
+  // keystroke, so the failure toast fires only on the transition into error.
+  saveError: SaveError | null;
   placementWarnings: PlacementWarning[];
   lastGeometryEdit: GeometryEditInfo | null;
   undoStack: EditEntry[];
@@ -200,6 +244,10 @@ export type AppState = ArrangeSliceState &
   // A .sightlines import paused on §6 artwork conflicts, awaiting one review
   // step in the conflict dialog. Nothing has been persisted yet.
   pendingPackageImport: ImportPlan | null;
+  // Set when a project fails to load with a typed corruption error AND a
+  // schema-valid earlier snapshot exists. Drives the recovery dialog; a restore
+  // is never applied silently.
+  recoveryOffer: RecoveryOffer | null;
   boot: () => Promise<void>;
   /** Dev-only, non-persisting document swap used by renderer benchmarks. */
   loadBenchmarkFixture: (project: Project, artworks: Artwork[]) => void;
@@ -292,6 +340,12 @@ export type AppState = ArrangeSliceState &
     allowOverlap?: boolean
   ) => Promise<void>;
   removeSelectedPlacements: () => Promise<void>;
+  // Restore a stored snapshot as the open document: snapshot the current doc
+  // first (a pre-restore copy), then load, migrate, and persist the snapshot.
+  restoreProjectSnapshot: (key: string) => Promise<void>;
+  // Accept/dismiss the recovery offer surfaced after a failed load.
+  acceptRecovery: () => Promise<void>;
+  dismissRecovery: () => void;
 };
 
 // Selection rides along as the whole {selection, wallContextId} bundle
@@ -314,7 +368,20 @@ export type AppStoreDeps = {
   artworkLibraryRepository: ArtworkLibraryRepository;
   assetRepository: AssetRepository;
   imageProcessor: ImageProcessor;
+  projectSnapshotRepository: ProjectSnapshotRepository;
+  // Cloud-backup provider seam. Absent (or unconfigured) leaves the whole
+  // feature inert — status stays "disconnected" and the UI hides it.
+  cloudBackupProvider?: CloudBackupProvider;
   onProjectDeleted?: (projectId: string) => void | Promise<void>;
+};
+
+// A schema-valid earlier copy of a project that failed to load, offered for
+// restore via the recovery dialog. Populated only on a typed load failure
+// (ProjectValidationError) with a snapshot that itself parses/migrates cleanly.
+export type RecoveryOffer = {
+  projectId: string;
+  snapshotKey: string;
+  createdAt: string;
 };
 
 export function createAppStore(deps: AppStoreDeps) {
@@ -353,17 +420,114 @@ export function createAppStore(deps: AppStoreDeps) {
       );
     }
 
+    // --- silent recovery snapshots -------------------------------------------
+    //
+    // Module-level (per createAppStore call) session state: which projects have
+    // taken their once-per-session open snapshot, and when each was last
+    // snapshotted (for the interval gate). Both are keyed by project id.
+    const snapshottedThisSession = new Set<string>();
+    const lastSnapshotAtByProject = new Map<string, number>();
+
+    // Fingerprint the document plus the referenced artwork/asset set, then store
+    // a snapshot. The repo dedupes identical fingerprints; we still record the
+    // attempt time so the interval gate advances.
+    async function writeSnapshot(project: Project): Promise<void> {
+      const artworks = selectReferencedArtworks(project, get().libraryArtworks);
+      const assetIds = collectReferencedAssetIds(artworks);
+      const fingerprint = computeBackupFingerprint({ project, artworks, assetIds });
+      await deps.projectSnapshotRepository.add({
+        projectId: project.id,
+        createdAt: new Date().toISOString(),
+        projectTitle: project.title,
+        fingerprint,
+        project
+      });
+      lastSnapshotAtByProject.set(project.id, Date.now());
+    }
+
+    // Once per project per app session, when it becomes the open document.
+    // Fire-and-forget; a snapshot failure never affects opening.
+    function snapshotOnOpen(project: Project): void {
+      if (snapshottedThisSession.has(project.id)) return;
+      snapshottedThisSession.add(project.id);
+      void writeSnapshot(project).catch((error) => {
+        console.warn("Could not write a recovery snapshot", error);
+      });
+    }
+
+    // Interval-gated snapshot from the save path: skip when the last snapshot of
+    // this project was under SNAPSHOT_MIN_INTERVAL_MS ago. The last-snapshot time
+    // is seeded lazily from stored snapshots so a fresh session doesn't
+    // immediately re-snapshot a project that was snapshotted moments before.
+    async function maybeIntervalSnapshot(project: Project): Promise<void> {
+      try {
+        let last = lastSnapshotAtByProject.get(project.id);
+        if (last === undefined) {
+          const summaries = await deps.projectSnapshotRepository.listByProject(project.id);
+          last = summaries[0] ? Date.parse(summaries[0].createdAt) : 0;
+          lastSnapshotAtByProject.set(project.id, last);
+        }
+        if (Date.now() - last < SNAPSHOT_MIN_INTERVAL_MS) return;
+        await writeSnapshot(project);
+      } catch (error) {
+        console.warn("Could not write a recovery snapshot", error);
+      }
+    }
+
+    // Search a project's snapshots newest→oldest for the first whose stored
+    // document still parses/migrates cleanly, and offer it for recovery. Returns
+    // true when an offer was set. Any snapshot-store failure degrades to "no
+    // offer" rather than throwing over the load error that triggered it.
+    async function offerRecovery(projectId: string): Promise<boolean> {
+      try {
+        const summaries = await deps.projectSnapshotRepository.listByProject(projectId);
+        for (const summary of summaries) {
+          const record = await deps.projectSnapshotRepository.get(summary.key);
+          if (!record) continue;
+          try {
+            migrateProject(record.project);
+          } catch {
+            // A snapshot can itself be stale/invalid — skip to an older one.
+            continue;
+          }
+          set({
+            recoveryOffer: {
+              projectId,
+              snapshotKey: summary.key,
+              createdAt: summary.createdAt
+            }
+          });
+          return true;
+        }
+      } catch (error) {
+        console.warn("Could not search for a recovery snapshot", error);
+      }
+      return false;
+    }
+
     async function persist(project: Project): Promise<boolean> {
       set({ saveState: "saving", error: null });
 
       try {
         await deps.projectRepository.save(project);
-        set({ saveState: "saved" });
+        // Clear any prior save failure — a successful persist is the recovery.
+        set({ saveState: "saved", saveError: null });
+        // Fire-and-forget: an interval snapshot must never affect saving.
+        void maybeIntervalSnapshot(project);
         return true;
       } catch (error) {
+        const message = error instanceof Error ? error.message : "Could not save project.";
         set({
           saveState: "error",
-          error: error instanceof Error ? error.message : "Could not save project."
+          error: message,
+          // Retry re-saves this exact project document.
+          saveError: {
+            scope: "project",
+            message,
+            retry: async () => {
+              await persist(project);
+            }
+          }
         });
         return false;
       }
@@ -416,11 +580,29 @@ export function createAppStore(deps: AppStoreDeps) {
         for (const artwork of artworks) {
           await deps.artworkLibraryRepository.save(artwork);
         }
-        set({ libraryArtworks: await deps.artworkLibraryRepository.list() });
+        const libraryArtworks = await deps.artworkLibraryRepository.list();
+        // The happy path leaves saveState alone (the project half owns it); but
+        // when this succeeds as the retry of a prior artwork-save failure, it is
+        // the recovery — clear the error state so the badge and toast settle.
+        if (get().saveError) {
+          set({ libraryArtworks, saveState: "saved", error: null, saveError: null });
+        } else {
+          set({ libraryArtworks });
+        }
       } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Could not save the artwork library.";
         set({
           saveState: "error",
-          error: error instanceof Error ? error.message : "Could not save the artwork library."
+          error: message,
+          // Retry re-saves this exact batch of artwork records.
+          saveError: {
+            scope: "artworkLibrary",
+            message,
+            retry: async () => {
+              await saveArtworkHalves(artworks);
+            }
+          }
         });
       }
     }
@@ -451,6 +633,9 @@ export function createAppStore(deps: AppStoreDeps) {
         undoStack: [],
         redoStack: [],
         error: null,
+        // A document swap (boot, open, import, restore) is a clean slate — any
+        // prior save failure no longer applies, so clear its provenance too.
+        saveError: null,
         pendingDuplicateUploads: [],
         pendingPackageImport: null,
         ...extras
@@ -792,9 +977,16 @@ export function createAppStore(deps: AppStoreDeps) {
 
     const selectionSlice = createSelectionSlice(set, get, { autoAcceptArrangeSession });
 
-    const projectManager = createProjectManagerSlice(set, get, { setDocument, deps });
+    const projectManager = createProjectManagerSlice(set, get, {
+      setDocument,
+      deps,
+      snapshotOnOpen,
+      offerRecovery
+    });
 
     const packageSlice = createPackageSlice(set, get, { persist, setDocument, deps });
+
+    const cloudBackupSlice = createCloudBackupSlice(set, get, { deps });
 
     const artworkIntake = createArtworkIntakeSlice(set, get, { applyEdit, persist, deps });
 
@@ -812,6 +1004,7 @@ export function createAppStore(deps: AppStoreDeps) {
       viewMode: "plan",
       saveState: "idle",
       error: null,
+      saveError: null,
       placementWarnings: [],
       lastGeometryEdit: null,
       undoStack: [],
@@ -819,7 +1012,9 @@ export function createAppStore(deps: AppStoreDeps) {
       libraryArtworks: [],
       intakeState: "idle",
       ...ARTWORK_INTAKE_SLICE_INITIAL,
+      ...CLOUD_BACKUP_SLICE_INITIAL,
       pendingPackageImport: null,
+      recoveryOffer: null,
 
       async boot() {
         // The library is a secondary document from the project's point of
@@ -848,18 +1043,34 @@ export function createAppStore(deps: AppStoreDeps) {
           }
 
           setDocument(project, { saveState: "saved", libraryArtworks, error: libraryError });
+          snapshotOnOpen(project);
         } catch (error) {
           // Keep the app usable with an in-memory sample, but say plainly that
           // the saved project could not load — never silently substitute.
           // The project load failure is the more important message here, so
           // it wins over any calmer library-load note.
+          const message = `Could not load the saved project (${
+            error instanceof Error ? error.message : "unknown error"
+          }). Showing an unsaved sample instead. Your data is still in browser storage.`;
+          // setDocument clears saveError by default; pass it through in extras so
+          // the load failure keeps its provenance. Retry re-runs the whole boot.
           setDocument(createSampleProject(), {
             saveState: "error",
             libraryArtworks,
-            error: `Could not load the saved project (${
-              error instanceof Error ? error.message : "unknown error"
-            }). Showing an unsaved sample instead. Your data is still in browser storage.`
+            error: message,
+            saveError: {
+              scope: "projectLoad",
+              message,
+              retry: async () => {
+                await get().boot();
+              }
+            }
           });
+          // A typed corruption error may have a schema-valid earlier copy to
+          // offer — a transient read error does not.
+          if (error instanceof ProjectValidationError) {
+            await offerRecovery(error.projectId);
+          }
         }
       },
 
@@ -1006,6 +1217,8 @@ export function createAppStore(deps: AppStoreDeps) {
       },
 
       ...packageSlice.actions,
+
+      ...cloudBackupSlice.actions,
 
       ...projectManager.actions,
 
@@ -2057,6 +2270,64 @@ export function createAppStore(deps: AppStoreDeps) {
           () => nextProject,
           selectionWrite(project, NO_SELECTION, get().wallContextId)
         );
+      },
+
+      async restoreProjectSnapshot(key) {
+        // Preserve the current document as a pre-restore copy so an unwanted
+        // restore is itself recoverable. Best-effort — a snapshot failure must
+        // not block the restore the user asked for.
+        const current = get().project;
+        if (current) {
+          try {
+            await writeSnapshot(current);
+          } catch (error) {
+            console.warn("Could not write a pre-restore snapshot", error);
+          }
+        }
+
+        set({ saveState: "saving", error: null });
+
+        // Both restore failures below re-run this same restore.
+        const retry = async () => {
+          await get().restoreProjectSnapshot(key);
+        };
+
+        try {
+          const record = await deps.projectSnapshotRepository.get(key);
+          if (!record) {
+            const message = "That copy could no longer be found.";
+            set({
+              saveState: "error",
+              error: message,
+              saveError: { scope: "restore", message, retry }
+            });
+            return;
+          }
+          const project = migrateProject(record.project);
+          setDocument(project, { viewMode: "plan", saveState: "saving" });
+          await persist(project);
+          snapshotOnOpen(project);
+        } catch (error) {
+          const message = `Could not restore that copy (${
+            error instanceof Error ? error.message : "unknown error"
+          }).`;
+          set({
+            saveState: "error",
+            error: message,
+            saveError: { scope: "restore", message, retry }
+          });
+        }
+      },
+
+      async acceptRecovery() {
+        const offer = get().recoveryOffer;
+        if (!offer) return;
+        set({ recoveryOffer: null });
+        await get().restoreProjectSnapshot(offer.snapshotKey);
+      },
+
+      dismissRecovery() {
+        set({ recoveryOffer: null });
       }
     };
   });
@@ -2073,6 +2344,8 @@ export const useAppStore = createAppStore({
   artworkLibraryRepository: new IndexedDbArtworkLibraryRepository(),
   assetRepository: new IndexedDbAssetRepository(),
   imageProcessor: createBrowserImageProcessor(),
+  projectSnapshotRepository: new IndexedDbProjectSnapshotRepository(),
+  cloudBackupProvider: createDropboxProvider() ?? undefined,
   onProjectDeleted: async (projectId) => {
     const { deleteStoredDocumentExportPreferences } = await import(
       "./hooks/useDocumentExportPreferences"

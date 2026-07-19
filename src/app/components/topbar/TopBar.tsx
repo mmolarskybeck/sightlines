@@ -20,6 +20,8 @@ import {
   getStorageNoteCopy,
   type StoragePersistenceState
 } from "../../hooks/useStoragePersistence";
+import { getCloudBackupPopoverLine } from "../../cloud/cloudBackupCopy";
+import type { CloudBackupProviderStatus } from "../../cloud/provider";
 import type { AppState, ViewMode } from "../../store";
 import { ProjectPicker } from "../library/ProjectPicker";
 import { StatusBadge } from "../toolbar";
@@ -65,6 +67,10 @@ type TopBarProps = {
   renameProjectById: AppState["renameProjectById"];
   storagePersistence: StoragePersistenceState;
   retryStoragePersistence: () => void;
+  cloudBackupConfigured: boolean;
+  cloudBackupProviderStatus: CloudBackupProviderStatus;
+  lastCloudBackupAt: string | null;
+  cloudBackupPending: boolean;
   isExportingPackage: boolean;
   handleExportPackage: (mode: PackageExportMode) => Promise<void>;
   handleExportProjectById: (id: string) => Promise<void>;
@@ -94,6 +100,10 @@ export function TopBar({
   renameProjectById,
   storagePersistence,
   retryStoragePersistence,
+  cloudBackupConfigured,
+  cloudBackupProviderStatus,
+  lastCloudBackupAt,
+  cloudBackupPending,
   isExportingPackage,
   handleExportPackage,
   handleExportProjectById,
@@ -103,6 +113,12 @@ export function TopBar({
   setIsExportPdfOpen,
   fileInputRef
 }: TopBarProps) {
+  const cloudBackupLine = getCloudBackupPopoverLine({
+    configured: cloudBackupConfigured,
+    status: cloudBackupProviderStatus,
+    lastCloudBackupAt,
+    pending: cloudBackupPending
+  });
   return (
     <header className="topbar">
       <div className="topbar-left">
@@ -190,6 +206,9 @@ export function TopBar({
               <h3>Where your work is saved</h3>
             </div>
             <p className="storage-popover-body">{getStorageNoteCopy(storagePersistence)}</p>
+            {cloudBackupLine ? (
+              <p className="storage-popover-cloud">{cloudBackupLine}</p>
+            ) : null}
             {storagePersistence === "denied" ? (
               <Button
                 className="storage-popover-retry"

@@ -3875,6 +3875,13 @@ body.panels-resizing * {
   line-height: var(--leading-copy);
 }
 
+.storage-popover-cloud {
+  margin: 0;
+  color: var(--subtle);
+  font-size: var(--type-xs);
+  line-height: var(--leading-copy);
+}
+
 .storage-popover-retry {
   justify-self: start;
 }

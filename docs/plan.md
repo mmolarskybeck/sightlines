@@ -442,13 +442,13 @@ MVP1 bundles a lot — geometry, artwork/checklist, snapping/collision/undo, and
 ### MVP 3 — Project packages, sharing, polish [IN PROGRESS]
 - **Shipped (2026-07-12):** `.sightlines` export/import as a self-contained `SightlinesPackage` (§6) — embeds the artwork snapshot the project actually needs, not just references into the local library — and the import safety pipeline (§13) applied to that path. Library-wide `exportAll()`/`importAll()` (§8) alongside per-project export is not yet built.
 - **Shipped (2026-07-16 → 17):** Saved camera views (create in 3D, thumbnail cache, left-rail collection pane); PNG export (Export image) for plan, elevation, and 3D view; Export PDF — multi-page document (Overview, room plans, per-wall elevations, Saved-view 3D pages) with automatic dimension lines and bundled-font text, per `docs/export-spec.md`.
-- `navigator.storage.persist()` and Settings' "Export backup" ship; a prominent, always-visible storage-status message ("this project is saved locally...") is still open (§11).
+- `navigator.storage.persist()` and Settings' "Export backup" ship. The storage-safety follow-up was reshaped 2026-07-19 from an always-visible status message into **Dropbox cloud backup + silent snapshot recovery** (§11, `docs/cloud-backup-providers.md`) — in progress: spike passed, snapshot layer + package-service/error-provenance built; provider, scheduler, and UI in flight.
 - PDF checklist export (client-side, pdf-lib) — a deliberate sibling slice to the elevation document above, not yet built (`docs/export-spec.md` §3.3).
 - Missing/approximate-data readiness report — not yet built.
 
 ### MVP 4 — Tablet + professional workflow depth
 - **Responsive/touch-adapted layout for iPad** (§3.5): touch-sized handles, gesture disambiguation, bottom-sheet panels, on-screen shortcut equivalents, 3D validated on real tablet hardware
-- Dropbox-folder sync (PKCE + offline access, app-folder-scoped — §6)
+- Dropbox-folder sync (PKCE + offline access, app-folder-scoped — §6); the backup half is landing early via the §11 storage-safety slice. Additional providers (Drive/OneDrive/Box): see `docs/cloud-backup-providers.md` for approval landscape + rollout staging
 - EXIF/IPTC metadata auto-fill on upload
 - Full checklist metadata editing, all sort modes, drag-reorder in custom mode
 - Scale-accurate PDF wall elevation + floor plan export (true ratio, tiling)
@@ -483,7 +483,9 @@ Even though Cloud is backlog, the decisions already made keep that door open wit
 
 ## 11. Two Things to Watch That Aren't Fully Solved by "Local-First"
 
-**Browser storage is a cache, not an archive.** IndexedDB/OPFS can be evicted, and OPFS is invisible to the user — no Finder window to recover from. The MVP1/MVP2 export and backup UX needs to be prominent, not buried. Two concrete, cheap things worth doing rather than leaving implicit: call `navigator.storage.persist()` on project load to request durable storage (not a guarantee, but it measurably reduces eviction risk on the browsers that honor it), and show a plain-language, always-visible status somewhere in the UI — "This project is saved locally in your browser. Export a backup for long-term safekeeping." — rather than assuming the export button alone communicates that.
+**Browser storage is a cache, not an archive.** IndexedDB/OPFS can be evicted, and OPFS is invisible to the user — no Finder window to recover from. The concrete mechanism is worse than "eviction under storage pressure": **Safari's ITP deletes all script-writable storage (IndexedDB, localStorage) after ~7 days of Safari use without visiting the site**, and Safari honors `navigator.storage.persist()` weakly — which maps directly onto this tool's audience (Mac/Safari-skewed) and usage rhythm (layout pass, then return weeks later during install week). `navigator.storage.persist()` is still worth calling (shipped), but it is not the answer.
+
+**The answer (decided 2026-07-19, in progress) is off-device backup into the user's own cloud storage.** Dropbox first — a pure browser app gets a secretless PKCE flow with a non-expiring refresh token refreshed by direct POST (spike-verified in the real browser; fully serverless, no Sightlines backend, app-folder-scoped so Sightlines can't see the rest of the account). Auto-backup after edits settle, last 5 copies retained per project, last-backup time visible in the save-status popover. A silent last-5-snapshot layer in IndexedDB complements it, but only against corruption/bad saves — snapshots share the origin, so they do not survive eviction. Future providers (Drive/OneDrive) may require a small **stateless** token-exchange helper on the existing Cloudflare worker; their auth constraints, approval processes, and a staged Dropbox rollout plan are recorded in `docs/cloud-backup-providers.md`.
 
 **The File System Access API (in-place save to a synced folder) is effectively Chromium-only.** Firefox has formally declined it, Safari has no committed timeline. Given the desktop audience skews Mac/Safari, this is the practical argument for keeping Tauri as a live option for a "real save/open" desktop experience — the only path to uniform real-disk access across platforms — even though the recommended path stays browser-first, and iPad specifically stays PWA-first per §3.5 rather than a native wrapper.
 

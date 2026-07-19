@@ -3,6 +3,13 @@ import type { Artwork, Asset, Project, ProjectSummary } from "../domain/project"
 import type { ArtworkLibraryRepository } from "../domain/repositories/artworkLibraryRepository";
 import { AssetNotFoundError, type AssetRepository } from "../domain/repositories/assetRepository";
 import type { ProjectRepository } from "../domain/repositories/projectRepository";
+import {
+  projectSnapshotKey,
+  SNAPSHOTS_PER_PROJECT,
+  type ProjectSnapshotRecord,
+  type ProjectSnapshotRepository,
+  type ProjectSnapshotSummary
+} from "../domain/repositories/projectSnapshotRepository";
 import { parseArtwork, parseAsset } from "../domain/schema/artworkSchema";
 import { parseProject } from "../domain/schema/projectSchema";
 
@@ -58,6 +65,58 @@ export class InMemoryArtworkLibraryRepository implements ArtworkLibraryRepositor
 
   async delete(id: string): Promise<void> {
     this.artworks.delete(id);
+  }
+}
+
+// Mirrors the IndexedDB snapshot repo's add semantics (fingerprint dedupe
+// against the newest, prune to SNAPSHOTS_PER_PROJECT) over a plain sorted map.
+export class InMemoryProjectSnapshotRepository implements ProjectSnapshotRepository {
+  records = new Map<string, ProjectSnapshotRecord>();
+
+  private keysFor(projectId: string): string[] {
+    return [...this.records.keys()]
+      .filter((key) => key.startsWith(`${projectId}:`))
+      .sort();
+  }
+
+  async add(record: ProjectSnapshotRecord): Promise<void> {
+    const keys = this.keysFor(record.projectId);
+    const newestKey = keys[keys.length - 1];
+    if (newestKey && this.records.get(newestKey)?.fingerprint === record.fingerprint) {
+      return;
+    }
+
+    this.records.set(projectSnapshotKey(record.projectId, record.createdAt), record);
+
+    const allKeys = this.keysFor(record.projectId);
+    const excess = allKeys.length - SNAPSHOTS_PER_PROJECT;
+    for (let i = 0; i < excess; i += 1) {
+      this.records.delete(allKeys[i]);
+    }
+  }
+
+  async listByProject(projectId: string): Promise<ProjectSnapshotSummary[]> {
+    return this.keysFor(projectId)
+      .map((key) => {
+        const record = this.records.get(key)!;
+        return {
+          key,
+          createdAt: record.createdAt,
+          projectTitle: record.projectTitle,
+          fingerprint: record.fingerprint
+        };
+      })
+      .reverse();
+  }
+
+  async get(key: string): Promise<ProjectSnapshotRecord | undefined> {
+    return this.records.get(key);
+  }
+
+  async deleteByProject(projectId: string): Promise<void> {
+    for (const key of this.keysFor(projectId)) {
+      this.records.delete(key);
+    }
   }
 }
 

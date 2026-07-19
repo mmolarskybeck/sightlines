@@ -3,9 +3,27 @@ import type { Project, ProjectSummary } from "../project";
 import type { ProjectRepository } from "./projectRepository";
 import { openDatabase, PROJECT_STORE, requestToPromise, transactionDone } from "./database";
 
+// A loaded record exists but fails to parse or migrate to the current schema —
+// a malformed document or a migration that can't run. Distinct from operational
+// IDB failures (a transient read error, a closed connection), which propagate
+// unchanged. Recovery is offered ONLY for this typed failure: a transient read
+// error must not substitute a snapshot for a document that is actually fine.
+export class ProjectValidationError extends Error {
+  constructor(
+    message: string,
+    readonly projectId: string,
+    override readonly cause?: unknown
+  ) {
+    super(message);
+    this.name = "ProjectValidationError";
+  }
+}
+
 export class IndexedDbProjectRepository implements ProjectRepository {
   async load(id: string): Promise<Project> {
     const db = await openDatabase();
+    // Operational IDB errors here (read failure, closed connection) propagate
+    // as-is — they are not a corruption signal.
     const value = await requestToPromise<unknown>(
       db.transaction(PROJECT_STORE, "readonly").objectStore(PROJECT_STORE).get(id)
     );
@@ -14,7 +32,17 @@ export class IndexedDbProjectRepository implements ProjectRepository {
       throw new Error(`Project not found: ${id}`);
     }
 
-    return migrateProject(value);
+    // Parse/migration failures are the corruption signal — wrap them so callers
+    // can offer recovery without catching every possible load error.
+    try {
+      return migrateProject(value);
+    } catch (error) {
+      throw new ProjectValidationError(
+        error instanceof Error ? error.message : "the project could not be read.",
+        id,
+        error
+      );
+    }
   }
 
   async save(project: Project): Promise<void> {

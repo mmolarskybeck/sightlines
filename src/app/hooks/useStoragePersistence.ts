@@ -54,7 +54,7 @@ export function getStorageNoteCopy(state: StoragePersistenceState): string {
   }
 
   if (state === "denied" || state === "unsupported") {
-    return "Saved locally in this browser, which may clear it under storage pressure. Export a backup regularly for long-term safekeeping.";
+    return "Saved locally in this browser. Some browsers, including Safari, can clear local data after about a week without a visit, so export a backup regularly — or connect cloud backup below.";
   }
 
   return "Saved locally in this browser. Export a backup for long-term safekeeping.";

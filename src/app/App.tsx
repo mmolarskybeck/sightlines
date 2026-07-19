@@ -96,6 +96,11 @@ import {
 import { WallInspector } from "./components/inspectors/WallInspector";
 import { WallTextInspector } from "./components/inspectors/WallTextInspector";
 import { useStoragePersistence } from "./hooks/useStoragePersistence";
+import { useSaveErrorToast } from "./hooks/useSaveErrorToast";
+import {
+  useCloudBackupScheduler,
+  useCloudBackupErrorToast
+} from "./hooks/useCloudBackupScheduler";
 import {
   escapeMeasurementState,
   useMeasurementTool
@@ -202,7 +207,18 @@ export function App() {
   const intakeState = useAppStore((state) => state.intakeState);
   const pendingDuplicateUploads = useAppStore((state) => state.pendingDuplicateUploads);
   const pendingPackageImport = useAppStore((state) => state.pendingPackageImport);
+  const recoveryOffer = useAppStore((state) => state.recoveryOffer);
+  const acceptRecovery = useAppStore((state) => state.acceptRecovery);
+  const dismissRecovery = useAppStore((state) => state.dismissRecovery);
   const boot = useAppStore((state) => state.boot);
+  const cloudBackupProviderStatus = useAppStore((state) => state.cloudBackupProviderStatus);
+  const cloudBackupAccountLabel = useAppStore((state) => state.cloudBackupAccountLabel);
+  const lastCloudBackupAt = useAppStore((state) => state.lastCloudBackupAt);
+  const cloudBackupPending = useAppStore((state) => state.cloudBackupPending);
+  const connectCloudBackup = useAppStore((state) => state.connectCloudBackup);
+  const disconnectCloudBackup = useAppStore((state) => state.disconnectCloudBackup);
+  const completeCloudBackupConnect = useAppStore((state) => state.completeCloudBackupConnect);
+  const refreshCloudBackupStatus = useAppStore((state) => state.refreshCloudBackupStatus);
   const loadBenchmarkFixture = useAppStore((state) => state.loadBenchmarkFixture);
   const setViewMode = useAppStore((state) => state.setViewMode);
   const selectWall = useAppStore((state) => state.selectWall);
@@ -528,6 +544,26 @@ export function App() {
   }, [boot, loadBenchmarkFixture]);
 
   useUndoRedoShortcuts({ undo, redo });
+
+  // Surface save failures as a one-shot toast with a scoped Retry (transition
+  // into error only — never per keystroke). The StatusBadge is unaffected.
+  useSaveErrorToast();
+
+  // Cloud backup: schedule auto-uploads (idle-settle + min-interval gates) and
+  // surface upload failures on their own toast surface.
+  useCloudBackupScheduler();
+  useCloudBackupErrorToast();
+
+  // Finish a Dropbox connect redirect once on boot (?code=&state= tail), then
+  // fold the provider's link status + this project's stored backup meta into
+  // state whenever the open project changes.
+  const cloudBackupConfigured = Boolean(import.meta.env.VITE_DROPBOX_CLIENT_ID);
+  useEffect(() => {
+    void completeCloudBackupConnect();
+  }, [completeCloudBackupConnect]);
+  useEffect(() => {
+    refreshCloudBackupStatus();
+  }, [refreshCloudBackupStatus, project?.id]);
 
   // The staged Saved-view pose is a one-shot handoff for a 3D mount (spec §4.3);
   // clear it on leaving 3D so a later re-entry frames the overview, not a stale
@@ -1395,6 +1431,10 @@ export function App() {
         renameProjectById={renameProjectById}
         storagePersistence={storagePersistence}
         retryStoragePersistence={retryStoragePersistence}
+        cloudBackupConfigured={cloudBackupConfigured}
+        cloudBackupProviderStatus={cloudBackupProviderStatus}
+        lastCloudBackupAt={lastCloudBackupAt}
+        cloudBackupPending={cloudBackupPending}
         isExportingPackage={isExportingPackage}
         handleExportPackage={handleExportPackage}
         handleExportProjectById={handleExportProjectById}
@@ -2287,6 +2327,12 @@ export function App() {
         setIsSettingsOpen={setIsSettingsOpen}
         storagePersistence={storagePersistence}
         retryStoragePersistence={retryStoragePersistence}
+        cloudBackupConfigured={cloudBackupConfigured}
+        cloudBackupProviderStatus={cloudBackupProviderStatus}
+        cloudBackupAccountLabel={cloudBackupAccountLabel}
+        lastCloudBackupAt={lastCloudBackupAt}
+        connectCloudBackup={connectCloudBackup}
+        disconnectCloudBackup={disconnectCloudBackup}
         resetPreferences={resetPreferences}
         handleExportPackage={handleExportPackage}
         fileInputRef={fileInputRef}
@@ -2313,6 +2359,9 @@ export function App() {
         pendingPackageImport={pendingPackageImport}
         resolvePackageImportConflicts={resolvePackageImportConflicts}
         dismissPackageImport={dismissPackageImport}
+        recoveryOffer={recoveryOffer}
+        acceptRecovery={acceptRecovery}
+        dismissRecovery={dismissRecovery}
       />
     </main>
     </TooltipProvider>

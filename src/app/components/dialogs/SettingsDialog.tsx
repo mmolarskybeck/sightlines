@@ -4,6 +4,10 @@ import {
   getStorageNoteCopy,
   type StoragePersistenceState
 } from "../../hooks/useStoragePersistence";
+import {
+  formatBackupRelativeTime
+} from "../../cloud/cloudBackupCopy";
+import type { CloudBackupProviderStatus } from "../../cloud/provider";
 import { useAppStore } from "../../store";
 import { LengthField } from "../shared/LengthField";
 import { getScopedUnitContext } from "../shared/scopedUnits";
@@ -30,6 +34,12 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void;
   storageState: StoragePersistenceState;
   onRetryStorage: () => void;
+  cloudBackupConfigured: boolean;
+  cloudBackupProviderStatus: CloudBackupProviderStatus;
+  cloudBackupAccountLabel: string | null;
+  lastCloudBackupAt: string | null;
+  onConnectCloudBackup: () => Promise<void>;
+  onDisconnectCloudBackup: () => void;
   resetPreferences: () => void;
   onExport: () => void;
   onImport: () => void;
@@ -58,6 +68,12 @@ export function SettingsDialog({
   onOpenChange,
   storageState,
   onRetryStorage,
+  cloudBackupConfigured,
+  cloudBackupProviderStatus,
+  cloudBackupAccountLabel,
+  lastCloudBackupAt,
+  onConnectCloudBackup,
+  onDisconnectCloudBackup,
   resetPreferences,
   onExport,
   onImport,
@@ -171,6 +187,16 @@ export function SettingsDialog({
                 </Button>
               </div>
 
+              {cloudBackupConfigured ? (
+                <CloudBackupBlock
+                  status={cloudBackupProviderStatus}
+                  accountLabel={cloudBackupAccountLabel}
+                  lastCloudBackupAt={lastCloudBackupAt}
+                  onConnect={onConnectCloudBackup}
+                  onDisconnect={onDisconnectCloudBackup}
+                />
+              ) : null}
+
               {project ? (
                 <div className="settings-danger">
                   <div className="settings-danger-item">
@@ -240,6 +266,69 @@ export function SettingsDialog({
         </Dialog>
       ) : null}
     </>
+  );
+}
+
+// The "Cloud backup" block inside the Storage section. Three states, all inside
+// the existing settings chrome (no new dialog): disconnected → connect;
+// connected → account + last-backup time + disconnect; reauth → reconnect. The
+// account never receives a copy of the work — the browser uploads straight to
+// the user's own Dropbox, said once here.
+function CloudBackupBlock({
+  status,
+  accountLabel,
+  lastCloudBackupAt,
+  onConnect,
+  onDisconnect
+}: {
+  status: CloudBackupProviderStatus;
+  accountLabel: string | null;
+  lastCloudBackupAt: string | null;
+  onConnect: () => Promise<void>;
+  onDisconnect: () => void;
+}) {
+  return (
+    <div className="settings-field">
+      <span className="settings-row-label">Cloud backup</span>
+      {status === "connected" ? (
+        <>
+          <p className="settings-row-note">
+            {accountLabel ? `Connected as ${accountLabel}. ` : "Connected. "}
+            {lastCloudBackupAt
+              ? `Backed up ${formatBackupRelativeTime(lastCloudBackupAt)}.`
+              : "Waiting for the first backup."}
+          </p>
+          <div className="settings-actions">
+            <Button variant="outline" onClick={onDisconnect}>
+              Disconnect
+            </Button>
+          </div>
+        </>
+      ) : status === "reauthorization-required" ? (
+        <>
+          <p className="settings-row-note">
+            Dropbox access expired. Reconnect to resume automatic backups.
+          </p>
+          <div className="settings-actions">
+            <Button variant="outline" onClick={() => void onConnect()}>
+              Reconnect Dropbox
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="settings-row-note">
+            Backs up this project to your Dropbox automatically. Sightlines never
+            receives a copy.
+          </p>
+          <div className="settings-actions">
+            <Button variant="outline" onClick={() => void onConnect()}>
+              Connect Dropbox
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

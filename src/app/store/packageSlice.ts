@@ -1,5 +1,5 @@
 import { toast } from "sonner";
-import { createSightlinesPackage, packageFilename } from "../../domain/package/buildPackage";
+import { buildProjectPackage } from "../../domain/package/packageService";
 import {
   finalizePackageImport,
   openSightlinesPackage,
@@ -62,7 +62,9 @@ export function createPackageSlice(
     mode: PackageExportMode
   ): Promise<{ filename: string; zip: Uint8Array; warnings: string[] } | null> {
     try {
-      const { zip, warnings } = await createSightlinesPackage({
+      // Pure build lives in the domain service (no store side effects); this
+      // wrapper keeps the export-error-banner behavior the UI relies on.
+      const { filename, zip, warnings } = await buildProjectPackage({
         project,
         libraryArtworks,
         mode,
@@ -70,7 +72,7 @@ export function createPackageSlice(
         getBlob: (key) => deps.assetRepository.getBlob(key)
       });
       set({ error: null });
-      return { filename: packageFilename(project), zip, warnings };
+      return { filename, zip, warnings };
     } catch (error) {
       set({
         error: `Export failed: ${

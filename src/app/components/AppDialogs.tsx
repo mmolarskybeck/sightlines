@@ -9,10 +9,12 @@ import type { PackageExportMode } from "../../domain/schema/packageSchema";
 import type { EffectiveDocumentSettings } from "../../domain/export/documentSettings";
 import { ArtworkLibraryPicker } from "./library/ArtworkLibrary";
 import { DeleteRoomDialog } from "./dialogs/DeleteRoomDialog";
+import { RecoveryDialog } from "./dialogs/RecoveryDialog";
 import { HelpDialog } from "./dialogs/HelpDialog";
 import { ImportConflictDialog } from "./imports/ImportConflictDialog";
 import type { SavedViewRenderHandle } from "./three/SavedViewRenderHost";
 import type { StoragePersistenceState } from "../hooks/useStoragePersistence";
+import type { CloudBackupProviderStatus } from "../cloud/provider";
 import type { UseSavedViewThumbnails } from "../hooks/useSavedViewThumbnails";
 import type { RoomContentsSummary } from "../roomDeletion";
 import type { AppState, ArtworkImportDestination, ViewMode } from "../store";
@@ -54,6 +56,12 @@ type AppDialogsProps = {
   setIsSettingsOpen: (open: boolean) => void;
   storagePersistence: StoragePersistenceState;
   retryStoragePersistence: () => void;
+  cloudBackupConfigured: boolean;
+  cloudBackupProviderStatus: CloudBackupProviderStatus;
+  cloudBackupAccountLabel: string | null;
+  lastCloudBackupAt: string | null;
+  connectCloudBackup: AppState["connectCloudBackup"];
+  disconnectCloudBackup: AppState["disconnectCloudBackup"];
   resetPreferences: () => void;
   handleExportPackage: (mode: PackageExportMode) => Promise<void>;
   fileInputRef: RefObject<HTMLInputElement>;
@@ -80,6 +88,9 @@ type AppDialogsProps = {
   pendingPackageImport: AppState["pendingPackageImport"];
   resolvePackageImportConflicts: AppState["resolvePackageImportConflicts"];
   dismissPackageImport: AppState["dismissPackageImport"];
+  recoveryOffer: AppState["recoveryOffer"];
+  acceptRecovery: AppState["acceptRecovery"];
+  dismissRecovery: AppState["dismissRecovery"];
 };
 
 export function AppDialogs({
@@ -97,6 +108,12 @@ export function AppDialogs({
   setIsSettingsOpen,
   storagePersistence,
   retryStoragePersistence,
+  cloudBackupConfigured,
+  cloudBackupProviderStatus,
+  cloudBackupAccountLabel,
+  lastCloudBackupAt,
+  connectCloudBackup,
+  disconnectCloudBackup,
   resetPreferences,
   handleExportPackage,
   fileInputRef,
@@ -122,7 +139,10 @@ export function AppDialogs({
   deleteRoom,
   pendingPackageImport,
   resolvePackageImportConflicts,
-  dismissPackageImport
+  dismissPackageImport,
+  recoveryOffer,
+  acceptRecovery,
+  dismissRecovery
 }: AppDialogsProps) {
   return (
     <>
@@ -147,6 +167,12 @@ export function AppDialogs({
           onOpenChange={setIsSettingsOpen}
           storageState={storagePersistence}
           onRetryStorage={retryStoragePersistence}
+          cloudBackupConfigured={cloudBackupConfigured}
+          cloudBackupProviderStatus={cloudBackupProviderStatus}
+          cloudBackupAccountLabel={cloudBackupAccountLabel}
+          lastCloudBackupAt={lastCloudBackupAt}
+          onConnectCloudBackup={connectCloudBackup}
+          onDisconnectCloudBackup={disconnectCloudBackup}
           resetPreferences={resetPreferences}
           onExport={() => void handleExportPackage("display")}
           onImport={() => fileInputRef.current?.click()}
@@ -197,6 +223,11 @@ export function AppDialogs({
         conflicts={pendingPackageImport?.conflicts ?? null}
         onResolve={(resolutions) => void resolvePackageImportConflicts(resolutions)}
         onDismiss={dismissPackageImport}
+      />
+      <RecoveryDialog
+        offer={recoveryOffer}
+        onRestore={() => void acceptRecovery()}
+        onDismiss={dismissRecovery}
       />
     </>
   );

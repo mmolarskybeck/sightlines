@@ -43,10 +43,14 @@ import {
   InMemoryArtworkLibraryRepository,
   InMemoryAssetRepository,
   InMemoryProjectRepository,
+  InMemoryProjectSnapshotRepository,
   makeImageFile
 } from "../test/inMemoryRepositories";
 import { exportProjectJson } from "../test/exportProjectJson";
-import type { AppStoreDeps } from "./store";
+import { ProjectValidationError } from "../domain/repositories/indexedDbProjectRepository";
+import { SNAPSHOT_MIN_INTERVAL_MS } from "../domain/repositories/projectSnapshotRepository";
+import type { AppStoreDeps, SaveError } from "./store";
+import { shouldAnnounceSaveError } from "./hooks/useSaveErrorToast";
 import {
   createAppStore,
   FORBIDDEN_OVERLAP_MESSAGE,
@@ -64,6 +68,7 @@ describe("app store", () => {
   let artworkLibraryRepository: InMemoryArtworkLibraryRepository;
   let assetRepository: InMemoryAssetRepository;
   let imageProcessor: FakeImageProcessor;
+  let projectSnapshotRepository: InMemoryProjectSnapshotRepository;
   let store: ReturnType<typeof createAppStore>;
 
   function makeDeps(overrides: Partial<AppStoreDeps> = {}): AppStoreDeps {
@@ -72,6 +77,7 @@ describe("app store", () => {
       artworkLibraryRepository,
       assetRepository,
       imageProcessor,
+      projectSnapshotRepository,
       ...overrides
     };
   }
@@ -92,6 +98,7 @@ describe("app store", () => {
     artworkLibraryRepository = new InMemoryArtworkLibraryRepository();
     assetRepository = new InMemoryAssetRepository();
     imageProcessor = new FakeImageProcessor();
+    projectSnapshotRepository = new InMemoryProjectSnapshotRepository();
     store = createAppStore(makeDeps());
     await store.getState().boot();
   });
@@ -1314,6 +1321,139 @@ describe("app store", () => {
     expect(state.error).toMatch(/stored document failed validation/);
     expect(state.saveState).toBe("error");
     expect(state.project?.title).toBe("Untitled Exhibition");
+  });
+
+  describe("recovery snapshots", () => {
+    // Snapshots are written fire-and-forget; let their microtask/timer settle.
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    it("snapshots a project once per session when it becomes the open document", async () => {
+      await flush(); // boot's open snapshot of the sample lands first
+
+      const other: Project = {
+        ...createSampleProject(),
+        id: "other-project-000001",
+        title: "Other"
+      };
+      await repository.save(other);
+
+      const bootId = store.getState().project!.id;
+
+      await store.getState().openProject(other.id);
+      await flush();
+      expect((await projectSnapshotRepository.listByProject(other.id))).toHaveLength(1);
+
+      // Switch away and back within the same session — no second snapshot.
+      await store.getState().openProject(bootId);
+      await store.getState().openProject(other.id);
+      await flush();
+      expect((await projectSnapshotRepository.listByProject(other.id))).toHaveLength(1);
+    });
+
+    it("interval-gates snapshots taken from the save path", async () => {
+      const bootId = store.getState().project!.id;
+      await flush();
+      expect((await projectSnapshotRepository.listByProject(bootId))).toHaveLength(1);
+
+      // Anchor to real now so the gate compares against boot's snapshot time.
+      let clock = Date.now();
+      const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
+
+      // An edit inside the interval doesn't add a snapshot.
+      await store.getState().renameProject("Renamed Once");
+      await flush();
+      expect((await projectSnapshotRepository.listByProject(bootId))).toHaveLength(1);
+
+      // Past the interval, the next successful save snapshots (distinct copy).
+      clock += SNAPSHOT_MIN_INTERVAL_MS + 1000;
+      await store.getState().renameProject("Renamed Twice");
+      await flush();
+      expect((await projectSnapshotRepository.listByProject(bootId))).toHaveLength(2);
+
+      nowSpy.mockRestore();
+    });
+
+    it("a failing snapshot repository never breaks saving", async () => {
+      const failingSnapshots = new InMemoryProjectSnapshotRepository();
+      failingSnapshots.add = async () => {
+        throw new Error("snapshot boom");
+      };
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const s = createAppStore(
+        makeDeps({ projectSnapshotRepository: failingSnapshots })
+      );
+      await s.getState().boot();
+      await s.getState().renameProject("Edited");
+      await flush();
+
+      expect(s.getState().saveState).toBe("saved");
+      warn.mockRestore();
+    });
+
+    it("offers recovery from the newest valid snapshot after a typed load failure, then restores it", async () => {
+      const projectId = "corrupt-project-00001";
+      const good: Project = {
+        ...createSampleProject(),
+        id: projectId,
+        title: "Recoverable"
+      };
+
+      const snapshots = new InMemoryProjectSnapshotRepository();
+      await snapshots.add({
+        projectId,
+        createdAt: "2026-07-19T00:00:00.000Z",
+        projectTitle: good.title,
+        fingerprint: "fp",
+        project: good
+      });
+
+      const repo = new InMemoryProjectRepository();
+      repo.list = async () => [
+        {
+          id: projectId,
+          title: "Recoverable",
+          updatedAt: "2026-07-19T00:00:00.000Z",
+          roomCount: 0,
+          artworkCount: 0
+        }
+      ];
+      repo.load = async () => {
+        throw new ProjectValidationError("stored document failed validation", projectId);
+      };
+
+      const s = createAppStore(
+        makeDeps({ projectRepository: repo, projectSnapshotRepository: snapshots })
+      );
+      await s.getState().boot();
+
+      const offer = s.getState().recoveryOffer;
+      expect(offer?.projectId).toBe(projectId);
+      expect(offer?.snapshotKey).toBeTruthy();
+      expect(offer?.createdAt).toBe("2026-07-19T00:00:00.000Z");
+
+      await s.getState().acceptRecovery();
+      const state = s.getState();
+      expect(state.recoveryOffer).toBeNull();
+      expect(state.project?.id).toBe(projectId);
+      expect(state.project?.title).toBe("Recoverable");
+      expect(state.saveState).toBe("saved");
+    });
+
+    it("does not offer recovery when a load fails with an untyped operational error", async () => {
+      const repo = new InMemoryProjectRepository();
+      const stored = createSampleProject();
+      repo.projects.set(stored.id, stored);
+      repo.load = async () => {
+        throw new Error("transient read error");
+      };
+
+      const s = createAppStore(makeDeps({ projectRepository: repo }));
+      await s.getState().boot();
+
+      expect(s.getState().recoveryOffer).toBeNull();
+      expect(s.getState().saveState).toBe("error");
+    });
   });
 
   it("save validates before writing, so an invalid document cannot persist", async () => {
@@ -5274,6 +5414,74 @@ describe("app store", () => {
       const wallText = store.getState().project!.wallObjects.find((o) => o.id === id)!;
       expect(wallText.widthMm).toBe(900);
       expect(wallText.heightMm).toBe(500);
+    });
+  });
+
+  describe("save-error provenance", () => {
+    it("classifies a failed project save as scope 'project' and its retry re-runs persist", async () => {
+      const saveSpy = vi
+        .spyOn(repository, "save")
+        .mockRejectedValueOnce(new Error("disk full"));
+
+      // Any project edit routes through persist().
+      await store.getState().resizeSelectedWall(9_000);
+
+      let state = store.getState();
+      expect(state.saveState).toBe("error");
+      expect(state.saveError?.scope).toBe("project");
+      expect(state.saveError?.message).toMatch(/disk full/);
+      expect(state.error).toMatch(/disk full/);
+      // First attempt only; the mock rejected once so the retry can succeed.
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+
+      // The Retry closure re-runs the same persist and recovers on success.
+      await state.saveError!.retry();
+
+      state = store.getState();
+      expect(saveSpy).toHaveBeenCalledTimes(2);
+      expect(state.saveState).toBe("saved");
+      expect(state.saveError).toBeNull();
+    });
+
+    it("classifies a failed artwork-library save as scope 'artworkLibrary' and its retry re-runs the artwork save", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+
+      const artworkSave = vi
+        .spyOn(artworkLibraryRepository, "save")
+        .mockRejectedValueOnce(new Error("library write failed"));
+
+      await store.getState().updateArtwork(artworkId, { title: "Untitled No. 4" });
+
+      let state = store.getState();
+      expect(state.saveState).toBe("error");
+      expect(state.saveError?.scope).toBe("artworkLibrary");
+      expect(state.saveError?.message).toMatch(/library write failed/);
+      expect(artworkSave).toHaveBeenCalledTimes(1);
+
+      // Retry re-runs exactly the artwork save; on success the state recovers.
+      await state.saveError!.retry();
+
+      state = store.getState();
+      expect(artworkSave).toHaveBeenCalledTimes(2);
+      expect(state.saveState).toBe("saved");
+      expect(state.saveError).toBeNull();
+      expect(artworkLibraryRepository.artworks.get(artworkId)?.title).toBe("Untitled No. 4");
+    });
+
+    it("repeated same-scope failures never re-toast: shouldAnnounceSaveError fires only on transition into error", () => {
+      const project: SaveError = { scope: "project", message: "a", retry: async () => {} };
+      const projectAgain: SaveError = { scope: "project", message: "b", retry: async () => {} };
+      const artwork: SaveError = { scope: "artworkLibrary", message: "c", retry: async () => {} };
+
+      // Clean → error announces; a fresh same-scope failure (keystroke) does not.
+      expect(shouldAnnounceSaveError(null, project)).toBe(true);
+      expect(shouldAnnounceSaveError(project, projectAgain)).toBe(false);
+      // A different failing scope announces; recovery (→ null) never toasts.
+      expect(shouldAnnounceSaveError(project, artwork)).toBe(true);
+      expect(shouldAnnounceSaveError(project, null)).toBe(false);
+      // After a recovery, the next failure announces again.
+      expect(shouldAnnounceSaveError(null, artwork)).toBe(true);
     });
   });
 });
