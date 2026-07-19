@@ -974,6 +974,24 @@ in Phase 1.
 - Saved-view schema shape (pose, room id, title, creation order/date) and
   its `.sightlines` migration.
 
+### Documented divergences (intentional, audited 2026-07-18)
+
+- **Dimension-label placement is two engines by design.** The gap *values*
+  and tick/line geometry come from the one shared engine
+  (`orthogonalNeighbors.ts`), so screen and PDF can never disagree on a
+  measurement. Label *positioning* diverges deliberately: the SVG components
+  size labels with `dimensionDrafting.ts`'s glyph-width estimate and step to
+  a farther offset (plus leader) when a label doesn't fit, while the PDF
+  measures real embedded-font metrics and escapes crowded clusters via
+  `pdfDimensionLayout.ts`'s candidate/flood-fill routing. Forcing one
+  placement routine would make the screen honor metrics it doesn't have (or
+  the PDF ignore metrics it does have). Do not unify; both sides carry
+  characterization tests.
+- **Door/window connection status dots do not print.** `roomScene` in the
+  PDF pipeline intentionally omits `openingConnections` — alignment status
+  is a live editing aid, not part of a static document (annotated at the
+  omission site).
+
 ## 17. Ethical review
 
 The feature produces artifacts the user explicitly composes and triggers; it

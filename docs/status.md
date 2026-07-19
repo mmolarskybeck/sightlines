@@ -1,6 +1,6 @@
 # Sightlines Status
 
-Last refreshed: 2026-07-17 (repo health pass)
+Last refreshed: 2026-07-18 (architecture audit + refactor pass)
 
 This is the single living status doc: current state, what shipped recently, and what comes next. The full product/architecture plan and roadmap live in `docs/plan.md`; small scraps live in `docs/quick-todos.md`; the chronological build log through 2026-07-10 is frozen at `docs/archive/progress.md`.
 
@@ -95,6 +95,25 @@ Review verdicts that held up under real scrutiny (no action needed): wall-length
 - **App.tsx narrow selectors**: the structural extractions shipped later on 2026-07-17 (App.tsx 2,690 → ~2,160: dialog host → `<AppDialogs>`, topbar → `components/topbar/TopBar` + `ProjectTitleInput`, `triggerDownload` → `app/export/`, wall-name helpers → `projectWalls.ts`; all pure props, no new store subscriptions). The narrow-selector conversion shipped 2026-07-17: App's selector-less `useAppStore()` destructure (105 fields, re-rendered on every store write) is now 105 individual `useAppStore((state) => state.X)` selectors per the PlanView/SettingsDialog pattern — action refs are stable (plain `create()`), so App re-renders only when a field it reads changes — note `project` is one of those fields, so document edits still re-render App (immutable updates give it a new reference); the win is isolation from non-project store churn (selection, drag, dialog/view state App doesn't read). Verified: tsc, vitest (1,991 tests), headless smoke driver.
 - **`exportProjectJson`** (store.ts) is test-only — production export goes through packages; retire into a test helper when convenient.
 - **Small notes**: the >900 kB pdf chunk build warning is pre-existing and acknowledged; `elevation/GroupDimensionLines` still imports `../plan/labelStagger` (existing cross-feature edge — candidate for `shared/` if it grows); export scale/JPEG-quality constants are intentionally duplicated between `captureSnapshot.ts` and `SnapshotStage.tsx` per spec §10.4 (skip consolidating).
+
+## Architecture Audit + Refactor Pass (2026-07-18)
+
+Four-agent audit (geometry contracts, dead code, coupling, test coverage) of the recent feature run (PDF export, display cases, wall text, snapping redesign, dimension lines), then five verified refactor commits (`287dc29`…`12e5e92`; tests 2,080 → 2,121, tsc/build/headless smoke green after each).
+
+**Audit verdict:** the shared-contract architecture is holding — `buildPlanScene`/`buildElevationScene` feed the PDF for all primary rects, `framing.ts` is the single framed-footprint source across all six consumers, `orthogonalNeighbors.ts` is the one dimension engine, `resolveSnap` the one snap engine, `partitionSpacing.ts` serves both snapping and dims, zero `domain/ → app/` imports, and confirmed dead code totaled ~12 lines. Drift lived in the decorative layer, not the primary geometry.
+
+**Landed:**
+
+- **Case-glyph parity** (`1a73480`): new pure `domain/geometry/caseGlyphs.ts` owns the vitrine construction (glass lid/slab/legs/hatch + wall-text plan lines) in mm; SVG components pass zoom-clamped insets in and render pixel-identically; the PDF dropped its drifted generic 0.22-inset glyphs and now draws the real construction — the one place an export visibly disagreed with the canvas.
+- **PDF wall-dimension outwardness** (`287dc29`): `drawRoomWallDimensions` re-introduced the concave-room centroid heuristic the 2026-07-09 pass eliminated; now uses canonical `outwardWallNormal` (L-shaped-room regression test added).
+- **Mat/frame ring nesting** (`08fc097`): `getArtworkRingRectsMm` in `framing.ts` is the single image→mat→frame decomposition; `ElevationArtwork` and the PDF both consume it (PDF expands in mm before the affine pt transform — bit-identical). `dimensionDrafting.ts` got its first characterization suite (constants, label estimation, span-fit boundaries).
+- **`createDocumentPdf.ts` mechanical split** (`2a48140`): 2,058 → 588 lines; drawing code moved verbatim to `app/export/pdf/{primitives,transforms,planPage,elevationPage,dimensionLines}.ts`; re-exports kept every external import site and all test files untouched; PDF chunk stays lazy (chunk-graph assertion). Seam prep for PDF checklist export, MVP4 scale-accurate tiling, and packet export.
+- **Measurement logic out of views** (`12e5e92`): PlanView 3,391 → 3,207; pure measure-source geometry → `domain/measurement/planMeasurementGeometry.ts`, nudge/re-anchor helpers → `domain/snapping/planGroupMove.ts`, keyboard/gesture policy → `app/hooks/planMeasurementPolicy.ts` + `elevationMeasurementPolicy.ts` (per the `measurementCreationKey` pattern); test bodies byte-identical.
+- **Cleanups** (`287dc29`): dead symbols deleted (`WALL_*_SENTINEL`, `floorPointToWorld`, `mmToFeet`, `ImageTier`); `exportProjectJson` → `src/test/`; `rendererBenchmarkEnabled` deduped into `rendererBenchmarkFlag.ts`; `ARTWORK_DRAG_MIME` moved to `artworkDragSession.ts`.
+
+**Documented, deliberately not unified:** PDF vs SVG dimension-*label placement* (real font metrics + flood-fill vs estimate + step-out — values/ticks share one engine; see `docs/export-spec.md` §16 "Documented divergences"); `openingConnections` omitted from PDF room pages (annotated in code).
+
+**Deferred from the audit:** `floorAlign` context helper (3× repetition in PlanView — extract on the fourth use), component render tests for case/wall-text components (domain-first strategy holds; glyph construction is now testable as data), unused shadcn primitive exports, `store/types.ts` cycle-break.
 
 ## Near-Term Order
 
