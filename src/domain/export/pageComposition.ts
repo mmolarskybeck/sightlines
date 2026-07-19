@@ -162,6 +162,18 @@ export function getPlanSceneBounds(scene: PlanScene): DocumentBoundsMm {
   return boundsFromPoints(points);
 }
 
+// Structure-only bounds (room polygons alone), excluding wall/floor object
+// rects. Wall-mounted objects straddle the wall centerline and can push
+// getPlanSceneBounds a few mm past the outer wall — fine for page fit, but
+// wrong as the grid's extent (it would leave cut-off grid stubs poking past
+// the wall line). Falls back to the object-inflated bounds when there are no
+// rooms to measure.
+export function getPlanStructureBounds(scene: PlanScene): DocumentBoundsMm {
+  const points = scene.rooms.flatMap((room) => room.polygonMm);
+  if (points.length === 0) return getPlanSceneBounds(scene);
+  return boundsFromPoints(points);
+}
+
 export function getRoomPlanBounds(room: PlanSceneRoom): DocumentBoundsMm {
   return expandDocumentBounds(
     boundsFromPoints(room.polygonMm),

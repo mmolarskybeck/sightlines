@@ -33,6 +33,7 @@ import {
   fitBoundsToRect,
   getPageDrawingRectPt,
   getPageSizePt,
+  getPlanStructureBounds,
   type DocumentPageManifest
 } from "../../domain/export/pageComposition";
 import { prepareImageForPdf, type PdfImageOptions } from "./pdfImage";
@@ -279,13 +280,16 @@ export async function createDocumentPdf(
     );
 
     if (manifestPage.kind === "overview") {
+      // Grid stops at the walls (structure bounds); the fit still uses the
+      // object-inflated manifest bounds so protruding wall objects aren't clipped.
       const transform = drawPlanScene(
         page,
         fullPlanScene,
         manifestPage.boundsMm,
         insetRect(baseRect, DRAWING_INSET_PT),
         input.project.unit,
-        input.settings.grid
+        input.settings.grid,
+        getPlanStructureBounds(fullPlanScene)
       );
       drawScaleBar(page, fonts, input.project.unit, transform.scalePtPerMm);
       continue;

@@ -10,6 +10,7 @@ import {
   getPageDrawingRectPt,
   getPageSizePt,
   getPlanSceneBounds,
+  getPlanStructureBounds,
   planRectCorners
 } from "./pageComposition";
 import { buildPlanScene } from "../scene2d/planScene";
@@ -61,6 +62,35 @@ describe("page composition", () => {
     );
     expect(bounds.minYMm).toBeLessThanOrEqual(
       Math.min(...corners.map((point) => point.yMm))
+    );
+  });
+
+  it("structure bounds ignore wall-object rects that protrude past room polygons", () => {
+    const project = createSampleProject();
+    project.wallObjects.push({
+      id: "placed-1",
+      kind: "door",
+      blocksPlacement: true,
+      wallId: "wall-north",
+      xMm: 2_000,
+      yMm: 1_450,
+      widthMm: 1_000,
+      heightMm: 800
+    });
+    const scene = buildPlanScene(project);
+    const sceneBounds = getPlanSceneBounds(scene);
+    const structureBounds = getPlanStructureBounds(scene);
+    const roomPoints = scene.rooms.flatMap((room) => room.polygonMm);
+
+    // Wall-mounted objects that straddle the wall centerline (e.g. doors)
+    // push the object-inflated scene bounds past the room polygon on that wall.
+    expect(sceneBounds.minYMm).toBeLessThan(structureBounds.minYMm);
+    // Structure bounds track the room polygons exactly.
+    expect(structureBounds.minXMm).toBeCloseTo(
+      Math.min(...roomPoints.map((point) => point.xMm))
+    );
+    expect(structureBounds.minYMm).toBeCloseTo(
+      Math.min(...roomPoints.map((point) => point.yMm))
     );
   });
 

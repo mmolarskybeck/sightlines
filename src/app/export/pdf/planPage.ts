@@ -231,11 +231,15 @@ export function drawPlanScene(
   bounds: DocumentBoundsMm,
   drawingRect: PageRectPt,
   unit: DisplayUnit,
-  grid: boolean
+  grid: boolean,
+  gridBoundsMm?: DocumentBoundsMm
 ): PlanTransform {
   const fit = fitBoundsToRect(bounds, drawingRect);
   const transform = createPlanTransform(bounds, fit);
-  if (grid) drawPlanGrid(page, bounds, transform, unit);
+  // Fit/transform always use the object-inflated `bounds` so protruding wall
+  // objects are never clipped; the grid draws over the narrower structure
+  // bounds (when given) so lines stop at the walls instead of poking past them.
+  if (grid) drawPlanGrid(page, gridBoundsMm ?? bounds, transform, unit);
 
   for (const room of scene.rooms) {
     page.drawSvgPath(
