@@ -2,6 +2,12 @@ import type { GapDimension } from "../../../domain/dimensions/orthogonalNeighbor
 import type { DisplayUnit } from "../../../domain/project";
 import { formatLength } from "../../../domain/units/length";
 import { wallLocalYToSvgY } from "./elevationArtworkGeometry";
+import {
+  estimateLabelWidth,
+  labelTextStyle,
+  ELEVATION_LABEL_FONT_PX,
+  MIN_DIMENSION_SEGMENT_MM
+} from "../shared/dimensionDrafting";
 
 // Vertical companion to GroupDimensionLines: one dimension line per vertical
 // neighbor gap (stacked works), derived by the same §9.6 corridor engine the
@@ -14,13 +20,10 @@ import { wallLocalYToSvgY } from "./elevationArtworkGeometry";
 // GroupDimensionLines — so ticks, text, and offsets hold their size at any
 // wall scale.
 
-const LABEL_FONT_PX = 10;
-const LABEL_GLYPH_WIDTH_RATIO = 0.62;
-
-// Mirrors GroupDimensionLines' MIN_SEGMENT_MM: gaps below this get no line
-// (it would be a zero-length hairline) but keep ticks and a "0" label — works
-// touching in a column is real information.
-const MIN_SEGMENT_MM = 0.5;
+// ELEVATION_LABEL_FONT_PX / LABEL_GLYPH_WIDTH_RATIO / MIN_DIMENSION_SEGMENT_MM
+// come from dimensionDrafting.ts, shared with GroupDimensionLines: gaps below
+// the segment cutoff get no line (it would be a zero-length hairline) but
+// keep ticks and a "0" label — works touching in a column is real information.
 
 export function VerticalGapDimensionLines({
   gaps,
@@ -39,7 +42,7 @@ export function VerticalGapDimensionLines({
 
   const tickHalfMm = 5 / pixelsPerMm;
   const labelOffsetMm = 8 / pixelsPerMm;
-  const fontSizeMm = LABEL_FONT_PX / pixelsPerMm;
+  const fontSizeMm = ELEVATION_LABEL_FONT_PX / pixelsPerMm;
 
   return (
     <g pointerEvents="none">
@@ -49,14 +52,13 @@ export function VerticalGapDimensionLines({
         const topSvgY = wallLocalYToSvgY(wallHeightMm, gap.toMm);
         const bottomSvgY = wallLocalYToSvgY(wallHeightMm, gap.fromMm);
         const midSvgY = (topSvgY + bottomSvgY) / 2;
-        const isTiny = gap.gapMm < MIN_SEGMENT_MM;
+        const isTiny = gap.gapMm < MIN_DIMENSION_SEGMENT_MM;
         const label = formatLength(gap.gapMm, { unit });
 
         // Horizontal label beside the line, vertically centered on the gap.
         // Flip to the left of the line when the estimated text would run past
         // the wall's right end (a column hung near the wall's end).
-        const labelWidthMm =
-          (label.length * LABEL_FONT_PX * LABEL_GLYPH_WIDTH_RATIO) / pixelsPerMm;
+        const labelWidthMm = estimateLabelWidth(label, fontSizeMm);
         const spillsRight = xMm + labelOffsetMm + labelWidthMm > wallLengthMm;
         const labelX = spillsRight ? xMm - labelOffsetMm : xMm + labelOffsetMm;
 
@@ -93,12 +95,9 @@ export function VerticalGapDimensionLines({
               x={labelX}
               y={midSvgY + fontSizeMm * 0.35}
               textAnchor={spillsRight ? "end" : "start"}
-              style={{
-                // Constant on-screen text size at any zoom, same as
-                // GroupDimensionLines' labels.
-                fontSize: fontSizeMm,
-                strokeWidth: fontSizeMm * 0.3
-              }}
+              // Constant on-screen text size at any zoom, same as
+              // GroupDimensionLines' labels.
+              style={labelTextStyle(fontSizeMm)}
             >
               {label}
             </text>

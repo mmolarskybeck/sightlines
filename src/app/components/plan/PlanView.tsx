@@ -154,6 +154,12 @@ import { PlacedObjectsLayer } from "./PlacedObjectsLayer";
 import { PlanHandlesLayer } from "./PlanHandlesLayer";
 import { PlanOverlaysLayer } from "./PlanOverlaysLayer";
 import { PartitionDimensionLines } from "./PartitionDimensionLines";
+import { PlanGapDimensionLines } from "./PlanGapDimensionLines";
+import {
+  derivePlanFloorGaps,
+  derivePlanWallGaps,
+  type PlanGapLine
+} from "../../../domain/dimensions/planDimensions";
 import type {
   DragState,
   DrawState,
@@ -1804,6 +1810,66 @@ export function PlanView({
     project.floor.rooms
   ]);
 
+  // Selection-driven plan dimension lines (the top-down twin of elevation's
+  // GroupDimensionLines): floor-object clearances to same-room neighbors and
+  // room walls, plus a wall-hung object's along-wall clearances. Static
+  // (committed) geometry only — the mount hides these during any active gesture
+  // rather than tracking a live preview, matching how dims read the rest scene.
+  const planGapLines = useMemo<PlanGapLine[]>(() => {
+    if (exportMode) return [];
+    const selectedIds = new Set(selectedObjectIds);
+    if (selectedIds.size === 0) return [];
+
+    // Floor-object gaps: every same-room floor object plus the room's wall
+    // strips form the neighbor graph; only gaps touching a selected object show.
+    const floorGaps = derivePlanFloorGaps({
+      selectedIds,
+      floorObjects: planScene.floorObjects.map((entry) => ({
+        id: entry.object.id,
+        rect: entry.rect,
+        roomId: floorObjectRoomIds.get(entry.object.id) ?? null
+      })),
+      walls: floorWallsForTool
+    });
+
+    // Wall-hung gaps: per selected wall object, its along-wall clearance to the
+    // nearest neighbor on the same wall per side (falling back to the wall end).
+    // Widths come from renderedRect — the framed/painted along-wall extent — so
+    // the gap edges match what the plan actually draws.
+    const wallObjectsByWall = new Map<
+      string,
+      Array<{ id: string; xMm: number; widthMm: number }>
+    >();
+    for (const entry of planScene.wallObjects) {
+      const bucket = wallObjectsByWall.get(entry.object.wallId) ?? [];
+      bucket.push({
+        id: entry.object.id,
+        xMm: entry.object.xMm,
+        widthMm: entry.renderedRect.widthMm
+      });
+      wallObjectsByWall.set(entry.object.wallId, bucket);
+    }
+    const wallsById = new Map(floorWallsForTool.map((wall) => [wall.id, wall]));
+    const wallGaps: PlanGapLine[] = [];
+    for (const entry of planScene.wallObjects) {
+      if (!selectedIds.has(entry.object.id)) continue;
+      const wall = wallsById.get(entry.object.wallId);
+      if (!wall) continue;
+      const onWall = wallObjectsByWall.get(entry.object.wallId) ?? [];
+      const self = onWall.find((object) => object.id === entry.object.id);
+      if (!self) continue;
+      wallGaps.push(
+        ...derivePlanWallGaps({
+          selectedObject: self,
+          others: onWall.filter((object) => object.id !== entry.object.id),
+          wall
+        })
+      );
+    }
+
+    return [...floorGaps, ...wallGaps];
+  }, [exportMode, selectedObjectIds, planScene, floorObjectRoomIds, floorWallsForTool]);
+
   function disarmTool() {
     onToolChange(null);
   }
@@ -3093,6 +3159,26 @@ export function PlanView({
                 ? partitionDrag.movedAxes
                 : { x: true, y: true }
             }
+            handleSizeMm={handleSizeMm}
+            unit={wallUnit}
+          />
+        ) : null}
+        {/* Selection-driven object dimension lines (floor-object clearances +
+            wall-hung along-wall clearances). Hidden during any active gesture —
+            they read the committed rest scene, not a live drag preview — the
+            same suppression set the placed-object tooltips use. */}
+        {!exportMode &&
+        !drag &&
+        !objectDrag &&
+        !dropGhost &&
+        !activeTool &&
+        !roomDrag &&
+        !drawRoomActive &&
+        !drawRectActive &&
+        !vertexDrag &&
+        !measurementActive ? (
+          <PlanGapDimensionLines
+            gaps={planGapLines}
             handleSizeMm={handleSizeMm}
             unit={wallUnit}
           />

@@ -697,10 +697,16 @@ export function ElevationView({
   // Every wall object on this wall is a valid snap neighbor for any other —
   // an artwork can align to a door's edge just as readily as to another
   // artwork's (docs/plan.md §2 snap-target priority doesn't distinguish by
-  // kind, only centerline > neighbor-center > neighbor-edge > grid).
+  // kind, only centerline > neighbor-center > neighbor-edge > grid). Wall
+  // texts and cases join the same pool: they already drag/select through
+  // this view's shared machinery (beginMoveDrag, onSelectObject below), so
+  // they need to be visible to it — snap neighbors, measurement points,
+  // marquee hit-testing, and dimension lines all derive from this array.
   const wallObjectsOnThisWall: WallObject[] = [
     ...elevationScene.artworks.map((entry) => entry.object),
-    ...elevationScene.openings.map((entry) => entry.object)
+    ...elevationScene.openings.map((entry) => entry.object),
+    ...elevationScene.wallTexts.map((entry) => entry.object),
+    ...elevationScene.cases.map((entry) => entry.object)
   ];
 
   const measurementSources = useMemo<MeasureCandidateSources>(() => {
@@ -1728,10 +1734,26 @@ export function ElevationView({
   const dimensionOthers: WallObject[] = wallObjectsOnThisWall
     .filter((wallObject) => !dimensionMemberIds.has(wallObject.id))
     .map((wallObject) => applyDragPreview(wallObject) as WallObject);
-  const effectiveDimensionOthers: WallObjectBase[] = getElevationFootprintObjects(
-    dimensionOthers,
-    artworksById
-  );
+  // Freestanding floor-case ghosts (elevationScene.floorCaseGhosts) are
+  // alignment aids projected onto this wall — never selectable, never
+  // dimension MEMBERS (they aren't wall objects at all) — but a gap line
+  // should still stop at one exactly like it would at a real neighbor, so a
+  // hung work reads as "close to the case below it" rather than "open to the
+  // wall". Synthesized as bare WallObjectBase shapes (no `kind`, since
+  // getNeighborAwareSegments/deriveVerticalNeighborGaps below only ever read
+  // xMm/yMm/widthMm/heightMm off an "other").
+  const dimensionOtherGhosts: WallObjectBase[] = elevationScene.floorCaseGhosts.map((ghost) => ({
+    id: ghost.object.id,
+    wallId: wallId ?? "",
+    xMm: (ghost.xMinMm + ghost.xMaxMm) / 2,
+    yMm: ghost.heightMm / 2,
+    widthMm: ghost.xMaxMm - ghost.xMinMm,
+    heightMm: ghost.heightMm
+  }));
+  const effectiveDimensionOthers: WallObjectBase[] = [
+    ...getElevationFootprintObjects(dimensionOthers, artworksById),
+    ...dimensionOtherGhosts
+  ];
   // Idle, or an active "From edges"/"Between works" session → neighbour-aware
   // (stop at the nearest window/door/work — "From edges" measures to that same
   // detected boundary, and "Between works" re-spaces about a fixed centre so

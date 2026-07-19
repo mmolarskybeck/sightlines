@@ -3,6 +3,13 @@ import type { DisplayUnit, WallObjectBase } from "../../../domain/project";
 import { formatLength } from "../../../domain/units/length";
 import { wallLocalYToSvgY } from "./elevationArtworkGeometry";
 import { staggerLabelRow } from "../plan/labelStagger";
+import {
+  estimateLabelWidth,
+  labelFitsInSpan,
+  labelTextStyle,
+  ELEVATION_LABEL_FONT_PX,
+  MIN_DIMENSION_SEGMENT_MM
+} from "../shared/dimensionDrafting";
 
 // On-canvas dimension lines for a selection on one wall: an outer segment on
 // each side, every actual interior gap between members, each with end ticks and
@@ -25,11 +32,6 @@ import { staggerLabelRow } from "../plan/labelStagger";
 // label text, and offsets hold a constant on-screen size at any wall scale,
 // the same job vector-effect="non-scaling-stroke" does for the line strokes.
 
-// Estimated on-screen glyph width as a fraction of the font size — used to
-// decide whether a segment is wide enough for its label to fit centered under
-// its own line, or whether it must be staggered to a lower row instead.
-const LABEL_FONT_PX = 10;
-const LABEL_GLYPH_WIDTH_RATIO = 0.62;
 const LABEL_FIT_SLACK_PX = 8;
 
 // Horizontal breathing room (screen px) kept between two labels sharing a
@@ -45,13 +47,14 @@ const MAX_STAGGER_ROW = 3;
 // zero-length or backwards span) — but they are still LABELED: a "0"" readout
 // tells the curator the works are touching, which is real information.
 //
-// Segments narrower than -MIN_SEGMENT_MM are OVERLAPS (e.g. members of the same
+// Segments narrower than -MIN_DIMENSION_SEGMENT_MM are OVERLAPS (e.g. members of the same
 // column in a stacked/salon selection) and are filtered out before rendering
 // entirely — no line, no ticks, no label, no stagger row. Overlap is an in-app
 // advisory (handled elsewhere via highlighting), not a distance worth printing;
 // this matches the document PDF pass in orthogonalNeighbors.ts (§9.6), which
 // also emits no gap for overlapping pairs.
-const MIN_SEGMENT_MM = 0.5;
+//
+// MIN_DIMENSION_SEGMENT_MM is the shared drafting cutoff (dimensionDrafting.ts).
 
 export function GroupDimensionLines({
   members,
@@ -88,7 +91,7 @@ export function GroupDimensionLines({
   const tickHalfMm = 5 / pixelsPerMm;
   const labelOffsetMm = 13 / pixelsPerMm;
   const rowSpacingMm = 12 / pixelsPerMm;
-  const fontSizeMm = LABEL_FONT_PX / pixelsPerMm;
+  const fontSizeMm = ELEVATION_LABEL_FONT_PX / pixelsPerMm;
 
   // First pass: decide each label's row. Row 0 = centered under its own line
   // (only when the label estimably fits inside the segment); rows 1..N =
@@ -98,21 +101,21 @@ export function GroupDimensionLines({
   // rowRightPx[row] tracks the right screen-x extent of the last label in that
   // staggered row.
   const rowRightPx: number[] = [];
-  // Overlap segments (width < -MIN_SEGMENT_MM) are dropped before layout so
-  // they draw nothing and never consume a stagger row — see MIN_SEGMENT_MM.
+  // Overlap segments (width < -MIN_DIMENSION_SEGMENT_MM) are dropped before
+  // layout so they draw nothing and never consume a stagger row.
   const placements = segments
-    .filter((segment) => segment.toMm - segment.fromMm >= -MIN_SEGMENT_MM)
+    .filter((segment) => segment.toMm - segment.fromMm >= -MIN_DIMENSION_SEGMENT_MM)
     .map((segment, index) => {
       const widthMm = segment.toMm - segment.fromMm;
-      const isTiny = Math.abs(widthMm) < MIN_SEGMENT_MM;
-      // Widths are >= -MIN_SEGMENT_MM here, so a tiny negative reading (e.g.
-      // -0.3mm) is clamped to 0 rather than printing "-0".
+      const isTiny = Math.abs(widthMm) < MIN_DIMENSION_SEGMENT_MM;
+      // Widths are >= -MIN_DIMENSION_SEGMENT_MM here, so a tiny negative
+      // reading (e.g. -0.3mm) is clamped to 0 rather than printing "-0".
       const label = formatLength(Math.max(0, widthMm), { unit });
       const midMm = (segment.fromMm + segment.toMm) / 2;
 
       const segmentPx = Math.abs(widthMm) * pixelsPerMm;
-      const labelWidthPx = label.length * LABEL_FONT_PX * LABEL_GLYPH_WIDTH_RATIO;
-      const fits = segmentPx >= labelWidthPx + LABEL_FIT_SLACK_PX;
+      const labelWidthPx = estimateLabelWidth(label, ELEVATION_LABEL_FONT_PX);
+      const fits = labelFitsInSpan(segmentPx, labelWidthPx, LABEL_FIT_SLACK_PX);
 
       const row = staggerLabelRow(rowRightPx, {
         fits,
@@ -175,14 +178,11 @@ export function GroupDimensionLines({
               x={midMm}
               y={labelY}
               textAnchor="middle"
-              style={{
-                // Same constant-screen-size trick as .resize-handle-label:
-                // font-size/stroke-width are SVG user units (mm), sized off the
-                // live px-per-mm so the text and its halo hold a fixed on-screen
-                // size at any zoom.
-                fontSize: fontSizeMm,
-                strokeWidth: fontSizeMm * 0.3
-              }}
+              // Same constant-screen-size trick as .resize-handle-label:
+              // font-size/stroke-width are SVG user units (mm), sized off the
+              // live px-per-mm so the text and its halo hold a fixed on-screen
+              // size at any zoom.
+              style={labelTextStyle(fontSizeMm)}
             >
               {label}
             </text>

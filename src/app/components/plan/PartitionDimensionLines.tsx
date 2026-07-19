@@ -6,8 +6,12 @@ import {
 } from "../../../domain/geometry/partitionSpacing";
 import { formatLength } from "../../../domain/units/length";
 import { staggerLabelRow } from "./labelStagger";
+import {
+  estimateLabelWidth,
+  labelFitsInSpan,
+  labelTextStyle
+} from "../shared/dimensionDrafting";
 
-const LABEL_GLYPH_WIDTH_RATIO = 0.62;
 const LABEL_FIT_SLACK = 0.8;
 const MAX_STAGGER_ROW = 3;
 
@@ -96,10 +100,10 @@ function DimensionChain({
       (segment.aMm.xMm - first.xMm) * dir.xMm +
       (segment.aMm.yMm - first.yMm) * dir.yMm;
     const endAlong = startAlong + segment.lengthMm;
-    const labelWidth = label.length * fontSizeMm * LABEL_GLYPH_WIDTH_RATIO;
+    const labelWidth = estimateLabelWidth(label, fontSizeMm);
     const midAlong = (startAlong + endAlong) / 2;
     const row = staggerLabelRow(rowEnd, {
-      fits: segment.lengthMm >= labelWidth + handleSizeMm * LABEL_FIT_SLACK,
+      fits: labelFitsInSpan(segment.lengthMm, labelWidth, handleSizeMm * LABEL_FIT_SLACK),
       mid: midAlong,
       halfWidth: labelWidth / 2,
       gap: handleSizeMm * 0.5,
@@ -215,7 +219,7 @@ function DimensionChain({
               y={labelPoint.yMm}
               textAnchor="middle"
               dominantBaseline="central"
-              style={{ fontSize: fontSizeMm, strokeWidth: fontSizeMm * 0.3 }}
+              style={labelTextStyle(fontSizeMm)}
             >
               {label}
             </text>
