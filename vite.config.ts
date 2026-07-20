@@ -5,6 +5,11 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    // stats-gl (via drei) nests its own three@0.170.0; force everything onto
+    // the root copy so tests and the app never load two Three.js instances.
+    dedupe: ["three"]
+  },
   build: {
     // Three.js is intentionally large but lazy; warn above its ~830 kB baseline.
     chunkSizeWarningLimit: 900,
