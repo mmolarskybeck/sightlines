@@ -38,7 +38,7 @@ Sightlines should let a user:
 * Edit measurements either tactically by dragging or precisely through numeric fields.
 * Move between plan view, elevation view, checklist, and simple 3D preview without losing context.
 * Export portable project files for backup or manual sharing.
-* Save/sync using services like Dropbox, Drive, OneDrive, etc. (stretch goal)
+* Back up project packages directly to the user’s Dropbox account (technical pilot).
 
 ## Core Workflow
 
@@ -54,6 +54,14 @@ A user can:
 6. Refine wall dimensions, artwork placement, openings, and constraints.
 7. Review the installation spatially.
 8. Export a backup or shareable project package.
+
+For additional protection, connect Dropbox from the save-status controls. Sightlines
+uploads versioned `.sightlines` packages directly to a private Dropbox app folder;
+project data is not uploaded to a Sightlines server. The app keeps the most recent
+five Dropbox backups per project and also maintains a silent, same-origin local
+snapshot history for recovery from a bad save. Local snapshots do not protect
+against browser storage eviction, so Dropbox or an exported package remains the
+off-device backup.
 
 The app should support early sketching without hiding uncertainty. Approximate dimensions and missing metadata should remain visible so a rough plan never masquerades as a final installation drawing.
 
@@ -102,15 +110,20 @@ Persistence sits behind repository interfaces so the current local implementatio
 Current persistence:
 
 * IndexedDB for project documents, metadata, artwork records, and thumbnails.
-* Browser storage messaging that reminds users to export backups.
-* JSON import/export for early development and debugging.
+* Silent, fingerprint-deduplicated local snapshots for recovery from corruption or a bad save.
+* Dropbox App Folder backup through browser OAuth with PKCE and offline refresh.
+* `.sightlines` package export/import for portable manual backups and sharing.
 * Static public info pages and trust/security metadata served from `public/`.
 
-Planned persistence/export:
+Provider boundary and future work:
 
-* `.sightlines` project package format.
-* Self-contained zip package containing project JSON plus the relevant artwork/image assets.
-* Future Dropbox-folder sync without hosting user projects on Sightlines servers.
+* Dropbox is the first supported cloud provider and is currently in technical pilot.
+* OneDrive and Google Drive are possible follow-on providers, not currently supported.
+* Provider state must distinguish connected, reauthorization required, and last successful backup.
+* Cloud backup is versioned file backup, not real-time collaboration or conflict-free co-editing.
+
+See [docs/cloud-backup-providers.md](docs/cloud-backup-providers.md) for the provider
+rollout plan, OAuth constraints, permissions, and production-readiness gates.
 
 ### Snapping and collision are separate
 
@@ -188,6 +201,8 @@ Implemented or substantially underway:
 * PNG/JPG image snapshots (one-click export of the current view).
 * PDF document export with configurable contents (overview plan, room details, wall elevations, 3D views), automatic dimension lines, and vector output with embedded artwork.
 * Bulk mat/frame editing for artwork selections with live preview.
+* Dropbox cloud backup with automatic settled-edit uploads, five retained copies per project,
+  reconnection handling, and save-status visibility.
 
 ## Deployment
 
@@ -200,7 +215,8 @@ The detailed roadmap lives in `docs/plan.md` §9 (source of truth); the current 
 * **MVP 1 — Spatial editor + checklist core: shipped.** Geometry spine, artwork library/checklist, placement with snapping and collision flagging, multi-select/group/arrange, simple derived 3D preview.
 * **MVP 2 — Room shape tools + multi-room flow: shipped** (a benchmark-triggered renderer-scalability gate remains open). Polygon rooms and reshaping, partitions, paired door/window connections with honest 3D see-through/capped treatment, multi-room placement, 3D navigation.
 * **MVP 3 — Project packages, sharing, polish: shipping.** `.sightlines` export/import with the untrusted-file safety pipeline (shipped 2026-07-12), PNG/PDF snapshot and document exports with automatic dimension lines (shipped 2026-07-17), saved views collection, bulk mat/frame editing, and readiness reporting.
-* **MVP 4/5 — Tablet depth, then phone tier.** iPad-adapted layout, Dropbox-folder sync, richer checklist workflows, command palette; phone viewing later.
+* **MVP 4/5 — Tablet depth, then phone tier.** iPad-adapted layout, richer checklist workflows, command palette; phone viewing later. Dropbox backup is shipped in technical pilot; folder-level sync semantics remain a separate follow-up.
+* **Future provider expansion:** evaluate Google Drive and OneDrive after the Dropbox pilot. Each requires its own OAuth, verification, institutional-admin, and token-lifecycle review.
 * **Backlog (real demand only):** hosted accounts/cloud, real-time collaboration, registrar-level collections management, full 3D editing, curved walls.
 
 ## Tech Stack
@@ -210,14 +226,16 @@ Current direction:
 * **App:** Vite, React, TypeScript
 * **State:** Zustand
 * **Validation:** Zod
-* **Storage:** IndexedDB now; OPFS planned for larger image blobs
+* **Storage:** IndexedDB for local projects and snapshots; Dropbox App Folder for optional off-device packages; OPFS planned for larger image blobs
 * **UI:** Radix / shadcn-style primitives, Tailwind-compatible styling
 * **2D editor:** React-rendered editor surfaces backed by plain project data
 * **3D preview:** React Three Fiber / three.js
-* **Exports:** Client-side image/PDF generation planned
-* **Project package:** `.sightlines` zip package planned
+* **Exports:** Client-side image/PDF and `.sightlines` package generation
+* **Cloud backup:** Provider interface with a Dropbox implementation; no Sightlines project-data backend
 
-No backend is required for the v1 local-first app.
+No backend is required for the current local-first app or Dropbox backup. Future
+providers may require a small stateless token-exchange helper, subject to security
+and provider-approval review.
 
 ## Development
 

@@ -2,7 +2,39 @@
 
 Notes for the roadmap item "additional cloud services" (first provider: Dropbox, shipped from plan 2026-07-19). Compiled 2026-07-19.
 
+## Product contract
+
+Dropbox backup is available as a technical pilot. It is an optional, user-controlled
+off-device backup for `.sightlines` project packages, not hosted project storage and
+not real-time collaboration.
+
+When Dropbox is connected, Sightlines:
+
+- authenticates with OAuth 2.0 + PKCE and requests App Folder access only;
+- builds a complete project package in the browser and uploads it directly to Dropbox;
+- waits for edits to settle before backing up, rather than uploading every keystroke;
+- retains the five most recent backup copies for each project;
+- shows connection, reauthorization, and last-successful-backup state in the save-status UI;
+- keeps a silent five-copy IndexedDB snapshot history as a separate recovery path for
+  corruption or a failed save.
+
+The local snapshot history is not an off-device backup: it shares the browser origin
+and can disappear if the browser evicts site storage. Manual `.sightlines` export and
+Dropbox backup are the durable recovery paths. A backup is a complete versioned
+package, so restoring or importing it follows the same untrusted-package validation
+and migration pipeline as a manually selected file.
+
+Dropbox backup does not currently merge simultaneous edits or provide collaborative
+editing. The intended model is versioned file backup with an explicit future decision
+required for conflict handling.
+
 **Current status (2026-07-19):** Dropbox shipped — now in **technical-pilot** stage. Phase 0 spike passed and is now retired (`public/dropbox-spike.html` deleted, its redirect URI removed from the Dropbox app). Callback path `/auth/dropbox/callback` (exact-match redirect URIs registered for `https://app.sightlines.art`, the Vercel mirror, and localhost dev); App Folder access only; scopes `account_info.read`, `files.metadata.read`, `files.content.write` — no chooser/saver/embedder domains or webhooks.
+
+OneDrive and Google Drive are candidate follow-on providers, not supported yet.
+Their inclusion in the provider comparison below is planning context, not a promise
+of feature parity or a target release date. The next provider should preserve the
+same local-first package contract while satisfying its own OAuth, token storage,
+verification, and institutional-admin requirements.
 
 **Deployment note:** OAuth redirect URIs are exact-match per origin. The Dropbox app must list every origin the app is served from — currently `https://app.sightlines.art/`, the temporary Vercel mirror `https://sightlines-three.vercel.app/` (corporate-firewall workaround while the domain is <30 days old; no CSP applies there since `public/_headers` is Cloudflare-only), and `http://localhost:5173/` for dev. Browser storage is per-origin, but backups from all origins land in the same Dropbox app folder — cloud backup is the bridge between origins and the migration path when the mirror is retired (~Aug 2026).
 
