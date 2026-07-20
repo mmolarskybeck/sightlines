@@ -2,6 +2,8 @@
 
 Notes for the roadmap item "additional cloud services" (first provider: Dropbox, shipped from plan 2026-07-19). Compiled 2026-07-19.
 
+**Current status (2026-07-19):** Dropbox shipped — now in **technical-pilot** stage. Phase 0 spike passed and is now retired (`public/dropbox-spike.html` deleted, its redirect URI removed from the Dropbox app). Callback path `/auth/dropbox/callback` (exact-match redirect URIs registered for `https://app.sightlines.art`, the Vercel mirror, and localhost dev); App Folder access only; scopes `account_info.read`, `files.metadata.read`, `files.content.write` — no chooser/saver/embedder domains or webhooks.
+
 **Deployment note:** OAuth redirect URIs are exact-match per origin. The Dropbox app must list every origin the app is served from — currently `https://app.sightlines.art/`, the temporary Vercel mirror `https://sightlines-three.vercel.app/` (corporate-firewall workaround while the domain is <30 days old; no CSP applies there since `public/_headers` is Cloudflare-only), and `http://localhost:5173/` for dev. Browser storage is per-origin, but backups from all origins land in the same Dropbox app folder — cloud backup is the bridge between origins and the migration path when the mirror is retired (~Aug 2026).
 
 
