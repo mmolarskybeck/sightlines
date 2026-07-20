@@ -13,6 +13,7 @@ import { AssetNotFoundError } from "../../domain/repositories/assetRepository";
 import type { PackageExportMode } from "../../domain/schema/packageSchema";
 import { migrateProjectJson } from "../../domain/schema/projectSchema";
 import type { AppState, AppStoreDeps } from "../store";
+import { telemetry } from "../telemetry/telemetry";
 
 export type PackageSliceActions = {
   importProjectJson: (text: string) => Promise<void>;
@@ -137,6 +138,7 @@ export function createPackageSlice(
     } else {
       toast.success(`Imported “${commit.project.title}”`);
     }
+    telemetry.track("package_import_completed", {});
   }
 
   const actions: PackageSliceActions = {

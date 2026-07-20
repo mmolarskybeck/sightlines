@@ -47,6 +47,8 @@ import {
   unitSystemFromDisplayUnit
 } from "../domain/units/unitSystem";
 import { AppDialogs } from "./components/AppDialogs";
+import { PrivacyConsentNotice } from "./components/privacy/PrivacyConsentNotice";
+import { usePrivacyPreferences } from "./telemetry/privacyPreferences";
 import { AppRail } from "./components/AppRail";
 import { ArtworkInspector } from "./components/inspectors/ArtworkInspector";
 import { ArtworkLibraryView } from "./components/library/ArtworkLibrary";
@@ -140,6 +142,7 @@ import type { SavedViewRenderHandle } from "./components/three/SavedViewRenderHo
 import { useSavedViewThumbnails } from "./hooks/useSavedViewThumbnails";
 import type { EffectiveDocumentSettings } from "../domain/export/documentSettings";
 import { rendererBenchmarkEnabled } from "./rendererBenchmarkFlag";
+import { telemetry } from "./telemetry/telemetry";
 
 const ElevationView = lazy(() =>
   import("./components/elevation/ElevationView").then((module) => ({ default: module.ElevationView }))
@@ -329,6 +332,11 @@ export function App() {
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isExportPdfOpen, setIsExportPdfOpen] = useState(false);
+  const {
+    preferences: privacyPreferences,
+    decision: privacyDecision,
+    setPreferences: setPrivacyPreferences
+  } = usePrivacyPreferences();
   // A Saved view's pose, staged to become the 3D view's INITIAL camera when the
   // pane opens a view while 3D isn't the active mode yet (saved-views spec §4.3
   // handoff). CameraRig captures it at mount, so the lingering value is inert;
@@ -1321,6 +1329,7 @@ export function App() {
         new Blob([result.bytes.slice()], { type: "application/pdf" }),
         filename
       );
+      telemetry.track("pdf_export_completed", {});
       setIsExportPdfOpen(false);
       if (result.warnings.length > 0) {
         toast.warning(
@@ -1394,6 +1403,21 @@ export function App() {
     // Disable hoverable content: the grace polygon can swallow adjacent 32px triggers.
     <TooltipProvider delayDuration={400} disableHoverableContent>
     <Toaster />
+    <PrivacyConsentNotice
+      undecided={privacyDecision === "unset"}
+      onAllow={() =>
+        setPrivacyPreferences(
+          { usageAnalytics: true, crashReports: true },
+          "accepted"
+        )
+      }
+      onDecline={() =>
+        setPrivacyPreferences(
+          { usageAnalytics: false, crashReports: false },
+          "declined"
+        )
+      }
+    />
     {measurementActive ? (
       <MeasurementLiveRegion
         state={measurement.state}
@@ -2362,6 +2386,14 @@ export function App() {
         recoveryOffer={recoveryOffer}
         acceptRecovery={acceptRecovery}
         dismissRecovery={dismissRecovery}
+        usageAnalyticsEnabled={privacyPreferences.usageAnalytics}
+        crashReportsEnabled={privacyPreferences.crashReports}
+        onUsageAnalyticsChange={(usageAnalytics) =>
+          setPrivacyPreferences({ ...privacyPreferences, usageAnalytics })
+        }
+        onCrashReportsChange={(crashReports) =>
+          setPrivacyPreferences({ ...privacyPreferences, crashReports })
+        }
       />
     </main>
     </TooltipProvider>

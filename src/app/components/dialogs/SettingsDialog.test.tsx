@@ -114,7 +114,9 @@ function renderDialog({ open = true, storageState = "granted", store = {} }: Ren
     resetPreferences: vi.fn(),
     onExport: vi.fn(),
     onImport: vi.fn(),
-    onOpenHelp: vi.fn()
+    onOpenHelp: vi.fn(),
+    onUsageAnalyticsChange: vi.fn(() => true),
+    onCrashReportsChange: vi.fn(() => true)
   };
   render(
     <SettingsDialog
@@ -124,6 +126,8 @@ function renderDialog({ open = true, storageState = "granted", store = {} }: Ren
       cloudBackupProviderStatus="disconnected"
       cloudBackupAccountLabel={null}
       lastCloudBackupAt={null}
+      usageAnalyticsEnabled={false}
+      crashReportsEnabled={false}
       {...handlers}
     />
   );
@@ -196,5 +200,27 @@ describe("SettingsDialog", () => {
     const { resetPreferences } = renderDialog();
     fireEvent.click(screen.getByRole("button", { name: "Reset workspace preferences" }));
     expect(resetPreferences).toHaveBeenCalledTimes(1);
+  });
+
+  it("changes anonymous usage and crash reporting independently", () => {
+    const { onUsageAnalyticsChange, onCrashReportsChange } = renderDialog();
+
+    fireEvent.click(screen.getByRole("switch", { name: "Anonymous usage analytics" }));
+    expect(onUsageAnalyticsChange).toHaveBeenCalledWith(true);
+    expect(onCrashReportsChange).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("switch", { name: "Anonymous crash reports" }));
+    expect(onCrashReportsChange).toHaveBeenCalledWith(true);
+    expect(screen.getByRole("link", { name: "privacy policy" })).toHaveAttribute(
+      "href",
+      "https://sightlines.art/privacy"
+    );
+  });
+
+  it("surfaces preference write failures", () => {
+    const { onUsageAnalyticsChange } = renderDialog();
+    onUsageAnalyticsChange.mockReturnValue(false);
+    fireEvent.click(screen.getByRole("switch", { name: "Anonymous usage analytics" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Reporting remains off");
   });
 });

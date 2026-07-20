@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && node scripts/assert-chunk-graph.mjs",
-    "check": "tsc --noEmit",
+    "build": "tsc && tsc -p tsconfig.worker.json && vite build && node scripts/assert-chunk-graph.mjs",
+    "check": "tsc --noEmit && tsc -p tsconfig.worker.json",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",

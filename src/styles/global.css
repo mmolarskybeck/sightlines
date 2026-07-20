@@ -7488,6 +7488,61 @@ body.panels-resizing * {
   gap: var(--space-8);
 }
 
+.settings-privacy-controls {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.settings-privacy-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  cursor: pointer;
+}
+
+.settings-privacy-row > span {
+  display: grid;
+  gap: 2px;
+}
+
+.settings-privacy-row strong {
+  color: var(--ink);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-ui);
+}
+
+.settings-privacy-row small,
+.settings-privacy-error {
+  color: var(--muted);
+  font-size: var(--type-xs);
+  line-height: var(--leading-copy);
+}
+
+.settings-privacy-switch {
+  width: 30px;
+  height: 18px;
+  border: 1px solid var(--input);
+  border-radius: 999px;
+  background: var(--surface-strong);
+}
+
+.settings-privacy-switch[data-state="checked"] {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+.settings-privacy-switch[data-state="checked"] .switch-thumb {
+  transform: translateX(12px);
+}
+
+.settings-privacy-error {
+  margin: 0;
+  color: var(--danger);
+}
+
 .settings-danger {
   display: grid;
   gap: var(--space-12);
@@ -7521,6 +7576,70 @@ body.panels-resizing * {
 
 .settings-footer-link:hover {
   color: var(--foreground);
+}
+
+.privacy-consent-notice {
+  position: fixed;
+  z-index: 30;
+  right: 20px;
+  bottom: 20px;
+  display: grid;
+  width: min(520px, calc(100vw - 40px));
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-overlay);
+  background: var(--surface);
+  box-shadow: var(--shadow-overlay);
+}
+
+.privacy-consent-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.privacy-consent-copy h2,
+.privacy-consent-copy p {
+  margin: 0;
+}
+
+.privacy-consent-copy h2 {
+  color: var(--ink);
+  font-size: var(--type-md);
+  line-height: var(--leading-tight);
+}
+
+.privacy-consent-copy p {
+  color: var(--muted);
+  font-size: var(--type-sm);
+  line-height: var(--leading-copy);
+}
+
+.privacy-consent-copy .privacy-consent-error {
+  color: var(--danger);
+}
+
+.privacy-consent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.privacy-consent-actions a {
+  padding: 6px 4px;
+  color: var(--ink);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
+  text-underline-offset: 2px;
+}
+
+@media (max-width: 560px) {
+  .privacy-consent-notice {
+    right: 12px;
+    bottom: 12px;
+    width: calc(100vw - 24px);
+  }
 }
 /* Artwork Library — global inventory surface and checklist picker. */
 .artwork-library-view {

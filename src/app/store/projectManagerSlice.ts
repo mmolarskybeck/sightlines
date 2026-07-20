@@ -3,6 +3,7 @@ import { createBlankProject } from "../../domain/newProject";
 import type { Project, ProjectSummary } from "../../domain/project";
 import { ProjectValidationError } from "../../domain/repositories/indexedDbProjectRepository";
 import type { AppState, AppStoreDeps, ArtworkProjectMembership } from "../store";
+import { telemetry } from "../telemetry/telemetry";
 
 export type ProjectManagerSliceActions = {
   listProjectSummaries: () => Promise<ProjectSummary[]>;
@@ -110,6 +111,7 @@ export function createProjectManagerSlice(
         try {
           await deps.projectRepository.save(project);
           setDocument(project, { viewMode: "plan", saveState: "saved" });
+          telemetry.track("project_created", {});
         } catch (error) {
           const message = `Could not create the new project (${
             error instanceof Error ? error.message : "unknown error"

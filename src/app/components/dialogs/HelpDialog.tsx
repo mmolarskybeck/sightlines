@@ -124,9 +124,9 @@ export function HelpDialog({
           <HintGroup group={generalHelpGroup(inputMode, isMac)} />
 
           <p className="help-privacy-note">
-            Projects and artwork images stay on this device: no account, no uploads. Use
-            <strong> Export</strong> to save a backup file you can share or move between
-            machines.
+            Projects and artwork images stay on this device unless you explicitly export
+            them or connect your own Dropbox for direct backup. Sightlines requires no
+            account and does not receive a copy of your work.
           </p>
 
           <nav aria-label="More information" className="help-link-row">

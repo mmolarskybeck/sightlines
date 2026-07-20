@@ -14,6 +14,7 @@ import type {
   EditExtras
 } from "../store";
 import { NO_SELECTION, selectionWrite } from "./selectionSlice";
+import { telemetry } from "../telemetry/telemetry";
 
 export type ArtworkIntakeSliceState = {
   pendingDuplicateUploads: {
@@ -178,6 +179,9 @@ export function createArtworkIntakeSlice(
             } could not be added: ${failures.join(" ")}`
           });
         }
+        if (newArtworkIds.length > 0) {
+          telemetry.track("artwork_import_completed", { source: "images" });
+        }
       } catch (error) {
         // Anything unexpected here (not the per-file try/catches above,
         // which already funnel into `failures`) must still surface in the
@@ -198,6 +202,9 @@ export function createArtworkIntakeSlice(
       const destinationProjectId = project?.id;
       const destination = opts.destination ?? "checklist";
       const selectedDrafts = drafts.filter((draft) => draft.selected);
+      const source = selectedDrafts.some((draft) => draft.imageFile)
+        ? ("combined" as const)
+        : ("spreadsheet" as const);
       if ((destination === "checklist" && !project) || selectedDrafts.length === 0) return;
 
       set({ intakeState: "processing", error: null });
@@ -264,6 +271,7 @@ export function createArtworkIntakeSlice(
               checklistArtworkIds: [...current.checklistArtworkIds, ...newArtworkIds]
             }));
           }
+          telemetry.track("artwork_import_completed", { source });
         }
 
         if (failures.length > 0) {

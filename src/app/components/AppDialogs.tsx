@@ -91,6 +91,10 @@ type AppDialogsProps = {
   recoveryOffer: AppState["recoveryOffer"];
   acceptRecovery: AppState["acceptRecovery"];
   dismissRecovery: AppState["dismissRecovery"];
+  usageAnalyticsEnabled: boolean;
+  crashReportsEnabled: boolean;
+  onUsageAnalyticsChange: (enabled: boolean) => boolean;
+  onCrashReportsChange: (enabled: boolean) => boolean;
 };
 
 export function AppDialogs({
@@ -142,7 +146,11 @@ export function AppDialogs({
   dismissPackageImport,
   recoveryOffer,
   acceptRecovery,
-  dismissRecovery
+  dismissRecovery,
+  usageAnalyticsEnabled,
+  crashReportsEnabled,
+  onUsageAnalyticsChange,
+  onCrashReportsChange
 }: AppDialogsProps) {
   return (
     <>
@@ -177,6 +185,10 @@ export function AppDialogs({
           onExport={() => void handleExportPackage("display")}
           onImport={() => fileInputRef.current?.click()}
           onOpenHelp={() => { setIsSettingsOpen(false); setIsHelpOpen(true); }}
+          usageAnalyticsEnabled={usageAnalyticsEnabled}
+          crashReportsEnabled={crashReportsEnabled}
+          onUsageAnalyticsChange={onUsageAnalyticsChange}
+          onCrashReportsChange={onCrashReportsChange}
         />
         <ExportPdfDialog
           open={isExportPdfOpen}

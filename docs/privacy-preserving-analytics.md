@@ -1,6 +1,6 @@
 # Privacy-Preserving Analytics and Observability
 
-**Status:** Approved direction; not yet implemented  
+**Status:** Phase 2 local privacy boundary implemented; Cloudflare analytics launch approved and in progress; Sentry deferred
 **Last updated:** 2026-07-19
 
 This document is the source of truth for Sightlines analytics, uptime
@@ -93,6 +93,12 @@ Cloudflare's automatic Web Analytics injection must not be used because it
 cannot honor a per-device Sightlines preference. Configure manual snippet
 installation and load the beacon only when anonymous usage analytics are
 enabled.
+
+Cloudflare currently retains unsampled Web Analytics beacon data for seven
+days, then aggregates it for longer-term storage; the previous six months are
+available in the dashboard. Workers Analytics Engine stores product-event data
+for three months. Re-check these provider-controlled periods before each
+privacy-policy update.
 
 Do not claim an exact number of individual users without an identifier.
 Initial reporting should use visits and aggregate event counts as reach and
@@ -238,48 +244,50 @@ deployment.
 
 ### Landing site
 
-- [ ] `landing/src/content/pages/privacy.md`
+- [x] `landing/src/content/pages/privacy.md`
   - Replace "no tracking" and "no analytics" claims.
   - Add the analytics/diagnostics section above, active processors, retention,
     controls, contact route, effective date, and change summary.
-- [ ] `landing/src/pages/index.astro`
+- [x] `landing/src/pages/index.astro`
   - Replace "No analytics, advertising, or tracking" with a precise claim such
     as "No project uploads, advertising, or personal profiles."
-- [ ] `landing/src/content/pages/security.md`
+- [x] `landing/src/content/pages/security.md`
   - Replace "No third-party scripts load" and "No third-party analytics"
     claims.
   - Document the narrowly allowed Cloudflare beacon and, only after it ships,
     Sentry ingestion. Keep the CSP source list exact.
-- [ ] `landing/src/content/pages/it.md`
+- [x] `landing/src/content/pages/it.md`
   - Replace claims that there are no third-party requests or tracking beacons.
   - Give institutional reviewers a concise data-flow table covering Cloudflare
     Web Analytics, the same-origin product-event endpoint, optional Sentry, and
     direct-to-Dropbox backup.
-- [ ] `landing/public/llms.txt`
+- [x] `landing/public/llms.txt`
   - Replace "No third-party tracking scripts" with the current, content-free
     analytics and diagnostics boundary.
 
 ### Application
 
-- [ ] `public/llms.txt`
+- [x] `public/llms.txt`
   - Replace "No third-party tracking" with the same accurate summary.
-- [ ] `src/app/components/dialogs/SettingsDialog.tsx`
+- [x] `src/app/components/dialogs/SettingsDialog.tsx`
   - Add separate usage-analytics and crash-report controls with links to the
     privacy page.
-- [ ] First-use application surface
+- [x] First-use application surface
   - Add the neutral consent notice and ensure it is keyboard and screen-reader
     accessible.
-- [ ] `src/app/components/dialogs/HelpDialog.tsx` and `helpContent.ts`
+- [x] `src/app/components/dialogs/HelpDialog.tsx` and `helpContent.ts`
   - Confirm the privacy summary and link remain accurate after analytics ship.
-- [ ] `public/_headers` and `landing/public/_headers`
+  - Qualify the former absolute "no uploads" summary for explicit exports and
+    direct-to-Dropbox backup.
+- [x] `public/_headers` and `landing/public/_headers`
   - Update CSP only for providers actually enabled. Do not add
     `'unsafe-inline'` to support analytics or Cloudflare JavaScript Detections.
 
 ### Repository and release communication
 
-- [ ] `README.md`
+- [x] `README.md`
   - Replace any absolute privacy claim that becomes inaccurate.
-- [ ] `docs/status.md`
+- [x] `docs/status.md`
   - Record the shipped providers, controls, event allowlist, verification, and
     public-policy update date.
 - [ ] Release notes/changelog
@@ -288,9 +296,11 @@ deployment.
 - [ ] Cloudflare dashboard
   - Disable automatic Web Analytics injection; use manual installation so the
     app preference is authoritative.
-  - Disable JavaScript Detections/Bot Fight Mode unless a documented security
-    rule actively depends on it. Do not weaken CSP merely to silence its
-    injected inline-script warning.
+  - Keep Bot Fight Mode off. Because the free dashboard does not expose a
+    separate JavaScript Detections switch, serve app HTML with
+    `Cache-Control: no-transform` so Cloudflare does not inject an incompatible
+    inline challenge script. Speed Brain may remain enabled. Do not weaken CSP
+    merely to silence an injected inline-script warning.
 - [ ] Sentry dashboard, if adopted
   - Disable IP storage, configure retention and scrubbing, exclude replays and
     attachments, and configure error/uptime alerts.
@@ -302,50 +312,54 @@ review under the repository workflow.
 
 ### Phase 0 — Finalize the contract
 
-- [ ] Confirm whether first-run reporting is consent-first (recommended) or
-  enabled with opt-out. Record the decision here before implementation.
-- [ ] Approve the initial event allowlist and reject any event without a named
+- [x] Use consent-first reporting. A fresh or malformed local preference keeps
+  both categories disabled until the user makes an explicit choice.
+- [x] Approve the initial event allowlist and reject any event without a named
   product decision.
-- [ ] Confirm active providers, account regions/settings, retention, and a
-  privacy contact.
-- [ ] Update all public-facing disclosures listed in section 5 before enabling
+- [x] Confirm launch providers and retention: Cloudflare Web Analytics (seven
+  days unsampled, then aggregated; six months dashboard access) and Workers
+  Analytics Engine (three months). Sentry is deferred and inactive. Privacy
+  contact: `hello@sightlines.art`. Provider account configuration must still be
+  verified before production enablement.
+- [x] Update all public-facing disclosures listed in section 5 before enabling
   production collection.
 
 ### Phase 1 — External uptime monitoring
 
 - [ ] Configure a production URL monitor with HTML marker and asset MIME
   assertions.
-- [ ] Send alerts to a tested owner channel.
-- [ ] Exercise a temporary failing assertion to prove alerts arrive, then
+- [x] Send alerts to a tested owner channel.
+- [x] Exercise a temporary failing assertion to prove alerts arrive, then
   restore and verify recovery notification.
 
 ### Phase 2 — Consent and shared telemetry boundary
 
-- [ ] Add a small typed privacy-preference module with separate usage and crash
+- [x] Add a small typed privacy-preference module with separate usage and crash
   settings stored locally.
-- [ ] Add the first-use notice and Settings controls.
-- [ ] Create a single telemetry gateway; feature code must not call provider
+- [x] Add the first-use notice and Settings controls.
+- [x] Create a single telemetry gateway; feature code must not call provider
   SDKs or `fetch` analytics endpoints directly.
-- [ ] Enforce compile-time event names/properties plus runtime payload
+- [x] Enforce compile-time event names/properties plus runtime payload
   validation and dropping of unknown fields.
-- [ ] Test default/declined/accepted preference behavior and changes made while
+- [x] Test default/declined/accepted preference behavior and changes made while
   the app is running.
 
 ### Phase 3 — Cloudflare Web Analytics
 
-- [ ] Switch Cloudflare to manual snippet installation.
-- [ ] Load the beacon only when usage analytics are enabled.
-- [ ] Update CSP with only the exact Cloudflare script/connect sources needed.
-- [ ] Verify that no beacon request occurs before consent or after opt-out.
+- [x] Switch Cloudflare to manual snippet installation.
+- [x] Load the beacon only when usage analytics are enabled.
+- [x] Update CSP with only the exact Cloudflare script/connect sources needed.
+- [x] Verify that no beacon request occurs before consent or after opt-out.
 
 ### Phase 4 — First-party product events
 
-- [ ] Add a same-origin Worker endpoint and Analytics Engine binding.
-- [ ] Accept only `POST`, cap body size, validate origin/content type and the
+- [x] Add a same-origin Worker endpoint and Analytics Engine binding.
+- [x] Accept only `POST`, cap body size, validate origin/content type and the
   allowlist, and return without logging rejected payload content.
-- [ ] Write only event name, allowed enum properties, app version, and server
-  timestamp. Do not write request IP, user agent, referer, or identifiers.
-- [ ] Instrument successful outcomes at the narrow product seams listed in the
+- [x] Write only event name, allowlisted properties (including app version only
+  for `app_opened`), and the Analytics Engine server timestamp. Do not write
+  request IP, user agent, referer, or identifiers.
+- [x] Instrument successful outcomes at the narrow product seams listed in the
   allowlist.
 - [ ] Add aggregate queries/dashboard notes that account for Analytics Engine
   sampling.
@@ -362,9 +376,9 @@ review under the repository workflow.
 
 ### Phase 6 — Browser and release verification
 
-- [ ] Playwright: fresh device sees the notice and sends no optional telemetry.
-- [ ] Playwright: decline persists locally and no provider endpoints are called.
-- [ ] Playwright: each control enables only its own telemetry category and
+- [x] Playwright: fresh device sees the notice and sends no optional telemetry.
+- [x] Playwright: decline persists locally and no provider endpoints are called.
+- [x] Playwright: each control enables only its own telemetry category and
   turning it off stops future sends.
 - [ ] Payload tests: seeded project titles, filenames, artist names, Dropbox
   labels, and imported values never appear in any outgoing body.
@@ -396,4 +410,3 @@ review under the repository workflow.
 - [Sentry uptime monitors](https://sentry.io/changelog/uptime-monitors-expanded-alert-configuration/)
 - [Sentry JavaScript breadcrumbs](https://docs.sentry.io/platforms/javascript/guides/svelte/enriching-events/breadcrumbs/)
 - [UK ICO guidance on cookies and similar technologies](https://ico.org.uk/for-organisations/direct-marketing-and-privacy-and-electronic-communications/guide-to-pecr/cookies-and-similar-technologies/)
-

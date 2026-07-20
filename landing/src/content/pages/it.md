@@ -35,24 +35,63 @@ lede: "This page is for network and IT administrators evaluating Sightlines for 
     </tr>
     <tr>
       <th scope="row">User data flow</th>
-      <td>Local-only. Projects and images stay in the user's browser storage.</td>
+      <td>Local-first. Projects and images stay in the user's browser storage; optional anonymous reporting excludes that content.</td>
     </tr>
   </tbody>
 </table>
 
 ## What it is
 
-Sightlines lets exhibition staff draw gallery floor plans to scale, place artworks on wall elevations, and preview the result in 3D. It's comparable in risk profile to any static documentation site: after the application files load, editing runs entirely in the browser. See the [about page](/about) for a fuller description.
+Sightlines lets exhibition staff draw gallery floor plans to scale, place artworks on wall elevations, and preview the result in 3D. Editing and project storage run in the browser; optional, consent-gated analytics report only aggregate product and performance data. See the [about page](/about) for a fuller description.
 
 It is not a file-sharing service, social network, streaming site, advertising network, gambling site, or download portal, and it hosts no user-generated public content.
 
 ## Network behavior
 
 - The browser fetches application assets (HTML, JS, CSS, fonts) from `app.sightlines.art` over HTTPS. This informational site's pages are served separately from `sightlines.art`.
-- Each origin's Content-Security-Policy restricts connections to that origin only; there are no cross-origin requests between the two hostnames and no third-party requests from either.
-- No user project content is transmitted over the network. There is no upload endpoint, on either hostname.
+- Each origin's Content-Security-Policy restricts connections to an explicit allowlist. Beyond its own origin, the application permits only the Cloudflare Web Analytics beacon (loaded after consent), its same-origin product-event endpoint, and the Dropbox API endpoints used by optional cloud backup.
+- No user project content is sent to Sightlines. There is no Sightlines project-upload endpoint on either hostname.
 - No account, authentication, or session traffic exists in the current version, on either hostname.
-- No analytics, advertising, or tracking beacons, on either hostname.
+- No advertising, cross-site tracking, session replay, or personal analytics profiles. Optional usage analytics is off until the user permits it.
+
+## Data flows
+
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Service</th>
+      <th scope="col">When used</th>
+      <th scope="col">Data boundary</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th scope="row">Cloudflare delivery and security</th>
+      <td>Necessary when either site is requested</td>
+      <td>Cloudflare processes ordinary request metadata, including IP addresses, to route and protect traffic. This is infrastructure processing, not optional product analytics.</td>
+    </tr>
+    <tr>
+      <th scope="row">Cloudflare Web Analytics</th>
+      <td>Only after Anonymous usage analytics is enabled</td>
+      <td>Visits, coarse browser/device categories, and page-performance measurements; no project or artwork content and no persistent Sightlines analytics identifier.</td>
+    </tr>
+    <tr>
+      <th scope="row">Sightlines product events</th>
+      <td>Only after Anonymous usage analytics is enabled</td>
+      <td>Predefined successful outcomes sent to a same-origin Worker and stored in Cloudflare Analytics Engine. Sightlines does not write IP address, user agent, referrer, or project content to this dataset.</td>
+    </tr>
+    <tr>
+      <th scope="row">Dropbox app-folder backup</th>
+      <td>Only after the user connects Dropbox</td>
+      <td>Project backups move directly between the browser and the user's Dropbox app folder; Sightlines does not receive a copy.</td>
+    </tr>
+    <tr>
+      <th scope="row">Crash reporting</th>
+      <td>Not active</td>
+      <td>The app includes a separate local preference, but Sentry is deferred and no crash-reporting provider currently receives reports.</td>
+    </tr>
+  </tbody>
+</table>
 
 ## Security posture
 

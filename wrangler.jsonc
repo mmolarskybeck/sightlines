@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "sightlines",
+  "main": "./worker/index.ts",
   "compatibility_date": "2026-07-07",
   "routes": [
     {
@@ -10,6 +11,13 @@
   ],
   "assets": {
     "directory": "./dist/",
-    "not_found_handling": "single-page-application"
-  }
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/analytics"]
+  },
+  "analytics_engine_datasets": [
+    {
+      "binding": "PRODUCT_ANALYTICS",
+      "dataset": "sightlines_product_events"
+    }
+  ]
 }

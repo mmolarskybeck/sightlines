@@ -16,10 +16,11 @@ Sightlines is built for curators, exhibition planners, registrars, preparators, 
 - **Artwork checklist:** keep works, dimensions, and images together, and drag works from the list straight onto a wall.
 - **3D preview:** check sightlines and proportions from a visitor's point of view.
 - **Portable projects:** export a project as a file to back it up, move it between machines, or hand it to a colleague.
+- **Automatic cloud backup:** connect your own Dropbox and the app keeps a backup in a private app folder there — sent straight from your browser, never through Sightlines.
 
 ## Private by design
 
-Sightlines doesn't ask you to create an account or upload your exhibition to anyone's server. Your project — layouts, artwork details, and images — is stored locally in your own browser, and sharing happens only through files you export deliberately. Unreleased exhibition plans and artwork images are sensitive material; keeping them on your device is the point. The details are on the [privacy page](/privacy).
+Sightlines doesn't ask you to create an account or upload your exhibition to anyone's server. Your project — layouts, artwork details, and images — is stored locally in your own browser, and sharing happens only through files you export deliberately. If you turn on cloud backup, it goes directly to your own Dropbox account — Sightlines just facilitates the connection and never sees your files. Unreleased exhibition plans and artwork images are sensitive material; keeping them on your device is the point. The details are on the [privacy page](/privacy).
 
 ## How it's built
 
