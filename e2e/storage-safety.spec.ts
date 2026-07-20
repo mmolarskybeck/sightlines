@@ -202,6 +202,46 @@ test.describe("cloud backup", () => {
     // The app is still alive and usable.
     await expect(page.locator("svg.plan-svg")).toBeVisible();
   });
+
+  test("backs up on demand from the save-status popover", async ({ page }) => {
+    await installDropboxRoutes(page);
+    await seedDropboxAuth(page);
+    await gotoApp(page);
+
+    // A real edit leaves the project dirty (nothing backed up yet).
+    await renameProject(page, "Manual Backup");
+    await expect(page.locator("button.status-badge")).toHaveText(/Saved/);
+
+    // "Back up now" in the popover triggers a real (mocked) upload.
+    await openStoragePopover(page);
+    const uploadRequest = page.waitForRequest((request) =>
+      request.url().includes("content.dropboxapi.com/2/files/upload")
+    );
+    await page.getByRole("button", { name: "Back up now" }).click();
+    await uploadRequest;
+
+    // The row settles into the backed-up state without reopening the popover.
+    await expect(page.locator(".storage-popover-cloud")).toContainText("Backed up to Dropbox");
+  });
+
+  test("offers a top-level Dropbox backup in the Export menu", async ({ page }) => {
+    await installDropboxRoutes(page);
+    await seedDropboxAuth(page);
+    await gotoApp(page);
+
+    // Back up once so the menu item can describe a last-backup time.
+    await renameProject(page, "Export Menu Cloud");
+    const uploadRequest = page.waitForRequest((request) =>
+      request.url().includes("content.dropboxapi.com/2/files/upload")
+    );
+    await flushCloudBackupOnHide(page);
+    await uploadRequest;
+
+    await page.getByRole("button", { name: "Export", exact: true }).click();
+    const item = page.getByRole("menuitem", { name: /Back up to Dropbox/ });
+    await expect(item).toBeVisible();
+    await expect(item).toContainText("Last backed up");
+  });
 });
 
 test.describe("corruption recovery", () => {

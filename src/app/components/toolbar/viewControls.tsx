@@ -1,5 +1,7 @@
 import { forwardRef, type ComponentPropsWithoutRef, type ReactNode } from "react";
 import { BookmarkSimpleIcon } from "@phosphor-icons/react/dist/csr/BookmarkSimple";
+import { CloudCheckIcon } from "@phosphor-icons/react/dist/csr/CloudCheck";
+import { CloudWarningIcon } from "@phosphor-icons/react/dist/csr/CloudWarning";
 import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
 import { CrosshairIcon } from "@phosphor-icons/react/dist/csr/Crosshair";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
@@ -308,12 +310,32 @@ export function PrecisionSelect({
 // Popover trigger for the storage-details popover in App.tsx — forwardRef +
 // spread props let `<PopoverTrigger asChild>` attach its onClick/aria-expanded/
 // aria-haspopup/ref directly to this element rather than wrapping it in an
-// extra DOM node. The dot + label visual is unchanged.
+// extra DOM node.
+//
+// The local save state still drives the default look; when the caller passes a
+// unified `tone`/`label`/`cloud` (folded from local save + cloud backup by
+// getStatusBadgeDisplay), those override so the one badge speaks for both. The
+// label text carries the state distinction (screen readers get it as the
+// accessible name even when the tier hides it); the trailing cloud glyph and
+// dot color are secondary, never the sole signal.
+export type StatusBadgeTone =
+  | "idle"
+  | "saving"
+  | "saved"
+  | "error"
+  | "attention"
+  | "backing-up";
+
 export const StatusBadge = forwardRef<
   HTMLButtonElement,
-  { state: "idle" | "saving" | "saved" | "error" } & ComponentPropsWithoutRef<"button">
->(({ state, className, ...props }, ref) => {
-  const label =
+  {
+    state: "idle" | "saving" | "saved" | "error";
+    tone?: StatusBadgeTone;
+    label?: string;
+    cloud?: "none" | "ok" | "attention";
+  } & ComponentPropsWithoutRef<"button">
+>(({ state, tone, label, cloud = "none", className, ...props }, ref) => {
+  const fallbackLabel =
     state === "saving"
       ? "Saving"
       : state === "saved"
@@ -321,16 +343,23 @@ export const StatusBadge = forwardRef<
         : state === "error"
           ? "Save issue"
           : "Idle";
+  const effectiveTone: StatusBadgeTone = tone ?? state;
+  const effectiveLabel = label ?? fallbackLabel;
 
   return (
     <button
       ref={ref}
       type="button"
-      className={["status-badge", state, className].filter(Boolean).join(" ")}
+      className={["status-badge", effectiveTone, className].filter(Boolean).join(" ")}
       {...props}
     >
       <span className="status-dot" aria-hidden="true" />
-      <span className="status-badge-label">{label}</span>
+      <span className="status-badge-label">{effectiveLabel}</span>
+      {cloud === "ok" ? (
+        <CloudCheckIcon aria-hidden="true" className="status-badge-cloud" size={13} />
+      ) : cloud === "attention" ? (
+        <CloudWarningIcon aria-hidden="true" className="status-badge-cloud" size={13} />
+      ) : null}
     </button>
   );
 });

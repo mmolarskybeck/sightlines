@@ -4,10 +4,13 @@ import {
   getStorageNoteCopy,
   type StoragePersistenceState
 } from "../../hooks/useStoragePersistence";
+import { CloudCheckIcon } from "@phosphor-icons/react/dist/csr/CloudCheck";
+import { CloudWarningIcon } from "@phosphor-icons/react/dist/csr/CloudWarning";
 import {
   formatBackupRelativeTime
 } from "../../cloud/cloudBackupCopy";
 import type { CloudBackupProviderStatus } from "../../cloud/provider";
+import type { CloudBackupUploadStatus } from "../../store/cloudBackupSlice";
 import { useAppStore } from "../../store";
 import { LengthField } from "../shared/LengthField";
 import { getScopedUnitContext } from "../shared/scopedUnits";
@@ -38,9 +41,11 @@ interface SettingsDialogProps {
   cloudBackupConfigured: boolean;
   cloudBackupProviderStatus: CloudBackupProviderStatus;
   cloudBackupAccountLabel: string | null;
+  cloudBackupStatus: CloudBackupUploadStatus;
   lastCloudBackupAt: string | null;
   onConnectCloudBackup: () => Promise<void>;
   onDisconnectCloudBackup: () => void;
+  onRunCloudBackup: () => Promise<void>;
   resetPreferences: () => void;
   onExport: () => void;
   onImport: () => void;
@@ -76,9 +81,11 @@ export function SettingsDialog({
   cloudBackupConfigured,
   cloudBackupProviderStatus,
   cloudBackupAccountLabel,
+  cloudBackupStatus,
   lastCloudBackupAt,
   onConnectCloudBackup,
   onDisconnectCloudBackup,
+  onRunCloudBackup,
   resetPreferences,
   onExport,
   onImport,
@@ -146,9 +153,8 @@ export function SettingsDialog({
                     onCommit={setDefaultWallHeightMm}
                     commitErrorFallback="Could not save the default wall height."
                   />
-                  <p className="settings-row-note">
-                    Applies to rooms and walls you draw from now on; existing walls
-                    keep their height.
+                  <p className="settings-row-hint">
+                    Applies to rooms and walls you draw from now on.
                   </p>
                 </div>
 
@@ -164,110 +170,138 @@ export function SettingsDialog({
                     onCommit={setDefaultCenterlineHeightMm}
                     commitErrorFallback="Could not save the default eyeline height."
                   />
-                  <p className="settings-row-note">
-                    Moves the eyeline in Elevation and 3D and guides new placements.
-                    Hung artworks stay where they are; walls with their own eyeline
-                    keep it.
+                  <p className="settings-row-hint">
+                    Guides the eyeline in Elevation and 3D and new placements. Hung
+                    artworks stay put.
                   </p>
                 </div>
               </SettingsSection>
             ) : null}
 
             <SettingsSection title="Storage &amp; data">
-              <p className="settings-status">
-                {getStorageNoteCopy(storageState)}
+              <div className="settings-action-row">
+                <div className="settings-action-text">
+                  <strong className="settings-action-title">
+                    {getStorageNoteCopy(storageState)}
+                  </strong>
+                  <p className="settings-action-desc">
+                    Some browsers clear local data after inactivity.
+                  </p>
+                </div>
                 {storageState === "denied" ? (
-                  <Button
-                    className="settings-status-action"
-                    size="sm"
-                    variant="ghost"
-                    onClick={onRetryStorage}
-                  >
-                    Request durable storage
-                  </Button>
+                  <div className="settings-action-buttons">
+                    <button
+                      className="settings-link"
+                      type="button"
+                      onClick={onRetryStorage}
+                    >
+                      Request durable storage
+                    </button>
+                  </div>
                 ) : null}
-              </p>
+              </div>
 
-              <div className="settings-actions">
-                <Button variant="outline" onClick={onExport}>
-                  Export backup
-                </Button>
-                <Button variant="outline" onClick={onImport}>
-                  Import project file…
-                </Button>
+              <div className="settings-action-row">
+                <div className="settings-action-text">
+                  <strong className="settings-action-title">Backup file</strong>
+                  <p className="settings-action-desc">
+                    A portable .sightlines file you can store anywhere or hand off.
+                  </p>
+                </div>
+                <div className="settings-action-buttons">
+                  <Button size="sm" variant="outline" onClick={onExport}>
+                    Export
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={onImport}>
+                    Import…
+                  </Button>
+                </div>
               </div>
 
               {cloudBackupConfigured ? (
                 <CloudBackupBlock
                   status={cloudBackupProviderStatus}
+                  uploadStatus={cloudBackupStatus}
                   accountLabel={cloudBackupAccountLabel}
                   lastCloudBackupAt={lastCloudBackupAt}
                   onConnect={onConnectCloudBackup}
                   onDisconnect={onDisconnectCloudBackup}
+                  onRunBackup={onRunCloudBackup}
                 />
               ) : null}
+            </SettingsSection>
 
-              <div className="settings-privacy-controls">
-                <PrivacySwitchRow
+            <SettingsSection title="Analytics">
+              <div className="settings-switch-group">
+                <SwitchRow
                   checked={usageAnalyticsEnabled}
-                  description="Share anonymous feature-use and performance information. Never includes project or artwork content. Turning this off reloads Sightlines so reporting stops immediately."
+                  description="Share anonymous feature-use and performance data. Never includes project or artwork content."
+                  note="Turning this off reloads Sightlines."
                   id="settings-usage-analytics"
                   label="Anonymous usage analytics"
                   onCheckedChange={(enabled) =>
                     setPrivacySaveFailed(!onUsageAnalyticsChange(enabled))
                   }
                 />
-                <PrivacySwitchRow
+                <SwitchRow
                   checked={crashReportsEnabled}
-                  description="Send sanitized technical errors when Sightlines stops working. Never includes project content, images, filenames, or Dropbox data. Not active yet — this saves your choice for when crash reporting launches."
+                  description="Send sanitized error reports when Sightlines stops working. Not active yet — this saves your choice for launch."
                   id="settings-crash-reports"
                   label="Anonymous crash reports"
                   onCheckedChange={(enabled) =>
                     setPrivacySaveFailed(!onCrashReportsChange(enabled))
                   }
                 />
-                <p className="settings-row-note">
-                  Read the <a href="https://sightlines.art/privacy">privacy policy</a>.
-                </p>
-                {privacySaveFailed ? (
-                  <p className="settings-privacy-error" role="alert">
-                    This choice could not be saved. Reporting remains off.
-                  </p>
-                ) : null}
               </div>
+              <a className="settings-link" href="https://sightlines.art/privacy">
+                Read the privacy policy
+              </a>
+              {privacySaveFailed ? (
+                <p className="settings-privacy-error" role="alert">
+                  This choice could not be saved. Reporting remains off.
+                </p>
+              ) : null}
+            </SettingsSection>
 
-              {project ? (
-                <div className="settings-danger">
-                  <div className="settings-danger-item">
+            {project ? (
+              <SettingsSection title="Danger zone">
+                <div className="settings-action-row">
+                  <div className="settings-action-text">
+                    <p className="settings-action-desc">
+                      Removes this project from this browser.
+                    </p>
+                  </div>
+                  <div className="settings-action-buttons">
                     <Button
+                      size="sm"
                       variant="destructive-ghost"
                       onClick={() => setConfirmDeleteOpen(true)}
                     >
                       Delete this project
                     </Button>
                   </div>
-                  <div className="settings-danger-item">
-                    <Button variant="outline" onClick={resetPreferences}>
-                      Reset workspace preferences
-                    </Button>
-                    <p className="settings-row-note">
+                </div>
+                <div className="settings-action-row">
+                  <div className="settings-action-text">
+                    <p className="settings-action-desc">
                       Restores grid, snap, panel, and layout preferences on this
                       device.
                     </p>
                   </div>
+                  <div className="settings-action-buttons">
+                    <Button size="sm" variant="outline" onClick={resetPreferences}>
+                      Reset workspace preferences
+                    </Button>
+                  </div>
                 </div>
-              ) : null}
-            </SettingsSection>
+              </SettingsSection>
+            ) : null}
           </div>
 
           <div className="settings-footer">
-            <p className="settings-row-note">
+            <p className="settings-row-hint">
               Keyboard shortcuts and product info are in{" "}
-              <button
-                className="settings-footer-link"
-                type="button"
-                onClick={onOpenHelp}
-              >
+              <button className="settings-link" type="button" onClick={onOpenHelp}>
                 Help
               </button>
               .
@@ -308,29 +342,32 @@ export function SettingsDialog({
   );
 }
 
-function PrivacySwitchRow({
+function SwitchRow({
   checked,
   description,
+  note,
   id,
   label,
   onCheckedChange
 }: {
   checked: boolean;
   description: string;
+  note?: string;
   id: string;
   label: string;
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="settings-privacy-row" htmlFor={id}>
-      <span>
+    <label className="settings-switch-row" htmlFor={id}>
+      <span className="settings-switch-text">
         <strong>{label}</strong>
         <small>{description}</small>
+        {note ? <small className="settings-switch-note">{note}</small> : null}
       </span>
       <Switch
         aria-label={label}
         checked={checked}
-        className="settings-privacy-switch"
+        className="settings-switch"
         id={id}
         onCheckedChange={onCheckedChange}
       />
@@ -340,63 +377,81 @@ function PrivacySwitchRow({
 
 // The "Cloud backup" block inside the Storage section. Three states, all inside
 // the existing settings chrome (no new dialog): disconnected → connect;
-// connected → account + last-backup time + disconnect; reauth → reconnect. The
-// account never receives a copy of the work — the browser uploads straight to
-// the user's own Dropbox, said once here.
+// connected → a status row (account + last-backup time) with Back up now +
+// Disconnect; reauth → a caution note + reconnect. The account never receives a
+// copy of the work — the browser uploads straight to the user's own Dropbox,
+// said once here.
 function CloudBackupBlock({
   status,
+  uploadStatus,
   accountLabel,
   lastCloudBackupAt,
   onConnect,
-  onDisconnect
+  onDisconnect,
+  onRunBackup
 }: {
   status: CloudBackupProviderStatus;
+  uploadStatus: CloudBackupUploadStatus;
   accountLabel: string | null;
   lastCloudBackupAt: string | null;
   onConnect: () => Promise<void>;
   onDisconnect: () => void;
+  onRunBackup: () => Promise<void>;
 }) {
+  const uploading = uploadStatus === "uploading";
   return (
-    <div className="settings-field">
-      <span className="settings-row-label">Cloud backup</span>
-      {status === "connected" ? (
-        <>
-          <p className="settings-row-note">
-            {accountLabel ? `Connected as ${accountLabel}. ` : "Connected. "}
-            {lastCloudBackupAt
-              ? `Backed up ${formatBackupRelativeTime(lastCloudBackupAt)}.`
-              : "Waiting for the first backup."}
-          </p>
-          <div className="settings-actions">
-            <Button variant="outline" onClick={onDisconnect}>
-              Disconnect
-            </Button>
-          </div>
-        </>
-      ) : status === "reauthorization-required" ? (
-        <>
-          <p className="settings-row-note">
-            Dropbox access expired. Reconnect to resume automatic backups.
-          </p>
-          <div className="settings-actions">
-            <Button variant="outline" onClick={() => void onConnect()}>
-              Reconnect Dropbox
-            </Button>
-          </div>
-        </>
-      ) : (
-        <>
-          <p className="settings-row-note">
+    <div className="settings-action-row">
+      <div className="settings-action-text">
+        <strong className="settings-action-title">Cloud backup</strong>
+        {status === "connected" ? (
+          <>
+            <span className="settings-cloud-status-line">
+              <CloudCheckIcon aria-hidden="true" size={14} />
+              {accountLabel ? `Connected as ${accountLabel}` : "Connected"}
+            </span>
+            <p className="settings-action-note">
+              {lastCloudBackupAt
+                ? `Backed up ${formatBackupRelativeTime(lastCloudBackupAt)} · Backs up automatically.`
+                : "Waiting for the first backup. Backs up automatically."}
+            </p>
+          </>
+        ) : status === "reauthorization-required" ? (
+          <span className="settings-cloud-status-line settings-cloud-status-caution">
+            <CloudWarningIcon aria-hidden="true" size={14} />
+            Dropbox access expired. Backups are paused.
+          </span>
+        ) : (
+          <p className="settings-action-desc">
             Backs up this project to your Dropbox automatically. Sightlines never
             receives a copy.
           </p>
-          <div className="settings-actions">
-            <Button variant="outline" onClick={() => void onConnect()}>
-              Connect Dropbox
+        )}
+      </div>
+      <div className="settings-action-buttons">
+        {status === "connected" ? (
+          <>
+            <Button
+              disabled={uploading}
+              size="sm"
+              variant="outline"
+              onClick={() => void onRunBackup()}
+            >
+              {uploading ? "Backing up…" : "Back up now"}
             </Button>
-          </div>
-        </>
-      )}
+            <button className="settings-link" type="button" onClick={onDisconnect}>
+              Disconnect
+            </button>
+          </>
+        ) : status === "reauthorization-required" ? (
+          <Button size="sm" variant="outline" onClick={() => void onConnect()}>
+            Reconnect Dropbox
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" onClick={() => void onConnect()}>
+            Connect Dropbox
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -418,18 +473,23 @@ function SettingsSection({ title, children }: { title: string; children: ReactNo
 function SettingsRow({
   label,
   htmlFor,
+  hint,
   children
 }: {
   label: string;
   htmlFor?: string;
+  hint?: string;
   children: ReactNode;
 }) {
   return (
     <div className="settings-row">
-      <label className="settings-row-label" htmlFor={htmlFor}>
-        {label}
-      </label>
-      {children}
+      <div className="settings-row-labelgroup">
+        <label className="settings-row-label" htmlFor={htmlFor}>
+          {label}
+        </label>
+        {hint ? <p className="settings-row-hint">{hint}</p> : null}
+      </div>
+      <div className="settings-row-control">{children}</div>
     </div>
   );
 }
@@ -465,6 +525,7 @@ function ProjectTitleRow({
       <Input
         aria-label="Project title"
         id={inputId}
+        size="compact"
         value={value}
         onChange={(event) => setValue(event.target.value)}
         onBlur={commit}

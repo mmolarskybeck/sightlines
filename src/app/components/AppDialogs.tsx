@@ -61,9 +61,11 @@ type AppDialogsProps = {
   cloudBackupConfigured: boolean;
   cloudBackupProviderStatus: CloudBackupProviderStatus;
   cloudBackupAccountLabel: string | null;
+  cloudBackupStatus: AppState["cloudBackupStatus"];
   lastCloudBackupAt: string | null;
   connectCloudBackup: AppState["connectCloudBackup"];
   disconnectCloudBackup: AppState["disconnectCloudBackup"];
+  runCloudBackupNow: AppState["runCloudBackupNow"];
   resetPreferences: () => void;
   handleExportPackage: (mode: PackageExportMode) => Promise<void>;
   fileInputRef: RefObject<HTMLInputElement>;
@@ -117,9 +119,11 @@ export function AppDialogs({
   cloudBackupConfigured,
   cloudBackupProviderStatus,
   cloudBackupAccountLabel,
+  cloudBackupStatus,
   lastCloudBackupAt,
   connectCloudBackup,
   disconnectCloudBackup,
+  runCloudBackupNow,
   resetPreferences,
   handleExportPackage,
   fileInputRef,
@@ -180,9 +184,11 @@ export function AppDialogs({
           cloudBackupConfigured={cloudBackupConfigured}
           cloudBackupProviderStatus={cloudBackupProviderStatus}
           cloudBackupAccountLabel={cloudBackupAccountLabel}
+          cloudBackupStatus={cloudBackupStatus}
           lastCloudBackupAt={lastCloudBackupAt}
           onConnectCloudBackup={connectCloudBackup}
           onDisconnectCloudBackup={disconnectCloudBackup}
+          onRunCloudBackup={runCloudBackupNow}
           resetPreferences={resetPreferences}
           onExport={() => void handleExportPackage("display")}
           onImport={() => fileInputRef.current?.click()}

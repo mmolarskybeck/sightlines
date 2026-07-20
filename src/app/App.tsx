@@ -218,6 +218,8 @@ export function App() {
   const cloudBackupAccountLabel = useAppStore((state) => state.cloudBackupAccountLabel);
   const lastCloudBackupAt = useAppStore((state) => state.lastCloudBackupAt);
   const cloudBackupPending = useAppStore((state) => state.cloudBackupPending);
+  const cloudBackupStatus = useAppStore((state) => state.cloudBackupStatus);
+  const runCloudBackupNow = useAppStore((state) => state.runCloudBackupNow);
   const connectCloudBackup = useAppStore((state) => state.connectCloudBackup);
   const disconnectCloudBackup = useAppStore((state) => state.disconnectCloudBackup);
   const completeCloudBackupConnect = useAppStore((state) => state.completeCloudBackupConnect);
@@ -1457,8 +1459,11 @@ export function App() {
         retryStoragePersistence={retryStoragePersistence}
         cloudBackupConfigured={cloudBackupConfigured}
         cloudBackupProviderStatus={cloudBackupProviderStatus}
+        cloudBackupStatus={cloudBackupStatus}
         lastCloudBackupAt={lastCloudBackupAt}
         cloudBackupPending={cloudBackupPending}
+        runCloudBackupNow={runCloudBackupNow}
+        connectCloudBackup={connectCloudBackup}
         isExportingPackage={isExportingPackage}
         handleExportPackage={handleExportPackage}
         handleExportProjectById={handleExportProjectById}
@@ -2354,9 +2359,11 @@ export function App() {
         cloudBackupConfigured={cloudBackupConfigured}
         cloudBackupProviderStatus={cloudBackupProviderStatus}
         cloudBackupAccountLabel={cloudBackupAccountLabel}
+        cloudBackupStatus={cloudBackupStatus}
         lastCloudBackupAt={lastCloudBackupAt}
         connectCloudBackup={connectCloudBackup}
         disconnectCloudBackup={disconnectCloudBackup}
+        runCloudBackupNow={runCloudBackupNow}
         resetPreferences={resetPreferences}
         handleExportPackage={handleExportPackage}
         fileInputRef={fileInputRef}

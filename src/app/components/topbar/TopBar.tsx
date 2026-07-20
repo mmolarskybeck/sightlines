@@ -5,6 +5,10 @@ import { ArchiveIcon } from "@phosphor-icons/react/dist/csr/Archive";
 import { CameraIcon } from "@phosphor-icons/react/dist/csr/Camera";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
+import { CloudIcon } from "@phosphor-icons/react/dist/csr/Cloud";
+import { CloudArrowUpIcon } from "@phosphor-icons/react/dist/csr/CloudArrowUp";
+import { CloudCheckIcon } from "@phosphor-icons/react/dist/csr/CloudCheck";
+import { CloudWarningIcon } from "@phosphor-icons/react/dist/csr/CloudWarning";
 import { FilePdfIcon } from "@phosphor-icons/react/dist/csr/FilePdf";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import { FileDashedIcon } from "@phosphor-icons/react/dist/csr/FileDashed";
@@ -20,8 +24,14 @@ import {
   getStorageNoteCopy,
   type StoragePersistenceState
 } from "../../hooks/useStoragePersistence";
-import { getCloudBackupPopoverLine } from "../../cloud/cloudBackupCopy";
+import {
+  getCloudBackupMenuItem,
+  getCloudBackupPopoverState,
+  getStatusBadgeDisplay,
+  type CloudBackupCloudIcon
+} from "../../cloud/cloudBackupCopy";
 import type { CloudBackupProviderStatus } from "../../cloud/provider";
+import type { CloudBackupUploadStatus } from "../../store/cloudBackupSlice";
 import type { AppState, ViewMode } from "../../store";
 import { ProjectPicker } from "../library/ProjectPicker";
 import { StatusBadge } from "../toolbar";
@@ -31,6 +41,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -69,8 +80,11 @@ type TopBarProps = {
   retryStoragePersistence: () => void;
   cloudBackupConfigured: boolean;
   cloudBackupProviderStatus: CloudBackupProviderStatus;
+  cloudBackupStatus: CloudBackupUploadStatus;
   lastCloudBackupAt: string | null;
   cloudBackupPending: boolean;
+  runCloudBackupNow: () => Promise<void>;
+  connectCloudBackup: () => Promise<void>;
   isExportingPackage: boolean;
   handleExportPackage: (mode: PackageExportMode) => Promise<void>;
   handleExportProjectById: (id: string) => Promise<void>;
@@ -102,8 +116,11 @@ export function TopBar({
   retryStoragePersistence,
   cloudBackupConfigured,
   cloudBackupProviderStatus,
+  cloudBackupStatus,
   lastCloudBackupAt,
   cloudBackupPending,
+  runCloudBackupNow,
+  connectCloudBackup,
   isExportingPackage,
   handleExportPackage,
   handleExportProjectById,
@@ -113,12 +130,44 @@ export function TopBar({
   setIsExportPdfOpen,
   fileInputRef
 }: TopBarProps) {
-  const cloudBackupLine = getCloudBackupPopoverLine({
+  const badgeDisplay = getStatusBadgeDisplay({
+    saveState,
+    configured: cloudBackupConfigured,
+    providerStatus: cloudBackupProviderStatus,
+    uploadStatus: cloudBackupStatus,
+    pending: cloudBackupPending
+  });
+  const cloudConnected =
+    cloudBackupConfigured && cloudBackupProviderStatus === "connected";
+  const badgeTooltip = cloudConnected
+    ? "Saved on this device and backed up to Dropbox. Open for details."
+    : "Saved automatically on this device. Open for details.";
+  const cloudPopover = getCloudBackupPopoverState({
     configured: cloudBackupConfigured,
     status: cloudBackupProviderStatus,
+    uploadStatus: cloudBackupStatus,
     lastCloudBackupAt,
     pending: cloudBackupPending
   });
+  const cloudMenu = cloudBackupConfigured
+    ? getCloudBackupMenuItem({
+        status: cloudBackupProviderStatus,
+        uploadStatus: cloudBackupStatus,
+        lastCloudBackupAt,
+        pending: cloudBackupPending
+      })
+    : null;
+  // The cloud row / export item share one action router so the two surfaces
+  // can't route the same intent differently.
+  const runCloudAction = (action: "backup-now" | "reconnect" | "retry" | "setup") => {
+    if (action === "reconnect") {
+      void connectCloudBackup();
+    } else if (action === "setup") {
+      setIsSettingsOpen(true);
+    } else {
+      void runCloudBackupNow();
+    }
+  };
   return (
     <header className="topbar">
       <div className="topbar-left">
@@ -193,11 +242,16 @@ export function TopBar({
           <Tooltip>
             <TooltipTrigger asChild>
               <PopoverTrigger asChild>
-                <StatusBadge state={saveState} />
+                <StatusBadge
+                  state={saveState}
+                  tone={badgeDisplay.tone}
+                  label={badgeDisplay.label}
+                  cloud={badgeDisplay.cloud}
+                />
               </PopoverTrigger>
             </TooltipTrigger>
             <TooltipContent className="toolbar-tooltip" side="bottom">
-              Saved automatically on this device. Open for details.
+              {badgeTooltip}
             </TooltipContent>
           </Tooltip>
           <PopoverContent side="bottom" align="end" className="storage-popover">
@@ -206,9 +260,6 @@ export function TopBar({
               <h3>Where your work is saved</h3>
             </div>
             <p className="storage-popover-body">{getStorageNoteCopy(storagePersistence)}</p>
-            {cloudBackupLine ? (
-              <p className="storage-popover-cloud">{cloudBackupLine}</p>
-            ) : null}
             {storagePersistence === "denied" ? (
               <Button
                 className="storage-popover-retry"
@@ -216,8 +267,27 @@ export function TopBar({
                 variant="ghost"
                 onClick={retryStoragePersistence}
               >
-                Retry
+                Retry durable storage
               </Button>
+            ) : null}
+            {cloudPopover ? (
+              <div
+                className={`storage-popover-cloud storage-popover-cloud-${cloudPopover.tone}`}
+              >
+                <CloudRowIcon icon={cloudPopover.icon} />
+                <span className="storage-popover-cloud-text">{cloudPopover.text}</span>
+                {cloudPopover.action ? (
+                  <Button
+                    className="storage-popover-cloud-action"
+                    disabled={cloudPopover.actionDisabled}
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => runCloudAction(cloudPopover.action!)}
+                  >
+                    {cloudPopover.actionLabel}
+                  </Button>
+                ) : null}
+              </div>
             ) : null}
             <div className="storage-popover-footer">
               <Button
@@ -466,6 +536,30 @@ export function TopBar({
                 </DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
+            {cloudMenu ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="dropdown-menu-item-stacked"
+                  disabled={cloudMenu.busy}
+                  onSelect={() => runCloudAction(cloudMenu.action)}
+                >
+                  {cloudMenu.busy ? (
+                    <CircleNotchIcon aria-hidden="true" className="animate-spin" size={16} />
+                  ) : cloudMenu.action === "reconnect" ? (
+                    <CloudWarningIcon aria-hidden="true" size={16} />
+                  ) : (
+                    <CloudArrowUpIcon aria-hidden="true" size={16} />
+                  )}
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span>{cloudMenu.label}</span>
+                    <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
+                      {cloudMenu.description}
+                    </span>
+                  </span>
+                </DropdownMenuItem>
+              </>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
         <input
@@ -484,4 +578,26 @@ export function TopBar({
       </div>
     </header>
   );
+}
+
+// The state-matched cloud glyph for the save-status popover row. The spinner
+// reuses the shared animate-spin (suppressed under reduced motion in
+// global.css); every glyph is decorative, so the row's text carries meaning.
+function CloudRowIcon({ icon }: { icon: CloudBackupCloudIcon }) {
+  if (icon === "cloud-spinner") {
+    return (
+      <CircleNotchIcon
+        aria-hidden="true"
+        className="storage-popover-cloud-icon animate-spin"
+        size={15}
+      />
+    );
+  }
+  const Glyph =
+    icon === "cloud-check"
+      ? CloudCheckIcon
+      : icon === "cloud-warning"
+        ? CloudWarningIcon
+        : CloudIcon;
+  return <Glyph aria-hidden="true" className="storage-popover-cloud-icon" size={15} />;
 }

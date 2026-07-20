@@ -774,6 +774,33 @@ input:focus-visible {
   color: var(--danger);
 }
 
+/* Cloud needs attention (reauth or a failed upload): caution amber, NOT
+   destructive red — the local copy is safe, only the backup is stuck. Both the
+   dot and the label carry it so it survives a grayscale read. */
+.status-badge.attention .status-dot {
+  background: var(--caution);
+}
+
+.status-badge.attention {
+  color: var(--caution);
+}
+
+/* An upload in flight reuses the saving pulse on a petrol dot. */
+.status-badge.backing-up .status-dot {
+  background: var(--primary);
+  animation: status-pulse 1.2s ease-in-out infinite;
+}
+
+/* The trailing cloud glyph: quiet, decorative, secondary to the dot + label. */
+.status-badge-cloud {
+  flex: 0 0 auto;
+  color: var(--subtle);
+}
+
+.status-badge.attention .status-badge-cloud {
+  color: var(--caution);
+}
+
 @keyframes status-pulse {
   0%,
   100% {
@@ -781,6 +808,15 @@ input:focus-visible {
   }
   50% {
     opacity: 0.3;
+  }
+}
+
+/* New badge/cloud motion respects the reduced-motion preference (mirrors the
+   pattern used for the inspector toggle and other transitions). */
+@media (prefers-reduced-motion: reduce) {
+  .status-badge .status-dot,
+  .storage-popover-cloud-icon {
+    animation: none;
   }
 }
 
@@ -4030,11 +4066,40 @@ body.panels-resizing * {
   line-height: var(--leading-copy);
 }
 
+/* The cloud-backup row: a quiet status line (icon + text) with an optional
+   inline action, structured by spacing rather than a card. */
 .storage-popover-cloud {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
   margin: 0;
   color: var(--subtle);
   font-size: var(--type-xs);
   line-height: var(--leading-copy);
+}
+
+.storage-popover-cloud-icon {
+  flex: 0 0 auto;
+}
+
+.storage-popover-cloud-text {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* Caution states (reauth, failed upload) carry amber on the icon + text; the
+   local copy is safe, so this never uses destructive red. */
+.storage-popover-cloud-caution {
+  color: var(--caution);
+}
+
+/* The inline action sheds the ghost button's default padding so it reads as a
+   quiet link tucked at the row's end, not a second CTA. */
+.storage-popover-cloud-action {
+  flex: 0 0 auto;
+  height: auto;
+  padding: var(--space-2) var(--space-6);
+  color: var(--primary);
 }
 
 .storage-popover-retry {
@@ -7400,14 +7465,14 @@ body.panels-resizing * {
   display: grid;
   flex: 1 1 auto;
   min-height: 0;
-  gap: var(--space-24);
-  padding: var(--space-20) var(--space-24);
+  gap: var(--space-32);
+  padding: var(--space-24);
   overflow-y: auto;
 }
 
 .settings-section {
   display: grid;
-  gap: var(--space-12);
+  gap: var(--space-16);
 }
 
 .settings-section-title {
@@ -7420,11 +7485,21 @@ body.panels-resizing * {
   text-transform: uppercase;
 }
 
+/* One consistent row: a label column (label + optional hint stacked) on the
+   left and a fixed control column on the right, so every control aligns to one
+   right edge regardless of hint length. */
 .settings-row {
   display: grid;
-  grid-template-columns: 1fr minmax(180px, 220px);
-  align-items: center;
-  gap: var(--space-16);
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 240px);
+  align-items: start;
+  gap: var(--space-8) var(--space-16);
+}
+
+.settings-row-labelgroup {
+  display: grid;
+  align-self: center;
+  gap: var(--space-4);
+  min-width: 0;
 }
 
 .settings-row-label {
@@ -7434,13 +7509,51 @@ body.panels-resizing * {
   line-height: var(--leading-ui);
 }
 
-/* Notes span both columns to use the dialog width. */
-.settings-row-note {
-  grid-column: 1 / -1;
+/* One short muted hint line, held inside the label column so it never pushes
+   the control sideways. */
+.settings-row-hint {
   margin: 0;
+  max-width: 60ch;
   color: var(--muted);
   font-size: var(--type-xs);
   line-height: var(--leading-copy);
+}
+
+/* Control column: controls fill it so their right edge lines up. */
+.settings-row-control {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+/* Restore the input chrome the bare global .select-trigger strips, matching the
+   32px / 13px compact control family. */
+.settings-row-control .select-trigger,
+.settings-field .field-row input,
+.settings-field .field-row .select-trigger {
+  min-height: 32px;
+  padding: var(--space-6) var(--space-8);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-ui);
+}
+
+.settings-row-control .select-trigger:hover,
+.settings-field .field-row input:hover,
+.settings-field .field-row .select-trigger:hover {
+  border-color: var(--subtle);
+}
+
+.settings-row-control .select-trigger:focus-visible,
+.settings-field .field-row input:focus,
+.settings-field .field-row .select-trigger:focus {
+  border-color: var(--ring);
 }
 
 .settings-field {
@@ -7450,7 +7563,7 @@ body.panels-resizing * {
 
 /* aria-live always renders, so keep row gap zero until it has content. */
 .settings-field .field-row {
-  grid-template-columns: 1fr minmax(180px, 220px);
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 240px);
   align-items: center;
   gap: 0 var(--space-16);
 }
@@ -7470,112 +7583,144 @@ body.panels-resizing * {
   margin: var(--space-4) 0 0;
 }
 
-.settings-status {
-  margin: 0;
-  color: var(--ink);
-  font-size: var(--type-sm);
-  line-height: var(--leading-copy);
-}
-
-.settings-status-action {
-  margin-left: var(--space-8);
-  vertical-align: baseline;
-}
-
-.settings-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-8);
-}
-
-.settings-privacy-controls {
-  display: grid;
-  gap: 10px;
-  padding-top: 4px;
-}
-
-.settings-privacy-row {
+/* The action-row grammar shared by Storage, Analytics, and Danger: a text
+   block (title + short muted lines) on the left, action(s) top-aligned on the
+   right. One family, one rhythm — no tall stacks in a narrow column. The
+   switch rows are the same grid with a Switch instead of buttons. */
+.settings-action-row,
+.settings-switch-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 16px;
+  align-items: start;
+  gap: var(--space-16);
+}
+
+.settings-switch-row {
   cursor: pointer;
 }
 
-.settings-privacy-row > span {
+.settings-action-text,
+.settings-switch-text {
   display: grid;
-  gap: 2px;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
-.settings-privacy-row strong {
+.settings-action-title,
+.settings-switch-text > strong {
   color: var(--ink);
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
   line-height: var(--leading-ui);
 }
 
-.settings-privacy-row small,
-.settings-privacy-error {
+.settings-action-desc,
+.settings-action-note,
+.settings-switch-text > small {
+  margin: 0;
+  max-width: 60ch;
   color: var(--muted);
   font-size: var(--type-xs);
   line-height: var(--leading-copy);
 }
 
-.settings-privacy-switch {
-  width: 30px;
-  height: 18px;
+/* Actions sit in the right column, top-aligned with the title. */
+.settings-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+/* Cloud status line: a small inline glyph before the account line, not a
+   floating icon column. overflow-wrap: normal keeps long account names on
+   whole words (never mid-name). */
+.settings-cloud-status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  min-width: 0;
+  color: var(--ink);
+  font-size: var(--type-sm);
+  line-height: var(--leading-ui);
+  overflow-wrap: normal;
+}
+
+.settings-cloud-status-line > svg {
+  flex: 0 0 auto;
+  color: var(--subtle);
+}
+
+/* Reauth: amber line + glyph, never destructive red. */
+.settings-cloud-status-line.settings-cloud-status-caution,
+.settings-cloud-status-line.settings-cloud-status-caution > svg {
+  color: var(--caution);
+}
+
+/* One shared tertiary link species: Request durable storage, Disconnect, the
+   privacy policy, and the footer Help link all read the same. */
+.settings-link {
+  display: inline;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: var(--type-sm);
+  line-height: var(--leading-ui);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.settings-link:hover {
+  color: var(--ink);
+}
+
+.settings-link:focus-visible {
+  border-radius: var(--radius-sm);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.settings-switch-group {
+  display: grid;
+  gap: var(--space-16);
+}
+
+/* Track sized so the shared 14px thumb (top/left 2px) centres in both axes:
+   34x20 track, 1px border -> 18px inner height, 2px top/bottom gap; checked
+   slide = 32px inner width - 14px thumb - 2px start = 16px, less the 2px end
+   gap = 14px. The old 18px track pinned the thumb to the bottom border. */
+.settings-switch {
+  align-self: start;
+  width: 34px;
+  height: 20px;
   border: 1px solid var(--input);
   border-radius: 999px;
   background: var(--surface-strong);
 }
 
-.settings-privacy-switch[data-state="checked"] {
+.settings-switch[data-state="checked"] {
   border-color: var(--primary);
   background: var(--primary);
 }
 
-.settings-privacy-switch[data-state="checked"] .switch-thumb {
-  transform: translateX(12px);
+.settings-switch[data-state="checked"] .switch-thumb {
+  transform: translateX(14px);
 }
 
 .settings-privacy-error {
   margin: 0;
   color: var(--danger);
-}
-
-.settings-danger {
-  display: grid;
-  gap: var(--space-12);
-  padding: var(--space-14) var(--space-16);
-  border: 1px solid var(--danger-line);
-  border-radius: var(--radius-fill);
-}
-
-.settings-danger-item {
-  display: grid;
-  gap: var(--space-6);
-  justify-items: start;
+  font-size: var(--type-xs);
+  line-height: var(--leading-copy);
 }
 
 .settings-footer {
   padding: var(--space-14) var(--space-24);
   border-top: 1px solid var(--line);
-}
-
-.settings-footer-link {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ink);
-  font: inherit;
-  font-weight: var(--weight-semibold);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-
-.settings-footer-link:hover {
-  color: var(--foreground);
 }
 
 .privacy-consent-notice {

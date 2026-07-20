@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 import {
   FakeImageProcessor,
   InMemoryArtworkLibraryRepository,
@@ -11,6 +12,11 @@ import { createAppStore, type AppStoreDeps } from "../store";
 import { readCloudBackupMeta } from "./cloudBackupMeta";
 import { selectBackupFingerprint } from "./cloudBackupSlice";
 import { telemetry } from "../telemetry/telemetry";
+
+// runCloudBackupNow owns its own sonner toasts; capture them without rendering.
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn() }
+}));
 
 // A controllable stand-in for the Dropbox provider. onUpload lets a test mutate
 // the store mid-upload to exercise the "edited during upload" path.
@@ -78,6 +84,8 @@ describe("cloudBackupSlice.runCloudBackup", () => {
   }
 
   beforeEach(() => {
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.error).mockClear();
     window.localStorage.clear();
     repository = new InMemoryProjectRepository();
     artworkLibraryRepository = new InMemoryArtworkLibraryRepository();
@@ -160,5 +168,128 @@ describe("cloudBackupSlice.runCloudBackup", () => {
     const store = await bootStore(undefined);
     await store.getState().runCloudBackup();
     expect(store.getState().cloudBackupStatus).toBe("idle");
+  });
+});
+
+describe("cloudBackupSlice.runCloudBackupNow", () => {
+  let repository: InMemoryProjectRepository;
+  let artworkLibraryRepository: InMemoryArtworkLibraryRepository;
+  let assetRepository: InMemoryAssetRepository;
+  let imageProcessor: FakeImageProcessor;
+  let projectSnapshotRepository: InMemoryProjectSnapshotRepository;
+
+  function makeDeps(overrides: Partial<AppStoreDeps> = {}): AppStoreDeps {
+    return {
+      projectRepository: repository,
+      artworkLibraryRepository,
+      assetRepository,
+      imageProcessor,
+      projectSnapshotRepository,
+      ...overrides
+    };
+  }
+
+  async function bootStore(provider?: CloudBackupProvider) {
+    const store = createAppStore(makeDeps({ cloudBackupProvider: provider }));
+    await store.getState().boot();
+    const project = store.getState().project!;
+    store.setState({
+      project: {
+        ...project,
+        checklistArtworkIds: [],
+        wallObjects: [],
+        floorObjects: []
+      },
+      libraryArtworks: []
+    });
+    return store;
+  }
+
+  beforeEach(() => {
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.error).mockClear();
+    window.localStorage.clear();
+    repository = new InMemoryProjectRepository();
+    artworkLibraryRepository = new InMemoryArtworkLibraryRepository();
+    assetRepository = new InMemoryAssetRepository();
+    imageProcessor = new FakeImageProcessor();
+    projectSnapshotRepository = new InMemoryProjectSnapshotRepository();
+  });
+
+  it("uploads and confirms when there are changes to back up", async () => {
+    const provider = makeFakeProvider();
+    const store = await bootStore(provider);
+
+    await store.getState().runCloudBackupNow();
+
+    expect(provider.uploads).toBe(1);
+    expect(toast.success).toHaveBeenCalledWith("Backed up to Dropbox.");
+  });
+
+  it("short-circuits with a quiet toast when nothing has changed", async () => {
+    const provider = makeFakeProvider();
+    const store = await bootStore(provider);
+
+    // First backup records the fingerprint as up to date.
+    await store.getState().runCloudBackup();
+    expect(provider.uploads).toBe(1);
+
+    // A manual run with no intervening edit must NOT re-upload.
+    await store.getState().runCloudBackupNow();
+    expect(provider.uploads).toBe(1);
+    expect(toast.success).toHaveBeenCalledWith(
+      expect.stringContaining("Already backed up — no changes")
+    );
+  });
+
+  it("is a no-op while an upload is already in flight", async () => {
+    const provider = makeFakeProvider();
+    const store = await bootStore(provider);
+    store.setState({ cloudBackupStatus: "uploading" });
+
+    await store.getState().runCloudBackupNow();
+
+    expect(provider.uploads).toBe(0);
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("gives feedback when a manual retry fails again with the same message", async () => {
+    const provider = makeFakeProvider({ fail: new Error("upload boom") });
+    const store = await bootStore(provider);
+
+    // Seed a prior identical error so the reactive toast would dedupe it.
+    store.setState({ cloudBackupError: "upload boom" });
+
+    await store.getState().runCloudBackupNow();
+
+    expect(store.getState().cloudBackupStatus).toBe("error");
+    expect(toast.error).toHaveBeenCalledWith(
+      "upload boom",
+      expect.objectContaining({ action: expect.any(Object) })
+    );
+  });
+
+  it("stays silent on the first failure so the reactive toast owns it", async () => {
+    const provider = makeFakeProvider({ fail: new Error("first boom") });
+    const store = await bootStore(provider);
+
+    // No prior error: the message transitions null → "first boom", which the
+    // reactive useCloudBackupErrorToast handles, so runCloudBackupNow must not
+    // double up.
+    await store.getState().runCloudBackupNow();
+
+    expect(store.getState().cloudBackupStatus).toBe("error");
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("routes a manual run to reconnect surfacing when not connected", async () => {
+    const provider = makeFakeProvider();
+    vi.spyOn(provider, "getStatus").mockReturnValue("reauthorization-required");
+    const store = await bootStore(provider);
+
+    await store.getState().runCloudBackupNow();
+
+    expect(provider.uploads).toBe(0);
+    expect(toast.success).not.toHaveBeenCalled();
   });
 });

@@ -9,7 +9,9 @@
 // captured one — so an edit made during a long upload correctly leaves the
 // project dirty for the next cycle.
 
+import { toast } from "sonner";
 import { CloudBackupError } from "../cloud/dropbox";
+import { formatBackupRelativeTime } from "../cloud/cloudBackupCopy";
 import type {
   CloudBackupProvider,
   CloudBackupProviderStatus
@@ -51,6 +53,11 @@ export type CloudBackupSliceActions = {
   completeCloudBackupConnect: () => Promise<void>;
   // Build + upload a backup of the open project (see fingerprint semantics above).
   runCloudBackup: () => Promise<void>;
+  // User-triggered backup with its own feedback (toasts). Short-circuits when
+  // nothing has changed since the last backup, guards against concurrent runs,
+  // and guarantees a manual failure gives feedback even when the reactive error
+  // toast would dedupe it.
+  runCloudBackupNow: () => Promise<void>;
   // Re-read provider status/account + this project's stored meta into state.
   refreshCloudBackupStatus: () => void;
 };
@@ -227,6 +234,74 @@ export function createCloudBackupSlice(
           cloudBackupAccountLabel: active.accountLabel()
         });
       }
+    },
+
+    async runCloudBackupNow() {
+      const active = provider();
+      const project = get().project;
+      if (!active || !project) return;
+      if (active.getStatus() !== "connected") {
+        // Not connected (e.g. reauth required): surface the link state; the
+        // reconnect affordance in the UI handles the actual fix.
+        refreshCloudBackupStatus();
+        return;
+      }
+      // Concurrent-run guard (runCloudBackup enforces it too, but short-circuit
+      // here so we never toast over an upload already in flight).
+      if (get().cloudBackupStatus === "uploading") return;
+
+      // Up-to-date short circuit: if the current fingerprint already matches the
+      // one on record, there's nothing to upload — just reassure the user.
+      const meta = readCloudBackupMeta(project.id);
+      const currentFingerprint = selectBackupFingerprint(
+        project,
+        get().libraryArtworks
+      );
+      if (
+        meta.backedUpFingerprint !== null &&
+        meta.backedUpFingerprint === currentFingerprint &&
+        meta.lastCloudBackupAt
+      ) {
+        toast.success(
+          `Already backed up — no changes since ${formatBackupRelativeTime(
+            meta.lastCloudBackupAt
+          )}.`
+        );
+        return;
+      }
+
+      const prevError = get().cloudBackupError;
+      const prevTimestamp = get().lastCloudBackupAt;
+      await actions.runCloudBackup();
+      const next = get();
+
+      if (next.cloudBackupStatus === "error") {
+        // The reactive error toast (useCloudBackupErrorToast) only fires on a
+        // transition to a NEW error message, so a manual retry that fails again
+        // with the SAME message would be silent. Give it its own feedback in
+        // exactly that case, and never double up when the message changed (the
+        // reactive toast already fired).
+        if (next.cloudBackupError && next.cloudBackupError === prevError) {
+          toast.error(next.cloudBackupError, {
+            action: {
+              label: "Retry",
+              onClick: () => {
+                void actions.runCloudBackupNow();
+              }
+            }
+          });
+        }
+        return;
+      }
+
+      if (next.lastCloudBackupAt !== prevTimestamp) {
+        toast.success("Backed up to Dropbox.");
+        return;
+      }
+
+      // No error and no new timestamp: the upload was rate-limited (expected
+      // backpressure). Don't claim success — the scheduler will retry.
+      toast.success("Backup queued — Dropbox is busy, it'll finish shortly.");
     }
   };
 
