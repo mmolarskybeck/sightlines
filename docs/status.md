@@ -12,6 +12,24 @@ Room-shape slices 1-5 have shipped: the fast rectangle path remains, polygon roo
 
 The import surface is also beyond one-off image upload now: the Import wizard supports images-only, spreadsheet metadata, and combined image + metadata intake with map/review steps and image matching. Static public info/trust pages now live under `public/` (`about.html`, `privacy.html`, `security.html`, `it.html`, plus crawler/security metadata) and are linked from the left-rail Help surface.
 
+The Phase 2 privacy boundary is implemented: a consent-first, device-local
+preference defaults both categories off, a neutral first-use notice records an
+explicit choice, Settings exposes independent usage-analytics and crash-report
+controls, and a typed gateway rejects unlisted events and properties. The
+approved analytics launch uses manually loaded Cloudflare Web Analytics plus a
+same-origin Workers Analytics Engine endpoint only after usage permission. The
+initial allowlist covers successful app open, project creation, artwork import,
+view open, PDF export, package import, and Dropbox connection outcomes; it
+excludes project/artwork/Dropbox content, free-form values, request metadata,
+and identifiers. Public disclosures were updated 2026-07-19. Cloudflare's
+current retention is seven days for unsampled Web Analytics data, followed by
+aggregation with six months of dashboard access, and three months for Analytics
+Engine events. Sentry Uptime monitors the public application independently and
+emails the owner after three consecutive failures. Its failure and recovery
+notifications were exercised successfully on 2026-07-19. The Sentry browser
+error SDK remains deferred and inactive even though the separate local
+crash-report preference is present.
+
 ## Consolidation Pass (shipped 2026-07-09)
 
 Post-irregular-rooms refactor: 20 commits, all phases green (1065 tests, up from 957). Highlights:

@@ -11,6 +11,7 @@ Sightlines is an interactive tool for curators, exhibition planners, and gallery
 - Local-first architecture: all project data stays on your device
 - No account or authentication required in v1
 - Artwork images stored locally in browser storage
+- Optional automatic backup to the user's own Dropbox app folder, sent directly from the browser — Sightlines never receives project data
 - Simple 3D visualization of exhibition layouts
 
 ### Learn More
@@ -26,5 +27,5 @@ Sightlines is an interactive tool for curators, exhibition planners, and gallery
 - HTTPS-only deployment
 - No user projects or artwork hosted on servers
 - No executable downloads
-- No third-party tracking
+- Optional, consent-controlled Cloudflare usage analytics excludes project and artwork content; no advertising, cross-site tracking, or personal profiles
 - Static application served from Cloudflare Workers

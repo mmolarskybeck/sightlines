@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { telemetry } from "../telemetry/telemetry";
 import { createSampleProject } from "../../domain/sample/sampleProject";
 import type {
   ArtworkWallObject,
@@ -451,6 +452,7 @@ describe("arrange-session settle matrix (rows missing from store.test.ts)", () =
   }
 
   it("view-mode change → accept (undo entry when the preview moved)", async () => {
+    const track = vi.spyOn(telemetry, "track");
     await threeWorksOnWall();
     store.getState().beginArrangeSession("equal");
     store.getState().updateArrangeSession({ equal: true });
@@ -463,6 +465,8 @@ describe("arrange-session settle matrix (rows missing from store.test.ts)", () =
     expect(state.viewMode).toBe("elevation");
     expect(state.undoStack).toHaveLength(undoBefore + 1);
     expect(state.undoStack.at(-1)?.label).toBe("Arrange on wall");
+    expect(track).toHaveBeenCalledWith("view_opened", { view: "elevation" });
+    track.mockRestore();
   });
 
   it("selection change with no preview delta settles silently (no undo entry)", async () => {

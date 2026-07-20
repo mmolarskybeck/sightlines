@@ -21,6 +21,7 @@ import {
   DialogTitle
 } from "../ui/dialog";
 import { Input } from "../ui/input";
+import { Switch } from "../ui/switch";
 import {
   Select,
   SelectContent,
@@ -44,6 +45,10 @@ interface SettingsDialogProps {
   onExport: () => void;
   onImport: () => void;
   onOpenHelp: () => void;
+  usageAnalyticsEnabled: boolean;
+  crashReportsEnabled: boolean;
+  onUsageAnalyticsChange: (enabled: boolean) => boolean;
+  onCrashReportsChange: (enabled: boolean) => boolean;
 }
 
 // The four display units, spelled out. There's no display-name helper in
@@ -77,7 +82,11 @@ export function SettingsDialog({
   resetPreferences,
   onExport,
   onImport,
-  onOpenHelp
+  onOpenHelp,
+  usageAnalyticsEnabled,
+  crashReportsEnabled,
+  onUsageAnalyticsChange,
+  onCrashReportsChange
 }: SettingsDialogProps) {
   const project = useAppStore((state) => state.project);
   const renameProject = useAppStore((state) => state.renameProject);
@@ -89,6 +98,7 @@ export function SettingsDialog({
   const deleteProject = useAppStore((state) => state.deleteProject);
 
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [privacySaveFailed, setPrivacySaveFailed] = useState(false);
 
   const wallContext = project ? getScopedUnitContext(project.unit, "wall") : null;
   const eyelineContext = project ? getScopedUnitContext(project.unit, "artwork") : null;
@@ -197,6 +207,35 @@ export function SettingsDialog({
                 />
               ) : null}
 
+              <div className="settings-privacy-controls">
+                <PrivacySwitchRow
+                  checked={usageAnalyticsEnabled}
+                  description="Share anonymous feature-use and performance information. Never includes project or artwork content. Turning this off reloads Sightlines so reporting stops immediately."
+                  id="settings-usage-analytics"
+                  label="Anonymous usage analytics"
+                  onCheckedChange={(enabled) =>
+                    setPrivacySaveFailed(!onUsageAnalyticsChange(enabled))
+                  }
+                />
+                <PrivacySwitchRow
+                  checked={crashReportsEnabled}
+                  description="Send sanitized technical errors when Sightlines stops working. Never includes project content, images, filenames, or Dropbox data. Not active yet — this saves your choice for when crash reporting launches."
+                  id="settings-crash-reports"
+                  label="Anonymous crash reports"
+                  onCheckedChange={(enabled) =>
+                    setPrivacySaveFailed(!onCrashReportsChange(enabled))
+                  }
+                />
+                <p className="settings-row-note">
+                  Read the <a href="https://sightlines.art/privacy">privacy policy</a>.
+                </p>
+                {privacySaveFailed ? (
+                  <p className="settings-privacy-error" role="alert">
+                    This choice could not be saved. Reporting remains off.
+                  </p>
+                ) : null}
+              </div>
+
               {project ? (
                 <div className="settings-danger">
                   <div className="settings-danger-item">
@@ -266,6 +305,36 @@ export function SettingsDialog({
         </Dialog>
       ) : null}
     </>
+  );
+}
+
+function PrivacySwitchRow({
+  checked,
+  description,
+  id,
+  label,
+  onCheckedChange
+}: {
+  checked: boolean;
+  description: string;
+  id: string;
+  label: string;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="settings-privacy-row" htmlFor={id}>
+      <span>
+        <strong>{label}</strong>
+        <small>{description}</small>
+      </span>
+      <Switch
+        aria-label={label}
+        checked={checked}
+        className="settings-privacy-switch"
+        id={id}
+        onCheckedChange={onCheckedChange}
+      />
+    </label>
   );
 }
 

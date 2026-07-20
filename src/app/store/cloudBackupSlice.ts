@@ -23,6 +23,7 @@ import { buildProjectPackage } from "../../domain/package/packageService";
 import type { Artwork, Project } from "../../domain/project";
 import type { AppState, AppStoreDeps } from "../store";
 import { readCloudBackupMeta, writeCloudBackupMeta } from "./cloudBackupMeta";
+import { telemetry } from "../telemetry/telemetry";
 
 export type CloudBackupUploadStatus = "idle" | "uploading" | "error";
 
@@ -133,7 +134,10 @@ export function createCloudBackupSlice(
       const active = provider();
       if (!active) return;
       const handled = await active.completeConnect();
-      if (handled) refreshCloudBackupStatus();
+      if (handled) {
+        refreshCloudBackupStatus();
+        telemetry.track("cloud_backup_connected", { provider: "dropbox" });
+      }
     },
 
     refreshCloudBackupStatus,

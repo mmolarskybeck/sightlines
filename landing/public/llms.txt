@@ -19,7 +19,8 @@ Security and privacy notes:
 
 - HTTPS-only production deployment on both hostnames.
 - No hosted user projects or artwork images in v1.
+- Optional cloud backup goes directly from the user's browser to their own Dropbox app folder; Sightlines never receives project data.
 - No executable downloads.
-- No third-party tracking scripts on either hostname.
+- Optional, consent-controlled Cloudflare Web Analytics and predefined aggregate product events exclude project and artwork content; no advertising, cross-site tracking, or personal profiles.
 - Application: static Vite React app on Cloudflare Workers static assets at app.sightlines.art.
-- This site: static Astro site with no client-side JavaScript at sightlines.art.
+- This site: static Astro informational site at sightlines.art.

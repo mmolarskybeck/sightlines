@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
+import { telemetry } from "./telemetry/telemetry";
 import {
   CURRENT_ARTWORK_SCHEMA_VERSION,
   CURRENT_SCHEMA_VERSION,
@@ -1464,6 +1465,7 @@ describe("app store", () => {
   });
 
   it("createProject opens a new, blank, roomless project and lists it alongside the original", async () => {
+    const track = vi.spyOn(telemetry, "track");
     const originalId = store.getState().project!.id;
 
     await store.getState().createProject("Winter Show");
@@ -1480,6 +1482,8 @@ describe("app store", () => {
       "Untitled Exhibition",
       "Winter Show"
     ]);
+    expect(track).toHaveBeenCalledWith("project_created", {});
+    track.mockRestore();
   });
 
   it("duplicateProject preserves the source and opens a freshly identified copy", async () => {
@@ -1835,9 +1839,12 @@ describe("app store", () => {
     });
 
     it("uploads two files as two library records with three blobs each, in one undo entry", async () => {
+      const track = vi.spyOn(telemetry, "track");
       const files = [makeImageFile("one.jpg"), makeImageFile("two.png", "image/png")];
 
       await store.getState().addArtworksFromFiles(files);
+      expect(track).toHaveBeenCalledWith("artwork_import_completed", { source: "images" });
+      track.mockRestore();
 
       const state = store.getState();
       expect(state.error).toBeNull();
@@ -1972,6 +1979,7 @@ describe("app store", () => {
 
   describe("importArtworkDrafts", () => {
     it("imports selected metadata drafts, processes matched images, and commits checklist membership once", async () => {
+      const track = vi.spyOn(telemetry, "track");
       const image = makeImageFile("mona-lisa.jpg");
       const draft: ArtworkImportDraft = {
         id: "draft-1",
@@ -1993,6 +2001,8 @@ describe("app store", () => {
       };
 
       await store.getState().importArtworkDrafts([draft]);
+      expect(track).toHaveBeenCalledWith("artwork_import_completed", { source: "combined" });
+      track.mockRestore();
 
       const state = store.getState();
       expect(state.error).toBeNull();
@@ -2006,6 +2016,7 @@ describe("app store", () => {
     });
 
     it("imports metadata-only rows even when no image is attached", async () => {
+      const track = vi.spyOn(telemetry, "track");
       const draft: ArtworkImportDraft = {
         id: "draft-1",
         row: { sourceRowIndex: 2, values: ["Untitled"] },
@@ -2023,6 +2034,8 @@ describe("app store", () => {
       };
 
       await store.getState().importArtworkDrafts([draft]);
+      expect(track).toHaveBeenCalledWith("artwork_import_completed", { source: "spreadsheet" });
+      track.mockRestore();
 
       const state = store.getState();
       expect(state.error).toBeNull();

@@ -10,12 +10,14 @@ import type { CloudBackupProvider } from "../cloud/provider";
 import { createAppStore, type AppStoreDeps } from "../store";
 import { readCloudBackupMeta } from "./cloudBackupMeta";
 import { selectBackupFingerprint } from "./cloudBackupSlice";
+import { telemetry } from "../telemetry/telemetry";
 
 // A controllable stand-in for the Dropbox provider. onUpload lets a test mutate
 // the store mid-upload to exercise the "edited during upload" path.
 function makeFakeProvider(options: {
   onUpload?: () => void;
   fail?: Error;
+  completeHandled?: boolean;
 } = {}): CloudBackupProvider & { uploads: number } {
   return {
     id: "fake",
@@ -23,7 +25,7 @@ function makeFakeProvider(options: {
     uploads: 0,
     async startConnect() {},
     async completeConnect() {
-      return false;
+      return options.completeHandled ?? false;
     },
     disconnect() {},
     getStatus() {
@@ -82,6 +84,14 @@ describe("cloudBackupSlice.runCloudBackup", () => {
     assetRepository = new InMemoryAssetRepository();
     imageProcessor = new FakeImageProcessor();
     projectSnapshotRepository = new InMemoryProjectSnapshotRepository();
+  });
+
+  it("records a successful Dropbox connection", async () => {
+    const track = vi.spyOn(telemetry, "track");
+    const store = await bootStore(makeFakeProvider({ completeHandled: true }));
+    await store.getState().completeCloudBackupConnect();
+    expect(track).toHaveBeenCalledWith("cloud_backup_connected", { provider: "dropbox" });
+    track.mockRestore();
   });
 
   it("marks backed-up when the project is unchanged during upload", async () => {

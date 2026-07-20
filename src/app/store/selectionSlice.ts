@@ -1,5 +1,6 @@
 import type { Project } from "../../domain/project";
 import type { AppState, ViewMode } from "../store";
+import { telemetry } from "../telemetry/telemetry";
 
 // Selection is transient view state: never persisted or undoable.
 //   none           — nothing selected
@@ -107,7 +108,14 @@ export function createSelectionSlice(
   const actions: SelectionSliceActions = {
     setViewMode(viewMode) {
       autoAcceptArrangeSession();
+      const previousViewMode = get().viewMode;
       set({ viewMode });
+      if (
+        viewMode !== previousViewMode &&
+        (viewMode === "plan" || viewMode === "elevation" || viewMode === "3d")
+      ) {
+        telemetry.track("view_opened", { view: viewMode });
+      }
     },
 
     selectWall(wallId) {
