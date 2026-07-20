@@ -1,7 +1,8 @@
 import "@testing-library/jest-dom/vitest";
 
-// Node 22+'s unusable Storage accessors can shadow jsdom's implementation.
-// Replace them only when the current global does not satisfy Storage.
+// Node 22+ ships a native Storage whose Web IDL named-property setter swallows
+// vi.spyOn's defineProperty as a stored item, so spies silently never install.
+// Always replace it with a plain, spyable in-memory Storage for tests.
 class MemoryStorage implements Storage {
   private readonly store = new Map<string, string>();
 
@@ -31,12 +32,6 @@ class MemoryStorage implements Storage {
 }
 
 function installWorkingStorage(propertyName: "localStorage" | "sessionStorage") {
-  const current = (globalThis as unknown as Record<string, unknown>)[propertyName] as
-    | Storage
-    | undefined;
-
-  if (current && typeof current.setItem === "function") return;
-
   Object.defineProperty(globalThis, propertyName, {
     configurable: true,
     enumerable: true,
