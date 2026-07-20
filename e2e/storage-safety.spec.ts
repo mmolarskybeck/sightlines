@@ -138,6 +138,22 @@ function openStoragePopover(page: Page) {
 }
 
 test.describe("cloud backup", () => {
+  test("separates automatic local save from optional Dropbox backup", async ({ page }) => {
+    await gotoApp(page);
+    await openStoragePopover(page);
+
+    await expect(page.getByRole("heading", { name: "Save & backup" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "On this device" })).toBeVisible();
+    await expect(
+      page.getByText("Saved automatically in this browser.", { exact: false })
+    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Dropbox backup" })).toBeVisible();
+    await expect(page.getByText("Automatic backup is off.", { exact: false })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Connect|Turn on/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Export backup file" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Storage settings" })).toBeVisible();
+  });
+
   test("backs up to Dropbox after an edit and shows the connected state", async ({ page }) => {
     await installDropboxRoutes(page);
     await seedDropboxAuth(page);
@@ -156,7 +172,9 @@ test.describe("cloud backup", () => {
 
     // The save-status popover reports the backup.
     await openStoragePopover(page);
-    await expect(page.locator(".storage-popover-cloud")).toContainText("Backed up to Dropbox");
+    await expect(page.locator(".storage-popover-destinations")).toContainText(
+      "Automatic backup on. Last backup"
+    );
 
     // Settings shows the connected account.
     await page.getByRole("button", { name: "Storage settings" }).click();
@@ -191,7 +209,9 @@ test.describe("cloud backup", () => {
 
     // Popover flips to the reconnect line.
     await openStoragePopover(page);
-    await expect(page.locator(".storage-popover-cloud")).toContainText("Reconnect Dropbox");
+    await expect(page.locator(".storage-popover-destinations")).toContainText(
+      "Reconnect Dropbox"
+    );
 
     // Settings offers the reconnect button.
     await page.getByRole("button", { name: "Storage settings" }).click();
@@ -221,7 +241,9 @@ test.describe("cloud backup", () => {
     await uploadRequest;
 
     // The row settles into the backed-up state without reopening the popover.
-    await expect(page.locator(".storage-popover-cloud")).toContainText("Backed up to Dropbox");
+    await expect(page.locator(".storage-popover-destinations")).toContainText(
+      "Automatic backup on. Last backup"
+    );
   });
 
   test("offers a top-level Dropbox backup in the Export menu", async ({ page }) => {

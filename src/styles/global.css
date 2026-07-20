@@ -4036,19 +4036,12 @@ body.panels-resizing * {
 
 .storage-popover {
   display: grid;
-  gap: var(--space-10);
-  width: 280px;
+  gap: var(--space-14);
+  width: 320px;
 }
 
 .storage-popover-heading {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
   color: var(--subtle);
-}
-
-.storage-popover-heading svg {
-  flex: 0 0 auto;
 }
 
 .storage-popover-heading h3 {
@@ -4059,60 +4052,73 @@ body.panels-resizing * {
   line-height: var(--leading-ui);
 }
 
-.storage-popover-body {
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--type-sm);
-  line-height: var(--leading-copy);
+.storage-popover-destinations {
+  display: grid;
+  gap: var(--space-14);
 }
 
-/* The cloud-backup row: a quiet status line (icon + text) with an optional
-   inline action, structured by spacing rather than a card. */
-.storage-popover-cloud {
-  display: flex;
-  align-items: center;
+/* Local save and Dropbox backup are parallel destinations, structured as
+   aligned rows instead of nested cards. Their labels carry the distinction;
+   icons remain secondary and decorative. */
+.storage-popover-destination {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
   gap: var(--space-8);
-  margin: 0;
+}
+
+.storage-popover-destination-icon,
+.storage-popover-cloud-icon {
+  margin-top: var(--space-2);
   color: var(--subtle);
+}
+
+.storage-popover-destination-copy {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.storage-popover-destination-copy h4,
+.storage-popover-destination-copy p {
+  margin: 0;
+}
+
+.storage-popover-destination-copy h4 {
+  color: var(--ink);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-ui);
+}
+
+.storage-popover-destination-copy p {
+  color: var(--muted);
   font-size: var(--type-xs);
   line-height: var(--leading-copy);
 }
 
-.storage-popover-cloud-icon {
-  flex: 0 0 auto;
-}
-
-.storage-popover-cloud-text {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
 /* Caution states (reauth, failed upload) carry amber on the icon + text; the
    local copy is safe, so this never uses destructive red. */
-.storage-popover-cloud-caution {
+.storage-popover-cloud-caution .storage-popover-cloud-icon,
+.storage-popover-cloud-caution .storage-popover-destination-copy p {
   color: var(--caution);
 }
 
-/* The inline action sheds the ghost button's default padding so it reads as a
-   quiet link tucked at the row's end, not a second CTA. */
-.storage-popover-cloud-action {
-  flex: 0 0 auto;
-  height: auto;
-  padding: var(--space-2) var(--space-6);
-  color: var(--primary);
-}
-
-.storage-popover-retry {
+/* Row recovery/setup actions read as links beneath their status copy. */
+.storage-popover-row-action {
   justify-self: start;
+  height: auto;
+  margin-left: calc(-1 * var(--space-6));
+  padding: var(--space-4) var(--space-6);
+  color: var(--primary);
 }
 
 .storage-popover-footer {
   display: flex;
-  gap: var(--space-8);
-}
-
-.storage-popover-footer > * {
-  flex: 1 1 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding-top: var(--space-2);
 }
 
 .select-viewport {

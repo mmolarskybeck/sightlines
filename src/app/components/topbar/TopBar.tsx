@@ -77,7 +77,6 @@ type TopBarProps = {
   openProject: AppState["openProject"];
   renameProjectById: AppState["renameProjectById"];
   storagePersistence: StoragePersistenceState;
-  retryStoragePersistence: () => void;
   cloudBackupConfigured: boolean;
   cloudBackupProviderStatus: CloudBackupProviderStatus;
   cloudBackupStatus: CloudBackupUploadStatus;
@@ -113,7 +112,6 @@ export function TopBar({
   openProject,
   renameProjectById,
   storagePersistence,
-  retryStoragePersistence,
   cloudBackupConfigured,
   cloudBackupProviderStatus,
   cloudBackupStatus,
@@ -135,13 +133,21 @@ export function TopBar({
     configured: cloudBackupConfigured,
     providerStatus: cloudBackupProviderStatus,
     uploadStatus: cloudBackupStatus,
-    pending: cloudBackupPending
+    pending: cloudBackupPending,
+    lastCloudBackupAt
   });
   const cloudConnected =
     cloudBackupConfigured && cloudBackupProviderStatus === "connected";
-  const badgeTooltip = cloudConnected
-    ? "Saved on this device and backed up to Dropbox. Open for details."
-    : "Saved automatically on this device. Open for details.";
+  const badgeTooltip =
+    badgeDisplay.tone === "error"
+      ? "Your project could not be saved on this device. Open for details."
+      : badgeDisplay.tone === "attention"
+        ? "Saved on this device. Dropbox backup needs attention. Open for details."
+        : badgeDisplay.cloud === "ok"
+          ? "Saved automatically on this device and backed up to Dropbox. Open for details."
+          : cloudConnected
+            ? "Saved automatically on this device. Automatic Dropbox backup is on. Open for details."
+            : "Saved automatically on this device. Open for details.";
   const cloudPopover = getCloudBackupPopoverState({
     configured: cloudBackupConfigured,
     status: cloudBackupProviderStatus,
@@ -256,50 +262,57 @@ export function TopBar({
           </Tooltip>
           <PopoverContent side="bottom" align="end" className="storage-popover">
             <div className="storage-popover-heading">
-              <FloppyDiskIcon aria-hidden="true" size={16} />
-              <h3>Where your work is saved</h3>
+              <h3>Save &amp; backup</h3>
             </div>
-            <p className="storage-popover-body">{getStorageNoteCopy(storagePersistence)}</p>
-            {storagePersistence === "denied" ? (
-              <Button
-                className="storage-popover-retry"
-                size="sm"
-                variant="ghost"
-                onClick={retryStoragePersistence}
-              >
-                Retry durable storage
-              </Button>
-            ) : null}
-            {cloudPopover ? (
-              <div
-                className={`storage-popover-cloud storage-popover-cloud-${cloudPopover.tone}`}
+            <div className="storage-popover-destinations">
+              <section className="storage-popover-destination">
+                <FloppyDiskIcon
+                  aria-hidden="true"
+                  className="storage-popover-destination-icon"
+                  size={16}
+                />
+                <div className="storage-popover-destination-copy">
+                  <h4>On this device</h4>
+                  <p>{getStorageNoteCopy(storagePersistence)}</p>
+                </div>
+              </section>
+              <section
+                className={`storage-popover-destination storage-popover-cloud-${cloudPopover.tone}`}
               >
                 <CloudRowIcon icon={cloudPopover.icon} />
-                <span className="storage-popover-cloud-text">{cloudPopover.text}</span>
-                {cloudPopover.action ? (
-                  <Button
-                    className="storage-popover-cloud-action"
-                    disabled={cloudPopover.actionDisabled}
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => runCloudAction(cloudPopover.action!)}
-                  >
-                    {cloudPopover.actionLabel}
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
+                <div className="storage-popover-destination-copy">
+                  <h4>Dropbox backup</h4>
+                  <p>{cloudPopover.text}</p>
+                  {cloudPopover.action ? (
+                    <Button
+                      className="storage-popover-row-action"
+                      disabled={cloudPopover.actionDisabled}
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => runCloudAction(cloudPopover.action!)}
+                    >
+                      {cloudPopover.actionLabel}
+                    </Button>
+                  ) : null}
+                </div>
+              </section>
+            </div>
             <div className="storage-popover-footer">
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => void handleExportPackage("display")}
               >
-                Export a backup
+                <DownloadSimpleIcon aria-hidden="true" size={15} />
+                Export backup file
               </Button>
-              <Button size="sm" variant="outline" onClick={() => setIsSettingsOpen(true)}>
+              <button
+                className="settings-link"
+                type="button"
+                onClick={() => setIsSettingsOpen(true)}
+              >
                 Storage settings
-              </Button>
+              </button>
             </div>
           </PopoverContent>
         </Popover>
@@ -464,7 +477,11 @@ export function TopBar({
                   ) : (
                     <DownloadSimpleIcon aria-hidden="true" size={18} />
                   )}
-                  <span>{isExportingPackage ? "Exporting…" : "Export"}</span>
+                  {/* Label stays constant while exporting: swapping to "Exporting…"
+                      widens the button, which shifts the Saved badge and drags its
+                      anchored popover sideways. The spinner + disabled state carry
+                      the busy signal. */}
+                  <span>Export</span>
                   <CaretDownIcon aria-hidden="true" className="topbar-button-caret" size={14} />
                 </Button>
               </DropdownMenuTrigger>

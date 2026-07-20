@@ -27,7 +27,8 @@ describe("getStatusBadgeDisplay", () => {
     configured: true,
     providerStatus: "connected" as const,
     uploadStatus: "idle" as const,
-    pending: false
+    pending: false,
+    lastCloudBackupAt: "2026-07-19T11:58:00Z"
   };
 
   it("puts a local save failure ahead of everything, with no glyph", () => {
@@ -84,6 +85,17 @@ describe("getStatusBadgeDisplay", () => {
     });
   });
 
+  it("does not show a completed cloud check before the first backup or while pending", () => {
+    expect(getStatusBadgeDisplay({ ...base, lastCloudBackupAt: null })).toMatchObject({
+      tone: "saved",
+      cloud: "none"
+    });
+    expect(getStatusBadgeDisplay({ ...base, pending: true })).toMatchObject({
+      tone: "saved",
+      cloud: "none"
+    });
+  });
+
   it("keeps today's glyph-free behavior when unconfigured or disconnected", () => {
     expect(getStatusBadgeDisplay({ ...base, configured: false })).toEqual({
       tone: "saved",
@@ -108,8 +120,12 @@ describe("getCloudBackupPopoverState", () => {
     now: NOW
   };
 
-  it("returns null when unconfigured", () => {
-    expect(getCloudBackupPopoverState({ ...base, configured: false })).toBeNull();
+  it("explains and offers optional Dropbox backup when unconfigured", () => {
+    expect(getCloudBackupPopoverState({ ...base, configured: false })).toMatchObject({
+      text: "Not connected. Automatic backup is off.",
+      action: "setup",
+      actionLabel: "Connect"
+    });
   });
 
   it("offers reconnect on reauth with a caution tone", () => {
@@ -120,20 +136,21 @@ describe("getCloudBackupPopoverState", () => {
       action: "reconnect",
       actionLabel: "Reconnect"
     });
-    expect(state?.text).toContain("Reconnect Dropbox");
+    expect(state.text).toContain("Reconnect Dropbox");
   });
 
   it("shows the off state with no action when disconnected", () => {
     expect(getCloudBackupPopoverState({ ...base, status: "disconnected" })).toMatchObject({
-      text: "Cloud backup is off.",
-      action: null,
+      text: "Automatic backup is off.",
+      action: "setup",
+      actionLabel: "Turn on",
       icon: "cloud"
     });
   });
 
   it("disables the action while uploading", () => {
     expect(getCloudBackupPopoverState({ ...base, uploadStatus: "uploading" })).toMatchObject({
-      text: "Backing up to Dropbox…",
+      text: "Backing up changes…",
       icon: "cloud-spinner",
       action: "backup-now",
       actionDisabled: true
@@ -151,14 +168,14 @@ describe("getCloudBackupPopoverState", () => {
 
   it("prefers pending over the last-backup time", () => {
     expect(getCloudBackupPopoverState({ ...base, pending: true })).toMatchObject({
-      text: "Changes waiting to back up.",
+      text: "Automatic backup on. Changes waiting to back up.",
       action: "backup-now"
     });
   });
 
   it("shows the relative last-backup time with a Back up now action", () => {
     expect(getCloudBackupPopoverState(base)).toMatchObject({
-      text: "Backed up to Dropbox 2 m ago.",
+      text: "Automatic backup on. Last backup 2 m ago.",
       icon: "cloud-check",
       action: "backup-now",
       actionLabel: "Back up now"
@@ -167,8 +184,8 @@ describe("getCloudBackupPopoverState", () => {
 
   it("handles connected-but-never-backed-up", () => {
     expect(
-      getCloudBackupPopoverState({ ...base, lastCloudBackupAt: null })?.text
-    ).toContain("waiting for the first backup");
+      getCloudBackupPopoverState({ ...base, lastCloudBackupAt: null }).text
+    ).toContain("Waiting for the first backup");
   });
 });
 

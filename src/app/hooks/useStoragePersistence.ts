@@ -50,8 +50,8 @@ export function useStoragePersistence(): {
 // Keep pending copy neutral to avoid flashing a warning before the check resolves.
 export function getStorageNoteCopy(state: StoragePersistenceState): string {
   if (state === "granted") {
-    return "Saved locally in this browser, with durable storage.";
+    return "Saved automatically in this browser. Protected from automatic cleanup.";
   }
 
-  return "Saved locally in this browser.";
+  return "Saved automatically in this browser.";
 }

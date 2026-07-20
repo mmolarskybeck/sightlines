@@ -67,6 +67,7 @@ export function getStatusBadgeDisplay(input: {
   providerStatus: CloudBackupProviderStatus;
   uploadStatus: CloudBackupUploadStatus;
   pending: boolean;
+  lastCloudBackupAt: string | null;
 }): { tone: StatusBadgeTone; label: string; cloud: StatusBadgeCloud } {
   const connected = input.configured && input.providerStatus === "connected";
 
@@ -95,8 +96,10 @@ export function getStatusBadgeDisplay(input: {
     return { tone: "backing-up", label: "Backing up…", cloud: "none" };
   }
 
-  // 5. Settled + connected: today's label plus a quiet cloud check.
-  if (connected) {
+  // 5. Settled + connected + previously backed up: today's label plus a quiet
+  //    cloud check. Pending and never-backed-up projects must not look fully
+  //    backed up even though automatic backup is enabled.
+  if (connected && !input.pending && input.lastCloudBackupAt) {
     return { tone: input.saveState, label: saveStateLabel(input.saveState), cloud: "ok" };
   }
 
@@ -109,7 +112,7 @@ export function getStatusBadgeDisplay(input: {
 // ---------------------------------------------------------------------------
 
 export type CloudBackupPopoverTone = "muted" | "info" | "caution";
-export type CloudBackupPopoverAction = "backup-now" | "reconnect" | "retry";
+export type CloudBackupPopoverAction = "backup-now" | "reconnect" | "retry" | "setup";
 export type CloudBackupCloudIcon =
   | "cloud"
   | "cloud-check"
@@ -125,9 +128,8 @@ export type CloudBackupPopoverState = {
   actionDisabled: boolean;
 };
 
-// The cloud row for the save-status popover. Returns null when unconfigured
-// (the row is hidden, as today). Supersedes the old single-line helper: the
-// popover now carries an inline action per state.
+// The Dropbox row is always present so the popover consistently explains the
+// second, optional save destination. It carries an inline action per state.
 export function getCloudBackupPopoverState(input: {
   configured: boolean;
   status: CloudBackupProviderStatus;
@@ -135,12 +137,21 @@ export function getCloudBackupPopoverState(input: {
   lastCloudBackupAt: string | null;
   pending: boolean;
   now?: number;
-}): CloudBackupPopoverState | null {
-  if (!input.configured) return null;
+}): CloudBackupPopoverState {
+  if (!input.configured) {
+    return {
+      text: "Not connected. Automatic backup is off.",
+      tone: "muted",
+      icon: "cloud",
+      action: "setup",
+      actionLabel: "Connect",
+      actionDisabled: false
+    };
+  }
 
   if (input.status === "reauthorization-required") {
     return {
-      text: "Reconnect Dropbox to resume backups.",
+      text: "Automatic backup paused. Reconnect Dropbox.",
       tone: "caution",
       icon: "cloud-warning",
       action: "reconnect",
@@ -150,14 +161,12 @@ export function getCloudBackupPopoverState(input: {
   }
 
   if (input.status === "disconnected") {
-    // The footer's Storage settings covers turning it back on — no inline
-    // action here.
     return {
-      text: "Cloud backup is off.",
+      text: "Automatic backup is off.",
       tone: "muted",
       icon: "cloud",
-      action: null,
-      actionLabel: null,
+      action: "setup",
+      actionLabel: "Turn on",
       actionDisabled: false
     };
   }
@@ -165,7 +174,7 @@ export function getCloudBackupPopoverState(input: {
   // connected
   if (input.uploadStatus === "uploading") {
     return {
-      text: "Backing up to Dropbox…",
+      text: "Backing up changes…",
       tone: "info",
       icon: "cloud-spinner",
       action: "backup-now",
@@ -175,7 +184,7 @@ export function getCloudBackupPopoverState(input: {
   }
   if (input.uploadStatus === "error") {
     return {
-      text: "Last backup didn't finish.",
+      text: "Automatic backup paused. Last backup didn't finish.",
       tone: "caution",
       icon: "cloud-warning",
       action: "retry",
@@ -185,7 +194,7 @@ export function getCloudBackupPopoverState(input: {
   }
   if (input.pending) {
     return {
-      text: "Changes waiting to back up.",
+      text: "Automatic backup on. Changes waiting to back up.",
       tone: "muted",
       icon: "cloud",
       action: "backup-now",
@@ -195,7 +204,7 @@ export function getCloudBackupPopoverState(input: {
   }
   if (input.lastCloudBackupAt) {
     return {
-      text: `Backed up to Dropbox ${formatBackupRelativeTime(
+      text: `Automatic backup on. Last backup ${formatBackupRelativeTime(
         input.lastCloudBackupAt,
         input.now
       )}.`,
@@ -207,7 +216,7 @@ export function getCloudBackupPopoverState(input: {
     };
   }
   return {
-    text: "Cloud backup on — waiting for the first backup.",
+    text: "Automatic backup on. Waiting for the first backup.",
     tone: "muted",
     icon: "cloud",
     action: "backup-now",

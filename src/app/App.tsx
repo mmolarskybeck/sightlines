@@ -1159,8 +1159,10 @@ export function App() {
     try {
       const result = await exportProjectPackage(mode);
       if (result) {
-        triggerDownload(result.zip, result.filename);
-        if (result.warnings.length > 0) {
+        const outcome = await triggerDownload(result.zip, result.filename);
+        if (outcome === "cancelled") {
+          // The user dismissed the save dialog — no file, no toast.
+        } else if (result.warnings.length > 0) {
           toast.warning(
             `Exported ${result.filename} with ${result.warnings.length} warning${
               result.warnings.length === 1 ? "" : "s"
@@ -1191,8 +1193,10 @@ export function App() {
     try {
       const result = await exportProjectPackageById(id, "display");
       if (result) {
-        triggerDownload(result.zip, result.filename);
-        if (result.warnings.length > 0) {
+        const outcome = await triggerDownload(result.zip, result.filename);
+        if (outcome === "cancelled") {
+          // The user dismissed the save dialog — no file, no toast.
+        } else if (result.warnings.length > 0) {
           toast.warning(
             `Exported ${result.filename} with ${result.warnings.length} warning${
               result.warnings.length === 1 ? "" : "s"
@@ -1238,8 +1242,11 @@ export function App() {
         return;
       }
       const extension = format === "jpeg" ? "jpg" : "png";
-      triggerDownload(blob, `${project.title} — ${viewLabel}.${extension}`);
-      toast.success(`Exported ${project.title} — ${viewLabel}.${extension}`);
+      const filename = `${project.title} — ${viewLabel}.${extension}`;
+      const outcome = await triggerDownload(blob, filename);
+      if (outcome !== "cancelled") {
+        toast.success(`Exported ${filename}`);
+      }
     } catch (error) {
       setSnapshotExportMode(false);
       toast.error(`Export failed: ${error instanceof Error ? error.message : "the image could not be created."}`);
@@ -1327,10 +1334,15 @@ export function App() {
         onProgress: setPdfExportProgress
       });
       const filename = `${project.title}.pdf`;
-      triggerDownload(
+      const outcome = await triggerDownload(
         new Blob([result.bytes.slice()], { type: "application/pdf" }),
         filename
       );
+      if (outcome === "cancelled") {
+        // Dismissing the save dialog behaves like the dialog's own cancel:
+        // no file, no toast, and the dialog stays open in its ready state.
+        return;
+      }
       telemetry.track("pdf_export_completed", {});
       setIsExportPdfOpen(false);
       if (result.warnings.length > 0) {
@@ -1456,7 +1468,6 @@ export function App() {
         openProject={openProject}
         renameProjectById={renameProjectById}
         storagePersistence={storagePersistence}
-        retryStoragePersistence={retryStoragePersistence}
         cloudBackupConfigured={cloudBackupConfigured}
         cloudBackupProviderStatus={cloudBackupProviderStatus}
         cloudBackupStatus={cloudBackupStatus}
