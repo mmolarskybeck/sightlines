@@ -9,27 +9,27 @@ const features = [
   {
     name: "Plan view",
     body:
-      "Draw rooms and walls to scale on a drafting grid. Snapping keeps corners square and walls aligned as you sketch the space, and openings connect between adjoining rooms.",
+      "Draw rooms and walls to scale on a drafting grid. Snapping keeps corners square and walls aligned as you sketch the space. Connect adjoining rooms with doors and windows.",
   },
   {
     name: "Wall elevations",
     body:
-      "See each wall face-on and place works at exact heights. Centerlines, snapping, and measured spacing help you hang to a consistent eye line across a run.",
+      "See each wall face-on and place works at exact heights. Centerlines, snapping, and measured spacing help you keep a consistent hanging height across a space.",
   },
   {
     name: "Artwork checklist",
     body:
-      "Keep works, dimensions, and images together in one list. Drag a work straight from the checklist onto a wall, and the placement carries its real measurements.",
+      "Easily add artworks or bulk import from an existing spreadsheet. Drag a work straight from the checklist onto a wall or floor, and it appears correctly scaled in the plan.",
   },
   {
     name: "3D preview",
     body:
-      "Step into the room from a visitor's point of view to check sightlines and proportion before anything is hung, then walk back to the plan to adjust.",
+      "Step into the room from a visitor's point of view to check sightlines and spatial flow before anything is hung, then walk back to the plan to adjust.",
   },
   {
     name: "Portable projects",
     body:
-      "Export a project as a single file to move it between machines or hand it to a colleague. Or connect your own Dropbox for automatic backup — straight from your browser to your account, never through Sightlines.",
+      "Export your work as a polished PDF or move it between devices as a .sightlines file. For automatic backup, connect your own Dropbox account.",
   },
 ];
 ---
@@ -40,20 +40,19 @@ const features = [
       <div class="hero-copy">
         <p class="kicker rise" style="--i: 0">Exhibition planning, drawn to scale</p>
         <h1 class="hero-title rise" style="--i: 1">
-          Lay out an exhibition to scale, before anything touches the wall.
+          Lay out an exhibition, before anything touches the wall
         </h1>
         <p class="hero-sub rise" style="--i: 2">
-          Sightlines is a planning tool for people who hang exhibitions. Draw a
-          gallery to scale, place artworks at their real dimensions, check
-          spacing and eye lines, and preview the room in 3D. It runs entirely in
-          your browser — nothing to install, and no account.
+          Sightlines is a visual planning tool for art exhibitions. Draw each gallery, place artworks at their real dimensions, check
+          spacing and alignment, and preview the flow in 3D. It runs entirely in
+          your browser, so there's nothing to install, and no account needed.
         </p>
         <div class="hero-actions rise" style="--i: 3">
           <a class="btn btn-primary" href={APP_URL}>Open the app</a>
           <a class="btn btn-quiet" href="/privacy">How your data stays private</a>
         </div>
         <p class="hero-note rise" style="--i: 4">
-          Free to use · no sign-up · your projects stay on your device
+          Free to use · no sign-up · your projects stay private
         </p>
       </div>
 
@@ -155,11 +154,11 @@ const features = [
 
     <section class="features" aria-labelledby="features-h">
       <h2 id="features-h" class="section-title">
-        Two ways of thinking, one project
+        Many ways of thinking, one project
       </h2>
       <p class="section-lede">
         Exhibition work is non-linear. Sometimes the checklist comes first,
-        sometimes the room does. Sightlines lets you move between spatial and
+        sometimes the floorplan does. Sightlines lets you move between spatial and
         checklist thinking without losing precision.
       </p>
 
@@ -226,12 +225,11 @@ const features = [
         <div class="privacy-lead">
           <h2 id="privacy-h">Private by design</h2>
           <p>
-            No accounts and no project uploads to Sightlines. Your room layouts,
-            artwork details, and images are stored in your own browser and are
-            never included in optional anonymous reporting. Even optional cloud
-            backup goes straight from your browser to your own Dropbox — we
-            never see it. Unreleased plans and artwork images are sensitive
-            material — keeping them in your hands is the point.
+            No accounts required. Your floorplans,
+            artwork details, and images are stored in your own browser. Optional cloud
+            backup goes straight from your device to your own Dropbox—we
+            never see your project data. Exhibition plans and artwork images are sensitive
+            materials, and Sightlines lets you keep them secure.
           </p>
           <p class="privacy-links">
             <a href="/privacy">Read the privacy page</a>
@@ -240,10 +238,10 @@ const features = [
           </p>
         </div>
         <ul class="privacy-points">
-          <li>No account, sign-up, or login</li>
-          <li>In-app analytics only if you allow it — never your content</li>
-          <li>No hosted storage of projects or images</li>
-          <li>Served over HTTPS with a restrictive content policy</li>
+          <li>No sign-up or user accounts</li>
+          <li>Your content never gets shared with us</li>
+          <li>Store your projects locally or in your own Dropbox account</li>
+          <li>Usage analytics only if you allow them</li>
         </ul>
       </div>
     </section>
@@ -251,12 +249,10 @@ const features = [
     <section class="audience" aria-labelledby="audience-h">
       <h2 id="audience-h" class="section-title">Who it's for</h2>
       <p class="audience-copy">
-        Built for <strong>curators</strong>, <strong>registrars</strong>,
-        <strong>preparators</strong>, <strong>artists</strong>,
-        <strong>gallerists</strong>, and <strong>small museum teams</strong> —
-        anyone who moves between a checklist and a floor plan, and needs the
-        measurements to be trustworthy. It works on managed institutional
-        machines too, because there is nothing to install.
+        Built for <strong>curators</strong>, <strong>artists</strong>,
+        <strong>gallerists</strong>, <strong>small museum teams</strong>, or anyone who moves between a checklist and a floor plan, and needs 
+        measurements to be trustworthy. Sightlines is built to work on managed institutional
+        machines, because there is nothing to install.
       </p>
     </section>
 

@@ -2,7 +2,7 @@
 title: "Reviewing or allowlisting sightlines.art and app.sightlines.art"
 description: "Information for IT and network administrators reviewing or allowlisting sightlines.art and app.sightlines.art: category, network behavior, and security posture."
 kicker: "For IT teams"
-lede: "This page is for network and IT administrators evaluating Sightlines for use on a managed network. Sightlines is professional productivity software used by museum, gallery, and exhibition staff to plan artwork layouts. A staff member at your organization has likely requested access to it. Sightlines spans two hostnames, sightlines.art and app.sightlines.art, and both should be reviewed and allowlisted together."
+lede: "For network and IT administrators evaluating Sightlines on a managed network. Sightlines is professional productivity software that museum, gallery, and exhibition staff use to plan artwork layouts, and a staff member at your organization has likely requested access. It spans two hostnames, sightlines.art and app.sightlines.art, which should be reviewed and allowlisted together."
 ---
 
 ## At a glance
@@ -12,9 +12,9 @@ lede: "This page is for network and IT administrators evaluating Sightlines for 
     <tr>
       <th scope="row">Hostnames</th>
       <td>
-        <code>sightlines.art</code> — this informational site<br />
-        <code>app.sightlines.art</code> — the application<br />
-        <code>www.sightlines.art</code> — redirects to <code>sightlines.art</code>
+        <code>sightlines.art</code> (this informational site)<br />
+        <code>app.sightlines.art</code> (the application)<br />
+        <code>www.sightlines.art</code> redirects to <code>sightlines.art</code>
       </td>
     </tr>
     <tr>
@@ -42,7 +42,7 @@ lede: "This page is for network and IT administrators evaluating Sightlines for 
 
 ## What it is
 
-Sightlines lets exhibition staff draw gallery floor plans to scale, place artworks on wall elevations, and preview the result in 3D. Editing and project storage run in the browser; optional, consent-gated analytics report only aggregate product and performance data. See the [about page](/about) for a fuller description.
+Sightlines lets exhibition staff draw gallery floor plans to scale, place artworks on wall elevations, and preview the result in 3D. Editing and project storage run in the browser; optional, consent-gated analytics report only aggregate product and performance data. See the [home page](/) for a fuller description, or the [privacy page](/privacy) for the complete data story.
 
 It is not a file-sharing service, social network, streaming site, advertising network, gambling site, or download portal, and it hosts no user-generated public content.
 
@@ -67,28 +67,28 @@ It is not a file-sharing service, social network, streaming site, advertising ne
   <tbody>
     <tr>
       <th scope="row">Cloudflare delivery and security</th>
-      <td>Necessary when either site is requested</td>
-      <td>Cloudflare processes ordinary request metadata, including IP addresses, to route and protect traffic. This is infrastructure processing, not optional product analytics.</td>
+      <td>Whenever either site is requested</td>
+      <td>Cloudflare processes ordinary request metadata, including IP addresses, to route and protect traffic. This is infrastructure, not product analytics.</td>
     </tr>
     <tr>
       <th scope="row">Cloudflare Web Analytics</th>
-      <td>In the app, only after Anonymous usage analytics is enabled; on this informational site, on every page</td>
-      <td>Visits, coarse browser/device categories, and page-performance measurements; cookie-less, no fingerprinting, no project or artwork content, and no persistent Sightlines analytics identifier.</td>
+      <td>In the app, only after Anonymous usage analytics is enabled; on this site, on every page</td>
+      <td>Visits, coarse browser/device categories, and page-performance measurements. Cookie-less, no fingerprinting, no project or artwork content, no persistent Sightlines analytics identifier.</td>
     </tr>
     <tr>
       <th scope="row">Sightlines product events</th>
       <td>Only after Anonymous usage analytics is enabled</td>
-      <td>Predefined successful outcomes sent to a same-origin Worker and stored in Cloudflare Analytics Engine. Sightlines does not write IP address, user agent, referrer, or project content to this dataset.</td>
+      <td>Predefined successful outcomes sent to a same-origin Worker and stored in Cloudflare Analytics Engine. No IP address, user agent, referrer, or project content is written.</td>
     </tr>
     <tr>
       <th scope="row">Dropbox app-folder backup</th>
       <td>Only after the user connects Dropbox</td>
-      <td>Project backups move directly between the browser and the user's Dropbox app folder; Sightlines does not receive a copy.</td>
+      <td>Backups move directly between the browser and the user's Dropbox app folder. Sightlines does not receive a copy.</td>
     </tr>
     <tr>
       <th scope="row">Crash reporting</th>
       <td>Not active</td>
-      <td>The app includes a separate local preference, but Sentry is deferred and no crash-reporting provider currently receives reports.</td>
+      <td>A local preference exists, but Sentry is deferred and no provider currently receives reports.</td>
     </tr>
   </tbody>
 </table>
@@ -99,4 +99,4 @@ Both hostnames set HSTS, a restrictive CSP, `X-Frame-Options: DENY`, and related
 
 ## If the site is miscategorized
 
-If your web filter currently classifies `sightlines.art` or `app.sightlines.art` as uncategorized, parked, or newly registered, we'd ask that you recategorize both as business or productivity software. This page, the [about page](/about), and the [security page](/security) can serve as supporting documentation for a recategorization request with your filtering vendor.
+If your web filter currently classifies `sightlines.art` or `app.sightlines.art` as uncategorized, parked, or newly registered, we'd ask that you recategorize both as business or productivity software. This page, the [home page](/), and the [security page](/security) can serve as supporting documentation for a recategorization request with your filtering vendor.

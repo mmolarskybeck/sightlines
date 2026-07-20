@@ -2,14 +2,16 @@
 title: "A small, static surface"
 description: "Sightlines security overview: static architecture, HTTPS with strict security headers, local-only data storage, and how to report a vulnerability."
 kicker: "Security"
-lede: "Sightlines keeps its attack surface deliberately small: a static web application with no server-side database, no user accounts, and no hosted user content. The most sensitive data in the system — your exhibition plans and artwork images — never leaves your device."
+lede: "Sightlines keeps its attack surface deliberately small: a static web application with no server-side database, no user accounts, and no hosted user content. The most sensitive data in the system, your exhibition plans and artwork images, never passes through Sightlines and leaves your device only when you send it somewhere yourself."
 ---
 
 ## Architecture
 
-The application at [app.sightlines.art](https://app.sightlines.art/) is a static React application served from Cloudflare's edge network. This page and the rest of sightlines.art are a separate static informational site whose only script is the cookie-less Cloudflare Web Analytics beacon; Cloudflare's edge may additionally inject an anti-bot snippet into responses, but this site's Content-Security-Policy prevents that snippet from executing. Neither origin maintains server-side session state or hosts user projects or images. Project data is held in the browser's local storage and leaves the device only when the user explicitly exports a file or connects their own Dropbox account for automatic backup — in which case backups go directly from the browser to the user's Dropbox app folder, never through Sightlines.
+The application at [app.sightlines.art](https://app.sightlines.art/) is a static React application served from Cloudflare's edge network. This page and the rest of sightlines.art are a separate static informational site whose only script is the cookie-less Cloudflare Web Analytics beacon. Cloudflare's edge may also inject an anti-bot snippet into responses, but this site's Content-Security-Policy prevents that snippet from executing.
 
-The app's optional anonymous usage reporting is a separate, content-free data flow. After permission, a manually loaded Cloudflare Web Analytics beacon sends page-performance measurements and the app may send predefined aggregate events to a same-origin Cloudflare Worker. Sentry and other crash-reporting services are not active.
+Neither origin maintains server-side session state or hosts user projects or images. Project data is held in the browser's local storage. It leaves the device only when the user explicitly exports a file or connects their own Dropbox account for automatic backup, in which case backups go directly from the browser to the user's Dropbox app folder, never through Sightlines.
+
+The app's optional anonymous usage reporting is a separate, content-free data flow that runs only after the user opts in, and no crash-reporting service is active. See the [privacy page](/privacy) for the full account of what is reported and retained.
 
 ## Transport and headers
 

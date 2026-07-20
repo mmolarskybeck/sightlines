@@ -6,11 +6,6 @@
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://sightlines.art/about</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-  </url>
-  <url>
     <loc>https://sightlines.art/privacy</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
