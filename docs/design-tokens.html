@@ -1,0 +1,785 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sightlines · Design Token Audit</title>
+<style>
+/* ============================================================
+   SIGHTLINES DESIGN TOKENS · extracted verbatim from
+   src/styles/global.css and src/app/components/ui/*.tsx
+   (as of 2026-07-20). Tweak a value here to preview a change.
+   Colors are the ACTUAL oklch() source values, not conversions.
+   ============================================================ */
+:root {
+  color-scheme: light;
+
+  /* --- Fonts (real @font-face families; fall back to system here) --- */
+  --font-brand: "Figtree Variable", Figtree, ui-sans-serif, system-ui, sans-serif;
+  --font-ui: "Geist Variable", Geist, ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-display: var(--font-brand);
+
+  /* --- Type scale --- */
+  --type-2xs: 0.6875rem;
+  --type-xs: 0.75rem;
+  --type-sm: 0.8125rem;
+  --type-md: 0.875rem;
+  --type-lg: 0.9375rem;
+  --type-xl: 1rem;
+  --type-project: 1.0625rem;
+  --leading-tight: 1.15;
+  --leading-ui: 1.3;
+  --leading-copy: 1.55;
+  --weight-regular: 420;
+  --weight-medium: 520;
+  --weight-semibold: 620;
+  --weight-strong: 680;
+
+  /* --- Core colors --- */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.155 0.004 240);
+  --card: oklch(1 0 0);
+  --card-foreground: var(--foreground);
+  --popover: oklch(1 0 0);
+  --popover-foreground: var(--foreground);
+  --secondary: oklch(0.968 0.004 230);
+  --secondary-foreground: var(--foreground);
+  --muted-surface: oklch(0.965 0.004 230);
+  --muted: oklch(0.39 0.007 230);
+  --muted-foreground: var(--muted);
+  --accent: oklch(0.955 0.013 200);
+  --accent-foreground: oklch(0.265 0.055 200);
+  --border: oklch(0.865 0.006 230);
+  --input: oklch(0.84 0.006 230);
+  --ring: oklch(0.45 0.082 200);
+  --primary: oklch(0.42 0.07 200);
+  --primary-foreground: oklch(1 0 0);
+  --primary-strong: oklch(0.3 0.065 200);
+  --primary-soft: oklch(0.94 0.022 200);
+  --selection: oklch(0.55 0.11 200);
+  --primary-line: oklch(0.82 0.045 200);
+  --destructive: oklch(0.47 0.15 22);
+  --destructive-strong: oklch(0.4 0.13 22);
+  --destructive-foreground: oklch(1 0 0);
+  --danger-soft: oklch(0.95 0.035 22);
+  --danger-line: oklch(0.8 0.07 22);
+  --caution: oklch(0.5 0.13 75);
+  --caution-soft: oklch(0.94 0.045 75);
+  --caution-line: oklch(0.8 0.09 75);
+  --surface: oklch(0.975 0.004 230);
+  --surface-strong: oklch(0.925 0.006 230);
+  --subtle: oklch(0.55 0.008 230);
+  --muted-on-ink: oklch(0.72 0.005 240);
+  --grid-minor: oklch(0.78 0.008 240 / 0.42);
+  --grid-major: oklch(0.62 0.01 240 / 0.5);
+  --track: oklch(0.945 0.005 230);
+  --chip: oklch(1 0 0);
+  --chip-ghost: oklch(1 0 0 / 0.55);
+
+  /* --- Aliases (semantic short names used throughout the app) --- */
+  --bg: var(--background);
+  --ink: var(--foreground);
+  --line: var(--border);
+  --danger: var(--destructive);
+  --focus: var(--ring);
+
+  /* --- Radii --- */
+  --radius: 0.25rem;            /* 4px, legacy base */
+  --radius-control: 8px;        /* inputs, buttons */
+  --radius-panel: 0;            /* structural panes are square */
+  --radius-fill: 10px;          /* borderless interactive fills */
+  --radius-overlay: 12px;       /* dialogs, popovers, toasts */
+  --radius-seg: 7px;            /* segmented chips */
+  --radius-track: 10px;         /* segmented track */
+  /* @theme inline aliases these to Tailwind's radius-* names: */
+  --radius-sm: var(--radius-control); /* 8px */
+  --radius-md: var(--radius-control); /* 8px */
+  --radius-lg: var(--radius-fill);    /* 10px */
+  --radius-xl: var(--radius-panel);   /* 0 (!) */
+
+  /* --- Spacing scale (px-named) --- */
+  --space-2: 2px;   --space-4: 4px;   --space-6: 6px;   --space-8: 8px;
+  --space-10: 10px; --space-12: 12px; --space-14: 14px; --space-16: 16px;
+  --space-20: 20px; --space-24: 24px; --space-28: 28px; --space-32: 32px;
+  --space-36: 36px; --space-40: 40px; --space-44: 44px; --space-48: 48px;
+  --space-52: 52px; --space-56: 56px; --space-64: 64px;
+
+  /* --- Shadows / elevation --- */
+  --shadow-tight: 0 1px 2px oklch(0 0 0 / 0.08);
+  --shadow-panel: 0 8px 24px oklch(0 0 0 / 0.12);
+  --shadow-overlay: 0 16px 48px oklch(0 0 0 / 0.14), 0 4px 12px oklch(0 0 0 / 0.06);
+  --shadow-chip:
+    0 1px 2px oklch(0 0 0 / 0.1),
+    0 1px 1px oklch(0 0 0 / 0.04),
+    0 0 0 1px oklch(0 0 0 / 0.04);
+  --shadow-pressed:
+    inset 0 1px 3px oklch(0 0 0 / 0.14),
+    inset 0 0 0 1px oklch(0 0 0 / 0.07);
+  --ring-armed: inset 0 0 0 1px oklch(0.42 0.07 200 / 0.5);
+
+  /* --- Motion --- */
+  --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-slide: 220ms;
+
+  /* Page chrome */
+  --page-gap: 40px;
+  --pane-line: oklch(0.9 0.004 230);
+}
+
+/* ---------- Page chrome (neutral, quiet) ---------- */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #fff;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1120px; margin: 0 auto; padding: 48px 32px 120px; }
+header.page-head { margin-bottom: 40px; }
+header.page-head h1 {
+  margin: 0 0 6px; font-family: var(--font-brand);
+  font-size: 26px; font-weight: 700; letter-spacing: -0.01em;
+}
+header.page-head p { margin: 0; color: var(--muted); max-width: 60ch; font-size: 13px; }
+header.page-head .meta { margin-top: 10px; font-family: var(--font-mono); font-size: 11px; color: var(--subtle); }
+
+section { margin-top: 56px; }
+section > h2 {
+  margin: 0 0 4px; font-size: 12px; font-weight: 680; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink);
+}
+section > .sec-note { margin: 0 0 20px; color: var(--muted); font-size: 12.5px; max-width: 70ch; }
+h3.sub { margin: 28px 0 12px; font-size: 12px; font-weight: 620; color: var(--subtle); letter-spacing: 0.04em; text-transform: uppercase; }
+
+.mono { font-family: var(--font-mono); font-size: 11px; }
+.cap {
+  font-family: var(--font-mono); font-size: 10.5px; line-height: 1.45;
+  color: var(--subtle); margin-top: 6px; display: block;
+}
+.cap b { color: var(--muted); font-weight: 600; }
+.tok {
+  font-family: var(--font-mono); font-size: 11px; color: var(--primary-strong);
+  cursor: pointer; border-radius: 3px; padding: 0 2px; transition: background 120ms;
+}
+.tok:hover { background: var(--primary-soft); }
+.tok.copied { background: var(--caution-soft); color: var(--caution); }
+
+/* Grids */
+.grid { display: grid; gap: 16px; }
+.swatches { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.cards { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+
+/* Color swatch */
+.swatch { border: 1px solid var(--pane-line); border-radius: 8px; overflow: hidden; background: #fff; }
+.swatch .chip { height: 62px; border-bottom: 1px solid var(--pane-line); }
+.swatch .body { padding: 8px 10px 10px; }
+.swatch .name { font-family: var(--font-mono); font-size: 11px; color: var(--ink); word-break: break-all; }
+.swatch .val { font-family: var(--font-mono); font-size: 10px; color: var(--subtle); margin-top: 3px; word-break: break-all; }
+.swatch.on-ink .chip { background-image: linear-gradient(45deg,var(--surface-strong) 25%,transparent 25%,transparent 75%,var(--surface-strong) 75%),linear-gradient(45deg,var(--surface-strong) 25%,transparent 25%,transparent 75%,var(--surface-strong) 75%); background-size: 12px 12px; background-position: 0 0, 6px 6px; }
+
+/* Example frame */
+.example {
+  border: 1px solid var(--pane-line); border-radius: 8px;
+  padding: 20px; background: #fff;
+}
+.row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.state-label { font-family: var(--font-mono); font-size: 10px; color: var(--subtle); display: block; margin-bottom: 6px; }
+.stack { display: inline-flex; flex-direction: column; }
+
+/* Spacing bars */
+.space-row { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.space-row .lbl { width: 96px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); flex: 0 0 auto; }
+.space-bar { height: 14px; background: var(--primary); border-radius: 2px; }
+
+/* Radii */
+.radii { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.radbox { border: 1px solid var(--pane-line); border-radius: 8px; padding: 16px; text-align: center; }
+.radbox .demo { height: 56px; background: var(--surface-strong); border: 1px solid var(--input); margin-bottom: 10px; }
+
+/* ============================================================
+   FAITHFUL COMPONENT RECIPES (copied from source)
+   ============================================================ */
+
+/* Buttons · buttonVariants cva (button.tsx). Base: */
+.btn {
+  display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center;
+  gap: 8px; white-space: nowrap; border-radius: var(--radius-sm);
+  font-size: var(--type-sm); font-weight: var(--weight-semibold); line-height: 1;
+  transition: all 150ms ease-out; outline: none; cursor: pointer;
+  border: 1px solid transparent;
+}
+.btn.sz-default { height: 36px; padding: 0 12px; }
+.btn.sz-sm { height: 32px; padding: 0 10px; font-size: var(--type-xs); }
+.btn.sz-lg { height: 40px; padding: 0 16px; }
+.btn.sz-icon { width: 36px; height: 36px; padding: 0; }
+.btn.sz-icon-sm { width: 32px; height: 32px; padding: 0; }
+
+.btn.v-default { border-color: var(--border); background: var(--background); color: var(--foreground); box-shadow: var(--shadow-tight); }
+.btn.v-default.is-hover { border-color: var(--input); background: var(--surface); }
+.btn.v-default.is-active { background: var(--surface-strong); box-shadow: var(--shadow-pressed); }
+
+.btn.v-primary { border-color: var(--primary); background: var(--primary); color: var(--primary-foreground); box-shadow: var(--shadow-tight); }
+.btn.v-primary.is-hover { border-color: var(--primary-strong); background: var(--primary-strong); }
+.btn.v-primary.is-active { border-color: var(--primary-strong); background: var(--primary-strong); filter: brightness(0.9); box-shadow: var(--shadow-pressed); }
+
+.btn.v-ghost { border-color: transparent; background: transparent; color: var(--muted-foreground); }
+.btn.v-ghost.is-hover { background: var(--surface); color: var(--foreground); }
+
+.btn.v-subtle { border-color: transparent; background: var(--surface); color: var(--foreground); }
+.btn.v-subtle.is-hover { background: var(--surface-strong); }
+
+.btn.v-outline { border-color: var(--border); background: var(--background); color: var(--foreground); box-shadow: var(--shadow-tight); }
+.btn.v-outline.is-hover { border-color: var(--input); background: var(--surface); }
+
+.btn.v-destructive { border-color: var(--destructive); background: var(--destructive); color: var(--destructive-foreground); box-shadow: var(--shadow-tight); }
+.btn.v-destructive.is-hover { border-color: var(--destructive-strong); background: var(--destructive-strong); }
+
+.btn.v-destructive-ghost { border-color: var(--danger-line); background: var(--surface); color: var(--danger); }
+.btn.v-destructive-ghost.is-hover { background: var(--danger-soft); }
+
+.btn.v-inspector { border-color: var(--border); background: var(--surface); color: var(--foreground); }
+.btn.v-inspector.is-hover { border-color: var(--input); background: var(--surface-strong); }
+
+.btn.is-disabled { pointer-events: none; cursor: not-allowed; opacity: 0.45; }
+.btn.is-focus { box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring); }
+
+/* Rail button (global.css .rail-button) */
+.rail-button {
+  position: relative; display: grid; width: 48px; height: 48px; place-items: center;
+  border: 0; border-radius: var(--radius-fill); background: transparent; color: var(--muted);
+  cursor: pointer;
+}
+.rail-button.is-hover { background: var(--surface); color: var(--ink); }
+.rail-button.is-active { background: var(--primary-soft); color: var(--primary-strong); box-shadow: inset 0 0 0 1px var(--primary-line), var(--shadow-pressed); }
+
+/* Icon button (topbar utility) */
+.icon-button { display: grid; width: 36px; height: 36px; place-items: center; border: 0; border-radius: var(--radius-fill); background: transparent; color: var(--muted); cursor: pointer; }
+.icon-button.is-hover { background: var(--surface); color: var(--ink); }
+
+/* Topbar labeled button (Export) */
+.topbar-button {
+  display: inline-flex; align-items: center; gap: var(--space-8); height: 36px;
+  padding: 0 var(--space-12); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--ink); cursor: pointer;
+  font-size: var(--type-sm); font-weight: var(--weight-semibold);
+}
+.topbar-button.is-hover { background: var(--surface); border-color: var(--input); }
+
+/* Tool cluster (view toolbar) */
+.tool-cluster { display: inline-flex; align-items: center; }
+.tool-cluster-label { display: inline-flex; align-items: center; padding: 0 8px; border-right: 1px solid var(--surface-strong); color: var(--muted); font-size: var(--type-xs); font-weight: var(--weight-medium); }
+.tool-cluster-segments { display: inline-flex; border-radius: var(--radius-seg); background: var(--surface); overflow: hidden; }
+.tool-cluster-segment { display: inline-flex; align-items: center; justify-content: center; width: 32px; min-height: 30px; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; }
+.tool-cluster-segment + .tool-cluster-segment { border-left: 1px solid var(--surface-strong); }
+.tool-cluster-segment.is-pressed { border-radius: var(--radius-seg); background: var(--primary-soft); color: var(--primary-strong); box-shadow: var(--shadow-pressed), var(--ring-armed); }
+
+/* Segmented track (seg-track) */
+.seg-track { position: relative; display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-4); border-radius: var(--radius-track); background: var(--track); }
+.seg-item { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-8); min-height: 28px; padding: 0 var(--space-12); border: 0; border-radius: var(--radius-seg); background: transparent; color: var(--muted); cursor: pointer; white-space: nowrap; font-size: 13px; }
+.seg-item.is-active { background: var(--chip); box-shadow: var(--shadow-chip); color: var(--primary-strong); }
+
+/* Underline tabs */
+.tabs-underline { position: relative; display: inline-flex; gap: var(--space-6); }
+.tab-button { display: inline-flex; align-items: center; min-height: 34px; padding: 0 var(--space-10); border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: var(--type-md); font-weight: var(--weight-semibold); }
+.tab-button.is-active { color: var(--ink); box-shadow: inset 0 -3px 0 var(--primary); }
+
+/* Inputs (input.tsx inputVariants) */
+.input-control {
+  display: flex; width: 100%; border: 1px solid var(--input); background: var(--background);
+  color: var(--foreground); font-weight: var(--weight-medium); border-radius: var(--radius-sm);
+  min-height: 38px; padding: 8px 10px; font-size: var(--type-md); outline: none;
+}
+.input-control::placeholder { color: var(--muted-foreground); }
+.input-control.compact { min-height: 32px; padding: 6px 8px; font-size: var(--type-sm); }
+.input-control.is-hover { border-color: var(--muted-foreground); }
+.input-control.is-focus { box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring); }
+.input-control.is-invalid { border-color: var(--danger); }
+
+/* Select trigger (SelectTrigger · h-9 = 36px, rounded-sm) */
+.select-trigger {
+  display: inline-flex; align-items: center; justify-content: space-between; gap: 8px;
+  height: 36px; padding: 0 10px; border: 1px solid var(--input); background: var(--background);
+  color: var(--foreground); border-radius: var(--radius-sm); font-size: var(--type-sm);
+  font-weight: var(--weight-medium); cursor: pointer; min-width: 160px;
+}
+.select-trigger .caret { color: var(--muted-foreground); }
+.select-trigger.is-hover { border-color: var(--muted-foreground); }
+.select-trigger.is-focus { box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring); }
+
+/* Switch · settings-switch: 34x20 pill (note: base class uses rounded-sm!) */
+.settings-switch { position: relative; display: inline-block; width: 34px; height: 20px; border: 1px solid var(--input); border-radius: 999px; background: var(--surface-strong); cursor: pointer; vertical-align: middle; }
+.settings-switch.on { border-color: var(--primary); background: var(--primary); }
+.switch-thumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 999px; background: var(--primary-foreground); transition: transform 150ms ease-out; }
+.settings-switch.on .switch-thumb { transform: translateX(14px); }
+
+/* Checkbox */
+.checkbox-control { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; border: 1px solid var(--input); border-radius: 4px; background: var(--background); color: var(--primary-foreground); vertical-align: middle; }
+.checkbox-control.on { border-color: var(--primary); background: var(--primary); }
+.checkbox-control svg { width: 12px; height: 12px; }
+
+/* Dropdown / select content */
+.menu-content { min-width: 200px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); box-shadow: var(--shadow-panel); padding: 4px; }
+.menu-item { position: relative; display: flex; min-height: 30px; align-items: center; gap: var(--space-8); padding: 0 var(--space-28) 0 var(--space-8); border-radius: var(--radius-sm); color: var(--ink); cursor: pointer; font-size: var(--type-sm); line-height: var(--leading-ui); }
+.menu-item.hl { background: var(--surface); }
+.menu-label { padding: 4px 8px 2px; color: var(--subtle); font-size: var(--type-xs); font-weight: var(--weight-semibold); }
+.menu-sep { height: 1px; margin: 4px -4px; background: var(--line); }
+
+/* Popover (rounded-overlay, softer border, overlay shadow) */
+.popover-content { overflow: hidden; padding: var(--space-16); border: 1px solid color-mix(in oklch, var(--line) 70%, transparent); border-radius: var(--radius-overlay); background: var(--bg); color: var(--foreground); box-shadow: var(--shadow-overlay); max-width: 320px; }
+
+/* Tooltip (dark ink surface) */
+.tooltip { display: inline-block; max-width: 256px; border-radius: var(--radius-sm); border: 1px solid transparent; background: var(--foreground); padding: 8px 12px; color: var(--background); box-shadow: var(--shadow-panel); font-size: var(--type-sm); }
+.toolbar-tooltip { padding: var(--space-6) var(--space-10); border-radius: var(--radius-control); font-size: var(--type-xs); font-weight: var(--weight-medium); }
+
+/* Dialog frame */
+.dialog-frame { border: 1px solid color-mix(in oklch, var(--line) 70%, transparent); border-radius: var(--radius-overlay); background: var(--bg); box-shadow: var(--shadow-overlay); overflow: hidden; max-width: 460px; }
+.dialog-header { display: grid; gap: var(--space-4); padding: var(--space-24) var(--space-56) var(--space-4) var(--space-24); }
+.dialog-title { margin: 0; font-size: var(--type-project); font-weight: var(--weight-strong); line-height: var(--leading-ui); }
+.dialog-description { margin: 0; color: var(--muted); font-size: var(--type-sm); line-height: var(--leading-copy); }
+.dialog-body-pad { padding: var(--space-14) var(--space-24) var(--space-20); font-size: var(--type-md); line-height: var(--leading-copy); color: var(--ink); }
+.dialog-footer { display: flex; justify-content: flex-end; gap: var(--space-8); padding: var(--space-14) var(--space-24); border-top: 1px solid var(--line); }
+
+/* Status badge (save status) */
+.status-badge { display: inline-flex; align-items: center; gap: var(--space-8); min-height: 28px; padding: var(--space-4) var(--space-8); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); cursor: pointer; font-size: var(--type-xs); font-weight: var(--weight-medium); }
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.status-badge.saved .status-dot { background: var(--primary); }
+.status-badge.error { color: var(--danger); } .status-badge.error .status-dot { background: var(--danger); }
+.status-badge.attention { color: var(--caution); } .status-badge.attention .status-dot { background: var(--caution); }
+
+/* Uncertainty badge (square 2px corners) */
+.uncertainty-badge { display: inline-flex; padding: var(--space-2) var(--space-6); border-radius: 2px; font-size: var(--type-xs); font-weight: var(--weight-semibold); }
+.uncertainty-badge.approximate { background: var(--caution-soft); color: var(--caution); }
+.uncertainty-badge.unknown { background: var(--danger-soft); color: var(--danger); }
+
+/* Rail issue count tag (2px square, never round) */
+.rail-issue-count { display: inline-block; min-width: 15px; padding: 0 var(--space-4); border-radius: 2px; background: var(--danger-soft); color: var(--danger); font-size: var(--type-2xs); font-weight: var(--weight-strong); line-height: 15px; text-align: center; }
+
+/* Observations */
+.obs { border: 1px solid var(--danger-line); border-radius: 8px; background: color-mix(in oklch, var(--danger-soft) 30%, #fff); padding: 6px 22px; }
+.obs li { margin: 12px 0; font-size: 13px; line-height: 1.5; }
+.obs li b { font-weight: 620; }
+.obs code { font-family: var(--font-mono); font-size: 11.5px; background: #fff; border: 1px solid var(--pane-line); border-radius: 3px; padding: 0 4px; }
+
+.legend { font-family: var(--font-mono); font-size: 10.5px; color: var(--subtle); margin-top: 8px; }
+.copyhint { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--foreground); color: #fff; font-family: var(--font-mono); font-size: 11px; padding: 6px 12px; border-radius: 8px; box-shadow: var(--shadow-panel); opacity: 0; transition: opacity 160ms; pointer-events: none; }
+.copyhint.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="page-head">
+  <h1>Sightlines · Design Token Audit</h1>
+  <p>Every value below is copied verbatim from <span class="mono">src/styles/global.css</span> and <span class="mono">src/app/components/ui/*.tsx</span>. Nothing is normalized or "fixed" · where the codebase disagrees with itself, that disagreement is shown. Colors are rendered from the actual <span class="mono">oklch()</span> source strings. Click any token name to copy it.</p>
+  <div class="meta">source snapshot: 2026-07-20 · global.css (8157 lines) · edit a variable in the &lt;style&gt; head to preview a change</div>
+</header>
+
+<!-- ============ 1. COLOR ============ -->
+<section id="color">
+  <h2>1 · Color</h2>
+  <p class="sec-note">Light-only theme (<span class="mono">color-scheme: light</span>). All hues sit near hue 200 (petrol) or 230/240 (cool grays); danger is hue 22, caution hue 75. Grouped by role.</p>
+
+  <h3 class="sub">Ink / text</h3>
+  <div class="grid swatches" id="grp-ink"></div>
+
+  <h3 class="sub">Surfaces</h3>
+  <div class="grid swatches" id="grp-surface"></div>
+
+  <h3 class="sub">Borders &amp; lines</h3>
+  <div class="grid swatches" id="grp-border"></div>
+
+  <h3 class="sub">Accent / petrol (primary)</h3>
+  <div class="grid swatches" id="grp-accent"></div>
+
+  <h3 class="sub">States · danger &amp; caution</h3>
+  <div class="grid swatches" id="grp-state"></div>
+
+  <h3 class="sub">Canvas / 3D-specific</h3>
+  <div class="grid swatches" id="grp-canvas"></div>
+</section>
+
+<!-- ============ 2. TYPOGRAPHY ============ -->
+<section id="type">
+  <h2>2 · Typography</h2>
+  <p class="sec-note">Two families: <b>Figtree</b> (<span class="mono">--font-brand</span>, display/wordmark only) and <b>Geist</b> (<span class="mono">--font-ui</span>, everything else). Weights are non-standard numeric axis values (420/520/620/680), exploiting the variable fonts.</p>
+  <div class="example" id="type-demo"></div>
+</section>
+
+<!-- ============ 3. SPACING ============ -->
+<section id="space">
+  <h2>3 · Spacing scale</h2>
+  <p class="sec-note">px-named tokens: 2px steps to 16, 4px steps to 32, coarser above. Rule (per header comment): all padding/margin/gap must come from this scale; 1px hairlines stay literal.</p>
+  <div class="example" id="space-demo"></div>
+</section>
+
+<!-- ============ 4. RADII & BORDERS ============ -->
+<section id="radii">
+  <h2>4 · Radii &amp; borders</h2>
+  <p class="sec-note">Philosophy: controls are rounded, structural panels are square (<span class="mono">--radius-panel: 0</span>), overlays are the rounded exception. Borders are all 1px; hairlines use <span class="mono">--line</span> / <span class="mono">--border</span>, softer overlay borders mix <span class="mono">--line</span> 70% with transparent.</p>
+  <div class="grid radii" id="radii-demo"></div>
+  <p class="legend">border tokens · --border (oklch 0.865) · --input (oklch 0.84, darker) · --line = alias of --border</p>
+</section>
+
+<!-- ============ 5. SHADOWS ============ -->
+<section id="shadow">
+  <h2>5 · Shadows / elevation</h2>
+  <p class="sec-note">Six elevation tokens. Outer shadows for controls/panels/overlays; two inset shadows for pressed states; one inset ring for armed tools.</p>
+  <div class="grid cards" id="shadow-demo"></div>
+</section>
+
+<!-- ============ 6. BUTTONS ============ -->
+<section id="buttons">
+  <h2>6 · Buttons</h2>
+  <p class="sec-note">From <span class="mono">buttonVariants</span> (button.tsx): base radius <span class="mono">rounded-sm</span> (= --radius-control 8px), size default h-36. Rest / hover / active / disabled rendered as separate static examples. Note: some buttons are cva variants, others are hand-rolled CSS classes (rail, topbar, icon).</p>
+
+  <h3 class="sub">cva variants · rest · hover · disabled</h3>
+  <div class="example"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr));" id="btn-variants"></div></div>
+
+  <h3 class="sub">Sizes (default variant)</h3>
+  <div class="example"><div class="row" id="btn-sizes"></div></div>
+
+  <h3 class="sub">Hand-rolled buttons (not cva)</h3>
+  <div class="example"><div class="row" id="btn-custom" style="gap:28px;"></div></div>
+</section>
+
+<!-- ============ 7. FORM CONTROLS ============ -->
+<section id="forms">
+  <h2>7 · Form controls</h2>
+  <p class="sec-note">Focus ring across all controls is <span class="mono">ring-2 ring-ring ring-offset-2</span> → rendered as the 4px double-ring in the "focus" examples.</p>
+  <div class="example" id="forms-demo"></div>
+</section>
+
+<!-- ============ 8. OVERLAYS ============ -->
+<section id="overlays">
+  <h2>8 · Overlays &amp; menus</h2>
+  <p class="sec-note">Two distinct overlay treatments coexist: <b>menus/select</b> use <span class="mono">rounded-sm (8px) + --shadow-panel + solid --line border</span>; <b>popovers/dialogs/toasts</b> use <span class="mono">--radius-overlay (12px) + --shadow-overlay + softened border</span>. Tooltips invert to a dark ink surface.</p>
+  <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));align-items:start;" id="overlay-demo"></div>
+</section>
+
+<!-- ============ 9. CHIPS / BADGES ============ -->
+<section id="badges">
+  <h2>9 · Chips, badges &amp; status</h2>
+  <p class="sec-note">No pills for content chrome · badges are square (2px). The one round shape is the save-status dot. Status colors: petrol = saved/saving, amber = attention (backup stuck, local safe), red = error.</p>
+  <div class="example" id="badge-demo"></div>
+</section>
+
+<!-- ============ DEAD / UNUSED ============ -->
+<section id="dead">
+  <h2>Dead / unused tokens</h2>
+  <p class="sec-note">Defined in <span class="mono">global.css</span> but with no live consumer found in <span class="mono">src/</span> (checked both <span class="mono">var(--x)</span> references and generated Tailwind utilities such as <span class="mono">bg-secondary</span>). Candidates to delete or revive deliberately. Landing site under <span class="mono">landing/</span> was excluded from this check per scope.</p>
+  <div class="example">
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+      <thead><tr style="text-align:left;color:var(--subtle)">
+        <th style="padding:6px 8px;font-family:var(--font-mono);font-weight:600">token</th>
+        <th style="padding:6px 8px;font-family:var(--font-mono);font-weight:600">value</th>
+        <th style="padding:6px 8px;font-weight:600">note</th>
+      </tr></thead>
+      <tbody id="dead-rows"></tbody>
+    </table>
+  </div>
+  <p class="legend">Verified 2026-07-20 by grep over src/ (*.css, *.tsx, *.ts). "used" counts elsewhere exclude the @theme-inline self-mapping line.</p>
+</section>
+
+<!-- ============ OBSERVATIONS ============ -->
+<section id="observations">
+  <h2>Observations · inconsistencies noted while extracting</h2>
+  <p class="sec-note">Neutral audit notes. Each cites the token / value so it can be verified in source.</p>
+  <ul class="obs">
+    <li><b>Inverted Tailwind radius aliases.</b> <code>@theme inline</code> maps <code>--radius-xl</code> → <code>--radius-panel</code> = <code>0</code>, while <code>--radius-lg</code> = <code>10px</code> and <code>--radius-sm/md</code> = <code>8px</code>. So the nominally "largest" Tailwind radius resolves to a square corner · any <code>rounded-xl</code> usage renders sharp, the opposite of intent.</li>
+    <li><b>Five near-identical light grays.</b> <code>--surface 0.975</code>, <code>--secondary 0.968</code>, <code>--muted-surface 0.965</code>, <code>--accent 0.955</code>, <code>--track 0.945</code>, <code>--surface-strong 0.925</code> all sit within a 0.05 lightness band at chroma ≤ 0.013. Several are visually indistinguishable; candidates to merge.</li>
+    <li><b>Two radius tokens with the same value.</b> <code>--radius-fill: 10px</code> and <code>--radius-track: 10px</code> are identical; <code>--radius-sm</code> and <code>--radius-md</code> both resolve to <code>--radius-control (8px)</code>. Redundant handles for the same corner.</li>
+    <li><b>Font-weight tokens bypassed by literals.</b> The scale is <code>--weight-regular/medium/semibold/strong</code> (420/520/620/680), but <code>.app-name</code>, <code>.rail-brand</code> and the page wordmark hardcode <code>font-weight: 700</code> · a value not in the scale.</li>
+    <li><b>Off-scale one-off px values that bypass the spacing/size system.</b> Control heights <code>30px, 34px, 38px, 26px, 18px, 15px</code> (rail-issue-count line-height, switch geometry, section triggers) are literals outside the <code>--space-*</code> scale. Some are load-bearing (the 34×20 switch math is commented), but they're invisible to the token system.</li>
+    <li><b>Switch base radius contradicts its rendered shape.</b> <code>Switch</code> (switch.tsx) base class sets <code>rounded-sm</code> (8px square-ish), but every real instance (<code>.settings-switch</code>, <code>.unit-switch</code>) overrides to <code>border-radius: 999px</code> (pill). The base radius is dead · and a pill switch is the one pill in an otherwise no-pill system.</li>
+    <li><b>Radix radius classes don't match the CSS they pair with.</b> Menu/select items use Tailwind <code>rounded-lg</code> in the .tsx, but the co-located <code>.select-item/.dropdown-menu-item</code> CSS sets <code>--radius-sm</code>; likewise <code>SelectContent</code> uses <code>rounded-sm</code> in JSX while <code>.select-content</code> CSS re-declares the same border/radius. Duplicated (and occasionally divergent) styling across the class-utility and CSS layers.</li>
+    <li><b>Legacy <code>--radius: 0.25rem (4px)</code> is orphaned.</b> Kept in <code>:root</code> but the checkbox that would use a 4px corner hardcodes <code>border-radius: 4px</code> instead of referencing it; nothing consumes <code>--radius</code> directly.</li>
+    <li><b>Two overlay border treatments.</b> Popover/dialog soften the border via <code>color-mix(in oklch, --line 70%, transparent)</code>; menus/select use solid <code>--line</code>. Intentional per comments, but worth confirming it reads as one system.</li>
+    <li><b>Danger has two "strong" ramps but caution has none.</b> <code>--destructive</code>/<code>--destructive-strong</code> and <code>--primary</code>/<code>--primary-strong</code> both provide hover-darken steps; <code>--caution</code> has only soft/line companions, so caution-tinted interactive states can't darken consistently with the others.</li>
+  </ul>
+</section>
+
+</div>
+<div class="copyhint" id="copyhint">copied</div>
+
+<script>
+// ---- token data (name -> resolved source value) ----
+var C = {
+  ink: [
+    ["--foreground","oklch(0.155 0.004 240)","ink / --ink"],
+    ["--muted","oklch(0.39 0.007 230)","muted text / --muted-foreground"],
+    ["--subtle","oklch(0.55 0.008 230)","subtle labels"],
+    ["--muted-on-ink","oklch(0.72 0.005 240)","muted text on dark tooltips"],
+    ["--primary-foreground","oklch(1 0 0)","text on petrol/danger fills"]
+  ],
+  surface: [
+    ["--background","oklch(1 0 0)","--bg (also --card, --popover)"],
+    ["--surface","oklch(0.975 0.004 230)","hover wash"],
+    ["--muted-surface","oklch(0.965 0.004 230)","Tailwind text-muted / border-muted"],
+    ["--track","oklch(0.945 0.005 230)","segmented track"],
+    ["--surface-strong","oklch(0.925 0.006 230)","active / pressed wash"],
+    ["--chip","oklch(1 0 0)","raised segmented chip"]
+  ],
+  border: [
+    ["--border","oklch(0.865 0.006 230)","--line, hairlines"],
+    ["--input","oklch(0.84 0.006 230)","input borders (darker)"],
+    ["--primary-line","oklch(0.82 0.045 200)","selection hairline"],
+    ["--danger-line","oklch(0.8 0.07 22)","danger hairline"],
+    ["--caution-line","oklch(0.8 0.09 75)","caution hairline"]
+  ],
+  accent: [
+    ["--primary","oklch(0.42 0.07 200)","petrol, primary CTA"],
+    ["--primary-strong","oklch(0.3 0.065 200)","hover / pressed"],
+    ["--primary-soft","oklch(0.94 0.022 200)","latched wash"],
+    ["--ring","oklch(0.45 0.082 200)","--focus"],
+    ["--selection","oklch(0.55 0.11 200)","canvas selection"]
+  ],
+  state: [
+    ["--destructive","oklch(0.47 0.15 22)","--danger"],
+    ["--destructive-strong","oklch(0.4 0.13 22)","danger hover"],
+    ["--danger-soft","oklch(0.95 0.035 22)","danger wash"],
+    ["--caution","oklch(0.5 0.13 75)","amber, needs-attention"],
+    ["--caution-soft","oklch(0.94 0.045 75)","caution wash"]
+  ],
+  canvas: [
+    ["--grid-minor","oklch(0.78 0.008 240 / 0.42)","minor grid lines"],
+    ["--grid-major","oklch(0.62 0.01 240 / 0.5)","major grid lines"],
+    ["--chip-ghost","oklch(1 0 0 / 0.55)","translucent hover chip"]
+  ]
+};
+
+function isLight(v){
+  var m = v.match(/oklch\(([\d.]+)/); return m ? parseFloat(m[1]) > 0.7 : false;
+}
+function swatch(name,val,note){
+  var onInk = name==="--primary-foreground" || val.indexOf("/ 0.5")>-1 || val.indexOf("/ 0.4")>-1 || val.indexOf("/ 0.5")>-1;
+  var translucent = val.indexOf("/")>-1;
+  var el = document.createElement("div");
+  el.className = "swatch" + (translucent?" on-ink":"");
+  el.innerHTML =
+    '<div class="chip" style="background:'+val+(isLight(val)?';box-shadow:inset 0 0 0 1px var(--pane-line)':'')+'"></div>'+
+    '<div class="body"><div class="name"><span class="tok">'+name+'</span></div>'+
+    '<div class="val">'+val+'</div>'+
+    (note?'<div class="val" style="color:var(--muted)">'+note+'</div>':'')+'</div>';
+  return el;
+}
+["ink","surface","border","accent","state","canvas"].forEach(function(g){
+  var host = document.getElementById("grp-"+g);
+  C[g].forEach(function(r){ host.appendChild(swatch(r[0],r[1],r[2])); });
+});
+
+// ---- typography ----
+var typeDemo = document.getElementById("type-demo");
+var types = [
+  ["Aa · SIGHTLINES","--font-brand · Figtree · 700 · 26px","font-family:var(--font-brand);font-weight:700;font-size:26px;letter-spacing:-0.01em"],
+  ["Dialog title","--type-project 1.0625rem · --weight-strong 680 · --leading-ui","font-size:var(--type-project);font-weight:var(--weight-strong);line-height:var(--leading-ui)"],
+  ["Body copy · the quick brown fox jumps over the lazy dog","--type-md 0.875rem · --weight-regular 420 · --leading-copy 1.55","font-size:var(--type-md);font-weight:var(--weight-regular);line-height:var(--leading-copy)"],
+  ["Button / control label","--type-sm 0.8125rem · --weight-semibold 620","font-size:var(--type-sm);font-weight:var(--weight-semibold)"],
+  ["Small label","--type-xs 0.75rem · --weight-medium 520","font-size:var(--type-xs);font-weight:var(--weight-medium)"],
+  ["MICRO / KICKER","--type-2xs 0.6875rem · --weight-strong 680 · 0.08em uppercase","font-size:var(--type-2xs);font-weight:var(--weight-strong);letter-spacing:0.08em;text-transform:uppercase;color:var(--muted)"],
+  ["1234.56 mm · 42 3/4 in","--font-mono · Geist Mono · tabular-nums (readouts)","font-family:var(--font-mono);font-size:var(--type-sm);font-variant-numeric:tabular-nums"],
+  ["Larger UI heading","--type-xl 1rem · --weight-semibold 620","font-size:var(--type-xl);font-weight:var(--weight-semibold)"],
+  ["Mid emphasis line","--type-lg 0.9375rem · --weight-medium 520","font-size:var(--type-lg);font-weight:var(--weight-medium)"]
+];
+types.forEach(function(t){
+  var d = document.createElement("div");
+  d.style.cssText = "padding:12px 0;border-bottom:1px solid var(--pane-line)";
+  d.innerHTML = '<div style="'+t[2]+'">'+t[0]+'</div><span class="cap"><b>'+t[1]+'</b></span>';
+  typeDemo.appendChild(d);
+});
+
+// ---- spacing ----
+var spaceDemo = document.getElementById("space-demo");
+[2,4,6,8,10,12,14,16,20,24,28,32,36,40,44,48,52,56,64].forEach(function(n){
+  var r = document.createElement("div");
+  r.className = "space-row";
+  r.innerHTML = '<span class="lbl">--space-'+n+'</span><div class="space-bar" style="width:'+n+'px"></div><span class="cap" style="margin:0">'+n+'px</span>';
+  spaceDemo.appendChild(r);
+});
+
+// ---- radii ----
+var radiiDemo = document.getElementById("radii-demo");
+var radii = [
+  ["--radius-panel","0","structural panes (square)"],
+  ["--radius (legacy)","0.25rem / 4px","orphaned base"],
+  ["--radius-seg","7px","segmented chips"],
+  ["--radius-control","8px","--radius-sm / --radius-md · inputs, buttons"],
+  ["--radius-fill","10px","--radius-lg · borderless fills"],
+  ["--radius-track","10px","segmented track (dup of --radius-fill)"],
+  ["--radius-overlay","12px","dialogs, popovers, toasts"],
+  ["2px (literal)","2px","badges, tags · not a token"],
+  ["4px (literal)","4px","checkbox · not a token"],
+  ["999px (literal)","999px","switch pill, underline cap"]
+];
+radii.forEach(function(r){
+  var val = r[1].indexOf("px")>-1 || r[1]==="0" ? r[1].replace(/ .*/,"") : r[1];
+  var css = r[1]==="0"?"0":(r[1].indexOf("rem")>-1?"0.25rem":val);
+  var b = document.createElement("div");
+  b.className = "radbox";
+  b.innerHTML = '<div class="demo" style="border-radius:'+css+'"></div><div class="name mono"><span class="tok">'+r[0]+'</span></div><span class="cap">'+r[1]+' · '+r[2]+'</span>';
+  radiiDemo.appendChild(b);
+});
+
+// ---- shadows ----
+var shadowDemo = document.getElementById("shadow-demo");
+var shadows = [
+  ["--shadow-tight","0 1px 2px /.08","default buttons, resting controls"],
+  ["--shadow-panel","0 8px 24px /.12","dropdown / select menus"],
+  ["--shadow-overlay","0 16px 48px + 0 4px 12px","dialogs, popovers, toasts"],
+  ["--shadow-chip","0 1px 2px + hairline","raised segmented chip"],
+  ["--shadow-pressed","inset · depression","active/pressed buttons, latched tools"],
+  ["--ring-armed","inset 0 0 0 1px petrol/.5","armed tool ring (with pressed)"]
+];
+shadows.forEach(function(s){
+  var isInset = s[0].indexOf("pressed")>-1 || s[0].indexOf("armed")>-1;
+  var c = document.createElement("div");
+  c.className = "example";
+  c.style.cssText = "text-align:center;padding:24px 16px 16px";
+  c.innerHTML = '<div style="height:56px;background:var(--bg);border:1px solid var(--pane-line);border-radius:8px;box-shadow:var('+s[0].split(" ")[0]+');margin-bottom:14px"></div><div class="name mono"><span class="tok">'+s[0].split(" ")[0]+'</span></div><span class="cap">'+s[2]+'</span>';
+  shadowDemo.appendChild(c);
+});
+
+// ---- buttons ----
+var bv = document.getElementById("btn-variants");
+var variants = [
+  ["v-default","default"],["v-primary","primary"],["v-outline","outline"],
+  ["v-ghost","ghost"],["v-subtle","subtle"],["v-inspector","inspector"],
+  ["v-destructive","destructive"],["v-destructive-ghost","destructive-ghost"]
+];
+variants.forEach(function(v){
+  var cell = document.createElement("div");
+  cell.innerHTML =
+    '<div class="mono" style="font-size:11px;color:var(--muted);margin-bottom:8px">'+v[1]+'</div>'+
+    '<div class="row">'+
+      '<span class="stack"><span class="state-label">rest</span><button class="btn sz-default '+v[0]+'">Button</button></span>'+
+      '<span class="stack"><span class="state-label">hover</span><button class="btn sz-default '+v[0]+' is-hover">Button</button></span>'+
+      '<span class="stack"><span class="state-label">disabled</span><button class="btn sz-default '+v[0]+' is-disabled">Button</button></span>'+
+    '</div>';
+  bv.appendChild(cell);
+});
+var bs = document.getElementById("btn-sizes");
+[["sz-sm","sm · h-32 · type-xs"],["sz-default","default · h-36"],["sz-lg","lg · h-40"],["sz-icon-sm","icon-sm 32²"],["sz-icon","icon 36²"]].forEach(function(s){
+  var isIcon = s[0].indexOf("icon")>-1;
+  bs.appendChild(mk('<span class="stack"><span class="state-label">'+s[1]+'</span><button class="btn v-default '+s[0]+'">'+(isIcon?'＋':'Button')+'</button></span>'));
+});
+var bc = document.getElementById("btn-custom");
+bc.appendChild(mk('<span class="stack"><span class="state-label">.rail-button rest / hover / active</span><span class="row"><button class="rail-button">▤</button><button class="rail-button is-hover">▤</button><button class="rail-button is-active">▤</button></span></span>'));
+bc.appendChild(mk('<span class="stack"><span class="state-label">.icon-button rest / hover</span><span class="row"><button class="icon-button">↶</button><button class="icon-button is-hover">↶</button></span></span>'));
+bc.appendChild(mk('<span class="stack"><span class="state-label">.topbar-button (Export)</span><span class="row"><button class="topbar-button">Export</button><button class="topbar-button is-hover">Export</button></span></span>'));
+
+// ---- forms ----
+var fd = document.getElementById("forms-demo");
+fd.innerHTML =
+  '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:20px">'+
+    '<span class="stack"><span class="state-label">input · default (rest)</span><input class="input-control" placeholder="Placeholder"></span>'+
+    '<span class="stack"><span class="state-label">input · hover</span><input class="input-control is-hover" value="Value"></span>'+
+    '<span class="stack"><span class="state-label">input · focus (ring)</span><input class="input-control is-focus" value="Value"></span>'+
+    '<span class="stack"><span class="state-label">input · invalid</span><input class="input-control is-invalid" value="Bad"></span>'+
+    '<span class="stack"><span class="state-label">input · compact</span><input class="input-control compact" value="Compact"></span>'+
+    '<span class="stack"><span class="state-label">select-trigger (rest)</span><button class="select-trigger">Inches <span class="caret">▾</span></button></span>'+
+    '<span class="stack"><span class="state-label">select-trigger (focus)</span><button class="select-trigger is-focus">Inches <span class="caret">▾</span></button></span>'+
+  '</div>'+
+  '<div class="row" style="margin-top:24px;gap:32px">'+
+    '<span class="stack"><span class="state-label">switch off</span><span class="settings-switch"><span class="switch-thumb"></span></span></span>'+
+    '<span class="stack"><span class="state-label">switch on</span><span class="settings-switch on"><span class="switch-thumb"></span></span></span>'+
+    '<span class="stack"><span class="state-label">checkbox off</span><span class="checkbox-control"></span></span>'+
+    '<span class="stack"><span class="state-label">checkbox on</span><span class="checkbox-control on"><svg viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2.5"><path d="M3.5 8.5l3 3 6-6"/></svg></span></span>'+
+  '</div>'+
+  '<span class="cap" style="margin-top:16px">inputs: border --input · radius --radius-sm(8px) · min-h 38 / compact 32 · switch: 34×20 pill, 14px thumb · checkbox: 16², radius 4px literal</span>';
+
+// ---- overlays ----
+var od = document.getElementById("overlay-demo");
+od.appendChild(mk(
+  '<div class="stack"><span class="state-label">dropdown / select menu</span>'+
+  '<div class="menu-content" style="width:200px">'+
+    '<div class="menu-label">Arrange</div>'+
+    '<div class="menu-item hl">Left edge</div>'+
+    '<div class="menu-item">Center</div>'+
+    '<div class="menu-item">Distribute</div>'+
+    '<div class="menu-sep"></div>'+
+    '<div class="menu-item">Reset</div>'+
+  '</div><span class="cap"><b>radius:</b> --radius-sm 8px · <b>shadow:</b> --shadow-panel · border --line · pad --space-4 · item h-30</span></div>'));
+od.appendChild(mk(
+  '<div class="stack"><span class="state-label">popover</span>'+
+  '<div class="popover-content" style="width:240px"><div style="font-weight:620;font-size:13px">Storage</div><p style="margin:8px 0 0;color:var(--muted);font-size:12px;line-height:1.55">Saved locally. Dropbox backup up to date.</p></div>'+
+  '<span class="cap"><b>radius:</b> --radius-overlay 12px · <b>shadow:</b> --shadow-overlay · softened border · pad --space-16</span></div>'));
+od.appendChild(mk(
+  '<div class="stack"><span class="state-label">tooltip (dark)</span>'+
+  '<div style="padding:20px 0"><span class="tooltip">Rotate 90&deg; <span style="color:var(--muted-on-ink);font-family:var(--font-mono);font-size:11px">R</span></span></div>'+
+  '<span class="cap"><b>surface:</b> --foreground · text --background · radius --radius-sm · --shadow-panel · pad 8/12</span></div>'));
+od.appendChild(mk(
+  '<div class="stack" style="grid-column:1/-1"><span class="state-label">dialog frame</span>'+
+  '<div class="dialog-frame"><div class="dialog-header"><h3 class="dialog-title">Delete project</h3><p class="dialog-description">This removes the local copy. Backups are kept.</p></div>'+
+  '<div class="dialog-footer"><button class="btn sz-default v-outline">Cancel</button><button class="btn sz-default v-destructive">Delete</button></div></div>'+
+  '<span class="cap"><b>radius:</b> --radius-overlay 12px · <b>shadow:</b> --shadow-overlay · header pad --space-24/56/4/24 · footer --space-14/24 + top hairline</span></div>'));
+
+// ---- badges ----
+var bd = document.getElementById("badge-demo");
+bd.innerHTML =
+  '<h3 class="sub" style="margin-top:0">Save-status badge</h3>'+
+  '<div class="row" style="gap:24px">'+
+    '<span class="stack"><span class="state-label">saved</span><span class="status-badge saved"><span class="status-dot"></span>Saved</span></span>'+
+    '<span class="stack"><span class="state-label">saving</span><span class="status-badge saved"><span class="status-dot"></span>Saving…</span></span>'+
+    '<span class="stack"><span class="state-label">attention (amber)</span><span class="status-badge attention"><span class="status-dot"></span>Backup paused</span></span>'+
+    '<span class="stack"><span class="state-label">error (red)</span><span class="status-badge error"><span class="status-dot"></span>Save failed</span></span>'+
+  '</div>'+
+  '<h3 class="sub">Uncertainty badge (dimension confidence)</h3>'+
+  '<div class="row" style="gap:16px">'+
+    '<span class="uncertainty-badge approximate">approximate</span>'+
+    '<span class="uncertainty-badge unknown">unknown</span>'+
+    '<span class="rail-issue-count">3</span>'+
+    '<span class="cap" style="margin:0;align-self:center">square 2px corners · caution-soft / danger-soft fills · rail-issue-count is a square danger tag, never a round dot</span>'+
+  '</div>'+
+  '<h3 class="sub">Segmented control &amp; tool cluster</h3>'+
+  '<div class="row" style="gap:28px;align-items:flex-start">'+
+    '<span class="stack"><span class="state-label">.seg-track (value picker)</span><span class="seg-track"><span class="seg-item">2D</span><span class="seg-item is-active">3D</span><span class="seg-item">List</span></span></span>'+
+    '<span class="stack"><span class="state-label">.tabs-underline (nav)</span><span class="tabs-underline"><span class="tab-button">Plan</span><span class="tab-button is-active">Elevation</span><span class="tab-button">3D</span></span></span>'+
+    '<span class="stack"><span class="state-label">.tool-cluster</span><span class="tool-cluster"><span class="tool-cluster-label">Align</span><span class="tool-cluster-segments"><span class="tool-cluster-segment">▤</span><span class="tool-cluster-segment is-pressed">▥</span><span class="tool-cluster-segment">▦</span></span></span></span>'+
+  '</div>'+
+  '<span class="cap" style="margin-top:16px">seg chip: --chip on --track, --radius-seg 7px, --shadow-chip · underline: 3px --primary · cluster pressed: --primary-soft + --shadow-pressed + --ring-armed</span>';
+
+// ---- dead / unused tokens ----
+var dead = [
+  ["--secondary","oklch(0.968 0.004 230)","No var() refs, no bg/text/border-secondary utility used"],
+  ["--secondary-foreground","var(--foreground)","No utility usage"],
+  ["--accent","oklch(0.955 0.013 200)","No var() refs, no bg-accent utility (menus use --surface instead)"],
+  ["--accent-foreground","oklch(0.265 0.055 200)","No utility usage"],
+  ["--card","oklch(1 0 0)","Alias of --background; bg-card never used"],
+  ["--card-foreground","var(--foreground)","No utility usage"],
+  ["--space-36","36px","Zero references (not a Tailwind spacing namespace, so var()-only)"],
+  ["--radius","0.25rem (4px)","Legacy base; nothing consumes it (checkbox hardcodes 4px)"]
+];
+var dr = document.getElementById("dead-rows");
+dead.forEach(function(r){
+  var tr = document.createElement("tr");
+  tr.style.borderTop = "1px solid var(--pane-line)";
+  tr.innerHTML =
+    '<td style="padding:8px;vertical-align:top"><span class="tok">'+r[0]+'</span></td>'+
+    '<td style="padding:8px;vertical-align:top;font-family:var(--font-mono);font-size:11px;color:var(--muted)">'+r[1]+'</td>'+
+    '<td style="padding:8px;vertical-align:top;color:var(--muted)">'+r[2]+'</td>';
+  dr.appendChild(tr);
+});
+
+// ---- helpers ----
+function mk(html){ var d=document.createElement("div"); d.innerHTML=html; return d.firstChild; }
+
+// ---- click to copy token names ----
+var hint = document.getElementById("copyhint"), hintT;
+document.addEventListener("click", function(e){
+  var t = e.target.closest(".tok");
+  if(!t) return;
+  var name = t.textContent.trim();
+  navigator.clipboard && navigator.clipboard.writeText(name);
+  t.classList.add("copied");
+  setTimeout(function(){ t.classList.remove("copied"); }, 600);
+  hint.textContent = "copied  " + name;
+  hint.classList.add("show");
+  clearTimeout(hintT);
+  hintT = setTimeout(function(){ hint.classList.remove("show"); }, 1100);
+});
+</script>
+</body>
+</html>
