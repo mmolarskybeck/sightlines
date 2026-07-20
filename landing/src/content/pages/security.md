@@ -7,7 +7,7 @@ lede: "Sightlines is deliberately simple, and that simplicity is its main protec
 
 ## Architecture
 
-The application at [app.sightlines.art](https://app.sightlines.art/) and this informational site are static sites — pre-built pages with no server-side application code — served through Cloudflare. Neither hosts user projects, images, accounts, or server-side sessions.
+The application at [app.sightlines.art](https://app.sightlines.art/) and this informational site are static sites: pre-built pages with no server-side application code. Neither hosts user projects, images, accounts, or server-side sessions.
 
 Project data is stored in the browser. It leaves the device only when you export it or connect your own Dropbox account, in which case backups travel directly between the browser and a dedicated folder in your Dropbox account. Optional, content-free usage reporting runs only after you allow it. See the [privacy page](/privacy) for the data flows and retention periods.
 
