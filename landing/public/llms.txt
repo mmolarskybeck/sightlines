@@ -21,6 +21,6 @@ Security and privacy notes:
 - No hosted user projects or artwork images in v1.
 - Optional cloud backup goes directly from the user's browser to their own Dropbox app folder; Sightlines never receives project data.
 - No executable downloads.
-- Optional, consent-controlled Cloudflare Web Analytics and predefined aggregate product events exclude project and artwork content; no advertising, cross-site tracking, or personal profiles.
+- App analytics are consent-controlled: Cloudflare Web Analytics plus predefined aggregate product events, excluding project and artwork content. This informational site uses cookie-less Cloudflare Web Analytics without a prompt. No advertising, cross-site tracking, or personal profiles on either hostname.
 - Application: static Vite React app on Cloudflare Workers static assets at app.sightlines.art.
 - This site: static Astro informational site at sightlines.art.

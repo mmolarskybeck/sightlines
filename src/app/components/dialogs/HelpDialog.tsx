@@ -28,11 +28,11 @@ const VIEW_TABS: { value: HelpViewTab; label: string }[] = [
   { value: "3d", label: "3D" }
 ];
 
+// Security and IT-evaluator pages stay off this list: they're reachable from
+// the landing site, and in-app help serves people already using the app.
 const TRUST_LINKS = [
-  { href: "/about.html", label: "About" },
-  { href: "/privacy.html", label: "Privacy" },
-  { href: "/security.html", label: "Security" },
-  { href: "/it.html", label: "For IT teams" }
+  { href: "https://sightlines.art/about", label: "About" },
+  { href: "https://sightlines.art/privacy", label: "Privacy" }
 ];
 
 // Touch-primary devices (iPhone/iPad, most Android) report a coarse pointer;

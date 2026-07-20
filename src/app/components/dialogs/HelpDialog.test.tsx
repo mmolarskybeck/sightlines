@@ -89,7 +89,11 @@ describe("HelpDialog", () => {
     expect(screen.getByText(/stay on this device/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Privacy" })).toHaveAttribute(
       "href",
-      "/privacy.html"
+      "https://sightlines.art/privacy"
+    );
+    expect(screen.getByRole("link", { name: "About" })).toHaveAttribute(
+      "href",
+      "https://sightlines.art/about"
     );
   });
 });

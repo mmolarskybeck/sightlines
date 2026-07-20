@@ -99,5 +99,16 @@ const structuredData =
       {NAV_LINKS.map((link) => <a href={link.href}>{link.label}</a>)}
       <span class="footer-copy">© 2026 Sightlines · sightlines.art</span>
     </footer>
+
+    {/* Cookie-less Cloudflare Web Analytics: aggregate visits and page
+        performance only, nothing stored on the visitor's device. The app at
+        app.sightlines.art keeps its separate consent gate; disclosure lives
+        on /privacy. Filter by hostname in the CF dashboard to separate the
+        two sites' traffic. */}
+    <script
+      is:inline
+      defer
+      src="https://static.cloudflareinsights.com/beacon.min.js"
+      data-cf-beacon='{"token": "921e0069e17642f481277baaf118a59f"}'></script>
   </body>
 </html>

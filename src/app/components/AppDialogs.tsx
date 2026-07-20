@@ -37,7 +37,9 @@ const SavedViewRenderHost = lazy(() =>
     default: module.SavedViewRenderHost
   }))
 );
-const FontLab = import.meta.env.DEV
+// Suppressed under automation (navigator.webdriver): the open-by-default panel
+// overlays real UI and intercepts e2e clicks that pass in a human session.
+const FontLab = import.meta.env.DEV && !globalThis.navigator?.webdriver
   ? lazy(() => import("./FontLab"))
   : null;
 

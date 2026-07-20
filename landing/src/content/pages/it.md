@@ -49,10 +49,10 @@ It is not a file-sharing service, social network, streaming site, advertising ne
 ## Network behavior
 
 - The browser fetches application assets (HTML, JS, CSS, fonts) from `app.sightlines.art` over HTTPS. This informational site's pages are served separately from `sightlines.art`.
-- Each origin's Content-Security-Policy restricts connections to an explicit allowlist. Beyond its own origin, the application permits only the Cloudflare Web Analytics beacon (loaded after consent), its same-origin product-event endpoint, and the Dropbox API endpoints used by optional cloud backup.
+- Each origin's Content-Security-Policy restricts connections to an explicit allowlist. Beyond its own origin, the application permits only the Cloudflare Web Analytics beacon (loaded after consent), its same-origin product-event endpoint, and the Dropbox API endpoints used by optional cloud backup; this informational site permits only the beacon.
 - No user project content is sent to Sightlines. There is no Sightlines project-upload endpoint on either hostname.
 - No account, authentication, or session traffic exists in the current version, on either hostname.
-- No advertising, cross-site tracking, session replay, or personal analytics profiles. Optional usage analytics is off until the user permits it.
+- No advertising, cross-site tracking, session replay, or personal analytics profiles. In-app usage analytics is off until the user permits it; this informational site runs cookie-less Cloudflare Web Analytics.
 
 ## Data flows
 
@@ -72,8 +72,8 @@ It is not a file-sharing service, social network, streaming site, advertising ne
     </tr>
     <tr>
       <th scope="row">Cloudflare Web Analytics</th>
-      <td>Only after Anonymous usage analytics is enabled</td>
-      <td>Visits, coarse browser/device categories, and page-performance measurements; no project or artwork content and no persistent Sightlines analytics identifier.</td>
+      <td>In the app, only after Anonymous usage analytics is enabled; on this informational site, on every page</td>
+      <td>Visits, coarse browser/device categories, and page-performance measurements; cookie-less, no fingerprinting, no project or artwork content, and no persistent Sightlines analytics identifier.</td>
     </tr>
     <tr>
       <th scope="row">Sightlines product events</th>
