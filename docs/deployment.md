@@ -7,13 +7,16 @@ Sightlines deploys as two separate Cloudflare Workers: a static Astro landing si
 | Component | Location | Serves | URL |
 | --- | --- | --- | --- |
 | Landing site | `landing/` (Astro) | Marketing, docs, markdown-based content | `https://sightlines.art/` |
-| App | `app/` (Vite React SPA) | Interactive editor | `https://app.sightlines.art/` |
+| App | repository root (Vite React SPA + Worker) | Interactive editor and analytics endpoint | `https://app.sightlines.art/` |
 
 Each has its own `wrangler.jsonc` configuration and custom domain binding in Cloudflare.
 
 ## One-Time Cloudflare Setup
 
 ### Landing Site
+
+Run these commands from the repository root unless a step explicitly changes
+directories.
 
 1. Log in locally:
 
@@ -25,33 +28,39 @@ Each has its own `wrangler.jsonc` configuration and custom domain binding in Clo
 
    ```sh
    cd landing
-   npm run cf:whoami
+   npx wrangler whoami
    ```
 
 3. Run a dry deployment check:
 
    ```sh
-   npm run deploy:dry-run
+   npm run build
+   npx wrangler deploy --dry-run
    ```
 
 4. Deploy:
 
    ```sh
-   npm run deploy
+   npx wrangler deploy
    ```
 
 This creates the `sightlines-landing` Worker in Cloudflare and attaches it to `sightlines.art` via custom domain binding.
 
 ### App
 
-Repeat the above steps in the `app/` directory:
+The app lives at the repository root; there is no `app/` directory. Return to
+the root after working in `landing/`, then use the root package scripts:
 
 ```sh
-cd app
+cd ..
+npm run deploy:dry-run
 npm run deploy
 ```
 
-This creates the `sightlines-app` Worker and attaches it to `app.sightlines.art` via custom domain binding.
+This creates the `sightlines` Worker and attaches it to `app.sightlines.art`
+via custom domain binding. The deployment also configures the
+`PRODUCT_ANALYTICS` Analytics Engine binding declared in the root
+`wrangler.jsonc`.
 
 ## Production and Branch Previews
 
@@ -64,30 +73,35 @@ Use these values in Cloudflare under `Workers & Pages > sightlines-landing > Set
 | Setting | Value |
 | --- | --- |
 | Production branch | `main` |
-| Builds for non-production branches | Enabled |
+| Builds for non-production branches | Disabled until a landing preview-upload script is added |
 | Root directory | `/landing` |
 | Build command | `npm run build` |
-| Deploy command | `npm run cf:deploy:prod` |
-| Non-production branch deploy command | `npm run cf:deploy:preview` |
+| Deploy command | `npx wrangler deploy` |
+| Non-production branch deploy command | Not currently configured |
 
 ### App
 
-Use these values in Cloudflare under `Workers & Pages > sightlines-app > Settings > Build`:
+Use these values in Cloudflare under `Workers & Pages > sightlines > Settings > Build`:
 
 | Setting | Value |
 | --- | --- |
 | Production branch | `main` |
 | Builds for non-production branches | Enabled |
-| Root directory | `/app` |
+| Root directory | `/` or blank |
 | Build command | `npm run build` |
 | Deploy command | `npm run cf:deploy:prod` |
 | Non-production branch deploy command | `npm run cf:deploy:preview` |
 
 What this does:
 
-- Pushes to `main` run `wrangler deploy` in each worker directory, promoting builds to production.
-- Pushes to other branches run `wrangler versions upload --preview-alias <branch>`, creating preview versions without changing production.
-- Branch names are sanitized before becoming aliases.
+- Pushes to `main` run `wrangler deploy` from the configured root directory,
+  promoting builds to production.
+- For the app, pushes to other branches run
+  `wrangler versions upload --preview-alias <branch>`, creating preview versions
+  without changing production. The root preview script sanitizes branch names
+  before using them as aliases.
+- Landing branch previews are not currently configured because
+  `landing/package.json` does not yet provide a preview-upload script.
 
 ## Manual Commands
 
@@ -95,14 +109,14 @@ Local commands for the landing site:
 
 ```sh
 cd landing
-npm run deploy:dry-run  # Validate production upload without publishing
-npm run deploy          # Deploy production manually
+npm run build
+npx wrangler deploy --dry-run  # Validate upload without publishing
+npx wrangler deploy            # Deploy production manually
 ```
 
-Local commands for the app:
+Local commands for the app, from the repository root:
 
 ```sh
-cd app
 npm run deploy:dry-run  # Validate production upload without publishing
 npm run deploy          # Deploy production manually
 ```
@@ -112,7 +126,7 @@ npm run deploy          # Deploy production manually
 The production domain `sightlines.art` has two custom domain bindings:
 
 - `sightlines.art` → `sightlines-landing` Worker
-- `app.sightlines.art` → `sightlines-app` Worker
+- `app.sightlines.art` → `sightlines` Worker
 - `www.sightlines.art` → `sightlines-landing` Worker (via Cloudflare Redirect Rule)
 
 The `www` subdomain is redirected to the apex via Cloudflare's dashboard Redirect Rules; all HTTP traffic is redirected to HTTPS.
@@ -133,9 +147,16 @@ curl --resolve sightlines.art:443:192.0.2.1 https://sightlines.art/
 
 ### App (Vite React SPA)
 
-- `assets.not_found_handling = "single-page-application"` in `app/wrangler.jsonc` serves `index.html` for navigation paths that do not match a built asset.
-- `app/public/_headers` is copied into `dist/_headers` during build. The CSP keeps `style-src 'unsafe-inline'` because the React app uses measured inline styles for parts of the editor UI.
-- `app/public/robots.txt` and `app/public/.well-known/security.txt` are trust signals.
+- `assets.not_found_handling = "single-page-application"` in the root
+  `wrangler.jsonc` serves `index.html` for navigation paths that do not match a
+  built asset.
+- Root `public/_headers` is copied into `dist/_headers` during build. The CSP
+  keeps `style-src 'unsafe-inline'` because the React app uses measured inline
+  styles for parts of the editor UI.
+- Root `public/robots.txt` and `public/.well-known/security.txt` are trust
+  signals.
+- `worker/index.ts` handles `/api/analytics`; all other requests are served by
+  the static asset binding.
 
 ### General
 
