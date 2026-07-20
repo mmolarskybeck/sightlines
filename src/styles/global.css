@@ -73,6 +73,31 @@
   --radius-xl: var(--radius-panel);
 }
 
+/* Spacing scale — 2px steps through 16px for dense UI, then 4px steps to 32px
+   and coarser above. Values are px-named (--space-8 = 8px). All padding/margin/
+   gap values must come from this scale; 1px hairline offsets stay literal. */
+@theme {
+  --space-2: 2px;
+  --space-4: 4px;
+  --space-6: 6px;
+  --space-8: 8px;
+  --space-10: 10px;
+  --space-12: 12px;
+  --space-14: 14px;
+  --space-16: 16px;
+  --space-20: 20px;
+  --space-24: 24px;
+  --space-28: 28px;
+  --space-32: 32px;
+  --space-36: 36px;
+  --space-40: 40px;
+  --space-44: 44px;
+  --space-48: 48px;
+  --space-52: 52px;
+  --space-56: 56px;
+  --space-64: 64px;
+}
+
 :root {
   color-scheme: light;
   --font-brand: "Figtree Variable", Figtree, ui-sans-serif, system-ui, sans-serif;
@@ -135,6 +160,8 @@
   --surface: oklch(0.975 0.004 230);
   --surface-strong: oklch(0.925 0.006 230);
   --subtle: oklch(0.55 0.008 230);
+  /* Muted text on ink-dark surfaces (tooltips) — --muted is too dark there. */
+  --muted-on-ink: oklch(0.72 0.005 240);
   /* Near-invisible cool wash echoing 3D's CASE_GLASS_COLOR (#eef2f3) for the
      case glass fill/tint — must read as barely-there under --muted strokes. */
   --focus: var(--ring);
@@ -248,8 +275,8 @@ input:focus-visible {
   width: 100%;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding-top: 14px;
+  gap: var(--space-12);
+  padding-top: var(--space-14);
 }
 
 .app-main {
@@ -331,7 +358,7 @@ input:focus-visible {
   top: 2px;
   right: 2px;
   min-width: 15px;
-  padding: 0 3px;
+  padding: 0 var(--space-4);
   border-radius: 2px;
   background: var(--danger-soft);
   color: var(--danger);
@@ -355,8 +382,8 @@ input:focus-visible {
   display: grid;
   flex: 1 1 auto;
   min-height: 0;
-  gap: 16px;
-  padding: 14px 24px 20px;
+  gap: var(--space-16);
+  padding: var(--space-14) var(--space-24) var(--space-20);
   overflow-y: auto;
 }
 
@@ -374,14 +401,14 @@ input:focus-visible {
 /* Compact segments for the dialog-width track. */
 .help-input-toggle .seg-item {
   min-height: 24px;
-  padding: 2px 10px;
+  padding: var(--space-2) var(--space-10);
   font-size: var(--type-xs);
   font-weight: var(--weight-medium);
 }
 
 .help-tabs {
   display: grid;
-  gap: 14px;
+  gap: var(--space-14);
 }
 
 .help-tabs-list {
@@ -390,16 +417,16 @@ input:focus-visible {
 
 .help-tab-panel {
   display: grid;
-  gap: 16px;
+  gap: var(--space-16);
 }
 
 .help-group {
   display: grid;
-  gap: 10px;
+  gap: var(--space-10);
 }
 
 .help-section-title {
-  margin: 0 0 10px;
+  margin: 0 0 var(--space-10);
   color: var(--muted);
   font-size: var(--type-xs);
   font-weight: var(--weight-strong);
@@ -411,14 +438,14 @@ input:focus-visible {
 .help-shortcut-list {
   display: grid;
   margin: 0;
-  row-gap: 7px;
+  row-gap: var(--space-8);
 }
 
 .help-shortcut-row {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--space-16);
 }
 
 .help-shortcut-row dt {
@@ -432,7 +459,7 @@ input:focus-visible {
   flex-wrap: wrap;
   align-items: baseline;
   justify-content: flex-end;
-  gap: 10px;
+  gap: var(--space-10);
   margin: 0;
 }
 
@@ -443,7 +470,7 @@ input:focus-visible {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 5px;
+  gap: var(--space-6);
 }
 
 /* Gesture / connector words ("drag", "scroll", "keeps existing"): plain,
@@ -463,7 +490,7 @@ input:focus-visible {
   align-items: center;
   justify-content: center;
   min-width: 22px;
-  padding: 2px 6px;
+  padding: var(--space-2) var(--space-6);
   border: 1px solid var(--line);
   border-radius: 3px;
   background: var(--surface);
@@ -477,7 +504,7 @@ input:focus-visible {
 
 .help-privacy-note {
   margin: 0;
-  padding-top: 13px;
+  padding-top: var(--space-12);
   border-top: 1px solid var(--line);
   color: var(--muted);
   font-size: var(--type-sm);
@@ -492,8 +519,8 @@ input:focus-visible {
 .help-link-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 18px;
-  padding-top: 12px;
+  gap: var(--space-4) var(--space-16);
+  padding-top: var(--space-12);
   border-top: 1px solid var(--line);
 }
 
@@ -519,9 +546,9 @@ input:focus-visible {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: 16px;
+  gap: var(--space-16);
   min-height: 80px;
-  padding: 10px 20px;
+  padding: var(--space-10) var(--space-20);
   background: var(--bg);
   border-bottom: 1px solid var(--line);
 }
@@ -539,7 +566,7 @@ input:focus-visible {
   flex: 1 1 auto;
   min-width: 0;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-12);
 }
 
 .topbar-center {
@@ -552,7 +579,7 @@ input:focus-visible {
   min-width: 0;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: var(--space-10);
 }
 
 .project-switcher {
@@ -560,7 +587,7 @@ input:focus-visible {
   flex: 1 1 auto;
   min-width: 0;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .project-switcher-trigger {
@@ -572,7 +599,7 @@ input:focus-visible {
    is just a flex gap rather than a segmented control. */
 .toolbar-group {
   display: inline-flex;
-  gap: 2px;
+  gap: var(--space-2);
 }
 
 .toolbar-divider {
@@ -595,9 +622,9 @@ input:focus-visible {
 .topbar-button {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-8);
   height: 36px;
-  padding: 0 12px;
+  padding: 0 var(--space-12);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--bg);
@@ -638,7 +665,7 @@ input:focus-visible {
 .project-title {
   max-width: clamp(140px, 22vw, 320px);
   min-width: 0;
-  padding: 3px 6px;
+  padding: var(--space-4) var(--space-6);
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
@@ -698,9 +725,9 @@ input:focus-visible {
 .status-badge {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-8);
   min-height: 28px;
-  padding: 3px 8px;
+  padding: var(--space-4) var(--space-8);
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
@@ -759,7 +786,7 @@ input:focus-visible {
 
 .error-banner {
   margin: 0;
-  padding: 10px 18px;
+  padding: var(--space-10) var(--space-20);
   border-bottom: 1px solid var(--danger-line);
   background: var(--danger-soft);
   color: var(--danger);
@@ -867,10 +894,10 @@ input:focus-visible {
 .export-pdf-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 240px;
-  gap: 4px;
+  gap: var(--space-4);
   flex: 1 1 auto;
   min-height: 0;
-  padding: 12px 24px 18px;
+  padding: var(--space-12) var(--space-24) var(--space-20);
 }
 
 .export-contents {
@@ -878,18 +905,18 @@ input:focus-visible {
   min-width: 0;
   min-height: 0;
   flex-direction: column;
-  padding-right: 16px;
+  padding-right: var(--space-16);
 }
 
 .export-contents-scroll {
   min-height: 0;
   overflow-y: auto;
-  padding: 4px 8px 12px 0;
+  padding: var(--space-4) var(--space-8) var(--space-12) 0;
   scrollbar-gutter: stable;
 }
 
 .export-group-title {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-8);
   color: var(--ink);
   font-size: var(--type-sm);
   font-weight: var(--weight-strong);
@@ -898,7 +925,7 @@ input:focus-visible {
 
 .export-section + .export-section,
 .export-section-overview + .export-section {
-  margin-top: 2px;
+  margin-top: var(--space-2);
 }
 
 .export-section-row,
@@ -911,7 +938,7 @@ input:focus-visible {
 .export-section-row {
   grid-template-columns: 24px 20px minmax(0, 1fr) auto;
   min-height: 34px;
-  gap: 4px;
+  gap: var(--space-4);
   border-radius: var(--radius-control);
 }
 
@@ -964,7 +991,7 @@ input:focus-visible {
 .export-section-label,
 .export-tree-label {
   min-width: 0;
-  padding: 7px 2px;
+  padding: var(--space-8) var(--space-2);
   overflow: hidden;
   text-align: left;
   text-overflow: ellipsis;
@@ -990,17 +1017,17 @@ input:focus-visible {
 }
 
 .export-section-count {
-  padding-right: 8px;
+  padding-right: var(--space-8);
 }
 
 .export-section-content {
-  padding: 1px 0 5px 48px;
+  padding: 1px 0 var(--space-4) var(--space-48);
 }
 
 .export-tree-row {
   grid-template-columns: 20px minmax(0, 1fr) auto;
   min-height: 32px;
-  gap: 4px;
+  gap: var(--space-4);
   border-radius: var(--radius-control);
 }
 
@@ -1020,7 +1047,7 @@ input:focus-visible {
 }
 
 .export-wall-list {
-  padding-left: 24px;
+  padding-left: var(--space-24);
 }
 
 .export-tree-wall {
@@ -1037,8 +1064,8 @@ input:focus-visible {
   grid-template-columns: 20px 74px minmax(0, 1fr);
   min-height: 58px;
   align-items: center;
-  gap: 8px;
-  padding: 6px 4px;
+  gap: var(--space-8);
+  padding: var(--space-6) var(--space-4);
   border-top: 1px solid color-mix(in oklch, var(--line) 68%, transparent);
   background: transparent;
   transition: background-color 120ms var(--ease-soft);
@@ -1081,7 +1108,7 @@ input:focus-visible {
 .export-saved-view-copy {
   display: grid;
   min-width: 0;
-  gap: 3px;
+  gap: var(--space-4);
 }
 
 .export-saved-view-copy strong,
@@ -1101,7 +1128,7 @@ input:focus-visible {
 .export-saved-view-copy span {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
   color: var(--muted);
   font-size: var(--type-xs);
   line-height: var(--leading-ui);
@@ -1112,8 +1139,8 @@ input:focus-visible {
 }
 
 .export-empty-hint {
-  margin: 4px 0 2px;
-  padding: 8px 0 8px 48px;
+  margin: var(--space-4) 0 var(--space-2);
+  padding: var(--space-8) 0 var(--space-8) var(--space-48);
   color: var(--muted);
   font-size: var(--type-xs);
   line-height: var(--leading-copy);
@@ -1123,10 +1150,10 @@ input:focus-visible {
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: 24px;
+  gap: var(--space-24);
   align-self: start;
-  margin-left: 4px;
-  padding: 16px;
+  margin-left: var(--space-4);
+  padding: var(--space-16);
   border-radius: 10px;
   background: color-mix(in oklch, var(--surface) 72%, transparent);
   overflow-y: auto;
@@ -1134,11 +1161,11 @@ input:focus-visible {
 
 .export-setup-group {
   display: grid;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .export-setup-group + .export-setup-group {
-  padding-top: 20px;
+  padding-top: var(--space-20);
   border-top: 1px solid var(--line);
 }
 
@@ -1146,14 +1173,14 @@ input:focus-visible {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr);
   align-items: start;
-  gap: 8px;
-  padding: 5px 0;
+  gap: var(--space-8);
+  padding: var(--space-4) 0;
   cursor: pointer;
 }
 
 .export-switch-row > span {
   display: grid;
-  gap: 2px;
+  gap: var(--space-2);
 }
 
 .export-switch-row strong {
@@ -1189,7 +1216,7 @@ input:focus-visible {
 
 .export-paper-field {
   display: grid;
-  gap: 6px;
+  gap: var(--space-6);
   color: var(--ink);
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
@@ -1212,7 +1239,7 @@ input:focus-visible {
 }
 
 .export-page-summary strong {
-  margin: 0 2px;
+  margin: 0 var(--space-2);
   color: var(--ink);
   font-weight: var(--weight-semibold);
 }
@@ -1225,7 +1252,7 @@ input:focus-visible {
 .export-footer-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 /* The body is a fieldset only so its :disabled state can make every content
@@ -1246,7 +1273,7 @@ fieldset.export-pdf-body:disabled {
   min-width: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .export-progress-bar {
@@ -1264,8 +1291,8 @@ fieldset.export-pdf-body:disabled {
   flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 4px 24px 16px;
+  gap: var(--space-10);
+  padding: var(--space-4) var(--space-24) var(--space-16);
 }
 
 .project-manager-count {
@@ -1276,15 +1303,15 @@ fieldset.export-pdf-body:disabled {
 
 .project-manager-list {
   display: grid;
-  gap: 2px;
+  gap: var(--space-2);
   flex: 1 1 auto;
   min-height: 0;
-  padding: 0 16px 16px;
+  padding: 0 var(--space-16) var(--space-16);
   overflow-y: auto;
 }
 
 .project-manager-empty {
-  margin: 6px 8px;
+  margin: var(--space-6) var(--space-8);
   color: var(--muted);
   font-size: var(--type-sm);
   line-height: var(--leading-ui);
@@ -1296,7 +1323,7 @@ fieldset.export-pdf-body:disabled {
 .project-manager-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
   border-radius: var(--radius-sm);
 }
 
@@ -1309,8 +1336,8 @@ fieldset.export-pdf-body:disabled {
   flex: 1;
   min-width: 0;
   flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-10);
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -1326,7 +1353,7 @@ fieldset.export-pdf-body:disabled {
 .project-manager-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   overflow: hidden;
   color: var(--ink);
   font-size: var(--type-sm);
@@ -1355,12 +1382,12 @@ fieldset.export-pdf-body:disabled {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 4px;
-  padding-right: 6px;
+  gap: var(--space-4);
+  padding-right: var(--space-6);
 }
 
 .project-manager-delete-confirm {
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .project-manager-delete-confirm span {
@@ -1378,15 +1405,15 @@ fieldset.export-pdf-body:disabled {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 32px 32px;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
   width: 100%;
-  padding: 4px 10px;
+  padding: var(--space-4) var(--space-10);
 }
 
 .project-manager-rename-form input {
   width: 100%;
   min-height: 32px;
-  padding: 6px 8px;
+  padding: var(--space-6) var(--space-8);
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
 }
@@ -1413,8 +1440,8 @@ fieldset.export-pdf-body:disabled {
 
 .dialog-header {
   display: grid;
-  gap: 4px;
-  padding: 24px 56px 4px 24px;
+  gap: var(--space-4);
+  padding: var(--space-24) var(--space-56) var(--space-4) var(--space-24);
 }
 
 .dialog-title {
@@ -1434,8 +1461,8 @@ fieldset.export-pdf-body:disabled {
 .dialog-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 14px 24px;
+  gap: var(--space-8);
+  padding: var(--space-14) var(--space-24);
   border-top: 1px solid var(--line);
 }
 
@@ -1560,7 +1587,7 @@ body.panels-resizing * {
   top: 31px;
 }
 .workspace.library-view .artwork-library-header {
-  padding-right: calc(12px + 36px + 12px);
+  padding-right: calc(var(--space-12) + 36px + var(--space-12));
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1595,7 +1622,7 @@ body.panels-resizing * {
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 20px;
+  padding: var(--space-20);
   background: var(--bg);
   border-left: 1px solid var(--line);
   container-name: inspector;
@@ -1606,9 +1633,9 @@ body.panels-resizing * {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 16px;
-  padding-bottom: 10px;
+  gap: var(--space-10);
+  margin-bottom: var(--space-16);
+  padding-bottom: var(--space-10);
   border-bottom: 1px solid var(--line);
 }
 
@@ -1630,26 +1657,26 @@ body.panels-resizing * {
 .panel-heading-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .room-list {
   display: grid;
-  gap: 18px;
+  gap: var(--space-16);
 }
 
 .room-group {
   display: grid;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .room-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--space-10);
   min-height: 32px;
-  padding: 0 2px;
+  padding: 0 var(--space-2);
 }
 
 .room-heading h3 {
@@ -1678,11 +1705,11 @@ body.panels-resizing * {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .room-delete-confirmation {
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .room-delete-confirmation .button,
@@ -1694,14 +1721,14 @@ body.panels-resizing * {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 32px 32px;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
   width: 100%;
 }
 
 .room-rename-form input {
   width: 100%;
   min-height: 32px;
-  padding: 6px 8px;
+  padding: var(--space-6) var(--space-8);
   font-size: var(--type-sm);
   font-weight: var(--weight-semibold);
 }
@@ -1710,12 +1737,12 @@ body.panels-resizing * {
   display: grid;
   grid-template-columns: 1fr 1fr;
   align-items: start;
-  gap: 8px;
-  padding: 0 2px 4px;
+  gap: var(--space-8);
+  padding: 0 var(--space-2) var(--space-4);
 }
 
 .field-row.compact {
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .field-row.compact > span,
@@ -1727,7 +1754,7 @@ body.panels-resizing * {
 .field-row.compact select,
 .field-row.compact .select-trigger {
   min-height: 32px;
-  padding: 6px 8px;
+  padding: var(--space-6) var(--space-8);
   font-size: var(--type-sm);
 }
 
@@ -1738,17 +1765,17 @@ body.panels-resizing * {
 
 .wall-list {
   display: grid;
-  gap: 3px;
+  gap: var(--space-4);
 }
 
 .wall-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--space-10);
   width: 100%;
   min-height: 42px;
-  padding: 9px 11px;
+  padding: var(--space-10) var(--space-12);
   border: 0;
   border-radius: var(--radius-fill);
   background: transparent;
@@ -1791,7 +1818,7 @@ body.panels-resizing * {
 
 .inspector-zone {
   flex: 0 0 auto;
-  padding-bottom: 18px;
+  padding-bottom: var(--space-16);
 }
 
 .rooms-panel {
@@ -1799,7 +1826,7 @@ body.panels-resizing * {
   min-height: 0;
   flex-direction: column;
   overflow: auto;
-  padding: 20px;
+  padding: var(--space-20);
   background: var(--bg);
   border-right: 1px solid var(--line);
 }
@@ -1813,7 +1840,7 @@ body.panels-resizing * {
   min-height: 0;
   flex-direction: column;
   overflow: auto;
-  padding: 20px;
+  padding: var(--space-20);
   background: var(--bg);
   border-right: 1px solid var(--line);
 }
@@ -1824,9 +1851,9 @@ body.panels-resizing * {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: var(--space-10);
   min-height: 140px;
-  padding: 28px 18px;
+  padding: var(--space-28) var(--space-20);
   border: 1px dashed var(--line);
   border-radius: 0;
   color: var(--muted);
@@ -1843,7 +1870,7 @@ body.panels-resizing * {
   align-content: start;
   /* minmax(0) so a long title ellipsizes instead of widening the panel. */
   grid-template-columns: minmax(0, 1fr);
-  gap: 2px;
+  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1853,9 +1880,9 @@ body.panels-resizing * {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-10);
   min-height: 60px;
-  padding: 7px;
+  padding: var(--space-8);
   border: 0;
   border-radius: var(--radius-fill);
   outline: none;
@@ -1909,7 +1936,7 @@ body.panels-resizing * {
   display: grid;
   flex: 1 1 auto;
   min-width: 0;
-  gap: 3px;
+  gap: var(--space-4);
 }
 
 .saved-view-copy strong,
@@ -1929,7 +1956,7 @@ body.panels-resizing * {
 .saved-view-copy span {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
   color: var(--muted);
   font-size: var(--type-xs);
   line-height: var(--leading-ui);
@@ -1945,7 +1972,7 @@ body.panels-resizing * {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-2);
   opacity: 0;
   transition: opacity 120ms var(--ease-soft);
 }
@@ -1959,7 +1986,7 @@ body.panels-resizing * {
   display: flex;
   flex: 1 1 auto;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-2);
   min-width: 0;
 }
 
@@ -1982,7 +2009,7 @@ body.panels-resizing * {
      pinned Add-artwork button breathe, while horizontal comes down to 12px
      because every pixel of pane width is text column. At a 320px pane the
      old 20px sides cost 16px of title — more than a whole word. */
-  padding: 16px 12px;
+  padding: var(--space-16) var(--space-12);
   background: var(--bg);
   border-right: 1px solid var(--line);
   /* Density follows the resizable panel, not the viewport. */
@@ -2006,9 +2033,9 @@ body.panels-resizing * {
   /* Pinned above the scrolling list, same as .checklist-controls. */
   flex: 0 0 auto;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 16px;
-  padding: 12px;
+  gap: var(--space-8);
+  margin-bottom: var(--space-16);
+  padding: var(--space-12);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 0;
@@ -2022,14 +2049,14 @@ body.panels-resizing * {
 
 .checklist-duplicate-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .checklist-filters {
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
-  gap: 4px;
+  gap: var(--space-4);
   /* Pan instead of wrapping at narrow panel widths. */
   overflow-x: auto;
   scrollbar-width: none;
@@ -2040,9 +2067,9 @@ body.panels-resizing * {
   /* Pinned above the scrolling list — the list is the only flexible child. */
   flex: 0 0 auto;
   align-items: center;
-  gap: 4px;
-  margin-bottom: 16px;
-  padding: 4px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-16);
+  padding: var(--space-4);
   border-radius: var(--radius-track);
   background: var(--track);
 }
@@ -2062,7 +2089,7 @@ body.panels-resizing * {
   flex: 0 0 auto;
   width: 1px;
   height: 16px;
-  margin: 0 4px;
+  margin: 0 var(--space-4);
   background: var(--input);
 }
 
@@ -2098,7 +2125,7 @@ body.panels-resizing * {
 
 /* Child specificity must beat the later bare .seg-item rule. */
 .checklist-filters > .checklist-filter {
-  gap: 4px;
+  gap: var(--space-4);
   font-size: var(--type-xs);
   font-weight: var(--weight-medium);
 }
@@ -2112,17 +2139,17 @@ body.panels-resizing * {
 
 @container (max-width: 232px) {
   .checklist-filters > .checklist-filter {
-    padding: 0 8px;
+    padding: 0 var(--space-8);
   }
 
   .checklist-sort-divider {
-    margin: 0 4px;
+    margin: 0 var(--space-4);
   }
 }
 
 .checklist-filter-empty {
   flex: 1 1 auto;
-  padding: 16px 4px;
+  padding: var(--space-16) var(--space-4);
 }
 
 .checklist-empty {
@@ -2131,9 +2158,9 @@ body.panels-resizing * {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: var(--space-8);
   min-height: 140px;
-  padding: 24px 16px;
+  padding: var(--space-24) var(--space-16);
   border: 1px dashed var(--line);
   border-radius: 0;
   color: var(--muted);
@@ -2158,7 +2185,7 @@ body.panels-resizing * {
   /* Inter-row separation. Must stay clearly larger than .checklist-row-main's
      4px line gap or the three lines of one work and the boundary between two
      works read as the same interval, and the list stops parsing as rows. */
-  gap: 8px;
+  gap: var(--space-8);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -2168,7 +2195,7 @@ body.panels-resizing * {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   /* Deterministic row height: the 48px thumb plus 8px padding top and bottom
      is 64px, and the tallest text block (3 lines at --leading-ui plus two 4px
      gaps ~= 57px) fits inside it. So a 2-line row and a 3-line row are the
@@ -2176,7 +2203,7 @@ body.panels-resizing * {
      interleaved 71px/56px. Changing the thumb size or the leading means
      re-deriving this number. */
   min-height: 64px;
-  padding: 8px;
+  padding: var(--space-8);
   border: 0;
   border-radius: var(--radius-fill);
   cursor: pointer;
@@ -2229,7 +2256,7 @@ body.panels-resizing * {
 @media (pointer: fine) {
   .checklist-row {
     /* The reserved grip lane. Right padding stays 8px. */
-    padding-left: 16px;
+    padding-left: var(--space-16);
   }
 
   .checklist-grip {
@@ -2268,7 +2295,7 @@ body.panels-resizing * {
   flex-direction: column;
   /* Intra-row leading. Half the list's 8px inter-row gap — related lines
      tight, distinct works separated. */
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 /* Line 2. Muted and a step down from the title. Absent artists don't render
@@ -2314,7 +2341,7 @@ body.panels-resizing * {
   min-width: 0;
   align-items: center;
   flex-wrap: nowrap;
-  gap: 4px;
+  gap: var(--space-4);
   color: var(--subtle);
   font-size: var(--type-xs);
   font-weight: var(--weight-regular);
@@ -2429,7 +2456,7 @@ body.panels-resizing * {
 /* Pinned below the scrolling list — never scrolls out of reach. */
 .checklist-actions {
   flex: 0 0 auto;
-  margin-top: 16px;
+  margin-top: var(--space-16);
 }
 
 /* The row's trailing control: the overflow menu, and only that. Rendered
@@ -2441,7 +2468,7 @@ body.panels-resizing * {
   /* Sits on the title line rather than centred against a 3-line block. */
   align-self: flex-start;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 /* Narrow but NOT short: width comes down to 24px to give the title back its
@@ -2486,7 +2513,7 @@ body.panels-resizing * {
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .checklist-remove-confirmation > span {
@@ -2519,7 +2546,7 @@ body.panels-resizing * {
 }
 
 .import-dialog-header {
-  padding: 24px 64px 18px;
+  padding: var(--space-24) var(--space-64) var(--space-20);
   border-bottom: 1px solid var(--line);
 }
 
@@ -2529,11 +2556,11 @@ body.panels-resizing * {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .import-destination-note {
-  margin: 10px 0 0;
+  margin: var(--space-10) 0 0;
   color: var(--muted-foreground);
   font-size: 0.8125rem;
   line-height: 1.4;
@@ -2542,9 +2569,9 @@ body.panels-resizing * {
 .import-step {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-10);
   min-height: 40px;
-  padding: 8px 12px;
+  padding: var(--space-8) var(--space-12);
   border: 0;
   border-radius: var(--radius-fill);
   background: transparent;
@@ -2614,8 +2641,8 @@ body.panels-resizing * {
 }
 
 .import-error {
-  margin: 16px 28px 0;
-  padding: 10px 12px;
+  margin: var(--space-16) var(--space-28) 0;
+  padding: var(--space-10) var(--space-12);
   border: 1px solid var(--danger-line);
   border-radius: var(--radius-fill);
   background: var(--danger-soft);
@@ -2625,10 +2652,10 @@ body.panels-resizing * {
 
 .import-body {
   display: grid;
-  gap: 18px;
+  gap: var(--space-16);
   min-height: 420px;
   overflow: auto;
-  padding: 22px 28px 28px;
+  padding: var(--space-24) var(--space-28) var(--space-28);
 }
 
 .import-body[data-step="upload"] {
@@ -2638,7 +2665,7 @@ body.panels-resizing * {
 .import-screen-header {
   display: grid;
   max-width: 680px;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .import-screen-header h2 {
@@ -2662,7 +2689,7 @@ body.panels-resizing * {
 .import-upload-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: var(--space-16);
 }
 
 .import-upload-tile {
@@ -2671,8 +2698,8 @@ body.panels-resizing * {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 24px;
+  gap: var(--space-8);
+  padding: var(--space-24);
   border: 1px dashed var(--line);
   border-radius: var(--radius-overlay);
   background: var(--bg);
@@ -2718,14 +2745,14 @@ body.panels-resizing * {
 .import-upload-file-head {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-12);
   min-width: 0;
 }
 
 .import-upload-file-copy {
   display: grid;
   min-width: 0;
-  gap: 3px;
+  gap: var(--space-4);
 }
 
 .import-upload-file-copy strong,
@@ -2736,17 +2763,17 @@ body.panels-resizing * {
 .import-upload-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 16px;
+  gap: var(--space-8);
+  margin-top: var(--space-16);
 }
 
 .import-upload-file-list {
   display: grid;
-  gap: 2px;
+  gap: var(--space-2);
   min-height: 0;
   max-height: 104px;
   overflow: auto;
-  margin: 8px 0 0;
+  margin: var(--space-8) 0 0;
   padding: 0;
 }
 
@@ -2754,7 +2781,7 @@ body.panels-resizing * {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) 28px;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   min-height: 30px;
   border-radius: var(--radius-control);
   color: var(--muted);
@@ -2857,7 +2884,7 @@ body.panels-resizing * {
 
 .import-map {
   display: grid;
-  gap: 18px;
+  gap: var(--space-16);
 }
 
 .import-map-toolbar {
@@ -2866,7 +2893,7 @@ body.panels-resizing * {
      room, so the toolbar absorbs 2–4 controls without a layout rewrite. */
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: var(--space-12);
 }
 
 .import-map-toolbar > .import-field {
@@ -2880,7 +2907,7 @@ body.panels-resizing * {
 .import-field,
 .import-mapping-row {
   display: grid;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .import-field > span,
@@ -2896,14 +2923,14 @@ body.panels-resizing * {
 .import-map-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
-  gap: 20px;
+  gap: var(--space-20);
   align-items: start;
 }
 
 .import-mapping-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px 20px;
+  gap: var(--space-16) var(--space-20);
 }
 
 .import-mapping-row {
@@ -2912,7 +2939,7 @@ body.panels-resizing * {
 }
 
 .import-mapping-row small {
-  margin-left: 6px;
+  margin-left: var(--space-6);
   color: var(--primary-strong);
   font-size: var(--type-2xs);
   font-weight: var(--weight-semibold);
@@ -2927,10 +2954,10 @@ body.panels-resizing * {
   display: flex;
   min-height: 220px;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-12);
   border-radius: var(--radius-fill);
   background: var(--surface);
-  padding: 14px;
+  padding: var(--space-14);
 }
 
 .import-sample-empty {
@@ -2943,7 +2970,7 @@ body.panels-resizing * {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-8);
   color: var(--muted);
   font-size: var(--type-2xs);
   font-weight: var(--weight-semibold);
@@ -2954,7 +2981,7 @@ body.panels-resizing * {
 .import-sample-pager-controls {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-2);
   font-variant-numeric: tabular-nums;
   text-transform: none;
   letter-spacing: normal;
@@ -2965,13 +2992,13 @@ body.panels-resizing * {
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-10);
 }
 
 .import-sample-thumb-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 /* Same square-slot vocabulary as .checklist-thumb — white bg, hairline
@@ -3012,22 +3039,22 @@ body.panels-resizing * {
 
 .import-review {
   display: grid;
-  gap: 16px;
+  gap: var(--space-16);
 }
 
 .import-summary {
   display: flex;
   flex-wrap: wrap;
-  gap: 24px;
+  gap: var(--space-24);
   border-radius: var(--radius-fill);
   background: var(--surface);
-  padding: 10px 14px;
+  padding: var(--space-10) var(--space-14);
 }
 
 .import-stat {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .import-stat span {
@@ -3046,16 +3073,16 @@ body.panels-resizing * {
 
 .import-review-list {
   display: grid;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .import-review-row {
   display: grid;
   grid-template-columns: 24px 48px minmax(0, 1fr) minmax(180px, 260px);
-  gap: 12px;
+  gap: var(--space-12);
   align-items: center;
   min-height: 82px;
-  padding: 10px;
+  padding: var(--space-10);
   border-radius: var(--radius-fill);
 }
 
@@ -3091,7 +3118,7 @@ body.panels-resizing * {
 .import-review-main {
   display: grid;
   min-width: 0;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .import-review-title,
@@ -3101,7 +3128,7 @@ body.panels-resizing * {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .import-review-title strong,
@@ -3156,22 +3183,22 @@ body.panels-resizing * {
   }
 
   .dialog-header {
-    padding: 18px 52px 14px 16px;
+    padding: var(--space-16) var(--space-52) var(--space-14) var(--space-16);
   }
 
   .import-dialog-header {
-    padding: 18px 44px 14px 16px;
+    padding: var(--space-16) var(--space-44) var(--space-14) var(--space-16);
   }
 
   .import-steps {
     justify-content: flex-start;
-    gap: 2px;
+    gap: var(--space-2);
   }
 
   .import-step {
     min-height: 36px;
-    gap: 7px;
-    padding: 6px 7px;
+    gap: var(--space-6);
+    padding: var(--space-6) var(--space-8);
     font-size: var(--type-sm);
   }
 
@@ -3187,12 +3214,12 @@ body.panels-resizing * {
 
   .import-body {
     min-height: 0;
-    gap: 14px;
-    padding: 16px;
+    gap: var(--space-14);
+    padding: var(--space-16);
   }
 
   .import-screen-header {
-    gap: 4px;
+    gap: var(--space-4);
   }
 
   .import-upload-grid,
@@ -3204,7 +3231,7 @@ body.panels-resizing * {
 
   .import-upload-tile {
     min-height: 172px;
-    padding: 20px;
+    padding: var(--space-20);
   }
 
   /* Sample card leads the stacked Map layout and stays in view while the
@@ -3239,7 +3266,7 @@ body.panels-resizing * {
    see UncertaintyIndicator.tsx. */
 .uncertainty-badge {
   flex: 0 0 auto;
-  padding: 2px 7px;
+  padding: var(--space-2) var(--space-6);
   border-radius: 2px;
   font-size: var(--type-xs);
   font-weight: var(--weight-semibold);
@@ -3257,7 +3284,7 @@ body.panels-resizing * {
 }
 
 .uncertainty-badge.compact {
-  padding: 1px 7px;
+  padding: 1px var(--space-6);
   font-size: var(--type-2xs);
 }
 
@@ -3279,16 +3306,13 @@ body.panels-resizing * {
    narrow widths labels collapse before controls wrap. Density is measured from
    the rendered controls rather than guessed from a viewport breakpoint. */
 .view-toolbar {
-  --toolbar-space-1: 4px;
-  --toolbar-space-2: 8px;
-  --toolbar-space-3: 12px;
   justify-content: space-between;
-  gap: var(--toolbar-space-3);
+  gap: var(--space-12);
   flex: 0 0 auto;
   min-width: 0;
   overflow-x: hidden;
   white-space: nowrap;
-  padding: var(--toolbar-space-2) var(--toolbar-space-3);
+  padding: var(--space-8) var(--space-12);
   scrollbar-width: none;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
@@ -3299,18 +3323,18 @@ body.panels-resizing * {
 }
 
 .view-tabs {
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .view-options {
-  gap: var(--toolbar-space-2);
+  gap: var(--space-8);
 }
 
 .view-tools-primary,
 .three-camera-tools {
   display: inline-flex;
   align-items: center;
-  gap: var(--toolbar-space-2);
+  gap: var(--space-8);
 }
 
 .view-tools-primary {
@@ -3325,7 +3349,7 @@ body.panels-resizing * {
   flex: 0 0 auto;
   align-self: stretch;
   width: 1px;
-  margin: 4px 0;
+  margin: var(--space-4) 0;
   background: var(--border);
 }
 
@@ -3344,7 +3368,7 @@ body.panels-resizing * {
 .tool-cluster-label {
   display: inline-flex;
   align-items: center;
-  padding: 0 calc(var(--toolbar-space-1) + 4px);
+  padding: 0 calc(var(--space-4) + var(--space-4));
   border-right: 1px solid var(--surface-strong);
   color: var(--muted);
   font-size: var(--type-xs);
@@ -3408,7 +3432,7 @@ body.panels-resizing * {
 }
 
 .toolbar-tooltip {
-  padding: 5px 9px;
+  padding: var(--space-6) var(--space-10);
   border-radius: var(--radius-control);
   font-size: var(--type-xs);
   font-weight: var(--weight-medium);
@@ -3418,15 +3442,15 @@ body.panels-resizing * {
 .toolbar-tooltip-kbd {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  margin-left: 7px;
+  gap: var(--space-4);
+  margin-left: var(--space-8);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
 .placement-tooltip.toolbar-tooltip .toolbar-tooltip-kbd,
 .placement-tooltip-dims {
-  color: oklch(0.72 0.005 240); /* --muted is too dark on ink tooltips. */
+  color: var(--muted-on-ink);
 }
 
 @keyframes tooltip-in {
@@ -3474,8 +3498,8 @@ body.panels-resizing * {
   height: 30px;
   min-height: 30px;
   align-items: center;
-  gap: var(--toolbar-space-1);
-  padding: 0 calc(var(--toolbar-space-2) + 1px);
+  gap: var(--space-4);
+  padding: 0 calc(var(--space-8) + 1px);
   border: 0;
   border-radius: var(--radius-seg);
   background: var(--surface);
@@ -3531,7 +3555,7 @@ body.panels-resizing * {
     [data-density="compact"],
     [data-density="tight"]
   ) {
-  gap: var(--toolbar-space-2);
+  gap: var(--space-8);
 }
 
 .view-toolbar:is(
@@ -3546,7 +3570,7 @@ body.panels-resizing * {
     [data-density="compact"],
     [data-density="tight"]
   ) .view-options {
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 /* Trimmed preserves labels marked as priority. */
@@ -3559,7 +3583,7 @@ body.panels-resizing * {
   .view-option-button:not(:has(.view-option-label-priority)) {
   min-width: 36px;
   justify-content: center;
-  padding-inline: 8px;
+  padding-inline: var(--space-8);
 }
 
 .view-toolbar:is(
@@ -3569,7 +3593,7 @@ body.panels-resizing * {
   ) .view-option-button {
   min-width: 36px;
   justify-content: center;
-  padding-inline: 8px;
+  padding-inline: var(--space-8);
 }
 
 .view-toolbar:is(
@@ -3590,7 +3614,7 @@ body.panels-resizing * {
     [data-density="compact"],
     [data-density="tight"]
   ) .unit-select {
-  padding-inline: 6px;
+  padding-inline: var(--space-6);
 }
 
 .view-toolbar:is(
@@ -3606,7 +3630,7 @@ body.panels-resizing * {
     [data-density="compact"],
     [data-density="tight"]
   ) .unit-switch-side {
-  padding-inline: 6px;
+  padding-inline: var(--space-6);
 }
 
 .view-toolbar:is([data-density="compact"], [data-density="tight"]) .tool-cluster {
@@ -3620,7 +3644,7 @@ body.panels-resizing * {
 
 .view-toolbar[data-density="tight"] {
   justify-content: flex-start;
-  gap: var(--toolbar-space-2);
+  gap: var(--space-8);
 }
 
 .view-toolbar[data-density="tight"] .view-options {
@@ -3642,12 +3666,12 @@ body.panels-resizing * {
 /* Preserve 40px touch targets when toolbar labels collapse. */
 @container (max-width: 750px) {
   .view-toolbar {
-    padding: var(--toolbar-space-1) var(--toolbar-space-2);
+    padding: var(--space-4) var(--space-8);
   }
 
   .view-toolbar .view-tools-primary,
   .view-toolbar .view-options {
-    gap: 4px;
+    gap: var(--space-4);
   }
 
   .view-toolbar .view-option-button {
@@ -3655,7 +3679,7 @@ body.panels-resizing * {
     min-height: 40px;
     height: 40px;
     justify-content: center;
-    padding-inline: 8px;
+    padding-inline: var(--space-8);
   }
 
   .view-toolbar .tool-cluster {
@@ -3691,15 +3715,15 @@ body.panels-resizing * {
 
   .view-toolbar .precision-select-trigger {
     min-width: 72px;
-    padding: 0 4px;
+    padding: 0 var(--space-4);
   }
 
   .view-toolbar .unit-select {
-    padding-inline: 6px;
+    padding-inline: var(--space-6);
   }
 
   .view-toolbar .unit-switch-side {
-    padding-inline: 8px;
+    padding-inline: var(--space-8);
   }
 
 }
@@ -3709,16 +3733,17 @@ body.panels-resizing * {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  padding: 3px;
+  gap: var(--space-2);
+  padding: var(--space-4);
   border-radius: var(--radius-track);
   background: var(--track);
 }
 
 .seg-chip {
   position: absolute;
-  top: 3px;
-  bottom: 3px;
+  /* Insets mirror .seg-track's padding so the chip matches item height. */
+  top: var(--space-4);
+  bottom: var(--space-4);
   left: 0;
   width: 0;
   border-radius: var(--radius-seg);
@@ -3742,9 +3767,9 @@ body.panels-resizing * {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: var(--space-8);
   min-height: 28px;
-  padding: 0 12px;
+  padding: 0 var(--space-12);
   border: 0;
   border-radius: var(--radius-seg);
   background: transparent;
@@ -3789,7 +3814,7 @@ body.panels-resizing * {
   position: relative;
   display: inline-flex;
   align-items: stretch;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .seg-underline {
@@ -3816,9 +3841,9 @@ body.panels-resizing * {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: var(--space-8);
   min-height: 34px;
-  padding: 0 10px;
+  padding: 0 var(--space-10);
   border: 0;
   background: transparent;
   color: var(--muted);
@@ -3856,11 +3881,11 @@ body.panels-resizing * {
 .view-option-button {
   display: inline-flex;
   align-items: center;
-  gap: var(--toolbar-space-2);
+  gap: var(--space-8);
   /* Override the primitive's fixed height; the container query restores 40px. */
   height: 30px;
   min-height: 30px;
-  padding: 0 calc(var(--toolbar-space-2) + 1px);
+  padding: 0 calc(var(--space-8) + 1px);
   border: 0;
   border-radius: var(--radius-seg);
   background: var(--surface);
@@ -3902,9 +3927,9 @@ body.panels-resizing * {
 .unit-select {
   display: inline-flex;
   align-items: center;
-  gap: var(--toolbar-space-1);
+  gap: var(--space-4);
   min-height: 30px;
-  padding: 0 calc(var(--toolbar-space-2) + 1px);
+  padding: 0 calc(var(--space-8) + 1px);
   border: 0;
   border-radius: var(--radius-seg);
   background: var(--surface);
@@ -3928,7 +3953,7 @@ body.panels-resizing * {
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: var(--space-6);
   border: 0;
   background: transparent;
   color: var(--ink);
@@ -3965,7 +3990,7 @@ body.panels-resizing * {
 
 .popover-content {
   overflow: hidden;
-  padding: 16px;
+  padding: var(--space-16);
   border: 1px solid color-mix(in oklch, var(--line) 70%, transparent);
   border-radius: var(--radius-overlay);
   background: var(--bg);
@@ -3975,14 +4000,14 @@ body.panels-resizing * {
 
 .storage-popover {
   display: grid;
-  gap: 10px;
+  gap: var(--space-10);
   width: 280px;
 }
 
 .storage-popover-heading {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   color: var(--subtle);
 }
 
@@ -4018,7 +4043,7 @@ body.panels-resizing * {
 
 .storage-popover-footer {
   display: flex;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .storage-popover-footer > * {
@@ -4026,11 +4051,11 @@ body.panels-resizing * {
 }
 
 .select-viewport {
-  padding: 4px;
+  padding: var(--space-4);
 }
 
 .select-label {
-  padding: 5px 8px;
+  padding: var(--space-4) var(--space-8);
   color: var(--subtle);
   font-size: var(--type-xs);
   font-weight: var(--weight-semibold);
@@ -4042,8 +4067,8 @@ body.panels-resizing * {
   display: flex;
   min-height: 30px;
   align-items: center;
-  gap: 8px;
-  padding: 0 28px 0 8px;
+  gap: var(--space-8);
+  padding: 0 var(--space-28) 0 var(--space-8);
   border-radius: var(--radius-sm);
   color: var(--ink);
   cursor: pointer;
@@ -4065,7 +4090,7 @@ body.panels-resizing * {
 }
 
 .dropdown-menu-label {
-  padding: 5px 8px 3px;
+  padding: var(--space-4) var(--space-8) var(--space-2);
   color: var(--subtle);
   font-size: var(--type-xs);
   font-weight: var(--weight-semibold);
@@ -4080,19 +4105,19 @@ body.panels-resizing * {
   align-items: flex-start;
   /* The shared item rule reserves 28px on the right for the select's check
      indicator; menu items have none, so reclaim it for the description line. */
-  padding: 6px 10px 6px 8px;
+  padding: var(--space-6) var(--space-10) var(--space-6) var(--space-8);
 }
 
 .dropdown-menu-item-stacked > svg {
   flex: none;
-  margin-top: 2px;
+  margin-top: var(--space-2);
 }
 
 /* Bleeds across the content's 4px inner padding so the hairline spans the
    full menu width, matching how panel hairlines run edge to edge. */
 .dropdown-menu-separator {
   height: 1px;
-  margin: 4px -4px;
+  margin: var(--space-4) -4px;
   background: var(--line);
 }
 
@@ -4104,7 +4129,7 @@ body.panels-resizing * {
    no accent stripes, matching the menu's Notion-like overlay language. */
 .wall-switcher-menu {
   min-width: min(448px, calc(100vw - 24px));
-  padding: 6px;
+  padding: var(--space-6);
   border-radius: var(--radius-overlay);
   font-family: var(--font-ui);
   font-kerning: normal;
@@ -4118,13 +4143,13 @@ body.panels-resizing * {
 
 .wall-switcher-rooms {
   min-width: 0;
-  padding-right: 6px;
+  padding-right: var(--space-6);
   border-right: 1px solid var(--line);
 }
 
 .wall-switcher-elevations {
   min-width: 0;
-  padding-left: 6px;
+  padding-left: var(--space-6);
 }
 
 /* Tall inventories scroll per column, so each list keeps its own heading in
@@ -4137,7 +4162,7 @@ body.panels-resizing * {
 
 .wall-switcher-menu .dropdown-menu-label {
   min-height: 26px;
-  padding: 6px 10px 4px;
+  padding: var(--space-6) var(--space-10) var(--space-4);
   color: var(--muted);
   font-size: var(--type-xs);
   font-weight: var(--weight-semibold);
@@ -4153,8 +4178,8 @@ body.panels-resizing * {
 
 .wall-switcher-room-item {
   justify-content: space-between;
-  gap: 12px;
-  padding: 0 10px;
+  gap: var(--space-12);
+  padding: 0 var(--space-10);
 }
 
 .wall-switcher-room-item-current {
@@ -4181,17 +4206,17 @@ body.panels-resizing * {
 }
 
 .wall-switcher-elevations .dropdown-menu-section-label {
-  margin-top: 4px;
+  margin-top: var(--space-4);
   letter-spacing: 0.015em;
 }
 
 .wall-switcher-elevation-item {
-  gap: 10px;
-  padding: 0 30px 0 10px;
+  gap: var(--space-10);
+  padding: 0 var(--space-28) 0 var(--space-10);
 }
 
 .wall-switcher-elevation-item-indented {
-  padding-left: 20px;
+  padding-left: var(--space-20);
 }
 
 .wall-switcher-elevation-name {
@@ -4230,7 +4255,7 @@ body.panels-resizing * {
 }
 
 .dropdown-menu-section-label {
-  padding: 5px 8px 3px 8px;
+  padding: var(--space-4) var(--space-8) var(--space-2) var(--space-8);
   color: var(--subtle);
   font-size: var(--type-xs);
   font-weight: var(--weight-semibold);
@@ -4238,14 +4263,14 @@ body.panels-resizing * {
 }
 
 .dropdown-menu-item-indented {
-  padding-left: 20px;
+  padding-left: var(--space-20);
 }
 
 /* Submenu trigger (an "other room"): reclaim the shared item's 28px trailing
    reserve (there is no check here) and float a muted disclosure caret to the
    trailing edge, echoing the room label's tone. */
 .dropdown-menu-sub-trigger {
-  padding-right: 8px;
+  padding-right: var(--space-8);
 }
 
 .dropdown-menu-sub-caret {
@@ -4259,13 +4284,13 @@ body.panels-resizing * {
   }
 
   .wall-switcher-rooms {
-    padding: 0 0 6px;
+    padding: 0 0 var(--space-6);
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
 
   .wall-switcher-elevations {
-    padding: 6px 0 0;
+    padding: var(--space-6) 0 0;
   }
 }
 
@@ -4316,7 +4341,7 @@ body.panels-resizing * {
   grid-template-columns: 1fr 1fr;
   align-items: stretch;
   min-height: 30px;
-  padding: 3px;
+  padding: var(--space-4);
   border: 0;
   border-radius: var(--radius-track);
   background: var(--track);
@@ -4328,10 +4353,11 @@ body.panels-resizing * {
 .unit-switch::before {
   content: "";
   position: absolute;
-  top: 3px;
-  bottom: 3px;
-  left: 3px;
-  width: calc(50% - 3px);
+  /* Insets mirror .unit-switch's padding so the chip fills one half exactly. */
+  top: var(--space-4);
+  bottom: var(--space-4);
+  left: var(--space-4);
+  width: calc(50% - var(--space-4));
   border-radius: var(--radius-seg);
   background: var(--chip);
   box-shadow: var(--shadow-chip);
@@ -4358,7 +4384,7 @@ body.panels-resizing * {
   align-items: center;
   justify-content: center;
   min-height: 24px;
-  padding: 0 var(--toolbar-space-2);
+  padding: 0 var(--space-8);
   border: 0;
   border-radius: var(--radius-seg);
   background: none;
@@ -4466,7 +4492,7 @@ body.panels-resizing * {
 }
 
 .data-surface {
-  padding: 22px;
+  padding: var(--space-24);
 }
 
 .drawing-surface-empty {
@@ -4474,7 +4500,7 @@ body.panels-resizing * {
   flex: 1;
   min-height: 0;
   place-items: center;
-  padding: 22px;
+  padding: var(--space-24);
   background: var(--bg);
 }
 
@@ -4482,7 +4508,7 @@ body.panels-resizing * {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
+  gap: var(--space-14);
   max-width: 280px;
   text-align: center;
 }
@@ -4871,8 +4897,8 @@ body.panels-resizing * {
   left: 14px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-10);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--bg);
@@ -4898,15 +4924,15 @@ body.panels-resizing * {
 .surface-label-switcher {
   flex-direction: row;
   align-items: stretch;
-  gap: 6px;
-  padding: 4px;
+  gap: var(--space-6);
+  padding: var(--space-4);
 }
 
 .surface-label-divider {
   flex: 0 0 auto;
   align-self: stretch;
   width: 1px;
-  margin: 3px 0;
+  margin: var(--space-4) 0;
   background: var(--line);
 }
 
@@ -4914,8 +4940,8 @@ body.panels-resizing * {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 2px;
-  padding-right: 2px;
+  gap: var(--space-2);
+  padding-right: var(--space-2);
 }
 
 .surface-label-switch {
@@ -4940,10 +4966,10 @@ body.panels-resizing * {
 .surface-label-select {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-12);
   min-width: 216px;
   max-width: 320px;
-  padding: 5px 10px;
+  padding: var(--space-6) var(--space-10);
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -4970,7 +4996,7 @@ body.panels-resizing * {
 .surface-label-select-value {
   display: grid;
   flex: 1 1 auto;
-  gap: 2px;
+  gap: var(--space-2);
   min-width: 0;
 }
 
@@ -4988,7 +5014,7 @@ body.panels-resizing * {
 .surface-label-select-line {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: var(--space-10);
   min-width: 0;
 }
 
@@ -5027,7 +5053,7 @@ body.panels-resizing * {
 
 /* Shared chip-button gap for the viewport's floating zoom cluster. */
 .plan-toolbar-button {
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 /* Zoom cluster (ViewportZoomControls) — floating chips anchored bottom-right
@@ -5048,7 +5074,7 @@ body.panels-resizing * {
      bottom-right and fully inside the surface. */
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 4px;
+  gap: var(--space-4);
   max-width: calc(100% - 28px);
   z-index: 1;
 }
@@ -5061,7 +5087,7 @@ body.panels-resizing * {
   justify-content: center;
   min-width: 46px;
   height: 32px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   border: 0;
   border-radius: var(--radius-sm);
   background: var(--bg);
@@ -5200,7 +5226,7 @@ body.panels-resizing * {
 .data-surface pre {
   min-width: max-content;
   margin: 0;
-  padding: 18px;
+  padding: var(--space-20);
   border: 1px solid var(--line);
   border-radius: 0;
   background: var(--bg);
@@ -5220,7 +5246,7 @@ body.panels-resizing * {
      badge, a summary) can only ellipsize — it can never inflate the form's
      min-content and push the whole panel past the right edge. */
   grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
+  gap: var(--space-16);
   min-width: 0;
 }
 
@@ -5237,7 +5263,7 @@ body.panels-resizing * {
 
 .opening-connection-section {
   display: grid;
-  gap: 10px;
+  gap: var(--space-10);
 }
 
 .opening-connection-section .select-trigger {
@@ -5249,12 +5275,12 @@ body.panels-resizing * {
    within the more generous 16px rhythm of .inspector-form. */
 .field-group {
   display: grid;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .field-row {
   display: grid;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 /* The label wraps only the label text and control so helper/error copy does
@@ -5273,7 +5299,7 @@ body.panels-resizing * {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   color: var(--muted);
   font-size: var(--type-xs);
   font-weight: var(--weight-semibold);
@@ -5285,7 +5311,7 @@ body.panels-resizing * {
 .field-row .select-trigger {
   width: 100%;
   min-height: 38px;
-  padding: 8px 10px;
+  padding: var(--space-8) var(--space-10);
   border: 1px solid var(--input);
   border-radius: var(--radius-sm);
   background: var(--bg);
@@ -5344,11 +5370,11 @@ body.panels-resizing * {
 }
 
 .field-row .length-field-input-wrap input {
-  padding-right: 22px;
+  padding-right: var(--space-24);
 }
 
 .field-row.compact .length-field-input-wrap input {
-  padding-right: 20px;
+  padding-right: var(--space-20);
 }
 
 .length-field-steppers {
@@ -5427,7 +5453,7 @@ body.panels-resizing * {
      conversion preview below. Bottom alignment made the untouched sibling
      jump downward whenever the hint appeared. */
   align-items: start;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 /* With a linked image the ratio lock sits BETWEEN Width and Height — beside
@@ -5437,14 +5463,14 @@ body.panels-resizing * {
    field. */
 .artwork-dimensions-grid.has-lock {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 8px;
+  column-gap: var(--space-8);
 }
 
 .artwork-dimensions-utility-row {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-10);
 }
 
 .artwork-dimensions-lock-row {
@@ -5458,7 +5484,7 @@ body.panels-resizing * {
 .artwork-dimensions-approximate {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   min-height: 26px;
   color: var(--muted);
   font-size: var(--type-xs);
@@ -5482,7 +5508,7 @@ body.panels-resizing * {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 /* The finish select spans the pair grid as its own full row (bulk mat & frame
@@ -5519,7 +5545,7 @@ body.panels-resizing * {
 }
 
 .inspector-section {
-  padding-block: 5px 7px;
+  padding-block: var(--space-4) var(--space-6);
   border-top: 1px solid var(--line);
 }
 
@@ -5532,7 +5558,7 @@ body.panels-resizing * {
 .inspector-section-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .inspector-section-trigger {
@@ -5540,10 +5566,10 @@ body.panels-resizing * {
   flex: 1 1 auto;
   min-width: 0;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-8);
   min-height: 30px;
   margin-inline: -6px;
-  padding: 2px 6px;
+  padding: var(--space-2) var(--space-6);
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -5603,15 +5629,15 @@ body.panels-resizing * {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 
 .inspector-section-body {
   display: grid;
-  gap: 10px;
-  padding-top: 7px;
-  padding-bottom: 5px;
+  gap: var(--space-10);
+  padding-top: var(--space-6);
+  padding-bottom: var(--space-4);
 }
 
 .inspector-section-static .inspector-section-header {
@@ -5623,7 +5649,7 @@ body.panels-resizing * {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .inspector-section-static .inspector-section-action {
@@ -5634,7 +5660,7 @@ body.panels-resizing * {
   display: grid;
   grid-template-columns: minmax(72px, 42%) minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   min-height: 32px;
 }
 
@@ -5647,7 +5673,7 @@ body.panels-resizing * {
 
 .inspector-row-control {
   display: grid;
-  gap: 4px;
+  gap: var(--space-4);
   min-width: 0;
 }
 
@@ -5656,7 +5682,7 @@ body.panels-resizing * {
   /* Override SelectTrigger's fixed 36px height. */
   height: 32px;
   min-height: 32px;
-  padding: 6px 8px;
+  padding: var(--space-6) var(--space-8);
   border: 1px solid var(--input);
   border-radius: var(--radius-sm);
   background: var(--bg);
@@ -5675,7 +5701,7 @@ body.panels-resizing * {
 
 .inspector-row-control input {
   min-height: 32px;
-  padding: 6px 8px;
+  padding: var(--space-6) var(--space-8);
   font-size: var(--type-sm);
 }
 
@@ -5683,7 +5709,7 @@ body.panels-resizing * {
 .inspector-summary-row {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--space-8);
   min-height: 28px;
 }
 
@@ -5713,9 +5739,9 @@ body.panels-resizing * {
 .inspector-notice {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: var(--space-8);
   margin: 0;
-  padding: 7px 9px;
+  padding: var(--space-8) var(--space-10);
   border-radius: var(--radius-sm);
   font-size: var(--type-xs);
   font-weight: var(--weight-medium);
@@ -5755,7 +5781,7 @@ body.panels-resizing * {
 
 .inspector-action-group {
   display: grid;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .inspector-action-group-label {
@@ -5768,7 +5794,7 @@ body.panels-resizing * {
 .inspector-action-group-buttons {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .inspector-action-group-buttons.split {
@@ -5794,13 +5820,13 @@ body.panels-resizing * {
 
 .inspector-disclosure {
   display: grid;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .inspector-disclosure-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   min-width: 0;
 }
 
@@ -5808,9 +5834,9 @@ body.panels-resizing * {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
   margin-inline-start: -4px;
-  padding: 2px 4px;
+  padding: var(--space-2) var(--space-4);
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -5846,8 +5872,8 @@ body.panels-resizing * {
 
 .inspector-disclosure-body {
   display: grid;
-  gap: 10px;
-  padding-top: 8px;
+  gap: var(--space-10);
+  padding-top: var(--space-8);
 }
 
 /* Fill distinguishes scale states without relying on hue alone. */
@@ -5871,13 +5897,14 @@ body.panels-resizing * {
   overflow: hidden;
 }
 
-/* Bleed the animation clip so input focus rings remain visible. */
+/* Bleed the animation clip so input focus rings remain visible. Mirrors the
+   body's padding-inline below so content stays net-aligned with the header. */
 .inspector-section > .collapsible-content {
-  margin-inline: -5px;
+  margin-inline: calc(-1 * var(--space-6));
 }
 
 .inspector-section > .collapsible-content > .inspector-section-body {
-  padding-inline: 5px;
+  padding-inline: var(--space-6);
 }
 
 .collapsible-content[data-state="open"] {
@@ -5912,21 +5939,21 @@ body.panels-resizing * {
 
 .framing-overall {
   display: grid;
-  gap: 6px;
-  margin-top: 2px;
+  gap: var(--space-6);
+  margin-top: var(--space-2);
 }
 
 .framing-overall-editor {
   display: grid;
-  gap: 6px;
-  padding-top: 4px;
+  gap: var(--space-6);
+  padding-top: var(--space-4);
 }
 
 .artwork-inspector-header {
   display: grid;
   grid-template-columns: minmax(0, auto) minmax(0, 1fr);
   align-items: flex-start;
-  gap: 12px;
+  gap: var(--space-12);
 }
 
 .artwork-inspector-thumb {
@@ -5955,9 +5982,9 @@ body.panels-resizing * {
   position: relative;
   display: grid;
   align-content: start;
-  gap: 2px;
+  gap: var(--space-2);
   min-width: 0;
-  padding-right: 28px;
+  padding-right: var(--space-28);
 }
 
 .artwork-tombstone-title {
@@ -6006,7 +6033,7 @@ body.panels-resizing * {
   .inspector-row {
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
-    gap: 5px;
+    gap: var(--space-6);
   }
 
   .panel-heading {
@@ -6023,7 +6050,7 @@ body.panels-resizing * {
 
 .arrange-controls {
   display: grid;
-  gap: 12px;
+  gap: var(--space-12);
 }
 
 .arrange-modes {
@@ -6031,9 +6058,9 @@ body.panels-resizing * {
   grid-template-columns: repeat(3, 1fr);
   /* Override the primitive's inline-flex layout with equal cells. */
   align-items: stretch;
-  gap: 2px;
+  gap: var(--space-2);
   width: 100%;
-  padding: 3px;
+  padding: var(--space-4);
   border: 0;
   border-radius: var(--radius-track);
   background: var(--track);
@@ -6044,12 +6071,12 @@ body.panels-resizing * {
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  gap: 5px;
+  gap: var(--space-6);
   min-width: 0;
   min-height: 0;
   /* Override the primitive's fixed height for wrapped labels. */
   height: auto;
-  padding: 10px 6px;
+  padding: var(--space-10) var(--space-6);
   border: 0;
   border-radius: var(--radius-seg);
   background: transparent;
@@ -6078,7 +6105,7 @@ body.panels-resizing * {
 
 .arrange-mode-body {
   display: grid;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .placement-form-toggle {
@@ -6086,9 +6113,9 @@ body.panels-resizing * {
   grid-template-columns: repeat(2, 1fr);
   /* Override the primitive's inline-flex layout with equal cells. */
   align-items: stretch;
-  gap: 2px;
+  gap: var(--space-2);
   width: 100%;
-  padding: 3px;
+  padding: var(--space-4);
   border: 0;
   border-radius: var(--radius-track);
   background: var(--track);
@@ -6098,13 +6125,13 @@ body.panels-resizing * {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
-  padding: 2px;
+  padding: var(--space-2);
   width: 100%;
 }
 
 .wall-length-edit-group {
   display: grid;
-  gap: 10px;
+  gap: var(--space-10);
   min-width: 0;
 }
 
@@ -6118,10 +6145,10 @@ body.panels-resizing * {
 }
 
 .wall-length-anchor-toggle .seg-item {
-  gap: 5px;
+  gap: var(--space-6);
   min-width: 0;
   min-height: 26px;
-  padding: 0 6px;
+  padding: 0 var(--space-6);
   font-size: var(--type-xs);
   font-weight: var(--weight-semibold);
   line-height: 1;
@@ -6161,7 +6188,7 @@ body.panels-resizing * {
   min-width: 0;
   /* Override the primitive's fixed height. */
   height: auto;
-  padding: 7px 6px;
+  padding: var(--space-8) var(--space-6);
   border: 0;
   border-radius: var(--radius-seg);
   background: transparent;
@@ -6186,7 +6213,7 @@ body.panels-resizing * {
 
 .arrange-anchor-row {
   display: grid;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .arrange-anchor-label {
@@ -6197,13 +6224,13 @@ body.panels-resizing * {
 
 .arrange-anchor-tabs {
   display: flex;
-  gap: 16px;
+  gap: var(--space-16);
   border-bottom: 1px solid var(--line);
 }
 
 .arrange-anchor-tab {
   min-height: 0;
-  padding: 2px 0 8px;
+  padding: var(--space-2) 0 var(--space-8);
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
 }
@@ -6215,7 +6242,7 @@ body.panels-resizing * {
 /* Keep label and value in one screen-reader readout. */
 .arrange-readout {
   display: grid;
-  gap: 2px;
+  gap: var(--space-2);
   margin: 0;
 }
 
@@ -6229,7 +6256,7 @@ body.panels-resizing * {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .arrange-readout-value {
@@ -6241,7 +6268,7 @@ body.panels-resizing * {
 
 /* Shared AA-contrast tag for calculated and neighbour readouts. */
 .arrange-tag {
-  padding: 1px 6px;
+  padding: 1px var(--space-6);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface);
@@ -6306,7 +6333,7 @@ body.panels-resizing * {
 .remove-all-confirm {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .remove-all-confirm-label {
@@ -6346,15 +6373,15 @@ body.panels-resizing * {
 
 .inspector-placement {
   display: grid;
-  gap: 12px;
-  padding-top: 4px;
+  gap: var(--space-12);
+  padding-top: var(--space-4);
 }
 
 .room-shape-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-12);
 }
 
 .room-shape-row .field-hint {
@@ -6368,9 +6395,9 @@ body.panels-resizing * {
 .inspector-action {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-8);
   min-height: 36px;
-  padding: 0 12px;
+  padding: 0 var(--space-12);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface);
@@ -6394,8 +6421,8 @@ body.panels-resizing * {
 }
 
 .measurement-subject {
-  margin-bottom: 12px;
-  padding-bottom: 8px;
+  margin-bottom: var(--space-12);
+  padding-bottom: var(--space-8);
 }
 
 .inspector-subject.measurement-subject h2 {
@@ -6403,7 +6430,7 @@ body.panels-resizing * {
 }
 
 .measurement-inspector {
-  gap: 12px;
+  gap: var(--space-12);
 }
 
 .measurement-inspector .inspector-summary-row {
@@ -6419,8 +6446,8 @@ body.panels-resizing * {
 .constraint-panel {
   display: flex;
   align-items: flex-start;
-  gap: 9px;
-  padding: 10px;
+  gap: var(--space-8);
+  padding: var(--space-10);
   border: 1px solid var(--line);
   border-radius: 0;
   background: var(--surface);
@@ -6428,12 +6455,12 @@ body.panels-resizing * {
 
 .constraint-panel svg {
   flex: 0 0 auto;
-  margin-top: 2px;
+  margin-top: var(--space-2);
   color: var(--primary-strong);
 }
 
 .constraint-panel h3 {
-  margin: 0 0 2px;
+  margin: 0 0 var(--space-2);
   font-size: var(--type-sm);
   line-height: var(--leading-ui);
   text-wrap: balance;
@@ -6449,9 +6476,9 @@ body.panels-resizing * {
 .warning-panel {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  margin-top: 2px;
-  padding: 12px;
+  gap: var(--space-10);
+  margin-top: var(--space-2);
+  padding: var(--space-12);
   border: 1px solid var(--caution-line);
   border-radius: 0;
   background: var(--caution-soft);
@@ -6459,7 +6486,7 @@ body.panels-resizing * {
 }
 
 .warning-panel h3 {
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-6);
   color: var(--ink);
   font-size: var(--type-md);
   line-height: var(--leading-ui);
@@ -6467,9 +6494,9 @@ body.panels-resizing * {
 
 .warning-panel ul {
   display: grid;
-  gap: 4px;
+  gap: var(--space-4);
   margin: 0;
-  padding-left: 16px;
+  padding-left: var(--space-16);
 }
 
 .warning-panel li {
@@ -6484,15 +6511,15 @@ body.panels-resizing * {
 
 .next-panel {
   align-items: flex-start;
-  gap: 10px;
-  margin-top: 16px;
-  padding: 12px;
+  gap: var(--space-10);
+  margin-top: var(--space-16);
+  padding: var(--space-12);
   border-radius: 0;
   background: var(--surface);
 }
 
 .next-panel h3 {
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-4);
   font-size: var(--type-md);
   line-height: var(--leading-ui);
 }
@@ -6578,8 +6605,8 @@ body.panels-resizing * {
      labels become optional, while the accessible names remain intact. This
      gives the header room to breathe before the shell needs to stack. */
   .topbar {
-    gap: 12px;
-    padding: 10px 14px;
+    gap: var(--space-12);
+    padding: var(--space-10) var(--space-14);
   }
 
   .tab-button span,
@@ -6597,7 +6624,7 @@ body.panels-resizing * {
   }
 
   .tab-button {
-    padding: 0 10px;
+    padding: 0 var(--space-10);
   }
 
   .topbar-button {
@@ -6615,7 +6642,7 @@ body.panels-resizing * {
 
   .topbar-left,
   .topbar-right {
-    gap: 6px;
+    gap: var(--space-6);
   }
 
   .project-title {
@@ -6657,8 +6684,8 @@ body.panels-resizing * {
       "left right"
       "center center";
     align-items: center;
-    row-gap: 6px;
-    padding: 8px 10px;
+    row-gap: var(--space-6);
+    padding: var(--space-8) var(--space-10);
   }
 
   .topbar-left {
@@ -6725,7 +6752,7 @@ body.panels-resizing * {
   .drawing-surface,
   .data-surface {
     min-height: 56vh;
-    padding: 12px;
+    padding: var(--space-12);
   }
 }
 
@@ -7116,9 +7143,9 @@ body.panels-resizing * {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: var(--space-6);
   min-width: 0;
-  padding: 0 6px;
+  padding: 0 var(--space-6);
   font-size: var(--type-xs);
   font-weight: var(--weight-semibold);
   line-height: var(--leading-ui);
@@ -7140,14 +7167,14 @@ body.panels-resizing * {
 .placement-tooltip-body {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-2);
   min-width: 0;
 }
 
 .placement-tooltip-heading {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   font-size: var(--type-sm);
   font-weight: var(--weight-semibold);
 }
@@ -7155,7 +7182,7 @@ body.panels-resizing * {
 .placement-tooltip-artwork {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: var(--space-10);
 }
 
 .placement-tooltip-thumb {
@@ -7195,8 +7222,8 @@ body.panels-resizing * {
 .font-lab {
   display: grid;
   width: min(300px, calc(100vw - 28px));
-  gap: 10px;
-  padding: 12px;
+  gap: var(--space-10);
+  padding: var(--space-12);
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--popover);
@@ -7223,7 +7250,7 @@ body.panels-resizing * {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-12);
 }
 
 .font-lab-header p,
@@ -7240,7 +7267,7 @@ body.panels-resizing * {
 }
 
 .font-lab-header h2 {
-  margin-top: 2px;
+  margin-top: var(--space-2);
   font-family: var(--font-display);
   font-size: var(--type-xl);
   font-weight: 700;
@@ -7267,8 +7294,8 @@ body.panels-resizing * {
 .font-lab-segment {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 2px;
-  padding: 2px;
+  gap: var(--space-2);
+  padding: var(--space-2);
   border: 1px solid var(--line);
   border-radius: var(--radius-fill);
   background: var(--surface);
@@ -7295,7 +7322,7 @@ body.panels-resizing * {
   display: grid;
   grid-template-columns: 68px minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  gap: var(--space-10);
   color: var(--muted);
   font-size: var(--type-xs);
   font-weight: var(--weight-strong);
@@ -7319,8 +7346,8 @@ body.panels-resizing * {
 
 .font-lab-preview {
   display: grid;
-  gap: 7px;
-  padding: 10px;
+  gap: var(--space-8);
+  padding: var(--space-10);
   border: 1px solid var(--line);
   border-radius: var(--radius-fill);
   background: var(--bg);
@@ -7348,7 +7375,7 @@ body.panels-resizing * {
 }
 
 .font-lab-preview span {
-  margin-top: 2px;
+  margin-top: var(--space-2);
   color: var(--muted);
   font-family: var(--font-numeric, var(--font-ui));
   font-size: var(--type-xs);
@@ -7359,7 +7386,7 @@ body.panels-resizing * {
 .font-lab-reset {
   justify-self: start;
   min-height: 28px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
 }
 
 /* Scroll the body independently so header and footer stay visible. */
@@ -7373,14 +7400,14 @@ body.panels-resizing * {
   display: grid;
   flex: 1 1 auto;
   min-height: 0;
-  gap: 24px;
-  padding: 20px 24px;
+  gap: var(--space-24);
+  padding: var(--space-20) var(--space-24);
   overflow-y: auto;
 }
 
 .settings-section {
   display: grid;
-  gap: 12px;
+  gap: var(--space-12);
 }
 
 .settings-section-title {
@@ -7397,7 +7424,7 @@ body.panels-resizing * {
   display: grid;
   grid-template-columns: 1fr minmax(180px, 220px);
   align-items: center;
-  gap: 16px;
+  gap: var(--space-16);
 }
 
 .settings-row-label {
@@ -7418,14 +7445,14 @@ body.panels-resizing * {
 
 .settings-field {
   display: grid;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 /* aria-live always renders, so keep row gap zero until it has content. */
 .settings-field .field-row {
   grid-template-columns: 1fr minmax(180px, 220px);
   align-items: center;
-  gap: 0 16px;
+  gap: 0 var(--space-16);
 }
 
 .settings-field .field-row > span,
@@ -7440,7 +7467,7 @@ body.panels-resizing * {
 .settings-field .field-row > .length-field-hint,
 .settings-field .field-row > .field-error {
   grid-column: 1 / -1;
-  margin: 4px 0 0;
+  margin: var(--space-4) 0 0;
 }
 
 .settings-status {
@@ -7451,32 +7478,32 @@ body.panels-resizing * {
 }
 
 .settings-status-action {
-  margin-left: 8px;
+  margin-left: var(--space-8);
   vertical-align: baseline;
 }
 
 .settings-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .settings-danger {
   display: grid;
-  gap: 12px;
-  padding: 14px 16px;
+  gap: var(--space-12);
+  padding: var(--space-14) var(--space-16);
   border: 1px solid var(--danger-line);
   border-radius: var(--radius-fill);
 }
 
 .settings-danger-item {
   display: grid;
-  gap: 6px;
+  gap: var(--space-6);
   justify-items: start;
 }
 
 .settings-footer {
-  padding: 14px 24px;
+  padding: var(--space-14) var(--space-24);
   border-top: 1px solid var(--line);
 }
 
@@ -7509,8 +7536,8 @@ body.panels-resizing * {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 1.5rem 1.5rem 1.25rem;
+  gap: var(--space-16);
+  padding: var(--space-24) var(--space-24) var(--space-20);
   border-bottom: 1px solid var(--border);
 }
 
@@ -7522,7 +7549,7 @@ body.panels-resizing * {
 }
 
 .artwork-library-header p {
-  margin: 0.2rem 0 0;
+  margin: var(--space-4) 0 0;
   color: var(--muted-foreground);
   font-size: var(--type-sm);
 }
@@ -7531,29 +7558,29 @@ body.panels-resizing * {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .artwork-library-duplicate {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin: 12px 24px 0;
-  padding: 10px 12px;
+  gap: var(--space-16);
+  margin: var(--space-12) var(--space-24) 0;
+  padding: var(--space-10) var(--space-12);
   border-radius: var(--radius-control);
   background: var(--primary-soft);
   font-size: 0.8125rem;
 }
 
 .artwork-library-duplicate p { margin: 0; }
-.artwork-library-duplicate > div { display: flex; gap: 8px; flex: none; }
+.artwork-library-duplicate > div { display: flex; gap: var(--space-8); flex: none; }
 
 .artwork-library-search {
   position: relative;
   display: block;
   width: min(34rem, calc(100% - 3rem));
-  margin: 1rem 1.5rem;
+  margin: var(--space-16) var(--space-24);
 }
 
 .artwork-library-search > svg {
@@ -7566,30 +7593,30 @@ body.panels-resizing * {
   pointer-events: none;
 }
 
-.artwork-library-search input { padding-left: 2rem; }
+.artwork-library-search input { padding-left: var(--space-32); }
 
 .artwork-library-toolbar {
   display: grid;
   grid-template-columns: minmax(18rem, 1fr) auto;
   align-items: center;
-  gap: 1rem 1.5rem;
-  padding: 1rem 1.5rem;
+  gap: var(--space-16) var(--space-24);
+  padding: var(--space-16) var(--space-24);
   background: var(--background);
 }
 
 .artwork-library-toolbar .artwork-library-search { width: 100%; min-width: 0; margin: 0; }
-.artwork-library-toolbar-secondary { display: flex; align-items: center; gap: 0.75rem; }
+.artwork-library-toolbar-secondary { display: flex; align-items: center; gap: var(--space-12); }
 .artwork-library-filters { flex: none; }
 .artwork-library-result-count { color: var(--muted-foreground); font-size: var(--type-xs); white-space: nowrap; }
-.artwork-library-sort-label { display: flex; align-items: center; gap: 0.45rem; color: var(--muted-foreground); font-size: var(--type-xs); font-weight: 600; }
+.artwork-library-sort-label { display: flex; align-items: center; gap: var(--space-8); color: var(--muted-foreground); font-size: var(--type-xs); font-weight: 600; }
 .artwork-library-sort { width: 7rem; }
 
 .artwork-library-selection {
   display: flex;
   min-height: 2.8rem;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.45rem 1.5rem;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-24);
   border-top: 1px solid var(--border);
   background: var(--primary-soft);
   font-size: var(--type-sm);
@@ -7624,7 +7651,7 @@ body.panels-resizing * {
 .artwork-library-table th,
 .artwork-library-table td {
   height: 3.6rem;
-  padding: 0.55rem 1rem;
+  padding: var(--space-8) var(--space-16);
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
@@ -7648,7 +7675,7 @@ body.panels-resizing * {
 .artwork-library-table tbody tr:hover { background: var(--surface); }
 .artwork-library-table tbody tr[data-selected] { background: var(--primary-soft); }
 .artwork-table-select { width: 2.5rem; padding-right: 0 !important; text-align: center; }
-.artwork-table-sort { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; font-weight: inherit; cursor: pointer; }
+.artwork-table-sort { display: inline-flex; align-items: center; gap: var(--space-6); padding: 0; border: 0; background: transparent; color: inherit; font: inherit; font-weight: inherit; cursor: pointer; }
 .artwork-table-sort span { color: var(--subtle); font-size: 0.7rem; }
 .artwork-table-sort:hover { color: var(--foreground); }
 .artwork-table-sort:focus-visible { border-radius: 3px; outline: 2px solid var(--ring); outline-offset: 3px; }
@@ -7672,9 +7699,9 @@ body.panels-resizing * {
   .export-pdf-body {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: var(--space-20);
     overflow-y: auto;
-    padding: 10px 16px 16px;
+    padding: var(--space-10) var(--space-16) var(--space-16);
   }
 
   .export-contents {
@@ -7687,18 +7714,18 @@ body.panels-resizing * {
     grid-template-columns: 1fr 1fr;
     flex: 0 0 auto;
     margin-left: 0;
-    padding: 14px;
+    padding: var(--space-14);
     overflow: visible;
   }
 
   .export-setup-group + .export-setup-group {
-    padding: 0 0 0 16px;
+    padding: 0 0 0 var(--space-16);
     border-top: 0;
     border-left: 1px solid var(--line);
   }
 
   .dialog-footer.export-pdf-footer {
-    padding-inline: 16px;
+    padding-inline: var(--space-16);
   }
 }
 
@@ -7708,7 +7735,7 @@ body.panels-resizing * {
   }
 
   .export-setup-group + .export-setup-group {
-    padding: 16px 0 0;
+    padding: var(--space-16) 0 0;
     border-top: 1px solid var(--line);
     border-left: 0;
   }
@@ -7749,7 +7776,7 @@ body.panels-resizing * {
   }
 
   .export-section-content {
-    padding-left: 64px;
+    padding-left: var(--space-64);
   }
 
   .export-tree-parent {
@@ -7758,7 +7785,7 @@ body.panels-resizing * {
   }
 }
 
-.artwork-table-identity { display: flex; align-items: center; gap: 0.7rem; }
+.artwork-table-identity { display: flex; align-items: center; gap: var(--space-12); }
 .artwork-table-edit {
   width: 100%;
   padding: 0;
@@ -7775,13 +7802,13 @@ body.panels-resizing * {
 .artwork-table-thumbnail img { width: 100%; height: 100%; object-fit: cover; }
 .artwork-table-muted { color: var(--muted-foreground); }
 .artwork-table-dimensions { font-variant-numeric: tabular-nums; }
-.artwork-membership { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--primary-strong); font-size: var(--type-xs); font-weight: 600; white-space: nowrap; }
+.artwork-membership { display: inline-flex; align-items: center; gap: var(--space-4); color: var(--primary-strong); font-size: var(--type-xs); font-weight: 600; white-space: nowrap; }
 .artwork-membership-project { max-width: 100%; }
 .artwork-membership-project-label { display: block; overflow: hidden; max-width: 11rem; text-overflow: ellipsis; white-space: nowrap; }
 
 .artwork-inspector-scope {
   margin: 0;
-  padding: 0 0 0.75rem;
+  padding: 0 0 var(--space-12);
   border-bottom: 1px solid var(--border);
   color: var(--muted-foreground);
   font-size: var(--type-xs);
@@ -7795,20 +7822,20 @@ body.panels-resizing * {
   align-items: center;
   justify-content: center;
   flex-direction: column;
-  gap: 0.6rem;
-  padding: 2rem;
+  gap: var(--space-10);
+  padding: var(--space-32);
   text-align: center;
 }
 
 .artwork-library-empty > svg { color: var(--muted-foreground); }
 .artwork-library-empty h2 { margin: 0; font-size: 1rem; }
 .artwork-library-empty p,
-.artwork-library-no-results p { max-width: 31rem; margin: 0 0 0.4rem; color: var(--muted-foreground); font-size: var(--type-sm); }
+.artwork-library-no-results p { max-width: 31rem; margin: 0 0 var(--space-6); color: var(--muted-foreground); font-size: var(--type-sm); }
 
 .artwork-library-picker { width: min(38rem, calc(100vw - 2rem)); max-height: min(42rem, calc(100vh - 2rem)); }
 .artwork-library-picker .artwork-library-search {
   width: auto;
-  margin: 0.75rem 1rem;
+  margin: var(--space-12) var(--space-16);
 }
 
 /* Keep the shared Input's complete focus ring. The inset belongs to the
@@ -7820,20 +7847,20 @@ body.panels-resizing * {
   overflow-y: auto;
   border-block: 1px solid var(--border);
 }
-.artwork-picker-row { display: flex; min-height: 3.8rem; align-items: center; gap: 0.7rem; padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--border); cursor: pointer; }
+.artwork-picker-row { display: flex; min-height: 3.8rem; align-items: center; gap: var(--space-12); padding: var(--space-8) var(--space-12); border-bottom: 1px solid var(--border); cursor: pointer; }
 .artwork-picker-row:last-child { border-bottom: 0; }
 .artwork-picker-row:hover { background: var(--surface); }
 .artwork-picker-row:has(.checkbox-control:focus-visible) { outline: 2px solid var(--ring); outline-offset: -2px; }
 .artwork-picker-row[data-disabled] { color: var(--muted-foreground); cursor: default; }
 .artwork-picker-thumbnail { display: grid; width: 2.5rem; height: 2.5rem; flex: none; place-items: center; overflow: hidden; border-radius: 6px; background: var(--surface-strong); color: var(--muted-foreground); }
 .artwork-picker-thumbnail img { width: 100%; height: 100%; object-fit: cover; }
-.artwork-picker-identity { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 0.1rem; }
+.artwork-picker-identity { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: var(--space-2); }
 .artwork-picker-identity strong,
 .artwork-picker-identity span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artwork-picker-identity strong { font-size: var(--type-sm); font-weight: 600; }
 .artwork-picker-identity span { color: var(--muted-foreground); font-size: var(--type-xs); }
-.artwork-picker-empty { padding: 2.5rem 1rem; color: var(--muted-foreground); font-size: var(--type-sm); text-align: center; }
-.artwork-picker-selectall { display: flex; align-items: center; gap: 0.7rem; padding: 0.2rem 0.7rem; color: var(--muted-foreground); cursor: pointer; font-size: var(--type-xs); }
+.artwork-picker-empty { padding: var(--space-40) var(--space-16); color: var(--muted-foreground); font-size: var(--type-sm); text-align: center; }
+.artwork-picker-selectall { display: flex; align-items: center; gap: var(--space-12); padding: var(--space-4) var(--space-12); color: var(--muted-foreground); cursor: pointer; font-size: var(--type-xs); }
 .artwork-picker-selectall:has(.checkbox-control:focus-visible) { outline: 2px solid var(--ring); outline-offset: -2px; }
 
 /* Bulk mat/frame dialog (Artwork Library entry point; the plan/elevation
@@ -7841,16 +7868,16 @@ body.panels-resizing * {
    same 24px inline padding as .dialog-header so fields align with the title,
    with enough bottom padding that the hints clear the footer hairline. */
 .bulk-matframe-dialog { width: min(26rem, calc(100vw - 2rem)); }
-.bulk-matframe-fields { display: flex; flex-direction: column; gap: 14px; padding: 14px 24px 20px; }
+.bulk-matframe-fields { display: flex; flex-direction: column; gap: var(--space-14); padding: var(--space-14) var(--space-24) var(--space-20); }
 
 @media (max-width: 720px) {
   .artwork-library-table th:nth-child(4),
   .artwork-library-table td:nth-child(4),
   .artwork-library-table th:nth-child(5),
   .artwork-library-table td:nth-child(5) { display: none; }
-  .artwork-library-header { padding-inline: 1rem; }
-  .artwork-library-search { width: calc(100% - 2rem); margin-inline: 1rem; }
-  .artwork-library-toolbar { grid-template-columns: 1fr; align-items: stretch; gap: 0.75rem; padding-inline: 1rem; }
+  .artwork-library-header { padding-inline: var(--space-16); }
+  .artwork-library-search { width: calc(100% - 2rem); margin-inline: var(--space-16); }
+  .artwork-library-toolbar { grid-template-columns: 1fr; align-items: stretch; gap: var(--space-12); padding-inline: var(--space-16); }
   .artwork-library-toolbar .artwork-library-search { width: 100%; min-width: 0; margin: 0; }
   .artwork-library-toolbar-secondary { align-items: stretch; flex-wrap: wrap; }
   .artwork-library-filters { max-width: 100%; overflow-x: auto; }
