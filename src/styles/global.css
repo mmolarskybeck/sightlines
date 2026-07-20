@@ -1971,12 +1971,18 @@ body.panels-resizing * {
   white-space: nowrap;
 }
 
+/* The pane itself never scrolls — .checklist-list owns the overflow — so the
+   heading/filters stay pinned at the top and .checklist-actions at the bottom
+   however long the checklist runs. */
 .checklist-panel {
   display: flex;
   min-height: 0;
   flex-direction: column;
-  overflow: auto;
-  padding: 20px;
+  /* Asymmetric on purpose: vertical stays generous so the heading and the
+     pinned Add-artwork button breathe, while horizontal comes down to 12px
+     because every pixel of pane width is text column. At a 320px pane the
+     old 20px sides cost 16px of title — more than a whole word. */
+  padding: 16px 12px;
   background: var(--bg);
   border-right: 1px solid var(--line);
   /* Density follows the resizable panel, not the viewport. */
@@ -1997,9 +2003,11 @@ body.panels-resizing * {
 
 .checklist-duplicate-notice {
   display: flex;
+  /* Pinned above the scrolling list, same as .checklist-controls. */
+  flex: 0 0 auto;
   flex-direction: column;
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: 8px;
+  margin-bottom: 16px;
   padding: 12px;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -2021,7 +2029,7 @@ body.panels-resizing * {
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
-  gap: 6px;
+  gap: 4px;
   /* Pan instead of wrapping at narrow panel widths. */
   overflow-x: auto;
   scrollbar-width: none;
@@ -2029,10 +2037,12 @@ body.panels-resizing * {
 
 .checklist-controls {
   display: flex;
+  /* Pinned above the scrolling list — the list is the only flexible child. */
+  flex: 0 0 auto;
   align-items: center;
-  gap: 2px;
-  margin-bottom: 14px;
-  padding: 3px;
+  gap: 4px;
+  margin-bottom: 16px;
+  padding: 4px;
   border-radius: var(--radius-track);
   background: var(--track);
 }
@@ -2052,15 +2062,15 @@ body.panels-resizing * {
   flex: 0 0 auto;
   width: 1px;
   height: 16px;
-  margin: 0 3px;
+  margin: 0 4px;
   background: var(--input);
 }
 
 .checklist-sort-trigger {
   flex: 0 0 auto;
   align-self: center;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   justify-content: center;
   padding: 0;
   border: 0;
@@ -2102,17 +2112,17 @@ body.panels-resizing * {
 
 @container (max-width: 232px) {
   .checklist-filters > .checklist-filter {
-    padding: 0 7px;
+    padding: 0 8px;
   }
 
   .checklist-sort-divider {
-    margin: 0 2px;
+    margin: 0 4px;
   }
 }
 
 .checklist-filter-empty {
   flex: 1 1 auto;
-  padding: 14px 2px;
+  padding: 16px 4px;
 }
 
 .checklist-empty {
@@ -2121,9 +2131,9 @@ body.panels-resizing * {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   min-height: 140px;
-  padding: 28px 18px;
+  padding: 24px 16px;
   border: 1px dashed var(--line);
   border-radius: 0;
   color: var(--muted);
@@ -2137,11 +2147,18 @@ body.panels-resizing * {
 .checklist-list {
   display: grid;
   flex: 1 1 auto;
+  /* The pane's scroll lives here. min-height:0 lets this flex child shrink
+     below its content instead of pushing .checklist-actions off the bottom. */
+  min-height: 0;
+  overflow: auto;
   align-content: start;
   /* minmax(0) so the track can't grow to the rows' max-content — otherwise
      long titles widen the list past the panel instead of ellipsizing. */
   grid-template-columns: minmax(0, 1fr);
-  gap: 2px;
+  /* Inter-row separation. Must stay clearly larger than .checklist-row-main's
+     4px line gap or the three lines of one work and the boundary between two
+     works read as the same interval, and the list stops parsing as rows. */
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -2151,9 +2168,15 @@ body.panels-resizing * {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 56px;
-  padding: 7px;
+  gap: 8px;
+  /* Deterministic row height: the 48px thumb plus 8px padding top and bottom
+     is 64px, and the tallest text block (3 lines at --leading-ui plus two 4px
+     gaps ~= 57px) fits inside it. So a 2-line row and a 3-line row are the
+     SAME height, and a mixed list has one rhythm instead of the old
+     interleaved 71px/56px. Changing the thumb size or the leading means
+     re-deriving this number. */
+  min-height: 64px;
+  padding: 8px;
   border: 0;
   border-radius: var(--radius-fill);
   cursor: pointer;
@@ -2187,9 +2210,41 @@ body.panels-resizing * {
   cursor: grabbing;
 }
 
+/* Base (and the coarse-pointer state): an in-flow, always-visible affordance.
+   Touch has no hover, so on iPad the grip can never be a reveal — it stays
+   drawn and finger-sized at all times. The fine-pointer override below is the
+   exception, not the rule. */
 .checklist-grip {
   flex: 0 0 auto;
   color: var(--subtle);
+}
+
+/* On a mouse, the grip is redundant at rest — the whole row is draggable (see
+   the row's draggable attr and the long-press path in ChecklistPanel.tsx), so
+   the grip only ever restates what the grab cursor already says. Lifting it
+   out of flow into its own lane in the row's left padding buys the title 16px
+   back. It is pinned in that lane rather than toggled with display, so
+   revealing it moves nothing: an out-of-flow element contributes no width, and
+   only opacity animates. */
+@media (pointer: fine) {
+  .checklist-row {
+    /* The reserved grip lane. Right padding stays 8px. */
+    padding-left: 16px;
+  }
+
+  .checklist-grip {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0;
+    transition: opacity 150ms ease-out;
+  }
+
+  .checklist-row:hover .checklist-grip,
+  .checklist-row:focus-within .checklist-grip {
+    opacity: 1;
+  }
 }
 
 .checklist-thumb {
@@ -2211,42 +2266,24 @@ body.panels-resizing * {
   flex: 1 1 auto;
   min-width: 0;
   flex-direction: column;
-  gap: 2px;
+  /* Intra-row leading. Half the list's 8px inter-row gap — related lines
+     tight, distinct works separated. */
+  gap: 4px;
 }
 
-.checklist-title-line {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-/* Keep the placement tag visible while long artist names truncate. */
-.checklist-artist-line {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: var(--type-xs);
-  color: var(--muted);
-}
-
+/* Line 2. Muted and a step down from the title. Absent artists don't render
+   this element at all, so the row closes to two lines instead of gapping. */
 .checklist-artist {
   min-width: 0;
   overflow: hidden;
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  /* Stated, not inherited: all three lines set their own leading so the row's
+     height is derivable from the rules rather than from the body default. */
+  line-height: var(--leading-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* Fine pointers reveal an overlaid remove button; reserve space on its row. */
-@media (pointer: fine) {
-  .checklist-row:hover .checklist-artist-line,
-  .checklist-row:focus-within .checklist-artist-line,
-  .checklist-row.selected .checklist-artist-line {
-    padding-right: 36px;
-  }
 }
 
 .checklist-title {
@@ -2254,7 +2291,11 @@ body.panels-resizing * {
   overflow: hidden;
   color: var(--ink);
   font-size: var(--type-sm);
-  font-weight: var(--weight-medium);
+  /* The pane is too narrow to buy hierarchy with size, so the three lines
+     step on weight and colour instead: semibold/--ink, medium/--muted,
+     regular/--subtle. Blurred, the title now reads as a separate mass from
+     the two lines under it. */
+  font-weight: var(--weight-semibold);
   line-height: var(--leading-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2265,25 +2306,45 @@ body.panels-resizing * {
   font-style: italic;
 }
 
+/* Line 3: dimensions · status, on one line always. Never wraps — the
+   dimensions truncate first and the status tag holds its size, so the thing
+   that survives at a narrow pane is where the work actually hangs. */
 .checklist-meta {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 6px;
-  color: var(--muted);
+  flex-wrap: nowrap;
+  gap: 4px;
+  color: var(--subtle);
   font-size: var(--type-xs);
   font-weight: var(--weight-regular);
+  line-height: var(--leading-ui);
   font-variant-numeric: tabular-nums;
 }
 
-.checklist-meta > span {
+/* Shrinks reluctantly. Both this and the wall name compete for the same tight
+   line at a 320px pane, and shrinking them evenly cost the height ("22 13/16…"
+   with the × 18" gone), which is the worse thing to lose — a half-read
+   dimension is misleading in a way a half-read wall name isn't. */
+.checklist-dims {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.checklist-tag {
+.checklist-meta-sep {
   flex: 0 0 auto;
+  color: var(--subtle);
+}
+
+/* Shrinks faster than the dimensions, but not so fast it collapses to a
+   meaningless stub — at a 320px pane with a long wall name both have to give
+   a little, and "North…" still locates the work where "No…" does not. */
+.checklist-tag {
+  flex: 0 3 auto;
+  min-width: 0;
   max-width: 104px;
   overflow: hidden;
   color: var(--subtle);
@@ -2297,34 +2358,32 @@ body.panels-resizing * {
   color: var(--primary-strong);
 }
 
-/* Overlay on fine pointers; coarse pointers keep this visible and in flow. */
-.checklist-remove {
-  position: absolute;
-  top: 50%;
-  right: 6px;
-  /* Solid background keeps the overlaid control legible. */
-  background: var(--bg);
-  border: 1px solid var(--line);
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-50%);
+/* .checklist-remove is gone entirely — the standalone unplace X is now a
+   "Remove from wall" item inside the row's ⋮ menu. It had been through two
+   layouts (an absolutely-positioned overlay pinned to the row's right edge,
+   then an in-flow sibling of the ⋮) and both spent a fixed slice of a 320px
+   pane's title column on a control that is inert on every unplaced row. */
+
+/* Dimmed at rest rather than hidden, and never pointer-events:none. The old
+   fade-in could do both because the X floated over the row content; now the
+   cluster owns its own column, so hiding it only cost discoverability — and a
+   control that is not hit-testable until :hover resolves loses real clicks to
+   the row underneath (the same overlay-eats-clicks failure as the dialog
+   focus-hint bug). Staying in the hit-test tree keeps every press landing. */
+.checklist-row-actions {
+  opacity: 0.55;
   transition: opacity 150ms ease-out;
 }
 
-.checklist-row:hover .checklist-remove,
-.checklist-row:focus-within .checklist-remove,
-.checklist-row.selected .checklist-remove {
+.checklist-row:hover .checklist-row-actions,
+.checklist-row:focus-within .checklist-row-actions,
+.checklist-row.selected .checklist-row-actions {
   opacity: 1;
-  pointer-events: auto;
 }
 
 @media (pointer: coarse) {
-  .checklist-remove {
-    position: static;
-    flex: 0 0 auto;
+  .checklist-row-actions {
     opacity: 1;
-    pointer-events: auto;
-    transform: none;
   }
 
   /* Prevent iOS selection/callouts from interrupting long-press drag. */
@@ -2367,8 +2426,79 @@ body.panels-resizing * {
   background: var(--surface);
 }
 
+/* Pinned below the scrolling list — never scrolls out of reach. */
 .checklist-actions {
-  margin-top: 14px;
+  flex: 0 0 auto;
+  margin-top: 16px;
+}
+
+/* The row's trailing control: the overflow menu, and only that. Rendered
+   unconditionally at a fixed width whatever the row's placed state, so the
+   title column never reflows as a work is placed or unplaced. */
+.checklist-row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  /* Sits on the title line rather than centred against a 3-line block. */
+  align-self: flex-start;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Narrow but NOT short: width comes down to 24px to give the title back its
+   horizontal room, while height stays a full 32px so the target is still
+   comfortably hittable. Beats both `size-8` and .icon-button.compact on
+   specificity. Coarse pointers keep the full 32px square (the base rule) —
+   24px is too tight for a fingertip, and the pane is dogfooded on iPad. */
+@media (pointer: fine) {
+  .checklist-row-actions .icon-button,
+  .checklist-row-actions .icon-button.compact {
+    width: 24px;
+    min-width: 24px;
+    height: 32px;
+    min-height: 32px;
+  }
+}
+
+/* The menu trigger holds its size — the title column is the one that shrinks
+   and ellipsizes. */
+.checklist-row-actions > * {
+  flex: 0 0 auto;
+}
+
+/* Qualified with .dropdown-menu-item: that base rule is declared later in this
+   file, so an unqualified class would tie on specificity and lose the colour. */
+.dropdown-menu-item.checklist-row-menu-destructive {
+  color: var(--destructive);
+}
+
+.dropdown-menu-item.checklist-row-menu-destructive[data-highlighted] {
+  background: var(--danger-soft);
+  color: var(--destructive-strong);
+}
+
+/* Swapped in for .checklist-row-actions while a remove is armed (the
+   RoomsPanel room-delete idiom). Takes the row's trailing space and wraps —
+   the reassurance line is the point, so it must not be clipped. */
+.checklist-remove-confirmation {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.checklist-remove-confirmation > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--type-xs);
+}
+
+.checklist-remove-confirmation .button,
+.checklist-remove-confirmation button {
+  min-height: 32px;
 }
 
 .checklist-add {
@@ -6436,11 +6566,13 @@ body.panels-resizing * {
     grid-template-columns: minmax(0, var(--left-panel-width, 320px)) minmax(0, 1fr);
   }
 
-  /* Reclaim row width where the panel is tightest — dragging still works
-     from anywhere on the row; the grip is an affordance hint, not the handle. */
-  .checklist-grip {
-    display: none;
-  }
+  /* The grip used to be display:none below this width to reclaim row width.
+     That rule is gone: it keyed off VIEWPORT width, so it also stripped the
+     grip on iPad — where there is no hover to reveal it and no grab cursor to
+     replace it, leaving the row's only draggability hint nowhere. The
+     pointer-based split up at .checklist-grip does the same reclaiming better
+     (out of flow, so it costs no width at all) and only where hover exists to
+     bring it back. */
 
   /* Medium widths get the same visual vocabulary as the narrow toolbar:
      labels become optional, while the accessible names remain intact. This

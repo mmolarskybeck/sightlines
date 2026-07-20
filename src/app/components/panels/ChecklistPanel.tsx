@@ -3,10 +3,12 @@ import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
 import { DotsSixVerticalIcon } from "@phosphor-icons/react/dist/csr/DotsSixVertical";
+import { DotsThreeVerticalIcon } from "@phosphor-icons/react/dist/csr/DotsThreeVertical";
 import { FileArrowUpIcon } from "@phosphor-icons/react/dist/csr/FileArrowUp";
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
+import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { ACCEPTED_IMAGE_MIME_TYPES } from "../../../domain/assets/imageIntake";
 import type { Artwork, DisplayUnit, Project } from "../../../domain/project";
@@ -79,8 +81,8 @@ export type ChecklistRowData = {
   // unplaced, or when the placement points at a wall that no longer exists.
   wallName: string | null;
   // Every placement (wall or floor) referencing this artwork — in practice
-  // there's at most one, but the X button removes all of them so a row
-  // never ends up half-unplaced.
+  // there's at most one, but the menu's "Remove from wall" removes all of
+  // them so a row never ends up half-unplaced.
   placementIds: string[];
 };
 
@@ -129,6 +131,10 @@ export function ChecklistPanel({
   const [isDropActive, setIsDropActive] = useState(false);
   const [filter, setFilter] = useState<ChecklistFilter>("all");
   const [sort, setSort] = useState<ChecklistSort>("project");
+  // Removing a work from the checklist is a two-step inline confirm (same
+  // idiom as RoomsPanel's room delete): the overflow menu arms this, and only
+  // the Remove button in the swapped-in strip actually dispatches.
+  const [confirmingRemoveArtworkId, setConfirmingRemoveArtworkId] = useState<string | null>(null);
   // dragenter/dragleave fire on every child element the pointer crosses, not
   // just the section boundary — a plain enter/leave toggle would flicker the
   // drop-active state as the drag passes over rows and buttons. Counting
@@ -207,6 +213,34 @@ export function ChecklistPanel({
     ),
     sort
   );
+
+  // Disarm a pending remove-confirm whenever the row it belongs to could have
+  // moved out from under the user — a filter/sort change that hides it, or the
+  // row disappearing by another route. Otherwise the strip can sit armed on a
+  // row the user has left behind.
+  const isConfirmingRowVisible = visibleRows.some(
+    (row) => row.artworkId === confirmingRemoveArtworkId
+  );
+  useEffect(() => {
+    if (confirmingRemoveArtworkId !== null && !isConfirmingRowVisible) {
+      setConfirmingRemoveArtworkId(null);
+    }
+  }, [confirmingRemoveArtworkId, isConfirmingRowVisible]);
+
+  // Moving the selection to a DIFFERENT row also disarms. Both halves of that
+  // condition are load-bearing: opening the overflow menu selects its own row,
+  // and that selection can land in the same commit as the arm — a bare
+  // "selection changed" test then clears the strip the instant it appears,
+  // while a bare identity test trips on the stale selection of the frame
+  // before. Together they only fire when the user has genuinely moved on.
+  const previousSelectedArtworkIdRef = useRef(selectedArtworkId);
+  useEffect(() => {
+    const movedAway = previousSelectedArtworkIdRef.current !== selectedArtworkId;
+    previousSelectedArtworkIdRef.current = selectedArtworkId;
+    if (movedAway && selectedArtworkId !== confirmingRemoveArtworkId) {
+      setConfirmingRemoveArtworkId(null);
+    }
+  }, [confirmingRemoveArtworkId, selectedArtworkId]);
 
   const thumbnailUrlsByAssetId = useAssetImageUrls(
     rows.map((row) => row.artwork?.assetId),
@@ -383,6 +417,11 @@ export function ChecklistPanel({
               key={row.artworkId}
               artwork={row.artwork}
               artworkId={row.artworkId}
+              isConfirmingRemove={row.artworkId === confirmingRemoveArtworkId}
+              // Gates the menu's "Remove from wall" item. Tracked separately
+              // from isPlaced so the item is never offered with nothing to
+              // remove.
+              hasPlacement={row.placementIds.length > 0}
               isPlaced={row.isPlaced}
               isSelected={row.artworkId === selectedArtworkId}
               thumbnailUrl={
@@ -392,17 +431,20 @@ export function ChecklistPanel({
               }
               unit={artworkUnit}
               wallName={row.wallName}
-              onRemove={() => {
-                // Placed: the X unplaces (removes the placement(s), keeps
-                // the checklist row) — deleting from the checklist entirely
-                // is a separate affordance for later. Unplaced: the X still
-                // removes the row, same as before.
-                if (row.placementIds.length > 0) {
-                  for (const placementId of row.placementIds) {
-                    void onRemovePlacement(placementId);
-                  }
-                  return;
+              // Unplaces and only unplaces. Both removals now live in the
+              // row's overflow menu, named apart ("Remove from wall" vs
+              // "Remove from checklist") and only the checklist one armed
+              // behind the two-step confirm — the destructive one is the one
+              // that needs the second press.
+              onRemovePlacement={() => {
+                for (const placementId of row.placementIds) {
+                  void onRemovePlacement(placementId);
                 }
+              }}
+              onRequestRemove={() => setConfirmingRemoveArtworkId(row.artworkId)}
+              onCancelRemove={() => setConfirmingRemoveArtworkId(null)}
+              onConfirmRemove={() => {
+                setConfirmingRemoveArtworkId(null);
                 void onRemoveArtworkFromChecklist(row.artworkId);
               }}
               onSelect={() => onSelectArtwork(row.artworkId)}
@@ -522,23 +564,33 @@ function FilterTab({
 function ChecklistRow({
   artwork,
   artworkId,
+  hasPlacement,
+  isConfirmingRemove,
   isPlaced,
   isSelected,
   thumbnailUrl,
   unit,
   wallName,
-  onRemove,
+  onCancelRemove,
+  onConfirmRemove,
+  onRemovePlacement,
+  onRequestRemove,
   onSelect,
   onDragStateChange
 }: {
   artwork: Artwork | null;
   artworkId: string;
+  hasPlacement: boolean;
+  isConfirmingRemove: boolean;
   isPlaced: boolean;
   isSelected: boolean;
   thumbnailUrl: string | undefined;
   unit: DisplayUnit;
   wallName: string | null;
-  onRemove: () => void;
+  onCancelRemove: () => void;
+  onConfirmRemove: () => void;
+  onRemovePlacement: () => void;
+  onRequestRemove: () => void;
   onSelect: () => void;
   onDragStateChange?: (artworkId: string | null) => void;
 }) {
@@ -692,9 +744,21 @@ function ChecklistRow({
       { unit }
     )}`;
   }
-  const showUncertainty = artwork !== null && artwork.dimensions.status !== "known";
-  const hasMeta = dimensionsText !== undefined || showUncertainty;
-  const tagLabel = isPlaced ? wallName ?? "Placed" : "Unplaced";
+  // "unknown" deliberately gets no badge — it's the default state of every
+  // fresh import, and line 3 now collapses entirely in that case (below).
+  const showApproximate = artwork !== null && artwork.dimensions.status === "approximate";
+  // Line 2 collapses on a blank/whitespace-only artist as well as a missing
+  // one, so a record carrying "" doesn't open an empty row.
+  const artistName = artwork?.artist?.trim() ? artwork.artist.trim() : null;
+  // Only placed rows carry a tag now; unplaced is the silent default.
+  const tagLabel = wallName ?? "Placed";
+  // Line 3 renders only when it has something to say. A work with no
+  // dimensions that isn't placed yet has nothing for this line, and the
+  // em-dash placeholder it used to draw was a full line of row height
+  // carrying zero information — repeated down a sketching curator's whole
+  // checklist, since "no dimensions yet" is the default state of every fresh
+  // import. Same collapse as the missing-artist case on line 2.
+  const showMeta = dimensionsText !== undefined || showApproximate || isPlaced;
 
   const rowClassName = [
     "checklist-row",
@@ -899,6 +963,13 @@ function ChecklistRow({
           : undefined
       }
       onKeyDown={(event) => {
+        // Escape backs out of an armed remove-confirm — it bubbles here from
+        // the strip's own buttons too, so focus can be anywhere in the row.
+        if (event.key === "Escape" && isConfirmingRemove) {
+          event.preventDefault();
+          onCancelRemove();
+          return;
+        }
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
         onSelect();
@@ -915,46 +986,125 @@ function ChecklistRow({
       ) : (
         <div aria-hidden="true" className="checklist-thumb placeholder" />
       )}
+      {/* Up to three lines: title, artist, then the meta line. Only the title
+          always renders. Lines 2 and 3 are dropped entirely rather than
+          rendered empty or placeholdered — a line that exists only to say
+          "nothing here" is row height spent on noise, and repeated down a
+          list it becomes the pane's dominant texture. The row's height is
+          unaffected either way (see .checklist-row's min-height derivation),
+          so collapsing costs no rhythm. */}
       <div className="checklist-row-main">
-        <span className="checklist-title-line">
-          <span className={artwork ? "checklist-title" : "checklist-title missing"}>
-            {title}
-          </span>
+        <span className={artwork ? "checklist-title" : "checklist-title missing"}>
+          {title}
         </span>
-        <span className="checklist-artist-line">
-          {artwork?.artist ? <span className="checklist-artist">{artwork.artist}</span> : <span />}
-          <span className={isPlaced ? "checklist-tag placed" : "checklist-tag"}>
-            {tagLabel}
-          </span>
-        </span>
-        {hasMeta ? (
+        {artistName ? <span className="checklist-artist">{artistName}</span> : null}
+        {showMeta ? (
           <span className="checklist-meta">
-            {dimensionsText ? <span>{dimensionsText}</span> : null}
-            {showUncertainty ? (
-              <UncertaintyIndicator compact status={artwork.dimensions.status} />
+            {/* The em-dash survives only where the line is rendered for some
+                OTHER reason — a placed work whose dimensions aren't recorded,
+                or an approximate-status record. There it's meaningful: it
+                says "measured? no" next to a fact that is known. It is never
+                a danger badge; missing dimensions are the default state of a
+                freshly imported work, not an error. Approximate dimensions DO
+                stay badged — a real exception, caution-toned, not danger. */}
+            <span className="checklist-dims">{dimensionsText ?? "—"}</span>
+            {showApproximate ? (
+              <UncertaintyIndicator compact status="approximate" />
+            ) : null}
+            {isPlaced ? (
+              <>
+                <span aria-hidden="true" className="checklist-meta-sep">
+                  ·
+                </span>
+                <span className="checklist-tag placed">{tagLabel}</span>
+              </>
             ) : null}
           </span>
         ) : null}
       </div>
-      <Tooltip>
-        <TooltipTrigger asChild>
+      {isConfirmingRemove ? (
+        <div className="checklist-remove-confirmation">
+          {/* Names the consequence and its limit in one breath: this drops the
+              work from THIS checklist, the Library copy is untouched. */}
+          <span>Remove? It stays in your Artwork Library.</span>
           <Button
-            aria-label={isPlaced ? "Remove placement" : "Remove from checklist"}
-            className="icon-button compact checklist-remove"
-            size="icon-sm"
-            variant="outline"
+            size="sm"
+            variant="destructive"
             onClick={(event) => {
               event.stopPropagation();
-              onRemove();
+              onConfirmRemove();
             }}
           >
-            <XIcon aria-hidden="true" size={14} />
+            Remove
           </Button>
-        </TooltipTrigger>
-        <TooltipContent className="toolbar-tooltip" side="left">
-          {isPlaced ? "Remove placement" : "Remove from checklist"}
-        </TooltipContent>
-      </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label="Cancel remove"
+                className="icon-button compact"
+                size="icon-sm"
+                variant="ghost"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCancelRemove();
+                }}
+              >
+                <XIcon aria-hidden="true" size={14} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="toolbar-tooltip" side="left">
+              Cancel
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      ) : (
+        <div className="checklist-row-actions">
+          {/* One trailing control, not two. Unplacing used to be a standalone
+              X rendered permanently-but-disabled on unplaced rows — which
+              cost 26px of title column on every row to show a control that is
+              inert on most of them, and made "why can't I click this?" the
+              row's most common question. Both problems have the same fix:
+              move it into the menu, where an action that doesn't apply is
+              simply absent. The trigger itself stays unconditional and
+              fixed-width, so the title column still never reflows as a row
+              moves between placed and unplaced — that guarantee is why the
+              disabled X existed, and it survives the X.
+
+              modal={false} for the same body pointer-events reason as the
+              panel's Add artwork menu above. */}
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                aria-label={`More actions for ${title}`}
+                className="icon-button compact checklist-row-menu"
+                size="icon-sm"
+                variant="ghost"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <DotsThreeVerticalIcon aria-hidden="true" size={16} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {/* Present only when there's a placement to remove. Not
+                  destructive-toned: this returns the work to the checklist's
+                  unplaced pool, it doesn't destroy anything. */}
+              {hasPlacement ? (
+                <DropdownMenuItem onSelect={onRemovePlacement}>
+                  <XIcon aria-hidden="true" size={16} />
+                  Remove from wall
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuItem
+                className="checklist-row-menu-destructive"
+                onSelect={onRequestRemove}
+              >
+                <TrashIcon aria-hidden="true" size={16} />
+                Remove from checklist
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
     </li>
     {isTouchDragging && touchPreviewPos
       ? createPortal(
