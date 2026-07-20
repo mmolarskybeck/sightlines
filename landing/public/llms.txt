@@ -10,6 +10,7 @@ Canonical category: professional productivity software for exhibition, gallery, 
 
 Reference pages:
 
+- [About](https://sightlines.art/about)
 - [Privacy](https://sightlines.art/privacy)
 - [Security](https://sightlines.art/security)
 - [IT access notes](https://sightlines.art/it)

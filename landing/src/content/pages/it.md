@@ -1,8 +1,8 @@
 ---
-title: "Reviewing or allowlisting sightlines.art and app.sightlines.art"
-description: "Information for IT and network administrators reviewing or allowlisting sightlines.art and app.sightlines.art: category, network behavior, and security posture."
+title: "Reviewing or allowlisting Sightlines"
+description: "Concise network, data-flow, and security information for IT teams reviewing sightlines.art and app.sightlines.art."
 kicker: "For IT teams"
-lede: "For network and IT administrators evaluating Sightlines on a managed network. Sightlines is professional productivity software that museum, gallery, and exhibition staff use to plan artwork layouts, and a staff member at your organization has likely requested access. It spans two hostnames, sightlines.art and app.sightlines.art, which should be reviewed and allowlisted together."
+lede: "Sightlines is browser-based exhibition-planning software for museums, galleries, artists, and curators. It uses two hostnames, sightlines.art and app.sightlines.art, which should be reviewed and allowlisted together."
 ---
 
 ## At a glance
@@ -10,49 +10,37 @@ lede: "For network and IT administrators evaluating Sightlines on a managed netw
 <table>
   <tbody>
     <tr>
-      <th scope="row">Hostnames</th>
-      <td>
-        <code>sightlines.art</code> (this informational site)<br />
-        <code>app.sightlines.art</code> (the application)<br />
-        <code>www.sightlines.art</code> redirects to <code>sightlines.art</code>
-      </td>
-    </tr>
-    <tr>
-      <th scope="row">Protocol / port</th>
-      <td>HTTPS on port 443 only, on both hostnames</td>
+      <th scope="row">Allowlist</th>
+      <td><code>sightlines.art</code> and <code>app.sightlines.art</code>, HTTPS on port 443</td>
     </tr>
     <tr>
       <th scope="row">Category</th>
-      <td>Business / productivity / design tool (arts and culture sector)</td>
+      <td>Business / productivity / design software for the arts and culture sector</td>
     </tr>
     <tr>
       <th scope="row">Hosting</th>
-      <td>Cloudflare (static assets on Cloudflare Workers, both hostnames)</td>
+      <td>Static sites delivered through Cloudflare</td>
     </tr>
     <tr>
-      <th scope="row">Downloads</th>
-      <td>None. No executables, installers, or binaries are served from either hostname.</td>
+      <th scope="row">Installation</th>
+      <td>None. Sightlines runs in the browser and serves no executables or installers.</td>
     </tr>
     <tr>
-      <th scope="row">User data flow</th>
-      <td>Local-first. Projects and images stay in the user's browser storage; optional anonymous reporting excludes that content.</td>
+      <th scope="row">Accounts</th>
+      <td>None. There is no authentication or session traffic.</td>
+    </tr>
+    <tr>
+      <th scope="row">Project storage</th>
+      <td>Local-first. Projects and images are stored in the user's browser.</td>
     </tr>
   </tbody>
 </table>
 
-## What it is
+## Purpose and network behavior
 
-Sightlines lets exhibition staff draw gallery floor plans to scale, place artworks on wall elevations, and preview the result in 3D. Editing and project storage run in the browser; optional, consent-gated analytics report only aggregate product and performance data. See the [home page](/) for a fuller description, or the [privacy page](/privacy) for the complete data story.
+Sightlines lets exhibition staff draw floor plans to scale, place artworks on wall elevations, and preview layouts in 3D. It is not a file-sharing service, social network, streaming site, advertising network, or download portal, and it hosts no public user content.
 
-It is not a file-sharing service, social network, streaming site, advertising network, gambling site, or download portal, and it hosts no user-generated public content.
-
-## Network behavior
-
-- The browser fetches application assets (HTML, JS, CSS, fonts) from `app.sightlines.art` over HTTPS. This informational site's pages are served separately from `sightlines.art`.
-- Each origin's Content-Security-Policy restricts connections to an explicit allowlist. Beyond its own origin, the application permits only the Cloudflare Web Analytics beacon (loaded after consent), its same-origin product-event endpoint, and the Dropbox API endpoints used by optional cloud backup; this informational site permits only the beacon.
-- No user project content is sent to Sightlines. There is no Sightlines project-upload endpoint on either hostname.
-- No account, authentication, or session traffic exists in the current version, on either hostname.
-- No advertising, cross-site tracking, session replay, or personal analytics profiles. In-app usage analytics is off until the user permits it; this informational site runs cookie-less Cloudflare Web Analytics.
+The browser downloads static application assets from `app.sightlines.art`. Content Security Policies restrict both Sightlines hostnames to explicit network destinations. There is no Sightlines project-upload endpoint.
 
 ## Data flows
 
@@ -67,36 +55,26 @@ It is not a file-sharing service, social network, streaming site, advertising ne
   <tbody>
     <tr>
       <th scope="row">Cloudflare delivery and security</th>
-      <td>Whenever either site is requested</td>
-      <td>Cloudflare processes ordinary request metadata, including IP addresses, to route and protect traffic. This is infrastructure, not product analytics.</td>
+      <td>When either site is requested</td>
+      <td>Processes ordinary request metadata to route and protect traffic.</td>
     </tr>
     <tr>
-      <th scope="row">Cloudflare Web Analytics</th>
-      <td>In the app, only after Anonymous usage analytics is enabled; on this site, on every page</td>
-      <td>Visits, coarse browser/device categories, and page-performance measurements. Cookie-less, no fingerprinting, no project or artwork content, no persistent Sightlines analytics identifier.</td>
+      <th scope="row">Anonymous analytics</th>
+      <td>On the informational site; in the app only after permission</td>
+      <td>Aggregate visits, performance, and fixed product milestones. No project content or persistent Sightlines identifier.</td>
     </tr>
     <tr>
-      <th scope="row">Sightlines product events</th>
-      <td>Only after Anonymous usage analytics is enabled</td>
-      <td>Predefined successful outcomes sent to a same-origin Worker and stored in Cloudflare Analytics Engine. No IP address, user agent, referrer, or project content is written.</td>
-    </tr>
-    <tr>
-      <th scope="row">Dropbox app-folder backup</th>
-      <td>Only after the user connects Dropbox</td>
-      <td>Backups move directly between the browser and the user's Dropbox app folder. Sightlines does not receive a copy.</td>
-    </tr>
-    <tr>
-      <th scope="row">Crash reporting</th>
-      <td>Not active</td>
-      <td>A local preference exists, but Sentry is deferred and no provider currently receives reports.</td>
+      <th scope="row">Dropbox backup</th>
+      <td>Only when connected by the user</td>
+      <td>Files travel directly between the browser and the user's Dropbox app folder. Sightlines receives no copy.</td>
     </tr>
   </tbody>
 </table>
 
-## Security posture
+Sightlines does not use advertising, cross-site tracking, session replay, or personal analytics profiles. More detail is available on the [privacy page](/privacy).
 
-Both hostnames set HSTS, a restrictive CSP, `X-Frame-Options: DENY`, and related hardening headers on every response. Details are on the [security page](/security), and a vulnerability-disclosure contact is published at [/.well-known/security.txt](/.well-known/security.txt) per RFC 9116.
+## Security and recategorization
 
-## If the site is miscategorized
+Both hostnames use HTTPS, HSTS, a restrictive Content Security Policy, framing protection, and related browser security headers. Vulnerability-reporting information is available on the [security page](/security) and at [/.well-known/security.txt](/.well-known/security.txt).
 
-If your web filter currently classifies `sightlines.art` or `app.sightlines.art` as uncategorized, parked, or newly registered, we'd ask that you recategorize both as business or productivity software. This page, the [home page](/), and the [security page](/security) can serve as supporting documentation for a recategorization request with your filtering vendor.
+If either hostname is classified as uncategorized, parked, or newly registered, please recategorize it as business or productivity software and allowlist both hostnames together.

@@ -2,65 +2,53 @@
 title: "Your exhibition stays on your device"
 description: "How Sightlines keeps projects and artwork images on your device while limiting optional anonymous reporting."
 kicker: "Privacy"
-lede: "Unreleased exhibition plans, loan negotiations, and artwork images are sensitive material. Sightlines is built local-first, so none of that content has to leave your machine. There are no accounts, no hosted project storage, and optional anonymous reporting never includes your work."
-updated: 2026-07-19
+lede: "Unreleased exhibition plans, loan negotiations, and artwork images are sensitive material. Sightlines keeps your work on your own device: there are no accounts, your projects are never uploaded to us, and optional anonymous reporting never includes your work."
+updated: 2026-07-20
 ---
 
-## What we store, and where
+## Your projects
 
-Everything you create in Sightlines (room layouts, wall elevations, artwork details, and the images you add to your checklist) is saved in your own browser's local storage, on your own device. We don't operate a project database, and Sightlines never receives or stores a copy of your work.
+Room layouts, wall elevations, artwork details, and images are saved in your browser on your device. Sightlines does not operate a project database or receive a copy of your work.
 
-Because your data lives in the browser, clearing the browser's site data will erase your projects. Use the app's export feature to save backup files anywhere you like, and to move projects between machines or share them with colleagues.
+One caution: if you clear the browser's stored website data (for example, while clearing history or cookies), projects saved there will be erased. Use the app's export feature to keep backup files or move a project between devices.
 
-## Optional cloud backup
+## Optional Dropbox backup
 
-Sightlines can back up your projects automatically to your own Dropbox account, which you connect yourself. Backups travel directly from your browser to your Dropbox, with no Sightlines server in the middle, so we never see the files. The connection is scoped to a single app folder, so Sightlines cannot read anything else in your account, and you can revoke access at any time from your Dropbox settings. If you never connect an account, no backup traffic occurs at all.
+If you connect Dropbox, backups travel directly from your browser to a dedicated Sightlines folder in your Dropbox account. They do not pass through a Sightlines server, and Sightlines cannot read anything outside that app folder. You can revoke access in Dropbox at any time. If you do not connect Dropbox, nothing is ever sent to it.
 
-## What we don't do
+## Information we collect
 
-- No account, sign-up, or login. We never ask for your name or email.
-- No advertising, cross-site tracking, or personal analytics profiles.
-- No cookies for tracking or profiling.
-- No selling of data. We never have your projects, and analytics stay aggregate.
+Sightlines has no accounts and does not ask for your name or email. We do not use advertising, cross-site tracking, tracking cookies, session recording, or personal analytics profiles, and we do not sell data.
 
-## Optional anonymous analytics
+The application sends anonymous usage information only if you allow it when first asked. Declining does not limit any feature. If enabled, reporting consists of:
 
-The Sightlines app sends usage information only if you allow it. It asks once, on first use. Nothing analytics-related loads before you answer, and declining costs you no feature. If you allow it, two things are reported:
+- **Cloudflare Web Analytics:** visits, broad browser and device categories, and page performance.
+- **Product events:** a fixed set of aggregate milestones, such as opening the app, creating a project, importing artwork, opening a view, exporting a PDF, importing a project, or connecting Dropbox backup.
 
-- **Cloudflare Web Analytics** measures visits, coarse browser and device categories, and page performance.
-- **Product events**, a short fixed list of milestones counted in aggregate: app opened (with app version), project created, artwork imported, a view opened (Plan, Elevation, or 3D), PDF exported, project package imported, and Dropbox backup connected. That is the complete list; the app cannot send events outside it.
+These reports never include artwork details or images, filenames, room or project names, exported files, Dropbox contents or tokens, keystrokes, or session recordings. They contain no persistent analytics or advertising identifier.
 
-These reports never include your work: no artwork details or images, filenames, room or project names, exported files, Dropbox contents or tokens, keystrokes, or session recordings. There is no persistent analytics identifier and no advertising ID, so the reports cannot be tied to you or used to build a profile, and we don't sell them.
+You can turn **Anonymous usage analytics** off at any time under **Settings → Storage & data**. The setting is stored in your browser so the app can honor it on that device. Crash reporting is not currently active, regardless of the separate crash-report preference shown there.
 
-You can change your mind anytime. **Anonymous usage analytics** and **Anonymous crash reports** are separate switches under **Settings → Storage & data**. Your choice is stored in your browser's local storage so the app can honor it on that device, and turning usage analytics off stops future reports.
+The informational website at sightlines.art uses cookie-free Cloudflare Web Analytics to measure aggregate visits and page performance. It does not fingerprint you or follow you across sites. The app at app.sightlines.art is a separate site, and its reporting stays off unless you allow it.
 
-**This website.** The informational site at sightlines.art, the pages you are reading now, uses Cloudflare Web Analytics. The beacon sets no cookies, stores nothing on your device, and does not fingerprint you or follow you across sites; it counts visits, page views, and page performance in aggregate. Your exhibition data is never in play here: the app is a separate origin, and its analytics stay behind your permission.
+## Service providers and retention
 
-**Retention.** Cloudflare processes this data on our behalf. Web Analytics keeps unsampled beacon data for seven days, then stores aggregates; the previous six months are visible in its dashboard. Product events are kept in Cloudflare Workers Analytics Engine for three months, and Sightlines never writes IP addresses, user agents, referrers, or other request metadata into that dataset.
+Cloudflare delivers and protects both sites and therefore processes ordinary request information, such as IP addresses, as part of operating its global network. Cloudflare also processes the anonymous analytics described above on our behalf. Web Analytics keeps the underlying visit records for seven days before keeping only aggregate results; six months of results are available in its dashboard.
 
-**Crash reports.** Crash reporting is not active yet; no provider currently receives anything. The switch exists so your preference is honored from day one. Before a provider (likely Sentry) is enabled, this policy will name it, list the exact fields sent, and state its retention.
+Product events are retained in Cloudflare Workers Analytics Engine for three months. Sightlines does not write IP addresses, user agents, referrers, or project content into that dataset. Dropbox processes backups only when you choose to connect it, under your Dropbox account and settings.
 
-## Your rights and legal bases
+## Your choices and rights
 
-Optional analytics runs only with your consent. You can withdraw it at any time under **Settings → Storage & data**; withdrawal stops future reporting, though it cannot recall reports already sent.
+Optional in-app analytics is based on your consent. Turning it off stops future reporting, although it cannot recall reports already sent. Cloudflare's limited delivery and security processing is necessary to operate and protect the sites.
 
-Cloudflare's ordinary delivery and security processing, such as routing requests and blocking abuse, is necessary to operate the sites at all. We rely on our legitimate interest in running the service securely for that limited infrastructure processing; it is not used for advertising or profiling.
+Depending on where you live, you may have rights to access, correct, delete, restrict, object to, or receive personal data, and to complain to a data-protection authority. Because Sightlines has no accounts or persistent analytics identifier, we may be unable to connect aggregate records to a particular person; we will honor requests wherever the relevant data can be identified.
 
-Sightlines makes no automated decisions about you. Depending on where you live, you may have rights to access, correct, delete, restrict, object to, or port personal data, and to complain to your local data-protection authority. Because there are no accounts and no persistent analytics identifier, we often cannot link aggregate analytics to a specific person; we will honor requests wherever the relevant data can be identified.
+Cloudflare's global network may process infrastructure and analytics information outside your country. Applicable provider terms and legally required transfer safeguards govern that processing.
 
-Cloudflare operates a global network, so infrastructure and analytics data may be processed outside your country or the European Economic Area. Where the law requires safeguards for an international transfer, the applicable provider terms and transfer mechanisms govern that processing.
+## Changes and questions
 
-## What the site actually loads
+If Sightlines introduces accounts, hosted storage, collaboration, or another material data flow, this policy will be updated before that feature is released.
 
-When you open the app at [app.sightlines.art](https://app.sightlines.art/), your browser downloads the application itself (HTML, JavaScript, stylesheets, and fonts) over HTTPS. After that, editing happens in your browser. The app never sends your project content back to us; the only outbound project data is the optional Dropbox backup described above. This site, at sightlines.art, serves static pages like this one plus the cookie-less Web Analytics beacon. The infrastructure processing Cloudflare performs to deliver and protect both sites is separate from consent-controlled analytics and never includes your project content.
+Sightlines is operated by Marina Molarsky-Beck in the United States. To ask a privacy question or exercise a privacy right, email [hello@sightlines.art](mailto:hello@sightlines.art). Security reporting details are on the [security page](/security) and at [/.well-known/security.txt](/.well-known/security.txt).
 
-## If this ever changes
-
-Features like hosted sync, collaboration, or accounts would change this picture, and this page will be updated before any such feature ships. The date below tells you when this policy last changed.
-
-
-## Questions
-
-Sightlines is operated by Marina Molarsky-Beck, an individual based in New York, NY 10025, USA, who is the controller for the processing described here. To withdraw permission, change the reporting controls under **Settings → Storage & data**. To exercise a privacy right or ask a question, email [hello@sightlines.art](mailto:hello@sightlines.art). You may also complain to the data-protection authority where you live or work. Security reporting details are published on the [security page](/security) and at [/.well-known/security.txt](/.well-known/security.txt).
-
-This policy was updated on July 19, 2026 to add the consent controls and describe the optional analytics they govern.
+This policy was updated on July 20, 2026.

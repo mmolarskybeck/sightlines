@@ -1,33 +1,26 @@
 ---
-title: "A small, static surface"
-description: "Sightlines security overview: static architecture, HTTPS with strict security headers, local-only data storage, and how to report a vulnerability."
+title: "Less to attack, by design"
+description: "Sightlines security overview: static architecture, HTTPS, local-first project storage, and vulnerability reporting."
 kicker: "Security"
-lede: "Sightlines keeps its attack surface deliberately small: a static web application with no server-side database, no user accounts, and no hosted user content. The most sensitive data in the system, your exhibition plans and artwork images, never passes through Sightlines and leaves your device only when you send it somewhere yourself."
+lede: "Sightlines is deliberately simple, and that simplicity is its main protection: there are no user accounts, no central database of projects, and no user content stored on our side. Your exhibition plans and artwork images stay on your device unless you choose to export or back them up."
 ---
 
 ## Architecture
 
-The application at [app.sightlines.art](https://app.sightlines.art/) is a static React application served from Cloudflare's edge network. This page and the rest of sightlines.art are a separate static informational site whose only script is the cookie-less Cloudflare Web Analytics beacon. Cloudflare's edge may also inject an anti-bot snippet into responses, but this site's Content-Security-Policy prevents that snippet from executing.
+The application at [app.sightlines.art](https://app.sightlines.art/) and this informational site are static sites — pre-built pages with no server-side application code — served through Cloudflare. Neither hosts user projects, images, accounts, or server-side sessions.
 
-Neither origin maintains server-side session state or hosts user projects or images. Project data is held in the browser's local storage. It leaves the device only when the user explicitly exports a file or connects their own Dropbox account for automatic backup, in which case backups go directly from the browser to the user's Dropbox app folder, never through Sightlines.
+Project data is stored in the browser. It leaves the device only when you export it or connect your own Dropbox account, in which case backups travel directly between the browser and a dedicated folder in your Dropbox account. Optional, content-free usage reporting runs only after you allow it. See the [privacy page](/privacy) for the data flows and retention periods.
 
-The app's optional anonymous usage reporting is a separate, content-free data flow that runs only after the user opts in, and no crash-reporting service is active. See the [privacy page](/privacy) for the full account of what is reported and retained.
+## Security controls
 
-## Transport and headers
+- Both sites use HTTPS and HTTP Strict Transport Security.
+- Content Security Policies restrict which scripts and network connections may run.
+- Browser protections prevent framing, limit referrer information and permissions, and block content-type sniffing.
+- There are no passwords, payment details, installers, or public user uploads to protect.
+- There is no advertising, cross-site tracking, session replay, or personal profiling.
 
-- All traffic is served over HTTPS, with `Strict-Transport-Security` enforcing it for a year.
-- A restrictive `Content-Security-Policy` limits scripts, styles, fonts, images, and network connections to an explicit allowlist. Beyond its own origin, the app allows only the consent-gated Cloudflare Web Analytics beacon, the same-origin product-event endpoint, and the Dropbox API endpoints used by optional cloud backup; this site allows only the beacon. Neither origin permits `'unsafe-inline'` scripts.
-- `X-Frame-Options: DENY` and `frame-ancestors 'none'` prevent the app from being embedded in other sites.
-- `X-Content-Type-Options`, `Referrer-Policy`, a locked-down `Permissions-Policy`, and `Cross-Origin-Opener-Policy` are also set on every response.
-- These headers are applied on every response from both sightlines.art and app.sightlines.art.
+These controls reduce risk, but no software can be guaranteed free of vulnerabilities.
 
-## What is not here
+## Report a vulnerability
 
-- No executable installers or desktop binaries are distributed from either domain.
-- No advertising, cross-site tracking, session replay, or user profiling. In-app analytics load only after permission; this site's analytics are cookie-less and aggregate.
-- No password handling: there are no accounts to compromise.
-- No payment processing.
-
-## Reporting a vulnerability
-
-If you believe you've found a security issue in Sightlines, we want to hear about it. Current contact details are published in the machine-readable record at [/.well-known/security.txt](/.well-known/security.txt), following RFC 9116. Please report issues privately and allow reasonable time for a fix before public disclosure. We appreciate good-faith research and will credit reporters who want credit.
+If you believe you have found a security issue, please report it privately using the current contact information at [/.well-known/security.txt](/.well-known/security.txt). Please allow reasonable time for investigation and a fix before public disclosure. We appreciate good-faith research and will credit reporters who want credit.
