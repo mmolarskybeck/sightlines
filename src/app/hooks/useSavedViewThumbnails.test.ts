@@ -80,12 +80,22 @@ function fakeRepository(seed: Record<string, SavedViewThumbnailRecord> = {}) {
 }
 
 function handleReturning(blob = new Blob(["png"], { type: "image/png" })) {
+  const releaseBatch = vi.fn();
   return {
-    renderSavedView: vi.fn(async () => blob),
-    // Thumbnail regeneration is a non-batch caller; it never opens a hold, so
-    // this is only here to satisfy the handle type.
-    beginRenderBatch: vi.fn(() => vi.fn())
-  } satisfies SavedViewRenderHandle;
+    renderSavedView: vi.fn(async (_view: SavedView, _size: typeof SAVED_VIEW_THUMBNAIL_SIZE) => blob),
+    beginRenderBatch: vi.fn(() => releaseBatch),
+    releaseBatch
+  } satisfies SavedViewRenderHandle & { releaseBatch: ReturnType<typeof vi.fn> };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 describe("useSavedViewThumbnails", () => {
@@ -112,6 +122,7 @@ describe("useSavedViewThumbnails", () => {
     await waitFor(() => expect(result.current.urls.v1).toBeDefined());
     // Fresh cache + no consumer visible: nothing renders.
     expect(handle.renderSavedView).not.toHaveBeenCalled();
+    expect(handle.beginRenderBatch).not.toHaveBeenCalled();
     expect(result.current.hasPendingWork).toBe(false);
   });
 
@@ -140,13 +151,69 @@ describe("useSavedViewThumbnails", () => {
     await waitFor(() => expect(result.current.urls.v1).toBeDefined());
     expect(handle.renderSavedView).toHaveBeenCalledWith(
       view,
-      SAVED_VIEW_THUMBNAIL_SIZE
+      SAVED_VIEW_THUMBNAIL_SIZE,
+      { tier: "thumbnail" }
     );
     // Persisted with the current project stamp.
     expect(store.get(`${withView.id}:v1`)?.projectUpdatedAt).toBe(
       withView.updatedAt
     );
     await waitFor(() => expect(result.current.hasPendingWork).toBe(false));
+  });
+
+  it("holds one render batch across multiple queued views and releases on drain", async () => {
+    const project = projectWith([], "t0");
+    const { repository } = fakeRepository();
+    const first = deferred<Blob>();
+    const second = deferred<Blob>();
+    const view1 = validView({ id: "v1" });
+    const view2 = validView({ id: "v2", ordinal: 2 });
+    const handle = handleReturning();
+    handle.renderSavedView.mockImplementation((view) =>
+      view.id === "v1" ? first.promise : second.promise
+    );
+
+    const { result } = renderHook(() =>
+      useSavedViewThumbnails({
+        project,
+        renderHandle: handle,
+        active: false,
+        repository
+      })
+    );
+
+    act(() => {
+      result.current.seed(view1);
+      result.current.seed(view2);
+    });
+
+    await waitFor(() => expect(handle.renderSavedView).toHaveBeenCalledWith(
+      view1,
+      SAVED_VIEW_THUMBNAIL_SIZE,
+      { tier: "thumbnail" }
+    ));
+    expect(handle.beginRenderBatch).toHaveBeenCalledTimes(1);
+    expect(handle.releaseBatch).not.toHaveBeenCalled();
+    expect(handle.renderSavedView).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      first.resolve(new Blob(["first"]));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(handle.renderSavedView).toHaveBeenCalledWith(
+      view2,
+      SAVED_VIEW_THUMBNAIL_SIZE,
+      { tier: "thumbnail" }
+    ));
+    expect(handle.beginRenderBatch).toHaveBeenCalledTimes(1);
+    expect(handle.releaseBatch).not.toHaveBeenCalled();
+
+    await act(async () => {
+      second.resolve(new Blob(["second"]));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(result.current.hasPendingWork).toBe(false));
+    expect(handle.releaseBatch).toHaveBeenCalledTimes(1);
   });
 
   it("never renders a degenerate pose", async () => {
@@ -185,11 +252,13 @@ describe("useSavedViewThumbnails", () => {
     const view = validView();
     const project = projectWith([view], "t0");
     const { repository, store } = fakeRepository();
-    const handle: SavedViewRenderHandle = {
+    const releaseBatch = vi.fn();
+    const handle: SavedViewRenderHandle & { releaseBatch: ReturnType<typeof vi.fn> } = {
       renderSavedView: vi.fn(async () => {
         throw new Error("webgl unavailable");
       }),
-      beginRenderBatch: vi.fn(() => vi.fn())
+      beginRenderBatch: vi.fn(() => releaseBatch),
+      releaseBatch
     };
 
     const { result } = renderHook(() =>
@@ -208,6 +277,61 @@ describe("useSavedViewThumbnails", () => {
     expect(result.current.urls.v1).toBeUndefined();
     expect(store.size).toBe(0);
     expect(consoleError).toHaveBeenCalled();
+    expect(handle.beginRenderBatch).toHaveBeenCalledTimes(1);
+    expect(handle.releaseBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases the active batch when the hook unmounts", async () => {
+    const project = projectWith([], "t0");
+    const { repository } = fakeRepository();
+    const pending = deferred<Blob>();
+    const handle = handleReturning();
+    handle.renderSavedView.mockReturnValue(pending.promise);
+    const view = validView();
+
+    const { result, unmount } = renderHook(() =>
+      useSavedViewThumbnails({
+        project,
+        renderHandle: handle,
+        active: false,
+        repository
+      })
+    );
+
+    act(() => result.current.seed(view));
+    await waitFor(() => expect(handle.beginRenderBatch).toHaveBeenCalledTimes(1));
+
+    unmount();
+    expect(handle.releaseBatch).toHaveBeenCalledTimes(1);
+    pending.resolve(new Blob(["done"]));
+  });
+
+  it("releases the active batch when the project switches", async () => {
+    const project = projectWith([], "t0");
+    const nextProject = { ...projectWith([], "t1"), id: "project-2" };
+    const { repository } = fakeRepository();
+    const pending = deferred<Blob>();
+    const handle = handleReturning();
+    handle.renderSavedView.mockReturnValue(pending.promise);
+    const view = validView();
+
+    const { result, rerender } = renderHook(
+      ({ p }: { p: Project }) =>
+        useSavedViewThumbnails({
+          project: p,
+          renderHandle: handle,
+          active: false,
+          repository
+        }),
+      { initialProps: { p: project } }
+    );
+
+    act(() => result.current.seed(view));
+    await waitFor(() => expect(handle.beginRenderBatch).toHaveBeenCalledTimes(1));
+
+    rerender({ p: nextProject });
+    expect(handle.releaseBatch).toHaveBeenCalledTimes(1);
+    pending.resolve(new Blob(["done"]));
   });
 
   it("deletes a view's cache entry and revokes its URL when the view is removed", async () => {
@@ -248,12 +372,9 @@ describe("useSavedViewThumbnails", () => {
     const view = validView();
     // Cache stamped at an older project state than the current one.
     const project = projectWith([view], "t-new");
-    const { repository, store } = fakeRepository({
-      [`${project.id}:v1`]: {
-        blob: new Blob(["stale"]),
-        projectUpdatedAt: "t-old"
-      }
-    });
+    const { repository, store } = fakeRepository();
+    const cached = deferred<SavedViewThumbnailRecord>();
+    vi.mocked(repository.get).mockReturnValue(cached.promise);
     const handle = handleReturning(new Blob(["fresh"]));
 
     const { result } = renderHook(() =>
@@ -265,17 +386,236 @@ describe("useSavedViewThumbnails", () => {
       })
     );
 
-    // Well before the debounce, nothing has re-rendered yet.
+    cached.resolve({
+      blob: new Blob(["stale"]),
+      projectUpdatedAt: "t-old"
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Well before the debounce, a stale-but-present thumbnail does not render.
     await vi.advanceTimersByTimeAsync(1000);
     expect(handle.renderSavedView).not.toHaveBeenCalled();
 
     // After ~2s of edit quiet, the stale view re-renders once and is restamped.
     await vi.advanceTimersByTimeAsync(1000);
     expect(handle.renderSavedView).toHaveBeenCalledTimes(1);
+    expect(handle.renderSavedView).toHaveBeenCalledWith(
+      view,
+      SAVED_VIEW_THUMBNAIL_SIZE,
+      { tier: "thumbnail" }
+    );
     await vi.waitFor(() =>
       expect(store.get(`${project.id}:v1`)?.projectUpdatedAt).toBe("t-new")
     );
     expect(result.current.urls.v1).toBeDefined();
+  });
+
+  it("queues a missing thumbnail after the cache miss yields one task", async () => {
+    vi.useFakeTimers();
+    const view = validView();
+    const project = projectWith([view], "t-new");
+    const { repository } = fakeRepository();
+    const cacheMiss = deferred<SavedViewThumbnailRecord | undefined>();
+    vi.mocked(repository.get).mockReturnValue(cacheMiss.promise);
+    const handle = handleReturning();
+
+    renderHook(() =>
+      useSavedViewThumbnails({
+        project,
+        renderHandle: handle,
+        active: true,
+        repository
+      })
+    );
+
+    cacheMiss.resolve(undefined);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(handle.renderSavedView).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(handle.renderSavedView).toHaveBeenCalledWith(
+      view,
+      SAVED_VIEW_THUMBNAIL_SIZE,
+      { tier: "thumbnail" }
+    );
+  });
+
+  it("queues a known cache miss promptly when the pane opens later", async () => {
+    vi.useFakeTimers();
+    const view = validView();
+    const project = projectWith([view], "t-new");
+    const { repository } = fakeRepository();
+    const handle = handleReturning();
+
+    const { rerender } = renderHook(
+      ({ isActive }: { isActive: boolean }) =>
+        useSavedViewThumbnails({
+          project,
+          renderHandle: handle,
+          active: isActive,
+          repository
+        }),
+      { initialProps: { isActive: false } }
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(handle.renderSavedView).not.toHaveBeenCalled();
+
+    rerender({ isActive: true });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(handle.renderSavedView).toHaveBeenCalledWith(
+      view,
+      SAVED_VIEW_THUMBNAIL_SIZE,
+      { tier: "thumbnail" }
+    );
+  });
+
+  it("waits for a delayed cache read instead of rendering over a fresh record", async () => {
+    vi.useFakeTimers();
+    const view = validView();
+    const project = projectWith([view], "t-current");
+    const { repository } = fakeRepository();
+    const delayed = deferred<SavedViewThumbnailRecord | undefined>();
+    vi.mocked(repository.get).mockReturnValue(delayed.promise);
+    const handle = handleReturning();
+
+    renderHook(() =>
+      useSavedViewThumbnails({
+        project,
+        renderHandle: handle,
+        active: true,
+        repository
+      })
+    );
+
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(handle.renderSavedView).not.toHaveBeenCalled();
+
+    delayed.resolve({
+      blob: new Blob(["fresh"]),
+      projectUpdatedAt: project.updatedAt
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(2500);
+    });
+    expect(handle.renderSavedView).not.toHaveBeenCalled();
+  });
+
+  it("drops queued regeneration work on pane close and releases after the in-flight render", async () => {
+    vi.useFakeTimers();
+    const view1 = validView({ id: "v1" });
+    const view2 = validView({ id: "v2", ordinal: 2 });
+    const project = projectWith([view1, view2], "t-new");
+    const { repository } = fakeRepository();
+    const first = deferred<Blob>();
+    const handle = handleReturning();
+    handle.renderSavedView.mockImplementation((view) =>
+      view.id === "v1" ? first.promise : Promise.resolve(new Blob(["second"]))
+    );
+
+    const { result, rerender } = renderHook(
+      ({ isActive }: { isActive: boolean }) =>
+        useSavedViewThumbnails({
+          project,
+          renderHandle: handle,
+          active: isActive,
+          repository
+        }),
+      { initialProps: { isActive: true } }
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await vi.waitFor(() =>
+      expect(handle.renderSavedView).toHaveBeenCalledWith(
+        view1,
+        SAVED_VIEW_THUMBNAIL_SIZE,
+        { tier: "thumbnail" }
+      )
+    );
+    expect(handle.renderSavedView).toHaveBeenCalledTimes(1);
+
+    rerender({ isActive: false });
+    expect(result.current.hasPendingWork).toBe(true);
+
+    await act(async () => {
+      first.resolve(new Blob(["first"]));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(result.current.hasPendingWork).toBe(false));
+    expect(handle.renderSavedView).toHaveBeenCalledTimes(1);
+    expect(handle.releaseBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a stale completion after switching projects with the same view id", async () => {
+    const firstProject = projectWith([], "t-first");
+    const secondProject = { ...projectWith([], "t-second"), id: "project-2" };
+    const firstView = validView({ title: "First project view" });
+    const secondView = validView({ title: "Second project view" });
+    const { repository, store } = fakeRepository();
+    const oldRender = deferred<Blob>();
+    const newRender = deferred<Blob>();
+    const oldRelease = vi.fn();
+    const newRelease = vi.fn();
+    const handle: SavedViewRenderHandle = {
+      renderSavedView: vi
+        .fn()
+        .mockImplementationOnce(() => oldRender.promise)
+        .mockImplementationOnce(() => newRender.promise),
+      beginRenderBatch: vi
+        .fn()
+        .mockImplementationOnce(() => oldRelease)
+        .mockImplementationOnce(() => newRelease)
+    };
+
+    const { result, rerender } = renderHook(
+      ({ p }: { p: Project }) =>
+        useSavedViewThumbnails({
+          project: p,
+          renderHandle: handle,
+          active: false,
+          repository
+        }),
+      { initialProps: { p: firstProject } }
+    );
+
+    act(() => result.current.seed(firstView));
+    await waitFor(() => expect(handle.beginRenderBatch).toHaveBeenCalledTimes(1));
+
+    rerender({ p: secondProject });
+    act(() => result.current.seed(secondView));
+    await waitFor(() => expect(handle.beginRenderBatch).toHaveBeenCalledTimes(2));
+    expect(handle.renderSavedView).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      oldRender.resolve(new Blob(["old"]));
+      await Promise.resolve();
+    });
+    expect(store.size).toBe(0);
+    expect(result.current.urls.v1).toBeUndefined();
+    expect(oldRelease).toHaveBeenCalledTimes(1);
+    expect(newRelease).not.toHaveBeenCalled();
+
+    await act(async () => {
+      newRender.resolve(new Blob(["new"]));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(result.current.hasPendingWork).toBe(false));
+    expect(store.get(`${secondProject.id}:v1`)?.projectUpdatedAt).toBe("t-second");
+    expect(newRelease).toHaveBeenCalledTimes(1);
   });
 
   it("does not regenerate a stale thumbnail while no consumer is visible", async () => {

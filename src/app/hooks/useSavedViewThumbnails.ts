@@ -23,6 +23,8 @@ const defaultRepository: SavedViewThumbnailRepository =
 
 type QueueItem = {
   view: SavedView;
+  projectId: string | null;
+  generation: number;
   // Seeds always render (they exist so a just-saved view has a preview before
   // the dialog opens); regen items are only enqueued while a consumer is
   // visible and are dropped when the last consumer goes away.
@@ -76,22 +78,40 @@ export function useSavedViewThumbnails(options: {
   // Latest project, read without making every edit re-run the render loop.
   const projectRef = useRef(project);
   projectRef.current = project;
-
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const queueRef = useRef<QueueItem[]>([]);
   const processingRef = useRef(false);
+  const processingItemRef = useRef<QueueItem | null>(null);
+  // One hold keeps the offscreen render stage mounted across the sequential
+  // queue. It is acquired only when the first queued item is about to render,
+  // not merely when work is enqueued or the host mounts.
+  const batchReleaseRef = useRef<(() => void) | null>(null);
   // Stored projectUpdatedAt per view, from the last read or render. A view is
   // stale when this differs from the project's current updatedAt.
   const freshnessRef = useRef<Map<string, string>>(new Map());
   // Views we've already read from (or accounted for in) the current project, so
   // reads don't repeat.
   const readRef = useRef<Set<string>>(new Set());
+  // Cache reads that completed without a usable record. Keep this knowledge
+  // while the pane is closed so the next open can render promptly instead of
+  // treating a known miss like a stale thumbnail and waiting for the debounce.
+  const missingRef = useRef<Set<string>>(new Set());
   // The updatedAt at which a render last failed, so a fail-open placeholder is
   // not retried in a tight loop until the project changes again.
   const failedRef = useRef<Map<string, string>>(new Map());
   const prevProjectIdRef = useRef<string | null>(null);
+  const projectGenerationRef = useRef(0);
   const unmountedRef = useRef(false);
 
   const bumpTick = useCallback(() => setTick((value) => value + 1), []);
+
+  const releaseRenderBatch = useCallback(() => {
+    const release = batchReleaseRef.current;
+    if (!release) return;
+    batchReleaseRef.current = null;
+    release();
+  }, []);
 
   // Replace (or set) a view's object URL, revoking any it displaces.
   const publishUrl = useCallback((viewId: string, url: string) => {
@@ -123,7 +143,12 @@ export function useSavedViewThumbnails(options: {
       // De-dupe against anything already queued (including the item in flight,
       // which stays at index 0 until it settles).
       if (queueRef.current.some((item) => item.view.id === view.id)) return;
-      queueRef.current.push({ view, kind });
+      queueRef.current.push({
+        view,
+        kind,
+        projectId: projectRef.current?.id ?? null,
+        generation: projectGenerationRef.current
+      });
       setHasPendingWork(true);
       bumpTick();
     },
@@ -139,17 +164,20 @@ export function useSavedViewThumbnails(options: {
   // Displays cached thumbnails (fresh or stale) as soon as the project opens,
   // and reconciles the cache when views are deleted or the project switches.
   useEffect(() => {
-    if (!projectId) return;
     let cancelled = false;
 
     // Project switch: revoke everything and reset, but do NOT delete the other
     // project's persisted entries — only same-project view removals delete.
     if (prevProjectIdRef.current !== projectId) {
       prevProjectIdRef.current = projectId;
+      projectGenerationRef.current += 1;
+      releaseRenderBatch();
       queueRef.current = [];
       processingRef.current = false;
+      processingItemRef.current = null;
       freshnessRef.current.clear();
       readRef.current.clear();
+      missingRef.current.clear();
       failedRef.current.clear();
       setUrls((current) => {
         for (const url of current.values()) URL.revokeObjectURL(url);
@@ -157,6 +185,14 @@ export function useSavedViewThumbnails(options: {
       });
       setHasPendingWork(false);
     }
+
+    if (!projectId) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const generation = projectGenerationRef.current;
 
     const wanted = new Set(savedViews.map((view) => view.id));
 
@@ -166,6 +202,7 @@ export function useSavedViewThumbnails(options: {
       if (wanted.has(viewId)) continue;
       readRef.current.delete(viewId);
       freshnessRef.current.delete(viewId);
+      missingRef.current.delete(viewId);
       failedRef.current.delete(viewId);
       queueRef.current = queueRef.current.filter(
         (item) => item.view.id !== viewId
@@ -184,19 +221,98 @@ export function useSavedViewThumbnails(options: {
       void repository
         .get(projectId, view.id)
         .then((record) => {
-          if (cancelled || unmountedRef.current || !record) return;
+          if (
+            cancelled ||
+            unmountedRef.current ||
+            projectGenerationRef.current !== generation ||
+            projectRef.current?.id !== projectId
+          ) {
+            return;
+          }
+          if (!record) {
+            // A seed may have completed while this older read was in flight.
+            // Never turn that fresh result back into a known cache miss.
+            if (
+              freshnessRef.current.get(view.id) !==
+              projectRef.current?.updatedAt
+            ) {
+              missingRef.current.add(view.id);
+              // Closed panes record the miss without causing a render. Opening
+              // later wakes the scheduler through its `active` dependency.
+              if (activeRef.current) bumpTick();
+            }
+            return;
+          }
+          missingRef.current.delete(view.id);
           freshnessRef.current.set(view.id, record.projectUpdatedAt);
           publishUrl(view.id, URL.createObjectURL(record.blob));
+          // Wake the stale scheduler after hydration. It deliberately skips
+          // views whose cache read has not completed yet. Fresh hydration is
+          // display-only and needs no extra queue-state update.
+          if (
+            activeRef.current &&
+            record.projectUpdatedAt !== projectRef.current?.updatedAt
+          ) {
+            bumpTick();
+          }
         })
         .catch(() => {
-          // A missing/unreadable entry just leaves the placeholder.
+          // A missing/unreadable entry just leaves the placeholder until the
+          // active consumer gets one frame to paint.
+          if (
+            !cancelled &&
+            !unmountedRef.current &&
+            projectGenerationRef.current === generation &&
+            projectRef.current?.id === projectId
+          ) {
+            if (
+              freshnessRef.current.get(view.id) !==
+              projectRef.current?.updatedAt
+            ) {
+              missingRef.current.add(view.id);
+              if (activeRef.current) bumpTick();
+            }
+          }
         });
     }
 
     return () => {
       cancelled = true;
     };
-  }, [projectId, savedViewIdsKey, savedViews, repository, dropUrl, publishUrl]);
+  }, [
+    projectId,
+    savedViewIdsKey,
+    repository,
+    dropUrl,
+    publishUrl,
+    releaseRenderBatch,
+    bumpTick
+  ]);
+
+  // A confirmed cache miss is different from a stale cached image: after the
+  // consumer paints its placeholder, start missing work promptly. The missing
+  // set persists while inactive, so opening the pane later takes this path too.
+  useEffect(() => {
+    if (!projectId || !projectUpdatedAt || !active) return;
+    const timer = setTimeout(() => {
+      for (const view of savedViews) {
+        if (!missingRef.current.has(view.id)) continue;
+        if (isDegeneratePose(view.pose)) continue;
+        if (freshnessRef.current.get(view.id) === projectUpdatedAt) continue;
+        if (failedRef.current.get(view.id) === projectUpdatedAt) continue;
+        enqueue(view, "regen");
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [
+    projectId,
+    projectUpdatedAt,
+    active,
+    savedViewIdsKey,
+    savedViews,
+    tick,
+    enqueue
+  ]);
 
   // --- Debounced regeneration while a consumer is visible ------------------
   useEffect(() => {
@@ -204,8 +320,13 @@ export function useSavedViewThumbnails(options: {
     const timer = setTimeout(() => {
       for (const view of savedViews) {
         if (isDegeneratePose(view.pose)) continue;
+        const cachedStamp = freshnessRef.current.get(view.id);
+        // Missing entries have their prompt path above; undefined here means
+        // the asynchronous cache read is still unresolved. Never render ahead
+        // of it and then discover that a fresh thumbnail already existed.
+        if (cachedStamp === undefined) continue;
         // Fresh already? Nothing to do.
-        if (freshnessRef.current.get(view.id) === projectUpdatedAt) continue;
+        if (cachedStamp === projectUpdatedAt) continue;
         // Already failed at this exact project state — don't retry in a loop.
         if (failedRef.current.get(view.id) === projectUpdatedAt) continue;
         enqueue(view, "regen");
@@ -218,6 +339,7 @@ export function useSavedViewThumbnails(options: {
     active,
     savedViewIdsKey,
     savedViews,
+    tick,
     enqueue
   ]);
 
@@ -225,15 +347,19 @@ export function useSavedViewThumbnails(options: {
   // survive — a just-saved preview must still render). In-flight work finishes.
   useEffect(() => {
     if (active) return;
+    const processingItem = processingItemRef.current;
     const kept = queueRef.current.filter(
-      (item, index) => item.kind === "seed" || (index === 0 && processingRef.current)
+      (item) => item.kind === "seed" || item === processingItem
     );
     if (kept.length !== queueRef.current.length) {
       queueRef.current = kept;
-      if (kept.length === 0 && !processingRef.current) setHasPendingWork(false);
+      if (kept.length === 0 && !processingItem) {
+        setHasPendingWork(false);
+        releaseRenderBatch();
+      }
       bumpTick();
     }
-  }, [active, bumpTick]);
+  }, [active, bumpTick, releaseRenderBatch]);
 
   // --- Processing loop: one render at a time -------------------------------
   useEffect(() => {
@@ -249,12 +375,25 @@ export function useSavedViewThumbnails(options: {
     if (!renderHandle) return;
 
     processingRef.current = true;
-    const { view } = next;
+    if (!batchReleaseRef.current) {
+      batchReleaseRef.current = renderHandle.beginRenderBatch();
+    }
+    const item = next;
+    const { view } = item;
+    processingItemRef.current = item;
+    const projectIdAtStart = item.projectId;
+    const generationAtStart = item.generation;
+    const ownsCurrentWork = () =>
+      !unmountedRef.current &&
+      processingItemRef.current === item &&
+      projectGenerationRef.current === generationAtStart &&
+      projectRef.current?.id === projectIdAtStart;
     // Stamp with the project state at completion time; the host renders its
     // current project prop, which reflects the same live project.
     renderHandle
-      .renderSavedView(view, SAVED_VIEW_THUMBNAIL_SIZE)
+      .renderSavedView(view, SAVED_VIEW_THUMBNAIL_SIZE, { tier: "thumbnail" })
       .then((blob) => {
+        if (!ownsCurrentWork()) return;
         const pid = projectRef.current?.id;
         const stamp = projectRef.current?.updatedAt ?? "";
         if (pid) {
@@ -265,14 +404,15 @@ export function useSavedViewThumbnails(options: {
             }
           );
         }
-        if (unmountedRef.current) return;
         freshnessRef.current.set(view.id, stamp);
+        missingRef.current.delete(view.id);
         failedRef.current.delete(view.id);
         publishUrl(view.id, URL.createObjectURL(blob));
       })
       .catch((error) => {
         // Fail open (§3.4): log, keep the placeholder, and mark this project
         // state failed so it isn't retried until the next edit.
+        if (!ownsCurrentWork()) return;
         console.error("Saved-view thumbnail render failed:", error);
         failedRef.current.set(
           view.id,
@@ -280,14 +420,32 @@ export function useSavedViewThumbnails(options: {
         );
       })
       .finally(() => {
+        if (processingItemRef.current !== item) return;
         processingRef.current = false;
+        processingItemRef.current = null;
         // Remove the item we just processed and advance.
         queueRef.current = queueRef.current.filter(
-          (item) => item.view.id !== view.id
+          (queuedItem) => queuedItem !== item
         );
+        if (queueRef.current.length === 0) releaseRenderBatch();
         if (!unmountedRef.current) bumpTick();
       });
-  }, [tick, renderHandle, hasPendingWork, repository, publishUrl, bumpTick]);
+  }, [
+    tick,
+    renderHandle,
+    hasPendingWork,
+    repository,
+    publishUrl,
+    bumpTick,
+    releaseRenderBatch
+  ]);
+
+  // Project changes and unmounts are cleanup/backstops. A normal queue drain
+  // releases the hold in the render's finally above, so pane visibility does
+  // not control the batch lifetime.
+  useEffect(() => {
+    return () => releaseRenderBatch();
+  }, [projectId, releaseRenderBatch]);
 
   // Reset the unmounted flag in the body (not just cleanup) so StrictMode's
   // dev-only mount → cleanup → remount cycle doesn't leave it stuck true and

@@ -7,8 +7,13 @@ const benchmarkImageUrls = import.meta.glob(
 ) as Record<string, string>;
 
 export async function getRendererBenchmarkBlob(key: string): Promise<Blob | null> {
-  if (!rendererBenchmarkEnabled || !key.endsWith(":display")) return null;
-  const assetId = key.slice(0, -":display".length);
+  const tierSuffix = key.endsWith(":display")
+    ? ":display"
+    : key.endsWith(":thumbnail")
+      ? ":thumbnail"
+      : null;
+  if (!rendererBenchmarkEnabled || !tierSuffix) return null;
+  const assetId = key.slice(0, -tierSuffix.length);
   const url = Object.entries(benchmarkImageUrls).find(([path]) =>
     path.endsWith(`/images/${assetId}.jpg`)
   )?.[1];

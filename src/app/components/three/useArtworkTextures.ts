@@ -1,9 +1,10 @@
 import { useThree } from "@react-three/fiber";
 import { useEffect, useRef, useState } from "react";
 import { SRGBColorSpace, Texture, TextureLoader } from "three";
+import type { AssetBlobTier } from "../../../domain/repositories/assetRepository";
 import { useAssetImageUrls } from "../../hooks/useAssetImageUrls";
 
-// Display-tier textures for artwork planes (spec §6.3). Builds on
+// Display-tier textures for artwork planes by default (spec §6.3). Builds on
 // useAssetImageUrls (which owns the object-URL lifecycle) and owns the GPU
 // half: one THREE.Texture per assetId, disposed when the asset drops out of
 // the scene, when its URL is replaced, or when the view unmounts. Stale async
@@ -11,11 +12,12 @@ import { useAssetImageUrls } from "../../hooks/useAssetImageUrls";
 // disposed instead of cached. Must be called inside <Canvas>.
 export function useArtworkTextures(
   assetIds: (string | undefined)[],
-  getBlob: (key: string) => Promise<Blob>
+  getBlob: (key: string) => Promise<Blob>,
+  tier: AssetBlobTier = "display"
 ): Map<string, Texture> {
   const gl = useThree((state) => state.gl);
   const invalidate = useThree((state) => state.invalidate);
-  const urlsByAssetId = useAssetImageUrls(assetIds, getBlob, "display");
+  const urlsByAssetId = useAssetImageUrls(assetIds, getBlob, tier);
 
   const [texturesByAssetId, setTexturesByAssetId] = useState<Map<string, Texture>>(
     () => new Map()

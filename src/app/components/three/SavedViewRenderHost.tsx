@@ -10,8 +10,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Vector3 } from "three";
 import type { Artwork, Project, SavedView } from "../../../domain/project";
 import { deriveScene3d } from "../../../domain/geometry/scene3d";
+import type { AssetBlobTier } from "../../../domain/repositories/assetRepository";
 import { isDegeneratePose } from "../../../domain/savedViews";
-import type { RenderSavedView } from "../../export/createDocumentPdf";
 import type { CameraPose } from "./cameraNav";
 import { SnapshotStage, type SnapshotRequest } from "./SnapshotStage";
 
@@ -21,7 +21,7 @@ import { SnapshotStage, type SnapshotRequest } from "./SnapshotStage";
 const RENDER_MAX_DIMENSION_PX = 4096;
 
 export type SavedViewRenderHandle = {
-  renderSavedView: RenderSavedView;
+  renderSavedView: SavedViewRender;
   // Hold the offscreen stage mounted across a whole batch of renders. The PDF
   // exporter renders Saved views one at a time and awaits each, so the queue
   // is empty in the gap between views — without a hold, pump() would unmount
@@ -30,15 +30,26 @@ export type SavedViewRenderHandle = {
   // context churn can trip the browser's ~8–16 context cap and evict the main
   // canvas's context. Call once before the batch; invoke the returned release
   // (idempotent) when the batch finishes, in a finally so an error still frees
-  // the stage. Non-batch callers (e.g. thumbnail regeneration) never call this
-  // and keep the original mount-per-request behavior.
+  // the stage. Callers that do not open a hold keep the original
+  // mount-per-request behavior.
   beginRenderBatch: () => () => void;
 };
+
+export type SavedViewRenderOptions = {
+  tier?: AssetBlobTier;
+};
+
+type SavedViewRender = (
+  view: SavedView,
+  size: { widthPx: number; heightPx: number },
+  options?: SavedViewRenderOptions
+) => Promise<Blob>;
 
 type QueueItem = {
   view: SavedView;
   widthPx: number;
   heightPx: number;
+  tier?: AssetBlobTier;
   resolve: (blob: Blob) => void;
   reject: (error: unknown) => void;
 };
@@ -117,6 +128,7 @@ export function SavedViewRenderHost({
     };
     setActiveRequest({
       format: "png",
+      tier: next.tier,
       pose,
       widthPx: next.widthPx,
       heightPx: next.heightPx,
@@ -125,8 +137,8 @@ export function SavedViewRenderHost({
     });
   }, []);
 
-  const renderSavedView = useCallback<RenderSavedView>(
-    (view, size) =>
+  const renderSavedView = useCallback<SavedViewRender>(
+    (view, size, options) =>
       new Promise<Blob>((resolve, reject) => {
         if (unmountedRef.current) {
           reject(new Error("The 3D render host is not available."));
@@ -144,6 +156,7 @@ export function SavedViewRenderHost({
           view,
           widthPx: clamped.widthPx,
           heightPx: clamped.heightPx,
+          tier: options?.tier,
           resolve,
           reject
         });

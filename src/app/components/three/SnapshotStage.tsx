@@ -2,6 +2,7 @@ import { Canvas, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import type { Artwork } from "../../../domain/project";
 import type { Scene3d } from "../../../domain/geometry/scene3d";
+import type { AssetBlobTier } from "../../../domain/repositories/assetRepository";
 import { type CameraPose, updateCameraClipping } from "./cameraNav";
 import { SceneRooms, sceneArtworkAssetIds } from "./SceneRooms";
 import {
@@ -19,6 +20,9 @@ export type SnapshotFormat = "png" | "jpeg";
 
 export type SnapshotRequest = {
   format: SnapshotFormat;
+  // Display is the safe default for every existing snapshot caller. Smaller
+  // tiers are opt-in for derived renders such as Saved-view thumbnails.
+  tier?: AssetBlobTier;
   pose: CameraPose;
   // Target raster size, already scale-applied (snapshotPixelSize below) —
   // computed from the live viewport so framing matches it exactly (spec §2.2).
@@ -83,7 +87,7 @@ function SnapshotRenderer({
   const gl = useThree((state) => state.gl);
 
   const assetIds = useMemo(() => sceneArtworkAssetIds(derivedScene), [derivedScene]);
-  const texturesByAssetId = useArtworkTextures(assetIds, getBlob);
+  const texturesByAssetId = useArtworkTextures(assetIds, getBlob, request.tier);
   const uniqueAssetIdCount = useMemo(
     () => new Set(assetIds.filter((id): id is string => Boolean(id))).size,
     [assetIds]

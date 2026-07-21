@@ -1,5 +1,6 @@
 import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { useEffect } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSampleProject } from "../../../domain/sample/sampleProject";
 import type { SavedView } from "../../../domain/project";
 import {
@@ -7,11 +8,39 @@ import {
   type SavedViewRenderHandle
 } from "./SavedViewRenderHost";
 
-// These paths never mount the offscreen Canvas: with no valid request enqueued
-// the host renders null, so they run cleanly in jsdom. A valid-pose render
-// (which spins up react-three-fiber/WebGL) is left to the driver-level check.
+const { snapshotRequests } = vi.hoisted(() => ({
+  snapshotRequests: [] as Array<{ tier?: string }>
+}));
 
-afterEach(cleanup);
+vi.mock("./SnapshotStage", () => ({
+  SnapshotStage: ({
+    request,
+    onSettled
+  }: {
+    request: null | {
+      tier?: string;
+      resolve: (blob: Blob) => void;
+    };
+    onSettled: () => void;
+  }) => {
+    useEffect(() => {
+      if (!request) return;
+      snapshotRequests.push(request);
+      request.resolve(new Blob(["snapshot"], { type: "image/png" }));
+      onSettled();
+    }, [request, onSettled]);
+    return null;
+  }
+}));
+
+// SnapshotStage is mocked so queue plumbing can be tested in jsdom without
+// standing up react-three-fiber/WebGL. Actual context reuse remains a
+// browser-level check.
+
+afterEach(() => {
+  cleanup();
+  snapshotRequests.length = 0;
+});
 
 function degenerateView(): SavedView {
   return {
@@ -89,6 +118,35 @@ describe("SavedViewRenderHost", () => {
         heightPx: 100
       })
     ).rejects.toThrow(/invalid camera pose/);
+  });
+
+  it("routes an explicit asset tier through the render queue", async () => {
+    const actionsRef: { current: SavedViewRenderHandle | null } = {
+      current: null
+    };
+    render(
+      <SavedViewRenderHost
+        project={createSampleProject()}
+        artworksById={new Map()}
+        getBlob={async () => new Blob()}
+        actionsRef={actionsRef}
+      />
+    );
+
+    await actionsRef.current!.renderSavedView(
+      {
+        ...degenerateView(),
+        pose: {
+          position: { x: 0, y: 1.6, z: 5 },
+          target: { x: 0, y: 1.6, z: 0 }
+        }
+      },
+      { widthPx: 296, heightPx: 184 },
+      { tier: "thumbnail" }
+    );
+
+    expect(snapshotRequests).toHaveLength(1);
+    expect(snapshotRequests[0]?.tier).toBe("thumbnail");
   });
 
   it("rejects pending requests once unmounted", async () => {
