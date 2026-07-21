@@ -12,11 +12,23 @@ import {
   parseRetryAfterMs,
   projectFolderPath,
   sanitizeDropboxTitle,
+  serializeDropboxApiArg,
   selectBackupsToPrune,
   type DropboxFileEntry
 } from "./dropboxAuth";
 
 describe("dropbox PKCE helpers", () => {
+  it("serializes Unicode Dropbox header arguments as ASCII JSON escapes", () => {
+    const serialized = serializeDropboxApiArg({
+      path: "/backups/Étude — abc123/🖼.sightlines"
+    });
+
+    expect(serialized).not.toMatch(/[^\x20-\x7e]/);
+    expect(JSON.parse(serialized)).toEqual({
+      path: "/backups/Étude — abc123/🖼.sightlines"
+    });
+  });
+
   it("base64url-encodes without padding or +/ characters", () => {
     const encoded = base64UrlEncode(new Uint8Array([251, 255, 191, 0, 1, 2]));
     expect(encoded).not.toMatch(/[+/=]/);

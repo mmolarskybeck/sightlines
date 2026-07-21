@@ -143,9 +143,11 @@ describe("DropboxCloudBackupProvider", () => {
         String(url).includes("/files/upload")
       );
       expect(uploadCall).toBeTruthy();
-      const arg = JSON.parse(
-        (uploadCall![1]!.headers as Record<string, string>)["Dropbox-API-Arg"]
-      );
+      const header = (uploadCall![1]!.headers as Record<string, string>)[
+        "Dropbox-API-Arg"
+      ];
+      expect(header).not.toMatch(/[^\x20-\x7e]/);
+      const arg = JSON.parse(header);
       expect(arg.path).toBe(
         "/backups/Winter Show — proj-1/Winter Show 2026-07-19T14-30-05-000Z.sightlines"
       );

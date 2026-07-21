@@ -34,6 +34,16 @@ export const DROPBOX_AUTH_STORAGE_KEY = "sightlines:dropboxAuth";
 export const DROPBOX_PKCE_VERIFIER_KEY = "sightlines:dropboxPkceVerifier";
 export const DROPBOX_PKCE_STATE_KEY = "sightlines:dropboxPkceState";
 
+// Fetch requires request-header values to be byte strings. JSON permits every
+// Unicode code point, so escape non-ASCII UTF-16 code units before putting a
+// Dropbox argument in the Dropbox-API-Arg header. Dropbox's JSON parser turns
+// the escapes back into the original path (including surrogate pairs).
+export function serializeDropboxApiArg(value: unknown): string {
+  return JSON.stringify(value).replace(/[\u007f-\uffff]/g, (character) =>
+    `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
+  );
+}
+
 // The stored auth record. accessToken/expiresAt are a refreshable cache; the
 // refreshToken is the durable credential. accountLabel is the linked account's
 // display name (best-effort; null until fetched).

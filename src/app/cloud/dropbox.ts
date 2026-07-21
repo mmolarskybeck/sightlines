@@ -32,6 +32,7 @@ import {
   isProjectFolderName,
   projectFolderPath,
   selectBackupsToPrune,
+  serializeDropboxApiArg,
   type DropboxAuthRecord,
   type DropboxErrorKind,
   type DropboxFileEntry
@@ -315,7 +316,7 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/octet-stream",
-        "Dropbox-API-Arg": JSON.stringify({
+        "Dropbox-API-Arg": serializeDropboxApiArg({
           path,
           mode: "add",
           autorename: true,
@@ -341,7 +342,7 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/octet-stream",
-          "Dropbox-API-Arg": JSON.stringify({ close: false })
+          "Dropbox-API-Arg": serializeDropboxApiArg({ close: false })
         },
         body: firstChunk as BodyInit
       }
@@ -365,7 +366,7 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/octet-stream",
-            "Dropbox-API-Arg": JSON.stringify({
+            "Dropbox-API-Arg": serializeDropboxApiArg({
               cursor: { session_id: sessionId, offset },
               close: false
             })
@@ -386,7 +387,7 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/octet-stream",
-          "Dropbox-API-Arg": JSON.stringify({
+          "Dropbox-API-Arg": serializeDropboxApiArg({
             cursor: { session_id: sessionId, offset },
             commit: { path, mode: "add", autorename: true, mute: true }
           })
