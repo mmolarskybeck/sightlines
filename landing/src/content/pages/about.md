@@ -1,11 +1,11 @@
 ---
-title: "About Sightlines"
-description: "Why Marina Molarsky-Beck created Sightlines as a free, independent exhibition-planning resource for the art field."
+title: "A tool for curatorial thinking"
+description: "Sightlines is a free, independent exhibition-planning and curatorial tool. What is it and why was it made?"
 kicker: "About"
-lede: "Sightlines is an independent exhibition-planning tool created by a working curator and art historian."
+lede: "Sightlines is a free app designed for the realities of exhibition development, from assembling a checklist to planning the installation."
 ---
 
-## Why I made it
+## Why Sightlines exists
 
 Planning an exhibition often means moving between very different ways of thinking: developing an argument or narrative, comparing works, testing groupings, calculating scale, and imagining how an installation will unfold in space. Much of the available software is either too general for this work or highly technical, designed for industries with different needs and conventions.
 
@@ -15,16 +15,18 @@ My hope is that Sightlines can help curators spend less time calculating scale o
 
 ## About me
 
-I am [Marina Molarsky-Beck](https://www.marinamolarskybeck.com/), currently the Beaumont & Nancy Newhall Curatorial Fellow in the Department of Photography at The Museum of Modern Art and a PhD candidate in the History of Art at Yale University. I'm intimately familiar with the labor that goes into putting an exhibition together. 
+I'm [Marina Molarsky-Beck](https://www.marinamolarskybeck.com/), a curator and historian of 20th-century photography, currently the Beaumont & Nancy Newhall Curatorial Fellow in the Department of Photography at The Museum of Modern Art and a PhD candidate in the History of Art at Yale University. I'm intimately familiar with the labor that goes into putting an exhibition together.
 
-I've had a lifelong side passion for tech and web development, and for creating workflows and automations to speed up tedious tasks. I used AI-assisted development tools to bring this project to life.
+I've had a lifelong side passion for web development and for creating workflows and automations to speed up tedious tasks. Perhaps unsurprisingly, I used agentic development tools to bring this project to life.
 
-## An independent resource
+## A personal, independent project
 
-Sightlines is a fully independent, self-funded, noncommercial web app. It is 100% free to use for anyone who could benefit from approachable software designed with the conventions of the art world in mind.
+Sightlines is a fully independent, self-funded, noncommercial web app. It is 100% free to use for anyone who could benefit from approachable exhibition planning software designed with the conventions of the art world in mind.
 
 Sightlines is a personal project. It is not affiliated with, funded by, endorsed by, or developed on behalf of The Museum of Modern Art, Yale University, or any other institution.
 
 ## Get in touch
 
-Questions, feedback, or bug reports? Drop me a line at [hello@sightlines.art](mailto:hello@sightlines.art).
+Questions or feedback? Drop me a line at [hello@sightlines.art](mailto:hello@sightlines.art).
+
+Bug report? Submit a [GitHub issue](https://github.com/mmolarskybeck/sightlines/issues).
