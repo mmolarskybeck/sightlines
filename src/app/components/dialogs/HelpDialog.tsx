@@ -128,7 +128,9 @@ export function HelpDialog({
             them or connect your own Dropbox for direct backup. Sightlines requires no
             account and does not receive a copy of your work.
           </p>
+        </div>
 
+        <div className="help-footer">
           <nav aria-label="More information" className="help-link-row">
             {TRUST_LINKS.map((link) => (
               <a
