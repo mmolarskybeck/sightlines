@@ -26,10 +26,9 @@ export function PrivacyConsentNotice({
       <div className="privacy-consent-copy">
         <h2 id="privacy-consent-title">Help improve Sightlines</h2>
         <p>
-          Sightlines can send anonymous usage, performance, and technical error
-          information so we can understand which features are useful and where the app
-          needs work. We never collect project content, artwork information, images,
-          files, filenames, or Dropbox data.
+          Send anonymous usage and performance data so we can see which features
+          help and where the app needs work. Your projects, artwork, images,
+          filenames, and Dropbox data are never included.
         </p>
         {saveFailed ? (
           <p className="privacy-consent-error" role="alert">
@@ -44,7 +43,13 @@ export function PrivacyConsentNotice({
         <Button variant="outline" onClick={() => saveChoice(onDecline)}>
           No thanks
         </Button>
-        <a href="https://sightlines.art/privacy">Learn more</a>
+        <a
+          href="https://sightlines.art/privacy"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Learn more
+        </a>
       </div>
     </aside>
   );

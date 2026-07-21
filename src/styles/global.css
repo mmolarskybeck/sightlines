@@ -7732,21 +7732,39 @@ body.panels-resizing * {
 .privacy-consent-notice {
   position: fixed;
   z-index: 30;
-  right: 20px;
-  bottom: 20px;
+  right: var(--space-20);
+  bottom: var(--space-20);
   display: grid;
-  width: min(520px, calc(100vw - 40px));
-  gap: 16px;
-  padding: 18px;
+  width: min(440px, calc(100vw - 2 * var(--space-20)));
+  gap: var(--space-14);
+  padding: var(--space-20);
   border: 1px solid var(--line);
   border-radius: var(--radius-overlay);
   background: var(--surface);
   box-shadow: var(--shadow-overlay);
+  animation: privacy-consent-enter 240ms var(--ease-soft) both;
+}
+
+@keyframes privacy-consent-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-8));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .privacy-consent-notice {
+    animation: none;
+  }
 }
 
 .privacy-consent-copy {
   display: grid;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .privacy-consent-copy h2,
@@ -7757,10 +7775,12 @@ body.panels-resizing * {
 .privacy-consent-copy h2 {
   color: var(--ink);
   font-size: var(--type-md);
+  font-weight: var(--weight-semibold);
   line-height: var(--leading-tight);
 }
 
 .privacy-consent-copy p {
+  max-width: 62ch;
   color: var(--muted);
   font-size: var(--type-sm);
   line-height: var(--leading-copy);
@@ -7774,22 +7794,29 @@ body.panels-resizing * {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .privacy-consent-actions a {
-  padding: 6px 4px;
-  color: var(--ink);
+  margin-left: auto;
+  padding: var(--space-6) var(--space-4);
+  color: var(--muted);
   font-size: var(--type-sm);
-  font-weight: var(--weight-semibold);
-  text-underline-offset: 2px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 140ms var(--ease-soft);
+}
+
+.privacy-consent-actions a:hover,
+.privacy-consent-actions a:focus-visible {
+  color: var(--ink);
 }
 
 @media (max-width: 560px) {
   .privacy-consent-notice {
-    right: 12px;
-    bottom: 12px;
-    width: calc(100vw - 24px);
+    right: var(--space-12);
+    bottom: var(--space-12);
+    width: calc(100vw - 2 * var(--space-12));
   }
 }
 /* Artwork Library — global inventory surface and checklist picker. */
