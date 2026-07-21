@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   CLOUD_BACKUP_META_KEY_PREFIX,
+  deleteCloudBackupMeta,
   readCloudBackupMeta,
   writeCloudBackupMeta
 } from "./cloudBackupMeta";
@@ -55,5 +56,25 @@ describe("cloudBackupMeta", () => {
     writeCloudBackupMeta("b", { lastCloudBackupAt: "t", backedUpFingerprint: "fb" });
     expect(readCloudBackupMeta("a").backedUpFingerprint).toBe("fa");
     expect(readCloudBackupMeta("b").backedUpFingerprint).toBe("fb");
+  });
+
+  it("deletes a stored meta record", () => {
+    writeCloudBackupMeta("p1", {
+      lastCloudBackupAt: "2026-07-19T00:00:00Z",
+      backedUpFingerprint: "abc"
+    });
+    deleteCloudBackupMeta("p1");
+    expect(readCloudBackupMeta("p1")).toEqual({
+      lastCloudBackupAt: null,
+      backedUpFingerprint: null
+    });
+  });
+
+  it("tolerates deleting a missing key", () => {
+    expect(() => deleteCloudBackupMeta("missing")).not.toThrow();
+    expect(readCloudBackupMeta("missing")).toEqual({
+      lastCloudBackupAt: null,
+      backedUpFingerprint: null
+    });
   });
 });

@@ -2355,5 +2355,9 @@ export const useAppStore = createAppStore({
     // they follow its lifecycle alongside the workspace-preference record
     // (saved-views spec §3.2, export-spec §6.3).
     await new IndexedDbSavedViewThumbnailRepository().deleteByProject(projectId);
+    // Cloud-backup bookkeeping is a workspace-only record that follows the
+    // project's lifecycle too.
+    const { deleteCloudBackupMeta } = await import("./store/cloudBackupMeta");
+    deleteCloudBackupMeta(projectId);
   }
 });

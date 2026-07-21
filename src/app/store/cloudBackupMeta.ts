@@ -55,3 +55,8 @@ export function writeCloudBackupMeta(
   if (typeof window === "undefined") return;
   window.localStorage.setItem(keyFor(projectId), JSON.stringify(meta));
 }
+
+export function deleteCloudBackupMeta(projectId: string): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(keyFor(projectId));
+}
