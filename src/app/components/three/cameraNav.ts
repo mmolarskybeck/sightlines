@@ -174,12 +174,16 @@ export function sightlineOccluders(
 
 // Near/far bracket the camera around its orbit distance so precision stays
 // even across the scene's scale — the standoff-derived clipping applyPose and
-// the wheel dolly both rely on.
+// the wheel dolly both rely on. Near rides at 1% of orbit distance (was 0.1%)
+// because the framed-artwork layers in framingGeometry.ts sit only 1–2mm apart;
+// at near=d/1000 the depth buffer resolves only ~d/16777 (0.6mm @10m, 1.2mm
+// @20m), which z-fought those layers during camera motion. d/100 buys 10× the
+// margin, and nothing is ever visible inside 1% of the viewing distance.
 export function updateCameraClipping(
   camera: { near: number; far: number; updateProjectionMatrix: () => void },
   distance: number
 ): void {
-  camera.near = Math.max(distance / 1000, 0.01);
+  camera.near = Math.max(distance / 100, 0.01);
   camera.far = Math.max(distance * 100, 100);
   camera.updateProjectionMatrix();
 }

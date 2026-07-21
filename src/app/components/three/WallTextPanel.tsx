@@ -15,11 +15,11 @@ import {
 
 // The white panel, its skeleton bars, and the selection outline are stacked
 // in z so they never z-fight. The steps must be several millimetres, not
-// fractions of one: with CAMERA_NEAR = 0.01 the depth buffer resolves only
-// ~0.6mm at 10m and ~2.4mm at 20m viewing distance, so the original 0.5mm
-// steps shimmered against each other during camera motion at room scale.
-// 4mm steps stay comfortably above depth precision across the whole room
-// while still reading as one flush panel.
+// fractions of one: the original 0.5mm steps shimmered against each other
+// during camera motion at room scale. These 4mm steps predate the dynamic
+// clipping in cameraNav.ts (updateCameraClipping now rides near at
+// distance/100, ~10× finer depth precision than before) and remain
+// comfortably safe under it, while still reading as one flush panel.
 const BORDER_Z_MM = 0;
 const PANEL_Z_MM = 4;
 const BAR_Z_MM = 8;

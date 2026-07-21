@@ -5,7 +5,10 @@
 // with exactly these numbers, never a re-guessed copy.
 
 export const CAMERA_FOV_DEG = 50;
-export const CAMERA_NEAR = 0.01;
+// Initial-frame value only: cameraNav.ts's updateCameraClipping re-derives
+// near/far from orbit distance on every pose change (see it for the
+// depth-precision constraint that drives framed-artwork z-fighting).
+export const CAMERA_NEAR = 0.1;
 export const CAMERA_FAR = 1000;
 
 // Soft, shadowless lighting (spec §6.1): flat ambient plus one gentle high
