@@ -128,7 +128,7 @@ describe("DropboxCloudBackupProvider", () => {
   });
 
   describe("upload path + single upload", () => {
-    it("uploads to a project-id folder with the title + timestamp filename", async () => {
+    it("uploads to a readable project folder with the title + timestamp filename", async () => {
       seedAuth();
       const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
         if (url.includes("/files/upload")) return jsonResponse(200, { path_display: "/x" });
@@ -147,9 +147,66 @@ describe("DropboxCloudBackupProvider", () => {
         (uploadCall![1]!.headers as Record<string, string>)["Dropbox-API-Arg"]
       );
       expect(arg.path).toBe(
-        "/backups/proj-1/Winter Show 2026-07-19T14-30-05-000Z.sightlines"
+        "/backups/Winter Show — proj-1/Winter Show 2026-07-19T14-30-05-000Z.sightlines"
       );
       expect(arg.mode).toBe("add");
+    });
+
+    it("migrates a legacy project-id folder before uploading", async () => {
+      seedAuth();
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith("/files/list_folder")) {
+          const path = JSON.parse(String(init?.body)).path;
+          if (path === "/backups") {
+            return jsonResponse(200, {
+              entries: [{ ".tag": "folder", name: "proj-1" }],
+              has_more: false
+            });
+          }
+          return jsonResponse(200, { entries: [], has_more: false });
+        }
+        return jsonResponse(200, {});
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await makeProvider().uploadBackup(smallBackupInput());
+
+      const moveCall = fetchMock.mock.calls.find(([url]) =>
+        String(url).includes("/files/move_v2")
+      );
+      expect(JSON.parse(String(moveCall?.[1]?.body))).toEqual({
+        from_path: "/backups/proj-1",
+        to_path: "/backups/Winter Show — proj-1",
+        autorename: false
+      });
+    });
+
+    it("renames an existing readable folder when the project title changes", async () => {
+      seedAuth();
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith("/files/list_folder")) {
+          const path = JSON.parse(String(init?.body)).path;
+          if (path === "/backups") {
+            return jsonResponse(200, {
+              entries: [{ ".tag": "folder", name: "Old Name — proj-1" }],
+              has_more: false
+            });
+          }
+          return jsonResponse(200, { entries: [], has_more: false });
+        }
+        return jsonResponse(200, {});
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await makeProvider().uploadBackup(smallBackupInput());
+
+      const moveCall = fetchMock.mock.calls.find(([url]) =>
+        String(url).includes("/files/move_v2")
+      );
+      expect(JSON.parse(String(moveCall?.[1]?.body))).toMatchObject({
+        from_path: "/backups/Old Name — proj-1",
+        to_path: "/backups/Winter Show — proj-1"
+      });
     });
   });
 
@@ -229,7 +286,7 @@ describe("DropboxCloudBackupProvider", () => {
           if (url.includes("/files/upload")) {
             return jsonResponse(429, { error: "too_many_requests" }, { "Retry-After": "30" });
           }
-          return jsonResponse(200, {});
+          return jsonResponse(200, { entries: [], has_more: false });
         })
       );
 
@@ -248,7 +305,7 @@ describe("DropboxCloudBackupProvider", () => {
           if (url.includes("/files/upload")) {
             return jsonResponse(507, { error_summary: "insufficient_space/.." });
           }
-          return jsonResponse(200, {});
+          return jsonResponse(200, { entries: [], has_more: false });
         })
       );
 

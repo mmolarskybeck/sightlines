@@ -108,19 +108,21 @@ describe("dropbox path construction", () => {
     );
   });
 
-  it("keys the folder by full project id and puts the title in the filename", () => {
+  it("uses a readable folder with a short stable project id", () => {
     const path = buildBackupPath({
       projectId: "proj-abc-123",
       projectTitle: "Winter Show",
       timestampIso: "2026-07-19T14:30:05.000Z"
     });
     expect(path).toBe(
-      "/backups/proj-abc-123/Winter Show 2026-07-19T14-30-05-000Z.sightlines"
+      "/backups/Winter Show — proj-abc/Winter Show 2026-07-19T14-30-05-000Z.sightlines"
     );
-    expect(projectFolderPath("proj-abc-123")).toBe("/backups/proj-abc-123");
+    expect(projectFolderPath("proj-abc-123", "Winter Show")).toBe(
+      "/backups/Winter Show — proj-abc"
+    );
   });
 
-  it("keeps the same folder across a rename (retention never splits)", () => {
+  it("reflects the current title while keeping the same identity suffix", () => {
     const a = buildBackupPath({
       projectId: "same-id",
       projectTitle: "Old Name",
@@ -131,8 +133,8 @@ describe("dropbox path construction", () => {
       projectTitle: "New Name",
       timestampIso: "2026-07-20T00:00:00.000Z"
     });
-    expect(a.startsWith("/backups/same-id/")).toBe(true);
-    expect(b.startsWith("/backups/same-id/")).toBe(true);
+    expect(a.startsWith("/backups/Old Name — same-id/")).toBe(true);
+    expect(b.startsWith("/backups/New Name — same-id/")).toBe(true);
   });
 });
 

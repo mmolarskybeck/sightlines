@@ -14,7 +14,7 @@ import {
   base64UrlEncode,
   buildAuthorizationCodeBody,
   buildAuthorizeUrl,
-  buildBackupPath,
+  buildBackupFilename,
   buildRefreshBody,
   classifyApiError,
   computeS256Challenge,
@@ -29,6 +29,7 @@ import {
   DROPBOX_UPLOAD_CHUNK_BYTES,
   generateRandomString,
   isReauthorizationFailure,
+  isProjectFolderName,
   projectFolderPath,
   selectBackupsToPrune,
   type DropboxAuthRecord,
@@ -197,11 +198,15 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
 
   async uploadBackup(input: UploadBackupInput): Promise<void> {
     const token = await this.accessToken();
-    const path = buildBackupPath({
-      projectId: input.projectId,
-      projectTitle: input.projectTitle,
-      timestampIso: input.timestampIso
-    });
+    const folderPath = await this.reconcileProjectFolder(
+      token,
+      input.projectId,
+      input.projectTitle
+    );
+    const path = `${folderPath}/${buildBackupFilename(
+      input.projectTitle,
+      input.timestampIso
+    )}`;
     const bytes = new Uint8Array(await input.blob.arrayBuffer());
 
     if (bytes.byteLength <= DROPBOX_SINGLE_UPLOAD_MAX_BYTES) {
@@ -213,7 +218,7 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
     // Retention runs AFTER a confirmed upload and is best-effort: a prune
     // failure must not fail the backup (it retries next cycle).
     try {
-      await this.pruneRetention(token, input.projectId);
+      await this.pruneRetention(token, folderPath);
     } catch (error) {
       console.warn("Cloud backup uploaded; pruning old copies failed", error);
     }
@@ -394,8 +399,46 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
 
   // --- retention -----------------------------------------------------------
 
-  private async pruneRetention(token: string, projectId: string): Promise<void> {
-    const entries = await this.listFolder(token, projectFolderPath(projectId));
+  private async reconcileProjectFolder(
+    token: string,
+    projectId: string,
+    projectTitle: string
+  ): Promise<string> {
+    const desiredPath = projectFolderPath(projectId, projectTitle);
+    const desiredName = desiredPath.slice("/backups/".length);
+    const entries = await this.listFolder(token, "/backups");
+    const folders = entries.filter((entry) => entry[".tag"] === "folder");
+
+    const existingDesired = folders.find(
+      (entry) => entry.name.toLocaleLowerCase() === desiredName.toLocaleLowerCase()
+    );
+    // Dropbox does not support case-only renames. Use the existing display
+    // spelling in that case; path lookup remains case-insensitive.
+    if (existingDesired) return `/backups/${existingDesired.name}`;
+
+    const existing = folders.find((entry) =>
+      isProjectFolderName(entry.name, projectId)
+    );
+    if (!existing) return desiredPath;
+
+    const response = await fetch(`${DROPBOX_API_URL}/2/files/move_v2`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from_path: `/backups/${existing.name}`,
+        to_path: desiredPath,
+        autorename: false
+      })
+    });
+    await ensureOk(response, "rename the project backup folder");
+    return desiredPath;
+  }
+
+  private async pruneRetention(token: string, folderPath: string): Promise<void> {
+    const entries = await this.listFolder(token, folderPath);
     const toDelete = selectBackupsToPrune(entries);
     for (const path of toDelete) {
       const response = await fetch(`${DROPBOX_API_URL}/2/files/delete_v2`, {
