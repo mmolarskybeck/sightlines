@@ -143,7 +143,6 @@ describe("ExportPdfDialog", () => {
     expect(screen.getByRole("heading", { name: "Export PDF" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Contents" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Options" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Page setup" })).toBeInTheDocument();
 
     expect(screen.getByRole("checkbox", { name: "Include Overview" })).toBeChecked();
     expect(
@@ -456,7 +455,7 @@ describe("ExportPdfDialog", () => {
   it("renders the inline preview pane starting on the first manifest page, with no blob Preview button", () => {
     renderDialog();
 
-    const preview = screen.getByRole("complementary", { name: "PDF preview" });
+    const preview = screen.getByRole("region", { name: "PDF preview" });
     // The pane is a live SVG look-ahead, not a generate-on-demand blob: there
     // is no "Preview" action button and no <iframe>.
     expect(
@@ -478,7 +477,7 @@ describe("ExportPdfDialog", () => {
 
   it("pages forward/back through the manifest and clamps at both ends", () => {
     renderDialog();
-    const preview = screen.getByRole("complementary", { name: "PDF preview" });
+    const preview = screen.getByRole("region", { name: "PDF preview" });
     const next = within(preview).getByRole("button", { name: "Next page" });
     const prev = within(preview).getByRole("button", { name: "Previous page" });
 
@@ -506,7 +505,7 @@ describe("ExportPdfDialog", () => {
 
   it("clamps the current page when the manifest shrinks under the cursor", () => {
     renderDialog();
-    const preview = screen.getByRole("complementary", { name: "PDF preview" });
+    const preview = screen.getByRole("region", { name: "PDF preview" });
     const next = within(preview).getByRole("button", { name: "Next page" });
 
     // Advance to the last (3D) page…
@@ -528,7 +527,7 @@ describe("ExportPdfDialog", () => {
     renderDialog(createSampleProject());
     fireEvent.click(screen.getByRole("checkbox", { name: "Include Overview" }));
 
-    const preview = screen.getByRole("complementary", { name: "PDF preview" });
+    const preview = screen.getByRole("region", { name: "PDF preview" });
     expect(within(preview).getByText("Nothing selected")).toBeInTheDocument();
     expect(
       within(preview).getByText("No pages to preview")

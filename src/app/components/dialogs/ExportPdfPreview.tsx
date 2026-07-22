@@ -728,6 +728,19 @@ function buildElevationForPage(
   });
 }
 
+// Page-card sizing: exact aspect ratio, width-driven, but never taller than
+// ~a third of the viewport — the preview is pinned above the scrolling
+// controls, so its height budget has to leave the Options group room on
+// short screens. Computing width from the height cap (instead of max-height)
+// keeps the card's border hugging the page proportions exactly.
+function previewCardStyle(widthPt: number, heightPt: number) {
+  const ratio = widthPt / heightPt;
+  return {
+    aspectRatio: `${widthPt} / ${heightPt}`,
+    width: `min(100%, calc(min(280px, 22dvh) * ${ratio.toFixed(4)}))`
+  };
+}
+
 type ExportPdfPreviewProps = {
   project: Project;
   settings: EffectiveDocumentSettings;
@@ -751,6 +764,10 @@ export function ExportPdfPreview({
     [project, artworksById]
   );
 
+  // Empty-state card keeps the chosen paper's portrait proportions, so
+  // switching paper size reads in the preview even with nothing selected.
+  const emptyPageSize = getPageSizePt(settings.paperSize, "portrait");
+
   const total = pages.length;
   const [index, setIndex] = useState(0);
   // Clamp back into range when the manifest shrinks under the cursor.
@@ -760,9 +777,10 @@ export function ExportPdfPreview({
   const safeIndex = clampPageIndex(index, total);
   const page: PreviewPage | undefined = pages[safeIndex];
 
+  // <section>, not <aside>: this now lives inside the dialog's options rail
+  // (itself an aside), so it's a named region rather than a nested landmark.
   return (
-    <aside className="export-preview" aria-label="PDF preview">
-      <h3 className="export-group-title">Preview</h3>
+    <section className="export-preview" aria-label="PDF preview">
       {page ? (
         <PreviewPageCard
           page={page}
@@ -773,7 +791,10 @@ export function ExportPdfPreview({
           thumbnailUrls={thumbnailUrls}
         />
       ) : (
-        <div className="export-preview-card export-preview-empty">
+        <div
+          className="export-preview-card export-preview-empty"
+          style={previewCardStyle(emptyPageSize.widthPt, emptyPageSize.heightPt)}
+        >
           <span>Nothing selected</span>
         </div>
       )}
@@ -804,7 +825,7 @@ export function ExportPdfPreview({
           <CaretRightIcon aria-hidden="true" size={16} />
         </Button>
       </div>
-    </aside>
+    </section>
   );
 }
 
@@ -864,7 +885,7 @@ function PreviewPageCard({
   return (
     <div
       className="export-preview-card"
-      style={{ aspectRatio: `${pageSize.widthPt} / ${pageSize.heightPt}` }}
+      style={previewCardStyle(pageSize.widthPt, pageSize.heightPt)}
     >
       <svg
         className="export-preview-svg"

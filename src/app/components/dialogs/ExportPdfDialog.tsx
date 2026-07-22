@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useState } from "react";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
 import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
@@ -202,26 +202,20 @@ export function ExportPdfDialog({
                     setSection("overview", checked === true)
                   }
                 />
-                <span style={{ display: "grid", gap: "var(--space-2)", minWidth: 0 }}>
-                  <button
-                    className="export-section-label"
-                    type="button"
-                    onClick={() =>
-                      setSection("overview", !settings.sections.overview)
-                    }
-                  >
-                    Overview
-                  </button>
-                  <ExportRowDescription>
-                    Entire floor plan on one page
-                  </ExportRowDescription>
-                </span>
+                <button
+                  className="export-section-label"
+                  type="button"
+                  onClick={() =>
+                    setSection("overview", !settings.sections.overview)
+                  }
+                >
+                  Overview
+                </button>
               </div>
 
               <ExportSection
                 count={roomPlanValues.filter(Boolean).length}
                 countTotal={settings.rooms.length}
-                description="One page per room, with dimensions"
                 label="Room plans"
                 open={openSections.roomPlans}
                 sectionState={selectionState(roomPlanValues)}
@@ -449,12 +443,20 @@ export function ExportPdfDialog({
             </div>
           </section>
 
-          <aside className="export-setup" aria-label="PDF options and page setup">
+          <aside className="export-setup" aria-label="PDF preview and options">
+            <ExportPdfPreview
+              project={project}
+              settings={settings}
+              artworksById={artworksById}
+              thumbnailUrls={thumbnailUrls}
+            />
+            {/* Preview stays pinned; only the controls scroll (print-dialog
+                pattern), so Paper size is never stranded below the fold. */}
+            <div className="export-setup-scroll">
             <section className="export-setup-group">
               <h3 className="export-group-title">Options</h3>
               <ExportSwitchRow
                 checked={settings.dimensions}
-                description="Automatic measurements"
                 label="Show dimensions"
                 onCheckedChange={(dimensions) =>
                   setPreferences((current) => ({
@@ -464,14 +466,7 @@ export function ExportPdfDialog({
                 }
               />
               {settings.dimensions && (
-                <div
-                  className="export-unit-rows"
-                  style={{
-                    display: "grid",
-                    gap: "var(--space-6)",
-                    paddingLeft: "var(--space-8)"
-                  }}
-                >
+                <div className="export-unit-rows">
                   <ExportUnitRow
                     label="Plan units"
                     value={settings.planUnit}
@@ -503,16 +498,11 @@ export function ExportPdfDialog({
               )}
               <ExportSwitchRow
                 checked={settings.grid}
-                description="Drawing grid on plans and elevations"
                 label="Show grid"
                 onCheckedChange={(grid) =>
                   setPreferences((current) => ({ ...current, grid }))
                 }
               />
-            </section>
-
-            <section className="export-setup-group">
-              <h3 className="export-group-title">Page setup</h3>
               <label className="export-paper-field">
                 <span>Paper size</span>
                 <Select
@@ -545,14 +535,8 @@ export function ExportPdfDialog({
                 Orientation is chosen automatically for each page.
               </p>
             </section>
+            </div>
           </aside>
-
-          <ExportPdfPreview
-            project={project}
-            settings={settings}
-            artworksById={artworksById}
-            thumbnailUrls={thumbnailUrls}
-          />
         </fieldset>
 
         <DialogFooter className="export-pdf-footer">
@@ -620,7 +604,6 @@ function ExportSection({
   children,
   count,
   countTotal,
-  description,
   disabled = false,
   label,
   open,
@@ -631,7 +614,6 @@ function ExportSection({
   children: React.ReactNode;
   count: number;
   countTotal?: number;
-  description?: string;
   disabled?: boolean;
   label: string;
   open: boolean;
@@ -645,7 +627,7 @@ function ExportSection({
       open={open}
       onOpenChange={onOpenChange}
     >
-      <div className="export-section-row">
+      <div className="export-section-row" data-disabled={disabled || undefined}>
         <CollapsibleTrigger asChild>
           <button
             aria-label={`${open ? "Collapse" : "Expand"} ${label}`}
@@ -661,19 +643,14 @@ function ExportSection({
           disabled={disabled}
           onCheckedChange={onToggle}
         />
-        <span style={{ display: "grid", gap: "var(--space-2)", minWidth: 0 }}>
-          <button
-            className="export-section-label"
-            disabled={disabled}
-            type="button"
-            onClick={onToggle}
-          >
-            {label}
-          </button>
-          {description && (
-            <ExportRowDescription>{description}</ExportRowDescription>
-          )}
-        </span>
+        <button
+          className="export-section-label"
+          disabled={disabled}
+          type="button"
+          onClick={onToggle}
+        >
+          {label}
+        </button>
         <span className="export-section-count">
           {countTotal === undefined ? count : `${count} of ${countTotal}`}
         </span>
@@ -685,41 +662,19 @@ function ExportSection({
   );
 }
 
-function ExportRowDescription({ children }: { children: React.ReactNode }) {
-  return (
-    <small
-      style={{
-        display: "block",
-        overflow: "hidden",
-        color: "var(--muted)",
-        fontSize: "var(--type-xs)",
-        lineHeight: "var(--leading-copy)",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap"
-      }}
-    >
-      {children}
-    </small>
-  );
-}
-
 function ExportSwitchRow({
   checked,
-  description,
   label,
   onCheckedChange
 }: {
   checked: boolean;
-  description: string;
   label: string;
   onCheckedChange: (checked: boolean) => void;
 }) {
-  const id = useMemo(
-    () => `export-${label.toLowerCase().replace(/\s+/g, "-")}`,
-    [label]
-  );
+  const id = useId();
   return (
     <label className="export-switch-row" htmlFor={id}>
+      <strong>{label}</strong>
       <Switch
         aria-label={label}
         checked={checked}
@@ -727,10 +682,6 @@ function ExportSwitchRow({
         id={id}
         onCheckedChange={onCheckedChange}
       />
-      <span>
-        <strong>{label}</strong>
-        <small>{description}</small>
-      </span>
     </label>
   );
 }

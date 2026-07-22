@@ -928,40 +928,37 @@ input:focus-visible {
    left rail / collection pane / canvas / inspector remain the background
    topology; these are task columns, not replacement app panes. */
 .export-pdf-dialog {
-  width: min(calc(100vw - 32px), 1160px);
-  height: min(760px, calc(100dvh - 32px));
+  width: min(calc(100vw - 32px), 1000px);
+  height: min(880px, calc(100dvh - 32px));
 }
 
-/* Three task columns: Contents | Options + Page setup | live Preview. The
-   preview is the widest so its page card reads clearly; it drops out entirely
-   on narrow viewports (see the media query below) rather than cramming. */
+/* Two task columns: Contents | one settings rail (Preview, then Options, then
+   Page setup) — the print-dialog shape, so the preview sits beside the
+   controls it reacts to. The rail scrolls as one unit on short screens. */
 .export-pdf-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 240px minmax(0, 320px);
+  grid-template-columns: minmax(0, 1fr) 360px;
   gap: var(--space-4);
   flex: 1 1 auto;
   min-height: 0;
   padding: var(--space-12) var(--space-24) var(--space-20);
 }
 
+/* A group inside the rail, not a card of its own — the rail owns the chrome. */
 .export-preview {
   display: flex;
   min-width: 0;
-  min-height: 0;
   flex-direction: column;
   gap: var(--space-12);
-  align-self: start;
-  margin-left: var(--space-4);
-  padding: var(--space-16);
-  border-radius: 10px;
-  background: color-mix(in oklch, var(--surface) 72%, transparent);
 }
 
 /* A page-shaped white card (aspect-ratio set inline per paper size + auto
-   orientation), with a subtle border/shadow in the app's square-pane grammar. */
+   orientation), with a subtle border/shadow in the app's square-pane grammar.
+   Width is capped so a portrait page doesn't swallow the rail's height. */
 .export-preview-card {
   display: flex;
-  width: 100%;
+  /* Width comes inline from previewCardStyle (aspect-exact, viewport-capped). */
+  margin-inline: auto;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--line);
@@ -996,27 +993,30 @@ input:focus-visible {
   flex: 0 0 auto;
 }
 
+/* Reserve two caption lines: captions swing between one line ("Overview") and
+   two ("Elevation — Main Gallery · North wall"), and without the reservation
+   the pager buttons hop vertically on every page flip. */
 .export-preview-caption {
+  display: grid;
   min-width: 0;
+  min-height: 2lh;
+  align-content: center;
   color: var(--muted);
   font-size: var(--type-xs);
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
 
-/* Below this width the three-column layout can't give the preview a legible
-   card, so hide it and fall back to the original two-column options body. */
-@media (max-width: 1000px) {
+/* Below this width the contents column can't stay legible beside a 360px
+   rail, so the rail slims down. The preview stays — its card just shrinks
+   with the rail (the width formula in previewCardStyle caps to 100%). */
+@media (max-width: 880px) {
   .export-pdf-dialog {
-    width: min(calc(100vw - 32px), 860px);
+    width: min(calc(100vw - 32px), 760px);
   }
 
   .export-pdf-body {
-    grid-template-columns: minmax(0, 1fr) 240px;
-  }
-
-  .export-preview {
-    display: none;
+    grid-template-columns: minmax(0, 1fr) 264px;
   }
 }
 
@@ -1130,10 +1130,16 @@ input:focus-visible {
 
 .export-section-count,
 .export-tree-count {
-  color: var(--subtle);
+  /* --muted, not --subtle: "4 of 4" is selection feedback the user reads, and
+     --subtle lands under 4.5:1 at this 12px size. */
+  color: var(--muted);
   font-size: var(--type-xs);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.export-section-row[data-disabled] .export-section-count {
+  color: var(--subtle);
 }
 
 .export-section-count {
@@ -1270,13 +1276,24 @@ input:focus-visible {
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: var(--space-24);
-  align-self: start;
+  gap: var(--space-16);
   margin-left: var(--space-4);
   padding: var(--space-16);
   border-radius: 10px;
   background: color-mix(in oklch, var(--surface) 72%, transparent);
+}
+
+/* Only the controls scroll; the preview above stays pinned. The top border is
+   the stationary divider the options slide beneath. */
+.export-setup-scroll {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--space-24);
+  padding-top: var(--space-16);
+  border-top: 1px solid var(--line);
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .export-setup-group {
@@ -1289,18 +1306,16 @@ input:focus-visible {
   border-top: 1px solid var(--line);
 }
 
+/* Text left, switch right — the Settings dialog's switch-row grammar
+   (.settings-switch-row), so the same control reads the same way in both
+   overlays. Single-line: the rail fits without scrolling. */
 .export-switch-row {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  align-items: start;
-  gap: var(--space-8);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-12);
   padding: var(--space-4) 0;
   cursor: pointer;
-}
-
-.export-switch-row > span {
-  display: grid;
-  gap: var(--space-2);
 }
 
 .export-switch-row strong {
@@ -1310,7 +1325,6 @@ input:focus-visible {
   line-height: var(--leading-ui);
 }
 
-.export-switch-row small,
 .export-setup-note {
   color: var(--muted);
   font-size: var(--type-xs);
@@ -1336,12 +1350,28 @@ input:focus-visible {
   transform: translateX(14px);
 }
 
+.export-unit-rows {
+  display: grid;
+  gap: var(--space-2);
+  padding-left: var(--space-8);
+}
+
+/* Label left, select right on one line — the compact row keeps the whole rail
+   visible without scrolling. The trigger stays borderless (value + caret),
+   so it reads as a quiet value, not an input box. */
 .export-paper-field {
   display: grid;
-  gap: var(--space-6);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-8);
   color: var(--ink);
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
+}
+
+.export-paper-field .select-trigger {
+  min-width: 0;
+  justify-self: end;
 }
 
 .export-setup-note {
