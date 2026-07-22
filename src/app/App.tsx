@@ -12,7 +12,6 @@ import { MagnetIcon } from "@phosphor-icons/react/dist/csr/Magnet";
 import { RulerIcon } from "@phosphor-icons/react/dist/csr/Ruler";
 import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { StackIcon } from "@phosphor-icons/react/dist/csr/Stack";
-import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
 import {
   getPlacedRoomBounds,
   getRectangleRoomDimensions,
@@ -53,6 +52,7 @@ import { AppRail } from "./components/AppRail";
 import { ArtworkInspector } from "./components/inspectors/ArtworkInspector";
 import { ArtworkLibraryView } from "./components/library/ArtworkLibrary";
 import { PanelResizeHandle } from "./components/shared/PanelResizeHandle";
+import { PlacementWarnings } from "./components/placement/PlacementWarnings";
 import { ChecklistPanel } from "./components/panels/ChecklistPanel";
 import { ElevationEmptyState } from "./components/elevation/ElevationEmptyState";
 import { FloorCaseInspector, WallCaseInspector } from "./components/inspectors/CaseInspector";
@@ -1950,26 +1950,6 @@ export function App() {
         {!visibleInspectorCollapsed ? (
         <aside className="inspector" aria-label="Inspector">
           <div className="inspector-zone">
-            {labeledPlacementWarnings.length > 0 ? (
-              <div className="warning-panel" role="status" aria-live="polite">
-                <WarningIcon aria-hidden="true" size={18} />
-                <div>
-                  <h3>Placement needs review</h3>
-                  <ul>
-                    {labeledPlacementWarnings.map((warning) => (
-                      // Subject leads so a list of warnings scans by object
-                      // name; without the separator it fuses into the message
-                      // ("…on this wall.Door").
-                      <li key={warning.id}>
-                        {warning.subject ? <span>{warning.subject} · </span> : null}
-                        {warning.message}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            ) : null}
-
             {(measurementActive &&
             (measurement.state.phase === "armed-complete" ||
               measurement.state.phase === "refining")) || selectedReferenceMeasurement ? (
@@ -2021,6 +2001,17 @@ export function App() {
                 </span> : null}
               </div>
             ) : null}
+
+            <PlacementWarnings
+              warnings={labeledPlacementWarnings}
+              selectedWallObjectId={
+                placedWallObject?.id ??
+                selectedOpening?.id ??
+                selectedWallCase?.id ??
+                selectedWallText?.id ??
+                null
+              }
+            />
 
             {selectedReferenceMeasurement ? (
               <ReferenceMeasurementInspector
