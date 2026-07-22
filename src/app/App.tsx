@@ -290,6 +290,7 @@ export function App() {
   const moveArtworkPlacement = useAppStore((state) => state.moveArtworkPlacement);
   const removePlacement = useAppStore((state) => state.removePlacement);
   const addOpening = useAppStore((state) => state.addOpening);
+  const addWallCase = useAppStore((state) => state.addWallCase);
   const moveOpening = useAppStore((state) => state.moveOpening);
   const resizeOpening = useAppStore((state) => state.resizeOpening);
   const connectOpenings = useAppStore((state) => state.connectOpenings);
@@ -2321,6 +2322,7 @@ export function App() {
               )}
               dimensionLink={wallDimensionLink}
               lastGeometryEdit={lastGeometryEdit}
+              onAddCase={() => void addWallCase(selectedWall.id)}
               onAddOpening={(kind) => void addOpening(selectedWall.id, kind)}
               onCommitHeight={(heightMm) =>
                 selectedWallRoomPlacement

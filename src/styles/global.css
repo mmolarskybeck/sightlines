@@ -6010,11 +6010,17 @@ body.panels-resizing * {
   justify-content: center;
 }
 
-/* Four verbs, two balanced columns: every chip keeps the primitive's fixed
-   control height, so the group reads as one even block with no wrapping. */
+/* Two balanced columns: every chip keeps the primitive's fixed control height,
+   so the group reads as one even block with no wrapping. */
 .wall-opening-actions .inspector-action-group-buttons {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* With an odd number of chips the last one would leave a hole; let it span the
+   row instead, so the block stays rectangular however many verbs there are. */
+.wall-opening-actions .opening-add-chip:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
 }
 
 .wall-opening-actions .opening-add-chip {

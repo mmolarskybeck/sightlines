@@ -315,6 +315,10 @@ export type AppState = ArrangeSliceState &
   // floor anchor creates a freestanding floor case (capture-any at the plan
   // layer decides which). Selects the new object; one undo step.
   placeCaseFromPlan: (placement: PlanPlacement) => Promise<void>;
+  // The wall inspector's "Wall case" chip. Freestanding cases have no wall to
+  // belong to, so they stay a plan-tool placement. Selects the new case; one
+  // undo step.
+  addWallCase: (wallId: string) => Promise<void>;
   // Numeric edits to a wall case (its own fields, including the new depthMm
   // protrusion). Separate from resizeOpening because a case carries depthMm and
   // is never an opening/does not pair.
@@ -1544,12 +1548,12 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
-        // Display cases are never added through this opening path — they are
-        // placed from plan via placeCaseFromPlan, which decides wall vs floor
-        // from the click. Guarding here also narrows `kind` to OpeningKind for
-        // the opening builders below.
+        // Display cases are never added through this opening path — the plan
+        // tool routes through placeCaseFromPlan and the wall inspector through
+        // addCaseToWall, since each decides wall vs floor differently. Guarding
+        // here also narrows `kind` to OpeningKind for the opening builders below.
         if (kind === "case") {
-          throw new Error("Display cases are placed via placeCaseFromPlan, not addOpening.");
+          throw new Error("Display cases are placed via placeCaseFromPlan or addCaseToWall.");
         }
 
         // Doors/windows can't be placed on a partition face in v1 (spec §2/§6.1);
@@ -2067,6 +2071,30 @@ export function createAppStore(deps: AppStoreDeps) {
           extras: selectionWrite(
             { ...project, floorObjects: [...project.floorObjects, floorCase] },
             { kind: "objects", ids: [floorCase.id] },
+            get().wallContextId
+          )
+        });
+      },
+
+      // The inspector-side counterpart to placeCaseFromPlan: with a wall already
+      // selected there is no click point to classify, so this only ever makes
+      // the hung kind (a freestanding case has no wall to belong to — it stays
+      // a plan-tool placement). Hangs at the wall's midpoint at the default
+      // mount height. Cases never block or pair, so — as in placeCaseFromPlan —
+      // there is nothing to validate.
+      async addWallCase(wallId) {
+        const project = get().project;
+        if (!project) return;
+
+        const wall = getProjectWalls(project).find((candidate) => candidate.id === wallId);
+        if (!wall) return;
+
+        const wallCase = createWallCase(wallId, wall.lengthMm / 2);
+        const nextWallObjects = [...project.wallObjects, wallCase];
+        await commitWallObjectEdit("Add display case", project, nextWallObjects, [], true, {
+          extras: selectionWrite(
+            { ...project, wallObjects: nextWallObjects },
+            { kind: "objects", ids: [wallCase.id] },
             get().wallContextId
           )
         });

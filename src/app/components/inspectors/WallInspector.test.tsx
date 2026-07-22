@@ -14,6 +14,7 @@ function renderInspector(polygonLengthEditing: boolean) {
         changedWallNames={[]}
         dimensionLink={null}
         lastGeometryEdit={null}
+        onAddCase={vi.fn()}
         onAddOpening={vi.fn()}
         onCommitHeight={vi.fn()}
         onCommitLength={onCommitLength}

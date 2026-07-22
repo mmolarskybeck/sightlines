@@ -13,6 +13,9 @@ import {
   unitSystemFromDisplayUnit
 } from "../../../domain/units/unitSystem";
 import { getScopedUnitContext } from "../shared/scopedUnits";
+// Same glyph the Case insert tool uses, so the chip and the toolbar name the
+// same object.
+import { CaseGlyph } from "../toolbar/toolbarGlyphs";
 import { InspectorSection } from "./InspectorSection";
 import { InspectorSummaryRow } from "./InspectorSummaryRow";
 import { InspectorNotice } from "./InspectorNotice";
@@ -35,6 +38,7 @@ export function WallInspector({
   changedWallNames,
   dimensionLink,
   lastGeometryEdit,
+  onAddCase,
   onAddOpening,
   onCommitHeight,
   onCommitLength,
@@ -52,6 +56,7 @@ export function WallInspector({
     anchorVertexId: string;
     changedWallIds: string[];
   } | null;
+  onAddCase: () => void;
   onAddOpening: (kind: InsertToolKind) => void;
   onCommitHeight: (heightMm: number) => Promise<void>;
   onCommitLength: (lengthMm: number, anchor: ResizeAnchor) => Promise<void>;
@@ -267,6 +272,22 @@ export function WallInspector({
           </TooltipTrigger>
           <TooltipContent className="opening-add-tooltip" side="bottom">
             Text panel is centered on the wall. Does not block artwork placement.
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              className="opening-add-chip"
+              variant="inspector"
+              onClick={onAddCase}
+            >
+              <CaseGlyph aria-hidden="true" size={16} />
+              <span>Wall case</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent className="opening-add-tooltip" side="bottom">
+            Vitrine hung on the wall at waist height, centered. Does not block
+            artwork placement.
           </TooltipContent>
         </Tooltip>
       </InspectorActionGroup>

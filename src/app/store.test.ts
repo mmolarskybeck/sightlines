@@ -2885,6 +2885,23 @@ describe("app store", () => {
       expect(store.getState().project!.wallObjects[0].kind).toBe("blocked-zone");
     });
 
+    it("adds a wall display case centered on the wall at the default mount height", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+
+      await store.getState().addWallCase(wall.id);
+
+      const state = store.getState();
+      expect(state.undoStack.at(-1)?.label).toBe("Add display case");
+      const wallCase = state.project!.wallObjects[0];
+      expect(wallCase.kind).toBe("case");
+      expect(wallCase.wallId).toBe(wall.id);
+      expect(wallCase.xMm).toBeCloseTo(wall.lengthMm / 2);
+      expect(wallCase.yMm).toBe(DEFAULT_WALL_CASE_CENTER_Y_MM);
+      expect(state.selection).toEqual(
+        expect.objectContaining({ kind: "objects", ids: [wallCase.id] })
+      );
+    });
+
     it("adds an elevation-placed opening at the requested wall-local position", async () => {
       const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
 
