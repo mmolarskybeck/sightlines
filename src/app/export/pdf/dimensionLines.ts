@@ -7,8 +7,11 @@ import type {
   BoundaryDimension,
   GapDimension
 } from "../../../domain/dimensions/orthogonalNeighbors";
+import type { PlanGapLine } from "../../../domain/dimensions/planDimensions";
+import { MIN_DIMENSION_SEGMENT_MM } from "../../components/shared/dimensionDrafting";
 import type { ElevationScene } from "../../../domain/scene2d/elevationScene";
-import type { DisplayUnit } from "../../../domain/project";
+import type { DocumentExportUnit } from "../../../domain/export/documentSettings";
+import { formatLength } from "../../../domain/units/length";
 import {
   choosePdfLabelCandidate,
   findPdfLeaderRoute,
@@ -23,7 +26,7 @@ import {
   textWidth,
   type PdfFonts
 } from "./primitives";
-import type { ElevationTransform } from "./transforms";
+import type { ElevationTransform, PlanTransform } from "./transforms";
 
 export function participantObstacleBoxes(
   scene: ElevationScene,
@@ -53,7 +56,7 @@ export function drawGapDimension(
   fonts: PdfFonts,
   transform: ElevationTransform,
   dimension: GapDimension | BoundaryDimension,
-  unit: DisplayUnit,
+  unit: DocumentExportUnit,
   occupied: PdfLabelBox[],
   obstacles: readonly PdfLabelBox[],
   leaderObstacles: readonly PdfLabelBox[],
@@ -368,7 +371,7 @@ export function drawElevationDimensions(
   fonts: PdfFonts,
   scene: ElevationScene,
   transform: ElevationTransform,
-  unit: DisplayUnit
+  unit: DocumentExportUnit
 ) {
   const dimensions = deriveElevationSceneDimensions(scene);
   // Participant footprints are hard obstacles; the occupied list contains
@@ -568,4 +571,105 @@ export function drawElevationDimensions(
       position.y
     );
   });
+}
+
+// Points of perpendicular stand-off per PlanGapLine.offsetHandleUnits — the
+// print analog of the on-screen handleSizeMm the SVG renderer scales by. Floor
+// gaps carry offset 0 (the line sits in the clear corridor); wall gaps carry
+// WALL_GAP_OFFSET_UNITS (2.5) so the line steps this many points × 2.5 off the
+// wall drawing into the room, matching PartitionDimensionLines' stand-off.
+const PLAN_GAP_STANDOFF_PT = 3;
+// Minimum perpendicular hop for a label too wide to sit within its own gap: it
+// escapes past the measured footprints (labelClearMm) but never by less than
+// this, so a hairline gap's label still clears the line's own ticks.
+const PLAN_LABEL_MIN_ESCAPE_PT = DIMENSION_SIZE_PT + 4;
+
+// Object/floor spacing dimensions for one exported room-plan page — the top-down
+// twin of drawElevationDimensions. Consumes selection-free PlanGapLines from
+// derivePlanSceneGaps (floor-mm space) and draws each as a facing-edge dimension
+// with the same tick/line/label vocabulary the elevation gaps use. These lines
+// sit INSIDE the room (floor gaps in the corridor, wall gaps stepped into the
+// room), structurally clear of drawRoomWallDimensions' wall-length lines, which
+// sit OUTSIDE the room — so the two annotation layers never collide.
+//
+// Label placement mirrors the SVG PlanGapDimensionLines rather than the
+// elevation PDF's crowd-routing engine (docs/export-spec.md §16 "two engines by
+// design" is about the elevation label solver; the plan gaps share the simpler
+// fit-or-step-out convention on both surfaces): a label that fits its gap sits
+// on the line under a white knockout; one that doesn't steps out along the
+// normal past the measured footprints with a short leader back to the line.
+export function drawPlanSceneDimensions(
+  page: PDFPage,
+  fonts: PdfFonts,
+  gaps: readonly PlanGapLine[],
+  transform: PlanTransform,
+  unit: DocumentExportUnit
+) {
+  for (const gap of gaps) {
+    const label = formatLength(Math.max(0, gap.gapMm), { unit });
+
+    // The plan transform scales x/y uniformly and flips y (mm-up vs page-down)
+    // with no rotation, so a mm-space direction maps to page space by negating
+    // its y component; re-normalize to a unit vector in points.
+    const rawNx = gap.normalMm.xMm;
+    const rawNy = -gap.normalMm.yMm;
+    const nLen = Math.hypot(rawNx, rawNy) || 1;
+    const normal = { x: rawNx / nLen, y: rawNy / nLen };
+
+    const offsetPt = gap.offsetHandleUnits * PLAN_GAP_STANDOFF_PT;
+    const a0 = transform.point(gap.aMm);
+    const b0 = transform.point(gap.bMm);
+    const a = { x: a0.x + normal.x * offsetPt, y: a0.y + normal.y * offsetPt };
+    const b = { x: b0.x + normal.x * offsetPt, y: b0.y + normal.y * offsetPt };
+
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const length = Math.hypot(dx, dy);
+    const dir = length > 1e-6 ? { x: dx / length, y: dy / length } : { x: 1, y: 0 };
+    // Tick runs perpendicular to the line (along the facing edge it measures).
+    const tick = { x: -dir.y, y: dir.x };
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+
+    // A hairline gap (touching within tolerance) draws its ticks and 0-label but
+    // no connecting line — same rule as MIN_DIMENSION_SEGMENT_MM on the canvas.
+    const isTiny = gap.gapMm < MIN_DIMENSION_SEGMENT_MM;
+    if (!isTiny) drawLine(page, a, b, 0.4, COLORS.dimension);
+    for (const point of [a, b]) {
+      drawLine(
+        page,
+        { x: point.x - tick.x * 2.5, y: point.y - tick.y * 2.5 },
+        { x: point.x + tick.x * 2.5, y: point.y + tick.y * 2.5 },
+        0.4,
+        COLORS.dimension
+      );
+    }
+
+    // Fit against the true measured span (a normal-direction offset never widens
+    // it): a label that fits sits on the line; otherwise it escapes along the
+    // normal past the footprints (labelClearMm) with a leader, mirroring the SVG.
+    const labelWidth = textWidth(fonts, label, DIMENSION_SIZE_PT, true);
+    const fits = length >= labelWidth + 6;
+    const escapePt =
+      gap.labelClearMm !== undefined
+        ? Math.max(
+            PLAN_LABEL_MIN_ESCAPE_PT,
+            gap.labelClearMm * transform.scalePtPerMm + DIMENSION_SIZE_PT
+          )
+        : PLAN_LABEL_MIN_ESCAPE_PT;
+    const labelOffset = fits ? 0 : escapePt;
+    const labelPoint = {
+      x: mid.x + normal.x * labelOffset,
+      y: mid.y + normal.y * labelOffset
+    };
+    if (!fits) {
+      drawLine(page, mid, labelPoint, 0.3, COLORS.subtle);
+    }
+    drawCenteredLabel(
+      page,
+      fonts,
+      label,
+      labelPoint.x,
+      labelPoint.y - DIMENSION_SIZE_PT / 2
+    );
+  }
 }

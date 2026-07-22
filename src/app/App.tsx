@@ -371,6 +371,7 @@ export function App() {
       }
     };
   }, []);
+
   // Prevent re-entry while package assets are hashed and zipped.
   const [isExportingPackage, setIsExportingPackage] = useState(false);
 

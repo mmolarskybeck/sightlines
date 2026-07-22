@@ -29,7 +29,10 @@
 // and does not participate as a blocker either — an AABB stand-in would print a
 // gap to a corner that isn't the true clearance, which is worse than silence.
 
-import { getNeighborAwareSegments } from "../placement/arrangeOnWall";
+import {
+  getNeighborAwareSegments,
+  getSpacingSegments
+} from "../placement/arrangeOnWall";
 import type { Point } from "../geometry/polygon";
 import type { FloorWall, PlanRect } from "../geometry/planObjects";
 import type { WallObjectBase } from "../project";
@@ -406,24 +409,44 @@ export function derivePlanWallGaps(args: {
   // member yields exactly these, but slicing guards against any interior noise.
   const outer = [segments[0], segments[segments.length - 1]];
 
+  return liftWallSegments(
+    args.wall,
+    outer,
+    (index) => `wall-gap:${args.selectedObject.id}:${index === 0 ? "lo" : "hi"}`,
+    tol
+  );
+}
+
+// Lift along-wall spacing segments (wall-local mm) into floor-space PlanGapLines.
+// Each segment becomes a line running along the wall direction between its
+// facing edges; the offset (WALL_GAP_OFFSET_UNITS) steps it off the wall drawing
+// toward the room. Shared by the selection-driven derivePlanWallGaps and the
+// export-side derivePlanWallGapsAllObjects so both lift identically.
+function liftWallSegments(
+  wall: FloorWall,
+  segments: ReadonlyArray<{ fromMm: number; toMm: number }>,
+  idFor: (index: number) => string,
+  tol: number
+): PlanGapLine[] {
+  if (wall.lengthMm <= 0) return [];
   // Wall direction start→end and its left normal (the viewer/room side, same
   // convention as offsetPlanRectToViewerSide: for dir (cos,sin) it's (-sin,cos)).
   const dir = {
-    xMm: (args.wall.endFloorMm.xMm - args.wall.startFloorMm.xMm) / args.wall.lengthMm,
-    yMm: (args.wall.endFloorMm.yMm - args.wall.startFloorMm.yMm) / args.wall.lengthMm
+    xMm: (wall.endFloorMm.xMm - wall.startFloorMm.xMm) / wall.lengthMm,
+    yMm: (wall.endFloorMm.yMm - wall.startFloorMm.yMm) / wall.lengthMm
   };
   const normalMm = { xMm: -dir.yMm, yMm: dir.xMm };
   const pointAt = (alongMm: number): Point => ({
-    xMm: args.wall.startFloorMm.xMm + dir.xMm * alongMm,
-    yMm: args.wall.startFloorMm.yMm + dir.yMm * alongMm
+    xMm: wall.startFloorMm.xMm + dir.xMm * alongMm,
+    yMm: wall.startFloorMm.yMm + dir.yMm * alongMm
   });
 
   const lines: PlanGapLine[] = [];
-  outer.forEach((segment, index) => {
+  segments.forEach((segment, index) => {
     const gapMm = segment.toMm - segment.fromMm;
     if (gapMm <= tol) return; // flush against a neighbor/end: nothing to print
     lines.push({
-      id: `wall-gap:${args.selectedObject.id}:${index === 0 ? "lo" : "hi"}`,
+      id: idFor(index),
       gapMm,
       aMm: pointAt(segment.fromMm),
       bMm: pointAt(segment.toMm),
@@ -432,4 +455,82 @@ export function derivePlanWallGaps(args: {
     });
   });
   return lines;
+}
+
+// Every along-wall gap on ONE wall, drawn once: wall-start → first object, each
+// consecutive object pair, last object → wall-end (getSpacingSegments). This is
+// the un-selected, show-everything twin of derivePlanWallGaps — a document page
+// has no selection, so instead of one object's two clearances it wants the whole
+// wall's spacing chain, each gap emitted exactly once (no A→B / B→A duplication).
+// Plan is top-down (height invisible), so every object shares one full-height
+// band: pure 1-D along-wall spacing, matching derivePlanWallGaps' BAND trick.
+export function derivePlanWallGapsAllObjects(args: {
+  objects: ReadonlyArray<{ id: string; xMm: number; widthMm: number }>;
+  wall: FloorWall;
+  toleranceMm?: number;
+}): PlanGapLine[] {
+  const tol = args.toleranceMm ?? NEIGHBOR_TOLERANCE_MM;
+  if (args.wall.lengthMm <= 0 || args.objects.length === 0) return [];
+
+  const BAND: Pick<WallObjectBase, "yMm" | "heightMm"> = { yMm: 0, heightMm: 1e6 };
+  const members: WallObjectBase[] = args.objects.map((object) => ({
+    ...BAND,
+    id: object.id,
+    wallId: args.wall.id,
+    xMm: object.xMm,
+    widthMm: object.widthMm
+  }));
+
+  const segments = getSpacingSegments(members, args.wall.lengthMm);
+  return liftWallSegments(
+    args.wall,
+    segments,
+    (index) => `wall-gap:${args.wall.id}:${index}`,
+    tol
+  );
+}
+
+// Selection-free plan gap lines for ONE room's exported plan page — the top-down
+// analog of deriveElevationSceneDimensions. A document has no selection, so this
+// shows every gap the app would show were each object selected in turn, with the
+// engine's own suppression already applied:
+//   • floor objects: derivePlanFloorGaps with all of them "selected", so every
+//     nearest-neighbor gap (object↔object and object↔wall-strip) survives while
+//     overlaps and non-nearest long-range gaps are dropped by the shared engine.
+//   • wall objects: each wall's full along-wall spacing chain (once per gap).
+// Callers pass ONE room's already-filtered floor objects, floor walls, and wall
+// objects (e.g. from roomScene); unit/label formatting stays with the renderer.
+export function derivePlanSceneGaps(args: {
+  floorObjects: PlanFloorObjectInput[];
+  walls: FloorWall[];
+  wallObjects: ReadonlyArray<{ id: string; wallId: string; xMm: number; widthMm: number }>;
+  toleranceMm?: number;
+}): PlanGapLine[] {
+  const tol = args.toleranceMm ?? NEIGHBOR_TOLERANCE_MM;
+
+  const floorGaps = derivePlanFloorGaps({
+    selectedIds: new Set(args.floorObjects.map((object) => object.id)),
+    floorObjects: args.floorObjects,
+    walls: args.walls,
+    toleranceMm: tol
+  });
+
+  const objectsByWall = new Map<
+    string,
+    Array<{ id: string; xMm: number; widthMm: number }>
+  >();
+  for (const object of args.wallObjects) {
+    const bucket = objectsByWall.get(object.wallId) ?? [];
+    bucket.push({ id: object.id, xMm: object.xMm, widthMm: object.widthMm });
+    objectsByWall.set(object.wallId, bucket);
+  }
+
+  const wallGaps: PlanGapLine[] = [];
+  for (const wall of args.walls) {
+    const objects = objectsByWall.get(wall.id);
+    if (!objects || objects.length === 0) continue;
+    wallGaps.push(...derivePlanWallGapsAllObjects({ objects, wall, toleranceMm: tol }));
+  }
+
+  return [...floorGaps, ...wallGaps];
 }

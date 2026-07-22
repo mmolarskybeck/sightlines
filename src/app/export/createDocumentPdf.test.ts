@@ -450,6 +450,72 @@ describe("createDocumentPdf", () => {
       await expect(PDFDocument.load(result.bytes)).resolves.toBeDefined();
     });
 
+    it("renders room-plan object/floor spacing dimensions without warnings", async () => {
+      const project = createSampleProject();
+      // Two artworks along one wall (a spacing chain: two ends + one gap) plus
+      // two floor cases (an object↔object gap and object↔wall strip gaps).
+      project.wallObjects = [
+        {
+          id: "w1",
+          kind: "artwork",
+          artworkId: "art-a",
+          wallId: "wall-north",
+          xMm: 1_500,
+          yMm: 1_450,
+          widthMm: 600,
+          heightMm: 500
+        },
+        {
+          id: "w2",
+          kind: "artwork",
+          artworkId: "art-b",
+          wallId: "wall-north",
+          xMm: 3_500,
+          yMm: 1_450,
+          widthMm: 600,
+          heightMm: 500
+        }
+      ];
+      project.floorObjects = [createFloorCase(2_000, 2_000), createFloorCase(4_000, 2_000)];
+      const settings = settingsFor(project);
+      settings.sections = {
+        overview: false,
+        roomPlans: true,
+        elevations: false,
+        threeDViews: false
+      };
+      settings.dimensions = true;
+      settings.rooms = settings.rooms.map((room) => ({
+        ...room,
+        planIncluded: true
+      }));
+
+      const result = await createDocumentPdf({
+        project,
+        settings,
+        artworks: [
+          {
+            id: "art-a",
+            schemaVersion: 1,
+            title: "A",
+            dimensions: { widthMm: 600, heightMm: 500, status: "known" },
+            metadata: {}
+          },
+          {
+            id: "art-b",
+            schemaVersion: 1,
+            title: "B",
+            dimensions: { widthMm: 600, heightMm: 500, status: "known" },
+            metadata: {}
+          }
+        ]
+      });
+
+      expect(result.manifest.some((page) => page.kind === "room-plan")).toBe(true);
+      expect(result.warnings).toEqual([]);
+      await expect(PDFDocument.load(result.bytes)).resolves.toBeDefined();
+    });
+
     it("derives its plan/elevation case marks from the shared glyph module", () => {
       // The export imports the exact glyph functions the screen uses, so parity
       // is by construction — pin the structure the PDF consumes so a drift back

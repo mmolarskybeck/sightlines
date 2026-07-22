@@ -40,6 +40,12 @@ vi.mock("../ui/select", async () => {
     SelectContent: ({ children }: { children: React.ReactNode }) => (
       <div role="listbox">{children}</div>
     ),
+    SelectGroup: ({ children }: { children: React.ReactNode }) => (
+      <div role="group">{children}</div>
+    ),
+    SelectLabel: ({ children }: { children: React.ReactNode }) => (
+      <div>{children}</div>
+    ),
     SelectItem: ({
       children,
       value
@@ -147,8 +153,12 @@ describe("ExportPdfDialog", () => {
       screen.getByRole("checkbox", { name: "Include Elevations" })
     ).toHaveAttribute("data-state", "indeterminate");
     expect(screen.getByRole("checkbox", { name: "Include 3D views" })).toBeChecked();
-    expect(screen.getByRole("switch", { name: "Dimensions" })).toBeChecked();
-    expect(screen.getByRole("switch", { name: "Grid" })).not.toBeChecked();
+    expect(
+      screen.getByRole("switch", { name: "Show dimensions" })
+    ).toBeChecked();
+    expect(
+      screen.getByRole("switch", { name: "Show grid" })
+    ).not.toBeChecked();
     expect(screen.getByRole("combobox", { name: "Paper size" })).toHaveTextContent(
       "letter"
     );
@@ -184,12 +194,14 @@ describe("ExportPdfDialog", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("uses tri-state select-all and preserves child choices while a section is off", () => {
+  it("uses tri-state select-all and clears child choices when the parent is unchecked", () => {
     renderDialog();
     const elevations = screen.getByRole("checkbox", {
       name: "Include Elevations"
     });
 
+    // Starts indeterminate (one wall pre-included by default). Clicking an
+    // indeterminate/unchecked parent selects every child.
     fireEvent.click(elevations);
     expect(elevations).toBeChecked();
     expect(
@@ -201,13 +213,17 @@ describe("ExportPdfDialog", () => {
       "Exports 6 pages"
     );
 
+    // Clicking a fully-checked parent clears every child — the section's
+    // "enabled" state is derived from its children, so this is the only way
+    // to guarantee nothing in the section exports (no more nothing-selected
+    // trap where an unchecked section still exports a stray checked child).
     fireEvent.click(elevations);
     expect(elevations).not.toBeChecked();
     expect(
       screen.getByRole("checkbox", {
         name: "Include Main Gallery, East wall elevation"
       })
-    ).toBeChecked();
+    ).not.toBeChecked();
     expect(screen.getByText(/Exports/).parentElement).toHaveTextContent(
       "Exports 2 pages"
     );
@@ -219,7 +235,7 @@ describe("ExportPdfDialog", () => {
     );
   });
 
-  it("shows the effective (zero) count while a section is off, remembering leaf selections", () => {
+  it("checking a single child while the section reads off makes just that child export (no nothing-selected trap)", () => {
     renderDialog();
     const elevations = screen.getByRole("checkbox", {
       name: "Include Elevations"
@@ -227,22 +243,37 @@ describe("ExportPdfDialog", () => {
     const elevationsRow = elevations.closest(".export-section-row");
     if (!elevationsRow) throw new Error("Elevations row not found");
 
+    // Clear the section entirely first.
     fireEvent.click(elevations);
     expect(elevations).toBeChecked();
-    expect(
-      within(elevationsRow as HTMLElement).getByText("4 of 4")
-    ).toBeInTheDocument();
-
     fireEvent.click(elevations);
     expect(elevations).not.toBeChecked();
+    expect(
+      within(elevationsRow as HTMLElement).getByText("0 of 4")
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Exports/).parentElement).toHaveTextContent(
+      "Exports 2 pages"
+    );
+
+    // Checking a single child brings the section back on and exports
+    // exactly that page.
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Include Main Gallery, East wall elevation"
+      })
+    );
     expect(
       screen.getByRole("checkbox", {
         name: "Include Main Gallery, East wall elevation"
       })
     ).toBeChecked();
+    expect(elevations).toHaveAttribute("data-state", "indeterminate");
     expect(
-      within(elevationsRow as HTMLElement).getByText("0 of 4")
+      within(elevationsRow as HTMLElement).getByText("1 of 4")
     ).toBeInTheDocument();
+    expect(screen.getByText(/Exports/).parentElement).toHaveTextContent(
+      "Exports 3 pages"
+    );
   });
 
   it("lets a single-room project opt into its room plan independently", () => {
@@ -280,6 +311,57 @@ describe("ExportPdfDialog", () => {
     expect(screen.getByText("Saved view 1")).toBeInTheDocument();
   });
 
+  it("reveals per-surface unit rows only while Show dimensions is on", () => {
+    renderDialog();
+
+    // Show dimensions defaults on, so both unit rows are present.
+    const planUnits = screen.getByRole("combobox", { name: "Plan units" });
+    const elevationUnits = screen.getByRole("combobox", {
+      name: "Elevation units"
+    });
+    // "Auto" spells out the resolved unit; the ft project resolves plan → ft
+    // and elevation → in (the in-app elevation convention).
+    const planLabel = planUnits.closest("label") as HTMLElement;
+    const elevationLabel = elevationUnits.closest("label") as HTMLElement;
+    expect(
+      within(planLabel).getByRole("option", { name: "Auto (ft)" })
+    ).toBeInTheDocument();
+    expect(
+      within(elevationLabel).getByRole("option", { name: "Auto (in)" })
+    ).toBeInTheDocument();
+
+    // Turning Show dimensions off hides the rows entirely (not just disables).
+    fireEvent.click(screen.getByRole("switch", { name: "Show dimensions" }));
+    expect(
+      screen.queryByRole("combobox", { name: "Plan units" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "Elevation units" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("threads an explicit plan unit choice through to the export callback", () => {
+    const { onExport } = renderDialog();
+    const planLabel = screen
+      .getByRole("combobox", { name: "Plan units" })
+      .closest("label") as HTMLElement;
+
+    fireEvent.click(
+      within(planLabel).getByRole("option", { name: "Millimeters (mm)" })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Export PDF" }));
+
+    expect(onExport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        planUnit: "mm",
+        resolvedPlanUnit: "mm",
+        // Elevation stays on Auto, resolving to inches for this ft project.
+        elevationUnit: "auto",
+        resolvedElevationUnit: "in"
+      })
+    );
+  });
+
   it("disables export and shows guidance when every section is off", () => {
     renderDialog(createSampleProject());
 
@@ -295,7 +377,7 @@ describe("ExportPdfDialog", () => {
 
   it("passes current effective settings to the export callback", () => {
     const { onExport } = renderDialog();
-    fireEvent.click(screen.getByRole("switch", { name: "Grid" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Show grid" }));
     fireEvent.click(screen.getByRole("button", { name: "Export PDF" }));
 
     expect(onExport).toHaveBeenCalledWith(
@@ -331,7 +413,9 @@ describe("ExportPdfDialog", () => {
 
     // Content controls go non-interactive via the disabled fieldset.
     expect(screen.getByRole("checkbox", { name: "Include Overview" })).toBeDisabled();
-    expect(screen.getByRole("switch", { name: "Dimensions" })).toBeDisabled();
+    expect(
+      screen.getByRole("switch", { name: "Show dimensions" })
+    ).toBeDisabled();
 
     // The page-count summary is replaced by the live progress status.
     expect(screen.queryByText(/Exports/)).not.toBeInTheDocument();
@@ -366,6 +450,88 @@ describe("ExportPdfDialog", () => {
     ).not.toBeDisabled();
     expect(
       screen.getByRole("button", { name: "Export PDF" })
+    ).toBeInTheDocument();
+  });
+
+  it("renders the inline preview pane starting on the first manifest page, with no blob Preview button", () => {
+    renderDialog();
+
+    const preview = screen.getByRole("complementary", { name: "PDF preview" });
+    // The pane is a live SVG look-ahead, not a generate-on-demand blob: there
+    // is no "Preview" action button and no <iframe>.
+    expect(
+      screen.queryByRole("button", { name: "Preview" })
+    ).not.toBeInTheDocument();
+    expect(document.querySelector("iframe")).toBeNull();
+
+    // Default sample: Overview + one default-included elevation + one 3D view.
+    expect(
+      within(preview).getByText("Page 1 of 3 · Overview")
+    ).toBeInTheDocument();
+    // Exactly one page card SVG is rendered — only the visible page draws.
+    expect(within(preview).getAllByRole("img")).toHaveLength(1);
+    expect(within(preview).getByRole("img")).toHaveAttribute(
+      "aria-label",
+      "Overview"
+    );
+  });
+
+  it("pages forward/back through the manifest and clamps at both ends", () => {
+    renderDialog();
+    const preview = screen.getByRole("complementary", { name: "PDF preview" });
+    const next = within(preview).getByRole("button", { name: "Next page" });
+    const prev = within(preview).getByRole("button", { name: "Previous page" });
+
+    // On the first page, Previous is disabled.
+    expect(prev).toBeDisabled();
+    expect(next).not.toBeDisabled();
+
+    fireEvent.click(next);
+    expect(
+      within(preview).getByText(/^Page 2 of 3 · Elevation/)
+    ).toBeInTheDocument();
+
+    fireEvent.click(next);
+    expect(
+      within(preview).getByText(/^Page 3 of 3 · 3D view/)
+    ).toBeInTheDocument();
+    // On the last page, Next is disabled (index clamps, doesn't overrun).
+    expect(next).toBeDisabled();
+
+    fireEvent.click(prev);
+    expect(
+      within(preview).getByText(/^Page 2 of 3 · Elevation/)
+    ).toBeInTheDocument();
+  });
+
+  it("clamps the current page when the manifest shrinks under the cursor", () => {
+    renderDialog();
+    const preview = screen.getByRole("complementary", { name: "PDF preview" });
+    const next = within(preview).getByRole("button", { name: "Next page" });
+
+    // Advance to the last (3D) page…
+    fireEvent.click(next);
+    fireEvent.click(next);
+    expect(
+      within(preview).getByText(/^Page 3 of 3 · 3D view/)
+    ).toBeInTheDocument();
+
+    // …then drop the 3D views section. The preview count follows the manifest
+    // and the index is pulled back to the new last page rather than going blank.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Include 3D views" }));
+    expect(
+      within(preview).getByText(/^Page 2 of 2 · Elevation/)
+    ).toBeInTheDocument();
+  });
+
+  it("shows a Nothing selected outline when no pages are selected", () => {
+    renderDialog(createSampleProject());
+    fireEvent.click(screen.getByRole("checkbox", { name: "Include Overview" }));
+
+    const preview = screen.getByRole("complementary", { name: "PDF preview" });
+    expect(within(preview).getByText("Nothing selected")).toBeInTheDocument();
+    expect(
+      within(preview).getByText("No pages to preview")
     ).toBeInTheDocument();
   });
 });

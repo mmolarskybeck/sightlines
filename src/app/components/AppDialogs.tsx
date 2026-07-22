@@ -205,6 +205,7 @@ export function AppDialogs({
           onExport={(settings) => void handleExportPdf(settings)}
           onPersistenceError={(message) => toast.error(message)}
           thumbnailUrls={savedViewThumbnailUrls}
+          artworksById={artworksById}
           exportState={pdfExportProgress}
           onCancelExport={handleCancelExportPdf}
         />

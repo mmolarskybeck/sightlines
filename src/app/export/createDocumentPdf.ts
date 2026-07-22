@@ -14,7 +14,9 @@ import {
   getArtworkRingRectsMm
 } from "../../domain/framing";
 import { getRoomPlaceableWalls } from "../../domain/geometry/placeableWalls";
+import { getFloorWalls } from "../../domain/geometry/planObjects";
 import { isPointInPolygon } from "../../domain/geometry/polygon";
+import { derivePlanSceneGaps } from "../../domain/dimensions/planDimensions";
 import type {
   Artwork,
   Asset,
@@ -68,7 +70,10 @@ import {
   drawElevationFloorCaseGhost,
   drawArtworkPlaceholder
 } from "./pdf/elevationPage";
-import { drawElevationDimensions } from "./pdf/dimensionLines";
+import {
+  drawElevationDimensions,
+  drawPlanSceneDimensions
+} from "./pdf/dimensionLines";
 
 export type RenderSavedView = (
   view: SavedView,
@@ -200,7 +205,10 @@ async function embedBlob(
 // another wall (the first draw sizes the shared embed). Most works print at
 // an inch or two, so this lands far below the global 1400px ceiling.
 const ARTWORK_PRINT_DPI = 300;
-function artworkImageBudgetPx(drawnRect: { width: number; height: number }): number {
+function artworkImageBudgetPx(drawnRect: {
+  width: number;
+  height: number;
+}): number {
   const drawnPt = Math.max(drawnRect.width, drawnRect.height);
   const target = Math.ceil(drawnPt * (ARTWORK_PRINT_DPI / 72) * 1.25);
   return Math.min(1400, Math.max(220, target));
@@ -291,7 +299,12 @@ export async function createDocumentPdf(
         input.settings.grid,
         getPlanStructureBounds(fullPlanScene)
       );
-      drawScaleBar(page, fonts, input.project.unit, transform.scalePtPerMm);
+      drawScaleBar(
+        page,
+        fonts,
+        input.settings.resolvedPlanUnit,
+        transform.scalePtPerMm
+      );
       continue;
     }
 
@@ -316,10 +329,43 @@ export async function createDocumentPdf(
           fonts,
           scene.rooms[0],
           transform,
-          input.project.unit
+          input.settings.resolvedPlanUnit
+        );
+        // Object/floor spacing gaps — the top-down twin of the elevation page's
+        // neighbor gaps, from the same shared engine (via derivePlanSceneGaps).
+        // Wall lengths sit OUTSIDE the room; these sit INSIDE, so the two layers
+        // stay legible together. Same `unit` threads through both.
+        const roomWalls = getFloorWalls(input.project.floor).filter(
+          (wall) => wall.roomId === manifestPage.roomId
+        );
+        const planGaps = derivePlanSceneGaps({
+          floorObjects: scene.floorObjects.map((entry) => ({
+            id: entry.object.id,
+            rect: entry.rect,
+            roomId: manifestPage.roomId
+          })),
+          walls: roomWalls,
+          wallObjects: scene.wallObjects.map((entry) => ({
+            id: entry.object.id,
+            wallId: entry.object.wallId,
+            xMm: entry.object.xMm,
+            widthMm: entry.renderedRect.widthMm
+          }))
+        });
+        drawPlanSceneDimensions(
+          page,
+          fonts,
+          planGaps,
+          transform,
+          input.settings.resolvedPlanUnit
         );
       }
-      drawScaleBar(page, fonts, input.project.unit, transform.scalePtPerMm);
+      drawScaleBar(
+        page,
+        fonts,
+        input.settings.resolvedPlanUnit,
+        transform.scalePtPerMm
+      );
       continue;
     }
 
@@ -516,10 +562,15 @@ export async function createDocumentPdf(
           fonts,
           scene,
           transform,
-          input.project.unit
+          input.settings.resolvedElevationUnit
         );
       }
-      drawScaleBar(page, fonts, input.project.unit, transform.scalePtPerMm);
+      drawScaleBar(
+        page,
+        fonts,
+        input.settings.resolvedElevationUnit,
+        transform.scalePtPerMm
+      );
       continue;
     }
 
@@ -527,6 +578,14 @@ export async function createDocumentPdf(
       (view) => view.id === manifestPage.savedViewId
     );
     const renderRect = insetRect(baseRect, DRAWING_INSET_PT);
+    const savedViewRect = {
+      x: renderRect.xPt,
+      y: renderRect.yPt,
+      width: renderRect.widthPt,
+      height: renderRect.heightPt
+    };
+    const title = savedView?.title ?? manifestPage.title;
+
     // A failed 3D render degrades to a placeholder page instead of discarding
     // the whole document, matching the missing-artwork-image behavior.
     let image: PDFImage | null = null;
@@ -548,16 +607,9 @@ export async function createDocumentPdf(
         image = null;
       }
     }
-    const savedViewRect = {
-      x: renderRect.xPt,
-      y: renderRect.yPt,
-      width: renderRect.widthPt,
-      height: renderRect.heightPt
-    };
     if (image) {
       page.drawImage(image, imageRectInside(savedViewRect, image));
     } else {
-      const title = savedView?.title ?? manifestPage.title;
       drawArtworkPlaceholder(page, fonts, savedViewRect, title, true);
       warnings.add(`Saved view "${title}" could not be rendered.`);
     }

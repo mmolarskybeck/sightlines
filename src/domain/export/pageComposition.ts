@@ -8,6 +8,7 @@ import {
 import type { PlanRect } from "../geometry/planObjects";
 import { getRoomPlaceableWalls } from "../geometry/placeableWalls";
 import type {
+  DocumentExportUnit,
   DocumentPaperSize,
   EffectiveDocumentSettings
 } from "./documentSettings";
@@ -361,11 +362,11 @@ const IMPERIAL_SCALE_BAR_MM = [
 
 export function chooseScaleBarLengthMm(
   scalePtPerMm: number,
-  unit: Project["unit"],
+  unit: DocumentExportUnit,
   targetWidthPt = 96
 ): number {
   const candidates =
-    unit === "cm" || unit === "m"
+    unit === "cm" || unit === "m" || unit === "mm"
       ? METRIC_SCALE_BAR_MM
       : IMPERIAL_SCALE_BAR_MM;
   const targetMm = targetWidthPt / Math.max(scalePtPerMm, 1e-9);

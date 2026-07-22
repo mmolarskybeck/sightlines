@@ -1,5 +1,5 @@
 import { PDFFont, PDFPage, degrees, rgb } from "pdf-lib";
-import type { DisplayUnit } from "../../../domain/project";
+import type { DocumentExportUnit } from "../../../domain/export/documentSettings";
 import { formatLength } from "../../../domain/units/length";
 import {
   chooseScaleBarLengthMm,
@@ -149,7 +149,7 @@ export function insetRectByEdges(
 
 export function formatDocumentDimension(
   mm: number,
-  unit: DisplayUnit
+  unit: DocumentExportUnit
 ): string {
   return formatLength(mm, {
     unit,
@@ -179,7 +179,7 @@ export function drawLine(
 export function drawScaleBar(
   page: PDFPage,
   fonts: PdfFonts,
-  unit: DisplayUnit,
+  unit: DocumentExportUnit,
   scalePtPerMm: number
 ) {
   const lengthMm = chooseScaleBarLengthMm(scalePtPerMm, unit);

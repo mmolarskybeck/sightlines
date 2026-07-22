@@ -4,12 +4,17 @@ export type ParseLengthResult =
   | { ok: true; valueMm: number }
   | { ok: false; error: string };
 
+// Length formatting also accepts millimetres — the internal storage unit — as a
+// display unit. It is intentionally NOT part of DisplayUnit (which the app UI
+// exposes); mm is only surfaced through PDF export's DocumentExportUnit.
+export type LengthDisplayUnit = DisplayUnit | "mm";
+
 export type LengthFormatOptions = {
-  unit: DisplayUnit;
+  unit: LengthDisplayUnit;
   fractionDenominator?: 4 | 8 | 16 | 32;
   precision?: number;
   feetAndInches?: boolean;
-  secondaryUnit?: DisplayUnit;
+  secondaryUnit?: LengthDisplayUnit;
 };
 
 const MM_PER_INCH = 25.4;
@@ -128,7 +133,7 @@ export function formatLength(mm: number, options: LengthFormatOptions): string {
 
 function formatSingleLength(
   mm: number,
-  unit: DisplayUnit,
+  unit: LengthDisplayUnit,
   options: LengthFormatOptions
 ): string {
   if (unit === "ft") {
@@ -141,6 +146,12 @@ function formatSingleLength(
 
   if (unit === "cm") {
     return `${trimNumber(mm / 10, options.precision ?? 1)} cm`;
+  }
+
+  // Millimetres print as whole numbers — no fractional part, matching the unit's
+  // role as the storage granularity.
+  if (unit === "mm") {
+    return `${Math.round(mm)} mm`;
   }
 
   return `${trimNumber(mm / 1000, options.precision ?? 2)} m`;

@@ -8,6 +8,7 @@ import {
 import { isPointInPolygon } from "../../../domain/geometry/polygon";
 import { getWallGeometry, outwardWallNormal } from "../../../domain/geometry/walls";
 import type { DisplayUnit, Project } from "../../../domain/project";
+import type { DocumentExportUnit } from "../../../domain/export/documentSettings";
 import {
   planScenePaintOrder,
   type PlanScene,
@@ -315,7 +316,7 @@ export function drawRoomWallDimensions(
   fonts: PdfFonts,
   room: PlanSceneRoom,
   transform: PlanTransform,
-  unit: DisplayUnit
+  unit: DocumentExportUnit
 ) {
   for (const wall of room.walls) {
     const start = transform.point(wall.startMm);

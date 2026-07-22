@@ -39,7 +39,11 @@ const settings: EffectiveDocumentSettings = {
   savedViews: [{ view: savedView, valid: true, included: true }],
   dimensions: true,
   grid: false,
-  paperSize: "a4"
+  paperSize: "a4",
+  planUnit: "auto",
+  elevationUnit: "auto",
+  resolvedPlanUnit: "cm",
+  resolvedElevationUnit: "cm"
 };
 
 const project = {

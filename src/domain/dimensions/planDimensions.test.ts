@@ -3,7 +3,9 @@ import type { FloorWall } from "../geometry/planObjects";
 import type { PlanRect } from "../geometry/planObjects";
 import {
   derivePlanFloorGaps,
+  derivePlanSceneGaps,
   derivePlanWallGaps,
+  derivePlanWallGapsAllObjects,
   type PlanFloorObjectInput
 } from "./planDimensions";
 
@@ -247,5 +249,85 @@ describe("derivePlanWallGaps", () => {
       wall: wall("deg", "room", [1000, 1000], [1000, 1000])
     });
     expect(gaps).toEqual([]);
+  });
+});
+
+describe("derivePlanWallGapsAllObjects", () => {
+  const horizontalWall = wall("wall", "room", [0, 0], [4000, 0]);
+
+  it("emits every along-wall gap once: both ends plus each interior pair", () => {
+    // a:[600,1000] b:[1800,2200] c:[3200,3600] on a 4000mm wall.
+    const gaps = derivePlanWallGapsAllObjects({
+      objects: [
+        { id: "a", xMm: 800, widthMm: 400 },
+        { id: "b", xMm: 2000, widthMm: 400 },
+        { id: "c", xMm: 3400, widthMm: 400 }
+      ],
+      wall: horizontalWall
+    });
+    // left end 600, a→b 800, b→c 1000, right end 400 → four distinct gaps.
+    expect(gaps.map((gap) => Math.round(gap.gapMm))).toEqual([600, 800, 1000, 400]);
+    // Each gap emitted exactly once (no A→B / B→A duplication).
+    expect(new Set(gaps.map((gap) => gap.id)).size).toBe(gaps.length);
+  });
+
+  it("drops a flush (zero-clearance) segment between touching objects", () => {
+    // a:[600,1000] b:[1000,1400] touch at 1000 → no interior gap, only the ends.
+    const gaps = derivePlanWallGapsAllObjects({
+      objects: [
+        { id: "a", xMm: 800, widthMm: 400 },
+        { id: "b", xMm: 1200, widthMm: 400 }
+      ],
+      wall: horizontalWall
+    });
+    expect(gaps.map((gap) => Math.round(gap.gapMm))).toEqual([600, 2600]);
+  });
+
+  it("returns nothing for a degenerate wall or no objects", () => {
+    expect(
+      derivePlanWallGapsAllObjects({
+        objects: [{ id: "a", xMm: 800, widthMm: 400 }],
+        wall: wall("deg", "room", [10, 10], [10, 10])
+      })
+    ).toEqual([]);
+    expect(
+      derivePlanWallGapsAllObjects({ objects: [], wall: horizontalWall })
+    ).toEqual([]);
+  });
+});
+
+describe("derivePlanSceneGaps", () => {
+  it("combines floor-object gaps (all selected) with wall spacing chains", () => {
+    const gaps = derivePlanSceneGaps({
+      floorObjects: [
+        floorObject("f1", 800, 1500, 400, 400),
+        floorObject("f2", 2000, 1500, 400, 400)
+      ],
+      walls: RECT_ROOM_WALLS,
+      wallObjects: [
+        { id: "w1", wallId: "w-top", xMm: 800, widthMm: 400 },
+        { id: "w2", wallId: "w-top", xMm: 2000, widthMm: 400 }
+      ]
+    });
+    // A floor gap between f1 and f2 (800mm) survives without any selection set.
+    expect(
+      gaps.some(
+        (gap) => gap.id.startsWith("floor-gap:") && Math.round(gap.gapMm) === 800
+      )
+    ).toBe(true);
+    // The two wall objects yield ONE gap between them (800mm), not two.
+    const interior = gaps.filter(
+      (gap) => gap.id.startsWith("wall-gap:") && Math.round(gap.gapMm) === 800
+    );
+    expect(interior).toHaveLength(1);
+  });
+
+  it("emits no wall gaps for a wall with no objects", () => {
+    const gaps = derivePlanSceneGaps({
+      floorObjects: [],
+      walls: RECT_ROOM_WALLS,
+      wallObjects: []
+    });
+    expect(gaps.filter((gap) => gap.id.startsWith("wall-gap:"))).toEqual([]);
   });
 });

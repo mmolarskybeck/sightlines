@@ -1,6 +1,49 @@
 import { getRoomPlaceableWalls } from "../geometry/placeableWalls";
-import type { Project, SavedView } from "../project";
+import type { DisplayUnit, Project, SavedView } from "../project";
 import { isDegeneratePose } from "../savedViews";
+import { unitSystemFromDisplayUnit } from "../units/unitSystem";
+
+// The units a PDF dimension may print in. Millimetres are export-only (not part
+// of the app's DisplayUnit), so this widens DisplayUnit with "mm".
+export type DocumentExportUnit = DisplayUnit | "mm";
+
+// A per-surface unit choice: an explicit unit, or "auto" (resolve from the
+// project + surface). Persisted per project; missing = "auto".
+export type DocumentExportUnitPreference = "auto" | DocumentExportUnit;
+
+const EXPORT_UNITS: readonly DocumentExportUnit[] = [
+  "ft",
+  "in",
+  "cm",
+  "m",
+  "mm"
+];
+
+function isExportUnit(value: unknown): value is DocumentExportUnit {
+  return (
+    typeof value === "string" &&
+    EXPORT_UNITS.includes(value as DocumentExportUnit)
+  );
+}
+
+function isUnitPreference(value: unknown): value is DocumentExportUnitPreference {
+  return value === "auto" || isExportUnit(value);
+}
+
+// Single source of truth for "Auto" resolution, shared by the export pipeline
+// and the dialog so the parenthetical hint ("Auto (in)") always matches what
+// actually prints. Plan pages follow the project unit; elevation pages follow
+// the app's in-app elevation view convention (imperial → in, metric → cm) so
+// the exported elevation reads in the same unit the on-screen elevation does.
+export function resolveDocumentExportUnit(
+  preference: DocumentExportUnitPreference | undefined,
+  projectUnit: DisplayUnit,
+  surface: "plan" | "elevation"
+): DocumentExportUnit {
+  if (preference && preference !== "auto") return preference;
+  if (surface === "plan") return projectUnit;
+  return unitSystemFromDisplayUnit(projectUnit) === "imperial" ? "in" : "cm";
+}
 
 export type DocumentSectionId =
   | "overview"
@@ -22,6 +65,10 @@ export type DocumentExportPreferences = {
   dimensions?: boolean;
   grid?: boolean;
   paperSize?: DocumentPaperSize;
+  // Display units for exported dimensions, chosen separately per surface.
+  // Missing (legacy prefs) = "auto".
+  planUnit?: DocumentExportUnitPreference;
+  elevationUnit?: DocumentExportUnitPreference;
 };
 
 export type DocumentWallChoice = {
@@ -51,6 +98,13 @@ export type EffectiveDocumentSettings = {
   dimensions: boolean;
   grid: boolean;
   paperSize: DocumentPaperSize;
+  // The user's per-surface preference (may be "auto")…
+  planUnit: DocumentExportUnitPreference;
+  elevationUnit: DocumentExportUnitPreference;
+  // …and the concrete unit that preference resolves to for this project, so the
+  // pipeline and dialog share one resolution.
+  resolvedPlanUnit: DocumentExportUnit;
+  resolvedElevationUnit: DocumentExportUnit;
 };
 
 export const EMPTY_DOCUMENT_EXPORT_PREFERENCES: DocumentExportPreferences = {
@@ -109,6 +163,12 @@ export function sanitizeDocumentExportPreferences(
     ...(typeof candidate.paperSize === "string" &&
     PAPER_SIZES.has(candidate.paperSize as DocumentPaperSize)
       ? { paperSize: candidate.paperSize as DocumentPaperSize }
+      : {}),
+    ...(isUnitPreference(candidate.planUnit)
+      ? { planUnit: candidate.planUnit }
+      : {}),
+    ...(isUnitPreference(candidate.elevationUnit)
+      ? { elevationUnit: candidate.elevationUnit }
       : {})
   };
 }
@@ -202,10 +262,22 @@ export function reconcileDocumentExportPreferences(
       };
     });
 
-  const hasIncludedElevation = rooms.some((room) =>
-    room.walls.some((wall) => wall.included)
+  // Room plans, Elevations, and 3D views no longer carry an independent
+  // "section enabled" flag: whether the section is on is *derived* from its
+  // children (§ any child selected => section on). This avoids the classic
+  // parent/child desync trap where a user unchecks the section, then checks
+  // a child, and the export silently drops that child because the stale
+  // section flag still reads false. Legacy stored `sections` entries for
+  // these three ids are preserved verbatim in `preferences` for backward
+  // compatibility (harmless, simply unused going forward) but are not read
+  // here. "Overview" has no children, so it keeps its own explicit flag.
+  const roomPlanValues = rooms.map((room) => room.planIncluded);
+  const elevationValues = rooms.flatMap((room) =>
+    room.walls.map((wall) => wall.included)
   );
-  const hasSavedViews = savedViewChoices.length > 0;
+  const validSavedViewValues = savedViewChoices
+    .filter((choice) => choice.valid)
+    .map((choice) => choice.included);
 
   const preferences: DocumentExportPreferences = {
     sections: source.sections,
@@ -216,27 +288,42 @@ export function reconcileDocumentExportPreferences(
       ? { dimensions: source.dimensions }
       : {}),
     ...(source.grid !== undefined ? { grid: source.grid } : {}),
-    ...(source.paperSize !== undefined ? { paperSize: source.paperSize } : {})
+    ...(source.paperSize !== undefined ? { paperSize: source.paperSize } : {}),
+    ...(source.planUnit !== undefined ? { planUnit: source.planUnit } : {}),
+    ...(source.elevationUnit !== undefined
+      ? { elevationUnit: source.elevationUnit }
+      : {})
   };
+
+  const planUnit = source.planUnit ?? "auto";
+  const elevationUnit = source.elevationUnit ?? "auto";
 
   return {
     preferences,
     settings: {
       sections: {
         overview: sectionOrDefault(source, "overview", true),
-        roomPlans: sectionOrDefault(source, "roomPlans", roomCount > 1),
-        elevations: sectionOrDefault(
-          source,
-          "elevations",
-          hasIncludedElevation
-        ),
-        threeDViews: sectionOrDefault(source, "threeDViews", hasSavedViews)
+        roomPlans: selectionState(roomPlanValues) !== false,
+        elevations: selectionState(elevationValues) !== false,
+        threeDViews: selectionState(validSavedViewValues) !== false
       },
       rooms,
       savedViews: savedViewChoices,
       dimensions: source.dimensions ?? true,
       grid: source.grid ?? false,
-      paperSize: source.paperSize ?? defaultDocumentPaperSize(locale)
+      paperSize: source.paperSize ?? defaultDocumentPaperSize(locale),
+      planUnit,
+      elevationUnit,
+      resolvedPlanUnit: resolveDocumentExportUnit(
+        planUnit,
+        project.unit,
+        "plan"
+      ),
+      resolvedElevationUnit: resolveDocumentExportUnit(
+        elevationUnit,
+        project.unit,
+        "elevation"
+      )
     }
   };
 }

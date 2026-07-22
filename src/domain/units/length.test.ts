@@ -79,4 +79,9 @@ describe("formatLength", () => {
       `10" (25.4 cm)`
     );
   });
+
+  it("formats millimetres as whole numbers", () => {
+    expect(formatLength(1234, { unit: "mm" })).toBe("1234 mm");
+    expect(formatLength(1234.6, { unit: "mm" })).toBe("1235 mm");
+  });
 });

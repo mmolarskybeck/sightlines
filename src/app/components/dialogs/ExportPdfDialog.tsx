@@ -5,14 +5,17 @@ import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
 import {
   countDocumentPages,
+  resolveDocumentExportUnit,
   selectionState,
   type DocumentExportPreferences,
+  type DocumentExportUnitPreference,
   type DocumentPaperSize,
   type DocumentSectionId,
   type EffectiveDocumentSettings
 } from "../../../domain/export/documentSettings";
-import type { Project } from "../../../domain/project";
+import type { Artwork, Project } from "../../../domain/project";
 import { composeSavedViewLabel } from "../../../domain/savedViews";
+import { ExportPdfPreview } from "./ExportPdfPreview";
 import { useDocumentExportPreferences } from "../../hooks/useDocumentExportPreferences";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
@@ -33,21 +36,46 @@ import { Progress } from "../ui/progress";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue
 } from "../ui/select";
 import { Switch } from "../ui/switch";
 
-const PAPER_SIZE_OPTIONS: {
-  value: DocumentPaperSize;
+const PAPER_SIZE_GROUPS: {
   label: string;
+  options: { value: DocumentPaperSize; label: string }[];
 }[] = [
-  { value: "a4", label: "A4" },
-  { value: "letter", label: "Letter" },
-  { value: "a3", label: "A3" },
-  { value: "tabloid", label: "Tabloid 11 × 17" }
+  {
+    label: "ISO",
+    options: [
+      { value: "a4", label: "A4" },
+      { value: "a3", label: "A3" }
+    ]
+  },
+  {
+    label: "US",
+    options: [
+      { value: "letter", label: "Letter" },
+      { value: "tabloid", label: "Tabloid 11 × 17" }
+    ]
+  }
 ];
+
+// Explicit unit choices, in the task's fixed order. Labels mirror the Settings
+// dialog's unit menu ("Feet & inches (ft)", "Inches (in)", …) so the two
+// surfaces name units the same way; "auto" is prepended per-surface with its
+// resolved unit shown in parentheses.
+const EXPORT_UNIT_OPTIONS: { value: DocumentExportUnitPreference; label: string }[] =
+  [
+    { value: "ft", label: "Feet & inches (ft)" },
+    { value: "in", label: "Inches (in)" },
+    { value: "cm", label: "Centimeters (cm)" },
+    { value: "m", label: "Meters (m)" },
+    { value: "mm", label: "Millimeters (mm)" }
+  ];
 
 type ExportPdfDialogProps = {
   open: boolean;
@@ -56,6 +84,9 @@ type ExportPdfDialogProps = {
   onExport: (settings: EffectiveDocumentSettings) => void;
   onPersistenceError?: (message: string) => void;
   thumbnailUrls?: Readonly<Record<string, string>>;
+  // Joined artwork records, so the inline preview can draw wall-object
+  // footprints/elevation rects from the same scene data the export uses.
+  artworksById?: ReadonlyMap<string, Artwork>;
   // Determinate progress while App assembles the PDF; null/undefined = idle.
   // App owns the async export, so this component only reflects its state.
   exportState?: { done: number; total: number } | null;
@@ -69,6 +100,7 @@ export function ExportPdfDialog({
   onExport,
   onPersistenceError,
   thumbnailUrls = {},
+  artworksById,
   exportState,
   onCancelExport
 }: ExportPdfDialogProps) {
@@ -123,25 +155,19 @@ export function ExportPdfDialog({
     }));
   };
 
+  // Section "enabled" is derived from its children (see documentSettings.ts),
+  // so toggling the parent checkbox just needs to set every child to match
+  // the opposite of the current state: fully checked -> clear all, anything
+  // else (empty or indeterminate) -> select all.
   const handleParentToggle = ({
-    sectionId,
     values,
     setAll
   }: {
-    sectionId: Exclude<DocumentSectionId, "overview">;
     values: readonly boolean[];
     setAll: (included: boolean) => void;
   }) => {
-    const enabled = settings.sections[sectionId];
     const state = selectionState(values);
-    if (!enabled) {
-      setSection(sectionId, true);
-      if (state === false) setAll(true);
-    } else if (state !== true) {
-      setAll(true);
-    } else {
-      setSection(sectionId, false);
-    }
+    setAll(state !== true);
   };
 
   const roomPlanValues = settings.rooms.map((room) => room.planIncluded);
@@ -176,31 +202,29 @@ export function ExportPdfDialog({
                     setSection("overview", checked === true)
                   }
                 />
-                <button
-                  className="export-section-label"
-                  type="button"
-                  onClick={() =>
-                    setSection("overview", !settings.sections.overview)
-                  }
-                >
-                  Overview
-                </button>
+                <span style={{ display: "grid", gap: "var(--space-2)", minWidth: 0 }}>
+                  <button
+                    className="export-section-label"
+                    type="button"
+                    onClick={() =>
+                      setSection("overview", !settings.sections.overview)
+                    }
+                  >
+                    Overview
+                  </button>
+                  <ExportRowDescription>
+                    Entire floor plan on one page
+                  </ExportRowDescription>
+                </span>
               </div>
 
               <ExportSection
-                count={
-                  settings.sections.roomPlans
-                    ? roomPlanValues.filter(Boolean).length
-                    : 0
-                }
+                count={roomPlanValues.filter(Boolean).length}
                 countTotal={settings.rooms.length}
+                description="One page per room, with dimensions"
                 label="Room plans"
                 open={openSections.roomPlans}
-                sectionState={
-                  settings.sections.roomPlans
-                    ? selectionState(roomPlanValues)
-                    : false
-                }
+                sectionState={selectionState(roomPlanValues)}
                 onOpenChange={(next) =>
                   setOpenSections((current) => ({
                     ...current,
@@ -209,7 +233,6 @@ export function ExportPdfDialog({
                 }
                 onToggle={() =>
                   handleParentToggle({
-                    sectionId: "roomPlans",
                     values: roomPlanValues,
                     setAll: (included) =>
                       setRoomPlans(
@@ -242,19 +265,11 @@ export function ExportPdfDialog({
               </ExportSection>
 
               <ExportSection
-                count={
-                  settings.sections.elevations
-                    ? wallValues.filter(Boolean).length
-                    : 0
-                }
+                count={wallValues.filter(Boolean).length}
                 countTotal={wallValues.length}
                 label="Elevations"
                 open={openSections.elevations}
-                sectionState={
-                  settings.sections.elevations
-                    ? selectionState(wallValues)
-                    : false
-                }
+                sectionState={selectionState(wallValues)}
                 onOpenChange={(next) =>
                   setOpenSections((current) => ({
                     ...current,
@@ -263,7 +278,6 @@ export function ExportPdfDialog({
                 }
                 onToggle={() =>
                   handleParentToggle({
-                    sectionId: "elevations",
                     values: wallValues,
                     setAll: (included) =>
                       setElevations(
@@ -362,20 +376,12 @@ export function ExportPdfDialog({
               </ExportSection>
 
               <ExportSection
-                count={
-                  settings.sections.threeDViews
-                    ? savedViewValues.filter(Boolean).length
-                    : 0
-                }
+                count={savedViewValues.filter(Boolean).length}
                 countTotal={validSavedViews.length}
                 disabled={validSavedViews.length === 0}
                 label="3D views"
                 open={openSections.threeDViews}
-                sectionState={
-                  settings.sections.threeDViews
-                    ? selectionState(savedViewValues)
-                    : false
-                }
+                sectionState={selectionState(savedViewValues)}
                 onOpenChange={(next) =>
                   setOpenSections((current) => ({
                     ...current,
@@ -384,7 +390,6 @@ export function ExportPdfDialog({
                 }
                 onToggle={() =>
                   handleParentToggle({
-                    sectionId: "threeDViews",
                     values: savedViewValues,
                     setAll: (included) =>
                       setSavedViews(
@@ -450,7 +455,7 @@ export function ExportPdfDialog({
               <ExportSwitchRow
                 checked={settings.dimensions}
                 description="Automatic measurements"
-                label="Dimensions"
+                label="Show dimensions"
                 onCheckedChange={(dimensions) =>
                   setPreferences((current) => ({
                     ...current,
@@ -458,10 +463,48 @@ export function ExportPdfDialog({
                   }))
                 }
               />
+              {settings.dimensions && (
+                <div
+                  className="export-unit-rows"
+                  style={{
+                    display: "grid",
+                    gap: "var(--space-6)",
+                    paddingLeft: "var(--space-8)"
+                  }}
+                >
+                  <ExportUnitRow
+                    label="Plan units"
+                    value={settings.planUnit}
+                    autoUnit={resolveDocumentExportUnit(
+                      "auto",
+                      project.unit,
+                      "plan"
+                    )}
+                    onValueChange={(planUnit) =>
+                      setPreferences((current) => ({ ...current, planUnit }))
+                    }
+                  />
+                  <ExportUnitRow
+                    label="Elevation units"
+                    value={settings.elevationUnit}
+                    autoUnit={resolveDocumentExportUnit(
+                      "auto",
+                      project.unit,
+                      "elevation"
+                    )}
+                    onValueChange={(elevationUnit) =>
+                      setPreferences((current) => ({
+                        ...current,
+                        elevationUnit
+                      }))
+                    }
+                  />
+                </div>
+              )}
               <ExportSwitchRow
                 checked={settings.grid}
-                description="Show the drawing grid"
-                label="Grid"
+                description="Drawing grid on plans and elevations"
+                label="Show grid"
                 onCheckedChange={(grid) =>
                   setPreferences((current) => ({ ...current, grid }))
                 }
@@ -485,10 +528,15 @@ export function ExportPdfDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {PAPER_SIZE_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
+                    {PAPER_SIZE_GROUPS.map((group) => (
+                      <SelectGroup key={group.label}>
+                        <SelectLabel>{group.label}</SelectLabel>
+                        {group.options.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
                     ))}
                   </SelectContent>
                 </Select>
@@ -498,6 +546,13 @@ export function ExportPdfDialog({
               </p>
             </section>
           </aside>
+
+          <ExportPdfPreview
+            project={project}
+            settings={settings}
+            artworksById={artworksById}
+            thumbnailUrls={thumbnailUrls}
+          />
         </fieldset>
 
         <DialogFooter className="export-pdf-footer">
@@ -565,6 +620,7 @@ function ExportSection({
   children,
   count,
   countTotal,
+  description,
   disabled = false,
   label,
   open,
@@ -575,6 +631,7 @@ function ExportSection({
   children: React.ReactNode;
   count: number;
   countTotal?: number;
+  description?: string;
   disabled?: boolean;
   label: string;
   open: boolean;
@@ -604,14 +661,19 @@ function ExportSection({
           disabled={disabled}
           onCheckedChange={onToggle}
         />
-        <button
-          className="export-section-label"
-          disabled={disabled}
-          type="button"
-          onClick={onToggle}
-        >
-          {label}
-        </button>
+        <span style={{ display: "grid", gap: "var(--space-2)", minWidth: 0 }}>
+          <button
+            className="export-section-label"
+            disabled={disabled}
+            type="button"
+            onClick={onToggle}
+          >
+            {label}
+          </button>
+          {description && (
+            <ExportRowDescription>{description}</ExportRowDescription>
+          )}
+        </span>
         <span className="export-section-count">
           {countTotal === undefined ? count : `${count} of ${countTotal}`}
         </span>
@@ -620,6 +682,24 @@ function ExportSection({
         <div className="export-section-content">{children}</div>
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+function ExportRowDescription({ children }: { children: React.ReactNode }) {
+  return (
+    <small
+      style={{
+        display: "block",
+        overflow: "hidden",
+        color: "var(--muted)",
+        fontSize: "var(--type-xs)",
+        lineHeight: "var(--leading-copy)",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap"
+      }}
+    >
+      {children}
+    </small>
   );
 }
 
@@ -651,6 +731,47 @@ function ExportSwitchRow({
         <strong>{label}</strong>
         <small>{description}</small>
       </span>
+    </label>
+  );
+}
+
+// A compact unit picker reusing the Paper size row's exact label+Select
+// structure (the row-grid select-trigger styling is finicky — see the Settings
+// row-grid history — so this deliberately does not invent a new layout). The
+// leading "Auto (…)" option resolves through the same function the pipeline
+// uses, so the hint always matches what prints.
+function ExportUnitRow({
+  autoUnit,
+  label,
+  onValueChange,
+  value
+}: {
+  autoUnit: string;
+  label: string;
+  onValueChange: (value: DocumentExportUnitPreference) => void;
+  value: DocumentExportUnitPreference;
+}) {
+  return (
+    <label className="export-paper-field">
+      <span>{label}</span>
+      <Select
+        value={value}
+        onValueChange={(next) =>
+          onValueChange(next as DocumentExportUnitPreference)
+        }
+      >
+        <SelectTrigger aria-label={label}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="auto">{`Auto (${autoUnit})`}</SelectItem>
+          {EXPORT_UNIT_OPTIONS.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </label>
   );
 }

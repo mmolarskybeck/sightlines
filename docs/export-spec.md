@@ -771,8 +771,9 @@ editorial constant, not a user option.
   height.
   Intervening works/openings block farther relationships; each pair/axis is
   dimensioned once; touching gaps read **0**; overlaps never print as
-  negative gaps. Room plan pages carry wall lengths; the Overview carries
-  neither.
+  negative gaps. Room plan pages carry wall lengths and top-down object/floor
+  spacing gaps (§9.6 engine, inside the room; wall lengths sit outside it);
+  the Overview carries neither.
 - With Dimensions off, and with Grid on/off, pages render accordingly.
 - Works with missing or absent images render the §10.3 vector placeholder
   with identifying metadata or a deterministic **Untitled work n** fallback;
@@ -890,9 +891,11 @@ Task-based, with curators and one installer if possible:
    Intervening objects block farther relationships; touching reads **0**;
    overlaps never print
    as negative gaps. This one rule covers rows and salon hangs without lane
-   classification. Room plans carry wall lengths; the Overview carries no
-   dimension lines. Center height, not bottom-to-floor, is the v1 vertical
-   datum.
+   classification. Room plans carry wall lengths **plus top-down object/floor
+   spacing gaps** (along-wall clearances between wall-hung objects and each
+   floor object's clearance to its neighbors and room walls, from the same
+   shared engine via `derivePlanSceneGaps`); the Overview carries no dimension
+   lines. Center height, not bottom-to-floor, is the v1 vertical datum.
 6. Grid excludable/includable in documents, default off; snapshots follow
    canvas grid visibility.
 7. Paper sizes: A4, Letter, A3, Tabloid 11×17. Orientation, margins,

@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { faceWallId } from "../geometry/freestandingWalls";
+import { getRoomPlaceableWalls } from "../geometry/placeableWalls";
 import { createSampleProject } from "../sample/sampleProject";
 import type { SavedView } from "../project";
 import {
   countDocumentPages,
   defaultDocumentPaperSize,
   reconcileDocumentExportPreferences,
+  resolveDocumentExportUnit,
   sanitizeDocumentExportPreferences,
   selectionState
 } from "./documentSettings";
@@ -141,7 +143,11 @@ describe("document export settings", () => {
     expect(second.preferences.roomPlans).toEqual({ "room-main": true });
     expect(second.preferences.elevations).toEqual({ "wall-north": false });
     expect(second.preferences.savedViews).toEqual({ "view-1": false });
-    expect(second.settings.sections.elevations).toBe(false);
+    // "Elevations" is derived from its children, not from the stored
+    // (now-legacy) sections.elevations flag. The reconciled project gained
+    // a new partition face that defaults to included (it holds work), so
+    // the section reads on even though it was stored disabled.
+    expect(second.settings.sections.elevations).toBe(true);
     expect(
       second.settings.rooms[0].walls.find(
         (wall) => wall.wallId === "wall-north"
@@ -232,5 +238,165 @@ describe("document export settings", () => {
     expect(defaultDocumentPaperSize("en-CA")).toBe("letter");
     expect(defaultDocumentPaperSize("en-GB")).toBe("a4");
     expect(defaultDocumentPaperSize("fr-FR")).toBe("a4");
+  });
+
+  describe("export dimension units", () => {
+    it("resolves Auto to project unit for plans and the elevation-view convention for elevations", () => {
+      // Imperial project: plan follows the project unit; elevation follows the
+      // in-app elevation view (imperial → inches).
+      expect(resolveDocumentExportUnit("auto", "ft", "plan")).toBe("ft");
+      expect(resolveDocumentExportUnit("auto", "ft", "elevation")).toBe("in");
+      expect(resolveDocumentExportUnit("auto", "in", "elevation")).toBe("in");
+      // Metric project: plan follows the project unit; elevation → cm.
+      expect(resolveDocumentExportUnit("auto", "cm", "plan")).toBe("cm");
+      expect(resolveDocumentExportUnit("auto", "cm", "elevation")).toBe("cm");
+      expect(resolveDocumentExportUnit("auto", "m", "elevation")).toBe("cm");
+      // An explicit choice is honored on either surface, including mm.
+      expect(resolveDocumentExportUnit("mm", "ft", "plan")).toBe("mm");
+      expect(resolveDocumentExportUnit("m", "ft", "elevation")).toBe("m");
+    });
+
+    it("defaults missing unit prefs to Auto and exposes the resolved units", () => {
+      const project = createSampleProject(); // unit: "ft"
+      const { preferences, settings } = reconcileDocumentExportPreferences(
+        project,
+        undefined
+      );
+
+      expect(settings.planUnit).toBe("auto");
+      expect(settings.elevationUnit).toBe("auto");
+      expect(settings.resolvedPlanUnit).toBe("ft");
+      expect(settings.resolvedElevationUnit).toBe("in");
+      // Auto is not materialized into stored prefs (missing = auto).
+      expect(preferences.planUnit).toBeUndefined();
+      expect(preferences.elevationUnit).toBeUndefined();
+    });
+
+    it("round-trips an explicit mm override through sanitize and reconcile", () => {
+      const project = createSampleProject();
+      const sanitized = sanitizeDocumentExportPreferences({
+        sections: {},
+        roomPlans: {},
+        elevations: {},
+        savedViews: {},
+        planUnit: "mm",
+        elevationUnit: "cm"
+      });
+      expect(sanitized.planUnit).toBe("mm");
+      expect(sanitized.elevationUnit).toBe("cm");
+
+      const { preferences, settings } = reconcileDocumentExportPreferences(
+        project,
+        sanitized
+      );
+      expect(preferences.planUnit).toBe("mm");
+      expect(preferences.elevationUnit).toBe("cm");
+      expect(settings.resolvedPlanUnit).toBe("mm");
+      expect(settings.resolvedElevationUnit).toBe("cm");
+    });
+
+    it("drops malformed unit prefs and treats legacy prefs (no unit keys) as Auto", () => {
+      // Malformed values are stripped by sanitize.
+      const sanitized = sanitizeDocumentExportPreferences({
+        sections: {},
+        roomPlans: {},
+        elevations: {},
+        savedViews: {},
+        planUnit: "furlong",
+        elevationUnit: 5
+      });
+      expect(sanitized.planUnit).toBeUndefined();
+      expect(sanitized.elevationUnit).toBeUndefined();
+
+      // A legacy stored blob predating unit prefs reconciles to Auto.
+      const project = createSampleProject();
+      const { settings } = reconcileDocumentExportPreferences(project, {
+        sections: {},
+        roomPlans: {},
+        elevations: {},
+        savedViews: {}
+      });
+      expect(settings.planUnit).toBe("auto");
+      expect(settings.elevationUnit).toBe("auto");
+      expect(settings.resolvedPlanUnit).toBe("ft");
+      expect(settings.resolvedElevationUnit).toBe("in");
+    });
+  });
+
+  describe("derived section state (parent/child checkbox model)", () => {
+    it("clearing every child (as the UI does when a section checkbox is unchecked) reads the section as off", () => {
+      const project = createSampleProject();
+      const allWallIds = getRoomPlaceableWalls(
+        project.floor.rooms[0].room
+      ).map((wall) => wall.id);
+
+      const { settings } = reconcileDocumentExportPreferences(project, {
+        sections: { elevations: true },
+        roomPlans: {},
+        elevations: Object.fromEntries(allWallIds.map((id) => [id, false])),
+        savedViews: {}
+      });
+
+      expect(settings.sections.elevations).toBe(false);
+      expect(
+        settings.rooms.flatMap((room) => room.walls).every((wall) => !wall.included)
+      ).toBe(true);
+      expect(countDocumentPages(settings)).toBe(1); // overview only
+    });
+
+    it("checking a single child while the section was stored off exports exactly that child", () => {
+      const project = createSampleProject();
+
+      const { settings } = reconcileDocumentExportPreferences(project, {
+        sections: { overview: false, elevations: false },
+        roomPlans: {},
+        elevations: { "wall-north": true },
+        savedViews: {}
+      });
+
+      // The section reads on because at least one child is included, even
+      // though the legacy `sections.elevations` flag was stored as false.
+      expect(settings.sections.elevations).toBe(true);
+      const included = settings.rooms
+        .flatMap((room) => room.walls)
+        .filter((wall) => wall.included)
+        .map((wall) => wall.wallId);
+      expect(included).toEqual(["wall-north"]);
+      expect(countDocumentPages(settings)).toBe(1); // just that one elevation
+    });
+
+    it("reconciles persisted prefs with a legacy enabled=false flag plus real selections without crashing", () => {
+      const project = createSampleProject();
+      project.savedViews = [VALID_VIEW];
+
+      const legacyStored = {
+        sections: {
+          overview: false,
+          roomPlans: false,
+          elevations: false,
+          threeDViews: false
+        },
+        roomPlans: { "room-main": true },
+        elevations: { "wall-north": true },
+        savedViews: { "view-1": true }
+      };
+
+      expect(() =>
+        reconcileDocumentExportPreferences(project, legacyStored)
+      ).not.toThrow();
+
+      const { settings } = reconcileDocumentExportPreferences(
+        project,
+        legacyStored
+      );
+
+      // Overview keeps its own explicit flag (no children), so the legacy
+      // false is honored there. The composite sections derive from their
+      // now-selected children and read on despite the legacy false flag.
+      expect(settings.sections.overview).toBe(false);
+      expect(settings.sections.roomPlans).toBe(true);
+      expect(settings.sections.elevations).toBe(true);
+      expect(settings.sections.threeDViews).toBe(true);
+    });
   });
 });
