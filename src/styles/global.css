@@ -2209,8 +2209,19 @@ body.panels-resizing * {
   flex: 1 1 auto;
   min-width: 0;
   gap: var(--space-4);
-  /* Pan instead of wrapping at narrow panel widths. */
+  /* Pan instead of wrapping at narrow panel widths. Setting overflow-x alone
+     resolves overflow-y to auto too, so it clips paint outside this box —
+     including the sliding .seg-chip's --shadow-chip (whose 0 0 0 1px ring is
+     the chip's visible border), which the flush 0/0 inset below
+     (.checklist-controls .seg-chip) put right at that clip edge — and the
+     default "All" chip sits at the track's LEFT edge, so the inline axis
+     clips too. Pad the scrollport on all sides and pull the padding back out
+     with a matching negative margin so the chip gets shadow clearance
+     without changing the control's outer geometry. offsetLeft-based chip
+     positioning already includes this padding, so the chip stays aligned. */
   overflow-x: auto;
+  padding: var(--space-2);
+  margin: calc(var(--space-2) * -1);
   scrollbar-width: none;
 }
 
@@ -2233,8 +2244,11 @@ body.panels-resizing * {
 }
 
 .checklist-controls .seg-chip {
-  top: 0;
-  bottom: 0;
+  /* Positive, not flush — flush left the chip's shadow with no room inside
+     the scrollport before .checklist-filters's own padding was clipping it
+     (see that rule's comment). */
+  top: var(--space-2);
+  bottom: var(--space-2);
 }
 
 .checklist-sort-divider {
@@ -2394,6 +2408,7 @@ body.panels-resizing * {
    drawn and finger-sized at all times. The fine-pointer override below is the
    exception, not the rule. */
 .checklist-grip {
+  display: flex;
   flex: 0 0 auto;
   color: var(--subtle);
 }
@@ -2617,8 +2632,9 @@ body.panels-resizing * {
 .checklist-row-actions {
   display: flex;
   flex: 0 0 auto;
-  /* Sits on the title line rather than centred against a 3-line block. */
-  align-self: flex-start;
+  /* Centred against the whole row, like the grip and thumbnail — pinning it
+     to the title line left it visually adrift on 2–3 line rows. */
+  align-self: center;
   align-items: center;
   gap: var(--space-4);
 }

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
 import { DotsSixVerticalIcon } from "@phosphor-icons/react/dist/csr/DotsSixVertical";
-import { DotsThreeVerticalIcon } from "@phosphor-icons/react/dist/csr/DotsThreeVertical";
+import { DotsThreeIcon } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { FileArrowUpIcon } from "@phosphor-icons/react/dist/csr/FileArrowUp";
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
@@ -975,7 +975,22 @@ function ChecklistRow({
         onSelect();
       }}
     >
-      <DotsSixVerticalIcon aria-hidden="true" className="checklist-grip" size={16} />
+      {isDraggable ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="checklist-grip">
+              <DotsSixVerticalIcon aria-hidden="true" weight="bold" size={16} />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent className="toolbar-tooltip" side="left">
+            Drag into exhibition plan
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        <span className="checklist-grip">
+          <DotsSixVerticalIcon aria-hidden="true" weight="bold" size={16} />
+        </span>
+      )}
       {thumbnailUrl ? (
         <img
           ref={thumbnailImgRef}
@@ -1073,17 +1088,24 @@ function ChecklistRow({
               modal={false} for the same body pointer-events reason as the
               panel's Add artwork menu above. */}
           <DropdownMenu modal={false}>
-            <DropdownMenuTrigger asChild>
-              <Button
-                aria-label={`More actions for ${title}`}
-                className="icon-button compact checklist-row-menu"
-                size="icon-sm"
-                variant="ghost"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <DotsThreeVerticalIcon aria-hidden="true" size={16} />
-              </Button>
-            </DropdownMenuTrigger>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    aria-label={`More actions for ${title}`}
+                    className="icon-button compact checklist-row-menu"
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <DotsThreeIcon aria-hidden="true" weight="bold" size={16} />
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent className="toolbar-tooltip" side="left">
+                Artwork actions
+              </TooltipContent>
+            </Tooltip>
             <DropdownMenuContent align="end">
               {/* Present only when there's a placement to remove. Not
                   destructive-toned: this returns the work to the checklist's
