@@ -6010,21 +6010,37 @@ body.panels-resizing * {
   justify-content: center;
 }
 
-/* Two balanced columns: every chip keeps the primitive's fixed control height,
-   so the group reads as one even block with no wrapping. */
+/* Wall additions are peer actions, not a card grid. A single scan line keeps
+   every verb equally weighted and leaves long or translated labels room. */
 .wall-opening-actions .inspector-action-group-buttons {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-/* With an odd number of chips the last one would leave a hole; let it span the
-   row instead, so the block stays rectangular however many verbs there are. */
-.wall-opening-actions .opening-add-chip:last-child:nth-child(odd) {
-  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
 }
 
 .wall-opening-actions .opening-add-chip {
+  min-height: var(--space-40);
   width: 100%;
+  justify-content: flex-start;
+  padding-inline: var(--space-12);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.wall-opening-actions .opening-add-chip:hover {
+  border-color: transparent;
+  background: var(--surface);
+}
+
+.wall-opening-actions .opening-add-chip:active {
+  background: var(--surface-strong);
+}
+
+@media (any-pointer: coarse) {
+  .wall-opening-actions .opening-add-chip {
+    min-height: var(--space-44);
+  }
 }
 
 .inspector-disclosure {
