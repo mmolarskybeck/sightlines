@@ -589,6 +589,37 @@ export function App() {
     toggleMeasure();
   };
 
+  // Safety net for a stranded checklist-drag flag. `draggingArtworkId` is set
+  // on native dragstart and normally cleared by the source row's onDragEnd —
+  // but the row stops being draggable the instant its work lands on a wall
+  // (isDraggable = !isPlaced), so React drops that onDragEnd handler before the
+  // browser fires dragend (desktop re-render race), and iPadOS/WebKit may not
+  // fire dragend at all (the same unreliability artworkDragSession's lingering
+  // timer exists to absorb). Either way the flag would strand non-null, and its
+  // guards in the delete/nudge shortcuts then silently swallow Delete and
+  // arrow-key nudges for the rest of the session. Clear it from the window,
+  // independent of the row: `drop` clears it the moment a work lands (this is
+  // what unblocks a nudge/Delete on a just-dropped, auto-selected work when no
+  // dragend follows), `dragend` covers a drag that ends off any target, and a
+  // trailing pointerdown reclaims the flag if neither fired — a fresh
+  // pointerdown can only land once the drag is truly over, since native DnD
+  // suppresses pointer events for its duration. Clearing on `drop` is safe:
+  // the drop targets resolve the placed work from dataTransfer/the drag
+  // session, and their React drop handlers keep this render's flag value in
+  // closure (setState is async), so the state reset can't disturb placement.
+  useEffect(() => {
+    if (draggingArtworkId === null) return;
+    const clearDragFlag = () => setDraggingArtworkId(null);
+    window.addEventListener("drop", clearDragFlag, true);
+    window.addEventListener("dragend", clearDragFlag, true);
+    window.addEventListener("pointerdown", clearDragFlag, true);
+    return () => {
+      window.removeEventListener("drop", clearDragFlag, true);
+      window.removeEventListener("dragend", clearDragFlag, true);
+      window.removeEventListener("pointerdown", clearDragFlag, true);
+    };
+  }, [draggingArtworkId]);
+
   useDeleteAndEscapeShortcuts({
     project,
     selection,
