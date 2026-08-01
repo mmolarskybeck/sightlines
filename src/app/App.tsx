@@ -293,6 +293,7 @@ export function App() {
   const addWallCase = useAppStore((state) => state.addWallCase);
   const moveOpening = useAppStore((state) => state.moveOpening);
   const resizeOpening = useAppStore((state) => state.resizeOpening);
+  const fitOpeningToAvailableSpan = useAppStore((state) => state.fitOpeningToAvailableSpan);
   const connectOpenings = useAppStore((state) => state.connectOpenings);
   const disconnectOpening = useAppStore((state) => state.disconnectOpening);
   const renameWallText = useAppStore((state) => state.renameWallText);
@@ -2274,12 +2275,15 @@ export function App() {
               connectionCandidates={openingConnectionCandidates}
               onConnect={(partnerId) => void connectOpenings(selectedOpening.id, partnerId)}
               onDisconnect={() => void disconnectOpening(selectedOpening.id)}
+              // Awaited, not void-ed: the resolved OpeningFit is how the
+              // inspector learns that a request was slid or trimmed to fit.
               onCommitPosition={(xMm, yMm) =>
-                void moveOpening(selectedOpening.id, xMm, yMm, allowOverlappingPlacement)
+                moveOpening(selectedOpening.id, xMm, yMm, allowOverlappingPlacement)
               }
               onCommitSize={(widthMm, heightMm) =>
-                void resizeOpening(selectedOpening.id, widthMm, heightMm, allowOverlappingPlacement)
+                resizeOpening(selectedOpening.id, widthMm, heightMm, allowOverlappingPlacement)
               }
+              onFitToWall={() => fitOpeningToAvailableSpan(selectedOpening.id)}
               onDelete={() => void removePlacement(selectedOpening.id)}
             />
           ) : selectedRoomPlacement ? (

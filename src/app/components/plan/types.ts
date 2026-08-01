@@ -94,6 +94,10 @@ export type ObjectDragState = {
   // threaded back into resolvePlanPlacement so its cross-boundary hysteresis
   // tracks the drag rather than the object's committed wall.
   currentAnchorWallId: string | null;
+  // For a PAIRED door/window: the wall its partner sits on — the other face of
+  // the same physical wall, which this drag must never capture. Resolved once
+  // at drag start and passed to resolvePlanPlacement as excludeWallId.
+  partnerWallId: string | null;
   previewPlanRect: PlanRect;
   // May be `{ anchor: "none" }` for an artwork dragged off all walls: the live
   // preview shows the danger token and release is a no-op.

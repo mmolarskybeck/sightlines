@@ -31,12 +31,15 @@ export type UseArrangeNudgeShortcutsParams = {
     yMm: number,
     allowOverlap?: boolean
   ) => Promise<void>;
+  // Resolves to how the request was adjusted to stay on the wall; nudging
+  // ignores it (the clamp is the whole point — a nudge into the wall's end
+  // simply stops there).
   moveOpening: (
     wallObjectId: string,
     xMm: number,
     yMm: number,
     allowOverlap?: boolean
-  ) => Promise<void>;
+  ) => Promise<unknown>;
 };
 
 // Arrange keyboard shortcuts, scoped to the elevation view: Enter commits a

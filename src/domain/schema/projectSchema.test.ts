@@ -6,6 +6,7 @@ import {
   MAX_IMPORT_JSON_LENGTH,
   migrateProject,
   migrateProjectJson,
+  migrateProjectWithReport,
   parseProject
 } from "./projectSchema";
 
@@ -419,6 +420,41 @@ describe("migrateProject", () => {
     ];
 
     expect(migrateProject(project)).toEqual(project);
+  });
+
+  // A document whose paired openings ended up on one wall used to be merely
+  // unsaveable; without repair it would also be permanently UNOPENABLE, since
+  // parseProject rejects it on load too.
+  it("repairs a same-wall opening pairing instead of refusing to open the document", () => {
+    const project = createSampleProject();
+    project.wallObjects = [
+      makeOpening({ id: "door-a", kind: "door", wallId: "wall-north", connectsToObjectId: "door-b" }),
+      makeOpening({ id: "door-b", kind: "door", wallId: "wall-north", connectsToObjectId: "door-a" })
+    ];
+
+    expect(() => parseProject(project)).toThrow(/different walls/i);
+
+    const { project: repaired, repairedCount } = migrateProjectWithReport(project);
+    expect(repairedCount).toBe(1);
+    for (const id of ["door-a", "door-b"]) {
+      const door = repaired.wallObjects.find((object) => object.id === id)!;
+      expect(door.kind === "door" ? door.connectsToObjectId : undefined).toBeUndefined();
+    }
+    // Both openings survive; only the impossible link is dropped.
+    expect(repaired.wallObjects).toHaveLength(2);
+  });
+
+  it("leaves a valid pairing on two non-facing walls alone when opening a document", () => {
+    const project = createSampleProject();
+    project.wallObjects = [
+      makeOpening({ id: "door-a", kind: "door", wallId: "wall-north", connectsToObjectId: "door-b" }),
+      makeOpening({ id: "door-b", kind: "door", wallId: "wall-south", connectsToObjectId: "door-a" })
+    ];
+
+    const { project: opened, repairedCount } = migrateProjectWithReport(project);
+    expect(repairedCount).toBe(0);
+    const doorA = opened.wallObjects.find((object) => object.id === "door-a")!;
+    expect(doorA.kind === "door" ? doorA.connectsToObjectId : undefined).toBe("door-b");
   });
 
   it("rejects a document from a newer schema version than this app supports", () => {

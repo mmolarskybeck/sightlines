@@ -190,6 +190,8 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
         floatPolicy: current.floatPolicy,
         // Keep wall-capture hysteresis across pointer moves.
         currentAnchorWallId: current.currentAnchorWallId,
+        // A paired opening must never capture its twin's face (see excludeWallId).
+        excludeWallId: current.partnerWallId,
         captureDistanceMm,
         gridTargets: gridSnapTargets,
         snapToGrid,
@@ -275,6 +277,23 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
     return floatPolicyForKind("artwork", artworkFormFor(artworkId));
   }
 
+  // The wall a paired door/window's partner sits on, or null when the object
+  // isn't a paired opening. That wall is the other face of the SAME physical
+  // wall, so capturing it would put both halves of one shared opening on one
+  // wall — a document the schema rejects at save time (projectSchema.ts). The
+  // two faces are coincident, so they tie on distance for every cursor position
+  // and the side-aware tie-break would otherwise hand the door straight to it.
+  function partnerWallIdOf(objectId: string): string | null {
+    const { project } = getDepsRef.current();
+    const object = project.wallObjects.find((candidate) => candidate.id === objectId);
+    if (object?.kind !== "door" && object?.kind !== "window") return null;
+    if (object.connectsToObjectId === undefined) return null;
+    return (
+      project.wallObjects.find((candidate) => candidate.id === object.connectsToObjectId)
+        ?.wallId ?? null
+    );
+  }
+
   function beginObjectDrag(
     params: BeginObjectDragParams,
     event: ReactPointerEvent<SVGGElement>
@@ -335,6 +354,10 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
           startPointerMm,
           startCenterMm: params.startCenterMm,
           currentAnchorWallId: null,
+          // Group drags re-anchor only ARTWORK members and never route an
+          // opening through resolvePlanPlacement, so there is no capture to
+          // exclude here; normalizeOpeningPairs guards the commit instead.
+          partnerWallId: null,
           previewPlanRect: params.initialPlanRect,
           previewPlacement: params.currentPlacement,
           previousSnapTargetIds: undefined,
@@ -359,6 +382,7 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
       startCenterMm: params.startCenterMm,
       currentAnchorWallId:
         params.currentPlacement.anchor === "wall" ? params.currentPlacement.wallId : null,
+      partnerWallId: partnerWallIdOf(params.objectId),
       previewPlanRect: params.initialPlanRect,
       previewPlacement: params.currentPlacement,
       previousSnapTargetIds: undefined,

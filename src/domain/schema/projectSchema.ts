@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CURRENT_SCHEMA_VERSION, type Project } from "../project";
 import { parseFaceWallId } from "../geometry/freestandingWalls";
+import { normalizeOpeningPairs } from "../placement/openingPairs";
 
 const displayUnitSchema = z.enum(["in", "ft", "cm", "m"]);
 
@@ -416,6 +417,15 @@ function formatApproxMegabytes(lengthInUtf16Units: number): string {
 
 // External JSON follows parse → minimal validation → migration → current validation.
 export function migrateProjectJson(text: string): Project {
+  return migrateProjectJsonWithReport(text).project;
+}
+
+// migrateProjectJson plus the shared-opening repair count, so an imported file
+// that had to be changed on the way in can say so.
+export function migrateProjectJsonWithReport(text: string): {
+  project: Project;
+  repairedCount: number;
+} {
   if (typeof text !== "string") {
     throw new Error("no file content was provided.");
   }
@@ -434,7 +444,7 @@ export function migrateProjectJson(text: string): Project {
     throw new Error("the file is not valid JSON.");
   }
 
-  return migrateProject(parsed);
+  return migrateProjectWithReport(parsed);
 }
 
 type Doc = Record<string, unknown>;
@@ -482,6 +492,17 @@ function migrateV2ToV3(doc: Doc): Doc {
 }
 
 export function migrateProject(input: unknown): Project {
+  return migrateProjectWithReport(input).project;
+}
+
+// migrateProject plus a count of shared-opening pairs that had to be
+// disconnected to make the document valid. Local documents repair silently;
+// the package-import path surfaces the count, since an imported file that
+// changed on the way in should say so.
+export function migrateProjectWithReport(input: unknown): {
+  project: Project;
+  repairedCount: number;
+} {
   const versioned = versionedDocumentSchema.safeParse(input);
 
   if (!versioned.success) {
@@ -515,8 +536,15 @@ export function migrateProject(input: unknown): Project {
     version += 1;
   }
 
+  // Repair structurally broken shared-opening pairings BEFORE validating. A
+  // paired opening that was re-anchored onto its partner's wall (or any
+  // unrelated wall) fails the pairing refinements below, which would otherwise
+  // make the document permanently unopenable rather than merely unsaveable.
+  // normalizeOpeningPairs is written to tolerate this not-yet-parsed input.
+  const { project: repaired, repairedCount } = normalizeOpeningPairs(migrated as unknown as Project);
+
   try {
-    return parseProject(migrated);
+    return { project: parseProject(repaired), repairedCount };
   } catch (error) {
     if (error instanceof z.ZodError) {
       const [issue] = error.issues;

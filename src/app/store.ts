@@ -22,8 +22,15 @@ import {
 } from "../domain/placement/createWallText";
 import {
   clearOpeningPartners,
-  includePairedOpenings
+  includePairedOpenings,
+  normalizeOpeningPairs
 } from "../domain/placement/openingPairs";
+import {
+  FIT_EPSILON_MM,
+  fitOpeningOnWall,
+  getOpeningLegalSpan,
+  type OpeningFit
+} from "../domain/placement/fitOpeningOnWall";
 import { createFloorCase, createWallCase } from "../domain/placement/createCase";
 import { createArtworkPlacement, getEffectivePlacementSizeMm } from "../domain/placement/placeArtwork";
 import { effectiveFloorDepthMm } from "../domain/placement/artworkForm";
@@ -89,6 +96,7 @@ import {
   moveObjectNoun,
   openingNoun,
   resolveFreeOpeningXMm,
+  resolvePairedOpeningSpan,
   syncPartnerMove,
   syncPartnerResize
 } from "./store/openingEdits";
@@ -283,18 +291,25 @@ export type AppState = ArrangeSliceState &
   ) => Promise<void>;
   removePlacement: (wallObjectId: string) => Promise<void>;
   addOpening: (wallId: string, kind: InsertToolKind) => Promise<void>;
+  // Both return how the request was adjusted to stay on the wall, so the
+  // inspector can say what it did ("Moved 2' 6\" to fit the wall."), or null
+  // when nothing was committed. See fitOpeningOnWall.
   moveOpening: (
     wallObjectId: string,
     xMm: number,
     yMm: number,
     allowOverlap?: boolean
-  ) => Promise<void>;
+  ) => Promise<OpeningFit | null>;
   resizeOpening: (
     wallObjectId: string,
     widthMm: number,
     heightMm: number,
     allowOverlap?: boolean
-  ) => Promise<void>;
+  ) => Promise<OpeningFit | null>;
+  // Widen an opening to fill the legal span it currently sits in — bounded by
+  // its same-wall neighbours, else the wall's ends. Widens in place; never
+  // relocates the opening to a larger gap elsewhere on the wall.
+  fitOpeningToAvailableSpan: (wallObjectId: string) => Promise<OpeningFit | null>;
   connectOpenings: (aId: string, bId: string) => Promise<void>;
   disconnectOpening: (id: string) => Promise<void>;
   // Rename a wall text (the only editable field it carries). An empty/blank
@@ -520,7 +535,17 @@ export function createAppStore(deps: AppStoreDeps) {
         void maybeIntervalSnapshot(project);
         return true;
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Could not save project.";
+        // A ZodError's .message is the JSON-stringified issue array, which is
+        // what used to be dumped into the banner and the retry toast. Show the
+        // issue's own sentence instead — unlike formatZodIssue (used on the
+        // artwork path, where the path names an editable field), a schema
+        // path here is an internal object id the user cannot act on.
+        const message =
+          error instanceof z.ZodError
+            ? `Couldn't save: ${formatZodIssueMessage(error)}`
+            : error instanceof Error
+              ? error.message
+              : "Could not save project.";
         set({
           saveState: "error",
           error: message,
@@ -700,6 +725,56 @@ export function createAppStore(deps: AppStoreDeps) {
       return true;
     }
 
+    // The legal span an opening may occupy on its wall, or null when its wall
+    // can't be resolved. Bounded by same-wall neighbours, else the wall's ends.
+    function resolveOpeningSpan(project: Project, target: WallObject) {
+      const wall = getProjectWalls(project).find((candidate) => candidate.id === target.wallId);
+      if (!wall) return null;
+
+      const sameWallObjects = project.wallObjects.filter(
+        (object) => object.wallId === target.wallId
+      );
+      return getOpeningLegalSpan(target, sameWallObjects, wall.lengthMm);
+    }
+
+    // Resolve a requested width/position for `target`. Returns null when the
+    // wall can't be resolved, in which case callers commit the raw request
+    // unchanged (the pre-existing behaviour).
+    //
+    // `bounds` decides what the request is fitted against:
+    //   "free-span" — the run between same-wall neighbours. For WIDTH, where a
+    //     neighbour-aware result is collision-free by construction, so a widen
+    //     never has to be rejected.
+    //   "wall" — the wall's own ends only. For MOVES, which must keep their
+    //     existing contract: an opening dragged onto another opening is BLOCKED
+    //     (opening x opening is forbidden and unoverridable), not quietly slid
+    //     flush against it. Clamping here only stops a typed X from leaving the
+    //     wall entirely; collisions stay the commit gate's decision.
+    function fitOpeningForRequest(
+      project: Project,
+      target: WallObject,
+      requestedWidthMm: number,
+      currentXMm: number,
+      bounds: "free-span" | "wall"
+    ): OpeningFit | null {
+      const wall = getProjectWalls(project).find((candidate) => candidate.id === target.wallId);
+      if (!wall) return null;
+
+      const span =
+        bounds === "wall"
+          ? { spanStartMm: 0, spanEndMm: wall.lengthMm, boundedByNeighbor: false }
+          : resolveOpeningSpan(project, target);
+      if (!span) return null;
+
+      return fitOpeningOnWall({
+        requestedWidthMm,
+        currentXMm,
+        spanStartMm: span.spanStartMm,
+        spanEndMm: span.spanEndMm,
+        constraintSource: span.boundedByNeighbor ? "neighbor" : "wall"
+      });
+    }
+
     // --- commitPlanMove case handlers ----------------------------------------
 
     // wall → wall: same wall (x only) or re-anchor to another wall. Either way
@@ -716,11 +791,20 @@ export function createAppStore(deps: AppStoreDeps) {
         return;
       }
 
-      const nextWallObjects = project.wallObjects.map((object) =>
+      const movedWallObjects = project.wallObjects.map((object) =>
         object.id === wallObject.id
           ? { ...object, wallId: placement.wallId, xMm: placement.xMm }
           : object
       );
+
+      // A wallId rewrite can invalidate a shared-wall pairing (the moved half is
+      // no longer on its partner's coincident twin face). Normalize the FINISHED
+      // draft, so the repair never reads a half-applied batch, and let it ride
+      // the same commit — one undo step covers the move and the disconnect.
+      const nextWallObjects = normalizeOpeningPairs({
+        ...project,
+        wallObjects: movedWallObjects
+      }).project.wallObjects;
 
       await commitWallObjectEdit(
         `Move ${moveObjectNoun(wallObject.kind)}`,
@@ -1603,18 +1687,31 @@ export function createAppStore(deps: AppStoreDeps) {
 
       async moveOpening(wallObjectId, xMm, yMm, allowOverlap = false) {
         const project = get().project;
-        if (!project) return;
+        if (!project) return null;
 
         const target = project.wallObjects.find((wallObject) => wallObject.id === wallObjectId);
-        if (!target || target.kind === "artwork") return;
+        if (!target || target.kind === "artwork") return null;
 
         // Doors must sit on the floorline (center at height/2).
         const clampedYMm = target.kind === "door" ? target.heightMm / 2 : yMm;
 
-        if (target.xMm === xMm && target.yMm === clampedYMm) return;
+        // Keep the opening on its wall. The numeric X field used to commit
+        // whatever was typed, so X = 50' on a 12' wall left a door off the wall
+        // entirely; the drag path has always clamped (resolveOnWall).
+        const raw = fitOpeningForRequest(project, target, target.widthMm, xMm, "wall");
+        // A move must never resize: an opening already wider than its span
+        // keeps its width and simply centres.
+        const fit: OpeningFit | null = raw
+          ? { ...raw, widthMm: target.widthMm, requestedWidthMm: target.widthMm, widthClamped: false }
+          : null;
+        const nextXMm = fit ? fit.xMm : xMm;
+
+        if (target.xMm === nextXMm && target.yMm === clampedYMm) return fit;
 
         let nextWallObjects = project.wallObjects.map((wallObject) =>
-          wallObject.id === wallObjectId ? { ...wallObject, xMm, yMm: clampedYMm } : wallObject
+          wallObject.id === wallObjectId
+            ? { ...wallObject, xMm: nextXMm, yMm: clampedYMm }
+            : wallObject
         );
         let validateIds = [wallObjectId];
 
@@ -1625,7 +1722,7 @@ export function createAppStore(deps: AppStoreDeps) {
           (target.kind === "door" || target.kind === "window") &&
           target.connectsToObjectId !== undefined
         ) {
-          const synced = syncPartnerMove(project, nextWallObjects, target, xMm, clampedYMm);
+          const synced = syncPartnerMove(project, nextWallObjects, target, nextXMm, clampedYMm);
           if (synced) {
             nextWallObjects = synced.nextWallObjects;
             validateIds = [wallObjectId, synced.partnerId];
@@ -1641,21 +1738,103 @@ export function createAppStore(deps: AppStoreDeps) {
           validateIds,
           allowOverlap
         );
+        return fit;
+      },
+
+      async fitOpeningToAvailableSpan(wallObjectId) {
+        const project = get().project;
+        if (!project) return null;
+
+        const target = project.wallObjects.find((wallObject) => wallObject.id === wallObjectId);
+        if (!target || target.kind === "artwork") return null;
+
+        const span = resolveOpeningSpan(project, target);
+        if (!span) return null;
+
+        // Request the whole span; the shared fit path clamps it to exactly the
+        // available width and positions it, so this needs no geometry of its own.
+        return get().resizeOpening(
+          wallObjectId,
+          span.spanEndMm - span.spanStartMm,
+          target.heightMm
+        );
       },
 
       async resizeOpening(wallObjectId, widthMm, heightMm, allowOverlap = false) {
         const project = get().project;
-        if (!project) return;
+        if (!project) return null;
 
         const target = project.wallObjects.find((wallObject) => wallObject.id === wallObjectId);
-        if (!target || target.kind === "artwork") return;
-        if (target.widthMm === widthMm && target.heightMm === heightMm) return;
+        if (!target || target.kind === "artwork") return null;
+
+        // Keep the requested width whenever it fits somewhere on the wall,
+        // sliding the opening the minimum distance to make room; reduce it only
+        // when it cannot fit at all. See fitOpeningOnWall.
+        //
+        // A PAIRED opening is one physical hole through one wall, so it is
+        // solved ONCE against the run both faces share — never fitted per face
+        // and reconciled, which would let the two halves settle at locally
+        // valid but physically different centres.
+        const partner =
+          (target.kind === "door" || target.kind === "window") &&
+          target.connectsToObjectId !== undefined
+            ? project.wallObjects.find((object) => object.id === target.connectsToObjectId)
+            : undefined;
+        const pairedSpan =
+          partner && (partner.kind === "door" || partner.kind === "window")
+            ? resolvePairedOpeningSpan(
+                project,
+                target as ConnectableOpeningWallObject,
+                partner
+              )
+            : null;
+
+        const fit = pairedSpan
+          ? fitOpeningOnWall({
+              requestedWidthMm: widthMm,
+              currentXMm: target.xMm,
+              spanStartMm: pairedSpan.spanStartMm,
+              spanEndMm: pairedSpan.spanEndMm,
+              constraintSource: pairedSpan.constraintSource
+            })
+          : fitOpeningForRequest(project, target, widthMm, target.xMm, "free-span");
+
+        // No run the two faces share: half a shared opening cannot move without
+        // the other half, so report rather than desynchronise them.
+        if (pairedSpan && pairedSpan.spanEndMm - pairedSpan.spanStartMm < FIT_EPSILON_MM) {
+          return {
+            requestedWidthMm: widthMm,
+            widthMm: target.widthMm,
+            xMm: target.xMm,
+            widthClamped: false,
+            positionAdjusted: false,
+            movedByMm: 0,
+            constraint: pairedSpan.constraintSource,
+            noMutualSpan: true
+          };
+        }
+
+        const nextWidthMm = fit ? fit.widthMm : widthMm;
+        const nextXMm = fit ? fit.xMm : target.xMm;
 
         // For doors, recompute yMm so the bottom stays on the floor when height changes.
         const updatedYMm = target.kind === "door" ? heightMm / 2 : target.yMm;
 
+        // Re-requesting a width that clamps to what the opening already has is a
+        // no-op: report the adjustment so the field can explain itself, but do
+        // not stack an undo entry for a document that did not change.
+        if (
+          target.widthMm === nextWidthMm &&
+          target.heightMm === heightMm &&
+          target.xMm === nextXMm
+        ) {
+          return fit;
+        }
+
         let nextWallObjects = project.wallObjects.map((wallObject) =>
-          wallObject.id === wallObjectId ? { ...wallObject, widthMm, heightMm, yMm: updatedYMm } : wallObject
+          wallObject.id === wallObjectId
+            ? { ...wallObject, widthMm: nextWidthMm, heightMm, xMm: nextXMm, yMm: updatedYMm }
+            : wallObject
         );
         let validateIds = [wallObjectId];
 
@@ -1666,7 +1845,14 @@ export function createAppStore(deps: AppStoreDeps) {
           (target.kind === "door" || target.kind === "window") &&
           target.connectsToObjectId !== undefined
         ) {
-          const synced = syncPartnerResize(project, nextWallObjects, target, widthMm, heightMm);
+          const synced = syncPartnerResize(
+            project,
+            nextWallObjects,
+            target,
+            nextWidthMm,
+            heightMm,
+            nextXMm
+          );
           if (synced) {
             nextWallObjects = synced.nextWallObjects;
             validateIds = [wallObjectId, synced.partnerId];
@@ -1680,6 +1866,7 @@ export function createAppStore(deps: AppStoreDeps) {
           validateIds,
           allowOverlap
         );
+        return fit;
       },
 
       async connectOpenings(aId, bId) {
@@ -2249,12 +2436,22 @@ export function createAppStore(deps: AppStoreDeps) {
 
         if (movedWallIds.length === 0 && movedFloorIds.length === 0) return;
 
+        // One normalization pass over the COMPLETED draft. Doing it per-object
+        // inside the map above would be order-dependent: the first twin's move
+        // would be judged against the second twin's not-yet-applied wall and
+        // sever a pair that the finished batch leaves perfectly valid (dragging
+        // both halves onto a new shared wall together must keep them paired).
+        const pairedWallObjects = normalizeOpeningPairs({
+          ...project,
+          wallObjects: nextWallObjects
+        }).project.wallObjects;
+
         // Floor objects get no bounds/collision validation in v1 (see
         // placeArtworkOnFloor) — only the wall-anchored members are checked.
         await commitWallObjectEdit(
           `Move ${movedWallIds.length + movedFloorIds.length} objects`,
           project,
-          nextWallObjects,
+          pairedWallObjects,
           movedWallIds,
           allowOverlap,
           { nextFloorObjects }
@@ -2359,6 +2556,17 @@ export function createAppStore(deps: AppStoreDeps) {
       }
     };
   });
+}
+
+// The first issue's sentence, lowercased to sit after a "Couldn't save: "
+// prefix, with the trailing "(<object id>)" the pairing refinements append
+// stripped — it identifies the record for a developer, not for the user.
+function formatZodIssueMessage(error: z.ZodError): string {
+  const [issue] = error.issues;
+  const message = (issue?.message ?? "the project data is invalid.")
+    .replace(/\s*\([0-9a-f-]{8,}\)\s*(?=\.?$)/i, "")
+    .trim();
+  return message.charAt(0).toLowerCase() + message.slice(1);
 }
 
 function formatZodIssue(error: z.ZodError): string {

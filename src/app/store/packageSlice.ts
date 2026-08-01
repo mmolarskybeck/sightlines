@@ -11,7 +11,7 @@ import {
 import type { Artwork, Project } from "../../domain/project";
 import { AssetNotFoundError } from "../../domain/repositories/assetRepository";
 import type { PackageExportMode } from "../../domain/schema/packageSchema";
-import { migrateProjectJson } from "../../domain/schema/projectSchema";
+import { migrateProjectJsonWithReport } from "../../domain/schema/projectSchema";
 import type { AppState, AppStoreDeps } from "../store";
 import { telemetry } from "../telemetry/telemetry";
 
@@ -152,8 +152,9 @@ export function createPackageSlice(
       // project, a newer schema version than this app knows, or a
       // Sightlines project whose data fails validation. The current
       // project is never touched until that pipeline has fully succeeded.
+      let repairedCount = 0;
       try {
-        project = migrateProjectJson(text);
+        ({ project, repairedCount } = migrateProjectJsonWithReport(text));
       } catch (error) {
         const message = `Import failed: ${
           error instanceof Error ? error.message : "the file could not be read."
@@ -164,6 +165,15 @@ export function createPackageSlice(
       }
 
       setDocument(project, { viewMode: "plan" });
+      // A local document repairs silently, but an imported file that changed on
+      // the way in should say so.
+      if (repairedCount > 0) {
+        toast.warning(
+          repairedCount === 1
+            ? "One invalid shared opening was disconnected while opening this project."
+            : `${repairedCount} invalid shared openings were disconnected while opening this project.`
+        );
+      }
       await persist(project);
     },
 

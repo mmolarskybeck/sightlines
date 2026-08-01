@@ -12,6 +12,11 @@ import {
   getOpeningKindLabel,
   type OpeningKind
 } from "../../domain/placement/createOpening";
+import {
+  FIT_EPSILON_MM,
+  getOpeningLegalSpan,
+  type OpeningFitConstraint
+} from "../../domain/placement/fitOpeningOnWall";
 import type {
   ConnectableOpeningWallObject,
   OpeningWallObject,
@@ -216,13 +221,79 @@ export function syncPartnerMove(
   };
 }
 
-// Mirror size onto a paired twin only when its current slot remains legal.
+// The run a PAIRED opening may occupy, expressed in the target's wall-local
+// coordinates, with both faces' constraints folded into one interval.
+//
+// A pair is one physical opening, so it has to be solved once in a common
+// coordinate space. Fitting each face on its own and reconciling afterwards
+// lets the two halves settle at locally valid but physically different centres.
+//
+// The mapping between twin walls is ORDER-REVERSING: coincident twins are
+// anti-parallel, so mirrorOpeningXMm sends the partner's local x to roughly
+// `length - x`. Intersecting [a1,b1] with the partner's [a2,b2] using the
+// mapped endpoints in their original order would therefore compare a start
+// against an end and silently yield an empty span. Map both endpoints, then
+// re-derive min/max from the results rather than assuming orientation.
+export function resolvePairedOpeningSpan(
+  project: Project,
+  target: ConnectableOpeningWallObject,
+  partner: OpeningWallObject
+): { spanStartMm: number; spanEndMm: number; constraintSource: OpeningFitConstraint } | null {
+  const walls = getProjectWalls(project);
+  const targetWall = walls.find((wall) => wall.id === target.wallId);
+  const partnerWall = walls.find((wall) => wall.id === partner.wallId);
+  if (!targetWall || !partnerWall) return null;
+
+  const sameWall = (wallId: string) =>
+    project.wallObjects.filter((object) => object.wallId === wallId);
+
+  const own = getOpeningLegalSpan(target, sameWall(target.wallId), targetWall.lengthMm);
+  const twin = getOpeningLegalSpan(partner, sameWall(partner.wallId), partnerWall.lengthMm);
+
+  const mappedA = mirrorOpeningXMm(project, partner.wallId, target.wallId, twin.spanStartMm);
+  const mappedB = mirrorOpeningXMm(project, partner.wallId, target.wallId, twin.spanEndMm);
+  // Unmappable walls (missing or degenerate) degrade to the target's own span
+  // rather than blocking the edit.
+  if (mappedA === null || mappedB === null) {
+    return {
+      spanStartMm: own.spanStartMm,
+      spanEndMm: own.spanEndMm,
+      constraintSource: own.boundedByNeighbor ? "neighbor" : "wall"
+    };
+  }
+
+  const twinLoMm = Math.min(mappedA, mappedB);
+  const twinHiMm = Math.max(mappedA, mappedB);
+
+  const spanStartMm = Math.max(own.spanStartMm, twinLoMm);
+  const spanEndMm = Math.min(own.spanEndMm, twinHiMm);
+
+  // Which face actually bound the result decides how the UI words it.
+  const twinBinds =
+    twinLoMm > own.spanStartMm + FIT_EPSILON_MM || twinHiMm < own.spanEndMm - FIT_EPSILON_MM;
+  const constraintSource: OpeningFitConstraint = twinBinds
+    ? twin.boundedByNeighbor
+      ? "paired-neighbor"
+      : "paired-wall"
+    : own.boundedByNeighbor
+      ? "neighbor"
+      : "wall";
+
+  return { spanStartMm, spanEndMm, constraintSource };
+}
+
+// Apply one solved geometry to a paired twin: the SAME width (a scalar, copied
+// verbatim — never mapped, which also sidesteps the fact that the pairing angle
+// tolerance makes the point mapping only near-isometric) and the mirrored
+// centre. The caller solves the fit once against the common span
+// (resolvePairedOpeningSpan), so both faces are guaranteed to agree.
 export function syncPartnerResize(
   project: Project,
   resizedWallObjects: WallObject[],
   target: ConnectableOpeningWallObject,
   widthMm: number,
-  heightMm: number
+  heightMm: number,
+  targetXMm: number
 ): { nextWallObjects: WallObject[]; partnerId: string } | null {
   const partnerId = target.connectsToObjectId;
   if (partnerId === undefined) return null;
@@ -231,13 +302,28 @@ export function syncPartnerResize(
 
   const twinWall = getProjectWalls(project).find((candidate) => candidate.id === partner.wallId);
   if (!twinWall) return null;
-  if (!isOpeningSlotFree(project, twinWall, { widthMm, heightMm }, partner.yMm, partner.xMm, partner.id)) {
+
+  const partnerXMm = mirrorOpeningXMm(project, target.wallId, partner.wallId, targetXMm);
+  if (partnerXMm === null) return null;
+
+  if (
+    !isOpeningSlotFree(
+      project,
+      twinWall,
+      { widthMm, heightMm },
+      partner.yMm,
+      partnerXMm,
+      partner.id
+    )
+  ) {
     return null;
   }
 
   return {
     nextWallObjects: resizedWallObjects.map((object) =>
-      object.id === partner.id ? { ...object, widthMm, heightMm } : object
+      object.id === partner.id
+        ? { ...object, widthMm, heightMm, xMm: partnerXMm }
+        : object
     ),
     partnerId
   };

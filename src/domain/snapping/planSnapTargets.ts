@@ -121,6 +121,14 @@ export function resolvePlanPlacement(
     // The wall the object is currently anchored to, for the wider break-free
     // capture radius; null when it isn't currently on any wall.
     currentAnchorWallId: string | null;
+    // A wall this object must never capture. Set to a paired opening's
+    // partner's wallId: the two faces of a shared wall are the SAME physical
+    // wall, so a paired door hopping between them is meaningless to the user
+    // and produces a pair on one wall, which the schema rejects at save time.
+    // Coincident twins tie at exactly the same distance for every cursor
+    // position, so without this the side-aware tie-break in capturePrefers
+    // hands the door to its own twin's face on the slightest cursor wobble.
+    excludeWallId?: string | null;
     captureDistanceMm: number;
     // Floor-space grid targets from getGridSnapTargets; only consulted when
     // snapToGrid and the object is floating.
@@ -155,7 +163,8 @@ export function resolvePlanPlacement(
           args.walls,
           args.captureDistanceMm,
           args.floatPolicy === "capture-any",
-          args.currentAnchorWallId
+          args.currentAnchorWallId,
+          args.excludeWallId ?? null
         );
 
   if (capturedWall) {
@@ -197,11 +206,13 @@ function captureWall(
   walls: FloorWall[],
   captureDistanceMm: number,
   capturesAtAnyDistance: boolean,
-  currentAnchorWallId: string | null
+  currentAnchorWallId: string | null,
+  excludeWallId: string | null
 ) {
   let best: { wall: FloorWall; xAlongMm: number; distanceMm: number } | null = null;
 
   for (const wall of walls) {
+    if (wall.id === excludeWallId) continue;
     const projection = projectPointToWall(pointMm, wall);
     const radius = capturesAtAnyDistance
       ? Infinity

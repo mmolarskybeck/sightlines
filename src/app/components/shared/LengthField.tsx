@@ -36,7 +36,9 @@ export function LengthField({
   hideFocusHint = false,
   commitErrorFallback = "Could not save this measurement.",
   stepMm,
-  onEnterWhenClean
+  onEnterWhenClean,
+  note,
+  onEditStart
 }: {
   label: string;
   /** Optional tag rendered inline after the label text (e.g. a "Neighbor"
@@ -70,6 +72,14 @@ export function LengthField({
    * call this instead of re-committing. Lets a caller distinguish "Enter to apply a live
    * preview" from "Enter again to accept it". */
   onEnterWhenClean?: () => void;
+  /** A neutral, caller-owned message explaining what a commit did to the value
+   * — e.g. "Moved 2' 6\" to fit the wall." Distinct from `error`: the commit
+   * succeeded. The caller owns its lifecycle (see `onEditStart`), because it
+   * must survive the resync that fires when the corrected value arrives. */
+  note?: string;
+  /** Fired the first time the user changes the input after a committed state,
+   * so a caller holding a `note` can clear it as the next edit begins. */
+  onEditStart?: () => void;
 }) {
   const [input, setInput] = useState(() =>
     valueMm === undefined ? "" : formatLength(valueMm, { unit: displayUnit })
@@ -88,6 +98,14 @@ export function LengthField({
 
   const commit = async () => {
     const trimmed = input.trim();
+
+    // Blurring a field nobody edited must not write. Display formatting rounds
+    // (800 mm renders as 2' 7 1/2", which parses back to 800.1 mm), so
+    // re-committing an untouched field wrote a slightly different value every
+    // time. Harmless in isolation, but it made a blur race any action the click
+    // was actually for: clicking "Fit wall" straight from a focused Width field
+    // blurred it, and that stale re-commit landed after the fit and undid it.
+    if (isInputClean() && !error) return;
 
     if (trimmed.length === 0 && clearable) {
       setError(null);
@@ -170,6 +188,11 @@ export function LengthField({
   if (error) {
     message = error;
     messageTone = "error";
+  } else if (note) {
+    // Above the conversion hint: having just corrected the user's value, saying
+    // WHY matters more than restating it in the other unit.
+    message = note;
+    messageTone = "hint";
   } else if (conversionHint) {
     message = `→ ${conversionHint}`;
     messageTone = "conversion";
@@ -196,7 +219,13 @@ export function LengthField({
         setFocused(false);
         void commit();
       }}
-      onChange={(event) => setInput(event.target.value)}
+      onChange={(event) => {
+        // Signal only on the first keystroke after a committed state, so a
+        // caller's note clears as the next edit begins rather than on every
+        // character.
+        if (isInputClean()) onEditStart?.();
+        setInput(event.target.value);
+      }}
       onKeyDown={(event) => {
         if (stepMm !== undefined && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
           event.preventDefault();
