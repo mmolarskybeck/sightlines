@@ -29,6 +29,7 @@ function props(opening: OpeningWallObject = door) {
   return {
     opening,
     unit: "m" as const,
+    wallLengthMm: 6000,
     connectionCandidates: [candidate],
     onCommitPosition: vi.fn().mockResolvedValue(null),
     onCommitSize: vi.fn().mockResolvedValue(null),

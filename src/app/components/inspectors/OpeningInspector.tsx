@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { ArrowsOutLineHorizontalIcon } from "@phosphor-icons/react/dist/csr/ArrowsOutLineHorizontal";
+import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
+import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
+import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
 import type { OpeningAlignment } from "../../../domain/geometry/openingConnections";
 import { getOpeningKindLabel } from "../../../domain/placement/createOpening";
 import type { OpeningFit } from "../../../domain/placement/fitOpeningOnWall";
@@ -9,9 +12,9 @@ import type { OpeningWallObject, DisplayUnit } from "../../../domain/project";
 import { getScopedUnitContext } from "../shared/scopedUnits";
 import { LengthField } from "../shared/LengthField";
 import { InspectorFieldGrid } from "./InspectorFieldGrid";
-import { InspectorRow } from "./InspectorRow";
 import { InspectorNotice } from "./InspectorNotice";
 import { Button } from "../ui/button";
+import { Field } from "../ui/field";
 import {
   Select,
   SelectContent,
@@ -38,6 +41,13 @@ function alignmentLabel(alignment: OpeningAlignment): string {
     case "height":
       return "Misaligned: heights do not overlap";
   }
+}
+
+// The one-word verdict for a candidate row. The full reason belongs to the
+// status line under the picker, which has the whole pane width to say it in —
+// repeating it inside every option only makes the trigger wrap.
+function shortAlignmentLabel(alignment: OpeningAlignment): string {
+  return alignment.status === "aligned" ? "Aligned" : "Misaligned";
 }
 
 // Plain-language account of how a request was adjusted to stay on the wall.
@@ -83,7 +93,8 @@ export function OpeningInspector({
   onDelete,
   connectionCandidates,
   opening,
-  unit
+  unit,
+  wallLengthMm
 }: {
   onCommitPosition: (xMm: number, yMm: number) => Promise<OpeningFit | null>;
   onCommitSize: (widthMm: number, heightMm: number) => Promise<OpeningFit | null>;
@@ -94,6 +105,10 @@ export function OpeningInspector({
   connectionCandidates: OpeningConnectionCandidate[];
   opening: OpeningWallObject;
   unit: DisplayUnit;
+  /** Run of the wall this opening sits on, so the jamb clearances can be read
+   * and edited from either end. 0 when the wall cannot be resolved, which
+   * hides the far-side field rather than showing a nonsense negative. */
+  wallLengthMm: number;
 }) {
   const position = getScopedUnitContext(unit, "openingPosition");
   const size = getScopedUnitContext(unit, "openingSize");
@@ -106,54 +121,54 @@ export function OpeningInspector({
   // already guard against. The placeholders carry the format guidance.
 
   // An opening can only be made to fit by changing width, position, or both, so
-  // a committed edit may quietly differ from what was typed. The note says what
-  // happened. Its lifecycle is explicit and owned here: cleared when the next
-  // edit begins (onEditStart) or the selection changes (keyed on opening.id),
-  // and set only after the store action resolves — it must survive the value
-  // resync that fires the moment the corrected value arrives.
-  const [widthNote, setWidthNote] = useState<string | null>(null);
-  const [positionNote, setPositionNote] = useState<string | null>(null);
+  // a committed edit may quietly differ from what was typed. One note says what
+  // happened, wherever the request came from — a width commit, a jamb commit,
+  // or "Fit wall" — because the sentence describes the opening, not the field
+  // that was touched (a Width edit routinely reports a *move*). It renders
+  // full-width BELOW "Fit wall": in a half-width field cell it wrapped to three
+  // lines, and placing it above the button would shift the button out from
+  // under a pointer mid-click, the same trap hideFocusHint guards against.
+  //
+  // Its lifecycle is explicit and owned here: cleared when the next edit begins
+  // (onEditStart) or the selection changes (keyed on opening.id), and set only
+  // after the store action resolves — it must survive the value resync that
+  // fires the moment the corrected value arrives.
+  const [fitNote, setFitNote] = useState<string | null>(null);
 
   useEffect(() => {
-    setWidthNote(null);
-    setPositionNote(null);
+    setFitNote(null);
   }, [opening.id]);
 
   const describe = (fit: OpeningFit | null) => describeFit(fit, size.displayUnit);
+  const clearNote = () => setFitNote(null);
+
+  // xMm is the opening's CENTRE on the wall, so the old "X (wall start)" label
+  // was plainly wrong: a door filling a 28' wall reported 14'. Both jambs are
+  // shown instead, the same left/right clearance pair the artwork inspector
+  // already uses — and for a door it fills the row that used to sit half empty.
+  const halfWidthMm = opening.widthMm / 2;
+  const fromStartMm = opening.xMm - halfWidthMm;
+  const fromEndMm = wallLengthMm - (opening.xMm + halfWidthMm);
+  const hasWallRun = wallLengthMm > 0;
+
+  // Blocked zones never pair, so the field is absent from their union member.
+  const connectsToObjectId =
+    "connectsToObjectId" in opening ? opening.connectsToObjectId : undefined;
+  const connected = connectionCandidates.find(
+    (candidate) => candidate.id === connectsToObjectId
+  );
+  const disconnectButton = (
+    <Button size="sm" variant="ghost" onClick={onDisconnect}>
+      Disconnect
+    </Button>
+  );
 
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
       {/* No "Kind" row: the panel's subject header directly above already
-          names it (e.g. "Door / Opening"). */}
-      <InspectorFieldGrid columns={2}>
-        <LengthField
-          compact
-          hideFocusHint
-          label="X (wall start)"
-          valueMm={opening.xMm}
-          displayUnit={position.displayUnit}
-          parseUnit={position.parseUnit}
-          placeholder={position.placeholder}
-          note={positionNote ?? undefined}
-          onEditStart={() => setPositionNote(null)}
-          onCommit={async (xMm) => {
-            setPositionNote(describe(await onCommitPosition(xMm, opening.yMm)));
-          }}
-        />
-        {opening.kind !== "door" && (
-          <LengthField
-            compact
-            hideFocusHint
-            label="Y (from floor)"
-            valueMm={opening.yMm}
-            displayUnit={size.displayUnit}
-            parseUnit={size.parseUnit}
-            placeholder={size.placeholder}
-            onCommit={(yMm) => void onCommitPosition(opening.xMm, yMm)}
-          />
-        )}
-      </InspectorFieldGrid>
-
+          names it (e.g. "Door / Opening"). Size leads, as it does in the
+          artwork and wall-case inspectors: the opening's dimensions are what
+          govern how it draws, and its position is read off them. */}
       <InspectorFieldGrid columns={2}>
         <LengthField
           compact
@@ -164,10 +179,9 @@ export function OpeningInspector({
           displayUnit={size.displayUnit}
           parseUnit={size.parseUnit}
           placeholder={size.placeholder}
-          note={widthNote ?? undefined}
-          onEditStart={() => setWidthNote(null)}
+          onEditStart={clearNote}
           onCommit={async (widthMm) => {
-            setWidthNote(describe(await onCommitSize(widthMm, opening.heightMm)));
+            setFitNote(describe(await onCommitSize(widthMm, opening.heightMm)));
           }}
         />
         <LengthField
@@ -179,75 +193,166 @@ export function OpeningInspector({
           displayUnit={size.displayUnit}
           parseUnit={size.parseUnit}
           placeholder={size.placeholder}
-          onCommit={(heightMm) => void onCommitSize(opening.widthMm, heightMm)}
+          onEditStart={clearNote}
+          onCommit={async (heightMm) => {
+            setFitNote(describe(await onCommitSize(opening.widthMm, heightMm)));
+          }}
         />
       </InspectorFieldGrid>
 
+      <InspectorFieldGrid columns={2}>
+        <LengthField
+          compact
+          hideFocusHint
+          label="From wall start"
+          valueMm={fromStartMm}
+          displayUnit={position.displayUnit}
+          parseUnit={position.parseUnit}
+          placeholder={position.placeholder}
+          onEditStart={clearNote}
+          onCommit={async (edgeMm) => {
+            setFitNote(describe(await onCommitPosition(edgeMm + halfWidthMm, opening.yMm)));
+          }}
+        />
+        {hasWallRun ? (
+          <LengthField
+            compact
+            hideFocusHint
+            label="From wall end"
+            valueMm={fromEndMm}
+            displayUnit={position.displayUnit}
+            parseUnit={position.parseUnit}
+            placeholder={position.placeholder}
+            onEditStart={clearNote}
+            onCommit={async (edgeMm) => {
+              setFitNote(
+                describe(
+                  await onCommitPosition(wallLengthMm - edgeMm - halfWidthMm, opening.yMm)
+                )
+              );
+            }}
+          />
+        ) : null}
+        {/* Doors are floor-anchored, so only a window or blocked zone carries a
+            vertical position — and yMm is its centre, matching the "Center
+            height" the artwork and wall-case inspectors already use. It lands
+            alone on the grid's second row, exactly as Depth does under the
+            artwork Width·Height pair. */}
+        {opening.kind !== "door" ? (
+          <LengthField
+            compact
+            hideFocusHint
+            label="Center height"
+            valueMm={opening.yMm}
+            displayUnit={size.displayUnit}
+            parseUnit={size.parseUnit}
+            placeholder={size.placeholder}
+            onEditStart={clearNote}
+            onCommit={async (yMm) => {
+              setFitNote(describe(await onCommitPosition(opening.xMm, yMm)));
+            }}
+          />
+        ) : null}
+      </InspectorFieldGrid>
+
       {/* Wide passages and full-wall openings are legitimate, and reaching one
-          by hand means coordinating Width against X. "Fit wall" names the
-          result rather than the mechanism ("Max width"): it fills the run the
-          opening already sits in — bounded by its neighbours, else the wall —
-          and widens in place rather than relocating to a larger gap. */}
+          by hand means coordinating Width against both jambs. "Fit wall" names
+          the result rather than the mechanism ("Max width"): it fills the run
+          the opening already sits in — bounded by its neighbours, else the
+          wall — and widens in place rather than relocating to a larger gap. */}
       <Button
         className="inspector-action"
         size="sm"
         variant="inspector"
-        onClick={async () => setWidthNote(describe(await onFitToWall()))}
+        onClick={async () => setFitNote(describe(await onFitToWall()))}
       >
         <ArrowsOutLineHorizontalIcon aria-hidden="true" size={15} />
         Fit wall
       </Button>
 
+      {fitNote ? (
+        <InspectorNotice
+          icon={<InfoIcon size={14} />}
+          tone="info"
+        >
+          {fitNote}
+        </InspectorNotice>
+      ) : null}
+
       {opening.kind === "door" || opening.kind === "window" ? (
         <div className="opening-connection-section">
-          {/* The row's own label replaces the old "Connects to" <h3> —
-              InspectorRow's label-wrapping-control association (no htmlFor,
-              same pattern as ArtworkInspector's Finish select) is exactly the
-              ArtworkInspector template for a Select with its own aria-label. */}
-          <InspectorRow label="Connects to">
-            {connectionCandidates.length > 0 ? (
+          {/* Stacked, not label-left: at inspector widths a label column left
+              the trigger too narrow for "Gallery 1, West wall" and wrapped it
+              to two lines. The label is a plain wrapping <label>, so the
+              trigger keeps its own aria-label (a button is not labelable) —
+              the same association ArtworkInspector's Finish select uses. */}
+          {connectionCandidates.length > 0 ? (
+            <Field compact label="Connects to">
               <Select
                 key={opening.id}
-                value={opening.connectsToObjectId ?? ""}
+                value={connectsToObjectId ?? ""}
                 onValueChange={(partnerId) => onConnect(partnerId)}
               >
-                <SelectTrigger aria-label={`Connect ${opening.kind} to`}>
-                  <SelectValue placeholder={`Choose another ${opening.kind}`} />
+                {/* h-8, not the trigger's default h-9: `.field-row.compact`
+                    sizes its inputs to 32px via min-height, which a Tailwind
+                    `height` utility silently wins over — the select rendered
+                    4px taller than every field above it. tailwind-merge drops
+                    h-9 for this, so the override is deterministic. */}
+                <SelectTrigger aria-label={`Connect ${opening.kind} to`} className="h-8">
+                  {/* Explicit children override Radix's portalled item text, so
+                      the trigger shows only where the partner is; its alignment
+                      is already spelled out in the status line below. */}
+                  <SelectValue
+                    className="min-w-0 truncate"
+                    placeholder={`Choose another ${opening.kind}`}
+                  >
+                    {connected?.label ?? "Unavailable opening"}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {connectionCandidates.map((candidate) => (
                     <SelectItem key={candidate.id} value={candidate.id}>
-                      {candidate.label}, {alignmentLabel(candidate.alignment)}
+                      {candidate.label} · {shortAlignmentLabel(candidate.alignment)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-            ) : (
+            </Field>
+          ) : (
+            <div className="field-row compact">
+              <span>Connects to</span>
               <p className="field-hint">
-                No nearby {opening.kind}s on a facing wall.
+                No {opening.kind} on a facing wall to pair with.
               </p>
-            )}
-          </InspectorRow>
-          {opening.connectsToObjectId ? (() => {
-            const connected = connectionCandidates.find(
-              (candidate) => candidate.id === opening.connectsToObjectId
-            );
-            // InspectorNotice generalizes .opening-connection-status (aligned
-            // -> positive, misaligned -> caution); Disconnect rides its
-            // trailing `action` slot since both only ever show together (the
-            // old heading-row button had the same connectsToObjectId gate).
-            // role="status" stays on an inner span, not the notice's own div,
-            // so its text is exactly the alignment label — the Disconnect
-            // button's text must not leak into the live-region readout the
-            // test asserts on.
-            return (
+            </div>
+          )}
+          {connectsToObjectId ? (
+            connected?.alignment.status === "aligned" ? (
+              // A healthy pairing states itself once and stays quiet. The old
+              // filled petrol bar gave the good state more weight than anything
+              // else in the panel; only a misaligned pair earns a wash, so the
+              // one that needs attention is the one that gets it.
+              //
+              // role="status" stays on an inner span, not the row, so its text
+              // is exactly the alignment label — the Disconnect button's text
+              // must not leak into the live-region readout the test asserts on.
+              <div className="opening-connection-status">
+                <CheckCircleIcon
+                  aria-hidden="true"
+                  className="opening-connection-status-icon"
+                  size={14}
+                  weight="fill"
+                />
+                <span className="opening-connection-status-text" role="status">
+                  {alignmentLabel(connected.alignment)}
+                </span>
+                {disconnectButton}
+              </div>
+            ) : (
               <InspectorNotice
-                tone={connected?.alignment.status === "aligned" ? "positive" : "caution"}
-                action={
-                  <Button size="sm" variant="ghost" onClick={onDisconnect}>
-                    Disconnect
-                  </Button>
-                }
+                action={disconnectButton}
+                icon={<WarningIcon size={14} weight="fill" />}
+                tone="caution"
               >
                 <span role="status">
                   {connected
@@ -255,8 +360,8 @@ export function OpeningInspector({
                     : "Connected opening is unavailable"}
                 </span>
               </InspectorNotice>
-            );
-          })() : null}
+            )
+          ) : null}
         </div>
       ) : null}
 

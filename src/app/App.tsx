@@ -938,6 +938,12 @@ export function App() {
       ) ?? null)
     : null;
 
+  // The opening inspector reads and edits both jamb clearances, so it needs the
+  // run of the wall the opening sits on (same lookup as selectedWallCaseWall).
+  const selectedOpeningWall = selectedOpening
+    ? (getProjectWalls(project).find((wall) => wall.id === selectedOpening.wallId) ?? null)
+    : null;
+
   // Display cases share the opening-selection id space (ids are globally unique),
   // but have their own inspector, so they are resolved out of `selectedOpening`
   // above and derived separately here. A wall case lives in wallObjects; a floor
@@ -2272,6 +2278,7 @@ export function App() {
             <OpeningInspector
               opening={selectedOpening}
               unit={project.unit}
+              wallLengthMm={selectedOpeningWall?.lengthMm ?? 0}
               connectionCandidates={openingConnectionCandidates}
               onConnect={(partnerId) => void connectOpenings(selectedOpening.id, partnerId)}
               onDisconnect={() => void disconnectOpening(selectedOpening.id)}

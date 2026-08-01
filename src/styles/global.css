@@ -5464,13 +5464,57 @@ body.panels-resizing * {
   min-width: 0;
 }
 
+/* Pairing is a relationship, not another measurement. One hairline separates
+   it from the geometry fields above so the panel reads as two ideas rather
+   than five evenly-spaced blocks — structure from a rule and spacing, no card.
+   The rule belongs to what follows it, hence the tighter gap below than the
+   form's own 16px above. */
 .opening-connection-section {
   display: grid;
-  gap: var(--space-10);
+  gap: var(--space-8);
+  padding-top: var(--space-12);
+  border-top: 1px solid var(--line);
 }
 
 .opening-connection-section .select-trigger {
   width: 100%;
+}
+
+/* A healthy pairing states itself once and stays quiet: a petrol check, muted
+   text, and the Disconnect ghost trailing. Only a misaligned pair escalates to
+   the filled caution InspectorNotice, so the state that needs attention is the
+   one that gets the wash. */
+.opening-connection-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-height: 28px;
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-ui);
+}
+
+.opening-connection-status-icon {
+  flex: 0 0 auto;
+  color: var(--primary);
+}
+
+.opening-connection-status-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* A misalignment reason is a whole clause ("openings do not overlap enough"),
+   and the trailing Disconnect squeezed it into a three-word column. Below the
+   12rem basis the action wraps under the sentence instead, keeping its own
+   margin-inline-start: auto so it stays right-aligned on its new line. */
+.opening-connection-section .inspector-notice {
+  flex-wrap: wrap;
+}
+
+.opening-connection-section .inspector-notice-body {
+  flex: 1 1 12rem;
 }
 
 
