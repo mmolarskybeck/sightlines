@@ -138,12 +138,14 @@ function validateWallObjectCollisions(
 }
 
 function collisionMessage(a: WallObject, b: WallObject): string {
-  const aIsArtwork = a.kind === "artwork";
-  const bIsArtwork = b.kind === "artwork";
-  if (!aIsArtwork && !bIsArtwork) {
+  // Word the message from the same policy that decides overridability
+  // (getOverlapRule), not a standalone artwork check — otherwise a
+  // door/wall-text collision (now blockable) would still read as the
+  // forbidden "can't overlap" message.
+  if (getOverlapRule(a.kind, b.kind) === "forbidden") {
     return "Doors, windows and blocked zones can't overlap.";
   }
-  if (aIsArtwork && bIsArtwork) {
+  if (a.kind === "artwork" && b.kind === "artwork") {
     return "Artworks overlap on this wall.";
   }
   return "Placement overlaps another object on this wall.";

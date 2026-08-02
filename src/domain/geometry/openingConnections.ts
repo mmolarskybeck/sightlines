@@ -30,17 +30,37 @@ type OpeningOnWall = {
   center: Point;
 };
 
+// The wall lookup evaluateOpeningPairWith consumes. Exported as a named
+// builder so every loop caller (3D derivation, plan scene, the shared-opening
+// analyzer) constructs it the same way, once per pass.
+export function buildFloorWallsById(project: Project): ReadonlyMap<string, FloorWall> {
+  return new Map(getFloorWalls(project.floor).map((wall) => [wall.id, wall]));
+}
+
 // Pure advisory geometry for one proposed/stored opening pair. The function is
 // deliberately total: wallObject.wallId is not schema-cross-checked, so a
 // hand-edited project can contain a dangling wall reference. With no geometry
 // there is no shared clear interval, which is reported as "no-overlap" rather
 // than throwing from an inspector or the 3D derivation.
+//
+// Convenience wrapper: rebuilds the wall map on every call. Callers that
+// evaluate more than one pair against the same project must build the map once
+// (buildFloorWallsById) and use evaluateOpeningPairWith — getFloorWalls is O(W)
+// and the analyzer runs this over every opening.
 export function evaluateOpeningPair(
   project: Project,
   aId: string,
   bId: string
 ): OpeningAlignment {
-  const wallsById = new Map(getFloorWalls(project.floor).map((wall) => [wall.id, wall]));
+  return evaluateOpeningPairWith(project, buildFloorWallsById(project), aId, bId);
+}
+
+export function evaluateOpeningPairWith(
+  project: Project,
+  wallsById: ReadonlyMap<string, FloorWall>,
+  aId: string,
+  bId: string
+): OpeningAlignment {
   const a = resolveOpening(project, wallsById, aId);
   const b = resolveOpening(project, wallsById, bId);
 

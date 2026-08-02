@@ -332,6 +332,175 @@ describe("collision validation between artworks", () => {
   });
 });
 
+describe("collision validation against wall text and cases", () => {
+  it("flags a door overlapping wall text as an overridable (blockable) collision — wall text never hard-blocks", () => {
+    const project = withSouthWallDoorAndWallText({ doorXMm: feetToMm(10), labelXMm: feetToMm(10) });
+
+    const warnings = validateWallObjectPlacements(project, ["door-1"]);
+
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        wallObjectId: "door-1",
+        wallId: "wall-south",
+        message: "Placement overlaps another object on this wall.",
+        type: "collision",
+        overridable: true
+      })
+    ]);
+  });
+
+  it("flags a door overlapping a display case as an overridable (blockable) collision — a case never hard-blocks", () => {
+    const project = withSouthWallDoorAndCase({ doorXMm: feetToMm(10), caseXMm: feetToMm(10) });
+
+    const warnings = validateWallObjectPlacements(project, ["door-1"]);
+
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        wallObjectId: "door-1",
+        wallId: "wall-south",
+        message: "Placement overlaps another object on this wall.",
+        type: "collision",
+        overridable: true
+      })
+    ]);
+  });
+
+  it("still forbids a door overlapping another door (both architectural)", () => {
+    const project = createSampleProject();
+    const doorA: OpeningWallObject = {
+      id: "door-a",
+      kind: "door",
+      blocksPlacement: true,
+      wallId: "wall-south",
+      xMm: feetToMm(10),
+      yMm: inchesToMm(40),
+      widthMm: feetToMm(3),
+      heightMm: inchesToMm(80)
+    };
+    const doorB: OpeningWallObject = {
+      id: "door-b",
+      kind: "door",
+      blocksPlacement: true,
+      wallId: "wall-south",
+      xMm: feetToMm(10),
+      yMm: inchesToMm(40),
+      widthMm: feetToMm(3),
+      heightMm: inchesToMm(80)
+    };
+    const withTwoDoors: Project = { ...project, wallObjects: [doorA, doorB] };
+
+    const warnings = validateWallObjectPlacements(withTwoDoors, ["door-a"]);
+
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        wallObjectId: "door-a",
+        message: "Doors, windows and blocked zones can't overlap.",
+        type: "collision",
+        overridable: false
+      })
+    ]);
+  });
+
+  it("still forbids a door overlapping a blocked zone (both architectural)", () => {
+    const project = createSampleProject();
+    const door: OpeningWallObject = {
+      id: "door-1",
+      kind: "door",
+      blocksPlacement: true,
+      wallId: "wall-south",
+      xMm: feetToMm(10),
+      yMm: inchesToMm(40),
+      widthMm: feetToMm(3),
+      heightMm: inchesToMm(80)
+    };
+    const zone: OpeningWallObject = {
+      id: "zone-1",
+      kind: "blocked-zone",
+      blocksPlacement: true,
+      wallId: "wall-south",
+      xMm: feetToMm(10),
+      yMm: inchesToMm(40),
+      widthMm: feetToMm(3),
+      heightMm: inchesToMm(40)
+    };
+    const withBoth: Project = { ...project, wallObjects: [door, zone] };
+
+    const warnings = validateWallObjectPlacements(withBoth, ["door-1"]);
+
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        wallObjectId: "door-1",
+        message: "Doors, windows and blocked zones can't overlap.",
+        type: "collision",
+        overridable: false
+      })
+    ]);
+  });
+});
+
+function withSouthWallDoorAndWallText({
+  doorXMm,
+  labelXMm
+}: {
+  doorXMm: number;
+  labelXMm: number;
+}): Project {
+  const project = createSampleProject();
+  const door: OpeningWallObject = {
+    id: "door-1",
+    kind: "door",
+    blocksPlacement: true,
+    wallId: "wall-south",
+    xMm: doorXMm,
+    yMm: inchesToMm(40),
+    widthMm: feetToMm(3),
+    heightMm: inchesToMm(80)
+  };
+  const label = {
+    id: "label-1",
+    kind: "wall-text" as const,
+    wallId: "wall-south",
+    xMm: labelXMm,
+    yMm: inchesToMm(57),
+    widthMm: feetToMm(4),
+    heightMm: feetToMm(1)
+  };
+
+  return { ...project, wallObjects: [door, label] };
+}
+
+function withSouthWallDoorAndCase({
+  doorXMm,
+  caseXMm
+}: {
+  doorXMm: number;
+  caseXMm: number;
+}): Project {
+  const project = createSampleProject();
+  const door: OpeningWallObject = {
+    id: "door-1",
+    kind: "door",
+    blocksPlacement: true,
+    wallId: "wall-south",
+    xMm: doorXMm,
+    yMm: inchesToMm(40),
+    widthMm: feetToMm(3),
+    heightMm: inchesToMm(80)
+  };
+  const vitrine = {
+    id: "case-1",
+    kind: "case" as const,
+    wallId: "wall-south",
+    xMm: caseXMm,
+    yMm: inchesToMm(38),
+    widthMm: feetToMm(5),
+    heightMm: feetToMm(1),
+    depthMm: feetToMm(1)
+  };
+
+  return { ...project, wallObjects: [door, vitrine] };
+}
+
 function withSouthWallTwoArtworks({
   firstXMm,
   secondXMm

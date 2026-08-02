@@ -1,6 +1,7 @@
 import { clamp } from "../geometry/scalar";
-import type { WallObjectBase } from "../project";
+import type { WallObject, WallObjectBase } from "../project";
 import { getOpenSpaceBounds } from "./arrangeOnWall";
+import { isBlockingKind } from "./overlapPolicy";
 
 // Lengths within this are treated as identical. A door exactly as wide as its
 // wall is a legitimate, requestable result (a full-span passage reserves no
@@ -107,8 +108,11 @@ export function getOpeningLegalSpan(
   sameWallObjects: WallObjectBase[],
   wallLengthMm: number
 ): { spanStartMm: number; spanEndMm: number; boundedByNeighbor: boolean } {
+  // Only architecture bounds the span. Wall text and display cases never block
+  // placement (overlapPolicy.ts), so a label must not act as a hard edge that
+  // "Fit wall" refuses to widen past — it is an overridable overlap, not a wall.
   const others = sameWallObjects.filter(
-    (object) => object.id !== opening.id && !isArtwork(object)
+    (object) => object.id !== opening.id && isBlockingWallObject(object)
   );
 
   const { startMm, endMm } = getOpenSpaceBounds([opening], others, wallLengthMm);
@@ -129,6 +133,13 @@ export function getOpeningLegalSpan(
   };
 }
 
-function isArtwork(object: WallObjectBase): boolean {
-  return (object as { kind?: string }).kind === "artwork";
+// WallObjectBase carries no `kind`, so this reads it structurally the way the
+// old isArtwork helper did. An object with no kind at all stays a blocker,
+// preserving the previous behaviour exactly: the old filter was `!isArtwork`,
+// which kept anything it could not identify. Erring toward a narrower span is
+// the conservative direction — "Fit wall" declines to widen rather than fitting
+// an opening over something it could not classify.
+function isBlockingWallObject(object: WallObjectBase): boolean {
+  const kind = (object as { kind?: WallObject["kind"] }).kind;
+  return kind === undefined || isBlockingKind(kind);
 }

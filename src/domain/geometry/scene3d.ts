@@ -6,7 +6,7 @@ import type {
   WallObject
 } from "../project";
 import { getFreestandingFaces } from "./freestandingWalls";
-import { evaluateOpeningPair } from "./openingConnections";
+import { buildFloorWallsById, evaluateOpeningPairWith } from "./openingConnections";
 import { signedAreaMm2 } from "./polygon";
 import { unitLeftNormalOrZero } from "./vector";
 import { getWallsWithGeometry } from "./walls";
@@ -169,6 +169,9 @@ export function deriveScene3d(
       placement.room.walls.map((wall) => [wall.id, placement.roomId] as const)
     )
   );
+  // Built once for the whole derivation: evaluateOpeningPair would otherwise
+  // rebuild every floor wall per pair.
+  const floorWallsById = buildFloorWallsById(project);
   const openConnectionsByObjectId = new Map<string, OpenConnection3d>();
   for (const a of project.wallObjects) {
     if (
@@ -186,7 +189,7 @@ export function deriveScene3d(
     ) {
       continue;
     }
-    const alignment = evaluateOpeningPair(project, a.id, b.id);
+    const alignment = evaluateOpeningPairWith(project, floorWallsById, a.id, b.id);
     if (alignment.status !== "aligned") continue;
 
     const verticalA = openingVerticalExtent(a);

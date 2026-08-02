@@ -4,12 +4,12 @@ import {
   type FloorPartition
 } from "../geometry/freestandingWalls";
 import {
-  evaluateOpeningPair,
+  buildFloorWallsById,
+  evaluateOpeningPairWith,
   type OpeningAlignment
 } from "../geometry/openingConnections";
 import {
   getFloorObjectPlanRect,
-  getFloorWalls,
   getWallObjectPlanRect,
   offsetPlanRectToViewerSide,
   planRectIntersectsRect,
@@ -260,7 +260,9 @@ export function buildPlanScene(project: Project, options: PlanSceneOptions = {})
 
   // Perimeter walls plus partition faces — wall objects can anchor to either,
   // so both connection endpoints and object rects project against this map.
-  const floorWallsById = new Map(getFloorWalls(project.floor).map((wall) => [wall.id, wall]));
+  // One wall map for the whole scene build — also handed to
+  // evaluateOpeningPairWith so each connection check stays O(1) in wall count.
+  const floorWallsById = buildFloorWallsById(project);
 
   const openingConnections: PlanSceneOpeningConnection[] = project.wallObjects.flatMap(
     (opening) => {
@@ -288,7 +290,7 @@ export function buildPlanScene(project: Project, options: PlanSceneOptions = {})
       }
       const a = getWallObjectPlanRect(wallA, opening);
       const b = getWallObjectPlanRect(wallB, partner);
-      const alignment = evaluateOpeningPair(project, opening.id, partner.id);
+      const alignment = evaluateOpeningPairWith(project, floorWallsById, opening.id, partner.id);
       return [
         {
           id: `${opening.id}:${partner.id}`,

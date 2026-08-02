@@ -151,6 +151,29 @@ describe("getOpeningLegalSpan", () => {
     expect(span.spanEndMm).toBe(WALL_12FT);
   });
 
+  it.each(["wall-text", "case"] as const)(
+    "ignores %s, which never blocks placement",
+    (kind) => {
+      // Same reasoning as artwork: overlapPolicy makes these blockable, not
+      // forbidden, so a label or vitrine must not act as a hard span edge that
+      // "Fit wall" refuses to widen past.
+      const door = opening({ id: "d1", xMm: feetToMm(2), widthMm: feetToMm(3) });
+      const furniture = {
+        id: "f1",
+        kind,
+        wallId: "wall-1",
+        xMm: feetToMm(9),
+        yMm: feetToMm(4),
+        widthMm: feetToMm(2),
+        heightMm: feetToMm(2)
+      } as unknown as WallObject;
+
+      const span = getOpeningLegalSpan(door, [door, furniture], WALL_12FT);
+      expect(span.spanEndMm).toBe(WALL_12FT);
+      expect(span.boundedByNeighbor).toBe(false);
+    }
+  );
+
   it("ignores a neighbour that does not overlap vertically", () => {
     const door = opening({ id: "d1", xMm: feetToMm(2), widthMm: feetToMm(3) });
     // A high window well above the door's band.

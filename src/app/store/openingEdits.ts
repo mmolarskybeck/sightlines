@@ -17,6 +17,8 @@ import {
   getOpeningLegalSpan,
   type OpeningFitConstraint
 } from "../../domain/placement/fitOpeningOnWall";
+import { isOpeningSlotFree, isTwinSlotFree } from "../../domain/placement/openingSlots";
+import { isBlockingKind } from "../../domain/placement/overlapPolicy";
 import type {
   ConnectableOpeningWallObject,
   OpeningWallObject,
@@ -24,6 +26,11 @@ import type {
   WallObject
 } from "../../domain/project";
 import { getProjectWalls } from "../projectWalls";
+
+// The slot-freedom predicates now live in the domain (the shared-opening
+// analyzer needs them and must not import from `src/app`). Re-exported here so
+// every existing store/UI call site keeps its import path.
+export { isOpeningSlotFree, isTwinSlotFree };
 
 // Lowercase noun for undo-stack labels ("Add door", "Move blocked zone"),
 // matching the "Add artwork"/"Move artwork" label casing already in use —
@@ -134,51 +141,6 @@ export function buildOpeningWithMirror(
   }
 
   return unpaired;
-}
-
-// Whether an opening of the given `size` centered at (`xMm`, `centerYMm`) on
-// `wall` would sit clear of a forbidden opening×opening overlap
-// (overlapPolicy.ts). Reuses the creation-time free-slot search: the preferred x
-// is returned unchanged only when it's already free, so an exact-match result
-// means "no overlap here." `ignoreOpeningId` excludes an opening being
-// moved/resized (its own current slot) from the blockers.
-export function isOpeningSlotFree(
-  project: Project,
-  wall: WallWithGeometry,
-  size: { widthMm: number; heightMm: number },
-  centerYMm: number,
-  xMm: number,
-  ignoreOpeningId: string | null
-): boolean {
-  const sameWallOpenings = project.wallObjects.filter(
-    (object) =>
-      object.wallId === wall.id &&
-      object.kind !== "artwork" &&
-      object.id !== ignoreOpeningId
-  );
-  const freeXMm = findFreeOpeningCenterXMm({
-    preferredXMm: xMm,
-    sizeMm: size,
-    centerYMm,
-    wallLengthMm: wall.lengthMm,
-    sameWallOpenings
-  });
-  return freeXMm !== null && Math.abs(freeXMm - xMm) < 1;
-}
-
-// Test a fresh mirrored twin using its resolved default size and centerline.
-export function isTwinSlotFree(
-  project: Project,
-  wall: WallWithGeometry,
-  kind: OpeningKind,
-  xMm: number,
-  centerYMm?: number
-): boolean {
-  const { widthMm, heightMm } = getDefaultOpeningSizeMm(kind);
-  const defaultCenterlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
-  const resolvedCenterYMm =
-    centerYMm ?? getDefaultOpeningCenterYMm(kind, heightMm, defaultCenterlineYMm);
-  return isOpeningSlotFree(project, wall, { widthMm, heightMm }, resolvedCenterYMm, xMm, null);
 }
 
 // Mirror a paired opening move across rooms. Return null when no live partner
@@ -342,8 +304,11 @@ export function resolveFreeOpeningXMm(
   const centerlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
   const resolvedCenterYMm =
     centerYMm ?? getDefaultOpeningCenterYMm(kind, heightMm, centerlineYMm);
+  // Blockers come from the overlap policy, not a second hardcoded copy of it:
+  // wall text and display cases are furniture and never block placement, so a
+  // new door must not slide away from a label it is allowed to overlap.
   const sameWallOpenings = project.wallObjects.filter(
-    (object) => object.wallId === wall.id && object.kind !== "artwork"
+    (object) => object.wallId === wall.id && isBlockingKind(object.kind)
   );
   return findFreeOpeningCenterXMm({
     preferredXMm,
