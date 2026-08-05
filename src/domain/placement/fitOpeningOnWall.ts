@@ -30,6 +30,11 @@ export type OpeningFit = {
   // Nothing is committed in that case: half a shared opening cannot move
   // without the other half, so the request is reported rather than applied.
   noMutualSpan?: boolean;
+  // The same refusal, one step later: the two faces DO share a run, but the
+  // other half cannot follow this particular request — its mirrored slot is
+  // occupied, or the request would carry the pair off the boundary the two
+  // rooms share. Nothing is committed; the request is reported instead.
+  partnerBlocked?: boolean;
 };
 
 // Resolve a requested width against the legal span an opening may occupy,

@@ -7,9 +7,15 @@ import {
   type GeometryEditResult
 } from "../domain/geometry/editRoom";
 import { parseFaceWallId } from "../domain/geometry/freestandingWalls";
+import { areSharedBoundaryWalls, findSharedBoundary } from "../domain/geometry/sharedWalls";
 import { getFloorWalls } from "../domain/geometry/planObjects";
 import type { PlanPlacement } from "../domain/snapping/planSnapTargets";
 import { newId } from "../domain/id";
+import {
+  analyzeSharedOpenings,
+  applySharedOpeningActions,
+  type SharedOpeningScope
+} from "../domain/placement/sharedOpeningAnalysis";
 import {
   getDefaultOpeningCenterYMm,
   getDefaultOpeningSizeMm,
@@ -92,11 +98,13 @@ import {
   type DocumentMetaSliceActions
 } from "./store/documentMetaSlice";
 import {
-  buildOpeningWithMirror,
+  buildOpeningOnWall,
   moveObjectNoun,
   openingNoun,
   resolveFreeOpeningXMm,
   resolvePairedOpeningSpan,
+  syncMovedPairHalves,
+  appliedPartnerSync,
   syncPartnerMove,
   syncPartnerResize
 } from "./store/openingEdits";
@@ -165,6 +173,26 @@ export const OVERLAP_BLOCKED_MESSAGE =
 // Non-artwork overlaps cannot be overridden.
 export const FORBIDDEN_OVERLAP_MESSAGE =
   "Can’t place it there. Doors, windows and blocked zones can’t overlap each other.";
+
+// A door or window on a wall two rooms share is ONE opening, stored as one half
+// per room. An edit that cannot keep both halves together is refused outright
+// rather than quietly leaving two facing alcoves behind, so these say which
+// half could not follow and why.
+// Worded to fit a move, a resize and a group drag alike — every one of them
+// fails for the same reason, and none of them committed anything.
+export const SHARED_OPENING_SLOT_BLOCKED_MESSAGE =
+  "This opening is shared with the room next door, and something on the other side is in the way.";
+
+export const SHARED_OPENING_OFF_BOUNDARY_MESSAGE =
+  "This opening is shared with the room next door, so it can’t leave the wall the two rooms share.";
+
+export function sharedOpeningRefusalMessage(
+  reason: "slot-occupied" | "off-boundary" | "not-aligned"
+): string {
+  return reason === "slot-occupied"
+    ? SHARED_OPENING_SLOT_BLOCKED_MESSAGE
+    : SHARED_OPENING_OFF_BOUNDARY_MESSAGE;
+}
 
 // Enforce one placement only when adding; preserve duplicates already loaded.
 const ALREADY_PLACED_MESSAGE =
@@ -293,7 +321,10 @@ export type AppState = ArrangeSliceState &
   addOpening: (wallId: string, kind: InsertToolKind) => Promise<void>;
   // Both return how the request was adjusted to stay on the wall, so the
   // inspector can say what it did ("Moved 2' 6\" to fit the wall."), or null
-  // when nothing was committed. See fitOpeningOnWall.
+  // when there was nothing to report at all (no such object, no resolvable
+  // wall). A REFUSED request still returns a fit — one carrying noMutualSpan or
+  // partnerBlocked — describing the state that was kept rather than a committed
+  // change; nothing is written and no undo entry is pushed. See fitOpeningOnWall.
   moveOpening: (
     wallObjectId: string,
     xMm: number,
@@ -671,6 +702,115 @@ export function createAppStore(deps: AppStoreDeps) {
       });
     }
 
+    // Only architecture opts a transaction into reconciliation. Artwork, wall
+    // text and display cases also live in wallObjects, but moving one says
+    // nothing about where a room's boundaries are.
+    function isOpeningKind(kind: WallObject["kind"]): boolean {
+      return kind === "door" || kind === "window" || kind === "blocked-zone";
+    }
+
+    // The scope a geometry edit reconciles within: the walls it touched, PLUS
+    // the walls those face. Both sides are required — an edit scoped to only
+    // the moved room's walls cannot see the boundary it is meant to reconcile,
+    // because the other face lives on a wall the edit never named.
+    //
+    // Scope is what stops an opted-in edit repairing the whole document:
+    // without it, nudging one room could create a twin in an unrelated gallery.
+    function sharedOpeningScope(project: Project, wallIds: Iterable<string>): SharedOpeningScope {
+      const walls = new Set<string>();
+      for (const wallId of wallIds) {
+        walls.add(wallId);
+        const boundary = findSharedBoundary(project, wallId);
+        if (boundary.status === "confirmed") {
+          walls.add(boundary.boundary.wallId);
+        } else if (boundary.status === "ambiguous") {
+          for (const candidate of boundary.boundaries) walls.add(candidate.wallId);
+        }
+      }
+      return { wallIds: [...walls] };
+    }
+
+    // Reconcile shared openings over a CANDIDATE draft, within scope. Returns
+    // the draft unchanged (same array reference) when there is nothing to do,
+    // so a caller's no-op detection still works.
+    //
+    // Analysis reads the candidate, not the pre-edit project: the whole point is
+    // to answer "given the geometry this edit is about to commit, which openings
+    // are now two faces of one opening?".
+    // `scopeWallIds` is the scope analysis actually ran over, which is WIDER
+    // than `touchedWallIds`: sharedOpeningScope expands again here, against the
+    // candidate's completed topology. A caller that validates by wall must use
+    // this rather than what it passed in, or an opening created on a wall only
+    // the internal expansion reached escapes validation entirely.
+    function reconcileSharedOpenings(
+      project: Project,
+      candidateWallObjects: WallObject[],
+      touchedWallIds: string[]
+    ): { wallObjects: WallObject[]; validateIds: string[]; scopeWallIds: string[] } {
+      const candidate: Project = { ...project, wallObjects: candidateWallObjects };
+      const scope = sharedOpeningScope(candidate, touchedWallIds);
+      const scopeWallIds = scope.wallIds ?? [];
+      const { actions } = analyzeSharedOpenings(candidate, scope);
+      if (actions.length === 0) {
+        return { wallObjects: candidateWallObjects, validateIds: [], scopeWallIds };
+      }
+
+      const applied = applySharedOpeningActions(candidate, actions, newId);
+      return {
+        wallObjects: applied.project.wallObjects,
+        validateIds: [
+          ...applied.createdOpeningIds,
+          ...applied.realignedIds,
+          ...applied.formedPairIds.flat()
+        ],
+        scopeWallIds
+      };
+    }
+
+    // Reconciliation for a ROOM-GEOMETRY edit, which commits through applyEdit
+    // rather than the placement gate. Returns the reconciled project plus the
+    // wall ids whose placements should now be re-validated — the changed walls
+    // AND the walls they face, since that is where a twin may have appeared.
+    //
+    // Scope is the union of what the changed walls faced BEFORE the edit and
+    // what they face AFTER it. Post-edit alone misses every edit that REMOVES
+    // topology: if wall A was ambiguously backed by B and C, moving (or
+    // deleting) C is exactly what makes A↔B uniquely resolvable — but in the
+    // completed geometry C's walls no longer lead back to A, so a post-only
+    // scope would never reconsider it.
+    function reconcileGeometryEdit(
+      preProject: Project,
+      postProject: Project,
+      changedWallIds: string[]
+    ): { project: Project; validateWallIds: string[] } {
+      const preScope = sharedOpeningScope(preProject, changedWallIds).wallIds ?? [];
+      const postScope = sharedOpeningScope(postProject, changedWallIds).wallIds ?? [];
+      const scopedWallIds = [...new Set([...preScope, ...postScope])];
+
+      const reconciled = reconcileSharedOpenings(
+        postProject,
+        postProject.wallObjects,
+        scopedWallIds
+      );
+
+      // Validate over what reconciliation actually ANALYSED, not over what it
+      // was handed. reconcileSharedOpenings expands the scope again through the
+      // completed topology, and that expansion is where new geometry appears:
+      // resolving an ambiguous A↔B/C by moving C away leaves the pre/post union
+      // holding only C and A, then the internal expansion reaches B through the
+      // now-unique boundary and creates a twin there. Returning the narrower set
+      // let that twin land on B unchecked — no bounds, no collision.
+      const validateWallIds = [...new Set([...scopedWallIds, ...reconciled.scopeWallIds])];
+
+      if (reconciled.wallObjects === postProject.wallObjects) {
+        return { project: postProject, validateWallIds };
+      }
+      return {
+        project: { ...postProject, wallObjects: reconciled.wallObjects },
+        validateWallIds
+      };
+    }
+
     // Placement commit gate. Forbidden collisions always block; artwork
     // collisions block unless allowOverlap is true. null means do not commit.
     function gatePlacementWarnings(
@@ -703,12 +843,28 @@ export function createAppStore(deps: AppStoreDeps) {
       nextWallObjects: WallObject[],
       validateIds: string[],
       allowOverlap: boolean,
-      options: { nextFloorObjects?: FloorObject[]; extras?: EditExtras } = {}
+      options: {
+        nextFloorObjects?: FloorObject[];
+        extras?: EditExtras;
+        // OPT-IN, by name. Present only on transactions whose intent is to
+        // change architecture — opening create/move/resize/re-anchor. Never on
+        // artwork, cases, wall text or partitions, which also rewrite
+        // wallObjects but say nothing about where a room's boundaries are.
+        reconcileWallIds?: string[];
+      } = {}
     ): Promise<boolean> {
+      // Reconcile BEFORE the gate, so a twin this edit creates is bounds- and
+      // collision-validated like anything else, and rides the same commit —
+      // one undo step covers the edit and its reconciliation, or neither
+      // happens.
+      const reconciled = options.reconcileWallIds
+        ? reconcileSharedOpenings(project, nextWallObjects, options.reconcileWallIds)
+        : { wallObjects: nextWallObjects, validateIds: [] };
+
       const placementWarnings = gatePlacementWarnings(
         project,
-        nextWallObjects,
-        validateIds,
+        reconciled.wallObjects,
+        [...validateIds, ...reconciled.validateIds],
         allowOverlap
       );
       if (placementWarnings === null) return false;
@@ -717,7 +873,7 @@ export function createAppStore(deps: AppStoreDeps) {
         label,
         (current) => ({
           ...current,
-          wallObjects: nextWallObjects,
+          wallObjects: reconciled.wallObjects,
           ...(options.nextFloorObjects ? { floorObjects: options.nextFloorObjects } : {})
         }),
         { placementWarnings, ...options.extras }
@@ -797,21 +953,62 @@ export function createAppStore(deps: AppStoreDeps) {
           : object
       );
 
+      let draftWallObjects = movedWallObjects;
+      let validateIds = [wallObject.id];
+
+      // A plan drag of one half of a shared opening drags the other half with
+      // it — the pair is one physical hole and cannot be dragged apart. The
+      // classification reads the PRE-EDIT project and runs BEFORE
+      // normalizeOpeningPairs, so a repair that would sever the pair can never
+      // pre-empt the refusal below. A plan drag carries no hang height, so the
+      // twin follows at the moved half's existing yMm (cf. movePlanObjectsGroup).
+      if (
+        (wallObject.kind === "door" || wallObject.kind === "window") &&
+        wallObject.connectsToObjectId !== undefined
+      ) {
+        const synced = syncPartnerMove(
+          project,
+          movedWallObjects,
+          wallObject,
+          placement.xMm,
+          wallObject.yMm,
+          placement.wallId
+        );
+        if (synced.status === "blocked") {
+          set({ error: sharedOpeningRefusalMessage(synced.reason) });
+          return;
+        }
+        // Only `synced` — deliberately NOT appliedPartnerSync. This path never
+        // mirrored anything before, so honouring a legacy pair's best-effort
+        // draft here would be a NEW behaviour for plan dragging, not a
+        // preserved one. Legacy best-effort belongs to the two direct-edit
+        // paths that already had it.
+        if (synced.status === "synced") {
+          draftWallObjects = synced.nextWallObjects;
+          validateIds = [wallObject.id, synced.partnerId];
+        }
+      }
+
       // A wallId rewrite can invalidate a shared-wall pairing (the moved half is
       // no longer on its partner's coincident twin face). Normalize the FINISHED
       // draft, so the repair never reads a half-applied batch, and let it ride
       // the same commit — one undo step covers the move and the disconnect.
       const nextWallObjects = normalizeOpeningPairs({
         ...project,
-        wallObjects: movedWallObjects
+        wallObjects: draftWallObjects
       }).project.wallObjects;
 
       await commitWallObjectEdit(
         `Move ${moveObjectNoun(wallObject.kind)}`,
         project,
         nextWallObjects,
-        [wallObject.id],
-        allowOverlap
+        validateIds,
+        allowOverlap,
+        // Both walls: a re-anchoring drag leaves one boundary and joins
+        // another, and each side needs reconciling.
+        isOpeningKind(wallObject.kind)
+          ? { reconcileWallIds: [wallObject.wallId, placement.wallId] }
+          : {}
       );
     }
 
@@ -999,13 +1196,38 @@ export function createAppStore(deps: AppStoreDeps) {
       });
       if (movedIds.length === 0) return { status: "no-op" };
 
+      // Shared openings survive a batch as one opening or not at all: one half
+      // in the batch drags the other, both halves in the batch are validated
+      // against the finished draft. Classified pre-edit, and a refusal blocks
+      // the whole batch — the same all-or-nothing rule as a collision.
+      const paired = syncMovedPairHalves(project, nextWallObjects, movedIds);
+      if (paired.status === "blocked") {
+        set({ error: sharedOpeningRefusalMessage(paired.reason) });
+        return { status: "blocked" };
+      }
+
+      // Reconcile the batch's own architecture before the gate, scoped to the
+      // walls it touched, so a created twin is validated with everything else.
+      const touchedOpeningWallIds = project.wallObjects
+        .filter((object) => movedIds.includes(object.id) && isOpeningKind(object.kind))
+        .map((object) => object.wallId);
+      const reconciled =
+        touchedOpeningWallIds.length > 0
+          ? reconcileSharedOpenings(project, paired.nextWallObjects, touchedOpeningWallIds)
+          : { wallObjects: paired.nextWallObjects, validateIds: [] };
+
       // One collision blocks the entire batch.
-      const placementWarnings = gatePlacementWarnings(project, nextWallObjects, movedIds, allowOverlap);
+      const placementWarnings = gatePlacementWarnings(
+        project,
+        reconciled.wallObjects,
+        [...movedIds, ...paired.validateIds, ...reconciled.validateIds],
+        allowOverlap
+      );
       if (placementWarnings === null) return { status: "blocked" };
 
       const after = {
         ...project,
-        wallObjects: nextWallObjects,
+        wallObjects: reconciled.wallObjects,
         updatedAt: new Date().toISOString()
       };
       const resolvedLabel = typeof label === "function" ? label(movedIds.length) : label;
@@ -1081,7 +1303,8 @@ export function createAppStore(deps: AppStoreDeps) {
     const roomGeometry = createRoomGeometrySlice(set, get, {
       applyEdit,
       runPartitionEdit,
-      validateChangedWallPlacements
+      validateChangedWallPlacements,
+      reconcileGeometryEdit
     });
 
     return {
@@ -1658,12 +1881,15 @@ export function createAppStore(deps: AppStoreDeps) {
         // difference is the chosen xMm (the plan drop point vs. wall center). It
         // also mirrors the opening onto a coincident twin wall in the same array
         // when the wall is shared between two rooms (spec §5.5).
-        const { nextWallObjects, primaryId, validateIds } = buildOpeningWithMirror(
-          project,
-          wall,
-          kind,
-          xMm
-        );
+        // Append the primary only. Mirroring onto a shared wall is
+        // reconciliation's job now (opted in below via reconcileWallIds), so
+        // creation and every later geometry edit build the twin the same way —
+        // the old builder sized it from the kind's DEFAULTS while the analyzer
+        // copies the primary's actual width, height and hang height.
+        const primary = buildOpeningOnWall(project, wall, kind, xMm);
+        const nextWallObjects = [...project.wallObjects, primary];
+        const primaryId = primary.id;
+        const validateIds = [primaryId];
 
         // Adding an opening is never blocked by a collision (there's no
         // allowOverlap knob for it) — allowOverlap: true skips the gate while
@@ -1675,6 +1901,7 @@ export function createAppStore(deps: AppStoreDeps) {
           validateIds,
           true,
           {
+            reconcileWallIds: [wall.id],
             // Select only the primary; a mirrored twin is created silently.
             extras: selectionWrite(
               { ...project, wallObjects: nextWallObjects },
@@ -1716,16 +1943,35 @@ export function createAppStore(deps: AppStoreDeps) {
         let validateIds = [wallObjectId];
 
         // Shared-wall sync: a paired door/window drags its twin in the same
-        // commit so the two rooms stay aligned (spec §5.5) — unless the mirrored
-        // slot would collide, in which case only the target moves.
+        // commit so the two rooms stay aligned (spec §5.5). The pair is
+        // classified against the PRE-EDIT project — a live shared pair either
+        // moves together or the move fails; a legacy pair across walls that
+        // never faced each other may still drift, exactly as before.
         if (
           (target.kind === "door" || target.kind === "window") &&
           target.connectsToObjectId !== undefined
         ) {
           const synced = syncPartnerMove(project, nextWallObjects, target, nextXMm, clampedYMm);
-          if (synced) {
-            nextWallObjects = synced.nextWallObjects;
-            validateIds = [wallObjectId, synced.partnerId];
+          if (synced.status === "blocked") {
+            // Same shape as the noMutualSpan refusal below: nothing committed,
+            // no undo entry, and the request reported so the inspector can say
+            // why it did not happen.
+            set({ error: sharedOpeningRefusalMessage(synced.reason) });
+            return {
+              requestedWidthMm: target.widthMm,
+              widthMm: target.widthMm,
+              xMm: target.xMm,
+              widthClamped: false,
+              positionAdjusted: false,
+              movedByMm: 0,
+              constraint: "none",
+              partnerBlocked: true
+            };
+          }
+          const applied = appliedPartnerSync(synced);
+          if (applied) {
+            nextWallObjects = applied.nextWallObjects;
+            validateIds = [wallObjectId, applied.partnerId];
           }
         }
 
@@ -1736,7 +1982,8 @@ export function createAppStore(deps: AppStoreDeps) {
           project,
           nextWallObjects,
           validateIds,
-          allowOverlap
+          allowOverlap,
+          { reconcileWallIds: [target.wallId] }
         );
         return fit;
       },
@@ -1753,6 +2000,9 @@ export function createAppStore(deps: AppStoreDeps) {
 
         // Request the whole span; the shared fit path clamps it to exactly the
         // available width and positions it, so this needs no geometry of its own.
+        // That also means a refusal (noMutualSpan / partnerBlocked) is returned
+        // verbatim rather than swallowed: "Fit wall" on half a shared opening
+        // whose twin cannot follow commits nothing and reports why.
         return get().resizeOpening(
           wallObjectId,
           span.spanEndMm - span.spanStartMm,
@@ -1780,8 +2030,15 @@ export function createAppStore(deps: AppStoreDeps) {
           target.connectsToObjectId !== undefined
             ? project.wallObjects.find((object) => object.id === target.connectsToObjectId)
             : undefined;
+        // Only a REAL shared boundary is solved as one hole. A legacy pair on
+        // unrelated walls has no meaningful mutual run — perpendicular walls
+        // project to a zero-length one — and solving it that way would refuse
+        // the resize with noMutualSpan before the non-refusing legacy branch
+        // was ever reached. Legacy pairs keep their own-wall fit.
         const pairedSpan =
-          partner && (partner.kind === "door" || partner.kind === "window")
+          partner &&
+          (partner.kind === "door" || partner.kind === "window") &&
+          areSharedBoundaryWalls(project, target.wallId, partner.wallId)
             ? resolvePairedOpeningSpan(
                 project,
                 target as ConnectableOpeningWallObject,
@@ -1839,8 +2096,9 @@ export function createAppStore(deps: AppStoreDeps) {
         let validateIds = [wallObjectId];
 
         // Shared-wall sync: mirror the new size onto a paired twin in the same
-        // commit (spec §5.5), skipping the twin when its new footprint would
-        // collide with another opening on its wall.
+        // commit (spec §5.5). Classified against the PRE-EDIT project, so a
+        // live shared pair resizes as one opening or not at all; a legacy pair
+        // keeps its old freedom to diverge.
         if (
           (target.kind === "door" || target.kind === "window") &&
           target.connectsToObjectId !== undefined
@@ -1851,11 +2109,26 @@ export function createAppStore(deps: AppStoreDeps) {
             target,
             nextWidthMm,
             heightMm,
-            nextXMm
+            nextXMm,
+            updatedYMm
           );
-          if (synced) {
-            nextWallObjects = synced.nextWallObjects;
-            validateIds = [wallObjectId, synced.partnerId];
+          if (synced.status === "blocked") {
+            set({ error: sharedOpeningRefusalMessage(synced.reason) });
+            return {
+              requestedWidthMm: widthMm,
+              widthMm: target.widthMm,
+              xMm: target.xMm,
+              widthClamped: false,
+              positionAdjusted: false,
+              movedByMm: 0,
+              constraint: pairedSpan ? pairedSpan.constraintSource : "none",
+              partnerBlocked: true
+            };
+          }
+          const applied = appliedPartnerSync(synced);
+          if (applied) {
+            nextWallObjects = applied.nextWallObjects;
+            validateIds = [wallObjectId, applied.partnerId];
           }
         }
 
@@ -1864,7 +2137,8 @@ export function createAppStore(deps: AppStoreDeps) {
           project,
           nextWallObjects,
           validateIds,
-          allowOverlap
+          allowOverlap,
+          { reconcileWallIds: [target.wallId] }
         );
         return fit;
       },
@@ -2078,12 +2352,15 @@ export function createAppStore(deps: AppStoreDeps) {
 
         // Same shared-wall mirroring as addOpening (spec §5.5): a twin wall gets
         // a paired opening in the same single commit.
-        const { nextWallObjects, primaryId, validateIds } = buildOpeningWithMirror(
-          project,
-          wall,
-          kind,
-          xMm
-        );
+        // Append the primary only. Mirroring onto a shared wall is
+        // reconciliation's job now (opted in below via reconcileWallIds), so
+        // creation and every later geometry edit build the twin the same way —
+        // the old builder sized it from the kind's DEFAULTS while the analyzer
+        // copies the primary's actual width, height and hang height.
+        const primary = buildOpeningOnWall(project, wall, kind, xMm);
+        const nextWallObjects = [...project.wallObjects, primary];
+        const primaryId = primary.id;
+        const validateIds = [primaryId];
 
         // Same as addOpening: never blocked by a collision.
         await commitWallObjectEdit(
@@ -2093,6 +2370,7 @@ export function createAppStore(deps: AppStoreDeps) {
           validateIds,
           true,
           {
+            reconcileWallIds: [wall.id],
             extras: selectionWrite(
               { ...project, wallObjects: nextWallObjects },
               { kind: "objects", ids: [primaryId] },
@@ -2152,13 +2430,10 @@ export function createAppStore(deps: AppStoreDeps) {
         // Doors must sit on the floorline (bottom edge at y=0, center at height/2).
         const resolvedYMm = kind === "door" ? undefined : yMm;
 
-        const { nextWallObjects, primaryId, validateIds } = buildOpeningWithMirror(
-          project,
-          wall,
-          kind,
-          xCenterMm,
-          resolvedYMm
-        );
+        const primary = buildOpeningOnWall(project, wall, kind, xCenterMm, resolvedYMm);
+        const nextWallObjects = [...project.wallObjects, primary];
+        const primaryId = primary.id;
+        const validateIds = [primaryId];
 
         await commitWallObjectEdit(
           `Add ${openingNoun(kind)}`,
@@ -2167,6 +2442,7 @@ export function createAppStore(deps: AppStoreDeps) {
           validateIds,
           true,
           {
+            reconcileWallIds: [wall.id],
             extras: selectionWrite(
               { ...project, wallObjects: nextWallObjects },
               { kind: "objects", ids: [primaryId] },
@@ -2436,6 +2712,17 @@ export function createAppStore(deps: AppStoreDeps) {
 
         if (movedWallIds.length === 0 && movedFloorIds.length === 0) return;
 
+        // Shared openings first, against the pre-edit classification and the
+        // COMPLETED draft: one half in the batch drags its twin, both halves in
+        // the batch are validated to still be one aligned opening on the same
+        // boundary. This runs BEFORE normalization so a severing repair cannot
+        // pre-empt the refusal.
+        const paired = syncMovedPairHalves(project, nextWallObjects, movedWallIds);
+        if (paired.status === "blocked") {
+          set({ error: sharedOpeningRefusalMessage(paired.reason) });
+          return;
+        }
+
         // One normalization pass over the COMPLETED draft. Doing it per-object
         // inside the map above would be order-dependent: the first twin's move
         // would be judged against the second twin's not-yet-applied wall and
@@ -2443,18 +2730,38 @@ export function createAppStore(deps: AppStoreDeps) {
         // both halves onto a new shared wall together must keep them paired).
         const pairedWallObjects = normalizeOpeningPairs({
           ...project,
-          wallObjects: nextWallObjects
+          wallObjects: paired.nextWallObjects
         }).project.wallObjects;
 
         // Floor objects get no bounds/collision validation in v1 (see
         // placeArtworkOnFloor) — only the wall-anchored members are checked.
+        // The label counts what the USER moved; a twin dragged along is still
+        // validated, so it joins validateIds without inflating the count.
+        // Reconcile the batch too: a group drag can carry an UNPAIRED opening
+        // onto (or off) a shared boundary just as a single drag can, and this
+        // path commits through the same gate. Both the pre-edit and post-edit
+        // walls of every moved opening are in scope, because a re-anchor
+        // leaves one boundary and joins another.
+        const movedOpeningWallIds = [
+          ...new Set(
+            [...project.wallObjects, ...pairedWallObjects]
+              .filter((object) => movedWallIds.includes(object.id) && isOpeningKind(object.kind))
+              .map((object) => object.wallId)
+          )
+        ];
+
         await commitWallObjectEdit(
           `Move ${movedWallIds.length + movedFloorIds.length} objects`,
           project,
           pairedWallObjects,
-          movedWallIds,
+          [...movedWallIds, ...paired.validateIds],
           allowOverlap,
-          { nextFloorObjects }
+          {
+            nextFloorObjects,
+            ...(movedOpeningWallIds.length > 0
+              ? { reconcileWallIds: movedOpeningWallIds }
+              : {})
+          }
         );
       },
 

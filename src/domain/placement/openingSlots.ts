@@ -48,18 +48,3 @@ export function isOpeningSlotFree(
   });
   return freeXMm !== null && Math.abs(freeXMm - xMm) < 1;
 }
-
-// Test a fresh mirrored twin using its resolved default size and centerline.
-export function isTwinSlotFree(
-  project: Project,
-  wall: WallWithGeometry,
-  kind: OpeningKind,
-  xMm: number,
-  centerYMm?: number
-): boolean {
-  const { widthMm, heightMm } = getDefaultOpeningSizeMm(kind);
-  const defaultCenterlineYMm = wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
-  const resolvedCenterYMm =
-    centerYMm ?? getDefaultOpeningCenterYMm(kind, heightMm, defaultCenterlineYMm);
-  return isOpeningSlotFree(project, wall, { widthMm, heightMm }, resolvedCenterYMm, xMm, null);
-}

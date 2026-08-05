@@ -109,6 +109,20 @@ export type RoomGeometrySliceInternals = {
     project: Project,
     changedWallIds: string[]
   ) => PlacementWarning[];
+  // Shared-opening reconciliation for a perimeter-geometry edit. Called only by
+  // the actions that can change ADJACENCY — moving, reshaping, splitting or
+  // adding a room. Deliberately not by renameRoom, resizeRoomHeight or any
+  // partition action: those rebuild `floor` too, but none of them changes which
+  // walls face which, and reconciling there would let renaming a room create a
+  // door.
+  // Scope is derived from BOTH the pre-edit and post-edit topology, so edits
+  // that remove a boundary (or an ambiguity) reconsider the walls they used to
+  // face, not just the walls they face now.
+  reconcileGeometryEdit: (
+    preProject: Project,
+    postProject: Project,
+    changedWallIds: string[]
+  ) => { project: Project; validateWallIds: string[] };
 };
 
 export function createRoomGeometrySlice(
@@ -116,7 +130,8 @@ export function createRoomGeometrySlice(
   get: () => AppState,
   internals: RoomGeometrySliceInternals
 ): { actions: RoomGeometrySliceActions } {
-  const { applyEdit, runPartitionEdit, validateChangedWallPlacements } = internals;
+  const { applyEdit, runPartitionEdit, validateChangedWallPlacements, reconcileGeometryEdit } =
+    internals;
 
   const actions: RoomGeometrySliceActions = {
     async renameRoom(roomId, name) {
@@ -148,7 +163,24 @@ export function createRoomGeometrySlice(
       if (!project || !roomPlacement) return;
 
       // Domain cascade removes room wall objects and dangling partner refs.
-      const { project: nextProject } = deleteRoomFromProject(project, roomId);
+      const { project: cascaded } = deleteRoomFromProject(project, roomId);
+
+      // Deletion can RESOLVE an ambiguity: if this room's wall was one of two
+      // backing a neighbour's opening, removing it is exactly what makes the
+      // surviving pair uniquely reconcilable. Scope comes from the PRE-delete
+      // topology (the deleted walls no longer lead anywhere afterwards). The
+      // disconnect-only contract is untouched — the cascade has already run,
+      // and a survivor whose only counterpart died reads as exterior here.
+      const reconciledDelete = reconcileGeometryEdit(
+        project,
+        cascaded,
+        roomPlacement.room.walls.map((wall) => wall.id)
+      );
+      const nextProject = reconciledDelete.project;
+      const deletePlacementWarnings = validateChangedWallPlacements(
+        nextProject,
+        reconciledDelete.validateWallIds
+      );
       const nextRooms = nextProject.floor.rooms;
       // Selection context keys off perimeter walls, not partition faces.
       const { wallIds: deletedWallIds } = getRoomCascadeScope(project, roomId);
@@ -181,6 +213,7 @@ export function createRoomGeometrySlice(
         `Delete ${roomPlacement.room.name}`,
         () => nextProject,
         {
+          placementWarnings: deletePlacementWarnings,
           ...selectionWrite(nextProject, nextSelection, nextWallContextId),
           viewMode: "plan"
         }
@@ -196,13 +229,31 @@ export function createRoomGeometrySlice(
         project.defaultWallHeightMm
       );
 
+      const nextProject: Project = {
+        ...project,
+        floor: { rooms: [...project.floor.rooms, roomPlacement] }
+      };
+      // A room drawn flush against an existing one creates a boundary, so an
+      // exterior door on the neighbour's wall becomes a shared opening and gets
+      // its other face here — in this same commit. The twin (and anything else
+      // on the affected walls) is then validated like any other placement:
+      // applyEdit clears placementWarnings unconditionally, so skipping this
+      // would let a colliding or out-of-bounds twin land silently.
+      const reconciled = reconcileGeometryEdit(
+        project,
+        nextProject,
+        roomPlacement.room.walls.map((wall) => wall.id)
+      );
+      const placementWarnings = validateChangedWallPlacements(
+        reconciled.project,
+        reconciled.validateWallIds
+      );
+
       await applyEdit(
         `Add ${roomPlacement.room.name}`,
-        (current) => ({
-          ...current,
-          floor: { rooms: [...current.floor.rooms, roomPlacement] }
-        }),
+        () => reconciled.project,
         {
+          placementWarnings,
           // Move the sidebar context to the new room's first wall; the
           // current selection (if any) is left as-is.
           ...selectionWrite(
@@ -243,7 +294,24 @@ export function createRoomGeometrySlice(
         floor: { rooms: [...project.floor.rooms, roomPlacement] }
       };
 
-      await applyEdit(`Add room`, () => nextProject, {
+      // A room drawn flush against an existing one creates a boundary, so an
+      // exterior door on the neighbour's wall becomes a shared opening and gets
+      // its other face here — in this same commit. The twin (and anything else
+      // on the affected walls) is then validated like any other placement:
+      // applyEdit clears placementWarnings unconditionally, so skipping this
+      // would let a colliding or out-of-bounds twin land silently.
+      const reconciled = reconcileGeometryEdit(
+        project,
+        nextProject,
+        roomPlacement.room.walls.map((wall) => wall.id)
+      );
+      const placementWarnings = validateChangedWallPlacements(
+        reconciled.project,
+        reconciled.validateWallIds
+      );
+
+      await applyEdit(`Add room`, () => reconciled.project, {
+        placementWarnings,
         // Select the new room and move the sidebar wall context to its first
         // wall, so plan handles and the elevation switcher both land on it.
         ...selectionWrite(
@@ -283,7 +351,24 @@ export function createRoomGeometrySlice(
         floor: { rooms: [...project.floor.rooms, roomPlacement] }
       };
 
-      await applyEdit(`Add ${roomPlacement.room.name}`, () => nextProject, {
+      // A room drawn flush against an existing one creates a boundary, so an
+      // exterior door on the neighbour's wall becomes a shared opening and gets
+      // its other face here — in this same commit. The twin (and anything else
+      // on the affected walls) is then validated like any other placement:
+      // applyEdit clears placementWarnings unconditionally, so skipping this
+      // would let a colliding or out-of-bounds twin land silently.
+      const reconciled = reconcileGeometryEdit(
+        project,
+        nextProject,
+        roomPlacement.room.walls.map((wall) => wall.id)
+      );
+      const placementWarnings = validateChangedWallPlacements(
+        reconciled.project,
+        reconciled.validateWallIds
+      );
+
+      await applyEdit(`Add ${roomPlacement.room.name}`, () => reconciled.project, {
+        placementWarnings,
         // Select the new room and move the sidebar wall context to its first
         // wall, so plan handles and the elevation switcher both land on it.
         ...selectionWrite(
@@ -553,12 +638,18 @@ export function createRoomGeometrySlice(
       const result = resizeWallPreservingAngles(project, wallId, lengthMm, anchor);
       if (result.changedWallIds.length === 0) return;
 
+      // Perimeter geometry can change which walls face which, so shared
+      // openings reconcile inside this same edit — one undo step covers the
+      // reshape and any twin it implies, or neither happens. Warnings are
+      // computed AFTER, over the counterpart walls too, so anything the
+      // reconciliation created is validated like the rest.
+      const reconciled = reconcileGeometryEdit(project, result.project, result.changedWallIds);
       const placementWarnings = validateChangedWallPlacements(
-        result.project,
-        result.changedWallIds
+        reconciled.project,
+        reconciled.validateWallIds
       );
 
-      await applyEdit("Resize wall", () => result.project, {
+      await applyEdit("Resize wall", () => reconciled.project, {
         placementWarnings,
         lastGeometryEdit: {
           anchorVertexId: result.anchorVertexId,
@@ -574,12 +665,18 @@ export function createRoomGeometrySlice(
       const result = setPolygonWallLengthEdit(project, wallId, lengthMm, anchor);
       if (result.changedWallIds.length === 0) return;
 
+      // Perimeter geometry can change which walls face which, so shared
+      // openings reconcile inside this same edit — one undo step covers the
+      // reshape and any twin it implies, or neither happens. Warnings are
+      // computed AFTER, over the counterpart walls too, so anything the
+      // reconciliation created is validated like the rest.
+      const reconciled = reconcileGeometryEdit(project, result.project, result.changedWallIds);
       const placementWarnings = validateChangedWallPlacements(
-        result.project,
-        result.changedWallIds
+        reconciled.project,
+        reconciled.validateWallIds
       );
 
-      await applyEdit("Resize wall", () => result.project, {
+      await applyEdit("Resize wall", () => reconciled.project, {
         placementWarnings,
         lastGeometryEdit: {
           anchorVertexId: result.anchorVertexId,
@@ -616,12 +713,18 @@ export function createRoomGeometrySlice(
       }
       if (result.changedWallIds.length === 0) return;
 
+      // Perimeter geometry can change which walls face which, so shared
+      // openings reconcile inside this same edit — one undo step covers the
+      // reshape and any twin it implies, or neither happens. Warnings are
+      // computed AFTER, over the counterpart walls too, so anything the
+      // reconciliation created is validated like the rest.
+      const reconciled = reconcileGeometryEdit(project, result.project, result.changedWallIds);
       const placementWarnings = validateChangedWallPlacements(
-        result.project,
-        result.changedWallIds
+        reconciled.project,
+        reconciled.validateWallIds
       );
 
-      await applyEdit("Move room corner", () => result.project, {
+      await applyEdit("Move room corner", () => reconciled.project, {
         placementWarnings,
         lastGeometryEdit: {
           anchorVertexId: result.anchorVertexId,
@@ -651,12 +754,18 @@ export function createRoomGeometrySlice(
       }
       if (result.changedWallIds.length === 0) return;
 
+      // Perimeter geometry can change which walls face which, so shared
+      // openings reconcile inside this same edit — one undo step covers the
+      // reshape and any twin it implies, or neither happens. Warnings are
+      // computed AFTER, over the counterpart walls too, so anything the
+      // reconciliation created is validated like the rest.
+      const reconciled = reconcileGeometryEdit(project, result.project, result.changedWallIds);
       const placementWarnings = validateChangedWallPlacements(
-        result.project,
-        result.changedWallIds
+        reconciled.project,
+        reconciled.validateWallIds
       );
 
-      await applyEdit("Move wall", () => result.project, {
+      await applyEdit("Move wall", () => reconciled.project, {
         placementWarnings,
         lastGeometryEdit: {
           anchorVertexId: result.anchorVertexId,
@@ -681,12 +790,18 @@ export function createRoomGeometrySlice(
         return;
       }
 
+      // Perimeter geometry can change which walls face which, so shared
+      // openings reconcile inside this same edit — one undo step covers the
+      // reshape and any twin it implies, or neither happens. Warnings are
+      // computed AFTER, over the counterpart walls too, so anything the
+      // reconciliation created is validated like the rest.
+      const reconciled = reconcileGeometryEdit(project, result.project, result.changedWallIds);
       const placementWarnings = validateChangedWallPlacements(
-        result.project,
-        result.changedWallIds
+        reconciled.project,
+        reconciled.validateWallIds
       );
 
-      await applyEdit("Split wall", () => result.project, {
+      await applyEdit("Split wall", () => reconciled.project, {
         placementWarnings,
         lastGeometryEdit: {
           anchorVertexId: result.anchorVertexId,
@@ -711,9 +826,15 @@ export function createRoomGeometrySlice(
         return;
       }
 
+      // Perimeter geometry can change which walls face which, so shared
+      // openings reconcile inside this same edit — one undo step covers the
+      // reshape and any twin it implies, or neither happens. Warnings are
+      // computed AFTER, over the counterpart walls too, so anything the
+      // reconciliation created is validated like the rest.
+      const reconciled = reconcileGeometryEdit(project, result.project, result.changedWallIds);
       const placementWarnings = validateChangedWallPlacements(
-        result.project,
-        result.changedWallIds
+        reconciled.project,
+        reconciled.validateWallIds
       );
       // The merge deletes one of the two walls it joins — if the sidebar's
       // wall context was pointed at it, fall back to the surviving merged
@@ -729,7 +850,7 @@ export function createRoomGeometrySlice(
           ? (result.changedWallIds[0] ?? wallContextId)
           : wallContextId;
 
-      await applyEdit("Delete room corner", () => result.project, {
+      await applyEdit("Delete room corner", () => reconciled.project, {
         placementWarnings,
         lastGeometryEdit: {
           anchorVertexId: result.anchorVertexId,
@@ -756,16 +877,31 @@ export function createRoomGeometrySlice(
         return;
       }
 
-      await applyEdit("Move room", (current) => ({
-        ...current,
+      const movedProject: Project = {
+        ...project,
         floor: {
-          rooms: current.floor.rooms.map((candidate) =>
+          rooms: project.floor.rooms.map((candidate) =>
             candidate.roomId === roomId
               ? { ...candidate, offsetXMm, offsetYMm }
               : candidate
           )
         }
-      }));
+      };
+
+      // Sliding a room is the edit most likely to change adjacency, and it was
+      // the ONLY geometry action with no validation at all — every sibling
+      // above computes placementWarnings, and pushEditEntry clears them
+      // unconditionally, so a room move used to wipe every existing warning and
+      // compute nothing in their place. It can now also create objects, which
+      // makes validating it mandatory rather than merely tidy.
+      const changedWallIds = placement.room.walls.map((wall) => wall.id);
+      const reconciled = reconcileGeometryEdit(project, movedProject, changedWallIds);
+      const placementWarnings = validateChangedWallPlacements(
+        reconciled.project,
+        reconciled.validateWallIds
+      );
+
+      await applyEdit("Move room", () => reconciled.project, { placementWarnings });
     }
   };
 

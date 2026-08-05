@@ -670,8 +670,10 @@ function mirrorSlot(
 }
 
 // The object standing in a mirrored slot, using the same strict-overlap rule
-// findFreeOpeningCenterXMm applies. A door/window is preferred over a blocked
-// zone or a case because it produces the more useful explanation.
+// findFreeOpeningCenterXMm applies. Only blocking kinds are considered, so the
+// candidates are exactly doors, windows and blocked zones; a door or window is
+// preferred over a blocked zone because it produces the more useful
+// explanation ("already part of another shared opening" vs "no room here").
 function findSlotBlocker(
   project: Project,
   wallId: string,

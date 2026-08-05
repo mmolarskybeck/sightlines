@@ -64,6 +64,13 @@ function describeFit(fit: OpeningFit | null, displayUnit: DisplayUnit): string |
     return "The facing wall leaves no room to resize this shared opening.";
   }
 
+  // Nothing committed either: the far half of this shared opening could not
+  // follow the request — the slot it would land in is taken, or the request
+  // reached past the run the two rooms share.
+  if (fit.partnerBlocked) {
+    return "The other side of this shared opening can’t go there, so nothing moved.";
+  }
+
   const byNeighbor = fit.constraint === "neighbor" || fit.constraint === "paired-neighbor";
   const byFacingWall = fit.constraint === "paired-wall" || fit.constraint === "paired-neighbor";
 

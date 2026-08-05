@@ -3305,6 +3305,118 @@ describe("app store", () => {
       expect(store.getState().saveState).toBe("saved");
     });
 
+    it("keeps mirroring a legacy pair on a same-wall nudge, and never refuses it", async () => {
+      // wall-north and wall-south of ONE room are not two faces of a shared
+      // boundary, so this pair is not one physical opening and never was. It is
+      // exactly the data the "existing pairs survive" decision protects, which
+      // includes how it MOVES: the partner has always followed a same-wall
+      // nudge when its slot was free, and silently dropping that would be
+      // changing legacy documents under the user. What it never does is refuse —
+      // refusal is reserved for pairs that really are one physical opening.
+      await store.getState().addOpening("wall-north", "door");
+      const doorA = store.getState().project!.wallObjects[0];
+      await store.getState().addOpening("wall-south", "door");
+      const doorB = store
+        .getState()
+        .project!.wallObjects.find((object) => object.id !== doorA.id)!;
+      await store.getState().connectOpenings(doorA.id, doorB.id);
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().moveOpening(doorA.id, 2500, doorA.yMm);
+
+      const state = store.getState();
+      const movedA = state.project!.wallObjects.find((object) => object.id === doorA.id)!;
+      const movedB = state.project!.wallObjects.find((object) => object.id === doorB.id)!;
+      expect(movedA.xMm).toBe(2500);
+      // The partner followed, mirrored across the two anti-parallel walls.
+      expect(movedB.xMm).not.toBe(doorB.xMm);
+      // Committed as one edit, still a pair, no refusal.
+      expect(movedA.kind === "door" ? movedA.connectsToObjectId : undefined).toBe(doorB.id);
+      expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+      expect(state.error).toBeNull();
+    });
+
+    it("does not mirror a legacy pair on a plan drag, which never mirrored", async () => {
+      // Direct edits (moveOpening/resizeOpening) have always dragged a legacy
+      // partner along when its slot was free, and that is preserved. Plan
+      // dragging never did — so honouring a legacy best-effort draft here would
+      // be a NEW behaviour, not a preserved one.
+      await store.getState().addOpening("wall-north", "door");
+      const doorA = store.getState().project!.wallObjects[0];
+      await store.getState().addOpening("wall-south", "door");
+      const doorB = store
+        .getState()
+        .project!.wallObjects.find((object) => object.id !== doorA.id)!;
+      await store.getState().connectOpenings(doorA.id, doorB.id);
+
+      await store.getState().commitPlanMove(doorA.id, {
+        anchor: "wall",
+        wallId: "wall-north",
+        xMm: 2500
+      });
+
+      const objects = store.getState().project!.wallObjects;
+      const movedA = objects.find((object) => object.id === doorA.id)!;
+      const keptB = objects.find((object) => object.id === doorB.id)!;
+      expect(movedA.xMm).toBe(2500);
+      expect(keptB.xMm).toBe(doorB.xMm);
+      expect(store.getState().error).toBeNull();
+    });
+
+    it("resizes a legacy pair on perpendicular walls instead of refusing it", async () => {
+      // wall-north and wall-east are perpendicular, so they project to a
+      // zero-length mutual run. Solving a legacy pair as one physical hole would
+      // report noMutualSpan and refuse — before the non-refusing legacy branch
+      // was ever reached. Only a real shared boundary gets the paired span.
+      await store.getState().addOpening("wall-north", "door");
+      const doorA = store.getState().project!.wallObjects[0];
+      await store.getState().addOpening("wall-east", "door");
+      const doorB = store
+        .getState()
+        .project!.wallObjects.find((object) => object.id !== doorA.id)!;
+      await store.getState().connectOpenings(doorA.id, doorB.id);
+
+      const fit = await store.getState().resizeOpening(doorA.id, 1200, doorA.heightMm);
+
+      expect(fit?.noMutualSpan).toBeFalsy();
+      expect(fit?.partnerBlocked).toBeFalsy();
+      const movedA = store
+        .getState()
+        .project!.wallObjects.find((object) => object.id === doorA.id)!;
+      expect(movedA.widthMm).toBe(1200);
+      expect(store.getState().error).toBeNull();
+    });
+
+    it("ignores a one-way pointer at a different kind rather than moving it", async () => {
+      // resolveLivePartner promises a structurally sound pair, and `no-partner`
+      // is documented as covering kind mismatches. Trusting the raw pointer let
+      // a broken door -> window reference drag an unrelated object.
+      await store.getState().addOpening("wall-north", "door");
+      const door = store.getState().project!.wallObjects[0];
+      await store.getState().addOpening("wall-south", "window");
+      const window = store
+        .getState()
+        .project!.wallObjects.find((object) => object.id !== door.id)!;
+
+      // A document the schema would reject, written straight into state.
+      const base = store.getState().project!;
+      store.setState({
+        project: {
+          ...base,
+          wallObjects: base.wallObjects.map((object) =>
+            object.id === door.id ? { ...object, connectsToObjectId: window.id } : object
+          )
+        }
+      });
+
+      await store.getState().moveOpening(door.id, 2500, door.yMm);
+
+      const objects = store.getState().project!.wallObjects;
+      expect(objects.find((object) => object.id === door.id)!.xMm).toBe(2500);
+      // The window is untouched: it was never this door's other face.
+      expect(objects.find((object) => object.id === window.id)!.xMm).toBe(window.xMm);
+    });
+
     it("keeps a pair when a group move relocates both halves in one batch", async () => {
       // The order-dependence guard: normalization runs once over the finished
       // draft, so the first half's new wall is never judged against the second
@@ -3538,7 +3650,11 @@ describe("app store", () => {
       ).toBe("aligned");
     });
 
-    it("leaves the twin put when a move's mirrored slot would collide (pair goes misaligned)", async () => {
+    // Was "leaves the twin put when a move's mirrored slot would collide (pair
+    // goes misaligned)": the move landed, the twin stayed, and one physical
+    // opening silently became two facing alcoves. A live shared pair either
+    // moves as one opening or the edit fails.
+    it("refuses a move whose mirrored slot would collide, leaving both halves put", async () => {
       setupSharedWallRooms();
       await store.getState().addOpening(A_EAST, "door");
       const primary = onWall(A_EAST);
@@ -3564,20 +3680,366 @@ describe("app store", () => {
           ]
         }
       });
+      const undoBefore = store.getState().undoStack.length;
 
-      await store.getState().moveOpening(primary.id, 2200, primary.yMm);
+      const fit = await store.getState().moveOpening(primary.id, 2200, primary.yMm);
 
-      const movedPrimary = store
+      const state = store.getState();
+      const keptPrimary = state.project!.wallObjects.find((object) => object.id === primary.id)!;
+      const keptTwin = state.project!.wallObjects.find((object) => object.id === twin.id)!;
+      // Nothing moved, nothing to undo, and the user is told why.
+      expect(keptPrimary.xMm).toBeCloseTo(1500);
+      expect(keptTwin.xMm).toBeCloseTo(1500);
+      expect(state.undoStack).toHaveLength(undoBefore);
+      expect(state.error).toMatch(/shared with the room next door/i);
+      // Reported the same way noMutualSpan is, so the inspector can explain it.
+      expect(fit?.partnerBlocked).toBe(true);
+      // Above all: the pair is still one opening.
+      expect(evaluateOpeningPair(state.project!, primary.id, twin.id).status).toBe("aligned");
+    });
+
+    it("refuses a resize whose mirrored footprint would collide on the facing wall", async () => {
+      // Normally unreachable: resolvePairedOpeningSpan folds BOTH faces' free
+      // runs into one interval, so a solved resize already clears the twin's
+      // neighbours. It becomes reachable on legacy geometry — an opening that
+      // already overlaps a neighbour makes getOpeningLegalSpan fall back to the
+      // bare wall, and the solved span then knows nothing about the blocker.
+      // The guard is what stops that resizing one face onto another opening.
+      setupSharedWallRooms();
+      await store.getState().addOpening(A_EAST, "door");
+      const primary = onWall(A_EAST);
+      const twin = onWall(B_WEST);
+
+      const base = store.getState().project!;
+      store.setState({
+        project: {
+          ...base,
+          wallObjects: [
+            ...base.wallObjects,
+            {
+              id: "blocker",
+              kind: "blocked-zone",
+              blocksPlacement: true,
+              wallId: B_WEST,
+              xMm: twin.xMm,
+              yMm: DOOR_Y_MM,
+              widthMm: 400,
+              heightMm: 2030
+            }
+          ]
+        }
+      });
+      const undoBefore = store.getState().undoStack.length;
+
+      const fit = await store.getState().resizeOpening(primary.id, 3000, 2030);
+
+      const state = store.getState();
+      expect(state.project!.wallObjects.find((o) => o.id === primary.id)!.widthMm).toBe(915);
+      expect(state.project!.wallObjects.find((o) => o.id === twin.id)!.widthMm).toBe(915);
+      expect(state.undoStack).toHaveLength(undoBefore);
+      expect(fit?.partnerBlocked).toBe(true);
+      expect(state.error).toMatch(/shared with the room next door/i);
+    });
+
+    it("propagates that refusal through Fit wall rather than swallowing it", async () => {
+      // fitOpeningToAvailableSpan delegates to resizeOpening, so the refusal
+      // has to travel back out instead of being reported as a committed fit.
+      setupSharedWallRooms();
+      await store.getState().addOpening(A_EAST, "door");
+      const primary = onWall(A_EAST);
+      const twin = onWall(B_WEST);
+
+      const base = store.getState().project!;
+      store.setState({
+        project: {
+          ...base,
+          wallObjects: [
+            ...base.wallObjects,
+            {
+              id: "blocker",
+              kind: "blocked-zone",
+              blocksPlacement: true,
+              wallId: B_WEST,
+              xMm: twin.xMm,
+              yMm: DOOR_Y_MM,
+              widthMm: 400,
+              heightMm: 2030
+            }
+          ]
+        }
+      });
+      const undoBefore = store.getState().undoStack.length;
+
+      const fit = await store.getState().fitOpeningToAvailableSpan(primary.id);
+
+      expect(fit?.partnerBlocked).toBe(true);
+      expect(store.getState().project!.wallObjects.find((o) => o.id === primary.id)!.widthMm).toBe(
+        915
+      );
+      expect(store.getState().undoStack).toHaveLength(undoBefore);
+    });
+
+    it("moves the target alone when the partner's wall has vanished", async () => {
+      // A missing wall is a broken document, not a user error: refusing here
+      // would wedge the opening with no way to edit it back into shape.
+      setupSharedWallRooms();
+      await store.getState().addOpening(A_EAST, "door");
+      const primary = onWall(A_EAST);
+      const twin = onWall(B_WEST);
+
+      const base = store.getState().project!;
+      store.setState({
+        project: {
+          ...base,
+          wallObjects: base.wallObjects.map((object) =>
+            object.id === twin.id ? { ...object, wallId: "wall-that-vanished" } : object
+          )
+        }
+      });
+      const undoBefore = store.getState().undoStack.length;
+
+      await store.getState().moveOpening(primary.id, 800, primary.yMm);
+
+      const state = store.getState();
+      expect(state.project!.wallObjects.find((o) => o.id === primary.id)!.xMm).toBe(800);
+      expect(state.project!.wallObjects.find((o) => o.id === twin.id)!.xMm).toBeCloseTo(1500);
+      expect(state.undoStack).toHaveLength(undoBefore + 1);
+      expect(state.error).toBeNull();
+    });
+
+    it("drags the twin when a plan drag moves one half of a shared pair", async () => {
+      setupSharedWallRooms();
+      await store.getState().addOpening(A_EAST, "door");
+      const primary = onWall(A_EAST);
+      const twin = onWall(B_WEST);
+      const undoBefore = store.getState().undoStack.length;
+
+      await store.getState().commitPlanMove(primary.id, {
+        anchor: "wall",
+        wallId: A_EAST,
+        xMm: 800
+      });
+
+      const state = store.getState();
+      const movedPrimary = state.project!.wallObjects.find((o) => o.id === primary.id)!;
+      const movedTwin = state.project!.wallObjects.find((o) => o.id === twin.id)!;
+      expect(movedPrimary.xMm).toBe(800);
+      expect(movedTwin.xMm).toBeCloseTo(2200);
+      // One drag, one undo step, still one opening.
+      expect(state.undoStack).toHaveLength(undoBefore + 1);
+      expect(partnerOf(movedTwin)).toBe(primary.id);
+      expect(evaluateOpeningPair(state.project!, primary.id, twin.id).status).toBe("aligned");
+    });
+
+    // The shared-pair counterpart of "disconnects a pair when one half is moved
+    // onto its partner's wall": for a LIVE shared pair there is nothing to
+    // disconnect — one physical opening cannot have both faces in one room —
+    // so the drag is refused instead of being laundered into a severed pair.
+    it("refuses a plan drag of one half onto its partner's own wall", async () => {
+      setupSharedWallRooms();
+      await store.getState().addOpening(A_EAST, "door");
+      const primary = onWall(A_EAST);
+      const twin = onWall(B_WEST);
+      const undoBefore = store.getState().undoStack.length;
+
+      await store.getState().commitPlanMove(primary.id, {
+        anchor: "wall",
+        wallId: B_WEST,
+        xMm: 1500
+      });
+
+      const state = store.getState();
+      const keptPrimary = state.project!.wallObjects.find((o) => o.id === primary.id)!;
+      expect(keptPrimary.wallId).toBe(A_EAST);
+      expect(partnerOf(keptPrimary)).toBe(twin.id);
+      expect(state.undoStack).toHaveLength(undoBefore);
+      expect(state.error).toMatch(/shared with the room next door/i);
+      expect(state.saveState).toBe("saved");
+    });
+
+    it("refuses a plan drag that re-anchors one half onto another wall", async () => {
+      setupSharedWallRooms();
+      await store.getState().addOpening(A_EAST, "door");
+      const primary = onWall(A_EAST);
+      const undoBefore = store.getState().undoStack.length;
+
+      await store.getState().commitPlanMove(primary.id, {
+        anchor: "wall",
+        wallId: "room-a-wall-north",
+        xMm: 1500
+      });
+
+      const state = store.getState();
+      const keptPrimary = state.project!.wallObjects.find((o) => o.id === primary.id)!;
+      // The half stays on its own wall rather than being severed from its twin.
+      expect(keptPrimary.wallId).toBe(A_EAST);
+      expect(partnerOf(keptPrimary)).toBeDefined();
+      expect(state.undoStack).toHaveLength(undoBefore);
+      expect(state.error).toMatch(/shared with the room next door/i);
+    });
+
+    it("drags the twin when an elevation group move includes only one half", async () => {
+      setupSharedWallRooms();
+      await store.getState().addOpening(A_EAST, "door");
+      const primary = onWall(A_EAST);
+      const twin = onWall(B_WEST);
+
+      await store
         .getState()
-        .project!.wallObjects.find((object) => object.id === primary.id)!;
-      const unmovedTwin = store
-        .getState()
-        .project!.wallObjects.find((object) => object.id === twin.id)!;
-      expect(movedPrimary.xMm).toBe(2200);
-      expect(unmovedTwin.xMm).toBeCloseTo(1500);
-      expect(
-        evaluateOpeningPair(store.getState().project!, movedPrimary.id, unmovedTwin.id).status
-      ).toBe("misaligned");
+        .moveWallObjectsGroup([{ id: primary.id, xMm: 800, yMm: primary.yMm }]);
+
+      const objects = store.getState().project!.wallObjects;
+      expect(objects.find((o) => o.id === primary.id)!.xMm).toBe(800);
+      expect(objects.find((o) => o.id === twin.id)!.xMm).toBeCloseTo(2200);
+    });
+
+    describe("group moves of a shared pair", () => {
+      it("drags the twin when only one half is in the batch", async () => {
+        setupSharedWallRooms();
+        await store.getState().addOpening(A_EAST, "door");
+        const primary = onWall(A_EAST);
+        const twin = onWall(B_WEST);
+
+        await store.getState().movePlanObjectsGroup([{ id: primary.id, xMm: 800 }]);
+
+        const objects = store.getState().project!.wallObjects;
+        expect(objects.find((o) => o.id === primary.id)!.xMm).toBe(800);
+        expect(objects.find((o) => o.id === twin.id)!.xMm).toBeCloseTo(2200);
+        expect(store.getState().error).toBeNull();
+      });
+
+      it("commits a batch that moves both halves in step", async () => {
+        setupSharedWallRooms();
+        await store.getState().addOpening(A_EAST, "door");
+        const primary = onWall(A_EAST);
+        const twin = onWall(B_WEST);
+
+        // The two faces run in opposite directions, so a group drag of the pair
+        // sends them to mirrored local positions.
+        await store.getState().movePlanObjectsGroup([
+          { id: primary.id, xMm: 800 },
+          { id: twin.id, xMm: 2200 }
+        ]);
+
+        const state = store.getState();
+        expect(state.project!.wallObjects.find((o) => o.id === primary.id)!.xMm).toBe(800);
+        expect(state.project!.wallObjects.find((o) => o.id === twin.id)!.xMm).toBe(2200);
+        expect(state.error).toBeNull();
+        expect(evaluateOpeningPair(state.project!, primary.id, twin.id).status).toBe("aligned");
+      });
+
+      it("refuses a batch that would leave the two halves out of step", async () => {
+        // "Both halves moved" is not on its own proof the pair survived: this
+        // batch would leave one opening reading as two.
+        setupSharedWallRooms();
+        await store.getState().addOpening(A_EAST, "door");
+        const primary = onWall(A_EAST);
+        const twin = onWall(B_WEST);
+        const undoBefore = store.getState().undoStack.length;
+
+        await store.getState().movePlanObjectsGroup([
+          { id: primary.id, xMm: 800 },
+          { id: twin.id, xMm: 2900 }
+        ]);
+
+        const state = store.getState();
+        expect(state.project!.wallObjects.find((o) => o.id === primary.id)!.xMm).toBeCloseTo(1500);
+        expect(state.project!.wallObjects.find((o) => o.id === twin.id)!.xMm).toBeCloseTo(1500);
+        expect(state.undoStack).toHaveLength(undoBefore);
+        expect(state.error).toBeTruthy();
+      });
+    });
+
+    // Two rooms that meet over only PART of one wall's run: room B is shallower
+    // than room A, so room A's east wall is shared for its first 2000mm and
+    // exterior beyond that. Local x on the east wall is the floor y coordinate,
+    // and the facing west wall runs the other way (x -> 2000 - x).
+    describe("a wall shared over only part of its run", () => {
+      function setupPartialSharedWallRooms(): void {
+        const base = store.getState().project!;
+        store.setState({
+          project: {
+            ...base,
+            wallObjects: [],
+            floorObjects: [],
+            floor: {
+              rooms: [
+                createRectangularRoomPlacement({
+                  roomId: "room-a",
+                  name: "Room A",
+                  widthMm: 4000,
+                  depthMm: 3000,
+                  heightMm: 2500,
+                  offsetXMm: 0,
+                  offsetYMm: 0
+                }),
+                createRectangularRoomPlacement({
+                  roomId: "room-b",
+                  name: "Room B",
+                  widthMm: 4000,
+                  depthMm: 2000,
+                  heightMm: 2500,
+                  offsetXMm: 4000,
+                  offsetYMm: 0
+                })
+              ]
+            }
+          }
+        });
+      }
+
+      it("refuses a move that would carry the pair past the run the rooms share", async () => {
+        setupPartialSharedWallRooms();
+        await store.getState().addOpening(A_EAST, "door");
+        const primary = onWall(A_EAST);
+        const twin = onWall(B_WEST);
+        expect(primary.xMm).toBeCloseTo(1500);
+        expect(twin.xMm).toBeCloseTo(500);
+        const undoBefore = store.getState().undoStack.length;
+
+        // 2500 is comfortably on room A's own 3000mm wall, but past the 2000mm
+        // the two rooms actually share — the twin would have no wall to sit on.
+        const fit = await store.getState().moveOpening(primary.id, 2500, primary.yMm);
+
+        const state = store.getState();
+        expect(state.project!.wallObjects.find((o) => o.id === primary.id)!.xMm).toBeCloseTo(1500);
+        expect(state.project!.wallObjects.find((o) => o.id === twin.id)!.xMm).toBeCloseTo(500);
+        expect(state.undoStack).toHaveLength(undoBefore);
+        expect(fit?.partnerBlocked).toBe(true);
+        expect(state.error).toMatch(/wall the two rooms share/i);
+      });
+
+      it("refuses the same drag from the plan", async () => {
+        setupPartialSharedWallRooms();
+        await store.getState().addOpening(A_EAST, "door");
+        const primary = onWall(A_EAST);
+        const undoBefore = store.getState().undoStack.length;
+
+        await store.getState().commitPlanMove(primary.id, {
+          anchor: "wall",
+          wallId: A_EAST,
+          xMm: 2500
+        });
+
+        const state = store.getState();
+        expect(state.project!.wallObjects.find((o) => o.id === primary.id)!.xMm).toBeCloseTo(1500);
+        expect(state.undoStack).toHaveLength(undoBefore);
+        expect(state.error).toMatch(/wall the two rooms share/i);
+      });
+
+      it("still allows a move that stays inside the shared run", async () => {
+        setupPartialSharedWallRooms();
+        await store.getState().addOpening(A_EAST, "door");
+        const primary = onWall(A_EAST);
+        const twin = onWall(B_WEST);
+
+        await store.getState().moveOpening(primary.id, 1000, primary.yMm);
+
+        const objects = store.getState().project!.wallObjects;
+        expect(objects.find((o) => o.id === primary.id)!.xMm).toBe(1000);
+        expect(objects.find((o) => o.id === twin.id)!.xMm).toBeCloseTo(1000);
+        expect(store.getState().error).toBeNull();
+      });
     });
 
     it("mirrors a resize onto the twin in one undo step", async () => {
@@ -3617,6 +4079,410 @@ describe("app store", () => {
     // against the run both faces share. Fitting each face independently would
     // let the two halves settle at locally valid but physically different
     // centres — a shared opening visibly offset between the two rooms.
+    describe("group moves of a shared pair", () => {
+      it("refuses a batch that leaves the halves slightly out of step", async () => {
+        // The certification for a both-halves batch has to be an EXACT mirror
+        // check, not evaluateOpeningPair: that predicate exists to infer whether
+        // two independent openings read as a passage, so it accepts roughly half
+        // a door of offset. A pair left 200 mm out of step is not one opening.
+        setupSharedWallRooms();
+        await store.getState().addOpening(A_EAST, "door");
+        const a = onWall(A_EAST);
+        const b = onWall(B_WEST);
+        const undoBefore = store.getState().undoStack.length;
+
+        await store.getState().movePlanObjectsGroup([
+          { id: a.id, xMm: 1200, wallId: A_EAST },
+          // Mirrored would be 1800; 1700 is well inside evaluateOpeningPair's
+          // tolerance and well outside the 1 mm mirror tolerance.
+          { id: b.id, xMm: 1700, wallId: B_WEST }
+        ]);
+
+        const state = store.getState();
+        expect(state.undoStack).toHaveLength(undoBefore);
+        expect(state.project!.wallObjects.find((object) => object.id === a.id)!.xMm).toBe(a.xMm);
+        expect(state.project!.wallObjects.find((object) => object.id === b.id)!.xMm).toBe(b.xMm);
+        expect(state.error).toBeTruthy();
+      });
+
+      it("accepts a batch that moves the blocker out of the twin's destination", async () => {
+        // Occupancy has to be read from the COMPLETED draft. Judging the twin's
+        // destination against the pre-edit project refuses a transaction whose
+        // own finished state is perfectly legal.
+        setupSharedWallRooms();
+        await store.getState().addOpening(A_EAST, "door");
+        const a = onWall(A_EAST);
+        const b = onWall(B_WEST);
+        // A blocked zone parked exactly where the twin will need to land: the
+        // door starts centred at 1500, so sliding it to 500 sends the twin to
+        // 2500. The zone sits there first, clear of the twin's current spot.
+        await store.getState().addOpening(B_WEST, "blocked-zone");
+        const zone = store
+          .getState()
+          .project!.wallObjects.find((object) => object.kind === "blocked-zone")!;
+        await store.getState().moveOpening(zone.id, 2500, zone.yMm);
+        expect(
+          store.getState().project!.wallObjects.find((object) => object.id === zone.id)!.xMm
+        ).toBe(2500);
+
+        // One batch: the door slides so its twin must land at 2500, and the
+        // zone vacates that exact spot in the same transaction.
+        await store.getState().movePlanObjectsGroup([
+          { id: a.id, xMm: 500, wallId: A_EAST },
+          { id: zone.id, xMm: 800, wallId: B_WEST }
+        ]);
+
+        const objects = store.getState().project!.wallObjects;
+        expect(objects.find((object) => object.id === a.id)!.xMm).toBe(500);
+        expect(objects.find((object) => object.id === b.id)!.xMm).toBeCloseTo(2500, 6);
+        expect(store.getState().error).toBeNull();
+      });
+    });
+
+    describe("reconciliation on geometry edits", () => {
+      // Two rooms 1000 mm apart, so their facing walls are NOT a boundary yet.
+      function setupSeparatedRooms(): void {
+        const base = store.getState().project!;
+        store.setState({
+          project: {
+            ...base,
+            wallObjects: [],
+            floorObjects: [],
+            floor: {
+              rooms: [
+                createRectangularRoomPlacement({
+                  roomId: "room-a", name: "Room A", widthMm: 4000, depthMm: 3000,
+                  heightMm: 2500, offsetXMm: 0, offsetYMm: 0
+                }),
+                createRectangularRoomPlacement({
+                  roomId: "room-b", name: "Room B", widthMm: 4000, depthMm: 3000,
+                  heightMm: 2500, offsetXMm: 5000, offsetYMm: 0
+                })
+              ]
+            }
+          }
+        });
+      }
+
+      it("creates the twin in ONE undo step when a room slides flush", async () => {
+        setupSeparatedRooms();
+        await store.getState().addOpening(A_EAST, "door");
+        // No neighbour yet, so no twin.
+        expect(store.getState().project!.wallObjects).toHaveLength(1);
+        const undoBefore = store.getState().undoStack.length;
+
+        await store.getState().moveRoom("room-b", 4000, 0);
+
+        const objects = store.getState().project!.wallObjects;
+        expect(objects).toHaveLength(2);
+        const a = objects.find((object) => object.wallId === A_EAST)!;
+        const b = objects.find((object) => object.wallId === B_WEST)!;
+        expect(partnerOf(a)).toBe(b.id);
+        expect(partnerOf(b)).toBe(a.id);
+        // The move and the twin are ONE edit: undo restores both.
+        expect(store.getState().undoStack).toHaveLength(undoBefore + 1);
+        await store.getState().undo();
+        expect(store.getState().project!.wallObjects).toHaveLength(1);
+      });
+
+      it("keeps the pair and the twin when the room slides away again", async () => {
+        setupSeparatedRooms();
+        await store.getState().addOpening(A_EAST, "door");
+        await store.getState().moveRoom("room-b", 4000, 0);
+        expect(store.getState().project!.wallObjects).toHaveLength(2);
+
+        await store.getState().moveRoom("room-b", 5000, 0);
+
+        // Never auto-severed: identity survives, the user resolves it.
+        const objects = store.getState().project!.wallObjects;
+        expect(objects).toHaveLength(2);
+        expect(partnerOf(objects[0])).toBe(objects[1].id);
+      });
+
+      it("does not duplicate the twin when the room slides back", async () => {
+        setupSeparatedRooms();
+        await store.getState().addOpening(A_EAST, "door");
+        await store.getState().moveRoom("room-b", 4000, 0);
+        await store.getState().moveRoom("room-b", 5000, 0);
+
+        await store.getState().moveRoom("room-b", 4000, 0);
+
+        expect(store.getState().project!.wallObjects).toHaveLength(2);
+      });
+
+      it.each([
+        ["renaming a room", async () => store.getState().renameRoom("room-b", "Gallery 2")],
+        ["resizing room height", async () => store.getState().resizeRoomHeight("room-b", 2800)]
+      ])("creates nothing when %s", async (_label, act) => {
+        setupSharedWallRooms();
+        // A door with no twin: something reconciliation WOULD repair if it ran.
+        const base = store.getState().project!;
+        store.setState({
+          project: {
+            ...base,
+            wallObjects: [
+              {
+                id: "stray-door", kind: "door", blocksPlacement: true, wallId: A_EAST,
+                xMm: 1500, yMm: DOOR_Y_MM, widthMm: 915, heightMm: 2030
+              }
+            ]
+          }
+        });
+
+        await act();
+
+        // Both rebuild `floor`, which is exactly why a referential gate would
+        // have been wrong: neither changes which walls face which.
+        expect(store.getState().project!.wallObjects).toHaveLength(1);
+      });
+
+      it("leaves a stray opening in an unrelated room alone", async () => {
+        // The scoping guarantee. Rooms A|B share a wall; rooms C|D share their
+        // own, far away, and carry an unpaired door. Editing in A must not
+        // reach across the document and repair D.
+        const base = store.getState().project!;
+        store.setState({
+          project: {
+            ...base,
+            wallObjects: [],
+            floorObjects: [],
+            floor: {
+              rooms: [
+                createRectangularRoomPlacement({
+                  roomId: "room-a", name: "Room A", widthMm: 4000, depthMm: 3000,
+                  heightMm: 2500, offsetXMm: 0, offsetYMm: 0
+                }),
+                createRectangularRoomPlacement({
+                  roomId: "room-b", name: "Room B", widthMm: 4000, depthMm: 3000,
+                  heightMm: 2500, offsetXMm: 4000, offsetYMm: 0
+                }),
+                createRectangularRoomPlacement({
+                  roomId: "room-c", name: "Room C", widthMm: 4000, depthMm: 3000,
+                  heightMm: 2500, offsetXMm: 0, offsetYMm: 20000
+                }),
+                createRectangularRoomPlacement({
+                  roomId: "room-d", name: "Room D", widthMm: 4000, depthMm: 3000,
+                  heightMm: 2500, offsetXMm: 4000, offsetYMm: 20000
+                })
+              ]
+            }
+          }
+        });
+        // A one-sided door on the far pair's shared wall.
+        store.setState({
+          project: {
+            ...store.getState().project!,
+            wallObjects: [
+              {
+                id: "far-door", kind: "door", blocksPlacement: true,
+                wallId: "room-c-wall-east", xMm: 1500, yMm: DOOR_Y_MM,
+                widthMm: 915, heightMm: 2030
+              }
+            ]
+          }
+        });
+
+        await store.getState().addOpening(A_EAST, "door");
+
+        const objects = store.getState().project!.wallObjects;
+        const far = objects.find((object) => object.id === "far-door")!;
+        // A|B got their pair; C|D's stray is untouched.
+        expect(objects.filter((object) => object.wallId === A_EAST)).toHaveLength(1);
+        expect(objects.filter((object) => object.wallId === B_WEST)).toHaveLength(1);
+        expect(partnerOf(far)).toBeUndefined();
+        expect(objects.filter((object) => object.wallId === "room-d-wall-west")).toHaveLength(0);
+      });
+    });
+
+    describe("reconciliation across removed topology and batch paths", () => {
+      // room-c overlaps room-b, so BOTH back A_EAST: adding a door there is
+      // ambiguous and stays unpaired. Removing room-c is what resolves it.
+      function setupAmbiguousRooms(): void {
+        const base = store.getState().project!;
+        store.setState({
+          project: {
+            ...base,
+            wallObjects: [],
+            floorObjects: [],
+            floor: {
+              rooms: [
+                createRectangularRoomPlacement({
+                  roomId: "room-a", name: "Room A", widthMm: 4000, depthMm: 3000,
+                  heightMm: 2500, offsetXMm: 0, offsetYMm: 0
+                }),
+                createRectangularRoomPlacement({
+                  roomId: "room-b", name: "Room B", widthMm: 4000, depthMm: 3000,
+                  heightMm: 2500, offsetXMm: 4000, offsetYMm: 0
+                }),
+                createRectangularRoomPlacement({
+                  roomId: "room-c", name: "Room C", widthMm: 4000, depthMm: 3000,
+                  heightMm: 2500, offsetXMm: 4100, offsetYMm: 0
+                })
+              ]
+            }
+          }
+        });
+      }
+
+      it("moving the ambiguous third room away resolves the surviving pair", async () => {
+        setupAmbiguousRooms();
+        await store.getState().addOpening(A_EAST, "door");
+        // Two rooms back the wall: no silent pick, so no twin yet.
+        expect(store.getState().project!.wallObjects).toHaveLength(1);
+
+        await store.getState().moveRoom("room-c", 12000, 0);
+
+        // Post-edit topology alone would never revisit A_EAST — room-c's walls
+        // no longer lead back to it. The pre-edit half of the scope does.
+        const objects = store.getState().project!.wallObjects;
+        expect(objects).toHaveLength(2);
+        const twin = objects.find((object) => object.wallId === B_WEST)!;
+        expect(partnerOf(twin)).toBe(objects.find((o) => o.wallId === A_EAST)!.id);
+      });
+
+      // The twin appears on a wall NEITHER the pre nor the post scope of the
+      // changed walls contains: the union holds only room-c's walls and A_EAST,
+      // and B_WEST is reached only by reconciliation's own second expansion
+      // through the now-unique boundary. Validating the scope that was passed IN
+      // rather than the one analysis ran OVER let this twin land unchecked.
+      it("validates a twin created on a wall only reconciliation's own expansion reached", async () => {
+        setupAmbiguousRooms();
+        await store.getState().addOpening(A_EAST, "door");
+        expect(store.getState().project!.wallObjects).toHaveLength(1);
+
+        // Hang a work on B_WEST exactly where the twin will be mirrored to.
+        // A_EAST is 3000 long and the two faces are anti-parallel, so the door
+        // centred at 1500 mirrors to 1500 on B_WEST.
+        await store.getState().addArtworksFromFiles([makeImageFile("on-b.jpg")]);
+        const artworkId = store.getState().project!.checklistArtworkIds[0];
+        await store.getState().placeArtwork(artworkId, B_WEST, 1500, 1400);
+        const artworkPlacementId = store
+          .getState()
+          .project!.wallObjects.find((object) => object.wallId === B_WEST)!.id;
+
+        await store.getState().moveRoom("room-c", 12000, 0);
+
+        const objects = store.getState().project!.wallObjects;
+        const twin = objects.find(
+          (object) => object.wallId === B_WEST && object.kind === "door"
+        )!;
+        expect(twin).toBeDefined();
+
+        // The twin really does land on top of the work...
+        const artwork = objects.find((object) => object.id === artworkPlacementId)!;
+        expect(Math.abs(twin.xMm - artwork.xMm)).toBeLessThan(
+          twin.widthMm / 2 + artwork.widthMm / 2
+        );
+        // ...and the collision is reported rather than committed in silence.
+        const warnings = store.getState().placementWarnings;
+        expect(
+          warnings.some(
+            (warning) =>
+              warning.type === "collision" &&
+              (warning.wallObjectId === twin.id ||
+                warning.wallObjectId === artworkPlacementId)
+          )
+        ).toBe(true);
+      });
+
+      it("deleting the ambiguous third room resolves the surviving pair", async () => {
+        setupAmbiguousRooms();
+        await store.getState().addOpening(A_EAST, "door");
+        expect(store.getState().project!.wallObjects).toHaveLength(1);
+
+        await store.getState().deleteRoom("room-c");
+
+        const objects = store.getState().project!.wallObjects;
+        expect(objects).toHaveLength(2);
+        expect(objects.some((object) => object.wallId === B_WEST)).toBe(true);
+      });
+
+      it("still only disconnects when the deleted room owned the other half", async () => {
+        // The disconnect-only contract survives reconciliation on delete: the
+        // survivor's counterpart wall died with the room, so it reads as
+        // exterior and nothing is recreated.
+        setupSharedWallRooms();
+        await store.getState().addOpening(A_EAST, "door");
+        expect(store.getState().project!.wallObjects).toHaveLength(2);
+
+        await store.getState().deleteRoom("room-b");
+
+        const objects = store.getState().project!.wallObjects;
+        expect(objects).toHaveLength(1);
+        expect(objects[0].wallId).toBe(A_EAST);
+        expect(partnerOf(objects[0])).toBeUndefined();
+      });
+
+      it("pairs an unpaired opening carried onto a shared wall by a group drag", async () => {
+        setupSharedWallRooms();
+        // An unpaired door far from the boundary on room-b's east wall.
+        const base = store.getState().project!;
+        store.setState({
+          project: {
+            ...base,
+            wallObjects: [
+              {
+                id: "lone-door", kind: "door", blocksPlacement: true,
+                wallId: "room-b-wall-east", xMm: 1500, yMm: DOOR_Y_MM, widthMm: 915, heightMm: 2030
+              }
+            ]
+          }
+        });
+
+        await store.getState().movePlanObjectsGroup([
+          { id: "lone-door", xMm: 1500, wallId: B_WEST }
+        ]);
+
+        const objects = store.getState().project!.wallObjects;
+        expect(objects).toHaveLength(2);
+        const moved = objects.find((object) => object.id === "lone-door")!;
+        expect(moved.wallId).toBe(B_WEST);
+        expect(partnerOf(moved)).toBeDefined();
+      });
+
+      it("keeps counterpart-wall warnings visible through a room add", async () => {
+        // applyEdit wipes placementWarnings unconditionally, and the add-room
+        // paths used to pass none — so the very edit that creates a twin also
+        // silently discarded every warning on the walls it touched.
+        setupSharedWallRooms();
+        store.setState({
+          project: {
+            ...store.getState().project!,
+            floor: { rooms: [store.getState().project!.floor.rooms[0]] }
+          }
+        });
+        // A door overlapping an artwork on A_EAST: a real, overridable warning.
+        store.setState({
+          project: {
+            ...store.getState().project!,
+            wallObjects: [
+              {
+                id: "warn-door", kind: "door", blocksPlacement: true, wallId: A_EAST,
+                xMm: 1500, yMm: DOOR_Y_MM, widthMm: 915, heightMm: 2030
+              },
+              {
+                id: "warn-art", wallId: A_EAST, kind: "artwork", artworkId: "artwork-1",
+                xMm: 1500, yMm: 1000, widthMm: 600, heightMm: 800
+              }
+            ]
+          }
+        });
+
+        await store.getState().addDrawnRectangleRoom({
+          offsetXMm: 4000, offsetYMm: 0, widthMm: 4000, depthMm: 3000
+        });
+
+        const state = store.getState();
+        // The flush room gave the door its twin...
+        expect(state.project!.wallObjects.filter((o) => o.kind === "door")).toHaveLength(2);
+        // ...and the pre-existing collision on the counterpart wall is
+        // reported, not wiped.
+        expect(
+          state.placementWarnings.some((warning) => warning.type === "collision")
+        ).toBe(true);
+      });
+    });
+
     describe("resizing a paired opening", () => {
       // The shared wall is 3000 long and the two faces are anti-parallel, so
       // the mapping between them is x -> 3000 - x.
@@ -3636,6 +4502,27 @@ describe("app store", () => {
         // Mirrored, not merely equal: the twin's local x runs the other way.
         expect(b.xMm).toBeCloseTo(SHARED_WALL_MM - a.xMm, 6);
         expect(store.getState().saveState).toBe("saved");
+      });
+
+      it("keeps both halves at the same height when a door's height changes", async () => {
+        // A door's y is recomputed as heightMm / 2 so its bottom stays on the
+        // floor. Mirroring width, height and x but NOT y left the two halves at
+        // different heights — manufacturing the very paired-geometry-mismatch
+        // this stage exists to prevent.
+        setupSharedWallRooms();
+        await store.getState().addOpening(A_EAST, "door");
+        const primary = onWall(A_EAST);
+
+        await store.getState().resizeOpening(primary.id, primary.widthMm, 1800);
+
+        const a = onWall(A_EAST);
+        const b = onWall(B_WEST);
+        expect(a.heightMm).toBe(1800);
+        expect(b.heightMm).toBe(1800);
+        expect(a.yMm).toBe(900);
+        expect(b.yMm).toBe(900);
+        expect(a.widthMm).toBe(b.widthMm);
+        expect(b.xMm).toBeCloseTo(SHARED_WALL_MM - a.xMm, 6);
       });
 
       it("stays non-empty even though the twin's local x runs in the opposite direction", async () => {
