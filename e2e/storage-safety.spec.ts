@@ -362,6 +362,203 @@ test.describe("corruption recovery", () => {
   });
 });
 
+test.describe("shared-opening load repair durability", () => {
+  const REPAIR_ID = "repair-project-e2e";
+  const ROOM_SIZE = { widthMm: 4000, depthMm: 3000, heightMm: 2500 };
+
+  // A rectangular room placement, spelled out for the same reason validProject
+  // is: keeping app source (and its transitive deps) out of the spec's Node
+  // context. Mirrors createRectangularRoomPlacement's output exactly.
+  function rectangularRoom(roomId: string, name: string, offsetXMm: number) {
+    const vertex = (corner: string, xMm: number, yMm: number) => ({
+      id: `${roomId}-v-${corner}`,
+      xMm,
+      yMm
+    });
+    const wall = (side: string, from: string, to: string) => ({
+      id: `${roomId}-wall-${side}`,
+      roomId,
+      name: `${side[0].toUpperCase()}${side.slice(1)} wall`,
+      startVertexId: `${roomId}-v-${from}`,
+      endVertexId: `${roomId}-v-${to}`,
+      heightMm: ROOM_SIZE.heightMm
+    });
+    return {
+      roomId,
+      offsetXMm,
+      offsetYMm: 0,
+      rotationDeg: 0,
+      room: {
+        id: roomId,
+        name,
+        heightMm: ROOM_SIZE.heightMm,
+        freestandingWalls: [],
+        vertices: [
+          vertex("nw", 0, 0),
+          vertex("ne", ROOM_SIZE.widthMm, 0),
+          vertex("se", ROOM_SIZE.widthMm, ROOM_SIZE.depthMm),
+          vertex("sw", 0, ROOM_SIZE.depthMm)
+        ],
+        walls: [
+          wall("north", "nw", "ne"),
+          wall("east", "ne", "se"),
+          wall("south", "se", "sw"),
+          wall("west", "sw", "nw")
+        ]
+      }
+    };
+  }
+
+  function door(id: string, wallId: string, xMm: number) {
+    return {
+      id,
+      kind: "door",
+      wallId,
+      xMm,
+      yMm: 1015,
+      widthMm: 915,
+      heightMm: 2030,
+      blocksPlacement: true
+    };
+  }
+
+  // Two rooms abutting at x = 4000, each carrying one unpaired door on the
+  // shared boundary: the legacy one-sided-per-room shape the load repair adopts
+  // into a single shared opening. door-b sits at the exact mirror of door-a
+  // (3000 − 1200), so the pass links the two rather than moving either.
+  function repairableProject() {
+    return {
+      ...validProject(REPAIR_ID, "Shared Opening Show"),
+      // Newest updatedAt, so boot opens this instead of the sample project.
+      updatedAt: "2099-01-01T00:00:00.000Z",
+      wallObjects: [door("door-a", "room-a-wall-east", 1200), door("door-b", "room-b-wall-west", 1800)],
+      floor: {
+        rooms: [rectangularRoom("room-a", "Room A", 0), rectangularRoom("room-b", "Room B", 4000)]
+      }
+    };
+  }
+
+  // Read the doors back out of IndexedDB — what a reload would actually get,
+  // as opposed to what the running app is holding in memory.
+  function readStoredDoors(page: Page, projectId: string) {
+    return page.evaluate(async (id) => {
+      const db: IDBDatabase = await new Promise((resolve, reject) => {
+        const request = indexedDB.open("sightlines", 4);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const record: { wallObjects?: { id: string; connectsToObjectId?: string }[] } =
+        await new Promise((resolve, reject) => {
+          const request = db.transaction("projects", "readonly").objectStore("projects").get(id);
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+      db.close();
+      return (record?.wallObjects ?? []).map((object) => ({
+        id: object.id,
+        partner: object.connectsToObjectId ?? null
+      }));
+    }, projectId);
+  }
+
+  // Every recovery snapshot held for this project, oldest first, reduced to the
+  // door links so an assertion can say which document each copy holds.
+  function readSnapshotDoors(page: Page, projectId: string) {
+    return page.evaluate(async (id) => {
+      const db: IDBDatabase = await new Promise((resolve, reject) => {
+        const request = indexedDB.open("sightlines", 4);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      type SnapshotRecord = {
+        projectId: string;
+        project: { wallObjects: { id: string; connectsToObjectId?: string }[] };
+      };
+      const records: SnapshotRecord[] = await new Promise((resolve, reject) => {
+        const request = db
+          .transaction("projectSnapshots", "readonly")
+          .objectStore("projectSnapshots")
+          .getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      db.close();
+      return records
+        .filter((record) => record.projectId === id)
+        .map((record) =>
+          record.project.wallObjects.map((object) => ({
+            id: object.id,
+            partner: object.connectsToObjectId ?? null
+          }))
+        );
+    }, projectId);
+  }
+
+  // Boot once so the DB and its schema exist, write the unrepaired document in
+  // as the newest project, then reload so boot opens it.
+  async function seedRepairableProject(page: Page) {
+    await gotoApp(page);
+    await page.evaluate(async (project) => {
+      const db: IDBDatabase = await new Promise((resolve, reject) => {
+        const request = indexedDB.open("sightlines", 4);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction("projects", "readwrite");
+        tx.objectStore("projects").put(project);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+      db.close();
+    }, repairableProject());
+    await page.reload();
+    await expect(page.locator(".app-main")).toBeVisible();
+  }
+
+  test("writes the repair to storage and survives a reload, original recoverable", async ({
+    page
+  }) => {
+    await seedRepairableProject(page);
+
+    // The app says what it did, and settles on a save state it can honour.
+    await expect(
+      page.getByText("One shared opening was linked while opening this project.")
+    ).toBeVisible();
+    await expect(page.locator("button.status-badge")).toHaveText(/Saved/);
+
+    // The claim under test: the REPAIRED document is what storage now holds.
+    await expect
+      .poll(() => readStoredDoors(page, REPAIR_ID))
+      .toEqual([
+        { id: "door-a", partner: "door-b" },
+        { id: "door-b", partner: "door-a" }
+      ]);
+
+    // ...and the pre-repair original was not simply thrown away: a recovery
+    // copy of it exists, so overwriting the user's document is reversible.
+    const snapshots = await readSnapshotDoors(page, REPAIR_ID);
+    expect(snapshots).toContainEqual([
+      { id: "door-a", partner: null },
+      { id: "door-b", partner: null }
+    ]);
+
+    // A reload gets the repaired document back — and does not have to repair it
+    // a second time, which is exactly what "durable" means here.
+    await page.reload();
+    await expect(page.locator(".app-main")).toBeVisible();
+    await expect(page.locator("button.status-badge")).toHaveText(/Saved/);
+    await expect(
+      page.getByText("One shared opening was linked while opening this project.")
+    ).toHaveCount(0);
+    expect(await readStoredDoors(page, REPAIR_ID)).toEqual([
+      { id: "door-a", partner: "door-b" },
+      { id: "door-b", partner: "door-a" }
+    ]);
+  });
+});
+
 test.describe("save failure", () => {
   test("shows a scoped retry toast and recovers when the write succeeds", async ({
     page,

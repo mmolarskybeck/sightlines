@@ -57,7 +57,13 @@ function saveStateLabel(state: SaveState): string {
     case "error":
       return "Save issue";
     default:
-      return "Idle";
+      // "idle" is this store's "nothing has been written yet" — at boot before
+      // the first save, and in the window after a document swap that still owes
+      // a write. The old label ("Idle") read as a settled, harmless state and
+      // the badge tooltip paired it with "Saved automatically on this device",
+      // which is exactly the claim this state cannot make. Say the true thing:
+      // a user must never close the tab believing an unwritten document is durable.
+      return "Not saved yet";
   }
 }
 
@@ -105,6 +111,38 @@ export function getStatusBadgeDisplay(input: {
 
   // 6. Not configured or not connected: exactly today's behavior, no glyph.
   return { tone: input.saveState, label: saveStateLabel(input.saveState), cloud: "none" };
+}
+
+// The badge's hover sentence, one branch per thing the badge can be saying.
+// Lives here rather than in TopBar so label and tooltip cannot drift apart —
+// the pair was the actual bug: an "Idle" badge explained as "Saved
+// automatically on this device".
+//
+// Ordered by what the user most needs to know: a local write problem, then a
+// cloud one, then the fact that nothing has been written yet, and only then the
+// reassuring variants. "idle" sits ahead of every cloud branch on purpose — it
+// means the document is not in local storage, so no wording built on "Saved
+// automatically on this device" is true, however healthy the Dropbox side looks.
+export function getStatusBadgeTooltip(
+  display: { tone: StatusBadgeTone; cloud: StatusBadgeCloud },
+  cloudConnected: boolean
+): string {
+  if (display.tone === "error") {
+    return "Your project could not be saved on this device. Open for details.";
+  }
+  if (display.tone === "attention") {
+    return "Saved on this device. Dropbox backup needs attention. Open for details.";
+  }
+  if (display.tone === "idle") {
+    return "Not saved on this device yet. Open for details.";
+  }
+  if (display.cloud === "ok") {
+    return "Saved automatically on this device and backed up to Dropbox. Open for details.";
+  }
+  if (cloudConnected) {
+    return "Saved automatically on this device. Automatic Dropbox backup is on. Open for details.";
+  }
+  return "Saved automatically on this device. Open for details.";
 }
 
 // ---------------------------------------------------------------------------

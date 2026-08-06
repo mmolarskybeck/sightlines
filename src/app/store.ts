@@ -31,6 +31,7 @@ import {
   includePairedOpenings,
   normalizeOpeningPairs
 } from "../domain/placement/openingPairs";
+import { repairSharedOpeningsOnLoad } from "../domain/placement/sharedOpeningLoadRepair";
 import {
   FIT_EPSILON_MM,
   fitOpeningOnWall,
@@ -472,11 +473,25 @@ export function createAppStore(deps: AppStoreDeps) {
 
     // --- silent recovery snapshots -------------------------------------------
     //
-    // Module-level (per createAppStore call) session state: which projects have
-    // taken their once-per-session open snapshot, and when each was last
-    // snapshotted (for the interval gate). Both are keyed by project id.
+    // Module-level (per createAppStore call) session state, all keyed by project
+    // id: which projects have SUCCEEDED at their once-per-session open snapshot,
+    // how many open snapshots have failed for each, the attempt currently in
+    // flight, and when each was last snapshotted (for the interval gate).
+    //
+    // Membership in snapshottedThisSession means "a copy is down", never "we
+    // tried". Recording the attempt instead would let a failed snapshot silence
+    // every later attempt AND, worse, report success to the write-back that is
+    // about to overwrite the only stored copy.
     const snapshottedThisSession = new Set<string>();
+    const failedOpenSnapshotsByProject = new Map<string, number>();
+    const openSnapshotInFlight = new Map<string, Promise<boolean>>();
     const lastSnapshotAtByProject = new Map<string, number>();
+
+    // A device that cannot write snapshots at all (quota, corrupt store) would
+    // otherwise pay the full failing write on every open, forever. Retry a
+    // handful of times per project per session — enough to ride out a transient
+    // failure, bounded enough that a permanent one stops costing anything.
+    const OPEN_SNAPSHOT_ATTEMPT_LIMIT = 3;
 
     // Fingerprint the document plus the referenced artwork/asset set, then store
     // a snapshot. The repo dedupes identical fingerprints; we still record the
@@ -496,13 +511,52 @@ export function createAppStore(deps: AppStoreDeps) {
     }
 
     // Once per project per app session, when it becomes the open document.
-    // Fire-and-forget; a snapshot failure never affects opening.
-    function snapshotOnOpen(project: Project): void {
-      if (snapshottedThisSession.has(project.id)) return;
-      snapshottedThisSession.add(project.id);
-      void writeSnapshot(project).catch((error) => {
-        console.warn("Could not write a recovery snapshot", error);
-      });
+    // Fire-and-forget for every caller that only wants a recovery copy taken;
+    // a snapshot failure never affects opening, which is why the returned
+    // promise RESOLVES on failure rather than rejecting.
+    //
+    // It resolves to whether a copy is down, and it returns that promise, so the
+    // one caller that is about to overwrite the stored original — the
+    // load-repair write-back in openLoadedDocument — can both wait for the copy
+    // and find out whether it landed. A resolved-but-failed promise used to be
+    // indistinguishable from success, which let the destructive write proceed
+    // with nothing behind it. Awaiting is still the caller's choice: making the
+    // snapshot block every open would trade a rare hazard for a certain delay.
+    function snapshotOnOpen(project: Project): Promise<boolean> {
+      if (snapshottedThisSession.has(project.id)) return Promise.resolve(true);
+
+      // Two opens of the same document can overlap (open, switch away, switch
+      // back while the first write is still in flight). Share the attempt
+      // rather than starting a second write of the same copy.
+      const inFlight = openSnapshotInFlight.get(project.id);
+      if (inFlight) return inFlight;
+
+      if ((failedOpenSnapshotsByProject.get(project.id) ?? 0) >= OPEN_SNAPSHOT_ATTEMPT_LIMIT) {
+        return Promise.resolve(false);
+      }
+
+      const attempt = writeSnapshot(project)
+        .then(
+          () => {
+            snapshottedThisSession.add(project.id);
+            return true;
+          },
+          (error) => {
+            failedOpenSnapshotsByProject.set(
+              project.id,
+              (failedOpenSnapshotsByProject.get(project.id) ?? 0) + 1
+            );
+            console.warn("Could not write a recovery snapshot", error);
+            return false;
+          }
+        )
+        .finally(() => {
+          openSnapshotInFlight.delete(project.id);
+        });
+      // Safe to register after the chain is built: writeSnapshot is async, so
+      // nothing above can have run its .finally before this line.
+      openSnapshotInFlight.set(project.id, attempt);
+      return attempt;
     }
 
     // Interval-gated snapshot from the save path: skip when the last snapshot of
@@ -591,6 +645,67 @@ export function createAppStore(deps: AppStoreDeps) {
         });
         return false;
       }
+    }
+
+    // Open a document that already exists in local storage (boot, openProject)
+    // and, when the shared-opening load repair changed it, WRITE THE REPAIRED
+    // COPY BACK.
+    //
+    // Persisting is the fix rather than relabelling the badge: a repair left in
+    // memory only is one reload away from being lost no matter how honestly the
+    // badge describes it, and the user has no way to "save" it by hand.
+    //
+    // THE ORDER IS THE POINT. The repaired write overwrites the user's stored
+    // original, so the recovery snapshot of that original must have LANDED
+    // first — otherwise a crash in between leaves neither the original nor any
+    // copy of it. The wait is scoped to the repair branch: an unrepaired open
+    // overwrites nothing, so it keeps today's fire-and-forget snapshot and
+    // never pays for the guarantee.
+    //
+    // Both bail-outs below leave the repair in memory and unsaved, on the "idle"
+    // badge setDocument already chose ("Not saved yet"). That is the honest
+    // state, and it costs nothing: the user's next edit saves the repair along
+    // with it, and the next open repairs again — repairSharedOpeningsOnLoad is
+    // idempotent. What we must never do is claim "Saved" over a document that
+    // storage does not hold, or over a document that is no longer open.
+    async function openLoadedDocument(
+      project: Project,
+      extras: Partial<AppState> = {}
+    ): Promise<Project> {
+      // Pass the PRE-repair document to the snapshot: the whole point of the
+      // copy is to be what storage held before this open touched it.
+      const opened = setDocument(project, extras);
+      const snapshot = snapshotOnOpen(project);
+      // setDocument returns its input by reference when the repair applied
+      // nothing (the openingPairs.ts:123 memoization convention).
+      if (opened === project) return opened;
+
+      // No copy, no destructive write. Opening still succeeds — a snapshot
+      // problem must never be the reason a project won't open — but overwriting
+      // the user's ONLY stored copy with nothing behind it is exactly the
+      // hazard the ordering above exists to prevent.
+      if (!(await snapshot)) return opened;
+
+      // LOST-UPDATE GUARD. This is the only open path with an await between
+      // installing the document and persisting it, so it is the only one with a
+      // window in which the app is interactive and the document can move on
+      // under us. (duplicateProject and commitPackageImport persist in the same
+      // beat as their setDocument — no window, no guard needed.) Writing
+      // `opened` now would clobber a newer edit and, worse, badge it "Saved".
+      //
+      // Reference identity is sufficient because every path that changes the
+      // open document installs a NEW Project object: applyEdit/pushEditEntry
+      // build `{...next, updatedAt}` object literals, and setDocument installs a
+      // freshly loaded, migrated or imported document. Nothing mutates
+      // state.project in place. The one case where identity still holds after a
+      // detour is undo restoring this exact object — and then `opened` IS the
+      // current document, so writing it is correct rather than stale.
+      if (get().project !== opened) return opened;
+
+      // persist() owns the failure surface: a repair that could not be written
+      // settles on "Save issue" with a retry, never on a saved-looking badge.
+      await persist(opened);
+      return opened;
     }
 
     // Apply project/artwork halves together and create one undo entry.
@@ -683,12 +798,53 @@ export function createAppStore(deps: AppStoreDeps) {
 
     // Replacing the whole document (boot, import, reset) starts a new edit
     // history — undoing across a document swap would resurrect the old one.
-    function setDocument(project: Project, extras: Partial<AppState> = {}) {
+    //
+    // This is also the choke point for the shared-opening load repair, which
+    // has to cover EVERY document-entry path — boot, sample reset, open,
+    // duplicate, JSON import, .sightlines import, snapshot restore, recovery —
+    // and this is the one function all of them go through. The repair rides the
+    // swap and pushes no undo entry, because the stacks are reset here anyway.
+    //
+    // RETURNS the document actually installed, which is not necessarily the one
+    // passed in. A caller that persists after a swap must persist THIS, or it
+    // writes the pre-repair document and then reports "Saved".
+    function setDocument(project: Project, extras: Partial<AppState> = {}): Project {
+      const repair = repairSharedOpeningsOnLoad(project, newId);
+      const repaired = repair.project !== project;
+
+      // A realign is allowed to land an opening on artwork (isBlockingKind
+      // deliberately excludes artwork — that overlap is overridable, not
+      // forbidden) but must not do so SILENTLY. Validate only what the repair
+      // actually moved; an adopt-only repair has nothing to check.
+      //
+      // Artwork list: extras.libraryArtworks when the caller is swapping the
+      // library in the same beat (package import, boot) — at this point
+      // get().libraryArtworks is still the OUTGOING document's library, and
+      // validating a just-imported project against it would compute
+      // footprints for the wrong artwork set. validateWallObjectPlacements
+      // already falls back to get().libraryArtworks when passed undefined,
+      // which is what every other caller (open, duplicate, restore) wants:
+      // the artwork library is device-level and unchanged by those swaps.
+      const placementWarnings =
+        repair.realignedIds.length > 0
+          ? validateWallObjectPlacements(repair.project, repair.realignedIds, extras.libraryArtworks)
+          : [];
+
+      // What the state would settle on if the repair had changed nothing.
+      // Callers that omit saveState inherit whatever the previous document left
+      // behind — a package import persists BEFORE opening, so "saved" is
+      // already on the state by the time it swaps.
+      const saveStateWithoutRepair = extras.saveState ?? get().saveState;
+
       set({
-        project,
-        ...selectionWrite(project, NO_SELECTION, getFirstWall(project)?.id ?? null),
+        project: repair.project,
+        ...selectionWrite(
+          repair.project,
+          NO_SELECTION,
+          getFirstWall(repair.project)?.id ?? null
+        ),
         arrangeSession: null,
-        placementWarnings: [],
+        placementWarnings,
         lastGeometryEdit: null,
         undoStack: [],
         redoStack: [],
@@ -698,8 +854,39 @@ export function createAppStore(deps: AppStoreDeps) {
         saveError: null,
         pendingDuplicateUploads: [],
         pendingPackageImport: null,
-        ...extras
+        ...extras,
+        // AFTER extras on purpose. Several callers pass saveState:"saved"
+        // because the document they handed over is what is in storage — but a
+        // repaired document is not, and claiming otherwise would leave the
+        // repair one refresh away from being lost. "idle" is this store's
+        // "nothing has been written yet"; the caller's persist settles it, and
+        // a caller reporting an error keeps its error.
+        //
+        // This is the honest INTERIM state, not the resting place: setDocument
+        // is synchronous and does not write, so every caller that swaps in a
+        // document belonging to local storage must persist what this returns
+        // (openLoadedDocument does it for the open paths). The one path that
+        // deliberately stops here is loadBenchmarkFixture, which must never
+        // touch storage — it calls setDocument directly for exactly that reason.
+        ...(repaired && saveStateWithoutRepair === "saved"
+          ? { saveState: "idle" as const }
+          : {})
       });
+
+      // Counted separately from normalizeOpeningPairs' repairedCount, and said
+      // separately: that one DISCONNECTS invalid pairs, this one JOINS two faces
+      // back into one opening. Rolling them into a single number would describe
+      // neither. Declined twins are not reported here — they are standing issues
+      // in the rail, not news about this load.
+      if (repair.linkedCount > 0) {
+        toast.warning(
+          repair.linkedCount === 1
+            ? "One shared opening was linked while opening this project."
+            : `${repair.linkedCount} shared openings were linked while opening this project.`
+        );
+      }
+
+      return repair.project;
     }
 
     // Only architecture opts a transaction into reconciliation. Artwork, wall
@@ -1289,8 +1476,9 @@ export function createAppStore(deps: AppStoreDeps) {
 
     const projectManager = createProjectManagerSlice(set, get, {
       setDocument,
+      persist,
       deps,
-      snapshotOnOpen,
+      openLoadedDocument,
       offerRecovery
     });
 
@@ -1353,8 +1541,16 @@ export function createAppStore(deps: AppStoreDeps) {
             await deps.projectRepository.save(project);
           }
 
-          setDocument(project, { saveState: "saved", libraryArtworks, error: libraryError });
-          snapshotOnOpen(project);
+          await openLoadedDocument(project, {
+            saveState: "saved",
+            libraryArtworks,
+            error: libraryError
+          });
+          // persist() clears `error` on its way through "saving", so a repair
+          // write-back would swallow the library-load note — which is not a save
+          // error and still applies. Restore it only over a clean state, never
+          // over a fresh save failure that has more to say.
+          if (libraryError && get().error === null) set({ error: libraryError });
         } catch (error) {
           // Keep the app usable with an in-memory sample, but say plainly that
           // the saved project could not load — never silently substitute.
@@ -2836,9 +3032,16 @@ export function createAppStore(deps: AppStoreDeps) {
             return;
           }
           const project = migrateProject(record.project);
-          setDocument(project, { viewMode: "plan", saveState: "saving" });
-          await persist(project);
-          snapshotOnOpen(project);
+          // Persist what setDocument actually opened: a snapshot may hold a
+          // document the load repair links up, and writing the pre-repair copy
+          // back would settle on "Saved" over a document that is not.
+          const opened = setDocument(project, { viewMode: "plan", saveState: "saving" });
+          await persist(opened);
+          // Not openLoadedDocument: this path already persists what it opened,
+          // and the document at risk here is the one being replaced, which the
+          // awaited pre-restore snapshot above already covers.
+          // The snapshot deliberately records the copy as it was restored.
+          void snapshotOnOpen(project);
         } catch (error) {
           const message = `Could not restore that copy (${
             error instanceof Error ? error.message : "unknown error"

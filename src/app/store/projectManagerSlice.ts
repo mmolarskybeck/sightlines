@@ -17,10 +17,17 @@ export type ProjectManagerSliceActions = {
 };
 
 export type ProjectManagerSliceInternals = {
-  setDocument: (project: Project, extras?: Partial<AppState>) => void;
+  // Returns the document actually opened, which may differ from the one handed
+  // in: setDocument runs the shared-opening load repair and writes nothing.
+  setDocument: (project: Project, extras?: Partial<AppState>) => Project;
+  persist: (project: Project) => Promise<boolean>;
   deps: AppStoreDeps;
-  // Once-per-session recovery snapshot when a project becomes the open document.
-  snapshotOnOpen: (project: Project) => void;
+  // Swap in a document that already exists in local storage: takes the
+  // once-per-session recovery snapshot and, if the load repair changed the
+  // document, writes the repaired copy back once that snapshot has landed. The
+  // write-back is skipped (leaving the repair in memory on an "idle" badge) when
+  // the snapshot failed or when the open document moved on during the wait.
+  openLoadedDocument: (project: Project, extras?: Partial<AppState>) => Promise<Project>;
   // Populate recoveryOffer from the newest schema-valid snapshot, if any.
   offerRecovery: (projectId: string) => Promise<boolean>;
 };
@@ -30,7 +37,7 @@ export function createProjectManagerSlice(
   get: () => AppState,
   internals: ProjectManagerSliceInternals
 ): { actions: ProjectManagerSliceActions } {
-  const { setDocument, deps, snapshotOnOpen, offerRecovery } = internals;
+  const { setDocument, persist, deps, openLoadedDocument, offerRecovery } = internals;
 
   const actions: ProjectManagerSliceActions = {
     async listProjectSummaries() {
@@ -77,8 +84,11 @@ export function createProjectManagerSlice(
 
       try {
         const project = await deps.projectRepository.load(id);
-        setDocument(project, { viewMode: "plan", saveState: "saved" });
-        snapshotOnOpen(project);
+        // saveState:"saved" describes the document as LOADED; if the load
+        // repair changed it, openLoadedDocument writes the repaired copy back
+        // (behind the recovery snapshot) so that stays true — or, when it can't
+        // safely write, downgrades the badge to "idle" rather than lie.
+        await openLoadedDocument(project, { viewMode: "plan", saveState: "saved" });
       } catch (error) {
         const message = `Could not open that project (${
           error instanceof Error ? error.message : "unknown error"
@@ -141,7 +151,13 @@ export function createProjectManagerSlice(
             updatedAt: now
           };
           await deps.projectRepository.save(copy);
-          setDocument(copy, { viewMode: "plan", saveState: "saved" });
+          const opened = setDocument(copy, { viewMode: "plan", saveState: "saved" });
+          // The record just written is the PRE-repair copy; if the load repair
+          // changed it, write the repaired one over it rather than leaving the
+          // copy stale behind a "Saved" badge. No recovery snapshot here (unlike
+          // the open paths): this id was minted a few lines up, so the write
+          // overwrites nothing the user could lose.
+          if (opened !== copy) await persist(opened);
         } catch (error) {
           const message = `Could not duplicate that project (${
             error instanceof Error ? error.message : "unknown error"

@@ -3,7 +3,8 @@ import {
   formatBackupRelativeTime,
   getCloudBackupMenuItem,
   getCloudBackupPopoverState,
-  getStatusBadgeDisplay
+  getStatusBadgeDisplay,
+  getStatusBadgeTooltip
 } from "./cloudBackupCopy";
 
 const NOW = Date.parse("2026-07-19T12:00:00Z");
@@ -80,9 +81,32 @@ describe("getStatusBadgeDisplay", () => {
     });
     expect(getStatusBadgeDisplay({ ...base, saveState: "idle" })).toEqual({
       tone: "idle",
-      label: "Idle",
+      label: "Not saved yet",
       cloud: "ok"
     });
+  });
+
+  it("never labels or explains an unwritten document as saved", () => {
+    // "idle" means the document is not in local storage — at boot before the
+    // first write, or in the window a document swap still owes one (a
+    // shared-opening load repair). The badge must not read as a settled, safe
+    // state, and a healthy Dropbox row must not decorate it into one: the
+    // hazard is a user closing the tab on the strength of this badge.
+    for (const configured of [true, false]) {
+      for (const lastCloudBackupAt of ["2026-07-19T11:58:00Z", null]) {
+        const display = getStatusBadgeDisplay({
+          ...base,
+          saveState: "idle",
+          configured,
+          lastCloudBackupAt
+        });
+        expect(display.tone).toBe("idle");
+        expect(display.label).toBe("Not saved yet");
+        const tooltip = getStatusBadgeTooltip(display, configured);
+        expect(tooltip).toBe("Not saved on this device yet. Open for details.");
+        expect(tooltip).not.toMatch(/Saved (automatically )?on this device/);
+      }
+    }
   });
 
   it("does not show a completed cloud check before the first backup or while pending", () => {
@@ -107,6 +131,26 @@ describe("getStatusBadgeDisplay", () => {
       label: "Saved",
       cloud: "none"
     });
+  });
+});
+
+describe("getStatusBadgeTooltip", () => {
+  it("keeps the settled wording for every state that IS saved or failing", () => {
+    expect(getStatusBadgeTooltip({ tone: "error", cloud: "none" }, false)).toBe(
+      "Your project could not be saved on this device. Open for details."
+    );
+    expect(getStatusBadgeTooltip({ tone: "attention", cloud: "attention" }, true)).toBe(
+      "Saved on this device. Dropbox backup needs attention. Open for details."
+    );
+    expect(getStatusBadgeTooltip({ tone: "saved", cloud: "ok" }, true)).toBe(
+      "Saved automatically on this device and backed up to Dropbox. Open for details."
+    );
+    expect(getStatusBadgeTooltip({ tone: "saved", cloud: "none" }, true)).toBe(
+      "Saved automatically on this device. Automatic Dropbox backup is on. Open for details."
+    );
+    expect(getStatusBadgeTooltip({ tone: "saved", cloud: "none" }, false)).toBe(
+      "Saved automatically on this device. Open for details."
+    );
   });
 });
 

@@ -42,7 +42,10 @@ export type PackageSliceActions = {
 
 export type PackageSliceInternals = {
   persist: (project: Project) => Promise<boolean>;
-  setDocument: (project: Project, extras?: Partial<AppState>) => void;
+  // Returns the document actually opened, which may differ from the one handed
+  // in: setDocument runs the shared-opening load repair. Anything persisted
+  // after a swap must be that return value.
+  setDocument: (project: Project, extras?: Partial<AppState>) => Project;
   deps: AppStoreDeps;
 };
 
@@ -122,7 +125,21 @@ export function createPackageSlice(
     }
 
     const libraryArtworks = await deps.artworkLibraryRepository.list();
-    setDocument(commit.project, { viewMode: "plan", libraryArtworks });
+    const opened = setDocument(commit.project, { viewMode: "plan", libraryArtworks });
+    // This path persists BEFORE it opens (the write above has to precede the
+    // asset/artwork writes), so a load repair lands after the record is
+    // already down. A second write is the only way the stored project matches
+    // the one on screen. No recovery snapshot: an import writes its own newly
+    // finalized project, so there is no earlier document of the user's at risk.
+    //
+    // A false return here must NOT throw or unwind: the document is already
+    // open and the assets/artworks are already on disk, so the import really
+    // did happen — only the repaired record's write-back failed. persist()
+    // has already flipped saveState to "error" and queued a saveError with
+    // its own retry closure (the badge + retry toast own announcing that).
+    // repairSaved just gates the toast below so it doesn't call that a
+    // success.
+    const repairSaved = opened === commit.project || (await persist(opened));
 
     // A successful import — even a degraded one — is not an error, so it
     // no longer rides the red `error` banner (see docs/status.md). Both
@@ -130,14 +147,28 @@ export function createPackageSlice(
     // the standing missing-image placeholder state on the affected
     // checklist rows, so the toast doesn't need to be permanent.
     if (commit.warnings.length > 0) {
+      // Content warnings (missing/invalid images) are true regardless of
+      // whether the trailing repair write-back landed, so they still get
+      // reported even on a degraded save — this toast never claims the
+      // record made it to disk, just that the import ran with issues.
       toast.warning(
         `Imported “${commit.project.title}” with ${commit.warnings.length} warning${
           commit.warnings.length === 1 ? "" : "s"
         }: ${commit.warnings.join(" ")}`
       );
-    } else {
+    } else if (repairSaved) {
       toast.success(`Imported “${commit.project.title}”`);
     }
+    // else: nothing else to report, and saying "Imported" here would read as
+    // success next to the red save badge repairSaved=false just left behind.
+    // Stay quiet and let saveState/saveError carry the failure.
+
+    // The import pipeline itself completed (document open, assets/artworks
+    // persisted) whether or not the trailing repair write landed — the same
+    // principle pdf_export_completed uses, firing once the file is actually
+    // delivered rather than re-litigating unrelated later save state. Whether
+    // the record made it to disk is the save badge's story, not this
+    // counter's, so this always fires.
     telemetry.track("package_import_completed", {});
   }
 
@@ -164,9 +195,11 @@ export function createPackageSlice(
         return;
       }
 
-      setDocument(project, { viewMode: "plan" });
+      const opened = setDocument(project, { viewMode: "plan" });
       // A local document repairs silently, but an imported file that changed on
-      // the way in should say so.
+      // the way in should say so. Separate from the linked-openings count
+      // setDocument reports: this one severed invalid pairs pre-parse, that one
+      // joined two faces back into one opening.
       if (repairedCount > 0) {
         toast.warning(
           repairedCount === 1
@@ -174,7 +207,8 @@ export function createPackageSlice(
             : `${repairedCount} invalid shared openings were disconnected while opening this project.`
         );
       }
-      await persist(project);
+      // The load repair may have changed the document; persist what was opened.
+      await persist(opened);
     },
 
     async exportProjectPackage(mode) {

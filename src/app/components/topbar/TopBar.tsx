@@ -28,6 +28,7 @@ import {
   getCloudBackupMenuItem,
   getCloudBackupPopoverState,
   getStatusBadgeDisplay,
+  getStatusBadgeTooltip,
   type CloudBackupCloudIcon
 } from "../../cloud/cloudBackupCopy";
 import type { CloudBackupProviderStatus } from "../../cloud/provider";
@@ -138,16 +139,7 @@ export function TopBar({
   });
   const cloudConnected =
     cloudBackupConfigured && cloudBackupProviderStatus === "connected";
-  const badgeTooltip =
-    badgeDisplay.tone === "error"
-      ? "Your project could not be saved on this device. Open for details."
-      : badgeDisplay.tone === "attention"
-        ? "Saved on this device. Dropbox backup needs attention. Open for details."
-        : badgeDisplay.cloud === "ok"
-          ? "Saved automatically on this device and backed up to Dropbox. Open for details."
-          : cloudConnected
-            ? "Saved automatically on this device. Automatic Dropbox backup is on. Open for details."
-            : "Saved automatically on this device. Open for details.";
+  const badgeTooltip = getStatusBadgeTooltip(badgeDisplay, cloudConnected);
   const cloudPopover = getCloudBackupPopoverState({
     configured: cloudBackupConfigured,
     status: cloudBackupProviderStatus,

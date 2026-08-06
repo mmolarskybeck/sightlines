@@ -1458,6 +1458,675 @@ describe("app store", () => {
     });
   });
 
+  // The link-only repair every document-entry path runs through setDocument.
+  // Adopt and realign are applied; a twin is never created on open.
+  describe("shared-opening load repair", () => {
+    // Two abutting rooms: room-a's east wall and room-b's west wall are one
+    // coincident twin pair, mirroring opening x to (3000 − x).
+    const A_EAST = "room-a-wall-east";
+    const B_WEST = "room-b-wall-west";
+    const DOOR_Y_MM = 1015; // door center = height/2 (2030/2), the placement default.
+
+    type DoorSpec = { id: string; wallId: string; xMm: number; connectsToObjectId?: string };
+
+    function sharedWallDocument(id: string, doors: DoorSpec[]): Project {
+      const base = store.getState().project!;
+      return {
+        ...base,
+        id,
+        title: id,
+        wallObjects: doors.map((spec) => ({
+          kind: "door" as const,
+          blocksPlacement: true,
+          yMm: DOOR_Y_MM,
+          widthMm: 915,
+          heightMm: 2030,
+          ...spec
+        })),
+        floorObjects: [],
+        floor: {
+          rooms: [
+            createRectangularRoomPlacement({
+              roomId: "room-a",
+              name: "Room A",
+              widthMm: 4000,
+              depthMm: 3000,
+              heightMm: 2500,
+              offsetXMm: 0,
+              offsetYMm: 0
+            }),
+            createRectangularRoomPlacement({
+              roomId: "room-b",
+              name: "Room B",
+              widthMm: 4000,
+              depthMm: 3000,
+              heightMm: 2500,
+              offsetXMm: 4000,
+              offsetYMm: 0
+            })
+          ]
+        }
+      };
+    }
+
+    // A legacy one-sided-per-room pair: two aligned, unpaired doors that are
+    // really one physical opening. The load pass adopts them into a pair.
+    const unlinkedPair: DoorSpec[] = [
+      { id: "door-a", wallId: A_EAST, xMm: 1200 },
+      { id: "door-b", wallId: B_WEST, xMm: 1800 }
+    ];
+
+    function partnerOf(project: Project | null, openingId: string): string | undefined {
+      const object = project?.wallObjects.find((candidate) => candidate.id === openingId);
+      return object && (object.kind === "door" || object.kind === "window")
+        ? object.connectsToObjectId
+        : undefined;
+    }
+
+    it("links a legacy pair on boot, with no undo entry", async () => {
+      const warning = vi.spyOn(toast, "warning");
+      const repo = new InMemoryProjectRepository();
+      await repo.save(sharedWallDocument("boot-legacy-000001", unlinkedPair));
+
+      const s = createAppStore(makeDeps({ projectRepository: repo }));
+      await s.getState().boot();
+
+      const state = s.getState();
+      expect(partnerOf(state.project, "door-a")).toBe("door-b");
+      expect(partnerOf(state.project, "door-b")).toBe("door-a");
+      // The repair rides the document swap; it is not an edit the user can undo.
+      expect(state.undoStack).toHaveLength(0);
+      expect(state.redoStack).toHaveLength(0);
+      expect(warning).toHaveBeenCalledWith(
+        "One shared opening was linked while opening this project."
+      );
+      warning.mockRestore();
+    });
+
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    it("writes the repair back on open, so a reload reads the repaired document", async () => {
+      // The hazard this closes: the repair used to live in memory only while
+      // the badge settled on a state the topbar explained as "Saved
+      // automatically on this device". One reload and the repair was gone.
+      const document = sharedWallDocument("open-legacy-000001", unlinkedPair);
+      await repository.save(document);
+
+      await store.getState().openProject(document.id);
+
+      const state = store.getState();
+      expect(partnerOf(state.project, "door-a")).toBe("door-b");
+      expect(state.saveState).toBe("saved");
+
+      // What a reload actually reads back — the assertion with the teeth.
+      const reloaded = await repository.load(document.id);
+      expect(partnerOf(reloaded, "door-a")).toBe("door-b");
+      expect(partnerOf(reloaded, "door-b")).toBe("door-a");
+    });
+
+    it("lands the pre-repair recovery copy BEFORE overwriting the original", async () => {
+      // Ordering, not just presence: the repaired write destroys the stored
+      // original, so the snapshot of it must already be down. A crash between
+      // the two would otherwise leave the user with neither.
+      const document = sharedWallDocument("open-order-000001", unlinkedPair);
+      await repository.save(document);
+
+      const events: string[] = [];
+      const linkOf = (project: Project) => partnerOf(project, "door-a") ?? "unlinked";
+
+      let releaseSnapshot = () => {};
+      const snapshotGate = new Promise<void>((resolve) => {
+        releaseSnapshot = resolve;
+      });
+      const addSnapshot = projectSnapshotRepository.add.bind(projectSnapshotRepository);
+      projectSnapshotRepository.add = async (record) => {
+        events.push(`snapshot-start:${linkOf(record.project)}`);
+        await snapshotGate;
+        await addSnapshot(record);
+        events.push("snapshot-done");
+      };
+      const save = repository.save.bind(repository);
+      repository.save = async (project) => {
+        events.push(`save:${linkOf(project)}`);
+        await save(project);
+      };
+
+      const open = store.getState().openProject(document.id);
+      // Give the open every chance to race ahead while the copy is in flight.
+      await flush();
+      expect(events).toEqual(["snapshot-start:unlinked"]);
+
+      releaseSnapshot();
+      await open;
+      await flush();
+
+      expect(events).toEqual([
+        "snapshot-start:unlinked",
+        "snapshot-done",
+        "save:door-b"
+      ]);
+
+      // And the copy that landed is the original, not the repaired document.
+      const [summary] = await projectSnapshotRepository.listByProject(document.id);
+      const record = await projectSnapshotRepository.get(summary.key);
+      expect(partnerOf(record!.project, "door-a")).toBeUndefined();
+      // Happy path, stated: the copy landed, so the write-back ran and the badge
+      // is entitled to say so.
+      expect(store.getState().saveState).toBe("saved");
+    });
+
+    // Hold the recovery copy open on a promise the test releases, so the window
+    // in which the app is interactive mid-open is a fact rather than a race.
+    function deferSnapshotsOf(projectId: string) {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const add = projectSnapshotRepository.add.bind(projectSnapshotRepository);
+      projectSnapshotRepository.add = async (record) => {
+        if (record.projectId === projectId) await gate;
+        await add(record);
+      };
+      return () => release();
+    }
+
+    it("skips the repair write-back when the recovery copy could not be written", async () => {
+      // The hazard: overwriting the user's ONLY stored copy with a repaired
+      // document when nothing was preserved behind it. Opening still succeeds —
+      // a snapshot problem must never keep a project from opening.
+      const document = sharedWallDocument("open-copy-failed-000001", unlinkedPair);
+      await repository.save(document);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      projectSnapshotRepository.add = async () => {
+        throw new Error("snapshot boom");
+      };
+
+      await store.getState().openProject(document.id);
+      await flush();
+
+      const state = store.getState();
+      // Opened, and repaired in memory.
+      expect(state.project?.id).toBe(document.id);
+      expect(partnerOf(state.project, "door-a")).toBe("door-b");
+      // The assertion with the teeth: storage still holds the untouched original.
+      expect(repository.projects.get(document.id)).toBe(document);
+      expect(partnerOf(await repository.load(document.id), "door-a")).toBeUndefined();
+      // "idle" renders as "Not saved yet" — the repair really is unsaved.
+      expect(state.saveState).toBe("idle");
+      warn.mockRestore();
+    });
+
+    it("does not record a failed recovery copy as taken, so a later open retries it", async () => {
+      // Marking the snapshot as taken before it lands used to strand the project
+      // for the rest of the session: never copied, and never copyable again.
+      const sampleId = store.getState().project!.id;
+      const document = sharedWallDocument("open-copy-retry-000001", unlinkedPair);
+      await repository.save(document);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const add = vi
+        .spyOn(projectSnapshotRepository, "add")
+        .mockRejectedValueOnce(new Error("snapshot boom"));
+
+      await store.getState().openProject(document.id);
+      await flush();
+      expect(add).toHaveBeenCalledTimes(1);
+      expect(await projectSnapshotRepository.listByProject(document.id)).toHaveLength(0);
+      expect(partnerOf(await repository.load(document.id), "door-a")).toBeUndefined();
+
+      // Switch away and back inside the same session: the copy is attempted
+      // again, lands, and only then does the repair get written back.
+      await store.getState().openProject(sampleId);
+      await store.getState().openProject(document.id);
+      await flush();
+
+      const summaries = await projectSnapshotRepository.listByProject(document.id);
+      expect(summaries).toHaveLength(1);
+      // The teeth: the copy that landed is the PRE-repair original. A guard that
+      // records the failed attempt as taken lets the second open skip straight to
+      // the write-back, and the only snapshot on file ends up being the repaired
+      // document written from the save path — which preserves nothing.
+      const record = await projectSnapshotRepository.get(summaries[0].key);
+      expect(partnerOf(record!.project, "door-a")).toBeUndefined();
+      expect(partnerOf(await repository.load(document.id), "door-a")).toBe("door-b");
+      expect(store.getState().saveState).toBe("saved");
+      warn.mockRestore();
+    });
+
+    it("stops retrying a recovery copy that keeps failing, rather than retrying every open", async () => {
+      // Retrying forever would make a device that simply cannot store snapshots
+      // pay the full failing write on every single open.
+      const sampleId = store.getState().project!.id;
+      const document = sharedWallDocument("open-copy-hopeless-000001", unlinkedPair);
+      await repository.save(document);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const add = vi
+        .spyOn(projectSnapshotRepository, "add")
+        .mockRejectedValue(new Error("snapshot boom"));
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await store.getState().openProject(document.id);
+        await flush();
+        await store.getState().openProject(sampleId);
+      }
+
+      // Three attempts for this project (the boot sample takes one of its own).
+      expect(
+        add.mock.calls.filter(([record]) => record.projectId === document.id)
+      ).toHaveLength(3);
+      // Still no write-back, at any point.
+      expect(partnerOf(await repository.load(document.id), "door-a")).toBeUndefined();
+      warn.mockRestore();
+    });
+
+    it("does not write the stale load-time document over an edit made during the wait", async () => {
+      // The app is interactive while the recovery copy is in flight. A rename
+      // committed in that window saves FIRST; writing the load-time document
+      // afterwards would silently undo it and badge the result "Saved".
+      const document = sharedWallDocument("open-stale-edit-000001", unlinkedPair);
+      await repository.save(document);
+      const releaseSnapshot = deferSnapshotsOf(document.id);
+
+      const open = store.getState().openProject(document.id);
+      await flush();
+      expect(store.getState().project?.id).toBe(document.id);
+
+      await store.getState().renameProject("Winter Show");
+
+      releaseSnapshot();
+      await open;
+      await flush();
+
+      const state = store.getState();
+      expect(state.project?.title).toBe("Winter Show");
+      const stored = await repository.load(document.id);
+      // The teeth: the rename survives in storage.
+      expect(stored.title).toBe("Winter Show");
+      // And nothing was lost by skipping — the edit was made on top of the
+      // already-repaired in-memory document, so the user's own save carried it.
+      expect(partnerOf(stored, "door-a")).toBe("door-b");
+      // The badge belongs to the rename's own save, not to a skipped write-back.
+      expect(state.saveState).toBe("saved");
+    });
+
+    it("does not write the first project's stale document after a switch during the wait", async () => {
+      const first = sharedWallDocument("open-switch-from-000001", unlinkedPair);
+      const second = sharedWallDocument("open-switch-to-000002", []);
+      await repository.save(first);
+      await repository.save(second);
+
+      const saved: string[] = [];
+      const save = repository.save.bind(repository);
+      repository.save = async (project) => {
+        saved.push(project.id);
+        await save(project);
+      };
+      const releaseSnapshot = deferSnapshotsOf(first.id);
+
+      const open = store.getState().openProject(first.id);
+      await flush();
+      expect(store.getState().project?.id).toBe(first.id);
+
+      await store.getState().openProject(second.id);
+
+      releaseSnapshot();
+      await open;
+      await flush();
+
+      // The user is on the second project and stays there.
+      expect(store.getState().project?.id).toBe(second.id);
+      // The first project's stored document is untouched — a document that is no
+      // longer open must not be written, however repaired the copy in hand is.
+      expect(saved).not.toContain(first.id);
+      expect(repository.projects.get(first.id)).toBe(first);
+      expect(partnerOf(await repository.load(first.id), "door-a")).toBeUndefined();
+    });
+
+    it("writes the repair back on boot, behind a recovery copy of the original", async () => {
+      const repo = new InMemoryProjectRepository();
+      const document = sharedWallDocument("boot-persist-000001", unlinkedPair);
+      await repo.save(document);
+
+      const s = createAppStore(makeDeps({ projectRepository: repo }));
+      await s.getState().boot();
+
+      expect(s.getState().saveState).toBe("saved");
+      expect(partnerOf(await repo.load(document.id), "door-a")).toBe("door-b");
+
+      const [summary] = await projectSnapshotRepository.listByProject(document.id);
+      const record = await projectSnapshotRepository.get(summary.key);
+      expect(partnerOf(record!.project, "door-a")).toBeUndefined();
+    });
+
+    it("keeps a repair that could not be written visible as a save failure", async () => {
+      // A repair the device refused to store must never look saved: the user
+      // has to know this document is still one reload from losing the link.
+      const document = sharedWallDocument("open-failed-write-000001", unlinkedPair);
+      await repository.save(document);
+      repository.save = async () => {
+        throw new Error("Simulated project save failure");
+      };
+
+      await store.getState().openProject(document.id);
+      await flush();
+
+      const state = store.getState();
+      expect(partnerOf(state.project, "door-a")).toBe("door-b");
+      expect(state.saveState).toBe("error");
+      expect(state.saveError?.scope).toBe("project");
+      expect(state.error).toContain("Simulated project save failure");
+      // The original stays recoverable — the snapshot went down regardless.
+      expect(await projectSnapshotRepository.listByProject(document.id)).toHaveLength(1);
+    });
+
+    it("loadBenchmarkFixture still writes nothing, repair or not", async () => {
+      // Benchmark data must never replace a user's saved local project, so the
+      // dev entry point calls setDocument directly and opts out of the
+      // write-back by construction. Its unwritten document is honestly "idle".
+      const save = vi.spyOn(repository, "save");
+      const document = sharedWallDocument("benchmark-legacy-000001", unlinkedPair);
+
+      store.getState().loadBenchmarkFixture(document, []);
+      await flush();
+
+      const state = store.getState();
+      expect(partnerOf(state.project, "door-a")).toBe("door-b");
+      expect(save).not.toHaveBeenCalled();
+      expect(repository.projects.has(document.id)).toBe(false);
+      expect(await projectSnapshotRepository.listByProject(document.id)).toHaveLength(0);
+      expect(state.saveState).toBe("idle");
+      save.mockRestore();
+    });
+
+    it("writes the repair back when a duplicate copies a document that needs one", async () => {
+      const source = sharedWallDocument("dup-legacy-000001", unlinkedPair);
+      await repository.save(source);
+
+      await store.getState().duplicateProject(source.id);
+
+      const copy = store.getState().project!;
+      expect(copy.id).not.toBe(source.id);
+      expect(partnerOf(copy, "door-a")).toBe("door-b");
+      expect(store.getState().saveState).toBe("saved");
+      expect(partnerOf(await repository.load(copy.id), "door-a")).toBe("door-b");
+      // The source is a different document and is left exactly as it was.
+      expect(partnerOf(await repository.load(source.id), "door-a")).toBeUndefined();
+    });
+
+    it("declines to create a twin on open, leaving the document byte-identical", async () => {
+      // Creating geometry in a document the user just opened is a bolder claim
+      // than doing it during an edit they initiated: the room facing this door
+      // must not gain one. The issues rail reports it as `missing-twin`.
+      const warning = vi.spyOn(toast, "warning");
+      const document = sharedWallDocument("open-one-sided-000001", [
+        { id: "door-a", wallId: A_EAST, xMm: 1200 }
+      ]);
+      await repository.save(document);
+
+      await store.getState().openProject(document.id);
+
+      const state = store.getState();
+      expect(state.project!.wallObjects).toHaveLength(1);
+      expect(partnerOf(state.project, "door-a")).toBeUndefined();
+      // Same reference in and out, so App.tsx's memo on project identity holds.
+      expect(state.project).toBe(repository.projects.get(document.id));
+      expect(state.saveState).toBe("saved");
+      expect(state.undoStack).toHaveLength(0);
+      expect(warning).not.toHaveBeenCalled();
+      warning.mockRestore();
+    });
+
+    it("realigns a drifted pair on open", async () => {
+      const document = sharedWallDocument("open-drifted-000001", [
+        { id: "door-a", wallId: A_EAST, xMm: 1200, connectsToObjectId: "door-b" },
+        { id: "door-b", wallId: B_WEST, xMm: 1700, connectsToObjectId: "door-a" }
+      ]);
+      await repository.save(document);
+
+      await store.getState().openProject(document.id);
+
+      const moved = store
+        .getState()
+        .project!.wallObjects.find((object) => object.id === "door-b")!;
+      expect(moved.xMm).toBeCloseTo(1800);
+      expect(store.getState().undoStack).toHaveLength(0);
+    });
+
+    it("reports a collision when a realign lands the moved half on artwork", async () => {
+      // isBlockingKind deliberately excludes artwork (overlap policy), so
+      // repairSharedOpeningsOnLoad's realign is free to land door-b's mirrored
+      // slot on top of a hung work. That must surface as a placementWarning
+      // instead of vanishing into setDocument's unconditional reset.
+      const base = sharedWallDocument("open-realign-collision-000001", [
+        { id: "door-a", wallId: A_EAST, xMm: 1200, connectsToObjectId: "door-b" },
+        { id: "door-b", wallId: B_WEST, xMm: 1700, connectsToObjectId: "door-a" }
+      ]);
+      const document: Project = {
+        ...base,
+        wallObjects: [
+          ...base.wallObjects,
+          {
+            id: "art-on-b-west",
+            kind: "artwork",
+            artworkId: "artwork-not-in-library",
+            wallId: B_WEST,
+            // Sits exactly where door-a's mirror (3000 − 1200 = 1800) lands.
+            xMm: 1800,
+            yMm: DOOR_Y_MM,
+            widthMm: 600,
+            heightMm: 800
+          }
+        ]
+      };
+      await repository.save(document);
+
+      await store.getState().openProject(document.id);
+
+      const state = store.getState();
+      const moved = state.project!.wallObjects.find((object) => object.id === "door-b")!;
+      expect(moved.xMm).toBeCloseTo(1800);
+      expect(
+        state.placementWarnings.some(
+          (warning) => warning.wallObjectId === "door-b" && warning.type === "collision"
+        )
+      ).toBe(true);
+    });
+
+    it("reports no warning when a realign lands the moved half somewhere clear", async () => {
+      const base = sharedWallDocument("open-realign-clear-000001", [
+        { id: "door-a", wallId: A_EAST, xMm: 1200, connectsToObjectId: "door-b" },
+        { id: "door-b", wallId: B_WEST, xMm: 1700, connectsToObjectId: "door-a" }
+      ]);
+      const document: Project = {
+        ...base,
+        wallObjects: [
+          ...base.wallObjects,
+          {
+            id: "art-far-from-mirror",
+            kind: "artwork",
+            artworkId: "artwork-not-in-library",
+            wallId: B_WEST,
+            // Far from the mirrored landing spot (1800): no overlap.
+            xMm: 400,
+            yMm: DOOR_Y_MM,
+            widthMm: 600,
+            heightMm: 800
+          }
+        ]
+      };
+      await repository.save(document);
+
+      await store.getState().openProject(document.id);
+
+      const state = store.getState();
+      const moved = state.project!.wallObjects.find((object) => object.id === "door-b")!;
+      expect(moved.xMm).toBeCloseTo(1800);
+      expect(state.placementWarnings).toEqual([]);
+    });
+
+    it("installs placementWarnings: [] for a document that needed no repair", async () => {
+      // Already mirrored exactly (door-b at 3000 − 1200 = 1800): no realign
+      // fires, so setDocument must still settle on the empty array, not skip
+      // installing placementWarnings entirely.
+      const document = sharedWallDocument("open-healthy-000001", [
+        { id: "door-a", wallId: A_EAST, xMm: 1200, connectsToObjectId: "door-b" },
+        { id: "door-b", wallId: B_WEST, xMm: 1800, connectsToObjectId: "door-a" }
+      ]);
+      await repository.save(document);
+
+      await store.getState().openProject(document.id);
+
+      expect(store.getState().placementWarnings).toEqual([]);
+    });
+
+    it("preserves a legacy non-boundary pair on open", async () => {
+      // Settled decision 4: a pair whose walls do not face each other is a
+      // caution the user resolves, not something load repair severs.
+      const document = sharedWallDocument("open-nonboundary-000001", [
+        { id: "door-a", wallId: "room-a-wall-north", xMm: 1200, connectsToObjectId: "door-b" },
+        { id: "door-b", wallId: "room-a-wall-south", xMm: 2400, connectsToObjectId: "door-a" }
+      ]);
+      await repository.save(document);
+
+      await store.getState().openProject(document.id);
+
+      const state = store.getState();
+      expect(partnerOf(state.project, "door-a")).toBe("door-b");
+      expect(partnerOf(state.project, "door-b")).toBe("door-a");
+      expect(state.project).toBe(repository.projects.get(document.id));
+    });
+
+    it("runs on a .sightlines package import", async () => {
+      const document = sharedWallDocument("package-legacy-000001", unlinkedPair);
+
+      await store.getState().importSightlinesPackage(await packageBytes(document));
+
+      const state = store.getState();
+      expect(state.project!.id).toBe(document.id);
+      expect(partnerOf(state.project, "door-a")).toBe("door-b");
+      // This path persists BEFORE it opens (the project write has to precede
+      // the asset writes), so the repair needs a second write to land.
+      expect(state.saveState).toBe("saved");
+      expect(partnerOf(await repository.load(document.id), "door-a")).toBe("door-b");
+    });
+
+    it("toasts success and reports completion when the repair write-back succeeds", async () => {
+      const successToast = vi.spyOn(toast, "success");
+      const track = vi.spyOn(telemetry, "track");
+      const document = sharedWallDocument("package-repair-ok-000001", unlinkedPair);
+
+      await store.getState().importSightlinesPackage(await packageBytes(document));
+
+      expect(store.getState().saveState).toBe("saved");
+      expect(successToast).toHaveBeenCalledWith(`Imported “${document.title}”`);
+      expect(track).toHaveBeenCalledWith("package_import_completed", {});
+      successToast.mockRestore();
+      track.mockRestore();
+    });
+
+    it("attempts only one write when the import needs no repair", async () => {
+      const successToast = vi.spyOn(toast, "success");
+      const track = vi.spyOn(telemetry, "track");
+      const saveSpy = vi.spyOn(repository, "save");
+      // Already mirrored (door-b at 3000 − 1200 = 1800): setDocument's repair
+      // pass has nothing to do, so commit.project === opened and the second
+      // `persist` in commitPackageImport must never run.
+      const document = sharedWallDocument("package-no-repair-000001", [
+        { id: "door-a", wallId: A_EAST, xMm: 1200, connectsToObjectId: "door-b" },
+        { id: "door-b", wallId: B_WEST, xMm: 1800, connectsToObjectId: "door-a" }
+      ]);
+
+      await store.getState().importSightlinesPackage(await packageBytes(document));
+
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+      expect(store.getState().saveState).toBe("saved");
+      expect(successToast).toHaveBeenCalledWith(`Imported “${document.title}”`);
+      expect(track).toHaveBeenCalledWith("package_import_completed", {});
+      saveSpy.mockRestore();
+      successToast.mockRestore();
+      track.mockRestore();
+    });
+
+    it("does not announce success when the post-repair write-back fails, and leaves a retryable save error", async () => {
+      const successToast = vi.spyOn(toast, "success");
+      const warningToast = vi.spyOn(toast, "warning");
+      const track = vi.spyOn(telemetry, "track");
+      const document = sharedWallDocument("package-repair-fail-000001", unlinkedPair);
+      const originalSave = repository.save.bind(repository);
+      let calls = 0;
+      // The first save is the pre-repair write commitPackageImport always
+      // makes before opening; only the SECOND — the repaired document's
+      // write-back — is the one this finding is about, so only it fails.
+      vi.spyOn(repository, "save").mockImplementation(async (project) => {
+        calls += 1;
+        if (calls === 2) throw new Error("disk full");
+        return originalSave(project);
+      });
+
+      await store.getState().importSightlinesPackage(await packageBytes(document));
+
+      const state = store.getState();
+      // The import genuinely happened: the repair is live on the open
+      // document even though the write-back of it failed.
+      expect(partnerOf(state.project, "door-a")).toBe("door-b");
+      expect(state.saveState).toBe("error");
+      expect(state.saveError?.message).toMatch(/disk full/);
+      // No plain "Imported" success toast next to the red save badge — the
+      // only warning toast fired is setDocument's own "linked" notice, which
+      // is unrelated to (and fires before) the write-back attempt.
+      expect(successToast).not.toHaveBeenCalled();
+      expect(warningToast).toHaveBeenCalledTimes(1);
+      expect(warningToast).toHaveBeenCalledWith(
+        "One shared opening was linked while opening this project."
+      );
+      // The import pipeline itself still completed — assets/artworks are
+      // written and the document is open — so completion telemetry still
+      // fires; only the trailing save is what's broken.
+      expect(track).toHaveBeenCalledWith("package_import_completed", {});
+
+      // The saveError's retry closure must be the user's real way out.
+      await state.saveError!.retry();
+      expect(store.getState().saveState).toBe("saved");
+      expect(store.getState().saveError).toBeNull();
+      expect(partnerOf(await repository.load(document.id), "door-a")).toBe("door-b");
+
+      successToast.mockRestore();
+      warningToast.mockRestore();
+      track.mockRestore();
+    });
+
+    it("runs on a JSON import and persists what it opened", async () => {
+      const document = sharedWallDocument("json-legacy-000001", unlinkedPair);
+
+      await store.getState().importProjectJson(exportProjectJson(document));
+
+      const state = store.getState();
+      expect(partnerOf(state.project, "door-a")).toBe("door-b");
+      // This path persists AFTER the swap, so it must write the repaired
+      // document — otherwise it stores the old one and reports "Saved".
+      expect(state.saveState).toBe("saved");
+      expect(partnerOf(repository.projects.get(document.id)!, "door-a")).toBe("door-b");
+    });
+
+    it("runs on a snapshot restore and persists what it opened", async () => {
+      const document = sharedWallDocument("snapshot-legacy-000001", unlinkedPair);
+      await projectSnapshotRepository.add({
+        projectId: document.id,
+        createdAt: "2026-07-19T00:00:00.000Z",
+        projectTitle: document.title,
+        fingerprint: "fp",
+        project: document
+      });
+      const [summary] = await projectSnapshotRepository.listByProject(document.id);
+
+      await store.getState().restoreProjectSnapshot(summary.key);
+
+      const state = store.getState();
+      expect(partnerOf(state.project, "door-a")).toBe("door-b");
+      expect(state.saveState).toBe("saved");
+      expect(partnerOf(repository.projects.get(document.id)!, "door-a")).toBe("door-b");
+    });
+  });
+
   it("save validates before writing, so an invalid document cannot persist", async () => {
     const project = store.getState().project!;
     const invalid = { ...project, title: "" };
