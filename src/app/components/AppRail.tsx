@@ -81,8 +81,8 @@ export function AppRail({
           icon={<WarningIcon aria-hidden="true" size={22} />}
           label={
             hasIssues
-              ? `Review ${issueCount} placement issue${issueCount === 1 ? "" : "s"}`
-              : "No placement issues"
+              ? `Review ${issueCount} issue${issueCount === 1 ? "" : "s"}`
+              : "No issues"
           }
           onClick={onSelectFirstIssue}
         >

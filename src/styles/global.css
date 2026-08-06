@@ -6851,6 +6851,33 @@ body.panels-resizing * {
   line-height: var(--leading-copy);
 }
 
+/* Document issues are a standing, persistent condition of the project
+   rather than a transient reaction to the current edit — see
+   PlacementWarnings.tsx. They reuse every .warning-panel layout rule above
+   (grid, spacing, icon/title/list mechanics) unchanged, and only override
+   color: a quiet neutral "filed note" instead of the vivid caution amber
+   reserved for "look at this now". Placement warnings keep their existing
+   colors untouched. */
+.warning-panel-document {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.warning-panel-document .warning-panel-count,
+.warning-panel-document p {
+  color: var(--muted);
+}
+
+/* The row dividers too. .warning-panel li sets border-top: var(--caution-line),
+   so a multi-issue card was neutral everywhere EXCEPT the amber rules between
+   its rows — the one place the caution palette still leaked into a panel whose
+   whole point is that it is not urgent. Single-issue cards never showed it,
+   which is why it survived: they render one compact row and no list. */
+.warning-panel-document li {
+  border-top-color: var(--line);
+}
+
 .next-panel {
   align-items: flex-start;
   gap: var(--space-10);

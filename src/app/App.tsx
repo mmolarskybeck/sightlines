@@ -53,6 +53,8 @@ import { ArtworkInspector } from "./components/inspectors/ArtworkInspector";
 import { ArtworkLibraryView } from "./components/library/ArtworkLibrary";
 import { PanelResizeHandle } from "./components/shared/PanelResizeHandle";
 import { PlacementWarnings } from "./components/placement/PlacementWarnings";
+import { describeSharedOpeningConflict } from "./components/placement/sharedOpeningIssueCopy";
+import { selectSharedOpeningConflicts } from "../domain/placement/sharedOpeningIssues";
 import { ChecklistPanel } from "./components/panels/ChecklistPanel";
 import { ElevationEmptyState } from "./components/elevation/ElevationEmptyState";
 import { FloorCaseInspector, WallCaseInspector } from "./components/inspectors/CaseInspector";
@@ -803,6 +805,25 @@ export function App() {
     ].join(":")
   );
 
+  // Standing shared-opening problems, as opposed to placementWarnings' reaction
+  // to the current edit. THE MEMO IS LOAD-BEARING: selectSharedOpeningConflicts
+  // re-runs a whole-document analysis pass, so without keying it to `project`
+  // identity this recomputes on every render, hover included.
+  //
+  // Declared ABOVE the `if (!project)` early return below: a hook placed after
+  // it runs only on renders that have a document, which changes the hook count
+  // between renders and tears the component down ("Rendered more hooks than
+  // during the previous render"). The null guard lives inside the memo instead.
+  const sharedOpeningIssues = useMemo(
+    () =>
+      project
+        ? selectSharedOpeningConflicts(project).map((conflict) =>
+            describeSharedOpeningConflict(conflict, project)
+          )
+        : [],
+    [project]
+  );
+
   if (!project) {
     return (
       <main className="loading-shell">
@@ -1125,10 +1146,16 @@ export function App() {
     return { ...warning, subject };
   });
 
-  // Issues navigation selects the first warning's placement in the inspector.
+  // Issues navigation selects the first warning's placement in the inspector,
+  // falling back to a standing shared-opening issue when nothing is wrong with
+  // the current edit — otherwise the rail could report a count it won't move to.
   const selectFirstWarningObject = () => {
     const first = placementWarnings[0];
-    if (!first) return;
+    if (!first) {
+      const issue = sharedOpeningIssues[0];
+      if (issue) selectOpening(issue.openingId);
+      return;
+    }
 
     const wallObject = project.wallObjects.find(
       (candidate) => candidate.id === first.wallObjectId
@@ -1486,7 +1513,7 @@ export function App() {
         onOpenLibrary={() => setViewMode("library")}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenHelp={() => setIsHelpOpen(true)}
-        issueCount={placementWarnings.length}
+        issueCount={placementWarnings.length + sharedOpeningIssues.length}
         onSelectFirstIssue={selectFirstWarningObject}
       />
       <div className="app-main">
@@ -2042,6 +2069,7 @@ export function App() {
 
             <PlacementWarnings
               warnings={labeledPlacementWarnings}
+              documentIssues={sharedOpeningIssues}
               selectedWallObjectId={
                 placedWallObject?.id ??
                 selectedOpening?.id ??
