@@ -158,10 +158,49 @@ type OpeningPlacement =
   | { kind: "ambiguous-wall"; boundaries: SharedBoundary[] }
   | { kind: "confirmed"; counterpartWallId: string };
 
+// The analysis plus the one thing only the pass itself can know: for each
+// opening that could be resolved BY HAND, the exact set of targets a resolver
+// may accept for THAT opening. Kept off `SharedOpeningAnalysis` because every
+// existing caller (load repair, reconciliation, issues rail) wants actions and
+// conflicts and nothing else.
+type SharedOpeningAnalysisInternals = SharedOpeningAnalysis & {
+  candidatesByOpeningId: Map<string, SharedOpeningTarget[]>;
+};
+
 export function analyzeSharedOpenings(
   project: Project,
   scope?: SharedOpeningScope
 ): SharedOpeningAnalysis {
+  const { actions, conflicts } = runSharedOpeningAnalysis(project, scope);
+  return { actions, conflicts };
+}
+
+// The ONLY targets a resolver may accept for this one opening.
+//
+// A conflict's own `candidates` are not a substitute. One
+// `ambiguous-counterpart-opening` conflict stands for a whole cluster and is
+// keyed on the cluster's lexicographically smallest member, so its `candidates`
+// are the KEYED opening's graph neighbours — offering those to a different
+// member of the same cluster would advertise a pairing that member cannot form.
+// This answers per opening, by graph adjacency to the opening actually being
+// resolved.
+//
+// Deliberately unscoped: the graph an opening lives in is a property of the
+// document, so narrowing the scope must never license a pairing the whole-
+// document pass would have refused. Returns [] for an opening with nothing to
+// choose between — including a `missing-twin`, whose repair is one fixed
+// action rather than a pick (see sharedOpeningIssues.ts).
+export function sharedOpeningCandidates(
+  project: Project,
+  openingId: string
+): SharedOpeningTarget[] {
+  return runSharedOpeningAnalysis(project).candidatesByOpeningId.get(openingId) ?? [];
+}
+
+function runSharedOpeningAnalysis(
+  project: Project,
+  scope?: SharedOpeningScope
+): SharedOpeningAnalysisInternals {
   const actions: SharedOpeningAction[] = [];
   const conflicts: SharedOpeningConflict[] = [];
 
@@ -634,7 +673,25 @@ export function analyzeSharedOpenings(
     });
   }
 
-  return { actions, conflicts };
+  // Per-opening resolution targets, from the same two sources the conflicts
+  // above draw on — graph adjacency for a cluster, and the ambiguous-wall
+  // candidate list for an opening backed by more than one room. Built for every
+  // opening that has one, not only the ones that ended up keying a conflict, so
+  // a cluster's non-keyed members can be resolved from their own neighbours.
+  const candidatesByOpeningId = new Map<string, SharedOpeningTarget[]>();
+  for (const node of graphNodes) {
+    const facing = neighbours.get(node.id) ?? [];
+    if (facing.length === 0) continue;
+    candidatesByOpeningId.set(
+      node.id,
+      facing.map((candidate) => ({ kind: "opening" as const, openingId: candidate.id }))
+    );
+  }
+  for (const [openingId, candidates] of ambiguousWallCandidates) {
+    if (candidates.length > 0) candidatesByOpeningId.set(openingId, candidates);
+  }
+
+  return { actions, conflicts, candidatesByOpeningId };
 }
 
 type MirrorSlot =

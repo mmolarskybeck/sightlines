@@ -208,6 +208,19 @@ Implemented or substantially underway:
 
 Sightlines is prepared for Cloudflare Workers static-assets deployment with Wrangler. See [docs/deployment.md](docs/deployment.md) for login, dry-run, deploy, and Cloudflare build settings.
 
+## Development
+
+After cloning, run `npm run hooks:install` once to activate the repository's
+pre-commit checks. The current guard rejects raw NUL bytes in staged source and
+documentation files while leaving intentional binary assets alone.
+
+The same check runs in CI as `npm run check:nuls`, over every tracked text file
+rather than only the staged ones — the hook is the fast local signal, CI is the
+one that binds. Run `npm run check:nuls` by hand any time you want the tree
+checked. A stray `0x00` in a source file is invisible in an editor and makes git
+treat the file as binary, so its diffs stop being reviewable; `od -c` cannot
+detect it, because it prints a raw NUL and the escape identically.
+
 ## Roadmap
 
 The detailed roadmap lives in `docs/plan.md` §9 (source of truth); the current position and near-term order live in `docs/status.md`. In brief:

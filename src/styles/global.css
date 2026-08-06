@@ -6878,6 +6878,50 @@ body.panels-resizing * {
   border-top-color: var(--line);
 }
 
+/* Every document-issue row is a real button, because two problem doors on one
+   wall produce rows with the SAME subject and the SAME sentence — and the rail
+   used to select only the first, leaving the second visible but unreachable.
+   Selection state is what tells two identical rows apart on screen; the
+   accessible name carries an ordinal, and only when the text actually repeats.
+   Modeled on .checklist-row, the app's existing selectable-row treatment, so a
+   selected issue reads the same as a selected checklist entry. */
+.warning-panel-issue-row {
+  display: block;
+  width: 100%;
+  padding: var(--space-6);
+  /* Pulled back out again so the hover/selected wash extends past the text
+     instead of hugging it, while the row still sits on the panel's own
+     rhythm. Negative offsets stay literal, per the spacing scale. */
+  margin: calc(var(--space-6) * -1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease-out,
+    box-shadow 150ms ease-out;
+}
+
+/* The panel itself is --surface, so the hover has to LIFT toward the page
+   background rather than settle into it. */
+.warning-panel-issue-row:hover {
+  background: var(--bg);
+}
+
+.warning-panel-issue-row.selected {
+  background: var(--primary-soft);
+  box-shadow: inset 0 0 0 1px var(--primary-line);
+}
+
+/* The <li> used to own the subject/message grid; the button holds them now. */
+.warning-panel-issue-list-row {
+  display: grid;
+  gap: var(--space-2);
+}
+
 .next-panel {
   align-items: flex-start;
   gap: var(--space-10);

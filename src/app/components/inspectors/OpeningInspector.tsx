@@ -1,16 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ArrowsOutLineHorizontalIcon } from "@phosphor-icons/react/dist/csr/ArrowsOutLineHorizontal";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
-import type { OpeningAlignment } from "../../../domain/geometry/openingConnections";
+import type {
+  SharedOpeningResolution,
+  SharedOpeningStatus
+} from "../../../domain/geometry/sharedOpeningStatus";
 import { getOpeningKindLabel } from "../../../domain/placement/createOpening";
 import type { OpeningFit } from "../../../domain/placement/fitOpeningOnWall";
+import type { SharedOpeningTarget } from "../../../domain/placement/sharedOpeningAnalysis";
 import { formatLength } from "../../../domain/units/length";
 import type { OpeningWallObject, DisplayUnit } from "../../../domain/project";
 import { getScopedUnitContext } from "../shared/scopedUnits";
 import { LengthField } from "../shared/LengthField";
+import { InspectorActionGroup } from "./InspectorActionGroup";
 import { InspectorFieldGrid } from "./InspectorFieldGrid";
 import { InspectorNotice } from "./InspectorNotice";
 import { Button } from "../ui/button";
@@ -23,31 +28,209 @@ import {
   SelectValue
 } from "../ui/select";
 
-export type OpeningConnectionCandidate = {
-  id: string;
-  label: string;
-  alignment: OpeningAlignment;
+// Everything the panel needs to render the shared-opening state of ONE selected
+// opening, assembled in App.tsx so this component stays rendering.
+//
+// Pairing is not a user-managed field — it is a consequence of wall topology —
+// so there is no "Connects to" picker and no Disconnect. What is offered is a
+// list of RESOLUTIONS for a state that needs one, and which resolutions those
+// are is decided by `sharedOpeningResolutions` (exhaustiveness-guarded in the
+// domain), never re-derived from the conflict reason here.
+export type OpeningSharedSection = {
+  status: SharedOpeningStatus;
+  resolutions: SharedOpeningResolution[];
+  /** The `shared` line, the drift sentence, or the conflict sentence. */
+  message: string | null;
+  /** Non-empty only when `resolutions` includes "resolve". */
+  candidates: { key: string; label: string; target: SharedOpeningTarget }[];
+  onResolve: (target: SharedOpeningTarget) => void;
+  onComplete: () => void;
+  onRealign: () => void;
+  onSplit: () => void;
+  onKeepThisOnly: () => void;
 };
 
-function alignmentLabel(alignment: OpeningAlignment): string {
-  if (alignment.status === "aligned") return "Aligned";
-  switch (alignment.reason) {
-    case "angle":
-      return "Misaligned: walls are not parallel";
-    case "gap":
-      return "Misaligned: walls are too far apart";
-    case "no-overlap":
-      return "Misaligned: openings do not overlap enough";
-    case "height":
-      return "Misaligned: heights do not overlap";
-  }
-}
+// The Stage 7 state -> UI table. Returns null for every state that has nothing
+// to say, so the panel never renders an empty ruled section.
+function SharedOpeningSection({
+  opening,
+  section
+}: {
+  opening: OpeningWallObject;
+  section: OpeningSharedSection;
+}) {
+  const { candidates, message, resolutions, status } = section;
 
-// The one-word verdict for a candidate row. The full reason belongs to the
-// status line under the picker, which has the whole pane width to say it in —
-// repeating it inside every option only makes the trigger wrap.
-function shortAlignmentLabel(alignment: OpeningAlignment): string {
-  return alignment.status === "aligned" ? "Aligned" : "Misaligned";
+  // An exposed opening is not a problem: no section, no placeholder. The old
+  // "No {kind} on a facing wall to pair with." was mechanism talk about a
+  // choice the user does not have.
+  if (status.kind === "exposed") return null;
+
+  // Mid-sentence noun for the kind-aware button labels ("Keep both as separate
+  // doors" / "…windows"). Blocked zones never pair, so App passes null for them
+  // and this component never sees one.
+  const noun = getOpeningKindLabel(opening.kind).toLowerCase();
+
+  // A healthy pairing states itself once and stays quiet. The check and the
+  // muted line are the same treatment the old "Aligned" status used; only a
+  // state needing attention escalates to the filled caution wash.
+  //
+  // role="status" stays on an inner span so the live-region readout is exactly
+  // the sentence, with no button text leaking into it.
+  if (status.kind === "shared") {
+    if (message === null) return null;
+    return (
+      <div className="opening-connection-section">
+        <div className="opening-connection-status">
+          <CheckCircleIcon
+            aria-hidden="true"
+            className="opening-connection-status-icon"
+            size={14}
+            weight="fill"
+          />
+          <span className="opening-connection-status-text" role="status">
+            {message}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const actions: ReactNode[] = [];
+  let picker = false;
+
+  for (const resolution of resolutions) {
+    switch (resolution) {
+      // A pick, not a verb: rendered as the captioned Select below.
+      case "resolve":
+        picker = true;
+        break;
+
+      case "complete":
+        actions.push(
+          <Button
+            key="complete"
+            className="inspector-action"
+            size="sm"
+            variant="inspector"
+            onClick={section.onComplete}
+          >
+            Complete shared opening
+          </Button>
+        );
+        break;
+
+      case "realign":
+        actions.push(
+          <Button
+            key="realign"
+            className="inspector-action"
+            size="sm"
+            variant="inspector"
+            onClick={section.onRealign}
+          >
+            Realign
+          </Button>
+        );
+        break;
+
+      case "split":
+        actions.push(
+          <Button
+            key="split"
+            className="inspector-action"
+            size="sm"
+            variant="inspector"
+            onClick={section.onSplit}
+          >
+            Keep both as separate {noun}s
+          </Button>
+        );
+        break;
+
+      case "keep-this-only":
+        actions.push(
+          <Button
+            key="keep-this-only"
+            className="inspector-action"
+            size="sm"
+            variant="inspector"
+            onClick={section.onKeepThisOnly}
+          >
+            Keep this {noun} only
+          </Button>
+        );
+        break;
+
+      default: {
+        // A tenth resolution must be a compile error here, not a state whose
+        // control silently never renders.
+        const exhaustive: never = resolution;
+        void exhaustive;
+        break;
+      }
+    }
+  }
+
+  const showPicker = picker && candidates.length > 0;
+  if (message === null && actions.length === 0 && !showPicker) return null;
+
+  return (
+    <div className="opening-connection-section">
+      {message === null ? null : (
+        <InspectorNotice icon={<WarningIcon size={14} weight="fill" />} tone="caution">
+          <span role="status">{message}</span>
+        </InspectorNotice>
+      )}
+
+      {/* Stacked, not label-left: at inspector widths a label column leaves the
+          trigger too narrow for "Door on East wall in Gallery 2". The label is a
+          plain wrapping <label>, so the trigger keeps its own aria-label (a
+          button is not labelable). */}
+      {showPicker ? (
+        <Field compact label="Resolve shared opening">
+          <Select
+            key={opening.id}
+            // Always empty: this is a command, not a stored field. Nothing is
+            // "currently selected" — an unresolved conflict has no answer yet —
+            // and leaving it uncontrolled would let the trigger keep showing a
+            // choice after the store has already acted on it.
+            value=""
+            onValueChange={(key) => {
+              // Map back through `key`. The target is an object, so encoding one
+              // into the option value by concatenation would need parsing back
+              // out — and a wall id containing the delimiter would silently
+              // resolve to the wrong wall.
+              const chosen = candidates.find((candidate) => candidate.key === key);
+              if (chosen) section.onResolve(chosen.target);
+            }}
+          >
+            {/* h-8, not the trigger's default h-9: `.field-row.compact` sizes
+                its inputs to 32px via min-height, which a Tailwind `height`
+                utility silently wins over. */}
+            <SelectTrigger aria-label="Resolve shared opening" className="h-8">
+              <SelectValue
+                className="min-w-0 truncate"
+                placeholder={`Choose the other side of this ${noun}`}
+              />
+            </SelectTrigger>
+            <SelectContent>
+              {candidates.map((candidate) => (
+                <SelectItem key={candidate.key} value={candidate.key}>
+                  {candidate.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      ) : null}
+
+      {/* Below the notice rather than in its single trailing `action` slot:
+          `boundary-lost` offers two verbs, and splitting one into the notice
+          and one underneath would read as a hierarchy that does not exist. */}
+      {actions.length > 0 ? <InspectorActionGroup>{actions}</InspectorActionGroup> : null}
+    </div>
+  );
 }
 
 // Plain-language account of how a request was adjusted to stay on the wall.
@@ -95,22 +278,19 @@ export function OpeningInspector({
   onCommitPosition,
   onCommitSize,
   onFitToWall,
-  onConnect,
-  onDisconnect,
   onDelete,
-  connectionCandidates,
   opening,
+  sharedOpening,
   unit,
   wallLengthMm
 }: {
   onCommitPosition: (xMm: number, yMm: number) => Promise<OpeningFit | null>;
   onCommitSize: (widthMm: number, heightMm: number) => Promise<OpeningFit | null>;
   onFitToWall: () => Promise<OpeningFit | null>;
-  onConnect: (partnerId: string) => void;
-  onDisconnect: () => void;
   onDelete: () => void;
-  connectionCandidates: OpeningConnectionCandidate[];
   opening: OpeningWallObject;
+  /** null for a blocked zone, which never pairs. */
+  sharedOpening: OpeningSharedSection | null;
   unit: DisplayUnit;
   /** Run of the wall this opening sits on, so the jamb clearances can be read
    * and edited from either end. 0 when the wall cannot be resolved, which
@@ -157,18 +337,6 @@ export function OpeningInspector({
   const fromStartMm = opening.xMm - halfWidthMm;
   const fromEndMm = wallLengthMm - (opening.xMm + halfWidthMm);
   const hasWallRun = wallLengthMm > 0;
-
-  // Blocked zones never pair, so the field is absent from their union member.
-  const connectsToObjectId =
-    "connectsToObjectId" in opening ? opening.connectsToObjectId : undefined;
-  const connected = connectionCandidates.find(
-    (candidate) => candidate.id === connectsToObjectId
-  );
-  const disconnectButton = (
-    <Button size="sm" variant="ghost" onClick={onDisconnect}>
-      Disconnect
-    </Button>
-  );
 
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
@@ -286,90 +454,8 @@ export function OpeningInspector({
         </InspectorNotice>
       ) : null}
 
-      {opening.kind === "door" || opening.kind === "window" ? (
-        <div className="opening-connection-section">
-          {/* Stacked, not label-left: at inspector widths a label column left
-              the trigger too narrow for "Gallery 1, West wall" and wrapped it
-              to two lines. The label is a plain wrapping <label>, so the
-              trigger keeps its own aria-label (a button is not labelable) —
-              the same association ArtworkInspector's Finish select uses. */}
-          {connectionCandidates.length > 0 ? (
-            <Field compact label="Connects to">
-              <Select
-                key={opening.id}
-                value={connectsToObjectId ?? ""}
-                onValueChange={(partnerId) => onConnect(partnerId)}
-              >
-                {/* h-8, not the trigger's default h-9: `.field-row.compact`
-                    sizes its inputs to 32px via min-height, which a Tailwind
-                    `height` utility silently wins over — the select rendered
-                    4px taller than every field above it. tailwind-merge drops
-                    h-9 for this, so the override is deterministic. */}
-                <SelectTrigger aria-label={`Connect ${opening.kind} to`} className="h-8">
-                  {/* Explicit children override Radix's portalled item text, so
-                      the trigger shows only where the partner is; its alignment
-                      is already spelled out in the status line below. */}
-                  <SelectValue
-                    className="min-w-0 truncate"
-                    placeholder={`Choose another ${opening.kind}`}
-                  >
-                    {connected?.label ?? "Unavailable opening"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {connectionCandidates.map((candidate) => (
-                    <SelectItem key={candidate.id} value={candidate.id}>
-                      {candidate.label} · {shortAlignmentLabel(candidate.alignment)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          ) : (
-            <div className="field-row compact">
-              <span>Connects to</span>
-              <p className="field-hint">
-                No {opening.kind} on a facing wall to pair with.
-              </p>
-            </div>
-          )}
-          {connectsToObjectId ? (
-            connected?.alignment.status === "aligned" ? (
-              // A healthy pairing states itself once and stays quiet. The old
-              // filled petrol bar gave the good state more weight than anything
-              // else in the panel; only a misaligned pair earns a wash, so the
-              // one that needs attention is the one that gets it.
-              //
-              // role="status" stays on an inner span, not the row, so its text
-              // is exactly the alignment label — the Disconnect button's text
-              // must not leak into the live-region readout the test asserts on.
-              <div className="opening-connection-status">
-                <CheckCircleIcon
-                  aria-hidden="true"
-                  className="opening-connection-status-icon"
-                  size={14}
-                  weight="fill"
-                />
-                <span className="opening-connection-status-text" role="status">
-                  {alignmentLabel(connected.alignment)}
-                </span>
-                {disconnectButton}
-              </div>
-            ) : (
-              <InspectorNotice
-                action={disconnectButton}
-                icon={<WarningIcon size={14} weight="fill" />}
-                tone="caution"
-              >
-                <span role="status">
-                  {connected
-                    ? alignmentLabel(connected.alignment)
-                    : "Connected opening is unavailable"}
-                </span>
-              </InspectorNotice>
-            )
-          ) : null}
-        </div>
+      {sharedOpening ? (
+        <SharedOpeningSection opening={opening} section={sharedOpening} />
       ) : null}
 
       <div className="inspector-placement">

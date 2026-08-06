@@ -14,7 +14,7 @@ import {
   DEFAULT_WALL_CASE_HEIGHT_MM,
   DEFAULT_WALL_CASE_WIDTH_MM
 } from "../domain/project";
-import type { Project } from "../domain/project";
+import type { Project, WallObject } from "../domain/project";
 import type { ArtworkImportDraft } from "../domain/spreadsheetImport/types";
 import {
   PLACEHOLDER_ARTWORK_HEIGHT_MM,
@@ -93,6 +93,26 @@ describe("app store", () => {
       getBlob: (key) => assetRepository.getBlob(key)
     });
     return zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.byteLength) as ArrayBuffer;
+  }
+
+  // A LEGACY pair, written straight into state — symmetric connectsToObjectId
+  // pointers between two openings whose walls are not a shared boundary. That
+  // is exactly what an old document holds, and since Stage 6 no store action
+  // will build one (resolveSharedOpening refuses any target the analyzer does
+  // not sanction, and a non-boundary wall is never a candidate), fabricating it
+  // is the only way to exercise the legacy carve-out.
+  function linkLegacyPair(aId: string, bId: string): void {
+    const base = store.getState().project!;
+    store.setState({
+      project: {
+        ...base,
+        wallObjects: base.wallObjects.map((object) => {
+          if (object.id === aId) return { ...object, connectsToObjectId: bId };
+          if (object.id === bId) return { ...object, connectsToObjectId: aId };
+          return object;
+        })
+      }
+    });
   }
 
   beforeEach(async () => {
@@ -3875,27 +3895,116 @@ describe("app store", () => {
   });
 
   describe("opening connections", () => {
-    it("connects and disconnects a same-kind pair symmetrically in one undoable edit", async () => {
+    // Two abutting rooms: room-a's east wall and room-b's west wall are one
+    // coincident twin pair, mirroring opening x to (3000 − x). Same shape as the
+    // shared-opening load-repair fixture above. room-c, when present, sits 100 mm
+    // off room-b and backs the SAME wall, which is what makes the boundary
+    // genuinely ambiguous — the only state that offers a bare wall as a target.
+    const A_EAST = "room-a-wall-east";
+    const A_NORTH = "room-a-wall-north";
+    const B_WEST = "room-b-wall-west";
+    const C_WEST = "room-c-wall-west";
+    const DOOR_Y_MM = 1015; // door center = height/2 (2030/2), the placement default.
+
+    type SharedDoorSpec = {
+      id: string;
+      wallId: string;
+      xMm: number;
+      kind?: "door" | "window" | "blocked-zone";
+      widthMm?: number;
+      heightMm?: number;
+      yMm?: number;
+      connectsToObjectId?: string;
+    };
+    type RoomSpec = { roomId: string; offsetXMm: number };
+
+    const TWO_ROOMS: RoomSpec[] = [
+      { roomId: "room-a", offsetXMm: 0 },
+      { roomId: "room-b", offsetXMm: 4000 }
+    ];
+    // room-c overlaps room-b, so both back the whole of room-a's east wall.
+    const AMBIGUOUS_ROOMS: RoomSpec[] = [...TWO_ROOMS, { roomId: "room-c", offsetXMm: 4100 }];
+
+    // Written straight into state rather than through a document-entry path: the
+    // load repair would otherwise link (or realign) the very geometry a test is
+    // posing before the test gets to run its action against it.
+    function abuttingRooms(doors: SharedDoorSpec[], rooms: RoomSpec[] = TWO_ROOMS): void {
+      const base = store.getState().project!;
+      store.setState({
+        project: {
+          ...base,
+          wallObjects: doors.map(
+            (spec): WallObject => ({
+              kind: spec.kind ?? "door",
+              blocksPlacement: true,
+              id: spec.id,
+              wallId: spec.wallId,
+              xMm: spec.xMm,
+              yMm: spec.yMm ?? DOOR_Y_MM,
+              widthMm: spec.widthMm ?? 915,
+              heightMm: spec.heightMm ?? 2030,
+              ...(spec.connectsToObjectId === undefined
+                ? {}
+                : { connectsToObjectId: spec.connectsToObjectId })
+            })
+          ),
+          floorObjects: [],
+          floor: {
+            rooms: rooms.map((room) =>
+              createRectangularRoomPlacement({
+                roomId: room.roomId,
+                name: room.roomId,
+                widthMm: 4000,
+                depthMm: 3000,
+                heightMm: 2500,
+                offsetXMm: room.offsetXMm,
+                offsetYMm: 0
+              })
+            )
+          }
+        }
+      });
+    }
+
+    // A healthy live pair, built the way the app builds one: addOpening on a
+    // shared wall reconciles a twin onto the facing wall in the same commit.
+    async function sharedPairOnBoundary(): Promise<{ primaryId: string; twinId: string }> {
+      abuttingRooms([]);
+      await store.getState().addOpening(A_EAST, "door");
+      const objects = store.getState().project!.wallObjects;
+      return {
+        primaryId: objects.find((object) => object.wallId === A_EAST)!.id,
+        twinId: objects.find((object) => object.wallId === B_WEST)!.id
+      };
+    }
+
+    function partnerOfId(openingId: string): string | undefined {
+      const object = store
+        .getState()
+        .project!.wallObjects.find((candidate) => candidate.id === openingId);
+      return object && (object.kind === "door" || object.kind === "window")
+        ? object.connectsToObjectId
+        : undefined;
+    }
+
+    it("a legacy pair can be split, and undo restores it", async () => {
+      // wall-north and wall-south belong to ONE room, so this pair is not two
+      // faces of a shared boundary and never was. Split is the whole resolution
+      // for it — and the only one, since the resolver refuses to rebuild it.
       await store.getState().addOpening("wall-north", "door");
       const doorA = store.getState().project!.wallObjects[0];
       await store.getState().addOpening("wall-south", "door");
       const doorB = store
         .getState()
         .project!.wallObjects.find((object) => object.id !== doorA.id)!;
+      linkLegacyPair(doorA.id, doorB.id);
       const undoStackBefore = store.getState().undoStack.length;
 
-      await store.getState().connectOpenings(doorA.id, doorB.id);
+      await store.getState().splitSharedOpening(doorA.id);
 
       let project = store.getState().project!;
       expect(store.getState().undoStack).toHaveLength(undoStackBefore + 1);
-      expect(store.getState().undoStack.at(-1)?.label).toBe("Connect doors");
-      const pairedA = project.wallObjects.find((object) => object.id === doorA.id)!;
-      const pairedB = project.wallObjects.find((object) => object.id === doorB.id)!;
-      expect(pairedA.kind === "door" ? pairedA.connectsToObjectId : undefined).toBe(doorB.id);
-      expect(pairedB.kind === "door" ? pairedB.connectsToObjectId : undefined).toBe(doorA.id);
-
-      await store.getState().disconnectOpening(doorA.id);
-      project = store.getState().project!;
+      expect(store.getState().undoStack.at(-1)?.label).toBe("Separate doors");
       expect(
         project.wallObjects.some(
           (object) =>
@@ -3903,11 +4012,14 @@ describe("app store", () => {
             object.connectsToObjectId !== undefined
         )
       ).toBe(false);
+      expect(store.getState().error).toBeNull();
 
       await store.getState().undo();
       project = store.getState().project!;
       const restoredA = project.wallObjects.find((object) => object.id === doorA.id)!;
+      const restoredB = project.wallObjects.find((object) => object.id === doorB.id)!;
       expect(restoredA.kind === "door" ? restoredA.connectsToObjectId : undefined).toBe(doorB.id);
+      expect(restoredB.kind === "door" ? restoredB.connectsToObjectId : undefined).toBe(doorA.id);
     });
 
     // Regression: a paired door re-anchored onto its partner's wall left both
@@ -3921,7 +4033,7 @@ describe("app store", () => {
       const doorB = store
         .getState()
         .project!.wallObjects.find((object) => object.id !== doorA.id)!;
-      await store.getState().connectOpenings(doorA.id, doorB.id);
+      linkLegacyPair(doorA.id, doorB.id);
 
       await store.getState().commitPlanMove(doorA.id, {
         anchor: "wall",
@@ -3951,15 +4063,15 @@ describe("app store", () => {
     });
 
     it("keeps a pair whose walls are not facing twins when only sliding along one wall", async () => {
-      // connectOpenings accepts non-facing walls and the inspector labels the
-      // result "Misaligned". Sliding must never trigger the repair.
+      // A legacy document may hold a pair on non-facing walls. Sliding must
+      // never trigger the repair.
       await store.getState().addOpening("wall-north", "door");
       const doorA = store.getState().project!.wallObjects[0];
       await store.getState().addOpening("wall-south", "door");
       const doorB = store
         .getState()
         .project!.wallObjects.find((object) => object.id !== doorA.id)!;
-      await store.getState().connectOpenings(doorA.id, doorB.id);
+      linkLegacyPair(doorA.id, doorB.id);
 
       await store.getState().commitPlanMove(doorA.id, {
         anchor: "wall",
@@ -3988,7 +4100,7 @@ describe("app store", () => {
       const doorB = store
         .getState()
         .project!.wallObjects.find((object) => object.id !== doorA.id)!;
-      await store.getState().connectOpenings(doorA.id, doorB.id);
+      linkLegacyPair(doorA.id, doorB.id);
       const undoStackBefore = store.getState().undoStack.length;
 
       await store.getState().moveOpening(doorA.id, 2500, doorA.yMm);
@@ -4016,7 +4128,7 @@ describe("app store", () => {
       const doorB = store
         .getState()
         .project!.wallObjects.find((object) => object.id !== doorA.id)!;
-      await store.getState().connectOpenings(doorA.id, doorB.id);
+      linkLegacyPair(doorA.id, doorB.id);
 
       await store.getState().commitPlanMove(doorA.id, {
         anchor: "wall",
@@ -4043,7 +4155,7 @@ describe("app store", () => {
       const doorB = store
         .getState()
         .project!.wallObjects.find((object) => object.id !== doorA.id)!;
-      await store.getState().connectOpenings(doorA.id, doorB.id);
+      linkLegacyPair(doorA.id, doorB.id);
 
       const fit = await store.getState().resizeOpening(doorA.id, 1200, doorA.heightMm);
 
@@ -4096,7 +4208,7 @@ describe("app store", () => {
       const doorB = store
         .getState()
         .project!.wallObjects.find((object) => object.id !== doorA.id)!;
-      await store.getState().connectOpenings(doorA.id, doorB.id);
+      linkLegacyPair(doorA.id, doorB.id);
 
       // Swap the two halves' walls in a single batch — every intermediate
       // per-object view of this move looks same-wall, the finished one does not.
@@ -4115,22 +4227,24 @@ describe("app store", () => {
       expect(store.getState().saveState).toBe("saved");
     });
 
-    it("atomically clears displaced partners when re-pairing", async () => {
-      await store.getState().addOpening("wall-north", "window");
-      await store.getState().addOpening("wall-east", "window");
-      await store.getState().addOpening("wall-south", "window");
-      const [a, b, c] = store.getState().project!.wallObjects;
+    // Replaces "atomically clears displaced partners when re-pairing". Re-pairing
+    // no longer exists: a paired opening is already one physical opening, so the
+    // resolver refuses rather than silently orphaning the half it displaces.
+    it("refuses to re-pair an already-paired opening", async () => {
+      const { primaryId, twinId } = await sharedPairOnBoundary();
+      const before = store.getState().project!.wallObjects;
+      const undoStackBefore = store.getState().undoStack.length;
 
-      await store.getState().connectOpenings(a.id, b.id);
-      await store.getState().connectOpenings(a.id, c.id);
+      await store.getState().resolveSharedOpening(primaryId, { kind: "wall", wallId: A_NORTH });
 
-      const objects = store.getState().project!.wallObjects;
-      const nextA = objects.find((object) => object.id === a.id)!;
-      const nextB = objects.find((object) => object.id === b.id)!;
-      const nextC = objects.find((object) => object.id === c.id)!;
-      expect(nextA.kind === "window" ? nextA.connectsToObjectId : undefined).toBe(c.id);
-      expect(nextB.kind === "window" ? nextB.connectsToObjectId : undefined).toBeUndefined();
-      expect(nextC.kind === "window" ? nextC.connectsToObjectId : undefined).toBe(a.id);
+      // Named specifically: falling through to the candidate guard would refuse
+      // too, but for the wrong reason and with the wrong sentence.
+      expect(store.getState().error).toBe(
+        "This is already one half of a shared opening."
+      );
+      expect(store.getState().undoStack).toHaveLength(undoStackBefore);
+      expect(store.getState().project!.wallObjects).toEqual(before);
+      expect(partnerOfId(twinId)).toBe(primaryId);
     });
 
     it("rejects cross-kind and blocked-zone connections without committing", async () => {
@@ -4140,12 +4254,243 @@ describe("app store", () => {
       const [door, window, blocked] = store.getState().project!.wallObjects;
       const undoStackBefore = store.getState().undoStack.length;
 
-      await store.getState().connectOpenings(door.id, window.id);
-      await store.getState().connectOpenings(door.id, blocked.id);
+      await store
+        .getState()
+        .resolveSharedOpening(door.id, { kind: "opening", openingId: window.id });
+      expect(store.getState().error).toMatch(/same kind/i);
+
+      await store
+        .getState()
+        .resolveSharedOpening(door.id, { kind: "opening", openingId: blocked.id });
 
       expect(store.getState().undoStack).toHaveLength(undoStackBefore);
       expect(store.getState().project!.wallObjects).toEqual([door, window, blocked]);
       expect(store.getState().error).toMatch(/only doors and windows/i);
+    });
+
+    // Everything above is the LEGACY carve-out. These are the real paths: two
+    // rooms that genuinely share a wall, where the store — not the inspector —
+    // decides what the user is allowed to pick.
+    describe("resolutions on a live shared boundary", () => {
+      it("adopts the facing opening the user picked, in one undo step", async () => {
+        abuttingRooms([
+          { id: "door-a", wallId: A_EAST, xMm: 1200 },
+          { id: "door-b", wallId: B_WEST, xMm: 1800 }
+        ]);
+        const undoBefore = store.getState().undoStack.length;
+
+        await store
+          .getState()
+          .resolveSharedOpening("door-a", { kind: "opening", openingId: "door-b" });
+
+        expect(partnerOfId("door-a")).toBe("door-b");
+        expect(partnerOfId("door-b")).toBe("door-a");
+        expect(store.getState().project!.wallObjects).toHaveLength(2);
+        expect(store.getState().undoStack).toHaveLength(undoBefore + 1);
+        expect(store.getState().undoStack.at(-1)?.label).toBe("Resolve shared door");
+      });
+
+      it("creates the twin on a bare wall the user picked, in one undo step", async () => {
+        // The {kind:"wall"} branch, and the only thing that makes an ambiguous
+        // boundary between two EMPTY walls resolvable at all.
+        abuttingRooms([{ id: "door-a", wallId: A_EAST, xMm: 1200 }], AMBIGUOUS_ROOMS);
+        const undoBefore = store.getState().undoStack.length;
+
+        await store.getState().resolveSharedOpening("door-a", { kind: "wall", wallId: C_WEST });
+
+        const objects = store.getState().project!.wallObjects;
+        expect(objects).toHaveLength(2);
+        const twin = objects.find((object) => object.wallId === C_WEST)!;
+        expect(twin.kind).toBe("door");
+        expect(twin.xMm).toBeCloseTo(1800);
+        expect(partnerOfId("door-a")).toBe(twin.id);
+        expect(partnerOfId(twin.id)).toBe("door-a");
+        expect(store.getState().undoStack).toHaveLength(undoBefore + 1);
+        expect(store.getState().undoStack.at(-1)?.label).toBe("Resolve shared door");
+
+        await store.getState().undo();
+        expect(store.getState().project!.wallObjects).toHaveLength(1);
+      });
+
+      it("refuses a target the current project does not offer, committing nothing", async () => {
+        // door-n passes every one of the resolver's own guards — a door, same
+        // kind, a different perimeter wall, unpaired. Only the candidate list
+        // knows it is not a face of this opening.
+        abuttingRooms([
+          { id: "door-a", wallId: A_EAST, xMm: 1200 },
+          { id: "door-b", wallId: B_WEST, xMm: 1800 },
+          { id: "door-n", wallId: A_NORTH, xMm: 1200 }
+        ]);
+        const before = store.getState().project!.wallObjects;
+        const undoBefore = store.getState().undoStack.length;
+
+        await store
+          .getState()
+          .resolveSharedOpening("door-a", { kind: "opening", openingId: "door-n" });
+
+        expect(store.getState().error).toMatch(/no longer an option/i);
+        expect(store.getState().undoStack).toHaveLength(undoBefore);
+        expect(store.getState().project!.wallObjects).toEqual(before);
+        expect(partnerOfId("door-a")).toBeUndefined();
+        expect(partnerOfId("door-n")).toBeUndefined();
+      });
+
+      it("completes a missing twin, in one undo step", async () => {
+        // A legacy one-sided door facing an empty shared wall: the load pass
+        // deliberately declines to create geometry on open, so the repair stands
+        // as an issue until the user asks for it.
+        abuttingRooms([{ id: "door-a", wallId: A_EAST, xMm: 1200 }]);
+        const undoBefore = store.getState().undoStack.length;
+
+        await store.getState().completeSharedOpening("door-a");
+
+        const objects = store.getState().project!.wallObjects;
+        expect(objects).toHaveLength(2);
+        const twin = objects.find((object) => object.wallId === B_WEST)!;
+        expect(twin.kind).toBe("door");
+        expect(twin.xMm).toBeCloseTo(1800);
+        expect(twin.widthMm).toBe(915);
+        expect(partnerOfId("door-a")).toBe(twin.id);
+        expect(partnerOfId(twin.id)).toBe("door-a");
+        expect(store.getState().undoStack).toHaveLength(undoBefore + 1);
+        expect(store.getState().undoStack.at(-1)?.label).toBe("Complete shared door");
+
+        await store.getState().undo();
+        expect(store.getState().project!.wallObjects).toHaveLength(1);
+      });
+
+      it("completes nothing, and pushes no undo entry, when no twin is pending", async () => {
+        // An exterior door on a wall no room backs. There is no repair to apply,
+        // and an empty undo step would be worse than doing nothing.
+        abuttingRooms([{ id: "door-n", wallId: A_NORTH, xMm: 1200 }]);
+        const before = store.getState().project!.wallObjects;
+        const undoBefore = store.getState().undoStack.length;
+
+        await store.getState().completeSharedOpening("door-n");
+
+        expect(store.getState().undoStack).toHaveLength(undoBefore);
+        expect(store.getState().project!.wallObjects).toEqual(before);
+      });
+
+      it("realigns the partner onto the selected half — position, size and height", async () => {
+        // paired-geometry-mismatch has no geometric answer to which half is
+        // right, so the analyzer picks none. The user's selection supplies it,
+        // and that means width/height/y travel with x.
+        abuttingRooms([
+          {
+            id: "door-a",
+            wallId: A_EAST,
+            xMm: 1200,
+            widthMm: 1000,
+            heightMm: 2100,
+            yMm: 1050,
+            connectsToObjectId: "door-b"
+          },
+          {
+            id: "door-b",
+            wallId: B_WEST,
+            xMm: 1000,
+            widthMm: 800,
+            heightMm: 2000,
+            yMm: 1000,
+            connectsToObjectId: "door-a"
+          }
+        ]);
+        const undoBefore = store.getState().undoStack.length;
+
+        await store.getState().realignSharedOpening("door-a");
+
+        const objects = store.getState().project!.wallObjects;
+        const primary = objects.find((object) => object.id === "door-a")!;
+        const partner = objects.find((object) => object.id === "door-b")!;
+        expect(partner.xMm).toBeCloseTo(1800);
+        expect(partner.widthMm).toBe(1000);
+        expect(partner.heightMm).toBe(2100);
+        expect(partner.yMm).toBe(1050);
+        // The authoritative half is untouched.
+        expect(primary.xMm).toBe(1200);
+        expect(primary.widthMm).toBe(1000);
+        expect(store.getState().undoStack).toHaveLength(undoBefore + 1);
+        expect(store.getState().undoStack.at(-1)?.label).toBe("Realign shared door");
+        expect(evaluateOpeningPair(store.getState().project!, "door-a", "door-b").status).toBe(
+          "aligned"
+        );
+      });
+
+      it("refuses a realign whose partner slot is blocked, and names the obstruction", async () => {
+        abuttingRooms([
+          { id: "door-a", wallId: A_EAST, xMm: 1200, connectsToObjectId: "door-b" },
+          { id: "door-b", wallId: B_WEST, xMm: 1000, connectsToObjectId: "door-a" },
+          { id: "zone-b", wallId: B_WEST, xMm: 1800, kind: "blocked-zone", widthMm: 400 }
+        ]);
+        const before = store.getState().project!.wallObjects;
+        const undoBefore = store.getState().undoStack.length;
+
+        await store.getState().realignSharedOpening("door-a");
+
+        expect(store.getState().error).toBe(
+          "The other side of this opening has nowhere to go — a blocked zone on the facing wall is already there."
+        );
+        // Nothing moved, so there is nothing to undo.
+        expect(store.getState().undoStack).toHaveLength(undoBefore);
+        expect(store.getState().project!.wallObjects).toEqual(before);
+      });
+
+      it("refuses to split two faces of one opening", async () => {
+        const { primaryId, twinId } = await sharedPairOnBoundary();
+        const before = store.getState().project!.wallObjects;
+        const undoBefore = store.getState().undoStack.length;
+
+        await store.getState().splitSharedOpening(primaryId);
+
+        expect(store.getState().error).toBe(
+          "These are two faces of one opening. Move the rooms apart, or delete it."
+        );
+        expect(store.getState().undoStack).toHaveLength(undoBefore);
+        expect(store.getState().project!.wallObjects).toEqual(before);
+        expect(partnerOfId(primaryId)).toBe(twinId);
+      });
+
+      it("keeps this opening only, deleting the partner in one undo step", async () => {
+        // boundary-lost: the pair survives the rooms moving apart (decision 3),
+        // and the user says which half was theirs.
+        abuttingRooms(
+          [
+            { id: "door-a", wallId: A_EAST, xMm: 1200, connectsToObjectId: "door-b" },
+            { id: "door-b", wallId: B_WEST, xMm: 1800, connectsToObjectId: "door-a" }
+          ],
+          [
+            { roomId: "room-a", offsetXMm: 0 },
+            { roomId: "room-b", offsetXMm: 5000 }
+          ]
+        );
+        const undoBefore = store.getState().undoStack.length;
+
+        await store.getState().keepThisOpeningOnly("door-a");
+
+        const objects = store.getState().project!.wallObjects;
+        expect(objects.map((object) => object.id)).toEqual(["door-a"]);
+        expect(partnerOfId("door-a")).toBeUndefined();
+        expect(store.getState().undoStack).toHaveLength(undoBefore + 1);
+        expect(store.getState().undoStack.at(-1)?.label).toBe("Keep this door only");
+
+        await store.getState().undo();
+        expect(store.getState().project!.wallObjects).toHaveLength(2);
+        expect(partnerOfId("door-a")).toBe("door-b");
+        expect(partnerOfId("door-b")).toBe("door-a");
+      });
+
+      it("refuses to keep one half while the walls still face each other", async () => {
+        const { primaryId, twinId } = await sharedPairOnBoundary();
+        const before = store.getState().project!.wallObjects;
+        const undoBefore = store.getState().undoStack.length;
+
+        await store.getState().keepThisOpeningOnly(primaryId);
+
+        expect(store.getState().undoStack).toHaveLength(undoBefore);
+        expect(store.getState().project!.wallObjects).toEqual(before);
+        expect(partnerOfId(primaryId)).toBe(twinId);
+      });
     });
   });
 
@@ -4170,7 +4515,7 @@ describe("app store", () => {
         const openingB = store
           .getState()
           .project!.wallObjects.find((wallObject) => wallObject.id !== openingA.id)!;
-        await store.getState().connectOpenings(openingA.id, openingB.id);
+        linkLegacyPair(openingA.id, openingB.id);
         const undoStackBefore = store.getState().undoStack.length;
 
         await store.getState().removePlacement(openingB.id);
@@ -6441,7 +6786,7 @@ describe("app store", () => {
           .project!.wallObjects.find(
             (wallObject) => wallObject.kind === "window" && wallObject.id !== windowA.id
           )!;
-        await store.getState().connectOpenings(windowA.id, windowB.id);
+        linkLegacyPair(windowA.id, windowB.id);
 
         store.getState().setObjectSelection([artwork.placementId, windowB.id]);
         await store.getState().removeSelectedPlacements();

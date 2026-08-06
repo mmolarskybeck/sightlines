@@ -54,15 +54,63 @@ export function groupPlacementWarnings(
 // different openings, not the same standing problem twice. Grouping them by
 // text would silently hide one of two real, distinct structural problems —
 // exactly the kind of loss this feature exists to prevent.
+//
+// Instead, every document-issue row is its own <button> that selects its
+// opening (onSelectIssue). Two rows can legitimately carry the same visible
+// subject and message — that is the whole reason grouping is wrong for this
+// list — so when that happens their *accessible* name still has to differ,
+// or a screen-reader user has no way to tell two buttons apart. The ordinal
+// suffix below is computed from documentIssues' own order (which comes from
+// selectSharedOpeningConflicts' deterministic id sort), never from render
+// timing or array identity, and it is never shown to sighted users — a row
+// with a one-of-a-kind subject+message pair gets no ordinal at all.
+
+type DocumentIssueOrdinal = { index: number; total: number };
+
+function computeDocumentIssueOrdinals(
+  issues: LabeledDocumentIssue[]
+): Map<string, DocumentIssueOrdinal | null> {
+  const totals = new Map<string, number>();
+  for (const issue of issues) {
+    const key = `${issue.subject} ${issue.message}`;
+    totals.set(key, (totals.get(key) ?? 0) + 1);
+  }
+
+  const seen = new Map<string, number>();
+  const ordinals = new Map<string, DocumentIssueOrdinal | null>();
+  for (const issue of issues) {
+    const key = `${issue.subject} ${issue.message}`;
+    const total = totals.get(key) ?? 1;
+    if (total <= 1) {
+      ordinals.set(issue.id, null);
+      continue;
+    }
+    const index = (seen.get(key) ?? 0) + 1;
+    seen.set(key, index);
+    ordinals.set(issue.id, { index, total });
+  }
+  return ordinals;
+}
+
+function documentIssueAccessibleName(
+  visibleSubject: string,
+  message: string,
+  ordinal: DocumentIssueOrdinal | null
+): string {
+  const base = `${visibleSubject}: ${message}`;
+  return ordinal ? `${base} (${ordinal.index} of ${ordinal.total})` : base;
+}
 
 export function PlacementWarnings({
   warnings,
   documentIssues = [],
-  selectedWallObjectId = null
+  selectedWallObjectId = null,
+  onSelectIssue
 }: {
   warnings: LabeledPlacementWarning[];
   documentIssues?: LabeledDocumentIssue[];
   selectedWallObjectId?: string | null;
+  onSelectIssue?: (openingId: string) => void;
 }) {
   const hasWarnings = warnings.length > 0;
   const hasDocumentIssues = documentIssues.length > 0;
@@ -81,6 +129,7 @@ export function PlacementWarnings({
 
   const documentIssueLabel = `${documentIssues.length} issue${documentIssues.length === 1 ? "" : "s"}`;
   const singleDocumentIssue = documentIssues.length === 1 ? documentIssues[0] : null;
+  const documentIssueOrdinals = computeDocumentIssueOrdinals(documentIssues);
 
   // One shared live-region sentence, not one per group: a screen reader
   // user should hear a single coherent status update, not two competing
@@ -165,24 +214,38 @@ export function PlacementWarnings({
           aria-labelledby={singleDocumentIssue ? undefined : "document-issue-title"}
         >
           {singleDocumentIssue ? (
-            <div className="warning-panel-single-row">
-              <WarningIcon
-                aria-hidden="true"
-                weight="fill"
-                className="warning-panel-icon"
-                size={18}
-              />
-              <div className="warning-panel-single-content">
-                <div className="warning-panel-subject">
-                  <span>
-                    {singleDocumentIssue.openingId === selectedWallObjectId
-                      ? "Shared opening issue"
-                      : singleDocumentIssue.subject}
-                  </span>
-                </div>
-                <p>{singleDocumentIssue.message}</p>
-              </div>
-            </div>
+            (() => {
+              const isSelected = singleDocumentIssue.openingId === selectedWallObjectId;
+              const visibleSubject = isSelected ? "Shared opening issue" : singleDocumentIssue.subject;
+              return (
+                <button
+                  type="button"
+                  className={`warning-panel-single-row warning-panel-issue-row${
+                    isSelected ? " selected" : ""
+                  }`}
+                  aria-current={isSelected ? "true" : undefined}
+                  aria-label={documentIssueAccessibleName(
+                    visibleSubject,
+                    singleDocumentIssue.message,
+                    null
+                  )}
+                  onClick={() => onSelectIssue?.(singleDocumentIssue.openingId)}
+                >
+                  <WarningIcon
+                    aria-hidden="true"
+                    weight="fill"
+                    className="warning-panel-icon"
+                    size={18}
+                  />
+                  <div className="warning-panel-single-content">
+                    <div className="warning-panel-subject">
+                      <span>{visibleSubject}</span>
+                    </div>
+                    <p>{singleDocumentIssue.message}</p>
+                  </div>
+                </button>
+              );
+            })()
           ) : (
             <>
               <div className="warning-panel-header">
@@ -201,14 +264,28 @@ export function PlacementWarnings({
               </div>
 
               <ul>
-                {documentIssues.map((issue) => (
-                  <li key={issue.id}>
-                    <div className="warning-panel-subject">
-                      <span>{issue.subject}</span>
-                    </div>
-                    <p>{issue.message}</p>
-                  </li>
-                ))}
+                {documentIssues.map((issue) => {
+                  const isSelected = issue.openingId === selectedWallObjectId;
+                  const ordinal = documentIssueOrdinals.get(issue.id) ?? null;
+                  return (
+                    <li key={issue.id}>
+                      <button
+                        type="button"
+                        className={`warning-panel-issue-row warning-panel-issue-list-row${
+                          isSelected ? " selected" : ""
+                        }`}
+                        aria-current={isSelected ? "true" : undefined}
+                        aria-label={documentIssueAccessibleName(issue.subject, issue.message, ordinal)}
+                        onClick={() => onSelectIssue?.(issue.openingId)}
+                      >
+                        <div className="warning-panel-subject">
+                          <span>{issue.subject}</span>
+                        </div>
+                        <p>{issue.message}</p>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </>
           )}

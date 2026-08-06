@@ -18,7 +18,10 @@ import {
 } from "../domain/geometry/walls";
 import { getRoomPlaceableWalls } from "../domain/geometry/placeableWalls";
 import type { WallSwitcherEntry } from "./components/elevation/WallSwitcher";
-import { evaluateOpeningPair } from "../domain/geometry/openingConnections";
+import {
+  getSharedOpeningStatus,
+  sharedOpeningResolutions
+} from "../domain/geometry/sharedOpeningStatus";
 import { getOpeningKindLabel } from "../domain/placement/createOpening";
 import { withArtworkFootprintFromMap } from "../domain/framing";
 import type {
@@ -53,7 +56,12 @@ import { ArtworkInspector } from "./components/inspectors/ArtworkInspector";
 import { ArtworkLibraryView } from "./components/library/ArtworkLibrary";
 import { PanelResizeHandle } from "./components/shared/PanelResizeHandle";
 import { PlacementWarnings } from "./components/placement/PlacementWarnings";
-import { describeSharedOpeningConflict } from "./components/placement/sharedOpeningIssueCopy";
+import {
+  describeSharedConnection,
+  describeSharedOpeningConflict,
+  describeSharedOpeningDrift,
+  describeSharedOpeningTarget
+} from "./components/placement/sharedOpeningIssueCopy";
 import { selectSharedOpeningConflicts } from "../domain/placement/sharedOpeningIssues";
 import { ChecklistPanel } from "./components/panels/ChecklistPanel";
 import { ElevationEmptyState } from "./components/elevation/ElevationEmptyState";
@@ -62,7 +70,7 @@ import { FloorObjectInspector, FloorPlacementFields } from "./components/inspect
 import { FreestandingWallInspector } from "./components/inspectors/FreestandingWallInspector";
 import {
   OpeningInspector,
-  type OpeningConnectionCandidate
+  type OpeningSharedSection
 } from "./components/inspectors/OpeningInspector";
 import { PlanEmptyState } from "./components/plan/PlanEmptyState";
 import { PlanView } from "./components/plan/PlanView";
@@ -296,8 +304,13 @@ export function App() {
   const moveOpening = useAppStore((state) => state.moveOpening);
   const resizeOpening = useAppStore((state) => state.resizeOpening);
   const fitOpeningToAvailableSpan = useAppStore((state) => state.fitOpeningToAvailableSpan);
-  const connectOpenings = useAppStore((state) => state.connectOpenings);
-  const disconnectOpening = useAppStore((state) => state.disconnectOpening);
+  // The five shared-opening resolutions. Each one re-derives its own guard from
+  // the current project inside the store — the inspector only ever asks.
+  const resolveSharedOpening = useAppStore((state) => state.resolveSharedOpening);
+  const completeSharedOpening = useAppStore((state) => state.completeSharedOpening);
+  const realignSharedOpening = useAppStore((state) => state.realignSharedOpening);
+  const splitSharedOpening = useAppStore((state) => state.splitSharedOpening);
+  const keepThisOpeningOnly = useAppStore((state) => state.keepThisOpeningOnly);
   const renameWallText = useAppStore((state) => state.renameWallText);
   const placeOpeningOnElevation = useAppStore((state) => state.placeOpeningOnElevation);
   const commitPlanMove = useAppStore((state) => state.commitPlanMove);
@@ -824,6 +837,62 @@ export function App() {
     [project]
   );
 
+  // Everything the opening inspector needs to say about the wall this opening
+  // shares — assembled here so the component stays a renderer and the words
+  // stay in the app's copy layer.
+  //
+  // Memoized for the same reason sharedOpeningIssues above is, and declared in
+  // the same place and for the same reason: a hook below the `if (!project)`
+  // return runs only on renders that have a document, which changes the hook
+  // count between renders and tears the component down. The null guards live
+  // inside the memo, not around it.
+  const sharedOpeningSection: OpeningSharedSection | null = useMemo(() => {
+    if (!project || !selectedOpeningId) return null;
+    const opening = project.wallObjects.find((object) => object.id === selectedOpeningId);
+    // Blocked zones never pair, so they get no section at all.
+    if (!opening || (opening.kind !== "door" && opening.kind !== "window")) return null;
+
+    const status = getSharedOpeningStatus(project, opening.id);
+    const message =
+      status.kind === "exposed"
+        ? null
+        : status.kind === "shared"
+          ? describeSharedConnection(project, opening.id, status.partnerId)
+          : status.kind === "drifted"
+            ? describeSharedOpeningDrift(project, opening.id)
+            : describeSharedOpeningConflict(status.conflict, project).message;
+
+    return {
+      status,
+      resolutions: sharedOpeningResolutions(status),
+      message,
+      candidates:
+        status.kind === "conflict"
+          ? status.candidates.map((target) => ({
+              key:
+                target.kind === "opening"
+                  ? `opening:${target.openingId}`
+                  : `wall:${target.wallId}`,
+              label: describeSharedOpeningTarget(project, target),
+              target
+            }))
+          : [],
+      onResolve: (target) => void resolveSharedOpening(opening.id, target),
+      onComplete: () => void completeSharedOpening(opening.id),
+      onRealign: () => void realignSharedOpening(opening.id),
+      onSplit: () => void splitSharedOpening(opening.id),
+      onKeepThisOnly: () => void keepThisOpeningOnly(opening.id)
+    };
+  }, [
+    project,
+    selectedOpeningId,
+    resolveSharedOpening,
+    completeSharedOpening,
+    realignSharedOpening,
+    splitSharedOpening,
+    keepThisOpeningOnly
+  ]);
+
   if (!project) {
     return (
       <main className="loading-shell">
@@ -1011,39 +1080,6 @@ export function App() {
           selectedWallTextWall.lengthMm
         )
       : { xMm: 0, boundaryKind: "wall" as const };
-  const openingConnectionCandidates: OpeningConnectionCandidate[] =
-    selectedOpening && (selectedOpening.kind === "door" || selectedOpening.kind === "window")
-      ? project.wallObjects
-          .filter(
-            (candidate) =>
-              candidate.id !== selectedOpening.id &&
-              candidate.kind === selectedOpening.kind &&
-              candidate.wallId !== selectedOpening.wallId &&
-              parseFaceWallId(candidate.wallId) === null
-          )
-          .map((candidate) => {
-            const alignment = evaluateOpeningPair(project, selectedOpening.id, candidate.id);
-            const owner = project.floor.rooms.find((placement) =>
-              placement.room.walls.some((wall) => wall.id === candidate.wallId)
-            );
-            const wallName = owner?.room.walls.find((wall) => wall.id === candidate.wallId)?.name;
-            return {
-              id: candidate.id,
-              label: owner
-                ? `${owner.room.name}, ${wallName ?? "Wall"}`
-                : wallName ?? "Unknown wall",
-              alignment
-            };
-          })
-          // Keep an invalid existing partner visible so it can be disconnected.
-          .filter(
-            (candidate) =>
-              candidate.id === selectedOpening.connectsToObjectId ||
-              candidate.alignment.status === "aligned" ||
-              (candidate.alignment.reason !== "angle" && candidate.alignment.reason !== "gap")
-          )
-          .sort((a, b) => a.label.localeCompare(b.label))
-      : [];
   // Opening selection also represents floor blocked zones; ids are globally unique.
   const selectedFloorBlockedZone: BlockedZoneFloorObject | null =
     selectedOpeningId && !selectedOpening
@@ -2070,6 +2106,10 @@ export function App() {
             <PlacementWarnings
               warnings={labeledPlacementWarnings}
               documentIssues={sharedOpeningIssues}
+              // Each row selects ITS OWN opening. The rail's "go to first
+              // issue" affordance still exists separately; this is what makes
+              // the second of two identically-worded rows reachable at all.
+              onSelectIssue={selectOpening}
               selectedWallObjectId={
                 placedWallObject?.id ??
                 selectedOpening?.id ??
@@ -2307,9 +2347,7 @@ export function App() {
               opening={selectedOpening}
               unit={project.unit}
               wallLengthMm={selectedOpeningWall?.lengthMm ?? 0}
-              connectionCandidates={openingConnectionCandidates}
-              onConnect={(partnerId) => void connectOpenings(selectedOpening.id, partnerId)}
-              onDisconnect={() => void disconnectOpening(selectedOpening.id)}
+              sharedOpening={sharedOpeningSection}
               // Awaited, not void-ed: the resolved OpeningFit is how the
               // inspector learns that a request was slid or trimmed to fit.
               onCommitPosition={(xMm, yMm) =>

@@ -1,6 +1,6 @@
 # Sightlines Status
 
-Last refreshed: 2026-07-19 (benchmark run + onboarding/feedback plan + cloud backup shipped)
+Last refreshed: 2026-08-06 (shared-opening invariant + resolver shipped)
 
 This is the single living status doc: current state, what shipped recently, and what comes next. The full product/architecture plan and roadmap live in `docs/plan.md`; small scraps live in `docs/quick-todos.md`; the chronological build log through 2026-07-10 is frozen at `docs/archive/progress.md`.
 
@@ -8,7 +8,7 @@ This is the single living status doc: current state, what shipped recently, and 
 
 MVP 1A and 1B are effectively complete, and MVP 1C has shipped its 2D planning behaviors **and the simple derived 3D preview**. The 3D mode shipped per `docs/archive/3d-preview-spec.md`: a read-only projection (pure `scene3d.ts` derivation → R3F dollhouse room shell, textured artwork planes, door/window cutouts, floor boxes, blocked zones, partition slabs, shared uncertainty language), click-to-select synced with the shared store, and animated Overview / Eye-level camera presets. No 3D editing — the inspector remains the numeric editing surface in 3D mode.
 
-Room-shape slices 1-5 have shipped: the fast rectangle path remains, polygon room drawing/reshape is live, wall split/delete and wall-slide reshaping are in place, and free-standing partition walls are schema v3 room-owned objects with derived double-sided faces. Doors and windows can now be paired through reciprocal opening IDs; the inspector and Plan share one advisory angle/gap/overlap/height evaluation, aligned pairs create a true shared clear opening in 3D, and every unpaired or misaligned opening gets a recessed cap so coplanar backface culling cannot create a false portal.
+Room-shape work has shipped: the fast rectangle path remains, polygon room drawing/reshape is live, wall split/delete and wall-slide reshaping are in place, and free-standing partition walls are schema v3 room-owned objects with derived double-sided faces. A door or window on a boundary shared by two rooms is now one physical opening with two synchronized faces, not a connection the curator manages. Scoped geometry edits automatically create, adopt, or realign the second face; an edit that would split a live shared opening is refused atomically. Ambiguous, obstructed, legacy one-sided, and boundary-lost cases persist as named issues with guarded inspector resolutions. Healthy pairs get one quiet `Connects Room A ↔ Room B` line—no connection dropdown or Disconnect action—and produce a true shared clear opening in 3D; unresolved openings remain honestly capped.
 
 The import surface is also beyond one-off image upload now: the Import wizard supports images-only, spreadsheet metadata, and combined image + metadata intake with map/review steps and image matching. Static public info/trust pages now live under `public/` (`about.html`, `privacy.html`, `security.html`, `it.html`, plus crawler/security metadata) and are linked from the left-rail Help surface.
 
@@ -34,11 +34,11 @@ crash-report preference is present.
 
 Post-irregular-rooms refactor: 20 commits, all phases green (1065 tests, up from 957). Highlights:
 
-- **New domain modules**: `vector.ts`, `wallLoop.ts`, `placeableWalls.ts` (the doorway feature's wall-enumeration seam), `roomCascade.ts` (single room-deletion cascade), `openingPairs.ts` (where doorway-pairing writers land), `planPreview.ts` (drag-preview composition out of PlanView), `signedAreaMm2` into `polygon.ts`.
+- **New domain modules**: `vector.ts`, `wallLoop.ts`, `placeableWalls.ts` (the doorway feature's wall-enumeration seam), `roomCascade.ts` (single room-deletion cascade), `openingPairs.ts` (structural validation and reciprocal-pair normalization), `planPreview.ts` (drag-preview composition out of PlanView), `signedAreaMm2` into `polygon.ts`.
 - **Bug fixed**: wall-slide chips pointed the wrong way on concave rooms (centroid heuristic); one canonical `outwardWallNormal` now.
-- **Landmines defused**: `removePlacement`/`removeSelectedPlacements` clear opening partner refs, and the shipped connection writers preserve the same reciprocal invariant during connect, re-pair, disconnect, and undo.
+- **Landmines defused**: `removePlacement`/`removeSelectedPlacements` clear opening partner refs, while topology-scoped reconciliation and guarded resolution actions preserve the reciprocal invariant through creation, geometry edits, splits, deletion, and undo.
 - **View layer**: all ten drag machines in PlanView/ElevationView share `useDragGesture`; PlanView −450 lines net.
-- **App/store**: `usePlanMode` union (doorway pairing adds a `pairOpenings` variant there, one place), `commitWallObjectEdit`/`runPartitionEdit` pipelines, `commitPlanMove` split into four named cases.
+- **App/store**: `usePlanMode` keeps the mutually exclusive plan tools in one union; `commitWallObjectEdit`/`runPartitionEdit` are the scoped reconciliation seams, and `commitPlanMove` is split into four named cases.
 - **3D loading**: Three.js and the React Three Fiber stack are isolated behind the lazy `ThreeDView` route. The eager vendor chunk is 148.87 kB gzip; the 223.14 kB gzip 3D chunk is fetched only when 3D opens, with a build-time eager-graph assertion protecting the boundary.
 - **Deliberately deferred**: rectangle↔polygon edit-pipeline merge — ~~an explicit decision gate behind the "rectangle resize characterization (pipeline-merge gate)" suites in `editRoom.test.ts`/`store.test.ts`~~ **shipped 2026-07-12**: `resizeWallPreservingAngles` now delegates into `moveRoomWall` (anchor "start" slides the next wall, "end" slides the previous — the end-anchor placement-offset compensation is gone; offsets are never touched). The gate suites passed unmodified and now pin the wrapper's contract. Still deferred to the doorway slice: PlanView single-`mode` prop, room-qualified hover ids, and schema v4 tightening (`MIN_ENDPOINT_SPACING_MM`, `wallId` cross-check — bundle with the pairing migration).
 

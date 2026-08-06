@@ -10,9 +10,15 @@ import {
 } from "../../../domain/placement/createOpening";
 import type {
   SharedOpeningConflict,
-  SharedOpeningConflictReason
+  SharedOpeningConflictReason,
+  SharedOpeningTarget
 } from "../../../domain/placement/sharedOpeningAnalysis";
-import { describeSharedOpeningConflict } from "./sharedOpeningIssueCopy";
+import {
+  describeSharedConnection,
+  describeSharedOpeningConflict,
+  describeSharedOpeningDrift,
+  describeSharedOpeningTarget
+} from "./sharedOpeningIssueCopy";
 import { selectSharedOpeningConflicts } from "../../../domain/placement/sharedOpeningIssues";
 
 // Same fixture shape as sharedOpeningIssues.test.ts (room-a's east wall and
@@ -328,5 +334,322 @@ describe("describeSharedOpeningConflict", () => {
       expect(display.message).toContain("This opening");
       expect(display.message).not.toContain(conflict.openingId);
     });
+  });
+});
+
+// The rest of the Stage 7 copy. Same fixtures, because the inspector and the
+// issues rail must name the same wall in the same room the same way.
+
+// A healthy shared pair: door-a in Gallery 1 joined to door-b in Gallery 2.
+const PAIRED = FIXTURES["paired-overhang"];
+
+// Every room stripped of its name — the shape a project has while a curator is
+// still laying it out.
+function unnamedRooms(fixture: Project): Project {
+  return {
+    ...fixture,
+    floor: {
+      rooms: fixture.floor.rooms.map((placement) => ({
+        ...placement,
+        room: { ...placement.room, name: "  " }
+      }))
+    }
+  };
+}
+
+// Every room gone, the wall objects left behind: the shape a stale reference
+// held across a room deletion would have.
+function withoutRooms(fixture: Project): Project {
+  return { ...fixture, floor: { rooms: [] } };
+}
+
+function idsIn(fixture: Project): string[] {
+  return [
+    fixture.id,
+    ...fixture.floor.rooms.flatMap((placement) => [
+      placement.roomId,
+      placement.room.id,
+      ...placement.room.walls.map((wall) => wall.id),
+      ...placement.room.vertices.map((vertex) => vertex.id)
+    ]),
+    ...fixture.wallObjects.map((object) => object.id)
+  ];
+}
+
+describe("describeSharedConnection", () => {
+  it("names both rooms one physical opening joins", () => {
+    expect(describeSharedConnection(PAIRED, "door-a", "door-b")).toBe(
+      "Connects Gallery 1 ↔ Gallery 2"
+    );
+  });
+
+  it("reads from the selected half, so the room the user is in leads", () => {
+    expect(describeSharedConnection(PAIRED, "door-b", "door-a")).toBe(
+      "Connects Gallery 2 ↔ Gallery 1"
+    );
+  });
+
+  it("is a label, not a sentence, so it carries no terminal period", () => {
+    expect(describeSharedConnection(PAIRED, "door-a", "door-b")).not.toMatch(/[.!?]$/);
+  });
+
+  it("names the far room alone when the near one has no name", () => {
+    const nearRoomGone: Project = {
+      ...PAIRED,
+      floor: {
+        rooms: PAIRED.floor.rooms.filter((placement) => placement.roomId !== "room-a")
+      }
+    };
+
+    expect(describeSharedConnection(nearRoomGone, "door-a", "door-b")).toBe(
+      "Connects to Gallery 2"
+    );
+  });
+
+  it("degrades to the plainest true statement when the far room has no name", () => {
+    expect(describeSharedConnection(unnamedRooms(PAIRED), "door-a", "door-b")).toBe(
+      "Connects both sides of this wall"
+    );
+    expect(describeSharedConnection(withoutRooms(PAIRED), "door-a", "door-b")).toBe(
+      "Connects both sides of this wall"
+    );
+  });
+
+  it("degrades when the partner cannot be found at all", () => {
+    expect(describeSharedConnection(PAIRED, "door-a", "door-gone")).toBe(
+      "Connects both sides of this wall"
+    );
+  });
+
+  // "Connects Gallery 1 ↔ Gallery 1" tells a curator nothing, whether that is
+  // one room facing itself or two rooms they gave the same name.
+  it("degrades when both sides carry the same room name", () => {
+    const sameName: Project = {
+      ...PAIRED,
+      floor: {
+        rooms: PAIRED.floor.rooms.map((placement) => ({
+          ...placement,
+          room: { ...placement.room, name: "Gallery 1" }
+        }))
+      }
+    };
+
+    expect(describeSharedConnection(sameName, "door-a", "door-b")).toBe(
+      "Connects both sides of this wall"
+    );
+  });
+
+  it("never prints an id or the word undefined", () => {
+    for (const fixture of [PAIRED, unnamedRooms(PAIRED), withoutRooms(PAIRED)]) {
+      for (const partnerId of ["door-b", "door-gone"]) {
+        const line = describeSharedConnection(fixture, "door-a", partnerId);
+
+        expect(line).not.toMatch(/undefined|null/i);
+        for (const id of idsIn(fixture)) expect(line).not.toContain(id);
+      }
+    }
+  });
+});
+
+describe("describeSharedOpeningDrift", () => {
+  // Not a conflict — the analyzer expresses drift as a `realign` action — so
+  // this sentence exists nowhere else.
+  const DRIFTED = FIXTURES["paired-geometry-mismatch"];
+
+  it("says what drift means for the plan, in both rooms' names", () => {
+    expect(describeSharedOpeningDrift(DRIFTED, "door-a")).toBe(
+      "This door sits at a different point on the wall in Gallery 1 than in Gallery 2, so its two sides no longer line up."
+    );
+  });
+
+  it("reads from the selected half", () => {
+    expect(describeSharedOpeningDrift(DRIFTED, "door-b")).toBe(
+      "This door sits at a different point on the wall in Gallery 2 than in Gallery 1, so its two sides no longer line up."
+    );
+  });
+
+  it("uses the object's own noun, so a window never reads as a door", () => {
+    const windows = project(
+      [galleryOne(), galleryTwo()],
+      [
+        {
+          id: "window-a",
+          kind: "window",
+          blocksPlacement: true,
+          wallId: A_EAST,
+          xMm: 1200,
+          yMm: 1450,
+          widthMm: 1200,
+          heightMm: 1200,
+          connectsToObjectId: "window-b"
+        },
+        {
+          id: "window-b",
+          kind: "window",
+          blocksPlacement: true,
+          wallId: B_WEST,
+          xMm: 1500,
+          yMm: 1450,
+          widthMm: 1200,
+          heightMm: 1200,
+          connectsToObjectId: "window-a"
+        }
+      ]
+    );
+
+    const message = describeSharedOpeningDrift(windows, "window-a");
+
+    expect(message).toContain("This window");
+    expect(message).not.toContain("door");
+  });
+
+  it("does not say wall twice when neither room can be named", () => {
+    const message = describeSharedOpeningDrift(withoutRooms(DRIFTED), "door-a");
+
+    expect(message).toBe(
+      "This door sits at a different point on each side of the wall, so its two sides no longer line up."
+    );
+  });
+
+  it("still reads when the opening has no partner recorded", () => {
+    const message = describeSharedOpeningDrift(FIXTURES["missing-twin"], "door-a");
+
+    expect(message).toBe(
+      "This door sits at a different point on each side of the wall, so its two sides no longer line up."
+    );
+  });
+
+  it("stays one sentence and never prints an id", () => {
+    for (const fixture of [DRIFTED, unnamedRooms(DRIFTED), withoutRooms(DRIFTED)]) {
+      for (const openingId of ["door-a", "door-gone"]) {
+        const message = describeSharedOpeningDrift(fixture, openingId);
+
+        expect(message).toMatch(/^[^.!?]+\.$/);
+        expect(message).not.toMatch(/undefined|null/i);
+        for (const id of idsIn(fixture)) expect(message).not.toContain(id);
+      }
+    }
+  });
+});
+
+describe("describeSharedOpeningTarget", () => {
+  it("names where an existing opening is", () => {
+    expect(describeSharedOpeningTarget(PAIRED, { kind: "opening", openingId: "door-b" })).toBe(
+      "Door on West wall in Gallery 2"
+    );
+  });
+
+  it("uses the target's own noun", () => {
+    const windows = project(
+      [galleryOne(), galleryTwo()],
+      [
+        {
+          id: "window-b",
+          kind: "window",
+          blocksPlacement: true,
+          wallId: B_WEST,
+          xMm: 1500,
+          yMm: 1450,
+          widthMm: 1200,
+          heightMm: 1200
+        }
+      ]
+    );
+
+    expect(describeSharedOpeningTarget(windows, { kind: "opening", openingId: "window-b" })).toBe(
+      "Window on West wall in Gallery 2"
+    );
+  });
+
+  // A bare wall has nothing on it: picking it CREATES the other face, so the
+  // row must not read as an object that already exists.
+  it("reads a bare wall as creating the other side, not as an existing object", () => {
+    const label = describeSharedOpeningTarget(PAIRED, { kind: "wall", wallId: B_WEST });
+
+    expect(label).toBe("Add the other side on West wall in Gallery 2");
+    expect(label).not.toMatch(/^Door\b|^Window\b|^Opening\b/);
+  });
+
+  it("keeps the two kinds of row visibly different", () => {
+    const opening = describeSharedOpeningTarget(PAIRED, {
+      kind: "opening",
+      openingId: "door-b"
+    });
+    const wall = describeSharedOpeningTarget(PAIRED, { kind: "wall", wallId: B_WEST });
+
+    expect(wall.startsWith("Add ")).toBe(true);
+    expect(opening.startsWith("Add ")).toBe(false);
+    expect(opening).not.toBe(wall);
+  });
+
+  it("falls back to the room when the wall has no name", () => {
+    const unnamedWalls: Project = {
+      ...PAIRED,
+      floor: {
+        rooms: PAIRED.floor.rooms.map((placement) => ({
+          ...placement,
+          room: {
+            ...placement.room,
+            walls: placement.room.walls.map((wall) => ({ ...wall, name: "  " }))
+          }
+        }))
+      }
+    };
+
+    expect(
+      describeSharedOpeningTarget(unnamedWalls, { kind: "opening", openingId: "door-b" })
+    ).toBe("Door in Gallery 2");
+    expect(describeSharedOpeningTarget(unnamedWalls, { kind: "wall", wallId: B_WEST })).toBe(
+      "Add the other side in Gallery 2"
+    );
+  });
+
+  it("falls back to the wall alone when the room has no name", () => {
+    const unnamed = unnamedRooms(PAIRED);
+
+    expect(describeSharedOpeningTarget(unnamed, { kind: "opening", openingId: "door-b" })).toBe(
+      "Door on West wall"
+    );
+    expect(describeSharedOpeningTarget(unnamed, { kind: "wall", wallId: B_WEST })).toBe(
+      "Add the other side on West wall"
+    );
+  });
+
+  it("still reads when nothing about the place resolves", () => {
+    const roomless = withoutRooms(PAIRED);
+
+    expect(describeSharedOpeningTarget(roomless, { kind: "opening", openingId: "door-b" })).toBe(
+      "Door on the facing wall"
+    );
+    expect(describeSharedOpeningTarget(roomless, { kind: "wall", wallId: B_WEST })).toBe(
+      "Add the other side on the facing wall"
+    );
+  });
+
+  it("still reads when the target itself is gone", () => {
+    expect(describeSharedOpeningTarget(PAIRED, { kind: "opening", openingId: "door-gone" })).toBe(
+      "Opening on the facing wall"
+    );
+    expect(describeSharedOpeningTarget(PAIRED, { kind: "wall", wallId: "wall-gone" })).toBe(
+      "Add the other side on the facing wall"
+    );
+  });
+
+  it("never prints an id or the word undefined", () => {
+    const targets: SharedOpeningTarget[] = [
+      { kind: "opening", openingId: "door-b" },
+      { kind: "opening", openingId: "door-gone" },
+      { kind: "wall", wallId: B_WEST },
+      { kind: "wall", wallId: "wall-gone" }
+    ];
+
+    for (const fixture of [PAIRED, unnamedRooms(PAIRED), withoutRooms(PAIRED)]) {
+      for (const target of targets) {
+        const label = describeSharedOpeningTarget(fixture, target);
+
+        expect(label).not.toMatch(/undefined|null/i);
+        for (const id of idsIn(fixture)) expect(label).not.toContain(id);
+      }
+    }
   });
 });

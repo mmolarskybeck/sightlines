@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import {
   PlacementWarnings,
   groupPlacementWarnings,
@@ -182,8 +182,170 @@ describe("PlacementWarnings", () => {
     expect(screen.getByText("2 issues")).toBeInTheDocument();
   });
 
-  it("offers no action or resolution affordance for document issues", () => {
+  it("offers no resolution affordance for document issues — rows only select, they never resolve", () => {
     render(<PlacementWarnings warnings={[]} documentIssues={[doorMissingTwin, windowDisagreement]} />);
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    // Rows are buttons now (selection), but Stage 6's resolver actions
+    // (Resolve / Complete shared opening / Split / Realign / Keep…) must
+    // never appear here — this component only ever selects an opening.
+    for (const button of screen.getAllByRole("button")) {
+      expect(button).not.toHaveAccessibleName(/resolve|complete|split|realign|keep/i);
+    }
+  });
+
+  describe("row selection", () => {
+    const doorA: LabeledDocumentIssue = {
+      id: "door-a:missing-twin",
+      openingId: "door-a",
+      subject: "Door in Gallery 1",
+      message: "Missing its other half on the facing wall."
+    };
+    const doorB: LabeledDocumentIssue = {
+      id: "door-b:missing-twin",
+      openingId: "door-b",
+      subject: "Door in Gallery 1",
+      message: "Missing its other half on the facing wall."
+    };
+
+    it("gives two document issues with identical subject and message distinct, individually clickable rows", () => {
+      const onSelectIssue = vi.fn();
+      render(
+        <PlacementWarnings
+          warnings={[]}
+          documentIssues={[doorA, doorB]}
+          onSelectIssue={onSelectIssue}
+        />
+      );
+
+      const buttons = screen.getAllByRole("button");
+      expect(buttons).toHaveLength(2);
+      expect(buttons[0]).not.toBe(buttons[1]);
+
+      // The regression: clicking the SECOND row must select the second
+      // opening, not silently re-select the first.
+      fireEvent.click(buttons[1]);
+      expect(onSelectIssue).toHaveBeenCalledTimes(1);
+      expect(onSelectIssue).toHaveBeenCalledWith("door-b");
+
+      fireEvent.click(buttons[0]);
+      expect(onSelectIssue).toHaveBeenCalledTimes(2);
+      expect(onSelectIssue).toHaveBeenNthCalledWith(2, "door-a");
+    });
+
+    it("gives rows with identical visible subject and message different accessible names", () => {
+      render(<PlacementWarnings warnings={[]} documentIssues={[doorA, doorB]} />);
+
+      const buttons = screen.getAllByRole("button");
+      const names = buttons.map((button) => button.getAttribute("aria-label"));
+      expect(names[0]).not.toEqual(names[1]);
+      // Both still carry the shared visible subject and message as a
+      // recognizable prefix — only a stable differentiator is appended.
+      expect(names[0]).toMatch(/^Door in Gallery 1: Missing its other half on the facing wall\./);
+      expect(names[1]).toMatch(/^Door in Gallery 1: Missing its other half on the facing wall\./);
+    });
+
+    it("adds no ordinal noise to a row whose subject and message are already unique", () => {
+      render(
+        <PlacementWarnings
+          warnings={[]}
+          documentIssues={[doorMissingTwin, windowDisagreement]}
+        />
+      );
+
+      const doorButton = screen.getByRole("button", {
+        name: "Door: Missing its other half on the facing wall."
+      });
+      expect(doorButton).toBeInTheDocument();
+      // No visible ordinal clutter either.
+      const visibleSubjects = screen.getAllByText("Door");
+      expect(visibleSubjects).toHaveLength(1);
+    });
+
+    it("renders selected state on the matching row only, via a class and aria-current", () => {
+      render(
+        <PlacementWarnings
+          warnings={[]}
+          documentIssues={[doorA, doorB]}
+          selectedWallObjectId="door-b"
+        />
+      );
+
+      const buttons = screen.getAllByRole("button");
+      const [firstButton, secondButton] = buttons;
+
+      expect(firstButton).not.toHaveClass("selected");
+      expect(firstButton).not.toHaveAttribute("aria-current");
+
+      expect(secondButton).toHaveClass("selected");
+      expect(secondButton).toHaveAttribute("aria-current", "true");
+    });
+
+    it("is a native <button> so Enter/Space activation is native browser behavior, not a reimplemented handler", () => {
+      const onSelectIssue = vi.fn();
+      render(
+        <PlacementWarnings
+          warnings={[]}
+          documentIssues={[doorMissingTwin]}
+          onSelectIssue={onSelectIssue}
+        />
+      );
+
+      const button = screen.getByRole("button", { name: /Door/ });
+      // Real <button type="button">, not a <li>/<div role="button"> — this
+      // is what makes native Enter/Space activation apply at all (jsdom does
+      // not simulate that browser default action, so we assert the native
+      // element/type and that the browser-dispatched click it produces
+      // reaches onSelectIssue).
+      expect(button.tagName).toBe("BUTTON");
+      expect(button).toHaveAttribute("type", "button");
+
+      button.focus();
+      expect(document.activeElement).toBe(button);
+
+      fireEvent.click(button);
+      expect(onSelectIssue).toHaveBeenCalledWith(doorMissingTwin.openingId);
+    });
+
+    it("renders document-issue rows and does not throw when onSelectIssue is omitted", () => {
+      expect(() =>
+        render(<PlacementWarnings warnings={[]} documentIssues={[doorA, doorB]} />)
+      ).not.toThrow();
+
+      const buttons = screen.getAllByRole("button");
+      expect(buttons).toHaveLength(2);
+
+      // A missing-handler regression (e.g. calling onSelectIssue(...) instead
+      // of onSelectIssue?.(...)) throws from inside a DOM event listener,
+      // which jsdom reports via a global "error" event rather than
+      // re-throwing synchronously out of fireEvent.click — so an
+      // uncaught-error listener is what actually catches it here.
+      const onUncaughtError = vi.fn();
+      window.addEventListener("error", onUncaughtError);
+      try {
+        fireEvent.click(buttons[0]);
+        fireEvent.click(buttons[1]);
+      } finally {
+        window.removeEventListener("error", onUncaughtError);
+      }
+      expect(onUncaughtError).not.toHaveBeenCalled();
+    });
+
+    it("makes the single-issue compact row a clickable, selectable button too", () => {
+      const onSelectIssue = vi.fn();
+      render(
+        <PlacementWarnings
+          warnings={[]}
+          documentIssues={[doorMissingTwin]}
+          selectedWallObjectId="door-a"
+          onSelectIssue={onSelectIssue}
+        />
+      );
+
+      const button = screen.getByRole("button", { name: /Shared opening issue/ });
+      expect(button).toHaveClass("selected");
+      expect(button).toHaveAttribute("aria-current", "true");
+
+      fireEvent.click(button);
+      expect(onSelectIssue).toHaveBeenCalledWith("door-a");
+    });
   });
 });

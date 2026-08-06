@@ -1,7 +1,10 @@
 import { getWallNames } from "../../projectWalls";
 import type { Project, WallObject } from "../../../domain/project";
 import { getOpeningKindLabel, type OpeningKind } from "../../../domain/placement/createOpening";
-import type { SharedOpeningConflict } from "../../../domain/placement/sharedOpeningAnalysis";
+import type {
+  SharedOpeningConflict,
+  SharedOpeningTarget
+} from "../../../domain/placement/sharedOpeningAnalysis";
 
 // The words for what `sharedOpeningAnalysis` found. Everything the analyzer
 // reports is expressed in document vocabulary — counterparts, twins, mirror
@@ -229,4 +232,98 @@ export function describeSharedOpeningConflict(
   })();
 
   return { id: conflict.id, openingId: conflict.openingId, subject, message };
+}
+
+// The rest of this module is the Stage 7 inspector's words. Same three rules —
+// name the place, say what it means for the plan, never surface an id — and the
+// same helpers, so a wall or a room is named here exactly as it is named in an
+// issues-rail row about the same object.
+//
+// There is deliberately NO second sentence for a conflict state:
+// `describeSharedOpeningConflict(conflict, project).message` is reused verbatim
+// by the inspector notice, because the rail row and the notice must say the
+// same thing about the same problem.
+
+function wallIdOf(project: Project, objectId: string | undefined): string | undefined {
+  if (objectId === undefined) return undefined;
+  return project.wallObjects.find((object) => object.id === objectId)?.wallId;
+}
+
+// The quiet static line for a healthy shared opening: `Connects Gallery 1 ↔
+// Gallery 2`. Not a sentence and not a warning — it is a label stating what the
+// opening IS, so it carries no terminal period.
+//
+// Degrades down a ladder rather than to a printed id. The own-room half adds
+// nothing on its own (the curator is already looking at that room), so a
+// counterpart that cannot be named collapses to the plainest true statement a
+// shared opening can make about itself.
+export function describeSharedConnection(
+  project: Project,
+  openingId: string,
+  partnerId: string
+): string {
+  const own = placeOf(project, wallIdOf(project, openingId));
+  const other = placeOf(project, wallIdOf(project, partnerId));
+
+  // Same name on both sides is either one room facing itself or two rooms a
+  // curator has given the same name: "Connects Gallery 1 ↔ Gallery 1" tells
+  // them nothing, so it degrades too.
+  if (other.roomName === null || other.roomName === own.roomName) {
+    return "Connects both sides of this wall";
+  }
+  if (own.roomName === null) return `Connects to ${other.roomName}`;
+  return `Connects ${own.roomName} ↔ ${other.roomName}`;
+}
+
+// The caution sentence for `drifted`: the walls still face each other and the
+// two halves are still one opening, but they no longer sit opposite one another.
+// This is not a conflict, so it has no `describeSharedOpeningConflict` sentence —
+// the analyzer expresses it as a `realign` action instead.
+export function describeSharedOpeningDrift(project: Project, openingId: string): string {
+  const opening = project.wallObjects.find((object) => object.id === openingId);
+  const noun = openingNoun(opening);
+  const partnerId =
+    opening !== undefined && "connectsToObjectId" in opening
+      ? opening.connectsToObjectId
+      : undefined;
+
+  const own = placeOf(project, opening?.wallId);
+  const other = placeOf(project, wallIdOf(project, partnerId));
+  const rooms = distinctRoomNames([own, other]);
+
+  // "on each side of the wall" rather than "on the wall ... on each side",
+  // so the degraded form does not say "wall" twice in one clause.
+  return rooms.length === 2
+    ? `This ${noun} sits at a different point on the wall in ${rooms[0]} than in ${rooms[1]}, so its two sides no longer line up.`
+    : `This ${noun} sits at a different point on each side of the wall, so its two sides no longer line up.`;
+}
+
+// One row of the "Resolve shared opening" picker.
+//
+// The two target kinds must not read alike. An `opening` target points at
+// something already standing in the plan, so it is named like any other object:
+// "Door on East wall in Gallery 2". A `wall` target points at a bare wall with
+// nothing on it — picking it CREATES the other face — so it leads with the verb
+// rather than naming an object that does not exist yet.
+export function describeSharedOpeningTarget(
+  project: Project,
+  target: SharedOpeningTarget
+): string {
+  if (target.kind === "opening") {
+    const object = project.wallObjects.find((candidate) => candidate.id === target.openingId);
+    const place = placeOf(project, object?.wallId);
+    const label = openingLabel(object);
+    const where = wallInRoom(place);
+
+    if (where !== null) return `${label} on ${where}`;
+    if (place.roomName !== null) return `${label} in ${place.roomName}`;
+    return `${label} on the facing wall`;
+  }
+
+  const place = placeOf(project, target.wallId);
+  const where = wallInRoom(place);
+
+  if (where !== null) return `Add the other side on ${where}`;
+  if (place.roomName !== null) return `Add the other side in ${place.roomName}`;
+  return "Add the other side on the facing wall";
 }
