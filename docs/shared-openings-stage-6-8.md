@@ -1,5 +1,15 @@
 # Shared openings — Stages 6–8 handoff
 
+> **COMPLETE as of 2026-08-06, commit `51f1b6f`.** Stages 6, 7 and 8 all shipped:
+> the five resolver actions, `sharedOpeningStatus.ts` and the rewritten inspector
+> connection section, `e2e/shared-openings.spec.ts`, and the `docs/status.md` /
+> `docs/plan.md` corrections. The carried-over duplicate-row defect is fixed too.
+>
+> **The stage descriptions below are kept as the record of what was built and why —
+> they are no longer a to-do list.** For what the app does now, read `docs/status.md`
+> and `docs/plan.md` §4.2, which are the live sources. "How to work this" at the
+> bottom is the part still worth reading before similar work.
+
 Continuation doc for the "One physical opening, two faces" work. Full original plan:
 `~/.claude/plans/structured-launching-stardust.md` (Stages 1–8, settled decisions, the
 five architecture rules). **Read that plan's "Settled decisions" and "Architecture" sections
@@ -21,17 +31,17 @@ Branch `feat/shared-opening-invariant`, at commit `688628c`. Tree clean.
 | 3 Atomic direct opening edits | shipped |
 | 4 Scoped reconciliation hooks | shipped |
 | 5 Load repair + persistent conflicts | shipped |
-| **6 Resolver** | **next** |
-| **7 Inspector** | **next** |
-| **8 Regression coverage + docs** | **next** |
+| 6 Resolver | shipped (`51f1b6f`) |
+| 7 Inspector | shipped (`51f1b6f`) |
+| 8 Regression coverage + docs | shipped (`51f1b6f`) |
 
-### Why Stages 6–7 are not optional
+### Why Stages 6–7 were not optional
 
 Stage 3 was the first user-visible change: it began **refusing edits that previously
 succeeded**. The plan's shipping boundary says Stages 3–7 ship together, because a refusal
 with no resolver behind it is a dead end. Stage 5 made problems *visible* but not *fixable* —
-a curator currently sees "This door appears on the Gallery 1 side of the wall but not on the
-Gallery 2 side" with no way to act. **Do not release before Stage 7.**
+a curator saw "This door appears on the Gallery 1 side of the wall but not on the
+Gallery 2 side" with no way to act. That gap is now closed; the shipping boundary is satisfied.
 
 ### What Stage 5 shipped, in files
 
