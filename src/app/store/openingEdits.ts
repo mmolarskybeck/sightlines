@@ -1,7 +1,10 @@
 import { evaluateOpeningPair } from "../../domain/geometry/openingConnections";
+import { signedAreaMm2 } from "../../domain/geometry/polygon";
 import {
   areSharedBoundaryWalls,
-  mirrorOpeningXMm
+  mirrorDoorLeaf,
+  mirrorOpeningXMm,
+  sameDoorLeaf
 } from "../../domain/geometry/sharedWalls";
 import type { WallWithGeometry } from "../../domain/geometry/walls";
 import {
@@ -20,12 +23,15 @@ import {
 import { isStructurallyValidPair } from "../../domain/placement/openingPairs";
 import {
   SHARED_OPENING_GEOMETRY_TOLERANCE_MM,
-  SHARED_OPENING_MIRROR_TOLERANCE_MM
+  SHARED_OPENING_MIRROR_TOLERANCE_MM,
+  withDoorLeaf
 } from "../../domain/placement/sharedOpeningAnalysis";
 import { isOpeningSlotFree } from "../../domain/placement/openingSlots";
 import { isBlockingKind } from "../../domain/placement/overlapPolicy";
 import type {
   ConnectableOpeningWallObject,
+  DoorLeaf,
+  DoorWallObject,
   OpeningWallObject,
   Project,
   WallObject
@@ -515,6 +521,67 @@ export function syncPartnerResize(
   if (!mirrored) return { status: "blocked", partnerId, reason: "slot-occupied" };
 
   return { status: "synced", nextWallObjects: mirrored, partnerId };
+}
+
+// ─── Hinged-door handing ───────────────────────────────────────────────────
+
+// Whether the room owning `wallId` is wound counter-clockwise — the ONE place
+// room-interior-ness is consulted for a door leaf. Everything downstream (the
+// stored flags, every renderer) works purely in the wall's authored frame; see
+// DoorLeaf. A wall on no room loop (a partition face, whose two sides are both
+// "interior") has no such answer, and gets the same default as a CCW room.
+function isCounterClockwiseRoomOfWall(project: Project, wallId: string): boolean {
+  for (const placement of project.floor.rooms) {
+    if (!placement.room.walls.some((wall) => wall.id === wallId)) continue;
+    return signedAreaMm2(placement.room.vertices) > 0;
+  }
+  return true;
+}
+
+// The handing a door gets the first time it is made hinged.
+//
+// Hinge at the jamb nearer the closer END of the wall, so the leaf sweeps into
+// the open middle of the wall rather than out of the corner it is tucked
+// against; swing toward the room's interior, which is the left of the authored
+// direction exactly when the room is wound counter-clockwise.
+export function defaultDoorLeaf(project: Project, door: DoorWallObject): DoorLeaf {
+  const wall = getProjectWalls(project).find((candidate) => candidate.id === door.wallId);
+  return {
+    hingeAtStart: wall ? door.xMm <= wall.lengthMm / 2 : true,
+    swingsToLeft: isCounterClockwiseRoomOfWall(project, door.wallId)
+  };
+}
+
+// Mirror a handing change onto the far half of a shared door.
+//
+// Gated on areSharedBoundaryWalls for the same reason syncPartnerMove is
+// (openingEdits' carve-out above): `connectsToObjectId` does NOT imply the two
+// walls face each other — isStructurallyValidPair deliberately preserves
+// user-created pairs on unrelated walls. Those halves are not two faces of one
+// physical door, so their leaves stay INDEPENDENT; mirroring across walls that
+// never faced each other would assert a physical relationship that is not there.
+//
+// Unlike position/size sync this can never be refused: handing changes no
+// footprint, so there is no slot to collide with and nothing to validate.
+// Returns the input array unchanged when there is nothing to mirror.
+export function syncPartnerLeaf(
+  project: Project,
+  wallObjects: WallObject[],
+  target: DoorWallObject,
+  leaf: DoorLeaf | undefined
+): WallObject[] {
+  const partner = resolveLivePartner(project, target);
+  if (!partner || partner.kind !== "door") return wallObjects;
+  if (!areSharedBoundaryWalls(project, target.wallId, partner.wallId)) return wallObjects;
+
+  const partnerLeaf = leaf ? mirrorDoorLeaf(leaf) : undefined;
+  if (sameDoorLeaf(partner.leaf, partnerLeaf)) return wallObjects;
+
+  return wallObjects.map((object) =>
+    object.id === partner.id && object.kind === "door"
+      ? withDoorLeaf(object, partnerLeaf)
+      : object
+  );
 }
 
 // Resolve the nearest legal x using the opening's exact default geometry.

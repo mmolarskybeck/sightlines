@@ -3,6 +3,7 @@ import {
   caseElevationGlyph,
   caseFloorGhostGlyph
 } from "../../../domain/geometry/caseGlyphs";
+import { doorElevationGlyph } from "../../../domain/geometry/doorGlyphs";
 import type { DisplayUnit } from "../../../domain/project";
 import type { ElevationScene } from "../../../domain/scene2d/elevationScene";
 import { computeWallTextSkeleton } from "../../../domain/scene2d/wallTextSkeleton";
@@ -113,6 +114,53 @@ export function drawElevationOpening(
       0.5,
       COLORS.muted
     );
+  } else if (opening.object.kind === "door" && opening.object.leaf) {
+    // A HINGED door's front face: an inset leaf panel and a latch-side knob,
+    // the print twin of ElevationOpening.tsx's DoorLeaf. A plain doorway (no
+    // `leaf`) still draws nothing but its outline — it is a void, and the
+    // unconditional door lines a1ebe03 removed from this exact branch are NOT
+    // revived here. Nor is any swing indication: an elevation cannot honestly
+    // show swing depth, which was that commit's whole objection. `showMarks`
+    // false (a door too narrow/short for its own reveal) falls through to the
+    // bare outline the same way.
+    const glyph = doorElevationGlyph({
+      widthMm: opening.sizeMm.widthMm,
+      heightMm: opening.sizeMm.heightMm,
+      hingeAtStart: opening.object.leaf.hingeAtStart
+    });
+    if (glyph.showMarks) {
+      // The glyph's frame is y-DOWN from the opening's TOP; this model space is
+      // y-up with the floor at 0, so every local y subtracts from the top edge
+      // (the same flip drawElevationCase does). Rectangles are placed by their
+      // BOTTOM edge here, hence the extra leaf height in the conversion.
+      const topYMm = yMm + opening.sizeMm.heightMm;
+      page.drawRectangle({
+        ...elevationRect(
+          transform,
+          xMm + glyph.leafRect.xMm,
+          topYMm - glyph.leafRect.yMm - glyph.leafRect.heightMm,
+          glyph.leafRect.widthMm,
+          glyph.leafRect.heightMm
+        ),
+        borderColor: COLORS.muted,
+        borderWidth: 0.5
+      });
+      if (glyph.knob) {
+        // True mm radius scaled like every other length on the page — no
+        // legibility floor, matching the canvas, where the knob is likewise a
+        // scaling circle (only strokes are non-scaling there).
+        const center = transform.point({
+          xMm: xMm + glyph.knob.cxMm,
+          yMm: topYMm - glyph.knob.cyMm
+        });
+        page.drawCircle({
+          x: center.x,
+          y: center.y,
+          size: glyph.knob.radiusMm * transform.scalePtPerMm,
+          color: COLORS.muted
+        });
+      }
+    }
   } else if (opening.object.kind === "blocked-zone") {
     const step = 7;
     for (let x = rect.x - rect.height; x < rect.x + rect.width; x += step) {

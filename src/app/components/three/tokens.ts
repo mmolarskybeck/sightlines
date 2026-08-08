@@ -23,6 +23,20 @@ export const WALL_SELECTED_COLOR = "#e4edee";
 export const OPENING_CAP_COLOR = "#d2d5d8";
 export const WINDOW_CAP_COLOR = "#b9d5d8";
 
+// A hinged door's shut leaf and its knob (spec §6). The leaf sits IN PLACE of
+// the neutral OPENING_CAP_COLOR backing plane (it replaces it — see the
+// treatment-forcing comment in scene3d.ts), so it needs to read as its own
+// material rather than as "more wall/more cap": a warm mid-brown, distinctly
+// darker than both WALL_COLOR (~0.966 lightness) and OPENING_CAP_COLOR
+// (light cool grey) — a believable painted or stained wood slab, and dark
+// enough that the knob (closer to brass) still separates from it.
+export const DOOR_LEAF_COLOR = "#8a6a52";
+
+// Knob: a warm metallic tone, lighter and more saturated-gold than the leaf
+// it sits on so a small ~28mm-radius cylinder still reads against the door
+// at room-scale viewing distance rather than disappearing into it.
+export const DOOR_KNOB_COLOR = "#c9a86a";
+
 // ============================================================================
 // Scene ground / background
 // ============================================================================

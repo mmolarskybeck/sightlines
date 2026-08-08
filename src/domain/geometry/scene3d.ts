@@ -29,6 +29,12 @@ export type Vec2 = {
 // `holes` array exist so the scene contract is stable when openings land (M3).
 export type Hole3d = {
   kind: "door" | "window";
+  // The source WallObject's id. Added for the hinged-door leaf (spec §6): the
+  // leaf SELECTS THE DOOR, unlike the flat cap plane which selects the wall,
+  // so the render layer needs a real object id to hand to onSelectObject.
+  // Always set (every hole comes from a stored WallObject) even though only
+  // doors currently consume it, so callers never have to branch on kind first.
+  objectId: string;
   xMinMm: number;
   xMaxMm: number;
   yMinMm: number;
@@ -36,6 +42,14 @@ export type Hole3d = {
   clamped: boolean; // true if the source object overflowed wall bounds
   treatment: "open" | "capped";
   connectedRoomId?: string;
+  // Present only for a HINGED door (DoorWallObject.leaf set) whose hole wins
+  // the shared-connection dedup below. hingeAtMinX is already remapped into
+  // PANEL-local x — the render layer never needs to know about authored
+  // direction or room winding, only which side of ITS OWN xMin/xMax the
+  // hinge sits on. Swing side is deliberately not carried: the door is drawn
+  // SHUT in 3D, so only the hinge (which sets the knob's latch-side x)
+  // matters — see the derivation site for the swing-is-symmetric argument.
+  leaf?: { hingeAtMinX: boolean };
 };
 
 // Wall-local axis-aligned rectangle (blocked zones); x along wall, y up.
@@ -285,7 +299,8 @@ function deriveRoom(
       toPanelLocalX,
       artworksById,
       true,
-      openConnectionsByObjectId
+      openConnectionsByObjectId,
+      isCounterClockwise
     );
 
     return {
@@ -316,7 +331,12 @@ function deriveRoom(
         (xMm) => xMm,
         artworksById,
         false,
-        openConnectionsByObjectId
+        openConnectionsByObjectId,
+        // Never consulted: allowHoles is false (openings are disallowed on
+        // partitions, spec §2) so the leaf branch below is unreachable here.
+        // `true` is passed only to match the identity mapping `(xMm) => xMm`
+        // just above it (the isCounterClockwise=true branch of toPanelLocalX).
+        true
       );
       return {
         wallId: face.id,
@@ -357,7 +377,16 @@ function derivePanelContents(
   toLocalX: (xMm: number) => number,
   artworksById: ReadonlyMap<string, Artwork>,
   allowHoles: boolean,
-  openConnectionsByObjectId: ReadonlyMap<string, OpenConnection3d>
+  openConnectionsByObjectId: ReadonlyMap<string, OpenConnection3d>,
+  // Same flag deriveRoom used to decide whether to swap wall endpoints (and
+  // therefore build toLocalX as the identity vs. `lengthMm - xMm`). A hinged
+  // door's `hingeAtStart` is authored-direction relative (DoorLeaf, project.ts)
+  // while everything this function emits is PANEL-local — this is the one
+  // extra bit needed to remap the former into the latter (see the leaf branch
+  // below). Threaded through rather than re-derived from toLocalX because a
+  // reversed wall's toLocalX is `lengthMm - xMm`, which is not distinguishable
+  // from the identity by probing it at a single point when lengthMm is 0.
+  isCounterClockwise: boolean
 ): {
   holes: Hole3d[];
   artworks: WallArtwork3d[];
@@ -432,8 +461,51 @@ function derivePanelContents(
       // Shape hole — drop it rather than break triangulation.
       if (xMinMm >= xMaxMm || yMinMm >= yMaxMm) continue;
 
+      // ── Hinged-door leaf (spec §6) ──────────────────────────────────────
+      // Only a door can carry `leaf`, and only when the user has actually
+      // hinged it (a plain doorway has none — see DoorWallObject, project.ts).
+      let leaf: { hingeAtMinX: boolean } | undefined;
+      if (object.kind === "door" && object.leaf) {
+        // THE remap this file exists to get right: DoorLeaf.hingeAtStart is
+        // relative to the wall's AUTHORED start->end direction (project.ts),
+        // but for a clockwise-wound room deriveRoom swaps the panel's
+        // endpoints so the left-normal still points inward (see the comment
+        // at the toPanelLocalX call site above) — panel-local x then runs
+        // OPPOSITE authored x. So the hinge is at panel-local xMin exactly
+        // when hingeAtStart holds for a CCW room, and exactly when it does
+        // NOT hold for a CW (swapped) room.
+        const hingeAtMinX = isCounterClockwise
+          ? object.leaf.hingeAtStart
+          : !object.leaf.hingeAtStart;
+
+        // Dedup: a real shared boundary is a coincident pair of TWIN walls
+        // (sharedWalls.ts), so one thin leaf box already reads correctly from
+        // both rooms — drawing the partner's leaf too would put two coplanar
+        // boxes in the same spot, z-fighting while orbiting. `openConnection`
+        // is only set for a geometrically ALIGNED, OPEN pair (populated
+        // above from evaluateOpeningPairWith), so it is exactly the "real
+        // shared boundary" test — NOT the mere presence of connectsToObjectId,
+        // which `isStructurallyValidPair` (openingPairs.ts) deliberately also
+        // allows for unrelated, non-facing walls as a legacy state. For that
+        // legacy case `openConnection` is undefined and each half is treated
+        // as its own independent door, hinge and all.
+        //
+        // Which half is canonical for an aligned pair must be a rule that
+        // agrees with itself when evaluated from either side, so it can't
+        // depend on iteration/object order — string comparison against the
+        // partner id is deterministic and symmetric (exactly one of the two
+        // ids is lexically smaller).
+        const partnerId = object.connectsToObjectId;
+        const isCanonicalSide =
+          !openConnection || (partnerId !== undefined && object.id < partnerId);
+        if (isCanonicalSide) {
+          leaf = { hingeAtMinX };
+        }
+      }
+
       holes.push({
         kind: object.kind,
+        objectId: object.id,
         xMinMm,
         xMaxMm,
         yMinMm,
@@ -443,10 +515,19 @@ function derivePanelContents(
           xMaxMm !== rawXMax ||
           yMinMm !== rawYMin ||
           yMaxMm !== rawYMax,
-        treatment: openConnection ? "open" : "capped",
+        // A hinged leaf physically fills the opening in place of the flat
+        // backing plane the render layer draws for "capped" holes — drawing
+        // both would coincide at the same recessed depth (WallPanel.tsx,
+        // OPENING_CAP_RECESS_MM). So `leaf` forces "open" even with no
+        // connected room on the other side: "open" here means "the render
+        // layer must not paint its own cap for this hole", which is exactly
+        // as true for an unconnected hinged door (the leaf is its cap) as it
+        // is for a real aligned pair.
+        treatment: openConnection || leaf ? "open" : "capped",
         ...(openConnection?.connectedRoomId
           ? { connectedRoomId: openConnection.connectedRoomId }
-          : {})
+          : {}),
+        ...(leaf ? { leaf } : {})
       });
     }
   }

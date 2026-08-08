@@ -42,11 +42,41 @@ const artworkWallObjectSchema = wallObjectBaseSchema.extend({
 // Split to mirror the TS union (spec §5.5): only doors/windows carry
 // connectsToObjectId; blocked zones never pair. connectsToObjectId replaces the
 // never-written connectsToWallId (dropped in the v2→v3 migration).
-const connectableOpeningWallObjectSchema = wallObjectBaseSchema.extend({
-  kind: z.enum(["door", "window"]),
+const connectableOpeningBaseSchema = wallObjectBaseSchema.extend({
   blocksPlacement: z.literal(true),
   connectsToObjectId: z.string().min(1).optional()
 });
+
+const doorLeafSchema = z.object({
+  hingeAtStart: z.boolean(),
+  swingsToLeft: z.boolean()
+});
+
+// Doors and windows are two branches, not one `z.enum(["door","window"])`,
+// because `leaf` exists only on a door. Purely additive optional field, so NO
+// schema-version bump — same reasoning as wallTextWallObjectSchema below: a v4
+// document with no hinged doors is byte-identical to one written before this
+// branch existed. (Contrast CaseWallObject.depthMm, which is REQUIRED and so
+// did force v3→v4.)
+const doorWallObjectSchema = connectableOpeningBaseSchema.extend({
+  kind: z.literal("door"),
+  leaf: doorLeafSchema.optional()
+});
+
+const windowWallObjectSchema = connectableOpeningBaseSchema.extend({
+  kind: z.literal("window"),
+  // `z.never().optional()` and not simply omitting the key: zod object schemas
+  // STRIP unknown keys, so an omitted `leaf` would be silently dropped from a
+  // window rather than refused. "A window can never carry a leaf" is meant as a
+  // real invariant — a document asserting one is malformed, not one to quietly
+  // rewrite — so the key has to be declared and rejected.
+  leaf: z.never().optional()
+});
+
+const connectableOpeningWallObjectSchemas = [
+  doorWallObjectSchema,
+  windowWallObjectSchema
+] as const;
 
 const blockedZoneWallObjectSchema = wallObjectBaseSchema.extend({
   kind: z.literal("blocked-zone"),
@@ -71,7 +101,7 @@ const caseWallObjectSchema = wallObjectBaseSchema.extend({
 
 const wallObjectSchema = z.discriminatedUnion("kind", [
   artworkWallObjectSchema,
-  connectableOpeningWallObjectSchema,
+  ...connectableOpeningWallObjectSchemas,
   blockedZoneWallObjectSchema,
   wallTextWallObjectSchema,
   caseWallObjectSchema

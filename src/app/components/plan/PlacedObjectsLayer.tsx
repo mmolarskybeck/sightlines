@@ -135,6 +135,7 @@ export function PlacedObjectsLayer({
         const renderWallObject = ({
           object: wallObject,
           artwork,
+          doorSwing,
           restRect,
           renderedRect
         }: PlanSceneWallObject) => {
@@ -207,6 +208,12 @@ export function PlacedObjectsLayer({
             kind={wallObject.kind}
             pixelsPerMm={pixelsPerMm}
             planRect={renderedPlanRect}
+            // Handing/size only, so the scene's rest glyph stays correct
+            // through a move preview (the arc is drawn in the rect's local
+            // frame and travels with it). Withheld while the preview is off
+            // the wall: a swing arc with no jamb to hinge on is a claim the
+            // placement hasn't made yet.
+            swing={isFloorPlaced || isInvalid ? undefined : doorSwing}
             tooltip={
               wallObject.kind === "artwork" ? (
                 artworkTooltip(wallObject.artworkId, wallObject.displayDimensionsOverride)

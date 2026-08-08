@@ -497,6 +497,14 @@ pages exist precisely to answer §1's pagination problem: the Overview shows
 everything small; room plans show each space large. No drawing is ever
 tiled across sheets in this mode.
 
+The crop is the room polygon **unioned with any hinged door's swing glyph**
+before the margin is applied (the Overview's fit does the same). A swing is
+the one glyph that paints outside its object's rect — up to a full door width
+off the wall — so a door swinging outward on an exterior wall would otherwise
+land in the margin or past the sheet edge. Paint bounds grow for it;
+interaction bounds on the canvas deliberately do not, and the grid extent
+(structure bounds) does not either.
+
 ### 9.4 Elevation pages
 
 One page per included wall, titled with room and wall label (matching the
@@ -626,6 +634,8 @@ stable, light-background editorial style.
 | Canvas element | In exports |
 |---|---|
 | Rooms, walls, partitions, openings | Yes |
+| Hinged-door swing arc (plan) | Yes — the leaf drawn open at 90° plus its swept quarter-circle, from `doorGlyphs.ts`. A plain doorway keeps its void chevron and gains nothing |
+| Hinged-door leaf + knob (elevation) | Yes — an inset leaf panel with a latch-side knob, from `doorGlyphs.ts`. Never a swing indication: an elevation cannot honestly show swing depth (a1ebe03) |
 | Placed works at framed footprint (per `docs/framing-dimension-contract.md`) | Yes |
 | Floor objects | Yes |
 | Dimension lines | Document: full pass per §9.6, **Dimensions** switch default on. Snapshot: as currently displayed (selection-driven) |

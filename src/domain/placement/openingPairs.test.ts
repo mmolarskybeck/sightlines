@@ -154,6 +154,28 @@ describe("normalizeOpeningPairs", () => {
     expect(twice.project).toBe(once.project);
   });
 
+  it("severs a pointer without disturbing the door's leaf", () => {
+    // The pass stays pointer-only and geometry-free (it runs PRE-parse, on
+    // untrusted input). Handing is reconciled later, in the post-parse
+    // geometry-aware pass, so nothing here may read or rewrite it — but it must
+    // not drop it either.
+    const hinged = {
+      ...door("d1", "d2", "wall-1"),
+      leaf: { hingeAtStart: true, swingsToLeft: false }
+    } as WallObject;
+    const before = projectWith([hinged, door("d2", "d1", "wall-1")]);
+
+    const { project, repairedCount } = normalizeOpeningPairs(before);
+
+    expect(repairedCount).toBe(1);
+    const repaired = project.wallObjects[0];
+    expect(repaired.kind === "door" ? repaired.leaf : null).toEqual({
+      hingeAtStart: true,
+      swingsToLeft: false
+    });
+    expect(partnerOf(project, "d1")).toBeUndefined();
+  });
+
   it("returns valid input untouched, including raw pre-parse documents", () => {
     const valid = projectWith([door("d1", "d2", "wall-1"), door("d2", "d1", "wall-2")]);
     expect(normalizeOpeningPairs(valid).project).toBe(valid);

@@ -2078,6 +2078,10 @@ export function ElevationView({
                 (selectedOpeningId === opening.id || selectedObjectIds.includes(opening.id))
               }
               kind={opening.kind}
+              // Handing only — an elevation can't honestly show swing depth,
+              // which is why the pre-a1ebe03 swing arc was removed. A doorway
+              // (no leaf) still draws as the bare outline it always has.
+              leaf={opening.kind === "door" ? opening.leaf : undefined}
               size={size}
               tooltip={
                 <OpeningTooltipContent

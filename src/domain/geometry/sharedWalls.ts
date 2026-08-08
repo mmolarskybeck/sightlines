@@ -1,4 +1,4 @@
-import type { Project } from "../project";
+import type { DoorLeaf, Project } from "../project";
 import { parseFaceWallId } from "./freestandingWalls";
 import {
   OPENING_PAIR_ANGLE_TOLERANCE_DEG,
@@ -165,6 +165,29 @@ export function mirrorOpeningXMm(
 
   const fromCenterMm = pointAlong(from.startFloorMm, floorWallDirection(from), fromXMm);
   return projectPointToWall(fromCenterMm, to).xAlongMm;
+}
+
+// The same hung leaf, described from the TWIN wall's frame — the handing half
+// of mirrorOpeningXMm, and it lives here for the same reason: it is a fact
+// about coincident twin walls, not about doors.
+//
+// BOTH flags invert, and it is worth being explicit about why, because
+// inverting one is the obvious wrong answer:
+//   - `hingeAtStart` flips because the twins are ANTI-PARALLEL, so the jamb
+//     nearer one wall's start vertex is the jamb nearer the other's end;
+//   - `swingsToLeft` flips because the twins face OPPOSITE interiors, so the
+//     left of one wall's direction is the right of the other's.
+// The two inversions compose to the identity in world space: the leaf stays in
+// the same physical quadrant seen from either room, which is the whole point.
+export function mirrorDoorLeaf(leaf: DoorLeaf): DoorLeaf {
+  return { hingeAtStart: !leaf.hingeAtStart, swingsToLeft: !leaf.swingsToLeft };
+}
+
+// Structural equality for the equality guards on the leaf-sync paths, where
+// `undefined` (a plain doorway) is a meaningful value on both sides.
+export function sameDoorLeaf(a: DoorLeaf | undefined, b: DoorLeaf | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return a.hingeAtStart === b.hingeAtStart && a.swingsToLeft === b.swingsToLeft;
 }
 
 // The room that owns a wall id (perimeter walls are listed on the room record).

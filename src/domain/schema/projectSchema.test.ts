@@ -220,6 +220,69 @@ describe("projectSchema", () => {
       expect(() => parseProject(project)).toThrow();
     });
 
+    it("accepts a door carrying a hinged leaf", () => {
+      const project = createSampleProject();
+      project.wallObjects = [
+        makeOpening({
+          id: "door-1",
+          kind: "door",
+          leaf: { hingeAtStart: true, swingsToLeft: false }
+        } as Partial<OpeningWallObject>)
+      ];
+
+      const parsed = parseProject(project);
+      const door = parsed.wallObjects.find((object) => object.id === "door-1");
+      expect(door?.kind === "door" ? door.leaf : null).toEqual({
+        hingeAtStart: true,
+        swingsToLeft: false
+      });
+    });
+
+    it("REJECTS a window carrying a leaf rather than silently stripping it", () => {
+      // The point of the z.never().optional() branch. Zod strips unknown keys
+      // by default, so merely omitting `leaf` from the window branch would open
+      // the document with the field quietly dropped — the invariant would look
+      // enforced while the malformed input was accepted.
+      const project = createSampleProject();
+      project.wallObjects = [
+        makeOpening({
+          id: "window-1",
+          kind: "window",
+          leaf: { hingeAtStart: true, swingsToLeft: true }
+        } as Partial<OpeningWallObject>)
+      ];
+
+      // Asserted on the reason, not merely "it threw": a window that failed to
+      // match the union for some unrelated shape error would pass a bare
+      // toThrow while the invariant was doing nothing.
+      expect(() => parseProject(project)).toThrow(/expected.*never/i);
+    });
+
+    it("rejects a malformed leaf on a door", () => {
+      const project = createSampleProject();
+      project.wallObjects = [
+        makeOpening({ id: "door-1", kind: "door", leaf: { hingeAtStart: true } } as Partial<
+          OpeningWallObject
+        >)
+      ];
+
+      expect(() => parseProject(project)).toThrow();
+    });
+
+    it("loads a stored v4 door with no leaf unchanged — additive, no version bump", () => {
+      // The compatibility claim behind not bumping the schema version: a
+      // document written before hinging existed parses byte-identically, with
+      // no `leaf` key invented for it.
+      const project = createSampleProject();
+      expect(project.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+      const stored = makeOpening({ id: "door-1", kind: "door" });
+      project.wallObjects = [stored];
+
+      const parsed = parseProject(project);
+      expect(parsed.wallObjects[0]).toEqual(stored);
+      expect(Object.keys(parsed.wallObjects[0])).not.toContain("leaf");
+    });
+
     it("keeps existing artwork-only projects valid — additive, no schema version bump", () => {
       const project = createSampleProject();
       expect(project.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);

@@ -10,7 +10,8 @@ import { parseFaceWallId } from "../domain/geometry/freestandingWalls";
 import {
   areSharedBoundaryWalls,
   findSharedBoundary,
-  mirrorOpeningXMm
+  mirrorOpeningXMm,
+  sameDoorLeaf
 } from "../domain/geometry/sharedWalls";
 import { getFloorWalls } from "../domain/geometry/planObjects";
 import type { PlanPlacement } from "../domain/snapping/planSnapTargets";
@@ -19,6 +20,7 @@ import {
   analyzeSharedOpenings,
   applySharedOpeningActions,
   sharedOpeningCandidates,
+  withDoorLeaf,
   type SharedOpeningAction,
   type SharedOpeningScope,
   type SharedOpeningTarget
@@ -66,6 +68,7 @@ import {
   type CaseWallObject,
   type ConnectableOpeningWallObject,
   type DisplayUnit,
+  type DoorLeaf,
   type FloorObject,
   type FloorObjectBase,
   type Project,
@@ -110,12 +113,14 @@ import {
 } from "./store/documentMetaSlice";
 import {
   buildOpeningOnWall,
+  defaultDoorLeaf,
   moveObjectNoun,
   openingNoun,
   resolveFreeOpeningXMm,
   resolvePairedOpeningSpan,
   syncMovedPairHalves,
   appliedPartnerSync,
+  syncPartnerLeaf,
   syncPartnerMove,
   syncPartnerResize
 } from "./store/openingEdits";
@@ -450,6 +455,23 @@ export type AppState = ArrangeSliceState &
   // Delete the partner and keep this half, for a pair whose rooms have moved
   // apart. Deliberately not `removePlacement`, which deletes both halves.
   keepThisOpeningOnly: (openingId: string) => Promise<void>;
+  // Turn a doorway into a hinged door, change its handing, or turn it back.
+  //
+  // `undefined` clears the leaf (back to a plain doorway). A PARTIAL leaf fills
+  // its missing flags from the door's current handing, or — for a doorway
+  // becoming hinged — from the geometry-derived default (hinge at the nearer
+  // wall end, swinging toward the room interior). That is the one place room
+  // interior is consulted, and it lives here because this is where floor
+  // geometry is available; the stored flags are wall-local from then on.
+  // So: `{}` = "make it hinged, you pick"; `{ hingeAtStart: x }` = "flip the
+  // hinge, leave the swing".
+  //
+  // Mirrors onto the far half only across a REAL shared boundary — see
+  // syncPartnerLeaf. One undo step covers both halves.
+  updateDoorLeaf: (
+    wallObjectId: string,
+    leaf: Partial<DoorLeaf> | undefined
+  ) => Promise<void>;
   // Rename a wall text (the only editable field it carries). An empty/blank
   // name resets it to the default label.
   renameWallText: (wallObjectId: string, name: string) => Promise<void>;
@@ -3054,6 +3076,36 @@ export function createAppStore(deps: AppStoreDeps) {
           [wallObjectId],
           true
         );
+      },
+
+      async updateDoorLeaf(wallObjectId, leaf) {
+        const project = get().project;
+        if (!project) return;
+
+        const target = project.wallObjects.find((object) => object.id === wallObjectId);
+        if (!target || target.kind !== "door") return;
+
+        // A partial fills from the door's CURRENT handing when it already has
+        // one, and only falls back to the derived default when it does not —
+        // so "flip the hinge" cannot silently reset the swing to the default.
+        const nextLeaf: DoorLeaf | undefined =
+          leaf === undefined
+            ? undefined
+            : { ...(target.leaf ?? defaultDoorLeaf(project, target)), ...leaf };
+        if (sameDoorLeaf(target.leaf, nextLeaf)) return;
+
+        const edited = project.wallObjects.map((object) =>
+          object.id === wallObjectId && object.kind === "door"
+            ? withDoorLeaf(object, nextLeaf)
+            : object
+        );
+        const nextWallObjects = syncPartnerLeaf(project, edited, target, nextLeaf);
+
+        // Nothing to validate and nothing to gate: hinging changes no
+        // footprint, so no placement can newly collide. Hence the empty
+        // validateIds — and no reconcileWallIds either, since this says nothing
+        // about where a room's boundaries are.
+        await commitWallObjectEdit("Edit door", project, nextWallObjects, [], true);
       },
 
       async commitPlanMove(objectId, placement, allowOverlap = false) {

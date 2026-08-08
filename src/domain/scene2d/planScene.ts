@@ -1,4 +1,5 @@
 import { getArtworkOuterDimensionsMm } from "../framing";
+import { doorSwingPlanGlyphFor, type DoorSwingPlanGlyph } from "../geometry/doorGlyphs";
 import {
   getFloorPartitions,
   type FloorPartition
@@ -83,6 +84,16 @@ export type PlanSceneWallObject = {
   // What actually paints at rest: getRenderedWallObjectPlanRect applied to
   // restRect (artwork framed + shifted to the viewer's side, min-depth clamp).
   renderedRect: PlanRect;
+  // The swing glyph for a HINGED door only (kind === "door" with a `leaf`);
+  // undefined for a plain doorway, a window, and every other kind. Computed
+  // once here — from restRect's TRUE model width/depth, never renderedRect's
+  // (which can be zoom- or print-clamped to a legibility floor, see
+  // getRenderedWallObjectPlanRect's minDepthMm) — so every consumer (screen,
+  // PDF export, ExportPdfPreview) draws the identical arc regardless of scale;
+  // the hinge sits on the wall's real face, not a rendering artifact. The
+  // swing paints OVER renderedRect and is deliberately excluded from it: see
+  // the "leaves its own rect" comment on PlanObject.tsx's swing rendering.
+  doorSwing?: DoorSwingPlanGlyph;
 };
 
 export type PlanSceneFloorObject = {
@@ -323,12 +334,23 @@ export function buildPlanScene(project: Project, options: PlanSceneOptions = {})
       object.kind === "case"
         ? getWallObjectPlanRect(wall, object, object.depthMm)
         : getWallObjectPlanRect(wall, object);
+    // A doorway (no `leaf`) keeps drawing as the plain chevron mark today —
+    // only a hinged door gets a swing glyph. depthMm here is restRect's real
+    // wall-thickness, per the field comment above.
+    const doorSwing =
+      object.kind === "door" && object.leaf
+        ? doorSwingPlanGlyphFor(object.leaf, {
+            widthMm: restRect.widthMm,
+            depthMm: restRect.depthMm
+          })
+        : undefined;
     return [
       {
         object,
         ...(artwork ? { artwork } : {}),
         restRect,
-        renderedRect: getRenderedWallObjectPlanRect(restRect, object.kind, artwork, minDepthMm)
+        renderedRect: getRenderedWallObjectPlanRect(restRect, object.kind, artwork, minDepthMm),
+        ...(doorSwing ? { doorSwing } : {})
       }
     ];
   });

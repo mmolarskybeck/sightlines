@@ -304,6 +304,7 @@ export function App() {
   const moveOpening = useAppStore((state) => state.moveOpening);
   const resizeOpening = useAppStore((state) => state.resizeOpening);
   const fitOpeningToAvailableSpan = useAppStore((state) => state.fitOpeningToAvailableSpan);
+  const updateDoorLeaf = useAppStore((state) => state.updateDoorLeaf);
   // The five shared-opening resolutions. Each one re-derives its own guard from
   // the current project inside the store — the inspector only ever asks.
   const resolveSharedOpening = useAppStore((state) => state.resolveSharedOpening);
@@ -2357,6 +2358,11 @@ export function App() {
                 resizeOpening(selectedOpening.id, widthMm, heightMm, allowOverlappingPlacement)
               }
               onFitToWall={() => fitOpeningToAvailableSpan(selectedOpening.id)}
+              // Only ever reachable for a door (OpeningInspector narrows on
+              // opening.kind itself), but wired unconditionally here: the
+              // store action already no-ops for a non-door id, so a second
+              // kind check on this line would just duplicate that guard.
+              onUpdateDoorLeaf={(leaf) => updateDoorLeaf(selectedOpening.id, leaf)}
               onDelete={() => void removePlacement(selectedOpening.id)}
             />
           ) : selectedRoomPlacement ? (

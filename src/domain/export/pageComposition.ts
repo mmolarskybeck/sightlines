@@ -3,8 +3,10 @@ import { resolveSavedViewRoomLabel } from "../savedViews";
 import {
   buildPlanScene,
   type PlanScene,
-  type PlanSceneRoom
+  type PlanSceneRoom,
+  type PlanSceneWallObject
 } from "../scene2d/planScene";
+import type { DoorGlyphBoundsMm } from "../geometry/doorGlyphs";
 import type { PlanRect } from "../geometry/planObjects";
 import { getRoomPlaceableWalls } from "../geometry/placeableWalls";
 import type {
@@ -153,11 +155,62 @@ export function planRectCorners(rect: PlanRect): {
   }));
 }
 
+// The floor-space corners of a glyph's LOCAL-CENTERED mm box (doorGlyphs'
+// `boundsMm`) carried by a plan rect. planRectCorners does the same rotation
+// for the rect's own half-extents; a glyph box is deliberately NOT centered on
+// the rect (a swing reaches out to one side only), so its corners are its own
+// min/max pairs rather than ±half sizes. Same center/angle mapping as
+// planRectWorldPoint, which is what the PDF and the preview draw the glyph
+// with — so the fitted page and the drawn arc can never disagree.
+export function planRectLocalBoundsCorners(
+  rect: PlanRect,
+  bounds: DoorGlyphBoundsMm
+): { xMm: number; yMm: number }[] {
+  const angleRad = (rect.angleDeg * Math.PI) / 180;
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+
+  return [
+    { xMm: bounds.minXMm, yMm: bounds.minYMm },
+    { xMm: bounds.maxXMm, yMm: bounds.minYMm },
+    { xMm: bounds.maxXMm, yMm: bounds.maxYMm },
+    { xMm: bounds.minXMm, yMm: bounds.maxYMm }
+  ].map((point) => ({
+    xMm: rect.centerXMm + point.xMm * cos - point.yMm * sin,
+    yMm: rect.centerYMm + point.xMm * sin + point.yMm * cos
+  }));
+}
+
+// Paint points contributed by hinged doors' swing glyphs. The swing is the one
+// glyph in the app that paints OUTSIDE its object's own rect — a leaf plus its
+// quarter-circle reaches a full door width off the wall — so a page fitted
+// from `renderedRect` alone crops a 915 mm outward swing on an exterior wall
+// clean off the sheet. Paint/export bounds therefore union it; INTERACTION
+// bounds (plan-object-hit, the marquee's planRectIntersectsRect) deliberately
+// do not, and stay the thin opening rect (see PlanObject.tsx).
+//
+// renderedRect, not restRect, only because it is what the surrounding bounds
+// code already holds: for a door the two share a center and an angle (the
+// viewer-side offset applies to artwork/case only, and the min-depth clamp
+// grows depth symmetrically about the center), and this reads nothing else
+// from the rect. The glyph itself was built from restRect's true model
+// geometry upstream, never from a clamped depth.
+function doorSwingPointsMm(
+  wallObjects: readonly PlanSceneWallObject[]
+): { xMm: number; yMm: number }[] {
+  return wallObjects.flatMap((entry) =>
+    entry.doorSwing
+      ? planRectLocalBoundsCorners(entry.renderedRect, entry.doorSwing.boundsMm)
+      : []
+  );
+}
+
 export function getPlanSceneBounds(scene: PlanScene): DocumentBoundsMm {
   const points = [
     ...scene.rooms.flatMap((room) => room.polygonMm),
     ...scene.partitions.flatMap((partition) => planRectCorners(partition.rect)),
     ...scene.wallObjects.flatMap((entry) => planRectCorners(entry.renderedRect)),
+    ...doorSwingPointsMm(scene.wallObjects),
     ...scene.floorObjects.flatMap((entry) => planRectCorners(entry.rect))
   ];
   return boundsFromPoints(points);
@@ -169,15 +222,43 @@ export function getPlanSceneBounds(scene: PlanScene): DocumentBoundsMm {
 // wrong as the grid's extent (it would leave cut-off grid stubs poking past
 // the wall line). Falls back to the object-inflated bounds when there are no
 // rooms to measure.
+//
+// Door swings are excluded here for exactly the same reason, and even more
+// strongly: a swing reaches a full door width into (or out of) the room, so
+// unioning it would drag the grid a metre past the wall line. This is the GRID
+// extent, not the paint extent — growing it is never the fix for a clipped
+// arc; getPlanSceneBounds (which drives the fit) already covers that.
 export function getPlanStructureBounds(scene: PlanScene): DocumentBoundsMm {
   const points = scene.rooms.flatMap((room) => room.polygonMm);
   if (points.length === 0) return getPlanSceneBounds(scene);
   return boundsFromPoints(points);
 }
 
-export function getRoomPlanBounds(room: PlanSceneRoom): DocumentBoundsMm {
+// A room page crops to the room polygon plus a fixed model-space margin
+// (export-spec §9.3). `wallObjects` is the WHOLE scene's list — filtered here
+// to this room's own walls, the same membership roomScene uses to decide what
+// the page draws — so a hinged door's swing is fitted on the page that will
+// actually paint it. Without it a door swinging OUT of an exterior wall lands
+// in the crop margin or past the sheet edge: 915 mm of swing against a 300 mm
+// margin. Defaulted to [] so a caller that only wants the polygon crop (and
+// draws no objects) keeps the old behavior verbatim.
+export function getRoomPlanBounds(
+  room: PlanSceneRoom,
+  wallObjects: readonly PlanSceneWallObject[] = []
+): DocumentBoundsMm {
+  const roomWallIds = new Set(
+    getRoomPlaceableWalls(room.placement.room).map((wall) => wall.id)
+  );
+  // The margin expands the UNION, not just the polygon: a swing that pokes out
+  // of the room keeps the same breathing room at the page edge that the room's
+  // own walls get, and a swing already inside the polygon changes nothing.
   return expandDocumentBounds(
-    boundsFromPoints(room.polygonMm),
+    boundsFromPoints([
+      ...room.polygonMm,
+      ...doorSwingPointsMm(
+        wallObjects.filter((entry) => roomWallIds.has(entry.object.wallId))
+      )
+    ]),
     ROOM_PLAN_CROP_MARGIN_MM
   );
 }
@@ -283,7 +364,7 @@ export function deriveDocumentPageManifest(
         (candidate) => candidate.roomId === roomChoice.roomId
       );
       if (!room) continue;
-      const boundsMm = getRoomPlanBounds(room);
+      const boundsMm = getRoomPlanBounds(room, planScene.wallObjects);
       pages.push({
         kind: "room-plan",
         roomId: roomChoice.roomId,

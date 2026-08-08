@@ -1,6 +1,6 @@
 # Sightlines Status
 
-Last refreshed: 2026-08-06 (shared-opening invariant + resolver shipped)
+Last refreshed: 2026-08-09 (hinged doors shipped)
 
 This is the single living status doc: current state, what shipped recently, and what comes next. The full product/architecture plan and roadmap live in `docs/plan.md`; small scraps live in `docs/quick-todos.md`; the chronological build log through 2026-07-10 is frozen at `docs/archive/progress.md`.
 
@@ -144,6 +144,19 @@ Off-device Dropbox backup + local snapshot recovery, closing the "browser storag
 - **Deployment verified live**: app.sightlines.art serves CSP `connect-src 'self' https://api.dropboxapi.com https://content.dropboxapi.com` and `/auth/dropbox/callback` returns 200 (worker SPA fallback); the Vercel mirror serves the same CSP via `vercel.json` with the same callback behavior (SPA rewrite). The user connected successfully against the deployed app.
 - **Env mechanics worth remembering**: `VITE_DROPBOX_CLIENT_ID` is baked at build time — for app.sightlines.art it must be in `.env.local` on the machine running `npm run build` before `wrangler deploy` (a Cloudflare dashboard var never reaches the bundle); Vercel builds from the repo so its project env var works there. The feature/UI is hidden entirely when the var is unset. Scheduler timing overrides: `VITE_CLOUD_BACKUP_SETTLE_MS` / `VITE_CLOUD_BACKUP_MIN_INTERVAL_MS` (see `.env.example`).
 - **Rollout stage**: now in "technical pilot" per `docs/cloud-backup-providers.md`; production-approval materials should be ready before ~30–40 cumulative linked Dropbox accounts (50 starts Dropbox's two-week clock).
+
+## Hinged Doors (shipped 2026-08-09)
+
+An optional hinged leaf on a door, per `docs/plan.md` §4.2. Openings stay what they were: `kind: "door"` is still a void, and the new `leaf` field is absent by default, so every existing project is a project of plain doorways and the default path renders byte-identically in all three views. Built across five concurrent slices; uncommitted at time of writing.
+
+- **Model**: `DoorWallObject` split out of the connectable-opening union so only a door can carry `leaf` — the window branch spells the prohibition as `z.never().optional()`, because zod strips unknown keys by default and "omit it from the schema" would have silently dropped the field instead of rejecting it. Purely additive optional field, so **no schema-version bump**.
+- **Coordinates**: both handing flags are stated against the wall's authored `start -> end`, so no renderer consults room winding. The one place winding matters is 3D, where `deriveRoom` reverses panels for clockwise rooms and the hinge must be remapped to panel-local x — verified against a seeded clockwise room, which is where this feature was most likely to be quietly wrong.
+- **Pairing**: mirroring is gated on `areSharedBoundaryWalls`, matching what position edits already do, so legacy pairs on unrelated walls keep independent leaves. Adoption resolves conflict by **hinged wins**, never by whichever id sorts first — the sort-order rule would silently erase the only leaf in a pair.
+- **Surfaces**: one shared pure glyph module (`domain/geometry/doorGlyphs.ts`, the `caseGlyphs.ts` pattern) feeds canvas, PDF and the export preview, so the three cannot drift. The plan swing arc is the only glyph that paints outside its own rect; it is pointer-transparent, and interaction bounds are deliberately unchanged while **paint/export** bounds grew to include it (an outward 915 mm swing was otherwise cropped by the 300 mm room-page margin).
+- **Found and fixed en route**: export-preview plan pages had been vertically **mirrored** relative to the printed PDF since the preview shipped (`cec13cba`, 2026-07-21). `planTransform` copied `createPlanTransform`'s `(maxYMm - yMm)` flip, which is correct only for pdf-lib's y-UP page space and inverts in the preview's y-DOWN SVG. Invisible while plan glyphs were symmetric; the swing arc is the first strongly handed one. Fixed and pinned by `ExportPdfPreview.test.ts`, which asserts orientation rather than arithmetic. Fixing it then exposed a second defect it had been masking: `planDimensionMarks` compared a screen-space normal against a world-space outward vector and hand-corrected the mismatch with a `-outWorldY`, so un-mirroring the page flipped the north and south dimension hints *inside* the room while east and west stayed right (only the x term was untouched). Now both sides of that comparison are computed in screen space via the transform itself, so it holds under any future axis convention rather than encoding this one.
+- **Verification**: tsc + 2,732 vitest + `npm run build` + 36 e2e green, plus a headless real-app pass covering the default-doorway regression, clockwise rooms, shared vs legacy pairs, narrow/short door clamping, undo and reload, and PDF page-crop on outward swings. New `e2e/hinged-doors.spec.ts` proves the arc is pointer-transparent by driving a real drag on the wall handle underneath it and asserting the room moved and the door did not.
+- **Known and intentional**: "Flip swing" has no visible effect in 3D — a shut leaf is symmetric about the wall plane, so only the hinge moves anything there. Swing clearance is advisory: nothing about the arc blocks or warns on placement.
+- **Not done**: the preview still draws windows and blocked zones with a coarse corner-to-corner diagonal where the PDF draws mullions and hatch (pre-existing, deliberately left).
 
 ## Near-Term Order
 

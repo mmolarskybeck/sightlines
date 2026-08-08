@@ -74,6 +74,13 @@ const window_: OpeningWallObject = {
   heightMm: 1200
 };
 
+// A hinged leaf: the specific flags matter to the flip-button assertions
+// below (each flip must send the OPPOSITE of the value shown here).
+const hingedDoor: OpeningWallObject = {
+  ...door,
+  leaf: { hingeAtStart: true, swingsToLeft: false }
+};
+
 function props(
   opening: OpeningWallObject = door,
   sharedOpening: OpeningSharedSection | null = null
@@ -86,6 +93,7 @@ function props(
     onCommitPosition: vi.fn().mockResolvedValue(null),
     onCommitSize: vi.fn().mockResolvedValue(null),
     onFitToWall: vi.fn().mockResolvedValue(null),
+    onUpdateDoorLeaf: vi.fn().mockResolvedValue(undefined),
     onDelete: vi.fn()
   };
 }
@@ -548,5 +556,100 @@ describe("OpeningInspector width fitting", () => {
     expect(
       await screen.findByText("Limited to 400 cm by the opening beside it.")
     ).toBeTruthy();
+  });
+});
+
+describe("OpeningInspector door leaf", () => {
+  // A Radix single ToggleGroup renders role="radiogroup", named by
+  // aria-labelledby -> the "Type" row label — same wiring WallInspector's
+  // "Move endpoint" row already uses.
+  const typeGroup = () => screen.getByRole("radiogroup", { name: "Type" });
+
+  it("shows the Type row only for a door, not a window or blocked zone", () => {
+    const { rerender } = render(<OpeningInspector {...props(door)} />);
+    expect(typeGroup()).toBeTruthy();
+
+    rerender(<OpeningInspector {...props(window_)} />);
+    expect(screen.queryByRole("radiogroup", { name: "Type" })).toBeNull();
+
+    const blockedZone: OpeningWallObject = { ...door, id: "zone-a", kind: "blocked-zone" };
+    rerender(<OpeningInspector {...props(blockedZone)} />);
+    expect(screen.queryByRole("radiogroup", { name: "Type" })).toBeNull();
+  });
+
+  it("defaults to Doorway checked for a door with no leaf", () => {
+    render(<OpeningInspector {...props(door)} />);
+
+    expect(screen.getByRole("radio", { name: "Doorway", checked: true })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Hinged door", checked: false })).toBeTruthy();
+  });
+
+  it("checks Hinged door for a door that already carries a leaf", () => {
+    render(<OpeningInspector {...props(hingedDoor)} />);
+
+    expect(screen.getByRole("radio", { name: "Hinged door", checked: true })).toBeTruthy();
+  });
+
+  // {} is deliberate: the store (updateDoorLeaf) picks the room-aware default
+  // handing, never this component — see the prop's own doc comment.
+  it("switching to Hinged calls onUpdateDoorLeaf with {}", () => {
+    const onUpdateDoorLeaf = vi.fn().mockResolvedValue(undefined);
+    render(<OpeningInspector {...props(door)} onUpdateDoorLeaf={onUpdateDoorLeaf} />);
+
+    fireEvent.click(screen.getByRole("radio", { name: "Hinged door" }));
+
+    expect(onUpdateDoorLeaf).toHaveBeenCalledTimes(1);
+    expect(onUpdateDoorLeaf).toHaveBeenCalledWith({});
+  });
+
+  // undefined puts the door back to a plain doorway (a void, no leaf at all)
+  // — distinct from any Partial<DoorLeaf>, so the store can tell "reset" from
+  // "flip one flag" apart.
+  it("switching back to Doorway calls onUpdateDoorLeaf with undefined", () => {
+    const onUpdateDoorLeaf = vi.fn().mockResolvedValue(undefined);
+    render(<OpeningInspector {...props(hingedDoor)} onUpdateDoorLeaf={onUpdateDoorLeaf} />);
+
+    fireEvent.click(screen.getByRole("radio", { name: "Doorway" }));
+
+    expect(onUpdateDoorLeaf).toHaveBeenCalledTimes(1);
+    expect(onUpdateDoorLeaf).toHaveBeenCalledWith(undefined);
+  });
+
+  it("shows the flip buttons only when hinged", () => {
+    const { rerender } = render(<OpeningInspector {...props(door)} />);
+    expect(screen.queryByRole("button", { name: "Flip hinge" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Flip swing" })).toBeNull();
+
+    rerender(<OpeningInspector {...props(hingedDoor)} />);
+    expect(screen.getByRole("button", { name: "Flip hinge" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Flip swing" })).toBeTruthy();
+  });
+
+  it("never shows flip buttons for a window or blocked zone", () => {
+    render(<OpeningInspector {...props(window_)} />);
+    expect(screen.queryByRole("button", { name: "Flip hinge" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Flip swing" })).toBeNull();
+  });
+
+  // Each flip sends only the ONE flag it names — the store fills the other
+  // from the door's current leaf, so this component must never guess it.
+  it("Flip hinge sends the opposite hingeAtStart, leaving swingsToLeft unsent", () => {
+    const onUpdateDoorLeaf = vi.fn().mockResolvedValue(undefined);
+    render(<OpeningInspector {...props(hingedDoor)} onUpdateDoorLeaf={onUpdateDoorLeaf} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Flip hinge" }));
+
+    expect(onUpdateDoorLeaf).toHaveBeenCalledTimes(1);
+    expect(onUpdateDoorLeaf).toHaveBeenCalledWith({ hingeAtStart: false });
+  });
+
+  it("Flip swing sends the opposite swingsToLeft, leaving hingeAtStart unsent", () => {
+    const onUpdateDoorLeaf = vi.fn().mockResolvedValue(undefined);
+    render(<OpeningInspector {...props(hingedDoor)} onUpdateDoorLeaf={onUpdateDoorLeaf} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Flip swing" }));
+
+    expect(onUpdateDoorLeaf).toHaveBeenCalledTimes(1);
+    expect(onUpdateDoorLeaf).toHaveBeenCalledWith({ swingsToLeft: true });
   });
 });

@@ -1,4 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
+import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowsClockwise";
+import { ArrowsLeftRightIcon } from "@phosphor-icons/react/dist/csr/ArrowsLeftRight";
 import { ArrowsOutLineHorizontalIcon } from "@phosphor-icons/react/dist/csr/ArrowsOutLineHorizontal";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
@@ -12,7 +14,7 @@ import { getOpeningKindLabel } from "../../../domain/placement/createOpening";
 import type { OpeningFit } from "../../../domain/placement/fitOpeningOnWall";
 import type { SharedOpeningTarget } from "../../../domain/placement/sharedOpeningAnalysis";
 import { formatLength } from "../../../domain/units/length";
-import type { OpeningWallObject, DisplayUnit } from "../../../domain/project";
+import type { DoorLeaf, OpeningWallObject, DisplayUnit } from "../../../domain/project";
 import { getScopedUnitContext } from "../shared/scopedUnits";
 import { LengthField } from "../shared/LengthField";
 import { InspectorActionGroup } from "./InspectorActionGroup";
@@ -27,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue
 } from "../ui/select";
+import { SegmentedToggleGroup, SegmentedToggleGroupItem } from "../ui/segmented";
 
 // Everything the panel needs to render the shared-opening state of ONE selected
 // opening, assembled in App.tsx so this component stays rendering.
@@ -279,6 +282,7 @@ export function OpeningInspector({
   onCommitSize,
   onFitToWall,
   onDelete,
+  onUpdateDoorLeaf,
   opening,
   sharedOpening,
   unit,
@@ -288,6 +292,15 @@ export function OpeningInspector({
   onCommitSize: (widthMm: number, heightMm: number) => Promise<OpeningFit | null>;
   onFitToWall: () => Promise<OpeningFit | null>;
   onDelete: () => void;
+  // Mirrors updateDoorLeaf's own contract exactly (store.ts) — this component
+  // never computes a handing, it only ever forwards one of three shapes:
+  // `{}` (make it hinged, store picks the room-aware default), a one-flag
+  // partial (flip just that side of the handing, store fills the other from
+  // the door's CURRENT leaf), or `undefined` (back to a plain doorway). Only
+  // reachable for a door (see the `door` narrowing below); App.tsx wires it
+  // for every opening kind because the store itself already no-ops for a
+  // non-door target, so there is no need to make the prop optional here.
+  onUpdateDoorLeaf: (leaf: Partial<DoorLeaf> | undefined) => Promise<void>;
   opening: OpeningWallObject;
   /** null for a blocked zone, which never pairs. */
   sharedOpening: OpeningSharedSection | null;
@@ -299,6 +312,15 @@ export function OpeningInspector({
 }) {
   const position = getScopedUnitContext(unit, "openingPosition");
   const size = getScopedUnitContext(unit, "openingSize");
+
+  // Narrowed once so every read below is type-safe without repeating the
+  // kind check: `leaf` does not exist on WindowWallObject/BlockedZoneWallObject
+  // at all (domain/project.ts's DoorWallObject split), so `door` is the only
+  // path that can reach it, and `leaf` truthy-narrows to a real DoorLeaf (an
+  // object type, never falsy) for the flip handlers below.
+  const door = opening.kind === "door" ? opening : null;
+  const leaf = door?.leaf;
+  const doorTypeLabelId = useId();
 
   // Every field here sets hideFocusHint. The focus-only accepted-formats hint
   // appears and disappears under the field, and "Fit wall" sits directly below
@@ -340,10 +362,52 @@ export function OpeningInspector({
 
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
-      {/* No "Kind" row: the panel's subject header directly above already
-          names it (e.g. "Door / Opening"). Size leads, as it does in the
-          artwork and wall-case inspectors: the opening's dimensions are what
-          govern how it draws, and its position is read off them. */}
+      {/* No "Kind" row for doorway vs. door-as-object: the panel's subject
+          header directly above already names it (e.g. "Door / Opening").
+          This IS a "Type" row, though — doorway vs. hinged is a real choice
+          the panel header cannot make for the user, so it gets one, labeled
+          "Type" rather than repeating "Door". Copies WallInspector's
+          "Move endpoint" segmented row in structure (inspector-row +
+          inspector-row-label + SegmentedToggleGroup type="single"), the
+          established two-state-pick pattern, wired the same way through
+          aria-labelledby rather than a native <label> (a Radix
+          ToggleGroup.Item is a button, not labelable). */}
+      {door ? (
+        <div className="inspector-row">
+          <span className="inspector-row-label" id={doorTypeLabelId}>
+            Type
+          </span>
+          <div className="inspector-row-control">
+            <SegmentedToggleGroup
+              aria-labelledby={doorTypeLabelId}
+              type="single"
+              value={leaf ? "hinged" : "doorway"}
+              onValueChange={(value) => {
+                // Radix fires "" when the pressed item is clicked again
+                // (single-select deselect); guarding on the two known
+                // values rather than an else-branch means that no-op is
+                // simply ignored, matching WallInspector's own guard.
+                if (value === "doorway") {
+                  void onUpdateDoorLeaf(undefined);
+                } else if (value === "hinged") {
+                  // {} — "make it hinged, you pick the default." The store
+                  // is where floor geometry lives to resolve a room-aware
+                  // default handing (defaultDoorLeaf); this component must
+                  // never compute one itself, per updateDoorLeaf's contract.
+                  void onUpdateDoorLeaf({});
+                }
+              }}
+            >
+              <SegmentedToggleGroupItem value="doorway">Doorway</SegmentedToggleGroupItem>
+              <SegmentedToggleGroupItem value="hinged">Hinged door</SegmentedToggleGroupItem>
+            </SegmentedToggleGroup>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Size leads, as it does in the artwork and wall-case inspectors: the
+          opening's dimensions are what govern how it draws, and its position
+          is read off them. */}
       <InspectorFieldGrid columns={2}>
         <LengthField
           compact
@@ -429,6 +493,43 @@ export function OpeningInspector({
           />
         ) : null}
       </InspectorFieldGrid>
+
+      {/* Verbs, not "Left/Right": which side is "left" is ambiguous once the
+          plan is rotated, but "flip the hinge" and "flip the swing" name the
+          action unambiguously, and the arc redrawing live in plan is the
+          real feedback. Only rendered once hinged (leaf narrowed above), so
+          toggling Type is what reveals/hides this row — a deliberate click,
+          not a focus side-effect, which is the case the hideFocusHint guard
+          above is actually protecting against. Flipping itself never adds or
+          removes a row (the leaf's flags change, hinged stays hinged), so
+          "Fit wall" below never moves out from under a pointer mid-click.
+          KNOWN AND ACCEPTED: "Flip swing" has no visible effect in 3D — a
+          shut leaf is symmetric about the wall plane, only "Flip hinge"
+          moves the knob there. Swing is a plan-view-only property and that
+          is where its feedback lives; no notice about this is shown here,
+          per the plan (docs/plan.md §7 / snappy-forging-horizon.md §7). */}
+      {leaf ? (
+        <InspectorActionGroup label="Swing">
+          <Button
+            className="inspector-action"
+            size="sm"
+            variant="inspector"
+            onClick={() => void onUpdateDoorLeaf({ hingeAtStart: !leaf.hingeAtStart })}
+          >
+            <ArrowsClockwiseIcon aria-hidden="true" size={15} />
+            Flip hinge
+          </Button>
+          <Button
+            className="inspector-action"
+            size="sm"
+            variant="inspector"
+            onClick={() => void onUpdateDoorLeaf({ swingsToLeft: !leaf.swingsToLeft })}
+          >
+            <ArrowsLeftRightIcon aria-hidden="true" size={15} />
+            Flip swing
+          </Button>
+        </InspectorActionGroup>
+      ) : null}
 
       {/* Wide passages and full-wall openings are legitimate, and reaching one
           by hand means coordinating Width against both jambs. "Fit wall" names

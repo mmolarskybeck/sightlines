@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createRectangularRoomPlacement } from "../geometry/createRoom";
 import type {
   ConnectableOpeningWallObject,
+  DoorLeaf,
   Project,
   RoomPlacement,
   WallObject
@@ -228,5 +229,143 @@ describe("repairSharedOpeningsOnLoad", () => {
 
     expect(second.project).toBe(first.project);
     expect(second.linkedCount).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Handing reconciliation. Post-parse and geometry-aware on purpose: the gate is
+// areSharedBoundaryWalls, which normalizeOpeningPairs (pre-parse, pointer-only)
+// must never learn to read.
+// ---------------------------------------------------------------------------
+
+const HINGED: DoorLeaf = { hingeAtStart: true, swingsToLeft: true };
+const HINGED_MIRRORED: DoorLeaf = { hingeAtStart: false, swingsToLeft: false };
+
+function leafOf(result: { project: Project }, id: string): DoorLeaf | undefined {
+  const opening = openingById(result, id);
+  return opening.kind === "door" ? opening.leaf : undefined;
+}
+
+describe("repairSharedOpeningsOnLoad — door handing", () => {
+  it("propagates the only leaf in a stored pair onto the doorway half, mirrored", () => {
+    const input = project(
+      [room("room-a", 0), room("room-b", 4000)],
+      [
+        door("door-a", A_EAST, 1200, { connectsToObjectId: "door-b" }),
+        door("door-b", B_WEST, 1800, { connectsToObjectId: "door-a", leaf: HINGED })
+      ]
+    );
+
+    const result = repairSharedOpeningsOnLoad(input, forbiddenId);
+
+    // Hinged wins even though the hinged half is the lexicographically LARGER
+    // one: the smaller-half convention decides conflicts, never whether a leaf
+    // survives at all.
+    expect(leafOf(result, "door-b")).toEqual(HINGED);
+    expect(leafOf(result, "door-a")).toEqual(HINGED_MIRRORED);
+    // Reconciliation alone is not a "link" — nothing was paired or moved.
+    expect(result.linkedCount).toBe(0);
+    expect(result.realignedIds).toEqual([]);
+  });
+
+  it("resolves two disagreeing leaves in favour of the lexicographically smaller half", () => {
+    const input = project(
+      [room("room-a", 0), room("room-b", 4000)],
+      [
+        door("door-a", A_EAST, 1200, { connectsToObjectId: "door-b", leaf: HINGED }),
+        door("door-b", B_WEST, 1800, {
+          connectsToObjectId: "door-a",
+          leaf: { hingeAtStart: true, swingsToLeft: false }
+        })
+      ]
+    );
+
+    const result = repairSharedOpeningsOnLoad(input, forbiddenId);
+
+    expect(leafOf(result, "door-a")).toEqual(HINGED);
+    expect(leafOf(result, "door-b")).toEqual(HINGED_MIRRORED);
+  });
+
+  it("is order-independent: the same pair stored the other way round reconciles the same", () => {
+    const input = project(
+      [room("room-a", 0), room("room-b", 4000)],
+      [
+        door("door-b", B_WEST, 1800, {
+          connectsToObjectId: "door-a",
+          leaf: { hingeAtStart: true, swingsToLeft: false }
+        }),
+        door("door-a", A_EAST, 1200, { connectsToObjectId: "door-b", leaf: HINGED })
+      ]
+    );
+
+    const result = repairSharedOpeningsOnLoad(input, forbiddenId);
+
+    expect(leafOf(result, "door-a")).toEqual(HINGED);
+    expect(leafOf(result, "door-b")).toEqual(HINGED_MIRRORED);
+  });
+
+  it("leaves an already-mirrored pair — and the project reference — untouched", () => {
+    const healthy = project(
+      [room("room-a", 0), room("room-b", 4000)],
+      [
+        door("door-a", A_EAST, 1200, { connectsToObjectId: "door-b", leaf: HINGED }),
+        door("door-b", B_WEST, 1800, { connectsToObjectId: "door-a", leaf: HINGED_MIRRORED })
+      ]
+    );
+
+    const result = repairSharedOpeningsOnLoad(healthy, forbiddenId);
+
+    expect(result.project).toBe(healthy);
+  });
+
+  it("keeps a legacy non-boundary pair's leaves INDEPENDENT", () => {
+    // Two walls that never faced each other are not two faces of one physical
+    // door, so there is no shared handing to agree on — the same carve-out the
+    // move/resize mirror makes. Rewriting one here would be inventing a
+    // physical relationship the geometry denies.
+    const input = project(
+      [room("room-a", 0)],
+      [
+        door("door-a", A_NORTH, 1200, { connectsToObjectId: "door-b", leaf: HINGED }),
+        door("door-b", A_SOUTH, 2400, { connectsToObjectId: "door-a" })
+      ]
+    );
+
+    const result = repairSharedOpeningsOnLoad(input, forbiddenId);
+
+    expect(result.project).toBe(input);
+    expect(leafOf(result, "door-a")).toEqual(HINGED);
+    expect(leafOf(result, "door-b")).toBeUndefined();
+  });
+
+  it("is idempotent — a second pass over a reconciled document changes nothing", () => {
+    const input = project(
+      [room("room-a", 0), room("room-b", 4000)],
+      [
+        door("door-a", A_EAST, 1200, { connectsToObjectId: "door-b", leaf: HINGED }),
+        door("door-b", B_WEST, 1800, { connectsToObjectId: "door-a", leaf: HINGED })
+      ]
+    );
+
+    const first = repairSharedOpeningsOnLoad(input, forbiddenId);
+    const second = repairSharedOpeningsOnLoad(first.project, forbiddenId);
+
+    expect(second.project).toBe(first.project);
+  });
+
+  it("does not reconcile a pair it is about to form — adoption owns that", () => {
+    // Two unpaired doors: the leaf is settled by `adopt`'s table (primary
+    // wins), not by this pass's smaller-half default, because reconciliation
+    // runs first and only ever visits halves that are ALREADY paired.
+    const input = project(
+      [room("room-a", 0), room("room-b", 4000)],
+      [door("door-a", A_EAST, 1200), door("door-b", B_WEST, 1800, { leaf: HINGED })]
+    );
+
+    const result = repairSharedOpeningsOnLoad(input, forbiddenId);
+
+    expect(result.linkedCount).toBe(1);
+    expect(leafOf(result, "door-b")).toEqual(HINGED);
+    expect(leafOf(result, "door-a")).toEqual(HINGED_MIRRORED);
   });
 });

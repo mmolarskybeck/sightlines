@@ -514,6 +514,7 @@ describe("deriveScene3d — door/window holes (M3)", () => {
     expect(wall.holes).toEqual([
       {
         kind: "door",
+        objectId: "door-1",
         xMinMm: 550,
         xMaxMm: 1450,
         yMinMm: 0,
@@ -531,6 +532,7 @@ describe("deriveScene3d — door/window holes (M3)", () => {
     expect(wall.holes).toEqual([
       {
         kind: "window",
+        objectId: "window-1",
         xMinMm: 400,
         xMaxMm: 1600,
         yMinMm: 1000,
@@ -548,6 +550,7 @@ describe("deriveScene3d — door/window holes (M3)", () => {
     expect(wall.holes).toEqual([
       {
         kind: "window",
+        objectId: "window-1",
         xMinMm: 0,
         xMaxMm: 600,
         yMinMm: 1900,
@@ -573,6 +576,7 @@ describe("deriveScene3d — door/window holes (M3)", () => {
     expect(wall.holes).toEqual([
       {
         kind: "door",
+        objectId: "door-1",
         xMinMm: 1600,
         xMaxMm: 2400,
         yMinMm: 0,
@@ -615,6 +619,7 @@ describe("deriveScene3d — door/window holes (M3)", () => {
 
     expect(holeA).toEqual({
       kind: "door",
+      objectId: "door-a",
       xMinMm: 1000,
       xMaxMm: 1600,
       yMinMm: 0,
@@ -625,6 +630,7 @@ describe("deriveScene3d — door/window holes (M3)", () => {
     });
     expect(holeB).toEqual({
       kind: "door",
+      objectId: "door-b",
       xMinMm: 1400,
       xMaxMm: 2000,
       yMinMm: 0,
@@ -658,6 +664,139 @@ describe("deriveScene3d — door/window holes (M3)", () => {
       room.walls.flatMap((wall) => wall.holes.map((hole) => hole.treatment))
     );
     expect(treatments).toEqual(["capped", "capped"]);
+  });
+});
+
+describe("deriveScene3d — hinged-door leaf (spec §6)", () => {
+  function makeHingedOpening(overrides: Partial<WallObject> = {}): WallObject {
+    return {
+      id: "door-1",
+      kind: "door",
+      blocksPlacement: true,
+      wallId: "room-a-wall-0",
+      xMm: 1000,
+      yMm: 1000,
+      widthMm: 900,
+      heightMm: 2000,
+      leaf: { hingeAtStart: true, swingsToLeft: true },
+      ...overrides
+    } as WallObject;
+  }
+
+  function deriveWall0Hinged(ring: typeof CCW_RECT) {
+    const scene = deriveScene3d(
+      makeProject([makePlacement(makeRoom("room-a", ring, 2500))], {
+        wallObjects: [makeHingedOpening({ wallId: "room-a-wall-0" })]
+      })
+    );
+    return scene.rooms[0].walls.find((wall) => wall.wallId === "room-a-wall-0")!;
+  }
+
+  it("keeps a standalone hinged door's hole from also being capped", () => {
+    const wall = deriveWall0Hinged(CCW_RECT);
+    const hole = wall.holes[0];
+    // No partner at all — without the leaf override this exact opening would
+    // be "capped" (see "derives a door as a floor-to-top cutout..." above,
+    // same shape minus `leaf`). The leaf itself replaces that flat backing
+    // plane, so treatment must not stay "capped" even with nothing on the
+    // other side of the wall to connect to.
+    expect(hole.treatment).toBe("open");
+    expect(hole.leaf).toEqual({ hingeAtMinX: true });
+  });
+
+  it("flips hingeAtMinX for a clockwise-wound room relative to the same stored leaf on a CCW room", () => {
+    const ccwWall = deriveWall0Hinged(CCW_RECT);
+    const cwWall = deriveWall0Hinged(CW_RECT);
+
+    // Same authored leaf (hingeAtStart: true) on both — deriveRoom swaps the
+    // CW room's panel endpoints (scene3d.ts:258-273) to keep the left-normal
+    // pointing inward, which reverses panel-local x relative to authored x.
+    // The hinge has to follow that swap or a stored/imported clockwise room
+    // would silently draw the leaf on the wrong jamb.
+    expect(ccwWall.holes[0].leaf).toEqual({ hingeAtMinX: true });
+    expect(cwWall.holes[0].leaf).toEqual({ hingeAtMinX: false });
+  });
+
+  it("emits the leaf on only one side of a real aligned/open shared connection", () => {
+    const roomA = makePlacement(makeRoom("room-a", CCW_RECT, 2500));
+    const roomB = makePlacement(makeRoom("room-b", CCW_RECT, 2500), {
+      offsetXMm: 4000
+    });
+    const a = makeHingedOpening({
+      id: "door-a",
+      wallId: "room-a-wall-1",
+      xMm: 1200,
+      widthMm: 1000,
+      yMm: 1050,
+      heightMm: 2100,
+      connectsToObjectId: "door-b",
+      leaf: { hingeAtStart: true, swingsToLeft: true }
+    });
+    const b = makeHingedOpening({
+      id: "door-b",
+      wallId: "room-b-wall-3",
+      xMm: 1700,
+      widthMm: 600,
+      yMm: 900,
+      heightMm: 1800,
+      connectsToObjectId: "door-a",
+      // Mirrored, as the store's boundary sync (§2) would write for a real
+      // shared wall — irrelevant to the outcome either way here, since the
+      // dedup below keys on which SIDE is canonical, never on whose leaf
+      // data happens to be read.
+      leaf: { hingeAtStart: false, swingsToLeft: false }
+    });
+
+    const scene = deriveScene3d(makeProject([roomA, roomB], { wallObjects: [a, b] }));
+    const holeA = scene.rooms[0].walls.find((wall) => wall.wallId === a.wallId)!.holes[0];
+    const holeB = scene.rooms[1].walls.find((wall) => wall.wallId === b.wallId)!.holes[0];
+
+    // "door-a" < "door-b" lexically, so A is the canonical side and is the
+    // only one that emits an actual leaf box — the two walls are coincident
+    // twins (shared walls, sharedWalls.ts), so A's single leaf already reads
+    // correctly from both rooms; a second coplanar leaf on B would z-fight
+    // it while orbiting.
+    expect(holeA.leaf).toEqual({ hingeAtMinX: true });
+    expect(holeB.leaf).toBeUndefined();
+    expect(holeA.treatment).toBe("open");
+    expect(holeB.treatment).toBe("open");
+  });
+
+  it("emits an independent leaf on each side of a legacy pair on unrelated walls", () => {
+    const roomA = makePlacement(makeRoom("room-a", CCW_RECT, 2500));
+    // Same offset the "keeps both sides capped when a stored pair is
+    // geometrically misaligned" test above uses — far enough that
+    // evaluateOpeningPairWith reports "misaligned", so this pair never
+    // becomes an openConnectionsByObjectId entry despite carrying
+    // connectsToObjectId. isStructurallyValidPair (openingPairs.ts)
+    // deliberately keeps such user-created pairs as a legitimate legacy
+    // state rather than silently dropping the link, so the two doors here
+    // are NOT a real shared boundary and each must draw its own leaf.
+    const roomB = makePlacement(makeRoom("room-b", CCW_RECT, 2500), {
+      offsetXMm: 4300
+    });
+    const a = makeHingedOpening({
+      id: "door-a",
+      wallId: "room-a-wall-1",
+      connectsToObjectId: "door-b",
+      leaf: { hingeAtStart: true, swingsToLeft: true }
+    });
+    const b = makeHingedOpening({
+      id: "door-b",
+      wallId: "room-b-wall-3",
+      connectsToObjectId: "door-a",
+      leaf: { hingeAtStart: false, swingsToLeft: false }
+    });
+
+    const scene = deriveScene3d(makeProject([roomA, roomB], { wallObjects: [a, b] }));
+    const holeA = scene.rooms[0].walls.find((wall) => wall.wallId === a.wallId)!.holes[0];
+    const holeB = scene.rooms[1].walls.find((wall) => wall.wallId === b.wallId)!.holes[0];
+
+    // Neither side is "canonical" here because there is no aligned open
+    // connection to dedup in the first place — these are two independent
+    // doors that happen to reference each other, each drawing its own leaf.
+    expect(holeA.leaf).toEqual({ hingeAtMinX: true });
+    expect(holeB.leaf).toEqual({ hingeAtMinX: false });
   });
 });
 

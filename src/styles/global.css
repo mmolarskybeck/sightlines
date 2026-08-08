@@ -7251,6 +7251,33 @@ body.panels-resizing * {
   stroke: var(--selection);
 }
 
+/* Hinged-door leaf (doorElevationGlyph, via ElevationOpening.tsx's DoorLeaf):
+   an inset panel + a latch-side knob dot. Same restrained stroke-only
+   language and the same var(--muted)/var(--selection) pair as
+   .window-mullions above, reusing its exact stroke-width rather than
+   inventing a new one. Deliberately NOT a swing indication — see the file
+   header comment; a1ebe03 removed the old `.door-swing` rules this replaces,
+   and this block is their template's replacement, not a revival of them. */
+.door-leaf {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+}
+
+.door-knob {
+  fill: var(--muted);
+  stroke: none;
+}
+
+.elevation-opening.selected .door-leaf {
+  stroke: var(--selection);
+}
+
+.elevation-opening.selected .door-knob {
+  fill: var(--selection);
+}
+
 .blocked-zone-hatch-line {
   stroke: var(--subtle);
   stroke-width: 1.5;
@@ -7462,6 +7489,20 @@ body.panels-resizing * {
 
 .plan-object-mark--blocked-zone {
   opacity: 0.75;
+}
+
+/* Hinged-door swing (doorSwingPlanGlyph, via PlanObject.tsx) — the leaf drawn
+   open plus the quarter-circle it sweeps. It fully inherits the generic
+   .plan-object-mark treatment above (subtle stroke, and the .is-selected
+   recolor a few rules down) with nothing to override, unlike
+   .plan-object-mark--blocked-zone. pointer-events:none is restated here
+   rather than left implicit: this is the one glyph that is allowed to paint
+   outside the object's own plan-object-hit rect, reaching over open floor and
+   sometimes over the neighboring wall's slide/resize handle at the wall
+   midpoint (the known handle-eats-clicks trap) — a future rule that narrows
+   .plan-object-mark's pointer-events must not silently reopen that. */
+.plan-object-mark--door-swing {
+  pointer-events: none;
 }
 
 /* Display case: the glass-line inset inherits the mark stroke (fill:none), and

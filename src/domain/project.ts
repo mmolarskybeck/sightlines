@@ -233,14 +233,54 @@ export type ArtworkWallObject = WallObjectBase & {
   displayDimensionsOverride?: Dimensions;
 };
 
+// How a hinged door's leaf is hung. BOTH flags are purely WALL-LOCAL, measured
+// against the wall's AUTHORED start→end direction, so no renderer ever needs a
+// room lookup or a winding test to draw the swing.
+//
+// `swingsToLeft`, not `swingsInward`, deliberately: "the interior side" is only
+// the LEFT normal for a counter-clockwise room. New rooms are normalized that
+// way (createRoom.ts), but stored and imported clockwise rooms are still
+// supported — deriveRoom (scene3d.ts) reverses their panel endpoints for
+// exactly this reason. Room-interior-ness is therefore resolved ONCE, when
+// picking a default handing in the store (where floor geometry is available),
+// and never again at render time.
+//
+// Same caveat as the wall-local `xMm` these sit beside: the flags are
+// authored-direction relative, so a geometry edit that reverses a wall's
+// authored direction flips the drawn handing. That is pre-existing behavior for
+// openings, not a new exposure.
+export type DoorLeaf = {
+  // Hinge at the jamb nearer the wall's authored START vertex.
+  hingeAtStart: boolean;
+  // The leaf opens toward the LEFT of the authored start→end direction.
+  swingsToLeft: boolean;
+};
+
 // The opening union is split (spec §5.5) so an illegal blocked-zone pairing is
 // unrepresentable in TS, not just rejected at runtime: only doors and windows
-// carry connectsToObjectId (opening→opening pairing; no writers until slice 4).
-export type ConnectableOpeningWallObject = WallObjectBase & {
-  kind: "door" | "window";
+// carry connectsToObjectId (opening→opening pairing).
+//
+// Doors and windows are then split from each other for the same reason: `leaf`
+// means nothing on a window, so a window that carries one is not a state to
+// reject at runtime — it is a state that cannot be written down.
+export type DoorWallObject = WallObjectBase & {
+  kind: "door";
   blocksPlacement: true;
   connectsToObjectId?: string; // v3; replaces the never-written connectsToWallId
+  // Absent = a plain doorway (a floor-to-head void punched through the wall,
+  // which is what every door was before hinging existed). Present = a hinged
+  // leaf, drawn shut in 3D and swept in plan. Optional and additive, so no
+  // schema-version bump — see projectSchema.ts.
+  leaf?: DoorLeaf;
 };
+
+export type WindowWallObject = WallObjectBase & {
+  kind: "window";
+  blocksPlacement: true;
+  connectsToObjectId?: string;
+};
+
+export type ConnectableOpeningWallObject = DoorWallObject | WindowWallObject;
 
 export type BlockedZoneWallObject = WallObjectBase & {
   kind: "blocked-zone";

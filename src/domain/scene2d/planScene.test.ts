@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
+import { doorSwingPlanGlyphFor } from "../geometry/doorGlyphs";
 import { WALL_OBJECT_PLAN_DEPTH_MM } from "../geometry/planObjects";
 import type {
   Artwork,
   ArtworkFloorObject,
   ArtworkWallObject,
+  BlockedZoneWallObject,
   CaseFloorObject,
   CaseWallObject,
-  ConnectableOpeningWallObject,
-  Project
+  DoorWallObject,
+  Project,
+  WindowWallObject
 } from "../project";
 import { createSampleProject } from "../sample/sampleProject";
 import { feetToMm } from "../units/length";
@@ -43,7 +46,7 @@ function placedArtwork(overrides: Partial<ArtworkWallObject> = {}): ArtworkWallO
   };
 }
 
-function door(overrides: Partial<ConnectableOpeningWallObject> = {}): ConnectableOpeningWallObject {
+function door(overrides: Partial<DoorWallObject> = {}): DoorWallObject {
   return {
     id: "wo-door",
     kind: "door",
@@ -286,6 +289,78 @@ describe("buildPlanScene wall objects", () => {
       caseEntry.renderedRect.centerYMm - caseEntry.restRect.centerYMm
     );
     expect(shiftMm).toBeCloseTo(225, 6);
+  });
+});
+
+describe("buildPlanScene door swing", () => {
+  it("computes doorSwing only for a hinged door — a plain doorway, a window and a blocked zone get none", () => {
+    const project = createSampleProject();
+    const windowObj: WindowWallObject = {
+      id: "wo-window",
+      kind: "window",
+      blocksPlacement: true,
+      wallId: "wall-north",
+      xMm: 6000,
+      yMm: 1200,
+      widthMm: 900,
+      heightMm: 1200
+    };
+    const blockedZone: BlockedZoneWallObject = {
+      id: "wo-blocked",
+      kind: "blocked-zone",
+      blocksPlacement: true,
+      wallId: "wall-north",
+      xMm: 7000,
+      yMm: 1000,
+      widthMm: 900,
+      heightMm: 2100
+    };
+    project.wallObjects.push(
+      door({ id: "wo-plain" }),
+      door({ id: "wo-hinged", leaf: { hingeAtStart: true, swingsToLeft: true } }),
+      windowObj,
+      blockedZone
+    );
+
+    const scene = buildPlanScene(project);
+    const byId = new Map(scene.wallObjects.map((entry) => [entry.object.id, entry]));
+
+    expect(byId.get("wo-plain")!.doorSwing).toBeUndefined();
+    expect(byId.get("wo-window")!.doorSwing).toBeUndefined();
+    expect(byId.get("wo-blocked")!.doorSwing).toBeUndefined();
+
+    const hingedEntry = byId.get("wo-hinged")!;
+    expect(hingedEntry.doorSwing).toBeDefined();
+    // doorSwing must match doorSwingPlanGlyphFor called with restRect's TRUE
+    // width/depth (planScene.ts's field comment: never renderedRect's, which
+    // this call leaves unclamped anyway since minWallObjectDepthMm is 0 here).
+    // arcPolyline is a fresh closure on each call, so it is compared by type,
+    // not by reference — everything else is compared exactly.
+    const expectedSwing = doorSwingPlanGlyphFor(
+      { hingeAtStart: true, swingsToLeft: true },
+      { widthMm: hingedEntry.restRect.widthMm, depthMm: hingedEntry.restRect.depthMm }
+    );
+    const { arcPolyline: actualArcPolyline, ...actualRest } = hingedEntry.doorSwing!;
+    const { arcPolyline: _expectedArcPolyline, ...expectedRest } = expectedSwing;
+    expect(actualRest).toEqual(expectedRest);
+    expect(typeof actualArcPolyline).toBe("function");
+  });
+
+  it("leaves restRect and renderedRect byte-identical whether or not the door is hinged", () => {
+    const project = createSampleProject();
+    project.wallObjects.push(
+      door({ id: "wo-plain" }),
+      door({ id: "wo-hinged", leaf: { hingeAtStart: false, swingsToLeft: false } })
+    );
+
+    const scene = buildPlanScene(project, { minWallObjectDepthMm: 300 });
+    const [plainEntry, hingedEntry] = scene.wallObjects;
+
+    // Hinging is drawn-only (plan §4): it must never perturb the thin
+    // interaction rect that plan-object-hit, the marquee's
+    // planRectIntersectsRect, and the wall's own drag geometry all key off.
+    expect(hingedEntry!.restRect).toEqual(plainEntry!.restRect);
+    expect(hingedEntry!.renderedRect).toEqual(plainEntry!.renderedRect);
   });
 });
 

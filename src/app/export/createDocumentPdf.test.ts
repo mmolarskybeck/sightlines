@@ -14,6 +14,10 @@ import {
   casePlanGlyph
 } from "../../domain/geometry/caseGlyphs";
 import {
+  doorElevationGlyph,
+  doorSwingPlanGlyph
+} from "../../domain/geometry/doorGlyphs";
+import {
   reconcileDocumentExportPreferences,
   type EffectiveDocumentSettings
 } from "../../domain/export/documentSettings";
@@ -525,6 +529,42 @@ describe("createDocumentPdf", () => {
       expect(plan.legs.length).toBe(4);
       const elevation = caseElevationGlyph({ widthMm: 1500, heightMm: 180 });
       expect(elevation.showMarks).toBe(true);
+    });
+  });
+
+  describe("door glyph parity", () => {
+    // Same pin as the case-mark test above, now for hinged doors: planPage.ts
+    // (drawPlanObject), elevationPage.ts (drawElevationOpening) and
+    // ExportPdfPreview.tsx all import these exact functions from
+    // doorGlyphs.ts rather than hand-drawing their own door marks, so
+    // screen/PDF/preview parity is by construction — this only needs to pin
+    // the STRUCTURE every surface consumes, so a future drift back to a
+    // bespoke per-surface swing/leaf (the old bug class the case-mark test
+    // above already guards against) would fail here first.
+    it("derives its plan swing and elevation leaf/knob from the shared glyph module", () => {
+      const plan = doorSwingPlanGlyph({
+        widthMm: 915,
+        depthMm: 150,
+        hingeAtStart: true,
+        swingsToLeft: true
+      });
+      // The leaf line's open tip and the arc's start point are the SAME
+      // coordinate by construction (doorGlyphs.ts) — every consumer draws
+      // them as one continuous path on that assumption, with no seam.
+      expect(plan.leaf.x2Mm).toBeCloseTo(plan.arc.startXMm);
+      expect(plan.leaf.y2Mm).toBeCloseTo(plan.arc.startYMm);
+      // pdf-lib has no arc primitive, so planPage.ts prints the flattened
+      // polyline instead of the SVG `A` command the screen uses — pin that
+      // the same module still produces one.
+      expect(plan.arcPolyline().length).toBeGreaterThan(0);
+
+      const elevation = doorElevationGlyph({
+        widthMm: 915,
+        heightMm: 2030,
+        hingeAtStart: true
+      });
+      expect(elevation.showMarks).toBe(true);
+      expect(elevation.knob).not.toBeNull();
     });
   });
 });

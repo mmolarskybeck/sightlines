@@ -3987,6 +3987,62 @@ describe("app store", () => {
         : undefined;
     }
 
+    describe("hinged handing", () => {
+      function leafOfId(openingId: string) {
+        const object = store
+          .getState()
+          .project!.wallObjects.find((candidate) => candidate.id === openingId);
+        return object?.kind === "door" ? object.leaf : undefined;
+      }
+
+      it("mirrors BOTH flags onto the far half of a real shared boundary", async () => {
+        const { primaryId, twinId } = await sharedPairOnBoundary();
+
+        await store.getState().updateDoorLeaf(primaryId, {
+          hingeAtStart: true,
+          swingsToLeft: true
+        });
+
+        // Twin walls are anti-parallel AND face opposite interiors, so both
+        // flags invert — which is what leaves the leaf in the same physical
+        // quadrant seen from either room.
+        expect(leafOfId(primaryId)).toEqual({ hingeAtStart: true, swingsToLeft: true });
+        expect(leafOfId(twinId)).toEqual({ hingeAtStart: false, swingsToLeft: false });
+        // One undo step covers both halves.
+        expect(store.getState().undoStack.at(-1)?.label).toBe("Edit door");
+        await store.getState().undo();
+        expect(leafOfId(primaryId)).toBeUndefined();
+        expect(leafOfId(twinId)).toBeUndefined();
+      });
+
+      it("clears the far half when the near half goes back to a doorway", async () => {
+        const { primaryId, twinId } = await sharedPairOnBoundary();
+        await store.getState().updateDoorLeaf(primaryId, {});
+
+        await store.getState().updateDoorLeaf(primaryId, undefined);
+
+        expect(leafOfId(twinId)).toBeUndefined();
+      });
+
+      it("leaves a legacy pair on unrelated walls INDEPENDENT", async () => {
+        // connectsToObjectId does not imply the walls face each other, so these
+        // two halves are not one physical door and have no shared handing —
+        // the same carve-out the position mirror makes.
+        await store.getState().addOpening("wall-north", "door");
+        const doorA = store.getState().project!.wallObjects[0];
+        await store.getState().addOpening("wall-south", "door");
+        const doorB = store
+          .getState()
+          .project!.wallObjects.find((object) => object.id !== doorA.id)!;
+        linkLegacyPair(doorA.id, doorB.id);
+
+        await store.getState().updateDoorLeaf(doorA.id, {});
+
+        expect(leafOfId(doorA.id)).not.toBeUndefined();
+        expect(leafOfId(doorB.id)).toBeUndefined();
+      });
+    });
+
     it("a legacy pair can be split, and undo restores it", async () => {
       // wall-north and wall-south belong to ONE room, so this pair is not two
       // faces of a shared boundary and never was. Split is the whole resolution
@@ -6055,6 +6111,101 @@ describe("app store", () => {
       // The case stays on the floor, unconverted.
       expect(store.getState().project!.floorObjects).toHaveLength(1);
       expect(store.getState().project!.wallObjects).toHaveLength(0);
+    });
+  });
+
+  describe("updateDoorLeaf", () => {
+    async function addDoor(): Promise<string> {
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+      await store.getState().addOpening(wall.id, "door");
+      return store.getState().project!.wallObjects.at(-1)!.id;
+    }
+
+    function doorById(id: string) {
+      const found = store.getState().project!.wallObjects.find((object) => object.id === id);
+      return found?.kind === "door" ? found : null;
+    }
+
+    it("a new door is a plain doorway — no leaf key at all", async () => {
+      const doorId = await addDoor();
+      expect(Object.keys(doorById(doorId)!)).not.toContain("leaf");
+    });
+
+    it("an empty partial makes it hinged with the derived default handing", async () => {
+      const doorId = await addDoor();
+
+      await store.getState().updateDoorLeaf(doorId, {});
+
+      // The sample room is wound counter-clockwise, so the interior IS the left
+      // of the authored direction; the door is centred on the wall, so the
+      // hinge goes to the nearer (start) jamb.
+      expect(doorById(doorId)!.leaf).toEqual({ hingeAtStart: true, swingsToLeft: true });
+      expect(store.getState().undoStack.at(-1)?.label).toBe("Edit door");
+    });
+
+    it("a partial flips one flag and leaves the other alone", async () => {
+      const doorId = await addDoor();
+      await store.getState().updateDoorLeaf(doorId, {});
+
+      await store.getState().updateDoorLeaf(doorId, { swingsToLeft: false });
+
+      // Filling from the CURRENT handing, not from the default: otherwise
+      // "flip the swing" would silently reset the hinge.
+      expect(doorById(doorId)!.leaf).toEqual({ hingeAtStart: true, swingsToLeft: false });
+    });
+
+    it("undefined turns it back into a doorway, deleting the key", async () => {
+      const doorId = await addDoor();
+      await store.getState().updateDoorLeaf(doorId, {});
+
+      await store.getState().updateDoorLeaf(doorId, undefined);
+
+      expect(Object.keys(doorById(doorId)!)).not.toContain("leaf");
+    });
+
+    it("pushes no undo entry when nothing actually changes", async () => {
+      const doorId = await addDoor();
+      await store.getState().updateDoorLeaf(doorId, {});
+      const doorwayId = await addDoor();
+      const depth = store.getState().undoStack.length;
+
+      await store.getState().updateDoorLeaf(doorId, { hingeAtStart: true, swingsToLeft: true });
+      // ...and clearing an already-clear leaf is a no-op too.
+      await store.getState().updateDoorLeaf(doorwayId, undefined);
+
+      expect(store.getState().undoStack).toHaveLength(depth);
+    });
+
+    it("ignores a window (and anything that is not a door)", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+      await store.getState().addOpening(wall.id, "window");
+      const windowId = store.getState().project!.wallObjects.at(-1)!.id;
+      const depth = store.getState().undoStack.length;
+
+      await store.getState().updateDoorLeaf(windowId, {});
+
+      expect(store.getState().undoStack).toHaveLength(depth);
+      expect(
+        Object.keys(store.getState().project!.wallObjects.find((o) => o.id === windowId)!)
+      ).not.toContain("leaf");
+    });
+
+    it("survives undo/redo and reaches the persisted document", async () => {
+      const doorId = await addDoor();
+      await store.getState().updateDoorLeaf(doorId, { hingeAtStart: false, swingsToLeft: false });
+
+      await store.getState().undo();
+      expect(doorById(doorId)!.leaf).toBeUndefined();
+
+      await store.getState().redo();
+      expect(doorById(doorId)!.leaf).toEqual({ hingeAtStart: false, swingsToLeft: false });
+
+      const persisted = repository.projects.get(store.getState().project!.id)!;
+      const stored = persisted.wallObjects.find((object) => object.id === doorId);
+      expect(stored?.kind === "door" ? stored.leaf : null).toEqual({
+        hingeAtStart: false,
+        swingsToLeft: false
+      });
     });
   });
 

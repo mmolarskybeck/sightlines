@@ -1,15 +1,25 @@
+import { useCursor } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Path, Shape, ShapeGeometry, type Texture } from "three";
+import {
+  DOOR_KNOB_HEIGHT_MM,
+  DOOR_KNOB_INSET_MM,
+  DOOR_KNOB_RADIUS_MM,
+  DOOR_LEAF_THICKNESS_MM
+} from "../../../domain/geometry/doorGlyphs";
 import type { Artwork } from "../../../domain/project";
 import { effectiveFraming } from "../../../domain/framing";
-import type { WallPanel3d } from "../../../domain/geometry/scene3d";
+import type { Hole3d, WallPanel3d } from "../../../domain/geometry/scene3d";
 import { ArtworkPlane } from "./ArtworkPlane";
 import { WallCaseMesh } from "./CaseMesh";
 import { WallTextPanel } from "./WallTextPanel";
 import { mmToWorld, MM_TO_WORLD } from "./coordinates";
+import { SelectionBoxOutline } from "./UncertaintyOutline";
 import {
   BLOCKED_ZONE_COLOR,
+  DOOR_KNOB_COLOR,
+  DOOR_LEAF_COLOR,
   GHOST_OPACITY,
   OPENING_CAP_COLOR,
   WALL_COLOR,
@@ -25,6 +35,13 @@ const BLOCKED_ZONE_OPACITY = 0.15;
 const BLOCKED_ZONE_OFFSET_MM = 6;
 const OPENING_CAP_RECESS_MM = -30;
 const WINDOW_CAP_OPACITY = 0.48;
+
+// How far each knob's cylinder barrel stands proud of the leaf face it is
+// mounted on. A rendering-only depth (unlike DOOR_KNOB_RADIUS_MM etc., there
+// is no plan/elevation glyph that needs this number too), so it lives here
+// rather than in doorGlyphs.ts — same reasoning as OPENING_CAP_RECESS_MM just
+// above. Small enough to read as a knob barrel, not a handle bar.
+const DOOR_KNOB_PROTRUSION_MM = 24;
 
 // One zero-thickness, single-sided wall and everything placed on it. The group
 // maps wall-local coordinates to the world: local +x runs start -> end, +y up
@@ -161,6 +178,24 @@ export function WallPanel({
             />
           </mesh>
         ))}
+      {/* Hinged-door leaves (spec §6). `leaf` is only ever set on a "door"
+          hole (see the derivation in scene3d.ts), and only on the canonical
+          side of a shared connection — the filter here is therefore also the
+          dedup: the partner's hole for the same aligned pair has no `leaf`
+          and never reaches this map. Its own `treatment` was already forced
+          away from "capped" (same derivation), so the cap-plane block above
+          never draws a competing plane at this hole's position either. */}
+      {wall.holes
+        .filter((hole) => hole.leaf !== undefined)
+        .map((hole) => (
+          <DoorLeafMesh
+            key={hole.objectId}
+            hole={hole}
+            isSelected={selectedObjectIds.includes(hole.objectId)}
+            onSelect={onSelectObject}
+            ghosted={ghosted}
+          />
+        ))}
       {wall.blockedZones.map((zone, index) => (
         <mesh
           key={index}
@@ -224,6 +259,139 @@ export function WallPanel({
           />
         );
       })}
+    </group>
+  );
+}
+
+// A hinged door's shut leaf: a thin slab filling the hole exactly (no reveal
+// inset — unlike doorElevationGlyph, 3D draws no separate frame, so "filling
+// the hole" is the leaf's whole visible footprint) plus one knob per face on
+// the latch side. Unlike the flat cap plane (handleWallClick, which selects
+// the WALL), the leaf is a real placed object with its own inspector, so it
+// selects the DOOR OBJECT via onSelect — the same onSelectObject idiom
+// WallTextPanel and WallCaseMesh already use for their own wall children,
+// and exactly what Hole3d.objectId exists for.
+function DoorLeafMesh({
+  hole,
+  isSelected,
+  onSelect,
+  ghosted
+}: {
+  hole: Hole3d;
+  isSelected: boolean;
+  onSelect: (objectId: string, opts: { additive: boolean }) => void;
+  ghosted: boolean;
+}) {
+  const [hovered, setHovered] = useState(false);
+  useCursor(hovered && !ghosted);
+
+  // Guaranteed by the caller's filter (wall.holes.filter(hole => hole.leaf
+  // !== undefined)); narrowed once here rather than optional-chaining every
+  // use below.
+  const leaf = hole.leaf!;
+  const widthMm = hole.xMaxMm - hole.xMinMm;
+  const heightMm = hole.yMaxMm - hole.yMinMm;
+  const centerXMm = (hole.xMinMm + hole.xMaxMm) / 2;
+  const centerYMm = (hole.yMinMm + hole.yMaxMm) / 2;
+
+  // The knob sits on the LATCH side — opposite the hinge — inset from that
+  // free edge; same convention doorElevationGlyph uses for its own knob
+  // (DOOR_KNOB_INSET_MM is measured from the leaf's own edge, not the wall's
+  // jamb — see that constant's doc comment in doorGlyphs.ts).
+  const rawKnobXMm = leaf.hingeAtMinX
+    ? hole.xMaxMm - DOOR_KNOB_INSET_MM
+    : hole.xMinMm + DOOR_KNOB_INSET_MM;
+  // Clamped inside the leaf's own width — the same guard doorElevationGlyph
+  // applies to its knob: a wall-bounds-clamped (narrow) hole can push the
+  // inset past the panel while the knob itself still fits, and pinning it to
+  // the latch edge is right; a knob drawn outside its own leaf would be the
+  // caseGlyphs `includeLegs` mistake in a different costume.
+  const knobXMm = Math.min(
+    Math.max(rawKnobXMm, hole.xMinMm + DOOR_KNOB_RADIUS_MM),
+    hole.xMaxMm - DOOR_KNOB_RADIUS_MM
+  );
+  // Height above the door's own bottom edge (its floor), not the room floor —
+  // matches DOOR_KNOB_HEIGHT_MM's own doc comment in doorGlyphs.ts. Doors run
+  // floor-to-top (derivePanelContents), so hole.yMinMm is always 0 in
+  // practice, but this stays right if that ever changes.
+  const knobYMm = hole.yMinMm + DOOR_KNOB_HEIGHT_MM;
+
+  const handleClick = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    // An orbit drag's release also fires click — only a true click selects.
+    if (event.delta > 6) return;
+    const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
+    onSelect(hole.objectId, { additive: shiftKey || metaKey || ctrlKey });
+  };
+
+  return (
+    <group
+      onPointerOver={(event) => {
+        event.stopPropagation();
+        setHovered(true);
+      }}
+      onPointerOut={() => setHovered(false)}
+    >
+      {/* The leaf slab, centered ON the wall plane (z=0) like the wall mesh
+          itself — deliberately NOT recessed the way the flat cap plane is
+          (OPENING_CAP_RECESS_MM): a real door sits IN its frame, not behind
+          it, so half its thickness naturally stands proud of each wall face. */}
+      <mesh onClick={handleClick} position={[mmToWorld(centerXMm), mmToWorld(centerYMm), 0]}>
+        <boxGeometry
+          args={[mmToWorld(widthMm), mmToWorld(heightMm), mmToWorld(DOOR_LEAF_THICKNESS_MM)]}
+        />
+        <meshLambertMaterial
+          key={ghosted ? "ghosted" : "solid"}
+          color={DOOR_LEAF_COLOR}
+          transparent={ghosted}
+          opacity={ghosted ? GHOST_OPACITY : 1}
+          depthWrite={!ghosted}
+        />
+      </mesh>
+      {/* One knob per face, standing proud of the leaf on each side — a shut
+          door is symmetric about the wall plane, so both faces need a knob
+          for the door to read correctly from either room (the swing side,
+          which WOULD differ the two faces, is deliberately not drawn at all —
+          see Hole3d.leaf's doc comment). Cylinders default to a y-axis
+          barrel; rotating 90deg about x lays that axis onto world z, i.e.
+          straight out of the leaf face. */}
+      {([1, -1] as const).map((sideSign) => (
+        <mesh
+          key={sideSign}
+          onClick={handleClick}
+          position={[
+            mmToWorld(knobXMm),
+            mmToWorld(knobYMm),
+            sideSign * mmToWorld(DOOR_LEAF_THICKNESS_MM / 2 + DOOR_KNOB_PROTRUSION_MM / 2)
+          ]}
+          rotation={[Math.PI / 2, 0, 0]}
+        >
+          <cylinderGeometry
+            args={[
+              mmToWorld(DOOR_KNOB_RADIUS_MM),
+              mmToWorld(DOOR_KNOB_RADIUS_MM),
+              mmToWorld(DOOR_KNOB_PROTRUSION_MM),
+              12
+            ]}
+          />
+          <meshLambertMaterial
+            key={ghosted ? "ghosted" : "solid"}
+            color={DOOR_KNOB_COLOR}
+            transparent={ghosted}
+            opacity={ghosted ? GHOST_OPACITY : 1}
+            depthWrite={!ghosted}
+          />
+        </mesh>
+      ))}
+      {!ghosted && isSelected ? (
+        <group position={[mmToWorld(centerXMm), mmToWorld(centerYMm), 0]}>
+          <SelectionBoxOutline
+            widthMm={widthMm + 20}
+            heightMm={heightMm + 20}
+            depthMm={DOOR_LEAF_THICKNESS_MM + DOOR_KNOB_PROTRUSION_MM * 2 + 20}
+          />
+        </group>
+      ) : null}
     </group>
   );
 }

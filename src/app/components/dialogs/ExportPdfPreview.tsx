@@ -8,6 +8,10 @@ import {
   casePlanGlyph,
   wallTextPlanGlyph
 } from "../../../domain/geometry/caseGlyphs";
+import {
+  doorElevationGlyph,
+  type DoorSwingPlanGlyph
+} from "../../../domain/geometry/doorGlyphs";
 import { getRoomPlaceableWalls } from "../../../domain/geometry/placeableWalls";
 import { isPointInPolygon } from "../../../domain/geometry/polygon";
 import {
@@ -83,9 +87,28 @@ function drawingRectPt(
   };
 }
 
-// Plan transform: world mm (y-UP) → SVG points (y-DOWN). Larger world-y maps to
-// a smaller SVG y (higher on the page), matching createPlanTransform's flip.
-function planTransform(
+// Plan transform: floor mm (y-DOWN, the same sense the plan canvas draws in) →
+// SVG points (y-DOWN). A plain shift and scale, with NO flip.
+//
+// This deliberately does NOT copy createPlanTransform's formula, and copying it
+// is exactly the bug this comment exists to prevent. That function ends in
+// `(bounds.maxYMm - yMm)`, which looks like the thing to match — but its
+// destination is pdf-lib page space, where y runs UP from the bottom-left, so
+// the subtraction is what puts north at the TOP of the sheet. Here the
+// destination is SVG, where y runs DOWN. The identical expression against the
+// opposite axis mirrors the whole page: north renders at the bottom, and every
+// room, artwork and door sits on the wrong side of the plan.
+//
+// It was invisible for as long as plan pages held only symmetric marks. The
+// hinged-door swing arc is the first strongly HANDED plan glyph, and it made a
+// preview that had been upside-down since the preview shipped (cec13cba) read
+// as a door hinged on the wrong jamb.
+//
+// So this is now identical to elevationTransform. They are kept separate
+// anyway: they answer different questions (floor space vs. wall-local space),
+// and collapsing them would invite re-deriving one from the other's page
+// conventions — which is how this went wrong in the first place.
+export function planTransform(
   bounds: DocumentBoundsMm,
   fit: ReturnType<typeof fitBoundsToRect>
 ): Transform {
@@ -93,7 +116,7 @@ function planTransform(
     scalePtPerMm: fit.scalePtPerMm,
     point: ({ xMm, yMm }) => ({
       x: fit.xPt + (xMm - bounds.minXMm) * fit.scalePtPerMm,
-      y: fit.yPt + (bounds.maxYMm - yMm) * fit.scalePtPerMm
+      y: fit.yPt + (yMm - bounds.minYMm) * fit.scalePtPerMm
     })
   };
 }
@@ -228,7 +251,12 @@ function planObjectMarks(
   kind: string,
   isFloor: boolean,
   xf: Transform,
-  key: string
+  key: string,
+  // A hinged door's swing glyph off the plan scene (PlanSceneWallObject
+  // .doorSwing) — the same object the canvas and the PDF writer draw. Never
+  // recomputed here: the preview drifting from the artifact it previews is
+  // exactly the failure this module's shared-glyph rule exists to prevent.
+  swing?: DoorSwingPlanGlyph
 ): JSX.Element {
   const world = (xMm: number, yMm: number) =>
     xf.point(localToWorld(rect, xMm, yMm));
@@ -325,6 +353,42 @@ function planObjectMarks(
         />
       );
     });
+  } else if (kind === "door" && swing) {
+    // A HINGED door: leaf line + swept quarter-circle, from the shared glyph.
+    const leafFrom = world(swing.leaf.x1Mm, swing.leaf.y1Mm);
+    const leafTo = world(swing.leaf.x2Mm, swing.leaf.y2Mm);
+    // Drawn as the FLATTENED polyline (arcPolyline), not an SVG `A` command,
+    // even though this surface is SVG and could emit one: it is what the PDF
+    // actually prints, and this card is a look-ahead at the PDF. Sharing the
+    // flattening also means a curve that reads smooth here cannot print
+    // faceted there.
+    //
+    // (An `A` would draw correctly now that planTransform no longer flips y.
+    // It did not before that fix, and the flattened form was already immune —
+    // a polyline carries no sweep flag to get backwards.)
+    const arcPoints = swing
+      .arcPolyline()
+      .map((point) => world(point.xMm, point.yMm))
+      .map((point) => `${point.x},${point.y}`)
+      .join(" ");
+    inner.push(
+      <line
+        key={`${key}-leaf`}
+        x1={leafFrom.x}
+        y1={leafFrom.y}
+        x2={leafTo.x}
+        y2={leafTo.y}
+        stroke={SUBTLE}
+        strokeWidth={0.5}
+      />,
+      <polyline
+        key={`${key}-arc`}
+        points={arcPoints}
+        fill="none"
+        stroke={SUBTLE}
+        strokeWidth={0.5}
+      />
+    );
   } else if (kind === "door") {
     const a = world(-halfW, halfD);
     const b = world(-halfW, -halfD);
@@ -360,7 +424,7 @@ function planObjectMarks(
 
 // A faint dimension hint alongside each wall: offset the segment outward (away
 // from the room centroid) by a few points. No labels — too small to read.
-function planDimensionMarks(room: PlanSceneRoom, xf: Transform): JSX.Element[] {
+export function planDimensionMarks(room: PlanSceneRoom, xf: Transform): JSX.Element[] {
   const centroid = room.polygonMm.reduce(
     (acc, p) => ({ xMm: acc.xMm + p.xMm, yMm: acc.yMm + p.yMm }),
     { xMm: 0, yMm: 0 }
@@ -382,10 +446,24 @@ function planDimensionMarks(room: PlanSceneRoom, xf: Transform): JSX.Element[] {
     // Screen-space perpendicular, oriented away from the centroid.
     let nx = -dy / len;
     let ny = dx / len;
-    const outWorldX = midWorld.xMm - centroid.xMm;
-    const outWorldY = midWorld.yMm - centroid.yMm;
-    // World-y is up, screen-y is down, so flip the world normal's y to compare.
-    if (nx * outWorldX + ny * -outWorldY < 0) {
+    // Both sides of this comparison are in SCREEN space: the outward direction
+    // is the transformed centroid subtracted from the transformed wall midpoint,
+    // not the world-space difference. `xf` is affine, so transforming both ends
+    // and subtracting yields the true screen direction under ANY axis
+    // convention it might use.
+    //
+    // The previous form compared a screen normal against a WORLD outward vector
+    // and hand-corrected with `-outWorldY`, on the premise that screen y opposed
+    // world y. That premise came from a planTransform which mirrored the page
+    // (see its comment); when the mirror was fixed the negation silently
+    // inverted, drawing the north and south dimension hints INSIDE the room
+    // while the east/west ones stayed correct — those only exercise the x term.
+    // Comparing within one space removes the premise rather than re-tuning it.
+    const midScreen = xf.point(midWorld);
+    const centroidScreen = xf.point(centroid);
+    const outX = midScreen.x - centroidScreen.x;
+    const outY = midScreen.y - centroidScreen.y;
+    if (nx * outX + ny * outY < 0) {
       nx = -nx;
       ny = -ny;
     }
@@ -461,7 +539,8 @@ function planPageMarks(
             painted.entry.object.kind,
             false,
             xf,
-            `wobj-${i}`
+            `wobj-${i}`,
+            painted.entry.doorSwing
           )
         );
       } else {
@@ -572,7 +651,7 @@ function elevationPageMarks(
     );
   });
 
-  // Openings: bordered rect with a diagonal.
+  // Openings: bordered rect, plus one mark per kind.
   scene.openings.forEach((entry, i) => {
     const r = getArtworkRectSvg(scene.wallHeightMm, entry.centerMm, entry.sizeMm);
     const a = xf.point({ xMm: r.xMm, yMm: r.yMm });
@@ -588,17 +667,72 @@ function elevationPageMarks(
         fill="#ffffff"
         stroke={MUTED}
         strokeWidth={0.75}
-      />,
-      <line
-        key={`open-d-${i}`}
-        x1={a.x}
-        y1={a.y + rh}
-        x2={a.x + rw}
-        y2={a.y}
-        stroke={SUBTLE}
-        strokeWidth={0.5}
       />
     );
+    // A HINGED door gets the shared leaf panel + latch knob (the same glyph
+    // the canvas and the PDF draw). The glyph's frame is y-DOWN from the
+    // opening's top-left, which is exactly what getArtworkRectSvg returns, so
+    // — unlike the plan glyph above — nothing flips here.
+    const leaf =
+      entry.object.kind === "door" ? entry.object.leaf : undefined;
+    const doorGlyph = leaf
+      ? doorElevationGlyph({
+          widthMm: entry.sizeMm.widthMm,
+          heightMm: entry.sizeMm.heightMm,
+          hingeAtStart: leaf.hingeAtStart
+        })
+      : undefined;
+    if (doorGlyph?.showMarks) {
+      const leafOrigin = xf.point({
+        xMm: r.xMm + doorGlyph.leafRect.xMm,
+        yMm: r.yMm + doorGlyph.leafRect.yMm
+      });
+      marks.push(
+        <rect
+          key={`open-leaf-${i}`}
+          x={leafOrigin.x}
+          y={leafOrigin.y}
+          width={doorGlyph.leafRect.widthMm * xf.scalePtPerMm}
+          height={doorGlyph.leafRect.heightMm * xf.scalePtPerMm}
+          fill="none"
+          stroke={MUTED}
+          strokeWidth={0.5}
+        />
+      );
+      if (doorGlyph.knob) {
+        const knob = xf.point({
+          xMm: r.xMm + doorGlyph.knob.cxMm,
+          yMm: r.yMm + doorGlyph.knob.cyMm
+        });
+        marks.push(
+          <circle
+            key={`open-knob-${i}`}
+            cx={knob.x}
+            cy={knob.y}
+            r={doorGlyph.knob.radiusMm * xf.scalePtPerMm}
+            fill={MUTED}
+          />
+        );
+      }
+    } else if (entry.object.kind !== "door") {
+      // The coarse corner-to-corner hint this card has always used for
+      // openings, now scoped to windows and blocked zones. A DOORWAY gets
+      // nothing: it is a void, and both the canvas and the PDF draw it as a
+      // bare outline (a1ebe03 removed the last unconditional door marks).
+      // Keeping the diagonal only here would make the preview assert a leaf on
+      // a door that has none — the precise drift this pass exists to close.
+      marks.push(
+        <line
+          key={`open-d-${i}`}
+          x1={a.x}
+          y1={a.y + rh}
+          x2={a.x + rw}
+          y2={a.y}
+          stroke={SUBTLE}
+          strokeWidth={0.5}
+        />
+      );
+    }
   });
 
   // Wall texts: bordered panel with a couple of skeleton bars.

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createRectangularRoomPlacement } from "../geometry/createRoom";
 import type {
   ConnectableOpeningWallObject,
+  DoorLeaf,
   Project,
   RoomPlacement,
   WallObject
@@ -1022,5 +1023,160 @@ describe("applySharedOpeningActions", () => {
 
     const reapplied = applySharedOpeningActions(first.project, second.actions, idFactory());
     expect(reapplied.project).toBe(first.project);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Apply — hinged-door handing.
+// ---------------------------------------------------------------------------
+
+const HINGED: DoorLeaf = { hingeAtStart: true, swingsToLeft: true };
+
+function leafOf(applied: { project: Project }, id: string): DoorLeaf | undefined {
+  const found = applied.project.wallObjects.find((object) => object.id === id);
+  return found?.kind === "door" ? found.leaf : undefined;
+}
+
+describe("applySharedOpeningActions — door leaves", () => {
+  it("copies a create-twin's leaf MIRRORED, not verbatim", () => {
+    // Twin walls run opposite directions and face opposite interiors, so the
+    // same physical door is described by the opposite flags on the far wall.
+    // A verbatim copy would put the two halves' arcs in different rooms.
+    const base = project(
+      [room("room-a", 0), room("room-b", 4000)],
+      [door("door-a", A_EAST, 1200, { leaf: HINGED })]
+    );
+    const applied = applySharedOpeningActions(
+      base,
+      analyzeSharedOpenings(base).actions,
+      idFactory()
+    );
+
+    expect(leafOf(applied, "door-a")).toEqual(HINGED);
+    expect(leafOf(applied, "twin-1")).toEqual({ hingeAtStart: false, swingsToLeft: false });
+  });
+
+  it("gives a create-twin no leaf when the primary is a plain doorway", () => {
+    const base = project(
+      [room("room-a", 0), room("room-b", 4000)],
+      [door("door-a", A_EAST, 1200)]
+    );
+    const applied = applySharedOpeningActions(
+      base,
+      analyzeSharedOpenings(base).actions,
+      idFactory()
+    );
+
+    const twin = applied.project.wallObjects.find((object) => object.id === "twin-1");
+    // The KEY is absent, not present-and-undefined: a doorway must serialize
+    // exactly as it did before hinging existed.
+    expect(Object.keys(twin ?? {})).not.toContain("leaf");
+  });
+
+  it("adopting hinged + doorway propagates the leaf, mirrored — hinged wins", () => {
+    // Whichever half the user acted on, the pair ends up hinged: the losing
+    // rule ("lexically smaller wins") could silently erase the only leaf.
+    const base = project(
+      [room("room-a", 0), room("room-b", 4000)],
+      [door("door-a", A_EAST, 1200), door("door-b", B_WEST, 1800, { leaf: HINGED })]
+    );
+    const applied = applySharedOpeningActions(
+      base,
+      [{ kind: "adopt", openingId: "door-a", counterpartOpeningId: "door-b" }],
+      idFactory()
+    );
+
+    // door-a is the primary here and it is the DOORWAY, so the counterpart's
+    // leaf is what survives — mirrored onto the primary.
+    expect(leafOf(applied, "door-b")).toEqual(HINGED);
+    expect(leafOf(applied, "door-a")).toEqual({ hingeAtStart: false, swingsToLeft: false });
+  });
+
+  it("adopting two conflicting hinged doors lets the PRIMARY win", () => {
+    const base = project(
+      [room("room-a", 0), room("room-b", 4000)],
+      [
+        door("door-a", A_EAST, 1200, { leaf: HINGED }),
+        door("door-b", B_WEST, 1800, { leaf: { hingeAtStart: true, swingsToLeft: false } })
+      ]
+    );
+    const applied = applySharedOpeningActions(
+      base,
+      [{ kind: "adopt", openingId: "door-a", counterpartOpeningId: "door-b" }],
+      idFactory()
+    );
+
+    // The half the user acted on keeps its handing verbatim; the counterpart is
+    // restated in its own wall's frame.
+    expect(leafOf(applied, "door-a")).toEqual(HINGED);
+    expect(leafOf(applied, "door-b")).toEqual({ hingeAtStart: false, swingsToLeft: false });
+  });
+
+  it("lets the primary win from the other side too — the table is not id-ordered", () => {
+    const base = project(
+      [room("room-a", 0), room("room-b", 4000)],
+      [
+        door("door-a", A_EAST, 1200, { leaf: HINGED }),
+        door("door-b", B_WEST, 1800, { leaf: { hingeAtStart: true, swingsToLeft: false } })
+      ]
+    );
+    const applied = applySharedOpeningActions(
+      base,
+      [{ kind: "adopt", openingId: "door-b", counterpartOpeningId: "door-a" }],
+      idFactory()
+    );
+
+    expect(leafOf(applied, "door-b")).toEqual({ hingeAtStart: true, swingsToLeft: false });
+    expect(leafOf(applied, "door-a")).toEqual({ hingeAtStart: false, swingsToLeft: true });
+  });
+
+  it("leaves a doorway + doorway adoption with no leaf at all", () => {
+    const base = project(
+      [room("room-a", 0), room("room-b", 4000)],
+      [door("door-a", A_EAST, 1200), door("door-b", B_WEST, 1800)]
+    );
+    const applied = applySharedOpeningActions(
+      base,
+      analyzeSharedOpenings(base).actions,
+      idFactory()
+    );
+
+    for (const id of ["door-a", "door-b"]) {
+      const found = applied.project.wallObjects.find((object) => object.id === id);
+      expect(Object.keys(found ?? {})).not.toContain("leaf");
+    }
+  });
+
+  it("never mints a leaf on an adopted WINDOW pair", () => {
+    const base = project(
+      [room("room-a", 0), room("room-b", 4000)],
+      [window("window-a", A_EAST, 1200), window("window-b", B_WEST, 1800)]
+    );
+    const applied = applySharedOpeningActions(
+      base,
+      analyzeSharedOpenings(base).actions,
+      idFactory()
+    );
+
+    for (const id of ["window-a", "window-b"]) {
+      const found = applied.project.wallObjects.find((object) => object.id === id);
+      expect(Object.keys(found ?? {})).not.toContain("leaf");
+    }
+  });
+
+  it("does not report a conflict for disagreeing handing", () => {
+    // Settled: paired-geometry-mismatch stays width/height/y. Handing is
+    // reconciled silently and never becomes something the user must resolve.
+    const base = project(
+      [room("room-a", 0), room("room-b", 4000)],
+      [
+        door("door-a", A_EAST, 1200, { connectsToObjectId: "door-b", leaf: HINGED }),
+        door("door-b", B_WEST, 1800, { connectsToObjectId: "door-a", leaf: HINGED })
+      ]
+    );
+
+    const analysis = analyzeSharedOpenings(base);
+    expect(analysis.conflicts).toEqual([]);
+    expect(analysis.actions).toEqual([]);
   });
 });

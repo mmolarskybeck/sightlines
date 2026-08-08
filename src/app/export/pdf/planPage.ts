@@ -5,6 +5,7 @@ import {
   casePlanGlyph,
   wallTextPlanGlyph
 } from "../../../domain/geometry/caseGlyphs";
+import type { DoorSwingPlanGlyph } from "../../../domain/geometry/doorGlyphs";
 import { isPointInPolygon } from "../../../domain/geometry/polygon";
 import { getWallGeometry, outwardWallNormal } from "../../../domain/geometry/walls";
 import type { DisplayUnit, Project } from "../../../domain/project";
@@ -137,7 +138,12 @@ function drawPlanObject(
   transform: PlanTransform,
   rect: PlanRect,
   kind: "artwork" | "door" | "window" | "blocked-zone" | "wall-text" | "case",
-  isFloorPlaced: boolean
+  isFloorPlaced: boolean,
+  // A hinged door's swing glyph, straight off the plan scene
+  // (PlanSceneWallObject.doorSwing) — never recomputed here, so print and
+  // screen sweep the identical arc. Undefined for a plain doorway (which keeps
+  // its chevron) and for every other kind.
+  swing?: DoorSwingPlanGlyph
 ) {
   const corners = planRectCorners(rect).map(transform.point);
   page.drawSvgPath(polygonPath(corners), {
@@ -163,6 +169,35 @@ function drawPlanObject(
       polygonPath(planRectCorners(insetRect).map(transform.point)),
       { borderColor: COLORS.subtle, borderWidth: 0.5 }
     );
+  } else if (kind === "door" && swing) {
+    // A HINGED door: the leaf open at 90° plus the quarter-circle it sweeps,
+    // the print twin of PlanObject.tsx's swing group. `world` reads only the
+    // rect's center/angle, and the glyph is authored in the same local-centered
+    // frame planRectWorldPoint expects, so the min-depth clamp applied to
+    // `rect` upstream cannot move the arc.
+    drawLine(
+      page,
+      world(swing.leaf.x1Mm, swing.leaf.y1Mm),
+      world(swing.leaf.x2Mm, swing.leaf.y2Mm),
+      0.5,
+      COLORS.subtle
+    );
+    // pdf-lib has no arc primitive, so print cannot consume the SVG `A`
+    // command the canvas draws. The glyph flattens the SAME arc for us
+    // (arcPolyline) rather than the export inventing its own approximation —
+    // that is the whole reason the flattening lives in the glyph module.
+    const arcPoints = swing.arcPolyline();
+    for (let index = 1; index < arcPoints.length; index += 1) {
+      const from = arcPoints[index - 1]!;
+      const to = arcPoints[index]!;
+      drawLine(
+        page,
+        world(from.xMm, from.yMm),
+        world(to.xMm, to.yMm),
+        0.5,
+        COLORS.subtle
+      );
+    }
   } else if (kind === "door") {
     drawLine(page, world(-halfW, halfD), world(-halfW, -halfD), 0.5, COLORS.subtle);
     drawLine(page, world(-halfW, -halfD), world(halfW, halfD), 0.5, COLORS.subtle);
@@ -282,7 +317,8 @@ export function drawPlanScene(
           depthMm: Math.max(entry.renderedRect.depthMm, minDepthMm)
         },
         entry.object.kind,
-        false
+        false,
+        entry.doorSwing
       );
     } else {
       const entry = painted.entry;

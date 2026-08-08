@@ -9,6 +9,7 @@ import {
   CASE_WALL_THICKNESS_MM
 } from "../../../domain/project";
 import { casePlanGlyph, wallTextPlanGlyph } from "../../../domain/geometry/caseGlyphs";
+import type { DoorSwingPlanGlyph } from "../../../domain/geometry/doorGlyphs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 
 // px → mm at the current zoom, or 0 with no zoom context (pixelsPerMm
@@ -41,6 +42,7 @@ export function PlanObject({
   onSelect,
   pixelsPerMm = 0,
   planRect,
+  swing,
   tooltip,
   tooltipDisabled = false
 }: {
@@ -70,6 +72,12 @@ export function PlanObject({
   // no clamping."
   pixelsPerMm?: number;
   planRect: PlanRect;
+  // A hinged door's swing glyph (planScene.ts's PlanSceneWallObject.doorSwing)
+  // — undefined for a plain doorway, which keeps drawing the void chevron
+  // exactly as before. Ignored for every kind other than "door". See the
+  // render-site comment below for why this is the one glyph that is allowed
+  // to paint outside the object's own rect.
+  swing?: DoorSwingPlanGlyph;
   // Hover-tooltip body (see PlacementTooltip). Ghosts never get one.
   tooltip?: ReactNode;
   // Suppresses the tooltip while a drag or armed placement tool is active.
@@ -167,7 +175,43 @@ export function PlanObject({
           ))}
         </g>
       ) : null}
-      {kind === "door" ? (
+      {kind === "door" && swing ? (
+        // A HINGED door: the leaf drawn open at 90° plus the quarter-circle
+        // it sweeps (doorSwingPlanGlyph). This is deliberately the only
+        // glyph in the app that paints outside the object's own rect — a
+        // swing can reach a full door-width beyond the thin opening rect,
+        // into the room's open floor. plan-object-hit, renderedRect (used by
+        // the marquee's planRectIntersectsRect) and the wall's own drag
+        // geometry all keep using the thin opening rect, UNCHANGED by
+        // hinging: giving the swing a hit target would let it compete with
+        // the neighboring wall's slide/resize handle, which the known
+        // handle-eats-clicks trap already places right at the wall midpoint
+        // a swing often reaches into. `.plan-object-mark` already carries
+        // pointer-events:none for every kind's glyph, which is exactly what
+        // keeps this transparent to clicks — v1 draws the swing only, it
+        // adds no hit target and no clearance validation (see the door-leaf
+        // plan §4/§8).
+        //
+        // midX/midY recenter the glyph's local-centered mm (origin at the
+        // rect's own center, +x/+y per doorGlyphs.ts's documented frame) into
+        // this component's absolute model-space coordinates, same as the
+        // `case` glyph above. The leaf and arc are drawn as one continuous
+        // path — the leaf's tip IS the arc's start point by construction
+        // (doorSwingPlanGlyph), so there is no seam.
+        <g className="plan-object-mark plan-object-mark--door-swing">
+          <line
+            vectorEffect="non-scaling-stroke"
+            x1={midX + swing.leaf.x1Mm}
+            x2={midX + swing.leaf.x2Mm}
+            y1={midY + swing.leaf.y1Mm}
+            y2={midY + swing.leaf.y2Mm}
+          />
+          <path
+            d={`M ${midX + swing.arc.startXMm} ${midY + swing.arc.startYMm} A ${swing.arc.radiusMm} ${swing.arc.radiusMm} 0 ${swing.arc.largeArcFlag} ${swing.arc.sweepFlag} ${midX + swing.arc.endXMm} ${midY + swing.arc.endYMm}`}
+            vectorEffect="non-scaling-stroke"
+          />
+        </g>
+      ) : kind === "door" ? (
         <path
           className="plan-object-mark plan-object-mark--door"
           d={`M ${x} ${bottomY} L ${x} ${y} L ${rightX} ${bottomY}`}

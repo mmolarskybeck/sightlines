@@ -7,10 +7,16 @@ import type { FloorWall } from "../geometry/planObjects";
 import {
   areSharedBoundaryWalls,
   findSharedBoundary,
+  mirrorDoorLeaf,
   mirrorOpeningXMm,
   type SharedBoundary
 } from "../geometry/sharedWalls";
-import type { ConnectableOpeningWallObject, Project, WallObject } from "../project";
+import type {
+  ConnectableOpeningWallObject,
+  DoorLeaf,
+  Project,
+  WallObject
+} from "../project";
 import { isStructurallyValidPair } from "./openingPairs";
 import { isOpeningSlotFree } from "./openingSlots";
 import { isBlockingKind } from "./overlapPolicy";
@@ -757,6 +763,54 @@ function findSlotBlocker(
   return overlapping.find(isConnectableOpening) ?? overlapping[0] ?? null;
 }
 
+// How two halves that are becoming (or already are) one physical opening
+// settle their handing. `authoritative` is the half whose handing wins a real
+// conflict — the primary the user acted on for an adoption, the
+// lexicographically smaller half for the whole-document load pass.
+//
+//   hinged + doorway (either order) -> HINGED WINS: the leaf propagates
+//                                      (mirrored) onto the doorway half
+//   two hinged, conflicting handing -> the authoritative half wins
+//   doorway + doorway               -> unchanged
+//
+// "Lexically smaller wins" is rejected outright for the first row: it can
+// silently erase the only hinged leaf in the pair. Hinged-wins never destroys
+// data, and — at the edit paths — it is one undoable edit.
+//
+// Returned as the pair of leaves to store on (authoritative, counterpart), so
+// the caller never has to remember which side gets mirrored.
+export function resolveSharedDoorLeaves(
+  authoritative: ConnectableOpeningWallObject,
+  counterpart: ConnectableOpeningWallObject
+): { authoritativeLeaf: DoorLeaf | undefined; counterpartLeaf: DoorLeaf | undefined } {
+  // A window pair has nothing to resolve; the type already says so, this only
+  // narrows it.
+  if (authoritative.kind !== "door" || counterpart.kind !== "door") {
+    return { authoritativeLeaf: undefined, counterpartLeaf: undefined };
+  }
+  // The only row where the non-authoritative half wins: it is the sole hinged
+  // leaf in the pair, and dropping it would be the data loss the table exists
+  // to avoid.
+  const winner = authoritative.leaf ?? counterpart.leaf;
+  if (!winner) return { authoritativeLeaf: undefined, counterpartLeaf: undefined };
+  return authoritative.leaf
+    ? { authoritativeLeaf: winner, counterpartLeaf: mirrorDoorLeaf(winner) }
+    : { authoritativeLeaf: mirrorDoorLeaf(winner), counterpartLeaf: winner };
+}
+
+// Set or clear `leaf` on a connectable opening. Clearing DELETES the key rather
+// than writing `undefined`, so a doorway serializes exactly as it did before
+// hinging existed (and structural equality in tests still holds).
+export function withDoorLeaf(
+  opening: ConnectableOpeningWallObject,
+  leaf: DoorLeaf | undefined
+): ConnectableOpeningWallObject {
+  if (opening.kind !== "door") return opening;
+  if (leaf) return { ...opening, leaf };
+  const { leaf: _cleared, ...rest } = opening;
+  return rest;
+}
+
 // The only half of this module that constructs anything.
 //
 // CONTRACT: `actions` MUST come from `analyzeSharedOpenings` of this exact
@@ -817,8 +871,22 @@ export function applySharedOpeningActions(
       ) {
         continue;
       }
-      replace(primary.id, { ...primary, connectsToObjectId: counterpart.id });
-      replace(counterpart.id, { ...counterpart, connectsToObjectId: primary.id });
+      // Handing is settled here and nowhere else: two authored leaves can
+      // disagree only at the moment they become one opening. `primary` is the
+      // half the user acted on, so it is the authoritative one.
+      //
+      // No boundary re-derivation, consistent with this function's no-geometry
+      // rule: every `adopt` reaches here from the analyzer's facing-wall graph,
+      // so the two walls already ARE a shared boundary and the mirror applies.
+      const { authoritativeLeaf, counterpartLeaf } = resolveSharedDoorLeaves(primary, counterpart);
+      replace(
+        primary.id,
+        withDoorLeaf({ ...primary, connectsToObjectId: counterpart.id }, authoritativeLeaf)
+      );
+      replace(
+        counterpart.id,
+        withDoorLeaf({ ...counterpart, connectsToObjectId: primary.id }, counterpartLeaf)
+      );
       formedPairIds.push([primary.id, counterpart.id]);
       continue;
     }
@@ -833,10 +901,13 @@ export function applySharedOpeningActions(
       // mirrored WINDOW sit at the same height rather than snapping back to the
       // wall's default centerline — the divergence that made the old
       // getDefaultOpeningSizeMm-based twin wrong.
+      //
+      // `leaf` is the one other thing that is mirrored rather than copied: the
+      // twin is the same physical door seen from the other room, so its handing
+      // has to be restated in the twin wall's own (opposite) frame.
       const twinId = newObjectId();
-      const twin: ConnectableOpeningWallObject = {
+      const twinBase = {
         id: twinId,
-        kind: primary.kind,
         blocksPlacement: primary.blocksPlacement,
         wallId: action.wallId,
         xMm: action.xMm,
@@ -845,6 +916,16 @@ export function applySharedOpeningActions(
         heightMm: primary.heightMm,
         connectsToObjectId: primary.id
       };
+      // Branching on kind rather than passing `primary.kind` through: with the
+      // union split, only a literal can discriminate, and only the door branch
+      // may carry a leaf at all.
+      const twin: ConnectableOpeningWallObject =
+        primary.kind === "door"
+          ? withDoorLeaf(
+              { ...twinBase, kind: "door" },
+              primary.leaf ? mirrorDoorLeaf(primary.leaf) : undefined
+            )
+          : { ...twinBase, kind: "window" };
       replace(primary.id, { ...primary, connectsToObjectId: twinId });
       indexById.set(twinId, wallObjects.length);
       wallObjects.push(twin);
