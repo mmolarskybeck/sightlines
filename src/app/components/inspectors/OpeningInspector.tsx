@@ -366,42 +366,56 @@ export function OpeningInspector({
           header directly above already names it (e.g. "Door / Opening").
           This IS a "Type" row, though — doorway vs. hinged is a real choice
           the panel header cannot make for the user, so it gets one, labeled
-          "Type" rather than repeating "Door". Copies WallInspector's
-          "Move endpoint" segmented row in structure (inspector-row +
-          inspector-row-label + SegmentedToggleGroup type="single"), the
-          established two-state-pick pattern, wired the same way through
-          aria-labelledby rather than a native <label> (a Radix
-          ToggleGroup.Item is a button, not labelable). */}
+          "Type" rather than repeating "Door".
+          STACKED (label above the control), not the label-left `inspector-row`
+          this first copied from WallInspector's "Move endpoint". Two reasons,
+          and they point the same way. Every other control in this panel —
+          Width, Height, the jamb fields, Swing — puts its label above, so a
+          lone label-left row broke the panel's own reading rhythm. And a
+          label-left row leaves the control ~58% of a narrow panel, which
+          "Hinged door" simply does not fit: `.seg-item` is `white-space:
+          nowrap`, so the text spilled past the panel edge and was clipped —
+          `min-width: 0` lets the CELL shrink but gives nowrap text nowhere to
+          go. The same trade-off is already recorded a few hundred lines below
+          for the shared-opening Resolve select ("Stacked, not label-left: at
+          inspector widths a label column leaves the trigger too narrow").
+          Reuses `inspector-action-group`, which is what "Swing" directly
+          underneath uses, so the two rows share their spacing and label
+          treatment for free. Wired through aria-labelledby rather than a
+          native <label> — a Radix ToggleGroup.Item is a button, not
+          labelable. */}
       {door ? (
-        <div className="inspector-row">
-          <span className="inspector-row-label" id={doorTypeLabelId}>
+        <div className="inspector-action-group">
+          <span className="inspector-action-group-label" id={doorTypeLabelId}>
             Type
           </span>
-          <div className="inspector-row-control">
-            <SegmentedToggleGroup
-              aria-labelledby={doorTypeLabelId}
-              type="single"
-              value={leaf ? "hinged" : "doorway"}
-              onValueChange={(value) => {
-                // Radix fires "" when the pressed item is clicked again
-                // (single-select deselect); guarding on the two known
-                // values rather than an else-branch means that no-op is
-                // simply ignored, matching WallInspector's own guard.
-                if (value === "doorway") {
-                  void onUpdateDoorLeaf(undefined);
-                } else if (value === "hinged") {
-                  // {} — "make it hinged, you pick the default." The store
-                  // is where floor geometry lives to resolve a room-aware
-                  // default handing (defaultDoorLeaf); this component must
-                  // never compute one itself, per updateDoorLeaf's contract.
-                  void onUpdateDoorLeaf({});
-                }
-              }}
-            >
-              <SegmentedToggleGroupItem value="doorway">Doorway</SegmentedToggleGroupItem>
-              <SegmentedToggleGroupItem value="hinged">Hinged door</SegmentedToggleGroupItem>
-            </SegmentedToggleGroup>
-          </div>
+          <SegmentedToggleGroup
+            aria-labelledby={doorTypeLabelId}
+            // Re-fits the topbar-tuned track for the inspector column: equal
+            // half-width segments at the panel's own label type size, instead
+            // of an inline-flex track demanding its content's width.
+            className="inspector-seg-toggle"
+            type="single"
+            value={leaf ? "hinged" : "doorway"}
+            onValueChange={(value) => {
+              // Radix fires "" when the pressed item is clicked again
+              // (single-select deselect); guarding on the two known values
+              // rather than an else-branch means that no-op is simply
+              // ignored, matching WallInspector's own guard.
+              if (value === "doorway") {
+                void onUpdateDoorLeaf(undefined);
+              } else if (value === "hinged") {
+                // {} — "make it hinged, you pick the default." The store is
+                // where floor geometry lives to resolve a room-aware default
+                // handing (defaultDoorLeaf); this component must never
+                // compute one itself, per updateDoorLeaf's contract.
+                void onUpdateDoorLeaf({});
+              }
+            }}
+          >
+            <SegmentedToggleGroupItem value="doorway">Doorway</SegmentedToggleGroupItem>
+            <SegmentedToggleGroupItem value="hinged">Hinged door</SegmentedToggleGroupItem>
+          </SegmentedToggleGroup>
         </div>
       ) : null}
 

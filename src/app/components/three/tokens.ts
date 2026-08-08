@@ -25,17 +25,26 @@ export const WINDOW_CAP_COLOR = "#b9d5d8";
 
 // A hinged door's shut leaf and its knob (spec §6). The leaf sits IN PLACE of
 // the neutral OPENING_CAP_COLOR backing plane (it replaces it — see the
-// treatment-forcing comment in scene3d.ts), so it needs to read as its own
-// material rather than as "more wall/more cap": a warm mid-brown, distinctly
-// darker than both WALL_COLOR (~0.966 lightness) and OPENING_CAP_COLOR
-// (light cool grey) — a believable painted or stained wood slab, and dark
-// enough that the knob (closer to brass) still separates from it.
-export const DOOR_LEAF_COLOR = "#8a6a52";
+// treatment-forcing comment in scene3d.ts).
+//
+// A painted white door, not a stained wooden one: these are gallery rooms, and
+// a mid-brown slab read as a piece of furniture in a white cube. That leaves
+// the leaf ~a percent brighter than WALL_COLOR, which Lambert shading alone
+// cannot be trusted to separate — a leaf on a wall facing the light lands at
+// almost exactly the wall's value. So the leaf carries an explicit edge
+// outline (DOOR_LEAF_EDGE_COLOR) rather than relying on shading: it is what
+// makes the door legible head-on, not a decorative extra.
+export const DOOR_LEAF_COLOR = "#ffffff";
 
-// Knob: a warm metallic tone, lighter and more saturated-gold than the leaf
-// it sits on so a small ~28mm-radius cylinder still reads against the door
-// at room-scale viewing distance rather than disappearing into it.
-export const DOOR_KNOB_COLOR = "#c9a86a";
+// The leaf's drawn edge — the same light cool grey family as OPENING_CAP_COLOR
+// but a step darker, so it reads as a drawn line at room distance without
+// turning into a hard border up close.
+export const DOOR_LEAF_EDGE_COLOR = "#b6bcc2";
+
+// Knob: near-black neutral. On a white leaf the contrast does the work a
+// metallic tone used to do, and a dark knob is what makes the panel read as a
+// door rather than as a blank white infill.
+export const DOOR_KNOB_COLOR = "#3d4348";
 
 // ============================================================================
 // Scene ground / background

@@ -15,11 +15,12 @@ import { ArtworkPlane } from "./ArtworkPlane";
 import { WallCaseMesh } from "./CaseMesh";
 import { WallTextPanel } from "./WallTextPanel";
 import { mmToWorld, MM_TO_WORLD } from "./coordinates";
-import { SelectionBoxOutline } from "./UncertaintyOutline";
+import { BoxEdgeOutline, SelectionBoxOutline } from "./UncertaintyOutline";
 import {
   BLOCKED_ZONE_COLOR,
   DOOR_KNOB_COLOR,
   DOOR_LEAF_COLOR,
+  DOOR_LEAF_EDGE_COLOR,
   GHOST_OPACITY,
   OPENING_CAP_COLOR,
   WALL_COLOR,
@@ -42,6 +43,17 @@ const WINDOW_CAP_OPACITY = 0.48;
 // rather than in doorGlyphs.ts — same reasoning as OPENING_CAP_RECESS_MM just
 // above. Small enough to read as a knob barrel, not a handle bar.
 const DOOR_KNOB_PROTRUSION_MM = 24;
+
+// How far the leaf's edge outline sits outside the slab it traces, on every
+// axis (so half of it on each side). Rendering-only, like the constant above.
+//
+// It exists purely to keep the line off the surface it bounds: coincident, the
+// two z-fight and the outline breaks into dashes at ordinary viewing distance.
+// Deliberately far smaller than SelectionBoxOutline's 20mm — that one is meant
+// to read as a ring AROUND the object, while this must still read as the door's
+// own edge. 6mm is ~0.3% of a door's height: enough separation to resolve in
+// the depth buffer, invisible as a gap at any distance a room is viewed from.
+const DOOR_LEAF_EDGE_OUTSET_MM = 6;
 
 // One zero-thickness, single-sided wall and everything placed on it. The group
 // maps wall-local coordinates to the world: local +x runs start -> end, +y up
@@ -348,6 +360,35 @@ function DoorLeafMesh({
           depthWrite={!ghosted}
         />
       </mesh>
+      {/* The leaf's own edge. NOT decoration and not a nicety: measured against
+          the shade-side wall the white leaf carries ~1.08 contrast — a 9/255
+          step — so on that side this line is the entire reason the door is
+          legible at all. The lit side manages ~1.19 on its own.
+
+          Hence DOOR_LEAF_EDGE_OUTSET_MM. Drawn at the leaf's EXACT box the line
+          is coplanar with the surface it bounds, and the two fight for the
+          depth buffer: the jamb-side vertical and half the head broke into an
+          intermittent dashed line at ordinary room distance. That is bad twice
+          over — it degrades the one thing holding the door up on the shade
+          side, and dashed box edges already MEAN something else here
+          (DashedBoxOutline = unknown/approximate dimensions). SelectionBoxOutline
+          below has always outset by 20mm and has always drawn clean; this is
+          the same trick at the smallest offset that resolves, so the line still
+          reads as the door's own edge rather than a halo around it.
+
+          Suppressed while ghosted (the whole wall is a hint then) and while
+          selected — the selection outline sits 20mm out and two concentric
+          rectangles read as a mistake. */}
+      {!ghosted && !isSelected ? (
+        <group position={[mmToWorld(centerXMm), mmToWorld(centerYMm), 0]}>
+          <BoxEdgeOutline
+            widthMm={widthMm + DOOR_LEAF_EDGE_OUTSET_MM}
+            heightMm={heightMm + DOOR_LEAF_EDGE_OUTSET_MM}
+            depthMm={DOOR_LEAF_THICKNESS_MM + DOOR_LEAF_EDGE_OUTSET_MM}
+            color={DOOR_LEAF_EDGE_COLOR}
+          />
+        </group>
+      ) : null}
       {/* One knob per face, standing proud of the leaf on each side — a shut
           door is symmetric about the wall plane, so both faces need a knob
           for the door to read correctly from either room (the swing side,

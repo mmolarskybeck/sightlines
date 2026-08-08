@@ -105,6 +105,31 @@ export function SelectionBoxOutline({
   heightMm: number;
   depthMm: number;
 }) {
+  return (
+    <BoxEdgeOutline
+      widthMm={widthMm}
+      heightMm={heightMm}
+      depthMm={depthMm}
+      color={SELECTION_COLOR}
+    />
+  );
+}
+
+// The same solid box edges in any color — the construction behind
+// SelectionBoxOutline, exposed because selection is not the only thing that
+// needs a drawn edge. A hinged door's white leaf uses it to stay legible
+// against an equally white wall, where shading alone cannot separate them.
+export function BoxEdgeOutline({
+  widthMm,
+  heightMm,
+  depthMm,
+  color
+}: {
+  widthMm: number;
+  heightMm: number;
+  depthMm: number;
+  color: string;
+}) {
   const box = useMemo(
     () => new BoxGeometry(mmToWorld(widthMm), mmToWorld(heightMm), mmToWorld(depthMm)),
     [widthMm, heightMm, depthMm]
@@ -113,7 +138,7 @@ export function SelectionBoxOutline({
   return (
     <lineSegments>
       <edgesGeometry args={[box]} />
-      <lineBasicMaterial color={SELECTION_COLOR} />
+      <lineBasicMaterial color={color} />
     </lineSegments>
   );
 }

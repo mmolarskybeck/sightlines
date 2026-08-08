@@ -6390,6 +6390,24 @@ body.panels-resizing * {
   background: var(--track);
 }
 
+/* Inspector-sized segmented pickers.
+
+   The bare .seg-track/.seg-item sizing is tuned for the topbar and the filter
+   rails: inline-flex, flex: 0 0 auto, nowrap, wide padding, and the inherited
+   body type size. Dropped into the inspector's narrow column that track runs
+   past the panel edge and clips the second segment, and its label outsizes the
+   field labels sitting directly above it. These rules re-fit it: a two-column
+   grid so the segments SHARE the available width instead of demanding their
+   own, and the inspector's own --type-xs/semibold so the row reads as a
+   sibling of "Width" and "Type", not as a control borrowed from the topbar.
+
+   Sizing is only half the job: `.seg-item` is `white-space: nowrap`, so a
+   segment whose label is longer than its share still paints past the track.
+   A track with a long label therefore also needs a FULL-WIDTH row — stacked
+   under its label, as OpeningInspector's "Type" is — not a label-left
+   `.inspector-row`, which leaves it under 60% of an already narrow panel.
+   Short labels (WallInspector's Start/End) are fine either way. */
+.inspector-seg-toggle,
 .wall-length-anchor-toggle {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -6408,11 +6426,16 @@ body.panels-resizing * {
   align-items: start;
 }
 
+.inspector-seg-toggle .seg-chip,
 .wall-length-anchor-toggle .seg-chip {
   top: 2px;
   bottom: 2px;
 }
 
+/* min-width: 0 is load-bearing, not defensive: a grid item's default
+   min-width: auto refuses to shrink below its (nowrap) content, so the longer
+   segment would push the track wide again and undo the column split. */
+.inspector-seg-toggle .seg-item,
 .wall-length-anchor-toggle .seg-item {
   gap: var(--space-6);
   min-width: 0;
