@@ -12,8 +12,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 // and an artwork can never disagree about how a center+size maps to an SVG
 // rect. Each kind gets one small, restrained glyph layered on the outline
 // rather than a busy illustration (docs/plan.md's "restrained, dense,
-// task-focused" note): a door gets a corner swing-arc hint, a window gets a
-// mullion cross, a blocked zone gets a diagonal hatch fill.
+// task-focused" note): a window gets a mullion cross, a blocked zone gets a
+// diagonal hatch fill. A door gets nothing but the outline — these are
+// openings, not hinged doors (the 3D view builds them as voids), so a swing
+// arc would assert a leaf and a hinge side the model doesn't have.
 export function ElevationOpening({
   center,
   isGhost = false,
@@ -70,7 +72,6 @@ export function ElevationOpening({
         x={rect.xMm}
         y={rect.yMm}
       />
-      {kind === "door" ? <DoorSwingHint rect={rect} /> : null}
       {kind === "window" ? <WindowMullions rect={rect} /> : null}
     </g>
   );
@@ -82,26 +83,6 @@ export function ElevationOpening({
       <TooltipTrigger asChild>{shape}</TooltipTrigger>
       {tooltipDisabled ? null : <TooltipContent>{tooltip}</TooltipContent>}
     </Tooltip>
-  );
-}
-
-// A quarter-circle swing arc anchored at the bottom-left (hinge) corner —
-// the familiar plan-view door glyph, borrowed here purely as an
-// iconographic "this is a door" cue rather than a physically accurate
-// elevation depiction (an elevation can't literally show swing depth, which
-// happens along the axis perpendicular to the wall face).
-function DoorSwingHint({ rect }: { rect: SvgRectMm }) {
-  const radius = Math.min(rect.widthMm, rect.heightMm);
-  const hingeXMm = rect.xMm;
-  const hingeYMm = rect.yMm + rect.heightMm;
-
-  return (
-    <path
-      className="door-swing"
-      d={`M ${hingeXMm} ${hingeYMm - radius} A ${radius} ${radius} 0 0 1 ${hingeXMm + radius} ${hingeYMm}`}
-      fill="none"
-      vectorEffect="non-scaling-stroke"
-    />
   );
 }
 

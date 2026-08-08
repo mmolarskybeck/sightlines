@@ -7241,16 +7241,6 @@ body.panels-resizing * {
   stroke-width: 2.5;
 }
 
-.door-swing {
-  stroke: var(--subtle);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-
-.elevation-opening.selected .door-swing {
-  stroke: var(--selection);
-}
-
 .window-mullions line {
   stroke: var(--muted);
   stroke-width: 1.25;

@@ -113,23 +113,7 @@ export function drawElevationOpening(
       0.5,
       COLORS.muted
     );
-  } else if (opening.object.kind === "door") {
-    const radius = Math.min(rect.width, rect.height);
-    drawLine(
-      page,
-      { x: rect.x, y: rect.y },
-      { x: rect.x, y: rect.y + radius },
-      0.45,
-      COLORS.subtle
-    );
-    drawLine(
-      page,
-      { x: rect.x, y: rect.y },
-      { x: rect.x + radius, y: rect.y },
-      0.45,
-      COLORS.subtle
-    );
-  } else {
+  } else if (opening.object.kind === "blocked-zone") {
     const step = 7;
     for (let x = rect.x - rect.height; x < rect.x + rect.width; x += step) {
       const startX = Math.max(rect.x, x);
