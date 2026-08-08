@@ -48,11 +48,21 @@ const DOOR_KNOB_PROTRUSION_MM = 24;
 // axis (so half of it on each side). Rendering-only, like the constant above.
 //
 // It exists purely to keep the line off the surface it bounds: coincident, the
-// two z-fight and the outline breaks into dashes at ordinary viewing distance.
-// Deliberately far smaller than SelectionBoxOutline's 20mm — that one is meant
-// to read as a ring AROUND the object, while this must still read as the door's
-// own edge. 6mm is ~0.3% of a door's height: enough separation to resolve in
-// the depth buffer, invisible as a gap at any distance a room is viewed from.
+// two z-fight and the outline breaks into dashes. That was measured, not
+// guessed — profiling the 335 scanlines crossing a door at 6m/24° off-axis,
+// 27.8% of the jamb-side vertical reached exactly bare-wall value (the line was
+// absent, not merely faint). With the outset, 0% do.
+//
+// This is added to the total dimension, so the clearance is HALF of it per
+// side: 3mm. At the live camera's near plane (far/10000) that is ~195x the
+// resolvable depth step at a 6m room view and ~27x at the 16m Overview.
+//
+// Do not raise it. Deliberately far smaller than SelectionBoxOutline's 20mm —
+// that one is meant to read as a ring AROUND the object, while this must still
+// read as the door's own edge. At 2.28m (as close as the orbit rig will get)
+// 3mm is ~1 CSS px, which antialiasing absorbs completely: there is no
+// wall-coloured band between the leaf face and the line at any reachable
+// distance. A larger value would open one.
 const DOOR_LEAF_EDGE_OUTSET_MM = 6;
 
 // One zero-thickness, single-sided wall and everything placed on it. The group

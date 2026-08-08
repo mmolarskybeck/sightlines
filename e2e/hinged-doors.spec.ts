@@ -404,4 +404,113 @@ test.describe("hinged doors", () => {
     expect(door.wallId).toBe("main-wall-north");
     expect(door.xMm).toBeCloseTo(doorXMm);
   });
+
+  // The Type control's LAYOUT, which shipped broken twice before this test
+  // existed. Both regressions were invisible to every other check: the
+  // component test asserts behavior, tsc has nothing to say about a stylesheet,
+  // and the tests above click the segments happily while "Hinged door" is
+  // painting past the panel edge.
+  //
+  // The mechanism is worth stating, because it is what makes this fragile: the
+  // segmented track is shared with the topbar, where `.seg-item` is
+  // `white-space: nowrap` and the track sizes to its content. Give that track a
+  // column narrower than its longest label and the text does not wrap, ellipse,
+  // or scroll — it simply paints outside and is clipped by the panel. So a
+  // clean `getBoundingClientRect` on the track proves nothing on its own; the
+  // assertion has to reach the TEXT.
+  test("the Type control fits its panel and matches the panel's label type", async ({
+    page
+  }) => {
+    const project = projectWith(
+      "layout",
+      [rectangularRoom({ roomId: "main", name: "Main Gallery", depthMm: ROOM_HEIGHT_MM })],
+      [
+        wallObject({
+          id: "door-a",
+          kind: "door",
+          wallId: "main-wall-north",
+          xMm: 1200,
+          widthMm: DOOR_WIDTH_MM,
+          heightMm: DOOR_HEIGHT_MM
+        })
+      ]
+    );
+    await seedProject(page, project);
+
+    const inspector = page.getByRole("complementary", { name: "Inspector" });
+
+    // Two viewports, because the failure is width-dependent: at 1500 the old
+    // label-left row had just enough room for "Doorway" but not "Hinged door".
+    // 1100 is deliberately just above SINGLE_PANE_WORKSPACE_MEDIA_QUERY
+    // (max-width: 1080px, App.tsx) — the narrowest layout that still shows the
+    // inspector beside the canvas, and therefore the tightest the Type row ever
+    // has to survive. Below 1080 the workspace goes single-pane and the panel
+    // is not rendered at all, so there is nothing to measure there.
+    //
+    // Resize BEFORE selecting, and re-select each time: a viewport change drops
+    // the current selection, so selecting first and then resizing unmounts the
+    // inspector out from under the assertions.
+    for (const width of [1500, 1100]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.locator(".plan-object--door").click();
+      await expect(inspector.getByRole("radiogroup", { name: "Type" })).toBeVisible();
+
+      const metrics = await page.evaluate(() => {
+        const panel = document.querySelector<HTMLElement>('aside[aria-label="Inspector"]');
+        // Found by ROLE, deliberately not by `.inspector-seg-toggle`. That class
+        // is the current fix; probing for it would make this test pass or fail
+        // on the fix's presence rather than on the layout it produces, so
+        // deleting the class would read as "selector missing" instead of "the
+        // control overflows" — and a different future fix would look like a
+        // regression. The radiogroup is what the control IS.
+        const track = panel?.querySelector<HTMLElement>('[role="radiogroup"]');
+        if (!panel || !track) return null;
+        const items = [...track.querySelectorAll<HTMLElement>(".seg-item")];
+        const typeLabel = document.querySelector<HTMLElement>(".inspector-action-group-label");
+        // A neighbouring numeric field's label ("Width"), the type the Type
+        // row has to sit beside without looking borrowed from another screen.
+        const fieldLabel = document.querySelector<HTMLElement>(".field-control > span");
+        const font = (el: HTMLElement | null) =>
+          el ? { size: getComputedStyle(el).fontSize, weight: getComputedStyle(el).fontWeight } : null;
+        const panelRect = panel.getBoundingClientRect();
+        const panelStyle = getComputedStyle(panel);
+        return {
+          panelInnerRight: panelRect.right - parseFloat(panelStyle.paddingRight || "0"),
+          trackRight: track.getBoundingClientRect().right,
+          items: items.map((item) => ({
+            text: (item.textContent ?? "").trim(),
+            // scrollWidth > clientWidth is the ONLY reliable signal that nowrap
+            // text is overflowing its own box — the box itself measures clean.
+            scrollWidth: item.scrollWidth,
+            clientWidth: item.clientWidth,
+            right: item.getBoundingClientRect().right,
+            font: font(item)
+          })),
+          typeLabelFont: font(typeLabel),
+          fieldLabelFont: font(fieldLabel)
+        };
+      });
+
+      expect(metrics, `metrics at ${width}px`).not.toBeNull();
+      const { items, typeLabelFont, fieldLabelFont } = metrics!;
+      expect(items).toHaveLength(2);
+      expect(items.map((item) => item.text)).toEqual(["Doorway", "Hinged door"]);
+
+      for (const item of items) {
+        // No clipped label, and nothing painting past the panel's inner edge.
+        expect(item.scrollWidth, `"${item.text}" overflows its box at ${width}px`)
+          .toBeLessThanOrEqual(item.clientWidth);
+        expect(item.right, `"${item.text}" escapes the panel at ${width}px`)
+          .toBeLessThanOrEqual(metrics!.panelInnerRight);
+        // Sized as a peer of the panel's own labels, not at the topbar's scale.
+        expect(item.font).toEqual(typeLabelFont);
+        expect(item.font).toEqual(fieldLabelFont);
+      }
+
+      expect(metrics!.trackRight).toBeLessThanOrEqual(metrics!.panelInnerRight);
+      // Equal halves: the two segments split the track rather than each
+      // claiming its content width (which is what overflowed it).
+      expect(items[0]!.clientWidth).toBe(items[1]!.clientWidth);
+    }
+  });
 });
