@@ -83,7 +83,7 @@ function validateWallObjects(project: Project, wallObjects: WallObject[]): Place
           id: `${wallObject.id}:open-wall`,
           wallObjectId: wallObject.id,
           wallId: wallObject.wallId,
-          message: "This wall is open — nothing can hang on it.",
+          message: "This wall is open, so nothing can hang on it.",
           type: "bounds" as const
         }
       ];

@@ -56,37 +56,45 @@ describe("OpenWallDialog", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  // The plainest case must stay two sentences. This is the guard against the
+  // dialog drifting back into a paragraph.
   it("names the wall and the room, and promises undo", () => {
     renderDialog(ready());
 
     expect(screen.getByText("Open North wall?")).toBeInTheDocument();
-    expect(screen.getByText(/opens East Gallery on that side/)).toBeInTheDocument();
-    expect(screen.getByText(/The floor and the room’s shape stay/)).toBeInTheDocument();
-    expect(screen.getByText(/Undo brings it all back/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This will delete the wall and open East Gallery on that side. Undo will revert this."
+      )
+    ).toBeInTheDocument();
   });
 
   // The accuracy requirement: two fates, two verbs, never merged into one
   // count. A reader skimming must not think the artworks are being deleted.
-  it("states unhang and delete as SEPARATE sentences", () => {
+  it("keeps unhang and delete in separate clauses", () => {
     renderDialog(ready({ summary: summary({ artworks: 2, doors: 1 }) }));
 
     expect(
-      screen.getByText(/2 works hung here go back to the checklist, unplaced\./)
+      screen.getByText(
+        /2 works currently placed will go back on the checklist, unplaced\. Everything else on it will be deleted\./
+      )
     ).toBeInTheDocument();
-    expect(screen.getByText(/1 door on this wall is deleted\./)).toBeInTheDocument();
-    // The artwork count must not appear inside the deletion sentence.
-    expect(screen.queryByText(/2 works.*are deleted/)).not.toBeInTheDocument();
+    // The work count must not land inside the deletion sentence — no path from
+    // "2 works" to "deleted" without crossing a full stop.
+    expect(screen.queryByText(/2 works[^.]*deleted/)).not.toBeInTheDocument();
   });
 
   it("uses singular phrasing for one work", () => {
     renderDialog(ready({ summary: summary({ artworks: 1 }) }));
 
     expect(
-      screen.getByText(/1 work hung here goes back to the checklist, unplaced\./)
+      screen.getByText(/1 work currently placed will go back on the checklist, unplaced\./)
     ).toBeInTheDocument();
   });
 
-  it("lists several fixture kinds naturally and discloses measurements", () => {
+  // Fixture kinds are deliberately NOT enumerated: undo restores them and the
+  // counts never changed the decision. One clause covers all of them.
+  it("does not inventory fixture kinds", () => {
     renderDialog(
       ready({
         summary: summary({ doors: 1, windows: 2, wallTexts: 1, measurements: 1 })
@@ -94,31 +102,30 @@ describe("OpenWallDialog", () => {
     );
 
     expect(
-      screen.getByText(/1 door, 2 windows, 1 wall label, and 1 measurement on this wall are deleted\./)
+      screen.getByText(/Everything on the wall will be deleted\./)
     ).toBeInTheDocument();
+    expect(screen.queryByText(/2 windows/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/wall label/)).not.toBeInTheDocument();
   });
 
-  it("says neither sentence for an empty wall", () => {
+  it("says nothing about contents for an empty wall", () => {
     renderDialog(ready());
 
-    expect(screen.queryByText(/back to the checklist/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/is deleted/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/are deleted/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/back on the checklist/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/will be deleted/)).not.toBeInTheDocument();
   });
 
   it("warns when the wall is shared, naming the other room", () => {
     renderDialog(ready({ sharedRoomNames: ["West Gallery"] }));
 
     expect(
-      screen.getByText(
-        /shared with West Gallery — opening it opens both sides, creating an open connection between the rooms/
-      )
+      screen.getByText("West Gallery shares this wall and will open too.")
     ).toBeInTheDocument();
   });
 
   it("omits the shared warning when the wall is exterior", () => {
     renderDialog(ready());
-    expect(screen.queryByText(/shared with/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/shares this wall/)).not.toBeInTheDocument();
   });
 
   // The alcove case: the neighbour's wall runs past this one and gets cut, so
@@ -126,9 +133,10 @@ describe("OpenWallDialog", () => {
   it("says the counterpart will be split when it outruns this wall", () => {
     renderDialog(ready({ sharedRoomNames: ["Main Gallery"], willSplit: true }));
 
-    expect(screen.getByText(/backs Main Gallery/)).toBeInTheDocument();
     expect(
-      screen.getByText(/it will be split and only the part behind this wall opens/)
+      screen.getByText(
+        "Main Gallery’s wall runs past this one. It will be split so only the shared part opens."
+      )
     ).toBeInTheDocument();
   });
 

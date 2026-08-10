@@ -20,7 +20,7 @@ export function ElevationEmptyState({
 }) {
   const isOpenWall = openWallName !== undefined;
   const copy = isOpenWall
-    ? `${openWallName} is open — there is no wall on this side to elevate.`
+    ? `${openWallName} is open, so there is no surface to elevate.`
     : hasRooms
       ? "Select a wall from the Gallery list to see its elevation."
       : "Add a room, then select a wall to see its elevation.";

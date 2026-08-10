@@ -233,8 +233,13 @@ export function WallInspector({
             icon={<DoorOpenIcon aria-hidden="true" size={15} />}
             tone="info"
           >
-            This wall is open — {roomName} has no surface on this side. Restoring it brings
-            the wall back, but not what used to hang here; undo does that.
+            {/* Three jobs, three sentences: the state now, what the button
+                below does, and the one thing it deliberately does not do.
+                Restore rebuilds geometry only — the wall objects were deleted
+                when it opened, so undo is the sole route back to them. */}
+            This wall is open, so {roomName} has no surface on this side. Restoring it
+            will rebuild that surface, but not what was on it. Only undo will bring
+            those back.
           </InspectorNotice>
           <InspectorActionGroup>
             <Button className="inspector-action" variant="inspector" onClick={onRestoreWall}>

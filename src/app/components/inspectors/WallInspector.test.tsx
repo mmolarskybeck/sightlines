@@ -73,8 +73,10 @@ describe("WallInspector open/closed states", () => {
     renderInspector(false, { isOpenSide: true });
 
     expect(
-      screen.getByText(/brings the wall back, but not what used to hang here/i)
+      screen.getByText(/will rebuild that surface, but not what was on it/i)
     ).toBeInTheDocument();
+    // The other half of the promise: undo is the only route to the contents.
+    expect(screen.getByText(/Only undo will bring those back/i)).toBeInTheDocument();
   });
 
   it("keeps Length and Height editable while open — the edge still shapes the room", async () => {

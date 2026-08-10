@@ -1,7 +1,6 @@
 import {
-  describeDeletedFixtures,
   describeSharedRooms,
-  describeUnhungWorks,
+  describeWallContents,
   type OpenWallRequest
 } from "../../wallOpening";
 import { Button } from "../ui/button";
@@ -31,19 +30,18 @@ export function OpenWallDialog({
   onConfirm: () => void;
   onOpenChange: (open: boolean) => void;
 }) {
-  const summary = request?.summary ?? null;
-  const unhung = summary ? describeUnhungWorks(summary) : "";
-  const deleted = summary ? describeDeletedFixtures(summary) : "";
-
-  // "Removing this wall" leads rather than "Opening": open is the feature's
-  // noun, but remove is what the user is authorising.
+  // The title asks the question; this answers what "open" actually does, in
+  // the user's words: the wall is deleted and the room opens. Delete leads
+  // because that is what is being authorised; open is only the result. Future
+  // tense throughout — nothing has happened yet.
+  //
+  // Kept to three short sentences at most. An empty exterior wall gets two.
   const sentences = [
     request
-      ? `Removing this wall opens ${request.roomName} on that side. The floor and the room’s shape stay.`
+      ? `This will delete the wall and open ${request.roomName} on that side.`
       : "",
-    unhung,
-    deleted,
-    "Undo brings it all back."
+    request ? describeWallContents(request.summary) : "",
+    "Undo will revert this."
   ].filter(Boolean);
 
   return (

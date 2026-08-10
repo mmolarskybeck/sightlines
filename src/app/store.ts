@@ -1207,7 +1207,7 @@ export function createAppStore(deps: AppStoreDeps) {
     // nothing reads as a broken app, and the user has no way to learn the rule.
     function refuseOpenWall(project: Project, wallId: string): boolean {
       if (isHangableWall(project, wallId)) return false;
-      set({ error: "This wall is open — nothing can hang on it." });
+      set({ error: "This wall is open, so nothing can hang on it." });
       return true;
     }
 

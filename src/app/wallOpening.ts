@@ -143,37 +143,39 @@ function joinNaturally(parts: string[]): string {
   return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
 }
 
-// The works that go back to the checklist, unplaced.
-export function describeUnhungWorks(summary: WallContentsSummary): string {
-  if (summary.artworks === 0) return "";
-  return summary.artworks === 1
-    ? "1 work hung here goes back to the checklist, unplaced."
-    : `${summary.artworks} works hung here go back to the checklist, unplaced.`;
-}
-
-// Everything that is deleted outright — deliberately a different sentence with
-// a different verb, so a reader skimming cannot conflate the two fates.
-export function describeDeletedFixtures(summary: WallContentsSummary): string {
-  const parts: string[] = [];
-  const push = (count: number, singular: string, plural = `${singular}s`) => {
-    if (count > 0) parts.push(`${count} ${count === 1 ? singular : plural}`);
-  };
-  push(summary.doors, "door");
-  push(summary.windows, "window");
-  push(summary.blockedZones, "blocked zone");
-  push(summary.wallTexts, "wall label");
-  push(summary.cases, "display case");
-  push(summary.measurements, "measurement");
-
-  if (parts.length === 0) return "";
-  const total =
+// What happens to the things on the wall, in ONE sentence.
+//
+// Every fixture kind used to get its own count ("1 door, 2 windows, 1 wall
+// label, and 1 measurement…"), which made the dialog read like an inventory
+// report. The counts of doors and labels never change the decision — undo
+// restores them and the wall is right there in elevation. The work count does
+// change it, so that is the only number kept.
+//
+// The two fates still get their own clause with their own verb: works come
+// back, everything else goes. A reader skimming must not think the works are
+// being deleted.
+export function describeWallContents(summary: WallContentsSummary): string {
+  const fixtures =
     summary.doors +
     summary.windows +
     summary.blockedZones +
     summary.wallTexts +
     summary.cases +
     summary.measurements;
-  return `${joinNaturally(parts)} on this wall ${total === 1 ? "is" : "are"} deleted.`;
+
+  if (summary.artworks === 0) {
+    return fixtures === 0 ? "" : "Everything on the wall will be deleted.";
+  }
+
+  const works =
+    summary.artworks === 1
+      ? "1 work currently placed"
+      : `${summary.artworks} works currently placed`;
+  const unhung = `${works} will go back on the checklist, unplaced.`;
+  // Two sentences, not one comma-spliced clause: the works survive and the
+  // fixtures do not, and a sentence break is what keeps a skimmer from reading
+  // the work count as part of "will be deleted".
+  return fixtures === 0 ? unhung : `${unhung} Everything else on it will be deleted.`;
 }
 
 // The consequence for the OTHER side of the boundary.
@@ -189,9 +191,9 @@ export function describeSharedRooms(roomNames: string[], willSplit: boolean): st
   const plural = roomNames.length > 1;
 
   if (willSplit) {
-    return `This wall backs ${rooms}. That ${
-      plural ? "walls are" : "wall is"
-    } longer, so it will be split and only the part behind this wall opens — creating an open connection between the rooms.`;
+    return plural
+      ? `The walls of ${rooms} run past this one. They will be split so only the shared parts open.`
+      : `${rooms}’s wall runs past this one. It will be split so only the shared part opens.`;
   }
-  return `This wall is shared with ${rooms} — opening it opens both sides, creating an open connection between the rooms.`;
+  return `${rooms} ${plural ? "share" : "shares"} this wall and will open too.`;
 }

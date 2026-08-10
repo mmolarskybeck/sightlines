@@ -65,8 +65,8 @@ test.describe("open walls", () => {
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText("The floor and the room’s shape stay");
-    await expect(dialog).toContainText("Undo brings it all back");
+    await expect(dialog).toContainText("This will delete the wall and open");
+    await expect(dialog).toContainText("Undo will revert this");
 
     await dialog.getByRole("button", { name: "Open wall" }).click();
 
