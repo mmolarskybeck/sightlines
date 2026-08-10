@@ -54,12 +54,22 @@ export type Hole3d = {
   leaf?: { hingeAtMinX: boolean };
 };
 
-// Wall-local axis-aligned rectangle (blocked zones); x along wall, y up.
+// Wall-local axis-aligned rectangle; x along wall, y up.
 export type Rect3d = {
   xMinMm: number;
   xMaxMm: number;
   yMinMm: number;
   yMaxMm: number;
+};
+
+// A wall blocked zone: the rect plus the id of the WallObject it was derived
+// from. The id is what makes the drawn wash SELECTABLE — a zone is a real
+// placed object with its own inspector, so clicking it must select the zone
+// and not the wall behind it (the same reason Hole3d carries `objectId` for
+// the hinged leaf). Without it the render layer had nothing to hand
+// onSelectObject and the wash was necessarily inert.
+export type WallBlockedZone3d = Rect3d & {
+  objectId: string;
 };
 
 // Wall-local, center-anchored artwork placement. The placement's stored size
@@ -174,7 +184,7 @@ export type WallPanel3d = {
   heightMm: number;
   holes: Hole3d[];
   artworks: WallArtwork3d[];
-  blockedZones: Rect3d[];
+  blockedZones: WallBlockedZone3d[];
   wallTexts: WallText3d[];
   cases: WallCase3d[];
 };
@@ -496,12 +506,12 @@ function derivePanelContents(
 ): {
   holes: Hole3d[];
   artworks: WallArtwork3d[];
-  blockedZones: Rect3d[];
+  blockedZones: WallBlockedZone3d[];
   wallTexts: WallText3d[];
   cases: WallCase3d[];
 } {
   const artworks: WallArtwork3d[] = [];
-  const blockedZones: Rect3d[] = [];
+  const blockedZones: WallBlockedZone3d[] = [];
   const holes: Hole3d[] = [];
   const wallTexts: WallText3d[] = [];
   const cases: WallCase3d[] = [];
@@ -538,6 +548,7 @@ function derivePanelContents(
     } else if (object.kind === "blocked-zone") {
       const centerX = toLocalX(object.xMm);
       blockedZones.push({
+        objectId: object.id,
         xMinMm: centerX - object.widthMm / 2,
         xMaxMm: centerX + object.widthMm / 2,
         yMinMm: object.yMm - object.heightMm / 2,

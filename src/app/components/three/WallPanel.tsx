@@ -10,12 +10,21 @@ import {
 } from "../../../domain/geometry/doorGlyphs";
 import type { Artwork } from "../../../domain/project";
 import { effectiveFraming } from "../../../domain/framing";
-import type { Hole3d, WallPanel3d } from "../../../domain/geometry/scene3d";
+import type {
+  Hole3d,
+  WallBlockedZone3d,
+  WallPanel3d
+} from "../../../domain/geometry/scene3d";
 import { ArtworkPlane } from "./ArtworkPlane";
 import { WallCaseMesh } from "./CaseMesh";
 import { WallTextPanel } from "./WallTextPanel";
 import { mmToWorld, MM_TO_WORLD } from "./coordinates";
-import { BoxEdgeOutline, SelectionBoxOutline } from "./UncertaintyOutline";
+import { openingPickBandRects } from "./openingPickBand";
+import {
+  BoxEdgeOutline,
+  SelectionBoxOutline,
+  SelectionRectOutline
+} from "./UncertaintyOutline";
 import {
   BLOCKED_ZONE_COLOR,
   DOOR_KNOB_COLOR,
@@ -36,6 +45,25 @@ const BLOCKED_ZONE_OPACITY = 0.15;
 const BLOCKED_ZONE_OFFSET_MM = 6;
 const OPENING_CAP_RECESS_MM = -30;
 const WINDOW_CAP_OPACITY = 0.48;
+
+// Selection outlines for wall children that are drawn FLAT on the wall face —
+// blocked zones and openings. Both sit proud of the surface they wrap so the
+// line can't z-fight it, on the same scale as ArtworkPlane's OUTLINE_OFFSET_MM
+// (millimetres, not fractions: sub-millimetre steps shimmered under camera
+// motion at room scale — see WallTextPanel's z-stack note).
+//
+// The opening outline rides the WALL plane, not the recessed cap plane: outset
+// around the aperture it lands on the wall face either way, and drawn at the
+// cap's own depth the part of the ring outside the hole would be behind the
+// wall and invisible from inside the room.
+const BLOCKED_ZONE_OUTLINE_OFFSET_MM = 5;
+const OPENING_OUTLINE_OFFSET_MM = 5;
+
+// Outset of a flat selection outline from the rect it wraps, total across both
+// sides — so 10mm of clearance per edge. Matches the value DoorLeafMesh's
+// SelectionBoxOutline has always used, so a selected doorway, a selected leaf
+// and a selected zone all wear the same ring.
+const SELECTION_OUTLINE_OUTSET_MM = 20;
 
 // How far each knob's cylinder barrel stands proud of the leaf face it is
 // mounted on. A rendering-only depth (unlike DOOR_KNOB_RADIUS_MM etc., there
@@ -146,9 +174,10 @@ export function WallPanel({
     return () => geometry.dispose();
   }, [geometry]);
 
-  // Event precedence (spec §4.3): artworks consume their clicks before this
-  // fires; a bare wall click selects the wall and stops so the canvas
-  // miss-handler doesn't also clear the selection.
+  // Event precedence (spec §4.3): everything riding on the wall — artworks,
+  // cases, wall texts, and now openings and blocked zones too — consumes its
+  // own click before this fires; a click on BARE wall selects the wall and
+  // stops so the canvas miss-handler doesn't also clear the selection.
   const handleWallClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
     // An orbit drag's release also fires click — only a true click selects.
@@ -169,37 +198,58 @@ export function WallPanel({
       </mesh>
       {wall.holes
         .filter((hole) => hole.treatment === "capped")
-        .map((hole, index) => (
-          <mesh
-            key={`cap-${index}`}
-            onClick={handleWallClick}
-            position={[
-              mmToWorld((hole.xMinMm + hole.xMaxMm) / 2),
-              mmToWorld((hole.yMinMm + hole.yMaxMm) / 2),
-              mmToWorld(OPENING_CAP_RECESS_MM)
-            ]}
-          >
-            <planeGeometry
-              args={[
-                mmToWorld(hole.xMaxMm - hole.xMinMm),
-                mmToWorld(hole.yMaxMm - hole.yMinMm)
-              ]}
-            />
-            <meshLambertMaterial
-              key={ghosted ? "ghosted" : "solid"}
-              color={hole.kind === "window" ? WINDOW_CAP_COLOR : OPENING_CAP_COLOR}
-              transparent={ghosted || hole.kind === "window"}
-              opacity={
-                ghosted
-                  ? GHOST_OPACITY
-                  : hole.kind === "window"
-                    ? WINDOW_CAP_OPACITY
-                    : 1
-              }
-              depthWrite={!ghosted}
-            />
-          </mesh>
+        .map((hole) => (
+          <OpeningCapPlane
+            key={hole.objectId}
+            hole={hole}
+            onSelect={onSelectObject}
+            ghosted={ghosted}
+          />
         ))}
+      {/* Open (uncapped) holes have no geometry at all — the wall mesh is
+          punched through — so each gets an invisible perimeter pick band to
+          stand in for it. Holes carrying a `leaf` are skipped: the leaf slab
+          already fills that aperture and is already clickable, and a band on
+          top of it would be a second hit at the same depth for the same
+          object. The PARTNER side of a shared hinged door has no leaf (the
+          dedup in scene3d.ts hands the leaf to one side only) and does get a
+          band — it is that room's own door object, with its own inspector. */}
+      {wall.holes
+        .filter((hole) => hole.treatment === "open" && hole.leaf === undefined)
+        .map((hole) => (
+          <OpeningPickBand
+            key={hole.objectId}
+            hole={hole}
+            onSelect={onSelectObject}
+            ghosted={ghosted}
+          />
+        ))}
+      {/* One selection ring for every opening that isn't a hinged leaf —
+          capped windows/doors and open doorways alike, since both now select
+          themselves. DoorLeafMesh draws its own (a box, around the slab), so
+          leaf holes are excluded here or they would wear two. */}
+      {!ghosted
+        ? wall.holes
+            .filter(
+              (hole) =>
+                hole.leaf === undefined && selectedObjectIds.includes(hole.objectId)
+            )
+            .map((hole) => (
+              <group
+                key={`selected-${hole.objectId}`}
+                position={[
+                  mmToWorld((hole.xMinMm + hole.xMaxMm) / 2),
+                  mmToWorld((hole.yMinMm + hole.yMaxMm) / 2),
+                  mmToWorld(OPENING_OUTLINE_OFFSET_MM)
+                ]}
+              >
+                <SelectionRectOutline
+                  widthMm={hole.xMaxMm - hole.xMinMm + SELECTION_OUTLINE_OUTSET_MM}
+                  heightMm={hole.yMaxMm - hole.yMinMm + SELECTION_OUTLINE_OUTSET_MM}
+                />
+              </group>
+            ))
+        : null}
       {/* Hinged-door leaves (spec §6). `leaf` is only ever set on a "door"
           hole (see the derivation in scene3d.ts), and only on the canonical
           side of a shared connection — the filter here is therefore also the
@@ -218,29 +268,14 @@ export function WallPanel({
             ghosted={ghosted}
           />
         ))}
-      {wall.blockedZones.map((zone, index) => (
-        <mesh
-          key={index}
-          visible={!ghosted}
-          position={[
-            mmToWorld((zone.xMinMm + zone.xMaxMm) / 2),
-            mmToWorld((zone.yMinMm + zone.yMaxMm) / 2),
-            mmToWorld(BLOCKED_ZONE_OFFSET_MM)
-          ]}
-        >
-          <planeGeometry
-            args={[
-              mmToWorld(zone.xMaxMm - zone.xMinMm),
-              mmToWorld(zone.yMaxMm - zone.yMinMm)
-            ]}
-          />
-          <meshBasicMaterial
-            color={BLOCKED_ZONE_COLOR}
-            transparent
-            opacity={BLOCKED_ZONE_OPACITY}
-            depthWrite={false}
-          />
-        </mesh>
+      {wall.blockedZones.map((zone) => (
+        <WallBlockedZoneWash
+          key={zone.objectId}
+          zone={zone}
+          isSelected={selectedObjectIds.includes(zone.objectId)}
+          onSelect={onSelectObject}
+          ghosted={ghosted}
+        />
       ))}
       {wall.wallTexts.map((wallText) => (
         <WallTextPanel
@@ -285,14 +320,215 @@ export function WallPanel({
   );
 }
 
+// The recessed backing plane an opening gets when it is NOT a geometrically
+// aligned pair (a window, or a door with no room on the other side).
+//
+// It selects THE OPENING, not the wall it sits in. It used to call the wall's
+// own click handler, which meant clicking a window selected the wall behind it
+// and left the window — a placed object with its own inspector — unreachable
+// from 3D. Same onSelectObject idiom as DoorLeafMesh below and every other
+// wall child; Hole3d.objectId exists for exactly this.
+function OpeningCapPlane({
+  hole,
+  onSelect,
+  ghosted
+}: {
+  hole: Hole3d;
+  onSelect: (objectId: string, opts: { additive: boolean }) => void;
+  ghosted: boolean;
+}) {
+  const [hovered, setHovered] = useState(false);
+  useCursor(hovered && !ghosted);
+
+  const handleClick = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    // An orbit drag's release also fires click — only a true click selects.
+    if (event.delta > 6) return;
+    const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
+    onSelect(hole.objectId, { additive: shiftKey || metaKey || ctrlKey });
+  };
+
+  return (
+    <mesh
+      onClick={handleClick}
+      onPointerOver={(event) => {
+        event.stopPropagation();
+        setHovered(true);
+      }}
+      onPointerOut={() => setHovered(false)}
+      position={[
+        mmToWorld((hole.xMinMm + hole.xMaxMm) / 2),
+        mmToWorld((hole.yMinMm + hole.yMaxMm) / 2),
+        mmToWorld(OPENING_CAP_RECESS_MM)
+      ]}
+    >
+      <planeGeometry
+        args={[mmToWorld(hole.xMaxMm - hole.xMinMm), mmToWorld(hole.yMaxMm - hole.yMinMm)]}
+      />
+      <meshLambertMaterial
+        key={ghosted ? "ghosted" : "solid"}
+        color={hole.kind === "window" ? WINDOW_CAP_COLOR : OPENING_CAP_COLOR}
+        transparent={ghosted || hole.kind === "window"}
+        opacity={
+          ghosted ? GHOST_OPACITY : hole.kind === "window" ? WINDOW_CAP_OPACITY : 1
+        }
+        depthWrite={!ghosted}
+      />
+    </mesh>
+  );
+}
+
+// The click target for an OPEN doorway: an invisible band hugging the inside
+// edge of the aperture, so the opening can be selected while its middle stays
+// see-through AND click-through (openingPickBand.ts owns that rule and the
+// geometry — read its header for why the centre is deliberately left alone).
+//
+// Invisible via the MATERIAL, never `visible={false}`: an object dropped from
+// rendering is the sort of thing a renderer or a future three.js is entitled
+// to drop from picking too, and this mesh exists ONLY to be picked. Zero
+// opacity + no colour write + no depth write leaves it fully in the scene
+// graph and fully raycastable while contributing nothing to any buffer.
+function OpeningPickBand({
+  hole,
+  onSelect,
+  ghosted
+}: {
+  hole: Hole3d;
+  onSelect: (objectId: string, opts: { additive: boolean }) => void;
+  ghosted: boolean;
+}) {
+  const [hovered, setHovered] = useState(false);
+  // The whole target is invisible, so the pointer cursor is the only feedback
+  // that there is something here to click. Gated on !ghosted like every other
+  // wall child.
+  useCursor(hovered && !ghosted);
+
+  const rects = useMemo(() => openingPickBandRects(hole), [hole]);
+
+  const handleClick = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    // An orbit drag's release also fires click — only a true click selects.
+    if (event.delta > 6) return;
+    const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
+    onSelect(hole.objectId, { additive: shiftKey || metaKey || ctrlKey });
+  };
+
+  return (
+    <group
+      onPointerOver={(event) => {
+        event.stopPropagation();
+        setHovered(true);
+      }}
+      onPointerOut={() => setHovered(false)}
+    >
+      {rects.map((rect, index) => (
+        <mesh
+          key={index}
+          onClick={handleClick}
+          position={[mmToWorld(rect.centerXMm), mmToWorld(rect.centerYMm), 0]}
+        >
+          <planeGeometry args={[mmToWorld(rect.widthMm), mmToWorld(rect.heightMm)]} />
+          {/* Single-sided ON PURPOSE (the material default), and load-bearing:
+              a real shared doorway is a pair of COINCIDENT twin walls, so both
+              rooms' bands occupy the same world position and a double-sided
+              band would leave the winner of that depth tie to chance. Front
+              faces point along the wall's inward normal, so each band is
+              pickable only from its own room — and each room's click selects
+              that room's own opening object, which is the one its inspector
+              edits. */}
+          <meshBasicMaterial transparent opacity={0} colorWrite={false} depthWrite={false} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+// A wall blocked zone: the translucent planning wash (spec §5.3) plus, now,
+// its own click target. The wash is drawn geometry like anything else, so it
+// selects ITS OWN object rather than falling through to the wall — a zone has
+// an inspector of its own, and the wall's click handler would have swallowed
+// every attempt to reach it.
+function WallBlockedZoneWash({
+  zone,
+  isSelected,
+  onSelect,
+  ghosted
+}: {
+  zone: WallBlockedZone3d;
+  isSelected: boolean;
+  onSelect: (objectId: string, opts: { additive: boolean }) => void;
+  ghosted: boolean;
+}) {
+  const [hovered, setHovered] = useState(false);
+  useCursor(hovered && !ghosted);
+
+  const widthMm = zone.xMaxMm - zone.xMinMm;
+  const heightMm = zone.yMaxMm - zone.yMinMm;
+  const centerXMm = (zone.xMinMm + zone.xMaxMm) / 2;
+  const centerYMm = (zone.yMinMm + zone.yMaxMm) / 2;
+
+  const handleClick = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    // An orbit drag's release also fires click — only a true click selects.
+    if (event.delta > 6) return;
+    const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
+    onSelect(zone.objectId, { additive: shiftKey || metaKey || ctrlKey });
+  };
+
+  return (
+    <group position={[mmToWorld(centerXMm), mmToWorld(centerYMm), 0]}>
+      {/* A ghosted wall's zone is not drawn at all (it has always been dropped
+          rather than faded — a wash at 15% of a hint is nothing), so it is not
+          clickable either: an invisible click target over blank wall would be
+          a trap. This is the one place the "drawn ⇒ selectable" rule cuts the
+          other way. Ghosted ARTWORKS still take clicks because they are still
+          drawn, just faint. */}
+      <mesh
+        visible={!ghosted}
+        onClick={ghosted ? undefined : handleClick}
+        onPointerOver={
+          ghosted
+            ? undefined
+            : (event) => {
+                event.stopPropagation();
+                setHovered(true);
+              }
+        }
+        onPointerOut={ghosted ? undefined : () => setHovered(false)}
+        position={[0, 0, mmToWorld(BLOCKED_ZONE_OFFSET_MM)]}
+      >
+        <planeGeometry args={[mmToWorld(widthMm), mmToWorld(heightMm)]} />
+        <meshBasicMaterial
+          color={BLOCKED_ZONE_COLOR}
+          transparent
+          opacity={BLOCKED_ZONE_OPACITY}
+          depthWrite={false}
+        />
+      </mesh>
+      {/* Outline, never a tint (spec §6.2): the wash's own colour is what says
+          "blocked", so tinting it to say "selected" would overwrite one
+          meaning with the other. */}
+      {!ghosted && isSelected ? (
+        <group position={[0, 0, mmToWorld(BLOCKED_ZONE_OFFSET_MM + BLOCKED_ZONE_OUTLINE_OFFSET_MM)]}>
+          <SelectionRectOutline
+            widthMm={widthMm + SELECTION_OUTLINE_OUTSET_MM}
+            heightMm={heightMm + SELECTION_OUTLINE_OUTSET_MM}
+          />
+        </group>
+      ) : null}
+    </group>
+  );
+}
+
 // A hinged door's shut leaf: a thin slab filling the hole exactly (no reveal
 // inset — unlike doorElevationGlyph, 3D draws no separate frame, so "filling
 // the hole" is the leaf's whole visible footprint) plus one knob per face on
-// the latch side. Unlike the flat cap plane (handleWallClick, which selects
-// the WALL), the leaf is a real placed object with its own inspector, so it
-// selects the DOOR OBJECT via onSelect — the same onSelectObject idiom
+// the latch side. The leaf is a real placed object with its own inspector, so
+// it selects the DOOR OBJECT via onSelect — the same onSelectObject idiom
 // WallTextPanel and WallCaseMesh already use for their own wall children,
-// and exactly what Hole3d.objectId exists for.
+// and exactly what Hole3d.objectId exists for. (OpeningCapPlane and
+// OpeningPickBand above now do the same for the two other ways an opening can
+// be drawn; the leaf was the first case of this, not the exception.)
 function DoorLeafMesh({
   hole,
   isSelected,

@@ -536,8 +536,47 @@ describe("deriveScene3d — wall artworks (M2)", () => {
     );
 
     expect(scene.rooms[0].walls[0].blockedZones).toEqual([
-      { xMinMm: 600, xMaxMm: 1400, yMinMm: 0, yMaxMm: 2500 }
+      { objectId: "zone-1", xMinMm: 600, xMaxMm: 1400, yMinMm: 0, yMaxMm: 2500 }
     ]);
+  });
+
+  it("carries the source placement id on each blocked zone so 3D can select it", () => {
+    // The wash a curator clicks in 3D has to resolve back to the zone's own
+    // WallObject — without this id the render layer can only select the wall
+    // behind it, which is the bug this field exists to make impossible.
+    const scene = deriveScene3d(
+      makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))], {
+        wallObjects: [
+          {
+            id: "zone-left",
+            kind: "blocked-zone",
+            blocksPlacement: true,
+            wallId: "room-a-wall-0",
+            xMm: 800,
+            yMm: 1250,
+            widthMm: 400,
+            heightMm: 2500
+          },
+          {
+            id: "zone-right",
+            kind: "blocked-zone",
+            blocksPlacement: true,
+            wallId: "room-a-wall-0",
+            xMm: 3000,
+            yMm: 1250,
+            widthMm: 400,
+            heightMm: 2500
+          }
+        ]
+      })
+    );
+
+    const zones = scene.rooms[0].walls[0].blockedZones;
+    // Each zone keeps its OWN id — a shared/positional mapping would look
+    // right for one zone and silently select the wrong one for the second.
+    expect(zones.map((zone) => zone.objectId)).toEqual(["zone-left", "zone-right"]);
+    expect(zones[0].xMinMm).toBe(600);
+    expect(zones[1].xMinMm).toBe(2800);
   });
 });
 

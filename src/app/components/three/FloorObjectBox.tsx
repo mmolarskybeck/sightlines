@@ -19,7 +19,8 @@ import {
 import {
   DashedBoxOutline,
   isUncertain,
-  SelectionBoxOutline
+  SelectionBoxOutline,
+  SelectionRectOutline
 } from "./UncertaintyOutline";
 import { BLOCKED_ZONE_COLOR, BOX_COLOR } from "./tokens";
 
@@ -29,6 +30,15 @@ const BLOCKED_ZONE_OPACITY = 0.15;
 
 // Sits just above the floor plane to avoid z-fighting.
 const FLOOR_QUAD_OFFSET_MM = 2;
+
+// The zone's selection outline sits a further step above the wash, for the same
+// reason (millimetres, not fractions — sub-millimetre steps shimmer under
+// camera motion at room scale).
+const BLOCKED_ZONE_OUTLINE_LIFT_MM = 2;
+
+// Outset of the selection outline from the rect it wraps, total across both
+// sides. The same 20mm every other selected thing in the 3D view wears.
+const SELECTION_OUTLINE_OUTSET_MM = 20;
 
 // Plan-space rotation (CCW in plan x/y) to a three.js yaw about +y: plan y
 // maps to world +z, which flips handedness — the one place that sign lives.
@@ -41,9 +51,7 @@ function planRotationToYaw(rotationDeg: number): number {
 // default, the freestanding-panel reading) with the shared uncertainty edge
 // treatment, blocked zones as flat translucent quads. When the artwork record
 // or its asset is missing the box shows no image at all (texture undefined),
-// never a broken one. Artwork boxes are click-to-select (spec §4.3) and consume
-// their clicks so the floor beneath doesn't clear the selection; blocked zones
-// stay inert and let the click fall through.
+// never a broken one.
 //
 // The box and the image are two different measurements: widthMm/heightMm/
 // depthMm size the OBJECT ON THE FLOOR, while the image is drawn at the WORK's
@@ -51,6 +59,13 @@ function planRotationToYaw(rotationDeg: number): number {
 // placement and diverge the moment a curator resizes the board — at which
 // point bare board appears around the image instead of the image stretching.
 // floorObjectImageFaces.ts owns that rule.
+//
+// BOTH kinds this component draws are click-to-select (spec §4.3) and both
+// consume their clicks. A zone's quad used to be deliberately inert, letting
+// the click fall through — but what it fell through TO was the floor, whose
+// handler CLEARS the selection, so clicking a blocked zone in 3D actively
+// deselected whatever you had. A zone is a placed object with its own
+// inspector; it selects itself now, like everything else that is drawn.
 //
 // An artwork box may also be SUSPENDED (baseHeightMm > 0): the box lifts off
 // the floor and hangs from wires drawn up to the room's wall height. See
@@ -70,12 +85,26 @@ export function FloorObjectBox({
   const z = mmToWorld(object.yMm);
   const yaw = planRotationToYaw(object.rotationDeg);
   const [hovered, setHovered] = useState(false);
-  useCursor(hovered && object.kind === "artwork");
+  // Every kind this component draws is selectable now, so the cursor is no
+  // longer gated on the kind — which also keeps the hook itself
+  // kind-independent, like the two below it.
+  useCursor(hovered);
   // Above the blocked-zone early return so the hook order never depends on the
   // object's kind. Memoized on the scene entry itself (deriveScene3d hands out
   // a fresh object only when the project actually changed) so the wire vertex
   // buffer downstream isn't rebuilt on every orbit frame.
   const wires = useMemo(() => planSuspensionWires(object), [object]);
+
+  // Not a hook, so it can sit either side of the early return — but both
+  // branches need it, and it is identical for both: the object selects itself
+  // and stops, so the floor beneath never sees the click and never clears.
+  const handleClick = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    // An orbit drag's release also fires click — only a true click selects.
+    if (event.delta > 6) return;
+    const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
+    onSelect(object.objectId, { additive: shiftKey || metaKey || ctrlKey });
+  };
 
   if (object.kind === "blocked-zone") {
     // A blocked zone deliberately IGNORES baseHeightMm and stays on the floor.
@@ -84,29 +113,43 @@ export function FloorObjectBox({
     // as a hatched footprint for the same reason. Floating it would say the
     // floor beneath it is free, which inverts the annotation's meaning, and it
     // has no height to hover with (heightMm is 0 for zones).
+    //
+    // The -90° x-rotation lays the quad flat and maps its local +z onto world
+    // +y, so the outline's own "proud of the surface" offset is a +z step in
+    // this same frame — and local x/y are the object's width/depth.
     return (
-      <mesh
+      <group
         position={[x, mmToWorld(FLOOR_QUAD_OFFSET_MM), z]}
         rotation={[-Math.PI / 2, 0, yaw]}
       >
-        <planeGeometry args={[mmToWorld(object.widthMm), mmToWorld(object.depthMm)]} />
-        <meshBasicMaterial
-          color={BLOCKED_ZONE_COLOR}
-          transparent
-          opacity={BLOCKED_ZONE_OPACITY}
-          depthWrite={false}
-        />
-      </mesh>
+        <mesh
+          onClick={handleClick}
+          onPointerOver={() => setHovered(true)}
+          onPointerOut={() => setHovered(false)}
+        >
+          <planeGeometry args={[mmToWorld(object.widthMm), mmToWorld(object.depthMm)]} />
+          <meshBasicMaterial
+            color={BLOCKED_ZONE_COLOR}
+            transparent
+            opacity={BLOCKED_ZONE_OPACITY}
+            depthWrite={false}
+          />
+        </mesh>
+        {/* Outline, never a tint (spec §6.2) — the wash's colour is what says
+            "blocked", and re-colouring it to say "selected" would overwrite
+            one meaning with the other. Flat rect rather than the box outline
+            the other kinds get: a zone is an AREA and has no height to trace. */}
+        {isSelected ? (
+          <group position={[0, 0, mmToWorld(BLOCKED_ZONE_OUTLINE_LIFT_MM)]}>
+            <SelectionRectOutline
+              widthMm={object.widthMm + SELECTION_OUTLINE_OUTSET_MM}
+              heightMm={object.depthMm + SELECTION_OUTLINE_OUTSET_MM}
+            />
+          </group>
+        ) : null}
+      </group>
     );
   }
-
-  const handleClick = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
-    // An orbit drag's release also fires click — only a true click selects.
-    if (event.delta > 6) return;
-    const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
-    onSelect(object.objectId, { additive: shiftKey || metaKey || ctrlKey });
-  };
 
   // Not memoized: a handful of `includes` over a six-element array plus some
   // arithmetic, computed from props that are already stable. Wrapping it would
@@ -200,9 +243,9 @@ export function FloorObjectBox({
       ) : null}
       {isSelected ? (
         <SelectionBoxOutline
-          widthMm={object.widthMm + 20}
-          heightMm={object.heightMm + 20}
-          depthMm={object.depthMm + 20}
+          widthMm={object.widthMm + SELECTION_OUTLINE_OUTSET_MM}
+          heightMm={object.heightMm + SELECTION_OUTLINE_OUTSET_MM}
+          depthMm={object.depthMm + SELECTION_OUTLINE_OUTSET_MM}
         />
       ) : null}
       {/* Inside the yawed group on purpose: the wires attach to the board's
