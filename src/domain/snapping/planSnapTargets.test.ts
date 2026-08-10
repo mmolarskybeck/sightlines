@@ -405,7 +405,9 @@ describe("resolvePlanPlacement — side-aware capture on coincident twin walls",
   });
 });
 
-describe("resolvePlanPlacement — artwork reject policy (wall-only)", () => {
+// Scoped to the checklist DROP path: a MOVE of an already-placed work passes
+// "float" and never reaches this policy (see floatPolicyForKind's scope note).
+describe("resolvePlanPlacement — artwork reject policy (checklist drop)", () => {
   const rejectArgs = { ...baseArgs, floatPolicy: floatPolicyForKind("artwork") };
 
   it("floatPolicyForKind maps kinds to their policy", () => {

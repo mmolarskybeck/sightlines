@@ -6191,9 +6191,9 @@ body.panels-resizing * {
 
 /* The support-vs-work size note: a footnote to the Width/Depth/Height fields
    directly above it, not a status. The element carries `.field-hint` too, so it
-   IS the same species as the "Floor-placed in plan view." line App renders
-   three fields up — muted, --type-xs, --leading-copy — and only the payload and
-   the action are styled here. The filled InspectorNotice card it replaces read
+   IS the same species as the hint lines InspectorRow renders under a control —
+   muted, --type-xs, --leading-copy — and only the payload and the action are
+   styled here. The filled InspectorNotice card it replaces read
    as an alert box for a quiet factual aside; DESIGN.md keeps inspector panels
    flat and reserves fills and shadows for real overlays. OpeningInspector draws
    the same line: its HEALTHY pairing states itself as icon-less muted text with
@@ -6726,9 +6726,18 @@ body.panels-resizing * {
   white-space: normal;
 }
 
-.placement-form-option:hover:not([data-state="on"]) {
+/* `:not(:disabled)` is load-bearing here even though `.seg-item` already guards
+   its own hover: this rule is later and more specific, so without the guard a
+   disabled segment would still light up under the cursor and read as clickable.
+   The Wall segment goes disabled for a floor work with no wall to hang on. */
+.placement-form-option:hover:not([data-state="on"]):not(:disabled) {
   background: var(--chip-ghost);
   color: var(--ink);
+}
+
+.placement-form-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .placement-form-option[data-state="on"],

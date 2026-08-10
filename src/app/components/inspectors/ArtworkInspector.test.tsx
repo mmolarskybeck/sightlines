@@ -25,6 +25,10 @@ function renderInspector(overrides: Partial<ComponentProps<typeof ArtworkInspect
   const props: ComponentProps<typeof ArtworkInspector> = {
     artwork: baseArtwork,
     isPlaced: false,
+    // App derives this from the surface a placed work sits on and from the
+    // library flag only while it is unplaced; the default here matches the
+    // unplaced baseArtwork (no depth → wall).
+    placementForm: "wall",
     sectionsOpen: {},
     unit: "cm",
     onCommitDimensions: vi.fn(),

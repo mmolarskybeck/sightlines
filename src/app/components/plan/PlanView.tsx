@@ -335,7 +335,6 @@ export function PlanView({
     snapToGrid,
     snapThresholdMm,
     selectedObjectIds,
-    artworkFormFor,
     suppressNextSelect,
     onCommitPlanMove,
     onCommitPlanMoveGroup
@@ -885,10 +884,8 @@ export function PlanView({
 
   // Artwork HTML5 drag/drop + touch-drop from the checklist: the drop ghost,
   // its snap hysteresis, and the DOM handlers the container div wires up.
-  // artworkFormFor is reused by floatPolicyForMovingObject below.
   const {
     dropGhost,
-    artworkFormFor,
     handleArtworkDragOver,
     handleArtworkDragLeave,
     handleArtworkDrop

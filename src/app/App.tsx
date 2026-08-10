@@ -17,6 +17,11 @@ import {
   getRectangleRoomDimensions,
 } from "../domain/geometry/walls";
 import { getRoomPlaceableWalls } from "../domain/geometry/placeableWalls";
+import { getPlaceableFloorWalls } from "../domain/geometry/planObjects";
+import {
+  effectivePlacementForm,
+  type PlacementForm
+} from "../domain/placement/artworkForm";
 import type { WallSwitcherEntry } from "./components/elevation/WallSwitcher";
 import {
   getSharedOpeningStatus,
@@ -307,6 +312,7 @@ export function App() {
   const updateArtworksMatFrame = useAppStore((state) => state.updateArtworksMatFrame);
   const placeArtwork = useAppStore((state) => state.placeArtwork);
   const placeArtworkOnFloor = useAppStore((state) => state.placeArtworkOnFloor);
+  const setArtworkPlacementForm = useAppStore((state) => state.setArtworkPlacementForm);
   const moveArtworkPlacement = useAppStore((state) => state.moveArtworkPlacement);
   const removePlacement = useAppStore((state) => state.removePlacement);
   const addOpening = useAppStore((state) => state.addOpening);
@@ -1022,6 +1028,23 @@ export function App() {
   const isArtworkPlaced = placedWallObject !== null || placedFloorArtwork !== null;
   // Remove the artwork from whichever surface currently owns it.
   const artworkPlacementId = placedWallObject?.id ?? placedFloorArtwork?.id ?? null;
+  // The inspector's Wall|Floor Type row shows where the object ACTUALLY is once
+  // it's placed, never the library's placementForm — reading the flag for a
+  // placed work is what let "Position on floor" render under "Type: Wall". The
+  // flag speaks only while nothing is placed, which is the one case it still
+  // decides anything (see store.setArtworkPlacementForm).
+  const artworkPlacementForm: PlacementForm = placedWallObject
+    ? "wall"
+    : placedFloorArtwork
+      ? "floor"
+      : selectedArtwork
+        ? effectivePlacementForm(selectedArtwork)
+        : "wall";
+  // Open walls have no surface, so a project made entirely of them offers a
+  // standing work nowhere to go. The store refuses that conversion anyway; this
+  // disables the segment so the refusal is never the way a curator finds out.
+  const noWallToHangSelectedArtworkOn =
+    placedFloorArtwork !== null && getPlaceableFloorWalls(project.floor).length === 0;
 
   // Placement readouts measure the same outer footprint the elevation paints.
   // Keep persisted image dimensions untouched and adapt only this geometry
@@ -2266,6 +2289,11 @@ export function App() {
                     : undefined
                 }
                 isPlaced={isArtworkPlaced}
+                placementForm={artworkPlacementForm}
+                disabledPlacementForm={
+                  noWallToHangSelectedArtworkOn ? "wall" : undefined
+                }
+                disabledPlacementFormReason="No wall to hang it on."
                 // A floor-placed work is dragged/dropped off a wall onto open
                 // floor; its remove affordance disconnects that floor object.
                 removeLabel={placedFloorArtwork ? "Remove from floor" : "Remove from wall"}
@@ -2297,7 +2325,6 @@ export function App() {
                     />
                   ) : placedFloorArtwork ? (
                     <>
-                      <p className="field-hint">Floor-placed in plan view.</p>
                       <FloorPlacementFields
                         floorObject={placedFloorArtwork}
                         unit={project.unit}
@@ -2353,7 +2380,11 @@ export function App() {
                 }
                 onCommitField={(changes) => void updateArtwork(selectedArtwork.id, changes)}
                 onChangePlacementForm={(placementForm) =>
-                  void updateArtwork(selectedArtwork.id, { placementForm })
+                  void setArtworkPlacementForm(
+                    selectedArtwork.id,
+                    placementForm,
+                    allowOverlappingPlacement
+                  )
                 }
                 onCommitFraming={(changes) => void updateArtwork(selectedArtwork.id, changes)}
                 onSectionOpenChange={setInspectorSectionOpen}

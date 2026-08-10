@@ -13,7 +13,13 @@ import {
   mirrorOpeningXMm,
   sameDoorLeaf
 } from "../domain/geometry/sharedWalls";
-import { getFloorWalls } from "../domain/geometry/planObjects";
+import {
+  findNearestWall,
+  getFloorWalls,
+  getPlaceableFloorWalls,
+  getWallObjectPlanRect
+} from "../domain/geometry/planObjects";
+import { clamp } from "../domain/geometry/scalar";
 import type { PlanPlacement } from "../domain/snapping/planSnapTargets";
 import { newId } from "../domain/id";
 import {
@@ -53,7 +59,10 @@ import {
 } from "../domain/placement/fitOpeningOnWall";
 import { createFloorCase, createWallCase } from "../domain/placement/createCase";
 import { createArtworkPlacement, getEffectivePlacementSizeMm } from "../domain/placement/placeArtwork";
-import { effectiveFloorDepthMm } from "../domain/placement/artworkForm";
+import {
+  effectiveFloorDepthMm,
+  type PlacementForm
+} from "../domain/placement/artworkForm";
 import { withArtworkFootprintFromMap } from "../domain/framing";
 import type { PixelAspect } from "../domain/units/aspectFill";
 import type { PlacementWarning } from "../domain/placement/validatePlacement";
@@ -67,6 +76,7 @@ import {
   type Artwork,
   type ArtworkFloorMemory,
   type ArtworkFloorObject,
+  type ArtworkWallObject,
   type BlockedZoneFloorObject,
   type CaseWallObject,
   type ConnectableOpeningWallObject,
@@ -492,6 +502,23 @@ export type AppState = ArrangeSliceState &
     yMm: number
   ) => Promise<void>;
   placeArtworkOnFloor: (artworkId: string, xMm: number, yMm: number) => Promise<void>;
+  // The artwork inspector's Wall|Floor "Type" control. For a PLACED work this
+  // converts the placement itself — off the wall onto the floor in front of it,
+  // or off the floor onto the nearest wall — reusing the same round-tripping
+  // machinery a plan drag across the boundary uses, so a mis-click is one undo
+  // away and nothing surface-specific is lost either way.
+  //
+  // It deliberately does NOT write the library's `placementForm` when it
+  // converts: updateArtwork pushes an undo entry of its own, so writing both
+  // would make one click two undo steps. For a placed work the PLACEMENT is the
+  // source of truth (App derives the control's displayed value from it), and the
+  // flag's only remaining job is deciding where an UNPLACED work lands when it's
+  // dropped in from the checklist — which is exactly the case this still writes.
+  setArtworkPlacementForm: (
+    artworkId: string,
+    form: PlacementForm,
+    allowOverlap?: boolean
+  ) => Promise<void>;
   // The single armed "Case" insert tool: a wall anchor creates a wall case, a
   // floor anchor creates a freestanding floor case (capture-any at the plan
   // layer decides which). Selects the new object; one undo step.
@@ -1360,6 +1387,24 @@ export function createAppStore(deps: AppStoreDeps) {
       );
     }
 
+    // The footprint depth a hung work takes on once it is standing on the floor:
+    // an explicitly overridden depth, else the work's own recorded depth, else
+    // the editable default. Extracted because setArtworkPlacementForm needs the
+    // SAME number planMoveWallToFloor is about to commit — it offsets the new
+    // floor position by depth/2 to stand the work's back flat against the wall
+    // face, and an offset computed from a different depth would leave the object
+    // hovering off the wall or sunk into it.
+    function floorDepthForWallArtwork(wallObject: ArtworkWallObject): number {
+      const artwork = get().libraryArtworks.find(
+        (candidate) => candidate.id === wallObject.artworkId
+      );
+      return (
+        wallObject.displayDimensionsOverride?.depthMm ??
+        artwork?.dimensions.depthMm ??
+        DEFAULT_FLOOR_OBJECT_DEPTH_MM
+      );
+    }
+
     // wall → floor conversion. Doors/windows must never leave a wall (throws).
     // No collision gate: floor objects get no bounds/collision validation in v1
     // (see placeArtworkOnFloor), so this keeps its own gate-free applyEdit.
@@ -1424,9 +1469,6 @@ export function createAppStore(deps: AppStoreDeps) {
 
       let newFloorObject: FloorObject;
       if (wallObject.kind === "artwork") {
-        const artwork = get().libraryArtworks.find(
-          (candidate) => candidate.id === wallObject.artworkId
-        );
         newFloorObject = {
           ...base,
           kind: "artwork",
@@ -1438,10 +1480,7 @@ export function createAppStore(deps: AppStoreDeps) {
           ...(wallObject.floorMemory?.imageFaces !== undefined
             ? { imageFaces: [...wallObject.floorMemory.imageFaces] }
             : {}),
-          depthMm:
-            wallObject.displayDimensionsOverride?.depthMm ??
-            artwork?.dimensions.depthMm ??
-            DEFAULT_FLOOR_OBJECT_DEPTH_MM,
+          depthMm: floorDepthForWallArtwork(wallObject),
           ...(wallObject.displayDimensionsOverride
             ? { displayDimensionsOverride: wallObject.displayDimensionsOverride }
             : {})
@@ -3116,6 +3155,112 @@ export function createAppStore(deps: AppStoreDeps) {
               get().wallContextId
             )
           }
+        );
+      },
+
+      async setArtworkPlacementForm(artworkId, form, allowOverlap = false) {
+        const project = get().project;
+        if (!project) return;
+
+        const wallObject = project.wallObjects.find(
+          (object): object is ArtworkWallObject =>
+            object.kind === "artwork" && object.artworkId === artworkId
+        );
+        const floorObject = project.floorObjects.find(
+          (object): object is ArtworkFloorObject =>
+            object.kind === "artwork" && object.artworkId === artworkId
+        );
+
+        // Unplaced: there is no placement to convert, so the library flag is the
+        // whole answer — and this is the one case where it still matters, since
+        // it decides which surface the work lands on when it's dropped in from
+        // the checklist (floatPolicyForKind).
+        if (!wallObject && !floorObject) {
+          await get().updateArtwork(artworkId, { placementForm: form });
+          return;
+        }
+
+        // --- wall → floor ---------------------------------------------------
+        if (wallObject) {
+          if (form === "wall") return;
+
+          const wall = getFloorWalls(project.floor).find(
+            (candidate) => candidate.id === wallObject.wallId
+          );
+          if (!wall) {
+            set({
+              error: "Can’t stand it on the floor. The wall it hangs on can’t be found."
+            });
+            return;
+          }
+
+          // Land it where it already is: same point along the wall, shifted off
+          // the centerline into the room by half its own footprint depth, so the
+          // work's back sits flat against the wall face it just left. That is
+          // what getWallObjectPlanRect's offsetToViewerSide computes, and the
+          // depth it is given has to be the depth planMoveWallToFloor commits —
+          // hence the shared floorDepthForWallArtwork.
+          //
+          // The flatness is best-effort, not a guarantee: planMoveWallToFloor
+          // prefers a REMEMBERED plan angle over the wall's own when the work
+          // has been on the floor before, and an offset derived from the wall's
+          // angle no longer squares the object's back to the wall once it turns
+          // to face 45°. Accepted deliberately — this is a starting point the
+          // curator drags, not a placement anyone should have to accept.
+          const planRect = getWallObjectPlanRect(
+            wall,
+            wallObject,
+            floorDepthForWallArtwork(wallObject),
+            true
+          );
+          await planMoveWallToFloor(project, wallObject, {
+            anchor: "floor",
+            xMm: planRect.centerXMm,
+            yMm: planRect.centerYMm
+          });
+          return;
+        }
+
+        // --- floor → wall ---------------------------------------------------
+        if (!floorObject) return; // unreachable — narrows the type below.
+        if (form === "floor") return;
+
+        // Placeable walls only: an open wall has no surface to hang on, so it
+        // must not even be a candidate for "nearest".
+        const walls = getPlaceableFloorWalls(project.floor);
+        const nearest = findNearestWall(
+          { xMm: floorObject.xMm, yMm: floorObject.yMm },
+          walls,
+          // No distance limit. Unlike a plan drag — where the capture radius is
+          // what tells a deliberate wall grab apart from a slide past one — this
+          // is an explicit request to hang the work, and refusing it because the
+          // work happens to stand mid-room would be inexplicable.
+          Number.POSITIVE_INFINITY
+        );
+        if (!nearest) {
+          set({ error: "Can’t hang it. There’s no wall here it can hang on." });
+          return;
+        }
+
+        const wall = walls.find((candidate) => candidate.id === nearest.wallId);
+        if (!wall) return; // unreachable — findNearestWall only reports these walls.
+
+        // Same clamp resolveOnWall applies to a plan drag (planSnapTargets.ts):
+        // keep the work's full width on the wall, and centre it when the wall is
+        // shorter than the work and there is no valid range at all. Without it a
+        // work standing near a corner would hang half off the end of the wall.
+        const halfWidthMm = floorObject.widthMm / 2;
+        const maxXMm = wall.lengthMm - halfWidthMm;
+        const xMm =
+          maxXMm < halfWidthMm
+            ? wall.lengthMm / 2
+            : clamp(nearest.xAlongMm, halfWidthMm, maxXMm);
+
+        await planMoveFloorToWall(
+          project,
+          floorObject,
+          { anchor: "wall", wallId: nearest.wallId, xMm },
+          allowOverlap
         );
       },
 

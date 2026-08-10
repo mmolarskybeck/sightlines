@@ -39,9 +39,10 @@ import { useArtworkAspect } from "./useArtworkAspect";
 // The artwork HTML5 drag/drop + touch-drop cluster, lifted out of PlanView
 // verbatim. It owns the transient drop-ghost state and snap hysteresis, loads
 // the dragged artwork's aspect, and subscribes to the module-level touch-drag
-// session. artworkFormFor is exposed because PlanView's own object-drag path
-// also needs a dragged artwork's effective placement form; the DOM handlers and
-// dropGhost the JSX renders round out the surface it hands back.
+// session. The DOM handlers and dropGhost the JSX renders are the whole surface
+// it hands back: artworkFormFor stays internal, because the DROP is now the only
+// path that reads a work's library placementForm — a MOVE of an already-placed
+// work floats both ways (see floatPolicyForKind's scope note).
 export function usePlanArtworkDrop(options: {
   artworksById: Map<string, Artwork> | undefined;
   draggingArtworkId: string | null;
@@ -330,7 +331,6 @@ export function usePlanArtworkDrop(options: {
 
   return {
     dropGhost,
-    artworkFormFor,
     handleArtworkDragOver,
     handleArtworkDragLeave,
     handleArtworkDrop

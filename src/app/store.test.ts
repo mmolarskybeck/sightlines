@@ -6657,6 +6657,201 @@ describe("app store", () => {
     });
   });
 
+  // The inspector's Wall|Floor "Type" control. For a placed work it drives the
+  // same conversion machinery a cross-boundary plan drag uses, so these exercise
+  // the store action end to end rather than asserting the handoff.
+  describe("setArtworkPlacementForm", () => {
+    async function addArtwork(name = "type-row.jpg") {
+      await store.getState().addArtworksFromFiles([makeImageFile(name)]);
+      return store.getState().project!.checklistArtworkIds.at(-1)!;
+    }
+
+    async function hangArtwork(xMm = 1000, yMm = 1450) {
+      const artworkId = await addArtwork();
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+      await store.getState().placeArtwork(artworkId, wall.id, xMm, yMm);
+      return { artworkId, wall };
+    }
+
+    function floorArtwork(artworkId: string) {
+      return store
+        .getState()
+        .project!.floorObjects.find(
+          (object) => object.kind === "artwork" && object.artworkId === artworkId
+        )!;
+    }
+
+    function wallArtwork(artworkId: string) {
+      return store
+        .getState()
+        .project!.wallObjects.find(
+          (object) => object.kind === "artwork" && object.artworkId === artworkId
+        )!;
+    }
+
+    it("round-trips hang height, suspension, plan angle and image faces across wall → floor → wall → floor", async () => {
+      const { artworkId } = await hangArtwork(1000, 1450);
+
+      await store.getState().setArtworkPlacementForm(artworkId, "floor");
+      const onFloor = floorArtwork(artworkId);
+      // Stood down at the same point along the wall, its back flat against the
+      // wall face: half its own footprint depth into the room.
+      expect(onFloor.xMm).toBeCloseTo(1000);
+      expect(onFloor.yMm).toBeCloseTo(DEFAULT_FLOOR_OBJECT_DEPTH_MM / 2);
+      expect(onFloor.wallYMm).toBe(1450);
+
+      // Floor-only state a wall cannot express — the whole reason the memory
+      // contract exists.
+      await store
+        .getState()
+        .updateFloorObject(onFloor.id, { rotationDeg: 45, baseHeightMm: 914.4 });
+      await store.getState().setFloorArtworkImageFaces(onFloor.id, ["top"]);
+
+      await store.getState().setArtworkPlacementForm(artworkId, "wall");
+      const backOnWall = wallArtwork(artworkId);
+      expect(backOnWall.yMm).toBe(1450);
+
+      await store.getState().setArtworkPlacementForm(artworkId, "floor");
+      const backOnFloor = floorArtwork(artworkId);
+      expect(backOnFloor.rotationDeg).toBe(45);
+      expect(backOnFloor.baseHeightMm).toBe(914.4);
+      expect(backOnFloor.wallYMm).toBe(1450);
+      expect(backOnFloor.kind).toBe("artwork");
+      if (backOnFloor.kind === "artwork") {
+        expect(backOnFloor.imageFaces).toEqual(["top"]);
+      }
+      // The id survives every leg, so selection and undo both track one object.
+      expect(backOnFloor.id).toBe(onFloor.id);
+    });
+
+    it("keeps imageFaces ABSENT absent and EMPTY empty across the round trip", async () => {
+      // Two records, one for each state, because the distinction only shows up
+      // by comparing them: absent means "never chosen" (front + back at read
+      // time) and [] means "every face deliberately off". Collapsing either into
+      // the other silently rewrites a curatorial choice.
+      const untouchedId = await addArtwork("faces-absent.jpg");
+      const clearedId = await addArtwork("faces-empty.jpg");
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+      await store.getState().placeArtwork(untouchedId, wall.id, 1000, 1450);
+      await store.getState().placeArtwork(clearedId, wall.id, 3000, 1450, true);
+
+      for (const artworkId of [untouchedId, clearedId]) {
+        await store.getState().setArtworkPlacementForm(artworkId, "floor");
+      }
+      await store.getState().setFloorArtworkImageFaces(floorArtwork(clearedId).id, []);
+
+      for (const artworkId of [untouchedId, clearedId]) {
+        await store.getState().setArtworkPlacementForm(artworkId, "wall");
+        await store.getState().setArtworkPlacementForm(artworkId, "floor");
+      }
+
+      expect("imageFaces" in floorArtwork(untouchedId)).toBe(false);
+      const cleared = floorArtwork(clearedId);
+      expect(cleared.kind).toBe("artwork");
+      if (cleared.kind === "artwork") {
+        expect(cleared.imageFaces).toEqual([]);
+      }
+    });
+
+    it("hangs a floor work on the NEAREST placeable wall, clamped to stay fully on it", async () => {
+      const artworkId = await addArtwork();
+      // Deep in the south-east corner: nearest to wall-south (36.4 mm) rather
+      // than wall-east (134.4 mm) or wall-north, so "nearest" is distinguishable
+      // from "first in the list". Its projection lands 134.4 mm from the south
+      // wall's start, which is inside the work's own half-width — without the
+      // clamp it would hang off the end of the wall.
+      await store.getState().placeArtworkOnFloor(artworkId, 8400, 5450);
+      const before = floorArtwork(artworkId);
+
+      await store.getState().setArtworkPlacementForm(artworkId, "wall");
+
+      const hung = wallArtwork(artworkId);
+      expect(hung.wallId).toBe("wall-south");
+      expect(hung.xMm).toBe(before.widthMm / 2);
+      expect(hung.yMm).toBe(before.wallYMm);
+    });
+
+    it("refuses to hang a floor work when every wall is open, changing nothing", async () => {
+      const artworkId = await addArtwork();
+      await store.getState().placeArtworkOnFloor(artworkId, 4000, 4000);
+      // An open wall has no surface, so a floor with nothing but open walls
+      // offers a standing work nowhere to go. The inspector disables the segment
+      // for exactly this; the store's refusal is the backstop behind it.
+      const base = store.getState().project!;
+      store.setState({
+        project: {
+          ...base,
+          floor: {
+            ...base.floor,
+            rooms: base.floor.rooms.map((placement) => ({
+              ...placement,
+              room: {
+                ...placement.room,
+                walls: placement.room.walls.map((wall) => ({ ...wall, isOpenSide: true }))
+              }
+            }))
+          }
+        }
+      });
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().setArtworkPlacementForm(artworkId, "wall");
+
+      const state = store.getState();
+      expect(state.error).toBeTruthy();
+      expect(state.undoStack).toHaveLength(undoStackBefore);
+      expect(state.project!.wallObjects).toHaveLength(0);
+      expect(state.project!.floorObjects).toHaveLength(1);
+    });
+
+    it("writes the library placementForm — and only that — while the work is unplaced", async () => {
+      const artworkId = await addArtwork();
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().setArtworkPlacementForm(artworkId, "floor");
+
+      const state = store.getState();
+      expect(state.libraryArtworks.find((a) => a.id === artworkId)?.placementForm).toBe("floor");
+      expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+      expect(state.project!.floorObjects).toHaveLength(0);
+      expect(state.project!.wallObjects).toHaveLength(0);
+    });
+
+    it("converts a PLACED work in one undo step, leaving the library flag alone", async () => {
+      const { artworkId } = await hangArtwork(1000, 1450);
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().setArtworkPlacementForm(artworkId, "floor");
+
+      let state = store.getState();
+      expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+      // Deliberately NOT written: updateArtwork pushes an undo entry of its own,
+      // so writing it would make one click two undo steps. The placement is the
+      // source of truth for a placed work.
+      expect(
+        state.libraryArtworks.find((a) => a.id === artworkId)?.placementForm
+      ).toBeUndefined();
+
+      await store.getState().undo();
+
+      state = store.getState();
+      expect(state.project!.floorObjects).toHaveLength(0);
+      const restored = wallArtwork(artworkId);
+      expect(restored.xMm).toBe(1000);
+      expect(restored.yMm).toBe(1450);
+    });
+
+    it("is a no-op when the work is already on the requested surface", async () => {
+      const { artworkId } = await hangArtwork(1000, 1450);
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().setArtworkPlacementForm(artworkId, "wall");
+
+      expect(store.getState().undoStack).toHaveLength(undoStackBefore);
+      expect(store.getState().project!.wallObjects).toHaveLength(1);
+    });
+  });
+
   describe("updateFloorObject", () => {
     it("edits X/Y/Width/Depth in one undo entry", async () => {
       await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);

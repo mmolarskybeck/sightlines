@@ -4,10 +4,7 @@ import { LockSimpleIcon } from "@phosphor-icons/react/dist/csr/LockSimple";
 import { LockSimpleOpenIcon } from "@phosphor-icons/react/dist/csr/LockSimpleOpen";
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import type { Artwork, ArtworkFrame, Dimensions, DisplayUnit } from "../../../domain/project";
-import {
-  effectivePlacementForm,
-  type PlacementForm
-} from "../../../domain/placement/artworkForm";
+import type { PlacementForm } from "../../../domain/placement/artworkForm";
 import {
   applyAspectFill,
   imageAspectRatio,
@@ -86,7 +83,10 @@ const DIMENSION_FIELDS: { key: DimensionAxisKey; label: string }[] = [
 // selection changes and reloads.
 export function ArtworkInspector({
   artwork,
+  disabledPlacementForm,
+  disabledPlacementFormReason,
   isPlaced,
+  placementForm,
   placementSection,
   placementTitle,
   removeLabel,
@@ -101,6 +101,13 @@ export function ArtworkInspector({
   unit
 }: {
   artwork: Artwork;
+  // The segment the Type row shows as active. App derives it from the SURFACE a
+  // placed work sits on, and from effectivePlacementForm only while it's
+  // unplaced — see PlacementTypeRow.
+  placementForm: PlacementForm;
+  // Set only when one surface is genuinely unavailable (see PlacementTypeRow).
+  disabledPlacementForm?: PlacementForm;
+  disabledPlacementFormReason?: string;
   isPlaced: boolean;
   // The wall- or floor-position FIELDS (WallPlacementFields /
   // FloorPlacementFields) for a placed artwork, null/undefined when unplaced.
@@ -126,9 +133,10 @@ export function ArtworkInspector({
   onCommitField: (
     changes: Partial<Pick<Artwork, ArtworkTextFieldKey>>
   ) => void;
-  // Writes the explicit placementForm override (wall vs floor). Distinct from
-  // onCommitField's metadata edits: this is a single-purpose commit ("Change
-  // placement type") the segmented control fires on change.
+  // Changes the wall-vs-floor placement. Distinct from onCommitField's metadata
+  // edits: this is a single-purpose commit the segmented control fires on
+  // change. For a PLACED work it converts the placement itself in one undo step
+  // and never touches the library flag (store.setArtworkPlacementForm).
   onChangePlacementForm: (form: PlacementForm) => void;
   onCommitFraming: (
     changes: Partial<Pick<Artwork, "matWidthMm" | "frame" | "frameIncludedInImage">>
@@ -233,7 +241,12 @@ export function ArtworkInspector({
             title={placementTitle ?? "Placement"}
             onOpenChange={(open) => onSectionOpenChange("placement", open)}
           >
-            <PlacementTypeRow artwork={artwork} onChangePlacementForm={onChangePlacementForm} />
+            <PlacementTypeRow
+              disabledForm={disabledPlacementForm}
+              disabledReason={disabledPlacementFormReason}
+              value={placementForm}
+              onChangePlacementForm={onChangePlacementForm}
+            />
             {placementSection}
           </InspectorSection>
         ) : null}
@@ -271,11 +284,17 @@ export function ArtworkInspector({
         ) : (
           // Unplaced: say so, then let the curator pick wall-vs-floor before
           // placing (the Type row lives in the placement section once placed).
+          // Still accurate now that the row converts a placed work: while
+          // nothing is placed, the row states the INTENT the drop will honour,
+          // and this line names the gesture that acts on it.
           <>
             <InspectorNotice tone="info">
               Not placed yet. Drag it onto a wall or the floor.
             </InspectorNotice>
-            <PlacementTypeRow artwork={artwork} onChangePlacementForm={onChangePlacementForm} />
+            <PlacementTypeRow
+              value={placementForm}
+              onChangePlacementForm={onChangePlacementForm}
+            />
           </>
         )}
       </div>
@@ -440,39 +459,65 @@ function TextField({
 }
 
 // Wall-vs-floor selector, shared by the placed (inside the Placement section)
-// and unplaced (footer) layouts. DISPLAYS the effective form; a change writes
-// the explicit override in one commit. A Radix single toggle-group fires ""
-// when the active segment is re-clicked (deselect) — ignore that and keep the
-// current form, since there's no "back to auto" affordance in v1. The row's
-// label points at the group by id rather than wrapping it: a <label> wrapping
-// a toggle-group binds to the group's first button, so any label click would
-// toggle "wall".
+// and unplaced (footer) layouts. A Radix single toggle-group fires "" when the
+// active segment is re-clicked (deselect) — ignore that and keep the current
+// form, since there's no "back to auto" affordance in v1. The row's label points
+// at the group by id rather than wrapping it: a <label> wrapping a toggle-group
+// binds to the group's first button, so any label click would toggle "wall".
+//
+// `value` arrives as a prop rather than being read off the artwork, and that is
+// the fix for a specific incoherence, not a preference. The row used to render
+// effectivePlacementForm — the LIBRARY flag — for a placed work too, so flipping
+// it to Wall while the work stood on the floor left the panel reading "Position
+// on floor" under "Type: Wall", with the floor-only fields still showing. App
+// now derives this from the surface the object is actually on and lets the flag
+// speak only for an unplaced work (see store.setArtworkPlacementForm).
 function PlacementTypeRow({
-  artwork,
-  onChangePlacementForm
+  disabledForm,
+  disabledReason,
+  onChangePlacementForm,
+  value
 }: {
-  artwork: Artwork;
+  value: PlacementForm;
+  // The one segment that cannot be chosen right now, with the reason shown as
+  // the row's hint. Only ever set for a real impossibility (a floor work with no
+  // placeable wall in the project) — the working case gets no explanatory copy,
+  // because retitling the section IS the feedback.
+  disabledForm?: PlacementForm;
+  disabledReason?: string;
   onChangePlacementForm: (form: PlacementForm) => void;
 }) {
   return (
-    <InspectorRow htmlFor="artwork-placement-type" label="Type">
+    <InspectorRow
+      hint={disabledForm ? disabledReason : undefined}
+      htmlFor="artwork-placement-type"
+      label="Type"
+    >
       <SegmentedToggleGroup
         aria-label="Placement type"
         className="placement-form-toggle"
         id="artwork-placement-type"
         type="single"
-        value={effectivePlacementForm(artwork)}
-        onValueChange={(value) => {
-          if (value === "wall" || value === "floor") onChangePlacementForm(value);
+        value={value}
+        onValueChange={(next) => {
+          if (next === "wall" || next === "floor") onChangePlacementForm(next);
         }}
       >
         {/* One-word cells: the row's "Type" label carries the context the old
             in-Dimensions control needed to spell out ("Hangs on wall"), and
             the verb phrases wrap to two lines inside a 260px pane's cells. */}
-        <SegmentedToggleGroupItem className="placement-form-option" value="wall">
+        <SegmentedToggleGroupItem
+          className="placement-form-option"
+          disabled={disabledForm === "wall"}
+          value="wall"
+        >
           Wall
         </SegmentedToggleGroupItem>
-        <SegmentedToggleGroupItem className="placement-form-option" value="floor">
+        <SegmentedToggleGroupItem
+          className="placement-form-option"
+          disabled={disabledForm === "floor"}
+          value="floor"
+        >
           Floor
         </SegmentedToggleGroupItem>
       </SegmentedToggleGroup>

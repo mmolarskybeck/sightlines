@@ -7,7 +7,6 @@ import {
   type PlanRect
 } from "../../domain/geometry/planObjects";
 import { roomIdContainingPoint } from "../../domain/geometry/freestandingWalls";
-import type { PlacementForm } from "../../domain/placement/artworkForm";
 import {
   floatPolicyForKind,
   resolvePlanPlacement,
@@ -52,7 +51,6 @@ export type PlanObjectMoveDeps = {
   snapToGrid: boolean;
   snapThresholdMm: number;
   selectedObjectIds: string[];
-  artworkFormFor: (artworkId: string | null) => PlacementForm;
   suppressNextSelect: () => void;
   onCommitPlanMove?: (objectId: string, placement: PlanPlacement) => void;
   onCommitPlanMoveGroup?: (
@@ -254,13 +252,11 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
     }
   });
 
-  // The float policy for a moving placed object. For every kind but artwork it's
-  // kind-only; an artwork's depends on its effective form (a floor work moves
-  // floor-only, a wall work rejects off the wall), so we resolve the object's
-  // artworkId (wall or floor object) and read the form. An unresolved artwork
-  // falls back to the wall-only default (floatPolicyForKind's own fallback).
+  // The float policy for a moving placed object — kind-only for everything but
+  // the two kinds whose current SURFACE decides, which the kind alone cannot
+  // say.
   function floatPolicyForMovingObject(kind: WallObject["kind"], objectId: string): FloatPolicy {
-    const { project, artworkFormFor } = getDepsRef.current();
+    const { project } = getDepsRef.current();
     // A case never converts between wall and floor (that machinery is
     // artwork-only; planMoveFloorToWall throws for a case). So a floor case must
     // drag floor-only — it can never capture a wall and hit that throw — while a
@@ -269,12 +265,18 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
       const isFloorCase = project.floorObjects.some((object) => object.id === objectId);
       return isFloorCase ? "floor-only" : "capture-any";
     }
-    if (kind !== "artwork") return floatPolicyForKind(kind);
-    const placed =
-      project.wallObjects.find((object) => object.id === objectId) ??
-      project.floorObjects.find((object) => object.id === objectId);
-    const artworkId = placed?.kind === "artwork" ? placed.artworkId : null;
-    return floatPolicyForKind("artwork", artworkFormFor(artworkId));
+    // Artwork floats BOTH ways, deliberately ignoring the library record's
+    // placementForm (USER DECISION, reversing the earlier wall-only rule — see
+    // floatPolicyForKind's scope note). Dragging a hung work out into open floor
+    // stands it up; dragging a standing work within capture distance of a wall
+    // hangs it. Reading the flag here is what used to strand a work whose flag
+    // and placement disagreed: the drag painted the reject ghost and committed
+    // nothing. "float" makes that state unreachable, and the store's conversion
+    // machinery (planMoveWallToFloor / planMoveFloorToWall) remembers the
+    // surface-specific fields either way, so neither direction loses anything.
+    // Same reasoning the `case` branch above already runs on.
+    if (kind === "artwork") return "float";
+    return floatPolicyForKind(kind);
   }
 
   // The wall a paired door/window's partner sits on, or null when the object

@@ -34,8 +34,8 @@ const SIZE_MATCH_TOLERANCE_MM = 0.5;
 // no discrepancy to explain.
 //
 // SHAPE. A footnote, not a status. It carries `.field-hint` — the same species
-// as the "Floor-placed in plan view." line App renders three fields above it —
-// and the corrective rides at the end of the sentence as an inline text action
+// as the hint lines InspectorRow renders under a control — and the corrective
+// rides at the end of the sentence as an inline text action
 // (the `.settings-link` tertiary-action species, tinted petrol because this one
 // writes numbers rather than opening a page). No fill, no icon, no button
 // chrome: a filled InspectorNotice card read as an alert for what is a quiet

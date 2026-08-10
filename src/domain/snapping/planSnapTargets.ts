@@ -37,12 +37,23 @@ export type PlanPlacement =
   | { anchor: "wall"; wallId: string; xMm: number }
   | { anchor: "floor"; xMm: number; yMm: number };
 
-// A drag that cannot commit anywhere: a 2D artwork (wall-only, USER DECISION)
-// dragged with no wall in capture range. It is deliberately NOT a PlanPlacement
-// — nothing gets persisted — so the `anchor: "none"` variant forces every caller
-// to handle the rejected case rather than silently floor-placing. The result
-// still carries a planRect so the caller can paint the danger ghost under the
-// cursor; release is a no-op.
+// A drag that cannot commit anywhere: a wall-form artwork dragged IN from the
+// checklist with no wall in capture range. It is deliberately NOT a
+// PlanPlacement — nothing gets persisted — so the `anchor: "none"` variant
+// forces every caller to handle the rejected case rather than silently
+// floor-placing. The result still carries a planRect so the caller can paint the
+// danger ghost under the cursor; release is a no-op.
+//
+// USER DECISION, SINCE REVERSED for one of the two paths that reached it. This
+// also used to cover MOVES of already-placed artwork — a hung work dragged off
+// its wall was refused outright — on the reasoning that a 2D work is wall-only,
+// full stop. That stranded any work whose library `placementForm` said "wall"
+// while its placement was on the floor: the drag painted the danger ghost and
+// committed nothing, with no gesture that could put it right. The curator has
+// chosen bidirectional direct manipulation instead, so a move now floats (see
+// floatPolicyForKind) and the inspector's Type control is its explicit twin.
+// Rejection survives only on the DROP path, where there is no placement to
+// convert and the library form is the only statement of intent there is.
 export type ResolvedPlacement = PlanPlacement | { anchor: "none" };
 
 // How a placement behaves relative to walls. `float` resolves a free
@@ -61,6 +72,20 @@ export type FloatPolicy = "float" | "capture-any" | "reject" | "floor-only";
 // The effective form is passed in (see effectivePlacementForm); it defaults to
 // the wall-only behavior when a caller has no form to hand (e.g. a placeholder
 // drag whose artwork hasn't resolved yet).
+//
+// SCOPE of the artwork branch, narrowed by a USER DECISION that reversed the
+// earlier one. It now answers for the DROP path only — an unplaced work dragged
+// in from the checklist, where `placementForm` is the only statement of intent
+// that exists yet. A MOVE of an already-placed work no longer consults the
+// record at all: it passes "float" outright (see floatPolicyForMovingObject in
+// usePlanObjectMove), exactly as a case does, so a hung work dragged onto open
+// floor stands up and a standing work dragged to a wall hangs. Under the old
+// rule `placementForm` was a MODE that had to be flipped in the inspector
+// before a cross-surface drag would take, and a work whose flag and placement
+// disagreed could not be dragged anywhere at all. The inspector's Type control
+// now converts the placement itself (store.setArtworkPlacementForm), so the
+// explicit path and the direct-manipulation path are twins rather than gates on
+// each other.
 export function floatPolicyForKind(
   kind: WallObject["kind"],
   artworkForm?: PlacementForm
@@ -152,9 +177,10 @@ export function resolvePlanPlacement(
     };
   }
 ): PlanPlacementResult {
-  // A floor work never hangs (USER DECISION): skip wall capture entirely and
-  // resolve on the floor stage below — the wall an off-form drag happens to
-  // pass over must never grab it.
+  // The caller asked to skip wall capture entirely — a floor-form work being
+  // dropped in from the checklist (see floatPolicyForKind's scope note): resolve
+  // on the floor stage below, so the wall such a drag happens to pass over can
+  // never grab it.
   const capturedWall =
     args.floatPolicy === "floor-only"
       ? null
@@ -171,9 +197,11 @@ export function resolvePlanPlacement(
     return resolveOnWall(proposedCenterFloorMm, capturedWall, args);
   }
 
-  // Nothing captured. Artwork is wall-only (USER DECISION): reject the drop so
-  // the caller paints the danger ghost and release is a no-op — a 2D artwork can
-  // never land mid-room as a floor object.
+  // Nothing captured, and the caller asked for refusal — a wall-form work being
+  // dropped in from the checklist (see floatPolicyForKind's scope note): reject
+  // the drop so the caller paints the danger ghost and release is a no-op. A
+  // wall work arrives on a wall or not at all; converting it is a decision for
+  // the inspector or a later drag, not for the moment it enters the plan.
   if (args.floatPolicy === "reject") {
     return resolveRejected(proposedCenterFloorMm, args);
   }
