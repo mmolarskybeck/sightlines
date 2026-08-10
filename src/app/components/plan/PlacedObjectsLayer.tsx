@@ -51,6 +51,13 @@ export type PlacedObjectsLayerProps = {
   floorObjects: PlanSceneFloorObject[];
   pixelsPerMm: number;
   objectDrag: ObjectDragState | null;
+  // The live angle of a floor object being rotated by its rotate handle (null
+  // at rest). Applied on top of whatever rect the object would otherwise paint
+  // at, rather than as another preview source: a rotate and a move can never be
+  // in flight together, so this only ever overrides the REST rect in practice —
+  // composing instead of branching keeps that assumption from becoming a trap
+  // if the two ever do overlap.
+  rotationPreview: { objectId: string; rotationDeg: number } | null;
   // Any in-flight gesture / armed tool suppresses hover tooltips (computed by
   // PlanView, which owns all the drag machines this depends on).
   tooltipsDisabled: boolean;
@@ -75,6 +82,7 @@ export function PlacedObjectsLayer({
   floorObjects,
   pixelsPerMm,
   objectDrag,
+  rotationPreview,
   tooltipsDisabled,
   artworksById,
   thumbnailUrlsByAssetId,
@@ -299,11 +307,18 @@ export function PlacedObjectsLayer({
         const groupPreviewRect = objectDrag?.members
           ? objectDrag.previewRectById?.get(floorObject.id)
           : undefined;
-        const planRect =
+        const movedRect =
           groupPreviewRect ??
           (objectDrag && !objectDrag.members && objectDrag.objectId === floorObject.id
             ? objectDrag.previewPlanRect
             : restRect);
+        // A rotate drag only ever changes the angle — center and footprint are
+        // untouched — so it composes onto whatever rect the move logic above
+        // produced instead of replacing it.
+        const planRect =
+          rotationPreview?.objectId === floorObject.id
+            ? { ...movedRect, angleDeg: rotationPreview.rotationDeg }
+            : movedRect;
         // A floor object reads floor-placed at rest and under a group
         // drag (translation-only keeps it on the floor); a single drag
         // follows the preview — a floor→wall drag drops the dashed look,

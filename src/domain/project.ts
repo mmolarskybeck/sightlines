@@ -352,12 +352,38 @@ export type FloorObjectBase = {
   yMm: number;
   widthMm: number;
   depthMm: number;
-  // Wall angle preserved on wall→floor conversion; 0 for fresh floor placements.
+  // Wall angle preserved on wall→floor conversion; 0 for fresh floor placements
+  // until the user sets one (Angle field / plan rotate handle).
+  //
+  // DELIBERATELY NOT NORMALIZED, and no reader may assume a range. The two
+  // writers produce different representations of the same orientation on
+  // purpose: the plan rotate handle folds to [0, 360) because atan2 has to
+  // return something, while the inspector's Angle field stores exactly what was
+  // typed (-40 stays -40, 365 stays 365). Both render identically — every
+  // consumer goes through degToRad, which does not care — and normalizing at
+  // the store would silently rewrite angles inherited verbatim from a wall,
+  // which is the one value here that is not the user's to round-trip.
   rotationDeg: number;
   // Remembered elevation height, restored on floor→wall conversion.
   heightMm: number;
   // Remembered hang-height center, restored on floor→wall conversion.
   wallYMm: number;
+  // Height of the object's BOTTOM edge above the floor. Absent/0 = resting on
+  // the floor, which is what every floor object was before suspension existed;
+  // above 0 the object hovers and 3D draws suspension wires up to the room's
+  // wall height (there is no ceiling geometry to hang from). Optional and
+  // additive, so no schema-version bump — contrast CaseWallObject.depthMm,
+  // which is REQUIRED and therefore rode v3→v4.
+  //
+  // TRAP: this is NOT wallYMm. `baseHeightMm` is live floor-space geometry —
+  // it moves the object you can see. `wallYMm` is dormant memory, meaningful
+  // only to a future floor→wall conversion and ignored while the object is on
+  // the floor. They are both "a height in mm" and they are never
+  // interchangeable: wallYMm is a hang-height CENTER measured for a wall,
+  // baseHeightMm is a BOTTOM edge measured for the floor. A converter that
+  // needs one must pick it explicitly rather than falling through to whichever
+  // is set.
+  baseHeightMm?: number;
 };
 
 export type ArtworkFloorObject = FloorObjectBase & {
@@ -403,6 +429,28 @@ export const CASE_GLASS_THICKNESS_MM = 6; // inset glass cap/lid thickness
 export const CASE_LEG_SIZE_MM = 40; // floor-case leg footprint (square, in plan)
 export const CASE_LEG_INSET_MM = 40; // distance from the footprint edge to a leg's center
 export const CASE_BASE_SLAB_THICKNESS_MM = 24; // floor-case base slab thickness
+
+// Suspension-rigging constants, shared by the 3D wires (three/SuspensionWires
+// .tsx) and the elevation ghost's wires (elevation/ElevationSuspendedArtwork
+// Ghost.tsx) — same rule as the case constants above: the 2D view echoes the
+// true 3D construction rather than picking its own numbers, so the two views
+// agree on where a wire meets the board.
+//
+// They live HERE, in domain, rather than in either view, specifically because
+// the 2D and 3D layers must not import from each other (that would drag R3F
+// into the elevation bundle). A constant they both depend on belongs below
+// both of them, not beside one.
+//
+// How far in from each top corner a wire attaches. Real rigging never lands on
+// the corner itself, and the inset keeps the wires visibly clear of the box's
+// own drawn edges instead of tracing them.
+export const SUSPENSION_WIRE_INSET_MM = 60;
+// ...capped at this fraction of each extent, which is load-bearing for the
+// motivating case: a flat 60mm inset on an 18mm-thick board would push the
+// front wires 51mm BEHIND its back face, inverting the geometry. In elevation
+// the same cap keeps a board seen nearly edge-on from collapsing its two wires
+// into a crossed X.
+export const SUSPENSION_WIRE_INSET_FRACTION = 0.25;
 
 export type ProjectSummary = {
   id: string;

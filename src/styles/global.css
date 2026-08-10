@@ -4986,6 +4986,29 @@ body.panels-resizing * {
   cursor: grabbing;
 }
 
+/* Rotate handle for a single selected floor object (FloorObjectRotateHandle).
+   Same hollow petrol square as every other plan handle — it is the same chip,
+   pointed out of the object's FRONT face rather than sitting on a wall — so it
+   only adds the stem and a rotation cursor. The chip keeps the .resize-handle
+   class because PlanView's pointer-down capture matches on it to suppress the
+   trailing background click; do not "clean that up" into a standalone class. */
+/* Solid, not dashed: a dashed petrol line at canvas weight is already the
+   snap-guide signal (.snap-guide), and the stem must not read as one. Same
+   stroke as the chip it carries, so the two read as one object on a leash. */
+.rotate-handle-stem {
+  stroke: var(--selection);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+.resize-handle.rotate-handle {
+  cursor: grab;
+}
+
+.resize-handle.rotate-handle.active {
+  cursor: grabbing;
+}
+
 .resize-handle-label {
   fill: var(--primary-strong);
   font-weight: var(--weight-strong);
@@ -7488,6 +7511,35 @@ body.panels-resizing * {
   fill: none;
 }
 
+/* The elevation shadow of a SUSPENDED floor artwork (a board hung from ceiling
+   wires — ElevationSuspendedArtworkGhost.tsx): the same quiet dashed vocabulary
+   as the floor-case ghost, and equally non-interactive, but the box FLOATS
+   between baseHeightMm and its top edge instead of standing on the floor line.
+   Kept as its own rule rather than a shared `.elevation-ghost` base so the two
+   ghosts can diverge (wires are finer than the board) without either quietly
+   restyling the other. */
+.elevation-suspended-artwork-ghost {
+  fill: none;
+  stroke: var(--subtle);
+  stroke-width: 1;
+  stroke-dasharray: 6 5;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.elevation-suspended-artwork-ghost rect,
+.elevation-suspended-artwork-ghost line {
+  fill: none;
+}
+
+/* Hairline wires with a finer dash than the board they carry: they explain the
+   float (it hangs, it isn't unexplained) without competing with the volume
+   itself, which is the thing a curator is reading. */
+.elevation-suspended-artwork-ghost .suspended-artwork-ghost-wire {
+  stroke-dasharray: 3 4;
+  opacity: 0.7;
+}
+
 /* Plan-view placements — PlanObject.tsx. The outline is a little clearer than
    the elevation hairline because these objects sit on top of room geometry at
    plan scale. Kind-specific interior marks add recognition without adding a
@@ -7590,6 +7642,23 @@ body.panels-resizing * {
 
 .plan-object-mark--blocked-zone {
   opacity: 0.75;
+}
+
+/* Front face of a floor-placed artwork (the +depth long edge — see the
+   FRONT-FACE CONVENTION block in PlanObject.tsx). Heavier and darker than both
+   the generic mark and the outline it overdraws, because in a plan drawing a
+   thickened line on one face IS the shorthand for "this is the significant
+   surface" — the projection/viewing side. Butt caps so it stops exactly at the
+   footprint corners instead of overhanging them the way the mark family's
+   default square caps would. No new color: --ink is the same structural
+   drawing token the hover outline uses, and the .is-selected / .is-invalid
+   .plan-object-mark recolors below still win on specificity (0,3,0 > 0,1,0),
+   so a selected or refused board turns petrol/red like every other mark. */
+.plan-object-mark--front-face {
+  stroke: var(--ink);
+  stroke-width: 3;
+  stroke-linecap: butt;
+  opacity: 1;
 }
 
 /* Hinged-door swing (doorSwingPlanGlyph, via PlanObject.tsx) — the leaf drawn

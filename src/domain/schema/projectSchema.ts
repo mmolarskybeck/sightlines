@@ -115,7 +115,12 @@ const floorObjectBaseSchema = z.object({
   depthMm: z.number().positive(),
   rotationDeg: z.number().finite(),
   heightMm: z.number().positive(),
-  wallYMm: z.number().finite()
+  wallYMm: z.number().finite(),
+  // Suspension height of the bottom edge above the floor. Optional and
+  // additive (absent = resting on the floor), so no schema-version bump —
+  // older projects simply carry no value. Non-negative: an object below the
+  // floor is not a state worth representing.
+  baseHeightMm: z.number().nonnegative().finite().optional()
 });
 
 const artworkFloorObjectSchema = floorObjectBaseSchema.extend({

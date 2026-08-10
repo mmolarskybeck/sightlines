@@ -61,6 +61,17 @@ const GLASS_MATERIAL_PROPS = {
 // texture/emissive tint) but is composed of several stacked meshes instead of
 // one box, so the click handler and hover state are shared across the pieces
 // that make up the case rather than living on a single mesh.
+//
+// DECISION: a floor case deliberately IGNORES FloorObjectBase.baseHeightMm and
+// always stands on the floor, unlike the suspended artwork boxes FloorObjectBox
+// now lifts. A vitrine is furniture on four legs, and this mesh derives those
+// legs' height from heightMm — which CaseFloorObject defines as "overall, floor
+// to the top of the glass box", a measurement taken FROM THE FLOOR. Honoring a
+// base height would render legs stopping in mid-air (and no wires: a case does
+// not hang from ceiling rigging), while silently invalidating the very datum
+// the leg height is computed against. planSuspensionWires (SuspensionWires.tsx)
+// encodes the same rule for the wires; the honest completion of this decision
+// is for the inspector not to offer suspension on a case at all.
 export function FloorCaseMesh({
   object,
   isSelected,

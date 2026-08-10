@@ -96,6 +96,11 @@ import { usePlanRoomEditing } from "../../hooks/usePlanRoomEditing";
 import { getPartitionMovedAxes, usePlanPartitionTool } from "../../hooks/usePlanPartitionTool";
 import { PlanStructureLayer } from "./PlanStructureLayer";
 import { PlacedObjectsLayer } from "./PlacedObjectsLayer";
+import {
+  FloorObjectRotateHandle,
+  rotationDegForPointer,
+  snapRotationDeg
+} from "./FloorObjectRotateHandle";
 import { PlanHandlesLayer } from "./PlanHandlesLayer";
 import { PlanOverlaysLayer } from "./PlanOverlaysLayer";
 import { PartitionDimensionLines } from "./PartitionDimensionLines";
@@ -104,14 +109,27 @@ import {
   computePlanGapLines,
   type PlanGapLine
 } from "../../../domain/dimensions/planDimensions";
-import type { ToolGhostState } from "./types";
+import type { FloorObjectRotateDragState, ToolGhostState } from "./types";
 
 // Selected-room resize handle size in screen pixels.
 const SELECTED_HANDLE_PX = 10;
 const SNAP_THRESHOLD_PX = 10;
 // Keep thin wall objects visible when zoomed out.
 const MIN_WALL_OBJECT_DEPTH_PX = 9;
-// Minimum invisible hit target for plan objects.
+// Minimum invisible hit target for plan objects, per axis (PlanObject's
+// hitMinSizeMm). Deliberately larger than the measurement line's 14px body
+// slop: a plan object can be a true hairline. A floor artwork used as a
+// projection board carries the board's ~18mm thickness as its depthMm and so
+// draws as a sub-pixel line at any realistic plan zoom — this is what keeps it
+// grabbable, and it must stay a HIT-only floor (the drawn depth is honest, and
+// unlike wall objects floor objects get no MIN_WALL_OBJECT_DEPTH_PX clamp).
+//
+// TRAP: do not raise this to a touch-target size. The pad is an invisible
+// surface that paints above room structure (PlacedObjectsLayer renders after
+// PlanStructureLayer), so every extra pixel is a pixel of wall/partition the
+// object steals from underneath it — a board parked against a wall would make
+// that wall unselectable along its whole length. Handles are safe either way:
+// PlanHandlesLayer renders after PlacedObjectsLayer and therefore always wins.
 const MIN_OBJECT_HIT_PX = 20;
 // Prevent fit-view from over-zooming sparse plans (~30 ft minimum extent).
 const MIN_PLAN_FIT_EXTENT_MM = 9144;
@@ -265,6 +283,10 @@ export function PlanView({
   );
   const onSelectMeasurement = useAppStore((state) => state.selectMeasurement);
   const onUpdateReferenceMeasurement = useAppStore((state) => state.updateReferenceMeasurement);
+  // Read straight from the store, like the measurement update above: the rotate
+  // handle writes exactly one field of one floor object and needs no App-level
+  // composition, so threading a prop through App would only add a seam.
+  const onUpdateFloorObject = useAppStore((state) => state.updateFloorObject);
   const onClearSelection = useAppStore((state) => state.clearObjectSelection);
   // The room/structure editing controller: the wall-resize / whole-room /
   // reshape-vertex / wall-slide pointer drags, the rectangle-room create drag,
@@ -341,6 +363,42 @@ export function PlanView({
         suppressNextToolClickRef.current = false;
       }, 0);
       onMarqueeSelect?.(idsIntersectingMarquee(rect), event.shiftKey);
+    }
+  });
+
+  // Rotate drag of the one selected floor object (FloorObjectRotateHandle).
+  // Declared up here beside the marquee — not next to its render site — for the
+  // same reason the controller hooks are: `rotateDrag` has to exist before
+  // planInteractionActive is assembled below. Its handlers close over toSvgMm
+  // and snapToGrid, which are declared further down; that is safe (and already
+  // the marquee's pattern) because useDragGesture only ever calls them from
+  // window pointer events, never during render.
+  const {
+    drag: rotateDrag,
+    beginDrag: startRotateDrag
+  } = useDragGesture<FloorObjectRotateDragState>({
+    onMove: (current, event) => {
+      const pointerMm = toSvgMm(event.clientX, event.clientY);
+      if (!pointerMm) return null;
+      // Inside the dead zone the pointer has no bearing from the pivot; hold
+      // the last angle rather than letting it spin on jitter. snapThresholdMm
+      // is the project's existing "this movement is meaningful" distance.
+      const rawDeg = rotationDegForPointer(current.centerMm, pointerMm, snapThresholdMm);
+      if (rawDeg === null) return null;
+
+      return {
+        ...current,
+        previewRotationDeg: snapRotationDeg(rawDeg, { snapToGrid, altKey: event.altKey })
+      };
+    },
+    onRelease: (current) => {
+      // A grab-and-release that never left the committed angle stays a click:
+      // no store write, no undo entry — the same policy the object move drag
+      // applies below its 0.5mm movement floor.
+      if (current.previewRotationDeg === current.startRotationDeg) return;
+      void onUpdateFloorObject(current.objectId, {
+        rotationDeg: current.previewRotationDeg
+      });
     }
   });
 
@@ -433,6 +491,7 @@ export function PlanView({
   const planInteractionActive = Boolean(
     roomEditing.drag ||
       objectMove.active ||
+      rotateDrag ||
       roomEditing.roomDrag ||
       roomEditing.vertexDrag ||
       roomEditing.wallDrag ||
@@ -755,6 +814,24 @@ export function PlanView({
     [displayedProject, artworksById, wallObjectMinDepthMm]
   );
   const measureSources = useMemo(() => buildPlanMeasureSources(planScene), [planScene]);
+
+  // The floor object that gets a rotate handle: exactly one selected, nothing
+  // else in flight. Reuses PlacedObjectsLayer's own is-selected predicate
+  // (placement id OR the library artwork id) so the handle can never appear on
+  // something the canvas isn't drawing as selected. Every floor kind qualifies —
+  // rotationDeg is editable for all of them, matching the inspector's Angle
+  // field — and a multi-selection gets none, because a group rotation is a
+  // different gesture (each member would need its own pivot policy) and this
+  // handle must not quietly imply it.
+  const rotateHandleTarget = useMemo(() => {
+    if (exportMode) return null;
+    const selected = planScene.floorObjects.filter(
+      (entry) =>
+        selectedObjectIds.includes(entry.object.id) ||
+        (entry.object.kind === "artwork" && entry.object.artworkId === selectedArtworkId)
+    );
+    return selected.length === 1 ? selected[0] : null;
+  }, [exportMode, planScene.floorObjects, selectedObjectIds, selectedArtworkId]);
   const {
     measureGestureRef,
     snappedMeasurementEndpoint,
@@ -1278,6 +1355,7 @@ export function PlanView({
         {!exportMode &&
         !roomEditing.drag &&
         !objectMove.objectDrag &&
+        !rotateDrag &&
         !dropGhost &&
         !activeTool &&
         !roomEditing.roomDrag &&
@@ -1301,11 +1379,17 @@ export function PlanView({
           floorObjects={planScene.floorObjects}
           pixelsPerMm={pixelsPerMm}
           objectDrag={objectMove.objectDrag}
+          rotationPreview={
+            rotateDrag
+              ? { objectId: rotateDrag.objectId, rotationDeg: rotateDrag.previewRotationDeg }
+              : null
+          }
           tooltipsDisabled={
             exportMode ||
             Boolean(
               roomEditing.drag ||
                 objectMove.objectDrag ||
+                rotateDrag ||
                 dropGhost ||
                 activeTool ||
                 roomEditing.roomDrag ||
@@ -1393,6 +1477,38 @@ export function PlanView({
           beginPartitionDrag={partition.beginPartitionDrag}
           exportMode={exportMode}
         />
+        {/* Rotate affordance for a single selected floor object — the plan-side
+            twin of the inspector's Angle field. Painted AFTER PlanHandlesLayer
+            on purpose, but it never actually competes with the room/partition
+            handles there: those render only for a selected room, partition or
+            reshape target, and the selection union makes "a room is selected"
+            and "a floor object is selected" mutually exclusive. It is also
+            withheld while any other plan gesture or tool is live, so it can
+            never intercept a click meant for a placement, a draw, or the
+            wall-midpoint slide handle (the known handle-eats-clicks trap). */}
+        {rotateHandleTarget && (rotateDrag || !planInteractionActive) ? (
+          <FloorObjectRotateHandle
+            handleSizeMm={handleSizeMm}
+            isActive={rotateDrag?.objectId === rotateHandleTarget.object.id}
+            planRect={
+              rotateDrag?.objectId === rotateHandleTarget.object.id
+                ? { ...rotateHandleTarget.rect, angleDeg: rotateDrag.previewRotationDeg }
+                : rotateHandleTarget.rect
+            }
+            onBeginDrag={(event) => {
+              event.stopPropagation();
+              startRotateDrag({
+                objectId: rotateHandleTarget.object.id,
+                centerMm: {
+                  xMm: rotateHandleTarget.rect.centerXMm,
+                  yMm: rotateHandleTarget.rect.centerYMm
+                },
+                startRotationDeg: rotateHandleTarget.object.rotationDeg,
+                previewRotationDeg: rotateHandleTarget.object.rotationDeg
+              });
+            }}
+          />
+        ) : null}
         {/* Gestural overlays: the polygon-room draw preview + capture rect, the
             partition- and rectangle-draw previews, the armed-tool/drop ghosts,
             the snap guides, and the in-progress marquee. activeGuides picks the

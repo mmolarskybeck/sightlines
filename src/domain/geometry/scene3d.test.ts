@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
   Artwork,
+  ArtworkFloorObject,
   FloorObject,
   Project,
   Room,
@@ -938,6 +939,78 @@ describe("deriveScene3d — floor objects (M2)", () => {
       makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))])
     );
     expect(scene.floorObjects).toEqual([]);
+  });
+});
+
+describe("deriveScene3d — suspended floor objects", () => {
+  function suspendable(overrides: Partial<ArtworkFloorObject> = {}): FloorObject {
+    return {
+      id: "fobj-1",
+      kind: "artwork",
+      artworkId: "art-1",
+      xMm: 2000,
+      yMm: 1500,
+      widthMm: 2400,
+      depthMm: 18,
+      heightMm: 1350,
+      rotationDeg: 0,
+      wallYMm: 1450,
+      ...overrides
+    };
+  }
+
+  function deriveOne(object: FloorObject, placements = [makePlacement(makeRoom("room-a", CCW_RECT, 2500))]) {
+    return deriveScene3d(makeProject(placements, { floorObjects: [object] }))
+      .floorObjects[0]!;
+  }
+
+  it("emits neither suspension field for a floor-resting object", () => {
+    // Absence, not 0, is the encoding — a floor-resting entry has to keep
+    // exactly the shape it had before suspension existed.
+    const resting = deriveOne(suspendable());
+    expect(resting).not.toHaveProperty("baseHeightMm");
+    expect(resting).not.toHaveProperty("suspensionAnchorHeightMm");
+
+    const explicitZero = deriveOne(suspendable({ baseHeightMm: 0 }));
+    expect(explicitZero).toEqual(resting);
+  });
+
+  it("anchors a suspended object to its containing room's height", () => {
+    expect(deriveOne(suspendable({ baseHeightMm: 900 }))).toMatchObject({
+      baseHeightMm: 900,
+      // There is no ceiling geometry, so the room's wall height is the anchor.
+      suspensionAnchorHeightMm: 2500
+    });
+  });
+
+  it("resolves containment in floor space, after the placement transform", () => {
+    // Room-local the object would be far outside the 4000x3000 ring; it is only
+    // inside once the placement offset is applied. Reading room.vertices
+    // instead of the derived floor polygon would lose the anchor here.
+    const placed = makePlacement(makeRoom("room-a", CCW_RECT, 2500), {
+      offsetXMm: 10000
+    });
+    expect(
+      deriveOne(suspendable({ xMm: 12000, baseHeightMm: 900 }), [placed])
+    ).toMatchObject({ suspensionAnchorHeightMm: 2500 });
+  });
+
+  it("picks the height of the room the object actually stands in", () => {
+    const near = makePlacement(makeRoom("room-a", CCW_RECT, 2500));
+    const far = makePlacement(makeRoom("room-b", CCW_RECT, 4200), {
+      offsetXMm: 10000
+    });
+    expect(
+      deriveOne(suspendable({ xMm: 12000, baseHeightMm: 900 }), [near, far])
+    ).toMatchObject({ suspensionAnchorHeightMm: 4200 });
+  });
+
+  it("leaves a suspended object outside every room with no anchor", () => {
+    // Nothing to hang from — the render layer must draw no wires rather than
+    // fall back to some invented height.
+    const orphan = deriveOne(suspendable({ xMm: -5000, baseHeightMm: 900 }));
+    expect(orphan.baseHeightMm).toBe(900);
+    expect(orphan).not.toHaveProperty("suspensionAnchorHeightMm");
   });
 });
 

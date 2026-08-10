@@ -43,6 +43,7 @@ import {
 } from "../../../domain/framing";
 import type {
   Artwork,
+  ArtworkFloorObject,
   CaseFloorObject,
   DisplayUnit,
   FloorObject,
@@ -105,6 +106,7 @@ import {
 import { ElevationArtwork } from "./ElevationArtwork";
 import { ElevationOpening } from "./ElevationOpening";
 import { ElevationCase, ElevationFloorCaseGhost } from "./ElevationCase";
+import { ElevationSuspendedArtworkGhost } from "./ElevationSuspendedArtworkGhost";
 import { ElevationWallText } from "./ElevationWallText";
 import {
   ArtworkTooltipContent,
@@ -618,14 +620,21 @@ export function ElevationView({
     return preview ? { ...object, xMm: preview.xMm, yMm: preview.yMm } : object;
   });
 
-  // Freestanding floor cases whose ghost may project onto THIS wall: the
+  // Freestanding floor objects whose ghost may project onto THIS wall: the
   // wall's floor-space endpoints (from getFloorWalls, which lifts room/partition
-  // walls into floor coordinates) plus the case floor objects in the room this
-  // wall bounds. The room filter (point-in-polygon on the room this wall belongs
-  // to) keeps a case behind the wall in a neighbouring room from ghosting through
-  // it — the builder's projection then drops any case not actually overlapping
-  // the wall extent. undefined/absent inputs simply yield no ghosts.
-  const floorCaseGhostInputs = useMemo(() => {
+  // walls into floor coordinates) plus the case and artwork floor objects in the
+  // room this wall bounds. The room filter (point-in-polygon on the room this
+  // wall belongs to) keeps an object behind the wall in a neighbouring room from
+  // ghosting through it — the builder's projection then drops anything not
+  // actually overlapping the wall extent. undefined/absent inputs simply yield
+  // no ghosts.
+  //
+  // ONE gate for both kinds on purpose: a suspended board hung on the far side
+  // of a wall must be excluded by exactly the same point-in-polygon test the
+  // cases already pass, not by a parallel rule that could drift looser. Floor
+  // artworks are handed over unfiltered by height — buildElevationScene owns the
+  // "only suspended ones ghost" rule so the canvas and any export agree.
+  const floorGhostInputs = useMemo(() => {
     if (!wallId || !floorRooms) return null;
     const floorWall = getFloorWalls({ rooms: floorRooms }).find((wall) => wall.id === wallId);
     if (!floorWall) return null;
@@ -638,14 +647,18 @@ export function ElevationView({
           yMm: vertex.yMm + room.offsetYMm
         }))
       : null;
+    const inThisRoom = (object: FloorObject): boolean =>
+      !polygonMm || isPointInPolygon({ xMm: object.xMm, yMm: object.yMm }, polygonMm);
     const floorCases = floorObjects.filter(
-      (object): object is CaseFloorObject =>
-        object.kind === "case" &&
-        (!polygonMm || isPointInPolygon({ xMm: object.xMm, yMm: object.yMm }, polygonMm))
+      (object): object is CaseFloorObject => object.kind === "case" && inThisRoom(object)
     );
-    if (floorCases.length === 0) return null;
+    const floorArtworks = floorObjects.filter(
+      (object): object is ArtworkFloorObject => object.kind === "artwork" && inThisRoom(object)
+    );
+    if (floorCases.length === 0 && floorArtworks.length === 0) return null;
     return {
       floorCases,
+      floorArtworks,
       wallStartFloorMm: floorWall.startFloorMm,
       wallEndFloorMm: floorWall.endFloorMm
     };
@@ -663,7 +676,7 @@ export function ElevationView({
     wallHeightMm,
     centerlineMm,
     artworksById,
-    ...(floorCaseGhostInputs ?? {})
+    ...(floorGhostInputs ?? {})
   });
   // Every wall object on this wall is a valid snap neighbor for any other —
   // an artwork can align to a door's edge just as readily as to another
@@ -1737,7 +1750,7 @@ export function ElevationView({
   const dimensionOthers: WallObject[] = wallObjectsOnThisWall
     .filter((wallObject) => !dimensionMemberIds.has(wallObject.id))
     .map((wallObject) => applyDragPreview(wallObject) as WallObject);
-  // Freestanding floor-case ghosts (elevationScene.floorCaseGhosts) are
+  // Projected floor-object ghosts (freestanding cases, suspended artwork) are
   // alignment aids projected onto this wall — never selectable, never
   // dimension MEMBERS (they aren't wall objects at all) — but a gap line
   // should still stop at one exactly like it would at a real neighbor, so a
@@ -1745,14 +1758,27 @@ export function ElevationView({
   // wall". Synthesized as bare WallObjectBase shapes (no `kind`, since
   // getNeighborAwareSegments/deriveVerticalNeighborGaps below only ever read
   // xMm/yMm/widthMm/heightMm off an "other").
-  const dimensionOtherGhosts: WallObjectBase[] = elevationScene.floorCaseGhosts.map((ghost) => ({
-    id: ghost.object.id,
-    wallId: wallId ?? "",
-    xMm: (ghost.xMinMm + ghost.xMaxMm) / 2,
-    yMm: ghost.heightMm / 2,
-    widthMm: ghost.xMaxMm - ghost.xMinMm,
-    heightMm: ghost.heightMm
-  }));
+  const dimensionOtherGhosts: WallObjectBase[] = [
+    ...elevationScene.floorCaseGhosts.map((ghost) => ({
+      id: ghost.object.id,
+      wallId: wallId ?? "",
+      xMm: (ghost.xMinMm + ghost.xMaxMm) / 2,
+      yMm: ghost.heightMm / 2,
+      widthMm: ghost.xMaxMm - ghost.xMinMm,
+      heightMm: ghost.heightMm
+    })),
+    // Suspended boards join the same pool for the same reason — but their
+    // center is baseHeightMm ABOVE the floor, not heightMm/2 off it. Getting
+    // that wrong would silently drop a vertical gap line onto the floor.
+    ...elevationScene.suspendedArtworkGhosts.map((ghost) => ({
+      id: ghost.object.id,
+      wallId: wallId ?? "",
+      xMm: (ghost.xMinMm + ghost.xMaxMm) / 2,
+      yMm: ghost.baseHeightMm + ghost.heightMm / 2,
+      widthMm: ghost.xMaxMm - ghost.xMinMm,
+      heightMm: ghost.heightMm
+    }))
+  ];
   const effectiveDimensionOthers: WallObjectBase[] = [
     ...getElevationFootprintObjects(dimensionOthers, artworksById),
     ...dimensionOtherGhosts
@@ -1988,6 +2014,20 @@ export function ElevationView({
         {elevationScene.floorCaseGhosts.map((ghost) => (
           <ElevationFloorCaseGhost
             key={ghost.object.id}
+            heightMm={ghost.heightMm}
+            wallHeightMm={wallHeightMm}
+            xMaxMm={ghost.xMaxMm}
+            xMinMm={ghost.xMinMm}
+          />
+        ))}
+        {/* Suspended floor artwork (a board hung from ceiling wires) gets the
+            same treatment: behind the wall objects, inert, dashed — it belongs
+            to no wall, it is only shown so its floating volume in front of this
+            one is visible. */}
+        {elevationScene.suspendedArtworkGhosts.map((ghost) => (
+          <ElevationSuspendedArtworkGhost
+            key={ghost.object.id}
+            baseHeightMm={ghost.baseHeightMm}
             heightMm={ghost.heightMm}
             wallHeightMm={wallHeightMm}
             xMaxMm={ghost.xMaxMm}

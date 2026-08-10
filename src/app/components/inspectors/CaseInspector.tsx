@@ -19,6 +19,7 @@ export function FloorCaseInspector({
   onCommitPosition,
   onCommitSize,
   onCommitHeight,
+  onCommitRotation,
   onDelete,
   unit
 }: {
@@ -26,6 +27,13 @@ export function FloorCaseInspector({
   onCommitPosition: (xMm: number, yMm: number) => void;
   onCommitSize: (widthMm: number, depthMm: number) => void;
   onCommitHeight: (heightMm: number) => void;
+  // A vitrine standing on its own legs can still usefully sit at an angle to
+  // the room around it, so Angle is wired here — but there is deliberately
+  // no onCommitBaseHeight prop: lifting the whole case off the floor would
+  // float its legs in open air, which nothing about a case supports (unlike
+  // artwork, a case never hangs from wires). See FloorPlacementFields'
+  // onCommitBaseHeight doc comment for the full reasoning.
+  onCommitRotation?: (rotationDeg: number) => void;
   onDelete: () => void;
   unit: DisplayUnit;
 }) {
@@ -39,6 +47,7 @@ export function FloorCaseInspector({
         floorObject={floorCase}
         onCommitPosition={onCommitPosition}
         onCommitSize={onCommitSize}
+        onCommitRotation={onCommitRotation}
         unit={unit}
       />
 

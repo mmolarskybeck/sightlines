@@ -125,6 +125,29 @@ export type ObjectDragState = {
   previewReanchorWall?: FloorWall | null;
 };
 
+// A rotate drag of ONE selected floor object (FloorObjectRotateHandle): the
+// pointer's bearing from the object's center becomes the object's rotationDeg,
+// transient until release, exactly one updateFloorObject commit. Same
+// discipline as every other plan gesture — live preview, one undo entry, and a
+// sub-threshold release that lands nothing.
+//
+// Deliberately NOT folded into ObjectDragState. A rotate never resolves a
+// placement: no wall capture, no float policy, no wall↔floor conversion, no
+// group members. Sharing that state would mean carrying a placement the
+// gesture can't produce, and the two can never run at once anyway (the handle
+// only renders while no other plan gesture is in flight).
+export type FloorObjectRotateDragState = {
+  objectId: string;
+  // The pivot, captured once at grab time. The object's center cannot move
+  // during a rotate, so re-reading it per frame would only invite drift.
+  centerMm: Vector2;
+  // The committed angle at grab time — a release still sitting on it commits
+  // nothing and creates no undo entry, mirroring the move drag's 0.5mm floor.
+  startRotationDeg: number;
+  // The live, already-snapped angle the object and the handle both paint at.
+  previewRotationDeg: number;
+};
+
 // The HTML5-drop preview for an artwork dragged in from the checklist —
 // mirrors ElevationView's DropGhostState, flowing through the same
 // resolvePlanPlacement call as the commit so a drop can never land where the

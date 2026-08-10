@@ -1,8 +1,10 @@
 import type {
   Artwork,
+  ArtworkFloorObject,
   ArtworkWallObject,
   CaseFloorObject,
   CaseWallObject,
+  FloorObject,
   OpeningWallObject,
   WallObject,
   WallTextWallObject
@@ -136,13 +138,51 @@ export type ElevationSceneFloorCaseGhost = {
   heightMm: number;
 };
 
-// Projects a floor case's rotated plan footprint onto the wall's along-axis.
+// The elevation "shadow" of a SUSPENDED floor artwork — a board hung from
+// ceiling wires (the projection-surface case: a thin panel angled to the wall,
+// hovering above the floor). Same along-wall projection as the floor case, but
+// the ghost FLOATS: it spans baseHeightMm..baseHeightMm+heightMm instead of
+// rising from the floor, because baseHeightMm is the bottom edge's height above
+// the floor (see FloorObjectBase.baseHeightMm — NOT wallYMm). A distinct entry
+// type from the case ghost so the UI can draw the floating board plus its
+// suspension wires rather than the case's glass-box/slab/legs glyph.
+//
+// DECISION — only SUSPENDED artworks ghost (baseHeightMm > 0); a floor-resting
+// artwork emits nothing. Weighed both ways: the floor-case precedent ghosts
+// unconditionally, and a floor-resting sculpture near a wall is arguably worth
+// aligning against too. But (a) every existing project with floor artwork would
+// suddenly grow dashed outlines on up to four wall elevations — a look
+// regression for work no one asked to see there, where the plan view already
+// says exactly where those objects sit; and (b) the thing that makes a
+// suspended board need an elevation at all is that it occupies air in front of
+// the wall, at the same heights as hung work, which no other view shows. The
+// case ghost earned its unconditional rule by being a waist-height vitrine you
+// hang work above. If floor-resting artwork should ghost later, this is one
+// predicate — deliberately not a silent default.
+export type ElevationSceneSuspendedArtworkGhost = {
+  object: ArtworkFloorObject;
+  xMinMm: number;
+  xMaxMm: number;
+  // Wall-local y of the ghost's BOTTOM edge (> 0 by construction).
+  baseHeightMm: number;
+  // The board's own height; its top edge is baseHeightMm + heightMm.
+  heightMm: number;
+};
+
+// Projects a floor object's rotated plan footprint onto the wall's along-axis.
 // Returns the [xMin, xMax] wall-local range (mm from the wall's start),
 // clamped to [0, wallLengthMm], or null when the footprint does not overlap
 // the wall's extent at all (entirely off either end). Reuses
 // getFloorObjectPlanRect for the footprint, then projects its four corners.
-export function projectFloorCaseOntoWall(
-  floorCase: CaseFloorObject,
+//
+// Kind-agnostic on purpose (floor cases AND suspended artwork boards run
+// through this one function): the along-wall extent of a rotated rectangle is
+// the same problem either way, and a second copy would be free to drift.
+// Rotation is genuinely handled — the corner formula here is character-for-
+// character the one in planRectIntersectsRect, so a 45° board correctly reports
+// the WIDER |w·cos| + |d·sin| span rather than its own width.
+export function projectFloorObjectOntoWall(
+  floorObject: FloorObject,
   wallStartFloorMm: Point,
   wallEndFloorMm: Point
 ): { xMinMm: number; xMaxMm: number } | null {
@@ -151,7 +191,7 @@ export function projectFloorCaseOntoWall(
   const wallLengthMm = Math.hypot(dirX, dirY);
   if (wallLengthMm === 0) return null;
 
-  const rect = getFloorObjectPlanRect(floorCase);
+  const rect = getFloorObjectPlanRect(floorObject);
   const angleRad = (rect.angleDeg * Math.PI) / 180;
   const cos = Math.cos(angleRad);
   const sin = Math.sin(angleRad);
@@ -203,6 +243,10 @@ export type ElevationScene = {
   // Empty unless the caller supplies floorCases + the wall's floor-space
   // endpoints in the options.
   floorCaseGhosts: ElevationSceneFloorCaseGhost[];
+  // Suspended floor artworks (boards hung above the floor) hovering in front of
+  // this wall, same projection, floating y-span. Empty unless the caller
+  // supplies floorArtworks + the wall's floor-space endpoints.
+  suspendedArtworkGhosts: ElevationSceneSuspendedArtworkGhost[];
 };
 
 export type ElevationSceneOptions = {
@@ -217,6 +261,11 @@ export type ElevationSceneOptions = {
   // by room). Projected onto the wall to emit floorCaseGhosts. Requires the
   // wall's floor-space endpoints below; without them no ghosts are emitted.
   floorCases?: CaseFloorObject[];
+  // Floor-placed artworks in the same room (caller filters by room, exactly as
+  // for floorCases). Pass them ALL — the suspension rule (baseHeightMm > 0)
+  // lives in the builder so every consumer, canvas and PDF alike, agrees on
+  // which floor artworks are visible in elevation.
+  floorArtworks?: ArtworkFloorObject[];
   wallStartFloorMm?: Point;
   wallEndFloorMm?: Point;
 };
@@ -232,6 +281,7 @@ export function buildElevationScene(
     centerlineMm,
     artworksById,
     floorCases,
+    floorArtworks,
     wallStartFloorMm,
     wallEndFloorMm
   } = options;
@@ -297,13 +347,34 @@ export function buildElevationScene(
   const floorCaseGhosts: ElevationSceneFloorCaseGhost[] = [];
   if (floorCases && wallStartFloorMm && wallEndFloorMm) {
     for (const floorCase of floorCases) {
-      const range = projectFloorCaseOntoWall(floorCase, wallStartFloorMm, wallEndFloorMm);
+      const range = projectFloorObjectOntoWall(floorCase, wallStartFloorMm, wallEndFloorMm);
       if (!range) continue;
       floorCaseGhosts.push({
         object: floorCase,
         xMinMm: range.xMinMm,
         xMaxMm: range.xMaxMm,
         heightMm: floorCase.heightMm
+      });
+    }
+  }
+
+  // Suspended-artwork ghosts: same projection, same wall-extent filter, but
+  // gated on baseHeightMm > 0 (see ElevationSceneSuspendedArtworkGhost for why
+  // floor-RESTING artwork deliberately emits nothing) and floating instead of
+  // standing on the floor line.
+  const suspendedArtworkGhosts: ElevationSceneSuspendedArtworkGhost[] = [];
+  if (floorArtworks && wallStartFloorMm && wallEndFloorMm) {
+    for (const floorArtwork of floorArtworks) {
+      const baseHeightMm = floorArtwork.baseHeightMm ?? 0;
+      if (baseHeightMm <= 0) continue;
+      const range = projectFloorObjectOntoWall(floorArtwork, wallStartFloorMm, wallEndFloorMm);
+      if (!range) continue;
+      suspendedArtworkGhosts.push({
+        object: floorArtwork,
+        xMinMm: range.xMinMm,
+        xMaxMm: range.xMaxMm,
+        baseHeightMm,
+        heightMm: floorArtwork.heightMm
       });
     }
   }
@@ -317,6 +388,7 @@ export function buildElevationScene(
     openings,
     wallTexts,
     cases,
-    floorCaseGhosts
+    floorCaseGhosts,
+    suspendedArtworkGhosts
   };
 }

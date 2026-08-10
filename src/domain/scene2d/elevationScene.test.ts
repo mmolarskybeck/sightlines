@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
   Artwork,
+  ArtworkFloorObject,
   ArtworkWallObject,
   CaseFloorObject,
   CaseWallObject,
@@ -9,7 +10,7 @@ import type {
 } from "../project";
 import {
   buildElevationScene,
-  projectFloorCaseOntoWall,
+  projectFloorObjectOntoWall,
   wallLocalYToSvgY
 } from "./elevationScene";
 
@@ -181,15 +182,15 @@ function floorCase(overrides: Partial<CaseFloorObject> = {}): CaseFloorObject {
   };
 }
 
-describe("projectFloorCaseOntoWall", () => {
+describe("projectFloorObjectOntoWall", () => {
   it("projects an axis-aligned floor case to its width-spanning x-range", () => {
-    const range = projectFloorCaseOntoWall(floorCase(), WALL_START, WALL_END);
+    const range = projectFloorObjectOntoWall(floorCase(), WALL_START, WALL_END);
     // center 2000 ± halfWidth 900.
     expect(range).toEqual({ xMinMm: 1100, xMaxMm: 2900 });
   });
 
   it("projects a 90°-rotated floor case to its depth-spanning x-range", () => {
-    const range = projectFloorCaseOntoWall(
+    const range = projectFloorObjectOntoWall(
       floorCase({ rotationDeg: 90 }),
       WALL_START,
       WALL_END
@@ -200,7 +201,7 @@ describe("projectFloorCaseOntoWall", () => {
   });
 
   it("clamps a footprint straddling the wall end to the wall extent", () => {
-    const range = projectFloorCaseOntoWall(
+    const range = projectFloorObjectOntoWall(
       floorCase({ xMm: 7800 }), // 6900..8700, past the 8000 end
       WALL_START,
       WALL_END
@@ -209,7 +210,7 @@ describe("projectFloorCaseOntoWall", () => {
   });
 
   it("emits nothing for a case entirely off the wall's extent", () => {
-    const range = projectFloorCaseOntoWall(
+    const range = projectFloorObjectOntoWall(
       floorCase({ xMm: 12000 }), // 11100..12900, all beyond 8000
       WALL_START,
       WALL_END
@@ -250,5 +251,112 @@ describe("buildElevationScene floor-case ghosts", () => {
   it("emits no ghosts when the wall geometry is not supplied", () => {
     const scene = buildElevationScene([], { ...WALL, floorCases: [floorCase()] });
     expect(scene.floorCaseGhosts).toHaveLength(0);
+  });
+});
+
+// A thin freestanding board (MDF projection surface) hung from ceiling wires:
+// 2400 wide, 40 deep, bottom edge 900 above the floor.
+function suspendedBoard(overrides: Partial<ArtworkFloorObject> = {}): ArtworkFloorObject {
+  return {
+    id: "floor-board",
+    kind: "artwork",
+    artworkId: "art-1",
+    xMm: 3000,
+    yMm: 1500,
+    widthMm: 2400,
+    depthMm: 40,
+    rotationDeg: 0,
+    heightMm: 1800,
+    wallYMm: 1450,
+    baseHeightMm: 900,
+    ...overrides
+  };
+}
+
+describe("buildElevationScene suspended-artwork ghosts", () => {
+  it("floats the ghost from baseHeightMm to baseHeightMm + heightMm", () => {
+    const scene = buildElevationScene([], {
+      ...WALL,
+      floorArtworks: [suspendedBoard()],
+      wallStartFloorMm: WALL_START,
+      wallEndFloorMm: WALL_END
+    });
+
+    expect(scene.suspendedArtworkGhosts).toHaveLength(1);
+    // The whole point of the entry: it does NOT rise from the floor the way a
+    // floor-case ghost does — bottom 900, top 900 + 1800 = 2700.
+    expect(scene.suspendedArtworkGhosts[0]).toMatchObject({
+      xMinMm: 1800, // center 3000 ± halfWidth 1200
+      xMaxMm: 4200,
+      baseHeightMm: 900,
+      heightMm: 1800
+    });
+    expect(scene.suspendedArtworkGhosts[0]!.object.id).toBe("floor-board");
+  });
+
+  it("projects a 45°-angled board onto the wall's along-axis, not its own width", () => {
+    const scene = buildElevationScene([], {
+      ...WALL,
+      floorArtworks: [suspendedBoard({ rotationDeg: 45 })],
+      wallStartFloorMm: WALL_START,
+      wallEndFloorMm: WALL_END
+    });
+
+    // The along-wall extent of a rotated rect is |w·cos| + |d·sin|:
+    // (2400 + 40) · cos45 = 1725.34, so center 3000 ± 862.67. Note this is
+    // NARROWER than the board's own 2400 width — a thin board angled away from
+    // the wall foreshortens. (A DEEP object, like a floor case, is the case
+    // where rotation widens the span past its width; both fall out of the same
+    // formula.)
+    const ghost = scene.suspendedArtworkGhosts[0]!;
+    expect(ghost.xMinMm).toBeCloseTo(2137.33, 1);
+    expect(ghost.xMaxMm).toBeCloseTo(3862.67, 1);
+  });
+
+  it("does not ghost a floor-RESTING artwork (absent or zero baseHeightMm)", () => {
+    const scene = buildElevationScene([], {
+      ...WALL,
+      floorArtworks: [
+        suspendedBoard({ id: "resting-implicit", baseHeightMm: undefined }),
+        suspendedBoard({ id: "resting-explicit", baseHeightMm: 0 })
+      ],
+      wallStartFloorMm: WALL_START,
+      wallEndFloorMm: WALL_END
+    });
+
+    // Deliberate: only suspended objects ghost, so existing projects with floor
+    // artwork keep the elevations they have today.
+    expect(scene.suspendedArtworkGhosts).toHaveLength(0);
+  });
+
+  it("emits no ghost for a board entirely off the wall's extent", () => {
+    const scene = buildElevationScene([], {
+      ...WALL,
+      floorArtworks: [suspendedBoard({ xMm: 12000 })], // 10800..13200, past 8000
+      wallStartFloorMm: WALL_START,
+      wallEndFloorMm: WALL_END
+    });
+
+    expect(scene.suspendedArtworkGhosts).toHaveLength(0);
+  });
+
+  it("emits no ghosts when the wall geometry is not supplied", () => {
+    const scene = buildElevationScene([], { ...WALL, floorArtworks: [suspendedBoard()] });
+    expect(scene.suspendedArtworkGhosts).toHaveLength(0);
+  });
+
+  it("keeps case and suspended-artwork ghosts in separate buckets", () => {
+    const scene = buildElevationScene([], {
+      ...WALL,
+      floorCases: [floorCase()],
+      floorArtworks: [suspendedBoard()],
+      wallStartFloorMm: WALL_START,
+      wallEndFloorMm: WALL_END
+    });
+
+    // The PDF elevation page draws floorCaseGhosts with the case glyph (glass
+    // box, slab, legs) — a board must never land in that array.
+    expect(scene.floorCaseGhosts.map((ghost) => ghost.object.id)).toEqual(["floor-case"]);
+    expect(scene.suspendedArtworkGhosts.map((ghost) => ghost.object.id)).toEqual(["floor-board"]);
   });
 });

@@ -1,13 +1,14 @@
 import type {
   Artwork,
   Dimensions,
+  FloorObject,
   Project,
   RoomPlacement,
   WallObject
 } from "../project";
 import { getFreestandingFaces } from "./freestandingWalls";
 import { buildFloorWallsById, evaluateOpeningPairWith } from "./openingConnections";
-import { signedAreaMm2 } from "./polygon";
+import { isPointInPolygon, signedAreaMm2 } from "./polygon";
 import { unitLeftNormalOrZero } from "./vector";
 import { getWallsWithGeometry } from "./walls";
 
@@ -94,6 +95,25 @@ export type FloorObject3d = {
   depthMm: number;
   heightMm: number;
   rotationDeg: number;
+  // Height of the object's BOTTOM edge above the floor (FloorObjectBase.
+  // baseHeightMm — read its TRAP note before touching this: it is not wallYMm).
+  // Emitted ONLY when the object is genuinely suspended, so a floor-resting
+  // object's scene entry keeps exactly the key set it had before suspension
+  // existed and every consumer that never learned about it keeps drawing the
+  // object on the floor. Absence is the encoding for "resting", not 0.
+  baseHeightMm?: number;
+  // Where a suspended object's rigging terminates. THERE IS NO CEILING
+  // GEOMETRY IN THIS APP — a room is a floor polygon plus wall panels (Room3d)
+  // and nothing renders a lid — so "hung from the ceiling" has to resolve to
+  // the only vertical datum that exists: the containing room's `heightMm`
+  // (the room-level height, not any one wall's, for the same reason camera
+  // framing uses it — an open wall emits no panel at all).
+  //
+  // Set only alongside baseHeightMm, and only when the object's center
+  // actually falls inside some room's floor polygon. A suspended object
+  // dragged out onto the bare void between rooms has nothing to hang from, and
+  // the render layer must then draw no wires rather than invent a height.
+  suspensionAnchorHeightMm?: number;
 };
 
 // Wall-local, center-anchored didactic text panel. Like artworks it rides the
@@ -229,10 +249,15 @@ export function deriveScene3d(
     });
   }
 
+  // Derived up front rather than inline in the returned literal: floor objects
+  // now need the rooms' floor-space polygons to resolve a suspension anchor
+  // (see suspensionFields), and re-deriving them per object would be quadratic.
+  const rooms = project.floor.rooms.map((placement) =>
+    deriveRoom(placement, wallObjectsByWallId, artworksById, openConnectionsByObjectId)
+  );
+
   return {
-    rooms: project.floor.rooms.map((placement) =>
-      deriveRoom(placement, wallObjectsByWallId, artworksById, openConnectionsByObjectId)
-    ),
+    rooms,
     floorObjects: project.floorObjects.map((object) => {
       const artwork =
         object.kind === "artwork" ? artworksById.get(object.artworkId) : undefined;
@@ -251,10 +276,41 @@ export function deriveScene3d(
         widthMm: object.widthMm,
         depthMm: object.depthMm,
         heightMm: object.heightMm,
-        rotationDeg: object.rotationDeg
+        rotationDeg: object.rotationDeg,
+        ...suspensionFields(object, rooms)
       };
     })
   };
+}
+
+// The suspension half of a floor object's scene entry — an empty object for the
+// overwhelmingly common floor-resting case, so those entries stay exactly what
+// this file emitted before suspension existed (see FloorObject3d.baseHeightMm
+// for why absence rather than 0 is the encoding).
+function suspensionFields(
+  object: FloorObject,
+  rooms: Room3d[]
+): { baseHeightMm?: number; suspensionAnchorHeightMm?: number } {
+  const baseHeightMm = object.baseHeightMm ?? 0;
+  if (baseHeightMm <= 0) return {};
+
+  // First containing room wins. Room footprints may overlap in floor space
+  // (nothing forbids it, and a doorway-joined pair shares a boundary), so a
+  // "which room owns this point" tiebreak would be a brand-new domain rule
+  // invented here for what is only a visual anchor. Placement order is
+  // deterministic and every candidate is a room the object genuinely stands
+  // in, so the first hit is honest as well as stable.
+  //
+  // The polygons are already placement-transformed (deriveRoom transforms the
+  // room's vertices), and floor objects are stored in floor space, so both
+  // sides of this test are in the same space — do not "simplify" it to the
+  // untransformed room.vertices, which are room-local.
+  const room = rooms.find((candidate) =>
+    isPointInPolygon({ xMm: object.xMm, yMm: object.yMm }, candidate.floorPolygon)
+  );
+  return room
+    ? { baseHeightMm, suspensionAnchorHeightMm: room.heightMm }
+    : { baseHeightMm };
 }
 
 // The inward-facing unit normal for a wall panel: the left normal of

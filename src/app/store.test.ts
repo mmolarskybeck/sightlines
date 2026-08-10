@@ -35,7 +35,7 @@ import {
 import { getPartitionClearances } from "../domain/geometry/partitionSpacing";
 import { evaluateOpeningPair } from "../domain/geometry/openingConnections";
 import { createSampleProject } from "../domain/sample/sampleProject";
-import { MAX_IMPORT_JSON_LENGTH } from "../domain/schema/projectSchema";
+import { MAX_IMPORT_JSON_LENGTH, parseProject } from "../domain/schema/projectSchema";
 import { createSightlinesPackage } from "../domain/package/buildPackage";
 import { makeFixture } from "../domain/package/packageTestFixtures";
 import { createArtworkImportPlan } from "../domain/spreadsheetImport/importPlan";
@@ -6096,6 +6096,31 @@ describe("app store", () => {
 
       await store.getState().updateFloorObject(floorCaseId, { heightMm: 1200 });
       expect(store.getState().project!.floorObjects[0].heightMm).toBe(1200);
+    });
+
+    // The schema declares baseHeightMm nonnegative and parseProject THROWS, and
+    // that parse runs on every save — so an unclamped negative commits fine in
+    // memory and then wedges persistence/export/backup behind a generic error,
+    // while all three views still draw the object as ordinary floor-resting
+    // (3D strips <= 0, elevation gates on > 0). Clamping is what keeps the
+    // inspector's deliberately-not-positiveOnly field (0 must stay typeable to
+    // un-suspend a work) from being able to write an unsaveable project.
+    it("clamps a negative baseHeightMm to 0 so a suspended object can never wedge saving", async () => {
+      await store.getState().placeCaseFromPlan({ anchor: "floor", xMm: 500, yMm: 500 });
+      const floorId = store.getState().project!.floorObjects[0].id;
+
+      await store.getState().updateFloorObject(floorId, { baseHeightMm: -2000 });
+
+      const clamped = store.getState().project!.floorObjects[0];
+      expect(clamped.baseHeightMm).toBe(0);
+      // The whole point of the clamp: the result still parses, i.e. still saves.
+      expect(() => parseProject(store.getState().project!)).not.toThrow();
+
+      // 0 stays writable (un-suspending), and a real height still round-trips.
+      await store.getState().updateFloorObject(floorId, { baseHeightMm: 1200 });
+      expect(store.getState().project!.floorObjects[0].baseHeightMm).toBe(1200);
+      await store.getState().updateFloorObject(floorId, { baseHeightMm: 0 });
+      expect(store.getState().project!.floorObjects[0].baseHeightMm).toBe(0);
     });
 
     it("refuses to convert a floor case onto a wall (no case wall↔floor conversion)", async () => {

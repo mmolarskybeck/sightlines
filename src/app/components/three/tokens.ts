@@ -131,6 +131,20 @@ export const CASE_GLASS_COLOR = "#eef2f3";
 export const CASE_GLASS_OPACITY = 0.25;
 
 // ============================================================================
+// Suspension rigging (hung floor objects)
+// ============================================================================
+
+// The wires a suspended floor object hangs by (SuspensionWires.tsx). Rigging
+// hardware, not a focal element: a hairline (lineBasicMaterial ignores
+// linewidth, so it is always 1px) in a mid cool grey. Line materials take no
+// shading, so unlike the Lambert surface colors above this hex is literally
+// what renders. Chosen a clear step darker than every surface a wire can cross
+// — the lit floor (~0.71 sRGB), SCENE_BACKGROUND_COLOR (~0.82), the darkest
+// wall face (~0.87) — so a single pixel stays readable against all three,
+// while staying well off the near-black ink that would read as structure.
+export const SUSPENSION_WIRE_COLOR = "#7e858b";
+
+// ============================================================================
 // Blocked zones (planning annotations, not physical)
 // ============================================================================
 

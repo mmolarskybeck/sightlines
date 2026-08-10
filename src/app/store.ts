@@ -510,7 +510,12 @@ export type AppState = ArrangeSliceState &
   ) => Promise<void>;
   updateFloorObject: (
     objectId: string,
-    changes: Partial<Pick<FloorObjectBase, "xMm" | "yMm" | "widthMm" | "depthMm" | "heightMm">>
+    changes: Partial<
+      Pick<
+        FloorObjectBase,
+        "xMm" | "yMm" | "widthMm" | "depthMm" | "heightMm" | "rotationDeg" | "baseHeightMm"
+      >
+    >
   ) => Promise<void>;
   moveWallObjectsGroup: (
     moves: { id: string; xMm: number; yMm: number }[],
@@ -3176,14 +3181,48 @@ export function createAppStore(deps: AppStoreDeps) {
         // heightMm is editable for cases (their overall floor-to-top height);
         // for artwork/blocked-zone the inspector never sends it, so including it
         // here is harmless — the equality guard drops any no-op change.
-        const keys = ["xMm", "yMm", "widthMm", "depthMm", "heightMm"] as const;
+        //
+        // rotationDeg and baseHeightMm join the same list: both are editable for
+        // every floor object kind (Angle / Height off floor in the inspector).
+        // baseHeightMm's guard compares against a possibly-undefined stored
+        // value, which is correct — setting it to a real number is a change,
+        // and re-sending the same number is not.
+        const keys = [
+          "xMm",
+          "yMm",
+          "widthMm",
+          "depthMm",
+          "heightMm",
+          "rotationDeg",
+          "baseHeightMm"
+        ] as const;
+
+        // Clamp baseHeightMm at the WRITE boundary, not in the field. The
+        // schema declares it nonnegative (projectSchema.ts) and parseProject
+        // THROWS, and that parse runs on every save (indexedDbProjectRepository)
+        // — so a negative value commits fine in memory and then wedges
+        // persistence, package export, and cloud backup behind a generic save
+        // error. Worse, it is invisible: 3D strips baseHeightMm <= 0 and the
+        // elevation builder gates on > 0, so all three views draw the object as
+        // an ordinary floor-resting work while nothing can be saved.
+        //
+        // Clamping here rather than making the field positiveOnly is deliberate:
+        // 0 is the meaningful "resting on the floor" value a curator must be
+        // able to type back in to un-suspend a work, and positiveOnly would
+        // reject it. A bottom edge below the floor has no physical meaning, so
+        // folding it to 0 is the honest reading of the input, not data loss.
+        const safeChanges =
+          changes.baseHeightMm !== undefined && changes.baseHeightMm < 0
+            ? { ...changes, baseHeightMm: 0 }
+            : changes;
+
         const hasChange = keys.some(
-          (key) => changes[key] !== undefined && changes[key] !== target[key]
+          (key) => safeChanges[key] !== undefined && safeChanges[key] !== target[key]
         );
         if (!hasChange) return;
 
         const nextFloorObjects = project.floorObjects.map((object) =>
-          object.id === objectId ? { ...object, ...changes } : object
+          object.id === objectId ? { ...object, ...safeChanges } : object
         );
 
         // Floor objects carry no wall bounds, so there's nothing to validate

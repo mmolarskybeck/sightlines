@@ -48,6 +48,14 @@ export function PlanObject({
 }: {
   // Floor of the invisible hit rect on both axes, in model mm — keeps small
   // (esp. thin wall) objects clickable at any zoom. Ghosts never get one.
+  //
+  // The floor is applied PER AXIS via Math.max, so it only ever pads the axis
+  // that is actually too small: a projection board (a floor artwork whose
+  // depthMm is the board's ~18mm thickness, drawn as a correct plan hairline)
+  // gets a full-length grab band on its thin axis and no overhang past its
+  // ends. This is the measurement overlay's hit-line-inert pattern — the drawn
+  // rect keeps its true thickness and the transparent rect below it carries
+  // the pointer, so a hairline stays draggable without being drawn fat.
   hitMinSizeMm?: number;
   isFloorPlaced?: boolean;
   // A click-to-place (or drop) preview: non-interactive, translucent,
@@ -154,6 +162,48 @@ export function PlanObject({
           width={insetWidthMm}
           x={x + insetMm}
           y={y + insetMm}
+        />
+      ) : null}
+      {kind === "artwork" && isFloorPlaced ? (
+        // ─── FRONT-FACE CONVENTION ────────────────────────────────────────
+        // A floor object's FRONT is its +depth face: the long edge at local
+        // +y, i.e. the world direction (-sin θ, cos θ) for θ = rotationDeg.
+        // At rotationDeg = 0 that is the edge at centerY + depth/2 — the
+        // BOTTOM edge as drawn in plan, since plan +y is screen-down. In 3D
+        // it is the box's local +z face, because three/FloorObjectBox.tsx's
+        // planRotationToYaw maps plan +y → world +z (yaw = -rotationDeg).
+        // Plan, elevation and 3D must all read it the same way.
+        //
+        // This is not an arbitrary pick — it's the convention the geometry
+        // already encodes. offsetPlanRectToViewerSide shifts a wall-hung rect
+        // by +depth/2 along exactly this axis (the "left normal" of the wall
+        // direction, which planObjects.ts documents as the viewer's/room's
+        // side), leaving the -depth edge sitting ON the wall line. So the back
+        // face is -depth and the viewer-facing one is +depth, and a wall→floor
+        // conversion — which inherits the wall's angle verbatim (store.ts) —
+        // keeps facing the way it already faced. A 45° projection board reads
+        // the same rule: this edge is the surface the image lands on.
+        //
+        // Drawn as a thickened edge rather than an added decoration: the same
+        // "2D glyph echoes real construction" discipline as the case legs. A
+        // heavier line on one face is plan-drawing shorthand for the finished/
+        // significant surface, and it costs no extra geometry outside the rect.
+        //
+        // ARTWORK ONLY, and FLOOR-PLACED only:
+        // - A wall-hung work needs no marker; the wall line it sits flush
+        //   against is already the cue (the same reasoning that leaves a wall
+        //   case legless).
+        // - A blocked zone is a planning annotation with no physical front,
+        //   and a case is glazed on every side — neither has a face to mark.
+        // - Ghosts never set isFloorPlaced (PlanOverlaysLayer passes only
+        //   isGhost), so a drop/tool preview stays as spare as it is today.
+        <line
+          className="plan-object-mark plan-object-mark--front-face"
+          vectorEffect="non-scaling-stroke"
+          x1={x}
+          x2={rightX}
+          y1={bottomY}
+          y2={bottomY}
         />
       ) : null}
       {kind === "wall-text" ? (

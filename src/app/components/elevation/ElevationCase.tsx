@@ -144,7 +144,9 @@ export function ElevationCase({
 // (y=0) to the case's overall height, spanning the along-wall x-range its
 // rotated plan footprint projects onto. Purely an alignment aid — it carries
 // no selection/drag, and paints BEHIND the wall objects so it never occludes
-// them. Its geometry comes straight from the scene's projectFloorCaseOntoWall.
+// them. Its geometry comes straight from the scene's projectFloorObjectOntoWall
+// (shared with the suspended-artwork ghost — see
+// ElevationSuspendedArtworkGhost.tsx, which floats instead of standing).
 export function ElevationFloorCaseGhost({
   wallHeightMm,
   xMinMm,
@@ -184,7 +186,7 @@ export function ElevationFloorCaseGhost({
   const glassBoxHeightMm = glyph.glassBox.heightMm;
   const slabLineYMm = topSvgYMm + glyph.slabYMm;
   // Only two legs (not four): the projected extent from
-  // projectFloorCaseOntoWall is a 1D along-wall range, so a rotated case's
+  // projectFloorObjectOntoWall is a 1D along-wall range, so a rotated case's
   // exact leg x-positions aren't recoverable here — these two lines are an
   // alignment approximation, inset CASE_LEG_INSET_MM from each edge of the
   // projected extent (clamped inside it on a narrow projection).

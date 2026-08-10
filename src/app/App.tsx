@@ -2304,6 +2304,15 @@ export function App() {
                         onCommitSize={(widthMm, depthMm) =>
                           void updateFloorObject(placedFloorArtwork.id, { widthMm, depthMm })
                         }
+                        onCommitHeight={(heightMm) =>
+                          void updateFloorObject(placedFloorArtwork.id, { heightMm })
+                        }
+                        onCommitRotation={(rotationDeg) =>
+                          void updateFloorObject(placedFloorArtwork.id, { rotationDeg })
+                        }
+                        onCommitBaseHeight={(baseHeightMm) =>
+                          void updateFloorObject(placedFloorArtwork.id, { baseHeightMm })
+                        }
                       />
                     </>
                   ) : null
@@ -2334,6 +2343,13 @@ export function App() {
               }
               onCommitSize={(widthMm, depthMm) =>
                 void updateFloorObject(selectedFloorBlockedZone.id, { widthMm, depthMm })
+              }
+              // Angle only, no Height off floor: a blocked zone is a keep-out
+              // annotation about floor AREA, so hovering it has no referent
+              // (see FloorObjectInspector / FloorObjectBox, which render it as a
+              // flat floor-plane wash that already honors rotationDeg).
+              onCommitRotation={(rotationDeg) =>
+                void updateFloorObject(selectedFloorBlockedZone.id, { rotationDeg })
               }
               onDelete={() => void removePlacement(selectedFloorBlockedZone.id)}
             />
@@ -2378,6 +2394,14 @@ export function App() {
               }
               onCommitHeight={(heightMm) =>
                 void updateFloorObject(selectedFloorCase.id, { heightMm })
+              }
+              // Angle only, no Height off floor: a vitrine stands on its own
+              // legs, whose height CaseMesh derives from heightMm ("overall,
+              // floor to box top"). Lifting the box would leave the legs
+              // ending in mid-air while invalidating the datum they are
+              // computed from — so 3D ignores baseHeightMm for cases too.
+              onCommitRotation={(rotationDeg) =>
+                void updateFloorObject(selectedFloorCase.id, { rotationDeg })
               }
               onDelete={() => void removePlacement(selectedFloorCase.id)}
             />

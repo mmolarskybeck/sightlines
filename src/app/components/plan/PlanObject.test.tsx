@@ -104,3 +104,141 @@ describe("PlanObject — hinged-door plan swing", () => {
     expect(container.querySelector(".plan-object-mark--door-swing")).toBeNull();
   });
 });
+
+// A video projection surface is modelled as a floor artwork whose depthMm is
+// the board's real thickness (~18mm MDF), so its plan rect is a hairline at
+// every realistic zoom. These lock the two things that make such a board
+// usable: it stays grabbable, and it says which way it faces.
+const boardRect: PlanRect = {
+  centerXMm: 3000,
+  centerYMm: 2000,
+  widthMm: 2400,
+  depthMm: 18,
+  angleDeg: 0
+};
+
+describe("PlanObject — thin floor object hit target", () => {
+  // The hit-line-inert pattern (measurement's .measurement-line-hit): the
+  // transparent rect grows, the drawn rect never does.
+  it("pads only the thin axis of a hairline board and leaves the drawn rect at true thickness", () => {
+    // 250mm ≈ MIN_OBJECT_HIT_PX at a whole-floor plan zoom.
+    const { container } = renderPlanObject({
+      kind: "artwork",
+      isFloorPlaced: true,
+      planRect: boardRect,
+      hitMinSizeMm: 250
+    });
+
+    const hit = container.querySelector(".plan-object-hit")!;
+    // Thin axis padded up to the floor…
+    expect(hit.getAttribute("height")).toBe("250");
+    // …long axis untouched, so the band never overhangs the board's ends into
+    // whatever sits past them.
+    expect(hit.getAttribute("width")).toBe(String(boardRect.widthMm));
+    // Padding is symmetric about the object's own center, so the grab band is
+    // centered on the drawn hairline rather than biased to one face.
+    expect(hit.getAttribute("x")).toBe(String(boardRect.centerXMm - boardRect.widthMm / 2));
+    expect(hit.getAttribute("y")).toBe(String(boardRect.centerYMm - 250 / 2));
+
+    const outline = container.querySelector(".plan-object-outline")!;
+    expect(outline.getAttribute("height")).toBe(String(boardRect.depthMm));
+    expect(outline.getAttribute("width")).toBe(String(boardRect.widthMm));
+  });
+
+  it("keeps the hit band in the object's own rotated frame, not the world frame", () => {
+    const { container } = renderPlanObject({
+      kind: "artwork",
+      isFloorPlaced: true,
+      planRect: { ...boardRect, angleDeg: 45 },
+      hitMinSizeMm: 250
+    });
+
+    // The pad is a plain rect inside the group's rotate() transform, so a 45°
+    // board's grab band tilts with it — the untransformed geometry stays
+    // identical and only the group's transform changes.
+    const group = container.querySelector(".plan-object")!;
+    expect(group.getAttribute("transform")).toBe(
+      `rotate(45 ${boardRect.centerXMm} ${boardRect.centerYMm})`
+    );
+    const hit = container.querySelector(".plan-object-hit")!;
+    expect(hit.getAttribute("height")).toBe("250");
+    expect(hit.getAttribute("width")).toBe(String(boardRect.widthMm));
+  });
+
+  it("gives a ghost no hit target at all, so a click-to-place click still commits", () => {
+    const { container } = renderPlanObject({
+      kind: "artwork",
+      isGhost: true,
+      planRect: boardRect,
+      hitMinSizeMm: 250
+    });
+
+    expect(container.querySelector(".plan-object-hit")).toBeNull();
+  });
+});
+
+describe("PlanObject — front-face marker", () => {
+  // FRONT-FACE CONVENTION: the front is the +depth long edge (local +y), which
+  // at rotationDeg = 0 is the edge at centerY + depth/2.
+  it("marks the +depth long edge of a floor-placed artwork", () => {
+    const { container } = renderPlanObject({
+      kind: "artwork",
+      isFloorPlaced: true,
+      planRect: boardRect
+    });
+
+    const front = container.querySelector(".plan-object-mark--front-face")!;
+    expect(front).not.toBeNull();
+    const frontYMm = boardRect.centerYMm + boardRect.depthMm / 2;
+    expect(front.getAttribute("y1")).toBe(String(frontYMm));
+    expect(front.getAttribute("y2")).toBe(String(frontYMm));
+    expect(front.getAttribute("x1")).toBe(String(boardRect.centerXMm - boardRect.widthMm / 2));
+    expect(front.getAttribute("x2")).toBe(String(boardRect.centerXMm + boardRect.widthMm / 2));
+  });
+
+  // The marker is drawn in the rect's own local frame and carried by the
+  // group's rotate(), so "front" tracks rotationDeg for free. This is the
+  // assertion the 3D and elevation views have to agree with: at 45° the front
+  // normal (-sin θ, cos θ) points toward (-0.707, +0.707) in floor space.
+  it("rotates with the object rather than staying pinned to world +y", () => {
+    const { container } = renderPlanObject({
+      kind: "artwork",
+      isFloorPlaced: true,
+      planRect: { ...boardRect, angleDeg: 45 }
+    });
+
+    const group = container.querySelector(".plan-object")!;
+    expect(group.getAttribute("transform")).toBe(
+      `rotate(45 ${boardRect.centerXMm} ${boardRect.centerYMm})`
+    );
+
+    // Local geometry is unchanged — still the +depth edge — which is exactly
+    // what makes the world-space front normal come out as (-sin 45, cos 45).
+    const front = container.querySelector(".plan-object-mark--front-face")!;
+    const frontYMm = boardRect.centerYMm + boardRect.depthMm / 2;
+    expect(front.getAttribute("y1")).toBe(String(frontYMm));
+    expect(front.getAttribute("y2")).toBe(String(frontYMm));
+  });
+
+  it("is withheld from a wall-hung artwork, whose wall line is already the cue", () => {
+    const { container } = renderPlanObject({
+      kind: "artwork",
+      planRect: boardRect
+    });
+
+    expect(container.querySelector(".plan-object-mark--artwork")).not.toBeNull();
+    expect(container.querySelector(".plan-object-mark--front-face")).toBeNull();
+  });
+
+  it("is withheld from floor blocked zones and cases, which have no physical front", () => {
+    for (const kind of ["blocked-zone", "case"] as const) {
+      const { container } = renderPlanObject({
+        kind,
+        isFloorPlaced: true,
+        planRect: boardRect
+      });
+      expect(container.querySelector(".plan-object-mark--front-face")).toBeNull();
+      cleanup();
+    }
+  });
+});
