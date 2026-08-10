@@ -244,6 +244,18 @@ input:focus-visible {
   border-color: var(--danger);
 }
 
+/* WebKit and Blink draw their own clear button inside `type="search"` — a
+   bold blue ✕ that answers to none of our tokens and lands right beside the
+   field's real trailing control, so a search field ships with two Xes and no
+   way to tell which does what. Suppressed everywhere: a search field's clear
+   affordance is the button we draw, styled and labelled like every other
+   control in the app. */
+.input-control[type="search"]::-webkit-search-cancel-button,
+.input-control[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 .loading-shell {
   min-height: 100vh;
 }
@@ -2273,14 +2285,19 @@ body.panels-resizing * {
   flex: 0 0 auto;
   align-items: center;
   gap: var(--space-4);
-  margin-bottom: var(--space-16);
+  /* The pane's header stack is chrome above a list, so it buys its separation
+     as tightly as it can still be read: 12px from the heading rule down to
+     the list, and only 6px when the search row is open — search belongs to
+     these controls, not to the list, and the two 32px lanes should read as
+     one block rather than two floating bars. */
+  margin-bottom: var(--space-12);
   padding: var(--space-4);
   border-radius: var(--radius-track);
   background: var(--track);
 }
 
 .checklist-controls[data-search-open] {
-  margin-bottom: var(--space-8);
+  margin-bottom: var(--space-6);
 }
 
 .checklist-controls .seg-track {
@@ -2336,12 +2353,15 @@ body.panels-resizing * {
   min-width: 184px;
 }
 
+/* Same 32px lane as the controls track above it (24px control + 4px padding
+   top and bottom), so the two rows stack as one header block instead of two
+   differently-sized bars. */
 .checklist-search {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
   gap: var(--space-6);
-  margin-bottom: var(--space-16);
+  margin-bottom: var(--space-10);
   padding: var(--space-4) var(--space-4) var(--space-4) var(--space-8);
   border: 1px solid var(--input);
   border-radius: var(--radius-control);
@@ -2352,7 +2372,14 @@ body.panels-resizing * {
 .checklist-search:focus-within {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px var(--ring);
-  color: var(--primary-strong);
+}
+
+/* The leading glyph marks the field; it never brightens with focus, because
+   the border and ring already say "typing here" and a third signal on the
+   same 32px row is noise. */
+.checklist-search-icon {
+  flex: 0 0 auto;
+  color: var(--subtle);
 }
 
 .checklist-search .input-control {
@@ -2369,12 +2396,43 @@ body.panels-resizing * {
   box-shadow: none;
 }
 
-.checklist-search-close {
+/* Squared off to the same 24px as the two triggers in the track above, so the
+   field's one trailing control sits on the same vertical lane as the sort and
+   search icons rather than bulging the row. Coarse pointers take it back to a
+   finger-sized target below. */
+.checklist-search-clear {
   flex: 0 0 auto;
-  width: 28px;
-  min-width: 28px;
-  height: 28px;
-  min-height: 28px;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  border-radius: var(--radius-seg);
+  color: var(--subtle);
+}
+
+/* --surface, not the track's --chip-ghost: this button sits on the field's
+   white ground, where a 55%-white chip would be invisible. */
+.checklist-search-clear:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* Inset, like the toolbar's grouped segments: the default offset ring is
+   drawn 4px outside a button that sits 4px from the field's border, so it
+   crossed and overhung the field edge. Drawn inside, the ring stays wholly
+   within the control it belongs to. */
+.checklist-search-clear:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--ring);
+  outline: none;
+}
+
+@media (pointer: coarse) {
+  .checklist-search-clear {
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    min-height: 32px;
+  }
 }
 
 /* Child specificity must beat the later bare .seg-item rule. */
@@ -2406,8 +2464,11 @@ body.panels-resizing * {
   flex: 1 1 auto;
   flex-direction: column;
   align-items: flex-start;
-  gap: var(--space-12);
-  padding: var(--space-16) var(--space-4);
+  gap: var(--space-10);
+  /* No side padding: the message and its recovery button start on the same
+     left edge as the search field and the filter track above them, so the
+     pane keeps one content edge when the list drops out. */
+  padding: var(--space-12) 0;
 }
 
 .checklist-filter-empty .empty-copy {
@@ -2453,10 +2514,19 @@ body.panels-resizing * {
   list-style: none;
 }
 
+/* A heading belongs to the works under it, so it sits closer to them (4px)
+   than one artist's block sits to the next (the list's 8px gap plus the 4px
+   below, so 12px between groups). Symmetric spacing was the reason the old
+   list read as headings floating between rows rather than as blocks with
+   titles. */
 .checklist-artist-group {
   display: grid;
   min-width: 0;
-  gap: var(--space-8);
+  gap: var(--space-4);
+}
+
+.checklist-artist-group + .checklist-artist-group {
+  margin-top: var(--space-4);
 }
 
 .checklist-artist-heading {
@@ -2466,10 +2536,10 @@ body.panels-resizing * {
   display: flex;
   width: 100%;
   min-width: 0;
-  min-height: 34px;
+  min-height: 28px;
   align-items: center;
   gap: var(--space-6);
-  padding: var(--space-6) var(--space-8);
+  padding: var(--space-4) var(--space-8);
   border: 0;
   border-top: 1px solid var(--line);
   background: var(--bg);

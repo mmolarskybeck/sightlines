@@ -235,6 +235,20 @@ export function ChecklistPanel({
     (group) => group.key
   );
   const searchIsActive = searchQuery.trim().length > 0;
+  // The search row's one trailing control walks a ladder rather than doing two
+  // things at once: with a query it clears and leaves you typing, and only an
+  // already-empty field closes. So the button can name exactly what the next
+  // press does, and a press can never take away more than you asked for.
+  // Escape follows the same ladder, and the magnifier trigger above stays the
+  // outright toggle for anyone who wants out in one move.
+  const clearOrCloseSearch = () => {
+    if (searchQuery.length > 0) {
+      setSearchQuery("");
+      searchInputRef.current?.focus();
+      return;
+    }
+    setIsSearchOpen(false);
+  };
   const renderedRows = groupByArtist
     ? artistGroups.flatMap((group) =>
         searchIsActive || !collapsedArtistKeys.has(group.key) ? group.rows : []
@@ -466,13 +480,17 @@ export function ChecklistPanel({
               <Button
                 aria-controls={`${searchInputId}-region`}
                 aria-expanded={isSearchOpen}
-                aria-label="Search checklist"
+                aria-label={isSearchOpen ? "Close search" : "Search checklist"}
                 className="checklist-control-trigger"
                 data-active={isSearchOpen || searchIsActive ? "" : undefined}
                 size="icon-sm"
                 variant="ghost"
                 onClick={() => {
-                  if (isSearchOpen && !searchIsActive) {
+                  // A real toggle in both directions: the disclosure that
+                  // opened the row is also the one-press way out of it, query
+                  // and all. The field's own X walks the gentler ladder.
+                  if (isSearchOpen) {
+                    setSearchQuery("");
                     setIsSearchOpen(false);
                   } else {
                     setIsSearchOpen(true);
@@ -483,7 +501,7 @@ export function ChecklistPanel({
               </Button>
             </TooltipTrigger>
             <TooltipContent className="toolbar-tooltip" side="bottom">
-              Search checklist
+              {isSearchOpen ? "Close search" : "Search checklist"}
             </TooltipContent>
           </Tooltip>
           <DropdownMenu>
@@ -556,7 +574,11 @@ export function ChecklistPanel({
 
       {rows.length > 0 && isSearchOpen ? (
         <div className="checklist-search" id={`${searchInputId}-region`} role="search">
-          <MagnifyingGlassIcon aria-hidden="true" size={15} />
+          <MagnifyingGlassIcon
+            aria-hidden="true"
+            className="checklist-search-icon"
+            size={14}
+          />
           <label className="visually-hidden" htmlFor={searchInputId}>
             Search checklist
           </label>
@@ -571,27 +593,23 @@ export function ChecklistPanel({
             onKeyDown={(event) => {
               if (event.key !== "Escape") return;
               event.preventDefault();
-              setSearchQuery("");
-              setIsSearchOpen(false);
+              clearOrCloseSearch();
             }}
           />
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                aria-label={searchIsActive ? "Clear and close search" : "Close search"}
-                className="icon-button compact checklist-search-close"
+                aria-label={searchQuery.length > 0 ? "Clear search" : "Close search"}
+                className="icon-button compact checklist-search-clear"
                 size="icon-sm"
                 variant="ghost"
-                onClick={() => {
-                  setSearchQuery("");
-                  setIsSearchOpen(false);
-                }}
+                onClick={clearOrCloseSearch}
               >
                 <XIcon aria-hidden="true" size={13} />
               </Button>
             </TooltipTrigger>
             <TooltipContent className="toolbar-tooltip" side="bottom">
-              {searchIsActive ? "Clear search" : "Close search"}
+              {searchQuery.length > 0 ? "Clear search" : "Close search"}
             </TooltipContent>
           </Tooltip>
         </div>

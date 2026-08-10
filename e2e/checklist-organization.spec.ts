@@ -61,8 +61,13 @@ test("temporarily searches and collapses artist groups in the checklist", async 
   );
   await expect(page.getByText("Landscape Study")).toBeVisible();
 
-  await page.getByRole("button", { name: "Clear and close search" }).click();
+  // The field's one trailing control clears first and only closes an already
+  // empty field, so the restored disclosure state is observable while the
+  // search row is still open.
+  await page.getByRole("button", { name: "Clear search" }).click();
   await expect(boyun).toHaveAttribute("aria-expanded", "false");
+  await page.getByRole("button", { name: "Close search" }).first().click();
+  await expect(search).toHaveCount(0);
 
   await options.click();
   await page.getByRole("menuitem", { name: "Expand all artists" }).click();

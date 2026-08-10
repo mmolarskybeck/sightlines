@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Artwork, Project } from "../../../domain/project";
 import { createSampleProject } from "../../../domain/sample/sampleProject";
@@ -133,7 +133,7 @@ describe("checklist retrieval and artist groups", () => {
 
 describe("ChecklistPanel temporary views", () => {
   it("searches the checklist, updates counts, and recovers from an empty result", () => {
-    renderChecklist();
+    const { container } = renderChecklist();
 
     fireEvent.click(screen.getByRole("button", { name: "Search checklist" }));
     const search = screen.getByRole("searchbox", { name: "Search checklist" });
@@ -146,7 +146,44 @@ describe("ChecklistPanel temporary views", () => {
 
     fireEvent.change(search, { target: { value: "no such work" } });
     expect(screen.getByText("No works match “no such work”.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+    // The empty state's own recovery button, not the field's trailing control —
+    // both clear the query, and both are named for what they do.
+    const emptyState = container.querySelector(".checklist-filter-empty") as HTMLElement;
+    fireEvent.click(within(emptyState).getByRole("button", { name: "Clear search" }));
+    expect(screen.getByText("Interior Study")).toBeInTheDocument();
+  });
+
+  it("clears before it closes, so one press never takes away more than it says", () => {
+    const { container } = renderChecklist();
+
+    fireEvent.click(screen.getByRole("button", { name: "Search checklist" }));
+    const search = screen.getByRole("searchbox", { name: "Search checklist" });
+    fireEvent.change(search, { target: { value: "landscape" } });
+
+    const field = container.querySelector(".checklist-search") as HTMLElement;
+    // With a query the control is a clear, and says so.
+    fireEvent.click(within(field).getByRole("button", { name: "Clear search" }));
+    expect(search).toHaveValue("");
+    expect(screen.getByText("Interior Study")).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search checklist" })).toBeInTheDocument();
+
+    // Emptied, the same control becomes the close.
+    fireEvent.click(within(field).getByRole("button", { name: "Close search" }));
+    expect(screen.queryByRole("searchbox", { name: "Search checklist" })).toBeNull();
+  });
+
+  it("closes and clears in one press from the magnifier toggle", () => {
+    renderChecklist();
+
+    fireEvent.click(screen.getByRole("button", { name: "Search checklist" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search checklist" }), {
+      target: { value: "landscape" }
+    });
+    expect(screen.getByText("1 of 4 works")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close search" }));
+    expect(screen.queryByRole("searchbox", { name: "Search checklist" })).toBeNull();
+    expect(screen.getByText("4 works")).toBeInTheDocument();
     expect(screen.getByText("Interior Study")).toBeInTheDocument();
   });
 
@@ -187,7 +224,9 @@ describe("ChecklistPanel temporary views", () => {
     );
     expect(screen.getByText("Landscape Study")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Clear and close search" }));
+    // Clearing the query is enough to hand the group back to the curator's own
+    // collapsed state — the search row itself can stay open for the next term.
+    fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
     expect(screen.getByRole("button", { name: "Boyun Jang, 2 works" })).toHaveAttribute(
       "aria-expanded",
       "false"
