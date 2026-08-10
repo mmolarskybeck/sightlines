@@ -171,8 +171,13 @@ export function ExportPdfDialog({
   };
 
   const roomPlanValues = settings.rooms.map((room) => room.planIncluded);
+  // Open walls can never be elevation pages, so they must not appear in any
+  // "n of m" denominator or any select-all id list — otherwise the counts lie
+  // and "select all" writes a preference that documentSettings forces false.
+  const selectableWalls = (room: (typeof settings.rooms)[number]) =>
+    room.walls.filter((wall) => !wall.isOpenSide);
   const wallValues = settings.rooms.flatMap((room) =>
-    room.walls.map((wall) => wall.included)
+    selectableWalls(room).map((wall) => wall.included)
   );
   const validSavedViews = settings.savedViews.filter((choice) => choice.valid);
   const savedViewValues = validSavedViews.map((choice) => choice.included);
@@ -276,7 +281,7 @@ export function ExportPdfDialog({
                     setAll: (included) =>
                       setElevations(
                         settings.rooms.flatMap((room) =>
-                          room.walls.map((wall) => wall.wallId)
+                          selectableWalls(room).map((wall) => wall.wallId)
                         ),
                         included
                       )
@@ -284,7 +289,7 @@ export function ExportPdfDialog({
                 }
               >
                 {settings.rooms.map((room) => {
-                  const roomWallValues = room.walls.map(
+                  const roomWallValues = selectableWalls(room).map(
                     (wall) => wall.included
                   );
                   const roomState = selectionState(roomWallValues);
@@ -309,7 +314,7 @@ export function ExportPdfDialog({
                           checked={roomState}
                           onCheckedChange={() =>
                             setElevations(
-                              room.walls.map((wall) => wall.wallId),
+                              selectableWalls(room).map((wall) => wall.wallId),
                               roomState !== true
                             )
                           }
@@ -319,7 +324,7 @@ export function ExportPdfDialog({
                           type="button"
                           onClick={() =>
                             setElevations(
-                              room.walls.map((wall) => wall.wallId),
+                              selectableWalls(room).map((wall) => wall.wallId),
                               roomState !== true
                             )
                           }
@@ -333,14 +338,19 @@ export function ExportPdfDialog({
                       </div>
                       <CollapsibleContent>
                         <div className="export-wall-list">
+                          {/* Open walls render as explicit disabled rows rather
+                              than vanishing: a wall the user knows exists,
+                              silently missing from the tree, reads as a bug. */}
                           {room.walls.map((wall) => (
                             <div
                               className="export-tree-row export-tree-wall"
+                              data-open={wall.isOpenSide ? "true" : undefined}
                               key={wall.wallId}
                             >
                               <Checkbox
                                 aria-label={`Include ${room.name}, ${wall.name} elevation`}
                                 checked={wall.included}
+                                disabled={wall.isOpenSide}
                                 onCheckedChange={(checked) =>
                                   setElevations(
                                     [wall.wallId],
@@ -351,6 +361,7 @@ export function ExportPdfDialog({
                               <button
                                 className="export-tree-label"
                                 type="button"
+                                disabled={wall.isOpenSide}
                                 onClick={() =>
                                   setElevations(
                                     [wall.wallId],
@@ -360,6 +371,9 @@ export function ExportPdfDialog({
                               >
                                 {wall.name}
                               </button>
+                              {wall.isOpenSide ? (
+                                <span className="export-tree-tag">Open</span>
+                              ) : null}
                             </div>
                           ))}
                         </div>

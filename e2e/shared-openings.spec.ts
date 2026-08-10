@@ -1,7 +1,7 @@
 import type { Locator, Page } from "playwright/test";
 import { expect, gotoApp, hideFontLab, test } from "./fixtures";
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const ROOM_WIDTH_MM = 4000;
 const ROOM_HEIGHT_MM = 2500;
 

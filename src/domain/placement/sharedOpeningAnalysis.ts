@@ -1,4 +1,5 @@
 import { parseFaceWallId } from "../geometry/freestandingWalls";
+import { getOpenWallIds } from "../geometry/wallCascade";
 import {
   buildFloorWallsById,
   evaluateOpeningPairWith
@@ -218,17 +219,28 @@ function runSharedOpeningAnalysis(
 
   // findSharedBoundary is O(walls); the same wall is asked about once per
   // opening on it and once per half of a pair, so memoize per pass.
+  // An open wall has no surface, so it can neither carry an opening nor back
+  // one on the other side: it must drop out of shared-opening topology
+  // entirely. Without this, sliding a room flush against a previously-exterior
+  // open wall would let reconciliation mint a `create-twin` door ON the open
+  // wall. Filtered HERE rather than inside findSharedBoundary, which stays
+  // purely geometric because restore has to find the twin of an already-open
+  // wall.
+  const openWallIds = getOpenWallIds(project);
   const boundaryCache = new Map<string, SharedBoundary[]>();
   const boundariesOf = (wallId: string): SharedBoundary[] => {
     const cached = boundaryCache.get(wallId);
     if (cached) return cached;
-    const result = findSharedBoundary(project, wallId);
-    const boundaries =
+    const result = openWallIds.has(wallId)
+      ? ({ status: "none" } as const)
+      : findSharedBoundary(project, wallId);
+    const boundaries = (
       result.status === "none"
         ? []
         : result.status === "confirmed"
           ? [result.boundary]
-          : result.boundaries;
+          : result.boundaries
+    ).filter((boundary) => !openWallIds.has(boundary.wallId));
     boundaryCache.set(wallId, boundaries);
     return boundaries;
   };

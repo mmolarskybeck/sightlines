@@ -180,6 +180,49 @@ describe("analyzeSharedOpenings — unpaired openings", () => {
     expect(action.xMm).toBeCloseTo(1800);
   });
 
+  it("never mints a twin ON an open wall", () => {
+    // The reachable bug this guards: a wall is opened while exterior, then a
+    // room is later slid flush against it. Without filtering, reconciliation
+    // would put a door on the side that has no surface at all.
+    const rooms = [room("room-a", 0), room("room-b", 4000)];
+    const openBWest: RoomPlacement = {
+      ...rooms[1],
+      room: {
+        ...rooms[1].room,
+        walls: rooms[1].room.walls.map((wall) =>
+          wall.id === B_WEST ? { ...wall, isOpenSide: true } : wall
+        )
+      }
+    };
+
+    const result = analyzeSharedOpenings(
+      project([rooms[0], openBWest], [door("door-a", A_EAST, 1200)])
+    );
+
+    expect(result.actions).toEqual([]);
+    expect(result.conflicts).toEqual([]);
+  });
+
+  it("treats an opening on an open wall as exterior, not as half a pair", () => {
+    const rooms = [room("room-a", 0), room("room-b", 4000)];
+    const openAEast: RoomPlacement = {
+      ...rooms[0],
+      room: {
+        ...rooms[0].room,
+        walls: rooms[0].room.walls.map((wall) =>
+          wall.id === A_EAST ? { ...wall, isOpenSide: true } : wall
+        )
+      }
+    };
+
+    const result = analyzeSharedOpenings(
+      project([openAEast, rooms[1]], [door("door-a", A_EAST, 1200)])
+    );
+
+    expect(result.actions).toEqual([]);
+    expect(result.conflicts).toEqual([]);
+  });
+
   it("adopts the one aligned, unpaired, same-kind opening opposite", () => {
     const result = analyzeSharedOpenings(
       project(

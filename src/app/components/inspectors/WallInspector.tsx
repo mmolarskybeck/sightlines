@@ -1,4 +1,6 @@
 import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
+import { DoorOpenIcon } from "@phosphor-icons/react/dist/csr/DoorOpen";
+import { WallIcon } from "@phosphor-icons/react/dist/csr/Wall";
 import { LinkIcon } from "@phosphor-icons/react/dist/csr/Link";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
 import { SquareIcon } from "@phosphor-icons/react/dist/csr/Square";
@@ -37,11 +39,14 @@ export function WallInspector({
   centerlineMm,
   changedWallNames,
   dimensionLink,
+  isOpenSide = false,
   lastGeometryEdit,
   onAddCase,
   onAddOpening,
   onCommitHeight,
   onCommitLength,
+  onOpenWall,
+  onRestoreWall,
   polygonLengthEditing = false,
   roomName,
   unit,
@@ -52,6 +57,7 @@ export function WallInspector({
   centerlineMm: number;
   changedWallNames: string[];
   dimensionLink: WallDimensionLink | null;
+  isOpenSide?: boolean;
   lastGeometryEdit: {
     anchorVertexId: string;
     changedWallIds: string[];
@@ -60,6 +66,8 @@ export function WallInspector({
   onAddOpening: (kind: InsertToolKind) => void;
   onCommitHeight: (heightMm: number) => Promise<void>;
   onCommitLength: (lengthMm: number, anchor: ResizeAnchor) => Promise<void>;
+  onOpenWall: () => void;
+  onRestoreWall: () => void;
   polygonLengthEditing?: boolean;
   roomName: string;
   unit: DisplayUnit;
@@ -213,6 +221,29 @@ export function WallInspector({
         </p>
       ) : null}
 
+      {/* An open wall has no surface, so the whole "add" category is
+          unavailable — hidden rather than disabled, because five dead controls
+          under a label promising something impossible explains nothing. The
+          Size fields above stay live: the wall's endpoints still define the
+          room's shape, and for a polygon room this is the only place to resize
+          that edge numerically. */}
+      {isOpenSide ? (
+        <>
+          <InspectorNotice
+            icon={<DoorOpenIcon aria-hidden="true" size={15} />}
+            tone="info"
+          >
+            This wall is open — {roomName} has no surface on this side. Restoring it brings
+            the wall back, but not what used to hang here; undo does that.
+          </InspectorNotice>
+          <InspectorActionGroup>
+            <Button className="inspector-action" variant="inspector" onClick={onRestoreWall}>
+              <WallIcon aria-hidden="true" size={15} />
+              Restore wall
+            </Button>
+          </InspectorActionGroup>
+        </>
+      ) : (
       <InspectorActionGroup className="wall-opening-actions" label="Add to this wall">
         <Tooltip>
           <TooltipTrigger asChild>
@@ -291,14 +322,35 @@ export function WallInspector({
           </TooltipContent>
         </Tooltip>
       </InspectorActionGroup>
+      )}
 
-      <InspectorSummaryRow
-        label="Centerline"
-        value={formatLength(centerlineMm, {
-          unit: centerlinePrimary,
-          secondaryUnit: centerlineSecondary
-        })}
-      />
+      {/* Centerline is a hanging-height readout: meaningless without a surface,
+          and a static row has no affordance to explain its own absence. */}
+      {isOpenSide ? null : (
+        <InspectorSummaryRow
+          label="Centerline"
+          value={formatLength(centerlineMm, {
+            unit: centerlinePrimary,
+            secondaryUnit: centerlineSecondary
+          })}
+        />
+      )}
+
+      {isOpenSide ? null : (
+        <InspectorActionGroup>
+          {/* Not a TrashIcon: this doesn't delete the wall record, it removes
+              the surface — the room's edge stays. `destructive-ghost` is still
+              right, because the wall's contents really are destroyed. */}
+          <Button
+            className="inspector-action inspector-danger"
+            variant="destructive-ghost"
+            onClick={onOpenWall}
+          >
+            <DoorOpenIcon aria-hidden="true" size={15} />
+            Open this wall
+          </Button>
+        </InspectorActionGroup>
+      )}
     </form>
   );
 }

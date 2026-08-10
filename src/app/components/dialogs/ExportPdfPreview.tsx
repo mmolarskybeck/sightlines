@@ -504,6 +504,10 @@ function planPageMarks(
   );
   scene.rooms.forEach((room, ri) =>
     room.walls.forEach((wall, wi) => {
+      // Matches planPage.ts and the interactive plan: an open wall is a gap.
+      // The preview's whole job is to show what the PDF will contain, so a
+      // divergence here would be worse than no preview at all.
+      if (wall.isOpenSide) return;
       const a = xf.point(wall.startMm);
       const b = xf.point(wall.endMm);
       marks.push(

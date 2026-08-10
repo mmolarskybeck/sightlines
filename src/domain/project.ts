@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 export const CURRENT_ARTWORK_SCHEMA_VERSION = 1;
 export const CURRENT_ASSET_SCHEMA_VERSION = 1;
 
@@ -194,6 +194,15 @@ export type Wall = {
   endVertexId: string;
   heightMm: number;
   defaultCenterlineHeightMm?: number;
+  // An "open side" (schema v5): the room is open on this edge. The wall record
+  // stays in room.walls and stays in the closed loop, so vertex topology, the
+  // floor polygon, dimension linking and every cyclic `room.walls[(i±1) % n]`
+  // walk are unaffected — only the SURFACE goes away. Nothing hangs on an open
+  // wall (see isHangableWall), it draws no panel in 3D, and it is not a
+  // candidate for shared openings. Absent means solid; restoring DELETES the
+  // key rather than writing false, so a restored wall round-trips byte-
+  // identical to a pre-v5 document.
+  isOpenSide?: boolean;
 };
 
 // A partition: a straight room-owned segment connected to nothing, with real

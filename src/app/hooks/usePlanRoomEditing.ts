@@ -385,7 +385,10 @@ export function usePlanRoomEditing(options: {
     });
   }
 
-  function beginRoomDrag(roomId: string, event: ReactPointerEvent<SVGPolygonElement>) {
+  // Widened from SVGPolygonElement: the room-hit polygon is no longer the only
+  // element that can start a room drag — the wall-hit strokes now paint above it
+  // and hand off edge-band drags here. Only clientX/clientY are read.
+  function beginRoomDrag(roomId: string, event: ReactPointerEvent<SVGElement>) {
     const { toSvgMm, project } = getDepsRef.current();
     const placement = project.floor.rooms.find((candidate) => candidate.roomId === roomId);
     if (!placement) return;

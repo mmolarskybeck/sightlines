@@ -12,7 +12,7 @@ import { type Vector2 } from "../../../domain/geometry/dragResize";
 import { applyPlanPreview, type PlanPreview } from "../../../domain/geometry/planPreview";
 import { getFloorBounds } from "../../../domain/geometry/walls";
 import {
-  getFloorWalls,
+  getPlaceableFloorWalls,
   getWallObjectPlanRect,
   WALL_OBJECT_PLAN_DEPTH_MM,
   type PlanRect
@@ -588,7 +588,16 @@ export function PlanView({
   // can't be armed mid wall-resize-drag anyway (see the drag guard in the
   // pointer/click handlers below), so there's no live-preview geometry to
   // reconcile here the way displayedProject does for rendering.
-  const floorWallsForTool = useMemo(() => getFloorWalls(project.floor), [project.floor]);
+  //
+  // Placeable, not structural: an open wall has no surface to capture against,
+  // so it must not be offered as a drop/click target. The store still guards
+  // every placement action — this only stops the UI from proposing one. Wall
+  // rendering and hit-testing read planScene, not this list, so an open wall
+  // stays clickable for selection and restore.
+  const floorWallsForTool = useMemo(
+    () => getPlaceableFloorWalls(project.floor),
+    [project.floor]
+  );
   // The door/window armed tools capture the nearest wall at any distance, so
   // their candidate set excludes partition faces — openings on partitions are
   // disallowed in v1 (spec §6.1). Blocked zones ARE allowed on faces, so they

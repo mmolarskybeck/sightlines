@@ -33,7 +33,9 @@ const settings: EffectiveDocumentSettings = {
       roomId: "r1",
       name: "Room",
       planIncluded: false,
-      walls: [{ wallId: "w1", name: "W1", hasWork: true, included: true }]
+      walls: [
+        { wallId: "w1", name: "W1", hasWork: true, isOpenSide: false, included: true }
+      ]
     }
   ],
   savedViews: [{ view: savedView, valid: true, included: true }],

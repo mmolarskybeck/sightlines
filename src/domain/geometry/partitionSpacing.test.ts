@@ -83,6 +83,31 @@ describe("getPartitionClearances — rectangular room (face-accurate)", () => {
     expect(clear.normal.minus.hit?.distanceMm).toBeCloseTo(1950, 6);
   });
 
+  it("reports no clearance toward an open wall instead of measuring to it", () => {
+    // Once the room is open on that side the space continues past it, so a
+    // clearance number there would contradict the feature. The ray finds no
+    // perimeter and yields no hit — an open-ended result, not a wrong one.
+    const room = rectRoom(4000, 4000);
+    const openNorth: Room = {
+      ...room,
+      walls: room.walls.map((wall) =>
+        wall.id === "room-1-wall-north" ? { ...wall, isOpenSide: true } : wall
+      )
+    };
+    const centered = partition({ startYMm: 2000, endYMm: 2000 });
+
+    // Sanity: the north wall is the −y side and normally reads 1950.
+    expect(getPartitionClearances(room, centered).normal.minus.hit?.distanceMm).toBeCloseTo(
+      1950,
+      6
+    );
+
+    const clear = getPartitionClearances(openNorth, centered);
+    expect(clear.normal.minus.hit).toBeFalsy();
+    // The opposite side is untouched.
+    expect(clear.normal.plus.hit?.distanceMm).toBeCloseTo(1950, 6);
+  });
+
   it("is asymmetric for an off-center partition (normal)", () => {
     const room = rectRoom(4000, 4000);
     // Midpoint y=1000: +y face at 1050 → south wall (4000) is 2950; −y face at

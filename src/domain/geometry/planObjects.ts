@@ -36,6 +36,19 @@ export function getFloorWalls(floor: Floor): FloorWall[] {
   );
 }
 
+// The subset of getFloorWalls that something can actually be placed on: open
+// walls have no surface to capture against.
+//
+// Deliberately a SEPARATE function rather than a filter inside getFloorWalls.
+// That one is the structural set, and two things depend on open walls staying
+// in it: sharedWalls.ts resolves an already-open wall's twin through it (so
+// restore can find the other side), and reshapeRoom.deleteRoomVertex
+// non-null-asserts both merged walls out of it. Only placement capture wants
+// the filtered view.
+export function getPlaceableFloorWalls(floor: Floor): FloorWall[] {
+  return getFloorWalls(floor).filter((wall) => wall.isOpenSide !== true);
+}
+
 // A floor wall's unit direction start→end. Degenerate (zero-length) walls
 // have no direction and yield the zero vector — the same tolerance policy as
 // unitLeftNormalOrZero; callers that care should filter on lengthMm first.

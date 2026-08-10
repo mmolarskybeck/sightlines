@@ -196,7 +196,14 @@ const wallSchema = z.object({
   startVertexId: z.string().min(1),
   endVertexId: z.string().min(1),
   heightMm: z.number().positive(),
-  defaultCenterlineHeightMm: z.number().positive().optional()
+  defaultCenterlineHeightMm: z.number().positive().optional(),
+  // An "open side": the wall record stays in the closed loop (so the vertex
+  // topology, floor polygon and every cyclic room.walls index are untouched)
+  // but its SURFACE is gone — no 3D panel, no plan stroke, nothing can hang
+  // on it. Structurally optional, but it rides the v4→v5 bump anyway: zod
+  // strips unknown keys, so an older build would redraw the wall solid, treat
+  // it as hangable, and save that misreading back over the file.
+  isOpenSide: z.boolean().optional()
 });
 
 const freestandingWallSchema = z.object({
@@ -489,7 +496,13 @@ const MIGRATIONS: Record<number, (doc: Doc) => Doc> = {
   // like the v1→v2 floorObjects passthrough this is a pure version-stamp — the
   // new union members are absent from every existing document and nothing in
   // the stored shape needs rewriting.
-  3: (doc) => ({ ...doc, schemaVersion: 4 })
+  3: (doc) => ({ ...doc, schemaVersion: 4 }),
+  // v5 adds open walls (Wall.isOpenSide). A v4 project has none, so this is a
+  // pure version stamp like v1→v2 and v3→v4. The bump exists for the DOWNGRADE
+  // direction: it makes an older build refuse the document (see the
+  // schemaVersion > CURRENT check below) instead of silently stripping the flag
+  // and re-saving every open wall as solid.
+  4: (doc) => ({ ...doc, schemaVersion: 5 })
 };
 
 function migrateV2ToV3(doc: Doc): Doc {

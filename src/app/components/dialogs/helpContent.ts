@@ -117,7 +117,13 @@ function planGroups(inputMode: HelpInputMode, mod: string): HelpGroup[] {
             [k("Esc"), t("cancels")]
           ]
         },
-        { action: "Edit a room's shape", inputs: [[t("double-click it")], [k("Esc"), t("done")]] }
+        { action: "Edit a room's shape", inputs: [[t("double-click it")], [k("Esc"), t("done")]] },
+        // Only a wall CLICKED on the canvas is eligible — picking one from the
+        // Rooms panel or the elevation switcher deliberately doesn't arm this.
+        {
+          action: "Open a selected wall",
+          inputs: [[t("click a wall")], [k(mod === "⌘" ? "⌫" : "Del")]]
+        }
       ]
     },
     toolbarKeyboardGroup("plan"),

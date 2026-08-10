@@ -9,6 +9,7 @@ import type { PackageExportMode } from "../../domain/schema/packageSchema";
 import type { EffectiveDocumentSettings } from "../../domain/export/documentSettings";
 import { ArtworkLibraryPicker } from "./library/ArtworkLibrary";
 import { DeleteRoomDialog } from "./dialogs/DeleteRoomDialog";
+import { OpenWallDialog } from "./dialogs/OpenWallDialog";
 import { RecoveryDialog } from "./dialogs/RecoveryDialog";
 import { HelpDialog } from "./dialogs/HelpDialog";
 import { ImportConflictDialog } from "./imports/ImportConflictDialog";
@@ -17,6 +18,7 @@ import type { StoragePersistenceState } from "../hooks/useStoragePersistence";
 import type { CloudBackupProviderStatus } from "../cloud/provider";
 import type { UseSavedViewThumbnails } from "../hooks/useSavedViewThumbnails";
 import type { RoomContentsSummary } from "../roomDeletion";
+import type { OpenWallRequest } from "../wallOpening";
 import type { AppState, ArtworkImportDestination, ViewMode } from "../store";
 
 const ImportWizard = lazy(() => import("./imports/ImportWizard"));
@@ -89,6 +91,9 @@ type AppDialogsProps = {
   confirmDeleteRoomPlacement: RoomPlacement | null;
   confirmDeleteRoomSummary: RoomContentsSummary | null;
   deleteRoom: AppState["deleteRoom"];
+  openWallRequest: OpenWallRequest | null;
+  setConfirmOpenWallId: (wallId: string | null) => void;
+  openWall: AppState["openWall"];
   pendingPackageImport: AppState["pendingPackageImport"];
   resolvePackageImportConflicts: AppState["resolvePackageImportConflicts"];
   dismissPackageImport: AppState["dismissPackageImport"];
@@ -147,6 +152,9 @@ export function AppDialogs({
   confirmDeleteRoomPlacement,
   confirmDeleteRoomSummary,
   deleteRoom,
+  openWallRequest,
+  setConfirmOpenWallId,
+  openWall,
   pendingPackageImport,
   resolvePackageImportConflicts,
   dismissPackageImport,
@@ -238,6 +246,19 @@ export function AppDialogs({
         }}
         onOpenChange={(open) => {
           if (!open) setConfirmDeleteRoomId(null);
+        }}
+      />
+      <OpenWallDialog
+        request={openWallRequest}
+        onConfirm={() => {
+          // Read the id off the REQUEST, not the raw pending state, so the wall
+          // we act on is always the one the dialog just described.
+          const wallId = openWallRequest?.wallId ?? null;
+          setConfirmOpenWallId(null);
+          if (wallId) void openWall(wallId);
+        }}
+        onOpenChange={(open) => {
+          if (!open) setConfirmOpenWallId(null);
         }}
       />
       <ImportConflictDialog

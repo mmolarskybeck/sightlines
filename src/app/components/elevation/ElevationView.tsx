@@ -388,7 +388,10 @@ export function ElevationView({
   const onSelectOpening = useAppStore((state) => state.selectOpening);
   const onSelectObject = useAppStore((state) => state.selectObject);
   const onClearSelection = useAppStore((state) => state.clearObjectSelection);
-  const onSelectWall = useAppStore((state) => state.selectWall);
+  // The wall switcher and its prev/next steppers are navigation: stepping
+  // through elevations to look at them must not leave Delete armed on whichever
+  // wall you land on.
+  const onSelectWall = useAppStore((state) => state.focusWallContext);
   const [dropGhost, setDropGhost] = useState<DropGhostState | null>(null);
   const [openingToolGhost, setOpeningToolGhost] = useState<OpeningToolGhostState | null>(null);
   const [measurementSnappedEndpoint, setMeasurementSnappedEndpoint] =

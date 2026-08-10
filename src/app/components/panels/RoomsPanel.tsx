@@ -234,13 +234,26 @@ export function RoomsPanel({
               <div className="wall-list">
                 {roomWalls.map((wall) => (
                   <Button
-                    className={wall.id === selectedWallId ? "wall-row active" : "wall-row"}
+                    className={[
+                      "wall-row",
+                      wall.id === selectedWallId ? "active" : "",
+                      wall.isOpenSide ? "is-open" : ""
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
                     data-active={wall.id === selectedWallId ? "true" : undefined}
+                    data-open={wall.isOpenSide ? "true" : undefined}
                     key={wall.id}
                     variant="ghost"
                     onClick={() => onSelectWall(wall.id)}
                   >
                     <span>{wall.name}</span>
+                    {/* The always-visible statement that this side is open —
+                        the plan draws nothing at rest, so this row is where the
+                        state is unambiguous. */}
+                    {wall.isOpenSide ? <span className="wall-row-tag">Open</span> : null}
+                    {/* Length stays: an open edge is still a real dimension,
+                        and it is still editable in the inspector. */}
                     <strong>{formatLength(wall.lengthMm, { unit: wallUnit })}</strong>
                   </Button>
                 ))}

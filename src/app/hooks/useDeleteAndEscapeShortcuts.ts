@@ -4,6 +4,7 @@ import type { ArrangeSession } from "../store";
 import type { Selection } from "../store/selectionSlice";
 import { isEditableTarget } from "./isEditableTarget";
 import { shouldDeleteRoomOnKey, summarizeRoomContents } from "../roomDeletion";
+import { buildOpenWallRequest, shouldOpenWallOnKey } from "../wallOpening";
 import type { Project } from "../../domain/project";
 
 export type UseDeleteAndEscapeShortcutsParams = {
@@ -15,6 +16,8 @@ export type UseDeleteAndEscapeShortcutsParams = {
   deleteRoom: (roomId: string) => Promise<void>;
   reshapeRoomId: string | null;
   confirmDeleteRoomId: string | null;
+  confirmOpenWallId: string | null;
+  setConfirmOpenWallId: (wallId: string | null) => void;
   draggingArtworkId: string | null;
   isHelpOpen: boolean;
   removeSelectedPlacements: () => Promise<void>;
@@ -42,6 +45,8 @@ export function useDeleteAndEscapeShortcuts({
   deleteRoom,
   reshapeRoomId,
   confirmDeleteRoomId,
+  confirmOpenWallId,
+  setConfirmOpenWallId,
   draggingArtworkId,
   isHelpOpen,
   removeSelectedPlacements,
@@ -64,11 +69,10 @@ export function useDeleteAndEscapeShortcuts({
         return;
       }
 
-      // The delete-room confirm dialog owns the keyboard while open: Radix
-      // itself closes on Escape (this handler must not ALSO clear the
-      // selection), and Delete must not re-trigger the branch below while
-      // the question is already on screen.
-      if (confirmDeleteRoomId) return;
+      // Either confirm dialog owns the keyboard while open: Radix itself closes
+      // on Escape (this handler must not ALSO clear the selection), and Delete
+      // must not re-trigger a branch below while the question is on screen.
+      if (confirmDeleteRoomId || confirmOpenWallId) return;
 
       // Escape now clears ANY selection kind — objects, an unplaced checklist
       // pick, or a room focus (previously only the multi-object slot cleared
@@ -109,9 +113,34 @@ export function useDeleteAndEscapeShortcuts({
         return;
       }
 
+      // A deliberately picked wall opens (loses its surface) behind a confirm.
+      //
+      // shouldOpenWallOnKey reads the SELECTION UNION, never wallContextId: the
+      // inspector always shows some wall because getSelectedWall falls back to
+      // walls[0], so keying off the displayed wall would let Delete remove one
+      // the user never picked. Navigation (the Rooms panel, the elevation
+      // switcher) goes through focusWallContext and so never arms this.
+      //
+      // Always confirms — unlike an empty room, a bare wall is still structural,
+      // and an empty wall can still be shared with a neighbour.
+      const wallIdToOpen = shouldOpenWallOnKey({
+        eventTarget: event.target,
+        reshapeRoomId,
+        selection
+      });
+      if (wallIdToOpen) {
+        // An already-open wall is inert here: Restore is a button, not a key.
+        // A stale id resolves to a null request and simply never opens.
+        const request = buildOpenWallRequest(project, wallIdToOpen);
+        if (!request) return;
+        event.preventDefault();
+        setConfirmOpenWallId(wallIdToOpen);
+        return;
+      }
+
       // Last in the chain: a whole-room selection (selection kind "room" —
-      // never a wall focus, which selectWall writes as NO_SELECTION + wall
-      // context). shouldDeleteRoomOnKey also stands down while edit-shape is
+      // never a picked wall, which owns the branch above).
+      // shouldDeleteRoomOnKey also stands down while edit-shape is
       // armed (vertex removal owns the key there, via PlanView). Empty rooms
       // delete immediately (one undo entry, cascade handled by deleteRoom);
       // occupied rooms confirm through the dialog first.
@@ -145,6 +174,8 @@ export function useDeleteAndEscapeShortcuts({
     deleteRoom,
     reshapeRoomId,
     confirmDeleteRoomId,
+    confirmOpenWallId,
+    setConfirmOpenWallId,
     draggingArtworkId,
     isHelpOpen,
     removeSelectedPlacements,

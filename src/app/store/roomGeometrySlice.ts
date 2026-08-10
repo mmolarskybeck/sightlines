@@ -38,6 +38,11 @@ import {
 import { clearOpeningPartners } from "../../domain/placement/openingPairs";
 import type { PlacementWarning } from "../../domain/placement/validatePlacement";
 import type { Project } from "../../domain/project";
+import {
+  openWallInProject,
+  restoreWallInProject,
+  type WallOpenBlockedReason
+} from "../../domain/geometry/wallCascade";
 import { getFirstWall } from "../projectWalls";
 import type { AppState, EditExtras } from "../store";
 import { NO_SELECTION, selectionWrite, type Selection } from "./selectionSlice";
@@ -76,6 +81,12 @@ export type RoomGeometrySliceActions = {
     distanceMm: number
   ) => Promise<void>;
   deleteFreestandingWall: (wallId: string) => Promise<void>;
+  // Removes a perimeter wall's SURFACE, leaving the room's shape and floor.
+  // Resolves to a blocked reason instead of mutating when the wall is only
+  // partly shared or its boundary is ambiguous, so callers can explain rather
+  // than silently no-op.
+  openWall: (wallId: string) => Promise<WallOpenBlockedReason | null>;
+  restoreWall: (wallId: string) => Promise<void>;
   resizeRoomHeight: (roomId: string, heightMm: number) => Promise<void>;
   resizeWall: (wallId: string, lengthMm: number, anchor?: ResizeAnchor) => Promise<void>;
   setPolygonWallLength: (
@@ -567,6 +578,85 @@ export function createRoomGeometrySlice(
 
       await applyEdit("Delete partition", () => nextProject, {
         ...selectionWrite(nextProject, nextSelection, nextWallContextId)
+      });
+    },
+
+    async openWall(wallId) {
+      const project = get().project;
+      if (!project) return null;
+
+      const result = openWallInProject(project, wallId);
+      if (result.status === "blocked") return result.reason;
+
+      const { project: nextProject, scope } = result;
+
+      // Deliberately NO reconcileGeometryEdit. Opening a wall moves no vertex
+      // and changes no adjacency — reconciling here is exactly the "renaming a
+      // room creates a door" failure the contract above warns about. Open walls
+      // leave shared-opening topology inside analyzeSharedOpenings instead.
+      //
+      // Revalidate every wall of every room this touched, rather than just the
+      // opened ids. Splitting a counterpart mints new wall ids and moves
+      // objects between segments, and includePairedOpenings can delete a
+      // partner living on a wall that is not being opened — so an exact list is
+      // easy to get subtly wrong. Validation is a pure read that only produces
+      // warnings, so over-including is free; under-including is not.
+      const touchedRoomIds = new Set<string>();
+      for (const placement of nextProject.floor.rooms) {
+        const touchesOpenWall = placement.room.walls.some((wall) =>
+          scope.wallIds.has(wall.id)
+        );
+        const touchesCounterpart = scope.backings.some((backing) =>
+          placement.room.walls.some((wall) => wall.id === backing.wallId)
+        );
+        if (touchesOpenWall || touchesCounterpart) touchedRoomIds.add(placement.roomId);
+      }
+      const revalidateWallIds = nextProject.floor.rooms
+        .filter((placement) => touchedRoomIds.has(placement.roomId))
+        .flatMap((placement) => placement.room.walls.map((wall) => wall.id));
+      const placementWarnings = validateChangedWallPlacements(nextProject, [
+        ...new Set([...scope.wallIds, ...revalidateWallIds])
+      ]);
+
+      // wallContextId is PRESERVED: the wall still exists, so its id stays
+      // valid, and keeping it flips the inspector straight to the open/Restore
+      // state — putting the way back directly under the cursor. Only the
+      // explicit pick is cleared, so the wall stops being Delete-eligible while
+      // remaining displayed.
+      const current = get().selection;
+      const nextSelection: Selection =
+        current.kind === "wall" && scope.wallIds.has(current.wallId)
+          ? NO_SELECTION
+          : current.kind === "objects" &&
+              current.ids.every((id) => scope.removedObjectIds.has(id))
+            ? NO_SELECTION
+            : current.kind === "measurement" &&
+                scope.removedMeasurementIds.has(current.measurementId)
+              ? NO_SELECTION
+              : current;
+
+      // One undo entry covers BOTH twins and both sides' contents, because
+      // applyEdit snapshots the whole project. The label is fixed rather than
+      // `Open ${wall.name}` since a twin open touches two differently-named
+      // walls.
+      await applyEdit("Open wall", () => nextProject, {
+        placementWarnings,
+        ...selectionWrite(nextProject, nextSelection, get().wallContextId)
+      });
+      return null;
+    },
+
+    async restoreWall(wallId) {
+      const project = get().project;
+      if (!project) return;
+
+      const { project: nextProject, wallIds } = restoreWallInProject(project, wallId);
+      if (wallIds.size === 0) return;
+
+      // Nothing gains objects, so there is nothing new to validate. Contents do
+      // not come back — only undo restores them.
+      await applyEdit("Restore wall", () => nextProject, {
+        ...selectionWrite(nextProject, get().selection, get().wallContextId)
       });
     },
 

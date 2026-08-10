@@ -453,16 +453,50 @@ describe("migrateProject", () => {
     ).toBeUndefined();
   });
 
-  it("migrates a v3 document to v4 as a pure version-stamp (v3 has no cases)", () => {
+  it("migrates a v3 document through the pure version-stamp steps (no cases, no open walls)", () => {
     const sample = createSampleProject();
     const v3Document = { ...sample, schemaVersion: 3 };
 
     const migrated = migrateProject(v3Document);
 
-    expect(migrated.schemaVersion).toBe(4);
-    // Nothing else changes: a v3 project carries no cases, so the only edit is
-    // the version stamp (mirrors the v1→v2 floorObjects passthrough).
-    expect(migrated).toEqual({ ...sample, schemaVersion: 4 });
+    // v3→v4 (cases) and v4→v5 (open walls) are both pure version stamps: a v3
+    // project carries neither, so the chain's only edit is the version itself
+    // (mirrors the v1→v2 floorObjects passthrough).
+    expect(migrated.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    expect(migrated).toEqual({ ...sample, schemaVersion: CURRENT_SCHEMA_VERSION });
+  });
+
+  it("migrates a v4 document to v5 as a pure version-stamp and leaves walls solid", () => {
+    const sample = createSampleProject();
+    const v4Document = { ...sample, schemaVersion: 4 };
+
+    const migrated = migrateProject(v4Document);
+
+    expect(migrated.schemaVersion).toBe(5);
+    expect(migrated).toEqual({ ...sample, schemaVersion: 5 });
+    // Absent means solid — the migration must not stamp `isOpenSide: false`
+    // onto every wall, or restored walls would stop round-tripping clean.
+    for (const wall of migrated.floor.rooms[0].room.walls) {
+      expect(wall.isOpenSide).toBeUndefined();
+    }
+  });
+
+  it("round-trips an open wall and refuses a document from a newer build", () => {
+    const sample = createSampleProject();
+    sample.floor.rooms[0].room.walls[0].isOpenSide = true;
+
+    const parsed = parseProject(JSON.parse(JSON.stringify(sample)));
+    expect(parsed.floor.rooms[0].room.walls[0].isOpenSide).toBe(true);
+    // The loop invariant is untouched — an open wall is still in the loop.
+    expect(parsed.floor.rooms[0].room.walls).toHaveLength(
+      sample.floor.rooms[0].room.walls.length
+    );
+
+    // The v5 bump exists for this direction: a build pinned to an older schema
+    // must refuse rather than strip the flag and re-save the wall as solid.
+    expect(() =>
+      migrateProject({ ...sample, schemaVersion: CURRENT_SCHEMA_VERSION + 1 })
+    ).toThrow(/newer version of Sightlines/);
   });
 
   it("round-trips a v2 document that already has floor objects", () => {

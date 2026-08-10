@@ -353,7 +353,20 @@ export function deleteRoomVertex(project: Project, roomId: string, vertexId: str
   // Merged wall keeps the entering wall's id/name (the "first" wall in loop
   // order) and now runs from the entering wall's start straight to the
   // exiting wall's end.
-  const mergedWall: Wall = { ...enteringWall, endVertexId: exitingWall.endVertexId };
+  //
+  // Openness resolves to solid unless BOTH sides were open. Spreading
+  // ...enteringWall alone would inherit only its flag, and the reprojection
+  // below moves the EXITING wall's objects onto this merged wall — so a
+  // solid-into-open merge would silently land live artworks and doors on a
+  // surface that doesn't exist. Resolving toward solid is additive rather
+  // than destructive.
+  const bothOpen = enteringWall.isOpenSide === true && exitingWall.isOpenSide === true;
+  const { isOpenSide: _enteringOpen, ...enteringRest } = enteringWall;
+  const mergedWall: Wall = {
+    ...enteringRest,
+    endVertexId: exitingWall.endVertexId,
+    ...(bothOpen ? { isOpenSide: true as const } : {})
+  };
 
   // The two walls are adjacent in loop order (enteringWall.end === vertexId
   // === exitingWall.start), so exitingWallIndex is always right after

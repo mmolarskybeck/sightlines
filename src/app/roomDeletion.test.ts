@@ -101,7 +101,19 @@ describe("shouldDeleteRoomOnKey", () => {
     ).toBeNull();
   });
 
-  it("stands down for a wall selection (selectWall writes NO_SELECTION + wall context)", () => {
+  it("stands down for a picked wall — the wall branch owns the key", () => {
+    expect(
+      shouldDeleteRoomOnKey({
+        eventTarget: document.body,
+        reshapeRoomId: null,
+        selection: { kind: "wall", wallId: "wall-north" }
+      })
+    ).toBeNull();
+  });
+
+  it("stands down for bare wall CONTEXT, which is a default and not a pick", () => {
+    // getSelectedWall falls back to walls[0], so the inspector always shows a
+    // wall. Nothing destructive may key off that.
     expect(
       shouldDeleteRoomOnKey({
         eventTarget: document.body,

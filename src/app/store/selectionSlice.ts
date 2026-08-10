@@ -8,8 +8,12 @@ import { telemetry } from "../telemetry/telemetry";
 //                    NEVER library artwork ids. [] is normalized to none.
 //   libraryArtwork — a checklist pick that has no placement yet (inspector-only)
 //   room           — plan view's room focus (resize/move affordances)
-// The sidebar's wall context is NOT part of this union — it persists across
-// object selection (see wallContextId at the use site).
+//   wall           — a perimeter wall the user PICKED on a canvas
+// Wall context (wallContextId) is a separate thing that persists across object
+// selection. The two are not interchangeable: getSelectedWall falls back to
+// walls[0], so the inspector always displays SOME wall even when the user has
+// clicked nothing. Only this union records a deliberate pick, which is why
+// destructive wall actions key off it and never off the context.
 export type Selection =
   | { kind: "none" }
   | { kind: "objects"; ids: string[] }
@@ -17,7 +21,8 @@ export type Selection =
   | { kind: "room"; roomId: string }
   | { kind: "measurement"; measurementId: string }
   // Partitions are selected by centerline id, never face id.
-  | { kind: "freestandingWall"; wallId: string };
+  | { kind: "freestandingWall"; wallId: string }
+  | { kind: "wall"; wallId: string };
 
 export const NO_SELECTION: Selection = { kind: "none" };
 
@@ -33,6 +38,16 @@ export function roomIdOf(selection: Selection): string | null {
 
 export function freestandingWallIdOf(selection: Selection): string | null {
   return selection.kind === "freestandingWall" ? selection.wallId : null;
+}
+
+// The perimeter wall the user deliberately picked, or null.
+//
+// Deliberately NOT named selectedWallIdOf: `selectedWall` already means the
+// FALLBACK-resolved wall the inspector displays (getSelectedWall, which
+// defaults to walls[0]). Destructive actions must key off this function; the
+// two names being one word apart is how that distinction gets broken later.
+export function pickedWallIdOf(selection: Selection): string | null {
+  return selection.kind === "wall" ? selection.wallId : null;
 }
 
 function findPlacement(project: Project, id: string) {
@@ -83,6 +98,7 @@ export function selectionWrite(
 export type SelectionSliceActions = {
   setViewMode: (viewMode: ViewMode) => void;
   selectWall: (wallId: string) => void;
+  focusWallContext: (wallId: string) => void;
   selectArtwork: (artworkId: string) => void;
   selectOpening: (wallObjectId: string) => void;
   selectRoom: (roomId: string) => void;
@@ -118,12 +134,28 @@ export function createSelectionSlice(
       }
     },
 
+    // A DIRECT canvas gesture: clicking a wall in plan or 3D. Records the pick
+    // in the union (so the wall is highlighted and Delete-eligible) and sets it
+    // as sidebar context. It still drops object selection and room focus — a
+    // wall click is a fresh focus gesture, not an addition to a group of
+    // placements, and a selected room's handles are an exclusive canvas mode.
+    //
+    // No existence guard, unlike selectFreestandingWall: getSelectedWall's
+    // fallback has always absorbed a stale id here, and adding validation would
+    // change behaviour for every caller. Staleness is absorbed downstream
+    // instead — the wall lookup in the Delete branch simply finds nothing.
     selectWall(wallId) {
       autoAcceptArrangeSession();
-      // Wall focus clears the selection but keeps the wall as sidebar
-      // context — a wall click is a fresh focus gesture, not an addition to
-      // a group of placements, and it drops room focus (a selected room's
-      // handles are a different, exclusive canvas mode).
+      set(selectionWrite(get().project, { kind: "wall", wallId }, wallId));
+    },
+
+    // NAVIGATION, not selection: the Rooms panel list, the elevation wall
+    // switcher and its prev/next steppers. Points the inspector and the
+    // elevation at a wall without arming Delete for it — moving through a list
+    // to look at walls must never leave a destructive key primed on whichever
+    // row you happened to land on.
+    focusWallContext(wallId) {
+      autoAcceptArrangeSession();
       set(selectionWrite(get().project, NO_SELECTION, wallId));
     },
 

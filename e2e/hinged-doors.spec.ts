@@ -16,7 +16,7 @@ import {
 // on: nothing under src/domain/{geometry,placement} touches window/document).
 import type { DoorLeaf } from "../src/domain/project";
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const ROOM_WIDTH_MM = 4000;
 // Wall elevation height, unrelated to a room's floor-plan depth (the `depthMm`
 // param below) — every wall needs one regardless of how deep the room is.

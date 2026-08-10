@@ -300,6 +300,33 @@ describe("moveRoomWall", () => {
 });
 
 describe("splitWall", () => {
+  it("gives both halves of an open wall the open flag", () => {
+    const base = createSampleProject();
+    const room = base.floor.rooms[0].room;
+    const project: Project = {
+      ...base,
+      floor: {
+        rooms: [
+          {
+            ...base.floor.rooms[0],
+            room: {
+              ...room,
+              walls: room.walls.map((wall) =>
+                wall.id === "wall-north" ? { ...wall, isOpenSide: true } : wall
+              )
+            }
+          }
+        ]
+      }
+    };
+
+    const result = splitWall(project, "wall-north", 3000);
+
+    const nextRoom = result.project.floor.rooms[0].room;
+    expect(nextRoom.walls.find((wall) => wall.id === "wall-north")!.isOpenSide).toBe(true);
+    expect(nextRoom.walls.find((wall) => wall.id === result.newWallId)!.isOpenSide).toBe(true);
+  });
+
   it("keeps the original wall's id/context on the first segment and gives the second a fresh id", () => {
     const project = createSampleProject();
     const wallLengthMm = getWallsWithGeometry(project.floor.rooms[0].room).find(
@@ -407,6 +434,91 @@ describe("deleteRoomVertex", () => {
     expect(merged.startVertexId).toBe(room.walls[0].startVertexId);
     expect(merged.endVertexId).toBe(room.walls[1].endVertexId);
     expect(() => parseProject(result.project)).not.toThrow();
+  });
+
+  it("resolves a merge of an open and a solid wall to solid", () => {
+    // The exiting wall's objects get reprojected onto the merged wall, so
+    // inheriting only the entering wall's openness would land live objects on
+    // a surface that doesn't exist.
+    const project = polygonRoomProject();
+    const room = project.floor.rooms[0].room;
+    const vertexId = room.vertices[1].id;
+    const enteringWallId = room.walls[0].id;
+    const exitingWallId = room.walls[1].id;
+
+    const withOpenEntering: Project = {
+      ...project,
+      floor: {
+        rooms: [
+          {
+            ...project.floor.rooms[0],
+            room: {
+              ...room,
+              walls: room.walls.map((wall) =>
+                wall.id === enteringWallId ? { ...wall, isOpenSide: true } : wall
+              )
+            }
+          }
+        ]
+      },
+      wallObjects: [
+        {
+          id: "on-exiting",
+          wallId: exitingWallId,
+          kind: "artwork",
+          artworkId: "artwork-1",
+          xMm: 100,
+          yMm: feetToMm(5),
+          widthMm: 600,
+          heightMm: 800
+        }
+      ]
+    };
+
+    const result = deleteRoomVertex(withOpenEntering, "room-l", vertexId);
+
+    const merged = result.project.floor.rooms[0].room.walls.find(
+      (wall) => wall.id === enteringWallId
+    )!;
+    expect(merged.isOpenSide).toBeUndefined();
+    // The reprojected object now sits on a real surface.
+    expect(
+      result.project.wallObjects.find((object) => object.id === "on-exiting")!.wallId
+    ).toBe(enteringWallId);
+  });
+
+  it("keeps the merged wall open when both sides were open", () => {
+    const project = polygonRoomProject();
+    const room = project.floor.rooms[0].room;
+    const vertexId = room.vertices[1].id;
+    const enteringWallId = room.walls[0].id;
+    const exitingWallId = room.walls[1].id;
+
+    const bothOpen: Project = {
+      ...project,
+      floor: {
+        rooms: [
+          {
+            ...project.floor.rooms[0],
+            room: {
+              ...room,
+              walls: room.walls.map((wall) =>
+                wall.id === enteringWallId || wall.id === exitingWallId
+                  ? { ...wall, isOpenSide: true }
+                  : wall
+              )
+            }
+          }
+        ]
+      }
+    };
+
+    const result = deleteRoomVertex(bothOpen, "room-l", vertexId);
+
+    const merged = result.project.floor.rooms[0].room.walls.find(
+      (wall) => wall.id === enteringWallId
+    )!;
+    expect(merged.isOpenSide).toBe(true);
   });
 
   it("reprojects objects from both merged walls by floor-space center", () => {

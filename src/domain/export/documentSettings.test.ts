@@ -24,6 +24,58 @@ const VALID_VIEW: SavedView = {
   createdAt: "2026-07-16T00:00:00.000Z"
 };
 
+describe("open walls in the export tree", () => {
+  function withOpenNorthWall() {
+    const project = createSampleProject();
+    project.floor.rooms[0].room.walls = project.floor.rooms[0].room.walls.map((wall) =>
+      wall.id === "wall-north" ? { ...wall, isOpenSide: true } : wall
+    );
+    return project;
+  }
+
+  it("is listed but never included — there is no surface to elevate", () => {
+    const { settings } = reconcileDocumentExportPreferences(
+      withOpenNorthWall(),
+      undefined,
+      "en-US"
+    );
+
+    const wall = settings.rooms[0].walls.find((choice) => choice.wallId === "wall-north");
+    expect(wall).toBeDefined();
+    expect(wall!.isOpenSide).toBe(true);
+    expect(wall!.included).toBe(false);
+    expect(wall!.hasWork).toBe(false);
+  });
+
+  // The stale-preference trap: `included` defaults to hasWork, but an explicit
+  // stored `true` from before the wall was opened would otherwise win and
+  // resurrect a blank elevation page.
+  it("overrides a stored explicit true rather than honouring it", () => {
+    const { settings } = reconcileDocumentExportPreferences(
+      withOpenNorthWall(),
+      { sections: {}, roomPlans: {}, savedViews: {}, elevations: { "wall-north": true } },
+      "en-US"
+    );
+
+    expect(
+      settings.rooms[0].walls.find((choice) => choice.wallId === "wall-north")!.included
+    ).toBe(false);
+  });
+
+  it("gives the stored choice straight back once the wall is restored", () => {
+    // Preferences are never rewritten for an open wall, so restore is lossless.
+    const { settings } = reconcileDocumentExportPreferences(
+      createSampleProject(),
+      { sections: {}, roomPlans: {}, savedViews: {}, elevations: { "wall-north": true } },
+      "en-US"
+    );
+
+    expect(
+      settings.rooms[0].walls.find((choice) => choice.wallId === "wall-north")!.included
+    ).toBe(true);
+  });
+});
+
 describe("document export settings", () => {
   it("uses §7.3 defaults for a single-room project", () => {
     const project = createSampleProject();

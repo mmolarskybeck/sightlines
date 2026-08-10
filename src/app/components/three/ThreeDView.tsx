@@ -237,9 +237,12 @@ export type ThreeDViewActions = {
 // freestanding partitions. Empty (isEmpty()) when the room has no geometry.
 function roomBounds(room: Room3d): Box3 {
   const box = new Box3();
+  // Seed with the room's own height, not 0: a room whose walls are all open
+  // emits no panels, and reducing over an empty list would flatten the box onto
+  // the floor plane and wreck the camera fit.
   const maxWallHeightMm = room.walls.reduce(
     (max, wall) => Math.max(max, wall.heightMm),
-    0
+    room.heightMm
   );
   for (const point of room.floorPolygon) {
     box.expandByPoint(

@@ -285,6 +285,11 @@ export function drawPlanScene(
   }
   for (const room of scene.rooms) {
     for (const wall of room.walls) {
+      // An open wall has no surface, so the printed plan must show a gap
+      // rather than a solid edge — same reading as the interactive plan and
+      // the export preview. Drawing it solid here would make the exported
+      // drawing disagree with the one the curator laid out.
+      if (wall.isOpenSide) continue;
       drawLine(
         page,
         transform.point(wall.startMm),

@@ -1,4 +1,9 @@
-import type { Artwork, Project, WallObject } from "../../src/domain/project";
+import {
+  CURRENT_SCHEMA_VERSION,
+  type Artwork,
+  type Project,
+  type WallObject
+} from "../../src/domain/project";
 
 /**
  * Deterministic renderer fixture: 10 rooms, 40 walls, and 200 placements.
@@ -90,7 +95,9 @@ export const rendererBenchmarkWallObjects: WallObject[] = Array.from(
 
 export const rendererBenchmarkProject: Project = {
   id: "renderer-benchmark-10-room-200-work",
-  schemaVersion: 4,
+  // Tracks the constant: the fixture is compared with parseProject's strict
+  // literal, so a hardcoded number silently breaks on every schema bump.
+  schemaVersion: CURRENT_SCHEMA_VERSION,
   title: "Renderer benchmark — 10 rooms / 200 works",
   unit: "m",
   defaultWallHeightMm: wallHeightMm,

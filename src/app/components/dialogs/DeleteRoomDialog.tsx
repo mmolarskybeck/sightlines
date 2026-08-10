@@ -32,7 +32,13 @@ export function DeleteRoomDialog({
           <DialogTitle>Delete {roomName}?</DialogTitle>
           <DialogDescription>
             {summary
-              ? `It contains ${describeRoomContents(summary)}. Deleting the room removes them too. Undo brings everything back.`
+              ? `It contains ${describeRoomContents(summary)}. ${
+                  summary.artworks > 0
+                    ? `${summary.artworks === 1 ? "The work" : "The works"} hung here ${
+                        summary.artworks === 1 ? "goes" : "go"
+                      } back to the checklist, unplaced; everything else is deleted.`
+                    : "Deleting the room removes them too."
+                } Undo brings everything back.`
               : null}
           </DialogDescription>
         </DialogHeader>

@@ -69,7 +69,9 @@ describe("HelpDialog", () => {
     renderHelp();
     // The chord is split into separate chips now; Ctrl appears in both Z and Y.
     expect(screen.getAllByText("Ctrl").length).toBeGreaterThan(0);
-    expect(screen.getByText("Del")).toBeInTheDocument();
+    // Del appears in more than one group (general "Delete selection" and plan's
+    // "Open a selected wall"), so assert presence rather than uniqueness.
+    expect(screen.getAllByText("Del").length).toBeGreaterThan(0);
   });
 
   it("keeps the general group visible on every tab", () => {

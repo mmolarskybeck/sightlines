@@ -9,7 +9,7 @@ import type { Page } from "playwright/test";
 // playwright.config.ts). Runs on Chromium and WebKit.
 
 const DROPBOX_AUTH_KEY = "sightlines:dropboxAuth";
-const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_SCHEMA_VERSION = 5;
 
 // A schema-valid project literal for the recovery snapshot (mirrors
 // createBlankProject so parseProject/migrateProject accept it as-is). Inlined

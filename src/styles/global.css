@@ -1138,6 +1138,15 @@ input:focus-visible {
   white-space: nowrap;
 }
 
+/* Why a wall row in the export tree is disabled. --muted for the same contrast
+   reason as the count above: this is a reason the user has to be able to read,
+   not decoration. */
+.export-tree-tag {
+  color: var(--muted);
+  font-size: var(--type-xs);
+  white-space: nowrap;
+}
+
 .export-section-row[data-disabled] .export-section-count {
   color: var(--subtle);
 }
@@ -1178,6 +1187,12 @@ input:focus-visible {
 
 .export-tree-wall {
   grid-template-columns: 20px minmax(0, 1fr);
+}
+
+/* An open wall's row carries a trailing reason chip, so it needs a third
+   column — without this the tag wraps onto an implicit second row. */
+.export-tree-wall:has(.export-tree-tag) {
+  grid-template-columns: 20px minmax(0, 1fr) auto;
 }
 
 .export-saved-view-list {
@@ -1610,6 +1625,16 @@ fieldset.export-pdf-body:disabled {
   line-height: var(--leading-copy);
 }
 
+/* The open-wall confirm's shared-wall consequence: a SECOND room is being
+   changed, which the title can't say, so it gets its own beat under the
+   description rather than another clause inside it. */
+.dialog-alert-note {
+  margin: var(--space-8) 0 0;
+  color: var(--danger);
+  font-size: var(--type-sm);
+  line-height: var(--leading-copy);
+}
+
 .dialog-footer {
   display: flex;
   justify-content: flex-end;
@@ -1953,6 +1978,23 @@ body.panels-resizing * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* "Open" on a wall row. Same register as .checklist-tag — a quiet word between
+   the name and the length, not a badge: no background, no pill. The row is a
+   space-between flex, so a third child sits naturally in the middle. */
+.wall-row-tag {
+  flex: 0 0 auto;
+  color: var(--subtle);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
+/* The wall still exists and is still selectable, so the name recedes rather
+   than striking through. */
+.wall-row.is-open > span:first-of-type {
+  color: var(--muted);
 }
 
 .wall-row span {
@@ -4422,6 +4464,16 @@ body.panels-resizing * {
   padding-left: var(--space-20);
 }
 
+/* "Open" in the elevation switcher — same quiet register as .wall-row-tag,
+   used both in the list rows and in the trigger chip. */
+.wall-switcher-open-tag {
+  flex: 0 0 auto;
+  color: var(--subtle);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
 .wall-switcher-elevation-name {
   flex: 1 1 auto;
   min-width: 0;
@@ -4880,6 +4932,32 @@ body.panels-resizing * {
    .wall-hit is the next sibling of .wall-line. */
 .plan-svg:not(.tool-armed) .wall-line:not(.active):has(+ .wall-hit:hover) {
   stroke: var(--primary-strong);
+}
+
+/* An open wall: the room has no surface on this side. At REST it draws
+   nothing — the gap in the outline is the whole signal, and a dashed line at
+   rest would read as hidden or overhead construction, which is a different
+   drafting meaning. Its invisible .wall-hit companion is untouched, so the
+   edge stays click-to-select — the only route back to Restore. Must come
+   after .wall-line.active: equal specificity, source order decides. */
+.wall-line.open {
+  stroke: none;
+}
+
+/* Discoverability without the false meaning: a faint dashed thread appears
+   only while the edge is hovered or picked, so it can be found and restored.
+   Butt caps so it visibly stops short of the solid walls it meets. */
+.wall-line.open.affordance,
+.plan-svg:not(.tool-armed) .wall-line.open:has(+ .wall-hit:hover) {
+  stroke: var(--line);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 7;
+  stroke-linecap: butt;
+}
+
+/* Picked reads as selection, not as a wall. */
+.wall-line.open.affordance {
+  stroke: var(--selection);
 }
 
 /* Square (no rounded corners — this design language has no pills), always

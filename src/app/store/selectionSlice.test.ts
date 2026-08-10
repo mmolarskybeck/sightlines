@@ -20,6 +20,7 @@ import {
   getSelectedOpeningId,
   NO_SELECTION,
   objectIdsOf,
+  pickedWallIdOf,
   roomIdOf,
   selectionWrite,
   type Selection
@@ -224,16 +225,39 @@ describe("selection transitions through the store", () => {
     expect(store.getState().selection).toBe(before);
   });
 
-  it("selectWall clears selection but keeps it as context", async () => {
+  it("selectWall records a deliberate pick and sets it as context", async () => {
     const { placementId } = await placeOnWall("p.jpg");
     store.getState().selectObject(placementId);
 
     store.getState().selectWall("wall-east");
 
     const state = store.getState();
-    expect(state.selection).toEqual(NO_SELECTION);
+    expect(state.selection).toEqual({ kind: "wall", wallId: "wall-east" });
     expect(state.wallContextId).toBe("wall-east");
     expect(objectIdsOf(state.selection)).toEqual([]);
+    expect(pickedWallIdOf(state.selection)).toBe("wall-east");
+  });
+
+  it("focusWallContext points at a wall WITHOUT recording a pick", () => {
+    // The safety split: navigating a list must not arm destructive actions for
+    // whichever wall you land on.
+    store.getState().focusWallContext("wall-east");
+
+    const state = store.getState();
+    expect(state.wallContextId).toBe("wall-east");
+    expect(state.selection).toEqual(NO_SELECTION);
+    expect(pickedWallIdOf(state.selection)).toBeNull();
+  });
+
+  it("clearObjectSelection drops the pick but leaves the wall on display", async () => {
+    store.getState().selectWall("wall-east");
+
+    store.getState().clearObjectSelection();
+
+    const state = store.getState();
+    // Escape disarms without changing what the inspector shows.
+    expect(pickedWallIdOf(state.selection)).toBeNull();
+    expect(state.wallContextId).toBe("wall-east");
   });
 
   it("selectRoom drops wall context; selectWall drops room", () => {
@@ -245,7 +269,7 @@ describe("selection transitions through the store", () => {
 
     store.getState().selectWall("wall-east");
     state = store.getState();
-    expect(state.selection).toEqual(NO_SELECTION);
+    expect(state.selection).toEqual({ kind: "wall", wallId: "wall-east" });
     expect(roomIdOf(state.selection)).toBeNull();
     expect(state.wallContextId).toBe("wall-east");
   });
@@ -289,7 +313,7 @@ describe("selection transitions through the store", () => {
     const cases: Expectation[] = [
       {
         act: () => store.getState().selectWall("wall-east"),
-        selection: NO_SELECTION,
+        selection: { kind: "wall", wallId: "wall-east" },
         wallContextId: "wall-east",
         artworkId: null,
         openingId: null,

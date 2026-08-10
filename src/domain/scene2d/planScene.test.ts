@@ -104,6 +104,31 @@ describe("buildPlanScene rooms", () => {
 
 });
 
+describe("buildPlanScene open walls", () => {
+  it("keeps the wall entry and flags it, so every painter can branch", () => {
+    // The segment must survive: measurement geometry and all three plan
+    // painters (interactive layer, PDF page, export preview) need to know
+    // WHERE the opening is, not merely that one exists.
+    const project = createSampleProject();
+    project.floor.rooms[0].room.walls = project.floor.rooms[0].room.walls.map((wall) =>
+      wall.id === "wall-north" ? { ...wall, isOpenSide: true } : wall
+    );
+
+    const scene = buildPlanScene(project, { artworksById: new Map() });
+    const room = scene.rooms[0];
+
+    expect(room.walls).toHaveLength(4);
+    const north = room.walls.find((wall) => wall.wallId === "wall-north")!;
+    expect(north.isOpenSide).toBe(true);
+    expect(north.startMm).toBeDefined();
+    expect(north.endMm).toBeDefined();
+    // Only that wall.
+    expect(room.walls.filter((wall) => wall.isOpenSide)).toHaveLength(1);
+    // The floor polygon comes from vertices, so the room keeps its shape.
+    expect(room.polygonMm).toHaveLength(4);
+  });
+});
+
 describe("buildPlanScene partitions", () => {
   it("lifts each free-standing wall's centerline to a floor-space slab rect at its own thickness", () => {
     const project = createSampleProject();

@@ -149,6 +149,11 @@ export type Room3d = {
   floorPolygon: Vec2[]; // floor-space, wound counter-clockwise
   walls: WallPanel3d[];
   freestandingWalls: FreestandingWall3d[];
+  // The room's height, independent of `walls`. Open walls emit no panel, so a
+  // fully-open room has `walls: []` — camera framing must not derive its
+  // vertical extent by reducing over panels or the bounding box collapses flat
+  // onto the floor plane.
+  heightMm: number;
 };
 
 export type Scene3d = {
@@ -278,7 +283,13 @@ function deriveRoom(
     floorPolygon = floorPolygon.slice().reverse();
   }
 
-  const walls: WallPanel3d[] = getWallsWithGeometry(room).map((wall) => {
+  // An open wall contributes no panel: the room is open on that side. The
+  // floor polygon above comes from room.vertices, so the floor is unaffected,
+  // and isCounterClockwise was measured from that polygon rather than from the
+  // wall list — skipping a panel cannot change the winding decision or any
+  // other wall's toPanelLocalX.
+  const walls: WallPanel3d[] = getWallsWithGeometry(room).flatMap((wall) => {
+    if (wall.isOpenSide === true) return [];
     const start = transformPoint(wall.start, placement);
     const end = transformPoint(wall.end, placement);
     // For a clockwise loop the interior sits on the right of each edge, so
@@ -303,13 +314,15 @@ function deriveRoom(
       isCounterClockwise
     );
 
-    return {
-      wallId: wall.id,
-      start: oriented.start,
-      end: oriented.end,
-      heightMm: wall.heightMm,
-      ...contents
-    };
+    return [
+      {
+        wallId: wall.id,
+        start: oriented.start,
+        end: oriented.end,
+        heightMm: wall.heightMm,
+        ...contents
+      }
+    ];
   });
 
   // Partition faces (spec §7.1). Each face keeps its DERIVED start→end (its
@@ -363,7 +376,8 @@ function deriveRoom(
     roomId: placement.roomId,
     floorPolygon,
     walls,
-    freestandingWalls
+    freestandingWalls,
+    heightMm: room.heightMm
   };
 }
 

@@ -134,6 +134,7 @@ import { useDeleteAndEscapeShortcuts } from "./hooks/useDeleteAndEscapeShortcuts
 import { useToolbarShortcuts } from "./hooks/useToolbarShortcuts";
 import { deriveArrangeReadout } from "./hooks/arrangeReadout";
 import { summarizeRoomContents } from "./roomDeletion";
+import { buildOpenWallRequest } from "./wallOpening";
 import {
   freestandingWallIdOf,
   getProjectWalls,
@@ -142,6 +143,7 @@ import {
   getSelectedWallTextId,
   getSelectedWall,
   objectIdsOf,
+  pickedWallIdOf,
   roomIdOf,
   useAppStore
 } from "./store";
@@ -237,6 +239,10 @@ export function App() {
   const loadBenchmarkFixture = useAppStore((state) => state.loadBenchmarkFixture);
   const setViewMode = useAppStore((state) => state.setViewMode);
   const selectWall = useAppStore((state) => state.selectWall);
+  // Navigation counterpart: points the inspector/elevation at a wall without
+  // arming Delete for it. Used by the Rooms panel list and the elevation wall
+  // switcher; the plan and 3D canvases use selectWall.
+  const focusWallContext = useAppStore((state) => state.focusWallContext);
   const selectArtwork = useAppStore((state) => state.selectArtwork);
   const selectOpening = useAppStore((state) => state.selectOpening);
   const addReferenceMeasurement = useAppStore((state) => state.addReferenceMeasurement);
@@ -266,6 +272,8 @@ export function App() {
   const renameProject = useAppStore((state) => state.renameProject);
   const renameRoom = useAppStore((state) => state.renameRoom);
   const deleteRoom = useAppStore((state) => state.deleteRoom);
+  const openWall = useAppStore((state) => state.openWall);
+  const restoreWall = useAppStore((state) => state.restoreWall);
   const setUnit = useAppStore((state) => state.setUnit);
   const resizeSelectedWall = useAppStore((state) => state.resizeSelectedWall);
   const resizeRoomHeight = useAppStore((state) => state.resizeRoomHeight);
@@ -428,6 +436,10 @@ export function App() {
   }, [libraryArtworks, listArtworkProjectMemberships, viewMode, project]);
   // Transient confirmation state; empty rooms delete immediately.
   const [confirmDeleteRoomId, setConfirmDeleteRoomId] = useState<string | null>(null);
+  // Transient confirm state for opening a wall. Every wall confirms (no
+  // empty-wall fast path — an empty wall can still be shared), and a blocked
+  // wall gets an explanatory dialog rather than a no-op action.
+  const [confirmOpenWallId, setConfirmOpenWallId] = useState<string | null>(null);
   // Mutually exclusive, transient plan tools must not persist or enter undo history.
   const {
     mode: planMode,
@@ -541,6 +553,16 @@ export function App() {
   // must use ITS id (not the raw wallContextId) or explicitly selecting that
   // same fallback wall would look like a wall switch and spuriously reset pan/zoom.
   const selectedWall = project ? getSelectedWall(project, wallContextId) : null;
+  // What the CANVASES highlight. Deliberately not selectedWall: that one falls
+  // back to walls[0], so highlighting it would draw a wall as selected on a
+  // fresh project nobody had clicked — and then Delete (which keys off the same
+  // deliberate pick) would appear to do nothing. The inspector and the sidebar
+  // list still show selectedWall, because a default is honest there.
+  const pickedWallId = pickedWallIdOf(selection);
+  // Nothing can be inserted onto an open wall — there is no surface. Same
+  // condition in all four places so the toolbar and the keyboard agree.
+  const elevationInsertBlocked =
+    viewMode === "elevation" && (!selectedWall || selectedWall.isOpenSide === true);
   // One elevation viewport, keyed on project id + resolved wall id so it
   // resets to fit on either a project switch OR a genuine wall switch (no
   // other reset code needed) — independent of planViewport, so switching
@@ -653,7 +675,9 @@ export function App() {
     arrangeSession,
     cancelArrangeSession,
     setIsHelpOpen,
-    setConfirmDeleteRoomId
+    setConfirmDeleteRoomId,
+    confirmOpenWallId,
+    setConfirmOpenWallId
   });
 
   useArrangeNudgeShortcuts({
@@ -682,8 +706,9 @@ export function App() {
       isSettingsOpen ||
       isExportPdfOpen ||
       importWizardOpen ||
-      confirmDeleteRoomId !== null,
-    insertDisabled: viewMode === "elevation" && !selectedWall,
+      confirmDeleteRoomId !== null ||
+      confirmOpenWallId !== null,
+    insertDisabled: elevationInsertBlocked,
     activeTool,
     armOpeningTool,
     togglePartitionTool,
@@ -709,7 +734,8 @@ export function App() {
       isSettingsOpen ||
       isExportPdfOpen ||
       importWizardOpen ||
-      confirmDeleteRoomId !== null,
+      confirmDeleteRoomId !== null ||
+      confirmOpenWallId !== null,
     state: measurement.state,
     dispatch: measurement.dispatch
   });
@@ -728,6 +754,7 @@ export function App() {
         isExportPdfOpen ||
         importWizardOpen ||
         confirmDeleteRoomId !== null ||
+        confirmOpenWallId !== null ||
         isEditableTarget(event.target) ||
         (event.target instanceof Element &&
           event.target.closest('[role="dialog"], [role="menu"], [role="listbox"]'))
@@ -755,7 +782,8 @@ export function App() {
     isSettingsOpen,
     isExportPdfOpen,
     importWizardOpen,
-    confirmDeleteRoomId
+    confirmDeleteRoomId,
+    confirmOpenWallId
   ]);
 
   const selectedWallRoomPlacement =
@@ -804,7 +832,12 @@ export function App() {
               roomName: placement.room.name,
               lengthMm: wall.lengthMm,
               heightMm: wall.heightMm,
-              kind: parseFaceWallId(wall.id) ? ("partition-face" as const) : ("perimeter" as const)
+              kind: parseFaceWallId(wall.id)
+                ? ("partition-face" as const)
+                : ("perimeter" as const),
+              // Open walls stay in the switcher on purpose — navigating to one
+              // is the route to its Restore action.
+              isOpenSide: wall.isOpenSide === true
             }))
           )
         : [],
@@ -937,6 +970,11 @@ export function App() {
     : null;
   const confirmDeleteRoomSummary = confirmDeleteRoomPlacement
     ? summarizeRoomContents(project, confirmDeleteRoomPlacement)
+    : null;
+  // Same idiom: a stale pending-open id (after an undo, or a room delete that
+  // took the wall with it) resolves to null and closes the dialog safely.
+  const openWallRequest = confirmOpenWallId
+    ? buildOpenWallRequest(project, confirmOpenWallId)
     : null;
   const selectedRoomWallIds = new Set(
     selectedRoomPlacement?.room.walls.map((wall) => wall.id) ?? []
@@ -1677,7 +1715,8 @@ export function App() {
             onDeleteRoom={deleteRoom}
             onRenameRoom={renameRoom}
             onResizeWall={resizeWall}
-            onSelectWall={selectWall}
+            // List navigation, not a canvas pick — see focusWallContext.
+            onSelectWall={focusWallContext}
           />
         ) : visibleLeftPanel === "savedViews" ? (
           <SavedViewsPanel
@@ -1729,20 +1768,20 @@ export function App() {
                     <InsertPicker
                       variant="full"
                       activeTool={activeTool}
-                      disabled={viewMode === "elevation" && !selectedWall}
+                      disabled={elevationInsertBlocked}
                       excludedTools={viewMode === "elevation" ? ["case"] : undefined}
                       onToolChange={armOpeningTool}
                     />
                     <InsertPicker
                       variant="compact"
                       activeTool={activeTool}
-                      disabled={viewMode === "elevation" && !selectedWall}
+                      disabled={elevationInsertBlocked}
                       excludedTools={viewMode === "elevation" ? ["case"] : undefined}
                       onToolChange={armOpeningTool}
                     />
                     <ViewOptionButton
                       active={measurementActive}
-                      disabled={viewMode === "elevation" && !selectedWall}
+                      disabled={elevationInsertBlocked}
                       icon={<RulerIcon aria-hidden="true" size={16} />}
                       label="Measure"
                       labelPriority
@@ -1870,7 +1909,7 @@ export function App() {
                 selectedArtworkId={selectedArtworkId}
                 selectedOpeningId={selectedOpeningId}
                 selectedRoomId={selectedRoomId}
-                selectedWallId={selectedWall?.id ?? null}
+                selectedWallId={pickedWallId}
                 snapToGrid={snapToGrid}
                 viewport={planViewport}
                 onViewportChange={setPlanViewport}
@@ -1909,7 +1948,11 @@ export function App() {
             )
           ) : null}
           {viewMode === "elevation" ? (
-            selectedWall ? (
+            // An open wall has no surface to elevate. It stays navigable in the
+            // switcher (that is how Restore is reached), but it gets a real
+            // empty state rather than a styled wall — a dashed wall-fill would
+            // read as a surface with odd styling instead of no surface at all.
+            selectedWall && selectedWall.isOpenSide !== true ? (
               <Suspense fallback={<div className="skeleton-panel" />}>
                 <ElevationView
                   allowOverlappingPlacement={allowOverlappingPlacement}
@@ -2000,7 +2043,17 @@ export function App() {
                 />
               </Suspense>
             ) : (
-              <ElevationEmptyState hasRooms={project.floor.rooms.length > 0} />
+              <ElevationEmptyState
+                hasRooms={project.floor.rooms.length > 0}
+                openWallName={
+                  selectedWall?.isOpenSide === true ? selectedWall.name : undefined
+                }
+                onRestoreWall={
+                  selectedWall?.isOpenSide === true
+                    ? () => void restoreWall(selectedWall.id)
+                    : undefined
+                }
+              />
             )
           ) : null}
           {viewMode === "library" ? (
@@ -2038,7 +2091,7 @@ export function App() {
                 selectedObjectIds={selectedObjectIds}
                 selectedArtworkId={selectedArtworkId}
                 selectedRoomId={selectedRoomId}
-                selectedWallId={selectedWall?.id ?? null}
+                selectedWallId={pickedWallId}
                 onSelectWall={selectWall}
                 onSelectObject={selectObject}
                 onClearSelection={clearObjectSelection}
@@ -2427,6 +2480,14 @@ export function App() {
               )}
               dimensionLink={wallDimensionLink}
               lastGeometryEdit={lastGeometryEdit}
+              isOpenSide={selectedWall.isOpenSide === true}
+              // The button fires for the DISPLAYED wall (fallback included),
+              // unlike the Delete key. That is not a hole in the safety rule:
+              // the user clicked a labelled control inside a panel headed by
+              // that wall's name, and the confirm names it again. The rule
+              // protects the implicit gesture — a bare keypress — not this one.
+              onOpenWall={() => setConfirmOpenWallId(selectedWall.id)}
+              onRestoreWall={() => void restoreWall(selectedWall.id)}
               onAddCase={() => void addWallCase(selectedWall.id)}
               onAddOpening={(kind) => void addOpening(selectedWall.id, kind)}
               onCommitHeight={(heightMm) =>
@@ -2506,6 +2567,9 @@ export function App() {
         confirmDeleteRoomPlacement={confirmDeleteRoomPlacement}
         confirmDeleteRoomSummary={confirmDeleteRoomSummary}
         deleteRoom={deleteRoom}
+        openWallRequest={openWallRequest}
+        setConfirmOpenWallId={setConfirmOpenWallId}
+        openWall={openWall}
         pendingPackageImport={pendingPackageImport}
         resolvePackageImportConflicts={resolvePackageImportConflicts}
         dismissPackageImport={dismissPackageImport}

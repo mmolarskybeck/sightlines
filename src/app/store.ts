@@ -35,6 +35,7 @@ import {
   createWallTextPlacement,
   WALL_TEXT_DEFAULT_NAME
 } from "../domain/placement/createWallText";
+import { isHangableWall } from "../domain/geometry/wallCascade";
 import {
   clearOpeningPartners,
   includePairedOpenings,
@@ -157,6 +158,7 @@ export {
   objectIdsOf,
   roomIdOf,
   freestandingWallIdOf,
+  pickedWallIdOf,
   getSelectedArtworkId,
   getSelectedOpeningId,
   getSelectedWallTextId
@@ -1196,6 +1198,19 @@ export function createAppStore(deps: AppStoreDeps) {
       return true;
     }
 
+    // Every path that creates a wall object or re-anchors one onto a different
+    // wall funnels through this. An open wall has no surface, so nothing can
+    // hang on it — and hiding the affordance is not enough, because these
+    // actions are also reachable from drops, group drags and keyboard paths.
+    //
+    // Reports rather than returning a bare no-op: a click that silently does
+    // nothing reads as a broken app, and the user has no way to learn the rule.
+    function refuseOpenWall(project: Project, wallId: string): boolean {
+      if (isHangableWall(project, wallId)) return false;
+      set({ error: "This wall is open — nothing can hang on it." });
+      return true;
+    }
+
     // The legal span an opening may occupy on its wall, or null when its wall
     // can't be resolved. Bounded by same-wall neighbours, else the wall's ends.
     function resolveOpeningSpan(project: Project, target: WallObject) {
@@ -1261,6 +1276,8 @@ export function createAppStore(deps: AppStoreDeps) {
       if (wallObject.wallId === placement.wallId && wallObject.xMm === placement.xMm) {
         return;
       }
+      // Re-anchoring onto an open wall is refused the same as creating there.
+      if (refuseOpenWall(project, placement.wallId)) return;
 
       const movedWallObjects = project.wallObjects.map((object) =>
         object.id === wallObject.id
@@ -1438,6 +1455,9 @@ export function createAppStore(deps: AppStoreDeps) {
       if (floorObject.kind === "case") {
         throw new Error("A display case cannot be moved onto a wall.");
       }
+      // Floor → wall conversion is a creation on that wall, so it obeys the
+      // same rule.
+      if (refuseOpenWall(project, placement.wallId)) return;
 
       const base = {
         id: floorObject.id,
@@ -2063,6 +2083,7 @@ export function createAppStore(deps: AppStoreDeps) {
         const artwork = get().libraryArtworks.find((candidate) => candidate.id === artworkId);
         if (!artwork) return;
         if (!getProjectWalls(project).some((wall) => wall.id === wallId)) return;
+        if (refuseOpenWall(project, wallId)) return;
 
         const alreadyPlaced =
           project.wallObjects.some((o) => o.kind === "artwork" && o.artworkId === artworkId) ||
@@ -2160,6 +2181,7 @@ export function createAppStore(deps: AppStoreDeps) {
 
         const wall = getProjectWalls(project).find((candidate) => candidate.id === wallId);
         if (!wall) return;
+        if (refuseOpenWall(project, wallId)) return;
 
         // Wall text starts at the wall's midpoint on the centerline — same
         // landing spot as placeOpeningFromPlan's wall-text branch, and no
@@ -2820,6 +2842,7 @@ export function createAppStore(deps: AppStoreDeps) {
         // rather than the wall center.
         const wall = getProjectWalls(project).find((candidate) => candidate.id === placement.wallId);
         if (!wall) return;
+        if (refuseOpenWall(project, placement.wallId)) return;
 
         // Doors/windows can't land on a partition face in v1 (spec §2/§6.1).
         if (kind !== "blocked-zone" && parseFaceWallId(placement.wallId) !== null) {
@@ -2870,6 +2893,7 @@ export function createAppStore(deps: AppStoreDeps) {
 
         const wall = getProjectWalls(project).find((candidate) => candidate.id === wallId);
         if (!wall) return;
+        if (refuseOpenWall(project, wallId)) return;
 
         // Wall text lands at the clicked point (the elevation resolver already
         // keeps the pointer on the wall). It never pairs, mirrors, or blocks, so
@@ -3000,6 +3024,7 @@ export function createAppStore(deps: AppStoreDeps) {
         // bounds/collision to validate in v1, so an empty validate-ids list
         // keeps the gate a no-op) and select the new object.
         if (placement.anchor === "wall") {
+          if (refuseOpenWall(project, placement.wallId)) return;
           const wallCase = createWallCase(placement.wallId, placement.xMm);
           const nextWallObjects = [...project.wallObjects, wallCase];
           await commitWallObjectEdit("Add display case", project, nextWallObjects, [], true, {
@@ -3035,6 +3060,7 @@ export function createAppStore(deps: AppStoreDeps) {
 
         const wall = getProjectWalls(project).find((candidate) => candidate.id === wallId);
         if (!wall) return;
+        if (refuseOpenWall(project, wallId)) return;
 
         const wallCase = createWallCase(wallId, wall.lengthMm / 2);
         const nextWallObjects = [...project.wallObjects, wallCase];
@@ -3197,6 +3223,13 @@ export function createAppStore(deps: AppStoreDeps) {
             .map((move) => [move.id, move])
         );
         if (wallMoveById.size === 0 && floorMoveById.size === 0) return;
+
+        // A group drag can re-anchor several members onto a foreign wall at
+        // once. Refuse the whole move if ANY member would land on an open wall
+        // — committing the legal half would silently split the group apart.
+        for (const move of wallMoveById.values()) {
+          if (move.wallId && refuseOpenWall(project, move.wallId)) return;
+        }
 
         const movedWallIds: string[] = [];
         const nextWallObjects = project.wallObjects.map((wallObject) => {

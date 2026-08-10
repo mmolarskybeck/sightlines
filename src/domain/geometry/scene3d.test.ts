@@ -278,6 +278,64 @@ describe("deriveScene3d — display cases", () => {
   });
 });
 
+describe("deriveScene3d — open walls", () => {
+  function openWall(room: Room, wallId: string): Room {
+    return {
+      ...room,
+      walls: room.walls.map((wall) =>
+        wall.id === wallId ? { ...wall, isOpenSide: true } : wall
+      )
+    };
+  }
+
+  it("emits no panel for an open wall but keeps the floor polygon intact", () => {
+    const solid = makeRoom("room-a", CCW_RECT, 2500);
+    const scene = deriveScene3d(
+      makeProject([makePlacement(openWall(solid, "room-a-wall-0"))])
+    );
+    const room = scene.rooms[0];
+
+    expect(room.walls.map((wall) => wall.wallId)).not.toContain("room-a-wall-0");
+    expect(room.walls).toHaveLength(3);
+    // The floor comes from room.vertices, so removing a surface never removes
+    // floor — that is the whole reason this feature is cheap.
+    expect(room.floorPolygon).toHaveLength(4);
+  });
+
+  it("keeps every surviving panel of a CW room facing inward with one skipped", () => {
+    // The winding regression: isCounterClockwise is measured from the floor
+    // polygon, not the wall list, so skipping a panel must not flip any other
+    // panel's orientation or its panel-local x remap.
+    const solid = makeRoom("room-a", CW_RECT, 2500);
+    const scene = deriveScene3d(
+      makeProject([makePlacement(openWall(solid, "room-a-wall-1"))])
+    );
+    const room = scene.rooms[0];
+
+    expect(room.walls).toHaveLength(3);
+    for (const wall of room.walls) {
+      const normal = wallInwardNormal(wall);
+      const probe = {
+        xMm: midpoint(wall).xMm + normal.xMm * 10,
+        yMm: midpoint(wall).yMm + normal.yMm * 10
+      };
+      expect(pointInPolygon(probe, room.floorPolygon)).toBe(true);
+    }
+  });
+
+  it("yields a floor plate with a usable height when every wall is open", () => {
+    let room = makeRoom("room-a", CCW_RECT, 2500);
+    for (const wall of [...room.walls]) room = openWall(room, wall.id);
+    const scene = deriveScene3d(makeProject([makePlacement(room)]));
+
+    expect(scene.rooms[0].walls).toEqual([]);
+    expect(scene.rooms[0].floorPolygon).toHaveLength(4);
+    // Camera framing reduces over panels; without this the 3D bounding box
+    // would collapse flat onto the floor plane.
+    expect(scene.rooms[0].heightMm).toBe(2500);
+  });
+});
+
 describe("wallInwardNormal — winding / orientation", () => {
   it("points every wall of a CCW room inward toward the floor", () => {
     const scene = deriveScene3d(

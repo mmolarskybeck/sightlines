@@ -44,6 +44,10 @@ export type PlanSceneWall = {
   wallId: string;
   startMm: Point;
   endMm: Point;
+  // The room is open on this edge — there is no wall surface here. Every
+  // painter must branch on it deliberately, so it is required rather than
+  // optional.
+  isOpenSide: boolean;
 };
 
 export type PlanSceneRoom = {
@@ -258,7 +262,12 @@ export function buildPlanScene(project: Project, options: PlanSceneOptions = {})
           endMm: {
             xMm: end.xMm + placement.offsetXMm,
             yMm: end.yMm + placement.offsetYMm
-          }
+          },
+          // The entry is kept, not dropped: measurement geometry and all three
+          // plan painters (interactive layer, PDF page, export preview) need
+          // the segment to know where the opening is. Each decides its own
+          // treatment from this flag.
+          isOpenSide: wall.isOpenSide === true
         }
       ];
     })

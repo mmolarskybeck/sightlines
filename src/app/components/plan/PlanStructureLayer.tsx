@@ -1,5 +1,4 @@
 import {
-  Fragment,
   type Dispatch,
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
@@ -16,13 +15,18 @@ import type { InsertToolKind } from "../../../domain/placement/createOpening";
 import type { FloorPartition } from "../../../domain/geometry/freestandingWalls";
 import type { PartitionDragState } from "./types";
 
-// Render-only structure layer: room walls (with their hover/hit strokes), the
-// per-room transparent hit polygons, and the free-standing partition slabs —
-// the three contiguous, non-interactive-state groups PlanView used to paint
-// inline between the grid and the placed objects. Paint order is preserved
-// exactly (walls → room-hit → partitions), and every event handler stays
-// attached to the same element it was before; the layer owns no state, only
+// Render-only structure layer: room wall lines, the per-room transparent hit
+// polygons, the walls' invisible hit strokes, and the free-standing partition
+// slabs — the contiguous, non-interactive-state groups PlanView used to paint
+// inline between the grid and the placed objects. The layer owns no state, only
 // forwards data + callbacks from PlanView.
+//
+// Paint order is wall LINES → room-hit → wall HIT strokes → partitions. The
+// split between a wall's line and its hit stroke is deliberate: a room's hit
+// polygon covers its own interior, so a hit stroke painted beside its line lost
+// its inner half to that polygon, leaving a wall clickable only from a ~7px
+// sliver on its outside — and where two rooms abut, the neighbour's polygon
+// covered that sliver too, making a shared wall completely unselectable.
 export type PlanStructureLayerProps = {
   rooms: PlanSceneRoom[];
   partitions: PlanScenePartition[];
@@ -42,7 +46,9 @@ export type PlanStructureLayerProps = {
   onSelectRoom?: (roomId: string) => void;
   onReshapeRoomChange?: (roomId: string | null) => void;
   onSelectFreestandingWall?: (wallId: string) => void;
-  beginRoomDrag: (roomId: string, event: ReactPointerEvent<SVGPolygonElement>) => void;
+  // SVGElement, not SVGPolygonElement: both the room-hit polygon and the
+  // wall-hit strokes (which now paint above it) can start a room drag.
+  beginRoomDrag: (roomId: string, event: ReactPointerEvent<SVGElement>) => void;
   beginPartitionDrag: (
     partition: FloorPartition,
     mode: "move" | "start" | "end",
@@ -91,76 +97,40 @@ export function PlanStructureLayer({
               reshapeRoomId !== room.roomId &&
               !isRectangleRoom(room.placement.room);
             const isHovered = slideHoverEligible && hoveredWallId === wall.wallId;
+            const isPicked = wall.wallId === selectedWallId;
+            // An open wall draws NO line at rest: the gap is the signal, and a
+            // dashed line at rest would read as hidden or overhead
+            // construction, which is the wrong meaning entirely. It gets a
+            // faint dashed affordance when picked (and, via CSS :has(), on
+            // hover — the slideHoverEligible state above is a different thing,
+            // scoped to selected non-rectangular rooms). The .wall-hit stroke
+            // below is untouched, which is what keeps an open wall clickable at
+            // all. The unambiguous, always-visible statement lives in the Rooms
+            // panel row.
+            const classes = wall.isOpenSide
+              ? isPicked
+                ? "wall-line open affordance"
+                : "wall-line open"
+              : isPicked || isHovered
+                ? "wall-line active"
+                : "wall-line";
             return (
-              <Fragment key={wall.wallId}>
-                <line
-                  className={
-                    wall.wallId === selectedWallId || isHovered
-                      ? "wall-line active"
-                      : "wall-line"
-                  }
-                  x1={x1}
-                  y1={y1}
-                  x2={x2}
-                  y2={y2}
-                  vectorEffect="non-scaling-stroke"
-                />
-                {/* Invisible, wide hit target painted on top of the visible
-                    line so it owns the click — wall-anchored doors/windows
-                    render in a later section of this svg, so they still
-                    paint above this and keep winning clicks by paint order
-                    alone, no z-ordering code needed. Hover here only teaches
-                    the chip link; the edge stays click-to-select, never
-                    draggable. */}
-                <line
-                  className="wall-hit"
-                  x1={x1}
-                  y1={y1}
-                  x2={x2}
-                  y2={y2}
-                  vectorEffect="non-scaling-stroke"
-                  onPointerEnter={
-                    slideHoverEligible ? () => setHoveredWallId(wall.wallId) : undefined
-                  }
-                  onPointerLeave={
-                    slideHoverEligible
-                      ? () =>
-                          setHoveredWallId((current) =>
-                            current === wall.wallId ? null : current
-                          )
-                      : undefined
-                  }
-                  onClick={(event) => {
-                    // TRAP 1 — armed placement tool: doors/windows are
-                    // click-placed ON walls via handleSvgClick's tool
-                    // branch. Swallowing this click would break
-                    // click-to-place entirely, so with a tool armed the
-                    // wall is inert and the click bubbles through to the
-                    // svg handler.
-                    if (activeTool) return;
-                    event.stopPropagation();
-                    // TRAP 2 — a marquee that starts AND ends on this
-                    // wall's hit stroke fires its trailing click here
-                    // instead of on the svg, so handleSvgClick never
-                    // consumes the suppression flag. Consuming it here
-                    // keeps that click from hijacking the fresh marquee
-                    // selection into a wall select (selectWall drops
-                    // multi-select by design).
-                    if (suppressNextToolClickRef.current) {
-                      suppressNextToolClickRef.current = false;
-                      return;
-                    }
-                    onSelectWall?.(wall.wallId);
-                  }}
-                />
-              </Fragment>
+              <line
+                key={wall.wallId}
+                className={classes}
+                x1={x1}
+                y1={y1}
+                x2={x2}
+                y2={y2}
+                vectorEffect="non-scaling-stroke"
+              />
             );
           })}
         </g>
       ))}
-      {/* Transparent hit polygon per room, painted after the walls so it
-          sits above the wall lines but still below placed objects (next
-          block) — those must keep winning their own clicks by paint order.
+      {/* Transparent hit polygon per room, painted after the wall LINES so it
+          sits above them but still below placed objects (later block) — those
+          must keep winning their own clicks by paint order.
           At rest a room is otherwise unclickable chrome; this is the only
           surface that turns a plain floor click into a selection. */}
       {rooms.map((room) => {
@@ -205,6 +175,84 @@ export function PlanStructureLayer({
               onReshapeRoomChange?.(room.roomId);
             }}
           />
+        );
+      })}
+      {/* Invisible, wide hit strokes — a SEPARATE pass, painted after EVERY
+          room-hit polygon rather than beside their own wall lines.
+
+          That ordering is the whole point. A room's hit polygon covers its own
+          interior, so when the strokes lived next to the lines the polygon ate
+          the inner half of each 14px band and a wall was clickable only from a
+          ~7px sliver on its outside. Where two rooms abut, the neighbour's
+          polygon covered that sliver too and the shared wall became completely
+          unreachable — no pointer cursor, no way to select it, and (since open
+          walls draw nothing) no way to restore one.
+
+          Still below partitions and placed objects, which come later and keep
+          winning their own clicks by paint order alone. */}
+      {rooms.map((room) => {
+        const isSelectedRoom = room.roomId === selectedRoomId;
+        const slideHoverEligible =
+          isSelectedRoom &&
+          reshapeRoomId !== room.roomId &&
+          !isRectangleRoom(room.placement.room);
+        return (
+          <g key={room.roomId}>
+            {room.walls.map((wall) => (
+              <line
+                key={wall.wallId}
+                className="wall-hit"
+                x1={wall.startMm.xMm}
+                y1={wall.startMm.yMm}
+                x2={wall.endMm.xMm}
+                y2={wall.endMm.yMm}
+                vectorEffect="non-scaling-stroke"
+                onPointerEnter={
+                  slideHoverEligible ? () => setHoveredWallId(wall.wallId) : undefined
+                }
+                onPointerLeave={
+                  slideHoverEligible
+                    ? () =>
+                        setHoveredWallId((current) =>
+                          current === wall.wallId ? null : current
+                        )
+                    : undefined
+                }
+                onPointerDown={(event) => {
+                  // These strokes now sit ABOVE the room-hit polygon, so
+                  // without this a drag started on a selected room's edge band
+                  // would fall through to the background marquee instead of
+                  // moving the room. Same contract as the polygon's handler:
+                  // unselected rooms let it bubble so the marquee still works.
+                  if (activeTool || !isSelectedRoom) return;
+                  event.stopPropagation();
+                  beginRoomDrag(room.roomId, event);
+                }}
+                onClick={(event) => {
+                  // TRAP 1 — armed placement tool: doors/windows are
+                  // click-placed ON walls via handleSvgClick's tool
+                  // branch. Swallowing this click would break
+                  // click-to-place entirely, so with a tool armed the
+                  // wall is inert and the click bubbles through to the
+                  // svg handler.
+                  if (activeTool) return;
+                  event.stopPropagation();
+                  // TRAP 2 — a marquee that starts AND ends on this
+                  // wall's hit stroke fires its trailing click here
+                  // instead of on the svg, so handleSvgClick never
+                  // consumes the suppression flag. Consuming it here
+                  // keeps that click from hijacking the fresh marquee
+                  // selection into a wall select (selectWall drops
+                  // multi-select by design).
+                  if (suppressNextToolClickRef.current) {
+                    suppressNextToolClickRef.current = false;
+                    return;
+                  }
+                  onSelectWall?.(wall.wallId);
+                }}
+              />
+            ))}
+          </g>
         );
       })}
       {/* Partition slabs — filled rects for each free-standing wall, painted

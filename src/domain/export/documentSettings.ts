@@ -75,6 +75,11 @@ export type DocumentWallChoice = {
   wallId: string;
   name: string;
   hasWork: boolean;
+  // An open wall has no surface, so it can never be an elevation page. Kept in
+  // the list (rather than filtered out) so the export tree can show it as an
+  // explicit, disabled row instead of silently omitting a wall the user knows
+  // exists.
+  isOpenSide: boolean;
   included: boolean;
 };
 
@@ -226,14 +231,23 @@ export function reconcileDocumentExportPreferences(
 
   const rooms: DocumentRoomChoice[] = project.floor.rooms.map((placement) => {
     const walls = getRoomPlaceableWalls(placement.room).map((wall) => {
-      const hasWork = project.wallObjects.some(
-        (object) => object.kind === "artwork" && object.wallId === wall.id
-      );
+      const isOpenSide = wall.isOpenSide === true;
+      const hasWork =
+        !isOpenSide &&
+        project.wallObjects.some(
+          (object) => object.kind === "artwork" && object.wallId === wall.id
+        );
       return {
         wallId: wall.id,
         name: wall.name,
         hasWork,
-        included: explicitOrDefault(source.elevations, wall.id, hasWork)
+        isOpenSide,
+        // Forced false rather than relying on hasWork: explicitOrDefault would
+        // otherwise honour a STALE explicit `true` stored before the wall was
+        // opened, resurrecting a blank elevation page. The stored preference is
+        // deliberately never rewritten here, so restoring the wall brings the
+        // user's original choice straight back.
+        included: !isOpenSide && explicitOrDefault(source.elevations, wall.id, hasWork)
       };
     });
 

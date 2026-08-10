@@ -72,6 +72,23 @@ function validateWallObjects(project: Project, wallObjects: WallObject[]): Place
       ];
     }
 
+    // Safety net, not a normal path: the open-wall cascade clears everything
+    // off the wall, so this only fires for a hand-edited document or one
+    // written by a build that predates the flag. Deliberately a runtime
+    // advisory rather than a schema refinement — rejecting at parse would make
+    // such a document permanently unopenable.
+    if (wall.isOpenSide === true) {
+      return [
+        {
+          id: `${wallObject.id}:open-wall`,
+          wallObjectId: wallObject.id,
+          wallId: wallObject.wallId,
+          message: "This wall is open — nothing can hang on it.",
+          type: "bounds" as const
+        }
+      ];
+    }
+
     return [
       ...validateWallObjectBounds(wallObject, wall.lengthMm, wall.heightMm),
       ...validateWallObjectCollisions(wallObject, project.wallObjects)

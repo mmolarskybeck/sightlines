@@ -113,11 +113,18 @@ export function partitionSlabSegments(partition: FreestandingWall): ObstacleSegm
 // OTHER partition in the room. The subject is excluded so it never blocks its
 // own rays.
 export function collectObstacleSegments(room: Room, subjectId: string): ObstacleSegment[] {
-  const segments: ObstacleSegment[] = getWallsWithGeometry(room).map((wall) => ({
-    a: { xMm: wall.start.xMm, yMm: wall.start.yMm },
-    b: { xMm: wall.end.xMm, yMm: wall.end.yMm },
-    id: wall.id
-  }));
+  // Open walls are not obstacles: there is no surface there and the space
+  // continues past it, so measuring a clearance to it would contradict the
+  // room being open. A ray that finds no perimeter simply yields no chain
+  // (rayChainToPerimeter returns [] on perimeterIndex < 0), which reads as
+  // "no clearance in this direction" rather than a wrong number.
+  const segments: ObstacleSegment[] = getWallsWithGeometry(room)
+    .filter((wall) => wall.isOpenSide !== true)
+    .map((wall) => ({
+      a: { xMm: wall.start.xMm, yMm: wall.start.yMm },
+      b: { xMm: wall.end.xMm, yMm: wall.end.yMm },
+      id: wall.id
+    }));
   for (const partition of room.freestandingWalls) {
     if (partition.id === subjectId) continue;
     segments.push(...partitionSlabSegments(partition));
@@ -336,7 +343,13 @@ export function getPartitionDimensionChains(
   const plusNormal = add(midpoint, scale(normalDir, half));
   const minusNormal = add(midpoint, scale(normalDir, -half));
   const segments = collectObstacleSegments(room, partition.id);
-  const perimeterIds = new Set(getWallsWithGeometry(room).map((wall) => wall.id));
+  // Matches collectObstacleSegments: an open wall is neither an obstacle nor a
+  // chain terminator, so a dimension chain aimed at it simply doesn't resolve.
+  const perimeterIds = new Set(
+    getWallsWithGeometry(room)
+      .filter((wall) => wall.isOpenSide !== true)
+      .map((wall) => wall.id)
+  );
 
   const combine = (
     minusOrigin: Point,

@@ -24,6 +24,8 @@ export type WallSwitcherEntry = {
   kind: "perimeter" | "partition-face";
   lengthMm: number;
   heightMm: number;
+  // Perimeter walls only; partition faces are never openable.
+  isOpenSide?: boolean;
 };
 
 const TRIGGER_CLASS =
@@ -67,8 +69,17 @@ function ElevationItems({ group, unit }: { group: RoomGroup; unit: DisplayUnit }
   return (
     <>
       {perimeter.map((wall) => (
-        <DropdownMenuRadioItem key={wall.id} value={wall.id} className="wall-switcher-elevation-item">
+        <DropdownMenuRadioItem
+          key={wall.id}
+          value={wall.id}
+          className="wall-switcher-elevation-item"
+          data-open={wall.isOpenSide ? "true" : undefined}
+        >
           <span className="wall-switcher-elevation-name">{formatElevationName(wall.name)}</span>
+          {/* An open wall stays navigable — it has to, or Restore would be
+              unreachable from here — but the list must say it has no surface
+              to elevate. */}
+          {wall.isOpenSide ? <span className="wall-switcher-open-tag">Open</span> : null}
           <span className="wall-switcher-elevation-dimensions">
             {formatElevationDimensions(wall, unit)}
           </span>
@@ -176,7 +187,11 @@ export function WallSwitcher({
         <button
           type="button"
           aria-label={
-            current ? `Change wall: ${formattedCurrentName}, ${current.roomName}` : "Change wall"
+            current
+              ? `Change wall: ${formattedCurrentName}${
+                  current.isOpenSide ? " (open)" : ""
+                }, ${current.roomName}`
+              : "Change wall"
           }
           className={cn(TRIGGER_CLASS, "surface-label-select")}
         >
@@ -188,6 +203,12 @@ export function WallSwitcher({
               <span className="surface-label-select-wall">
                 {current ? formatElevationName(current.name) : ""}
               </span>
+              {/* The chip alone has to say that the elevation on screen is an
+                  open wall — the canvas below is an empty state, and without
+                  this the two would read as a bug. */}
+              {current?.isOpenSide ? (
+                <span className="wall-switcher-open-tag">Open</span>
+              ) : null}
               {current ? (
                 <span className="surface-label-select-dimensions">
                   {formatElevationDimensions(current, unit)}
@@ -259,7 +280,11 @@ export function WallSwitcher({
         </div>
       </DropdownMenuContent>
       <span className="visually-hidden" aria-live="polite" aria-atomic="true">
-        {current ? `Now viewing ${formattedCurrentName} in ${current.roomName}` : ""}
+        {current
+          ? `Now viewing ${formattedCurrentName}${
+              current.isOpenSide ? ", open" : ""
+            } in ${current.roomName}`
+          : ""}
       </span>
     </DropdownMenu>
   );
