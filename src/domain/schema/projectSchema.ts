@@ -33,9 +33,50 @@ const wallObjectBaseSchema = z.object({
   groupId: z.string().min(1).optional()
 });
 
+const floorObjectFaceSchema = z.enum([
+  "front",
+  "back",
+  "left",
+  "right",
+  "top",
+  "bottom"
+]);
+
+// Floor-only state parked on a wall object while it is captured (see
+// FloorMemory in domain/project.ts, and its TRAP: nothing renders from it).
+// Every member is optional, and the whole object is optional on its two
+// carriers, so this is PURELY ADDITIVE and needs NO schema-version bump — a v5
+// document written before this branch existed parses byte-identically.
+//
+// Contrast Wall.isOpenSide, which is also structurally optional and DID ride a
+// bump: there, an older build stripping the key would redraw the wall solid,
+// treat it as hangable, and save that misreading back. Here an older build
+// stripping floorMemory changes nothing that is drawn — the object is on a
+// wall, and a wall renders identically with or without it. The only casualty is
+// dormant memory, and losing it degrades exactly to the pre-fix behaviour
+// (inherit the wall's angle) rather than to a wrong picture of the document.
+const floorMemorySchema = z.object({
+  rotationDeg: z.number().finite().optional(),
+  // Non-negative, mirroring the live floorObjectBaseSchema.baseHeightMm it
+  // shadows: the memory must not be able to hold a value that would fail
+  // validation the moment it is restored onto a floor object.
+  baseHeightMm: z.number().nonnegative().finite().optional()
+});
+
+// The artwork-only extension. Deliberately NOT mirrored with a
+// `imageFaces: z.never().optional()` refusal on the blocked-zone variant the
+// way windowWallObjectSchema refuses `leaf`: a window carrying a leaf is a
+// malformed claim about physical construction worth rejecting loudly, whereas
+// stripping imageFaces from a blocked zone's dormant memory is the correct
+// outcome anyway — there is no image, no reader, and nothing drawn changes.
+const artworkFloorMemorySchema = floorMemorySchema.extend({
+  imageFaces: z.array(floorObjectFaceSchema).optional()
+});
+
 const artworkWallObjectSchema = wallObjectBaseSchema.extend({
   kind: z.literal("artwork"),
   artworkId: z.string().min(1),
+  floorMemory: artworkFloorMemorySchema.optional(),
   displayDimensionsOverride: dimensionsSchema.optional()
 });
 
@@ -80,7 +121,11 @@ const connectableOpeningWallObjectSchemas = [
 
 const blockedZoneWallObjectSchema = wallObjectBaseSchema.extend({
   kind: z.literal("blocked-zone"),
-  blocksPlacement: z.literal(true)
+  blocksPlacement: z.literal(true),
+  // The BASE memory shape: a blocked zone's plan angle is live floor geometry
+  // and is lost on a capture round trip exactly as an artwork's is, but it has
+  // no image, so imageFaces is unrepresentable here.
+  floorMemory: floorMemorySchema.optional()
 });
 
 // A wall text is additive (a new union member): older projects simply carry no
@@ -126,6 +171,11 @@ const floorObjectBaseSchema = z.object({
 const artworkFloorObjectSchema = floorObjectBaseSchema.extend({
   kind: z.literal("artwork"),
   artworkId: z.string().min(1),
+  // Which box faces carry the image. Optional and additive (absent =
+  // DEFAULT_FLOOR_OBJECT_IMAGE_FACES, front + back), so no schema-version bump.
+  // An empty array is deliberately legal — it means every face was turned off,
+  // which is different from "never chosen"; see ArtworkFloorObject.imageFaces.
+  imageFaces: z.array(floorObjectFaceSchema).optional(),
   displayDimensionsOverride: dimensionsSchema.optional()
 });
 

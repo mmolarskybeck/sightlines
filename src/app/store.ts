@@ -63,15 +63,19 @@ import {
 } from "../domain/placement/validatePlacement";
 import {
   DEFAULT_FLOOR_OBJECT_DEPTH_MM,
+  DEFAULT_FLOOR_OBJECT_IMAGE_FACES,
   type Artwork,
+  type ArtworkFloorMemory,
   type ArtworkFloorObject,
   type BlockedZoneFloorObject,
   type CaseWallObject,
   type ConnectableOpeningWallObject,
   type DisplayUnit,
   type DoorLeaf,
+  type FloorMemory,
   type FloorObject,
   type FloorObjectBase,
+  type FloorObjectFace,
   type Project,
   type ProjectSummary,
   type WallObject
@@ -517,6 +521,13 @@ export type AppState = ArrangeSliceState &
       >
     >
   ) => Promise<void>;
+  // Which box faces a floor-placed ARTWORK shows its image on. Separate from
+  // updateFloorObject on purpose: imageFaces lives on ArtworkFloorObject, not
+  // FloorObjectBase (a blocked zone and a case have no image to map), and its
+  // value is an array, which updateFloorObject's `!==` change guard would
+  // mis-handle — two equal face sets are never reference-equal, so every
+  // commit would look like a change and pile up undo entries.
+  setFloorArtworkImageFaces: (objectId: string, faces: FloorObjectFace[]) => Promise<void>;
   moveWallObjectsGroup: (
     moves: { id: string; xMm: number; yMm: number }[],
     allowOverlap?: boolean
@@ -1368,7 +1379,27 @@ export function createAppStore(deps: AppStoreDeps) {
       const sourceWall = getFloorWalls(project.floor).find(
         (candidate) => candidate.id === wallObject.wallId
       );
-      const rotationDeg = sourceWall ? (sourceWall.angleRad * 180) / Math.PI : 0;
+      const wallAngleDeg = sourceWall ? (sourceWall.angleRad * 180) / Math.PI : 0;
+
+      // Floor-only state stashed when this object was captured onto a wall (see
+      // FloorMemory in domain/project.ts). Absent for an object that has always
+      // lived on a wall, which is the whole basis of the rotation rule below.
+      const floorMemory = wallObject.floorMemory;
+
+      // Two writers, one field, and the tie-break is about PROVENANCE, not
+      // precedence. Wall-angle inheritance is right for a first-ever wall→floor
+      // conversion: a work coming off a wall should face the way that wall
+      // faced, and it has no authored plan angle of its own to fall back on. It
+      // is wrong for a return trip: the wall the object is leaving is one it was
+      // captured onto by a stray drag, so inheriting that wall's angle would let
+      // an accident overwrite an angle the curator actually chose. A remembered
+      // angle therefore wins, and only ever exists when the object came from the
+      // floor in the first place.
+      //
+      // `??`, not `||`: a remembered 0° is a real authored angle — a floor
+      // graphic squared to the grid — and must beat the wall's angle exactly as
+      // a remembered 45° does.
+      const rotationDeg = floorMemory?.rotationDeg ?? wallAngleDeg;
 
       const base = {
         id: wallObject.id,
@@ -1379,7 +1410,16 @@ export function createAppStore(deps: AppStoreDeps) {
         heightMm: wallObject.heightMm,
         // Remember the hang height so a later floor→wall conversion can
         // restore it.
-        wallYMm: wallObject.yMm
+        wallYMm: wallObject.yMm,
+        // Restore suspension, keeping absent absent — see the write side in
+        // planMoveFloorToWall. Nothing on a wall can edit this value (there is
+        // no wall-side notion of a bottom edge above the floor), so the memory
+        // cannot have gone stale while the object was up there; restoring it
+        // verbatim is the only reading available and the only one that makes a
+        // mis-drag reversible.
+        ...(floorMemory?.baseHeightMm !== undefined
+          ? { baseHeightMm: floorMemory.baseHeightMm }
+          : {})
       };
 
       let newFloorObject: FloorObject;
@@ -1391,6 +1431,13 @@ export function createAppStore(deps: AppStoreDeps) {
           ...base,
           kind: "artwork",
           artworkId: wallObject.artworkId,
+          // `!== undefined` and a copy, mirroring the write side: an empty
+          // array means "every face deliberately off" and must come back empty,
+          // never collapsing to absent (which would resurrect the front+back
+          // default and quietly rewrite a curatorial choice).
+          ...(wallObject.floorMemory?.imageFaces !== undefined
+            ? { imageFaces: [...wallObject.floorMemory.imageFaces] }
+            : {}),
           depthMm:
             wallObject.displayDimensionsOverride?.depthMm ??
             artwork?.dimensions.depthMm ??
@@ -1473,18 +1520,70 @@ export function createAppStore(deps: AppStoreDeps) {
         heightMm: floorObject.heightMm
       };
 
+      // The floor-only half of the object, parked for the trip (see FloorMemory
+      // in domain/project.ts). A wall has no way to express suspension, a plan
+      // angle, or which box faces carry the image, so without this stash a
+      // capture — which is one stray drag away for a board parked NEAR a wall —
+      // silently destroys all three and the drag back cannot undo it.
+      //
+      // `rotationDeg` is written unconditionally because the floor side always
+      // has one, and its presence doubles as the marker that this wall object
+      // arrived FROM the floor: planMoveWallToFloor only prefers a remembered
+      // angle over the wall's own when this key exists, so a first-ever
+      // wall→floor conversion still inherits the wall angle it always did.
+      //
+      // `baseHeightMm` is spread conditionally, never defaulted to 0: absence
+      // is how this codebase records "never chosen", and materializing the key
+      // would both lose that distinction and dirty the cloud-backup fingerprint,
+      // which hashes key presence.
+      //
+      // On STALENESS — the memory is never invalidated, and that is a decision,
+      // not an omission. Editing the object while it sits on the wall cannot
+      // contradict it: there is no wall-side control for suspension, for a plan
+      // angle, or for image faces, because none of the three means anything on
+      // a wall (the inspector's Angle and "Height off floor" fields exist only
+      // on the floor branch, and WallObjectBase.rotationDeg is a different axis
+      // entirely). So there is never a competing newer value to prefer — the
+      // remembered one is the last and only thing the curator authored. This
+      // write is itself the refresh: every capture rewrites the memory from the
+      // object's current floor state, so it can only ever be as old as the most
+      // recent trip up onto a wall.
+      const floorMemory: FloorMemory = {
+        rotationDeg: floorObject.rotationDeg,
+        ...(floorObject.baseHeightMm !== undefined
+          ? { baseHeightMm: floorObject.baseHeightMm }
+          : {})
+      };
+
       let newWallObject: WallObject;
       if (floorObject.kind === "artwork") {
+        // `!== undefined`, deliberately not a truthiness test: `imageFaces: []`
+        // is a real curatorial state ("every face off") that is DIFFERENT from
+        // absent ("never chosen", meaning front+back), and both must survive
+        // verbatim. The array is copied so the memory can never alias the live
+        // array held by an undo snapshot.
+        const artworkFloorMemory: ArtworkFloorMemory = {
+          ...floorMemory,
+          ...(floorObject.imageFaces !== undefined
+            ? { imageFaces: [...floorObject.imageFaces] }
+            : {})
+        };
         newWallObject = {
           ...base,
           kind: "artwork",
           artworkId: floorObject.artworkId,
+          floorMemory: artworkFloorMemory,
           ...(floorObject.displayDimensionsOverride
             ? { displayDimensionsOverride: floorObject.displayDimensionsOverride }
             : {})
         };
       } else {
-        newWallObject = { ...base, kind: "blocked-zone", blocksPlacement: true };
+        newWallObject = {
+          ...base,
+          kind: "blocked-zone",
+          blocksPlacement: true,
+          floorMemory
+        };
       }
 
       const nextWallObjects = [...project.wallObjects, newWallObject];
@@ -3228,6 +3327,37 @@ export function createAppStore(deps: AppStoreDeps) {
         // Floor objects carry no wall bounds, so there's nothing to validate
         // here in v1 (see placeArtworkOnFloor).
         await applyEdit(`Edit ${moveObjectNoun(target.kind)}`, (current) => ({
+          ...current,
+          floorObjects: nextFloorObjects
+        }));
+      },
+
+      async setFloorArtworkImageFaces(objectId, faces) {
+        const project = get().project;
+        if (!project) return;
+
+        const target = project.floorObjects.find((object) => object.id === objectId);
+        // Kind-gated at the write, not just in the UI: imageFaces is only
+        // representable on ArtworkFloorObject, so a stray call for a case or a
+        // blocked zone is dropped rather than stored somewhere every reader
+        // would then have to remember to ignore.
+        if (!target || target.kind !== "artwork") return;
+
+        // Order-insensitive set comparison, NOT array equality: the picker
+        // rebuilds the array on every toggle, so `!==` (or even an
+        // element-by-element compare against a differently-ordered set) would
+        // report a change for an identical selection and push a dead undo
+        // entry. Faces are a SET; the stored order carries no meaning.
+        const current = target.imageFaces ?? DEFAULT_FLOOR_OBJECT_IMAGE_FACES;
+        const sameSet =
+          current.length === faces.length && current.every((face) => faces.includes(face));
+        if (sameSet) return;
+
+        const nextFloorObjects = project.floorObjects.map((object) =>
+          object.id === objectId ? { ...object, imageFaces: [...faces] } : object
+        );
+
+        await applyEdit("Edit image faces", (current) => ({
           ...current,
           floorObjects: nextFloorObjects
         }));

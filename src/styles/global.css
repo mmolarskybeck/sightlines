@@ -6155,6 +6155,40 @@ body.panels-resizing * {
   justify-content: center;
 }
 
+/* Six per-face image toggles for a floor-placed artwork's box (Front/Back/
+   Top/Left/Right/Bottom) — see FloorArtworkImageFacesField for why this is a
+   grid of independent `Toggle`s rather than `.split`'s two peer verbs or a
+   .seg-track (that grammar's sliding chip assumes exactly one active
+   segment; this set is legitimately 0-to-6 at once). Three-per-row keeps
+   "Front Back Top" and "Left Right Bottom" each on one line at the
+   inspector's narrow width. */
+.floor-artwork-image-faces .inspector-action-group-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.floor-artwork-image-faces .inspector-action-group-buttons > * {
+  width: 100%;
+  min-width: 0;
+  justify-content: center;
+}
+
+/* Resting-state hairline only: an unlayered rule beats Toggle's own
+   data-[state=on] Tailwind utilities regardless of attribute-selector
+   specificity (Tailwind utilities live in @layer utilities, which always
+   loses to unlayered CSS), so touching `background` here unqualified would
+   permanently mask the pressed petrol wash. Guarding on
+   :not([data-state="on"]) keeps this rule to the six chips' idle look only. */
+.floor-artwork-image-faces .inspector-action-group-buttons > *:not([data-state="on"]) {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.floor-artwork-image-faces .inspector-action-group-buttons > *:hover:not([data-state="on"]) {
+  border-color: var(--input);
+}
+
 /* Wall additions are peer actions, not a card grid. A single scan line keeps
    every verb equally weighted and leaves long or translated labels room. */
 .wall-opening-actions .inspector-action-group-buttons {

@@ -175,6 +175,24 @@ describe("FloorObjectInspector (blocked zone) scope", () => {
     expect(screen.queryByLabelText("Height off floor")).not.toBeInTheDocument();
   });
 
+  // A blocked zone is a keep-out annotation, not artwork — it has no image to
+  // map, so the "Image on" face picker (FloorArtworkImageFacesField, wired
+  // only in App's placedFloorArtwork branch) must never appear here.
+  it("never shows the Image on face picker", () => {
+    render(
+      <FloorObjectInspector
+        floorObject={blockedZone}
+        unit="cm"
+        onCommitPosition={vi.fn()}
+        onCommitSize={vi.fn()}
+        onCommitRotation={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("Image on")).not.toBeInTheDocument();
+  });
+
   it("hides Angle entirely when the caller has not wired a rotation handler", () => {
     render(
       <FloorObjectInspector

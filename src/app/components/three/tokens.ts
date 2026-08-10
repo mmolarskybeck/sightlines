@@ -78,8 +78,10 @@ export const FLOOR_COLOR = "#b4b8bc";
 
 // Neutral matte volume — the fallback for a floor-placed artwork box whose
 // image is missing (no asset / unresolved record), so it never renders as a
-// broken texture. A resolved box carries the work's image on every face.
-// Cool neutral between the mid-grey floor and the white walls so the box
+// broken texture. Also the fill for every face of a resolved box that the
+// curator did NOT choose to carry the image (ArtworkFloorObject.imageFaces —
+// front + back by default), so most boxes show it and the texture side by
+// side. Cool neutral between the mid-grey floor and the white walls so the box
 // reads as a distinct volume against both.
 export const BOX_COLOR = "#d5d8db";
 

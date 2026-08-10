@@ -33,6 +33,7 @@ import {
   createRectangularRoomPlacement
 } from "../domain/geometry/createRoom";
 import { getPartitionClearances } from "../domain/geometry/partitionSpacing";
+import { getFloorWalls } from "../domain/geometry/planObjects";
 import { evaluateOpeningPair } from "../domain/geometry/openingConnections";
 import { createSampleProject } from "../domain/sample/sampleProject";
 import { MAX_IMPORT_JSON_LENGTH, parseProject } from "../domain/schema/projectSchema";
@@ -6491,6 +6492,143 @@ describe("app store", () => {
           floorObject.displayDimensionsOverride
         );
       }
+    });
+
+    // Capture round trip (FloorMemory in domain/project.ts). A floor object
+    // dragged near a wall is CONVERTED to a wall object, and a wall cannot
+    // express suspension, a plan angle, or which box faces carry the image.
+    // These exercise the real store actions in both directions rather than
+    // asserting the memory field in isolation: the round trip is the contract.
+    async function placeFloorArtwork() {
+      await store.getState().addArtworksFromFiles([makeImageFile("board.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      await store.getState().placeArtworkOnFloor(artworkId, 4000, 4000);
+      return store.getState().project!.floorObjects[0].id;
+    }
+
+    // wall-east runs across the room, so its inherited angle is nowhere near
+    // the authored 45° below — capturing onto it is what makes "the remembered
+    // angle won" distinguishable from "the wall's angle happened to match".
+    async function captureOntoWallEast(objectId: string) {
+      await store
+        .getState()
+        .commitPlanMove(objectId, { anchor: "wall", wallId: "wall-east", xMm: 1200 });
+    }
+
+    it("restores suspension, plan angle, and image faces across a floor → wall → floor capture", async () => {
+      const objectId = await placeFloorArtwork();
+      await store
+        .getState()
+        .updateFloorObject(objectId, { rotationDeg: 45, baseHeightMm: 1200 });
+      await store.getState().setFloorArtworkImageFaces(objectId, ["top"]);
+      const before = store.getState().project!.floorObjects.find((o) => o.id === objectId)!;
+
+      await captureOntoWallEast(objectId);
+      expect(store.getState().project!.floorObjects).toHaveLength(0);
+
+      await store
+        .getState()
+        .commitPlanMove(objectId, { anchor: "floor", xMm: 4200, yMm: 4100 });
+
+      const after = store.getState().project!.floorObjects.find((o) => o.id === objectId)!;
+      expect(after.rotationDeg).toBe(before.rotationDeg);
+      expect(after.baseHeightMm).toBe(before.baseHeightMm);
+      expect(after.kind).toBe("artwork");
+      if (after.kind === "artwork" && before.kind === "artwork") {
+        expect(after.imageFaces).toEqual(before.imageFaces);
+      }
+    });
+
+    it("round-trips an unauthored floor object with baseHeightMm and imageFaces still ABSENT", async () => {
+      const objectId = await placeFloorArtwork();
+
+      await captureOntoWallEast(objectId);
+
+      // The memory itself must not materialize keys either: absence encodes
+      // "never chosen", and a spurious key makes a clean project hash dirty.
+      const captured = store.getState().project!.wallObjects.find((o) => o.id === objectId)!;
+      expect(captured.kind).toBe("artwork");
+      if (captured.kind === "artwork") {
+        expect("baseHeightMm" in captured.floorMemory!).toBe(false);
+        expect("imageFaces" in captured.floorMemory!).toBe(false);
+      }
+
+      await store
+        .getState()
+        .commitPlanMove(objectId, { anchor: "floor", xMm: 4200, yMm: 4100 });
+
+      const after = store.getState().project!.floorObjects.find((o) => o.id === objectId)!;
+      expect("baseHeightMm" in after).toBe(false);
+      expect("imageFaces" in after).toBe(false);
+      // Absent is not "defaulted either": the front+back default stays a read
+      // -time fallback, never a stored value.
+      expect(after.baseHeightMm).toBeUndefined();
+    });
+
+    it("keeps an empty imageFaces selection empty across the round trip", async () => {
+      const objectId = await placeFloorArtwork();
+      // Every face deliberately off — a neutral volume. Distinct from absent,
+      // which means front + back, and the sharpest case of the three: it is a
+      // stated curatorial choice, not a measurement.
+      await store.getState().setFloorArtworkImageFaces(objectId, []);
+
+      await captureOntoWallEast(objectId);
+      await store
+        .getState()
+        .commitPlanMove(objectId, { anchor: "floor", xMm: 4200, yMm: 4100 });
+
+      const after = store.getState().project!.floorObjects.find((o) => o.id === objectId)!;
+      expect(after.kind).toBe("artwork");
+      if (after.kind === "artwork") {
+        expect(after.imageFaces).toEqual([]);
+      }
+    });
+
+    it("still inherits the source wall's angle on a first-ever wall → floor conversion", async () => {
+      const { placementId } = await placeArtworkOnWall(1000, 1450);
+      await store
+        .getState()
+        .commitPlanMove(placementId, { anchor: "wall", wallId: "wall-east", xMm: 800 });
+
+      // A work that has never been on the floor has no remembered angle, so
+      // wall-angle inheritance must still apply — it should face the way the
+      // wall it just left faced.
+      const captured = store.getState().project!.wallObjects.find((o) => o.id === placementId)!;
+      expect(captured.kind === "artwork" && captured.floorMemory).toBeUndefined();
+      const wall = getFloorWalls(store.getState().project!.floor).find(
+        (candidate) => candidate.id === "wall-east"
+      )!;
+      const wallAngleDeg = (wall.angleRad * 180) / Math.PI;
+      // Guard the fixture: an axis-aligned 0° wall would make this test unable
+      // to fail, since 0 is also the fresh-placement default.
+      expect(wallAngleDeg).not.toBe(0);
+
+      await store
+        .getState()
+        .commitPlanMove(placementId, { anchor: "floor", xMm: 5000, yMm: 3000 });
+
+      const floorObject = store.getState().project!.floorObjects.find((o) => o.id === placementId)!;
+      expect(floorObject.rotationDeg).toBeCloseTo(wallAngleDeg);
+    });
+
+    it("preserves a captured blocked zone's plan angle on the way back to the floor", async () => {
+      const wall = getSelectedWall(store.getState().project!, store.getState().wallContextId)!;
+      await store.getState().addOpening(wall.id, "blocked-zone");
+      const zoneId = store.getState().project!.wallObjects[0].id;
+      await store.getState().commitPlanMove(zoneId, { anchor: "floor", xMm: 4000, yMm: 4000 });
+      // A blocked zone's rotationDeg is live floor geometry too (its flat wash
+      // rotates), so it carries the base memory shape — no imageFaces.
+      await store.getState().updateFloorObject(zoneId, { rotationDeg: 30 });
+
+      await captureOntoWallEast(zoneId);
+      const captured = store.getState().project!.wallObjects.find((o) => o.id === zoneId)!;
+      expect(captured.kind === "blocked-zone" && captured.floorMemory).toEqual({
+        rotationDeg: 30
+      });
+
+      await store.getState().commitPlanMove(zoneId, { anchor: "floor", xMm: 4200, yMm: 4100 });
+      const after = store.getState().project!.floorObjects.find((o) => o.id === zoneId)!;
+      expect(after.rotationDeg).toBe(30);
     });
 
     it("moves a floor object to a new floor position", async () => {

@@ -6,6 +6,10 @@ import type { Texture } from "three";
 import type { FloorObject3d } from "../../../domain/geometry/scene3d";
 import { mmToWorld } from "./coordinates";
 import {
+  BOX_MATERIAL_GROUP_FACES,
+  floorObjectImageFaceFlags
+} from "./floorObjectFaceMaterials";
+import {
   planSuspensionWires,
   suspendedCenterYMm,
   SuspensionWires
@@ -30,8 +34,9 @@ function planRotationToYaw(rotationDeg: number): number {
   return -MathUtils.degToRad(rotationDeg);
 }
 
-// One floor-placed object: artwork boxes carry the work's image on every
-// visible face (four sides + top) with the shared uncertainty edge treatment,
+// One floor-placed object: artwork boxes carry the work's image on the faces
+// the curator chose (ArtworkFloorObject.imageFaces — front + back by default,
+// the freestanding-panel reading) with the shared uncertainty edge treatment,
 // blocked zones as flat translucent quads. When the artwork record or its asset
 // is missing the box falls back to the neutral BOX_COLOR volume (texture
 // undefined), never a broken image. Artwork boxes are click-to-select
@@ -94,6 +99,13 @@ export function FloorObjectBox({
     onSelect(object.objectId, { additive: shiftKey || metaKey || ctrlKey });
   };
 
+  // Not memoized: six `includes` over a six-element array, computed from props
+  // that are already stable. Wrapping it would cost more (a hook slot plus a
+  // dependency array on an array prop whose identity changes with the scene
+  // derivation anyway) than the work it saves. Contrast `wires` above, which
+  // memoizes because it allocates a GPU vertex buffer.
+  const imageFaceFlags = floorObjectImageFaceFlags(object.imageFaces, texture !== undefined);
+
   const height = mmToWorld(object.heightMm);
   // The box is center-anchored, so its center rides at bottom edge + half the
   // height. With no baseHeightMm that is heightMm / 2 exactly as before —
@@ -112,10 +124,26 @@ export function FloorObjectBox({
         <boxGeometry
           args={[mmToWorld(object.widthMm), height, mmToWorld(object.depthMm)]}
         />
-        {/* Box default UVs map the full image onto each face (plain stretch per
-            face, no aspect correction — acceptable for v1).
+        {/* SIX materials, one per BoxGeometry material group, so each face is
+            independently textured or neutral. `attach={"material-N"}` is R3F's
+            array form: it creates mesh.material as an array and slots the child
+            at index N (so the index, not the child order, is what binds a
+            material to a face). Preferred over building a materials array by
+            hand because R3F then owns each material's lifecycle and disposal
+            exactly as it did for the single material this replaces; a
+            useMemo'd array of hand-constructed materials would leak them on
+            unmount unless we disposed them ourselves.
 
-            The TEXTURED branch is MeshBasicMaterial + toneMapped:false, exactly
+            The group index -> face mapping lives in floorObjectFaceMaterials.ts
+            (read its TRAP note): the order is +x, -x, +y, -y, +z, -z, which is
+            not the order anything else in the app lists faces in.
+
+            Box default UVs map the full image onto each face (plain stretch per
+            face, no aspect correction — acceptable for v1). That stretch is
+            precisely why the default is front + back only: on a thin board the
+            side faces would smear the whole image across a few millimetres.
+
+            The TEXTURED faces are MeshBasicMaterial + toneMapped:false, exactly
             like ArtworkPlane (spec §6.2: lighting realism must never tint a
             work a curator is judging). It is not a style choice — Lambert here
             was a bug. AMBIENT_LIGHT_INTENSITY is 2.9 (sceneConstants.ts), tuned
@@ -125,13 +153,25 @@ export function FloorObjectBox({
             correctly. Most visible on a suspended projection board, whose whole
             purpose is showing the projected image.
 
-            The UNTEXTURED fallback stays Lambert: with no image to be faithful
-            to, per-face shading is what makes the neutral box read as a volume
-            rather than a flat silhouette. */}
-        {texture ? (
-          <meshBasicMaterial map={texture} toneMapped={false} />
-        ) : (
-          <meshLambertMaterial color={BOX_COLOR} />
+            The UNTEXTURED faces stay Lambert: with no image to be faithful to,
+            per-face shading is what makes the neutral box read as a volume
+            rather than a flat silhouette. This is the whole box when no texture
+            resolved at all, which is byte-for-byte the old fallback. */}
+        {BOX_MATERIAL_GROUP_FACES.map((face, index) =>
+          imageFaceFlags[index] ? (
+            <meshBasicMaterial
+              key={face}
+              attach={`material-${index}`}
+              map={texture}
+              toneMapped={false}
+            />
+          ) : (
+            <meshLambertMaterial
+              key={face}
+              attach={`material-${index}`}
+              color={BOX_COLOR}
+            />
+          )
         )}
       </mesh>
       {isUncertain(object.status) ? (

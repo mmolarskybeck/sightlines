@@ -59,6 +59,25 @@ describe("FloorCaseInspector scope", () => {
     expect(onCommitRotation).toHaveBeenCalledWith(90);
   });
 
+  // A display case has no image to map onto its box, so the "Image on" face
+  // picker (FloorArtworkImageFacesField, wired only in App's
+  // placedFloorArtwork branch) must never appear here.
+  it("never shows the Image on face picker", () => {
+    render(
+      <FloorCaseInspector
+        floorCase={floorCase}
+        unit="cm"
+        onCommitPosition={vi.fn()}
+        onCommitSize={vi.fn()}
+        onCommitHeight={vi.fn()}
+        onCommitRotation={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("Image on")).not.toBeInTheDocument();
+  });
+
   it("hides Angle when the caller has not wired a rotation handler", () => {
     render(
       <FloorCaseInspector

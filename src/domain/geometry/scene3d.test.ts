@@ -934,6 +934,40 @@ describe("deriveScene3d — floor objects (M2)", () => {
     ]);
   });
 
+  it("passes imageFaces through verbatim, keeping empty distinct from absent", () => {
+    function facesOf(imageFaces: ArtworkFloorObject["imageFaces"]) {
+      const scene = deriveScene3d(
+        makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))], {
+          floorObjects: [
+            {
+              id: "fobj-1",
+              kind: "artwork",
+              artworkId: "art-1",
+              xMm: 2000,
+              yMm: 1500,
+              widthMm: 900,
+              depthMm: 400,
+              heightMm: 1200,
+              rotationDeg: 0,
+              wallYMm: 1450,
+              ...(imageFaces ? { imageFaces } : {})
+            }
+          ]
+        })
+      );
+      return scene.floorObjects[0]!;
+    }
+
+    expect(facesOf(["top"]).imageFaces).toEqual(["top"]);
+    // An EMPTY array must survive as an empty array: the render layer reads
+    // absence as "use the front+back default", so collapsing the two here
+    // would silently re-light a box the curator blanked on purpose.
+    expect(facesOf([]).imageFaces).toEqual([]);
+    // Absent stays absent — the key is not even present, so an untouched
+    // object's entry is what it was before the feature existed.
+    expect("imageFaces" in facesOf(undefined)).toBe(false);
+  });
+
   it("emits an empty floorObjects array when there are none", () => {
     const scene = deriveScene3d(
       makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))])

@@ -233,9 +233,81 @@ export type WallObjectBase = {
   groupId?: string;
 };
 
+// Floor-only state parked on a wall object for the duration of a capture.
+//
+// This is the mirror image of FloorObjectBase.wallYMm and is deliberately
+// shaped like it: a dormant slot that the object's CURRENT anchor has no use
+// for, carried solely so the next conversion in the opposite direction can put
+// back what the curator authored. wallYMm remembers a wall value while the
+// object sits on the floor; floorMemory remembers floor values while the object
+// sits on a wall.
+//
+// It exists because capture is one drag away: a floor object dragged near a
+// wall becomes a WallObject, and a wall has no way to express "hanging 1200mm
+// off the floor, angled 45° in plan, with the image on its top face". Before
+// this slot those fields were silently discarded at the conversion, and
+// dragging the object back produced a DIFFERENT object than the one that left —
+// resting on the floor, at the wall's angle, showing the default front+back
+// faces. The motivating case is the worst case: a video projection board hung
+// on wires at ~45° and parked NEAR a wall is exactly the object most likely to
+// be captured by accident, and the loss is invisible in plan view. Now the
+// round trip is lossless and a mis-drag is fully undone by dragging back.
+//
+// TRAP: NOTHING may render from this, in any view. It is not live geometry and
+// it is not a fallback for a missing wall value — while the object is on a wall
+// these numbers describe a floor placement that does not currently exist. The
+// ONE legitimate reader is the wall→floor converter in app/store.ts. The name
+// collision beside it is the specific hazard: `rotationDeg` HERE is a plan
+// angle about the vertical axis (FloorObjectBase.rotationDeg), while
+// WallObjectBase.rotationDeg on the very same object is a rotation in the wall
+// PLANE. Same name, different axis; a renderer that reaches in here is drawing
+// one object's angle on another object's geometry.
+//
+// Carried by ArtworkWallObject and BlockedZoneWallObject — the only two wall
+// kinds a floor object can become (see planMoveFloorToWall). A blocked zone's
+// rotationDeg is live floor geometry too (FloorObjectBox rotates its flat wash
+// exactly as it rotates an artwork's box), so a captured blocked zone suffers
+// the identical loss and gets the identical slot. It gets THIS shape and not
+// the artwork one — see ArtworkFloorMemory.
+export type FloorMemory = {
+  // The authored plan angle at the moment of capture. Optional because a
+  // hand-edited or partially-written document may omit it, but the store's
+  // writer always sets it: rotationDeg is required on FloorObjectBase, so the
+  // floor side always has one, and an object authored at exactly 0° needs
+  // remembering just as much as one at 45° — without it a floor graphic
+  // deliberately squared to the grid comes back wearing its wall's angle.
+  rotationDeg?: number;
+  // The suspension height at the moment of capture. Absent means the object was
+  // resting on the floor and MUST stay absent through the round trip: absence
+  // is how this codebase records "never chosen", and a spurious key makes a
+  // clean project hash dirty for the cloud backup check.
+  baseHeightMm?: number;
+};
+
+// The artwork-only extension of the same slot. `imageFaces` lives here rather
+// than on FloorMemory for exactly the reason it lives on ArtworkFloorObject
+// rather than FloorObjectBase: only artwork carries an image at all, so "which
+// faces show it" is a state a blocked zone cannot express rather than one every
+// reader has to remember to ignore.
+export type ArtworkFloorMemory = FloorMemory & {
+  // Preserved with the same absent-vs-empty discipline as the live field it
+  // shadows (see ArtworkFloorObject.imageFaces). Absent means "never chosen"
+  // and must round-trip absent so the front+back default still applies; an
+  // EMPTY array means the curator deliberately turned every face off and must
+  // round-trip as an empty array, not collapse to absent and not resurrect the
+  // default. Erasing this is the worst of the three losses because it is the
+  // only one that is a stated curatorial choice rather than a measurement — a
+  // "top only" floor graphic silently becoming a front+back board.
+  imageFaces?: FloorObjectFace[];
+};
+
 export type ArtworkWallObject = WallObjectBase & {
   kind: "artwork";
   artworkId: string;
+  // Dormant floor-only state from a capture. Read the TRAP on FloorMemory
+  // before touching this: nothing renders from it, and it is the artwork-shaped
+  // variant because only artwork can remember which faces carried its image.
+  floorMemory?: ArtworkFloorMemory;
   // Display/provenance metadata only. Geometry always uses the placement's
   // stored widthMm/heightMm as its image footprint and never resolves this
   // override. A future writer must explicitly rebake stored dimensions.
@@ -294,6 +366,16 @@ export type ConnectableOpeningWallObject = DoorWallObject | WindowWallObject;
 export type BlockedZoneWallObject = WallObjectBase & {
   kind: "blocked-zone";
   blocksPlacement: true;
+  // Dormant floor-only state from a capture (see FloorMemory's TRAP). The BASE
+  // shape, not the artwork one: a blocked zone has no image, so imageFaces is
+  // unrepresentable here rather than stored-and-ignored. In practice this holds
+  // only `rotationDeg` — a blocked zone's baseHeightMm is structurally legal
+  // (FloorObjectBase owns it) but no UI ever writes one, since a blocked zone
+  // is a flat floor-plane planning wash and "how far off the floor" has no
+  // referent for it (see FloorObjectInspector). Carrying the field anyway costs
+  // nothing and avoids a third memory shape whose only job would be to make an
+  // already-absent key absent a second way.
+  floorMemory?: FloorMemory;
 };
 
 export type OpeningWallObject = ConnectableOpeningWallObject | BlockedZoneWallObject;
@@ -353,7 +435,10 @@ export type FloorObjectBase = {
   widthMm: number;
   depthMm: number;
   // Wall angle preserved on wall→floor conversion; 0 for fresh floor placements
-  // until the user sets one (Angle field / plan rotate handle).
+  // until the user sets one (Angle field / plan rotate handle). An object that
+  // is RETURNING from a capture is the exception: its own remembered angle wins
+  // over the wall's, because the wall it is leaving was never the angle anyone
+  // authored (see ArtworkWallObject.floorMemory / planMoveWallToFloor).
   //
   // DELIBERATELY NOT NORMALIZED, and no reader may assume a range. The two
   // writers produce different representations of the same orientation on
@@ -382,13 +467,62 @@ export type FloorObjectBase = {
   // interchangeable: wallYMm is a hang-height CENTER measured for a wall,
   // baseHeightMm is a BOTTOM edge measured for the floor. A converter that
   // needs one must pick it explicitly rather than falling through to whichever
-  // is set.
+  // is set. A capture onto a wall parks this value in the wall object's
+  // floorMemory and restores it on the way back, so a suspended work survives a
+  // mis-drag (see FloorMemory).
   baseHeightMm?: number;
 };
+
+// Which faces of a floor object's box carry the artwork image.
+//
+// Named from the perspective of a viewer standing at the FRONT face looking at
+// it — so `right` is that viewer's right. In the box's local frame (x along its
+// width, y up, z along its depth) that resolves to:
+//
+//   front  = +z    back   = -z
+//   right  = +x    left   = -x
+//   top    = +y    bottom = -y
+//
+// `front = +z` is not a fresh choice: it is the same front the plan view's
+// front-face marker and `floorObjectFrontNormal` already use (plan +y → world
+// +z under planRotationToYaw). All three views mean the same face by "front",
+// and a test pins the mapping.
+export type FloorObjectFace = "front" | "back" | "left" | "right" | "top" | "bottom";
+
+// The default when `imageFaces` is absent. Front and back only, deliberately
+// NOT all six: box UVs stretch the whole image across each face independently,
+// so on a 3/4"-thick projection board the side faces smear the entire image
+// across 19mm — unreadable, and actively misleading about what is installed.
+// Front and back are the only faces whose aspect means anything.
+//
+// This changed the rendered default (boxes used to wrap the image over all six
+// faces) with no migration and no schema bump, which is safe for one specific
+// reason worth recording: floor artwork was painted with a Lambert material
+// under a 2.9-intensity ambient light, so every texture saturated to flat white
+// and NO existing project has ever visibly shown the wrap. There is no prior
+// appearance to preserve. See FloorObjectBox for the material fix.
+export const DEFAULT_FLOOR_OBJECT_IMAGE_FACES: FloorObjectFace[] = ["front", "back"];
 
 export type ArtworkFloorObject = FloorObjectBase & {
   kind: "artwork";
   artworkId: string;
+  // Which box faces show the image. Absent = DEFAULT_FLOOR_OBJECT_IMAGE_FACES
+  // (front + back), the freestanding-panel reading: a projection board, a
+  // double-sided hanging work. A sculpture whose photograph should read from
+  // more angles opts into more faces; a floor graphic uses ["top"].
+  //
+  // Lives on ArtworkFloorObject, not FloorObjectBase, because only artwork
+  // carries an image at all — a blocked zone and a display case have no texture
+  // to map, so "which faces show it" is a state they cannot express rather than
+  // one every reader has to remember to ignore.
+  //
+  // An EMPTY array is legal and distinct from absent: it means the curator
+  // deliberately turned every face off, leaving a neutral volume. Absent means
+  // "never chosen", which is why the default cannot be baked in at write time.
+  // Both readings are carried verbatim through a wall capture in the wall
+  // object's floorMemory (see ArtworkFloorMemory) — a capture must not be able
+  // to rewrite a curatorial choice into the default.
+  imageFaces?: FloorObjectFace[];
   displayDimensionsOverride?: Dimensions;
 };
 

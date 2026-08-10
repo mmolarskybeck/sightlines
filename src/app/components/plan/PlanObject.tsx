@@ -181,8 +181,18 @@ export function PlanObject({
         // side), leaving the -depth edge sitting ON the wall line. So the back
         // face is -depth and the viewer-facing one is +depth, and a wall→floor
         // conversion — which inherits the wall's angle verbatim (store.ts) —
-        // keeps facing the way it already faced. A 45° projection board reads
-        // the same rule: this edge is the surface the image lands on.
+        // keeps facing the way it already faced.
+        //
+        // What this edge marks is ORIENTATION, not "where the image is". It
+        // used to be able to claim both, back when a floor box wrapped its
+        // image over every face; now ArtworkFloorObject.imageFaces makes the
+        // textured set a curatorial choice, and a "top only" floor graphic has
+        // no image on this edge at all. The marker stays honest anyway —
+        // knowing which way a work faces is what drives rotation, wall
+        // conversion, and reading a 45° board off the drawing — but do not
+        // reintroduce a comment (or a test) asserting that the front face is
+        // necessarily the imaged one. 3D and the inspector are the only
+        // surfaces that know which faces carry the image.
         //
         // Drawn as a thickened edge rather than an added decoration: the same
         // "2D glyph echoes real construction" discipline as the case legs. A

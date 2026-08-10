@@ -67,6 +67,7 @@ import { ChecklistPanel } from "./components/panels/ChecklistPanel";
 import { ElevationEmptyState } from "./components/elevation/ElevationEmptyState";
 import { FloorCaseInspector, WallCaseInspector } from "./components/inspectors/CaseInspector";
 import { FloorObjectInspector, FloorPlacementFields } from "./components/inspectors/FloorObjectInspector";
+import { FloorArtworkImageFacesField } from "./components/inspectors/FloorArtworkImageFacesField";
 import { FreestandingWallInspector } from "./components/inspectors/FreestandingWallInspector";
 import {
   OpeningInspector,
@@ -324,6 +325,7 @@ export function App() {
   const placeOpeningOnElevation = useAppStore((state) => state.placeOpeningOnElevation);
   const commitPlanMove = useAppStore((state) => state.commitPlanMove);
   const updateFloorObject = useAppStore((state) => state.updateFloorObject);
+  const setFloorArtworkImageFaces = useAppStore((state) => state.setFloorArtworkImageFaces);
   const updateWallCase = useAppStore((state) => state.updateWallCase);
   const moveWallObjectsGroup = useAppStore((state) => state.moveWallObjectsGroup);
   const movePlanObjectsGroup = useAppStore((state) => state.movePlanObjectsGroup);
@@ -2312,6 +2314,15 @@ export function App() {
                         }
                         onCommitBaseHeight={(baseHeightMm) =>
                           void updateFloorObject(placedFloorArtwork.id, { baseHeightMm })
+                        }
+                      />
+                      {/* Which box faces carry the image — a box-specific
+                          question a wall-hung placement (a plane, not a box)
+                          never has, so it rides only this floor branch. */}
+                      <FloorArtworkImageFacesField
+                        imageFaces={placedFloorArtwork.imageFaces}
+                        onChange={(faces) =>
+                          void setFloorArtworkImageFaces(placedFloorArtwork.id, faces)
                         }
                       />
                     </>

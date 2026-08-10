@@ -2,6 +2,7 @@ import type {
   Artwork,
   Dimensions,
   FloorObject,
+  FloorObjectFace,
   Project,
   RoomPlacement,
   WallObject
@@ -89,6 +90,13 @@ export type FloorObject3d = {
   artworkId?: string;
   assetId?: string;
   status?: Dimensions["status"];
+  // Which faces of the box carry the image (artwork only). Passed through
+  // VERBATIM, including the difference between absent and empty: absent means
+  // "never chosen" and resolves to DEFAULT_FLOOR_OBJECT_IMAGE_FACES, empty
+  // means every face deliberately off. Resolving the default here would erase
+  // that distinction and hard-code today's default into every derived scene.
+  // The render layer resolves it (floorObjectFaceMaterials.ts).
+  imageFaces?: FloorObjectFace[];
   xMm: number;
   yMm: number;
   widthMm: number;
@@ -268,7 +276,12 @@ export function deriveScene3d(
           ? {
               artworkId: object.artworkId,
               assetId: artwork?.assetId,
-              status: artwork?.dimensions.status
+              status: artwork?.dimensions.status,
+              // Spread only when the object actually stores a choice, so an
+              // untouched object's scene entry keeps exactly the key set it
+              // had before image faces existed — same "absence is the
+              // encoding" rule baseHeightMm follows below.
+              ...(object.imageFaces ? { imageFaces: object.imageFaces } : {})
             }
           : {}),
         xMm: object.xMm,

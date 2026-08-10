@@ -365,6 +365,122 @@ describe("WallTextWallObject", () => {
   });
 });
 
+// Dormant floor-only state parked on a captured object (FloorMemory in
+// domain/project.ts). Purely additive and optional, so it must parse without a
+// schema-version bump AND leave a document that predates it untouched.
+describe("floorMemory", () => {
+  it("round-trips a captured artwork's floor memory verbatim, keeping absent keys absent", () => {
+    const project = createSampleProject();
+    project.wallObjects = [
+      {
+        id: "artwork-placement-1",
+        kind: "artwork",
+        artworkId: "artwork-1",
+        wallId: "wall-north",
+        xMm: feetToMm(4),
+        yMm: inchesToMm(57),
+        widthMm: 610,
+        heightMm: 460,
+        // The motivating object: a suspended board angled 45° whose image the
+        // curator put on the top face only.
+        floorMemory: { rotationDeg: 45, baseHeightMm: 1200, imageFaces: ["top"] }
+      },
+      {
+        id: "artwork-placement-2",
+        kind: "artwork",
+        artworkId: "artwork-2",
+        wallId: "wall-north",
+        xMm: feetToMm(12),
+        yMm: inchesToMm(57),
+        widthMm: 610,
+        heightMm: 460,
+        // Never suspended, never chose faces: an EMPTY memory object, not one
+        // padded out with nulls or zeros.
+        floorMemory: { rotationDeg: 0 }
+      }
+    ];
+
+    const [first, second] = parseProject(project).wallObjects;
+    expect(first.kind === "artwork" && first.floorMemory).toEqual({
+      rotationDeg: 45,
+      baseHeightMm: 1200,
+      imageFaces: ["top"]
+    });
+    // Key ABSENCE is the load-bearing part: absent means "never chosen", and a
+    // materialized key would both lose that reading and dirty the cloud-backup
+    // fingerprint, which hashes key presence.
+    const secondMemory = second.kind === "artwork" ? second.floorMemory! : {};
+    expect("baseHeightMm" in secondMemory).toBe(false);
+    expect("imageFaces" in secondMemory).toBe(false);
+  });
+
+  it("preserves an empty imageFaces memory as empty rather than collapsing it to absent", () => {
+    const project = createSampleProject();
+    project.wallObjects = [
+      {
+        id: "artwork-placement-1",
+        kind: "artwork",
+        artworkId: "artwork-1",
+        wallId: "wall-north",
+        xMm: feetToMm(4),
+        yMm: inchesToMm(57),
+        widthMm: 610,
+        heightMm: 460,
+        // "Every face deliberately off" — a different state from absent, which
+        // means front + back (DEFAULT_FLOOR_OBJECT_IMAGE_FACES).
+        floorMemory: { rotationDeg: 0, imageFaces: [] }
+      }
+    ];
+
+    const [parsed] = parseProject(project).wallObjects;
+    expect(parsed.kind === "artwork" && parsed.floorMemory?.imageFaces).toEqual([]);
+  });
+
+  it("strips an imageFaces claim from a blocked zone's memory (it has no image)", () => {
+    const project = createSampleProject();
+    project.wallObjects = [
+      {
+        id: "zone-1",
+        kind: "blocked-zone",
+        blocksPlacement: true,
+        wallId: "wall-north",
+        xMm: feetToMm(4),
+        yMm: inchesToMm(57),
+        widthMm: 610,
+        heightMm: 460,
+        floorMemory: { rotationDeg: 30, imageFaces: ["top"] }
+      } as unknown as OpeningWallObject
+    ];
+
+    // The blocked-zone branch uses the BASE memory shape, so strict parsing
+    // strips the artwork-only key rather than storing something no reader wants.
+    const [parsed] = parseProject(project).wallObjects;
+    expect(parsed.kind === "blocked-zone" && parsed.floorMemory).toEqual({ rotationDeg: 30 });
+  });
+
+  it("parses a document written before floor memory existed, at the same schema version", () => {
+    const project = createSampleProject();
+    project.wallObjects = [
+      {
+        id: "artwork-placement-1",
+        kind: "artwork",
+        artworkId: "artwork-1",
+        wallId: "wall-north",
+        xMm: feetToMm(4),
+        yMm: inchesToMm(57),
+        widthMm: 610,
+        heightMm: 460
+      }
+    ];
+
+    // No bump: the field is optional on both carriers, so a pre-existing
+    // document parses unchanged and comes back out with no floorMemory key.
+    const parsed = parseProject(project);
+    expect(parsed.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    expect("floorMemory" in parsed.wallObjects[0]).toBe(false);
+  });
+});
+
 describe("migrateProject", () => {
   it("rejects input with no recognizable schemaVersion as not a Sightlines project", () => {
     expect(() => migrateProject({ hello: 1 })).toThrow(/not a Sightlines project/);
