@@ -95,8 +95,24 @@ export type FloorObject3d = {
   // "never chosen" and resolves to DEFAULT_FLOOR_OBJECT_IMAGE_FACES, empty
   // means every face deliberately off. Resolving the default here would erase
   // that distinction and hard-code today's default into every derived scene.
-  // The render layer resolves it (floorObjectFaceMaterials.ts).
+  // The render layer resolves it (floorObjectImageFaces.ts).
   imageFaces?: FloorObjectFace[];
+  // The WORK's own recorded dimensions (artwork only) — deliberately NOT the
+  // same numbers as widthMm/heightMm below, which size the OBJECT STANDING ON
+  // THE FLOOR (a projection board, a plinth, a sculpture's bounding box). The
+  // two coincide at placement, when placeArtworkOnFloor seeds the box from the
+  // artwork's effective size, and diverge the moment a curator resizes the
+  // board. The render layer draws the image at THIS size, centered on each
+  // chosen face, so widening the board can never stretch the image
+  // (floorObjectImageFaces.ts owns that rule).
+  //
+  // Emitted per axis, only when the artwork actually records it: an unmeasured
+  // axis has to stay distinguishable from a measured one, because the render
+  // layer's fallback for "we don't know" (contain the texture's native aspect
+  // in the face) is different from — and better than — any number invented
+  // here. Absence is the encoding, as it is for imageFaces and baseHeightMm.
+  artworkWidthMm?: number;
+  artworkHeightMm?: number;
   xMm: number;
   yMm: number;
   widthMm: number;
@@ -281,7 +297,14 @@ export function deriveScene3d(
               // untouched object's scene entry keeps exactly the key set it
               // had before image faces existed — same "absence is the
               // encoding" rule baseHeightMm follows below.
-              ...(object.imageFaces ? { imageFaces: object.imageFaces } : {})
+              ...(object.imageFaces ? { imageFaces: object.imageFaces } : {}),
+              // Per axis, and only when recorded — see artworkWidthMm's note.
+              ...(artwork?.dimensions.widthMm !== undefined
+                ? { artworkWidthMm: artwork.dimensions.widthMm }
+                : {}),
+              ...(artwork?.dimensions.heightMm !== undefined
+                ? { artworkHeightMm: artwork.dimensions.heightMm }
+                : {})
             }
           : {}),
         xMm: object.xMm,

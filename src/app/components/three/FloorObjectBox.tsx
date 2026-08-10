@@ -4,11 +4,13 @@ import { useMemo, useState } from "react";
 import { MathUtils } from "three";
 import type { Texture } from "three";
 import type { FloorObject3d } from "../../../domain/geometry/scene3d";
+import { textureNativeAspect } from "./artworkFit";
 import { mmToWorld } from "./coordinates";
 import {
-  BOX_MATERIAL_GROUP_FACES,
-  floorObjectImageFaceFlags
-} from "./floorObjectFaceMaterials";
+  floorArtworkWorkSizeMm,
+  floorObjectImagePanels,
+  resolveFloorObjectImageFaces
+} from "./floorObjectImageFaces";
 import {
   planSuspensionWires,
   suspendedCenterYMm,
@@ -34,14 +36,21 @@ function planRotationToYaw(rotationDeg: number): number {
   return -MathUtils.degToRad(rotationDeg);
 }
 
-// One floor-placed object: artwork boxes carry the work's image on the faces
-// the curator chose (ArtworkFloorObject.imageFaces — front + back by default,
-// the freestanding-panel reading) with the shared uncertainty edge treatment,
-// blocked zones as flat translucent quads. When the artwork record or its asset
-// is missing the box falls back to the neutral BOX_COLOR volume (texture
-// undefined), never a broken image. Artwork boxes are click-to-select
-// (spec §4.3) and consume their clicks so the floor beneath doesn't clear the
-// selection; blocked zones stay inert and let the click fall through.
+// One floor-placed object: a neutral artwork box carrying the work's image on
+// the faces the curator chose (ArtworkFloorObject.imageFaces — front + back by
+// default, the freestanding-panel reading) with the shared uncertainty edge
+// treatment, blocked zones as flat translucent quads. When the artwork record
+// or its asset is missing the box shows no image at all (texture undefined),
+// never a broken one. Artwork boxes are click-to-select (spec §4.3) and consume
+// their clicks so the floor beneath doesn't clear the selection; blocked zones
+// stay inert and let the click fall through.
+//
+// The box and the image are two different measurements: widthMm/heightMm/
+// depthMm size the OBJECT ON THE FLOOR, while the image is drawn at the WORK's
+// own recorded dimensions, centered on each chosen face. They coincide at
+// placement and diverge the moment a curator resizes the board — at which
+// point bare board appears around the image instead of the image stretching.
+// floorObjectImageFaces.ts owns that rule.
 //
 // An artwork box may also be SUSPENDED (baseHeightMm > 0): the box lifts off
 // the floor and hangs from wires drawn up to the room's wall height. See
@@ -99,12 +108,23 @@ export function FloorObjectBox({
     onSelect(object.objectId, { additive: shiftKey || metaKey || ctrlKey });
   };
 
-  // Not memoized: six `includes` over a six-element array, computed from props
-  // that are already stable. Wrapping it would cost more (a hook slot plus a
-  // dependency array on an array prop whose identity changes with the scene
-  // derivation anyway) than the work it saves. Contrast `wires` above, which
-  // memoizes because it allocates a GPU vertex buffer.
-  const imageFaceFlags = floorObjectImageFaceFlags(object.imageFaces, texture !== undefined);
+  // Not memoized: a handful of `includes` over a six-element array plus some
+  // arithmetic, computed from props that are already stable. Wrapping it would
+  // cost more (a hook slot plus a dependency array on an array prop whose
+  // identity changes with the scene derivation anyway) than the work it saves.
+  // Contrast `wires` above, which memoizes because it allocates a GPU vertex
+  // buffer.
+  //
+  // The image is drawn at the WORK's own size, centered on each chosen face —
+  // never stretched to the face. See floorObjectImageFaces.ts, which owns both
+  // the face resolution and the sizing rule.
+  const nativeAspect = textureNativeAspect(texture?.image);
+  const imagePanels = floorObjectImagePanels(
+    object,
+    resolveFloorObjectImageFaces(object.imageFaces, texture !== undefined),
+    floorArtworkWorkSizeMm(object.artworkWidthMm, object.artworkHeightMm, nativeAspect),
+    nativeAspect
+  );
 
   const height = mmToWorld(object.heightMm);
   // The box is center-anchored, so its center rides at bottom edge + half the
@@ -124,56 +144,52 @@ export function FloorObjectBox({
         <boxGeometry
           args={[mmToWorld(object.widthMm), height, mmToWorld(object.depthMm)]}
         />
-        {/* SIX materials, one per BoxGeometry material group, so each face is
-            independently textured or neutral. `attach={"material-N"}` is R3F's
-            array form: it creates mesh.material as an array and slots the child
-            at index N (so the index, not the child order, is what binds a
-            material to a face). Preferred over building a materials array by
-            hand because R3F then owns each material's lifecycle and disposal
-            exactly as it did for the single material this replaces; a
-            useMemo'd array of hand-constructed materials would leak them on
-            unmount unless we disposed them ourselves.
+        {/* The box is the SUPPORT — a projection board, a plinth, a sculpture's
+            bounding volume — and is always the neutral colour. The image rides
+            on top as its own quads (below) rather than as the box's face
+            textures, because a face texture's aspect ratio is necessarily the
+            FACE's aspect ratio: widening a 60"x48" work's board to 7' stretched
+            the image 1.4x horizontally, and there was no way to prevent or undo
+            it short of retyping the board to match the work.
 
-            The group index -> face mapping lives in floorObjectFaceMaterials.ts
-            (read its TRAP note): the order is +x, -x, +y, -y, +z, -z, which is
-            not the order anything else in the app lists faces in.
-
-            Box default UVs map the full image onto each face (plain stretch per
-            face, no aspect correction — acceptable for v1). That stretch is
-            precisely why the default is front + back only: on a thin board the
-            side faces would smear the whole image across a few millimetres.
-
-            The TEXTURED faces are MeshBasicMaterial + toneMapped:false, exactly
-            like ArtworkPlane (spec §6.2: lighting realism must never tint a
-            work a curator is judging). It is not a style choice — Lambert here
-            was a bug. AMBIENT_LIGHT_INTENSITY is 2.9 (sceneConstants.ts), tuned
-            to wash the near-white walls, so a Lambert-shaded artwork texture
-            was multiplied ~3x and saturated to flat white: floor-placed works
-            rendered as blank boxes while the same image on a wall rendered
-            correctly. Most visible on a suspended projection board, whose whole
-            purpose is showing the projected image.
-
-            The UNTEXTURED faces stay Lambert: with no image to be faithful to,
-            per-face shading is what makes the neutral box read as a volume
-            rather than a flat silhouette. This is the whole box when no texture
-            resolved at all, which is byte-for-byte the old fallback. */}
-        {BOX_MATERIAL_GROUP_FACES.map((face, index) =>
-          imageFaceFlags[index] ? (
-            <meshBasicMaterial
-              key={face}
-              attach={`material-${index}`}
-              map={texture}
-              toneMapped={false}
-            />
-          ) : (
-            <meshLambertMaterial
-              key={face}
-              attach={`material-${index}`}
-              color={BOX_COLOR}
-            />
-          )
-        )}
+            Lambert, so per-face shading still reads the neutral box as a volume
+            rather than a flat silhouette. Note the image quads are deliberately
+            NOT Lambert — see their material below. */}
+        <meshLambertMaterial color={BOX_COLOR} />
       </mesh>
+      {/* One quad per chosen face, at the WORK's own dimensions, centered, and
+          floated a millimetre clear of the face it sits on so the two coplanar
+          surfaces can't z-fight. Sizing and placement are
+          floorObjectImageFaces.ts's; nothing about them is decided here.
+
+          No pointer handlers: an R3F event walks every intersection in
+          front-to-back order and only calls handlers it finds, so a click that
+          lands on a panel still reaches the box's onClick behind it. Adding
+          handlers here would just duplicate them.
+
+          MeshBasicMaterial + toneMapped:false, exactly like ArtworkPlane (spec
+          §6.2: lighting realism must never tint a work a curator is judging).
+          It is not a style choice — Lambert here was a bug.
+          AMBIENT_LIGHT_INTENSITY is 2.9 (sceneConstants.ts), tuned to wash the
+          near-white walls, so a Lambert-shaded artwork texture was multiplied
+          ~3x and saturated to flat white: floor-placed works rendered as blank
+          boxes while the same image on a wall rendered correctly. Most visible
+          on a suspended projection board, whose whole purpose is showing the
+          projected image. */}
+      {imagePanels.map((panel) => (
+        <mesh
+          key={panel.face}
+          position={[
+            mmToWorld(panel.positionMm[0]),
+            mmToWorld(panel.positionMm[1]),
+            mmToWorld(panel.positionMm[2])
+          ]}
+          rotation={[panel.rotationRad[0], panel.rotationRad[1], panel.rotationRad[2]]}
+        >
+          <planeGeometry args={[mmToWorld(panel.widthMm), mmToWorld(panel.heightMm)]} />
+          <meshBasicMaterial map={texture} toneMapped={false} />
+        </mesh>
+      ))}
       {isUncertain(object.status) ? (
         <DashedBoxOutline
           widthMm={object.widthMm}

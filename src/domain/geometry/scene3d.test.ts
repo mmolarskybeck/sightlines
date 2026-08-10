@@ -968,6 +968,53 @@ describe("deriveScene3d — floor objects (M2)", () => {
     expect("imageFaces" in facesOf(undefined)).toBe(false);
   });
 
+  it("carries the WORK's own dimensions alongside the box's, per axis", () => {
+    function sizesOf(dimensions: Artwork["dimensions"]) {
+      const artwork = makeArtwork("art-1", { dimensions });
+      const scene = deriveScene3d(
+        makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))], {
+          floorObjects: [
+            {
+              id: "fobj-1",
+              kind: "artwork",
+              artworkId: "art-1",
+              xMm: 2000,
+              yMm: 1500,
+              // A board widened well past the work it carries — the case the
+              // whole distinction exists for.
+              widthMm: 2133,
+              depthMm: 25,
+              heightMm: 1219,
+              rotationDeg: 0,
+              wallYMm: 1450
+            }
+          ]
+        }),
+        new Map([[artwork.id, artwork]])
+      );
+      return scene.floorObjects[0]!;
+    }
+
+    const both = sizesOf({ status: "known", widthMm: 1524, heightMm: 1219 });
+    expect(both.artworkWidthMm).toBe(1524);
+    expect(both.artworkHeightMm).toBe(1219);
+    // And emphatically NOT collapsed into the box's own size: these two pairs
+    // describe different physical things (the work vs. the board carrying it),
+    // and the render layer draws the image from the artwork pair.
+    expect(both.widthMm).toBe(2133);
+    expect(both.heightMm).toBe(1219);
+
+    // Per axis: an unmeasured axis stays absent so the render layer can tell
+    // "not recorded" from a number and fall back to the image's own aspect.
+    const widthOnly = sizesOf({ status: "approximate", widthMm: 1524 });
+    expect(widthOnly.artworkWidthMm).toBe(1524);
+    expect("artworkHeightMm" in widthOnly).toBe(false);
+
+    const neither = sizesOf({ status: "unknown" });
+    expect("artworkWidthMm" in neither).toBe(false);
+    expect("artworkHeightMm" in neither).toBe(false);
+  });
+
   it("emits an empty floorObjects array when there are none", () => {
     const scene = deriveScene3d(
       makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))])

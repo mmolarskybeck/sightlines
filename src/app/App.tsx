@@ -68,6 +68,7 @@ import { ElevationEmptyState } from "./components/elevation/ElevationEmptyState"
 import { FloorCaseInspector, WallCaseInspector } from "./components/inspectors/CaseInspector";
 import { FloorObjectInspector, FloorPlacementFields } from "./components/inspectors/FloorObjectInspector";
 import { FloorArtworkImageFacesField } from "./components/inspectors/FloorArtworkImageFacesField";
+import { FloorArtworkImageSizeNote } from "./components/inspectors/FloorArtworkImageSizeNote";
 import { FreestandingWallInspector } from "./components/inspectors/FreestandingWallInspector";
 import {
   OpeningInspector,
@@ -2314,6 +2315,23 @@ export function App() {
                         }
                         onCommitBaseHeight={(baseHeightMm) =>
                           void updateFloorObject(placedFloorArtwork.id, { baseHeightMm })
+                        }
+                      />
+                      {/* The box's Width/Height size the object standing on the
+                          floor; the work has its own recorded size, and 3D
+                          draws the image at THAT size. This note appears only
+                          once the two have drifted apart, and offers the way
+                          back. */}
+                      <FloorArtworkImageSizeNote
+                        dimensions={selectedArtwork.dimensions}
+                        objectWidthMm={placedFloorArtwork.widthMm}
+                        objectHeightMm={placedFloorArtwork.heightMm}
+                        unit={project.unit}
+                        onMatchSizeToWork={(widthMm, heightMm) =>
+                          void updateFloorObject(placedFloorArtwork.id, {
+                            widthMm,
+                            heightMm
+                          })
                         }
                       />
                       {/* Which box faces carry the image — a box-specific

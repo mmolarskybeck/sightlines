@@ -6189,6 +6189,104 @@ body.panels-resizing * {
   border-color: var(--input);
 }
 
+/* The support-vs-work size note: a footnote to the Width/Depth/Height fields
+   directly above it, not a status. The element carries `.field-hint` too, so it
+   IS the same species as the "Floor-placed in plan view." line App renders
+   three fields up — muted, --type-xs, --leading-copy — and only the payload and
+   the action are styled here. The filled InspectorNotice card it replaces read
+   as an alert box for a quiet factual aside; DESIGN.md keeps inspector panels
+   flat and reserves fills and shadows for real overlays. OpeningInspector draws
+   the same line: its HEALTHY pairing states itself as icon-less muted text with
+   a trailing ghost verb, and only a state that needs attention escalates to the
+   filled wash. A support resized on purpose is the healthy case.
+
+   NOTE: `margin-top` below only lands because this block sits AFTER `.field-hint`
+   in source order — both are single-class selectors, so nothing but order
+   separates them. Moving this earlier in the file would silently restore
+   `.field-hint`'s `margin: 0`. */
+.floor-artwork-image-size-note {
+  /* Bind the note to the numbers it annotates: 6px above (pulled in from the
+     section body's 10px grid gap), a full 10px below to the "Image on" grid.
+     Tight group, generous separation. */
+  margin-top: calc(var(--space-4) * -1);
+  /* Only bites on a pathological unbreakable value, and keeps the note's
+     min-content width off the inspector grid's floor at 260px. */
+  overflow-wrap: anywhere;
+}
+
+/* The payload. Ink and tabular numerals lift the measurement out of the muted
+   sentence so it can be read at a glance against the fields above — the same
+   move .length-field-hint makes for its conversion preview. nowrap keeps
+   "152.4 cm × 121.9 cm" from breaking around the × (it is ~118px at the 219px
+   content width of a 260px inspector, so it never needs to). */
+.floor-artwork-image-size-note-value {
+  color: var(--ink);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Inline text action, the .settings-link tertiary species tinted petrol: this
+   one writes numbers into the fields above rather than opening a page, and
+   petrol is the app's interaction ink. `white-space: nowrap` means the label
+   moves to the next line whole, so it can never break mid-word and never
+   strands a focus ring across two fragments.
+
+   `padding-block` buys hit area, and it DOES pay for it in line height —
+   measured, not assumed. The familiar rule that vertical padding on an inline
+   box leaves the line box alone holds for a <span> (18.6px either way) but not
+   for a <button>, which Chromium lays out as an ATOMIC inline-level box
+   whatever `display` says: the same 8px padding takes its line from 18.6px to
+   34.6px, identically under `inline` and `inline-block`. So the coarse-pointer
+   branch below genuinely grows the note (~41px to ~53px). That is the right
+   trade — a 35px target beats 12px of saved height on a device with no cursor —
+   but it is a trade, not a free lunch, so do not "restore" a tighter line by
+   removing that padding without knowing what it costs on touch. */
+.floor-artwork-image-size-note-action {
+  display: inline;
+  padding: 0;
+  padding-block: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--primary);
+  font: inherit;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition:
+    color 150ms ease-out,
+    background-color 150ms ease-out;
+}
+
+.floor-artwork-image-size-note-action:hover {
+  color: var(--primary-strong);
+  text-decoration-thickness: 2px;
+}
+
+.floor-artwork-image-size-note-action:active {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  text-decoration-thickness: 2px;
+}
+
+.floor-artwork-image-size-note-action:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* Touch: a 35px target instead of 23px, at the cost of ~12px of note height
+   (see the measurement note above — a <button> is atomic, so this is not free).
+   PRODUCT.md asks for touch-sized targets on tablet, and the inspector is a
+   first-class iPad surface. */
+@media (any-pointer: coarse) {
+  .floor-artwork-image-size-note-action {
+    padding-block: var(--space-8);
+  }
+}
+
 /* Wall additions are peer actions, not a card grid. A single scan line keeps
    every verb equally weighted and leaves long or translated labels room. */
 .wall-opening-actions .inspector-action-group-buttons {
