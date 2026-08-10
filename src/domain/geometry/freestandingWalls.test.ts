@@ -222,7 +222,7 @@ describe("getFloorPartitions", () => {
       }
     };
 
-    const partitions = getFloorPartitions(project);
+    const partitions = getFloorPartitions(project.floor);
     expect(partitions).toHaveLength(2);
 
     const partitionA = partitions.find((p) => p.wallId === "room-a-partition-1")!;

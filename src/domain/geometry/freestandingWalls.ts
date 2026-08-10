@@ -4,6 +4,7 @@
 // the centerline. Everything downstream (plan capture, validation, elevation,
 // 3D) consumes faces through the four injection choke points (spec §5.3).
 import type {
+  Floor,
   FreestandingWall,
   Project,
   Room,
@@ -100,11 +101,16 @@ export type FloorPartition = {
   startMm: Point;
   endMm: Point;
   thicknessMm: number;
+  // The slab's true height — plan drawing ignores it, but the elevation
+  // profile of a partition standing in front of a wall rises to exactly it.
+  heightMm: number;
   name: string;
 };
 
-export function getFloorPartitions(project: Project): FloorPartition[] {
-  return project.floor.rooms.flatMap((placement) =>
+// Takes a Floor rather than a whole Project for the same reason getFloorWalls
+// does: the elevation view holds only `project.floor.rooms`.
+export function getFloorPartitions(floor: Floor): FloorPartition[] {
+  return floor.rooms.flatMap((placement) =>
     placement.room.freestandingWalls.map((wall) => ({
       wallId: wall.id,
       roomId: placement.roomId,
@@ -114,6 +120,7 @@ export function getFloorPartitions(project: Project): FloorPartition[] {
       },
       endMm: { xMm: wall.endXMm + placement.offsetXMm, yMm: wall.endYMm + placement.offsetYMm },
       thicknessMm: wall.thicknessMm,
+      heightMm: wall.heightMm,
       name: wall.name
     }))
   );

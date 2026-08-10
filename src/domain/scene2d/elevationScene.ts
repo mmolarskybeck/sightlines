@@ -10,7 +10,12 @@ import type {
   WallTextWallObject
 } from "../project";
 import { getPlacementFootprintMm } from "../framing";
-import { getFloorObjectPlanRect } from "../geometry/planObjects";
+import type { FloorPartition } from "../geometry/freestandingWalls";
+import {
+  getFloorObjectPlanRect,
+  segmentPlanRect,
+  type PlanRect
+} from "../geometry/planObjects";
 import type { Point } from "../geometry/polygon";
 
 // Pure derivation: one wall's object inventory -> the static elevation
@@ -169,29 +174,48 @@ export type ElevationSceneSuspendedArtworkGhost = {
   heightMm: number;
 };
 
-// Projects a floor object's rotated plan footprint onto the wall's along-axis.
-// Returns the [xMin, xMax] wall-local range (mm from the wall's start),
-// clamped to [0, wallLengthMm], or null when the footprint does not overlap
-// the wall's extent at all (entirely off either end). Reuses
-// getFloorObjectPlanRect for the footprint, then projects its four corners.
+// A plan rect's shadow on one wall: the along-wall extent plus how the
+// footprint sits relative to the wall's VIEWER side.
+export type PlanRectWallProjection = {
+  // Wall-local x range (mm from the wall's start), clamped to [0, wallLengthMm].
+  xMinMm: number;
+  xMaxMm: number;
+  // Perpendicular distance from the wall line to the NEAREST corner, measured
+  // along the wall's viewer-side normal — 0 when the footprint touches or
+  // crosses the line. Never negative (see onViewerSide for "fully behind").
+  gapMm: number;
+  // false when EVERY corner sits on the non-viewer side of the wall line: the
+  // rect is behind this face and invisible from its elevation. Callers that
+  // ghost things standing in the room (floor cases, boards) have historically
+  // ignored this — the room filter upstream already did that job for them.
+  onViewerSide: boolean;
+};
+
+// Projects a (possibly rotated) plan rect onto the wall's along-axis by
+// projecting its four corners. Returns null when the footprint does not overlap
+// the wall's [0, wallLengthMm] extent at all (entirely off either end).
 //
-// Kind-agnostic on purpose (floor cases AND suspended artwork boards run
-// through this one function): the along-wall extent of a rotated rectangle is
-// the same problem either way, and a second copy would be free to drift.
-// Rotation is genuinely handled — the corner formula here is character-for-
-// character the one in planRectIntersectsRect, so a 45° board correctly reports
-// the WIDER |w·cos| + |d·sin| span rather than its own width.
-export function projectFloorObjectOntoWall(
-  floorObject: FloorObject,
+// Kind-agnostic on purpose (floor cases, suspended artwork boards AND partition
+// slabs run through this one function): the along-wall extent of a rotated
+// rectangle is the same problem either way, and a second copy would be free to
+// drift. Rotation is genuinely handled — the corner formula here is character-
+// for-character the one in planRectIntersectsRect, so a 45° board correctly
+// reports the WIDER |w·cos| + |d·sin| span rather than its own width.
+//
+// The viewer-side normal is the LEFT of start→end ((-dy, dx)/L, see
+// unitLeftNormalOrZero) — the ONE handedness convention in this codebase, the
+// same one partition faces are offset along in freestandingWalls.ts, so a face
+// and the perimeter walls it faces agree on which side a viewer stands.
+export function projectPlanRectOntoWall(
+  rect: PlanRect,
   wallStartFloorMm: Point,
   wallEndFloorMm: Point
-): { xMinMm: number; xMaxMm: number } | null {
+): PlanRectWallProjection | null {
   const dirX = wallEndFloorMm.xMm - wallStartFloorMm.xMm;
   const dirY = wallEndFloorMm.yMm - wallStartFloorMm.yMm;
   const wallLengthMm = Math.hypot(dirX, dirY);
   if (wallLengthMm === 0) return null;
 
-  const rect = getFloorObjectPlanRect(floorObject);
   const angleRad = (rect.angleDeg * Math.PI) / 180;
   const cos = Math.cos(angleRad);
   const sin = Math.sin(angleRad);
@@ -200,30 +224,81 @@ export function projectFloorObjectOntoWall(
 
   // Wall-local x (mm from start) of a floor point = its scalar projection onto
   // the unit start→end direction. Unclamped, so a footprint straddling an end
-  // still reports its true reach past the wall.
-  const alongOf = (localX: number, localY: number): number => {
+  // still reports its true reach past the wall. The offset is the companion
+  // projection onto the unit left normal.
+  const cornerOf = (localX: number, localY: number): { alongMm: number; offsetMm: number } => {
     const px = rect.centerXMm + localX * cos - localY * sin;
     const py = rect.centerYMm + localX * sin + localY * cos;
-    return ((px - wallStartFloorMm.xMm) * dirX + (py - wallStartFloorMm.yMm) * dirY) / wallLengthMm;
+    const relX = px - wallStartFloorMm.xMm;
+    const relY = py - wallStartFloorMm.yMm;
+    return {
+      alongMm: (relX * dirX + relY * dirY) / wallLengthMm,
+      offsetMm: (relX * -dirY + relY * dirX) / wallLengthMm
+    };
   };
 
-  const alongs = [
-    alongOf(-halfW, -halfD),
-    alongOf(halfW, -halfD),
-    alongOf(halfW, halfD),
-    alongOf(-halfW, halfD)
+  const corners = [
+    cornerOf(-halfW, -halfD),
+    cornerOf(halfW, -halfD),
+    cornerOf(halfW, halfD),
+    cornerOf(-halfW, halfD)
   ];
+  const alongs = corners.map((corner) => corner.alongMm);
+  const offsets = corners.map((corner) => corner.offsetMm);
   const rawMin = Math.min(...alongs);
   const rawMax = Math.max(...alongs);
 
-  // No overlap with the wall's [0, wallLengthMm] extent → no ghost.
+  // No overlap with the wall's [0, wallLengthMm] extent → no shadow.
   if (rawMax <= 0 || rawMin >= wallLengthMm) return null;
 
   return {
     xMinMm: Math.max(0, rawMin),
-    xMaxMm: Math.min(wallLengthMm, rawMax)
+    xMaxMm: Math.min(wallLengthMm, rawMax),
+    gapMm: Math.max(0, Math.min(...offsets)),
+    onViewerSide: Math.max(...offsets) > 0
   };
 }
+
+// Projects a floor object's rotated plan footprint onto the wall's along-axis.
+// Returns the [xMin, xMax] wall-local range, or null when it doesn't overlap
+// the wall at all — a thin view over projectPlanRectOntoWall that keeps the
+// side-relationship fields out of the floor-ghost call sites, which filter by
+// room membership instead.
+export function projectFloorObjectOntoWall(
+  floorObject: FloorObject,
+  wallStartFloorMm: Point,
+  wallEndFloorMm: Point
+): { xMinMm: number; xMaxMm: number } | null {
+  const projection = projectPlanRectOntoWall(
+    getFloorObjectPlanRect(floorObject),
+    wallStartFloorMm,
+    wallEndFloorMm
+  );
+  if (!projection) return null;
+  return { xMinMm: projection.xMinMm, xMaxMm: projection.xMaxMm };
+}
+
+// A partition standing in front of this wall gets a projected profile rather
+// than nothing at all: from the wall's own elevation it is architecture that
+// divides the surface into hanging zones, and until now it left no trace.
+// TWO TIERS, keyed on gapMm:
+//  - abutting (gap ≤ PARTITION_ABUT_THRESHOLD_MM): a SOLID band painted OVER
+//    the wall objects — the partition physically meets this wall, so it really
+//    does cut the surface in two;
+//  - freestanding (gap beyond that): a dashed ghost OUTLINE in the existing
+//    elevation ghost language, painted BEFORE the wall objects so it can never
+//    occlude hung work.
+// Both are inert — this is a drawing, not a placement rule.
+export const PARTITION_ABUT_THRESHOLD_MM = 150;
+
+export type ElevationScenePartitionProfile = {
+  partition: FloorPartition;
+  xMinMm: number;
+  xMaxMm: number;
+  // The partition's true height; the profile rises from the floor line to it.
+  heightMm: number;
+  abutting: boolean;
+};
 
 export type ElevationScene = {
   wallLengthMm: number;
@@ -247,6 +322,10 @@ export type ElevationScene = {
   // this wall, same projection, floating y-span. Empty unless the caller
   // supplies floorArtworks + the wall's floor-space endpoints.
   suspendedArtworkGhosts: ElevationSceneSuspendedArtworkGhost[];
+  // Free-standing partitions in front of this wall, projected onto its
+  // along-axis. Empty unless the caller supplies partitions + the wall's
+  // floor-space endpoints.
+  partitionProfiles: ElevationScenePartitionProfile[];
 };
 
 export type ElevationSceneOptions = {
@@ -266,6 +345,12 @@ export type ElevationSceneOptions = {
   // lives in the builder so every consumer, canvas and PDF alike, agrees on
   // which floor artworks are visible in elevation.
   floorArtworks?: ArtworkFloorObject[];
+  // Free-standing partitions in the room containing this wall, in floor space
+  // (getFloorPartitions). The caller owns BOTH gates, mirroring floorCases:
+  // the room filter, and — when the viewed wall is itself a partition face —
+  // dropping the partition that face belongs to, which would otherwise project
+  // its own thickness onto itself.
+  partitions?: FloorPartition[];
   wallStartFloorMm?: Point;
   wallEndFloorMm?: Point;
 };
@@ -282,6 +367,7 @@ export function buildElevationScene(
     artworksById,
     floorCases,
     floorArtworks,
+    partitions,
     wallStartFloorMm,
     wallEndFloorMm
   } = options;
@@ -379,6 +465,30 @@ export function buildElevationScene(
     }
   }
 
+  // Partition profiles: the partition's plan slab (centerline + thickness)
+  // projected onto this wall. Unlike the floor ghosts these DO test the viewer
+  // side — a partition behind the wall face being viewed is masonry the viewer
+  // cannot see, and the room filter alone can't tell the two sides of a
+  // partition face apart.
+  const partitionProfiles: ElevationScenePartitionProfile[] = [];
+  if (partitions && wallStartFloorMm && wallEndFloorMm) {
+    for (const partition of partitions) {
+      const projection = projectPlanRectOntoWall(
+        segmentPlanRect(partition.startMm, partition.endMm, partition.thicknessMm),
+        wallStartFloorMm,
+        wallEndFloorMm
+      );
+      if (!projection || !projection.onViewerSide) continue;
+      partitionProfiles.push({
+        partition,
+        xMinMm: projection.xMinMm,
+        xMaxMm: projection.xMaxMm,
+        heightMm: partition.heightMm,
+        abutting: projection.gapMm <= PARTITION_ABUT_THRESHOLD_MM
+      });
+    }
+  }
+
   return {
     wallLengthMm,
     wallHeightMm,
@@ -389,6 +499,7 @@ export function buildElevationScene(
     wallTexts,
     cases,
     floorCaseGhosts,
-    suspendedArtworkGhosts
+    suspendedArtworkGhosts,
+    partitionProfiles
   };
 }

@@ -273,7 +273,7 @@ export function buildPlanScene(project: Project, options: PlanSceneOptions = {})
     })
   }));
 
-  const partitions: PlanScenePartition[] = getFloorPartitions(project).map((partition) => ({
+  const partitions: PlanScenePartition[] = getFloorPartitions(project.floor).map((partition) => ({
     partition,
     rect: segmentPlanRect(partition.startMm, partition.endMm, partition.thicknessMm)
   }));

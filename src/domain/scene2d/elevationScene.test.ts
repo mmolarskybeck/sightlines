@@ -8,8 +8,10 @@ import type {
   ConnectableOpeningWallObject,
   WallObject
 } from "../project";
+import type { FloorPartition } from "../geometry/freestandingWalls";
 import {
   buildElevationScene,
+  PARTITION_ABUT_THRESHOLD_MM,
   projectFloorObjectOntoWall,
   wallLocalYToSvgY
 } from "./elevationScene";
@@ -358,5 +360,156 @@ describe("buildElevationScene suspended-artwork ghosts", () => {
     // box, slab, legs) — a board must never land in that array.
     expect(scene.floorCaseGhosts.map((ghost) => ghost.object.id)).toEqual(["floor-case"]);
     expect(scene.suspendedArtworkGhosts.map((ghost) => ghost.object.id)).toEqual(["floor-board"]);
+  });
+});
+
+// WALL_START→WALL_END runs +x along y=0, so the LEFT normal (the codebase's
+// one viewer-side convention, unitLeftNormalOrZero) is +y: the viewer stands at
+// POSITIVE y, which is exactly where the floor cases and boards above sit. Every
+// partition below is positioned against that fact.
+function partition(overrides: Partial<FloorPartition> = {}): FloorPartition {
+  return {
+    wallId: "partition-1",
+    roomId: "room-1",
+    startMm: { xMm: 3000, yMm: 0 },
+    endMm: { xMm: 3000, yMm: 2000 },
+    thicknessMm: 100,
+    heightMm: 2400,
+    name: "Partition 1",
+    ...overrides
+  };
+}
+
+function buildPartitionScene(partitions: FloorPartition[]) {
+  return buildElevationScene([], {
+    ...WALL,
+    partitions,
+    wallStartFloorMm: WALL_START,
+    wallEndFloorMm: WALL_END
+  });
+}
+
+describe("buildElevationScene partition profiles", () => {
+  it("projects a perpendicular partition meeting the wall to a thickness-wide abutting band", () => {
+    const scene = buildPartitionScene([partition()]);
+
+    expect(scene.partitionProfiles).toHaveLength(1);
+    const profile = scene.partitionProfiles[0]!;
+    // Seen end-on, the partition shows only its end cap: 100 mm of thickness
+    // centered on x=3000 — NOT its 2000 mm length.
+    expect(profile.xMinMm).toBeCloseTo(2950);
+    expect(profile.xMaxMm).toBeCloseTo(3050);
+    expect(profile.heightMm).toBe(2400);
+    expect(profile.abutting).toBe(true);
+    expect(profile.partition.wallId).toBe("partition-1");
+  });
+
+  it("ghosts a parallel partition standing a metre off the wall", () => {
+    const scene = buildPartitionScene([
+      partition({
+        startMm: { xMm: 2000, yMm: 1000 },
+        endMm: { xMm: 5000, yMm: 1000 }
+      })
+    ]);
+
+    const profile = scene.partitionProfiles[0]!;
+    // Seen broadside: its full 3000 mm length.
+    expect(profile.xMinMm).toBeCloseTo(2000);
+    expect(profile.xMaxMm).toBeCloseTo(5000);
+    // Nearest face is 950 mm off the wall — well past the abut threshold.
+    expect(profile.abutting).toBe(false);
+  });
+
+  it("counts a partition exactly at the abut threshold as abutting", () => {
+    // Face-to-wall gap = 200 − thickness/2 = 150 = the threshold itself.
+    const scene = buildPartitionScene([
+      partition({
+        startMm: { xMm: 2000, yMm: PARTITION_ABUT_THRESHOLD_MM + 50 },
+        endMm: { xMm: 5000, yMm: PARTITION_ABUT_THRESHOLD_MM + 50 }
+      })
+    ]);
+
+    expect(scene.partitionProfiles[0]!.abutting).toBe(true);
+  });
+
+  it("emits nothing for a partition entirely on the wall's non-viewer side", () => {
+    // Handedness pin: the viewer of a wall running start→end is on its LEFT
+    // (+y here). A partition at NEGATIVE y is behind this face — masonry the
+    // viewer cannot see — while its mirror image at positive y is visible. If
+    // the normal ever flips, exactly one of these two assertions breaks.
+    const behind = buildPartitionScene([
+      partition({
+        startMm: { xMm: 2000, yMm: -1500 },
+        endMm: { xMm: 5000, yMm: -1500 }
+      })
+    ]);
+    expect(behind.partitionProfiles).toHaveLength(0);
+
+    const inFront = buildPartitionScene([
+      partition({
+        startMm: { xMm: 2000, yMm: 1500 },
+        endMm: { xMm: 5000, yMm: 1500 }
+      })
+    ]);
+    expect(inFront.partitionProfiles).toHaveLength(1);
+  });
+
+  it("treats a partition crossing the wall line as abutting and clamps its span", () => {
+    const scene = buildPartitionScene([
+      partition({
+        startMm: { xMm: 7900, yMm: -500 },
+        endMm: { xMm: 7900, yMm: 1500 },
+        thicknessMm: 400
+      })
+    ]);
+
+    const profile = scene.partitionProfiles[0]!;
+    // Raw span 7700..8100; the far end is clamped to the wall's 8000 extent.
+    expect(profile.xMinMm).toBeCloseTo(7700);
+    expect(profile.xMaxMm).toBeCloseTo(8000);
+    // Corners on both sides of the line → the gap floors at 0, never negative.
+    expect(profile.abutting).toBe(true);
+  });
+
+  it("projects an oblique partition to a span between its thickness and its length", () => {
+    const scene = buildPartitionScene([
+      partition({
+        startMm: { xMm: 3000, yMm: 500 },
+        endMm: { xMm: 4000, yMm: 1500 },
+        thicknessMm: 200
+      })
+    ]);
+
+    const profile = scene.partitionProfiles[0]!;
+    // 45°: |L·cos45| + |t·sin45| = 1000 + 141.42, centered on x=3500.
+    expect(profile.xMinMm).toBeCloseTo(2929.29, 1);
+    expect(profile.xMaxMm).toBeCloseTo(4070.71, 1);
+    const spanMm = profile.xMaxMm - profile.xMinMm;
+    expect(spanMm).toBeGreaterThan(200);
+    expect(spanMm).toBeLessThan(Math.hypot(1000, 1000));
+    // Nearest corner is 429 mm out — a freestanding ghost, not a band.
+    expect(profile.abutting).toBe(false);
+  });
+
+  it("emits nothing for a partition entirely off the wall's extent", () => {
+    const scene = buildPartitionScene([
+      partition({ startMm: { xMm: 12000, yMm: 0 }, endMm: { xMm: 12000, yMm: 2000 } })
+    ]);
+
+    expect(scene.partitionProfiles).toHaveLength(0);
+  });
+
+  it("emits no profiles when the wall geometry is not supplied", () => {
+    const scene = buildElevationScene([], { ...WALL, partitions: [partition()] });
+    expect(scene.partitionProfiles).toHaveLength(0);
+  });
+
+  it("emits no profiles when no partitions are supplied", () => {
+    const scene = buildElevationScene([], {
+      ...WALL,
+      wallStartFloorMm: WALL_START,
+      wallEndFloorMm: WALL_END
+    });
+    expect(scene.partitionProfiles).toEqual([]);
   });
 });

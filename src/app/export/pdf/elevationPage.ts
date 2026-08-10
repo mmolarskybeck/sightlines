@@ -326,3 +326,29 @@ export function drawElevationFloorCaseGhost(
     );
   }
 }
+
+// A free-standing partition projected onto this wall, print twin of
+// ElevationPartitionProfile.tsx. Abutting → a solid slab in the same ink and
+// opacity the plan page fills its partition slabs with (planPage.ts), drawn
+// AFTER the wall objects; otherwise → the dashed subtle outline the floor-case
+// ghost uses, drawn BEFORE them. The caller owns that ordering, exactly as it
+// does on the canvas — this only draws one profile in its own tier.
+export function drawElevationPartitionProfile(
+  page: PDFPage,
+  transform: ElevationTransform,
+  profile: ElevationScene["partitionProfiles"][number]
+) {
+  const widthMm = Math.max(0, profile.xMaxMm - profile.xMinMm);
+  const rect = elevationRect(transform, profile.xMinMm, 0, widthMm, profile.heightMm);
+
+  if (profile.abutting) {
+    page.drawRectangle({ ...rect, color: COLORS.ink, opacity: 0.72 });
+    return;
+  }
+  page.drawRectangle({
+    ...rect,
+    borderColor: COLORS.subtle,
+    borderWidth: 0.5,
+    borderDashArray: [3, 2]
+  });
+}

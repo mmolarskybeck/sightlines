@@ -14,6 +14,10 @@ import {
   getArtworkRingRectsMm
 } from "../../domain/framing";
 import { getRoomPlaceableWalls } from "../../domain/geometry/placeableWalls";
+import {
+  getFloorPartitions,
+  parseFaceWallId
+} from "../../domain/geometry/freestandingWalls";
 import { getFloorWalls } from "../../domain/geometry/planObjects";
 import { isPointInPolygon } from "../../domain/geometry/polygon";
 import { derivePlanSceneGaps } from "../../domain/dimensions/planDimensions";
@@ -68,6 +72,7 @@ import {
   drawElevationWallText,
   drawElevationCase,
   drawElevationFloorCaseGhost,
+  drawElevationPartitionProfile,
   drawArtworkPlaceholder
 } from "./pdf/elevationPage";
 import {
@@ -392,6 +397,16 @@ export async function createDocumentPdf(
           object.kind === "case" &&
           isPointInPolygon({ xMm: object.xMm, yMm: object.yMm }, roomPolygonMm)
       );
+      // Partitions in this room project onto the wall face as well. Room-OWNED,
+      // so they gate on roomId rather than point-in-polygon; and when this page
+      // IS a partition face, its own partition is dropped so it can't project
+      // its thickness onto itself. Same two gates the canvas applies.
+      const ownFreestandingWallId = parseFaceWallId(wall.id)?.freestandingWallId;
+      const elevationPartitions = getFloorPartitions(input.project.floor).filter(
+        (partition) =>
+          partition.roomId === manifestPage.roomId &&
+          partition.wallId !== ownFreestandingWallId
+      );
       const scene = buildElevationScene(input.project.wallObjects, {
         wallId: wall.id,
         wallLengthMm: wall.lengthMm,
@@ -401,6 +416,7 @@ export async function createDocumentPdf(
           input.project.defaultCenterlineHeightMm,
         artworksById,
         floorCases: elevationFloorCases,
+        partitions: elevationPartitions,
         wallStartFloorMm: {
           xMm: wall.start.xMm + placement.offsetXMm,
           yMm: wall.start.yMm + placement.offsetYMm
@@ -439,6 +455,12 @@ export async function createDocumentPdf(
       // Freestanding-case ghosts first, behind the wall objects.
       for (const ghost of scene.floorCaseGhosts) {
         drawElevationFloorCaseGhost(page, transform, ghost);
+      }
+      // Partitions standing clear of the wall ghost here too; the abutting ones
+      // are drawn after the wall objects below (canvas paint order).
+      for (const profile of scene.partitionProfiles) {
+        if (profile.abutting) continue;
+        drawElevationPartitionProfile(page, transform, profile);
       }
 
       let anonymousOrdinal = 0;
@@ -555,6 +577,12 @@ export async function createDocumentPdf(
       }
       for (const displayCase of scene.cases) {
         drawElevationCase(page, transform, displayCase);
+      }
+      // Abutting partitions paint over the wall objects — architecture meeting
+      // this wall — but still under the dimension overlay below.
+      for (const profile of scene.partitionProfiles) {
+        if (!profile.abutting) continue;
+        drawElevationPartitionProfile(page, transform, profile);
       }
       if (input.settings.dimensions) {
         drawElevationDimensions(

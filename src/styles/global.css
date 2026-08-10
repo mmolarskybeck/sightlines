@@ -7896,6 +7896,32 @@ body.panels-resizing * {
   opacity: 0.7;
 }
 
+/* A free-standing PARTITION projected onto this wall's elevation, in two tiers
+   (ElevationPartitionProfile.tsx). Standing clear of the wall it is one more
+   quiet dashed volume in front of it — the same vocabulary as the two ghosts
+   above, painted with them, behind the wall objects. */
+.elevation-partition-ghost {
+  fill: none;
+  stroke: var(--subtle);
+  stroke-width: 1;
+  stroke-dasharray: 6 5;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* ABUTTING the wall (gap ≤ PARTITION_ABUT_THRESHOLD_MM) it is not a volume in
+   the room at all, it is architecture meeting this surface and dividing it
+   into two hanging zones — so it reads as the plan view's partition slab does
+   (var(--ink), same family, a touch more opaque here since it stands against
+   the wall fill rather than the floor) and paints OVER the wall objects. Inert
+   all the same: nothing here is selectable. */
+.elevation-partition-profile {
+  fill: var(--ink);
+  fill-opacity: 0.88;
+  stroke: none;
+  pointer-events: none;
+}
+
 /* Plan-view placements — PlanObject.tsx. The outline is a little clearer than
    the elevation hairline because these objects sit on top of room geometry at
    plan scale. Kind-specific interior marks add recognition without adding a

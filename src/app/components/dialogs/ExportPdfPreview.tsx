@@ -13,6 +13,10 @@ import {
   type DoorSwingPlanGlyph
 } from "../../../domain/geometry/doorGlyphs";
 import { getRoomPlaceableWalls } from "../../../domain/geometry/placeableWalls";
+import {
+  getFloorPartitions,
+  parseFaceWallId
+} from "../../../domain/geometry/freestandingWalls";
 import { isPointInPolygon } from "../../../domain/geometry/polygon";
 import {
   buildElevationScene,
@@ -636,6 +640,28 @@ function elevationPageMarks(
     );
   });
 
+  // Free-standing partitions projected onto this wall. Non-abutting ones ghost
+  // here with the floor cases; abutting ones are a solid band after the wall
+  // objects (below), mirroring the page's own paint order.
+  scene.partitionProfiles.forEach((profile, i) => {
+    if (profile.abutting) return;
+    const a = xf.point({ xMm: profile.xMinMm, yMm: scene.wallHeightMm - profile.heightMm });
+    marks.push(
+      <rect
+        key={`partition-ghost-${i}`}
+        x={a.x}
+        y={a.y}
+        width={(profile.xMaxMm - profile.xMinMm) * xf.scalePtPerMm}
+        height={profile.heightMm * xf.scalePtPerMm}
+        fill="none"
+        stroke={SUBTLE}
+        strokeWidth={0.5}
+        strokeDasharray="3 2"
+        opacity={0.7}
+      />
+    );
+  });
+
   // Artworks: the stored image rect, filled (no per-artwork thumbnail data in
   // the dialog), with a muted border.
   scene.artworks.forEach((entry, i) => {
@@ -811,6 +837,24 @@ function elevationPageMarks(
     }
   });
 
+  // Abutting partitions: a solid slab over the wall objects, same ink/opacity
+  // as the plan page's partition slabs.
+  scene.partitionProfiles.forEach((profile, i) => {
+    if (!profile.abutting) return;
+    const a = xf.point({ xMm: profile.xMinMm, yMm: scene.wallHeightMm - profile.heightMm });
+    marks.push(
+      <rect
+        key={`partition-slab-${i}`}
+        x={a.x}
+        y={a.y}
+        width={(profile.xMaxMm - profile.xMinMm) * xf.scalePtPerMm}
+        height={profile.heightMm * xf.scalePtPerMm}
+        fill={INK}
+        opacity={0.72}
+      />
+    );
+  });
+
   // Dimension hint: a thin baseline rule just below the floor (no labels).
   if (withDimensions) {
     const y = floorA.y + 8;
@@ -847,6 +891,13 @@ function buildElevationForPage(
       object.kind === "case" &&
       isPointInPolygon({ xMm: object.xMm, yMm: object.yMm }, roomPolygonMm)
   );
+  // Same two partition gates createDocumentPdf applies: room-owned, minus the
+  // partition this page's own face belongs to.
+  const ownFreestandingWallId = parseFaceWallId(wall.id)?.freestandingWallId;
+  const partitions = getFloorPartitions(project.floor).filter(
+    (candidate) =>
+      candidate.roomId === page.roomId && candidate.wallId !== ownFreestandingWallId
+  );
   return buildElevationScene(project.wallObjects, {
     wallId: wall.id,
     wallLengthMm: wall.lengthMm,
@@ -855,6 +906,7 @@ function buildElevationForPage(
       wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm,
     artworksById,
     floorCases,
+    partitions,
     wallStartFloorMm: {
       xMm: wall.start.xMm + placement.offsetXMm,
       yMm: wall.start.yMm + placement.offsetYMm

@@ -53,6 +53,10 @@ import type {
 } from "../../../domain/project";
 import { getFloorWalls } from "../../../domain/geometry/planObjects";
 import { getRoomPlaceableWalls } from "../../../domain/geometry/placeableWalls";
+import {
+  getFloorPartitions,
+  parseFaceWallId
+} from "../../../domain/geometry/freestandingWalls";
 import { isPointInPolygon } from "../../../domain/geometry/polygon";
 import { resolveArtworkSnap } from "../../../domain/snapping/artworkSnapTargets";
 import {
@@ -106,6 +110,7 @@ import {
 import { ElevationArtwork } from "./ElevationArtwork";
 import { ElevationOpening } from "./ElevationOpening";
 import { ElevationCase, ElevationFloorCaseGhost } from "./ElevationCase";
+import { ElevationPartitionProfile } from "./ElevationPartitionProfile";
 import { ElevationSuspendedArtworkGhost } from "./ElevationSuspendedArtworkGhost";
 import { ElevationWallText } from "./ElevationWallText";
 import {
@@ -634,6 +639,9 @@ export function ElevationView({
   // cases already pass, not by a parallel rule that could drift looser. Floor
   // artworks are handed over unfiltered by height — buildElevationScene owns the
   // "only suspended ones ghost" rule so the canvas and any export agree.
+  //
+  // Free-standing PARTITIONS ride along here too (same wall endpoints, same
+  // projection), on their own room gate — see below.
   const floorGhostInputs = useMemo(() => {
     if (!wallId || !floorRooms) return null;
     const floorWall = getFloorWalls({ rooms: floorRooms }).find((wall) => wall.id === wallId);
@@ -655,10 +663,26 @@ export function ElevationView({
     const floorArtworks = floorObjects.filter(
       (object): object is ArtworkFloorObject => object.kind === "artwork" && inThisRoom(object)
     );
-    if (floorCases.length === 0 && floorArtworks.length === 0) return null;
+    // Partitions are ROOM-OWNED, so they filter by roomId rather than by the
+    // point-in-polygon test the floor objects need — a partition may legally
+    // run right along the room boundary, where point-in-polygon is a coin toss.
+    // The one extra exclusion: when the viewed wall is itself a partition FACE,
+    // that partition must not project onto its own elevation.
+    const ownFreestandingWallId = parseFaceWallId(wallId)?.freestandingWallId;
+    const partitions = room
+      ? getFloorPartitions({ rooms: floorRooms }).filter(
+          (partition) =>
+            partition.roomId === room.roomId &&
+            partition.wallId !== ownFreestandingWallId
+        )
+      : [];
+    if (floorCases.length === 0 && floorArtworks.length === 0 && partitions.length === 0) {
+      return null;
+    }
     return {
       floorCases,
       floorArtworks,
+      partitions,
       wallStartFloorMm: floorWall.startFloorMm,
       wallEndFloorMm: floorWall.endFloorMm
     };
@@ -1777,6 +1801,18 @@ export function ElevationView({
       yMm: ghost.baseHeightMm + ghost.heightMm / 2,
       widthMm: ghost.xMaxMm - ghost.xMinMm,
       heightMm: ghost.heightMm
+    })),
+    // Projected partitions bound a gap line for exactly the same reason — more
+    // strongly, in fact, for an abutting one: the hanging zone it creates ENDS
+    // at the slab, and a dimension running past it would describe wall the
+    // curator can't use. Both tiers participate; the tier is a paint decision.
+    ...elevationScene.partitionProfiles.map((profile) => ({
+      id: profile.partition.wallId,
+      wallId: wallId ?? "",
+      xMm: (profile.xMinMm + profile.xMaxMm) / 2,
+      yMm: profile.heightMm / 2,
+      widthMm: profile.xMaxMm - profile.xMinMm,
+      heightMm: profile.heightMm
     }))
   ];
   const effectiveDimensionOthers: WallObjectBase[] = [
@@ -2034,6 +2070,21 @@ export function ElevationView({
             xMinMm={ghost.xMinMm}
           />
         ))}
+        {/* Partitions standing CLEAR of this wall join the ghost band: quiet,
+            dashed, behind the wall objects. The abutting ones are drawn much
+            later, after the wall objects — see below. */}
+        {elevationScene.partitionProfiles
+          .filter((profile) => !profile.abutting)
+          .map((profile) => (
+            <ElevationPartitionProfile
+              key={profile.partition.wallId}
+              abutting={false}
+              heightMm={profile.heightMm}
+              wallHeightMm={wallHeightMm}
+              xMaxMm={profile.xMaxMm}
+              xMinMm={profile.xMinMm}
+            />
+          ))}
         {elevationScene.artworks.map(({ object: placement, artwork, centerMm, sizeMm, outOfBounds }) => {
           const previewCenter = previewCenterById.get(placement.id);
           const center = previewCenter ?? centerMm;
@@ -2255,6 +2306,23 @@ export function ElevationView({
             />
           );
         })}
+        {/* ABUTTING partitions paint over the wall objects: the slab meets this
+            wall, so the surface behind it genuinely isn't hangable and work
+            drawn there should read as covered. Still before the drafting
+            overlays (dimension lines, guides, measurements) below, which must
+            stay readable on top of everything. */}
+        {elevationScene.partitionProfiles
+          .filter((profile) => profile.abutting)
+          .map((profile) => (
+            <ElevationPartitionProfile
+              key={profile.partition.wallId}
+              abutting
+              heightMm={profile.heightMm}
+              wallHeightMm={wallHeightMm}
+              xMaxMm={profile.xMaxMm}
+              xMinMm={profile.xMinMm}
+            />
+          ))}
         {!exportMode && dropGhost ? (
           <ElevationArtwork
             center={dropGhost.centerMm}
