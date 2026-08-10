@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
+import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { DotsSixVerticalIcon } from "@phosphor-icons/react/dist/csr/DotsSixVertical";
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { FileArrowUpIcon } from "@phosphor-icons/react/dist/csr/FileArrowUp";
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
+import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
@@ -25,17 +27,16 @@ import { UncertaintyIndicator } from "./UncertaintyIndicator";
 import { Button } from "../ui/button";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger
 } from "../ui/dropdown-menu";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "../ui/select";
+import { Input } from "../ui/input";
 import {
   SegmentedToggleGroup,
   SegmentedToggleGroupItem
@@ -86,6 +87,12 @@ export type ChecklistRowData = {
   placementIds: string[];
 };
 
+export type ChecklistArtistGroup = {
+  key: string;
+  label: string;
+  rows: ChecklistRowData[];
+};
+
 // The left workspace pane (docs/plan.md §3.5, §4.1): checklist membership is
 // independent of both the library and wall placement, so a row here can be a
 // fully-formed artwork, or — if its library record has since been deleted out
@@ -131,6 +138,12 @@ export function ChecklistPanel({
   const [isDropActive, setIsDropActive] = useState(false);
   const [filter, setFilter] = useState<ChecklistFilter>("all");
   const [sort, setSort] = useState<ChecklistSort>("project");
+  const [groupByArtist, setGroupByArtist] = useState(false);
+  const [collapsedArtistKeys, setCollapsedArtistKeys] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   // Removing a work from the checklist is a two-step inline confirm (same
   // idiom as RoomsPanel's room delete): the overflow menu arms this, and only
   // the Remove button in the swapped-in strip actually dispatches.
@@ -141,6 +154,9 @@ export function ChecklistPanel({
   // nesting depth keeps it lit until the drag has actually left the section.
   const dragDepthRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchInputId = useId();
+  const previousProjectIdRef = useRef(project.id);
 
   const artworksById = useMemo(
     () => new Map(libraryArtworks.map((artwork) => [artwork.id, artwork])),
@@ -205,20 +221,65 @@ export function ChecklistPanel({
     };
   });
 
-  const placedCount = rows.filter((row) => row.isPlaced).length;
-  const unplacedCount = rows.length - placedCount;
+  const searchMatchedRows = rows.filter((row) => checklistRowMatchesQuery(row, searchQuery));
+  const placedCount = searchMatchedRows.filter((row) => row.isPlaced).length;
+  const unplacedCount = searchMatchedRows.length - placedCount;
   const visibleRows = sortChecklistRows(
-    rows.filter((row) =>
+    searchMatchedRows.filter((row) =>
       filter === "placed" ? row.isPlaced : filter === "unplaced" ? !row.isPlaced : true
     ),
     sort
   );
+  const artistGroups = groupChecklistRowsByArtist(visibleRows);
+  const allArtistKeys = groupChecklistRowsByArtist(sortChecklistRows(rows, "artist")).map(
+    (group) => group.key
+  );
+  const searchIsActive = searchQuery.trim().length > 0;
+  const renderedRows = groupByArtist
+    ? artistGroups.flatMap((group) =>
+        searchIsActive || !collapsedArtistKeys.has(group.key) ? group.rows : []
+      )
+    : visibleRows;
+
+  useEffect(() => {
+    if (isSearchOpen) searchInputRef.current?.focus();
+  }, [isSearchOpen]);
+
+  // Search and artist disclosures are temporary workspace aids. A project
+  // switch must never carry a stale query or a previous exhibition's hidden
+  // artists into the newly opened checklist.
+  useEffect(() => {
+    if (previousProjectIdRef.current === project.id) return;
+    previousProjectIdRef.current = project.id;
+    setFilter("all");
+    setSort("project");
+    setGroupByArtist(false);
+    setCollapsedArtistKeys(new Set());
+    setSearchQuery("");
+    setIsSearchOpen(false);
+  }, [project.id]);
+
+  // Selection can move from the canvas or inspector while its artist is
+  // hidden. Open that one group so the checklist always reflects the current
+  // selection, without closing any other groups the curator is using.
+  useEffect(() => {
+    if (!groupByArtist || selectedArtworkId === null) return;
+    const selectedRow = rows.find((row) => row.artworkId === selectedArtworkId);
+    if (!selectedRow) return;
+    const selectedArtistKey = artistGroupIdentity(selectedRow).key;
+    setCollapsedArtistKeys((current) => {
+      if (!current.has(selectedArtistKey)) return current;
+      const next = new Set(current);
+      next.delete(selectedArtistKey);
+      return next;
+    });
+  }, [groupByArtist, rows, selectedArtworkId]);
 
   // Disarm a pending remove-confirm whenever the row it belongs to could have
   // moved out from under the user — a filter/sort change that hides it, or the
   // row disappearing by another route. Otherwise the strip can sit armed on a
   // row the user has left behind.
-  const isConfirmingRowVisible = visibleRows.some(
+  const isConfirmingRowVisible = renderedRows.some(
     (row) => row.artworkId === confirmingRemoveArtworkId
   );
   useEffect(() => {
@@ -243,7 +304,7 @@ export function ChecklistPanel({
   }, [confirmingRemoveArtworkId, selectedArtworkId]);
 
   const thumbnailUrlsByAssetId = useAssetImageUrls(
-    rows.map((row) => row.artwork?.assetId),
+    renderedRows.map((row) => row.artwork?.assetId),
     getBlob
   );
 
@@ -261,6 +322,38 @@ export function ChecklistPanel({
     if (fileArray.length === 0) return;
     void onAddArtworksFromFiles(fileArray);
   };
+
+  const renderChecklistRow = (row: ChecklistRowData) => (
+    <ChecklistRow
+      key={row.artworkId}
+      artwork={row.artwork}
+      artworkId={row.artworkId}
+      isConfirmingRemove={row.artworkId === confirmingRemoveArtworkId}
+      hasPlacement={row.placementIds.length > 0}
+      isPlaced={row.isPlaced}
+      isSelected={row.artworkId === selectedArtworkId}
+      thumbnailUrl={
+        row.artwork?.assetId
+          ? thumbnailUrlsByAssetId.get(row.artwork.assetId)
+          : undefined
+      }
+      unit={artworkUnit}
+      wallName={row.wallName}
+      onRemovePlacement={() => {
+        for (const placementId of row.placementIds) {
+          void onRemovePlacement(placementId);
+        }
+      }}
+      onRequestRemove={() => setConfirmingRemoveArtworkId(row.artworkId)}
+      onCancelRemove={() => setConfirmingRemoveArtworkId(null)}
+      onConfirmRemove={() => {
+        setConfirmingRemoveArtworkId(null);
+        void onRemoveArtworkFromChecklist(row.artworkId);
+      }}
+      onSelect={() => onSelectArtwork(row.artworkId)}
+      onDragStateChange={onArtworkDragStateChange}
+    />
+  );
 
   return (
     <section
@@ -291,7 +384,8 @@ export function ChecklistPanel({
         <h2>Checklist</h2>
         <div className="panel-heading-actions">
           <span>
-            {rows.length} work{rows.length === 1 ? "" : "s"}
+            {searchIsActive ? `${visibleRows.length} of ${rows.length}` : rows.length} work
+            {rows.length === 1 ? "" : "s"}
           </span>
           {intakeState === "processing" ? (
             <span className="intake-note">Adding…</span>
@@ -333,7 +427,7 @@ export function ChecklistPanel({
       ) : null}
 
       {rows.length > 0 ? (
-        <div className="checklist-controls">
+        <div className="checklist-controls" data-search-open={isSearchOpen ? "" : undefined}>
           <SegmentedToggleGroup
             aria-label="Filter checklist"
             className="checklist-filters"
@@ -346,7 +440,7 @@ export function ChecklistPanel({
             }}
           >
             <FilterTab
-              count={rows.length}
+              count={searchMatchedRows.length}
               label="All"
               value="all"
             />
@@ -362,40 +456,144 @@ export function ChecklistPanel({
             />
           </SegmentedToggleGroup>
 
-          {/* Sort is deliberately subordinate to the filter tabs: an
-              icon-only trigger docked at the track's right end, behind a
-              hairline divider so it reads as part of the same instrument.
-              The Select semantics are unchanged — the visually-hidden
-              SelectValue still announces the active sort — and a
-              non-default sort tints the icon petrol so a surprising row
-              order always has a visible cause. */}
+          {/* Search and checklist options stay subordinate to the filter
+              tabs: two icon-only triggers docked inside the same track,
+              behind one hairline. Active temporary views tint their icon so
+              hidden rows or a surprising order always have a visible cause. */}
           <div aria-hidden="true" className="checklist-sort-divider" />
-          <Select value={sort} onValueChange={(value) => setSort(value as ChecklistSort)}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-controls={`${searchInputId}-region`}
+                aria-expanded={isSearchOpen}
+                aria-label="Search checklist"
+                className="checklist-control-trigger"
+                data-active={isSearchOpen || searchIsActive ? "" : undefined}
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => {
+                  if (isSearchOpen && !searchIsActive) {
+                    setIsSearchOpen(false);
+                  } else {
+                    setIsSearchOpen(true);
+                  }
+                }}
+              >
+                <MagnifyingGlassIcon aria-hidden="true" size={14} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="toolbar-tooltip" side="bottom">
+              Search checklist
+            </TooltipContent>
+          </Tooltip>
+          <DropdownMenu>
             <Tooltip>
               <TooltipTrigger asChild>
-                <SelectTrigger
-                  aria-label="Sort checklist"
-                  className="checklist-sort-trigger"
-                  data-nondefault={sort === "project" ? undefined : ""}
-                >
-                  <ArrowsDownUpIcon aria-hidden="true" size={14} />
-                  <span className="visually-hidden">
-                    <SelectValue />
-                  </span>
-                </SelectTrigger>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    aria-label={`Checklist options. Sort: ${SORT_LABELS[sort]}${groupByArtist ? ". Grouped by artist" : ""}`}
+                    className="checklist-control-trigger"
+                    data-active={sort !== "project" || groupByArtist ? "" : undefined}
+                    size="icon-sm"
+                    variant="ghost"
+                  >
+                    <ArrowsDownUpIcon aria-hidden="true" size={14} />
+                  </Button>
+                </DropdownMenuTrigger>
               </TooltipTrigger>
               <TooltipContent className="toolbar-tooltip" side="bottom">
-                Sort: {SORT_LABELS[sort]}
+                {groupByArtist ? "Grouped by artist" : `Sort: ${SORT_LABELS[sort]}`}
               </TooltipContent>
             </Tooltip>
-            <SelectContent align="end">
-              {CHECKLIST_SORTS.map((value) => (
-                <SelectItem key={value} value={value}>
-                  {SORT_LABELS[value]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <DropdownMenuContent align="end" className="checklist-options-menu">
+              <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={sort}
+                onValueChange={(value) => {
+                  const nextSort = value as ChecklistSort;
+                  setSort(nextSort);
+                  if (nextSort !== "artist") setGroupByArtist(false);
+                }}
+              >
+                {CHECKLIST_SORTS.map((value) => (
+                  <DropdownMenuRadioItem key={value} value={value}>
+                    {SORT_LABELS[value]}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuCheckboxItem
+                checked={groupByArtist}
+                onCheckedChange={(checked) => {
+                  const enabled = checked === true;
+                  setGroupByArtist(enabled);
+                  if (enabled) setSort("artist");
+                }}
+              >
+                Group by artist
+              </DropdownMenuCheckboxItem>
+              {groupByArtist ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    disabled={allArtistKeys.every((key) => collapsedArtistKeys.has(key))}
+                    onSelect={() => setCollapsedArtistKeys(new Set(allArtistKeys))}
+                  >
+                    Collapse all artists
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={collapsedArtistKeys.size === 0}
+                    onSelect={() => setCollapsedArtistKeys(new Set())}
+                  >
+                    Expand all artists
+                  </DropdownMenuItem>
+                </>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      ) : null}
+
+      {rows.length > 0 && isSearchOpen ? (
+        <div className="checklist-search" id={`${searchInputId}-region`} role="search">
+          <MagnifyingGlassIcon aria-hidden="true" size={15} />
+          <label className="visually-hidden" htmlFor={searchInputId}>
+            Search checklist
+          </label>
+          <Input
+            ref={searchInputRef}
+            id={searchInputId}
+            placeholder="Search checklist"
+            size="compact"
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              setSearchQuery("");
+              setIsSearchOpen(false);
+            }}
+          />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label={searchIsActive ? "Clear and close search" : "Close search"}
+                className="icon-button compact checklist-search-close"
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => {
+                  setSearchQuery("");
+                  setIsSearchOpen(false);
+                }}
+              >
+                <XIcon aria-hidden="true" size={13} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="toolbar-tooltip" side="bottom">
+              {searchIsActive ? "Clear search" : "Close search"}
+            </TooltipContent>
+          </Tooltip>
         </div>
       ) : null}
 
@@ -407,50 +605,45 @@ export function ChecklistPanel({
           </p>
         </div>
       ) : visibleRows.length === 0 ? (
-        <p className="empty-copy checklist-filter-empty">
-          {filter === "placed" ? "Nothing placed yet." : "Everything is placed."}
-        </p>
+        <div className="checklist-filter-empty">
+          <p className="empty-copy">
+            {searchIsActive
+              ? filter === "placed"
+                ? `No placed works match “${searchQuery.trim()}”.`
+                : filter === "unplaced"
+                  ? `No unplaced works match “${searchQuery.trim()}”.`
+                  : `No works match “${searchQuery.trim()}”.`
+              : filter === "placed"
+                ? "Nothing placed yet."
+                : "Everything is placed."}
+          </p>
+          {searchIsActive ? (
+            <Button size="sm" variant="outline" onClick={() => setSearchQuery("")}>
+              Clear search
+            </Button>
+          ) : null}
+        </div>
       ) : (
         <ul className="checklist-list">
-          {visibleRows.map((row) => (
-            <ChecklistRow
-              key={row.artworkId}
-              artwork={row.artwork}
-              artworkId={row.artworkId}
-              isConfirmingRemove={row.artworkId === confirmingRemoveArtworkId}
-              // Gates the menu's "Remove from wall" item. Tracked separately
-              // from isPlaced so the item is never offered with nothing to
-              // remove.
-              hasPlacement={row.placementIds.length > 0}
-              isPlaced={row.isPlaced}
-              isSelected={row.artworkId === selectedArtworkId}
-              thumbnailUrl={
-                row.artwork?.assetId
-                  ? thumbnailUrlsByAssetId.get(row.artwork.assetId)
-                  : undefined
-              }
-              unit={artworkUnit}
-              wallName={row.wallName}
-              // Unplaces and only unplaces. Both removals now live in the
-              // row's overflow menu, named apart ("Remove from wall" vs
-              // "Remove from checklist") and only the checklist one armed
-              // behind the two-step confirm — the destructive one is the one
-              // that needs the second press.
-              onRemovePlacement={() => {
-                for (const placementId of row.placementIds) {
-                  void onRemovePlacement(placementId);
-                }
-              }}
-              onRequestRemove={() => setConfirmingRemoveArtworkId(row.artworkId)}
-              onCancelRemove={() => setConfirmingRemoveArtworkId(null)}
-              onConfirmRemove={() => {
-                setConfirmingRemoveArtworkId(null);
-                void onRemoveArtworkFromChecklist(row.artworkId);
-              }}
-              onSelect={() => onSelectArtwork(row.artworkId)}
-              onDragStateChange={onArtworkDragStateChange}
-            />
-          ))}
+          {groupByArtist
+            ? artistGroups.map((group) => (
+                <ArtistChecklistGroup
+                  key={group.key}
+                  group={group}
+                  isOpen={searchIsActive || !collapsedArtistKeys.has(group.key)}
+                  onOpenChange={(open) => {
+                    if (searchIsActive) return;
+                    setCollapsedArtistKeys((current) => {
+                      const next = new Set(current);
+                      if (open) next.delete(group.key);
+                      else next.add(group.key);
+                      return next;
+                    });
+                  }}
+                  renderRow={renderChecklistRow}
+                />
+              ))
+            : visibleRows.map(renderChecklistRow)}
         </ul>
       )}
 
@@ -527,6 +720,47 @@ export function sortChecklistRows(
   });
 }
 
+export function checklistRowMatchesQuery(row: ChecklistRowData, query: string): boolean {
+  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  if (!row.artwork) return false;
+
+  const artwork = row.artwork;
+  const searchableText = [
+    artwork.title,
+    artwork.artist,
+    artwork.date,
+    artwork.accessionNumber,
+    artwork.locationOrLender,
+    ...Object.values(artwork.metadata)
+  ]
+    .filter((value) => value !== undefined)
+    .map(String)
+    .join("\n")
+    .toLocaleLowerCase();
+
+  return terms.every((term) => searchableText.includes(term));
+}
+
+export function groupChecklistRowsByArtist(
+  rows: ChecklistRowData[]
+): ChecklistArtistGroup[] {
+  const groups = new Map<string, ChecklistArtistGroup>();
+  for (const row of rows) {
+    const identity = artistGroupIdentity(row);
+    const existing = groups.get(identity.key);
+    if (existing) existing.rows.push(row);
+    else groups.set(identity.key, { ...identity, rows: [row] });
+  }
+  return [...groups.values()];
+}
+
+function artistGroupIdentity(row: ChecklistRowData): { key: string; label: string } {
+  const artist = row.artwork?.artist?.trim();
+  if (!artist) return { key: "missing-artist", label: "Artist not recorded" };
+  return { key: `artist:${artist.toLocaleLowerCase()}`, label: artist };
+}
+
 function byProjectOrder(a: ChecklistRowData, b: ChecklistRowData) {
   return a.projectIndex - b.projectIndex;
 }
@@ -538,6 +772,47 @@ function byText(a: string | undefined, b: string | undefined) {
   if (aText) return -1;
   if (bText) return 1;
   return 0;
+}
+
+function ArtistChecklistGroup({
+  group,
+  isOpen,
+  onOpenChange,
+  renderRow
+}: {
+  group: ChecklistArtistGroup;
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  renderRow: (row: ChecklistRowData) => ReactNode;
+}) {
+  const contentId = useId();
+  return (
+    <li className="checklist-artist-group">
+      <button
+        aria-controls={contentId}
+        aria-expanded={isOpen}
+        aria-label={`${group.label}, ${group.rows.length} work${group.rows.length === 1 ? "" : "s"}`}
+        className="checklist-artist-heading"
+        type="button"
+        onClick={() => onOpenChange(!isOpen)}
+      >
+        <CaretRightIcon aria-hidden="true" className="checklist-artist-caret" size={13} />
+        <span className="checklist-artist-name">{group.label}</span>
+        <span aria-hidden="true" className="checklist-artist-count">
+          · {group.rows.length}
+        </span>
+      </button>
+      {isOpen ? (
+        <ul
+          aria-label={`${group.label} works`}
+          className="checklist-artist-rows"
+          id={contentId}
+        >
+          {group.rows.map(renderRow)}
+        </ul>
+      ) : null}
+    </li>
+  );
 }
 
 function FilterTab({
