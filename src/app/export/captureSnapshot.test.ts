@@ -129,7 +129,7 @@ describe("buildExportableSvgMarkup", () => {
     document.body.removeChild(svg);
   });
 
-  it("leaves a blob href untouched (rather than failing the whole capture) when the fetch rejects", async () => {
+  it("strips a blob href whose fetch rejects (rather than failing the capture or shipping a dead reference)", async () => {
     const svg = document.createElementNS(SVG_NS, "svg") as SVGSVGElement;
     svg.setAttribute("viewBox", "0 0 100 100");
     const image = document.createElementNS(SVG_NS, "image");
@@ -144,9 +144,12 @@ describe("buildExportableSvgMarkup", () => {
       })
     );
 
+    // A dead blob: href serialized into the standalone SVG is guaranteed to
+    // rasterize as the browser's broken-image glyph (secure static mode
+    // refuses to fetch it), so the capture must drop the reference entirely.
     await expect(buildExportableSvgMarkup(svg)).resolves.toBeDefined();
     const { markup } = await buildExportableSvgMarkup(svg);
-    expect(markup).toContain("blob:http://localhost/gone-missing");
+    expect(markup).not.toContain("blob:http://localhost/gone-missing");
 
     document.body.removeChild(svg);
   });

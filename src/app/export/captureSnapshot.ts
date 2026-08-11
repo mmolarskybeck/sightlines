@@ -106,10 +106,14 @@ async function inlineBlobImages(svg: SVGSVGElement): Promise<void> {
           image.setAttributeNS(XLINK_NS, "href", dataUri);
         }
       } catch {
-        // A blob gone missing/corrupt by capture time: leave the element as
-        // the live app already rendered it rather than aborting the whole
-        // capture. The §10.3 vector-placeholder behavior for genuinely
-        // missing images is a separate, later piece of work.
+        // A blob gone missing/revoked by capture time. Keeping the dead
+        // blob: href would guarantee the rasterizer draws the browser's
+        // broken-image glyph (secure static mode refuses it), so strip the
+        // reference instead — the artwork's outline rect still marks its
+        // place. The §10.3 vector-placeholder behavior for genuinely missing
+        // images is a separate, later piece of work.
+        image.removeAttribute("href");
+        image.removeAttributeNS(XLINK_NS, "href");
       }
     })
   );

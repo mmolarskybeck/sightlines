@@ -161,6 +161,19 @@ describe("useAssetImageUrls", () => {
     await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith(thumbnailUrl));
   });
 
+  // NOTE (state-preserving remounts): under Vite Fast Refresh — and React 19's
+  // StrictMode/<Activity> lifecycles — React re-runs ALL effects while
+  // preserving state and refs. The unmount cleanup revokes every object URL,
+  // so a remount that trusted the preserved cache would keep handing out
+  // revoked URLs: they still PAINT (the browser retains the decoded bitmap
+  // for a rendered <image>) but fetch() on them fails, which silently turned
+  // the snapshot exporter's blob-inlining into broken-image glyphs. The hook
+  // tracks this with a "revoked" ref that forces a refetch on the next effect
+  // run. React 18 offers no public API that drives that lifecycle in a unit
+  // test (Suspense hide does NOT destroy passive effects until React 19's
+  // <Activity>), so the regression coverage is the live-HMR check in the
+  // verify driver rather than a test here.
+
   it("does not create or apply an object URL for a fetch that resolves after unmount", async () => {
     let resolveBlob: (blob: Blob) => void = () => {};
     const getBlob = vi.fn(
