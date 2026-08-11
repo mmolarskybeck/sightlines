@@ -15,7 +15,60 @@ export const FRAME_FINISH_HEX: Record<FrameFinish, string> = {
   white: "#F5F5F2",
   black: "#1A1A1A",
   silver: "#C0C3C7",
-  wood: "#8B5A2B"
+  // Walnut: a dark, slightly cool chocolate brown (real walnut heartwood),
+  // not the orangey saddle-brown a generic "wood" swatch tends toward.
+  wood: "#5A4232"
+};
+
+// Material shading for gold, silver, and wood. Still schematic — no photo
+// textures — and the profile is deliberately FLAT (a square, box-section
+// molding like a brushed-aluminum or plain walnut frame), not a rounded
+// cushion: each band face is one uniform tone, and the material reads from
+// lengthwise texture (grain / brushed streaks) plus per-side tone shifts.
+// Elevation paints its four mitred bands with lit/base/shade flat fills (a
+// top-light drawing convention that keeps the 45° mitre seams legible on
+// coplanar faces); the 3D view bakes base + streaks into a small one-time
+// canvas texture and lets real Lambert shading separate the side faces.
+// White and black stay flat single-color — matte painted finishes genuinely
+// read flat, and their absence here is what keeps them on the legacy
+// single-rect path. PDF export always uses the flat FRAME_FINISH_HEX: the
+// print artifact stays schematic.
+export type FrameFinishShading = {
+  // The band's face tone — matches FRAME_FINISH_HEX.
+  baseHex: string;
+  // Flat fill for the TOP band in elevation (face tilted toward the light
+  // in the drawing convention).
+  litHex: string;
+  // Flat fill for the BOTTOM band in elevation (face in its own shadow).
+  shadeHex: string;
+  // Lengthwise streak overlay, 3D texture only: grain for wood, brushed
+  // sheen for the metals. Light/dark pair straddling baseHex.
+  streakLightHex: string;
+  streakDarkHex: string;
+};
+
+export const FRAME_FINISH_SHADING: Partial<Record<FrameFinish, FrameFinishShading>> = {
+  gold: {
+    baseHex: "#C9A227",
+    litHex: "#D6B342",
+    shadeHex: "#A8871E",
+    streakLightHex: "#D9BA4C",
+    streakDarkHex: "#AA8A20"
+  },
+  silver: {
+    baseHex: "#C0C3C7",
+    litHex: "#CFD2D5",
+    shadeHex: "#A8ACB0",
+    streakLightHex: "#CDD0D4",
+    streakDarkHex: "#AEB2B6"
+  },
+  wood: {
+    baseHex: "#5A4232",
+    litHex: "#69503D",
+    shadeHex: "#4A3628",
+    streakLightHex: "#6B5340",
+    streakDarkHex: "#4C3829"
+  }
 };
 
 // Ordered for the inspector dropdown; labels carry the human-facing wording

@@ -1,6 +1,6 @@
 import { useCursor } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Texture } from "three";
 import {
   FRAME_EDGE_HAIRLINE_HEX,
@@ -11,7 +11,9 @@ import type { ArtworkFrame } from "../../../domain/project";
 import type { WallArtwork3d } from "../../../domain/geometry/scene3d";
 import { fitArtworkImageSizeMm, textureNativeAspect } from "./artworkFit";
 import { mmToWorld } from "./coordinates";
+import { getFrameFinishTexture } from "./frameFinishTextures";
 import { framingLayout } from "./framingGeometry";
+import { mitredFrameBarGeometries } from "./frameMitreGeometry";
 import {
   DashedRectOutline,
   isUncertain,
@@ -109,6 +111,34 @@ export function ArtworkPlane({
   // elevation does — the letterboxed image sits inside the opening.
   const layout = framingLayout(artwork.widthMm, artwork.heightMm, matWidthMm, frame);
   const frameFill = frame ? FRAME_FINISH_HEX[frame.finish] : undefined;
+  // Baked band texture for the material finishes (gold/silver/wood) —
+  // session-cached, so this is a map lookup, not a canvas paint. Undefined
+  // (flat finishes, DOM-less tests) falls back to the flat color. The bars'
+  // material keys include the finish so a texture appearing/disappearing
+  // remounts the material instead of relying on needsUpdate.
+  const frameTexture = frame ? getFrameFinishTexture(frame.finish) : undefined;
+  const frameMaterialKey = `${ghosted ? "ghosted" : "solid"}-${frame?.finish ?? "none"}`;
+
+  // Mitred bar prisms, rebuilt only when the framed footprint changes; the
+  // previous set is disposed (imperatively created geometry isn't r3f's to
+  // free).
+  const frameBarGeometries = useMemo(
+    () => (layout.hasFrame ? mitredFrameBarGeometries(layout) : undefined),
+    // layout is a fresh object every render; its size fields are the real
+    // inputs, so they are the deps.
+    [
+      layout.hasFrame,
+      layout.outerWidthMm,
+      layout.outerHeightMm,
+      layout.openingWidthMm,
+      layout.openingHeightMm,
+      layout.frameDepthMm
+    ]
+  );
+  useEffect(
+    () => () => frameBarGeometries?.forEach((geometry) => geometry.dispose()),
+    [frameBarGeometries]
+  );
 
   // Desktop-only affordance (spec §4.3): a pointer cursor, nothing
   // load-bearing on hover.
@@ -130,52 +160,22 @@ export function ArtworkPlane({
     // off-wall depth. A plain work's image lands at WALL_OFFSET_MM, identical
     // to the historical group-offset placement.
     <group position={[mmToWorld(artwork.xMm), mmToWorld(artwork.yMm), 0]}>
-      {layout.hasFrame ? (
-        // Frame: a rectangular ring of four flat-finish Lambert boxes around
-        // the mat opening, extruded FRAME_DEPTH_MM off the wall. Lambert (not a
-        // metallic material) keeps it a flat schematic finish; the boxes' side
-        // faces self-shade under the scene's ambient+key so the ring reads as
-        // real depth. Horizontal bars span the full outer width; verticals fill
-        // only the opening height between them, so corners aren't doubled.
-        <group position={[0, 0, mmToWorld(layout.frameCenterZMm as number)]}>
-          {[1, -1].map((sign) => (
-            <mesh
-              key={`h${sign}`}
-              position={[0, mmToWorld(sign * (layout.openingHeightMm + layout.frameBandMm) / 2), 0]}
-              onClick={handleClick}
-            >
-              <boxGeometry
-                args={[
-                  mmToWorld(layout.outerWidthMm),
-                  mmToWorld(layout.frameBandMm),
-                  mmToWorld(layout.frameDepthMm)
-                ]}
-              />
+      {frameBarGeometries ? (
+        // Frame: four mitred trapezoid prisms (one per side) meeting at 45°
+        // seams, extruded from the wall to FRAME_DEPTH_MM — the same corner
+        // treatment as elevation's trapezoid bands. Lambert (not a metallic
+        // material) keeps the schematic look and separates the flat faces of
+        // a square-section molding by normal alone; the material finishes
+        // (gold/silver/wood) sample their baked band texture, whose UVs the
+        // geometry writes in band terms so grain/brushing runs along every
+        // bar. The prisms already sit at z 0..depth, so no group offset.
+        <group>
+          {frameBarGeometries.map((geometry, index) => (
+            <mesh key={index} geometry={geometry} onClick={handleClick}>
               <meshLambertMaterial
-                key={ghosted ? "ghosted" : "solid"}
-                color={frameFill}
-                transparent={ghosted}
-                opacity={ghosted ? GHOST_OPACITY : 1}
-                depthWrite={!ghosted}
-              />
-            </mesh>
-          ))}
-          {[1, -1].map((sign) => (
-            <mesh
-              key={`v${sign}`}
-              position={[mmToWorld(sign * (layout.openingWidthMm + layout.frameBandMm) / 2), 0, 0]}
-              onClick={handleClick}
-            >
-              <boxGeometry
-                args={[
-                  mmToWorld(layout.frameBandMm),
-                  mmToWorld(layout.openingHeightMm),
-                  mmToWorld(layout.frameDepthMm)
-                ]}
-              />
-              <meshLambertMaterial
-                key={ghosted ? "ghosted" : "solid"}
-                color={frameFill}
+                key={frameMaterialKey}
+                color={frameTexture ? "#ffffff" : frameFill}
+                map={frameTexture}
                 transparent={ghosted}
                 opacity={ghosted ? GHOST_OPACITY : 1}
                 depthWrite={!ghosted}

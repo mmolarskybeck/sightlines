@@ -7,6 +7,7 @@ import type { ArtworkFrame, Dimensions } from "../../../domain/project";
 import {
   FRAME_EDGE_HAIRLINE_HEX,
   FRAME_FINISH_HEX,
+  FRAME_FINISH_SHADING,
   MAT_BEVEL_HAIRLINE_HEX,
   MAT_FILL_HEX,
   getArtworkRingRectsMm
@@ -79,6 +80,7 @@ export function ElevationArtwork({
   const frameBandMm = frame && frame.widthMm > 0 ? frame.widthMm : 0;
   const { matRect, outerRect } = getArtworkRingRectsMm(rect, matBandMm, frameBandMm);
   const frameFill = frame ? FRAME_FINISH_HEX[frame.finish] : undefined;
+  const frameShading = frame ? FRAME_FINISH_SHADING[frame.finish] : undefined;
 
   const classNames = ["elevation-artwork"];
   if (isGhost) classNames.push("ghost");
@@ -92,9 +94,52 @@ export function ElevationArtwork({
       onClick={isGhost ? undefined : onSelect}
       onPointerDown={isGhost ? undefined : onPointerDown}
     >
-      {frameBandMm > 0 ? (
-        // Frame: flat color ring, outermost. A simple filled rect the mat/
-        // image paint over — a schematic mockup, not a molded profile.
+      {frameBandMm > 0 && frameShading ? (
+        // Frame, material finishes (gold/silver/wood): four mitred trapezoid
+        // bands in FLAT per-side tones — a square box-section molding, not a
+        // rounded cushion. On coplanar faces nothing physically shades, so a
+        // top-light drawing convention keeps the 45° mitre seams legible:
+        // top band lit, sides base, bottom in shade. Matches the flat-faced
+        // 3D prisms, where real Lambert shading does the same job.
+        <g className="elevation-artwork-frame">
+          {(() => {
+            const x0 = outerRect.xMm;
+            const y0 = outerRect.yMm;
+            const x1 = outerRect.xMm + outerRect.widthMm;
+            const y1 = outerRect.yMm + outerRect.heightMm;
+            const ix0 = matRect.xMm;
+            const iy0 = matRect.yMm;
+            const ix1 = matRect.xMm + matRect.widthMm;
+            const iy1 = matRect.yMm + matRect.heightMm;
+            const bands: { points: string; fill: string }[] = [
+              // top (SVG y-down: y0 is the upper edge)
+              {
+                points: `${x0},${y0} ${x1},${y0} ${ix1},${iy0} ${ix0},${iy0}`,
+                fill: frameShading.litHex
+              },
+              // bottom
+              {
+                points: `${x0},${y1} ${x1},${y1} ${ix1},${iy1} ${ix0},${iy1}`,
+                fill: frameShading.shadeHex
+              },
+              // left / right
+              {
+                points: `${x0},${y0} ${ix0},${iy0} ${ix0},${iy1} ${x0},${y1}`,
+                fill: frameShading.baseHex
+              },
+              {
+                points: `${x1},${y0} ${ix1},${iy0} ${ix1},${iy1} ${x1},${y1}`,
+                fill: frameShading.baseHex
+              }
+            ];
+            return bands.map((band) => (
+              <polygon key={band.points} fill={band.fill} points={band.points} />
+            ));
+          })()}
+        </g>
+      ) : frameBandMm > 0 ? (
+        // Frame, flat finishes (white/black): a simple filled rect the mat/
+        // image paint over — matte painted moldings genuinely read flat.
         <rect
           className="elevation-artwork-frame"
           fill={frameFill}
