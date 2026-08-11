@@ -7550,6 +7550,50 @@ describe("app store", () => {
         return store.getState().project!.wallObjects.find((o) => o.id === id)!.xMm;
       }
 
+      it("bounds the session at a partition standing in front of the wall", async () => {
+        // A partition close to a wall carves it into bays; an arrange session
+        // must distribute inside the bay, not run past the slab to the wall end.
+        const wallId = getSelectedWall(
+          store.getState().project!,
+          store.getState().wallContextId
+        )!.id;
+        await store.getState().resizeWall(wallId, 4000);
+        const a = await placeArtworkOnWall(2600, 1450, 400);
+        const b = await placeArtworkOnWall(3400, 1450, 400);
+
+        // Parallel to the wall, 400 mm into the room (interior = LEFT normal of
+        // start→end), covering 200..2000 along the run.
+        const floorWall = getFloorWalls(store.getState().project!.floor).find(
+          (wall) => wall.id === wallId
+        )!;
+        const uxMm = (floorWall.endFloorMm.xMm - floorWall.startFloorMm.xMm) / floorWall.lengthMm;
+        const uyMm = (floorWall.endFloorMm.yMm - floorWall.startFloorMm.yMm) / floorWall.lengthMm;
+        const at = (alongMm: number) => ({
+          xMm: floorWall.startFloorMm.xMm + uxMm * alongMm + -uyMm * 400,
+          yMm: floorWall.startFloorMm.yMm + uyMm * alongMm + uxMm * 400
+        });
+        await store.getState().addFreestandingWall(at(200), at(2000));
+        const partition =
+          store.getState().project!.floor.rooms.flatMap((placement) =>
+            placement.room.freestandingWalls
+          )[0];
+        expect(partition).toBeDefined();
+
+        store.getState().setObjectSelection([a.placementId, b.placementId]);
+        store.getState().beginArrangeSession("equal");
+
+        const session = store.getState().arrangeSession!;
+        // The bay runs from the slab's projected right edge to the wall end.
+        expect(session.openZoneBoundsMm.startMm).toBeCloseTo(2000);
+        expect(session.openZoneBoundsMm.endMm).toBeCloseTo(4000);
+        // And the frozen "From edges" target names the partition, not the wall.
+        expect(session.insetBoundary.left).toMatchObject({
+          type: "object",
+          objectId: partition.id
+        });
+        expect(session.insetBoundary.right).toMatchObject({ type: "wall" });
+      });
+
       describe("beginArrangeSession guards", () => {
         it("creates no session when the selection includes a floor object", async () => {
           const a = await placeArtworkOnWall(500, 1450);
