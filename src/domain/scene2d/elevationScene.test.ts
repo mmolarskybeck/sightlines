@@ -12,6 +12,7 @@ import type { FloorPartition } from "../geometry/freestandingWalls";
 import {
   buildElevationScene,
   PARTITION_ABUT_THRESHOLD_MM,
+  PARTITION_NEIGHBOR_MAX_GAP_MM,
   projectFloorObjectOntoWall,
   wallLocalYToSvgY
 } from "./elevationScene";
@@ -511,5 +512,63 @@ describe("buildElevationScene partition profiles", () => {
       wallEndFloorMm: WALL_END
     });
     expect(scene.partitionProfiles).toEqual([]);
+  });
+
+  it("carries the raw perpendicular gap, not just the abutting flag", () => {
+    // Broadside at y=1000 with 100 mm thickness → nearest face 950 mm out.
+    const far = buildPartitionScene([
+      partition({
+        startMm: { xMm: 2000, yMm: 1000 },
+        endMm: { xMm: 5000, yMm: 1000 }
+      })
+    ]);
+    expect(far.partitionProfiles[0]!.gapMm).toBeCloseTo(950);
+    expect(far.partitionProfiles[0]!.abutting).toBe(false);
+
+    // Same slab pushed out past the spacing-neighbor rule: still a profile,
+    // still a gap that consumers can threshold on.
+    const beyond = buildPartitionScene([
+      partition({
+        startMm: { xMm: 2000, yMm: 3000 },
+        endMm: { xMm: 5000, yMm: 3000 }
+      })
+    ]);
+    expect(beyond.partitionProfiles[0]!.gapMm).toBeCloseTo(2950);
+    expect(beyond.partitionProfiles[0]!.gapMm).toBeGreaterThan(
+      PARTITION_NEIGHBOR_MAX_GAP_MM
+    );
+  });
+
+  it("floors the gap at 0 for a partition touching or crossing the wall line", () => {
+    const meeting = buildPartitionScene([partition()]);
+    expect(meeting.partitionProfiles[0]!.gapMm).toBe(0);
+
+    const crossing = buildPartitionScene([
+      partition({
+        startMm: { xMm: 3000, yMm: -500 },
+        endMm: { xMm: 3000, yMm: 1500 }
+      })
+    ]);
+    expect(crossing.partitionProfiles[0]!.gapMm).toBe(0);
+  });
+
+  it("keeps abutting pinned to the 150 mm threshold, independent of the neighbor rule", () => {
+    // Gap exactly 150 → abutting; one millimetre further → not.
+    const at = buildPartitionScene([
+      partition({
+        startMm: { xMm: 2000, yMm: PARTITION_ABUT_THRESHOLD_MM + 50 },
+        endMm: { xMm: 5000, yMm: PARTITION_ABUT_THRESHOLD_MM + 50 }
+      })
+    ]);
+    expect(at.partitionProfiles[0]!.gapMm).toBeCloseTo(PARTITION_ABUT_THRESHOLD_MM);
+    expect(at.partitionProfiles[0]!.abutting).toBe(true);
+
+    const past = buildPartitionScene([
+      partition({
+        startMm: { xMm: 2000, yMm: PARTITION_ABUT_THRESHOLD_MM + 51 },
+        endMm: { xMm: 5000, yMm: PARTITION_ABUT_THRESHOLD_MM + 51 }
+      })
+    ]);
+    expect(past.partitionProfiles[0]!.abutting).toBe(false);
   });
 });

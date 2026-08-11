@@ -291,6 +291,16 @@ export function projectFloorObjectOntoWall(
 // Both are inert — this is a drawing, not a placement rule.
 export const PARTITION_ABUT_THRESHOLD_MM = 150;
 
+// SPACING rule, a wider tier than the drawing tiers above: a partition whose
+// near edge sits within this perpendicular gap of the wall participates as a
+// spacing NEIGHBOR on that wall's elevation — it bounds and blocks gap
+// dimensions, centering and snapping exactly like a real wall object. Beyond
+// it, the partition is scenery standing well out in the room: still drawn as a
+// ghost, but too far away for a dimension between it and hung work to mean
+// anything. (A drawn profile is not automatically a neighbor; consumers filter
+// on ElevationScenePartitionProfile.gapMm.)
+export const PARTITION_NEIGHBOR_MAX_GAP_MM = 1200;
+
 export type ElevationScenePartitionProfile = {
   partition: FloorPartition;
   xMinMm: number;
@@ -298,7 +308,42 @@ export type ElevationScenePartitionProfile = {
   // The partition's true height; the profile rises from the floor line to it.
   heightMm: number;
   abutting: boolean;
+  // Perpendicular distance from the wall face to the partition's NEAREST
+  // corner (0 when it touches or crosses the wall line). `abutting` is one
+  // threshold on this value; the spacing-neighbor rule
+  // (PARTITION_NEIGHBOR_MAX_GAP_MM) is a second, wider one, so the raw
+  // distance is carried rather than collapsed into a single boolean.
+  gapMm: number;
 };
+
+// The partition half of buildElevationScene, split out so consumers that want
+// only the projected profiles (partitionNeighbors.ts's shim path) can get them
+// without assembling a whole scene — and so there is exactly ONE place the
+// viewer-side gate and the abut threshold are applied.
+export function buildPartitionProfiles(
+  partitions: readonly FloorPartition[],
+  wallStartFloorMm: Point,
+  wallEndFloorMm: Point
+): ElevationScenePartitionProfile[] {
+  const profiles: ElevationScenePartitionProfile[] = [];
+  for (const partition of partitions) {
+    const projection = projectPlanRectOntoWall(
+      segmentPlanRect(partition.startMm, partition.endMm, partition.thicknessMm),
+      wallStartFloorMm,
+      wallEndFloorMm
+    );
+    if (!projection || !projection.onViewerSide) continue;
+    profiles.push({
+      partition,
+      xMinMm: projection.xMinMm,
+      xMaxMm: projection.xMaxMm,
+      heightMm: partition.heightMm,
+      abutting: projection.gapMm <= PARTITION_ABUT_THRESHOLD_MM,
+      gapMm: projection.gapMm
+    });
+  }
+  return profiles;
+}
 
 export type ElevationScene = {
   wallLengthMm: number;
@@ -470,24 +515,10 @@ export function buildElevationScene(
   // side — a partition behind the wall face being viewed is masonry the viewer
   // cannot see, and the room filter alone can't tell the two sides of a
   // partition face apart.
-  const partitionProfiles: ElevationScenePartitionProfile[] = [];
-  if (partitions && wallStartFloorMm && wallEndFloorMm) {
-    for (const partition of partitions) {
-      const projection = projectPlanRectOntoWall(
-        segmentPlanRect(partition.startMm, partition.endMm, partition.thicknessMm),
-        wallStartFloorMm,
-        wallEndFloorMm
-      );
-      if (!projection || !projection.onViewerSide) continue;
-      partitionProfiles.push({
-        partition,
-        xMinMm: projection.xMinMm,
-        xMaxMm: projection.xMaxMm,
-        heightMm: partition.heightMm,
-        abutting: projection.gapMm <= PARTITION_ABUT_THRESHOLD_MM
-      });
-    }
-  }
+  const partitionProfiles: ElevationScenePartitionProfile[] =
+    partitions && wallStartFloorMm && wallEndFloorMm
+      ? buildPartitionProfiles(partitions, wallStartFloorMm, wallEndFloorMm)
+      : [];
 
   return {
     wallLengthMm,

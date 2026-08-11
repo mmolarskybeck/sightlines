@@ -14,10 +14,8 @@ import {
   getArtworkRingRectsMm
 } from "../../domain/framing";
 import { getRoomPlaceableWalls } from "../../domain/geometry/placeableWalls";
-import {
-  getFloorPartitions,
-  parseFaceWallId
-} from "../../domain/geometry/freestandingWalls";
+import { getFloorPartitions } from "../../domain/geometry/freestandingWalls";
+import { selectElevationPartitions } from "../../domain/placement/partitionNeighbors";
 import { getFloorWalls } from "../../domain/geometry/planObjects";
 import { isPointInPolygon } from "../../domain/geometry/polygon";
 import { derivePlanSceneGaps } from "../../domain/dimensions/planDimensions";
@@ -412,11 +410,9 @@ export async function createDocumentPdf(
       // so they gate on roomId rather than point-in-polygon; and when this page
       // IS a partition face, its own partition is dropped so it can't project
       // its thickness onto itself. Same two gates the canvas applies.
-      const ownFreestandingWallId = parseFaceWallId(wall.id)?.freestandingWallId;
-      const elevationPartitions = getFloorPartitions(input.project.floor).filter(
-        (partition) =>
-          partition.roomId === manifestPage.roomId &&
-          partition.wallId !== ownFreestandingWallId
+      const elevationPartitions = selectElevationPartitions(
+        getFloorPartitions(input.project.floor),
+        { roomId: manifestPage.roomId, wallId: wall.id }
       );
       const scene = buildElevationScene(input.project.wallObjects, {
         wallId: wall.id,

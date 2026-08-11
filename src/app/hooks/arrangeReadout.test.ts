@@ -1,7 +1,21 @@
 import { describe, expect, it } from "vitest";
 import type { WallWithGeometry } from "../../domain/geometry/walls";
+import type { PartitionNeighborShim } from "../../domain/placement/partitionNeighbors";
 import type { Artwork, ArtworkWallObject } from "../../domain/project";
 import { deriveArrangeReadout } from "./arrangeReadout";
+
+const WALL: WallWithGeometry = {
+  id: "wall-north",
+  roomId: "room-1",
+  name: "North wall",
+  startVertexId: "v1",
+  endVertexId: "v2",
+  heightMm: 3000,
+  start: { id: "v1", xMm: 0, yMm: 0 },
+  end: { id: "v2", xMm: 2000, yMm: 0 },
+  lengthMm: 2000,
+  angleRad: 0
+};
 
 function member(
   id: string,
@@ -32,21 +46,8 @@ describe("deriveArrangeReadout", () => {
       frame: { widthMm: 25, finish: "black" },
       metadata: {}
     };
-    const wall: WallWithGeometry = {
-      id: "wall-north",
-      roomId: "room-1",
-      name: "North wall",
-      startVertexId: "v1",
-      endVertexId: "v2",
-      heightMm: 3000,
-      start: { id: "v1", xMm: 0, yMm: 0 },
-      end: { id: "v2", xMm: 2000, yMm: 0 },
-      lengthMm: 2000,
-      angleRad: 0
-    };
-
     const readout = deriveArrangeReadout({
-      arrangeWall: wall,
+      arrangeWall: WALL,
       arrangeMembers: [framed, unframed],
       activeArrangeSession: null,
       selectedArtworkMembers: [framed, unframed],
@@ -62,6 +63,47 @@ describe("deriveArrangeReadout", () => {
       gapMm: 300,
       leftEdgeDistanceMm: 200,
       rightEdgeDistanceMm: 500
+    });
+  });
+
+  it("names a partition boundary instead of collapsing it to the wall edge", () => {
+    // A slab abutting this wall at 0..500 closes the run's left end. Without the
+    // shim path the readout would report the wall edge at 0 and measure 300 mm
+    // too far — and the boundary lookup would silently miss.
+    const left = member("left", "art-left", 800);
+    const right = member("right", "art-right", 1400);
+    const partition: PartitionNeighborShim = {
+      id: "partition-1",
+      wallId: "wall-north",
+      xMm: 250,
+      yMm: 1500,
+      widthMm: 500,
+      heightMm: 3000,
+      partitionNeighbor: true,
+      partitionName: "Partition 1"
+    };
+
+    const readout = deriveArrangeReadout({
+      arrangeWall: WALL,
+      arrangeMembers: [left, right],
+      activeArrangeSession: null,
+      selectedArtworkMembers: [left, right],
+      wallObjects: [left, right],
+      selectedObjectIds: [left.id, right.id],
+      artworksById: new Map(),
+      lastInsetAnchor: "both",
+      lastArrangeMode: "inset",
+      lastEvenZone: null,
+      partitionNeighbors: [partition]
+    });
+
+    expect(readout).toMatchObject({
+      leftBoundary: { type: "object", kind: "partition", name: "Partition 1" },
+      rightBoundary: { type: "wall" },
+      // left member's outer edge 600, slab's right edge 500.
+      leftEdgeDistanceMm: 100,
+      // The bay defaults the even zone to "open".
+      evenZone: "open"
     });
   });
 });

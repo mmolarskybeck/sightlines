@@ -51,10 +51,12 @@ import type {
 } from "../../../domain/project";
 import { getFloorWalls } from "../../../domain/geometry/planObjects";
 import { getRoomPlaceableWalls } from "../../../domain/geometry/placeableWalls";
+import { getFloorPartitions } from "../../../domain/geometry/freestandingWalls";
 import {
-  getFloorPartitions,
-  parseFaceWallId
-} from "../../../domain/geometry/freestandingWalls";
+  partitionProfileNeighborShims,
+  selectElevationPartitions,
+  selectVisiblePartitionProfiles
+} from "../../../domain/placement/partitionNeighbors";
 import { isPointInPolygon } from "../../../domain/geometry/polygon";
 import { resolveArtworkSnap } from "../../../domain/snapping/artworkSnapTargets";
 import {
@@ -670,18 +672,14 @@ export function ElevationView({
     const floorArtworks = floorObjects.filter(
       (object): object is ArtworkFloorObject => object.kind === "artwork" && inThisRoom(object)
     );
-    // Partitions are ROOM-OWNED, so they filter by roomId rather than by the
-    // point-in-polygon test the floor objects need — a partition may legally
-    // run right along the room boundary, where point-in-polygon is a coin toss.
-    // The one extra exclusion: when the viewed wall is itself a partition FACE,
-    // that partition must not project onto its own elevation.
-    const ownFreestandingWallId = parseFaceWallId(wallId)?.freestandingWallId;
+    // Partitions gate on room ownership + own-face exclusion, not on the
+    // point-in-polygon test the floor objects need — see
+    // selectElevationPartitions, which the two PDF paths share.
     const partitions = room
-      ? getFloorPartitions({ rooms: floorRooms }).filter(
-          (partition) =>
-            partition.roomId === room.roomId &&
-            partition.wallId !== ownFreestandingWallId
-        )
+      ? selectElevationPartitions(getFloorPartitions({ rooms: floorRooms }), {
+          roomId: room.roomId,
+          wallId
+        })
       : [];
     if (floorCases.length === 0 && floorArtworks.length === 0 && partitions.length === 0) {
       return null;
@@ -719,9 +717,26 @@ export function ElevationView({
     ? elevationScene.suspendedArtworkGhosts
     : [];
   // Abutting slabs are architecture, not projection: they stay in every state.
-  const visiblePartitionProfiles = ghostsVisible
-    ? elevationScene.partitionProfiles
-    : elevationScene.partitionProfiles.filter((profile) => profile.abutting);
+  const visiblePartitionProfiles = selectVisiblePartitionProfiles(
+    elevationScene.partitionProfiles,
+    ghostsVisible
+  );
+  // The projected partitions that act as SPACING NEIGHBORS on this wall —
+  // derived once from the visibility-gated profile set and shared by the two
+  // things a neighbor does on this canvas: bound a dimension line (below) and
+  // capture a drag (resolveElevationPlacement). Deriving them from
+  // `visiblePartitionProfiles` rather than the raw scene is the point: a dashed
+  // ghost the curator has switched OFF must not silently grab a drag, while an
+  // abutting slab — which survives the toggle — always participates.
+  //
+  // They are deliberately absent from the barrier/obstacle pass: partition
+  // projection is a drawing, not a placement restriction (USER DECISION), so a
+  // work may legally hang across one.
+  const partitionNeighborShims = partitionProfileNeighborShims(
+    visiblePartitionProfiles,
+    wallHeightMm,
+    wallId ?? ""
+  );
   // Every wall object on this wall is a valid snap neighbor for any other —
   // an artwork can align to a door's edge just as readily as to another
   // artwork's (docs/plan.md §2 snap-target priority doesn't distinguish by
@@ -1143,6 +1158,16 @@ export function ElevationView({
       boundsMm: getWallObjectBoundsMm(neighbor),
       hardness: barrierHardnessFor(movingKinds, neighbor.kind)
     }));
+    // A partition standing at (or near) this wall ends the hanging zone, so it
+    // should capture a drag exactly like a real neighbor: its edges and center
+    // become snap targets, and the clean-increment quantizer measures the gap
+    // from its edge rather than sailing past it to the wall end. Note where this
+    // list is NOT used — `obstacles` above stays wall-objects-only, keeping the
+    // projection visual-only for placement legality (USER DECISION).
+    const snapNeighbors: WallObjectBase[] = [
+      ...footprintNeighbors,
+      ...partitionNeighborShims
+    ];
 
     if (precisionBypass) {
       // Free move, but hard barriers still apply (yielding + wall container are
@@ -1170,7 +1195,7 @@ export function ElevationView({
       wallLengthMm,
       wallHeightMm,
       gridIntervalMm: minorGridMm,
-      neighbors: footprintNeighbors,
+      neighbors: snapNeighbors,
       movingSize: sizeMm,
       movingKind,
       // Grid tier removed for elevation placement — the quantizer replaces it.
@@ -1199,7 +1224,7 @@ export function ElevationView({
           sizeMm,
           incrementMm,
           wallLengthMm,
-          footprintNeighbors
+          snapNeighbors
         );
       }
     }
@@ -1827,14 +1852,10 @@ export function ElevationView({
     // at the slab, and a dimension running past it would describe wall the
     // curator can't use. Both tiers participate while ghosts are shown; with
     // ghosts hidden only the abutting tier survives (see visiblePartitionProfiles).
-    ...visiblePartitionProfiles.map((profile) => ({
-      id: profile.partition.wallId,
-      wallId: wallId ?? "",
-      xMm: (profile.xMinMm + profile.xMaxMm) / 2,
-      yMm: profile.heightMm / 2,
-      widthMm: profile.xMaxMm - profile.xMinMm,
-      heightMm: profile.heightMm
-    }))
+    // partitionProfileNeighborShims adds the proximity rule on top: a partition
+    // standing more than PARTITION_NEIGHBOR_MAX_GAP_MM out in the room still
+    // ghosts, but is too far off the wall to bound a measurement on it.
+    ...partitionNeighborShims
   ];
   const effectiveDimensionOthers: WallObjectBase[] = [
     ...getElevationFootprintObjects(dimensionOthers, artworksById),

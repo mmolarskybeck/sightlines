@@ -29,6 +29,7 @@ import {
   sharedOpeningResolutions
 } from "../domain/geometry/sharedOpeningStatus";
 import { getOpeningKindLabel } from "../domain/placement/createOpening";
+import { derivePartitionNeighborShimsForFloorWall } from "../domain/placement/partitionNeighbors";
 import { withArtworkFootprintFromMap } from "../domain/framing";
 import type {
   Artwork,
@@ -1067,12 +1068,21 @@ export function App() {
   const placedWallObjectWall = placedWallObject
     ? (getProjectWalls(project).find((wall) => wall.id === placedWallObject.wallId) ?? null)
     : null;
+  // A partition standing at a wall bounds that wall's hanging zone, so the
+  // inspector's numeric affordances (neighbor distances, the Center button) have
+  // to see it as a neighbor exactly like the elevation's dimension lines do.
+  // Explicit actions are never gated on the canvas "Ghosts" toggle — see
+  // derivePartitionNeighborShimsForFloorWall.
+  const partitionNeighborShimsForWall = (wallId: string | null | undefined) =>
+    wallId ? derivePartitionNeighborShimsForFloorWall(project.floor, wallId) : [];
+  const placedWallObjectPartitions = partitionNeighborShimsForWall(placedWallObject?.wallId);
   const wallPlacementNeighbors = placedWallObjectFootprint
     ? getWallPlacementNeighborEdges(
         placedWallObjectFootprint,
         wallPlacementGeometryObjects.filter(
           (wallObject): wallObject is ArtworkWallObject => wallObject.kind === "artwork"
-        )
+        ),
+        placedWallObjectPartitions
       )
     : { leftNeighborRightEdgeMm: undefined, rightNeighborLeftEdgeMm: undefined };
   // Centering boundaries include every wall-object kind.
@@ -1081,7 +1091,8 @@ export function App() {
       ? getWallPlacementCenterTarget(
           placedWallObjectFootprint,
           wallPlacementGeometryObjects,
-          placedWallObjectWall.lengthMm
+          placedWallObjectWall.lengthMm,
+          placedWallObjectPartitions
         )
       : { xMm: 0, boundaryKind: "wall" as const };
 
@@ -1121,7 +1132,8 @@ export function App() {
       ? getWallPlacementCenterTarget(
           selectedWallCase as unknown as ArtworkWallObject,
           project.wallObjects,
-          selectedWallCaseWall.lengthMm
+          selectedWallCaseWall.lengthMm,
+          partitionNeighborShimsForWall(selectedWallCase.wallId)
         )
       : { xMm: 0, boundaryKind: "wall" as const };
   const selectedFloorCase: CaseFloorObject | null = selectedOpeningId
@@ -1146,7 +1158,8 @@ export function App() {
       ? getWallPlacementCenterTarget(
           selectedWallText as unknown as ArtworkWallObject,
           project.wallObjects,
-          selectedWallTextWall.lengthMm
+          selectedWallTextWall.lengthMm,
+          partitionNeighborShimsForWall(selectedWallText.wallId)
         )
       : { xMm: 0, boundaryKind: "wall" as const };
   // Opening selection also represents floor blocked zones; ids are globally unique.
@@ -1193,7 +1206,8 @@ export function App() {
     artworksById,
     lastInsetAnchor,
     lastArrangeMode,
-    lastEvenZone
+    lastEvenZone,
+    partitionNeighbors: partitionNeighborShimsForWall(arrangeWall?.id)
   });
 
   // Distinct artwork records behind the current multi-selection, for the bulk
@@ -2340,6 +2354,8 @@ export function App() {
                       wallLengthMm={placedWallObjectWall.lengthMm}
                       leftNeighborRightEdgeMm={wallPlacementNeighbors.leftNeighborRightEdgeMm}
                       rightNeighborLeftEdgeMm={wallPlacementNeighbors.rightNeighborLeftEdgeMm}
+                      leftNeighborIsPartition={wallPlacementNeighbors.leftNeighborIsPartition}
+                      rightNeighborIsPartition={wallPlacementNeighbors.rightNeighborIsPartition}
                       centerTargetXMm={wallPlacementCenterTarget.xMm}
                       centerBoundaryKind={wallPlacementCenterTarget.boundaryKind}
                       unit={project.unit}

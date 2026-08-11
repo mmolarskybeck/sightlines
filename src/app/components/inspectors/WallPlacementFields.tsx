@@ -1,10 +1,19 @@
 import { AlignCenterHorizontalSimpleIcon } from "@phosphor-icons/react/dist/csr/AlignCenterHorizontalSimple";
-import type { ArtworkWallObject, DisplayUnit, WallObject } from "../../../domain/project";
+import type {
+  ArtworkWallObject,
+  DisplayUnit,
+  WallObject,
+  WallObjectBase
+} from "../../../domain/project";
 import {
   centerMemberBetweenBoundaries,
   detectBoundary,
   type BoundaryDetection
 } from "../../../domain/placement/arrangeOnWall";
+import {
+  findPartitionNeighborShim,
+  type PartitionNeighborShim
+} from "../../../domain/placement/partitionNeighbors";
 import { LengthField } from "../shared/LengthField";
 import { Button } from "../ui/button";
 import { getScopedUnitContext } from "../shared/scopedUnits";
@@ -13,7 +22,12 @@ import { getScopedUnitContext } from "../shared/scopedUnits";
 const CENTER_BUTTON_LABEL: Record<WallPlacementCenterBoundaryKind, string> = {
   wall: "Center on wall",
   works: "Center between works",
-  open: "Center in open space"
+  open: "Center in open space",
+  // A partition standing at this wall carves the run into bays; centering
+  // between one and whatever bounds the other side is centering IN a bay, and
+  // the label has to say so — otherwise the button silently stops meaning
+  // "center on the wall" the moment a partition goes up.
+  bay: "Center in bay"
 };
 
 export function getWallPlacementEdges(
@@ -33,6 +47,8 @@ export function WallPlacementFields({
   wallLengthMm,
   leftNeighborRightEdgeMm,
   rightNeighborLeftEdgeMm,
+  leftNeighborIsPartition = false,
+  rightNeighborIsPartition = false,
   centerTargetXMm,
   centerBoundaryKind,
   onCommit,
@@ -44,6 +60,10 @@ export function WallPlacementFields({
   leftNeighborRightEdgeMm?: number;
   // Left edge of the nearest other artwork whose center is right of this work.
   rightNeighborLeftEdgeMm?: number;
+  // A partition slab, not a work, is what that side measures to — the field
+  // says "edge" instead of "work" so the number is never read as a gap to art.
+  leftNeighborIsPartition?: boolean;
+  rightNeighborIsPartition?: boolean;
   // Centering treats openings as boundaries; neighbor gap fields do not.
   centerTargetXMm: number;
   centerBoundaryKind: WallPlacementCenterBoundaryKind;
@@ -91,7 +111,7 @@ export function WallPlacementFields({
           {leftNeighborRightEdgeMm !== undefined ? (
             <LengthField
               compact
-              label="To work on left"
+              label={leftNeighborIsPartition ? "To edge on left" : "To work on left"}
               valueMm={leftEdgeMm - leftNeighborRightEdgeMm}
               displayUnit={displayUnit}
               parseUnit={parseUnit}
@@ -105,7 +125,7 @@ export function WallPlacementFields({
           {rightNeighborLeftEdgeMm !== undefined ? (
             <LengthField
               compact
-              label="To work on right"
+              label={rightNeighborIsPartition ? "To edge on right" : "To work on right"}
               valueMm={rightNeighborLeftEdgeMm - rightEdgeMm}
               displayUnit={displayUnit}
               parseUnit={parseUnit}
@@ -143,63 +163,102 @@ export function WallPlacementFields({
   );
 }
 
-// Find inner edges of the nearest same-wall artworks on each side by center.
+// Find inner edges of the nearest same-wall neighbors on each side by center.
+// Projected partitions (`partitionNeighbors`, shims from
+// derivePartitionNeighborShimsForFloorWall) join the artwork pool: the edge of a
+// slab abutting this wall is exactly the kind of distance a curator types, and
+// leaving it out made the field jump to the far side of the partition. Which
+// side found a partition is reported back so the label can stop saying "work".
 export function getWallPlacementNeighborEdges(
   self: ArtworkWallObject,
-  wallObjects: ArtworkWallObject[]
-): { leftNeighborRightEdgeMm?: number; rightNeighborLeftEdgeMm?: number } {
+  wallObjects: ArtworkWallObject[],
+  partitionNeighbors: readonly PartitionNeighborShim[] = []
+): {
+  leftNeighborRightEdgeMm?: number;
+  rightNeighborLeftEdgeMm?: number;
+  leftNeighborIsPartition?: boolean;
+  rightNeighborIsPartition?: boolean;
+} {
   let leftNeighborRightEdgeMm: number | undefined;
   let rightNeighborLeftEdgeMm: number | undefined;
+  let leftNeighborIsPartition = false;
+  let rightNeighborIsPartition = false;
 
   // Use centers so a wide, farther work cannot beat a narrower, nearer one.
   let leftBestCenter = -Infinity;
   let rightBestCenter = Infinity;
-  for (const other of wallObjects) {
+  const candidates: readonly WallObjectBase[] = [...wallObjects, ...partitionNeighbors];
+  for (const other of candidates) {
     if (other.id === self.id) continue;
     if (other.wallId !== self.wallId) continue;
+    const isPartition = findPartitionNeighborShim(partitionNeighbors, other.id) !== undefined;
 
     if (other.xMm < self.xMm && other.xMm > leftBestCenter) {
       leftBestCenter = other.xMm;
       leftNeighborRightEdgeMm = other.xMm + other.widthMm / 2;
+      leftNeighborIsPartition = isPartition;
     } else if (other.xMm > self.xMm && other.xMm < rightBestCenter) {
       rightBestCenter = other.xMm;
       rightNeighborLeftEdgeMm = other.xMm - other.widthMm / 2;
+      rightNeighborIsPartition = isPartition;
     }
   }
 
-  return { leftNeighborRightEdgeMm, rightNeighborLeftEdgeMm };
+  return {
+    leftNeighborRightEdgeMm,
+    rightNeighborLeftEdgeMm,
+    leftNeighborIsPartition,
+    rightNeighborIsPartition
+  };
 }
 
-// "open" covers doors, windows, and blocked zones without mislabeling them as works.
-export type WallPlacementCenterBoundaryKind = "wall" | "works" | "open";
+// "open" covers doors, windows, and blocked zones without mislabeling them as
+// works; "bay" covers the run a projected partition closes off.
+export type WallPlacementCenterBoundaryKind = "wall" | "works" | "open" | "bay";
 
-// Center within actual open space, including boundaries created by openings.
+// Center within actual open space, including boundaries created by openings and
+// by partitions standing at this wall (`partitionNeighbors`). A partition
+// boundary outranks the other kinds in the label: it is the one that changes
+// what "center" means most, and it names itself ("Center in bay").
 export function getWallPlacementCenterTarget(
   self: ArtworkWallObject,
   wallObjects: WallObject[],
-  wallLengthMm: number
+  wallLengthMm: number,
+  partitionNeighbors: readonly PartitionNeighborShim[] = []
 ): { xMm: number; boundaryKind: WallPlacementCenterBoundaryKind } {
-  const others = wallObjects.filter(
-    (wallObject) => wallObject.id !== self.id && wallObject.wallId === self.wallId
-  );
+  const others: WallObjectBase[] = [
+    ...wallObjects.filter(
+      (wallObject) => wallObject.id !== self.id && wallObject.wallId === self.wallId
+    ),
+    ...partitionNeighbors
+  ];
 
   const xMm = centerMemberBetweenBoundaries(self, others, wallLengthMm);
 
-  const kindOf = (detection: BoundaryDetection): WallObject["kind"] | "wall" =>
-    detection.type === "wall"
-      ? "wall"
-      : (others.find((object) => object.id === detection.objectId)?.kind ?? "wall");
+  // A partition shim carries no `kind`, so it resolves to its own sentinel
+  // rather than falling through to "wall".
+  const kindOf = (
+    detection: BoundaryDetection
+  ): WallObject["kind"] | "wall" | "partition" => {
+    if (detection.type === "wall") return "wall";
+    if (findPartitionNeighborShim(partitionNeighbors, detection.objectId)) return "partition";
+    const object = wallObjects.find((candidate) => candidate.id === detection.objectId);
+    return object?.kind ?? "wall";
+  };
 
   const leftKind = kindOf(detectBoundary("left", [self], others, wallLengthMm));
   const rightKind = kindOf(detectBoundary("right", [self], others, wallLengthMm));
-  const isOpeningKind = (kind: WallObject["kind"] | "wall") => kind !== "wall" && kind !== "artwork";
+  const isOpeningKind = (kind: WallObject["kind"] | "wall" | "partition") =>
+    kind !== "wall" && kind !== "artwork" && kind !== "partition";
 
   const boundaryKind: WallPlacementCenterBoundaryKind =
-    leftKind === "wall" && rightKind === "wall"
-      ? "wall"
-      : isOpeningKind(leftKind) || isOpeningKind(rightKind)
-        ? "open"
-        : "works";
+    leftKind === "partition" || rightKind === "partition"
+      ? "bay"
+      : leftKind === "wall" && rightKind === "wall"
+        ? "wall"
+        : isOpeningKind(leftKind) || isOpeningKind(rightKind)
+          ? "open"
+          : "works";
 
   return { xMm, boundaryKind };
 }

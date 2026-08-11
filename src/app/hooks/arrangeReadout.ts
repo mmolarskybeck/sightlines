@@ -1,7 +1,11 @@
-import type { Artwork, Project, WallObject } from "../../domain/project";
+import type { Artwork, Project, WallObject, WallObjectBase } from "../../domain/project";
 import { withArtworkFootprintFromMap } from "../../domain/framing";
 import type { WallWithGeometry } from "../../domain/geometry/walls";
 import { getOpeningKindLabel } from "../../domain/placement/createOpening";
+import {
+  findPartitionNeighborShim,
+  type PartitionNeighborShim
+} from "../../domain/placement/partitionNeighbors";
 import {
   detectBoundary,
   getArrangeReadoutDetailed,
@@ -12,10 +16,14 @@ import {
 } from "../../domain/placement/arrangeOnWall";
 import type { ArrangeSession } from "../store";
 
-// Display-ready target for one side of "From edges."
+// Display-ready target for one side of "From edges." A projected partition is
+// not a wall object, but it bounds the run just as hard as one, so it reports as
+// an object under its own "partition" kind rather than collapsing to "wall".
+export type ArrangeBoundaryKind = WallObject["kind"] | "partition";
+
 export type ArrangeBoundary =
   | { type: "wall" }
-  | { type: "object"; name: string; kind: WallObject["kind"] };
+  | { type: "object"; name: string; kind: ArrangeBoundaryKind };
 
 export type ArrangeReadout = {
   mode: "equal" | "inset" | "gap";
@@ -44,15 +52,26 @@ export type UseArrangeReadoutParams = {
   lastInsetAnchor: ArrangeSession["insetAnchor"];
   lastArrangeMode: ArrangeSession["mode"];
   lastEvenZone: ArrangeSession["evenZone"] | null;
+  // Partitions standing at the arrange wall, as spacing shims (from
+  // derivePartitionNeighborShimsForFloorWall). Defaults to none so existing
+  // callers and tests are unaffected.
+  partitionNeighbors?: readonly PartitionNeighborShim[];
 };
 
 // Keep display-name lookups out of the geometry domain.
 function resolveBoundary(
   detection: BoundaryDetection,
   wallObjects: Project["wallObjects"],
-  artworksById: Map<string, Artwork>
+  artworksById: Map<string, Artwork>,
+  partitionNeighbors: readonly PartitionNeighborShim[]
 ): ArrangeBoundary {
   if (detection.type === "wall") return { type: "wall" };
+  // Partition shims are not wall objects, so they must be resolved BEFORE the
+  // wallObjects lookup — otherwise the miss below reports them as bare wall.
+  const partition = findPartitionNeighborShim(partitionNeighbors, detection.objectId);
+  if (partition) {
+    return { type: "object", kind: "partition", name: partition.partitionName };
+  }
   const object = wallObjects.find((wallObject) => wallObject.id === detection.objectId);
   if (!object) return { type: "wall" };
   if (object.kind === "artwork") {
@@ -82,7 +101,8 @@ export function deriveArrangeReadout({
   artworksById,
   lastInsetAnchor,
   lastArrangeMode,
-  lastEvenZone
+  lastEvenZone,
+  partitionNeighbors = []
 }: UseArrangeReadoutParams): ArrangeReadout | null {
   if (!arrangeWall) return null;
 
@@ -97,13 +117,18 @@ export function deriveArrangeReadout({
     arrangeWall.lengthMm
   );
   const equal = solveEqualArrangement(footprintArrangeMembers, arrangeWall.lengthMm);
-  // All boundary calculations share the same unselected wall objects.
-  const others = wallObjects
-    .filter(
-      (wallObject) =>
-        wallObject.wallId === arrangeWall.id && !selectedObjectIds.includes(wallObject.id)
-    )
-    .map(withResolvedArtworkFootprint);
+  // All boundary calculations share the same unselected wall objects, plus the
+  // partitions standing at this wall — the same neighbor set beginArrangeSession
+  // freezes, so the readout can never describe a zone the session won't use.
+  const others: WallObjectBase[] = [
+    ...wallObjects
+      .filter(
+        (wallObject) =>
+          wallObject.wallId === arrangeWall.id && !selectedObjectIds.includes(wallObject.id)
+      )
+      .map(withResolvedArtworkFootprint),
+    ...partitionNeighbors
+  ];
   // Freeze open-space bounds during a live preview.
   const openBounds = activeArrangeSession
     ? activeArrangeSession.openZoneBoundsMm
@@ -130,8 +155,18 @@ export function deriveArrangeReadout({
         others,
         arrangeWall.lengthMm
       );
-  const leftBoundary = resolveBoundary(leftBoundaryDetection, wallObjects, artworksById);
-  const rightBoundary = resolveBoundary(rightBoundaryDetection, wallObjects, artworksById);
+  const leftBoundary = resolveBoundary(
+    leftBoundaryDetection,
+    wallObjects,
+    artworksById,
+    partitionNeighbors
+  );
+  const rightBoundary = resolveBoundary(
+    rightBoundaryDetection,
+    wallObjects,
+    artworksById,
+    partitionNeighbors
+  );
   // Measure from detected boundaries, which may be neighbouring objects.
   const memberLeftEdgeMm = Math.min(
     ...footprintArrangeMembers.map((member) => member.xMm - member.widthMm / 2)

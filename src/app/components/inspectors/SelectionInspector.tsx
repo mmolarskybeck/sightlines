@@ -8,7 +8,7 @@ import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import type { ArtworkFrame, DisplayUnit, WallObject } from "../../../domain/project";
 import { FRAME_FINISHES } from "../../../domain/framing";
 import { formatLength } from "../../../domain/units/length";
-import type { ArrangeBoundary } from "../../hooks/arrangeReadout";
+import type { ArrangeBoundary, ArrangeBoundaryKind } from "../../hooks/arrangeReadout";
 import { LengthField } from "../shared/LengthField";
 import { InspectorSection } from "./InspectorSection";
 import { InspectorNotice } from "./InspectorNotice";
@@ -35,8 +35,10 @@ type InsetAnchor = "left" | "both" | "right";
 type EvenZone = "wall" | "open";
 
 // "From edges" names whichever wall or neighboring object was auto-detected.
-function nearestNounFor(kind: WallObject["kind"]): string {
+function nearestNounFor(kind: ArrangeBoundaryKind): string {
   switch (kind) {
+    case "partition":
+      return "partition";
     case "artwork":
       return "artwork";
     case "door":

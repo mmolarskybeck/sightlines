@@ -7,8 +7,9 @@ import {
   spaceGroupAboutCenter,
   type BoundaryDetection
 } from "../../domain/placement/arrangeOnWall";
+import { derivePartitionNeighborShimsForFloorWall } from "../../domain/placement/partitionNeighbors";
 import { withArtworkFootprintFromMap } from "../../domain/framing";
-import type { Project } from "../../domain/project";
+import type { Project, WallObjectBase } from "../../domain/project";
 import { getProjectWalls } from "../projectWalls";
 import type { AppState, EditExtras } from "../store";
 import { getArrangeEligibility } from "./arrangeEligibility";
@@ -192,13 +193,21 @@ export function createArrangeSlice(
       );
       if (!wall) return;
 
-      // Freeze the open-space span from unselected same-wall objects.
-      const others = project.wallObjects
-        .filter(
-          (wallObject) =>
-            wallObject.wallId === wall.id && !selectedIds.includes(wallObject.id)
-        )
-        .map(withResolvedArtworkFootprint);
+      // Freeze the open-space span from unselected same-wall objects, plus any
+      // partition standing at this wall: the bay a slab creates is the zone the
+      // curator means when they space a run "between works", so an arrange
+      // session must distribute from the partition edge rather than run past it
+      // to the wall end. Shims are plain WallObjectBase, invisible to everything
+      // downstream except as spacing boundaries — nothing here can move them.
+      const others: WallObjectBase[] = [
+        ...project.wallObjects
+          .filter(
+            (wallObject) =>
+              wallObject.wallId === wall.id && !selectedIds.includes(wallObject.id)
+          )
+          .map(withResolvedArtworkFootprint),
+        ...derivePartitionNeighborShimsForFloorWall(project.floor, wall.id)
+      ];
       const openZoneBoundsMm = getOpenSpaceBounds(members, others, wall.lengthMm);
       // Default to the open zone only when neighbors bound the group.
       const isBounded =

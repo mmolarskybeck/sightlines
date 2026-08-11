@@ -1,5 +1,8 @@
 import { getPlacementFootprintMm } from "../framing";
-import type { ElevationScene } from "../scene2d/elevationScene";
+import {
+  PARTITION_NEIGHBOR_MAX_GAP_MM,
+  type ElevationScene
+} from "../scene2d/elevationScene";
 import {
   deriveElevationDimensions,
   type DimensionParticipant,
@@ -27,6 +30,14 @@ import {
 // opening by its object.kind below already covers blocked zones. There is no
 // separate blocked-zone channel on ElevationScene today; if one is ever added
 // it must be mapped here too so those footprints keep participating (§9.6).
+//
+// Channels mapped here: artworks, openings (doors/windows/blocked zones) and
+// NEARBY partition profiles. The last is the one channel with an admission
+// rule of its own — a partition standing further than
+// PARTITION_NEIGHBOR_MAX_GAP_MM off the wall still draws as a ghost but does
+// not participate in spacing (domain/placement/partitionNeighbors.ts).
+// Deliberately NOT mapped: floor-case and suspended-artwork ghosts, which have
+// never participated in the document dimension pass.
 
 function centerToMinRect(
   centerXMm: number,
@@ -72,6 +83,25 @@ export function elevationSceneToDimensionParticipants(
         opening.sizeMm.widthMm,
         opening.sizeMm.heightMm
       )
+    });
+  }
+
+  // Partition profiles rise from the floor (y = 0), so they are already
+  // min-corner rects — no center shift. Their height is clamped to the wall
+  // (the profile's own heightMm is unclamped for drawing) exactly as
+  // partitionProfileNeighborShims clamps the canvas-side shims, and the id is
+  // the same bare partition wallId, so canvas and document agree on identity.
+  for (const profile of scene.partitionProfiles) {
+    if (profile.gapMm > PARTITION_NEIGHBOR_MAX_GAP_MM) continue;
+    participants.push({
+      id: profile.partition.wallId,
+      kind: "partition",
+      rect: {
+        xMm: profile.xMinMm,
+        yMm: 0,
+        widthMm: profile.xMaxMm - profile.xMinMm,
+        heightMm: Math.min(profile.heightMm, scene.wallHeightMm)
+      }
     });
   }
 

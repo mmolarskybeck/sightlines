@@ -18,10 +18,8 @@ import {
   type DoorSwingPlanGlyph
 } from "../../../domain/geometry/doorGlyphs";
 import { getRoomPlaceableWalls } from "../../../domain/geometry/placeableWalls";
-import {
-  getFloorPartitions,
-  parseFaceWallId
-} from "../../../domain/geometry/freestandingWalls";
+import { getFloorPartitions } from "../../../domain/geometry/freestandingWalls";
+import { selectElevationPartitions } from "../../../domain/placement/partitionNeighbors";
 import { isPointInPolygon } from "../../../domain/geometry/polygon";
 import {
   SUSPENSION_WIRE_INSET_FRACTION,
@@ -984,11 +982,10 @@ function buildElevationForPage(
   );
   // Same two partition gates createDocumentPdf applies: room-owned, minus the
   // partition this page's own face belongs to.
-  const ownFreestandingWallId = parseFaceWallId(wall.id)?.freestandingWallId;
-  const partitions = getFloorPartitions(project.floor).filter(
-    (candidate) =>
-      candidate.roomId === page.roomId && candidate.wallId !== ownFreestandingWallId
-  );
+  const partitions = selectElevationPartitions(getFloorPartitions(project.floor), {
+    roomId: page.roomId,
+    wallId: wall.id
+  });
   return buildElevationScene(project.wallObjects, {
     wallId: wall.id,
     wallLengthMm: wall.lengthMm,

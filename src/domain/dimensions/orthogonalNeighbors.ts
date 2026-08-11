@@ -15,7 +15,18 @@
 // NOT SVG y-down space; center height reads directly as bottom + height/2 and
 // the floor is y = 0. A renderer flips to SVG via wallLocalYToSvgY as needed.
 
-export type ParticipantKind = "artwork" | "door" | "window" | "blocked-zone";
+// "partition" is the projected profile of a free-standing partition standing
+// close in front of this wall (see domain/placement/partitionNeighbors.ts). It
+// is architecture, not a work: it bounds and blocks gaps like any other
+// participant, but the two kind-sensitive passes below (boundary margins and
+// center-height datums) test `=== "artwork"`, so it never earns a wall margin
+// or a centerline datum of its own.
+export type ParticipantKind =
+  | "artwork"
+  | "door"
+  | "window"
+  | "blocked-zone"
+  | "partition";
 
 export type ParticipantRect = {
   // Min corner (left, bottom) in wall-local y-up space, plus extent.

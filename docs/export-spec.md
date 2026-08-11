@@ -550,6 +550,15 @@ there is no row/salon classification and no guessed lane grouping:
   rendered footprints: an opening between two works prevents those works
   from being direct neighbors and can itself be dimensioned to an adjacent
   work.
+- A free-standing partition standing near the wall joins as a `partition`
+  participant too: a floor-standing rect spanning its projected width, height
+  clamped to the wall (the drawn profile itself may rise taller than the
+  wall — the clamp is for spacing only). Only profiles within the
+  spacing-neighbor gap (perpendicular gap ≤ 1200mm) qualify; a partition
+  further out in the room still draws as a ghost but stops bounding
+  measurements. As architecture rather than a work, a partition blocks
+  corridors and gets gap dimensions like any other participant, but claims
+  no wall-boundary margin of its own and contributes no center-height datum.
 - The wall's left and right boundaries act as virtual horizontal neighbors
   for works exposed directly to them, preserving useful outer margins.
   Coincident exterior dimensions may consolidate when their meaning stays
