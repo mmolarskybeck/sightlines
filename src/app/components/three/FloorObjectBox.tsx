@@ -230,7 +230,9 @@ export function FloorObjectBox({
           rotation={[panel.rotationRad[0], panel.rotationRad[1], panel.rotationRad[2]]}
         >
           <planeGeometry args={[mmToWorld(panel.widthMm), mmToWorld(panel.heightMm)]} />
-          <meshBasicMaterial map={texture} toneMapped={false} />
+          {/* transparent + alphaTest: a PNG's clear regions show the neutral
+              box face beneath instead of the black stored under the alpha. */}
+          <meshBasicMaterial map={texture} toneMapped={false} transparent alphaTest={0.01} />
         </mesh>
       ))}
       {isUncertain(object.status) ? (

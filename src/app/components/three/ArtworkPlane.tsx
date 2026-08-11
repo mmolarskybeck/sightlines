@@ -243,11 +243,16 @@ export function ArtworkPlane({
       >
         <planeGeometry args={[width, height]} />
         {texture ? (
+          // Always transparent so a PNG's alpha channel is honored — the wall
+          // (or mat, when matted) shows through, matching the elevation view's
+          // native SVG behavior. alphaTest discards fully-clear pixels so they
+          // never write depth over things behind the plane.
           <meshBasicMaterial
             key={ghosted ? "ghosted" : "solid"}
             map={texture}
             toneMapped={false}
-            transparent={ghosted}
+            transparent
+            alphaTest={0.01}
             opacity={ghosted ? GHOST_OPACITY : 1}
             depthWrite={!ghosted}
           />
