@@ -343,6 +343,9 @@ export function App() {
   const commitPlanMove = useAppStore((state) => state.commitPlanMove);
   const updateFloorObject = useAppStore((state) => state.updateFloorObject);
   const setFloorArtworkImageFaces = useAppStore((state) => state.setFloorArtworkImageFaces);
+  const pairFloorArtworksBackToBack = useAppStore(
+    (state) => state.pairFloorArtworksBackToBack
+  );
   const updateWallCase = useAppStore((state) => state.updateWallCase);
   const moveWallObjectsGroup = useAppStore((state) => state.moveWallObjectsGroup);
   const movePlanObjectsGroup = useAppStore((state) => state.movePlanObjectsGroup);
@@ -1247,6 +1250,23 @@ export function App() {
   });
   const bulkMatFrameSkippedCount = selectedArtworkIds.length - bulkMatFrameTargets.length;
   const bulkMatFrameTargetCount = bulkMatFrameTargets.length;
+
+  // Back-to-back pairing needs exactly two floor-placed artworks — the anchor
+  // (first selected, stays put) and the mover. Selection order is click order
+  // for shift-clicks; a marquee hands ids in document order, which is still a
+  // deterministic anchor the curator can flip by reselecting.
+  const backToBackFloorArtworks =
+    selectedObjectIds.length === 2
+      ? selectedObjectIds.map((id) =>
+          project.floorObjects.find(
+            (floorObject) => floorObject.kind === "artwork" && floorObject.id === id
+          )
+        )
+      : [];
+  const backToBackPair =
+    backToBackFloorArtworks.length === 2 && backToBackFloorArtworks.every(Boolean)
+      ? { anchorId: backToBackFloorArtworks[0]!.id, movingId: backToBackFloorArtworks[1]!.id }
+      : null;
 
   // Branch order mirrors arrange eligibility so the hint names the first blocker.
   const arrangeDisabledReason = arrangeEligibility.eligible
@@ -2357,6 +2377,17 @@ export function App() {
                 onCancelArrange={cancelArrangeSession}
                 onCenterGroup={() =>
                   void centerSelectionBetweenBoundaries(allowOverlappingPlacement)
+                }
+                backToBack={
+                  backToBackPair
+                    ? {
+                        onPair: () =>
+                          void pairFloorArtworksBackToBack(
+                            backToBackPair.anchorId,
+                            backToBackPair.movingId
+                          )
+                      }
+                    : undefined
                 }
                 matFrame={
                   selectedArtworkIds.length > 0

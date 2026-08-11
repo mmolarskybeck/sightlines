@@ -4,6 +4,7 @@ import { ArrowsHorizontalIcon } from "@phosphor-icons/react/dist/csr/ArrowsHoriz
 import { ArrowsInLineHorizontalIcon } from "@phosphor-icons/react/dist/csr/ArrowsInLineHorizontal";
 import { ArrowsOutLineHorizontalIcon } from "@phosphor-icons/react/dist/csr/ArrowsOutLineHorizontal";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
+import { FlipHorizontalIcon } from "@phosphor-icons/react/dist/csr/FlipHorizontal";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import type { ArtworkFrame, DisplayUnit, WallObject } from "../../../domain/project";
@@ -117,6 +118,7 @@ export function SelectionInspector({
   onAcceptArrange,
   onCancelArrange,
   onCenterGroup,
+  backToBack,
   matFrame,
   onRemoveAll
 }: {
@@ -163,6 +165,12 @@ export function SelectionInspector({
   // boundaries define. Only reachable when `arrange` is non-null, i.e. under the
   // same eligibility as every other control in this section.
   onCenterGroup: () => void;
+  // Present only when the selection is exactly two floor-placed artworks:
+  // snaps the second-selected board flat against the back of the first,
+  // turned 180°, making a two-sided panel (one work per side). Undefined
+  // hides the section entirely — wall placements and mixed selections have
+  // no back face to pair against.
+  backToBack?: { onPair: () => void };
   // Bulk mat & frame for the selected works, rendered as an inline collapsible
   // section (same grammar as the single-artwork inspector's Mat & frame).
   // Undefined when no selected object resolves to an artwork placement
@@ -463,6 +471,27 @@ export function SelectionInspector({
           <InspectorNotice tone="caution">{arrangeDisabledReason}</InspectorNotice>
         )}
       </InspectorSection>
+
+      {/* One-shot pose action, not a mode: after the snap the two boards are
+          still independent placements (drag either one apart to unpair, or
+          drag with both selected to move the panel whole). */}
+      {backToBack ? (
+        <InspectorSection collapsible={false} title="Two-sided panel">
+          <Button
+            className="inspector-action"
+            size="sm"
+            variant="inspector"
+            onClick={backToBack.onPair}
+          >
+            <FlipHorizontalIcon aria-hidden="true" size={15} />
+            Pair back-to-back
+          </Button>
+          <p className="field-hint">
+            Snaps the second work you selected against the back of the first,
+            facing the other way — one work on each side of the panel.
+          </p>
+        </InspectorSection>
+      ) : null}
 
       {/* Bulk mat & frame lives inline, mirroring the single-artwork
           inspector's section of the same name — closed at rest so the arrange

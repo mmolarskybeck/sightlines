@@ -561,6 +561,16 @@ export type AppState = ArrangeSliceState &
   // mis-handle — two equal face sets are never reference-equal, so every
   // commit would look like a change and pile up undo entries.
   setFloorArtworkImageFaces: (objectId: string, faces: FloorObjectFace[]) => Promise<void>;
+  // Snaps two floor-placed artworks together as one two-sided panel: the
+  // moving board lands flat against the ANCHOR board's back face, rotated
+  // 180°, so each work shows on an opposite side of the combined panel (the
+  // hanging-projection-screen rig — two videos on one suspended board). Both
+  // works stay ordinary independent placements; this is a one-shot pose edit,
+  // not a persistent link.
+  pairFloorArtworksBackToBack: (
+    anchorObjectId: string,
+    movingObjectId: string
+  ) => Promise<void>;
   moveWallObjectsGroup: (
     moves: { id: string; xMm: number; yMm: number }[],
     allowOverlap?: boolean
@@ -3693,6 +3703,74 @@ export function createAppStore(deps: AppStoreDeps) {
         );
 
         await applyEdit("Edit image faces", (current) => ({
+          ...current,
+          floorObjects: nextFloorObjects
+        }));
+      },
+
+      async pairFloorArtworksBackToBack(anchorObjectId, movingObjectId) {
+        const project = get().project;
+        if (!project) return;
+
+        const anchor = project.floorObjects.find((object) => object.id === anchorObjectId);
+        const moving = project.floorObjects.find((object) => object.id === movingObjectId);
+        // Kind-gated at the write like setFloorArtworkImageFaces: only artwork
+        // has an image to face outward, and the UI only offers the action for
+        // a two-floor-artwork selection anyway.
+        if (!anchor || !moving || anchor.id === moving.id) return;
+        if (anchor.kind !== "artwork" || moving.kind !== "artwork") return;
+
+        // The anchor's BACK direction in plan space. Convention chain: a floor
+        // object's front (+z in the 3D box's local frame — see FloorObjectFace)
+        // points along plan +y at rotationDeg 0, and rotationDeg rotates plan
+        // vectors by the standard [[cos,-sin],[sin,cos]] matrix (the SVG
+        // rotate() PlanRect renders with, and the same angle FloorObjectBox
+        // negates into a three.js yaw). So back = that matrix applied to
+        // (0,-1) = (sin, -cos).
+        const angleRad = (anchor.rotationDeg * Math.PI) / 180;
+        const backNormal = { xMm: Math.sin(angleRad), yMm: -Math.cos(angleRad) };
+        // Centers separate by the two half-depths: the boards' faces touch.
+        const offsetMm = anchor.depthMm / 2 + moving.depthMm / 2;
+
+        // Vertical: a suspended anchor reads as a shared hanging rig, so the
+        // boards' TOP edges align (wires drop to the top corners); an anchor
+        // resting on the floor pulls the moving board down to rest beside it.
+        const anchorBaseMm = anchor.baseHeightMm ?? 0;
+        const movingBaseMm =
+          anchorBaseMm > 0
+            ? Math.max(0, anchorBaseMm + anchor.heightMm - moving.heightMm)
+            : 0;
+
+        // Each board keeps its faces except "back", which now presses against
+        // the other board and can't be seen. Resolves the absent-means-default
+        // rule at this write (absent -> front+back -> front), producing a
+        // stated choice — the same thing the curator would do by hand.
+        const withoutBack = (faces: FloorObjectFace[] | undefined): FloorObjectFace[] =>
+          (faces ?? DEFAULT_FLOOR_OBJECT_IMAGE_FACES).filter((face) => face !== "back");
+
+        const nextFloorObjects = project.floorObjects.map((object) => {
+          if (object.id === anchor.id) {
+            return { ...object, imageFaces: withoutBack(anchor.imageFaces) };
+          }
+          if (object.id === moving.id) {
+            return {
+              ...object,
+              xMm: anchor.xMm + backNormal.xMm * offsetMm,
+              yMm: anchor.yMm + backNormal.yMm * offsetMm,
+              rotationDeg: anchor.rotationDeg + 180,
+              imageFaces: withoutBack(moving.imageFaces),
+              // Absence discipline (see FloorMemory): a board that was never
+              // suspended and stays on the floor keeps the key absent rather
+              // than gaining a spurious 0.
+              ...(movingBaseMm > 0 || moving.baseHeightMm !== undefined
+                ? { baseHeightMm: movingBaseMm }
+                : {})
+            };
+          }
+          return object;
+        });
+
+        await applyEdit("Pair works back-to-back", (current) => ({
           ...current,
           floorObjects: nextFloorObjects
         }));
