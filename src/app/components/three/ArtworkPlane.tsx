@@ -282,6 +282,20 @@ export function ArtworkPlane({
           </group>
         </>
       ) : null}
+      {layout.hasMat && !layout.hasFrame && !ghosted ? (
+        // Mat edge hairline for a matted-but-frameless work: the off-white
+        // board against a white wall has no frame ring to bound it, so trace
+        // its outer edge (elevation's outerRect stroke does the same job).
+        // Seated just proud of the mat plane; the loop is outside the image
+        // rect, so it never shares depth with the image quad.
+        <group position={[0, 0, mmToWorld((layout.matZMm as number) + HAIRLINE_OFFSET_MM)]}>
+          <FrameEdgeHairline
+            widthMm={layout.openingWidthMm}
+            heightMm={layout.openingHeightMm}
+            color={MAT_BEVEL_HAIRLINE_HEX}
+          />
+        </group>
+      ) : null}
       {layout.hasMat ? (
         // Mat: an off-white board covering the frame's inner opening (image +
         // mat band), recessed a step behind the frame's front face. Lambert so
