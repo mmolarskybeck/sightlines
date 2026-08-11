@@ -3685,6 +3685,22 @@ describe("app store", () => {
       expect(state.placementWarnings).toHaveLength(1);
       expect(state.placementWarnings[0].wallId).toBe(wallId);
     });
+
+    it("makes the wall it was dropped on the elevation view's wall context", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      // Point the wall context at a DIFFERENT wall than the one we're about
+      // to place on, the way it would be left after browsing elsewhere.
+      store.getState().focusWallContext("wall-north");
+      expect(store.getState().wallContextId).toBe("wall-north");
+
+      await store.getState().placeArtwork(artworkId, "wall-east", 1000, 1450);
+
+      const state = store.getState();
+      const placement = state.project!.wallObjects[0];
+      expect(state.wallContextId).toBe("wall-east");
+      expect(state.selection).toEqual({ kind: "objects", ids: [placement.id] });
+    });
   });
 
   describe("moveArtworkPlacement", () => {
@@ -6619,6 +6635,33 @@ describe("app store", () => {
       expect(placement.heightMm).toBe(before.heightMm);
     });
 
+    it("re-anchoring onto a different wall makes it the elevation view's wall context", async () => {
+      const { placementId } = await placeArtworkOnWall(1000, 1450);
+      store.getState().focusWallContext("wall-north");
+      expect(store.getState().wallContextId).toBe("wall-north");
+
+      await store.getState().commitPlanMove(placementId, {
+        anchor: "wall",
+        wallId: "wall-east",
+        xMm: 800
+      });
+
+      expect(store.getState().wallContextId).toBe("wall-east");
+    });
+
+    it("dragging along the same wall leaves the wall context on that wall", async () => {
+      const { placementId, wall } = await placeArtworkOnWall(1000, 1450);
+      store.getState().focusWallContext(wall.id);
+
+      await store.getState().commitPlanMove(placementId, {
+        anchor: "wall",
+        wallId: wall.id,
+        xMm: 2000
+      });
+
+      expect(store.getState().wallContextId).toBe(wall.id);
+    });
+
     it("converts a wall artwork to a floor object: same id, one undo entry, and undo restores the wall placement", async () => {
       const { placementId } = await placeArtworkOnWall(1000, 1450);
       const projectWithOverride: Project = {
@@ -6765,6 +6808,16 @@ describe("app store", () => {
       if (after.kind === "artwork" && before.kind === "artwork") {
         expect(after.imageFaces).toEqual(before.imageFaces);
       }
+    });
+
+    it("capturing a floor object onto a wall makes it the elevation view's wall context", async () => {
+      const objectId = await placeFloorArtwork();
+      store.getState().focusWallContext("wall-north");
+      expect(store.getState().wallContextId).toBe("wall-north");
+
+      await captureOntoWallEast(objectId);
+
+      expect(store.getState().wallContextId).toBe("wall-east");
     });
 
     it("round-trips an unauthored floor object with baseHeightMm and imageFaces still ABSENT", async () => {

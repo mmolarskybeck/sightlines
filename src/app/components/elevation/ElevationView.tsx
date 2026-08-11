@@ -33,7 +33,6 @@ import {
   getDefaultInsertToolSizeMm,
   WALL_TEXT_DEFAULT_NAME
 } from "../../../domain/placement/createWallText";
-import { effectivePlacementForm } from "../../../domain/placement/artworkForm";
 import {
   effectiveFraming,
   getPlacementFootprintMm,
@@ -1544,17 +1543,15 @@ export function ElevationView({
   // client coordinates and the dragged artwork, resolve the placement and paint
   // the drop ghost. No-ops with no wall selected. Caller has gated on an active
   // drag; bypassSnap comes from ⌘/Ctrl on the mouse path, false on touch.
-  // A floor work never hangs on a wall (USER DECISION), so it's not droppable in
-  // elevation at all. Elevation has no danger-ghost vocabulary for a drop (a
-  // wall artwork always resolves somewhere), so the closest existing affordance
-  // is to refuse the drop outright: paint no ghost and commit nothing (the
-  // dragover handler also flips the cursor to no-drop). An unresolved id reads
-  // as a wall work, matching the plan-view default.
-  function isFloorWork(artworkId: string | null): boolean {
-    const artwork = artworkId ? artworksById?.get(artworkId) : undefined;
-    return artwork ? effectivePlacementForm(artwork) === "floor" : false;
-  }
-
+  //
+  // Every work is droppable here, whatever its library form. This used to refuse
+  // a floor work outright — no ghost, no-drop cursor, no commit — on the reading
+  // that a floor work never hangs. That was reversed by USER DECISION along with
+  // the plan-view policy (see floatPolicyForKind): dropping onto a wall IS the
+  // statement that this thing hangs, and a depth-bearing work on a wall is the
+  // supported deep-wall path. The library placementForm flag is not written on
+  // the way through — App derives the effective type from where the object
+  // actually lives.
   function updateArtworkDropGhost(
     clientX: number,
     clientY: number,
@@ -1562,11 +1559,6 @@ export function ElevationView({
     bypassSnap: boolean
   ) {
     if (!wallId) return;
-    // A floor work can't hang here — refuse it (no ghost).
-    if (isFloorWork(artworkId)) {
-      setDropGhost(null);
-      return;
-    }
     const pointerMm = toWallLocalMm(clientX, clientY);
     if (!pointerMm) return;
 
@@ -1609,9 +1601,6 @@ export function ElevationView({
     bypassSnap: boolean
   ) {
     if (!wallId) return;
-    // A floor work is not droppable on a wall — refuse the commit (see
-    // isFloorWork). The ghost was already suppressed, so this is a no-op release.
-    if (isFloorWork(artworkId)) return;
     const pointerMm = toWallLocalMm(clientX, clientY);
     if (!pointerMm) return;
 
@@ -1648,9 +1637,7 @@ export function ElevationView({
     )
       return;
     event.preventDefault();
-    // A floor work can't hang here: show the no-drop cursor instead of "copy",
-    // the closest existing affordance to a rejected elevation drop.
-    event.dataTransfer.dropEffect = isFloorWork(draggingArtworkId) ? "none" : "copy";
+    event.dataTransfer.dropEffect = "copy";
     updateArtworkDropGhost(
       event.clientX,
       event.clientY,

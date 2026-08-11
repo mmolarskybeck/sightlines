@@ -2205,6 +2205,13 @@ export function App() {
                 onSelectWall={selectWall}
                 onSelectObject={selectObject}
                 onClearSelection={clearObjectSelection}
+                draggingArtworkId={draggingArtworkId}
+                onPlaceArtwork={(artworkId, wallId, xMm, yMm) =>
+                  void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement)
+                }
+                onPlaceArtworkOnFloor={(artworkId, xMm, yMm) =>
+                  void placeArtworkOnFloor(artworkId, xMm, yMm)
+                }
                 actionsRef={threeDActionsRef}
                 initialPose={pendingViewPose ?? undefined}
               />

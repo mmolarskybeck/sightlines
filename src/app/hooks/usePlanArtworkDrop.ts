@@ -11,9 +11,7 @@ import { roomIdContainingPoint } from "../../domain/geometry/freestandingWalls";
 import { getArtworkOuterDimensionsMm } from "../../domain/framing";
 import {
   effectiveFloorDepthMm,
-  effectivePlacementForm,
-  effectiveWallArtworkDepthMm,
-  type PlacementForm
+  effectiveWallArtworkDepthMm
 } from "../../domain/placement/artworkForm";
 import {
   getEffectivePlacementSizeMm,
@@ -41,9 +39,10 @@ import { useArtworkAspect } from "./useArtworkAspect";
 // verbatim. It owns the transient drop-ghost state and snap hysteresis, loads
 // the dragged artwork's aspect, and subscribes to the module-level touch-drag
 // session. The DOM handlers and dropGhost the JSX renders are the whole surface
-// it hands back: artworkFormFor stays internal, because the DROP is now the only
-// path that reads a work's library placementForm — a MOVE of an already-placed
-// work floats both ways (see floatPolicyForKind's scope note).
+// it hands back. It no longer reads a work's library placementForm at all: a
+// drop floats exactly like a move, so the wall under the cursor (or the absence
+// of one) is what decides whether the work hangs or stands (see
+// floatPolicyForKind).
 export function usePlanArtworkDrop(options: {
   artworksById: Map<string, Artwork> | undefined;
   draggingArtworkId: string | null;
@@ -90,9 +89,15 @@ export function usePlanArtworkDrop(options: {
 
   // The effective footprint of an artwork being dragged from the checklist:
   // its real size if we know which one (draggingArtworkId), otherwise the same
-  // placeholder placement itself falls back to. depthMm feeds a floor-drop
-  // preview; a wall drop reads wallFootprintDepthMm instead (deep works
-  // protrude, flat works keep the nominal band).
+  // placeholder placement itself falls back to. BOTH footprints are always
+  // resolved, because the drop now floats in both directions (USER DECISION —
+  // intent wins) and only the RESOLVED anchor knows which one to read: the wall
+  // stage takes wallFootprintWidthMm/wallFootprintDepthMm (framing widens the
+  // work, deep works protrude, flat works keep the nominal band), the floor
+  // stage takes movingSize's widthMm/depthMm. Gating either footprint on the
+  // library placementForm — as this did before — left a floor work with no wall
+  // footprint the moment it hovered a wall, and a wall work's ghost keeping the
+  // nominal 150mm band once it stood on open floor.
   function effectiveArtworkDims(artworkId: string | null): {
     widthMm: number;
     heightMm: number;
@@ -106,28 +111,30 @@ export function usePlanArtworkDrop(options: {
       const aspect = artworkId === draggingArtworkId ? draggingArtworkAspect : undefined;
       const { widthMm, heightMm } = getEffectivePlacementSizeMm(artwork.dimensions, aspect);
       // Framing is WALL-ONLY geometry (docs/framing-dimension-contract.md §3,
-      // Phase 6b): a floor work gets NO outer width, by construction rather than
-      // by the floor stage happening to ignore one. An outer width leaking into
-      // a floor drop would also reach effectiveFloorDepthMm's width fallback and
-      // put the frame band on the depth axis, which it has no relationship to.
-      const wallFootprintWidthMm =
-        effectivePlacementForm(artwork) === "wall"
-          ? getArtworkOuterDimensionsMm(widthMm, heightMm, artwork.matWidthMm, artwork.frame)
-              .widthMm
-          : undefined;
+      // Phase 6b), which is why the outer width travels in its own field and
+      // never in movingSize: only resolveOnWall reads it. The floor stage keeps
+      // the image width, so the frame band can never reach
+      // effectiveFloorDepthMm's width fallback and land on the depth axis, which
+      // it has no physical relationship to.
+      const wallFootprintWidthMm = getArtworkOuterDimensionsMm(
+        widthMm,
+        heightMm,
+        artwork.matWidthMm,
+        artwork.frame
+      ).widthMm;
       return {
         widthMm,
         heightMm,
         wallFootprintWidthMm,
         // A checklist drag has no placement yet, so no displayDimensionsOverride
         // — the record's own depth is the only source. Undefined for flat works,
-        // which keeps the drop ghost at the nominal band exactly as before.
-        wallFootprintDepthMm:
-          effectivePlacementForm(artwork) === "wall"
-            ? effectiveWallArtworkDepthMm({}, artwork)
-            : undefined,
-        // Floor footprint depth for a floor-work drop — shared with the store
-        // commit and 3D via effectiveFloorDepthMm; ignored for a wall drop.
+        // which keeps the drop ghost at the nominal band; a depth-bearing work
+        // hovering a wall previews (and places as) the supported deep-wall work.
+        wallFootprintDepthMm: effectiveWallArtworkDepthMm({}, artwork),
+        // Floor footprint depth for a floor drop — shared with the store commit
+        // and 3D via effectiveFloorDepthMm (depth → width → default, so a flat
+        // work standing on the floor still gets a real footprint); ignored by
+        // the wall stage.
         depthMm: effectiveFloorDepthMm(artwork.dimensions)
       };
     }
@@ -138,15 +145,6 @@ export function usePlanArtworkDrop(options: {
     };
   }
 
-  // The effective placement form of the artwork under a drag — governs whether
-  // the drop captures a wall (wall work) or lands on the floor (floor work). An
-  // unresolved id (placeholder drag before the payload is known) reads as a wall
-  // work, the conservative default (matches floatPolicyForKind's own fallback).
-  function artworkFormFor(artworkId: string | null): PlacementForm {
-    const artwork = artworkId ? artworksById?.get(artworkId) : undefined;
-    return artwork ? effectivePlacementForm(artwork) : "wall";
-  }
-
   function resolveArtworkDrop(
     pointerMm: Vector2,
     dims: ReturnType<typeof effectiveArtworkDims>,
@@ -154,11 +152,7 @@ export function usePlanArtworkDrop(options: {
     // kill the grid tier and drop the neighbor threshold to zero so the point
     // lands exactly under the pointer. Touch drags pass false — they have no
     // modifier and read best fully snapped.
-    bypassSnap: boolean,
-    // The dragged work's effective form: a wall work rejects off every wall
-    // (resolves to `{ anchor: "none" }`), a floor work goes straight to the
-    // floor stage and never captures a wall (floor-only).
-    form: PlacementForm
+    bypassSnap: boolean
   ) {
     const roomId = roomIdContainingPoint(project, pointerMm);
     return resolvePlanPlacement(pointerMm, {
@@ -168,7 +162,11 @@ export function usePlanArtworkDrop(options: {
       wallFootprintWidthMm: dims.wallFootprintWidthMm,
       wallFootprintDepthMm: dims.wallFootprintDepthMm,
       movingKind: "artwork",
-      floatPolicy: floatPolicyForKind("artwork", form),
+      // "float": a wall in capture range takes the work, otherwise it lands on
+      // open floor — the same policy a MOVE of an already-placed work uses, so
+      // the drop and the drag that follows it behave identically. The library
+      // placementForm is not consulted at all (see floatPolicyForKind).
+      floatPolicy: floatPolicyForKind("artwork"),
       currentAnchorWallId: null,
       captureDistanceMm,
       gridTargets: gridSnapTargets,
@@ -199,12 +197,7 @@ export function usePlanArtworkDrop(options: {
     const pointerMm = toSvgMm(clientX, clientY);
     if (!pointerMm) return;
 
-    const result = resolveArtworkDrop(
-      pointerMm,
-      effectiveArtworkDims(artworkId),
-      bypassSnap,
-      artworkFormFor(artworkId)
-    );
+    const result = resolveArtworkDrop(pointerMm, effectiveArtworkDims(artworkId), bypassSnap);
     dropSnapTargetIdsRef.current = result.snapTargetIds;
     setDropGhost({
       planRect: result.planRect,
@@ -229,21 +222,21 @@ export function usePlanArtworkDrop(options: {
     const pointerMm = toSvgMm(clientX, clientY);
     if (!pointerMm) return;
 
-    const placement = resolveArtworkDrop(
-      pointerMm,
-      effectiveArtworkDims(artworkId),
-      bypassSnap,
-      artworkFormFor(artworkId)
-    ).placement;
-    // A floor work lands on the floor (floor-only policy always resolves a floor
-    // center) via the store's placeArtworkOnFloor path.
+    const placement = resolveArtworkDrop(pointerMm, effectiveArtworkDims(artworkId), bypassSnap)
+      .placement;
+    // Where it was dropped decides what it becomes, for any work: no wall in
+    // capture range → it stands on the floor via placeArtworkOnFloor, whatever
+    // the library form said. The form flag is deliberately NOT written here —
+    // App derives the effective type from where the object actually lives, and
+    // writing it would cost a second undo step (same precedent as
+    // setArtworkPlacementForm's conversion).
     if (placement.anchor === "floor") {
       onPlaceArtworkOnFloor?.(artworkId, placement.xMm, placement.yMm);
       return;
     }
-    // A wall work is wall-only: only a wall capture commits. `anchor: "none"`
-    // (no wall in range) is a rejected drop — a no-op, matching the danger ghost
-    // the user saw.
+    // `anchor: "none"` no longer occurs for an artwork drop (the policy above
+    // floats), but the arm is still the type's, so it stays a no-op rather than
+    // an assumption.
     if (placement.anchor !== "wall") return;
     const wall = floorWallsForTool.find((candidate) => candidate.id === placement.wallId);
     // A wall-dropped artwork hangs at the wall's centerline (its own default,

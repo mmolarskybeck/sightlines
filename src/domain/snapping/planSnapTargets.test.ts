@@ -363,7 +363,7 @@ describe("resolvePlanPlacement — clamping", () => {
       { xMm: 2000, yMm: 5 },
       {
         ...baseArgs,
-        floatPolicy: floatPolicyForKind("artwork", "floor"),
+        floatPolicy: "floor-only" as const,
         wallFootprintWidthMm: 500
       }
     );
@@ -424,15 +424,19 @@ describe("resolvePlanPlacement — side-aware capture on coincident twin walls",
   });
 });
 
-// Scoped to the checklist DROP path: a MOVE of an already-placed work passes
-// "float" and never reaches this policy (see floatPolicyForKind's scope note).
-describe("resolvePlanPlacement — artwork reject policy (checklist drop)", () => {
-  const rejectArgs = { ...baseArgs, floatPolicy: floatPolicyForKind("artwork") };
+// The refusal stage no kind maps to any more: artwork drops float in both
+// directions (USER DECISION — see the intent-wins describe below), so nothing
+// floatPolicyForKind returns reaches resolveRejected. It stays the module's
+// refusal vocabulary — the only way a caller can paint a danger ghost and commit
+// nothing — so it keeps its coverage, driven by the policy literal rather than
+// by a kind.
+describe("resolvePlanPlacement — reject policy (no kind maps here)", () => {
+  const rejectArgs = { ...baseArgs, floatPolicy: "reject" as const };
 
   it("floatPolicyForKind maps kinds to their policy", () => {
-    expect(floatPolicyForKind("artwork")).toBe("reject");
-    expect(floatPolicyForKind("artwork", "wall")).toBe("reject");
-    expect(floatPolicyForKind("artwork", "floor")).toBe("floor-only");
+    // Artwork floats exactly as a case does: the drop point decides the surface,
+    // never the library placementForm (which is only a default preference now).
+    expect(floatPolicyForKind("artwork")).toBe("float");
     expect(floatPolicyForKind("blocked-zone")).toBe("float");
     expect(floatPolicyForKind("door")).toBe("capture-any");
     expect(floatPolicyForKind("window")).toBe("capture-any");
@@ -450,9 +454,9 @@ describe("resolvePlanPlacement — artwork reject policy (checklist drop)", () =
     expect(result.activeGuides).toEqual([]);
   });
 
-  it("keeps the framed outer width in the rejected ghost (it is still a wall work)", () => {
-    // A reject is a wall-only work that lost capture, not a floor object: the
-    // ghost must not shrink to the image width the instant the wall lets go.
+  it("keeps the framed outer width in the rejected ghost (it is still a wall object)", () => {
+    // A reject is a wall-anchored object that lost capture, not a floor object:
+    // the ghost must not shrink to the image width the instant the wall lets go.
     const args = { ...rejectArgs, wallFootprintWidthMm: 500 };
     const captured = resolvePlanPlacement({ xMm: 2000, yMm: 30 }, args);
     const rejected = resolvePlanPlacement({ xMm: 2000, yMm: 80 }, args);
@@ -473,7 +477,7 @@ describe("resolvePlanPlacement — artwork reject policy (checklist drop)", () =
     expect(result.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 2000 });
   });
 
-  it("a blocked-zone still floats where an artwork would reject", () => {
+  it("a blocked-zone floats where the reject policy would refuse", () => {
     const result = resolvePlanPlacement(
       { xMm: 2000, yMm: 80 },
       { ...baseArgs, movingKind: "blocked-zone", floatPolicy: floatPolicyForKind("blocked-zone") }
@@ -481,7 +485,7 @@ describe("resolvePlanPlacement — artwork reject policy (checklist drop)", () =
     expect(result.placement).toEqual({ anchor: "floor", xMm: 2000, yMm: 80 });
   });
 
-  it("a door still captures at any distance where an artwork would reject", () => {
+  it("a door still captures at any distance where the reject policy would refuse", () => {
     const result = resolvePlanPlacement(
       { xMm: 2000, yMm: 100000 },
       {
@@ -495,11 +499,13 @@ describe("resolvePlanPlacement — artwork reject policy (checklist drop)", () =
   });
 });
 
-describe("resolvePlanPlacement — floor-only policy (floor artwork)", () => {
+// A floor CASE is the only thing that asks for floor-only now — a floor artwork
+// used to, and no longer does (see the intent-wins describe below).
+describe("resolvePlanPlacement — floor-only policy (floor case)", () => {
   const floorOnlyArgs = {
     ...baseArgs,
-    movingKind: "artwork" as const,
-    floatPolicy: floatPolicyForKind("artwork", "floor")
+    movingKind: "case" as const,
+    floatPolicy: "floor-only" as const
   };
 
   it("never captures a wall even when dropped directly on one", () => {
@@ -530,12 +536,67 @@ describe("resolvePlanPlacement — floor-only policy (floor artwork)", () => {
     expect(result.placement).toEqual({ anchor: "floor", xMm: 1850, yMm: 200 });
   });
 
-  it("leaves the wall work's reject policy unchanged (regression guard)", () => {
-    const wallWork = resolvePlanPlacement(
+  it("keeps ignoring walls for a case even with a wall footprint in hand", () => {
+    const result = resolvePlanPlacement(
       { xMm: 2000, yMm: 30 },
-      { ...baseArgs, floatPolicy: floatPolicyForKind("artwork", "wall") }
+      { ...floorOnlyArgs, wallFootprintWidthMm: 500, wallFootprintDepthMm: 500 }
     );
-    expect(wallWork.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 2000 });
+    expect(result.placement).toEqual({ anchor: "floor", xMm: 2000, yMm: 30 });
+  });
+});
+
+// USER DECISION — intent wins on the checklist DROP path, matching the rule
+// moves already followed: where the work is released is what it becomes, whatever
+// its library placementForm says. Both directions used to be impossible and
+// unexplained — a depth-bearing work could not be dropped on a wall (floor-only
+// never attempted a capture) and a flat work could not be dropped on open floor
+// (reject painted a red ghost and committed nothing). The dims the caller hands
+// in still describe BOTH surfaces; only the resolved anchor picks which ones the
+// rect is drawn from.
+describe("resolvePlanPlacement — artwork drop converts by drop point", () => {
+  const dropArgs = {
+    ...baseArgs,
+    movingKind: "artwork" as const,
+    floatPolicy: floatPolicyForKind("artwork")
+  };
+
+  it("hangs a FLOOR-form work dropped near a wall, at its protruding depth", () => {
+    // What usePlanArtworkDrop hands in for a depth-bearing work: a real floor
+    // footprint (movingSize.depthMm) AND the wall footprint a deep work
+    // protrudes (effectiveWallArtworkDepthMm), unframed so the widths agree.
+    const result = resolvePlanPlacement(
+      { xMm: 2000, yMm: 30 },
+      { ...dropArgs, wallFootprintWidthMm: 300, wallFootprintDepthMm: 400 }
+    );
+
+    expect(result.placement).toEqual({ anchor: "wall", wallId: "wall-1", xMm: 2000 });
+    // The ghost follows the RESOLVED anchor: the deep work's real protrusion,
+    // not the thin nominal band.
+    expect(result.planRect.depthMm).toBe(400);
+  });
+
+  it("stands a WALL-form work dropped on open floor, at its floor footprint", () => {
+    // A flat framed work: outer width 500 for the wall stage, image width 300
+    // and the floor-depth fallback for the floor stage, no wall protrusion.
+    const result = resolvePlanPlacement(
+      { xMm: 2000, yMm: 80 },
+      {
+        ...dropArgs,
+        movingSize: { widthMm: 300, heightMm: 400, depthMm: 300 },
+        wallFootprintWidthMm: 500
+      }
+    );
+
+    expect(result.placement).toEqual({ anchor: "floor", xMm: 2000, yMm: 80 });
+    // Floor geometry stays framing-agnostic (Phase 6b) even though the wall
+    // footprint travelled with the drag.
+    expect(result.planRect.widthMm).toBe(300);
+    expect(result.planRect.depthMm).toBe(300);
+  });
+
+  it("never rejects: no wall in range resolves a floor center, not anchor 'none'", () => {
+    const result = resolvePlanPlacement({ xMm: 2000, yMm: 100000 }, dropArgs);
+    expect(result.placement.anchor).toBe("floor");
   });
 });
 
@@ -646,7 +707,8 @@ describe("resolvePlanPlacement — floor stage alignment (Phase 3)", () => {
     const rejectArgs = {
       ...alignArgs,
       movingKind: "artwork" as const,
-      floatPolicy: floatPolicyForKind("artwork")
+      // The policy literal, not a kind — nothing maps to "reject" any more.
+      floatPolicy: "reject" as const
     };
     // Far from every wall so nothing captures, and near the room centerline
     // so alignment WOULD fire if it leaked through.

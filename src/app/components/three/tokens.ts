@@ -190,3 +190,15 @@ export const UNKNOWN_COLOR = "#b03a28"; // ≈ --danger    oklch(0.53 0.18 28)
 // Solid accent stroke for selection in three.js views. Selection never tints
 // an artwork's image texture (spec §4.3) — it's outline-only on textured planes.
 export const SELECTION_COLOR = "#1d7e8c"; // ≈ --selection oklch(0.55 0.11 200)
+
+// ============================================================================
+// Checklist drop preview (3D)
+// ============================================================================
+
+// The translucent plane shown while a checklist work is dragged over the 3D
+// view. Deliberately the selection petrol, not a new hue: it previews the
+// object that is about to become the selection, and the same accent already
+// means "this is the thing you are acting on" everywhere else in the app.
+// Untextured on purpose — the preview answers "how big, and where", and a
+// half-loaded image would answer it worse.
+export const DROP_GHOST_OPACITY = 0.35;

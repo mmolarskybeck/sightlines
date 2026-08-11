@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Artwork, Project } from "../../../domain/project";
 import { createSampleProject } from "../../../domain/sample/sampleProject";
 import { TooltipProvider } from "../ui/tooltip";
@@ -10,6 +10,12 @@ import {
   groupChecklistRowsByArtist,
   sortChecklistRows
 } from "./ChecklistPanel";
+
+// jsdom doesn't implement scrollIntoView; the panel calls it when selection
+// changes to a row (see ChecklistPanel.tsx's scroll-into-view effect).
+beforeAll(() => {
+  window.HTMLElement.prototype.scrollIntoView = vi.fn();
+});
 
 afterEach(() => cleanup());
 
@@ -232,6 +238,79 @@ describe("ChecklistPanel temporary views", () => {
       "false"
     );
   });
+
+  // Regression coverage for the bug in docs/interaction-improvements-2026-08.md
+  // §1: the auto-expand-on-selection effect used to depend on an unmemoized
+  // `rows` array, so it re-fired on every render — including the render
+  // caused by the user's own collapse click — and immediately re-opened the
+  // section it had just closed. The harness above defaults selectedArtworkId
+  // to null, which is why the bug was invisible in the existing tests; these
+  // all render with a non-null selection.
+  it("lets the selected work's own artist section be collapsed, and it stays collapsed across a re-render", async () => {
+    const { rerenderWithSelection } = renderChecklist({ selectedArtworkId: "boyun-landscape" });
+    await enableArtistGrouping();
+
+    const boyun = screen.getByRole("button", { name: "Boyun Jang, 2 works" });
+    expect(boyun).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.click(boyun);
+    expect(screen.getByRole("button", { name: "Boyun Jang, 2 works" })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    );
+
+    // Re-render with the SAME selection (the component re-rendering for any
+    // other reason — this is what used to reopen the section, since `rows`
+    // was rebuilt with a new identity on every render).
+    rerenderWithSelection("boyun-landscape");
+    expect(screen.getByRole("button", { name: "Boyun Jang, 2 works" })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    );
+  });
+
+  it("expands a collapsed section when selection changes to a work inside it", async () => {
+    const { rerenderWithSelection } = renderChecklist({ selectedArtworkId: null });
+    await enableArtistGrouping();
+    fireEvent.click(screen.getByRole("button", { name: "Boyun Jang, 2 works" }));
+    expect(screen.getByRole("button", { name: "Boyun Jang, 2 works" })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    );
+    expect(screen.queryByText("Landscape Study")).not.toBeInTheDocument();
+
+    // Selection arriving from outside the panel (canvas/plan/3D) into the
+    // collapsed section should open it and reveal the row.
+    rerenderWithSelection("boyun-landscape");
+    expect(screen.getByRole("button", { name: "Boyun Jang, 2 works" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    );
+    expect(screen.getByText("Landscape Study")).toBeInTheDocument();
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it("collapses every artist section from Collapse all, even with a work selected", async () => {
+    renderChecklist({ selectedArtworkId: "boyun-landscape" });
+    await enableArtistGrouping();
+
+    const alma = screen.getByRole("button", { name: "Alma Thomas, 1 work" });
+    const boyun = screen.getByRole("button", { name: "Boyun Jang, 2 works" });
+    expect(alma).toHaveAttribute("aria-expanded", "true");
+    expect(boyun).toHaveAttribute("aria-expanded", "true");
+
+    await openChecklistOptions();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Collapse all artists" }));
+
+    expect(screen.getByRole("button", { name: "Alma Thomas, 1 work" })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    );
+    expect(screen.getByRole("button", { name: "Boyun Jang, 2 works" })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    );
+  });
 });
 
 const panelArtworks: Artwork[] = [
@@ -260,13 +339,8 @@ function artwork(
   };
 }
 
-function renderChecklist(overrides: { project?: Project; selectedArtworkId?: string | null } = {}) {
-  const project = overrides.project ?? {
-    ...createSampleProject(),
-    id: "checklist-test",
-    checklistArtworkIds: panelArtworks.map((item) => item.id)
-  };
-  return render(
+function buildChecklistElement(project: Project, selectedArtworkId: string | null) {
+  return (
     <TooltipProvider>
       <ChecklistPanel
         getBlob={vi.fn(async () => new Blob())}
@@ -282,10 +356,28 @@ function renderChecklist(overrides: { project?: Project; selectedArtworkId?: str
         onSelectArtwork={vi.fn()}
         pendingDuplicateUploads={[]}
         project={project}
-        selectedArtworkId={overrides.selectedArtworkId ?? null}
+        selectedArtworkId={selectedArtworkId}
       />
     </TooltipProvider>
   );
+}
+
+function renderChecklist(overrides: { project?: Project; selectedArtworkId?: string | null } = {}) {
+  const project = overrides.project ?? {
+    ...createSampleProject(),
+    id: "checklist-test",
+    checklistArtworkIds: panelArtworks.map((item) => item.id)
+  };
+  const result = render(buildChecklistElement(project, overrides.selectedArtworkId ?? null));
+  return {
+    ...result,
+    // Re-renders the SAME element tree with a different selection — used to
+    // simulate the selection changing from outside the panel (canvas/plan/3D)
+    // without remounting, since that's exactly the path the auto-expand and
+    // scroll-into-view effects key off of.
+    rerenderWithSelection: (selectedArtworkId: string | null) =>
+      result.rerender(buildChecklistElement(project, selectedArtworkId))
+  };
 }
 
 async function openChecklistOptions() {

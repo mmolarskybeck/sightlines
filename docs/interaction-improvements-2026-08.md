@@ -8,7 +8,7 @@ Status legend: ☐ planned · ◐ in progress · ☑ built · ✔ reviewed+verif
 
 ---
 
-## 1. ☐ Checklist: always-collapsible sections + auto-expand on selection
+## 1. ✔ Checklist: always-collapsible sections + auto-expand on selection
 
 *(User items 3 and 4 — one root cause.)*
 
@@ -46,7 +46,7 @@ into view.
 
 ---
 
-## 2. ☐ Plan drop onto a wall selects that wall for elevation
+## 2. ✔ Plan drop onto a wall selects that wall for elevation
 
 *(User item 1.)*
 
@@ -80,7 +80,7 @@ toggle → that wall is showing with the new work selected.
 
 ---
 
-## 3. ☐ Cross-type drops convert placement (floor work → wall, wall work → floor)
+## 3. ✔ Cross-type drops convert placement (floor work → wall, wall work → floor)
 
 *(User item 5.)*
 
@@ -130,7 +130,7 @@ toggle still round-trips.
 
 ---
 
-## 4. ☐ 3D view: drop-to-place on walls (and floor) + arrow-key nudge
+## 4. ✔ 3D view: drop-to-place on walls (and floor) + arrow-key nudge
 
 *(User item 2. Amends the "no 3D editing" decision — 3D becomes a placement
 and nudge surface; elevation/inspector remain the precision surfaces.)*

@@ -1,5 +1,4 @@
 import type { FloorObject, WallObject, WallObjectBase } from "../project";
-import type { PlacementForm } from "../placement/artworkForm";
 import {
   getWallObjectPlanRect,
   projectPointToWall,
@@ -37,60 +36,62 @@ export type PlanPlacement =
   | { anchor: "wall"; wallId: string; xMm: number }
   | { anchor: "floor"; xMm: number; yMm: number };
 
-// A drag that cannot commit anywhere: a wall-form artwork dragged IN from the
-// checklist with no wall in capture range. It is deliberately NOT a
-// PlanPlacement — nothing gets persisted — so the `anchor: "none"` variant
-// forces every caller to handle the rejected case rather than silently
-// floor-placing. The result still carries a planRect so the caller can paint the
-// danger ghost under the cursor; release is a no-op.
+// A drag that cannot commit anywhere. It is deliberately NOT a PlanPlacement —
+// nothing gets persisted — so the `anchor: "none"` variant forces every caller
+// to handle the rejected case rather than silently floor-placing. The result
+// still carries a planRect so the caller can paint the danger ghost under the
+// cursor; release is a no-op.
 //
-// USER DECISION, SINCE REVERSED for one of the two paths that reached it. This
-// also used to cover MOVES of already-placed artwork — a hung work dragged off
-// its wall was refused outright — on the reasoning that a 2D work is wall-only,
-// full stop. That stranded any work whose library `placementForm` said "wall"
-// while its placement was on the floor: the drag painted the danger ghost and
-// committed nothing, with no gesture that could put it right. The curator has
-// chosen bidirectional direct manipulation instead, so a move now floats (see
-// floatPolicyForKind) and the inspector's Type control is its explicit twin.
-// Rejection survives only on the DROP path, where there is no placement to
-// convert and the library form is the only statement of intent there is.
+// USER DECISION, SINCE REVERSED for BOTH paths that used to reach it. It first
+// covered MOVES of already-placed artwork — a hung work dragged off its wall was
+// refused outright — on the reasoning that a 2D work is wall-only, full stop.
+// That stranded any work whose library `placementForm` said "wall" while its
+// placement was on the floor: the drag painted the danger ghost and committed
+// nothing, with no gesture that could put it right. It then survived on the DROP
+// path (an unplaced work dragged in from the checklist), where the same refusal
+// simply moved earlier in the work's life: a depth-bearing work could not be
+// dropped on a wall and a flat one could not be dropped on open floor, silently
+// and with no explanation. The curator has chosen bidirectional direct
+// manipulation on both paths — where you drop it is where it goes — so artwork
+// now floats either way (see floatPolicyForKind) and the inspector's Type
+// control is its explicit twin rather than a gate in front of the mouse.
+//
+// No kind maps to "reject" today, so `anchor: "none"` is currently unreachable
+// from floatPolicyForKind. The variant and the resolver stage below are kept as
+// the module's refusal vocabulary: they are the only way a future placement
+// surface can paint a danger ghost and commit nothing, and every caller already
+// handles the arm.
 export type ResolvedPlacement = PlanPlacement | { anchor: "none" };
 
 // How a placement behaves relative to walls. `float` resolves a free
-// floor-space center when no wall captures (blocked zones); `capture-any` never
-// floats and grabs the globally nearest wall at any distance (doors/windows);
-// `reject` refuses the drop (a WALL artwork off every wall — wall-only);
-// `floor-only` never even attempts a wall capture — it goes straight to the
-// floor stage (a FLOOR artwork, which sits on the floor and never hangs). See
-// floatPolicyForKind.
+// floor-space center when no wall captures (blocked zones, artwork, cases);
+// `capture-any` never floats and grabs the globally nearest wall at any distance
+// (doors/windows); `floor-only` never even attempts a wall capture — it goes
+// straight to the floor stage (a floor case, which sits on the floor and never
+// hangs); `reject` refuses the drop outright. `reject` is no longer produced by
+// floatPolicyForKind — see ResolvedPlacement for why the stage is kept.
 export type FloatPolicy = "float" | "capture-any" | "reject" | "floor-only";
 
 // The per-kind policy that used to be spread across callers as
 // `canFloat: kind === ...`. Blocked zones float, doors/windows capture at any
-// distance. Artwork is the one kind that depends on the artwork RECORD, not the
-// kind alone: a wall work is wall-only (reject), a floor work is floor-only.
-// The effective form is passed in (see effectivePlacementForm); it defaults to
-// the wall-only behavior when a caller has no form to hand (e.g. a placeholder
-// drag whose artwork hasn't resolved yet).
+// distance, and artwork floats exactly as a case does: it captures a wall within
+// capture distance and otherwise resolves a free floor-space center, so the
+// caller's `anchor` — not the artwork record — decides whether the work hangs or
+// stands.
 //
-// SCOPE of the artwork branch, narrowed by a USER DECISION that reversed the
-// earlier one. It now answers for the DROP path only — an unplaced work dragged
-// in from the checklist, where `placementForm` is the only statement of intent
-// that exists yet. A MOVE of an already-placed work no longer consults the
-// record at all: it passes "float" outright (see floatPolicyForMovingObject in
-// usePlanObjectMove), exactly as a case does, so a hung work dragged onto open
-// floor stands up and a standing work dragged to a wall hangs. Under the old
-// rule `placementForm` was a MODE that had to be flipped in the inspector
-// before a cross-surface drag would take, and a work whose flag and placement
-// disagreed could not be dragged anywhere at all. The inspector's Type control
-// now converts the placement itself (store.setArtworkPlacementForm), so the
-// explicit path and the direct-manipulation path are twins rather than gates on
-// each other.
-export function floatPolicyForKind(
-  kind: WallObject["kind"],
-  artworkForm?: PlacementForm
-): FloatPolicy {
-  if (kind === "artwork") return artworkForm === "floor" ? "floor-only" : "reject";
+// The artwork branch USED to read the record's effective placementForm (a wall
+// work rejected off every wall, a floor work never even attempted a capture),
+// which made `placementForm` a MODE that had to be flipped in the inspector
+// before a cross-surface gesture would take. That was reversed for MOVES first
+// and now for DROPS too, by USER DECISION: intent wins — a depth-bearing work
+// dragged from the checklist onto a wall hangs, a flat work dropped on open
+// floor stands. The form survives as the record's DEFAULT preference (it still
+// answers "what is this thing" for an unplaced work, and the inspector's Type
+// control still converts an existing placement via
+// store.setArtworkPlacementForm), but it never gates placement, so it is not a
+// parameter here any more.
+export function floatPolicyForKind(kind: WallObject["kind"]): FloatPolicy {
+  if (kind === "artwork") return "float";
   if (kind === "blocked-zone") return "float";
   // A case floats like a blocked zone: it captures a wall only within capture
   // distance and otherwise resolves a free floor-space center. placeCaseFromPlan
@@ -137,7 +138,10 @@ export function resolvePlanPlacement(
     // including the REJECTED ghost, which is still a wall work under the cursor.
     // Only the genuine floor stage (float / floor-only) keeps movingSize: floor
     // geometry is framing-agnostic by decision (docs/framing-dimension-contract.md
-    // §3, Phase 6b), and callers do not even supply this field for a floor work.
+    // §3, Phase 6b). Callers may hand this in for ANY artwork now that a drop
+    // floats both ways (the resolved anchor, not the library form, decides which
+    // footprint is read) — the stage split above is what keeps framing off the
+    // floor, not the caller withholding the field.
     wallFootprintWidthMm?: number;
     // The wall-only twin of the field above: how far the object protrudes off
     // the wall face while anchored to one, so the preview is as deep as the
@@ -189,10 +193,9 @@ export function resolvePlanPlacement(
     };
   }
 ): PlanPlacementResult {
-  // The caller asked to skip wall capture entirely — a floor-form work being
-  // dropped in from the checklist (see floatPolicyForKind's scope note): resolve
-  // on the floor stage below, so the wall such a drag happens to pass over can
-  // never grab it.
+  // The caller asked to skip wall capture entirely — a floor case being dragged
+  // in plan: resolve on the floor stage below, so the wall such a drag happens
+  // to pass over can never grab it.
   const capturedWall =
     args.floatPolicy === "floor-only"
       ? null
@@ -209,18 +212,19 @@ export function resolvePlanPlacement(
     return resolveOnWall(proposedCenterFloorMm, capturedWall, args);
   }
 
-  // Nothing captured, and the caller asked for refusal — a wall-form work being
-  // dropped in from the checklist (see floatPolicyForKind's scope note): reject
-  // the drop so the caller paints the danger ghost and release is a no-op. A
-  // wall work arrives on a wall or not at all; converting it is a decision for
-  // the inspector or a later drag, not for the moment it enters the plan.
+  // Nothing captured, and the caller asked for refusal: reject the drop so the
+  // caller paints the danger ghost and release is a no-op. No kind maps here any
+  // more (artwork drops float in both directions — see floatPolicyForKind); the
+  // stage stays as the module's refusal vocabulary, reachable only by a caller
+  // passing "reject" explicitly.
   if (args.floatPolicy === "reject") {
     return resolveRejected(proposedCenterFloorMm, args);
   }
 
-  // Floor stage. Reached when nothing captured: the object floats (blocked zone
-  // far from every wall), it's floor-only (a floor artwork, which never even
-  // attempted a capture above), or (invariant break, e.g. a room with no walls)
+  // Floor stage. Reached when nothing captured: the object floats (a blocked
+  // zone, case or artwork far from every wall), it's floor-only (a floor case,
+  // which never even attempted a capture above), or (invariant break, e.g. a
+  // room with no walls)
   // there was no wall to capture at all. In the last case we fall back
   // to a floor placement even for doors/windows rather than crash — rooms always
   // have walls in practice, so a "capture-any" kind reaching here only ever

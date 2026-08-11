@@ -1,10 +1,28 @@
 import { OrbitControls } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Box3, MathUtils, PerspectiveCamera, Plane, TOUCH, Vector2, Vector3 } from "three";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent as ReactDragEvent
+} from "react";
+import {
+  Box3,
+  DoubleSide,
+  MathUtils,
+  PerspectiveCamera,
+  Plane,
+  Raycaster,
+  Scene,
+  TOUCH,
+  Vector2,
+  Vector3
+} from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { effectiveFraming, getArtworkOuterDimensionsMm } from "../../../domain/framing";
 import { parseFaceWallId } from "../../../domain/geometry/freestandingWalls";
+import { getPlaceableFloorWalls } from "../../../domain/geometry/planObjects";
 import {
   deriveScene3d,
   wallInwardNormal,
@@ -13,7 +31,33 @@ import {
   type WallArtwork3d,
   type WallPanel3d
 } from "../../../domain/geometry/scene3d";
-import type { Artwork, Project, SavedViewPose } from "../../../domain/project";
+import { effectiveFloorDepthMm } from "../../../domain/placement/artworkForm";
+import {
+  getEffectivePlacementSizeMm,
+  PLACEHOLDER_ARTWORK_HEIGHT_MM,
+  PLACEHOLDER_ARTWORK_WIDTH_MM
+} from "../../../domain/placement/placeArtwork";
+import {
+  DEFAULT_FLOOR_OBJECT_DEPTH_MM,
+  type Artwork,
+  type Project,
+  type SavedViewPose
+} from "../../../domain/project";
+import {
+  ARTWORK_DRAG_MIME,
+  consumeArtworkDragSession,
+  peekArtworkDragSession,
+  subscribeArtworkTouchDrag
+} from "../library/artworkDragSession";
+import { useArtworkAspect } from "../../hooks/useArtworkAspect";
+import {
+  dropGhostTransform,
+  pickDropSurface,
+  resolveThreeDrop,
+  type DropDimsMm,
+  type DropGhost3d,
+  type DropGhostTransform
+} from "./dropTarget";
 import { fitDistance } from "./cameraFit";
 import {
   ORBIT_MAX_DISTANCE,
@@ -41,7 +85,7 @@ import {
 } from "./sceneConstants";
 import { SceneRooms } from "./SceneRooms";
 import { SnapshotStage, snapshotPixelSize, type SnapshotFormat, type SnapshotRequest } from "./SnapshotStage";
-import { SCENE_BACKGROUND_COLOR } from "./tokens";
+import { DROP_GHOST_OPACITY, SCENE_BACKGROUND_COLOR, SELECTION_COLOR } from "./tokens";
 
 // Entry framing: above and outside the room, looking down at ~40° elevation
 // from a corner (spec §4.2).
@@ -711,6 +755,15 @@ function KeyboardZoom() {
 // Continuous WASD / arrow travel (spec §4.2): pure translation of camera and
 // target together, so orbit radius is unchanged. Speed scales with zoom — a
 // walk when close, a glide when zoomed out (envelope in cameraNav.ts).
+//
+// ARBITRATION WITH ARROW-KEY NUDGE: useArrangeNudgeShortcuts listens in window
+// CAPTURE phase and, when a single wall artwork is selected in 3D, claims the
+// arrow with stopImmediatePropagation — so the keydown below never fires and
+// the code never enters `pressed`. WASD is never claimed, so travel keeps
+// working while a work is selected. The keyup handler is deliberately NOT
+// symmetric: it deletes unconditionally, so a keyup for a code this component
+// never saw pressed is a harmless no-op and the set can't wedge if a press is
+// swallowed mid-hold.
 const TRAVEL_CODES = new Set([
   "KeyW",
   "KeyS",
@@ -1007,6 +1060,63 @@ function LiveCameraTracker({
   return null;
 }
 
+// What a checklist drop needs from inside the Canvas. HTML5 `dragover` never
+// becomes an R3F pointer event, so the wrapper div's DOM handlers have to
+// raycast by hand — the same escape hatch CursorZoom uses for `wheel`. Same
+// publish-to-a-ref pattern (and same rationale) as LiveCameraTracker above:
+// these are the live three.js objects, so a handler reading them mid-drag can
+// never see a stale camera.
+type DropRaycastApi = {
+  raycaster: Raycaster;
+  camera: PerspectiveCamera;
+  scene: Scene;
+  canvas: HTMLCanvasElement;
+  invalidate: () => void;
+};
+
+function DropRaycastTracker({
+  apiRef
+}: {
+  apiRef: React.MutableRefObject<DropRaycastApi | null>;
+}) {
+  const raycaster = useThree((state) => state.raycaster);
+  const camera = useThree((state) => state.camera);
+  const scene = useThree((state) => state.scene);
+  const gl = useThree((state) => state.gl);
+  const invalidate = useThree((state) => state.invalidate);
+
+  apiRef.current =
+    camera instanceof PerspectiveCamera
+      ? { raycaster, camera, scene, canvas: gl.domElement, invalidate }
+      : null;
+  return null;
+}
+
+// The drop preview: a plain translucent rectangle at the resolved placement,
+// untextured by design (see DROP_GHOST_OPACITY). `raycast` is disabled so the
+// ghost can never become a hit of its own on the next dragover, and it writes
+// no depth so it reads as an overlay rather than a physical panel.
+function DropGhostPlane({ transform }: { transform: DropGhostTransform }) {
+  return (
+    <mesh
+      position={transform.position}
+      rotation={transform.rotation}
+      raycast={() => null}
+      renderOrder={1}
+    >
+      <planeGeometry args={[transform.widthWorld, transform.heightWorld]} />
+      <meshBasicMaterial
+        color={SELECTION_COLOR}
+        transparent
+        opacity={DROP_GHOST_OPACITY}
+        side={DoubleSide}
+        depthWrite={false}
+        toneMapped={false}
+      />
+    </mesh>
+  );
+}
+
 export function ThreeDView({
   project,
   artworksById,
@@ -1018,6 +1128,9 @@ export function ThreeDView({
   onSelectWall,
   onSelectObject,
   onClearSelection,
+  draggingArtworkId = null,
+  onPlaceArtwork,
+  onPlaceArtworkOnFloor,
   actionsRef,
   initialPose
 }: {
@@ -1031,6 +1144,12 @@ export function ThreeDView({
   onSelectWall: (wallId: string) => void;
   onSelectObject: (objectId: string, opts: { additive: boolean }) => void;
   onClearSelection: () => void;
+  // The checklist drag protocol, identical to plan's and elevation's: the
+  // app-level id is the iPadOS fallback for a dataTransfer that hides custom
+  // MIME types, and the module-level drag session is the fallback for that.
+  draggingArtworkId?: string | null;
+  onPlaceArtwork?: (artworkId: string, wallId: string, xMm: number, yMm: number) => void;
+  onPlaceArtworkOnFloor?: (artworkId: string, xMm: number, yMm: number) => void;
   actionsRef?: { current: ThreeDViewActions | null };
   // A Saved-view pose to seat as the initial camera when this view mounts to
   // open a view while 3D wasn't yet the active mode (spec §4.3 handoff).
@@ -1093,6 +1212,204 @@ export function ThreeDView({
     ghostSessionRef.current = false;
     setGhostedWallIds((current) => (current.size === 0 ? current : new Set()));
   };
+
+  // --- Checklist drop-to-place (docs/interaction-improvements-2026-08.md §4) --
+  //
+  // 3D is a placement surface now, not only a preview: a work released over a
+  // wall hangs there at the hit height, a work released over the floor stands
+  // there. No snapping — elevation and the inspector stay the precision
+  // surfaces, and the whole point of the 3D drop is "roughly there, in the
+  // room I'm looking at".
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const dropRaycastRef = useRef<DropRaycastApi | null>(null);
+  const [dropGhost, setDropGhost] = useState<DropGhostTransform | null>(null);
+
+  // The authored placeable surfaces (perimeter walls ∪ partition faces, open
+  // walls excluded) in floor space. Face ids are `${partitionId}#a|#b`, exactly
+  // the wallIds the scene's panels carry, so partitions need no special case.
+  const placeableWalls = useMemo(
+    () => getPlaceableFloorWalls(project.floor),
+    [project.floor]
+  );
+
+  // The dragged work's image aspect, so a partial/unknown-dimension work
+  // previews at its true proportions — the same read placeArtwork itself makes
+  // when it bakes the placement size.
+  const draggingArtworkAspect = useArtworkAspect(
+    draggingArtworkId ? artworksById.get(draggingArtworkId)?.assetId : undefined
+  );
+
+  function dropDimsFor(artworkId: string | null): DropDimsMm {
+    const artwork = artworkId ? artworksById.get(artworkId) : undefined;
+    if (!artwork) {
+      return {
+        wallWidthMm: PLACEHOLDER_ARTWORK_WIDTH_MM,
+        wallHeightMm: PLACEHOLDER_ARTWORK_HEIGHT_MM,
+        floorWidthMm: PLACEHOLDER_ARTWORK_WIDTH_MM,
+        floorDepthMm: DEFAULT_FLOOR_OBJECT_DEPTH_MM
+      };
+    }
+    // The aspect only applies to the artwork it was loaded for.
+    const aspect = artworkId === draggingArtworkId ? draggingArtworkAspect : undefined;
+    const { widthMm, heightMm } = getEffectivePlacementSizeMm(artwork.dimensions, aspect);
+    // Framing is WALL-ONLY geometry (docs/framing-dimension-contract.md §3):
+    // the outer box travels in the wall fields only, and the floor footprint
+    // keeps the bare image size. The library placementForm is not consulted —
+    // the anchor the drop resolves to decides which pair is read, same as the
+    // plan drop (usePlanArtworkDrop), so a framed work hanging via a 3D drop
+    // ghosts and clamps at its true outer width whatever its form says.
+    const outer = getArtworkOuterDimensionsMm(
+      widthMm,
+      heightMm,
+      artwork.matWidthMm,
+      artwork.frame
+    );
+    return {
+      wallWidthMm: outer.widthMm,
+      wallHeightMm: outer.heightMm,
+      floorWidthMm: widthMm,
+      floorDepthMm: effectiveFloorDepthMm(artwork.dimensions)
+    };
+  }
+
+  // Resolve the placement under the cursor by hand-raycasting the live scene.
+  // pickDropSurface walks the (near→far) intersections for the first tagged
+  // wall/floor, so a hit on an artwork plane, a pick band or a door leaf falls
+  // through to the surface behind it instead of killing the drop.
+  function resolveDropUnderCursor(clientX: number, clientY: number, artworkId: string | null) {
+    const api = dropRaycastRef.current;
+    if (!api) return null;
+    api.raycaster.setFromCamera(cursorNdc(api.canvas, clientX, clientY), api.camera);
+    const surface = pickDropSurface(api.raycaster.intersectObjects(api.scene.children, true));
+    if (!surface) return null;
+    return resolveThreeDrop({
+      point: surface.point,
+      tag: surface.tag,
+      walls: placeableWalls,
+      dims: dropDimsFor(artworkId)
+    });
+  }
+
+  function paintDropGhost(ghost: DropGhost3d | null) {
+    const api = dropRaycastRef.current;
+    setDropGhost(ghost && api ? dropGhostTransform(ghost, api.camera.position) : null);
+    // frameloop="demand": nothing redraws unless we ask.
+    api?.invalidate();
+  }
+
+  // Returns whether the cursor is over a placement surface at all, so the
+  // dragover handler can show the no-drop cursor over empty space instead of
+  // promising a "copy" that would be a silent no-op.
+  function updateDropGhost(
+    clientX: number,
+    clientY: number,
+    artworkId: string | null
+  ): boolean {
+    const resolved = resolveDropUnderCursor(clientX, clientY, artworkId);
+    paintDropGhost(resolved?.ghost ?? null);
+    return resolved !== null;
+  }
+
+  function clearDropGhost() {
+    paintDropGhost(null);
+  }
+
+  // Intent wins (§3): the surface under the cursor decides the anchor, never
+  // the work's library placementForm. Both store actions carry their own
+  // guards (open wall, already placed), and placeArtwork also moves the
+  // elevation wall context to the drop wall — nothing to duplicate here.
+  function completeDrop(clientX: number, clientY: number, artworkId: string) {
+    const resolved = resolveDropUnderCursor(clientX, clientY, artworkId);
+    if (!resolved) return;
+    if (resolved.anchor === "floor") {
+      onPlaceArtworkOnFloor?.(artworkId, resolved.xMm, resolved.yMm);
+      return;
+    }
+    onPlaceArtwork?.(artworkId, resolved.wallId, resolved.xMm, resolved.yMm);
+  }
+
+  function handleArtworkDragOver(event: ReactDragEvent<HTMLDivElement>) {
+    // iPadOS Safari hides custom MIME types during dragover/drop, so fall back
+    // to the app-level drag state, and further to the module-level session.
+    if (
+      !event.dataTransfer.types.includes(ARTWORK_DRAG_MIME) &&
+      !draggingArtworkId &&
+      !peekArtworkDragSession()
+    ) {
+      return;
+    }
+    event.preventDefault();
+    const overSurface = updateDropGhost(event.clientX, event.clientY, draggingArtworkId);
+    // Empty space between rooms (or the back of a single-sided wall) is not a
+    // placement surface: say so with the cursor rather than accepting a drop
+    // that would do nothing.
+    event.dataTransfer.dropEffect = overSurface ? "copy" : "none";
+  }
+
+  function handleArtworkDragLeave(event: ReactDragEvent<HTMLDivElement>) {
+    // Only clear when the pointer actually leaves the surface, not when it
+    // crosses between child elements (which also fire dragleave).
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    clearDropGhost();
+  }
+
+  function handleArtworkDrop(event: ReactDragEvent<HTMLDivElement>) {
+    const artworkId =
+      event.dataTransfer.getData(ARTWORK_DRAG_MIME) ||
+      draggingArtworkId ||
+      peekArtworkDragSession();
+    consumeArtworkDragSession();
+    clearDropGhost();
+    if (!artworkId) return;
+    if (!artworksById.get(artworkId)) return;
+    event.preventDefault();
+    completeDrop(event.clientX, event.clientY, artworkId);
+  }
+
+  // The touch/pen drag path (iOS/iPadOS, where HTML5 DnD is unavailable or
+  // unreliable), mirroring plan's and elevation's. The handlers close over live
+  // props, so route them through a ref refreshed each render and subscribe once
+  // — re-subscribing per render would churn the shared listener Set.
+  const touchDropRef = useRef({
+    update: updateDropGhost,
+    complete: completeDrop,
+    clear: clearDropGhost,
+    isValidArtwork: (id: string) => Boolean(artworksById.get(id))
+  });
+  touchDropRef.current = {
+    update: updateDropGhost,
+    complete: completeDrop,
+    clear: clearDropGhost,
+    isValidArtwork: (id: string) => Boolean(artworksById.get(id))
+  };
+
+  useEffect(() => {
+    return subscribeArtworkTouchDrag((dragEvent) => {
+      const container = containerRef.current;
+      const handlers = touchDropRef.current;
+      if (!container) return;
+      if (dragEvent.type === "cancel") {
+        handlers.clear();
+        return;
+      }
+      const rect = container.getBoundingClientRect();
+      const inside =
+        dragEvent.clientX >= rect.left &&
+        dragEvent.clientX <= rect.right &&
+        dragEvent.clientY >= rect.top &&
+        dragEvent.clientY <= rect.bottom;
+      if (dragEvent.type === "move") {
+        if (inside) handlers.update(dragEvent.clientX, dragEvent.clientY, dragEvent.artworkId);
+        else handlers.clear();
+        return;
+      }
+      handlers.clear();
+      if (inside && handlers.isValidArtwork(dragEvent.artworkId)) {
+        handlers.complete(dragEvent.clientX, dragEvent.clientY, dragEvent.artworkId);
+      }
+    });
+    // Subscribes once for the component's life; the refs above stay current.
+  }, []);
 
   // Cmd/Ctrl+0: same "reclaim framing" action as the Overview toolbar button
   // (viewControls.tsx) — the 3D counterpart of the 2D SVG viewport's Cmd/Ctrl+0
@@ -1248,9 +1565,15 @@ export function ThreeDView({
     // viewport, not the app.
     <div
       className="three-view"
+      ref={containerRef}
       onPointerDown={(event) => {
         pointerDownAt.current = { x: event.clientX, y: event.clientY };
       }}
+      // HTML5 drag events never become R3F pointer events, so the checklist
+      // drop lives on the wrapper div and raycasts by hand (see above).
+      onDragOver={handleArtworkDragOver}
+      onDragLeave={handleArtworkDragLeave}
+      onDrop={handleArtworkDrop}
     >
       <Canvas
         frameloop="demand"
@@ -1375,6 +1698,8 @@ export function ThreeDView({
           controlsRef={liveControlsRef}
           sizeRef={liveSizeRef}
         />
+        <DropRaycastTracker apiRef={dropRaycastRef} />
+        {dropGhost ? <DropGhostPlane transform={dropGhost} /> : null}
       </Canvas>
     </div>
   );

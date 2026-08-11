@@ -90,7 +90,11 @@ export function SceneRooms({
     <group onDoubleClick={handleFocusPoint}>
       {scene.rooms.map((room) => (
         <group key={room.roomId}>
-          <FloorSurface polygon={room.floorPolygon} onClick={handleFloorClick} />
+          <FloorSurface
+            polygon={room.floorPolygon}
+            roomId={room.roomId}
+            onClick={handleFloorClick}
+          />
           {room.walls.map((wall) => (
             <WallPanel
               key={wall.wallId}

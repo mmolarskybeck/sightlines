@@ -42,12 +42,17 @@ export type UseArrangeNudgeShortcutsParams = {
   ) => Promise<unknown>;
 };
 
-// Arrange keyboard shortcuts, scoped to the elevation view: Enter commits a
-// live arrange session, and arrow keys nudge the whole selected group (a
-// series of nudges auto-opens one session so they commit as a single undo
-// entry). Both stay out of the way of text editing (isEditableTarget) and of
-// an in-flight checklist drag. Eligibility mirrors the arrange readout — 2+
-// wall objects, no floor member, all on one wall.
+// Arrange keyboard shortcuts: Enter commits a live arrange session, and arrow
+// keys nudge the whole selected group (a series of nudges auto-opens one
+// session so they commit as a single undo entry). Both stay out of the way of
+// text editing (isEditableTarget) and of an in-flight checklist drag.
+// Eligibility mirrors the arrange readout — 2+ wall objects, no floor member,
+// all on one wall.
+//
+// ELEVATION gets all of the above. 3D gets a deliberate subset: a SINGLE
+// selected wall artwork nudges (plain step, no clean-increment quantization),
+// and every other case declines so the arrows fall through to the 3D camera
+// travel that owns them. See the viewMode gate below.
 export function useArrangeNudgeShortcuts({
   project,
   artworks,
@@ -97,7 +102,14 @@ export function useArrangeNudgeShortcuts({
         event.key === "ArrowUp" ||
         event.key === "ArrowDown";
       if (!isArrow) return;
-      if (viewMode !== "elevation") return;
+      // 3D is a nudge surface too now (docs/interaction-improvements-2026-08.md
+      // §4), but only for the single wall-artwork case below: the multi-select
+      // path opens an arrange session whose preview renders in ELEVATION only,
+      // so in 3D it would move works with nothing on screen to show for it.
+      // Everything this hook declines to handle in 3D falls through to
+      // KeyboardTravel, which owns Arrow* + WASD camera travel.
+      const inThreeD = viewMode === "3d";
+      if (viewMode !== "elevation" && !inThreeD) return;
       if (draggingArtworkId) return;
 
       const selectedWallObjects = project.wallObjects.filter((wallObject) =>
@@ -156,12 +168,27 @@ export function useArrangeNudgeShortcuts({
       // moveArtworkPlacement, openings via moveOpening, matching the single-
       // object pointer-drag split — a lone opening still nudges here.
       if (selectedWallObjects.length === 1) {
+        const member = selectedWallObjects[0];
+        // In 3D only an ARTWORK nudges. A lone selected opening is
+        // architecture the curator is looking at, not something to slide with
+        // the same keys that fly the camera — the arrows keep travelling.
+        if (inThreeD && member.kind !== "artwork") return;
         event.preventDefault();
         event.stopPropagation();
-        const member = selectedWallObjects[0];
+        // KeyboardTravel listens on window in the BUBBLE phase and owns
+        // Arrow* + WASD. stopPropagation already skips it (a stopped event
+        // never reaches window's bubble pass), but stopImmediatePropagation is
+        // the honest statement of intent and also covers any later-registered
+        // window-capture listener: once this press is a nudge, nothing else
+        // gets to read it. WASD is never claimed here, so camera travel keeps
+        // working while a work is selected.
+        event.stopImmediatePropagation();
         let nextXMm = member.xMm + dxMm;
         let nextYMm = member.yMm + dyMm;
-        if (useQuantize) {
+        // Clean-increment quantization is an elevation behavior: it reads the
+        // wall's neighbor footprints to land on a clean GAP, which 3D gives the
+        // curator no way to see. A plain step nudge is the right v1 there.
+        if (useQuantize && !inThreeD) {
           const wall = getProjectWalls(project).find((candidate) => candidate.id === member.wallId);
           if (wall) {
             const footprintMember = withResolvedArtworkFootprint(member);
@@ -197,6 +224,9 @@ export function useArrangeNudgeShortcuts({
       // A multi-selection nudges through the arrange session, which moves ARTWORK
       // members only (a selected opening is architecture — it stays put). Needs
       // 2+ artwork members on one wall, mirroring the session's own guards.
+      // In 3D there is no arrange preview to render, so the arrows stay with
+      // the camera instead of committing an invisible session.
+      if (inThreeD) return;
       const members = selectedWallObjects.filter((member) => member.kind === "artwork");
       if (members.length < 2) return;
       const sameWall = members.every((member) => member.wallId === members[0].wallId);

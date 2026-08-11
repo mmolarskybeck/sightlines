@@ -19,6 +19,7 @@ import { ArtworkPlane } from "./ArtworkPlane";
 import { WallCaseMesh } from "./CaseMesh";
 import { WallTextPanel } from "./WallTextPanel";
 import { mmToWorld, MM_TO_WORLD } from "./coordinates";
+import { DROP_TARGET_USER_DATA_KEY } from "./dropTarget";
 import { openingPickBandRects } from "./openingPickBand";
 import {
   BoxEdgeOutline,
@@ -174,6 +175,11 @@ export function WallPanel({
     return () => geometry.dispose();
   }, [geometry]);
 
+  const dropTargetUserData = useMemo(
+    () => ({ [DROP_TARGET_USER_DATA_KEY]: { kind: "wall", wallId: wall.wallId } }),
+    [wall.wallId]
+  );
+
   // Event precedence (spec §4.3): everything riding on the wall — artworks,
   // cases, wall texts, and now openings and blocked zones too — consumes its
   // own click before this fires; a click on BARE wall selects the wall and
@@ -187,7 +193,12 @@ export function WallPanel({
 
   return (
     <group position={[originX, 0, originZ]} rotation={[0, rotationY, 0]}>
-      <mesh geometry={geometry} onClick={handleWallClick}>
+      {/* The face mesh is the wall's DROP TARGET (dropTarget.ts): a checklist
+          drag raycasts the scene and takes the first hit carrying this tag, so
+          anything riding on the wall (artwork planes, pick bands, leaves) —
+          none of which is tagged — falls through to the surface behind it. The
+          tag lives on the mesh rather than the group for exactly that reason. */}
+      <mesh geometry={geometry} onClick={handleWallClick} userData={dropTargetUserData}>
         <meshLambertMaterial
           key={ghosted ? "ghosted" : "solid"}
           color={isSelected ? WALL_SELECTED_COLOR : WALL_COLOR}

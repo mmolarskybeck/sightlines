@@ -148,6 +148,10 @@ export function ChecklistPanel({
   // idiom as RoomsPanel's room delete): the overflow menu arms this, and only
   // the Remove button in the swapped-in strip actually dispatches.
   const [confirmingRemoveArtworkId, setConfirmingRemoveArtworkId] = useState<string | null>(null);
+  // Set when selection changes to an artwork whose row should be scrolled
+  // into view once it exists in the DOM (see the effect pair below); cleared
+  // again as soon as that effect runs.
+  const [scrollTargetArtworkId, setScrollTargetArtworkId] = useState<string | null>(null);
   // dragenter/dragleave fire on every child element the pointer crosses, not
   // just the section boundary — a plain enter/leave toggle would flicker the
   // drop-active state as the drag passes over rows and buttons. Counting
@@ -155,6 +159,7 @@ export function ChecklistPanel({
   const dragDepthRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
   const searchInputId = useId();
   const previousProjectIdRef = useRef(project.id);
 
@@ -208,18 +213,35 @@ export function ChecklistPanel({
       };
     }, [project.floor.rooms, project.wallObjects, project.floorObjects]);
 
-  const rows: ChecklistRowData[] = project.checklistArtworkIds.map((artworkId, projectIndex) => {
-    const wallId = placedArtworkWallIds.get(artworkId);
-    const isFloorPlaced = floorPlacedArtworkIds.has(artworkId);
-    return {
-      artworkId,
-      artwork: artworksById.get(artworkId) ?? null,
-      isPlaced: wallId !== undefined || isFloorPlaced,
-      projectIndex,
-      wallName: wallId !== undefined ? (wallNamesById.get(wallId) ?? null) : null,
-      placementIds: placementIdsByArtworkId.get(artworkId) ?? []
-    };
-  });
+  // Memoized: this feeds the auto-expand/scroll effect's deps below, and an
+  // inline `.map` here would rebuild the array (new identity) every render —
+  // that used to make the effect re-fire on every render, including the
+  // user's own collapse click, and immediately re-open the section it just
+  // closed. The ref guard in that effect is the actual fix for the bug, but
+  // there's no reason for this array to churn identity on every render either.
+  const rows: ChecklistRowData[] = useMemo(
+    () =>
+      project.checklistArtworkIds.map((artworkId, projectIndex) => {
+        const wallId = placedArtworkWallIds.get(artworkId);
+        const isFloorPlaced = floorPlacedArtworkIds.has(artworkId);
+        return {
+          artworkId,
+          artwork: artworksById.get(artworkId) ?? null,
+          isPlaced: wallId !== undefined || isFloorPlaced,
+          projectIndex,
+          wallName: wallId !== undefined ? (wallNamesById.get(wallId) ?? null) : null,
+          placementIds: placementIdsByArtworkId.get(artworkId) ?? []
+        };
+      }),
+    [
+      project.checklistArtworkIds,
+      placedArtworkWallIds,
+      floorPlacedArtworkIds,
+      artworksById,
+      wallNamesById,
+      placementIdsByArtworkId
+    ]
+  );
 
   const searchMatchedRows = rows.filter((row) => checklistRowMatchesQuery(row, searchQuery));
   const placedCount = searchMatchedRows.filter((row) => row.isPlaced).length;
@@ -273,21 +295,65 @@ export function ChecklistPanel({
     setIsSearchOpen(false);
   }, [project.id]);
 
-  // Selection can move from the canvas or inspector while its artist is
-  // hidden. Open that one group so the checklist always reflects the current
-  // selection, without closing any other groups the curator is using.
+  // Selection can move from the canvas, inspector, or 3D view while its
+  // artist group is collapsed. Open that one group so the checklist always
+  // reflects the current selection, without closing any other groups the
+  // curator is using — and queue the row to be scrolled into view once that
+  // expansion (if any) has committed.
+  //
+  // This must fire only when selectedArtworkId actually CHANGES, never
+  // merely because the component re-rendered. `rows` is memoized above now,
+  // but the ref guard below is the load-bearing fix, not the memoization:
+  // without it, the user's own collapse click (which re-renders this
+  // component) would look identical to a fresh selection and re-open the
+  // section right back up. This intentionally uses a sibling ref rather than
+  // the `previousSelectedArtworkIdRef` below (:328) — that one's paired
+  // effect answers a different question ("did selection move to a
+  // DIFFERENT row, including to null") for a different purpose (disarming
+  // the remove-confirm strip), and folding this into it would make both
+  // conditions harder to read.
+  const previousAutoRevealArtworkIdRef = useRef(selectedArtworkId);
   useEffect(() => {
-    if (!groupByArtist || selectedArtworkId === null) return;
-    const selectedRow = rows.find((row) => row.artworkId === selectedArtworkId);
-    if (!selectedRow) return;
-    const selectedArtistKey = artistGroupIdentity(selectedRow).key;
-    setCollapsedArtistKeys((current) => {
-      if (!current.has(selectedArtistKey)) return current;
-      const next = new Set(current);
-      next.delete(selectedArtistKey);
-      return next;
-    });
+    const changedToSelection =
+      selectedArtworkId !== null &&
+      previousAutoRevealArtworkIdRef.current !== selectedArtworkId;
+    previousAutoRevealArtworkIdRef.current = selectedArtworkId;
+    if (!changedToSelection) return;
+
+    if (groupByArtist) {
+      const selectedRow = rows.find((row) => row.artworkId === selectedArtworkId);
+      if (selectedRow) {
+        const selectedArtistKey = artistGroupIdentity(selectedRow).key;
+        setCollapsedArtistKeys((current) => {
+          if (!current.has(selectedArtistKey)) return current;
+          const next = new Set(current);
+          next.delete(selectedArtistKey);
+          return next;
+        });
+      }
+    }
+    setScrollTargetArtworkId(selectedArtworkId);
   }, [groupByArtist, rows, selectedArtworkId]);
+
+  // Runs in its own effect, one render after the expand above (if any): in
+  // group-by-artist mode the group's <ul> is conditionally rendered, so the
+  // row's DOM node doesn't exist until that expand has committed. Batches
+  // with the setState above into a single re-render, so by the time this
+  // effect observes the new scrollTargetArtworkId the row already exists —
+  // no rAF or polling needed. Works in ungrouped mode too, where there's no
+  // expand to wait on and the row already exists on the same render.
+  useEffect(() => {
+    if (scrollTargetArtworkId === null) return;
+    const targetId = scrollTargetArtworkId;
+    setScrollTargetArtworkId(null);
+    // block: "nearest" is also what makes a guard against "selection
+    // originated from clicking the row itself" unnecessary: a row already
+    // in view is already "nearest" and this is a no-op for it.
+    const node = sectionRef.current?.querySelector<HTMLElement>(
+      `[data-artwork-id="${cssAttributeEscape(targetId)}"]`
+    );
+    node?.scrollIntoView({ block: "nearest" });
+  }, [scrollTargetArtworkId]);
 
   // Disarm a pending remove-confirm whenever the row it belongs to could have
   // moved out from under the user — a filter/sort change that hides it, or the
@@ -371,6 +437,7 @@ export function ChecklistPanel({
 
   return (
     <section
+      ref={sectionRef}
       aria-label="Checklist"
       className={isDropActive ? "checklist-panel drop-active" : "checklist-panel"}
       onDragEnter={(event) => {
@@ -779,6 +846,13 @@ function artistGroupIdentity(row: ChecklistRowData): { key: string; label: strin
   return { key: `artist:${artist.toLocaleLowerCase()}`, label: artist };
 }
 
+// Artwork ids are generated (nanoid-style), never author-supplied, so this
+// is a defensive belt-and-suspenders rather than a real threat model — still
+// cheaper than pulling in CSS.escape's jsdom quirks for a one-line query.
+function cssAttributeEscape(value: string): string {
+  return value.replace(/["\\]/g, "\\$&");
+}
+
 function byProjectOrder(a: ChecklistRowData, b: ChecklistRowData) {
   return a.projectIndex - b.projectIndex;
 }
@@ -1067,6 +1141,9 @@ function ChecklistRow({
       ref={rowRef}
       aria-pressed={isSelected}
       className={rowClassName}
+      // Lets the panel's scroll-into-view effect find this row by artwork id
+      // without threading a ref map through ChecklistRow.
+      data-artwork-id={artworkId}
       // Coarse pointers use our long-press drag (below); native draggable would
       // race iPadOS's own long-press, so it's suppressed there.
       draggable={isDraggable && !COARSE_POINTER}

@@ -409,8 +409,10 @@ export function PlanOverlaysLayer({
       {dropGhost ? (
         <PlanObject
           isGhost
-          // No wall captured → wall-only artwork can't land here: paint the
-          // danger token so the refusal reads before release.
+          // The danger token for a drop that would commit nothing. An artwork
+          // drop no longer reaches it — it floats onto the floor when no wall
+          // captures (see floatPolicyForKind) — but the arm stays wired, since
+          // `anchor: "none"` is still what a refusal looks like.
           isInvalid={dropGhost.placement.anchor === "none"}
           kind="artwork"
           pixelsPerMm={pixelsPerMm}

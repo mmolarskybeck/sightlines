@@ -79,7 +79,8 @@ export type ObjectDragState = {
   objectId: string;
   kind: WallObject["kind"];
   // Per-kind fall-through behavior when no wall captures (floatPolicyForKind):
-  // artwork rejects (wall-only), blocked-zone floats, door/window capture-any.
+  // artwork, case and blocked-zone float onto the floor, door/window
+  // capture-any, a floor case is floor-only.
   floatPolicy: FloatPolicy;
   movingSize: { widthMm: number; heightMm: number; depthMm: number };
   // Outer wall-rendered width for framed artwork; floor previews keep movingSize.

@@ -1537,11 +1537,19 @@ export function createAppStore(deps: AppStoreDeps) {
         nextWallObjects,
         validateIds,
         allowOverlap,
-        // Both walls: a re-anchoring drag leaves one boundary and joins
-        // another, and each side needs reconciling.
-        isOpeningKind(wallObject.kind)
-          ? { reconcileWallIds: [wallObject.wallId, placement.wallId] }
-          : {}
+        {
+          // Both walls: a re-anchoring drag leaves one boundary and joins
+          // another, and each side needs reconciling.
+          ...(isOpeningKind(wallObject.kind)
+            ? { reconcileWallIds: [wallObject.wallId, placement.wallId] }
+            : {}),
+          // The wall the drag ends on becomes the elevation view's wall
+          // context, same as a checklist drop — including a same-wall nudge,
+          // where this is a harmless no-op (destination equals the current
+          // context). Selection itself is untouched: the object stays
+          // selected exactly as it was mid-drag.
+          extras: selectionWrite(project, get().selection, placement.wallId)
+        }
       );
     }
 
@@ -1794,7 +1802,12 @@ export function createAppStore(deps: AppStoreDeps) {
         nextWallObjects,
         [floorObject.id],
         allowOverlap,
-        { nextFloorObjects }
+        {
+          nextFloorObjects,
+          // Landing on a wall makes it the elevation view's wall context,
+          // same as a checklist drop. Selection is preserved as-is.
+          extras: selectionWrite(project, get().selection, placement.wallId)
+        }
       );
     }
 
@@ -2420,11 +2433,13 @@ export function createAppStore(deps: AppStoreDeps) {
           [placement.id],
           allowOverlap,
           {
-            // Replace selection with the new placement.
+            // Replace selection with the new placement, and make the wall it
+            // was placed on the elevation view's wall context so toggling to
+            // elevation shows this wall.
             extras: selectionWrite(
               { ...project, wallObjects: nextWallObjects },
               { kind: "objects", ids: [placement.id] },
-              get().wallContextId
+              wallId
             )
           }
         );
@@ -3345,9 +3360,11 @@ export function createAppStore(deps: AppStoreDeps) {
         );
 
         // Unplaced: there is no placement to convert, so the library flag is the
-        // whole answer — and this is the one case where it still matters, since
-        // it decides which surface the work lands on when it's dropped in from
-        // the checklist (floatPolicyForKind).
+        // whole answer — it is what the inspector reads back, and what the work
+        // is understood to be until it lands somewhere. It no longer decides
+        // where a checklist drop may land: that follows the drop point on both
+        // surfaces now (floatPolicyForKind), so the flag is a default, not a
+        // gate.
         if (!wallObject && !floorObject) {
           await get().updateArtwork(artworkId, { placementForm: form });
           return;

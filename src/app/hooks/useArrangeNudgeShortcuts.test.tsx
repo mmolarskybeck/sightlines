@@ -7,7 +7,7 @@ import {
   type WallObject
 } from "../../domain/project";
 import { createSampleProject } from "../../domain/sample/sampleProject";
-import type { ArrangeSession } from "../store";
+import type { ArrangeSession, ViewMode } from "../store";
 import { useArrangeNudgeShortcuts } from "./useArrangeNudgeShortcuts";
 
 const artworkPlacement: WallObject = {
@@ -36,6 +36,8 @@ function projectWith(wallObjects: WallObject[]): Project {
   return { ...createSampleProject(), wallObjects };
 }
 
+const cameraTravelListeners: ((event: KeyboardEvent) => void)[] = [];
+
 function renderNudgeHarness({
   project = projectWith([artworkPlacement]),
   artworks = [],
@@ -46,7 +48,9 @@ function renderNudgeHarness({
   snapToGrid = false,
   gridPrecisionFloorMm = null,
   beginArrangeSession = vi.fn(),
-  setArrangeSessionPreview = vi.fn()
+  setArrangeSessionPreview = vi.fn(),
+  viewMode = "elevation",
+  moveOpening = vi.fn(async () => {})
 }: {
   project?: Project;
   artworks?: Artwork[];
@@ -63,14 +67,26 @@ function renderNudgeHarness({
   gridPrecisionFloorMm?: number | null;
   beginArrangeSession?: (mode: ArrangeSession["mode"]) => void;
   setArrangeSessionPreview?: (moves: { id: string; xMm: number; yMm: number }[]) => void;
+  viewMode?: ViewMode;
+  moveOpening?: (
+    wallObjectId: string,
+    xMm: number,
+    yMm: number,
+    allowOverlap?: boolean
+  ) => Promise<void>;
 } = {}) {
   const targetKeyDown = vi.fn((event: KeyboardEvent) => event.stopPropagation());
+  // Stands in for ThreeDView's KeyboardTravel, which listens on window in the
+  // BUBBLE phase and owns Arrow* + WASD. A claimed nudge must never reach it.
+  const cameraTravelKeyDown = vi.fn();
+  window.addEventListener("keydown", cameraTravelKeyDown);
+  cameraTravelListeners.push(cameraTravelKeyDown);
 
   function Harness() {
     useArrangeNudgeShortcuts({
       project,
       artworks,
-      viewMode: "elevation",
+      viewMode,
       selectedObjectIds,
       draggingArtworkId: null,
       arrangeSession,
@@ -81,7 +97,7 @@ function renderNudgeHarness({
       setArrangeSessionPreview,
       commitArrangeSession,
       moveArtworkPlacement,
-      moveOpening: vi.fn(async () => {})
+      moveOpening
     });
 
     return (
@@ -114,16 +130,25 @@ function renderNudgeHarness({
 
   return {
     moveArtworkPlacement,
+    moveOpening,
     commitArrangeSession,
     beginArrangeSession,
     setArrangeSessionPreview,
     targetKeyDown,
+    cameraTravelKeyDown,
     ...render(<Harness />)
   };
 }
 
+function arrowEvent(key: string): KeyboardEvent {
+  return new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+}
+
 afterEach(() => {
   cleanup();
+  for (const listener of cameraTravelListeners.splice(0)) {
+    window.removeEventListener("keydown", listener);
+  }
   vi.restoreAllMocks();
 });
 
@@ -346,5 +371,153 @@ describe("useArrangeNudgeShortcuts framed footprint geometry", () => {
       { id: first.id, xMm: first.xMm, yMm: 375 },
       { id: second.id, xMm: second.xMm, yMm: 375 }
     ]);
+  });
+});
+
+describe("useArrangeNudgeShortcuts in the 3D view", () => {
+  it("nudges a single selected wall artwork", () => {
+    const { moveArtworkPlacement } = renderNudgeHarness({ viewMode: "3d" });
+
+    const event = arrowEvent("ArrowRight");
+    act(() => {
+      document.body.dispatchEvent(event);
+    });
+
+    expect(moveArtworkPlacement).toHaveBeenCalledWith(
+      artworkPlacement.id,
+      artworkPlacement.xMm + 12.7,
+      artworkPlacement.yMm,
+      false
+    );
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("stops a claimed arrow before the 3D camera travel listener sees it", () => {
+    const { cameraTravelKeyDown } = renderNudgeHarness({ viewMode: "3d" });
+
+    act(() => {
+      document.body.dispatchEvent(arrowEvent("ArrowUp"));
+    });
+
+    expect(cameraTravelKeyDown).not.toHaveBeenCalled();
+  });
+
+  it("leaves the arrow to camera travel when nothing is selected", () => {
+    const { moveArtworkPlacement, cameraTravelKeyDown } = renderNudgeHarness({
+      viewMode: "3d",
+      selectedObjectIds: []
+    });
+
+    const event = arrowEvent("ArrowRight");
+    act(() => {
+      document.body.dispatchEvent(event);
+    });
+
+    expect(moveArtworkPlacement).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+    expect(cameraTravelKeyDown).toHaveBeenCalled();
+  });
+
+  it("leaves the arrow to camera travel for a multi-selection", () => {
+    const second: WallObject = {
+      ...artworkPlacement,
+      id: "placement-art-2",
+      artworkId: "art-2",
+      xMm: 1500
+    };
+    const {
+      beginArrangeSession,
+      setArrangeSessionPreview,
+      cameraTravelKeyDown
+    } = renderNudgeHarness({
+      viewMode: "3d",
+      project: projectWith([artworkPlacement, second]),
+      selectedObjectIds: [artworkPlacement.id, second.id]
+    });
+
+    const event = arrowEvent("ArrowRight");
+    act(() => {
+      document.body.dispatchEvent(event);
+    });
+
+    // The arrange session's preview only renders in elevation — in 3D the
+    // press must reach the camera instead of silently moving works.
+    expect(beginArrangeSession).not.toHaveBeenCalled();
+    expect(setArrangeSessionPreview).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+    expect(cameraTravelKeyDown).toHaveBeenCalled();
+  });
+
+  it("leaves the arrow to camera travel for a lone selected opening", () => {
+    const { moveOpening, cameraTravelKeyDown } = renderNudgeHarness({
+      viewMode: "3d",
+      project: projectWith([doorPlacement]),
+      selectedObjectIds: [doorPlacement.id]
+    });
+
+    const event = arrowEvent("ArrowLeft");
+    act(() => {
+      document.body.dispatchEvent(event);
+    });
+
+    expect(moveOpening).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+    expect(cameraTravelKeyDown).toHaveBeenCalled();
+  });
+
+  it("skips clean-increment quantization in 3D (plain step nudge)", () => {
+    const selected = { ...artworkPlacement, xMm: 1000 };
+    const neighbor: WallObject = {
+      ...artworkPlacement,
+      id: "placement-art-2",
+      artworkId: "art-2",
+      xMm: 600,
+      widthMm: 200
+    };
+    const project = projectWith([selected, neighbor]);
+    const northEast = project.floor.rooms[0].room.vertices.find(
+      (vertex) => vertex.id === "v-ne"
+    )!;
+    northEast.xMm = 3000;
+
+    const inThreeD = renderNudgeHarness({
+      viewMode: "3d",
+      project,
+      selectedObjectIds: [selected.id],
+      snapToGrid: true,
+      gridPrecisionFloorMm: 100
+    });
+    act(() => {
+      document.body.dispatchEvent(arrowEvent("ArrowRight"));
+    });
+
+    // Elevation would quantize this to a clean 100mm gap lattice (see the
+    // framed-footprint suite above); 3D takes the raw step.
+    expect(inThreeD.moveArtworkPlacement).toHaveBeenCalledWith(
+      selected.id,
+      1100,
+      selected.yMm,
+      false
+    );
+  });
+
+  it("leaves elevation behavior unchanged", () => {
+    const { moveArtworkPlacement, cameraTravelKeyDown } = renderNudgeHarness({
+      viewMode: "elevation"
+    });
+
+    const event = arrowEvent("ArrowUp");
+    act(() => {
+      document.body.dispatchEvent(event);
+    });
+
+    expect(moveArtworkPlacement).toHaveBeenCalledWith(
+      artworkPlacement.id,
+      artworkPlacement.xMm,
+      artworkPlacement.yMm + 12.7,
+      false
+    );
+    expect(event.defaultPrevented).toBe(true);
+    expect(cameraTravelKeyDown).not.toHaveBeenCalled();
   });
 });

@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { DoubleSide, Shape } from "three";
 import type { Vec2 } from "../../../domain/geometry/scene3d";
 import { MM_TO_WORLD } from "./coordinates";
+import { DROP_TARGET_USER_DATA_KEY } from "./dropTarget";
 import { FLOOR_COLOR } from "./tokens";
 
 // The room floor as a single ShapeGeometry triangulated from the polygon,
@@ -10,11 +11,24 @@ import { FLOOR_COLOR } from "./tokens";
 // the camera orbits above (the common case) or dips below.
 export function FloorSurface({
   polygon,
+  roomId,
   onClick
 }: {
   polygon: Vec2[];
+  // Which room's floor this is. Only the drop-target tag needs it (a checklist
+  // work released over bare floor stands on the floor — dropTarget.ts), so it
+  // stays optional for the offscreen snapshot/saved-view render paths.
+  roomId?: string;
   onClick?: (event: ThreeEvent<MouseEvent>) => void;
 }) {
+  const dropTargetUserData = useMemo(
+    () =>
+      roomId === undefined
+        ? undefined
+        : { [DROP_TARGET_USER_DATA_KEY]: { kind: "floor", roomId } },
+    [roomId]
+  );
+
   const shape = useMemo(() => {
     const outline = new Shape();
     polygon.forEach((point, index) => {
@@ -31,7 +45,7 @@ export function FloorSurface({
   // about x lays it into the xz-plane so local y becomes world +z, matching the
   // plan(x, y) -> three(x, z) convention.
   return (
-    <mesh rotation={[Math.PI / 2, 0, 0]} onClick={onClick}>
+    <mesh rotation={[Math.PI / 2, 0, 0]} onClick={onClick} userData={dropTargetUserData}>
       <shapeGeometry args={[shape]} />
       <meshLambertMaterial color={FLOOR_COLOR} side={DoubleSide} />
     </mesh>
