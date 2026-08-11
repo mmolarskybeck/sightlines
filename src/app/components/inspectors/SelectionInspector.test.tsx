@@ -38,6 +38,7 @@ function renderPanel(
     onArrangeValue: vi.fn(),
     onAcceptArrange: vi.fn(),
     onCancelArrange: vi.fn(),
+    onCenterGroup: vi.fn(),
     onRemoveAll: vi.fn(),
     ...overrides
   };
@@ -180,6 +181,75 @@ describe("SelectionInspector arrange body", () => {
     expect(screen.getByText("Arranging is for works only.")).toBeTruthy();
     expect(screen.queryByRole("combobox")).toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
+  });
+});
+
+// The group Center button names its target with the SAME four labels as the
+// single placement's button — a curator reading "Center in bay" in one panel
+// must not have to learn a second phrase for the same move in the other.
+describe("SelectionInspector group centering", () => {
+  it("names the wall when nothing bounds the group, and reports the click", () => {
+    const onCenterGroup = vi.fn();
+    renderPanel({ onCenterGroup });
+
+    const button = screen.getByRole("button", { name: "Center on wall" });
+    fireEvent.click(button);
+
+    expect(onCenterGroup).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the bay when a partition bounds either side", () => {
+    const bounded = {
+      type: "object" as const,
+      kind: "partition" as const,
+      name: "Partition 1"
+    };
+
+    renderPanel({ arrange: { ...baseArrange, leftBoundary: bounded } });
+    expect(screen.getByRole("button", { name: "Center in bay" })).toBeTruthy();
+
+    cleanup();
+    renderPanel({ arrange: { ...baseArrange, rightBoundary: bounded } });
+    expect(screen.getByRole("button", { name: "Center in bay" })).toBeTruthy();
+  });
+
+  it("prefers the bay over an opening on the other side", () => {
+    renderPanel({
+      arrange: {
+        ...baseArrange,
+        leftBoundary: { type: "object", kind: "partition", name: "Partition 1" },
+        rightBoundary: { type: "object", kind: "window", name: "Window" }
+      }
+    });
+
+    expect(screen.getByRole("button", { name: "Center in bay" })).toBeTruthy();
+  });
+
+  it("names works and open space for the remaining boundary kinds", () => {
+    renderPanel({
+      arrange: {
+        ...baseArrange,
+        leftBoundary: { type: "object", kind: "artwork", name: "Portrait Study" },
+        rightBoundary: { type: "wall" }
+      }
+    });
+    expect(screen.getByRole("button", { name: "Center between works" })).toBeTruthy();
+
+    cleanup();
+    renderPanel({
+      arrange: {
+        ...baseArrange,
+        leftBoundary: { type: "object", kind: "artwork", name: "Portrait Study" },
+        rightBoundary: { type: "object", kind: "door", name: "Door" }
+      }
+    });
+    expect(screen.getByRole("button", { name: "Center in open space" })).toBeTruthy();
+  });
+
+  it("is absent when the selection is not arrangeable", () => {
+    renderPanel({ arrange: null, arrangeDisabledReason: "Arranging is for works only." });
+
+    expect(screen.queryByRole("button", { name: /^Center / })).toBeNull();
   });
 
   it("hides the Mat & frame section when the selection holds no artwork", () => {

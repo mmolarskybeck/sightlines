@@ -137,6 +137,44 @@ export function slideGroupToEdgeInset(
   );
 }
 
+// Translate the group rigidly so its union span sits centered between two
+// boundary edges — the group analogue of centerMemberBetweenBoundaries, and the
+// reason it is a translation rather than a re-solve: relative offsets inside the
+// group are the curator's composition, not spacing the button may touch.
+//
+// Two deliberate non-behaviours:
+//  - a bay NARROWER than the group still centers (the group overhangs both
+//    boundary edges symmetrically); overlap is a separate, toggle-gated policy
+//    and must not be re-decided here;
+//  - the only clamp is the WALL: a group pushed past an end by an off-center bay
+//    slides back so no member leaves the wall. A group wider than the wall has
+//    no clamped position to slide to, so it stays centered.
+export function centerGroupBetweenBoundaries(
+  members: WallObjectBase[],
+  leftBoundaryMm: number,
+  rightBoundaryMm: number,
+  wallLengthMm: number
+): { id: string; xMm: number }[] {
+  if (members.length === 0) return [];
+
+  const leftEdgeMm = Math.min(
+    ...members.map((member) => member.xMm - member.widthMm / 2)
+  );
+  const rightEdgeMm = Math.max(
+    ...members.map((member) => member.xMm + member.widthMm / 2)
+  );
+  const spanMm = rightEdgeMm - leftEdgeMm;
+
+  const centeredLeftMm = (leftBoundaryMm + rightBoundaryMm) / 2 - spanMm / 2;
+  const targetLeftMm =
+    spanMm >= wallLengthMm
+      ? centeredLeftMm
+      : Math.min(Math.max(centeredLeftMm, 0), wallLengthMm - spanMm);
+
+  const deltaMm = targetLeftMm - leftEdgeMm;
+  return members.map((member) => ({ id: member.id, xMm: member.xMm + deltaMm }));
+}
+
 // Set absolute interior gaps while preserving the group's union-bounds center.
 export function spaceGroupAboutCenter(
   members: WallObjectBase[],

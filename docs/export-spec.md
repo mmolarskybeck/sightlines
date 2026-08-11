@@ -611,9 +611,21 @@ v1 switch (§16).
 For the other drawing pages:
 
 - **Room plan pages:** each wall's overall length, drawn outside the room
-  polygon along its wall. Object-to-object plan spacing is *not* drawn —
-  on a floorplan it produces a web of crossing lines that buries the
-  drawing; wall-to-wall and elevation spacing carry the working numbers.
+  polygon along its wall, plus the top-down spacing gaps drawn *inside* it
+  (`derivePlanSceneGaps`): each wall's along-wall clearance chain for the
+  objects hung on it, and each floor object's clearance to its nearest
+  neighbors and room walls. The two layers stay legible together because
+  they sit on opposite sides of the wall line. A **free-standing partition
+  standing near a wall splits that wall's chain**, exactly as its projected
+  band splits the gap dimensions on the wall's elevation (§9.6): the same
+  two gates (the partition belongs to this wall's room, and a partition face
+  never bounds itself), the same projected band, and the same 1200mm
+  spacing-neighbor threshold, with both drawing tiers — abutting slab and
+  dashed ghost — qualifying. The chain becomes work → band → work; the
+  through-gap it replaces is *not* also drawn, because a clearance that runs
+  through a slab the visitor cannot see past is not a clearance. A partition
+  further out in the room still draws and stops bounding measurements. A
+  wall carrying a partition but no objects emits no chain.
 - **Overview page:** no dimension lines regardless of the switch. At
   whole-plan scale the labels cannot stay legible, and the room plan and
   elevation pages own the numbers. The Overview keeps only its scale bar.
@@ -913,8 +925,9 @@ Task-based, with curators and one installer if possible:
    classification. Room plans carry wall lengths **plus top-down object/floor
    spacing gaps** (along-wall clearances between wall-hung objects and each
    floor object's clearance to its neighbors and room walls, from the same
-   shared engine via `derivePlanSceneGaps`); the Overview carries no dimension
-   lines. Center height, not bottom-to-floor, is the v1 vertical datum.
+   shared engine via `derivePlanSceneGaps`), with a near partition splitting
+   the along-wall chain on the same 1200mm rule the elevation uses; the
+   Overview carries no dimension lines. Center height, not bottom-to-floor, is the v1 vertical datum.
 6. Grid excludable/includable in documents, default off; snapshots follow
    canvas grid visibility.
 7. Paper sizes: A4, Letter, A3, Tabloid 11×17. Orientation, margins,

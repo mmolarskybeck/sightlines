@@ -4,6 +4,7 @@ import {
   arrangeOnWall,
   arrangeOnWallInZone,
   arrangeOnWallInZoneWithInset,
+  centerGroupBetweenBoundaries,
   centerMemberBetweenBoundaries,
   detectBoundary,
   gapForInset,
@@ -1083,5 +1084,115 @@ describe("arrangeOnWallInZoneWithInset", () => {
 
     expect(result[0].xMm - 300 / 2).toBeCloseTo(600); // zoneStart + inset
     expect(result[1].xMm + 300 / 2).toBeCloseTo(1900); // zoneEnd - inset
+  });
+});
+
+describe("centerGroupBetweenBoundaries", () => {
+  // 100..400 and 600..1000: a 900 mm span with a 550 mm centre-to-centre offset.
+  const pair = () => [
+    makeMember({ id: "a", widthMm: 300, xMm: 250 }),
+    makeMember({ id: "b", widthMm: 400, xMm: 800 })
+  ];
+
+  it("returns [] with no members", () => {
+    expect(centerGroupBetweenBoundaries([], 0, 2000, 2000)).toEqual([]);
+  });
+
+  it("translates rigidly: every relative offset survives the move", () => {
+    const members = pair();
+    const result = centerGroupBetweenBoundaries(members, 200, 2000, 2400);
+
+    // Boundary midpoint 1100, span 900 -> left edge lands at 650.
+    expect(result[0].xMm).toBeCloseTo(800);
+    expect(result[1].xMm).toBeCloseTo(1350);
+    // One delta for the whole group, so the interval is untouched.
+    expect(result[1].xMm - result[0].xMm).toBeCloseTo(members[1].xMm - members[0].xMm);
+  });
+
+  it("matches centerMemberBetweenBoundaries for a group of one", () => {
+    const member = makeMember({ id: "solo", widthMm: 400, xMm: 300 });
+    const others = [makeMember({ id: "left-neighbour", widthMm: 200, xMm: 100 })];
+
+    const [move] = centerGroupBetweenBoundaries(
+      [member],
+      detectBoundary("left", [member], others, 2400).edgeMm,
+      detectBoundary("right", [member], others, 2400).edgeMm,
+      2400
+    );
+
+    expect(move.xMm).toBeCloseTo(centerMemberBetweenBoundaries(member, others, 2400));
+  });
+
+  it("centres in the bay a partition shim opens on one side", () => {
+    // Slab projected across 200..2000 of a 4000 wall; the works sit past it.
+    const partitionShim = makeMember({ id: "partition-1", widthMm: 1800, xMm: 1100 });
+    const members = [
+      makeMember({ id: "a", widthMm: 400, xMm: 2600 }),
+      makeMember({ id: "b", widthMm: 400, xMm: 3200 })
+    ];
+
+    const left = detectBoundary("left", members, [partitionShim], 4000);
+    const right = detectBoundary("right", members, [partitionShim], 4000);
+    expect(left).toEqual({ type: "object", edgeMm: 2000, objectId: "partition-1" });
+    expect(right).toEqual({ type: "wall", edgeMm: 4000 });
+
+    const result = centerGroupBetweenBoundaries(members, left.edgeMm, right.edgeMm, 4000);
+
+    // Bay 2000..4000, span 1000 -> left edge at 2500, i.e. +100 for both works.
+    expect(result[0].xMm).toBeCloseTo(2700);
+    expect(result[1].xMm).toBeCloseTo(3300);
+  });
+
+  it("clamps at the wall end rather than pushing a member off the wall", () => {
+    // An off-centre bay would put the group's right edge past 2000.
+    const members = [
+      makeMember({ id: "a", widthMm: 400, xMm: 300 }),
+      makeMember({ id: "b", widthMm: 400, xMm: 700 })
+    ];
+
+    const result = centerGroupBetweenBoundaries(members, 1400, 2000, 2000);
+
+    expect(result[0].xMm).toBeCloseTo(1400);
+    expect(result[1].xMm).toBeCloseTo(1800);
+    // Flush with the wall end, never past it.
+    expect(result[1].xMm + 200).toBeCloseTo(2000);
+  });
+
+  it("clamps at the wall start the same way", () => {
+    const members = [
+      makeMember({ id: "a", widthMm: 400, xMm: 1300 }),
+      makeMember({ id: "b", widthMm: 400, xMm: 1700 })
+    ];
+
+    const result = centerGroupBetweenBoundaries(members, 0, 600, 2000);
+
+    expect(result[0].xMm - 200).toBeCloseTo(0);
+    expect(result[1].xMm + 200).toBeCloseTo(800);
+  });
+
+  it("centres a bay narrower than the group instead of refusing to move", () => {
+    // Overlap is a separate, toggle-gated policy: the button still centres.
+    const members = pair();
+
+    const result = centerGroupBetweenBoundaries(members, 1000, 1400, 4000);
+
+    const leftEdgeMm = result[0].xMm - 150;
+    const rightEdgeMm = result[1].xMm + 200;
+    expect(leftEdgeMm).toBeCloseTo(750);
+    expect(rightEdgeMm).toBeCloseTo(1650);
+    expect((leftEdgeMm + rightEdgeMm) / 2).toBeCloseTo(1200);
+  });
+
+  it("centres a group wider than the wall rather than clamping it to nothing", () => {
+    const members = [
+      makeMember({ id: "a", widthMm: 400, xMm: 200 }),
+      makeMember({ id: "b", widthMm: 400, xMm: 1300 })
+    ];
+
+    // Span 0..1500 on a 1000 wall: no clamped position exists.
+    const result = centerGroupBetweenBoundaries(members, 0, 1000, 1000);
+
+    expect(result[0].xMm - 200).toBeCloseTo(-250);
+    expect(result[1].xMm + 200).toBeCloseTo(1250);
   });
 });

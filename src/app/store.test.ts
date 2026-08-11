@@ -7594,6 +7594,106 @@ describe("app store", () => {
         expect(session.insetBoundary.right).toMatchObject({ type: "wall" });
       });
 
+      describe("centerSelectionBetweenBoundaries", () => {
+        // Same scene as the session test above: a slab covering 200..2000 of a
+        // 4000 mm wall, so the works hang in the bay it leaves behind.
+        async function twoWorksInAPartitionBay() {
+          const wallId = getSelectedWall(
+            store.getState().project!,
+            store.getState().wallContextId
+          )!.id;
+          await store.getState().resizeWall(wallId, 4000);
+          const a = await placeArtworkOnWall(2600, 1450, 400);
+          const b = await placeArtworkOnWall(3200, 1450, 400);
+
+          const floorWall = getFloorWalls(store.getState().project!.floor).find(
+            (wall) => wall.id === wallId
+          )!;
+          const uxMm =
+            (floorWall.endFloorMm.xMm - floorWall.startFloorMm.xMm) / floorWall.lengthMm;
+          const uyMm =
+            (floorWall.endFloorMm.yMm - floorWall.startFloorMm.yMm) / floorWall.lengthMm;
+          const at = (alongMm: number) => ({
+            xMm: floorWall.startFloorMm.xMm + uxMm * alongMm + -uyMm * 400,
+            yMm: floorWall.startFloorMm.yMm + uyMm * alongMm + uxMm * 400
+          });
+          await store.getState().addFreestandingWall(at(200), at(2000));
+
+          store.getState().setObjectSelection([a.placementId, b.placementId]);
+          return { a, b };
+        }
+
+        it("centers the group in the bay a real partition opens, in one undo step", async () => {
+          const { a, b } = await twoWorksInAPartitionBay();
+          const undoStackBefore = store.getState().undoStack.length;
+
+          await store.getState().centerSelectionBetweenBoundaries();
+
+          // Group spans 2400..3400; the bay runs 2000..4000, so the whole block
+          // slides 100 mm right and the 600 mm interval is untouched.
+          expect(xById(a.placementId)).toBeCloseTo(2700);
+          expect(xById(b.placementId)).toBeCloseTo(3300);
+          expect(xById(b.placementId) - xById(a.placementId)).toBeCloseTo(600);
+
+          expect(store.getState().undoStack).toHaveLength(undoStackBefore + 1);
+          expect(store.getState().undoStack.at(-1)?.label).toBe("Center on wall");
+
+          await store.getState().undo();
+          expect(xById(a.placementId)).toBeCloseTo(2600);
+          expect(xById(b.placementId)).toBeCloseTo(3200);
+        });
+
+        it("centers on the wall itself once the partition is gone", async () => {
+          await twoWorksInAPartitionBay();
+          const partitionId = store.getState().project!.floor.rooms.flatMap(
+            (placement) => placement.room.freestandingWalls
+          )[0].id;
+          const ids = objectIdsOf(store.getState().selection);
+
+          await store.getState().deleteFreestandingWall(partitionId);
+          store.getState().setObjectSelection(ids);
+          await store.getState().centerSelectionBetweenBoundaries();
+
+          // Wall 0..4000 with a 1000 mm span: the block centers at 1500/2100.
+          expect(xById(ids[0])).toBeCloseTo(1700);
+          expect(xById(ids[1])).toBeCloseTo(2300);
+        });
+
+        it("does nothing for a selection the arrange controls refuse", async () => {
+          const a = await placeArtworkOnWall(500, 1450);
+          await store.getState().addArtworksFromFiles([makeImageFile("floor-center.jpg")]);
+          const floorArtworkId = store.getState().project!.checklistArtworkIds.at(-1)!;
+          await store.getState().placeArtworkOnFloor(floorArtworkId, 1000, 1000);
+          const floorObjectId = store.getState().project!.floorObjects[0].id;
+          store.getState().setObjectSelection([a.placementId, floorObjectId]);
+          const undoStackBefore = store.getState().undoStack.length;
+
+          await store.getState().centerSelectionBetweenBoundaries();
+
+          expect(store.getState().undoStack).toHaveLength(undoStackBefore);
+          expect(xById(a.placementId)).toBe(500);
+        });
+
+        it("routes into a live session's preview instead of committing behind it", async () => {
+          const { a, b } = await twoWorksInAPartitionBay();
+          store.getState().beginArrangeSession("inset");
+          const undoStackBefore = store.getState().undoStack.length;
+
+          await store.getState().centerSelectionBetweenBoundaries();
+
+          // Pending, not committed: Apply/Cancel still governs the move.
+          expect(store.getState().undoStack).toHaveLength(undoStackBefore);
+          expect(xById(a.placementId)).toBeCloseTo(2600);
+          const session = store.getState().arrangeSession!;
+          expect(session.previewById[a.placementId].xMm).toBeCloseTo(2700);
+          expect(session.previewById[b.placementId].xMm).toBeCloseTo(3300);
+
+          store.getState().commitArrangeSession();
+          expect(xById(a.placementId)).toBeCloseTo(2700);
+          expect(store.getState().undoStack).toHaveLength(undoStackBefore + 1);
+        });
+      });
+
       describe("beginArrangeSession guards", () => {
         it("creates no session when the selection includes a floor object", async () => {
           const a = await placeArtworkOnWall(500, 1450);

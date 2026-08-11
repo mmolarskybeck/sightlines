@@ -355,7 +355,12 @@ export async function createDocumentPdf(
             wallId: entry.object.wallId,
             xMm: entry.object.xMm,
             widthMm: entry.renderedRect.widthMm
-          }))
+          })),
+          // Unfiltered on purpose: the room and own-face gates live inside the
+          // derivation (same pair the elevation page applies), so a partition
+          // near a wall splits that wall's spacing chain here exactly as it
+          // does on the elevation and in the app's plan view.
+          partitions: getFloorPartitions(input.project.floor)
         });
         drawPlanSceneDimensions(
           page,

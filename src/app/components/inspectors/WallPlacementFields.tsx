@@ -18,8 +18,10 @@ import { LengthField } from "../shared/LengthField";
 import { Button } from "../ui/button";
 import { getScopedUnitContext } from "../shared/scopedUnits";
 
-// Label the Center target from its detected boundaries.
-const CENTER_BUTTON_LABEL: Record<WallPlacementCenterBoundaryKind, string> = {
+// Label the Center target from its detected boundaries. Exported because the
+// multi-selection panel centers a whole GROUP against the same boundary kinds
+// and must name the target with the same words.
+export const CENTER_BUTTON_LABEL: Record<WallPlacementCenterBoundaryKind, string> = {
   wall: "Center on wall",
   works: "Center between works",
   open: "Center in open space",
@@ -216,12 +218,37 @@ export function getWallPlacementNeighborEdges(
 // works; "bay" covers the run a projected partition closes off.
 export type WallPlacementCenterBoundaryKind = "wall" | "works" | "open" | "bay";
 
+// What the two detected boundaries make the Center button MEAN. Kept apart from
+// the geometry below so both callers — the single placement and the
+// multi-selection group — resolve the label from one rule instead of two.
+// Precedence: a partition ("bay") outranks everything, because it is the
+// boundary that changes what "center" means most; then the bare wall; then
+// openings ("open space"); otherwise neighbouring works.
+export type WallPlacementBoundaryObjectKind = WallObject["kind"] | "wall" | "partition";
+
+export function getWallPlacementCenterBoundaryKind(
+  leftKind: WallPlacementBoundaryObjectKind,
+  rightKind: WallPlacementBoundaryObjectKind
+): WallPlacementCenterBoundaryKind {
+  const isOpeningKind = (kind: WallPlacementBoundaryObjectKind) =>
+    kind !== "wall" && kind !== "artwork" && kind !== "partition";
+
+  if (leftKind === "partition" || rightKind === "partition") return "bay";
+  if (leftKind === "wall" && rightKind === "wall") return "wall";
+  if (isOpeningKind(leftKind) || isOpeningKind(rightKind)) return "open";
+  return "works";
+}
+
 // Center within actual open space, including boundaries created by openings and
 // by partitions standing at this wall (`partitionNeighbors`). A partition
 // boundary outranks the other kinds in the label: it is the one that changes
 // what "center" means most, and it names itself ("Center in bay").
+//
+// `self` is only ever read as a footprint (id, wall, center, extent), so a
+// synthetic group footprint may stand in for a real placement — that is what
+// lets the multi-selection panel ask the same question about a whole group.
 export function getWallPlacementCenterTarget(
-  self: ArtworkWallObject,
+  self: WallObjectBase,
   wallObjects: WallObject[],
   wallLengthMm: number,
   partitionNeighbors: readonly PartitionNeighborShim[] = []
@@ -237,28 +264,17 @@ export function getWallPlacementCenterTarget(
 
   // A partition shim carries no `kind`, so it resolves to its own sentinel
   // rather than falling through to "wall".
-  const kindOf = (
-    detection: BoundaryDetection
-  ): WallObject["kind"] | "wall" | "partition" => {
+  const kindOf = (detection: BoundaryDetection): WallPlacementBoundaryObjectKind => {
     if (detection.type === "wall") return "wall";
     if (findPartitionNeighborShim(partitionNeighbors, detection.objectId)) return "partition";
     const object = wallObjects.find((candidate) => candidate.id === detection.objectId);
     return object?.kind ?? "wall";
   };
 
-  const leftKind = kindOf(detectBoundary("left", [self], others, wallLengthMm));
-  const rightKind = kindOf(detectBoundary("right", [self], others, wallLengthMm));
-  const isOpeningKind = (kind: WallObject["kind"] | "wall" | "partition") =>
-    kind !== "wall" && kind !== "artwork" && kind !== "partition";
-
-  const boundaryKind: WallPlacementCenterBoundaryKind =
-    leftKind === "partition" || rightKind === "partition"
-      ? "bay"
-      : leftKind === "wall" && rightKind === "wall"
-        ? "wall"
-        : isOpeningKind(leftKind) || isOpeningKind(rightKind)
-          ? "open"
-          : "works";
+  const boundaryKind = getWallPlacementCenterBoundaryKind(
+    kindOf(detectBoundary("left", [self], others, wallLengthMm)),
+    kindOf(detectBoundary("right", [self], others, wallLengthMm))
+  );
 
   return { xMm, boundaryKind };
 }

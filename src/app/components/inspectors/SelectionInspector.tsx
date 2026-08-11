@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { AlignCenterHorizontalSimpleIcon } from "@phosphor-icons/react/dist/csr/AlignCenterHorizontalSimple";
 import { ArrowsHorizontalIcon } from "@phosphor-icons/react/dist/csr/ArrowsHorizontal";
 import { ArrowsInLineHorizontalIcon } from "@phosphor-icons/react/dist/csr/ArrowsInLineHorizontal";
 import { ArrowsOutLineHorizontalIcon } from "@phosphor-icons/react/dist/csr/ArrowsOutLineHorizontal";
@@ -29,6 +30,11 @@ import {
   SelectValue
 } from "../ui/select";
 import { getScopedUnitContext } from "../shared/scopedUnits";
+import {
+  CENTER_BUTTON_LABEL,
+  getWallPlacementCenterBoundaryKind,
+  type WallPlacementBoundaryObjectKind
+} from "./WallPlacementFields";
 
 type ArrangeMode = "equal" | "inset" | "gap";
 type InsetAnchor = "left" | "both" | "right";
@@ -52,6 +58,14 @@ function nearestNounFor(kind: ArrangeBoundaryKind): string {
     case "case":
       return "display case";
   }
+}
+
+// The group Center button names its target with the single placement's words —
+// same boundary rule, so "Center in bay" means the same thing in both panels.
+function centerButtonLabel(left: ArrangeBoundary, right: ArrangeBoundary): string {
+  const kindOf = (boundary: ArrangeBoundary): WallPlacementBoundaryObjectKind =>
+    boundary.type === "wall" ? "wall" : boundary.kind;
+  return CENTER_BUTTON_LABEL[getWallPlacementCenterBoundaryKind(kindOf(left), kindOf(right))];
 }
 
 function edgeFieldLabel(side: "left" | "right", boundary: ArrangeBoundary): string {
@@ -102,6 +116,7 @@ export function SelectionInspector({
   onArrangeValue,
   onAcceptArrange,
   onCancelArrange,
+  onCenterGroup,
   matFrame,
   onRemoveAll
 }: {
@@ -144,6 +159,10 @@ export function SelectionInspector({
   ) => void;
   onAcceptArrange: () => void;
   onCancelArrange: () => void;
+  // Moves the whole selection as one rigid block to the middle of the span its
+  // boundaries define. Only reachable when `arrange` is non-null, i.e. under the
+  // same eligibility as every other control in this section.
+  onCenterGroup: () => void;
   // Bulk mat & frame for the selected works, rendered as an inline collapsible
   // section (same grammar as the single-artwork inspector's Mat & frame).
   // Undefined when no selected object resolves to an artwork placement
@@ -403,6 +422,21 @@ export function SelectionInspector({
                 </p>
               </div>
             )}
+
+            {/* A one-shot move, not a spacing mode: it keeps every interval
+                inside the group exactly as composed and slides the block to the
+                middle of its bay. Sits below the mode body so the modes stay
+                the section's lead, and above the session footer so Apply/Cancel
+                remain last. */}
+            <Button
+              className="inspector-action"
+              size="sm"
+              variant="inspector"
+              onClick={onCenterGroup}
+            >
+              <AlignCenterHorizontalSimpleIcon aria-hidden="true" size={15} />
+              {centerButtonLabel(arrange.leftBoundary, arrange.rightBoundary)}
+            </Button>
 
             {arrange.sessionActive ? (
               <InspectorActionGroup split>

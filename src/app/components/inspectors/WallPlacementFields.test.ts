@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { withArtworkFootprint } from "../../../domain/framing";
 import type { PartitionNeighborShim } from "../../../domain/placement/partitionNeighbors";
-import type { ArtworkWallObject, OpeningWallObject } from "../../../domain/project";
+import type {
+  ArtworkWallObject,
+  OpeningWallObject,
+  WallObjectBase
+} from "../../../domain/project";
 import {
   getWallPlacementCenterTarget,
   getWallPlacementEdges,
@@ -130,6 +134,26 @@ describe("partition neighbours in the wall placement inspector", () => {
     expect(edges.leftNeighborIsPartition).toBe(true);
     expect(edges.rightNeighborLeftEdgeMm).toBeUndefined();
     expect(edges.rightNeighborIsPartition).toBe(false);
+  });
+
+  it("answers the same question for a synthetic group footprint", () => {
+    // The multi-selection panel centres a GROUP, which reaches this rule as a
+    // union footprint (min left edge .. max right edge) rather than a real
+    // placement. Nothing here may depend on it being a stored wall object.
+    const groupFootprint: WallObjectBase = {
+      id: "group",
+      wallId: "wall-1",
+      xMm: 1200,
+      yMm: 1200,
+      widthMm: 1000,
+      heightMm: 500
+    };
+
+    // Bay 600..2400: the group's centre target is 1500, a 300 mm slide right.
+    expect(getWallPlacementCenterTarget(groupFootprint, [], 2400, [partitionShim])).toEqual({
+      xMm: 1500,
+      boundaryKind: "bay"
+    });
   });
 
   it("lets a nearer artwork beat the partition for the neighbour field", () => {

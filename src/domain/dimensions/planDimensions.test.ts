@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { FloorPartition } from "../geometry/freestandingWalls";
 import type { FloorWall } from "../geometry/planObjects";
 import type { PlanRect } from "../geometry/planObjects";
 import {
@@ -35,6 +36,27 @@ function wall(id: string, roomId: string, start: [number, number], end: [number,
     endFloorMm: { xMm: ex, yMm: ey },
     lengthMm: Math.hypot(ex - sx, ey - sy)
   } as unknown as FloorWall;
+}
+
+// A free-standing partition in floor space (getFloorPartitions' shape): a
+// centerline plus a thickness. Its projected band on a wall is derived, never
+// stated here, so these fixtures exercise the real projection.
+function partition(
+  wallId: string,
+  start: [number, number],
+  end: [number, number],
+  thicknessMm = 100,
+  roomId = "room"
+): FloorPartition {
+  return {
+    wallId,
+    roomId,
+    startMm: { xMm: start[0], yMm: start[1] },
+    endMm: { xMm: end[0], yMm: end[1] },
+    thicknessMm,
+    heightMm: 2400,
+    name: wallId
+  };
 }
 
 // A 4000×3000 rectangular room: walls run clockwise so the interior is enclosed.
@@ -250,6 +272,44 @@ describe("derivePlanWallGaps", () => {
     });
     expect(gaps).toEqual([]);
   });
+
+  it("stops the clearance at a near partition instead of the artwork behind it", () => {
+    // Selected art at [2800,3200]; a neighbour at [600,1000]; a partition slab
+    // standing 50mm off the wall projects a band at [1950,2050] between them.
+    // Without the split the left clearance would read 1800 straight THROUGH it.
+    const gaps = derivePlanWallGaps({
+      selectedObject: { id: "art", xMm: 3000, widthMm: 400 },
+      others: [{ id: "nb", xMm: 800, widthMm: 400 }],
+      wall: horizontalWall,
+      partitions: [partition("p1", [2000, 50], [2000, 1500])]
+    });
+    const leftGap = gaps.find((gap) => gap.id.endsWith(":lo"));
+    expect(leftGap?.gapMm).toBeCloseTo(750, 3);
+    expect(leftGap?.aMm.xMm).toBeCloseTo(2050, 3);
+  });
+
+  it("ignores a partition standing further out than the neighbor threshold", () => {
+    // Same slab pushed to 1500mm off the wall — past PARTITION_NEIGHBOR_MAX_GAP_MM
+    // (1200). It still DRAWS in plan; it stops bounding the measurement.
+    const gaps = derivePlanWallGaps({
+      selectedObject: { id: "art", xMm: 3000, widthMm: 400 },
+      others: [{ id: "nb", xMm: 800, widthMm: 400 }],
+      wall: horizontalWall,
+      partitions: [partition("p1", [2000, 1500], [2000, 2900])]
+    });
+    const leftGap = gaps.find((gap) => gap.id.endsWith(":lo"));
+    expect(leftGap?.gapMm).toBeCloseTo(1800, 3);
+  });
+
+  it("ignores a partition owned by another room", () => {
+    const gaps = derivePlanWallGaps({
+      selectedObject: { id: "art", xMm: 3000, widthMm: 400 },
+      others: [{ id: "nb", xMm: 800, widthMm: 400 }],
+      wall: horizontalWall,
+      partitions: [partition("p1", [2000, 50], [2000, 1500], 100, "otherRoom")]
+    });
+    expect(gaps.find((gap) => gap.id.endsWith(":lo"))?.gapMm).toBeCloseTo(1800, 3);
+  });
 });
 
 describe("derivePlanWallGapsAllObjects", () => {
@@ -294,6 +354,59 @@ describe("derivePlanWallGapsAllObjects", () => {
       derivePlanWallGapsAllObjects({ objects: [], wall: horizontalWall })
     ).toEqual([]);
   });
+
+  it("splits the chain at a qualifying partition band", () => {
+    // a:[600,1000], b:[2800,3200], partition band [1950,2050] between them.
+    const objects = [
+      { id: "a", xMm: 800, widthMm: 400 },
+      { id: "b", xMm: 3000, widthMm: 400 }
+    ];
+    const withoutPartition = derivePlanWallGapsAllObjects({
+      objects,
+      wall: horizontalWall
+    });
+    expect(withoutPartition.map((gap) => Math.round(gap.gapMm))).toEqual([600, 1800, 800]);
+
+    const withPartition = derivePlanWallGapsAllObjects({
+      objects,
+      wall: horizontalWall,
+      partitions: [partition("p1", [2000, 50], [2000, 1500])]
+    });
+    // Two honest clearances (a→band 950, band→b 750) instead of one 1800 that
+    // ran through the slab — and NOT both.
+    expect(withPartition.map((gap) => Math.round(gap.gapMm))).toEqual([600, 950, 750, 800]);
+    expect(withPartition.some((gap) => Math.round(gap.gapMm) === 1800)).toBe(false);
+  });
+
+  it("emits nothing for a wall carrying a partition but no objects", () => {
+    expect(
+      derivePlanWallGapsAllObjects({
+        objects: [],
+        wall: horizontalWall,
+        partitions: [partition("p1", [2000, 50], [2000, 1500])]
+      })
+    ).toEqual([]);
+  });
+
+  it("never lets a partition face bound itself, while a foreign slab still splits it", () => {
+    // The dimensioned wall IS partition p1's face. Its geometry is placed so p1
+    // would otherwise project a full-length band over it (gap 950, on the
+    // viewer side) and flatten the chain — only the own-face gate stops it.
+    // p2, a genuinely separate slab, still splits at [1950,2050].
+    const face = wall("p1#a", "room", [0, 0], [4000, 0]);
+    const gaps = derivePlanWallGapsAllObjects({
+      objects: [
+        { id: "a", xMm: 800, widthMm: 400 },
+        { id: "b", xMm: 3000, widthMm: 400 }
+      ],
+      wall: face,
+      partitions: [
+        partition("p1", [0, 1000], [4000, 1000]),
+        partition("p2", [2000, 50], [2000, 1500])
+      ]
+    });
+    expect(gaps.map((gap) => Math.round(gap.gapMm))).toEqual([600, 950, 750, 800]);
+  });
 });
 
 describe("derivePlanSceneGaps", () => {
@@ -329,5 +442,30 @@ describe("derivePlanSceneGaps", () => {
       wallObjects: []
     });
     expect(gaps.filter((gap) => gap.id.startsWith("wall-gap:"))).toEqual([]);
+  });
+
+  it("splits only the wall a partition actually stands against", () => {
+    // A slab hard against the LEFT wall (x 0..120, y 1500..2500). It is 1500mm
+    // from the top wall — past the 1200mm neighbor threshold — so the top wall's
+    // chain must be untouched while the left wall's splits.
+    const gaps = derivePlanSceneGaps({
+      floorObjects: [],
+      walls: RECT_ROOM_WALLS,
+      wallObjects: [
+        { id: "t1", wallId: "w-top", xMm: 800, widthMm: 400 },
+        { id: "t2", wallId: "w-top", xMm: 3000, widthMm: 400 },
+        { id: "l1", wallId: "w-left", xMm: 250, widthMm: 300 },
+        { id: "l2", wallId: "w-left", xMm: 2000, widthMm: 400 }
+      ],
+      partitions: [partition("p-left", [60, 1500], [60, 2500], 120)]
+    });
+    const chainFor = (wallId: string) =>
+      gaps
+        .filter((gap) => gap.id.startsWith(`wall-gap:${wallId}:`))
+        .map((gap) => Math.round(gap.gapMm));
+    // Top wall: t1 [600,1000], t2 [2800,3200] on a 4000 wall — unsplit.
+    expect(chainFor("w-top")).toEqual([600, 1800, 800]);
+    // Left wall (3000 long): l1 [100,400], band [500,1500], l2 [1800,2200].
+    expect(chainFor("w-left")).toEqual([100, 100, 300, 800]);
   });
 });

@@ -346,6 +346,9 @@ export function App() {
   const setArrangeSessionPreview = useAppStore((state) => state.setArrangeSessionPreview);
   const commitArrangeSession = useAppStore((state) => state.commitArrangeSession);
   const cancelArrangeSession = useAppStore((state) => state.cancelArrangeSession);
+  const centerSelectionBetweenBoundaries = useAppStore(
+    (state) => state.centerSelectionBetweenBoundaries
+  );
   // Selection union is the source of truth; single-subject ids resolve live.
   const selectedObjectIds = objectIdsOf(selection);
   const selectedRoomId = roomIdOf(selection);
@@ -2307,6 +2310,9 @@ export function App() {
                   commitArrangeSession(allowOverlappingPlacement)
                 }
                 onCancelArrange={cancelArrangeSession}
+                onCenterGroup={() =>
+                  void centerSelectionBetweenBoundaries(allowOverlappingPlacement)
+                }
                 matFrame={
                   selectedArtworkIds.length > 0
                     ? {

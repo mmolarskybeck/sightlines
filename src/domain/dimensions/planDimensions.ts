@@ -16,7 +16,9 @@
 //     clearance to the nearest neighbor on the same wall per side, falling back
 //     to the wall ends, reusing arrangeOnWall's getNeighborAwareSegments (the
 //     same spacing logic the elevation "From edges" readout uses) rather than
-//     reinventing it.
+//     reinventing it. A free-standing partition standing close enough to the
+//     wall joins that chain as a band (see planPartitionParticipants) so the
+//     printed clearance stops AT the partition instead of running through it.
 //
 // Coordinate space: floor millimeters, the plan SVG's own y-DOWN space (a floor
 // point maps straight to an SVG point). Everything here stays in floor mm; the
@@ -33,10 +35,16 @@ import {
   getNeighborAwareSegments,
   getSpacingSegments
 } from "../placement/arrangeOnWall";
+import { selectElevationPartitions } from "../placement/partitionNeighbors";
+import type { FloorPartition } from "../geometry/freestandingWalls";
 import type { Point } from "../geometry/polygon";
 import type { FloorWall, PlanRect } from "../geometry/planObjects";
 import type { WallObjectBase } from "../project";
 import type { buildPlanScene } from "../scene2d/planScene";
+import {
+  buildPartitionProfiles,
+  PARTITION_NEIGHBOR_MAX_GAP_MM
+} from "../scene2d/elevationScene";
 import {
   deriveElevationDimensions,
   NEIGHBOR_TOLERANCE_MM,
@@ -79,6 +87,62 @@ export type PlanGapLine = {
   // already clear — the room side is open by construction.
   labelClearMm?: number;
 };
+
+// Plan is a top-down projection where height is invisible: two works at
+// different hang heights still read as along-wall neighbors, and a knee-high
+// partition still cuts the floor plan in two. Both spacing engines gate
+// neighbors by vertical band overlap, so EVERY participant a wall-gap pass
+// builds is given this one shared full-height band, disabling that gate — the
+// result is pure 1-D along-wall spacing.
+const PLAN_BAND: Pick<WallObjectBase, "yMm" | "heightMm"> = { yMm: 0, heightMm: 1e6 };
+
+// A free-standing partition standing in front of (or against) a wall divides
+// that wall's hanging zone, exactly as it already does on the wall's ELEVATION
+// — where its projected band splits the gap-dimension chain. Plan view drew the
+// partition but kept measuring straight through it, so a "gap" between two
+// works could span a slab the visitor cannot see past. Same rule, same numbers:
+//
+//   • the same two gates as the elevation (selectElevationPartitions): the
+//     partition must belong to this wall's room, and when the wall being
+//     dimensioned is itself a partition FACE, that partition never bounds
+//     itself;
+//   • the same projection (buildPartitionProfiles), so the band's along-wall
+//     extent is the slab's true shadow — rotation included — clamped to the
+//     wall, not a re-derived approximation;
+//   • the same proximity threshold (PARTITION_NEIGHBOR_MAX_GAP_MM): BOTH
+//     drawing tiers qualify, the abutting slab and the dashed ghost alike, and
+//     a partition standing further out in the room still draws but stops
+//     bounding measurements.
+//
+// The band enters as a plain WallObjectBase — the shape both arrangeOnWall
+// engines read off an "other" — so the chain splits with no engine change. It
+// is not a wall object: nothing selects, drags or persists it, and its id is
+// namespaced so it can never collide with a real object's.
+function planPartitionParticipants(
+  wall: FloorWall,
+  partitions: readonly FloorPartition[] | undefined
+): WallObjectBase[] {
+  if (!partitions || partitions.length === 0 || wall.lengthMm <= 0) return [];
+  const profiles = buildPartitionProfiles(
+    selectElevationPartitions(partitions, { roomId: wall.roomId, wallId: wall.id }),
+    wall.startFloorMm,
+    wall.endFloorMm
+  );
+  const bands: WallObjectBase[] = [];
+  for (const profile of profiles) {
+    if (profile.gapMm > PARTITION_NEIGHBOR_MAX_GAP_MM) continue;
+    const widthMm = profile.xMaxMm - profile.xMinMm;
+    if (widthMm <= 0) continue;
+    bands.push({
+      ...PLAN_BAND,
+      id: `partition:${profile.partition.wallId}`,
+      wallId: wall.id,
+      xMm: (profile.xMinMm + profile.xMaxMm) / 2,
+      widthMm
+    });
+  }
+  return bands;
+}
 
 // A floor object reduced to what the dimension pass needs: its id, plan rect,
 // and containing room (null → not in any room, excluded from the floor pass).
@@ -310,13 +374,8 @@ function participantsBounds(participants: DimensionParticipant[]): {
 // rightSegment] in wall-local mm: the gap to the nearest neighbor on each side,
 // or to the wall end when none. We keep the two OUTER segments (the member's own
 // clearances) and lift each into floor space along the wall direction, offset
-// into the room.
-//
-// Plan is a top-down projection where height is invisible: two works at
-// different hang heights still read as along-wall neighbors. getNeighborAware-
-// Segments gates neighbors by vertical band overlap, so every participant is
-// given one shared full-height band here (yMm 0, a large heightMm) to disable
-// that gate — the result is pure 1-D along-wall spacing.
+// into the room. Qualifying partition bands join `others`, so a slab between two
+// works splits the chain (see PLAN_BAND for the height-invisible policy).
 // Selection-driven plan dimension lines (the top-down twin of elevation's
 // GroupDimensionLines): floor-object clearances to same-room neighbors and
 // room walls, plus a wall-hung object's along-wall clearances. Static
@@ -328,8 +387,19 @@ export function computePlanGapLines(args: {
   planScene: ReturnType<typeof buildPlanScene>;
   floorObjectRoomIds: ReadonlyMap<string, string | null>;
   floorWallsForTool: FloorWall[];
+  // Every partition on the floor (getFloorPartitions), UNFILTERED — the room
+  // and own-face gates live in planPartitionParticipants so no caller can
+  // apply just one of them.
+  partitions?: readonly FloorPartition[];
 }): PlanGapLine[] {
-  const { exportMode, selectedObjectIds, planScene, floorObjectRoomIds, floorWallsForTool } = args;
+  const {
+    exportMode,
+    selectedObjectIds,
+    planScene,
+    floorObjectRoomIds,
+    floorWallsForTool,
+    partitions
+  } = args;
   if (exportMode) return [];
   const selectedIds = new Set(selectedObjectIds);
   if (selectedIds.size === 0) return [];
@@ -376,7 +446,8 @@ export function computePlanGapLines(args: {
       ...derivePlanWallGaps({
         selectedObject: self,
         others: onWall.filter((object) => object.id !== entry.object.id),
-        wall
+        wall,
+        partitions
       })
     );
   }
@@ -388,20 +459,25 @@ export function derivePlanWallGaps(args: {
   selectedObject: { id: string; xMm: number; widthMm: number };
   others: ReadonlyArray<{ id: string; xMm: number; widthMm: number }>;
   wall: FloorWall;
+  // Unfiltered floor partitions; qualifying ones bound the chain like a
+  // neighbor (see planPartitionParticipants).
+  partitions?: readonly FloorPartition[];
   toleranceMm?: number;
 }): PlanGapLine[] {
   const tol = args.toleranceMm ?? NEIGHBOR_TOLERANCE_MM;
   if (args.wall.lengthMm <= 0) return [];
 
-  const BAND: Pick<WallObjectBase, "yMm" | "heightMm"> = { yMm: 0, heightMm: 1e6 };
-  const member: WallObjectBase = { ...BAND, id: args.selectedObject.id, wallId: args.wall.id, xMm: args.selectedObject.xMm, widthMm: args.selectedObject.widthMm };
-  const others: WallObjectBase[] = args.others.map((object) => ({
-    ...BAND,
-    id: object.id,
-    wallId: args.wall.id,
-    xMm: object.xMm,
-    widthMm: object.widthMm
-  }));
+  const member: WallObjectBase = { ...PLAN_BAND, id: args.selectedObject.id, wallId: args.wall.id, xMm: args.selectedObject.xMm, widthMm: args.selectedObject.widthMm };
+  const others: WallObjectBase[] = [
+    ...args.others.map((object) => ({
+      ...PLAN_BAND,
+      id: object.id,
+      wallId: args.wall.id,
+      xMm: object.xMm,
+      widthMm: object.widthMm
+    })),
+    ...planPartitionParticipants(args.wall, args.partitions)
+  ];
 
   const segments = getNeighborAwareSegments([member], others, args.wall.lengthMm);
   if (segments.length < 2) return [];
@@ -463,23 +539,33 @@ function liftWallSegments(
 // has no selection, so instead of one object's two clearances it wants the whole
 // wall's spacing chain, each gap emitted exactly once (no A→B / B→A duplication).
 // Plan is top-down (height invisible), so every object shares one full-height
-// band: pure 1-D along-wall spacing, matching derivePlanWallGaps' BAND trick.
+// band: pure 1-D along-wall spacing (PLAN_BAND).
+//
+// Qualifying partition bands join the chain as LINKS, not as bounds: the chain
+// runs wall-start → … → work → partition → work → … → wall-end, so a slab
+// between two works yields two honest clearances instead of one that spans it.
+// A wall carrying no objects still emits nothing — a partition alone in front
+// of a bare wall is architecture, not spacing.
 export function derivePlanWallGapsAllObjects(args: {
   objects: ReadonlyArray<{ id: string; xMm: number; widthMm: number }>;
   wall: FloorWall;
+  // Unfiltered floor partitions (see planPartitionParticipants for the gates).
+  partitions?: readonly FloorPartition[];
   toleranceMm?: number;
 }): PlanGapLine[] {
   const tol = args.toleranceMm ?? NEIGHBOR_TOLERANCE_MM;
   if (args.wall.lengthMm <= 0 || args.objects.length === 0) return [];
 
-  const BAND: Pick<WallObjectBase, "yMm" | "heightMm"> = { yMm: 0, heightMm: 1e6 };
-  const members: WallObjectBase[] = args.objects.map((object) => ({
-    ...BAND,
-    id: object.id,
-    wallId: args.wall.id,
-    xMm: object.xMm,
-    widthMm: object.widthMm
-  }));
+  const members: WallObjectBase[] = [
+    ...args.objects.map((object) => ({
+      ...PLAN_BAND,
+      id: object.id,
+      wallId: args.wall.id,
+      xMm: object.xMm,
+      widthMm: object.widthMm
+    })),
+    ...planPartitionParticipants(args.wall, args.partitions)
+  ];
 
   const segments = getSpacingSegments(members, args.wall.lengthMm);
   return liftWallSegments(
@@ -504,6 +590,11 @@ export function derivePlanSceneGaps(args: {
   floorObjects: PlanFloorObjectInput[];
   walls: FloorWall[];
   wallObjects: ReadonlyArray<{ id: string; wallId: string; xMm: number; widthMm: number }>;
+  // Every partition on the floor (getFloorPartitions), UNFILTERED — unlike the
+  // floor objects and walls, which the caller has already narrowed to one room.
+  // The room gate is one of the two gates planPartitionParticipants owns, and
+  // pre-filtering here would leave the own-face gate silently un-applied.
+  partitions?: readonly FloorPartition[];
   toleranceMm?: number;
 }): PlanGapLine[] {
   const tol = args.toleranceMm ?? NEIGHBOR_TOLERANCE_MM;
@@ -529,7 +620,14 @@ export function derivePlanSceneGaps(args: {
   for (const wall of args.walls) {
     const objects = objectsByWall.get(wall.id);
     if (!objects || objects.length === 0) continue;
-    wallGaps.push(...derivePlanWallGapsAllObjects({ objects, wall, toleranceMm: tol }));
+    wallGaps.push(
+      ...derivePlanWallGapsAllObjects({
+        objects,
+        wall,
+        partitions: args.partitions,
+        toleranceMm: tol
+      })
+    );
   }
 
   return [...floorGaps, ...wallGaps];

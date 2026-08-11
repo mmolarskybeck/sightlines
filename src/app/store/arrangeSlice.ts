@@ -1,6 +1,7 @@
 import {
   arrangeOnWallInZone,
   arrangeOnWallInZoneWithInset,
+  centerGroupBetweenBoundaries,
   detectBoundary,
   getOpenSpaceBounds,
   slideGroupToBoundaryInset,
@@ -60,6 +61,11 @@ export type ArrangeSliceActions = {
   setArrangeSessionPreview: (moves: { id: string; xMm: number; yMm: number }[]) => void;
   commitArrangeSession: (allowOverlap?: boolean) => void;
   cancelArrangeSession: () => void;
+  // One-shot rigid centering of the whole selection between its bounding
+  // neighbours — the group analogue of the single placement's Center button, so
+  // it commits on click rather than opening a preview. When a session IS live it
+  // writes the preview instead, so Apply/Cancel keeps governing the pending move.
+  centerSelectionBetweenBoundaries: (allowOverlap?: boolean) => Promise<void>;
 };
 
 export type ArrangeSliceInternals = {
@@ -370,6 +376,84 @@ export function createArrangeSlice(
 
     cancelArrangeSession() {
       settleArrangeSession("cancel");
+    },
+
+    async centerSelectionBetweenBoundaries(allowOverlap = false) {
+      const project = get().project;
+      if (!project) return;
+
+      // Same gate as the arrange controls the button sits with: 2+ wall-hung
+      // works on ONE wall. Nothing here can move architecture or floor objects.
+      const selectedIds = objectIdsOf(get().selection);
+      const eligibility = getArrangeEligibility(project, selectedIds);
+      if (!eligibility.eligible) return;
+
+      const wall = getProjectWalls(project).find(
+        (candidate) => candidate.id === eligibility.wallId
+      );
+      if (!wall) return;
+
+      const artworksById = new Map(
+        get().libraryArtworks.map((artwork) => [artwork.id, artwork])
+      );
+      const withResolvedArtworkFootprint = (wallObject: Project["wallObjects"][number]) =>
+        withArtworkFootprintFromMap(wallObject, artworksById);
+
+      // A live session's preview is the truth about where the group currently
+      // is; centering composes onto it rather than snapping back to stored x.
+      const session = get().arrangeSession;
+      const activeSession = session && session.wallId === wall.id ? session : null;
+      const members = eligibility.members
+        .map(withResolvedArtworkFootprint)
+        .map((member) => {
+          const preview = activeSession?.previewById[member.id];
+          return preview ? { ...member, xMm: preview.xMm, yMm: preview.yMm } : member;
+        });
+
+      // Same neighbour set as beginArrangeSession, partitions included: an
+      // explicit action answers the same whether or not ghosts are painted.
+      const others: WallObjectBase[] = [
+        ...project.wallObjects
+          .filter(
+            (wallObject) =>
+              wallObject.wallId === wall.id && !selectedIds.includes(wallObject.id)
+          )
+          .map(withResolvedArtworkFootprint),
+        ...derivePartitionNeighborShimsForFloorWall(project.floor, wall.id)
+      ];
+
+      // A live session already froze its targets; reusing them keeps the button
+      // from centering against a boundary the panel is not showing.
+      const boundary = activeSession
+        ? activeSession.insetBoundary
+        : {
+            left: detectBoundary("left", members, others, wall.lengthMm),
+            right: detectBoundary("right", members, others, wall.lengthMm)
+          };
+
+      const centered = centerGroupBetweenBoundaries(
+        members,
+        boundary.left.edgeMm,
+        boundary.right.edgeMm,
+        wall.lengthMm
+      );
+      if (centered.length === 0) return;
+
+      // Vertical position is untouched — centering is a horizontal move.
+      const yById = new Map(members.map((member) => [member.id, member.yMm]));
+      const moves = centered.map((move) => ({
+        id: move.id,
+        xMm: move.xMm,
+        yMm: yById.get(move.id) ?? 0
+      }));
+
+      if (activeSession) {
+        get().setArrangeSessionPreview(moves);
+        return;
+      }
+
+      const result = commitWallObjectMoves(moves, "Center on wall", allowOverlap);
+      if (result.status === "committed") await persist(result.project);
     }
   };
 
