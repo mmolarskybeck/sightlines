@@ -47,6 +47,10 @@ export type ArtworkIntakeSliceInternals = {
     extras?: EditExtras
   ) => Promise<void>;
   persist: (project: Project) => Promise<boolean>;
+  // Tell the other tabs the device-level artwork library changed, so they can
+  // re-list theirs. Covers deletes too — the message means "the library moved",
+  // not "a record was written".
+  announceArtworksSaved: () => void;
   deps: AppStoreDeps;
 };
 
@@ -59,7 +63,14 @@ export function createArtworkIntakeSlice(
   get: () => AppState,
   internals: ArtworkIntakeSliceInternals
 ): { actions: ArtworkIntakeSliceActions } {
-  const { applyEdit, persist, deps } = internals;
+  const { applyEdit, persist, deps, announceArtworksSaved } = internals;
+
+  // The artwork library is device-level, so every tab holds its own copy of the
+  // same records. Re-read ours and say so in the same beat, always together.
+  async function republishLibrary(): Promise<void> {
+    set({ libraryArtworks: await deps.artworkLibraryRepository.list() });
+    announceArtworksSaved();
+  }
 
   const actions: ArtworkIntakeSliceActions = {
     async addArtworksFromFiles(files, opts = {}) {
@@ -146,7 +157,7 @@ export function createArtworkIntakeSlice(
         // record it points at — the same artwork may be shared with
         // another project or a future tour stop (docs/plan.md §4.1).
         if (newArtworkIds.length > 0) {
-          set({ libraryArtworks: await deps.artworkLibraryRepository.list() });
+          await republishLibrary();
 
           if (destination === "checklist") {
             if (get().project?.id !== destinationProjectId) {
@@ -251,7 +262,7 @@ export function createArtworkIntakeSlice(
         }
 
         if (newArtworkIds.length > 0) {
-          set({ libraryArtworks: await deps.artworkLibraryRepository.list() });
+          await republishLibrary();
 
           if (destination === "checklist") {
             if (get().project?.id !== destinationProjectId) {
@@ -484,7 +495,7 @@ export function createArtworkIntakeSlice(
       }
 
       try {
-        set({ libraryArtworks: await deps.artworkLibraryRepository.list() });
+        await republishLibrary();
       } catch (error) {
         failureMessage = error instanceof Error ? error.message : "unknown error";
       }

@@ -14,6 +14,7 @@ import {
   InMemoryProjectSnapshotRepository,
   makeImageFile
 } from "../../test/inMemoryRepositories";
+import { createInertCrossTabSync } from "../crossTabSync";
 import { createAppStore } from "../store";
 import {
   getSelectedArtworkId,
@@ -115,7 +116,9 @@ function makeStore() {
     artworkLibraryRepository: new InMemoryArtworkLibraryRepository(),
     assetRepository: new InMemoryAssetRepository(),
     imageProcessor: new FakeImageProcessor(),
-    projectSnapshotRepository: new InMemoryProjectSnapshotRepository()
+    projectSnapshotRepository: new InMemoryProjectSnapshotRepository(),
+    // Every store in this process would otherwise share one BroadcastChannel.
+    crossTabSync: createInertCrossTabSync()
   });
 }
 

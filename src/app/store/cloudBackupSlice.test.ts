@@ -8,6 +8,7 @@ import {
   InMemoryProjectSnapshotRepository
 } from "../../test/inMemoryRepositories";
 import type { CloudBackupProvider } from "../cloud/provider";
+import { createInertCrossTabSync } from "../crossTabSync";
 import { createAppStore, type AppStoreDeps } from "../store";
 import { readCloudBackupMeta } from "./cloudBackupMeta";
 import { selectBackupFingerprint } from "./cloudBackupSlice";
@@ -62,6 +63,8 @@ describe("cloudBackupSlice.runCloudBackup", () => {
       assetRepository,
       imageProcessor,
       projectSnapshotRepository,
+      // Every store in this process would otherwise share one BroadcastChannel.
+      crossTabSync: createInertCrossTabSync(),
       ...overrides
     };
   }
@@ -185,6 +188,8 @@ describe("cloudBackupSlice.runCloudBackupNow", () => {
       assetRepository,
       imageProcessor,
       projectSnapshotRepository,
+      // Every store in this process would otherwise share one BroadcastChannel.
+      crossTabSync: createInertCrossTabSync(),
       ...overrides
     };
   }

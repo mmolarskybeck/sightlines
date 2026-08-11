@@ -9,6 +9,7 @@ import {
   InMemoryProjectRepository,
   InMemoryProjectSnapshotRepository
 } from "../../test/inMemoryRepositories";
+import { createInertCrossTabSync } from "../crossTabSync";
 import { createAppStore } from "../store";
 import { NO_SELECTION } from "./selectionSlice";
 
@@ -27,7 +28,9 @@ describe("openWall / restoreWall", () => {
       artworkLibraryRepository: new InMemoryArtworkLibraryRepository(),
       assetRepository: new InMemoryAssetRepository(),
       imageProcessor: new FakeImageProcessor(),
-      projectSnapshotRepository: new InMemoryProjectSnapshotRepository()
+      projectSnapshotRepository: new InMemoryProjectSnapshotRepository(),
+      // Every store in this process would otherwise share one BroadcastChannel.
+      crossTabSync: createInertCrossTabSync()
     });
     await store.getState().boot();
   });
@@ -236,7 +239,9 @@ describe("open walls refuse every placement and re-anchor path", () => {
       artworkLibraryRepository: new InMemoryArtworkLibraryRepository(),
       assetRepository: new InMemoryAssetRepository(),
       imageProcessor: new FakeImageProcessor(),
-      projectSnapshotRepository: new InMemoryProjectSnapshotRepository()
+      projectSnapshotRepository: new InMemoryProjectSnapshotRepository(),
+      // Every store in this process would otherwise share one BroadcastChannel.
+      crossTabSync: createInertCrossTabSync()
     });
     await store.getState().boot();
     const base = store.getState().project!;

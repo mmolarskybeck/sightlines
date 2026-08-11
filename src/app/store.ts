@@ -109,6 +109,7 @@ import { createSampleProject } from "../domain/sample/sampleProject";
 import { parseArtwork } from "../domain/schema/artworkSchema";
 import { getFirstWall, getProjectWalls } from "./projectWalls";
 export { getProjectWalls, getSelectedWall } from "./projectWalls";
+import { createCrossTabSync, type CrossTabMessage, type CrossTabSync } from "./crossTabSync";
 import {
   ARRANGE_SLICE_INITIAL,
   createArrangeSlice,
@@ -390,6 +391,11 @@ export type AppState = ArrangeSliceState &
   // is never applied silently.
   recoveryOffer: RecoveryOffer | null;
   boot: () => Promise<void>;
+  /**
+   * Begin listening for saves from this app's other tabs. Idempotent; boot()
+   * calls it, and boot runs once per tab.
+   */
+  startCrossTabSync: () => void;
   /** Dev-only, non-persisting document swap used by renderer benchmarks. */
   loadBenchmarkFixture: (project: Project, artworks: Artwork[]) => void;
   renameProject: (title: string) => Promise<void>;
@@ -596,6 +602,12 @@ export type AppStoreDeps = {
   // Cloud-backup provider seam. Absent (or unconfigured) leaves the whole
   // feature inert — status stays "disconnected" and the UI hides it.
   cloudBackupProvider?: CloudBackupProvider;
+  // Cross-tab notification seam. Absent means the store opens a real
+  // BroadcastChannel the first time it needs one, which is what the app wants.
+  // Tests pass createInertCrossTabSync() (or a fake) instead: a test process is
+  // ONE browsing context, so every store built in it would otherwise share one
+  // channel and hear every other store's saves.
+  crossTabSync?: CrossTabSync;
   onProjectDeleted?: (projectId: string) => void | Promise<void>;
 };
 
@@ -782,6 +794,142 @@ export function createAppStore(deps: AppStoreDeps) {
       return false;
     }
 
+    // --- cross-tab refresh ---------------------------------------------------
+    //
+    // All tabs share one IndexedDB database, but each holds its OWN full copy of
+    // the open project and writes the whole document on every edit. A second tab
+    // that boots and then sits idle is holding a stale document whose first edit
+    // would overwrite everything the first tab saved. So: after a successful
+    // save we say so on a BroadcastChannel, and a tab that hears about a newer
+    // copy of the document it has open reloads that document from storage.
+    //
+    // The advertised trade-offs, deliberately not "fixed" here: two tabs editing
+    // the same instant still resolve last-write-wins, and an external reload
+    // resets that tab's undo/redo history and selection (setDocument's contract
+    // — undoing across a document swap would resurrect the old document). This
+    // is a refresh, not a merge, and never a multiplayer session.
+    let crossTabSync: CrossTabSync | null = null;
+    let crossTabSyncStarted = false;
+    // The project id of a reload we know we owe but have not been able to take
+    // yet. At most one is ever outstanding: a second announcement about the same
+    // project just means "still stale", which is what this already records.
+    let pendingExternalReloadProjectId: string | null = null;
+
+    // Resolved lazily so a store that never saves and never boots — most unit
+    // tests — opens no channel at all.
+    function getCrossTabSync(): CrossTabSync {
+      if (!crossTabSync) crossTabSync = deps.crossTabSync ?? createCrossTabSync();
+      return crossTabSync;
+    }
+
+    // Why a reload is DEFERRED rather than applied on arrival: it wipes undo,
+    // redo and selection, so doing it under the user's hands mid-drag would be
+    // worse than the staleness it cures. An unfocused tab has no hands in it, so
+    // it refreshes immediately; a focused one waits for the user to leave and
+    // come back, and re-checks on every later trigger in the meantime.
+    type ExternalReloadTrigger = "message" | "focus" | "save";
+
+    async function flushExternalReload(trigger: ExternalReloadTrigger): Promise<void> {
+      const projectId = pendingExternalReloadProjectId;
+      if (!projectId) return;
+
+      // The project was closed, swapped or deleted while we owed it a reload —
+      // whatever is open now is not what the announcement was about.
+      if (get().project?.id !== projectId) {
+        pendingExternalReloadProjectId = null;
+        return;
+      }
+
+      // "focus" IS the moment the user came back, so it is allowed to reload a
+      // now-focused tab; every other trigger defers while the tab has focus.
+      const focused = typeof document !== "undefined" && document.hasFocus();
+      if (focused && trigger !== "focus") return;
+      // Mid-save: our own write is in flight and about to move updatedAt.
+      if (get().saveState === "saving") return;
+      // A live arrange preview is uncommitted work drawn from this document.
+      if (get().arrangeSession != null) return;
+
+      // Claim the pending reload before the await. Every path from here drops it
+      // (applied, overtaken, or failed); a fresh announcement arriving during the
+      // load re-arms it, and that later flush is the one that should win.
+      pendingExternalReloadProjectId = null;
+
+      let loaded: Project;
+      try {
+        loaded = await deps.projectRepository.load(projectId);
+      } catch (error) {
+        // A passive refresh never gets to speak: no toast, no error state, no
+        // saveError. The next save in the other tab announces again and this
+        // retries naturally.
+        console.warn("Could not refresh the project after another tab saved it", error);
+        return;
+      }
+
+      const current = get().project;
+      // Re-check both facts after the await — the document can have been swapped
+      // or edited past the announcement while we were reading storage.
+      if (current?.id !== projectId) return;
+      if (loaded.updatedAt <= current.updatedAt) return;
+
+      // NOT openLoadedDocument, and nothing persists after this. A tab
+      // refreshing someone else's save must never write the document back: no
+      // snapshot (there is nothing to protect — we are not overwriting anything)
+      // and no save (writing what we just read is how a stale tab clobbers a
+      // fresh one in the first place). If setDocument's load repair changes the
+      // document it downgrades saveState to "idle" on its own — that is honest,
+      // because the repaired copy is genuinely not what storage holds, and the
+      // user's next edit writes it.
+      setDocument(loaded, { saveState: "saved" });
+    }
+
+    async function refreshLibraryArtworks(): Promise<void> {
+      try {
+        const libraryArtworks = await deps.artworkLibraryRepository.list();
+        // ONLY libraryArtworks. saveState/error/saveError belong to this tab's
+        // own in-flight work (see how carefully saveArtworkHalves manages them);
+        // another tab's library write says nothing about them.
+        set({ libraryArtworks });
+      } catch (error) {
+        console.warn("Could not refresh the artwork library after another tab saved it", error);
+      }
+    }
+
+    async function handleCrossTabMessage(message: CrossTabMessage): Promise<void> {
+      if (message.kind === "artworks-saved") {
+        // The library is device-level and not undoable, so there is nothing to
+        // defer for: re-list it immediately.
+        await refreshLibraryArtworks();
+        return;
+      }
+
+      const project = get().project;
+      if (!project || project.id !== message.projectId) return;
+      // Both timestamps are Date#toISOString output (UTC, fixed width), so
+      // lexical comparison is chronological. Equal counts as "already have it":
+      // the other tab may simply have re-saved the same document.
+      if (message.updatedAt <= project.updatedAt) return;
+
+      pendingExternalReloadProjectId = message.projectId;
+      await flushExternalReload("message");
+    }
+
+    function startCrossTabSync(): void {
+      if (crossTabSyncStarted) return;
+      crossTabSyncStarted = true;
+
+      getCrossTabSync().subscribe((message) => {
+        void handleCrossTabMessage(message);
+      });
+
+      // The deferred reload's other half: a tab that skipped its refresh because
+      // the user was working in it takes it the moment they come back.
+      if (typeof window !== "undefined") {
+        window.addEventListener("focus", () => {
+          void flushExternalReload("focus");
+        });
+      }
+    }
+
     async function persist(project: Project): Promise<boolean> {
       set({ saveState: "saving", error: null });
 
@@ -789,8 +937,14 @@ export function createAppStore(deps: AppStoreDeps) {
         await deps.projectRepository.save(project);
         // Clear any prior save failure — a successful persist is the recovery.
         set({ saveState: "saved", saveError: null });
+        // Tell the other tabs what is now in storage, so the one holding a stale
+        // copy of THIS project can reload instead of overwriting us later.
+        getCrossTabSync().announceProjectSaved(project.id, project.updatedAt);
         // Fire-and-forget: an interval snapshot must never affect saving.
         void maybeIntervalSnapshot(project);
+        // A reload we owed but deferred may be flushable now that this save is
+        // done (the "saving" gate above is one of the reasons it can be stuck).
+        void flushExternalReload("save");
         return true;
       } catch (error) {
         // A ZodError's .message is the JSON-stringified issue array, which is
@@ -937,6 +1091,10 @@ export function createAppStore(deps: AppStoreDeps) {
         } else {
           set({ libraryArtworks });
         }
+        // The artwork library is device-level: every tab shows the same works
+        // regardless of which project is open, so this needs no id or timestamp
+        // to compare — the other tabs just re-read it.
+        getCrossTabSync().announceArtworksSaved();
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Could not save the artwork library.";
@@ -1777,7 +1935,15 @@ export function createAppStore(deps: AppStoreDeps) {
 
     const cloudBackupSlice = createCloudBackupSlice(set, get, { deps });
 
-    const artworkIntake = createArtworkIntakeSlice(set, get, { applyEdit, persist, deps });
+    const artworkIntake = createArtworkIntakeSlice(set, get, {
+      applyEdit,
+      persist,
+      // Intake owns its own library writes (they are outside applyEdit on
+      // purpose), so it announces them itself — saveArtworkHalves is not the
+      // choke point for the library the way persist is for the document.
+      announceArtworksSaved: () => getCrossTabSync().announceArtworksSaved(),
+      deps
+    });
 
     const roomGeometry = createRoomGeometrySlice(set, get, {
       applyEdit,
@@ -1806,7 +1972,14 @@ export function createAppStore(deps: AppStoreDeps) {
       pendingPackageImport: null,
       recoveryOffer: null,
 
+      startCrossTabSync,
+
       async boot() {
+        // Listen before anything is loaded. Boot runs once per tab, and a
+        // message that lands mid-boot is simply about a project this tab does
+        // not have open yet, which handleCrossTabMessage already ignores.
+        startCrossTabSync();
+
         // The library is a secondary document from the project's point of
         // view (docs/plan.md §4.1) — a failure to load it shouldn't take
         // down boot the way a failed project load does. Keep it empty and

@@ -52,6 +52,7 @@ import {
 import { exportProjectJson } from "../test/exportProjectJson";
 import { ProjectValidationError } from "../domain/repositories/indexedDbProjectRepository";
 import { SNAPSHOT_MIN_INTERVAL_MS } from "../domain/repositories/projectSnapshotRepository";
+import type { CrossTabMessage, CrossTabSync } from "./crossTabSync";
 import type { AppStoreDeps, SaveError } from "./store";
 import { shouldAnnounceSaveError } from "./hooks/useSaveErrorToast";
 import {
@@ -66,12 +67,55 @@ import {
   roomIdOf
 } from "./store";
 
+// A CrossTabSync stand-in: it records what this store told the other tabs, and
+// `deliver` plays another tab's announcement back into it.
+//
+// Injected into EVERY store built here, not just the cross-tab tests: a vitest
+// process is one browsing context, so stores sharing the real BroadcastChannel
+// would hear each other's saves — and since they all open "sample-gallery" from
+// their own repository, that cross-talk would be about the same project id.
+type FakeCrossTabSync = {
+  sync: CrossTabSync;
+  announced: CrossTabMessage[];
+  deliver: (message: CrossTabMessage) => Promise<void>;
+};
+
+function makeFakeCrossTabSync(): FakeCrossTabSync {
+  const handlers = new Set<(message: CrossTabMessage) => void>();
+  const announced: CrossTabMessage[] = [];
+  return {
+    announced,
+    async deliver(message) {
+      for (const handler of [...handlers]) handler(message);
+      // The store's handler is async and started with `void`; a macrotask turn
+      // lets its storage read and setDocument finish before the test asserts.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    },
+    sync: {
+      announceProjectSaved(projectId, updatedAt) {
+        announced.push({ kind: "project-saved", projectId, updatedAt });
+      },
+      announceArtworksSaved() {
+        announced.push({ kind: "artworks-saved" });
+      },
+      subscribe(handler) {
+        handlers.add(handler);
+        return () => handlers.delete(handler);
+      },
+      close() {
+        handlers.clear();
+      }
+    }
+  };
+}
+
 describe("app store", () => {
   let repository: InMemoryProjectRepository;
   let artworkLibraryRepository: InMemoryArtworkLibraryRepository;
   let assetRepository: InMemoryAssetRepository;
   let imageProcessor: FakeImageProcessor;
   let projectSnapshotRepository: InMemoryProjectSnapshotRepository;
+  let crossTabSync: FakeCrossTabSync;
   let store: ReturnType<typeof createAppStore>;
 
   function makeDeps(overrides: Partial<AppStoreDeps> = {}): AppStoreDeps {
@@ -81,6 +125,7 @@ describe("app store", () => {
       assetRepository,
       imageProcessor,
       projectSnapshotRepository,
+      crossTabSync: crossTabSync.sync,
       ...overrides
     };
   }
@@ -122,6 +167,7 @@ describe("app store", () => {
     assetRepository = new InMemoryAssetRepository();
     imageProcessor = new FakeImageProcessor();
     projectSnapshotRepository = new InMemoryProjectSnapshotRepository();
+    crossTabSync = makeFakeCrossTabSync();
     store = createAppStore(makeDeps());
     await store.getState().boot();
   });
@@ -133,6 +179,188 @@ describe("app store", () => {
     expect(state.saveState).toBe("saved");
     expect(repository.projects.size).toBe(1);
     expect(state.wallContextId).toBe("wall-north");
+  });
+
+  // Every tab writes the WHOLE document, so a tab holding a stale copy is a tab
+  // whose next edit erases another tab's work. These cover the refresh that
+  // keeps a background tab current — and, just as importantly, that the
+  // refreshing tab never writes anything back.
+  describe("cross-tab refresh", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    // Play the part of the other tab: put a newer document straight into the
+    // shared repository, the way that tab's own persist() would have.
+    async function saveFromAnotherTab(changes: Partial<Project> = {}): Promise<Project> {
+      const current = store.getState().project!;
+      const external: Project = {
+        ...current,
+        title: "Saved in the other tab",
+        ...changes,
+        updatedAt: new Date(Date.parse(current.updatedAt) + 60_000).toISOString()
+      };
+      await repository.save(external);
+      return external;
+    }
+
+    // jsdom's document.hasFocus() is not something a test should be at the
+    // mercy of — the deferral rule is the thing under test, so drive it.
+    function setFocused(focused: boolean): void {
+      vi.spyOn(document, "hasFocus").mockReturnValue(focused);
+    }
+
+    it("announces every successful save so other tabs know their copy is stale", async () => {
+      await store.getState().renameProject("Announced");
+
+      const project = store.getState().project!;
+      expect(crossTabSync.announced).toContainEqual({
+        kind: "project-saved",
+        projectId: project.id,
+        updatedAt: project.updatedAt
+      });
+    });
+
+    it("reloads the document when another tab saves a newer copy", async () => {
+      setFocused(false);
+      // Give this tab an edit history, so we can see the swap reset it.
+      await store.getState().renameProject("Mine");
+      const external = await saveFromAnotherTab();
+
+      await crossTabSync.deliver({
+        kind: "project-saved",
+        projectId: external.id,
+        updatedAt: external.updatedAt
+      });
+
+      const state = store.getState();
+      expect(state.project?.title).toBe("Saved in the other tab");
+      expect(state.project?.updatedAt).toBe(external.updatedAt);
+      // An external swap starts a new history — undoing across it would
+      // resurrect a document nobody has.
+      expect(state.undoStack).toEqual([]);
+      expect(state.redoStack).toEqual([]);
+      expect(state.saveState).toBe("saved");
+    });
+
+    it("never writes the document back when it refreshes", async () => {
+      setFocused(false);
+      const external = await saveFromAnotherTab();
+      const save = vi.spyOn(repository, "save");
+      const snapshotsBefore = projectSnapshotRepository.records.size;
+
+      await crossTabSync.deliver({
+        kind: "project-saved",
+        projectId: external.id,
+        updatedAt: external.updatedAt
+      });
+
+      expect(store.getState().project?.title).toBe("Saved in the other tab");
+      // This is the whole point of the feature: a tab catching up must not
+      // re-save what it just read, or it becomes the clobberer itself.
+      expect(save).not.toHaveBeenCalled();
+      expect(projectSnapshotRepository.records.size).toBe(snapshotsBefore);
+    });
+
+    it("ignores an announcement no newer than the copy it already has", async () => {
+      setFocused(false);
+      // The repository holds a DIFFERENT document, so a reload would be visible.
+      await saveFromAnotherTab({ title: "Should not be read" });
+      const mine = store.getState().project!;
+      const load = vi.spyOn(repository, "load");
+
+      await crossTabSync.deliver({
+        kind: "project-saved",
+        projectId: mine.id,
+        updatedAt: mine.updatedAt
+      });
+      await crossTabSync.deliver({
+        kind: "project-saved",
+        projectId: mine.id,
+        updatedAt: new Date(Date.parse(mine.updatedAt) - 60_000).toISOString()
+      });
+
+      expect(load).not.toHaveBeenCalled();
+      expect(store.getState().project).toBe(mine);
+    });
+
+    it("ignores an announcement about a project this tab does not have open", async () => {
+      setFocused(false);
+      const mine = store.getState().project!;
+      const load = vi.spyOn(repository, "load");
+
+      await crossTabSync.deliver({
+        kind: "project-saved",
+        projectId: "some-other-project",
+        updatedAt: new Date(Date.parse(mine.updatedAt) + 60_000).toISOString()
+      });
+
+      expect(load).not.toHaveBeenCalled();
+      expect(store.getState().project).toBe(mine);
+    });
+
+    it("defers the reload while the tab has focus, then takes it on focus", async () => {
+      setFocused(true);
+      const external = await saveFromAnotherTab();
+
+      await crossTabSync.deliver({
+        kind: "project-saved",
+        projectId: external.id,
+        updatedAt: external.updatedAt
+      });
+
+      // The user may be mid-drag in this tab; yanking the document out from
+      // under them is worse than the staleness.
+      expect(store.getState().project?.title).not.toBe("Saved in the other tab");
+
+      window.dispatchEvent(new Event("focus"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(store.getState().project?.title).toBe("Saved in the other tab");
+    });
+
+    it("keeps the document when a passive reload cannot read storage", async () => {
+      setFocused(false);
+      const external = await saveFromAnotherTab();
+      const mine = store.getState().project!;
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.spyOn(repository, "load").mockRejectedValue(new Error("read failed"));
+
+      await crossTabSync.deliver({
+        kind: "project-saved",
+        projectId: external.id,
+        updatedAt: external.updatedAt
+      });
+
+      // A refresh that fails says nothing to the user and changes nothing.
+      expect(store.getState().project).toBe(mine);
+      expect(store.getState().saveState).toBe("saved");
+      expect(store.getState().error).toBeNull();
+      expect(store.getState().saveError).toBeNull();
+      expect(warn).toHaveBeenCalled();
+    });
+
+    it("re-lists the artwork library when another tab saves a work", async () => {
+      await store
+        .getState()
+        .addArtworksFromFiles([makeImageFile("shared.jpg")], { destination: "library" });
+      const [artwork] = store.getState().libraryArtworks;
+      expect(artwork).toBeDefined();
+      expect(crossTabSync.announced).toContainEqual({ kind: "artworks-saved" });
+
+      // The other tab retitles the same library work.
+      await artworkLibraryRepository.save({ ...artwork, title: "Retitled elsewhere" });
+      store.setState({ saveState: "saved", error: null, saveError: null });
+
+      await crossTabSync.deliver({ kind: "artworks-saved" });
+
+      const state = store.getState();
+      expect(state.libraryArtworks.map((entry) => entry.title)).toEqual(["Retitled elsewhere"]);
+      // Another tab's library write says nothing about this tab's save status.
+      expect(state.saveState).toBe("saved");
+      expect(state.error).toBeNull();
+      expect(state.saveError).toBeNull();
+    });
   });
 
   it("resize creates one undo entry and undo/redo round-trips the document", async () => {

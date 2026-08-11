@@ -1,6 +1,6 @@
 # Sightlines Status
 
-Last refreshed: 2026-08-10 (open walls, floor-object refinements, and checklist organization shipped)
+Last refreshed: 2026-08-10 (open walls, floor-object refinements, checklist organization, and cross-tab refresh shipped)
 
 This is the single living status doc: current state, what shipped recently, and what comes next. The full product/architecture plan and roadmap live in `docs/plan.md`; small scraps live in `docs/quick-todos.md`; the chronological build log through 2026-07-10 is frozen at `docs/archive/progress.md`.
 
@@ -186,6 +186,16 @@ A video projection surface — an MDF panel hung from ceiling wires, angled to t
 - **Partition profiles**: free-standing partition faces now carry their elevation profile through the derived scene and PDF export, with the same profile-aware rendering path used by the live elevation view. Elevation ghost handling and floor/wall mode switching were tightened alongside the suspended-object work.
 - **Checklist organization**: the checklist can group works by artist and temporarily filter them with search. Clear and close controls return to the full grouped list without changing project membership or placement state.
 - **Verification**: the open-wall behavior has a dedicated browser regression covering plan, placement disabling, and PDF listing; checklist organization has a browser regression covering grouping, search, collapse, clear, and close behavior.
+
+## Cross-Tab Refresh (shipped 2026-08-10)
+
+Every tab held its own full copy of the open project and wrote the **whole** document on every edit, so a second tab left open on the same project would silently overwrite everything the first tab had saved with its stale boot-time copy. Tabs now tell each other when they save.
+
+- **How it works**: `src/app/crossTabSync.ts` wraps one `BroadcastChannel("sightlines-sync")` with two messages — `project-saved` (id + `updatedAt`) and `artworks-saved`. `persist()` announces after every successful document save, and the artwork-library writes announce after re-listing. A tab that hears about a **newer** copy of the project it has open reloads that document from IndexedDB through `setDocument`, and deliberately does not write anything back (no snapshot, no save) — a tab catching up must never become the clobberer.
+- **When the reload lands**: an unfocused tab refreshes immediately; a focused one defers (it may be mid-drag) and takes the pending reload on its next `focus`, on the next announcement, or after its own next save. A reload is also held off while a save is in flight or an arrange preview is live. A failed passive reload is logged and dropped — never a toast, never an error state.
+- **Advertised trade-offs, not bugs**: two tabs editing the same instant still resolve last-write-wins, and an external reload resets that tab's undo/redo history and selection (a document swap always has — undoing across it would resurrect a document nobody has). This is a refresh, not multiplayer: no locks, no conflict dialogs.
+- **Seam**: `AppStoreDeps.crossTabSync` is optional and defaults to a real channel opened lazily on first use; the whole module is inert where `BroadcastChannel` does not exist. Tests inject `createInertCrossTabSync()` or a fake, because a vitest process is one browsing context and every store in it would otherwise hear the others' saves.
+- **Known limitation**: only the *open* document and the artwork library refresh. Project-manager writes to a project that is not the open one — rename-by-id, delete — do not announce, so a tab holding that project can still re-save over the rename, or resurrect the deleted project on its next edit. The saved-projects list itself does not refresh across tabs either.
 
 ## Near-Term Order
 
