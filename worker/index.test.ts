@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { handleAnalyticsRequest } from "./index";
+import { handleAnalyticsRequest, handleDropboxShareRequest } from "./index";
 
 const endpoint = "https://app.sightlines.art/api/analytics";
 
@@ -116,5 +116,87 @@ describe("product analytics Worker", () => {
     } as RequestInit);
     expect((await handleAnalyticsRequest(oversizedRequest, oversized.env)).status).toBe(413);
     expect(oversized.writeDataPoint).not.toHaveBeenCalled();
+  });
+});
+
+describe("Dropbox share relay", () => {
+  const shareEndpoint = "https://app.sightlines.art/api/dropbox-share";
+  const dropboxUrl =
+    "https://www.dropbox.com/scl/fi/token/project.sightlines?rlkey=secret&dl=0";
+
+  function shareRequest(
+    url = dropboxUrl,
+    origin = "https://app.sightlines.art"
+  ): Request {
+    return new Request(shareEndpoint, {
+      method: "POST",
+      headers: { Origin: origin, "Content-Type": "application/json" },
+      body: JSON.stringify({ url })
+    });
+  }
+
+  it("streams a supported Dropbox file without caching it", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(new Uint8Array([80, 75, 3, 4]), {
+        status: 200,
+        headers: { "Content-Length": "4", "Content-Type": "application/zip" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await handleDropboxShareRequest(shareRequest());
+
+    expect(result.status).toBe(200);
+    expect(result.headers.get("cache-control")).toContain("no-store");
+    expect(result.headers.get("content-type")).toBe("application/octet-stream");
+    expect(Array.from(new Uint8Array(await result.arrayBuffer()))).toEqual([80, 75, 3, 4]);
+    const requested = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(requested.searchParams.get("dl")).toBe("1");
+    expect(requested.searchParams.get("rlkey")).toBe("secret");
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({
+      Range: `bytes=0-${256 * 1024 * 1024}`
+    });
+  });
+
+  it("rejects cross-origin callers and arbitrary download hosts", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(
+      (await handleDropboxShareRequest(shareRequest(dropboxUrl, "https://evil.example"))).status
+    ).toBe(403);
+    expect(
+      (await handleDropboxShareRequest(shareRequest("https://evil.example/project.sightlines")))
+        .status
+    ).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("maps missing Dropbox files to 404 and rejects declared oversized packages", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 404 })));
+    expect((await handleDropboxShareRequest(shareRequest())).status).toBe(404);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(new Uint8Array([1]), {
+            headers: { "Content-Length": String(256 * 1024 * 1024 + 1) }
+          })
+      )
+    );
+    expect((await handleDropboxShareRequest(shareRequest())).status).toBe(413);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(new Uint8Array([1]), {
+            status: 206,
+            headers: { "Content-Range": `bytes 0-0/${256 * 1024 * 1024 + 1}` }
+          })
+      )
+    );
+    expect((await handleDropboxShareRequest(shareRequest())).status).toBe(413);
   });
 });

@@ -34,6 +34,9 @@ export type PackageSliceActions = {
   // bytes. If §6 artwork conflicts need a decision, the import parks in
   // pendingPackageImport for the review dialog; otherwise it commits directly.
   importSightlinesPackage: (bytes: ArrayBuffer) => Promise<void>;
+  // Same validation and merge pipeline, but always saves a fresh project id so
+  // a Dropbox snapshot can never become the sender's identity on this device.
+  importSharedSightlinesPackage: (bytes: ArrayBuffer) => Promise<boolean>;
   resolvePackageImportConflicts: (
     resolutions: Record<string, ConflictResolution>
   ) => Promise<void>;
@@ -172,6 +175,70 @@ export function createPackageSlice(
     telemetry.track("package_import_completed", {});
   }
 
+  async function runPackageImport(
+    bytes: ArrayBuffer,
+    options: { forceProjectCopy?: boolean } = {}
+  ): Promise<boolean> {
+    set({ intakeState: "processing" });
+    try {
+      // 1-2. Zip safety + staged manifest pipeline (extract enforces the
+      // caps pre-inflation; readPackageManifest migrates embedded docs).
+      const { manifest, files } = await openSightlinesPackage(new Uint8Array(bytes));
+
+      // 3. Asset intake validation: re-hash, MIME allowlist, decode guards.
+      const validated = await validatePackageAssets(manifest, files);
+
+      // Existing-library snapshot the pure planner merges against.
+      const libraryArtworks = get().libraryArtworks;
+      const assetShaById = new Map<string, string>();
+      for (const artwork of libraryArtworks) {
+        if (!artwork.assetId || assetShaById.has(artwork.assetId)) continue;
+        try {
+          const asset = await deps.assetRepository.getAsset(artwork.assetId);
+          if (asset.sha256) assetShaById.set(asset.id, asset.sha256);
+        } catch (error) {
+          // Missing assets skip dedupe; operational read failures fail closed.
+          if (!(error instanceof AssetNotFoundError)) throw error;
+        }
+      }
+      // Collision detection must fail closed. The project-manager list is
+      // intentionally tolerant, but treating a failed read as an empty
+      // repository here could overwrite an existing project.
+      const summaries = await deps.projectRepository.list();
+
+      // 4-5. §6 merge rules + project identity, as one pure plan.
+      const plan = planPackageImport(
+        manifest,
+        validated,
+        {
+          artworks: libraryArtworks,
+          assetShaById,
+          projectIds: summaries.map((summary) => summary.id)
+        },
+        options
+      );
+
+      if (plan.conflicts.length > 0) {
+        // Park for ONE review step in the conflict dialog — nothing has
+        // been persisted yet, so dismissing discards the import cleanly.
+        set({ pendingPackageImport: plan });
+        return true;
+      }
+
+      await commitPackageImport(plan, {});
+      return true;
+    } catch (error) {
+      const message = `Import failed: ${
+        error instanceof Error ? error.message : "the package could not be read."
+      }`;
+      set({ error: message });
+      toast.error(message);
+      return false;
+    } finally {
+      set({ intakeState: "idle" });
+    }
+  }
+
   const actions: PackageSliceActions = {
     async importProjectJson(text) {
       let project: Project;
@@ -239,57 +306,11 @@ export function createPackageSlice(
     },
 
     async importSightlinesPackage(bytes) {
-      set({ intakeState: "processing" });
-      try {
-        // 1-2. Zip safety + staged manifest pipeline (extract enforces the
-        // caps pre-inflation; readPackageManifest migrates embedded docs).
-        const { manifest, files } = await openSightlinesPackage(new Uint8Array(bytes));
+      await runPackageImport(bytes);
+    },
 
-        // 3. Asset intake validation: re-hash, MIME allowlist, decode guards.
-        const validated = await validatePackageAssets(manifest, files);
-
-        // Existing-library snapshot the pure planner merges against.
-        const libraryArtworks = get().libraryArtworks;
-        const assetShaById = new Map<string, string>();
-        for (const artwork of libraryArtworks) {
-          if (!artwork.assetId || assetShaById.has(artwork.assetId)) continue;
-          try {
-            const asset = await deps.assetRepository.getAsset(artwork.assetId);
-            if (asset.sha256) assetShaById.set(asset.id, asset.sha256);
-          } catch (error) {
-            // Missing assets skip dedupe; operational read failures fail closed.
-            if (!(error instanceof AssetNotFoundError)) throw error;
-          }
-        }
-        // Collision detection must fail closed. The project-manager list is
-        // intentionally tolerant, but treating a failed read as an empty
-        // repository here could overwrite an existing project.
-        const summaries = await deps.projectRepository.list();
-
-        // 4-5. §6 merge rules + project identity, as one pure plan.
-        const plan = planPackageImport(manifest, validated, {
-          artworks: libraryArtworks,
-          assetShaById,
-          projectIds: summaries.map((summary) => summary.id)
-        });
-
-        if (plan.conflicts.length > 0) {
-          // Park for ONE review step in the conflict dialog — nothing has
-          // been persisted yet, so dismissing discards the import cleanly.
-          set({ pendingPackageImport: plan });
-          return;
-        }
-
-        await commitPackageImport(plan, {});
-      } catch (error) {
-        const message = `Import failed: ${
-          error instanceof Error ? error.message : "the package could not be read."
-        }`;
-        set({ error: message });
-        toast.error(message);
-      } finally {
-        set({ intakeState: "idle" });
-      }
+    async importSharedSightlinesPackage(bytes) {
+      return runPackageImport(bytes, { forceProjectCopy: true });
     },
 
     async resolvePackageImportConflicts(resolutions) {

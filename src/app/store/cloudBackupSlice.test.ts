@@ -25,11 +25,12 @@ function makeFakeProvider(options: {
   onUpload?: () => void;
   fail?: Error;
   completeHandled?: boolean;
-} = {}): CloudBackupProvider & { uploads: number } {
+} = {}): CloudBackupProvider & { uploads: number; shares: number } {
   return {
     id: "fake",
     label: "Fake",
     uploads: 0,
+    shares: 0,
     async startConnect() {},
     async completeConnect() {
       return options.completeHandled ?? false;
@@ -45,6 +46,10 @@ function makeFakeProvider(options: {
       this.uploads += 1;
       options.onUpload?.();
       if (options.fail) throw options.fail;
+    },
+    async createShareLink() {
+      this.shares += 1;
+      return "https://www.dropbox.com/scl/fi/share/project.sightlines?rlkey=test&dl=0";
     }
   };
 }
@@ -171,6 +176,18 @@ describe("cloudBackupSlice.runCloudBackup", () => {
     const store = await bootStore(undefined);
     await store.getState().runCloudBackup();
     expect(store.getState().cloudBackupStatus).toBe("idle");
+  });
+
+  it("creates a share snapshot without marking the project as backed up", async () => {
+    const provider = makeFakeProvider();
+    const store = await bootStore(provider);
+    const project = store.getState().project!;
+
+    const result = await store.getState().createCloudShareLink();
+
+    expect(provider.shares).toBe(1);
+    expect(result.url).toContain("dropbox.com/scl/fi/share");
+    expect(readCloudBackupMeta(project.id).backedUpFingerprint).toBeNull();
   });
 });
 

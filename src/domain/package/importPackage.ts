@@ -163,6 +163,12 @@ export type ExistingLibraryState = {
   projectIds: string[];
 };
 
+export type PlanPackageImportOptions = {
+  // Shared links are snapshots, never identity-preserving transfers. Force a
+  // fresh project record even when the sender's id is absent locally.
+  forceProjectCopy?: boolean;
+};
+
 export type ArtworkConflict = {
   incoming: Artwork; // already rebound to its resolved local assetId
   existing: Artwork;
@@ -227,19 +233,22 @@ function resolvedOriginalContentHash(
 export function planPackageImport(
   manifest: SightlinesPackage,
   validated: ValidatedPackageAssets,
-  existing: ExistingLibraryState
+  existing: ExistingLibraryState,
+  options: PlanPackageImportOptions = {}
 ): ImportPlan {
   const warnings = [...validated.warnings];
 
   // Never overwrite a local project on id collision.
   const projectIds = new Set(existing.projectIds);
-  const projectRenamed = projectIds.has(manifest.project.id);
+  const projectRenamed = options.forceProjectCopy || projectIds.has(manifest.project.id);
   const importedAt = new Date().toISOString();
   const project: Project = projectRenamed
     ? {
         ...manifest.project,
         id: newId(),
-        title: `${manifest.project.title} (imported)`,
+        title: options.forceProjectCopy
+          ? `${manifest.project.title} (copy)`
+          : `${manifest.project.title} (imported)`,
         updatedAt: importedAt
       }
     : { ...manifest.project, updatedAt: importedAt };

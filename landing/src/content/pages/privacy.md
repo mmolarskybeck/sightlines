@@ -2,19 +2,21 @@
 title: "Your exhibition stays on your device"
 description: "How Sightlines keeps projects and artwork images on your device while limiting optional anonymous reporting."
 kicker: "Privacy"
-lede: "Unreleased exhibition plans, loan negotiations, and artwork images are sensitive material. Sightlines keeps your work on your own device(s): there are no accounts, your projects are never uploaded to us, and optional anonymous reporting never includes your work."
-updated: 2026-07-20
+lede: "Unreleased exhibition plans, loan negotiations, and artwork images are sensitive material. Sightlines is local-first: there are no accounts or hosted project database, and optional anonymous reporting never includes your work."
+updated: 2026-08-11
 ---
 
 ## Your projects
 
-Room layouts, wall elevations, artwork details, and images are saved in your browser on your device. Sightlines does not operate a project database or receive a copy of your work.
+Room layouts, wall elevations, artwork details, and images are saved in your browser on your device. Sightlines does not operate a project database or retain a server-side copy of your work.
 
 One caution: if you clear the browser's stored website data (for example, while clearing history or cookies), projects saved there will be erased. Use the app's export feature to keep backup files or move a project between devices. Or connect your Dropbox account to backup to your own cloud storage.
 
 ## Optional Dropbox backup
 
 If you connect Dropbox, backups travel directly from your browser to a dedicated Sightlines folder in your Dropbox account. They do not pass through a Sightlines server, and Sightlines cannot read anything outside that app folder. You can revoke access in Dropbox at any time. If you do not connect Dropbox, nothing is ever sent to it.
+
+If you choose to create a project share link, Sightlines saves a separate snapshot in that Dropbox folder and asks Dropbox for a public file link. Anyone with the Sightlines link can retrieve that snapshot until you remove the file or its shared link in Dropbox. When a recipient opens it, the snapshot passes through a stateless Sightlines relay on Cloudflare solely so the browser can download it from Dropbox. The relay does not store or cache the project. The recipient must choose to save an independent local copy; later edits do not sync.
 
 ## Information we collect
 
@@ -35,7 +37,7 @@ The informational website at sightlines.art uses cookie-free Cloudflare Web Anal
 
 Cloudflare delivers and protects both sites and therefore processes ordinary request information, such as IP addresses, as part of operating its global network. Cloudflare also processes the anonymous analytics described above on our behalf. Web Analytics keeps the underlying visit records for seven days before keeping only aggregate results; six months of results are available in its dashboard.
 
-Product events are retained in Cloudflare Workers Analytics Engine for three months. Sightlines does not write IP addresses, user agents, referrers, or project content into that dataset. Dropbox processes backups only when you choose to connect it, under your Dropbox account and settings.
+Product events are retained in Cloudflare Workers Analytics Engine for three months. Sightlines does not write IP addresses, user agents, referrers, or project content into that dataset. Dropbox processes backups and shared snapshots only when you choose those features, under your Dropbox account and settings. Cloudflare transiently processes shared-snapshot downloads but Sightlines does not store them.
 
 ## Your choices and rights
 
@@ -51,4 +53,4 @@ If Sightlines introduces accounts, hosted storage, collaboration, or another mat
 
 Sightlines is operated out of the United States. To ask a privacy question or exercise a privacy right, email [hello@sightlines.art](mailto:hello@sightlines.art). Security reporting details are on the [security page](/security) and at [/.well-known/security.txt](/.well-known/security.txt).
 
-This policy was updated on July 20, 2026.
+This policy was updated on August 11, 2026.

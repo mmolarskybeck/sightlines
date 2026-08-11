@@ -13,9 +13,10 @@ export const DROPBOX_API_URL = "https://api.dropboxapi.com";
 export const DROPBOX_CONTENT_URL = "https://content.dropboxapi.com";
 
 // account_info.read (display name), files.content.write (upload),
-// files.metadata.read (list for retention). files.content.read is not needed.
+// files.metadata.read (list for retention), sharing.write (create a view-only
+// link for a snapshot). files.content.read is not needed.
 export const DROPBOX_SCOPES =
-  "account_info.read files.content.write files.metadata.read";
+  "account_info.read files.content.write files.metadata.read sharing.write";
 
 // Retention: keep this many newest backups per project; older ones are pruned.
 export const CLOUD_BACKUPS_PER_PROJECT = 5;
@@ -52,6 +53,7 @@ export type DropboxAuthRecord = {
   accessToken: string;
   expiresAt: number;
   accountLabel: string | null;
+  scope?: string;
 };
 
 // Base64url without padding, per RFC 7636.
@@ -85,9 +87,10 @@ export function buildAuthorizeUrl(params: {
   redirectUri: string;
   codeChallenge: string;
   state: string;
+  forceReapprove?: boolean;
 }): string {
   const url = new URL(DROPBOX_AUTHORIZE_URL);
-  url.search = new URLSearchParams({
+  const searchParams = new URLSearchParams({
     client_id: params.clientId,
     response_type: "code",
     redirect_uri: params.redirectUri,
@@ -96,7 +99,16 @@ export function buildAuthorizeUrl(params: {
     token_access_type: "offline",
     scope: DROPBOX_SCOPES,
     state: params.state
-  }).toString();
+  });
+  if (params.forceReapprove) {
+    // Dropbox otherwise skips the approval screen for an already-linked app,
+    // which can return the old grant when Sightlines adds a new scope.
+    searchParams.set("force_reapprove", "true");
+    // This parameter is valid only for an existing grant. The caller enables
+    // it only when a local auth record proves this is a reconnect/upgrade.
+    searchParams.set("include_granted_scopes", "user");
+  }
+  url.search = searchParams.toString();
   return url.toString();
 }
 
@@ -229,6 +241,15 @@ export function buildBackupFilename(
   const title = sanitizeDropboxTitle(projectTitle);
   const stamp = filesystemSafeTimestamp(timestampIso);
   return `${title} ${stamp}.sightlines`;
+}
+
+export function buildSharePath(input: {
+  projectId: string;
+  projectTitle: string;
+  timestampIso: string;
+}): string {
+  const folder = projectFolderName(input.projectId, input.projectTitle);
+  return `/shares/${folder}/${buildBackupFilename(input.projectTitle, input.timestampIso)}`;
 }
 
 export function projectFolderPath(projectId: string, projectTitle: string): string {

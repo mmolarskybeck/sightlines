@@ -14,6 +14,7 @@ When Dropbox is connected, Sightlines:
 - builds a complete project package in the browser and uploads it directly to Dropbox;
 - waits for edits to settle before backing up, rather than uploading every keystroke;
 - retains the five most recent backup copies for each project;
+- can create a user-initiated, view-only Dropbox link to a separate project snapshot;
 - shows connection, reauthorization, and last-successful-backup state in the save-status UI;
 - keeps a silent five-copy IndexedDB snapshot history as a separate recovery path for
   corruption or a failed save.
@@ -28,7 +29,15 @@ Dropbox backup does not currently merge simultaneous edits or provide collaborat
 editing. The intended model is versioned file backup with an explicit future decision
 required for conflict handling.
 
-**Current status (2026-07-19):** Dropbox shipped — now in **technical-pilot** stage. Phase 0 spike passed and is now retired (`public/dropbox-spike.html` deleted, its redirect URI removed from the Dropbox app). Callback path `/auth/dropbox/callback` (exact-match redirect URIs registered for `https://app.sightlines.art`, the Vercel mirror, and localhost dev); App Folder access only; scopes `account_info.read`, `files.metadata.read`, `files.content.write` — no chooser/saver/embedder domains or webhooks.
+Share links are snapshot handoffs, not collaboration. Sightlines writes each shared
+snapshot under `/shares` in the user's Dropbox app folder, outside automatic backup
+retention. The recipient follows a Sightlines URL whose fragment contains the Dropbox
+file link, downloads the package through a stateless same-origin relay, and explicitly
+saves a fresh local project copy. The relay does not persist or cache project bytes;
+the normal untrusted-package validation pipeline runs before anything is saved. The
+sender controls availability by deleting the snapshot or shared link in Dropbox.
+
+**Current status (2026-08-11):** Dropbox shipped — now in **technical-pilot** stage. Phase 0 spike passed and is now retired (`public/dropbox-spike.html` deleted, its redirect URI removed from the Dropbox app). Callback path `/auth/dropbox/callback` (exact-match redirect URIs registered for `https://app.sightlines.art`, the Vercel mirror, and localhost dev); App Folder access only; scopes `account_info.read`, `files.metadata.read`, `files.content.write`, `sharing.write` — no chooser/saver/embedder domains or webhooks. Existing connections created before the sharing scope was added must reconnect once before creating a link; the upgrade authorization forces Dropbox to show the approval step instead of silently returning the earlier grant.
 
 OneDrive and Google Drive are candidate follow-on providers, not supported yet.
 Their inclusion in the provider comparison below is planning context, not a promise

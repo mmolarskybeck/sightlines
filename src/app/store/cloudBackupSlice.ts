@@ -58,6 +58,9 @@ export type CloudBackupSliceActions = {
   // and guarantees a manual failure gives feedback even when the reactive error
   // toast would dedupe it.
   runCloudBackupNow: () => Promise<void>;
+  // Upload a frozen Standard package and ask the connected provider for a
+  // view-only file link. This does not affect automatic-backup bookkeeping.
+  createCloudShareLink: () => Promise<{ url: string; warnings: string[] }>;
   // Re-read provider status/account + this project's stored meta into state.
   refreshCloudBackupStatus: () => void;
 };
@@ -302,6 +305,46 @@ export function createCloudBackupSlice(
       // No error and no new timestamp: the upload was rate-limited (expected
       // backpressure). Don't claim success — the scheduler will retry.
       toast.success("Backup queued — Dropbox is busy, it'll finish shortly.");
+    },
+
+    async createCloudShareLink() {
+      const active = provider();
+      const project = get().project;
+      if (!active || !project) {
+        throw new Error("Dropbox is not connected.");
+      }
+      if (active.getStatus() !== "connected") {
+        refreshCloudBackupStatus();
+        throw new Error("Reconnect Dropbox to share this project.");
+      }
+
+      try {
+        const { blob, warnings } = await buildProjectPackage({
+          project,
+          libraryArtworks: get().libraryArtworks,
+          mode: "display",
+          getAsset: (assetId) => deps.assetRepository.getAsset(assetId),
+          getBlob: (key) => deps.assetRepository.getBlob(key)
+        });
+        const url = await active.createShareLink({
+          projectId: project.id,
+          projectTitle: project.title,
+          blob,
+          timestampIso: new Date().toISOString()
+        });
+        set({
+          cloudBackupProviderStatus: active.getStatus(),
+          cloudBackupAccountLabel: active.accountLabel(),
+          cloudBackupError: null
+        });
+        return { url, warnings };
+      } catch (error) {
+        set({
+          cloudBackupProviderStatus: active.getStatus(),
+          cloudBackupAccountLabel: active.accountLabel()
+        });
+        throw error;
+      }
     }
   };
 

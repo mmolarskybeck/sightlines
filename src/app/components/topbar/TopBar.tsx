@@ -16,6 +16,7 @@ import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { MapTrifoldIcon } from "@phosphor-icons/react/dist/csr/MapTrifold";
 import { PackageIcon } from "@phosphor-icons/react/dist/csr/Package";
 import { PresentationIcon } from "@phosphor-icons/react/dist/csr/Presentation";
+import { ShareNetworkIcon } from "@phosphor-icons/react/dist/csr/ShareNetwork";
 import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
 import { UploadSimpleIcon } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import type { Project, Wall } from "../../../domain/project";
@@ -86,7 +87,9 @@ type TopBarProps = {
   runCloudBackupNow: () => Promise<void>;
   connectCloudBackup: () => Promise<void>;
   isExportingPackage: boolean;
+  isSharingProject: boolean;
   handleExportPackage: (mode: PackageExportMode) => Promise<void>;
+  handleShareProject: () => Promise<void>;
   handleExportProjectById: (id: string) => Promise<void>;
   handleExportImage: (format?: "png" | "jpeg") => Promise<void>;
   handleImportFile: (file: File) => Promise<void>;
@@ -121,7 +124,9 @@ export function TopBar({
   runCloudBackupNow,
   connectCloudBackup,
   isExportingPackage,
+  isSharingProject,
   handleExportPackage,
+  handleShareProject,
   handleExportProjectById,
   handleExportImage,
   handleImportFile,
@@ -139,6 +144,7 @@ export function TopBar({
   });
   const cloudConnected =
     cloudBackupConfigured && cloudBackupProviderStatus === "connected";
+  const exportBusy = isExportingPackage || isSharingProject;
   const badgeTooltip = getStatusBadgeTooltip(badgeDisplay, cloudConnected);
   const cloudPopover = getCloudBackupPopoverState({
     configured: cloudBackupConfigured,
@@ -459,12 +465,12 @@ export function TopBar({
                 <Button
                   className="topbar-button"
                   aria-label="Export"
-                  aria-busy={isExportingPackage}
-                  disabled={isExportingPackage}
+                  aria-busy={exportBusy}
+                  disabled={exportBusy}
                   size="default"
                   variant="outline"
                 >
-                  {isExportingPackage ? (
+                  {exportBusy ? (
                     <CircleNotchIcon aria-hidden="true" className="animate-spin" size={18} />
                   ) : (
                     <DownloadSimpleIcon aria-hidden="true" size={18} />
@@ -548,6 +554,34 @@ export function TopBar({
             {cloudMenu ? (
               <>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="dropdown-menu-item-stacked"
+                  disabled={isSharingProject}
+                  onSelect={() => {
+                    if (cloudConnected) void handleShareProject();
+                    else {
+                      runCloudAction(
+                        cloudBackupProviderStatus === "reauthorization-required"
+                          ? "reconnect"
+                          : "setup"
+                      );
+                    }
+                  }}
+                >
+                  {isSharingProject ? (
+                    <CircleNotchIcon aria-hidden="true" className="animate-spin" size={16} />
+                  ) : (
+                    <ShareNetworkIcon aria-hidden="true" size={16} />
+                  )}
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span>{cloudConnected ? "Share project link…" : "Connect Dropbox to share…"}</span>
+                    <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
+                      {cloudConnected
+                        ? "Upload a snapshot and create one link."
+                        : "Shared snapshots stay in your Dropbox."}
+                    </span>
+                  </span>
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   className="dropdown-menu-item-stacked"
                   disabled={cloudMenu.busy}

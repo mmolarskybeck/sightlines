@@ -15,6 +15,7 @@ import {
   buildAuthorizationCodeBody,
   buildAuthorizeUrl,
   buildBackupFilename,
+  buildSharePath,
   buildRefreshBody,
   classifyApiError,
   computeS256Challenge,
@@ -23,6 +24,7 @@ import {
   DROPBOX_CONTENT_URL,
   DROPBOX_PKCE_STATE_KEY,
   DROPBOX_PKCE_VERIFIER_KEY,
+  DROPBOX_SCOPES,
   DROPBOX_SINGLE_UPLOAD_MAX_BYTES,
   DROPBOX_TOKEN_EXPIRY_SKEW_MS,
   DROPBOX_TOKEN_URL,
@@ -68,7 +70,8 @@ function readAuth(): DropboxAuthRecord | null {
       accessToken: typeof record.accessToken === "string" ? record.accessToken : "",
       expiresAt: typeof record.expiresAt === "number" ? record.expiresAt : 0,
       accountLabel:
-        typeof record.accountLabel === "string" ? record.accountLabel : null
+        typeof record.accountLabel === "string" ? record.accountLabel : null,
+      ...(typeof record.scope === "string" ? { scope: record.scope } : {})
     };
   } catch {
     return null;
@@ -107,6 +110,10 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
   }
 
   async startConnect(): Promise<void> {
+    const existingAuth = readAuth();
+    const forceReapprove =
+      this.reauthorizationRequired ||
+      (existingAuth !== null && !existingAuth.scope?.split(/\s+/).includes("sharing.write"));
     const verifier = generateRandomString();
     const state = generateRandomString();
     window.sessionStorage.setItem(DROPBOX_PKCE_VERIFIER_KEY, verifier);
@@ -116,7 +123,8 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
       clientId: this.clientId,
       redirectUri: this.redirectUri,
       codeChallenge,
-      state
+      state,
+      forceReapprove
     });
     // Full-page navigation — this document does not continue past here; boot
     // resumes at redirectUri and finishes in completeConnect().
@@ -171,7 +179,11 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
         refreshToken: body.refresh_token,
         accessToken: body.access_token,
         expiresAt: Date.now() + (body.expires_in ?? 0) * 1000,
-        accountLabel: null
+        accountLabel: null,
+        // A successful authorization-code exchange granted the scopes in the
+        // authorize URL. Dropbox may omit `scope` from the token response, so
+        // persist the requested set as the reliable fallback.
+        scope: body.scope ?? DROPBOX_SCOPES
       });
       // Best-effort display name; a failure here doesn't undo the link.
       await this.fetchAccountLabel().catch(() => {});
@@ -208,13 +220,7 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
       input.projectTitle,
       input.timestampIso
     )}`;
-    const bytes = new Uint8Array(await input.blob.arrayBuffer());
-
-    if (bytes.byteLength <= DROPBOX_SINGLE_UPLOAD_MAX_BYTES) {
-      await this.uploadSingle(token, path, bytes);
-    } else {
-      await this.uploadSession(token, path, bytes);
-    }
+    await this.uploadPackage(token, path, input.blob);
 
     // Retention runs AFTER a confirmed upload and is best-effort: a prune
     // failure must not fail the backup (it retries next cycle).
@@ -223,6 +229,41 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
     } catch (error) {
       console.warn("Cloud backup uploaded; pruning old copies failed", error);
     }
+  }
+
+  async createShareLink(input: UploadBackupInput): Promise<string> {
+    const auth = readAuth();
+    if (!auth) throw new CloudBackupError("reauth", "Dropbox is not connected.");
+    if (!auth.scope?.split(/\s+/).includes("sharing.write")) {
+      this.reauthorizationRequired = true;
+      throw new CloudBackupError(
+        "reauth",
+        "Reconnect Dropbox once to enable project sharing."
+      );
+    }
+
+    const token = await this.accessToken();
+    const requestedPath = buildSharePath(input);
+    const uploadedPath = await this.uploadPackage(token, requestedPath, input.blob);
+    const response = await fetch(
+      `${DROPBOX_API_URL}/2/sharing/create_shared_link_with_settings`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          path: uploadedPath,
+          settings: { requested_visibility: "public" }
+        })
+      }
+    );
+    const body = await ensureOk<{ url?: string }>(response, "create the share link");
+    if (!body.url) {
+      throw new CloudBackupError("transient", "Dropbox returned no share link.");
+    }
+    return body.url;
   }
 
   // --- token lifecycle -----------------------------------------------------
@@ -280,7 +321,8 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
     writeAuth({
       ...auth,
       accessToken: body.access_token,
-      expiresAt: Date.now() + (body.expires_in ?? 0) * 1000
+      expiresAt: Date.now() + (body.expires_in ?? 0) * 1000,
+      ...(body.scope ? { scope: body.scope } : {})
     });
     return body.access_token;
   }
@@ -306,11 +348,22 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
 
   // --- upload paths --------------------------------------------------------
 
+  private async uploadPackage(
+    token: string,
+    path: string,
+    blob: Blob
+  ): Promise<string> {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    return bytes.byteLength <= DROPBOX_SINGLE_UPLOAD_MAX_BYTES
+      ? this.uploadSingle(token, path, bytes)
+      : this.uploadSession(token, path, bytes);
+  }
+
   private async uploadSingle(
     token: string,
     path: string,
     bytes: Uint8Array
-  ): Promise<void> {
+  ): Promise<string> {
     const response = await fetch(`${DROPBOX_CONTENT_URL}/2/files/upload`, {
       method: "POST",
       headers: {
@@ -325,14 +378,15 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
       },
       body: bytes as BodyInit
     });
-    await ensureOk(response, "upload the backup");
+    const body = await ensureOk<{ path_display?: string }>(response, "upload the package");
+    return body.path_display ?? path;
   }
 
   private async uploadSession(
     token: string,
     path: string,
     bytes: Uint8Array
-  ): Promise<void> {
+  ): Promise<string> {
     // start
     const firstChunk = bytes.subarray(0, DROPBOX_UPLOAD_CHUNK_BYTES);
     const startResponse = await fetch(
@@ -395,7 +449,8 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
         body: lastChunk as BodyInit
       }
     );
-    await ensureOk(finishResponse, "finish the upload");
+    const body = await ensureOk<{ path_display?: string }>(finishResponse, "finish the upload");
+    return body.path_display ?? path;
   }
 
   // --- retention -----------------------------------------------------------

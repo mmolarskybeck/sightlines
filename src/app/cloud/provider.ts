@@ -57,4 +57,9 @@ export interface CloudBackupProvider {
   // is classified (transient vs. auth-revocation vs. quota) so the caller can
   // decide whether to surface a reauth prompt or just retry later.
   uploadBackup(input: UploadBackupInput): Promise<void>;
+
+  // Upload a frozen package snapshot and return a provider-hosted, view-only
+  // file link. The caller wraps this provider URL in a Sightlines deep link;
+  // later project edits never mutate an already-shared snapshot.
+  createShareLink(input: UploadBackupInput): Promise<string>;
 }

@@ -38,9 +38,9 @@ lede: "Sightlines is browser-based exhibition-planning software for museums, gal
 
 ## Purpose and network behavior
 
-Sightlines lets exhibition staff draw floor plans to scale, place artworks on wall elevations, and preview layouts in 3D. It is not a file-sharing service, social network, streaming site, advertising network, or download portal, and it hosts no public user content.
+Sightlines lets exhibition staff draw floor plans to scale, place artworks on wall elevations, and preview layouts in 3D. It is not a social network, streaming site, or advertising network, and it hosts no public user content.
 
-The browser downloads static application assets from `app.sightlines.art`. Content Security Policies restrict both Sightlines hostnames to explicit network destinations. There is no Sightlines project-upload endpoint.
+The browser downloads static application assets from `app.sightlines.art`. Content Security Policies restrict both Sightlines hostnames to explicit network destinations. Sightlines has no project-storage endpoint; its share relay streams a user-requested Dropbox snapshot without storing or caching it.
 
 ## Data flows
 
@@ -64,9 +64,9 @@ The browser downloads static application assets from `app.sightlines.art`. Conte
       <td>Aggregate visits, performance, and fixed product milestones. No project content or persistent Sightlines identifier.</td>
     </tr>
     <tr>
-      <th scope="row">Dropbox backup</th>
-      <td>Only when connected by the user</td>
-      <td>Files travel directly between the browser and the user's Dropbox app folder. Sightlines receives no copy.</td>
+      <th scope="row">Dropbox backup and sharing</th>
+      <td>Only when connected or a recipient opens a user-created link</td>
+      <td>Backups travel directly to the user's Dropbox app folder. Shared snapshots stay in Dropbox and pass through a no-store Cloudflare relay only while a recipient retrieves them.</td>
     </tr>
   </tbody>
 </table>

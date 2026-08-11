@@ -279,6 +279,57 @@ describe("DropboxCloudBackupProvider", () => {
     });
   });
 
+  describe("share links", () => {
+    it("requires one reconnect when the stored token predates the sharing scope", async () => {
+      seedAuth({ scope: "account_info.read files.content.write files.metadata.read" });
+      const provider = makeProvider();
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(provider.createShareLink(smallBackupInput())).rejects.toMatchObject({
+        kind: "reauth",
+        message: "Reconnect Dropbox once to enable project sharing."
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(provider.getStatus()).toBe("reauthorization-required");
+    });
+
+    it("uploads a durable snapshot under shares and creates a public file link", async () => {
+      seedAuth({
+        scope: "account_info.read files.content.write files.metadata.read sharing.write"
+      });
+      let uploadedPath = "";
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes("/files/upload")) {
+          const header = (init?.headers as Record<string, string>)["Dropbox-API-Arg"];
+          uploadedPath = JSON.parse(header).path;
+          return jsonResponse(200, { path_display: uploadedPath });
+        }
+        if (url.includes("/sharing/create_shared_link_with_settings")) {
+          return jsonResponse(200, {
+            url: "https://www.dropbox.com/scl/fi/token/project.sightlines?rlkey=test&dl=0"
+          });
+        }
+        return jsonResponse(200, {});
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(makeProvider().createShareLink(smallBackupInput())).resolves.toBe(
+        "https://www.dropbox.com/scl/fi/token/project.sightlines?rlkey=test&dl=0"
+      );
+      expect(uploadedPath).toBe(
+        "/shares/Winter Show — proj-1/Winter Show 2026-07-19T14-30-05-000Z.sightlines"
+      );
+      const shareCall = fetchMock.mock.calls.find(([url]) =>
+        String(url).includes("/sharing/create_shared_link_with_settings")
+      );
+      expect(JSON.parse(String(shareCall?.[1]?.body))).toEqual({
+        path: uploadedPath,
+        settings: { requested_visibility: "public" }
+      });
+    });
+  });
+
   describe("error handling", () => {
     it("surfaces a 429 as a rate-limit CloudBackupError (transient, not hard-fail)", async () => {
       seedAuth();
@@ -359,6 +410,7 @@ describe("DropboxCloudBackupProvider", () => {
       const handled = await makeProvider().completeConnect();
       expect(handled).toBe(true);
       expect(readStoredAuth()?.refreshToken).toBe("new-refresh");
+      expect(readStoredAuth()?.scope).toContain("sharing.write");
       expect(window.location.pathname).toBe("/");
       expect(window.location.search).toBe("");
     });

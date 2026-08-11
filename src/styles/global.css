@@ -929,6 +929,71 @@ input:focus-visible {
   width: min(calc(100vw - 32px), 26.5rem);
 }
 
+/* Dropbox sharing is a compact handoff, not a document-scale workflow. Keep
+   its reading measure calm and give the body its own inset; the shared dialog
+   primitive only pads headers and footers because large wizards own their
+   body layouts independently. */
+.share-project-dialog {
+  width: min(calc(100vw - 32px), 34rem);
+}
+
+.share-project-body {
+  display: grid;
+  gap: var(--space-12);
+  padding: var(--space-16) var(--space-24) var(--space-20);
+}
+
+.share-project-link-field {
+  display: grid;
+  gap: var(--space-6);
+  color: var(--ink);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+}
+
+.share-project-note,
+.share-project-warning {
+  margin: 0;
+  font-size: var(--type-xs);
+  line-height: var(--leading-copy);
+}
+
+.share-project-note {
+  color: var(--muted);
+}
+
+.share-project-warning {
+  color: var(--caution);
+}
+
+.shared-project-status {
+  display: flex;
+  min-height: 44px;
+  align-items: flex-start;
+  gap: var(--space-8);
+  padding: var(--space-12);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--type-sm);
+  line-height: var(--leading-copy);
+}
+
+.shared-project-status svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.shared-project-status[data-status="ready"] {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.shared-project-status[data-status="error"] {
+  background: color-mix(in oklch, var(--destructive) 8%, var(--background));
+  color: var(--destructive);
+}
+
 /* Scroll long project lists within a compact dialog. Keep after the base. */
 .project-manager-dialog {
   width: min(calc(100vw - 32px), 620px);

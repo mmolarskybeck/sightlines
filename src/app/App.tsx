@@ -50,6 +50,10 @@ import { isDegeneratePose, resolveSavedViewRoomLabel } from "../domain/savedView
 import { faceWallId, parseFaceWallId } from "../domain/geometry/freestandingWalls";
 import { getPartitionClearances } from "../domain/geometry/partitionSpacing";
 import type { PackageExportMode } from "../domain/schema/packageSchema";
+import {
+  buildSightlinesDropboxShareUrl,
+  readDropboxShareUrl
+} from "./cloud/dropboxShare";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import {
   displayUnitForSystem,
@@ -241,6 +245,7 @@ export function App() {
   const cloudBackupPending = useAppStore((state) => state.cloudBackupPending);
   const cloudBackupStatus = useAppStore((state) => state.cloudBackupStatus);
   const runCloudBackupNow = useAppStore((state) => state.runCloudBackupNow);
+  const createCloudShareLink = useAppStore((state) => state.createCloudShareLink);
   const connectCloudBackup = useAppStore((state) => state.connectCloudBackup);
   const disconnectCloudBackup = useAppStore((state) => state.disconnectCloudBackup);
   const completeCloudBackupConnect = useAppStore((state) => state.completeCloudBackupConnect);
@@ -294,6 +299,9 @@ export function App() {
   const exportProjectPackage = useAppStore((state) => state.exportProjectPackage);
   const exportProjectPackageById = useAppStore((state) => state.exportProjectPackageById);
   const importSightlinesPackage = useAppStore((state) => state.importSightlinesPackage);
+  const importSharedSightlinesPackage = useAppStore(
+    (state) => state.importSharedSightlinesPackage
+  );
   const resolvePackageImportConflicts = useAppStore((state) => state.resolvePackageImportConflicts);
   const dismissPackageImport = useAppStore((state) => state.dismissPackageImport);
   const listProjectSummaries = useAppStore((state) => state.listProjectSummaries);
@@ -414,6 +422,12 @@ export function App() {
 
   // Prevent re-entry while package assets are hashed and zipped.
   const [isExportingPackage, setIsExportingPackage] = useState(false);
+  const [isSharingProject, setIsSharingProject] = useState(false);
+  const [shareProjectUrl, setShareProjectUrl] = useState<string | null>(null);
+  const [shareProjectWarningCount, setShareProjectWarningCount] = useState(0);
+  const [incomingDropboxShareUrl, setIncomingDropboxShareUrl] = useState<string | null>(() =>
+    readDropboxShareUrl(window.location.href)
+  );
 
   useEffect(() => {
     if (viewMode !== "library" || !project) return;
@@ -1404,6 +1418,28 @@ export function App() {
     }
   };
 
+  const handleShareProject = async () => {
+    if (isSharingProject) return;
+    setIsSharingProject(true);
+    try {
+      const result = await createCloudShareLink();
+      const appRoot = new URL(import.meta.env.BASE_URL || "/", window.location.origin).toString();
+      setShareProjectUrl(buildSightlinesDropboxShareUrl(result.url, appRoot));
+      setShareProjectWarningCount(result.warnings.length);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Could not create the Dropbox share link."
+      );
+    } finally {
+      setIsSharingProject(false);
+    }
+  };
+
+  const leaveIncomingShare = () => {
+    window.history.replaceState(null, "", import.meta.env.BASE_URL || "/");
+    setIncomingDropboxShareUrl(null);
+  };
+
   const handleExportImage = async (format: "png" | "jpeg" = "png") => {
     if (!project) return;
     try {
@@ -1665,7 +1701,9 @@ export function App() {
         runCloudBackupNow={runCloudBackupNow}
         connectCloudBackup={connectCloudBackup}
         isExportingPackage={isExportingPackage}
+        isSharingProject={isSharingProject}
         handleExportPackage={handleExportPackage}
+        handleShareProject={handleShareProject}
         handleExportProjectById={handleExportProjectById}
         handleExportImage={handleExportImage}
         handleImportFile={handleImportFile}
@@ -2681,6 +2719,12 @@ export function App() {
         runCloudBackupNow={runCloudBackupNow}
         resetPreferences={resetPreferences}
         handleExportPackage={handleExportPackage}
+        shareProjectUrl={shareProjectUrl}
+        shareProjectWarningCount={shareProjectWarningCount}
+        onCloseShareProject={() => setShareProjectUrl(null)}
+        incomingDropboxShareUrl={incomingDropboxShareUrl}
+        importSharedSightlinesPackage={importSharedSightlinesPackage}
+        onLeaveIncomingShare={leaveIncomingShare}
         fileInputRef={fileInputRef}
         isExportPdfOpen={isExportPdfOpen}
         handleExportPdfOpenChange={handleExportPdfOpenChange}

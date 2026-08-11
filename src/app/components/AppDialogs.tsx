@@ -11,6 +11,8 @@ import { ArtworkLibraryPicker } from "./library/ArtworkLibrary";
 import { DeleteRoomDialog } from "./dialogs/DeleteRoomDialog";
 import { OpenWallDialog } from "./dialogs/OpenWallDialog";
 import { RecoveryDialog } from "./dialogs/RecoveryDialog";
+import { ShareProjectDialog } from "./dialogs/ShareProjectDialog";
+import { SharedProjectImportDialog } from "./dialogs/SharedProjectImportDialog";
 import { HelpDialog } from "./dialogs/HelpDialog";
 import { ImportConflictDialog } from "./imports/ImportConflictDialog";
 import type { SavedViewRenderHandle } from "./three/SavedViewRenderHost";
@@ -70,6 +72,12 @@ type AppDialogsProps = {
   runCloudBackupNow: AppState["runCloudBackupNow"];
   resetPreferences: () => void;
   handleExportPackage: (mode: PackageExportMode) => Promise<void>;
+  shareProjectUrl: string | null;
+  shareProjectWarningCount: number;
+  onCloseShareProject: () => void;
+  incomingDropboxShareUrl: string | null;
+  importSharedSightlinesPackage: AppState["importSharedSightlinesPackage"];
+  onLeaveIncomingShare: () => void;
   fileInputRef: RefObject<HTMLInputElement>;
   isExportPdfOpen: boolean;
   handleExportPdfOpenChange: (open: boolean) => void;
@@ -131,6 +139,12 @@ export function AppDialogs({
   runCloudBackupNow,
   resetPreferences,
   handleExportPackage,
+  shareProjectUrl,
+  shareProjectWarningCount,
+  onCloseShareProject,
+  incomingDropboxShareUrl,
+  importSharedSightlinesPackage,
+  onLeaveIncomingShare,
   fileInputRef,
   isExportPdfOpen,
   handleExportPdfOpenChange,
@@ -265,6 +279,16 @@ export function AppDialogs({
         conflicts={pendingPackageImport?.conflicts ?? null}
         onResolve={(resolutions) => void resolvePackageImportConflicts(resolutions)}
         onDismiss={dismissPackageImport}
+      />
+      <ShareProjectDialog
+        url={shareProjectUrl}
+        warningCount={shareProjectWarningCount}
+        onClose={onCloseShareProject}
+      />
+      <SharedProjectImportDialog
+        dropboxUrl={incomingDropboxShareUrl}
+        onImport={importSharedSightlinesPackage}
+        onLeave={onLeaveIncomingShare}
       />
       <RecoveryDialog
         offer={recoveryOffer}

@@ -3,6 +3,7 @@ import {
   base64UrlEncode,
   buildAuthorizeUrl,
   buildBackupPath,
+  buildSharePath,
   buildRefreshBody,
   classifyApiError,
   computeS256Challenge,
@@ -69,6 +70,25 @@ describe("dropbox PKCE helpers", () => {
     expect(params.get("token_access_type")).toBe("offline");
     expect(params.get("state")).toBe("STATE");
     expect(params.get("scope")).toContain("files.content.write");
+    expect(params.get("scope")).toContain("sharing.write");
+    expect(params.get("force_reapprove")).toBeNull();
+    expect(params.get("include_granted_scopes")).toBeNull();
+  });
+
+  it("forces a real approval step when upgrading an existing Dropbox grant", () => {
+    const url = new URL(
+      buildAuthorizeUrl({
+        clientId: "abc123",
+        redirectUri: "https://app.sightlines.art/",
+        codeChallenge: "CHALLENGE",
+        state: "STATE",
+        forceReapprove: true
+      })
+    );
+
+    expect(url.searchParams.get("force_reapprove")).toBe("true");
+    expect(url.searchParams.get("include_granted_scopes")).toBe("user");
+    expect(url.searchParams.get("scope")).toContain("sharing.write");
   });
 
   it("builds a refresh body with client_id only (no secret)", () => {
@@ -147,6 +167,18 @@ describe("dropbox path construction", () => {
     });
     expect(a.startsWith("/backups/Old Name — same-id/")).toBe(true);
     expect(b.startsWith("/backups/New Name — same-id/")).toBe(true);
+  });
+
+  it("keeps share snapshots outside automatic backup retention", () => {
+    expect(
+      buildSharePath({
+        projectId: "proj-abc-123",
+        projectTitle: "Winter Show",
+        timestampIso: "2026-07-19T14:30:05.000Z"
+      })
+    ).toBe(
+      "/shares/Winter Show — proj-abc/Winter Show 2026-07-19T14-30-05-000Z.sightlines"
+    );
   });
 });
 

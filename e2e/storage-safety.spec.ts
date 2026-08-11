@@ -1,5 +1,6 @@
 import { test, expect, gotoApp } from "./fixtures";
 import type { Page } from "playwright/test";
+import { strToU8, zipSync } from "fflate";
 
 // End-to-end coverage for the storage-safety slice: Dropbox cloud backup
 // (happy path + reauth), silent snapshot corruption recovery, and the
@@ -53,7 +54,8 @@ async function seedDropboxAuth(
         refreshToken: "seed-refresh-token",
         accessToken: "seed-access-token",
         expiresAt,
-        accountLabel
+        accountLabel,
+        scope: "account_info.read files.content.write files.metadata.read sharing.write"
       }
     }
   );
@@ -94,21 +96,33 @@ async function installDropboxRoutes(
         body: JSON.stringify({ name: { display_name: "Test Curator" } })
       });
     }
+    if (url.includes("/2/sharing/create_shared_link_with_settings")) {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          url: "https://www.dropbox.com/scl/fi/mock/shared-project.sightlines?rlkey=test&dl=0"
+        })
+      });
+    }
     return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
   });
 
-  await page.route("https://content.dropboxapi.com/**", async (route) =>
-    route.fulfill({
+  await page.route("https://content.dropboxapi.com/**", async (route) => {
+    const apiArg = route.request().headers()["dropbox-api-arg"];
+    const path = apiArg ? JSON.parse(apiArg).path : "/backups/mock";
+    return route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
         name: "backup.sightlines",
         id: "id:mock-upload",
-        path_lower: "/backups/mock",
+        path_lower: String(path).toLowerCase(),
+        path_display: path,
         server_modified: new Date().toISOString()
       })
-    })
-  );
+    });
+  });
 }
 
 // The scheduler's periodic gate is a 15s interval, but its visibilitychange →
@@ -138,6 +152,28 @@ function openStoragePopover(page: Page) {
 }
 
 test.describe("cloud backup", () => {
+  test("runs the shared-package relay during local development", async ({
+    page,
+    consoleGuard
+  }) => {
+    consoleGuard.allow(/Failed to load resource.*400/);
+    await gotoApp(page);
+
+    const status = await page.evaluate(async () => {
+      const response = await fetch("/api/dropbox-share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: "https://evil.example/project.sightlines" })
+      });
+      return response.status;
+    });
+
+    // The production Worker handler rejects the host. A Vite fallthrough would
+    // return its generic 404 instead, which caused local shared links to look
+    // as though Dropbox had deleted them.
+    expect(status).toBe(400);
+  });
+
   test("separates automatic local save from optional Dropbox backup", async ({ page }) => {
     await gotoApp(page);
     await openStoragePopover(page);
@@ -263,6 +299,99 @@ test.describe("cloud backup", () => {
     const item = page.getByRole("menuitem", { name: /Back up to Dropbox/ });
     await expect(item).toBeVisible();
     await expect(item).toContainText("Last backed up");
+  });
+
+  test("creates a one-link Dropbox snapshot from the Export menu", async ({ page }) => {
+    await installDropboxRoutes(page);
+    await seedDropboxAuth(page);
+    await gotoApp(page);
+
+    const uploadRequest = page.waitForRequest((request) =>
+      request.url().includes("content.dropboxapi.com/2/files/upload")
+    );
+    const linkRequest = page.waitForRequest((request) =>
+      request.url().includes("api.dropboxapi.com/2/sharing/create_shared_link_with_settings")
+    );
+    await page.getByRole("button", { name: "Export", exact: true }).click();
+    await page.getByRole("menuitem", { name: /Share project link/ }).click();
+    await uploadRequest;
+    await linkRequest;
+
+    const dialog = page.getByRole("dialog", { name: "Share this project snapshot" });
+    await expect(dialog).toBeVisible();
+    const dialogBox = await dialog.boundingBox();
+    expect(dialogBox?.width).toBeLessThanOrEqual(550);
+    const bodyPadding = await dialog.locator(".share-project-body").evaluate((element) => {
+      const styles = getComputedStyle(element);
+      return { left: parseFloat(styles.paddingLeft), right: parseFloat(styles.paddingRight) };
+    });
+    expect(bodyPadding.left).toBeGreaterThanOrEqual(20);
+    expect(bodyPadding.right).toBeGreaterThanOrEqual(20);
+    const sharedUrl = await dialog.getByRole("textbox", { name: "Share link" }).inputValue();
+    const parsed = new URL(sharedUrl);
+    expect(parsed.pathname).toBe("/share");
+    expect(parsed.search).toBe("");
+    expect(parsed.hash).toContain("provider=dropbox");
+    expect(parsed.hash).toContain("www.dropbox.com");
+    await expect(dialog).toContainText("Later changes will not sync");
+  });
+
+  test("opens a shared link as a fresh editable local copy", async ({ page }) => {
+    const senderProject = validProject("sender-project-id", "Shared Exhibition");
+    const bytes = zipSync({
+      "manifest.json": strToU8(
+        JSON.stringify({
+          schemaVersion: 1,
+          exportedAt: new Date().toISOString(),
+          mode: "metadata-only",
+          project: senderProject,
+          artworks: [],
+          assets: []
+        })
+      )
+    });
+    await page.route("**/api/dropbox-share", async (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/octet-stream",
+        body: Buffer.from(bytes)
+      })
+    );
+    const dropboxUrl =
+      "https://www.dropbox.com/scl/fi/mock/shared-project.sightlines?rlkey=test&dl=0";
+    const fragment = new URLSearchParams({ provider: "dropbox", url: dropboxUrl });
+
+    await page.goto(`/share#${fragment.toString()}`);
+    await expect(page.locator(".app-main")).toBeVisible();
+    const dialog = page.getByRole("dialog", { name: "A project was shared with you" });
+    await expect(dialog).toContainText("The project is ready to save.");
+    const dialogBox = await dialog.boundingBox();
+    expect(dialogBox?.width).toBeLessThanOrEqual(550);
+    await expect(dialog.locator(".shared-project-status")).toHaveAttribute(
+      "data-status",
+      "ready"
+    );
+    await dialog.getByRole("button", { name: "Save a copy and open" }).click();
+
+    await expect(page.getByRole("textbox", { name: "Project title" }).first()).toHaveValue(
+      "Shared Exhibition (copy)"
+    );
+    const storedProjects = await page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("sightlines", 4);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      return new Promise<Array<{ id: string; title: string }>>((resolve, reject) => {
+        const request = db.transaction("projects", "readonly").objectStore("projects").getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    });
+    expect(storedProjects).toContainEqual(
+      expect.objectContaining({ title: "Shared Exhibition (copy)" })
+    );
+    expect(storedProjects.some((project) => project.id === "sender-project-id")).toBe(false);
   });
 });
 

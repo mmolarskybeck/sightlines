@@ -378,6 +378,17 @@ describe("planPackageImport — §6 merge rules", () => {
     expect(plan.project.updatedAt).not.toBe(manifest.project.updatedAt);
   });
 
+  it("always gives a shared snapshot a fresh independent identity", () => {
+    const manifest = makeManifest();
+    const plan = planPackageImport(manifest, noAssets(), emptyExisting(), {
+      forceProjectCopy: true
+    });
+
+    expect(plan.projectRenamed).toBe(true);
+    expect(plan.project.id).not.toBe(manifest.project.id);
+    expect(plan.project.title).toBe(`${manifest.project.title} (copy)`);
+  });
+
   it("stamps a non-colliding imported project with the import time", () => {
     const manifest = makeManifest();
     manifest.project.updatedAt = "2020-01-01T00:00:00.000Z";
