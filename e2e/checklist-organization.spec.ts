@@ -8,13 +8,20 @@ import {
 } from "../src/domain/repositories/database";
 import { expect, gotoApp, hideFontLab, test } from "./fixtures";
 
+// Public-domain records mirrored from fixtures/artworks/rijks-aic/metadata.json.
 const artworks: Artwork[] = [
-  makeArtwork("boyun-landscape", "Landscape Study", "Boyun Jang", {
-    subject: "urban landscape"
-  }),
-  makeArtwork("boyun-interior", "Interior Study", "Boyun Jang"),
-  makeArtwork("alma-wind", "Wind Study", "Alma Thomas"),
-  makeArtwork("unknown", "Untitled Study")
+  makeArtwork("the-milkmaid", "The Milkmaid", "Johannes Vermeer"),
+  makeArtwork(
+    "the-little-street",
+    "View of Houses in Delft, Known as ‘The Little Street’",
+    "Johannes Vermeer"
+  ),
+  makeArtwork(
+    "the-night-watch",
+    "The Night Watch Militia Company of District II under the Command of Captain Frans Banninck Cocq",
+    "Rembrandt van Rijn"
+  ),
+  makeArtwork("unattributed-fixture", "Unattributed Fixture Work")
 ];
 
 const project: Project = {
@@ -41,42 +48,42 @@ test("temporarily searches and collapses artist groups in the checklist", async 
   await options.click();
   await page.getByRole("menuitemcheckbox", { name: "Group by artist" }).click();
 
-  const alma = page.getByRole("button", { name: "Alma Thomas, 1 work" });
-  const boyun = page.getByRole("button", { name: "Boyun Jang, 2 works" });
-  await expect(alma).toHaveAttribute("aria-expanded", "true");
-  await expect(boyun).toHaveAttribute("aria-expanded", "true");
+  const rembrandt = page.getByRole("button", { name: "Rembrandt van Rijn, 1 work" });
+  const vermeer = page.getByRole("button", { name: "Johannes Vermeer, 2 works" });
+  await expect(rembrandt).toHaveAttribute("aria-expanded", "true");
+  await expect(vermeer).toHaveAttribute("aria-expanded", "true");
 
-  await boyun.click();
-  await expect(boyun).toHaveAttribute("aria-expanded", "false");
-  await expect(page.getByText("Landscape Study")).toHaveCount(0);
-  await expect(page.getByText("Wind Study")).toBeVisible();
+  await vermeer.click();
+  await expect(vermeer).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByText("View of Houses in Delft, Known as ‘The Little Street’")).toHaveCount(0);
+  await expect(page.getByText("The Night Watch Militia Company of District II under the Command of Captain Frans Banninck Cocq")).toBeVisible();
 
   await page.getByRole("button", { name: "Search checklist" }).click();
   const search = page.getByRole("searchbox", { name: "Search checklist" });
-  await search.fill("landscape");
+  await search.fill("street");
   await expect(page.getByText("1 of 4 works")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Boyun Jang, 1 work" })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: "Johannes Vermeer, 1 work" })).toHaveAttribute(
     "aria-expanded",
     "true"
   );
-  await expect(page.getByText("Landscape Study")).toBeVisible();
+  await expect(page.getByText("View of Houses in Delft, Known as ‘The Little Street’")).toBeVisible();
 
   // The field's one trailing control clears first and only closes an already
   // empty field, so the restored disclosure state is observable while the
   // search row is still open.
   await page.getByRole("button", { name: "Clear search" }).click();
-  await expect(boyun).toHaveAttribute("aria-expanded", "false");
+  await expect(vermeer).toHaveAttribute("aria-expanded", "false");
   await page.getByRole("button", { name: "Close search" }).first().click();
   await expect(search).toHaveCount(0);
 
   await options.click();
   await page.getByRole("menuitem", { name: "Expand all artists" }).click();
-  await expect(boyun).toHaveAttribute("aria-expanded", "true");
+  await expect(vermeer).toHaveAttribute("aria-expanded", "true");
 
   await options.click();
   await page.getByRole("menuitem", { name: "Collapse all artists" }).click();
-  await expect(alma).toHaveAttribute("aria-expanded", "false");
-  await expect(boyun).toHaveAttribute("aria-expanded", "false");
+  await expect(rembrandt).toHaveAttribute("aria-expanded", "false");
+  await expect(vermeer).toHaveAttribute("aria-expanded", "false");
   await expect(page.locator(".checklist-panel")).toHaveJSProperty("scrollLeft", 0);
   expect(
     await page.locator(".checklist-panel").evaluate((panel) => panel.scrollWidth <= panel.clientWidth)
