@@ -2,7 +2,6 @@ import { useRef, type PointerEvent as ReactPointerEvent } from "react";
 import type { Vector2 } from "../../domain/geometry/dragResize";
 import {
   getWallObjectPlanRect,
-  WALL_OBJECT_PLAN_DEPTH_MM,
   type FloorWall,
   type PlanRect
 } from "../../domain/geometry/planObjects";
@@ -21,7 +20,8 @@ import {
   resolvePlanGroupReanchorWall,
   type PlanGroupMember
 } from "../../domain/snapping/planGroupMove";
-import type { Project, WallObject, WallObjectBase } from "../../domain/project";
+import type { Artwork, Project, WallObject, WallObjectBase } from "../../domain/project";
+import { effectiveWallObjectPlanDepthMm } from "../../domain/placement/artworkForm";
 import { useDragGesture } from "./useDragGesture";
 import type { ObjectDragState } from "../components/plan/types";
 
@@ -43,6 +43,10 @@ import type { ObjectDragState } from "../components/plan/types";
 export type PlanObjectMoveDeps = {
   toSvgMm: (clientX: number, clientY: number) => Vector2 | null;
   project: Project;
+  // Library records for the placed works, for the one thing this controller
+  // needs off them: a deep work's real off-wall protrusion (the depth lives on
+  // the record, not the placement — effectiveWallObjectPlanDepthMm).
+  artworksById?: ReadonlyMap<string, Artwork>;
   floorWallsForTool: FloorWall[];
   snappingWallObjects: WallObjectBase[];
   floorObjectRoomIds: ReadonlyMap<string, string | null>;
@@ -64,6 +68,7 @@ type BeginObjectDragParams = {
   startCenterMm: Vector2;
   movingSize: { widthMm: number; heightMm: number; depthMm: number };
   wallFootprintWidthMm?: number;
+  wallFootprintDepthMm?: number;
   rotationDeg: number;
   currentPlacement: PlanPlacement;
   initialPlanRect: PlanRect;
@@ -184,6 +189,7 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
         wallObjects: snappingWallObjects.filter((object) => object.id !== current.objectId),
         movingSize: current.movingSize,
         wallFootprintWidthMm: current.wallFootprintWidthMm,
+        wallFootprintDepthMm: current.wallFootprintDepthMm,
         movingKind: current.kind,
         floatPolicy: current.floatPolicy,
         // Keep wall-capture hysteresis across pointer moves.
@@ -300,7 +306,8 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
     params: BeginObjectDragParams,
     event: ReactPointerEvent<SVGGElement>
   ) {
-    const { toSvgMm, selectedObjectIds, floorWallsForTool, project } = getDepsRef.current();
+    const { toSvgMm, selectedObjectIds, floorWallsForTool, project, artworksById } =
+      getDepsRef.current();
     const startPointerMm = toSvgMm(event.clientX, event.clientY);
     if (!startPointerMm) return;
 
@@ -315,7 +322,14 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
         if (!selectedObjectIds.includes(object.id)) continue;
         const wall = wallsById.get(object.wallId);
         if (!wall) continue;
-        const rest = getWallObjectPlanRect(wall, object);
+        // The member's real plan protrusion, not the nominal band: a case (or a
+        // deep work) dragged as part of a multi-selection used to flatten to the
+        // thin through-wall strip for the whole gesture and pop back on release.
+        const depthMm = effectiveWallObjectPlanDepthMm(
+          object,
+          object.kind === "artwork" ? artworksById?.get(object.artworkId) : undefined
+        );
+        const rest = getWallObjectPlanRect(wall, object, depthMm);
         members.push({
           id: object.id,
           anchor: "wall",
@@ -323,7 +337,7 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
           wall,
           worldCenterMm: { xMm: rest.centerXMm, yMm: rest.centerYMm },
           widthMm: object.widthMm,
-          depthMm: WALL_OBJECT_PLAN_DEPTH_MM
+          depthMm
         });
       }
       for (const object of project.floorObjects) {
@@ -352,6 +366,7 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
           floatPolicy: floatPolicyForMovingObject(params.kind, params.objectId),
           movingSize: params.movingSize,
           wallFootprintWidthMm: params.wallFootprintWidthMm,
+          wallFootprintDepthMm: params.wallFootprintDepthMm,
           rotationDeg: params.rotationDeg,
           startPointerMm,
           startCenterMm: params.startCenterMm,
@@ -379,6 +394,7 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
       floatPolicy: floatPolicyForMovingObject(params.kind, params.objectId),
       movingSize: params.movingSize,
       wallFootprintWidthMm: params.wallFootprintWidthMm,
+      wallFootprintDepthMm: params.wallFootprintDepthMm,
       rotationDeg: params.rotationDeg,
       startPointerMm,
       startCenterMm: params.startCenterMm,

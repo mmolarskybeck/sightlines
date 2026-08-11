@@ -84,6 +84,11 @@ export type ObjectDragState = {
   movingSize: { widthMm: number; heightMm: number; depthMm: number };
   // Outer wall-rendered width for framed artwork; floor previews keep movingSize.
   wallFootprintWidthMm?: number;
+  // Off-wall protrusion for the wall-anchored preview (a case's box, a deep
+  // work's body). Absent → the nominal plan band. NOT movingSize.depthMm, which
+  // is the floor footprint this object would take on if the drag leaves the wall
+  // — see the field's note on resolvePlanPlacement.
+  wallFootprintDepthMm?: number;
   // The rotation to preview a floated result at: the wall's floor-space angle
   // for a wall object (so a wall→floor preview keeps its orientation, matching
   // commitPlanMove), or the floor object's own rotation.

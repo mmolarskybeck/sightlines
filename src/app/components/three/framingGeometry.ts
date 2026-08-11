@@ -26,6 +26,30 @@ export const MAT_RECESS_MM = 8;
 // z-fight (and, when framed but matless, proud of the recessed image seat).
 export const IMAGE_PROUD_MM = 1;
 
+// The work's own physical volume, for a WALL-placed work whose recorded depth
+// makes it a solid object rather than a plane (a deep canvas on a stretcher, a
+// shadow box, a relief). Present only when the work is genuinely deep — a flat
+// work's layout has no `body` key at all, and every z below is then exactly the
+// number it has always been.
+//
+// width/height are the WORK's own box, i.e. the stored placement rect — NOT the
+// framed outer footprint. A frame/mat is mounted ON the front face and may
+// legitimately overhang the body's edges, which is what a real frame on a deep
+// stretcher does.
+export type FramingBody = {
+  widthMm: number;
+  heightMm: number;
+  depthMm: number;
+  // The box's own z span, wall surface = 0, +z into the room. The back face sits
+  // one WALL_OFFSET_MM standoff off the wall rather than flush on it — the same
+  // fix WallCaseMesh applies to its own box, and for the same reason: a back
+  // face at z = 0 is coplanar with the wall panel AND with the coincident twin
+  // panel a shared wall carries on its other side, and the two fight for the
+  // depth buffer.
+  backZMm: number;
+  frontZMm: number;
+};
+
 export type FramingLayout = {
   hasMat: boolean;
   hasFrame: boolean;
@@ -49,18 +73,55 @@ export type FramingLayout = {
   // Depth to seat the outline at: the frame's front face when framed (so it
   // isn't buried inside the ring), else the image plane's depth.
   outlineZMm: number;
+  // The work's own volume, absent for a flat work (see FramingBody). Every z
+  // above is measured from `body.frontZMm` instead of from the wall when this is
+  // present, so the frame/mat/image stack rides the FRONT of the box exactly as
+  // it rides the wall when there is no box.
+  body?: FramingBody;
 };
 
 // Bands: image + mat (inside) + frame (outside), each added twice per axis.
 // Missing/zero mat or frame contributes nothing, so a plain work returns its
 // image rect unchanged and the plain-work depth baseline — this is exactly
 // what legacy (no mat/frame fields) records get.
+//
+// bodyDepthMm is the work's own protrusion off the wall (effectiveWallArtwork-
+// DepthMm — absent/0 for the flat works that are the overwhelming majority).
+// When it is present the WHOLE stack slides forward to sit on the box's front
+// face: the body becomes the surface everything is measured from, in place of
+// the wall. That is one shift applied to every z rather than per-layer special
+// cases, so a deep work's framing keeps exactly the internal spacing (reveal,
+// mat recess, image proud) a flat work has — only its distance from the wall
+// changes. Absent, every z is arithmetically untouched, which is what makes a
+// flat work bit-for-bit identical to before deep works existed.
 export function framingLayout(
   imageWidthMm: number,
   imageHeightMm: number,
   matWidthMm: number | undefined,
-  frame: ArtworkFrame | undefined
+  frame: ArtworkFrame | undefined,
+  bodyDepthMm?: number
 ): FramingLayout {
+  const body: FramingBody | undefined =
+    bodyDepthMm !== undefined && bodyDepthMm > 0
+      ? {
+          widthMm: imageWidthMm,
+          heightMm: imageHeightMm,
+          depthMm: bodyDepthMm,
+          backZMm: WALL_OFFSET_MM,
+          frontZMm: WALL_OFFSET_MM + bodyDepthMm
+        }
+      : undefined;
+  // The datum every layer below measures from: the box's front face, or the
+  // wall itself when the work is flat.
+  const surfaceZMm = body ? body.frontZMm : 0;
+  // Frameless standoff from that datum. A flat work hangs WALL_OFFSET_MM off
+  // the wall (a plane this module does not draw, so it needs both the visual
+  // standoff and the z-fight clearance); a DEEP work's image/mat is mounted ON
+  // the body's own front face and seats there the way the image seats on a mat
+  // — reusing the wall standoff here would float the picture 20mm in front of
+  // its own box, a visible air gap edge-on.
+  const surfaceStandoffMm = body ? IMAGE_PROUD_MM : WALL_OFFSET_MM;
+
   const matBandMm = matWidthMm && matWidthMm > 0 ? matWidthMm : 0;
   const frameBandMm = frame && frame.widthMm > 0 ? frame.widthMm : 0;
   const hasMat = matBandMm > 0;
@@ -71,16 +132,17 @@ export function framingLayout(
   const outerWidthMm = openingWidthMm + frameBandMm * 2;
   const outerHeightMm = openingHeightMm + frameBandMm * 2;
 
-  // Frame ring: back at the wall, front FRAME_DEPTH_MM proud, centered halfway.
-  const frameFrontZMm = hasFrame ? FRAME_DEPTH_MM : undefined;
-  const frameCenterZMm = hasFrame ? FRAME_DEPTH_MM / 2 : undefined;
+  // Frame ring: back on the surface (wall, or the body's front face), front
+  // FRAME_DEPTH_MM proud of it, centered halfway.
+  const frameFrontZMm = hasFrame ? surfaceZMm + FRAME_DEPTH_MM : undefined;
+  const frameCenterZMm = hasFrame ? surfaceZMm + FRAME_DEPTH_MM / 2 : undefined;
 
   // Mat plane: recessed a step behind the frame front when framed; the plain
   // off-wall baseline when matted but frameless.
   const matZMm = hasMat
     ? hasFrame
-      ? FRAME_DEPTH_MM - MAT_RECESS_MM
-      : WALL_OFFSET_MM
+      ? surfaceZMm + FRAME_DEPTH_MM - MAT_RECESS_MM
+      : surfaceZMm + surfaceStandoffMm
     : undefined;
 
   // Image plane: proud of the mat when matted; seated in the frame's reveal
@@ -88,12 +150,12 @@ export function framingLayout(
   const imageZMm = hasMat
     ? (matZMm as number) + IMAGE_PROUD_MM
     : hasFrame
-      ? FRAME_DEPTH_MM - MAT_RECESS_MM + IMAGE_PROUD_MM
-      : WALL_OFFSET_MM;
+      ? surfaceZMm + FRAME_DEPTH_MM - MAT_RECESS_MM + IMAGE_PROUD_MM
+      : surfaceZMm + surfaceStandoffMm;
 
   // Outline at the frame front when framed so it stays visible; else it rides
   // just at the image plane's depth (the caller adds its small proud offset).
-  const outlineZMm = hasFrame ? FRAME_DEPTH_MM : imageZMm;
+  const outlineZMm = hasFrame ? surfaceZMm + FRAME_DEPTH_MM : imageZMm;
 
   return {
     hasMat,
@@ -109,6 +171,9 @@ export function framingLayout(
     frameFrontZMm,
     matZMm,
     imageZMm,
-    outlineZMm
+    outlineZMm,
+    // Spread, not `body: undefined`: a flat work's layout must carry no `body`
+    // key at all, so "is this deep?" is one presence test everywhere.
+    ...(body ? { body } : {})
   };
 }

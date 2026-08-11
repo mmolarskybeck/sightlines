@@ -90,6 +90,25 @@ describe("resolvePlanGroupMemberMove", () => {
     expect(rect.centerYMm).toBeCloseTo(0);
   });
 
+  it("previews a wall member at its OWN depth, so a case/deep work keeps its protrusion", () => {
+    // The builders (PlanView's nudge, beginObjectDrag's group path) resolve
+    // this per member via effectiveWallObjectPlanDepthMm; both used to hard-code
+    // the nominal band, which flattened a vitrine for the whole gesture.
+    const member: PlanGroupMember = {
+      id: "wall-case",
+      anchor: "wall",
+      kind: "case",
+      wall: HORIZONTAL_WALL,
+      worldCenterMm: { xMm: 1000, yMm: 0 },
+      widthMm: 300,
+      depthMm: 450
+    };
+
+    const { rect } = resolvePlanGroupMemberMove(member, { xMm: 200, yMm: 0 });
+
+    expect(rect.depthMm).toBe(450);
+  });
+
   it("clamps a wall member's along-wall x to the wall extent", () => {
     const member: PlanGroupMember = {
       id: "wall-1-obj",

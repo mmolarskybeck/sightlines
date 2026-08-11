@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   Artwork,
   ArtworkFloorObject,
+  ArtworkWallObject,
   FloorObject,
   Project,
   Room,
@@ -515,6 +516,76 @@ describe("deriveScene3d — wall artworks (M2)", () => {
     expect(placed.objectId).toBe("obj-1");
     expect(placed.assetId).toBeUndefined();
     expect(placed.status).toBeUndefined();
+  });
+
+  // Deep wall artwork: a work with a real recorded depth protrudes from the
+  // wall face like a wall case does. A flat work must stay byte-identical.
+  function deepArtworkScene(
+    artwork: Artwork | undefined,
+    objectOverrides: Partial<ArtworkWallObject> = {}
+  ) {
+    const object: ArtworkWallObject = {
+      id: "obj-1",
+      kind: "artwork",
+      artworkId: "art-1",
+      wallId: "room-a-wall-0",
+      xMm: 1500,
+      yMm: 1450,
+      widthMm: 600,
+      heightMm: 800,
+      ...objectOverrides
+    };
+    const scene = deriveScene3d(
+      makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))], {
+        wallObjects: [object]
+      }),
+      artwork ? new Map([[artwork.id, artwork]]) : undefined
+    );
+    return scene.rooms[0].walls.find((w) => w.wallId === "room-a-wall-0")!.artworks[0];
+  }
+
+  it("emits the artwork's recorded depth as a protrusion", () => {
+    const placed = deepArtworkScene(
+      makeArtwork("art-1", {
+        dimensions: { status: "known", widthMm: 600, heightMm: 800, depthMm: 150 },
+        placementForm: "wall"
+      })
+    );
+    expect(placed.depthMm).toBe(150);
+  });
+
+  it("emits NO depthMm key for a flat work (absence is the encoding, not 0)", () => {
+    const placed = deepArtworkScene(
+      makeArtwork("art-1", { dimensions: { status: "known", widthMm: 600, heightMm: 800 } })
+    );
+    expect("depthMm" in placed).toBe(false);
+    // …and a zero/negative depth reads as flat too, never a degenerate body.
+    const zero = deepArtworkScene(
+      makeArtwork("art-1", {
+        dimensions: { status: "known", widthMm: 600, heightMm: 800, depthMm: 0 }
+      })
+    );
+    expect("depthMm" in zero).toBe(false);
+    // A missing record can't be deep either.
+    expect("depthMm" in deepArtworkScene(undefined)).toBe(false);
+  });
+
+  it("lets the placement's displayDimensionsOverride depth win over the record", () => {
+    const placed = deepArtworkScene(
+      makeArtwork("art-1", {
+        dimensions: { status: "known", widthMm: 600, heightMm: 800, depthMm: 150 },
+        placementForm: "wall"
+      }),
+      {
+        displayDimensionsOverride: {
+          status: "known",
+          widthMm: 600,
+          heightMm: 800,
+          depthMm: 320
+        }
+      }
+    );
+    expect(placed.depthMm).toBe(320);
   });
 
   it("derives wall blocked zones as wall-local extents", () => {

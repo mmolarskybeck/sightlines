@@ -24,6 +24,10 @@ import {
   WallTextTooltipContent
 } from "../shared/PlacementTooltip";
 import { WALL_TEXT_DEFAULT_NAME } from "../../../domain/placement/createWallText";
+import {
+  effectiveWallArtworkDepthMm,
+  effectiveWallObjectPlanDepthMm
+} from "../../../domain/placement/artworkForm";
 import type { ObjectDragState } from "./types";
 
 // Render-only placed-objects layer: the advisory opening-connection glyphs, the
@@ -40,6 +44,7 @@ type BeginObjectDragParams = {
   startCenterMm: Vector2;
   movingSize: { widthMm: number; heightMm: number; depthMm: number };
   wallFootprintWidthMm?: number;
+  wallFootprintDepthMm?: number;
   rotationDeg: number;
   currentPlacement: PlanPlacement;
   initialPlanRect: PlanRect;
@@ -260,17 +265,26 @@ export function PlacedObjectsLayer({
                   movingSize: {
                     widthMm: wallObject.widthMm,
                     heightMm: wallObject.heightMm,
-                    // A case's depth is its real wall protrusion — resolveOnWall
-                    // keeps the wall-anchored preview that deep (without it the
-                    // case collapses to the thin through-wall band mid-drag).
-                    // For every other kind this is the eventual floor footprint
-                    // depth if it drags off the wall; unused while on a wall.
+                    // The FLOOR footprint depth this object would take on if the
+                    // drag leaves every wall — unused while it stays on one (the
+                    // wall preview reads wallFootprintDepthMm below). A case
+                    // keeps its box depth; a work keeps whatever depth the store
+                    // is about to commit, which is floorDepthForWallArtwork's
+                    // exact source order (override, record, default) — preview
+                    // and commit must agree on the same number.
                     depthMm:
                       wallObject.kind === "case"
                         ? wallObject.depthMm
-                        : DEFAULT_FLOOR_OBJECT_DEPTH_MM
+                        : wallObject.kind === "artwork"
+                          ? (effectiveWallArtworkDepthMm(wallObject, artwork) ??
+                            DEFAULT_FLOOR_OBJECT_DEPTH_MM)
+                          : DEFAULT_FLOOR_OBJECT_DEPTH_MM
                   },
                   wallFootprintWidthMm: renderedRect.widthMm,
+                  // The wall-anchored preview's protrusion: without it a case —
+                  // or a deep work — collapses to the thin through-wall band the
+                  // instant it is grabbed, then pops back on release.
+                  wallFootprintDepthMm: effectiveWallObjectPlanDepthMm(wallObject, artwork),
                   // Preview a floated result at the wall's angle so a
                   // wall→floor drag keeps its orientation (matching
                   // commitPlanMove).

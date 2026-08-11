@@ -286,6 +286,66 @@ describe("buildPlanScene wall objects", () => {
     expect(caseEntry!.restRect.depthMm).toBe(450);
   });
 
+  it("emits a deep wall artwork with its real protrusion depth, offset flush to the viewer side", () => {
+    const project = createSampleProject();
+    project.wallObjects.push(placedArtwork());
+    const artwork = artworkRecord({
+      dimensions: { widthMm: 1000, heightMm: 800, depthMm: 220, status: "known" },
+      placementForm: "wall"
+    });
+
+    const scene = buildPlanScene(project, { artworksById: new Map([[artwork.id, artwork]]) });
+    const entry = scene.wallObjects.find((candidate) => candidate.object.id === "wo-artwork")!;
+
+    // The work's own depth, not the nominal band — same treatment as a case.
+    expect(entry.restRect.depthMm).toBe(220);
+    expect(entry.renderedRect.depthMm).toBe(220);
+    // Rendered center shifts off the wall line by exactly HALF the real depth,
+    // so the body sits flush on the wall and protrudes into the room.
+    const shiftMm = Math.hypot(
+      entry.renderedRect.centerXMm - entry.restRect.centerXMm,
+      entry.renderedRect.centerYMm - entry.restRect.centerYMm
+    );
+    expect(shiftMm).toBeCloseTo(110, 6);
+  });
+
+  it("lets a placement's displayDimensionsOverride depth drive the plan protrusion", () => {
+    const project = createSampleProject();
+    project.wallObjects.push(
+      placedArtwork({
+        displayDimensionsOverride: { widthMm: 1000, heightMm: 800, depthMm: 500, status: "known" }
+      })
+    );
+    const artwork = artworkRecord({
+      dimensions: { widthMm: 1000, heightMm: 800, depthMm: 220, status: "known" }
+    });
+
+    const scene = buildPlanScene(project, { artworksById: new Map([[artwork.id, artwork]]) });
+    const entry = scene.wallObjects.find((candidate) => candidate.object.id === "wo-artwork")!;
+
+    expect(entry.restRect.depthMm).toBe(500);
+  });
+
+  it("keeps a flat artwork on the nominal plan depth (no depth, zero depth, or no record)", () => {
+    const project = createSampleProject();
+    project.wallObjects.push(placedArtwork());
+
+    for (const dimensions of [
+      { widthMm: 1000, heightMm: 800, status: "known" as const },
+      { widthMm: 1000, heightMm: 800, depthMm: 0, status: "known" as const }
+    ]) {
+      const artwork = artworkRecord({ dimensions });
+      const scene = buildPlanScene(project, { artworksById: new Map([[artwork.id, artwork]]) });
+      const entry = scene.wallObjects.find((candidate) => candidate.object.id === "wo-artwork")!;
+      expect(entry.restRect.depthMm).toBe(WALL_OBJECT_PLAN_DEPTH_MM);
+      expect(entry.renderedRect.centerYMm).toBeCloseTo(WALL_OBJECT_PLAN_DEPTH_MM / 2);
+    }
+
+    // No artwork records supplied at all — the pre-deep-artwork default path.
+    const bare = buildPlanScene(project);
+    expect(bare.wallObjects[0]!.restRect.depthMm).toBe(WALL_OBJECT_PLAN_DEPTH_MM);
+  });
+
   it("offsets a wall case's rendered rect to the viewer side (flush against the wall), keeping the anchor centered", () => {
     const project = createSampleProject();
     const wallCase: CaseWallObject = {

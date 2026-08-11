@@ -15,15 +15,23 @@ import { getFrameFinishTexture } from "./frameFinishTextures";
 import { framingLayout } from "./framingGeometry";
 import { mitredFrameBarGeometries } from "./frameMitreGeometry";
 import {
+  DashedBoxOutline,
   DashedRectOutline,
   isUncertain,
+  SelectionBoxOutline,
   SelectionRectOutline
 } from "./UncertaintyOutline";
-import { GHOST_OPACITY, MAT_FILL_COLOR, PLACEHOLDER_COLOR } from "./tokens";
+import { BOX_COLOR, GHOST_OPACITY, MAT_FILL_COLOR, PLACEHOLDER_COLOR } from "./tokens";
 
 // Outlines sit slightly proud of whatever face they wrap (the image plane, or
 // the frame's front face when framed) so they never z-fight it.
 const OUTLINE_OFFSET_MM = 5;
+
+// Clearance a DEEP work's box outline keeps around the volume it wraps, total
+// across each axis. Matches WallCaseMesh's own +20 so a selected vitrine and a
+// selected deep work wear the same ring — a flat work keeps its flat rect
+// outline (and its own OUTLINE_OFFSET_MM stack) untouched.
+const BOX_OUTLINE_OUTSET_MM = 20;
 
 // Frame-edge hairlines sit just off the frame's front face — proud enough not
 // to z-fight the boxes, but below OUTLINE_OFFSET_MM so they never share a
@@ -109,7 +117,33 @@ export function ArtworkPlane({
 
   // Bands wrap the STORED rect (not the letterboxed image), exactly as
   // elevation does — the letterboxed image sits inside the opening.
-  const layout = framingLayout(artwork.widthMm, artwork.heightMm, matWidthMm, frame);
+  //
+  // The work's own depth (scene-derived, never re-resolved here — see
+  // WallArtwork3d.depthMm) turns the plane into a solid body and slides the
+  // whole framing stack onto its front face. Absent for a flat work, which is
+  // then rendered by exactly the code path it always was.
+  const layout = framingLayout(
+    artwork.widthMm,
+    artwork.heightMm,
+    matWidthMm,
+    frame,
+    artwork.depthMm
+  );
+  const body = layout.body;
+
+  // The box a DEEP work's outlines wrap: its whole occupied volume, from the
+  // body's back face to whatever sits furthest forward (the frame's front face
+  // when framed, else the image plane), outset for clearance on every axis.
+  // Undefined for a flat work — which keeps the flat rect outlines below,
+  // untouched.
+  const boxOutline = body
+    ? {
+        widthMm: layout.outerWidthMm + BOX_OUTLINE_OUTSET_MM,
+        heightMm: layout.outerHeightMm + BOX_OUTLINE_OUTSET_MM,
+        depthMm: layout.outlineZMm - body.backZMm + BOX_OUTLINE_OUTSET_MM,
+        centerZMm: (body.backZMm + layout.outlineZMm) / 2
+      }
+    : undefined;
   const frameFill = frame ? FRAME_FINISH_HEX[frame.finish] : undefined;
   // Baked band texture for the material finishes (gold/silver/wood) —
   // session-cached, so this is a map lookup, not a canvas paint. Undefined
@@ -160,6 +194,31 @@ export function ArtworkPlane({
     // off-wall depth. A plain work's image lands at WALL_OFFSET_MM, identical
     // to the historical group-offset placement.
     <group position={[mmToWorld(artwork.xMm), mmToWorld(artwork.yMm), 0]}>
+      {body ? (
+        // The work's own volume — a deep canvas/shadow box/relief standing off
+        // the wall, the same physical treatment a wall case gets. Lambert (like
+        // the placeholder fill below and every floor-object box) so the sides
+        // take the scene light and read as a solid; the image is NOT drawn on
+        // it — the front-face quad below still carries the texture at exactly
+        // the size it always has, just further off the wall.
+        <mesh
+          position={[0, 0, mmToWorld(body.backZMm + body.depthMm / 2)]}
+          onClick={handleClick}
+          onPointerOver={() => setHovered(true)}
+          onPointerOut={() => setHovered(false)}
+        >
+          <boxGeometry
+            args={[mmToWorld(body.widthMm), mmToWorld(body.heightMm), mmToWorld(body.depthMm)]}
+          />
+          <meshLambertMaterial
+            key={ghosted ? "ghosted" : "solid"}
+            color={BOX_COLOR}
+            transparent={ghosted}
+            opacity={ghosted ? GHOST_OPACITY : 1}
+            depthWrite={!ghosted}
+          />
+        </mesh>
+      ) : null}
       {frameBarGeometries ? (
         // Frame: four mitred trapezoid prisms (one per side) meeting at 45°
         // seams, extruded from the wall to FRAME_DEPTH_MM — the same corner
@@ -168,8 +227,12 @@ export function ArtworkPlane({
         // a square-section molding by normal alone; the material finishes
         // (gold/silver/wood) sample their baked band texture, whose UVs the
         // geometry writes in band terms so grain/brushing runs along every
-        // bar. The prisms already sit at z 0..depth, so no group offset.
-        <group>
+        // bar. The prisms are built spanning z 0..frameDepth (mitredFrame-
+        // BarGeometries owns that), so the ONE thing this group supplies is
+        // which surface they are mounted to: the wall (z = 0) for a flat work,
+        // the body's front face for a deep one. Without it a deep work's ring
+        // would stay pinned to the wall, buried inside its own body.
+        <group position={[0, 0, mmToWorld(body?.frontZMm ?? 0)]}>
           {frameBarGeometries.map((geometry, index) => (
             <mesh key={index} geometry={geometry} onClick={handleClick}>
               <meshLambertMaterial
@@ -205,11 +268,12 @@ export function ArtworkPlane({
               color={FRAME_EDGE_HAIRLINE_HEX[frame.finish]}
             />
           </group>
-          {/* Wall-contact loop: the frame's footprint traced on the wall
-              itself, so from an oblique angle the frame's side faces still
-              end at a visible seam instead of dissolving into the wall fill.
+          {/* Wall-contact loop: the frame's footprint traced on the surface it
+              is mounted to — the wall, or a deep work's own front face — so
+              from an oblique angle the frame's side faces still end at a
+              visible seam instead of dissolving into the fill behind them.
               Mat-bevel grey (it reads against the wall, not the frame). */}
-          <group position={[0, 0, mmToWorld(HAIRLINE_OFFSET_MM)]}>
+          <group position={[0, 0, mmToWorld((body?.frontZMm ?? 0) + HAIRLINE_OFFSET_MM)]}>
             <FrameEdgeHairline
               widthMm={layout.outerWidthMm}
               heightMm={layout.outerHeightMm}
@@ -268,22 +332,47 @@ export function ArtworkPlane({
       </mesh>
       {!ghosted && isUncertain(artwork.status) ? (
         // Outline wraps the OUTER rect (image + mat + frame), matching
-        // elevation's outerRect, seated at the frame front (or image) depth.
-        <group position={[0, 0, mmToWorld(layout.outlineZMm + OUTLINE_OFFSET_MM)]}>
-          <DashedRectOutline
-            widthMm={layout.outerWidthMm}
-            heightMm={layout.outerHeightMm}
-            status={artwork.status}
-          />
-        </group>
+        // elevation's outerRect, seated at the frame front (or image) depth. A
+        // DEEP work wraps its whole volume instead — a flat ring floating at the
+        // front of a protruding box reads as a smaller work hung in front of it,
+        // which is exactly the confusion the outline exists to prevent (same
+        // rect→box switch WallCaseMesh makes for its own selection ring).
+        boxOutline ? (
+          <group position={[0, 0, mmToWorld(boxOutline.centerZMm)]}>
+            <DashedBoxOutline
+              widthMm={boxOutline.widthMm}
+              heightMm={boxOutline.heightMm}
+              depthMm={boxOutline.depthMm}
+              status={artwork.status}
+            />
+          </group>
+        ) : (
+          <group position={[0, 0, mmToWorld(layout.outlineZMm + OUTLINE_OFFSET_MM)]}>
+            <DashedRectOutline
+              widthMm={layout.outerWidthMm}
+              heightMm={layout.outerHeightMm}
+              status={artwork.status}
+            />
+          </group>
+        )
       ) : null}
       {!ghosted && isSelected ? (
-        <group position={[0, 0, mmToWorld(layout.outlineZMm + OUTLINE_OFFSET_MM * 2)]}>
-          <SelectionRectOutline
-            widthMm={layout.outerWidthMm}
-            heightMm={layout.outerHeightMm}
-          />
-        </group>
+        boxOutline ? (
+          <group position={[0, 0, mmToWorld(boxOutline.centerZMm)]}>
+            <SelectionBoxOutline
+              widthMm={boxOutline.widthMm + OUTLINE_OFFSET_MM}
+              heightMm={boxOutline.heightMm + OUTLINE_OFFSET_MM}
+              depthMm={boxOutline.depthMm + OUTLINE_OFFSET_MM}
+            />
+          </group>
+        ) : (
+          <group position={[0, 0, mmToWorld(layout.outlineZMm + OUTLINE_OFFSET_MM * 2)]}>
+            <SelectionRectOutline
+              widthMm={layout.outerWidthMm}
+              heightMm={layout.outerHeightMm}
+            />
+          </group>
+        )
       ) : null}
     </group>
   );

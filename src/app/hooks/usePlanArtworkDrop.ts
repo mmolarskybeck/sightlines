@@ -12,6 +12,7 @@ import { getArtworkOuterDimensionsMm } from "../../domain/framing";
 import {
   effectiveFloorDepthMm,
   effectivePlacementForm,
+  effectiveWallArtworkDepthMm,
   type PlacementForm
 } from "../../domain/placement/artworkForm";
 import {
@@ -90,12 +91,14 @@ export function usePlanArtworkDrop(options: {
   // The effective footprint of an artwork being dragged from the checklist:
   // its real size if we know which one (draggingArtworkId), otherwise the same
   // placeholder placement itself falls back to. depthMm feeds a floor-drop
-  // preview; it's ignored for a wall drop.
+  // preview; a wall drop reads wallFootprintDepthMm instead (deep works
+  // protrude, flat works keep the nominal band).
   function effectiveArtworkDims(artworkId: string | null): {
     widthMm: number;
     heightMm: number;
     depthMm: number;
     wallFootprintWidthMm?: number;
+    wallFootprintDepthMm?: number;
   } {
     const artwork = artworkId ? artworksById?.get(artworkId) : undefined;
     if (artwork) {
@@ -116,6 +119,13 @@ export function usePlanArtworkDrop(options: {
         widthMm,
         heightMm,
         wallFootprintWidthMm,
+        // A checklist drag has no placement yet, so no displayDimensionsOverride
+        // — the record's own depth is the only source. Undefined for flat works,
+        // which keeps the drop ghost at the nominal band exactly as before.
+        wallFootprintDepthMm:
+          effectivePlacementForm(artwork) === "wall"
+            ? effectiveWallArtworkDepthMm({}, artwork)
+            : undefined,
         // Floor footprint depth for a floor-work drop — shared with the store
         // commit and 3D via effectiveFloorDepthMm; ignored for a wall drop.
         depthMm: effectiveFloorDepthMm(artwork.dimensions)
@@ -156,6 +166,7 @@ export function usePlanArtworkDrop(options: {
       wallObjects: snappingWallObjects,
       movingSize: dims,
       wallFootprintWidthMm: dims.wallFootprintWidthMm,
+      wallFootprintDepthMm: dims.wallFootprintDepthMm,
       movingKind: "artwork",
       floatPolicy: floatPolicyForKind("artwork", form),
       currentAnchorWallId: null,

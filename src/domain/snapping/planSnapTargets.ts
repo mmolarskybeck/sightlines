@@ -139,6 +139,18 @@ export function resolvePlanPlacement(
     // geometry is framing-agnostic by decision (docs/framing-dimension-contract.md
     // §3, Phase 6b), and callers do not even supply this field for a floor work.
     wallFootprintWidthMm?: number;
+    // The wall-only twin of the field above: how far the object protrudes off
+    // the wall face while anchored to one, so the preview is as deep as the
+    // thing it previews. Resolved app-side by effectiveWallObjectPlanDepthMm
+    // (cases and deep works protrude their real depth; everything else keeps the
+    // nominal band) and passed IN rather than derived here — this module has no
+    // artwork records and must not grow a dependency on them.
+    //
+    // TRAP: this is NOT movingSize.depthMm. That one is the FLOOR footprint the
+    // object takes on if the drag leaves every wall, which for a flat work is
+    // the editable floor default, not 150mm. The two coincide only for a case.
+    // Omitted → the nominal band, which is what every non-protruding kind wants.
+    wallFootprintDepthMm?: number;
     movingKind: WallObject["kind"];
     // Per-kind behavior when no wall captures — see FloatPolicy /
     // floatPolicyForKind.
@@ -384,6 +396,7 @@ function resolveOnWall(
     wallObjects: WallObjectBase[];
     movingSize: PlanMovingSize;
     wallFootprintWidthMm?: number;
+    wallFootprintDepthMm?: number;
     movingKind: WallObject["kind"];
     thresholdMm: number;
     previousSnapTargetIds?: SnapTargetIds;
@@ -423,14 +436,15 @@ function resolveOnWall(
 
   return {
     placement: { anchor: "wall", wallId: wall.id, xMm },
-    // A case protrudes its real depth into the room, so its wall-anchored
-    // preview must carry movingSize.depthMm — mirroring buildPlanScene, which
-    // passes object.depthMm for cases, and resolvePlanGroupMemberMove's
-    // member.depthMm. Every other kind renders the thin through-wall band.
+    // A case — and a deep work — protrudes its real depth into the room, so its
+    // wall-anchored preview must carry that depth or it collapses to the thin
+    // through-wall band the moment it is grabbed. The caller resolves it (see
+    // wallFootprintDepthMm), mirroring buildPlanScene and resolvePlanGroup-
+    // MemberMove's member.depthMm; every other kind renders the nominal band.
     planRect: getWallObjectPlanRect(
       wall,
       { xMm, widthMm },
-      args.movingKind === "case" ? args.movingSize.depthMm : WALL_OBJECT_PLAN_DEPTH_MM
+      args.wallFootprintDepthMm ?? WALL_OBJECT_PLAN_DEPTH_MM
     ),
     snapTargetIds: resolved.snapTargetIds,
     // Wall-local guides are omitted in v1: the resolve above ran in wall-local

@@ -17,6 +17,7 @@ import {
   segmentPlanRect,
   type PlanRect
 } from "../geometry/planObjects";
+import { effectiveWallObjectPlanDepthMm } from "../placement/artworkForm";
 import type { Point } from "../geometry/polygon";
 import type {
   Artwork,
@@ -333,16 +334,19 @@ export function buildPlanScene(project: Project, options: PlanSceneOptions = {})
     if (!wall) return [];
 
     const artwork = object.kind === "artwork" ? artworksById?.get(object.artworkId) : undefined;
-    // A wall case protrudes from the wall by its real depthMm; every other
-    // wall object uses the fixed nominal plan depth. The restRect stays the
+    // A wall case — and a DEEP work, which is the same physical situation —
+    // protrudes from the wall by its real depth; every other wall object (and
+    // every flat work) uses the fixed nominal plan depth. The restRect stays the
     // geometric anchor centered ON the wall line (drag math reads its
-    // center/angle); getRenderedWallObjectPlanRect then shifts the CASE (like
-    // artwork) to the viewer's side so its box protrudes into the room flush
-    // against the wall, rather than straddling the line.
-    const restRect =
-      object.kind === "case"
-        ? getWallObjectPlanRect(wall, object, object.depthMm)
-        : getWallObjectPlanRect(wall, object);
+    // center/angle); getRenderedWallObjectPlanRect then shifts artwork and cases
+    // to the viewer's side so the protruding body sits flush against the wall
+    // rather than straddling the line — which means a deep work's rendered
+    // center moves further off the line than a flat one's, by half its depth.
+    const restRect = getWallObjectPlanRect(
+      wall,
+      object,
+      effectiveWallObjectPlanDepthMm(object, artwork)
+    );
     // A doorway (no `leaf`) keeps drawing as the plain chevron mark today —
     // only a hinged door gets a swing glyph. depthMm here is restRect's real
     // wall-thickness, per the field comment above.

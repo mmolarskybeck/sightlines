@@ -102,6 +102,66 @@ describe("framingLayout", () => {
     expect(negative.hasFrame).toBe(false);
   });
 
+  it("emits no body and no z shift for a flat work, at every bodyDepthMm that means 'flat'", () => {
+    // The top regression risk: a flat work must be arithmetically identical to
+    // what it was before deep works existed, whichever way "flat" is spelled.
+    const baseline = framingLayout(IMG_W, IMG_H, MAT, FRAME);
+    for (const flat of [undefined, 0, -120]) {
+      const layout = framingLayout(IMG_W, IMG_H, MAT, FRAME, flat);
+      expect(layout).toEqual(baseline);
+      expect("body" in layout).toBe(false);
+    }
+    // …and the same for the plain (unframed, unmatted) work.
+    const plain = framingLayout(IMG_W, IMG_H, undefined, undefined, 0);
+    expect(plain).toEqual(framingLayout(IMG_W, IMG_H, undefined, undefined));
+    expect(plain.imageZMm).toBe(WALL_OFFSET_MM);
+  });
+
+  it("deep + plain: the body stands off the wall and the image rides its front face", () => {
+    const DEPTH = 120;
+    const layout = framingLayout(IMG_W, IMG_H, undefined, undefined, DEPTH);
+
+    // The body is the WORK's own box (stored rect), never a framed footprint.
+    expect(layout.body).toEqual({
+      widthMm: IMG_W,
+      heightMm: IMG_H,
+      depthMm: DEPTH,
+      backZMm: WALL_OFFSET_MM,
+      frontZMm: WALL_OFFSET_MM + DEPTH
+    });
+    // Its back face never sits ON the wall plane (z-fight with the wall panel
+    // and with a shared wall's coincident twin).
+    expect(layout.body!.backZMm).toBeGreaterThan(0);
+    // The image is mounted ON the body's front face — just proud enough not to
+    // z-fight it, NOT the wall standoff (that would float the picture 20mm in
+    // front of its own box, a visible air gap edge-on).
+    expect(layout.imageZMm).toBe(WALL_OFFSET_MM + DEPTH + IMAGE_PROUD_MM);
+    expect(layout.imageZMm - layout.body!.frontZMm).toBe(IMAGE_PROUD_MM);
+    expect(layout.outlineZMm).toBe(layout.imageZMm);
+  });
+
+  it("deep + framed + matted: the frame ring sits on the body's front face, spacing unchanged", () => {
+    const DEPTH = 90;
+    const flat = framingLayout(IMG_W, IMG_H, MAT, FRAME);
+    const deep = framingLayout(IMG_W, IMG_H, MAT, FRAME, DEPTH);
+    const shiftMm = deep.body!.frontZMm;
+
+    // The frame's BACK lands exactly on the body's front face — a frame mounted
+    // on a deep stretcher, not floating off it.
+    expect(deep.frameFrontZMm).toBe(shiftMm + FRAME_DEPTH_MM);
+    expect(deep.frameCenterZMm).toBe(shiftMm + FRAME_DEPTH_MM / 2);
+    // Every layer moved by the SAME shift, so the internal stack is untouched.
+    expect(deep.matZMm! - flat.matZMm!).toBe(shiftMm);
+    expect(deep.imageZMm - flat.imageZMm).toBe(shiftMm);
+    expect(deep.outlineZMm - flat.outlineZMm).toBe(shiftMm);
+    expect(deep.imageZMm).toBeLessThan(deep.frameFrontZMm as number);
+
+    // Bands are unaffected by depth — the frame may overhang the body's edges.
+    expect(deep.outerWidthMm).toBe(flat.outerWidthMm);
+    expect(deep.openingWidthMm).toBe(flat.openingWidthMm);
+    expect(deep.body!.widthMm).toBeLessThan(deep.outerWidthMm);
+  });
+
   it("bands wrap the STORED rect: a placeholder-square rect still grows outward", () => {
     // Unknown-dims works carry a placeholder rect; the letterboxed image lives
     // INSIDE the opening, but the bands are computed off the stored rect here.

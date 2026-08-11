@@ -25,6 +25,7 @@ import {
 import { withArtworkFootprintFromMap } from "../../../domain/framing";
 import { type InsertToolKind } from "../../../domain/placement/createOpening";
 import { getDefaultInsertToolSizeMm } from "../../../domain/placement/createWallText";
+import { effectiveWallObjectPlanDepthMm } from "../../../domain/placement/artworkForm";
 import {
   DEFAULT_FLOOR_CASE_DEPTH_MM,
   DEFAULT_FLOOR_OBJECT_DEPTH_MM,
@@ -35,6 +36,7 @@ import {
   type ReferenceMeasurement
 } from "../../../domain/project";
 import {
+  getFloorPartitions,
   parseFaceWallId,
   roomIdContainingPoint
 } from "../../../domain/geometry/freestandingWalls";
@@ -327,6 +329,7 @@ export function PlanView({
   const objectMove = usePlanObjectMove(() => ({
     toSvgMm,
     project,
+    artworksById,
     floorWallsForTool,
     snappingWallObjects,
     floorObjectRoomIds,
@@ -754,7 +757,13 @@ export function PlanView({
         if (!selectedSet.has(object.id)) continue;
         const wall = wallsById.get(object.wallId);
         if (!wall) continue;
-        const rest = getWallObjectPlanRect(wall, object);
+        // Real plan protrusion, matching beginObjectDrag's member builder: a
+        // nudged case (or deep work) must not flatten to the nominal band.
+        const depthMm = effectiveWallObjectPlanDepthMm(
+          object,
+          object.kind === "artwork" ? artworksById?.get(object.artworkId) : undefined
+        );
+        const rest = getWallObjectPlanRect(wall, object, depthMm);
         members.push({
           id: object.id,
           anchor: "wall",
@@ -762,7 +771,7 @@ export function PlanView({
           wall,
           worldCenterMm: { xMm: rest.centerXMm, yMm: rest.centerYMm },
           widthMm: object.widthMm,
-          depthMm: WALL_OBJECT_PLAN_DEPTH_MM
+          depthMm
         });
       }
       for (const object of project.floorObjects) {
@@ -934,6 +943,15 @@ export function PlanView({
   // room walls, plus a wall-hung object's along-wall clearances. Static
   // (committed) geometry only — the mount hides these during any active gesture
   // rather than tracking a live preview, matching how dims read the rest scene.
+  //
+  // Partitions are passed UNFILTERED: a partition standing within reach of a
+  // wall bounds that wall's spacing chain, so a clearance stops at the slab
+  // rather than running through it (the room and own-face gates are the
+  // derivation's, matching the elevation).
+  const floorPartitions = useMemo(
+    () => getFloorPartitions(project.floor),
+    [project.floor]
+  );
   const planGapLines = useMemo<PlanGapLine[]>(
     () =>
       computePlanGapLines({
@@ -941,9 +959,17 @@ export function PlanView({
         selectedObjectIds,
         planScene,
         floorObjectRoomIds,
-        floorWallsForTool
+        floorWallsForTool,
+        partitions: floorPartitions
       }),
-    [exportMode, selectedObjectIds, planScene, floorObjectRoomIds, floorWallsForTool]
+    [
+      exportMode,
+      selectedObjectIds,
+      planScene,
+      floorObjectRoomIds,
+      floorWallsForTool,
+      floorPartitions
+    ]
   );
 
   function disarmTool() {
@@ -976,6 +1002,10 @@ export function PlanView({
       floatPolicy: (activeTool === "blocked-zone" || activeTool === "case"
         ? "float"
         : "capture-any") as FloatPolicy,
+      // Only a case protrudes off the wall, and a wall case's protrusion is
+      // always the wall-case depth — the open-floor footprint in `size` says
+      // nothing about it. Every other tool draws the nominal band (undefined).
+      wallFootprintDepthMm: activeTool === "case" ? caseWallToolSize.depthMm : undefined,
       currentAnchorWallId: null,
       captureDistanceMm,
       gridTargets: gridSnapTargets,

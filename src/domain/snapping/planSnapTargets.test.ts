@@ -71,6 +71,25 @@ describe("resolvePlanPlacement — wall capture", () => {
     expect(result.planRect.angleDeg).toBeCloseTo(0);
   });
 
+  it("previews the wall-anchored rect at wallFootprintDepthMm — a case and a deep work alike", () => {
+    // The protrusion is passed IN (effectiveWallObjectPlanDepthMm resolves it
+    // app-side), so this module never branches on kind for depth again.
+    for (const movingKind of ["case", "artwork"] as const) {
+      const result = resolvePlanPlacement(
+        { xMm: 2000, yMm: 30 },
+        { ...baseArgs, movingKind, wallFootprintDepthMm: 450 }
+      );
+      expect(result.planRect.depthMm).toBe(450);
+    }
+  });
+
+  it("falls back to the nominal band when no wall footprint depth is supplied", () => {
+    // …and specifically NOT to movingSize.depthMm (400 here), which is the
+    // FLOOR footprint this object would take on off the wall.
+    const result = resolvePlanPlacement({ xMm: 2000, yMm: 30 }, { ...baseArgs, movingKind: "case" });
+    expect(result.planRect.depthMm).toBe(WALL_OBJECT_PLAN_DEPTH_MM);
+  });
+
   it("floats (no wall) when beyond captureDistanceMm and canFloat", () => {
     const result = resolvePlanPlacement({ xMm: 2000, yMm: 80 }, baseArgs);
 

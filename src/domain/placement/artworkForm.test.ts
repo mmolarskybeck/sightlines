@@ -1,7 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { CURRENT_ARTWORK_SCHEMA_VERSION, DEFAULT_FLOOR_OBJECT_DEPTH_MM, type Artwork, type Dimensions } from "../project";
+import {
+  CURRENT_ARTWORK_SCHEMA_VERSION,
+  DEFAULT_FLOOR_OBJECT_DEPTH_MM,
+  type Artwork,
+  type ArtworkWallObject,
+  type CaseWallObject,
+  type Dimensions,
+  type DoorWallObject
+} from "../project";
+import { WALL_OBJECT_PLAN_DEPTH_MM } from "../geometry/planObjects";
 import { getArtworkOuterDimensionsMm } from "../framing";
-import { effectiveFloorDepthMm, effectivePlacementForm } from "./artworkForm";
+import {
+  effectiveFloorDepthMm,
+  effectivePlacementForm,
+  effectiveWallArtworkDepthMm,
+  effectiveWallObjectPlanDepthMm
+} from "./artworkForm";
 
 function makeArtwork(dimensions: Dimensions, placementForm?: "wall" | "floor"): Artwork {
   return {
@@ -57,6 +71,112 @@ describe("effectiveFloorDepthMm — depth fallback", () => {
 
   it("falls back to the default when neither depth nor width is known", () => {
     expect(effectiveFloorDepthMm({ status: "unknown" })).toBe(DEFAULT_FLOOR_OBJECT_DEPTH_MM);
+  });
+});
+
+function wallArtwork(overrides: Partial<ArtworkWallObject> = {}): ArtworkWallObject {
+  return {
+    id: "wo-art",
+    kind: "artwork",
+    artworkId: "artwork-1",
+    wallId: "wall-1",
+    xMm: 1000,
+    yMm: 1450,
+    widthMm: 600,
+    heightMm: 800,
+    ...overrides
+  };
+}
+
+describe("effectiveWallArtworkDepthMm — deep wall artwork", () => {
+  it("uses the artwork record's depth for a hung work", () => {
+    const artwork = makeArtwork({ widthMm: 600, heightMm: 800, depthMm: 120, status: "known" }, "wall");
+    expect(effectiveWallArtworkDepthMm(wallArtwork(), artwork)).toBe(120);
+  });
+
+  it("is undefined when the record records no depth (flat — today's behavior)", () => {
+    const artwork = makeArtwork({ widthMm: 600, heightMm: 800, status: "known" });
+    expect(effectiveWallArtworkDepthMm(wallArtwork(), artwork)).toBeUndefined();
+  });
+
+  it("treats zero and negative depth as flat, never as a zero-thickness body", () => {
+    expect(
+      effectiveWallArtworkDepthMm(wallArtwork(), makeArtwork({ widthMm: 600, depthMm: 0, status: "known" }))
+    ).toBeUndefined();
+    expect(
+      effectiveWallArtworkDepthMm(wallArtwork(), makeArtwork({ widthMm: 600, depthMm: -50, status: "known" }))
+    ).toBeUndefined();
+  });
+
+  it("is undefined when the artwork record is missing entirely", () => {
+    expect(effectiveWallArtworkDepthMm(wallArtwork(), undefined)).toBeUndefined();
+  });
+
+  it("lets the placement's displayDimensionsOverride win over the record", () => {
+    const artwork = makeArtwork({ widthMm: 600, heightMm: 800, depthMm: 120, status: "known" });
+    const placement = wallArtwork({
+      displayDimensionsOverride: { widthMm: 600, heightMm: 800, depthMm: 300, status: "known" }
+    });
+    expect(effectiveWallArtworkDepthMm(placement, artwork)).toBe(300);
+  });
+
+  it("falls through to the record when the override carries no depth", () => {
+    const artwork = makeArtwork({ widthMm: 600, heightMm: 800, depthMm: 120, status: "known" });
+    const placement = wallArtwork({
+      displayDimensionsOverride: { widthMm: 600, heightMm: 800, status: "known" }
+    });
+    expect(effectiveWallArtworkDepthMm(placement, artwork)).toBe(120);
+  });
+
+  it("never falls back to the floor default (a depth-less hung work is flat, not 400mm proud)", () => {
+    expect(effectiveWallArtworkDepthMm(wallArtwork(), undefined)).not.toBe(
+      DEFAULT_FLOOR_OBJECT_DEPTH_MM
+    );
+  });
+});
+
+describe("effectiveWallObjectPlanDepthMm — one plan depth for every wall object", () => {
+  const wallCase: CaseWallObject = {
+    id: "wo-case",
+    kind: "case",
+    wallId: "wall-1",
+    xMm: 2000,
+    yMm: 950,
+    widthMm: 1500,
+    heightMm: 180,
+    depthMm: 450
+  };
+  const door: DoorWallObject = {
+    id: "wo-door",
+    kind: "door",
+    blocksPlacement: true,
+    wallId: "wall-1",
+    xMm: 1000,
+    yMm: 1050,
+    widthMm: 900,
+    heightMm: 2100
+  };
+
+  it("gives a case its real protrusion", () => {
+    expect(effectiveWallObjectPlanDepthMm(wallCase, undefined)).toBe(450);
+  });
+
+  it("gives a deep work its real protrusion", () => {
+    const artwork = makeArtwork({ widthMm: 600, heightMm: 800, depthMm: 120, status: "known" });
+    expect(effectiveWallObjectPlanDepthMm(wallArtwork(), artwork)).toBe(120);
+  });
+
+  it("gives a flat work the nominal band (bit-for-bit today's behavior)", () => {
+    const artwork = makeArtwork({ widthMm: 600, heightMm: 800, status: "known" });
+    expect(effectiveWallObjectPlanDepthMm(wallArtwork(), artwork)).toBe(WALL_OBJECT_PLAN_DEPTH_MM);
+    expect(effectiveWallObjectPlanDepthMm(wallArtwork(), undefined)).toBe(
+      WALL_OBJECT_PLAN_DEPTH_MM
+    );
+  });
+
+  it("gives openings the nominal band and ignores any artwork handed in", () => {
+    const artwork = makeArtwork({ widthMm: 600, heightMm: 800, depthMm: 120, status: "known" });
+    expect(effectiveWallObjectPlanDepthMm(door, artwork)).toBe(WALL_OBJECT_PLAN_DEPTH_MM);
   });
 });
 

@@ -7,6 +7,7 @@ import type {
   RoomPlacement,
   WallObject
 } from "../project";
+import { effectiveWallArtworkDepthMm } from "../placement/artworkForm";
 import { getFreestandingFaces } from "./freestandingWalls";
 import { buildFloorWallsById, evaluateOpeningPairWith } from "./openingConnections";
 import { isPointInPolygon, signedAreaMm2 } from "./polygon";
@@ -86,6 +87,15 @@ export type WallArtwork3d = {
   yMm: number; // wall-local center, 0 = floor
   widthMm: number;
   heightMm: number;
+  // How far the work physically stands off the wall face: a deep canvas, a
+  // shadow box, a relief. Resolved by effectiveWallArtworkDepthMm from the
+  // placement's override or the joined record (there is no stored depth on the
+  // wall object itself), and emitted ONLY when the work is genuinely deep — a
+  // flat work's entry keeps exactly the key set it had before deep works
+  // existed, so every consumer that never learned about protrusion keeps
+  // drawing it flat on the wall. Absence is the encoding, not 0, exactly as it
+  // is for FloorObject3d.baseHeightMm.
+  depthMm?: number;
 };
 
 // A floor-placed object (artwork pedestal-box or blocked zone), floor-space
@@ -518,6 +528,7 @@ function derivePanelContents(
   for (const object of objects) {
     if (object.kind === "artwork") {
       const artwork = artworksById.get(object.artworkId);
+      const depthMm = effectiveWallArtworkDepthMm(object, artwork);
       artworks.push({
         objectId: object.id,
         artworkId: object.artworkId,
@@ -526,7 +537,10 @@ function derivePanelContents(
         xMm: toLocalX(object.xMm),
         yMm: object.yMm,
         widthMm: object.widthMm,
-        heightMm: object.heightMm
+        heightMm: object.heightMm,
+        // Spread, not `depthMm: undefined`: a flat work must emit no key at all
+        // (see the field's note above).
+        ...(depthMm === undefined ? {} : { depthMm })
       });
     } else if (object.kind === "wall-text") {
       wallTexts.push({
