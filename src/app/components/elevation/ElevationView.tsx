@@ -8,8 +8,6 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent
 } from "react";
-import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
-import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import type { Vector2 } from "../../../domain/geometry/dragResize";
 import {
   getNeighborAwareSegments,
@@ -119,7 +117,6 @@ import {
   OpeningTooltipContent,
   WallTextTooltipContent
 } from "../shared/PlacementTooltip";
-import { ToolbarTooltipKbd } from "../toolbar/ToolbarTooltipKbd";
 import { marqueeRectMm, type MarqueeState } from "../shared/marqueeRect";
 import { buildElevationScene } from "../../../domain/scene2d/elevationScene";
 import {
@@ -140,7 +137,8 @@ import { MeasurementOverlay, type MeasurementEndpoint } from "../measurement/Mea
 import { Button } from "../ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { ViewportZoomControls } from "../shared/ViewportZoomControls";
-import { WallSwitcher, type WallSwitcherEntry } from "./WallSwitcher";
+import { type WallSwitcherEntry } from "./WallSwitcher";
+import { WallSwitcherChip, canSwitchWalls } from "./WallSwitcherChip";
 
 // Re-exported for backward compatibility — this used to be defined here,
 // and nothing outside this file depends on the distinction between "defined
@@ -250,6 +248,7 @@ export function ElevationView({
   draggingArtworkId = null,
   centerlineMm,
   centerlineVisible = true,
+  ghostsVisible = true,
   getBlob,
   gridPrecisionFloorMm,
   gridVisible,
@@ -294,6 +293,16 @@ export function ElevationView({
   // (including tests) that doesn't pass it keeps rendering the line exactly
   // as before this toggle existed.
   centerlineVisible?: boolean;
+  // Elevation-only "ghosts" visibility toggle. Hides the DASHED projected band
+  // — floor-case ghosts, suspended-artwork ghosts, and partitions standing
+  // clear of this wall — and drops those same shapes out of the synthetic
+  // dimension "others" pool, so a hidden ghost can't bound a gap line it no
+  // longer draws. SOLID abutting partition profiles are exempt: that slab is
+  // architecture meeting the wall, not a projection, so it keeps both its paint
+  // and its dimension participation. Canvas only — the PDF export builders read
+  // the scene directly and always draw everything. Defaults true so every call
+  // site that doesn't pass it (tests, exports) behaves as before this toggle.
+  ghostsVisible?: boolean;
   unit: DisplayUnit;
   // The manual/fit viewport for this surface (owned by App via useViewport2D,
   // keyed on project id + wall id so a wall switch resets to fit), and the
@@ -370,8 +379,6 @@ export function ElevationView({
   useEffect(() => {
     onSvgElementChange?.(svgRef.current);
   }, [onSvgElementChange]);
-  const previousWallButtonRef = useRef<HTMLButtonElement>(null);
-  const nextWallButtonRef = useRef<HTMLButtonElement>(null);
   // Store-connected passthroughs. App forwarded each of these verbatim (a bare
   // `prop={storeAction}`, and wallObjects={project.wallObjects}), so reading
   // them from the store here cuts the umbilical without moving ownership — the
@@ -702,6 +709,19 @@ export function ElevationView({
     artworksById,
     ...(floorGhostInputs ?? {})
   });
+  // ONE gate for the "Ghosts" toggle, applied to the scene OUTPUT rather than
+  // its inputs: the scene has to keep building partition profiles either way so
+  // the abutting ones survive, and filtering here means the render passes and
+  // the synthetic dimension "others" below read the same arrays — a ghost can
+  // never be invisible yet still bound a gap line, or vice versa.
+  const visibleFloorCaseGhosts = ghostsVisible ? elevationScene.floorCaseGhosts : [];
+  const visibleSuspendedArtworkGhosts = ghostsVisible
+    ? elevationScene.suspendedArtworkGhosts
+    : [];
+  // Abutting slabs are architecture, not projection: they stay in every state.
+  const visiblePartitionProfiles = ghostsVisible
+    ? elevationScene.partitionProfiles
+    : elevationScene.partitionProfiles.filter((profile) => profile.abutting);
   // Every wall object on this wall is a valid snap neighbor for any other —
   // an artwork can align to a door's edge just as readily as to another
   // artwork's (docs/plan.md §2 snap-target priority doesn't distinguish by
@@ -1783,7 +1803,7 @@ export function ElevationView({
   // getNeighborAwareSegments/deriveVerticalNeighborGaps below only ever read
   // xMm/yMm/widthMm/heightMm off an "other").
   const dimensionOtherGhosts: WallObjectBase[] = [
-    ...elevationScene.floorCaseGhosts.map((ghost) => ({
+    ...visibleFloorCaseGhosts.map((ghost) => ({
       id: ghost.object.id,
       wallId: wallId ?? "",
       xMm: (ghost.xMinMm + ghost.xMaxMm) / 2,
@@ -1794,7 +1814,7 @@ export function ElevationView({
     // Suspended boards join the same pool for the same reason — but their
     // center is baseHeightMm ABOVE the floor, not heightMm/2 off it. Getting
     // that wrong would silently drop a vertical gap line onto the floor.
-    ...elevationScene.suspendedArtworkGhosts.map((ghost) => ({
+    ...visibleSuspendedArtworkGhosts.map((ghost) => ({
       id: ghost.object.id,
       wallId: wallId ?? "",
       xMm: (ghost.xMinMm + ghost.xMaxMm) / 2,
@@ -1805,8 +1825,9 @@ export function ElevationView({
     // Projected partitions bound a gap line for exactly the same reason — more
     // strongly, in fact, for an abutting one: the hanging zone it creates ENDS
     // at the slab, and a dimension running past it would describe wall the
-    // curator can't use. Both tiers participate; the tier is a paint decision.
-    ...elevationScene.partitionProfiles.map((profile) => ({
+    // curator can't use. Both tiers participate while ghosts are shown; with
+    // ghosts hidden only the abutting tier survives (see visiblePartitionProfiles).
+    ...visiblePartitionProfiles.map((profile) => ({
       id: profile.partition.wallId,
       wallId: wallId ?? "",
       xMm: (profile.xMinMm + profile.xMaxMm) / 2,
@@ -1861,18 +1882,10 @@ export function ElevationView({
       )
     : [];
 
-  // Wall switcher wiring for the chip. Prev/next cycle through every placeable
-  // surface in room order (each room's perimeter walls then its partition
-  // faces, wrapping at the ends), and the WallSwitcher menu lists them all —
-  // grouped by room, faces sectioned under "Partitions", once more than one
-  // room exists.
-  const currentWallIndex = walls.findIndex((wall) => wall.id === wallId);
-  const canSwitchWalls = walls.length > 0 && currentWallIndex >= 0 && Boolean(onSelectWall);
-  const stepWall = (delta: number) => {
-    if (currentWallIndex < 0) return;
-    const next = walls[(currentWallIndex + delta + walls.length) % walls.length];
-    if (next) onSelectWall?.(next.id);
-  };
+  // Wall switcher wiring for the chip — see WallSwitcherChip, which the open-
+  // wall empty state renders too so the switcher survives navigating to a wall
+  // with no surface to draw.
+  const showWallSwitcher = canSwitchWalls(walls, wallId) && Boolean(onSelectWall);
 
   // Pan cursor affordance: grabbing while a pan drag is live, grab while space
   // is merely held ready. Otherwise the surface keeps its default cursor.
@@ -1892,72 +1905,13 @@ export function ElevationView({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {canSwitchWalls ? (
-        // Switcher chip: the browser trigger leads (it carries the room, wall,
-        // and dimensions itself) and the prev/next steppers dock behind a
-        // hairline at the trailing edge, so the two-column menu can align with
-        // the chip's leading edge and drop fully below it.
-        <div
-          className="surface-label surface-label-switcher"
-          data-owns-arrow-keys
-          onKeyDown={(event) => {
-            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-            event.preventDefault();
-            event.stopPropagation();
-            const direction = event.key === "ArrowLeft" ? -1 : 1;
-            const focusedStepper =
-              event.target === previousWallButtonRef.current ||
-              event.target === nextWallButtonRef.current;
-            stepWall(direction);
-            if (focusedStepper) {
-              (direction === -1 ? previousWallButtonRef : nextWallButtonRef).current?.focus();
-            }
-          }}
-        >
-          <WallSwitcher
-            walls={walls}
-            unit={unit}
-            currentWallId={wallId ?? ""}
-            onSelectWall={(value) => onSelectWall?.(value)}
-          />
-          <span aria-hidden="true" className="surface-label-divider" />
-          <div className="surface-label-steps">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  aria-label="Previous wall"
-                  className="surface-label-switch"
-                  ref={previousWallButtonRef}
-                  size="icon-sm"
-                  variant="ghost"
-                  onClick={() => stepWall(-1)}
-                >
-                  <CaretLeftIcon aria-hidden="true" size={16} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent className="toolbar-tooltip" side="bottom">
-                Previous wall <ToolbarTooltipKbd hint="←" />
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  aria-label="Next wall"
-                  className="surface-label-switch"
-                  ref={nextWallButtonRef}
-                  size="icon-sm"
-                  variant="ghost"
-                  onClick={() => stepWall(1)}
-                >
-                  <CaretRightIcon aria-hidden="true" size={16} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent className="toolbar-tooltip" side="bottom">
-                Next wall <ToolbarTooltipKbd hint="→" />
-              </TooltipContent>
-            </Tooltip>
-          </div>
-        </div>
+      {showWallSwitcher ? (
+        <WallSwitcherChip
+          walls={walls}
+          unit={unit}
+          currentWallId={wallId ?? ""}
+          onSelectWall={(value) => onSelectWall?.(value)}
+        />
       ) : (
         <div className="surface-label">
           <strong>{wallName}</strong>
@@ -2047,7 +2001,7 @@ export function ElevationView({
         />
         {/* Freestanding-case ghosts paint first (behind the wall objects) so
             they never occlude wall-hung work — non-interactive alignment aids. */}
-        {elevationScene.floorCaseGhosts.map((ghost) => (
+        {visibleFloorCaseGhosts.map((ghost) => (
           <ElevationFloorCaseGhost
             key={ghost.object.id}
             heightMm={ghost.heightMm}
@@ -2060,7 +2014,7 @@ export function ElevationView({
             same treatment: behind the wall objects, inert, dashed — it belongs
             to no wall, it is only shown so its floating volume in front of this
             one is visible. */}
-        {elevationScene.suspendedArtworkGhosts.map((ghost) => (
+        {visibleSuspendedArtworkGhosts.map((ghost) => (
           <ElevationSuspendedArtworkGhost
             key={ghost.object.id}
             baseHeightMm={ghost.baseHeightMm}
@@ -2073,7 +2027,7 @@ export function ElevationView({
         {/* Partitions standing CLEAR of this wall join the ghost band: quiet,
             dashed, behind the wall objects. The abutting ones are drawn much
             later, after the wall objects — see below. */}
-        {elevationScene.partitionProfiles
+        {visiblePartitionProfiles
           .filter((profile) => !profile.abutting)
           .map((profile) => (
             <ElevationPartitionProfile
@@ -2311,7 +2265,7 @@ export function ElevationView({
             drawn there should read as covered. Still before the drafting
             overlays (dimension lines, guides, measurements) below, which must
             stay readable on top of everything. */}
-        {elevationScene.partitionProfiles
+        {visiblePartitionProfiles
           .filter((profile) => profile.abutting)
           .map((profile) => (
             <ElevationPartitionProfile

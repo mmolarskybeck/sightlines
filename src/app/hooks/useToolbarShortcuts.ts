@@ -22,6 +22,7 @@ export type UseToolbarShortcutsParams = {
   toggleSnapToGrid: () => void;
   toggleAllowOverlappingPlacement: () => void;
   toggleShowCenterline: () => void;
+  toggleShowElevationGhosts: () => void;
 };
 
 // Single-key 2D toolbar accelerators. They stand down for editable targets,
@@ -39,7 +40,8 @@ export function useToolbarShortcuts({
   toggleShowGrid,
   toggleSnapToGrid,
   toggleAllowOverlappingPlacement,
-  toggleShowCenterline
+  toggleShowCenterline,
+  toggleShowElevationGhosts
 }: UseToolbarShortcutsParams) {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -109,6 +111,12 @@ export function useToolbarShortcuts({
           event.preventDefault();
           toggleShowCenterline();
           break;
+        case "h":
+          // Ghosts only exist on the elevation surface, so H stays free in plan.
+          if (viewMode !== "elevation") return;
+          event.preventDefault();
+          toggleShowElevationGhosts();
+          break;
         default:
           break;
       }
@@ -129,6 +137,7 @@ export function useToolbarShortcuts({
     toggleShowGrid,
     toggleSnapToGrid,
     toggleAllowOverlappingPlacement,
-    toggleShowCenterline
+    toggleShowCenterline,
+    toggleShowElevationGhosts
   ]);
 }

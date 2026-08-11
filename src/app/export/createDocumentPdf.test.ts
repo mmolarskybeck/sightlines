@@ -2,6 +2,7 @@ import { PDFDocument } from "pdf-lib";
 import { describe, expect, it, vi } from "vitest";
 import type {
   Artwork,
+  ArtworkFloorObject,
   Asset,
   SavedView
 } from "../../domain/project";
@@ -440,6 +441,48 @@ describe("createDocumentPdf", () => {
       settings.sections = {
         overview: false,
         roomPlans: true,
+        elevations: true,
+        threeDViews: false
+      };
+
+      const result = await createDocumentPdf({
+        project,
+        settings,
+        artworks: []
+      });
+
+      expect(result.warnings).toEqual([]);
+      await expect(PDFDocument.load(result.bytes)).resolves.toBeDefined();
+    });
+
+    it("exports a suspended floor artwork's elevation ghost without warnings", async () => {
+      // A projection board hung from ceiling wires (baseHeightMm > 0), placed
+      // where createFloorCase(4000, 3000) sits above — known to project onto
+      // wall-north's elevation in the test above. Exercises the full path
+      // wired up for this feature: the room-filtered floorArtworks pass-
+      // through in createDocumentPdf.ts, buildElevationScene's baseHeightMm
+      // gate, and drawElevationSuspendedArtworkGhost — nothing here asserted
+      // the ghost's own geometry, which elevationPage.test.ts covers
+      // directly; this only pins that the wiring doesn't throw or warn.
+      const project = createSampleProject();
+      const suspendedBoard: ArtworkFloorObject = {
+        id: "floor-board",
+        kind: "artwork",
+        artworkId: "board-art",
+        xMm: 4000,
+        yMm: 3000,
+        widthMm: 2400,
+        depthMm: 40,
+        rotationDeg: 0,
+        heightMm: 1800,
+        wallYMm: 1450,
+        baseHeightMm: 900
+      };
+      project.floorObjects = [suspendedBoard];
+      const settings = settingsFor(project);
+      settings.sections = {
+        overview: false,
+        roomPlans: false,
         elevations: true,
         threeDViews: false
       };

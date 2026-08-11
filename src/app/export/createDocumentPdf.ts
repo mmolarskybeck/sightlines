@@ -23,6 +23,7 @@ import { isPointInPolygon } from "../../domain/geometry/polygon";
 import { derivePlanSceneGaps } from "../../domain/dimensions/planDimensions";
 import type {
   Artwork,
+  ArtworkFloorObject,
   Asset,
   CaseFloorObject,
   Project,
@@ -72,6 +73,7 @@ import {
   drawElevationWallText,
   drawElevationCase,
   drawElevationFloorCaseGhost,
+  drawElevationSuspendedArtworkGhost,
   drawElevationPartitionProfile,
   drawArtworkPlaceholder
 } from "./pdf/elevationPage";
@@ -397,6 +399,15 @@ export async function createDocumentPdf(
           object.kind === "case" &&
           isPointInPolygon({ xMm: object.xMm, yMm: object.yMm }, roomPolygonMm)
       );
+      // Same room filter, applied to floor artworks — the builder itself gates
+      // on baseHeightMm > 0 (only SUSPENDED boards ghost), so every floor
+      // artwork in the room is passed through unfiltered here, mirroring
+      // elevationFloorCases and ExportPdfPreview's buildElevationForPage.
+      const elevationFloorArtworks = input.project.floorObjects.filter(
+        (object): object is ArtworkFloorObject =>
+          object.kind === "artwork" &&
+          isPointInPolygon({ xMm: object.xMm, yMm: object.yMm }, roomPolygonMm)
+      );
       // Partitions in this room project onto the wall face as well. Room-OWNED,
       // so they gate on roomId rather than point-in-polygon; and when this page
       // IS a partition face, its own partition is dropped so it can't project
@@ -416,6 +427,7 @@ export async function createDocumentPdf(
           input.project.defaultCenterlineHeightMm,
         artworksById,
         floorCases: elevationFloorCases,
+        floorArtworks: elevationFloorArtworks,
         partitions: elevationPartitions,
         wallStartFloorMm: {
           xMm: wall.start.xMm + placement.offsetXMm,
@@ -455,6 +467,11 @@ export async function createDocumentPdf(
       // Freestanding-case ghosts first, behind the wall objects.
       for (const ghost of scene.floorCaseGhosts) {
         drawElevationFloorCaseGhost(page, transform, ghost);
+      }
+      // Suspended-artwork ghosts (boards hung above the floor) in the same
+      // behind-the-wall-objects paint slot.
+      for (const ghost of scene.suspendedArtworkGhosts) {
+        drawElevationSuspendedArtworkGhost(page, transform, ghost, scene.wallHeightMm);
       }
       // Partitions standing clear of the wall ghost here too; the abutting ones
       // are drawn after the wall objects below (canvas paint order).

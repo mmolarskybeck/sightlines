@@ -25,7 +25,8 @@ function renderHarness(
     toggleShowGrid: vi.fn(() => {}),
     toggleSnapToGrid: vi.fn(() => {}),
     toggleAllowOverlappingPlacement: vi.fn(() => {}),
-    toggleShowCenterline: vi.fn(() => {})
+    toggleShowCenterline: vi.fn(() => {}),
+    toggleShowElevationGhosts: vi.fn(() => {})
   };
 
   function Harness() {
@@ -137,6 +138,16 @@ describe("useToolbarShortcuts", () => {
     const plan = renderHarness({ viewMode: "plan" });
     press("e");
     expect(plan.toggleShowCenterline).not.toHaveBeenCalled();
+  });
+
+  it("scopes Ghosts to elevation only", () => {
+    const elevation = renderHarness({ viewMode: "elevation" });
+    press("h");
+    expect(elevation.toggleShowElevationGhosts).toHaveBeenCalledTimes(1);
+
+    const plan = renderHarness({ viewMode: "plan" });
+    press("h");
+    expect(plan.toggleShowElevationGhosts).not.toHaveBeenCalled();
   });
 
   it("makes the opening keys no-ops when insert is disabled", () => {

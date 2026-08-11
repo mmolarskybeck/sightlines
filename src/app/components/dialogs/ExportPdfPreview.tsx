@@ -1,7 +1,12 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
-import type { Artwork, CaseFloorObject, Project } from "../../../domain/project";
+import type {
+  Artwork,
+  ArtworkFloorObject,
+  CaseFloorObject,
+  Project
+} from "../../../domain/project";
 import type { EffectiveDocumentSettings } from "../../../domain/export/documentSettings";
 import {
   caseElevationGlyph,
@@ -18,6 +23,10 @@ import {
   parseFaceWallId
 } from "../../../domain/geometry/freestandingWalls";
 import { isPointInPolygon } from "../../../domain/geometry/polygon";
+import {
+  SUSPENSION_WIRE_INSET_FRACTION,
+  SUSPENSION_WIRE_INSET_MM
+} from "../../../domain/project";
 import {
   buildElevationScene,
   getArtworkRectSvg,
@@ -59,6 +68,21 @@ const MUTED = "var(--muted)";
 const SUBTLE = "var(--subtle)";
 const GRID = "var(--line)";
 const FILL_WEAK = "var(--surface-strong)";
+
+// Ghost vocabulary (floor-case, suspended-artwork, non-abutting partition):
+// hardcoded here rather than reused from CSS classes because these marks are
+// plain SVG attributes, not classed elements — this card intentionally
+// avoids className-based styling so it never silently drifts from what's
+// literally drawn. Mirrors the PDF writer's boldened GHOST_BORDER_WIDTH_PT /
+// dash / wire constants (elevationPage.ts) so the preview never disagrees
+// with the artifact it previews. Opacity nudged up alongside the width bump,
+// same reasoning as the CSS pass (global.css .elevation-*-ghost).
+const GHOST_STROKE_WIDTH = 0.6;
+const GHOST_DASH = "3 2";
+const GHOST_OPACITY = 0.82;
+const GHOST_WIRE_WIDTH = 0.45;
+const GHOST_WIRE_DASH = "2 2";
+const GHOST_WIRE_OPACITY = 0.9;
 
 type XY = { x: number; y: number };
 type Transform = {
@@ -633,9 +657,68 @@ function elevationPageMarks(
         height={ghost.heightMm * xf.scalePtPerMm}
         fill="none"
         stroke={SUBTLE}
-        strokeWidth={0.5}
-        strokeDasharray="3 2"
-        opacity={0.7}
+        strokeWidth={GHOST_STROKE_WIDTH}
+        strokeDasharray={GHOST_DASH}
+        opacity={GHOST_OPACITY}
+      />
+    );
+  });
+
+  // Suspended-artwork ghosts (boards hung above the floor): the board floats
+  // between baseHeightMm and baseHeightMm + heightMm rather than standing on
+  // the floor line, plus two suspension wires up to the wall's top edge — the
+  // print twin of drawElevationSuspendedArtworkGhost / the canvas component,
+  // same behind-the-wall-objects paint slot as the floor-case ghosts above.
+  scene.suspendedArtworkGhosts.forEach((ghost, i) => {
+    const topMm = ghost.baseHeightMm + ghost.heightMm;
+    const topY = scene.wallHeightMm - topMm;
+    const a = xf.point({ xMm: ghost.xMinMm, yMm: topY });
+    const widthMm = Math.max(0, ghost.xMaxMm - ghost.xMinMm);
+    if (topMm < scene.wallHeightMm) {
+      const wireInsetMm = Math.min(
+        SUSPENSION_WIRE_INSET_MM,
+        widthMm * SUSPENSION_WIRE_INSET_FRACTION
+      );
+      const wireStartX = xf.point({ xMm: ghost.xMinMm + wireInsetMm, yMm: 0 }).x;
+      const wireEndX = xf.point({ xMm: ghost.xMaxMm - wireInsetMm, yMm: 0 }).x;
+      const wireTopY = xf.point({ xMm: 0, yMm: 0 }).y;
+      marks.push(
+        <line
+          key={`suspended-wire-l-${i}`}
+          x1={wireStartX}
+          y1={wireTopY}
+          x2={wireStartX}
+          y2={a.y}
+          stroke={SUBTLE}
+          strokeWidth={GHOST_WIRE_WIDTH}
+          strokeDasharray={GHOST_WIRE_DASH}
+          opacity={GHOST_WIRE_OPACITY}
+        />,
+        <line
+          key={`suspended-wire-r-${i}`}
+          x1={wireEndX}
+          y1={wireTopY}
+          x2={wireEndX}
+          y2={a.y}
+          stroke={SUBTLE}
+          strokeWidth={GHOST_WIRE_WIDTH}
+          strokeDasharray={GHOST_WIRE_DASH}
+          opacity={GHOST_WIRE_OPACITY}
+        />
+      );
+    }
+    marks.push(
+      <rect
+        key={`suspended-ghost-${i}`}
+        x={a.x}
+        y={a.y}
+        width={widthMm * xf.scalePtPerMm}
+        height={ghost.heightMm * xf.scalePtPerMm}
+        fill="none"
+        stroke={SUBTLE}
+        strokeWidth={GHOST_STROKE_WIDTH}
+        strokeDasharray={GHOST_DASH}
+        opacity={GHOST_OPACITY}
       />
     );
   });
@@ -655,9 +738,9 @@ function elevationPageMarks(
         height={profile.heightMm * xf.scalePtPerMm}
         fill="none"
         stroke={SUBTLE}
-        strokeWidth={0.5}
-        strokeDasharray="3 2"
-        opacity={0.7}
+        strokeWidth={GHOST_STROKE_WIDTH}
+        strokeDasharray={GHOST_DASH}
+        opacity={GHOST_OPACITY}
       />
     );
   });
@@ -891,6 +974,14 @@ function buildElevationForPage(
       object.kind === "case" &&
       isPointInPolygon({ xMm: object.xMm, yMm: object.yMm }, roomPolygonMm)
   );
+  // Same room filter, applied to floor artworks — mirrors
+  // createDocumentPdf.ts's elevationFloorArtworks; the builder itself gates
+  // on baseHeightMm > 0.
+  const floorArtworks = project.floorObjects.filter(
+    (object): object is ArtworkFloorObject =>
+      object.kind === "artwork" &&
+      isPointInPolygon({ xMm: object.xMm, yMm: object.yMm }, roomPolygonMm)
+  );
   // Same two partition gates createDocumentPdf applies: room-owned, minus the
   // partition this page's own face belongs to.
   const ownFreestandingWallId = parseFaceWallId(wall.id)?.freestandingWallId;
@@ -906,6 +997,7 @@ function buildElevationForPage(
       wall.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm,
     artworksById,
     floorCases,
+    floorArtworks,
     partitions,
     wallStartFloorMm: {
       xMm: wall.start.xMm + placement.offsetXMm,

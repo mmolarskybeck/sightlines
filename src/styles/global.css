@@ -4966,6 +4966,10 @@ body.panels-resizing * {
 }
 
 .drawing-surface-empty {
+  /* Positioned so the elevation empty state can carry the same absolutely
+     placed `.surface-label` chip a drawn elevation does — an open wall keeps
+     its wall switcher in the identical top-left spot. */
+  position: relative;
   display: grid;
   flex: 1;
   min-height: 0;
@@ -7853,12 +7857,17 @@ body.panels-resizing * {
 .elevation-floor-case-ghost {
   /* Covers the degenerate fallback, a bare <rect> carrying this class
      directly rather than as a <g> ancestor (SVG fill is inherited, but the
-     descendant rule below is kept as well to match every child explicitly). */
+     descendant rule below is kept as well to match every child explicitly).
+     Bolder than the original 1/0.55 (users read the old pairing as too
+     faint against real artwork strokes) but still var(--subtle), not
+     --muted: no token sits strictly between the two, and width+opacity
+     alone keep the ghost family visibly subordinate to a real artwork's
+     --muted 1.5px outline. */
   fill: none;
   stroke: var(--subtle);
-  stroke-width: 1;
+  stroke-width: 1.5;
   stroke-dasharray: 6 5;
-  opacity: 0.55;
+  opacity: 0.78;
   pointer-events: none;
 }
 
@@ -7877,9 +7886,9 @@ body.panels-resizing * {
 .elevation-suspended-artwork-ghost {
   fill: none;
   stroke: var(--subtle);
-  stroke-width: 1;
+  stroke-width: 1.5;
   stroke-dasharray: 6 5;
-  opacity: 0.55;
+  opacity: 0.78;
   pointer-events: none;
 }
 
@@ -7890,10 +7899,15 @@ body.panels-resizing * {
 
 /* Hairline wires with a finer dash than the board they carry: they explain the
    float (it hangs, it isn't unexplained) without competing with the volume
-   itself, which is the thing a curator is reading. */
+   itself, which is the thing a curator is reading. Width stays one step below
+   the board's (now 1.5) rather than inheriting it, so the "hairline" reading
+   survives the boldening pass; opacity climbs anyway (0.7 → 0.85) because a
+   thinner stroke needs more of it to hold at the same visual weight the board
+   gets from width alone. */
 .elevation-suspended-artwork-ghost .suspended-artwork-ghost-wire {
+  stroke-width: 1;
   stroke-dasharray: 3 4;
-  opacity: 0.7;
+  opacity: 0.85;
 }
 
 /* A free-standing PARTITION projected onto this wall's elevation, in two tiers
@@ -7903,9 +7917,9 @@ body.panels-resizing * {
 .elevation-partition-ghost {
   fill: none;
   stroke: var(--subtle);
-  stroke-width: 1;
+  stroke-width: 1.5;
   stroke-dasharray: 6 5;
-  opacity: 0.55;
+  opacity: 0.78;
   pointer-events: none;
 }
 

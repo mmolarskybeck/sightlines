@@ -161,6 +161,37 @@ describe("useViewPreferences", () => {
     expect(result.current.showCenterline).toBe(true);
   });
 
+  it("defaults showElevationGhosts on, reads it back, and repairs a malformed value", () => {
+    // Ghosts were always drawn before this toggle existed, so a project saved
+    // by an older build must keep drawing them.
+    expect(renderHook(() => useViewPreferences()).result.current.showElevationGhosts).toBe(true);
+
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ showElevationGhosts: false }));
+    expect(renderHook(() => useViewPreferences()).result.current.showElevationGhosts).toBe(false);
+
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ showElevationGhosts: "nope" }));
+    expect(renderHook(() => useViewPreferences()).result.current.showElevationGhosts).toBe(true);
+  });
+
+  it("toggles and persists showElevationGhosts independently of showCenterline", () => {
+    const { result } = renderHook(() => useViewPreferences());
+
+    act(() => {
+      result.current.toggleShowElevationGhosts();
+    });
+
+    expect(result.current.showElevationGhosts).toBe(false);
+    expect(result.current.showCenterline).toBe(true);
+    expect(
+      JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}").showElevationGhosts
+    ).toBe(false);
+
+    act(() => {
+      result.current.toggleShowElevationGhosts();
+    });
+    expect(result.current.showElevationGhosts).toBe(true);
+  });
+
   it("falls back to null for a non-positive, non-finite, or malformed stored floor", () => {
     window.localStorage.setItem(
       STORAGE_KEY,
@@ -342,6 +373,7 @@ describe("useViewPreferences", () => {
     expect(result.current.showGrid).toBe(true);
     expect(result.current.snapToGrid).toBe(true);
     expect(result.current.showCenterline).toBe(true);
+    expect(result.current.showElevationGhosts).toBe(true);
     expect(result.current.gridPrecisionFloorMm).toBeNull();
     expect(result.current.allowOverlappingPlacement).toBe(false);
     expect(result.current.leftPanel).toBe("checklist");
@@ -359,6 +391,7 @@ describe("useViewPreferences", () => {
       showGrid: true,
       snapToGrid: true,
       showCenterline: true,
+      showElevationGhosts: true,
       gridPrecisionFloorMm: null,
       allowOverlappingPlacement: false,
       leftPanel: "checklist",

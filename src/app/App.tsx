@@ -7,6 +7,7 @@ import {
   useState
 } from "react";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
+import { GhostIcon } from "@phosphor-icons/react/dist/csr/Ghost";
 import { GridFourIcon } from "@phosphor-icons/react/dist/csr/GridFour";
 import { MagnetIcon } from "@phosphor-icons/react/dist/csr/Magnet";
 import { RulerIcon } from "@phosphor-icons/react/dist/csr/Ruler";
@@ -496,6 +497,7 @@ export function App() {
     showGrid,
     snapToGrid,
     showCenterline,
+    showElevationGhosts,
     gridPrecisionFloorMm,
     allowOverlappingPlacement,
     leftPanel,
@@ -511,6 +513,7 @@ export function App() {
     toggleShowGrid,
     toggleSnapToGrid,
     toggleShowCenterline,
+    toggleShowElevationGhosts,
     setGridPrecisionFloorMm,
     toggleAllowOverlappingPlacement,
     resetPreferences
@@ -727,7 +730,8 @@ export function App() {
     toggleShowGrid,
     toggleSnapToGrid,
     toggleAllowOverlappingPlacement,
-    toggleShowCenterline
+    toggleShowCenterline,
+    toggleShowElevationGhosts
   });
 
   const measurementContext =
@@ -1864,6 +1868,17 @@ export function App() {
                         onClick={toggleShowCenterline}
                       />
                     ) : null}
+                    {viewMode === "elevation" ? (
+                      <ViewOptionButton
+                        active={showElevationGhosts}
+                        disabled={false}
+                        icon={<GhostIcon aria-hidden="true" size={16} />}
+                        label="Ghosts"
+                        title={showElevationGhosts ? "Hide ghosts" : "Show ghosts"}
+                        kbd="H"
+                        onClick={toggleShowElevationGhosts}
+                      />
+                    ) : null}
                     <ViewOptionButton
                       active={allowOverlappingPlacement}
                       disabled={false}
@@ -1988,6 +2003,7 @@ export function App() {
                     project.defaultCenterlineHeightMm
                   }
                   centerlineVisible={showCenterline}
+                  ghostsVisible={showElevationGhosts}
                   draggingArtworkId={draggingArtworkId}
                   getBlob={getAssetBlob}
                   gridPrecisionFloorMm={gridPrecisionFloorMm}
@@ -2077,6 +2093,19 @@ export function App() {
                 onRestoreWall={
                   selectedWall?.isOpenSide === true
                     ? () => void restoreWall(selectedWall.id)
+                    : undefined
+                }
+                // Open walls only: the same chip ElevationView draws, so
+                // navigating onto an open wall does not strand the curator with
+                // no way to reach the next elevation.
+                switcher={
+                  selectedWall?.isOpenSide === true
+                    ? {
+                        walls: wallsForSwitcher,
+                        currentWallId: selectedWall.id,
+                        onSelectWall: focusWallContext,
+                        unit: elevationUnit
+                      }
                     : undefined
                 }
               />

@@ -34,7 +34,7 @@ const arrowKeys = (): HelpInput => [k("←"), k("↑"), k("↓"), k("→")];
 
 // Single-key toolbar accelerators (useToolbarShortcuts) — keyboard only; touch
 // users tap the same toolbar buttons directly. Plan owns Partition and the
-// room-draw tools (R rectangle, ⇧R outline), Elevation owns Eyeline; the
+// room-draw tools (R rectangle, ⇧R outline), Elevation owns Eyeline and Ghosts; the
 // opening tools and Grid/Snap/Overlap are shared. Exactly the kind of thing
 // this dialog exists to surface, so every accelerator stays.
 function toolbarKeyboardGroup(view: "plan" | "elevation"): HelpGroup {
@@ -55,7 +55,12 @@ function toolbarKeyboardGroup(view: "plan" | "elevation"): HelpGroup {
       { action: "Toggle grid", inputs: [[k("G")]] },
       { action: "Toggle snap", inputs: [[k("S")]] },
       { action: "Toggle overlap", inputs: [[k("O")]] },
-      ...(view === "elevation" ? [{ action: "Toggle eyeline", inputs: [[k("E")]] }] : [])
+      ...(view === "elevation"
+        ? [
+            { action: "Toggle eyeline", inputs: [[k("E")]] },
+            { action: "Toggle ghosts", inputs: [[k("H")]] }
+          ]
+        : [])
     ]
   };
 }

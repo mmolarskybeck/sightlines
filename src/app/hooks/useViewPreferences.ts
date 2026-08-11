@@ -16,6 +16,10 @@ type ViewPreferences = {
   snapToGrid: boolean;
   // Visibility only; centerline snapping remains unconditional.
   showCenterline: boolean;
+  // Elevation-only: the dashed projected ghost band (floor cases, suspended
+  // artwork, partitions standing clear of the wall). Canvas only — PDF export
+  // always draws them.
+  showElevationGhosts: boolean;
   // Millimetres regardless of display unit; null selects automatic precision.
   gridPrecisionFloorMm: number | null;
   // Explicit opt-in to bypass the default collision rejection.
@@ -42,6 +46,7 @@ const DEFAULT_PREFERENCES: ViewPreferences = {
   showGrid: true,
   snapToGrid: true,
   showCenterline: true,
+  showElevationGhosts: true,
   gridPrecisionFloorMm: null,
   allowOverlappingPlacement: false,
   leftPanel: "checklist",
@@ -80,6 +85,10 @@ function readStoredPreferences(): ViewPreferences {
         typeof parsed.showCenterline === "boolean"
           ? parsed.showCenterline
           : DEFAULT_PREFERENCES.showCenterline,
+      showElevationGhosts:
+        typeof parsed.showElevationGhosts === "boolean"
+          ? parsed.showElevationGhosts
+          : DEFAULT_PREFERENCES.showElevationGhosts,
       gridPrecisionFloorMm:
         typeof parsed.gridPrecisionFloorMm === "number" &&
         Number.isFinite(parsed.gridPrecisionFloorMm) &&
@@ -138,6 +147,7 @@ export function useViewPreferences(onPersistenceError?: (message: string) => voi
     showGrid: preferences.showGrid,
     snapToGrid: preferences.snapToGrid,
     showCenterline: preferences.showCenterline,
+    showElevationGhosts: preferences.showElevationGhosts,
     gridPrecisionFloorMm: preferences.gridPrecisionFloorMm,
     allowOverlappingPlacement: preferences.allowOverlappingPlacement,
     leftPanel: preferences.leftPanel,
@@ -173,6 +183,11 @@ export function useViewPreferences(onPersistenceError?: (message: string) => voi
       setPreferences((current) => ({ ...current, snapToGrid: !current.snapToGrid })),
     toggleShowCenterline: () =>
       setPreferences((current) => ({ ...current, showCenterline: !current.showCenterline })),
+    toggleShowElevationGhosts: () =>
+      setPreferences((current) => ({
+        ...current,
+        showElevationGhosts: !current.showElevationGhosts
+      })),
     setGridPrecisionFloorMm: (gridPrecisionFloorMm: number | null) =>
       setPreferences((current) => ({ ...current, gridPrecisionFloorMm })),
     toggleAllowOverlappingPlacement: () =>

@@ -1,5 +1,8 @@
 import { WallIcon } from "@phosphor-icons/react/dist/csr/Wall";
+import type { DisplayUnit } from "../../../domain/project";
 import { Button } from "../ui/button";
+import type { WallSwitcherEntry } from "./WallSwitcher";
+import { WallSwitcherChip } from "./WallSwitcherChip";
 
 // Three states, matching the reasons the Elevation tab can have nothing
 // to draw: no rooms exist yet, or rooms exist but no wall is selected. The
@@ -10,13 +13,24 @@ import { Button } from "../ui/button";
 export function ElevationEmptyState({
   hasRooms,
   openWallName,
-  onRestoreWall
+  onRestoreWall,
+  switcher
 }: {
   hasRooms: boolean;
   // Set when the selected wall is OPEN — a third state, distinct from "nothing
   // selected": there is a wall, it just has no surface to draw.
   openWallName?: string;
   onRestoreWall?: () => void;
+  // Open-wall state only. An open wall is still a wall the curator navigated
+  // to, so the switcher chip has to survive the trip — without it the only way
+  // back to another elevation would be the Gallery list. The plain "no wall
+  // selected"/"no rooms" states have nothing to switch between and omit it.
+  switcher?: {
+    walls: WallSwitcherEntry[];
+    currentWallId: string;
+    onSelectWall: (id: string) => void;
+    unit: DisplayUnit;
+  };
 }) {
   const isOpenWall = openWallName !== undefined;
   const copy = isOpenWall
@@ -27,6 +41,14 @@ export function ElevationEmptyState({
 
   return (
     <div className="drawing-surface-empty">
+      {switcher ? (
+        <WallSwitcherChip
+          walls={switcher.walls}
+          currentWallId={switcher.currentWallId}
+          onSelectWall={switcher.onSelectWall}
+          unit={switcher.unit}
+        />
+      ) : null}
       <div className="canvas-empty">
         <svg
           aria-hidden="true"

@@ -4,7 +4,11 @@ import {
   caseFloorGhostGlyph
 } from "../../../domain/geometry/caseGlyphs";
 import { doorElevationGlyph } from "../../../domain/geometry/doorGlyphs";
-import type { DisplayUnit } from "../../../domain/project";
+import {
+  SUSPENSION_WIRE_INSET_FRACTION,
+  SUSPENSION_WIRE_INSET_MM,
+  type DisplayUnit
+} from "../../../domain/project";
 import type { ElevationScene } from "../../../domain/scene2d/elevationScene";
 import { computeWallTextSkeleton } from "../../../domain/scene2d/wallTextSkeleton";
 import {
@@ -20,6 +24,22 @@ import {
   type PdfFonts
 } from "./primitives";
 import { elevationRect, type ElevationTransform } from "./transforms";
+
+// Shared dashed/subtle vocabulary for every elevation ghost (freestanding
+// floor cases, suspended-artwork boards, non-abutting partitions): the print
+// twin of the CSS ghost boldening (global.css .elevation-*-ghost, 1→1.5,
+// 0.55→0.78 opacity). Bumped from the original 0.5pt/COLORS.subtle pairing —
+// users read that as too faint next to a real artwork's 0.65-0.75pt
+// COLORS.muted outline — but kept below that thickness, and still
+// COLORS.subtle rather than COLORS.muted: there's no PDF gray strictly
+// between the two (see COLORS in primitives.ts), so width alone carries the
+// "still subordinate" read, same call the CSS pass made.
+const GHOST_BORDER_WIDTH_PT = 0.6;
+const GHOST_DASH: [number, number] = [3, 2];
+// Wires read as hairlines relative to the board they carry — one step
+// thinner than GHOST_BORDER_WIDTH_PT, echoing the CSS wire rule.
+const GHOST_WIRE_WIDTH_PT = 0.45;
+const GHOST_WIRE_DASH: [number, number] = [2, 2];
 
 export function drawElevationGrid(
   page: PDFPage,
@@ -280,7 +300,11 @@ export function drawElevationFloorCaseGhost(
 ) {
   const widthMm = Math.max(0, ghost.xMaxMm - ghost.xMinMm);
   const glyph = caseFloorGhostGlyph({ widthMm, heightMm: ghost.heightMm });
-  const dash = { borderColor: COLORS.subtle, borderWidth: 0.5, borderDashArray: [3, 2] };
+  const dash = {
+    borderColor: COLORS.subtle,
+    borderWidth: GHOST_BORDER_WIDTH_PT,
+    borderDashArray: GHOST_DASH
+  };
 
   if (!glyph.hasLegs) {
     // Too short for legs — a plain dashed silhouette, exactly as before.
@@ -311,20 +335,73 @@ export function drawElevationFloorCaseGhost(
     page,
     transform.point({ xMm: ghost.xMinMm, yMm: slabY }),
     transform.point({ xMm: ghost.xMinMm + widthMm, yMm: slabY }),
-    0.5,
+    GHOST_BORDER_WIDTH_PT,
     COLORS.subtle,
-    [3, 2]
+    GHOST_DASH
   );
   for (const leg of glyph.legs) {
     drawLine(
       page,
       transform.point({ xMm: ghost.xMinMm + leg.xMm, yMm: slabY }),
       transform.point({ xMm: ghost.xMinMm + leg.xMm, yMm: ghost.heightMm - glyph.floorYMm }),
-      0.5,
+      GHOST_BORDER_WIDTH_PT,
       COLORS.subtle,
-      [3, 2]
+      GHOST_DASH
     );
   }
+}
+
+// The elevation shadow of a SUSPENDED floor artwork (a board hung from
+// ceiling wires) — the print twin of ElevationSuspendedArtworkGhost.tsx.
+// Unlike the floor-case ghost this does NOT stand on the floor line: this
+// module's model space is wall-local y-up with the floor at 0 (see the caller
+// in createDocumentPdf.ts drawing the floor line at yMm=0), so the board's
+// bottom edge sits directly at ghost.baseHeightMm and its top at
+// baseHeightMm + heightMm — no flip needed, unlike the SVG-y-down canvas
+// component this mirrors. Wires run from the board's top up to the wall's
+// TOP edge (wallHeightMm), suppressed once the board has reached it — same
+// rule as the canvas twin, passed in because (unlike the floor-case ghost)
+// the ceiling reference isn't part of the ghost's own data.
+export function drawElevationSuspendedArtworkGhost(
+  page: PDFPage,
+  transform: ElevationTransform,
+  ghost: ElevationScene["suspendedArtworkGhosts"][number],
+  wallHeightMm: number
+) {
+  const widthMm = Math.max(0, ghost.xMaxMm - ghost.xMinMm);
+  const topMm = ghost.baseHeightMm + ghost.heightMm;
+
+  if (topMm < wallHeightMm) {
+    const wireInsetMm = Math.min(
+      SUSPENSION_WIRE_INSET_MM,
+      widthMm * SUSPENSION_WIRE_INSET_FRACTION
+    );
+    const wireXStartMm = ghost.xMinMm + wireInsetMm;
+    const wireXEndMm = ghost.xMaxMm - wireInsetMm;
+    drawLine(
+      page,
+      transform.point({ xMm: wireXStartMm, yMm: topMm }),
+      transform.point({ xMm: wireXStartMm, yMm: wallHeightMm }),
+      GHOST_WIRE_WIDTH_PT,
+      COLORS.subtle,
+      GHOST_WIRE_DASH
+    );
+    drawLine(
+      page,
+      transform.point({ xMm: wireXEndMm, yMm: topMm }),
+      transform.point({ xMm: wireXEndMm, yMm: wallHeightMm }),
+      GHOST_WIRE_WIDTH_PT,
+      COLORS.subtle,
+      GHOST_WIRE_DASH
+    );
+  }
+
+  page.drawRectangle({
+    ...elevationRect(transform, ghost.xMinMm, ghost.baseHeightMm, widthMm, ghost.heightMm),
+    borderColor: COLORS.subtle,
+    borderWidth: GHOST_BORDER_WIDTH_PT,
+    borderDashArray: GHOST_DASH
+  });
 }
 
 // A free-standing partition projected onto this wall, print twin of
@@ -348,7 +425,7 @@ export function drawElevationPartitionProfile(
   page.drawRectangle({
     ...rect,
     borderColor: COLORS.subtle,
-    borderWidth: 0.5,
-    borderDashArray: [3, 2]
+    borderWidth: GHOST_BORDER_WIDTH_PT,
+    borderDashArray: GHOST_DASH
   });
 }
