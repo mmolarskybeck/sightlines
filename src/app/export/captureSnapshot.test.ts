@@ -129,6 +129,53 @@ describe("buildExportableSvgMarkup", () => {
     document.body.removeChild(svg);
   });
 
+  it("falls back to an <img>+canvas re-encode when the blob fetch is refused (CSP connect-src without blob:)", async () => {
+    const svg = document.createElementNS(SVG_NS, "svg") as SVGSVGElement;
+    svg.setAttribute("viewBox", "0 0 100 100");
+    const image = document.createElementNS(SVG_NS, "image");
+    image.setAttribute("href", "blob:http://localhost/csp-blocked");
+    svg.appendChild(image);
+    document.body.appendChild(svg);
+
+    // A connect-src without blob: refuses the fetch even though the URL is
+    // this document's own live data...
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Refused to connect because it violates the document's CSP.");
+      })
+    );
+
+    // ...but the same URL still loads as an image resource (img-src allows
+    // blob:), so the capture must recover through the canvas re-encode.
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockReturnValue({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D);
+    const toDataURL = vi
+      .spyOn(HTMLCanvasElement.prototype, "toDataURL")
+      .mockReturnValue("data:image/png;base64,ZmFrZQ==");
+    class FakeImage {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      naturalWidth = 40;
+      naturalHeight = 60;
+      set src(_value: string) {
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+    vi.stubGlobal("Image", FakeImage);
+
+    try {
+      const { markup } = await buildExportableSvgMarkup(svg);
+      expect(markup).not.toContain("blob:http://localhost/csp-blocked");
+      expect(markup).toContain("data:image/png;base64,ZmFrZQ==");
+    } finally {
+      getContext.mockRestore();
+      toDataURL.mockRestore();
+      document.body.removeChild(svg);
+    }
+  });
+
   it("strips a blob href whose fetch rejects (rather than failing the capture or shipping a dead reference)", async () => {
     const svg = document.createElementNS(SVG_NS, "svg") as SVGSVGElement;
     svg.setAttribute("viewBox", "0 0 100 100");

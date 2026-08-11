@@ -80,6 +80,31 @@ function blobUrlToDataUri(blobUrl: string): Promise<string> {
     );
 }
 
+// fetch() of a blob: URL is governed by the CSP's connect-src, and 'self'
+// does NOT cover the blob: scheme — a policy without an explicit blob: entry
+// blocks the fetch above even though the URL is this document's own data.
+// That shipped once (app.sightlines.art, found 2026-08): every artwork in a
+// snapshot rasterized as the broken-image glyph while the live view looked
+// fine. Loading the same URL through an <img> instead falls under img-src
+// (which has always allowed blob: — the whole app renders artwork that way)
+// and re-encoding through a canvas recovers a data: URI. Lossier than the
+// byte-exact fetch path (PNG re-encode), so it stays the fallback, not the
+// default.
+async function blobUrlToDataUriViaCanvas(blobUrl: string): Promise<string> {
+  const canvas = document.createElement("canvas");
+  // Probe the context before touching the network: in environments without
+  // canvas rasterization (jsdom) this throws immediately instead of hanging
+  // on an image load that never settles.
+  const probe = canvas.getContext("2d");
+  if (!probe) throw new Error("blobUrlToDataUriViaCanvas: 2D canvas context unavailable");
+
+  const image = await loadImage(blobUrl, "blobUrlToDataUriViaCanvas: failed to decode blob image");
+  canvas.width = Math.max(1, image.naturalWidth);
+  canvas.height = Math.max(1, image.naturalHeight);
+  probe.drawImage(image, 0, 0);
+  return canvas.toDataURL("image/png");
+}
+
 // ElevationArtwork sets its <image>'s `href` to a `blob:` URL from the app's
 // asset pipeline (useAssetImageUrls / imageUrlsByAssetId) — valid and
 // resolvable in the live document. But `captureSvgSnapshot` renders the
@@ -99,21 +124,30 @@ async function inlineBlobImages(svg: SVGSVGElement): Promise<void> {
     images.map(async (image) => {
       const href = image.getAttribute("href") ?? image.getAttributeNS(XLINK_NS, "href");
       if (!href || !href.startsWith("blob:")) return;
+      let dataUri: string | null = null;
       try {
-        const dataUri = await blobUrlToDataUri(href);
+        dataUri = await blobUrlToDataUri(href);
+      } catch {
+        // fetch() blocked (a CSP connect-src without blob:) or otherwise
+        // failed while the URL may still be loadable as an image resource.
+        try {
+          dataUri = await blobUrlToDataUriViaCanvas(href);
+        } catch {
+          // Genuinely dead (revoked) or undecodable. Keeping the blob: href
+          // would guarantee the rasterizer draws the browser's broken-image
+          // glyph (secure static mode refuses it), so strip the reference —
+          // the artwork's outline rect still marks its place. The §10.3
+          // vector-placeholder behavior for genuinely missing images is a
+          // separate, later piece of work.
+          image.removeAttribute("href");
+          image.removeAttributeNS(XLINK_NS, "href");
+        }
+      }
+      if (dataUri !== null) {
         image.setAttribute("href", dataUri);
         if (image.getAttributeNS(XLINK_NS, "href")) {
           image.setAttributeNS(XLINK_NS, "href", dataUri);
         }
-      } catch {
-        // A blob gone missing/revoked by capture time. Keeping the dead
-        // blob: href would guarantee the rasterizer draws the browser's
-        // broken-image glyph (secure static mode refuses it), so strip the
-        // reference instead — the artwork's outline rect still marks its
-        // place. The §10.3 vector-placeholder behavior for genuinely missing
-        // images is a separate, later piece of work.
-        image.removeAttribute("href");
-        image.removeAttributeNS(XLINK_NS, "href");
       }
     })
   );
@@ -160,11 +194,14 @@ export async function buildExportableSvgMarkup(svgElement: SVGSVGElement): Promi
   return { markup: new XMLSerializer().serializeToString(clone), widthPx, heightPx };
 }
 
-function loadImage(src: string): Promise<HTMLImageElement> {
+function loadImage(
+  src: string,
+  errorMessage = "captureSvgSnapshot: failed to decode serialized SVG"
+): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("captureSvgSnapshot: failed to decode serialized SVG"));
+    image.onerror = () => reject(new Error(errorMessage));
     image.src = src;
   });
 }
