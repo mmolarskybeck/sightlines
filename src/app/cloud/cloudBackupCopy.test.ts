@@ -391,6 +391,15 @@ describe("getCloudProjectOpenErrorMessage", () => {
     );
   });
 
+  // Uploads are uncapped on purpose, so a backup too big for this tab to open
+  // really can exist; the message points at the place it can still be fetched
+  // instead of implying a retry here would work.
+  it("sends an oversized backup to dropbox.com rather than offering a retry", () => {
+    expect(getCloudProjectOpenErrorMessage("too-large")).toBe(
+      "That backup is too large to open here. You can download it from dropbox.com."
+    );
+  });
+
   it("names the fix for a lapsed grant and backs off on rate limits", () => {
     expect(getCloudProjectOpenErrorMessage("reauth")).toBe(
       "Reconnect Dropbox to open this backup."

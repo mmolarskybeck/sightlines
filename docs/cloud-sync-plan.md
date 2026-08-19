@@ -1,8 +1,8 @@
 # Cloud Sync Plan — cross-device Dropbox sync
 
 Design settled 2026-08-19. **Stage 1 (cloud project browser) built 2026-08-19**
-(uncommitted, `feat/cloud-project-browser`; see `docs/status.md`); stages 2–4 are not
-built. This doc records the agreed architecture and staging so implementation
+(`feat/cloud-project-browser`, committed `8e7566f` + review-fix follow-up; see
+`docs/status.md`); stages 2–4 are not built. This doc records the agreed architecture and staging so implementation
 sessions can start from decisions, not re-derivation. It extends the shipped backup system described in
 `docs/cloud-backup-providers.md` and supersedes that doc's "explicit future decision
 required for conflict handling" — the decision is now made.

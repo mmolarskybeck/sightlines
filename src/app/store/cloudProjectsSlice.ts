@@ -16,9 +16,9 @@ import {
   getCloudProjectOpenErrorMessage,
   type CloudProjectOpenErrorKind
 } from "../cloud/cloudBackupCopy";
+import { MAX_BACKUP_DOWNLOAD_BYTES } from "../cloud/dropboxAuth";
 import type { CloudBackupProvider, CloudProjectFolder } from "../cloud/provider";
 import type { AppState, AppStoreDeps } from "../store";
-import { telemetry } from "../telemetry/telemetry";
 
 export type CloudProjectsStatus =
   | "idle"
@@ -77,6 +77,7 @@ export function createCloudProjectsSlice(
       case "not-found":
       case "rate-limit":
       case "quota":
+      case "too-large":
         return error.kind;
       default:
         return "transient";
@@ -129,6 +130,19 @@ export function createCloudProjectsSlice(
         return false;
       }
 
+      // Uploads are deliberately uncapped (a backup that silently stops is the
+      // worse failure), while a download has to fit in this tab's memory — so a
+      // backup can legitimately exist that this surface can never open. Say so
+      // from the listing's own size, before spending the bytes: the download
+      // would only fail the same way after a long wait.
+      if (
+        typeof latest.sizeBytes === "number" &&
+        latest.sizeBytes > MAX_BACKUP_DOWNLOAD_BYTES
+      ) {
+        toast.error(getCloudProjectOpenErrorMessage("too-large"));
+        return false;
+      }
+
       set({ cloudProjectOpening: folder.folderName });
       let bytes: Uint8Array;
       try {
@@ -160,11 +174,16 @@ export function createCloudProjectsSlice(
         const buffer = new ArrayBuffer(bytes.byteLength);
         new Uint8Array(buffer).set(bytes);
 
-        const imported = await get().importCloudBackupPackage(buffer, {
-          asCopy: matchesLocalProject
+        // lastBackupIso is the timestamp of the very file being restored: on a
+        // commit that preserves identity, the import seeds this device's
+        // cloud-backup meta with it, so the scheduler doesn't immediately
+        // re-upload content Dropbox already holds. Telemetry for a restore
+        // fires at that commit too, never here — an import that only parks in
+        // the conflict dialog may still be cancelled.
+        return await get().importCloudBackupPackage(buffer, {
+          asCopy: matchesLocalProject,
+          lastBackupIso: latest.serverModifiedIso
         });
-        if (imported) telemetry.track("cloud_project_opened", {});
-        return imported;
       } finally {
         set({ cloudProjectOpening: null });
       }

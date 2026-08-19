@@ -13,7 +13,23 @@ import { AssetNotFoundError } from "../../domain/repositories/assetRepository";
 import type { PackageExportMode } from "../../domain/schema/packageSchema";
 import { migrateProjectJsonWithReport } from "../../domain/schema/projectSchema";
 import type { AppState, AppStoreDeps } from "../store";
+import { selectBackupFingerprint } from "./cloudBackupSlice";
+import { writeCloudBackupMeta } from "./cloudBackupMeta";
 import { telemetry } from "../telemetry/telemetry";
+
+// Set when the bytes being imported came from this account's own cloud backup
+// (the cloud project browser), carrying the timestamp of the file that was
+// downloaded. Absent for every other import path.
+export type CloudRestoreContext = { lastBackupIso: string | null };
+
+// A parked import: the pure plan the dialog reviews, plus the provenance the
+// commit still needs once the user resolves it. The plan alone is not enough —
+// a cloud restore's bookkeeping (and its telemetry) has to survive the park,
+// which can end in a commit or a dismissal minutes later.
+export type PendingPackageImport = {
+  plan: ImportPlan;
+  cloudRestore?: CloudRestoreContext;
+};
 
 export type PackageSliceActions = {
   importProjectJson: (text: string) => Promise<void>;
@@ -44,7 +60,7 @@ export type PackageSliceActions = {
   // which includes parking in the artwork conflict dialog.
   importCloudBackupPackage: (
     bytes: ArrayBuffer,
-    options?: { asCopy?: boolean }
+    options?: { asCopy?: boolean; lastBackupIso?: string | null }
   ) => Promise<boolean>;
   resolvePackageImportConflicts: (
     resolutions: Record<string, ConflictResolution>
@@ -113,7 +129,8 @@ export function createPackageSlice(
   // no-conflict fast path and the dialog resolution path.
   async function commitPackageImport(
     plan: ImportPlan,
-    resolutions: Record<string, ConflictResolution>
+    resolutions: Record<string, ConflictResolution>,
+    cloudRestore?: CloudRestoreContext
   ) {
     const commit = finalizePackageImport(plan, resolutions);
 
@@ -182,11 +199,38 @@ export function createPackageSlice(
     // the record made it to disk is the save badge's story, not this
     // counter's, so this always fires.
     telemetry.track("package_import_completed", {});
+
+    if (!cloudRestore) return;
+
+    // A restore only counts here, at the commit — the parked-in-conflicts path
+    // can still be dismissed, and counting that as an opened project inflates
+    // the number with restores the user cancelled. Both restore shapes
+    // (identity-preserving and save-a-copy) count, because both really did put
+    // a cloud project on this device.
+    telemetry.track("cloud_project_opened", {});
+
+    // Seed this device's cloud-backup bookkeeping so the scheduler doesn't
+    // immediately re-upload what it just downloaded: the restored content
+    // already exists as the newest backup in that project's Dropbox folder, so
+    // an upload minutes later would burn one of the five retention slots on a
+    // duplicate. The next real edit changes the fingerprint and flips the dirty
+    // check honestly.
+    //
+    // Only when identity was preserved. A save-a-copy restore is a NEW project
+    // with its own, still-empty backup folder — its first backup is correct
+    // behavior, and claiming it is already backed up would leave a project with
+    // no cloud copy at all. The (opened, libraryArtworks) pair below is exactly
+    // what the scheduler will fingerprint, so the two agree by construction.
+    if (plan.projectRenamed) return;
+    writeCloudBackupMeta(opened.id, {
+      lastCloudBackupAt: cloudRestore.lastBackupIso ?? new Date().toISOString(),
+      backedUpFingerprint: selectBackupFingerprint(opened, libraryArtworks)
+    });
   }
 
   async function runPackageImport(
     bytes: ArrayBuffer,
-    options: { forceProjectCopy?: boolean } = {}
+    options: { forceProjectCopy?: boolean; cloudRestore?: CloudRestoreContext } = {}
   ): Promise<boolean> {
     set({ intakeState: "processing" });
     try {
@@ -224,17 +268,24 @@ export function createPackageSlice(
           assetShaById,
           projectIds: summaries.map((summary) => summary.id)
         },
-        options
+        { forceProjectCopy: options.forceProjectCopy }
       );
 
       if (plan.conflicts.length > 0) {
         // Park for ONE review step in the conflict dialog — nothing has
         // been persisted yet, so dismissing discards the import cleanly.
-        set({ pendingPackageImport: plan });
+        // The restore provenance parks with the plan so the commit that may
+        // follow can still tell where these bytes came from.
+        set({
+          pendingPackageImport: {
+            plan,
+            ...(options.cloudRestore ? { cloudRestore: options.cloudRestore } : {})
+          }
+        });
         return true;
       }
 
-      await commitPackageImport(plan, {});
+      await commitPackageImport(plan, {}, options.cloudRestore);
       return true;
     } catch (error) {
       const message = `Import failed: ${
@@ -323,15 +374,18 @@ export function createPackageSlice(
     },
 
     async importCloudBackupPackage(bytes, options = {}) {
-      return runPackageImport(bytes, { forceProjectCopy: options.asCopy === true });
+      return runPackageImport(bytes, {
+        forceProjectCopy: options.asCopy === true,
+        cloudRestore: { lastBackupIso: options.lastBackupIso ?? null }
+      });
     },
 
     async resolvePackageImportConflicts(resolutions) {
-      const plan = get().pendingPackageImport;
-      if (!plan) return;
+      const pending = get().pendingPackageImport;
+      if (!pending) return;
       set({ pendingPackageImport: null });
       try {
-        await commitPackageImport(plan, resolutions);
+        await commitPackageImport(pending.plan, resolutions, pending.cloudRestore);
       } catch (error) {
         const message = `Import failed: ${
           error instanceof Error ? error.message : "the package could not be saved."
@@ -342,6 +396,9 @@ export function createPackageSlice(
     },
 
     dismissPackageImport() {
+      // Dropping the whole parked record discards the plan AND its provenance:
+      // a cancelled restore leaves no trace, and in particular never counts as
+      // an opened cloud project.
       set({ pendingPackageImport: null });
     }
   };

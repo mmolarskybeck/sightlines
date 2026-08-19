@@ -276,8 +276,8 @@ export function AppDialogs({
         }}
       />
       <ImportConflictDialog
-        assetsToSave={pendingPackageImport?.assetsToSave ?? null}
-        conflicts={pendingPackageImport?.conflicts ?? null}
+        assetsToSave={pendingPackageImport?.plan.assetsToSave ?? null}
+        conflicts={pendingPackageImport?.plan.conflicts ?? null}
         getBlob={getAssetBlob}
         unit={project.unit}
         onResolve={(resolutions) => void resolvePackageImportConflicts(resolutions)}

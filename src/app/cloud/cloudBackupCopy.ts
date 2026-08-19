@@ -444,16 +444,23 @@ export type CloudProjectOpenErrorKind =
   | "not-found"
   | "rate-limit"
   | "quota"
+  | "too-large"
   | "transient";
 
 // Failure to download one backup. "not-found" gets no retry affordance — the
-// file is gone, and the list is refreshed instead.
+// file is gone, and the list is refreshed instead. "too-large" gets its own
+// sentence because backup uploads are deliberately uncapped (a backup must
+// never silently stop), so a file too big for this tab to open really can
+// exist — and the honest answer names the place it can still be fetched from
+// rather than implying a retry here would work.
 export function getCloudProjectOpenErrorMessage(
   kind: CloudProjectOpenErrorKind
 ): string {
   switch (kind) {
     case "not-found":
       return "That backup is no longer in Dropbox.";
+    case "too-large":
+      return "That backup is too large to open here. You can download it from dropbox.com.";
     case "reauth":
       return "Reconnect Dropbox to open this backup.";
     case "rate-limit":

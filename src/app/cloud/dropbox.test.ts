@@ -450,7 +450,8 @@ describe("DropboxCloudBackupProvider", () => {
         entries: [
           folder("Winter Show — abc12345"),
           folder("Spring Show — def67890"),
-          // Not written by Sightlines: no id suffix, so it is not a project.
+          // No id suffix AND nothing that could be a backup inside it: not a
+          // project folder under any reading.
           folder("Scratch Notes"),
           file("Winter Show — abc12345", "Winter Show A.sightlines", "2026-07-01T00:00:00Z")
         ],
@@ -463,7 +464,7 @@ describe("DropboxCloudBackupProvider", () => {
           // A stray non-package file is not a backup.
           file("Winter Show — abc12345", "notes.txt", "2026-09-01T00:00:00Z"),
           file("Spring Show — def67890", "Spring Show A.sightlines", "2026-06-01T00:00:00Z"),
-          file("Scratch Notes", "loose.sightlines", "2026-12-01T00:00:00Z")
+          file("Scratch Notes", "loose.txt", "2026-12-01T00:00:00Z")
         ],
         has_more: false
       };
@@ -483,7 +484,7 @@ describe("DropboxCloudBackupProvider", () => {
         path: "/backups",
         recursive: true
       });
-      // Newest backup first; the unparseable folder is dropped entirely.
+      // Newest backup first; a folder holding no backup is dropped entirely.
       expect(projects.map((project) => project.folderName)).toEqual([
         "Winter Show — abc12345",
         "Spring Show — def67890"
@@ -534,6 +535,90 @@ describe("DropboxCloudBackupProvider", () => {
       expect(projects[2].backupCount).toBe(0);
     });
 
+    // Folder naming was migrated once (bare project id → "<Title> — <id8>"),
+    // so pre-migration folders can still hold the only copy of a project whose
+    // device is gone. They must be listable, not silently skipped.
+    it("lists a legacy folder named with the bare project id under its raw name", async () => {
+      seedAuth();
+      const legacyId = "8f14e45f-ceea-467a-9a1e-2b4c0b2f9d31";
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          if (url.endsWith("/files/list_folder")) {
+            return jsonResponse(200, {
+              entries: [
+                folder(legacyId),
+                file(legacyId, "Winter Show 2026-05-01.sightlines", "2026-05-01T00:00:00Z")
+              ],
+              has_more: false
+            });
+          }
+          return jsonResponse(200, {});
+        })
+      );
+
+      const projects = await makeProvider().listCloudProjects();
+
+      expect(projects).toHaveLength(1);
+      expect(projects[0]).toMatchObject({
+        folderName: legacyId,
+        title: legacyId,
+        // The whole id, so the browser's startsWith test is an exact match and
+        // a project still on this device correctly offers "Save a copy".
+        projectIdPrefix: legacyId,
+        backupCount: 1
+      });
+    });
+
+    it("keeps a legacy folder with no backups in it hidden", async () => {
+      seedAuth();
+      const legacyId = "8f14e45f-ceea-467a-9a1e-2b4c0b2f9d31";
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          if (url.endsWith("/files/list_folder")) {
+            return jsonResponse(200, {
+              entries: [folder(legacyId), file(legacyId, "readme.txt", "2026-05-01T00:00:00Z")],
+              has_more: false
+            });
+          }
+          return jsonResponse(200, {});
+        })
+      );
+
+      await expect(makeProvider().listCloudProjects()).resolves.toEqual([]);
+    });
+
+    it("lists an unrecognizable folder holding a backup, with no id guess", async () => {
+      seedAuth();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          if (url.endsWith("/files/list_folder")) {
+            return jsonResponse(200, {
+              entries: [
+                folder("Old Exports"),
+                file("Old Exports", "Recovered.sightlines", "2026-05-01T00:00:00Z")
+              ],
+              has_more: false
+            });
+          }
+          return jsonResponse(200, {});
+        })
+      );
+
+      const projects = await makeProvider().listCloudProjects();
+
+      expect(projects).toHaveLength(1);
+      // "" matches no local id, so the row offers "Open" and the import
+      // pipeline stays the authority on identity.
+      expect(projects[0]).toMatchObject({
+        folderName: "Old Exports",
+        title: "Old Exports",
+        projectIdPrefix: ""
+      });
+    });
+
     it("returns an empty list when /backups does not exist yet", async () => {
       seedAuth();
       vi.stubGlobal(
@@ -542,6 +627,26 @@ describe("DropboxCloudBackupProvider", () => {
       );
 
       await expect(makeProvider().listCloudProjects()).resolves.toEqual([]);
+    });
+
+    // Dropbox answers every route-level error with 409, so reading them all as
+    // "the folder isn't there" renders a real rejection as "No cloud backups
+    // yet" — the one sentence that must never be a guess.
+    it("surfaces a non-not_found 409 as an error rather than an empty listing", async () => {
+      seedAuth();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          jsonResponse(409, { error_summary: "path/not_folder/...", error: { ".tag": "path" } })
+        )
+      );
+
+      const failure = await makeProvider()
+        .listCloudProjects()
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(CloudBackupError);
+      expect(failure).toMatchObject({ kind: "transient" });
     });
 
     it("requires one reconnect when the stored token predates the read scope", async () => {

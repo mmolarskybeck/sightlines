@@ -289,8 +289,10 @@ export function isProjectFolderName(name: string, projectId: string): boolean {
 // names without knowing any project id. The separator can legitimately occur
 // inside a title ("A — B — abc12345"), so the id suffix is always the segment
 // after the LAST separator. Legacy folders named with the bare project id carry
-// no title and deliberately return null — the next upload from the owning
-// device reconciles them into the readable form.
+// no title, so this returns null for them — but the LISTING no longer drops
+// them: groupCloudProjects falls back to the raw folder name for any folder
+// that actually contains backups (a pre-migration folder can be the only way
+// back to a project whose device is gone).
 //
 // The recovered projectIdPrefix is a display hint, never proof of identity
 // (see CloudProjectFolder in provider.ts).
@@ -309,6 +311,15 @@ export function parseProjectFolderName(
     return null;
   }
   return { title, projectIdPrefix };
+}
+
+// Whether a folder name is plausibly a bare project id — the pre-migration
+// naming, which is exactly what newId() produces (a v4 UUID). Used only to
+// decide whether an unparseable folder's raw name can serve as its
+// projectIdPrefix; a full id makes the browser's `id.startsWith(prefix)` test
+// an exact match rather than an 8-char guess.
+export function isBareProjectIdFolderName(name: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name);
 }
 
 // A minimal entry from list_folder: what retention needs, plus the fields the

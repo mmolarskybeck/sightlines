@@ -32,10 +32,13 @@ export type CloudProjectBackup = {
 };
 
 // A per-project backup folder in the provider's backup location. Identity here
-// is heuristic: the folder name carries only the first 8 chars of the project
-// UUID, so "matches a local project" is a display-level guess — authoritative
-// identity is the manifest's project id, read only after download. Never treat
-// projectIdPrefix as proof of identity.
+// is heuristic: the folder name usually carries only the first 8 chars of the
+// project UUID, so "matches a local project" is a display-level guess —
+// authoritative identity is the manifest's project id, read only after
+// download. Never treat projectIdPrefix as proof of identity. It may also be a
+// full id (a pre-migration folder named with the bare project id) or "" (a
+// folder holding backups under a name this app never wrote); both are still
+// only labels.
 export type CloudProjectFolder = {
   folderName: string;
   title: string;

@@ -3094,7 +3094,7 @@ describe("app store", () => {
       await store.getState().importSightlinesPackage(bytes);
 
       expect(store.getState().error).toBeNull();
-      const plan = store.getState().pendingPackageImport;
+      const plan = store.getState().pendingPackageImport?.plan;
       expect(plan?.conflicts.map((conflict) => conflict.incoming.id)).toEqual([
         store.getState().libraryArtworks[0]!.id
       ]);
@@ -3139,7 +3139,7 @@ describe("app store", () => {
 
       await store.getState().importSightlinesPackage(bytes);
 
-      const plan = store.getState().pendingPackageImport;
+      const plan = store.getState().pendingPackageImport?.plan;
       expect(plan?.conflicts.map((conflict) => conflict.incoming.id).sort()).toEqual(
         [mineId, theirsId, bothId].sort()
       );

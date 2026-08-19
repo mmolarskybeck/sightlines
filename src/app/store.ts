@@ -90,7 +90,6 @@ import {
   type ProjectSummary,
   type WallObject
 } from "../domain/project";
-import { type ImportPlan } from "../domain/package/importPackage";
 import type { ArtworkLibraryRepository } from "../domain/repositories/artworkLibraryRepository";
 import type { AssetRepository } from "../domain/repositories/assetRepository";
 import { IndexedDbArtworkLibraryRepository } from "../domain/repositories/indexedDbArtworkLibraryRepository";
@@ -142,7 +141,8 @@ import {
 } from "./store/openingEdits";
 import {
   createPackageSlice,
-  type PackageSliceActions
+  type PackageSliceActions,
+  type PendingPackageImport
 } from "./store/packageSlice";
 import {
   CLOUD_BACKUP_SLICE_INITIAL,
@@ -392,8 +392,9 @@ export type AppState = ArrangeSliceState &
   libraryArtworks: Artwork[];
   intakeState: "idle" | "processing";
   // A .sightlines import paused on §6 artwork conflicts, awaiting one review
-  // step in the conflict dialog. Nothing has been persisted yet.
-  pendingPackageImport: ImportPlan | null;
+  // step in the conflict dialog. Nothing has been persisted yet. Carries the
+  // plan plus the provenance the eventual commit still needs.
+  pendingPackageImport: PendingPackageImport | null;
   // Set when a project fails to load with a typed corruption error AND a
   // schema-valid earlier snapshot exists. Drives the recovery dialog; a restore
   // is never applied silently.

@@ -33,6 +33,7 @@ import {
   DROPBOX_UPLOAD_CHUNK_BYTES,
   generateRandomString,
   isReauthorizationFailure,
+  isBareProjectIdFolderName,
   isProjectFolderName,
   MAX_BACKUP_DOWNLOAD_BYTES,
   parseProjectFolderName,
@@ -611,8 +612,17 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
         options.recursive ? { path, recursive: true } : { path }
       )
     });
-    // A missing folder (nothing uploaded yet, or all pruned) is not an error.
-    if (response.status === 409) return [];
+    // Dropbox answers EVERY route-level error with 409 — not_folder, a
+    // malformed path, a disallowed name — so only the body says which one this
+    // is. A missing folder (nothing uploaded yet, or all pruned) is genuinely
+    // an empty listing; anything else is a real rejection and must surface as
+    // one, or the browser renders a rejected request as "No cloud backups yet."
+    if (response.status === 409) {
+      const errorBody = await response.json().catch(() => null);
+      const summary = errorBody === null ? "" : JSON.stringify(errorBody);
+      if (summary.includes("not_found")) return [];
+      throw classifiedError(response.status, errorBody, "list backups");
+    }
     let body = await ensureOk<{
       entries: DropboxFileEntry[];
       has_more: boolean;
@@ -707,8 +717,22 @@ function oversizeError(action: string): CloudBackupError {
 // from the entry path rather than trusted from the order Dropbox returns:
 // /backups/<folder> is a project folder, /backups/<folder>/<file> its backup.
 // Paths are lowercased by Dropbox, so the folder segment is the join key.
+//
+// A folder name that doesn't parse is NOT dropped if it actually holds
+// backups. Folder naming was migrated once (bare project id → "<Title> —
+// <id8>"), so pre-migration folders exist, and they'd be invisible exactly
+// when a dead device makes them the only way back to that project. An
+// unparseable folder therefore shows under its raw name; only one with no
+// .sightlines file in it stays hidden (that is somebody else's folder, not a
+// project).
 function groupCloudProjects(entries: DropboxFileEntry[]): CloudProjectFolder[] {
-  type Group = { folder: CloudProjectFolder; backups: CloudProjectBackup[] };
+  type Group = {
+    folder: CloudProjectFolder;
+    backups: CloudProjectBackup[];
+    // False for a folder recovered by the fallback above: it earns its place
+    // only by containing a backup.
+    named: boolean;
+  };
   const groups = new Map<string, Group>();
 
   for (const entry of entries) {
@@ -716,16 +740,22 @@ function groupCloudProjects(entries: DropboxFileEntry[]): CloudProjectFolder[] {
     const segments = backupPathSegments(entry);
     if (segments.length !== 2) continue;
     const parsed = parseProjectFolderName(entry.name);
-    if (!parsed) continue;
     groups.set(segments[1], {
       folder: {
         folderName: entry.name,
-        title: parsed.title,
-        projectIdPrefix: parsed.projectIdPrefix,
+        title: parsed?.title ?? entry.name,
+        // A bare project id IS the whole prefix, so `id.startsWith(prefix)`
+        // becomes an exact match — a still-local project correctly gets "Save
+        // a copy". Any other unparseable name yields "" (matches nothing, so
+        // "Open"). Either way this only picks a label: the import pipeline
+        // re-ids on collision, so a wrong guess costs a redundant copy.
+        projectIdPrefix:
+          parsed?.projectIdPrefix ?? (isBareProjectIdFolderName(entry.name) ? entry.name : ""),
         backupCount: 0,
         latestBackup: null
       },
-      backups: []
+      backups: [],
+      named: parsed !== null
     });
   }
 
@@ -747,6 +777,9 @@ function groupCloudProjects(entries: DropboxFileEntry[]): CloudProjectFolder[] {
 
   const folders: CloudProjectFolder[] = [];
   for (const group of groups.values()) {
+    // An unnamed folder with nothing in it proves nothing; a properly named one
+    // is a project whose backups were all pruned, and still belongs in the list.
+    if (!group.named && group.backups.length === 0) continue;
     // ISO timestamps compare lexicographically; an entry without one sorts
     // last (its "" loses every comparison), so it is never mistaken for newest.
     group.backups.sort(
