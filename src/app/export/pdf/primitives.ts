@@ -70,6 +70,11 @@ export function drawText(
     strong?: boolean;
     color?: ReturnType<typeof rgb>;
     rotate?: number;
+    // Synthetic oblique, in degrees of forward lean. The bundled Geist ships
+    // no italic cut, so the checklist PDF's title line slants the upright face
+    // through the text matrix instead (pdf-lib's ySkew is the `c` term, the
+    // x-shear). Advance widths are unchanged, so measured text still fits.
+    obliqueDeg?: number;
   }
 ) {
   page.drawText(fontText(fonts, text), {
@@ -78,7 +83,8 @@ export function drawText(
     size: options.size,
     font: options.strong ? fonts.strong : fonts.regular,
     color: options.color ?? COLORS.ink,
-    ...(options.rotate !== undefined ? { rotate: degrees(options.rotate) } : {})
+    ...(options.rotate !== undefined ? { rotate: degrees(options.rotate) } : {}),
+    ...(options.obliqueDeg ? { ySkew: degrees(options.obliqueDeg) } : {})
   });
 }
 

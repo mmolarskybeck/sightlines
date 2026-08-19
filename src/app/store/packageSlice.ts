@@ -1,4 +1,9 @@
 import { toast } from "sonner";
+import {
+  buildChecklistExport,
+  type BuiltChecklistExport
+} from "../../domain/checklistExport/buildChecklistExport";
+import type { ChecklistExportOptions } from "../../domain/checklistExport/types";
 import { buildProjectPackage } from "../../domain/package/packageService";
 import {
   finalizePackageImport,
@@ -46,6 +51,13 @@ export type PackageSliceActions = {
     id: string,
     mode: PackageExportMode
   ) => Promise<{ filename: string; zip: Uint8Array; warnings: string[] } | null>;
+  // Builds the checklist spreadsheet (docs/export-spec.md §3.4) for the current
+  // project. Same shape as exportProjectPackage: pure derivation in the domain
+  // layer, repositories wired here, failures on the error banner, and the bytes
+  // handed back for the thin UI to download (no DOM here).
+  exportChecklistSpreadsheet: (
+    options: ChecklistExportOptions
+  ) => Promise<BuiltChecklistExport | null>;
   // Runs the untrusted-file pipeline (docs/plan.md §13) over .sightlines
   // bytes. If §6 artwork conflicts need a decision, the import parks in
   // pendingPackageImport for the review dialog; otherwise it commits directly.
@@ -363,6 +375,33 @@ export function createPackageSlice(
       }
 
       return buildPackageZip(project, get().libraryArtworks, mode);
+    },
+
+    async exportChecklistSpreadsheet(options) {
+      const { project, libraryArtworks } = get();
+      if (!project) return null;
+
+      try {
+        // Missing assets and deleted library records degrade to warnings inside
+        // the builder, so anything that reaches this catch is structural (the
+        // spreadsheet writer or the zipper), not missing content.
+        const result = await buildChecklistExport({
+          project,
+          libraryArtworks,
+          options,
+          getAsset: (assetId) => deps.assetRepository.getAsset(assetId),
+          getBlob: (key) => deps.assetRepository.getBlob(key)
+        });
+        set({ error: null });
+        return result;
+      } catch (error) {
+        set({
+          error: `Export failed: ${
+            error instanceof Error ? error.message : "the checklist could not be built."
+          }`
+        });
+        return null;
+      }
     },
 
     async importSightlinesPackage(bytes) {

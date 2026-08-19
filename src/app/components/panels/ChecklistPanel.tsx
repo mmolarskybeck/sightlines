@@ -14,6 +14,7 @@ import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { ACCEPTED_IMAGE_MIME_TYPES } from "../../../domain/assets/imageIntake";
 import type { Artwork, DisplayUnit, Project } from "../../../domain/project";
+import { compareChecklistText } from "../../../domain/checklistExport/sort";
 import { formatLength } from "../../../domain/units/length";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../../domain/units/unitSystem";
 import { useAssetImageUrls } from "../../hooks/useAssetImageUrls";
@@ -789,11 +790,11 @@ export function sortChecklistRows(
   return [...rows].sort((a, b) => {
     switch (sort) {
       case "title":
-        return byText(a.artwork?.title, b.artwork?.title) || byProjectOrder(a, b);
+        return compareChecklistText(a.artwork?.title, b.artwork?.title) || byProjectOrder(a, b);
       case "artist":
         return (
-          byText(a.artwork?.artist, b.artwork?.artist) ||
-          byText(a.artwork?.title, b.artwork?.title) ||
+          compareChecklistText(a.artwork?.artist, b.artwork?.artist) ||
+          compareChecklistText(a.artwork?.title, b.artwork?.title) ||
           byProjectOrder(a, b)
         );
       case "status":
@@ -855,15 +856,6 @@ function cssAttributeEscape(value: string): string {
 
 function byProjectOrder(a: ChecklistRowData, b: ChecklistRowData) {
   return a.projectIndex - b.projectIndex;
-}
-
-function byText(a: string | undefined, b: string | undefined) {
-  const aText = a?.trim();
-  const bText = b?.trim();
-  if (aText && bText) return aText.localeCompare(bText, undefined, { sensitivity: "base" });
-  if (aText) return -1;
-  if (bText) return 1;
-  return 0;
 }
 
 function ArtistChecklistGroup({

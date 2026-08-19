@@ -1512,6 +1512,36 @@ fieldset.export-pdf-body:disabled {
   opacity: 0.55;
 }
 
+/* Checklist spreadsheet export (export-spec §3.4). Four controls, no page tree
+   and no preview, so it stays a narrow single column instead of inheriting the
+   980px workspace-dialog width the PDF export needs. Rows, switch geometry and
+   the setup note are shared with .export-pdf-body above. */
+.export-checklist-dialog {
+  width: min(calc(100vw - 32px), 460px);
+}
+
+/* Same fieldset-for-:disabled trick as .export-pdf-body — no chrome of its own. */
+fieldset.export-checklist-body {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+  gap: var(--space-20);
+  border: 0;
+  margin: 0;
+  padding: var(--space-12) var(--space-24) var(--space-16);
+}
+
+fieldset.export-checklist-body:disabled {
+  opacity: 0.55;
+}
+
+.export-checklist-group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
 .export-progress {
   display: flex;
   min-width: 0;

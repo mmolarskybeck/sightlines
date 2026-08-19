@@ -17,6 +17,7 @@ import { MapTrifoldIcon } from "@phosphor-icons/react/dist/csr/MapTrifold";
 import { PackageIcon } from "@phosphor-icons/react/dist/csr/Package";
 import { PresentationIcon } from "@phosphor-icons/react/dist/csr/Presentation";
 import { ShareNetworkIcon } from "@phosphor-icons/react/dist/csr/ShareNetwork";
+import { TableIcon } from "@phosphor-icons/react/dist/csr/Table";
 import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
 import { UploadSimpleIcon } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import type { Project, Wall } from "../../../domain/project";
@@ -104,6 +105,7 @@ type TopBarProps = {
   handleImportFile: (file: File) => Promise<void>;
   setIsSettingsOpen: (open: boolean) => void;
   setIsExportPdfOpen: (open: boolean) => void;
+  setIsExportChecklistOpen: (open: boolean) => void;
   fileInputRef: RefObject<HTMLInputElement>;
 };
 
@@ -146,6 +148,7 @@ export function TopBar({
   handleImportFile,
   setIsSettingsOpen,
   setIsExportPdfOpen,
+  setIsExportChecklistOpen,
   fileInputRef
 }: TopBarProps) {
   const badgeDisplay = getStatusBadgeDisplay({
@@ -521,6 +524,19 @@ export function TopBar({
                 <span>Export PDF…</span>
                 <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
                   Composed pages: overview, room plans, elevations, 3D views
+                </span>
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="dropdown-menu-item-stacked"
+              disabled={project.checklistArtworkIds.length === 0}
+              onSelect={() => setIsExportChecklistOpen(true)}
+            >
+              <TableIcon aria-hidden="true" size={16} />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span>Export checklist…</span>
+                <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
+                  Spreadsheet of works with metadata, optional image folder
                 </span>
               </span>
             </DropdownMenuItem>

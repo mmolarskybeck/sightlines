@@ -49,6 +49,7 @@ import type {
 import { isDegeneratePose, resolveSavedViewRoomLabel } from "../domain/savedViews";
 import { faceWallId, parseFaceWallId } from "../domain/geometry/freestandingWalls";
 import { getPartitionClearances } from "../domain/geometry/partitionSpacing";
+import type { ChecklistExportOptions } from "../domain/checklistExport/types";
 import type { PackageExportMode } from "../domain/schema/packageSchema";
 import {
   buildSightlinesDropboxShareUrl,
@@ -303,6 +304,7 @@ export function App() {
   const importProjectJson = useAppStore((state) => state.importProjectJson);
   const exportProjectPackage = useAppStore((state) => state.exportProjectPackage);
   const exportProjectPackageById = useAppStore((state) => state.exportProjectPackageById);
+  const exportChecklistSpreadsheet = useAppStore((state) => state.exportChecklistSpreadsheet);
   const importSightlinesPackage = useAppStore((state) => state.importSightlinesPackage);
   const importSharedSightlinesPackage = useAppStore(
     (state) => state.importSharedSightlinesPackage
@@ -390,6 +392,7 @@ export function App() {
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isExportPdfOpen, setIsExportPdfOpen] = useState(false);
+  const [isExportChecklistOpen, setIsExportChecklistOpen] = useState(false);
   const {
     preferences: privacyPreferences,
     decision: privacyDecision,
@@ -430,6 +433,7 @@ export function App() {
 
   // Prevent re-entry while package assets are hashed and zipped.
   const [isExportingPackage, setIsExportingPackage] = useState(false);
+  const [isExportingChecklist, setIsExportingChecklist] = useState(false);
   const [isSharingProject, setIsSharingProject] = useState(false);
   const [shareProjectUrl, setShareProjectUrl] = useState<string | null>(null);
   const [shareProjectWarningCount, setShareProjectWarningCount] = useState(0);
@@ -743,6 +747,7 @@ export function App() {
       isHelpOpen ||
       isSettingsOpen ||
       isExportPdfOpen ||
+      isExportChecklistOpen ||
       importWizardOpen ||
       confirmDeleteRoomId !== null ||
       confirmOpenWallId !== null,
@@ -772,6 +777,7 @@ export function App() {
       isHelpOpen ||
       isSettingsOpen ||
       isExportPdfOpen ||
+      isExportChecklistOpen ||
       importWizardOpen ||
       confirmDeleteRoomId !== null ||
       confirmOpenWallId !== null,
@@ -791,6 +797,7 @@ export function App() {
         isHelpOpen ||
         isSettingsOpen ||
         isExportPdfOpen ||
+        isExportChecklistOpen ||
         importWizardOpen ||
         confirmDeleteRoomId !== null ||
         confirmOpenWallId !== null ||
@@ -820,6 +827,7 @@ export function App() {
     isHelpOpen,
     isSettingsOpen,
     isExportPdfOpen,
+    isExportChecklistOpen,
     importWizardOpen,
     confirmDeleteRoomId,
     confirmOpenWallId
@@ -1416,6 +1424,50 @@ export function App() {
     }
   };
 
+  // Checklist spreadsheet (export-spec §3.4). Same delivery contract as
+  // handleExportPackage: the store action catches its own failures onto
+  // `error`, so a null result means "read the banner back out", and the dialog
+  // only closes once bytes were actually delivered.
+  const handleExportChecklist = async (options: ChecklistExportOptions) => {
+    if (isExportingChecklist) return;
+    setIsExportingChecklist(true);
+    try {
+      const result = await exportChecklistSpreadsheet(options);
+      if (result) {
+        // Pass a typed Blob rather than the raw bytes: triggerDownload's
+        // Uint8Array path stamps application/octet-stream, which loses the
+        // .xlsx/.zip type the save picker offers.
+        const outcome = await triggerDownload(
+          new Blob([result.bytes.slice()], { type: result.mimeType }),
+          result.filename
+        );
+        if (outcome === "cancelled") {
+          // The user dismissed the save dialog — no file, no toast.
+        } else if (result.warnings.length > 0) {
+          setIsExportChecklistOpen(false);
+          toast.warning(
+            `Exported ${result.filename} with ${result.warnings.length} warning${
+              result.warnings.length === 1 ? "" : "s"
+            }: ${result.warnings.join(" ")}`
+          );
+        } else {
+          setIsExportChecklistOpen(false);
+          toast.success(`Exported ${result.filename}`);
+        }
+      } else {
+        toast.error(
+          useAppStore.getState().error ?? "Export failed: the checklist could not be built."
+        );
+      }
+    } catch (error) {
+      toast.error(
+        `Export failed: ${error instanceof Error ? error.message : "the checklist could not be built."}`
+      );
+    } finally {
+      setIsExportingChecklist(false);
+    }
+  };
+
   // Project-row quick export uses the standard display-quality mode.
   const handleExportProjectById = async (id: string) => {
     try {
@@ -1739,6 +1791,7 @@ export function App() {
         handleImportFile={handleImportFile}
         setIsSettingsOpen={setIsSettingsOpen}
         setIsExportPdfOpen={setIsExportPdfOpen}
+        setIsExportChecklistOpen={setIsExportChecklistOpen}
         fileInputRef={fileInputRef}
       />
 
@@ -2776,6 +2829,10 @@ export function App() {
         fileInputRef={fileInputRef}
         isExportPdfOpen={isExportPdfOpen}
         handleExportPdfOpenChange={handleExportPdfOpenChange}
+        isExportChecklistOpen={isExportChecklistOpen}
+        setIsExportChecklistOpen={setIsExportChecklistOpen}
+        handleExportChecklist={handleExportChecklist}
+        isExportingChecklist={isExportingChecklist}
         handleExportPdf={handleExportPdf}
         savedViewThumbnailUrls={savedViewThumbnailUrls}
         pdfExportProgress={pdfExportProgress}

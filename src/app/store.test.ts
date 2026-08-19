@@ -3228,6 +3228,37 @@ describe("app store", () => {
       expect(load).not.toHaveBeenCalled();
       expect(result?.filename).toContain("live-unsaved-title");
     });
+
+    it("builds the checklist spreadsheet from the live document", async () => {
+      const current = store.getState().project!;
+      store.setState({ project: { ...current, title: "Checklist Show" } });
+
+      const result = await store.getState().exportChecklistSpreadsheet({
+        format: "xlsx",
+        images: "none",
+        sort: "project",
+        placedOnly: false
+      });
+
+      expect(result?.filename).toBe("checklist-show-checklist.xlsx");
+      expect(result?.mimeType).toMatch(/spreadsheetml/);
+      // A real xlsx is a zip; anything else means the writer silently no-oped.
+      expect([result!.bytes[0], result!.bytes[1]]).toEqual([0x50, 0x4b]);
+      expect(store.getState().error).toBeNull();
+    });
+
+    it("returns null for the checklist export when no document is open", async () => {
+      store.setState({ project: null });
+
+      const result = await store.getState().exportChecklistSpreadsheet({
+        format: "csv",
+        images: "none",
+        sort: "project",
+        placedOnly: false
+      });
+
+      expect(result).toBeNull();
+    });
   });
 
   describe("upload duplicate detection", () => {

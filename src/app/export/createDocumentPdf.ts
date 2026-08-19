@@ -1,9 +1,7 @@
-import fontkit from "@pdf-lib/fontkit";
 import {
   PDFDocument,
   PDFImage,
-  PDFPage,
-  StandardFonts
+  PDFPage
 } from "pdf-lib";
 import {
   FRAME_EDGE_HAIRLINE_HEX,
@@ -54,6 +52,7 @@ import {
   formatDocumentDimension,
   type PdfFonts
 } from "./pdf/primitives";
+import { loadPdfFonts } from "./pdf/embedFonts";
 import {
   createElevationTransform,
   imageRectInside,
@@ -159,39 +158,6 @@ function drawHeader(
     size: HEADER_DATE_SIZE_PT,
     color: COLORS.muted
   });
-}
-
-async function loadPdfFonts(
-  pdf: PDFDocument,
-  fontBytes?: CreateDocumentPdfInput["fontBytes"]
-): Promise<PdfFonts> {
-  if (fontBytes) {
-    pdf.registerFontkit(fontkit);
-    const regularBytes =
-      fontBytes instanceof Uint8Array ? fontBytes : fontBytes.regular;
-    const strongBytes =
-      fontBytes instanceof Uint8Array ? undefined : fontBytes.strong;
-    const regular = await pdf.embedFont(regularBytes, { subset: true });
-    const strong = strongBytes
-      ? await pdf.embedFont(strongBytes, { subset: true })
-      : regular;
-    return {
-      regular,
-      strong,
-      supportedCodePoints: new Set(regular.getCharacterSet()),
-      substitutedUnsupportedText: false
-    };
-  }
-  const [regular, strong] = await Promise.all([
-    pdf.embedFont(StandardFonts.Helvetica),
-    pdf.embedFont(StandardFonts.HelveticaBold)
-  ]);
-  return {
-    regular,
-    strong,
-    supportedCodePoints: new Set(regular.getCharacterSet()),
-    substitutedUnsupportedText: false
-  };
 }
 
 async function embedBlob(

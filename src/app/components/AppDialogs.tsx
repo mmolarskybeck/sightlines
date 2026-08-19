@@ -1,10 +1,11 @@
-import { Suspense, lazy, type RefObject } from "react";
+import { Suspense, lazy, useMemo, type RefObject } from "react";
 import { toast } from "sonner";
 import type {
   Artwork,
   Project,
   RoomPlacement
 } from "../../domain/project";
+import type { ChecklistExportOptions } from "../../domain/checklistExport/types";
 import type { PackageExportMode } from "../../domain/schema/packageSchema";
 import type { EffectiveDocumentSettings } from "../../domain/export/documentSettings";
 import { ArtworkLibraryPicker } from "./library/ArtworkLibrary";
@@ -30,6 +31,13 @@ const SettingsDialog = lazy(() =>
 const ExportPdfDialog = lazy(() =>
   import("./dialogs/ExportPdfDialog").then((module) => ({
     default: module.ExportPdfDialog
+  }))
+);
+// Lazy for the same reason the PDF dialog is: nothing here is needed until the
+// Export menu is used, and the export it launches dynamically imports SheetJS.
+const ExportChecklistDialog = lazy(() =>
+  import("./dialogs/ExportChecklistDialog").then((module) => ({
+    default: module.ExportChecklistDialog
   }))
 );
 // Lazy so the three.js it pulls in (via SnapshotStage) stays out of the initial
@@ -81,6 +89,10 @@ type AppDialogsProps = {
   fileInputRef: RefObject<HTMLInputElement>;
   isExportPdfOpen: boolean;
   handleExportPdfOpenChange: (open: boolean) => void;
+  isExportChecklistOpen: boolean;
+  setIsExportChecklistOpen: (open: boolean) => void;
+  handleExportChecklist: (options: ChecklistExportOptions) => Promise<void>;
+  isExportingChecklist: boolean;
   handleExportPdf: (settings: EffectiveDocumentSettings) => Promise<void>;
   savedViewThumbnailUrls: UseSavedViewThumbnails["urls"];
   pdfExportProgress: { done: number; total: number } | null;
@@ -147,6 +159,10 @@ export function AppDialogs({
   onLeaveIncomingShare,
   fileInputRef,
   isExportPdfOpen,
+  isExportChecklistOpen,
+  setIsExportChecklistOpen,
+  handleExportChecklist,
+  isExportingChecklist,
   handleExportPdfOpenChange,
   handleExportPdf,
   savedViewThumbnailUrls,
@@ -180,6 +196,21 @@ export function AppDialogs({
   onUsageAnalyticsChange,
   onCrashReportsChange
 }: AppDialogsProps) {
+  // How many checklist works currently have a placement — the checklist export
+  // dialog's "Placed works only" count. Membership and placement are
+  // independent (a work can be placed without being on the checklist), so this
+  // is an intersection, not a length.
+  const placedChecklistCount = useMemo(() => {
+    const placedIds = new Set<string>();
+    for (const object of project.wallObjects) {
+      if (object.kind === "artwork") placedIds.add(object.artworkId);
+    }
+    for (const object of project.floorObjects) {
+      if (object.kind === "artwork") placedIds.add(object.artworkId);
+    }
+    return project.checklistArtworkIds.filter((id) => placedIds.has(id)).length;
+  }, [project.checklistArtworkIds, project.wallObjects, project.floorObjects]);
+
   return (
     <>
       {FontLab ? (
@@ -230,6 +261,14 @@ export function AppDialogs({
           artworksById={artworksById}
           exportState={pdfExportProgress}
           onCancelExport={handleCancelExportPdf}
+        />
+        <ExportChecklistDialog
+          open={isExportChecklistOpen}
+          checklistCount={project.checklistArtworkIds.length}
+          placedCount={placedChecklistCount}
+          onOpenChange={setIsExportChecklistOpen}
+          onExport={(options) => void handleExportChecklist(options)}
+          busy={isExportingChecklist}
         />
       </Suspense>
       {isExportPdfOpen || savedViewsPaneVisible || pdfExportProgress || thumbnailsPending ? (

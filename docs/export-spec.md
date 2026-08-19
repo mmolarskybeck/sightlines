@@ -220,6 +220,66 @@ still substitute with the writer's warning.
   inclusion-only, per that spec's Phase C. Full-resolution open/download from
   a row remains deferred there.)
 
+### 3.4 Checklist spreadsheet (shipped 2026-08-19)
+
+A sibling of the Document, not part of it: **Export checklist…** in the Export
+menu produces a spreadsheet of the works in `project.checklistArtworkIds`, with
+an optional folder of their images. It exists because the division of labor in
+§3.3 cuts both ways — elevation pages explain *where things go*, the checklist
+explains *what the things are* — and a curator's collaborators (registrars,
+lenders, insurers, shippers) work in Excel, not in PDF.
+
+- **Scope.** Every checklist work, placed or not, with a **Status** column
+  (Placed / Unplaced) and a "Placed works only" toggle. Placement is not
+  membership: a work placed on a wall but never added to the checklist is
+  deliberately absent, unlike the `.sightlines` package's union rule.
+- **Format.** Excel `.xlsx` (SheetJS, dynamically imported so the parser chunk
+  stays off the critical path — `scripts/assert-chunk-graph.mjs` enforces it) or
+  CSV (UTF-8 **with a BOM**, CRLF, RFC 4180 quoting, so Excel opens a non-ASCII
+  artist name correctly).
+- **Columns**, in order: `#`, `Artist`, `Title`, `Date`, `Medium`, `Dimensions`,
+  `Height (unit)`, `Width (unit)`, `Depth (unit)`, `Accession number`,
+  `Location / Lender`, `Framing`, `Status`, `Room`, `Wall`, `Image file`, then
+  one trailing column per extra `artwork.metadata` key. **The header strings are
+  a round-trip contract**, chosen to match `FIELD_ALIASES` in
+  `domain/spreadsheetImport/columnMapping.ts` so an exported file re-imports
+  through the wizard without hand-mapping; the unit in the axis headers is part
+  of that (it is scored as evidence for height/width/depth). The axis cells are
+  bare **numbers** in the project's artwork unit (cm on metric projects, inches
+  on imperial) — summable and sortable — while `Dimensions` carries the same
+  formatted `W × H` text the checklist panel draws. Unknown dimensions are blank
+  cells, never zeros. `Framing` is read through `effectiveFraming`, so a work
+  whose stored size already includes its frame says so rather than listing bands
+  nothing draws. Internal importer keys (`dimensionSourceText`, `dimensionRole`,
+  `medium`) never re-export; `source:*` keys shed their prefix and are dropped
+  when the resulting header would duplicate a core column.
+- **Sorts.** Checklist order (default), artist, title, accession number, or
+  **placement** — rooms in floor order → walls in room order → left-to-right
+  along each wall → floor works by room → unplaced last. Every sort ends in
+  checklist order, so the result is a total order.
+- **Images.** None, display quality, or originals, using the same asset tiers as
+  `.sightlines` export (`tiersForMode`), falling back down the tier list rather
+  than dropping an image. Filenames are
+  `<accession or zero-padded index>_<artist>_<title>.<ext>`, ASCII-folded and
+  collision-suffixed; the `Image file` column carries the `images/…` path, which
+  the import wizard's matcher basenames. Excel embeds no images — the folder is
+  the deliverable.
+- **Container.** A bare `.xlsx` or `.csv` when images are off;
+  otherwise `<project-slug>-checklist.zip` holding `checklist.xlsx` (or
+  `checklist.csv`) plus `images/…`, zipped with fflate exactly as the package
+  writer does (sheet deflated, images stored).
+- **Degradation.** Missing assets and deleted library records produce warnings
+  and blank cells, never a thrown export. Warnings ride the same
+  `Exported X with N warnings` toast as the package export.
+- **Where it lives.** `src/domain/checklistExport/` (`rows.ts`, `sort.ts`,
+  `filenames.ts`, `workbook.ts`, `buildChecklistExport.ts`) — pure, over
+  `getAsset`/`getBlob` seams; `packageSlice.exportChecklistSpreadsheet` wires the
+  repositories; `ExportChecklistDialog` is the only DOM.
+- **The PDF checklist deferred in §3.3 is the next sibling slice** and is
+  expected to consume this same `ChecklistExportRow` model rather than
+  re-deriving placement, framing, and dimension text from the project. The row
+  model is deliberately view-agnostic for that reason.
+
 ## 4. Vocabulary and copy
 
 | Concept | User-facing term | Avoid |
@@ -227,6 +287,7 @@ still substitute with the writer's warning.
 | Raster export of the current view | Export image | Screenshot, snapshot (internal name only), capture |
 | Composed multi-page PDF | Export PDF | Print, report, packet, deck |
 | `.sightlines` package | Backup | Export (unqualified), save file |
+| Spreadsheet of the works in the show | Export checklist | Works list, manifest, inventory, CSV (unqualified) |
 | Saved 3D viewpoint | Saved view (verb: **Save view**) | Camera, bookmark, capture, perspective, view for export |
 | The whole-plan PDF page | Overview | Site plan, master plan |
 | Per-room cropped plan page | Room plan | Detail, zoom, crop |
