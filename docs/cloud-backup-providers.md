@@ -25,9 +25,12 @@ Dropbox backup are the durable recovery paths. A backup is a complete versioned
 package, so restoring or importing it follows the same untrusted-package validation
 and migration pipeline as a manually selected file.
 
-Dropbox backup does not currently merge simultaneous edits or provide collaborative
-editing. The intended model is versioned file backup with an explicit future decision
-required for conflict handling.
+Dropbox backup does not merge simultaneous edits or provide collaborative editing.
+The conflict-handling decision has since been made (2026-08-19): cross-device sync
+will use a canonical per-project file with revision-conditional writes and
+whole-project conflict choices — no layout merging. Design and staged roadmap:
+`docs/cloud-sync-plan.md` (not yet built; the shipped behavior remains versioned
+file backup as described here).
 
 Share links are snapshot handoffs, not collaboration. Sightlines writes each shared
 snapshot under `/shares` in the user's Dropbox app folder, outside automatic backup
