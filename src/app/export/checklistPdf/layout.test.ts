@@ -4,7 +4,7 @@ import {
   captionHeightPt,
   CAPTION_STYLE_METRICS,
   CHECKLIST_LAYOUT,
-  CHECKLIST_PAGE_SIZE_PT,
+  ellipsizeText,
   fitThumbnailRect,
   paginateChecklistBands,
   wrapCaptionLines,
@@ -17,6 +17,25 @@ import {
 const measure: MeasureText = (text, metrics) => text.length * metrics.sizePt * 0.5;
 
 const BODY = CAPTION_STYLE_METRICS.body;
+
+describe("ellipsizeText", () => {
+  it("keeps display text inside its assigned width, including an unbroken title", () => {
+    const fitted = ellipsizeText(
+      "AnExtremelyLongProjectTitleWithoutAnyWordBoundaries",
+      80,
+      (text) => text.length * 5
+    );
+
+    expect(fitted.endsWith("...")).toBe(true);
+    expect(fitted.length * 5).toBeLessThanOrEqual(80);
+  });
+
+  it("leaves a title unchanged when it already fits", () => {
+    expect(ellipsizeText("Night Vision", 100, (text) => text.length * 5)).toBe(
+      "Night Vision"
+    );
+  });
+});
 
 describe("wrapCaptionText", () => {
   it("breaks on words and keeps every one of them", () => {
@@ -73,7 +92,7 @@ describe("bandHeightPt", () => {
 });
 
 describe("paginateChecklistBands", () => {
-  const nominal = bandHeightPt(0);
+  const nominal = { captionLineHeightsPt: [] };
 
   it("fits four nominal bands to a page, on the title page and after it", () => {
     const placements = paginateChecklistBands(Array.from({ length: 9 }, () => nominal));
@@ -97,24 +116,41 @@ describe("paginateChecklistBands", () => {
   });
 
   it("pushes the rest of the page down when one caption makes its band taller", () => {
-    const tall = bandHeightPt(400);
+    const tall = { captionLineHeightsPt: [400] };
     const placements = paginateChecklistBands([nominal, tall, nominal, nominal]);
 
     expect(placements[1].topPt).toBeCloseTo(
-      CHECKLIST_LAYOUT.firstPageTopPt - nominal,
+      CHECKLIST_LAYOUT.firstPageTopPt - bandHeightPt(0),
       6
     );
     // The tall band eats the room the third and fourth works would have used.
     expect(placements.map((placement) => placement.pageIndex)).toEqual([0, 0, 1, 1]);
   });
 
-  it("keeps an unbreakably tall band on its own page rather than looping", () => {
+  it("splits one caption taller than a page without losing or clipping a line", () => {
+    const lineHeights = Array.from({ length: 120 }, () => BODY.leadingPt);
     const placements = paginateChecklistBands([
-      CHECKLIST_PAGE_SIZE_PT.heightPt * 2
+      { captionLineHeightsPt: lineHeights }
     ]);
 
-    expect(placements).toHaveLength(1);
-    expect(placements[0].pageIndex).toBe(0);
+    expect(placements.length).toBeGreaterThan(1);
+    expect(placements[0].showImage).toBe(true);
+    expect(placements.slice(1).every((placement) => !placement.showImage)).toBe(
+      true
+    );
+    expect(placements.flatMap((placement) =>
+      Array.from(
+        { length: placement.captionLineEnd - placement.captionLineStart },
+        (_unused, index) => placement.captionLineStart + index
+      )
+    )).toEqual(Array.from({ length: lineHeights.length }, (_unused, index) => index));
+    expect(
+      placements.every(
+        (placement) =>
+          placement.topPt - placement.heightPt >=
+          CHECKLIST_LAYOUT.bottomLimitPt - 0.001
+      )
+    ).toBe(true);
   });
 });
 

@@ -30,11 +30,10 @@ import {
 import { prepareImageForPdf } from "../pdfImage";
 import { buildChecklistCaptionLines } from "./caption";
 import {
-  bandHeightPt,
-  captionHeightPt,
   CAPTION_BASELINE_RATIO,
   CHECKLIST_LAYOUT,
   CHECKLIST_PAGE_SIZE_PT,
+  ellipsizeText,
   fitThumbnailRect,
   paginateChecklistBands,
   wrapCaptionLines,
@@ -121,18 +120,25 @@ function drawRunningHeader(
 ): void {
   const size = CHECKLIST_LAYOUT.headerSizePt;
   const y = CHECKLIST_LAYOUT.headerBaselinePt;
-  drawText(page, fonts, projectTitle, {
+  const label = `Page ${pageNumber} of ${pageCount}`;
+  const labelWidth = textWidth(fonts, label, size);
+  const labelX =
+    CHECKLIST_PAGE_SIZE_PT.widthPt -
+    CHECKLIST_LAYOUT.marginXPt -
+    labelWidth;
+  const title = ellipsizeText(
+    projectTitle,
+    labelX - CHECKLIST_LAYOUT.marginXPt - 18,
+    (candidate) => textWidth(fonts, candidate, size)
+  );
+  drawText(page, fonts, title, {
     x: CHECKLIST_LAYOUT.marginXPt,
     y,
     size,
     color: COLORS.muted
   });
-  const label = `Page ${pageNumber} of ${pageCount}`;
   drawText(page, fonts, label, {
-    x:
-      CHECKLIST_PAGE_SIZE_PT.widthPt -
-      CHECKLIST_LAYOUT.marginXPt -
-      textWidth(fonts, label, size),
+    x: labelX,
     y,
     size,
     color: COLORS.muted
@@ -147,8 +153,13 @@ function drawExhibitionTitle(
   title: string
 ): void {
   const size = CHECKLIST_LAYOUT.titleSizePt;
-  const width = textWidth(fonts, title, size, true);
-  drawText(page, fonts, title, {
+  const fittedTitle = ellipsizeText(
+    title,
+    CHECKLIST_PAGE_SIZE_PT.widthPt - CHECKLIST_LAYOUT.marginXPt * 2,
+    (candidate) => textWidth(fonts, candidate, size, true)
+  );
+  const width = textWidth(fonts, fittedTitle, size, true);
+  drawText(page, fonts, fittedTitle, {
     x: (CHECKLIST_PAGE_SIZE_PT.widthPt - width) / 2,
     y: CHECKLIST_LAYOUT.titleBaselinePt,
     size,
@@ -211,7 +222,7 @@ export async function buildChecklistPdf(
     textWidth(fonts, text, metrics.sizePt, metrics.strong);
 
   // Measure every caption first: the page count is only knowable once the tall
-  // bands are known, and "Page N of M" needs it before the first page is drawn.
+  // captions have been split, and "Page N of M" needs it before drawing begins.
   const bands = rows.map((row, index) => {
     const captionLines = wrapCaptionLines(
       buildChecklistCaptionLines(row, project.unit, {
@@ -225,12 +236,15 @@ export async function buildChecklistPdf(
     const assetId = row.artwork?.assetId;
     return {
       captionLines,
-      image: (assetId ? thumbnails.get(assetId) : null) ?? null,
-      heightPt: bandHeightPt(captionHeightPt(captionLines))
+      image: (assetId ? thumbnails.get(assetId) : null) ?? null
     };
   });
 
-  const placements = paginateChecklistBands(bands.map((band) => band.heightPt));
+  const placements = paginateChecklistBands(
+    bands.map((band) => ({
+      captionLineHeightsPt: band.captionLines.map((line) => line.metrics.leadingPt)
+    }))
+  );
   // An empty checklist still produces a title page rather than a zero-page file
   // (which no reader will open).
   const pageCount = Math.max(
@@ -249,10 +263,10 @@ export async function buildChecklistPdf(
     pages.push(page);
   }
 
-  bands.forEach((band, index) => {
-    const placement = placements[index];
+  placements.forEach((placement) => {
+    const band = bands[placement.bandIndex];
     const page = pages[placement.pageIndex];
-    if (band.image) {
+    if (placement.showImage && band.image) {
       const rect = fitThumbnailRect(
         { widthPx: band.image.image.width, heightPx: band.image.image.height },
         placement.topPt
@@ -264,7 +278,15 @@ export async function buildChecklistPdf(
         height: rect.heightPt
       });
     }
-    drawCaption(page, fonts, band.captionLines, placement.topPt);
+    drawCaption(
+      page,
+      fonts,
+      band.captionLines.slice(
+        placement.captionLineStart,
+        placement.captionLineEnd
+      ),
+      placement.topPt
+    );
   });
 
   if (fonts.substitutedUnsupportedText) {

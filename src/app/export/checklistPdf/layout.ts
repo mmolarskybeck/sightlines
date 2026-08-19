@@ -70,6 +70,35 @@ export type MeasureText = (
   metrics: CaptionStyleMetrics
 ) => number;
 
+// Keep single-line display text inside a known width. This is intentionally
+// character-based after the fast full-width check: project titles can contain
+// one unbroken word, and neither the title page nor a running header may escape
+// the page just because there is no word boundary available.
+export function ellipsizeText(
+  text: string,
+  maxWidthPt: number,
+  measure: (candidate: string) => number
+): string {
+  if (measure(text) <= maxWidthPt) return text;
+
+  // Standard-14 Helvetica is the offline fallback, so the truncation marker
+  // must stay inside its guaranteed ASCII repertoire.
+  const ellipsis = "...";
+  if (measure(ellipsis) > maxWidthPt) return "";
+
+  const characters = [...text];
+  let low = 0;
+  let high = characters.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    const candidate = `${characters.slice(0, middle).join("").trimEnd()}${ellipsis}`;
+    if (measure(candidate) <= maxWidthPt) low = middle;
+    else high = middle - 1;
+  }
+
+  return `${characters.slice(0, low).join("").trimEnd()}${ellipsis}`;
+}
+
 // Greedy word wrap. A single word wider than the column is broken by character
 // rather than allowed to run into the page margin — long accession numbers and
 // URLs in a credit line are the realistic cause, and both are readable broken.
@@ -161,37 +190,110 @@ export function bandHeightPt(captionPt: number): number {
 // binary rounding, which is a visible regression from an invisible cause.
 const FIT_EPSILON_PT = 0.01;
 
+export type ChecklistBandLayout = {
+  captionLineHeightsPt: readonly number[];
+};
+
 export type ChecklistBandPlacement = {
+  bandIndex: number;
   pageIndex: number;
   // Top edge of the band, in PDF user space (y up from the page's bottom).
   topPt: number;
   heightPt: number;
+  captionLineStart: number;
+  captionLineEnd: number;
+  // The thumbnail belongs to the start of the entry, not every continuation.
+  showImage: boolean;
 };
 
-// Flow the bands down the pages. A band that will not fit below the current
-// cursor starts a new page — unless it is the first on its page, in which case
-// it stays and overflows rather than looping forever on an unbreakable band.
+function continuationHeightPt(captionPt: number): number {
+  return captionPt + CHECKLIST_LAYOUT.bandGutterPt;
+}
+
+// Flow the bands down the pages. Ordinary entries remain indivisible and keep
+// the four-work rhythm. Only a caption taller than a fresh printable page is
+// split, at wrapped-line boundaries; continuation fragments start at the next
+// page top and never repeat the thumbnail.
 export function paginateChecklistBands(
-  heightsPt: readonly number[]
+  bands: readonly ChecklistBandLayout[]
 ): ChecklistBandPlacement[] {
   const placements: ChecklistBandPlacement[] = [];
   let pageIndex = 0;
   let cursor = CHECKLIST_LAYOUT.firstPageTopPt;
   let firstOnPage = true;
 
-  for (const heightPt of heightsPt) {
-    if (
-      !firstOnPage &&
-      cursor - heightPt < CHECKLIST_LAYOUT.bottomLimitPt - FIT_EPSILON_PT
-    ) {
-      pageIndex += 1;
-      cursor = CHECKLIST_LAYOUT.pageTopPt;
-      firstOnPage = true;
+  const startPage = () => {
+    pageIndex += 1;
+    cursor = CHECKLIST_LAYOUT.pageTopPt;
+    firstOnPage = true;
+  };
+
+  bands.forEach((band, bandIndex) => {
+    let captionLineStart = 0;
+    let firstFragment = true;
+
+    while (captionLineStart < band.captionLineHeightsPt.length || firstFragment) {
+      const remainingCaptionPt = band.captionLineHeightsPt
+        .slice(captionLineStart)
+        .reduce((total, heightPt) => total + heightPt, 0);
+      const completeHeightPt = firstFragment
+        ? bandHeightPt(remainingCaptionPt)
+        : continuationHeightPt(remainingCaptionPt);
+      const availablePt = cursor - CHECKLIST_LAYOUT.bottomLimitPt;
+
+      // Preserve entries as a unit whenever they fit on a fresh page.
+      if (
+        completeHeightPt > availablePt + FIT_EPSILON_PT &&
+        !firstOnPage
+      ) {
+        startPage();
+        continue;
+      }
+
+      let captionLineEnd = band.captionLineHeightsPt.length;
+      let heightPt = completeHeightPt;
+      if (completeHeightPt > availablePt + FIT_EPSILON_PT) {
+        let captionPt = 0;
+        captionLineEnd = captionLineStart;
+        while (captionLineEnd < band.captionLineHeightsPt.length) {
+          const nextCaptionPt =
+            captionPt + band.captionLineHeightsPt[captionLineEnd];
+          const nextHeightPt = firstFragment
+            ? bandHeightPt(nextCaptionPt)
+            : continuationHeightPt(nextCaptionPt);
+          if (nextHeightPt > availablePt + FIT_EPSILON_PT) break;
+          captionPt = nextCaptionPt;
+          captionLineEnd += 1;
+        }
+
+        // Page geometry always admits many caption lines, but retain a guarded
+        // fallback so future layout constants cannot create an infinite loop.
+        if (captionLineEnd === captionLineStart) {
+          captionLineEnd += 1;
+          captionPt = band.captionLineHeightsPt[captionLineStart] ?? 0;
+        }
+        heightPt = firstFragment
+          ? bandHeightPt(captionPt)
+          : continuationHeightPt(captionPt);
+      }
+
+      placements.push({
+        bandIndex,
+        pageIndex,
+        topPt: cursor,
+        heightPt,
+        captionLineStart,
+        captionLineEnd,
+        showImage: firstFragment
+      });
+      cursor -= heightPt;
+      firstOnPage = false;
+      firstFragment = false;
+      captionLineStart = captionLineEnd;
+
+      if (captionLineStart < band.captionLineHeightsPt.length) startPage();
     }
-    placements.push({ pageIndex, topPt: cursor, heightPt });
-    cursor -= heightPt;
-    firstOnPage = false;
-  }
+  });
 
   return placements;
 }

@@ -110,6 +110,39 @@ describe("buildChecklistPdf", () => {
     expect(pdf.getPageCount()).toBe(2);
   });
 
+  it("constrains a long project title with the fallback font on both title and running-header pages", async () => {
+    const ids = Array.from({ length: 5 }, (_unused, index) => `w${index}`);
+    const longTitle = Array.from(
+      { length: 30 },
+      () => "Extremely Long Exhibition Title"
+    ).join(" ");
+    const result = await buildChecklistPdf({
+      project: { ...projectWith(ids), title: longTitle },
+      libraryArtworks: ids.map((id) => artwork(id)),
+      options: OPTIONS,
+      ...seams()
+    });
+
+    expect(result.warnings).toEqual([]);
+    expect((await PDFDocument.load(result.bytes)).getPageCount()).toBe(2);
+  });
+
+  it("continues one caption taller than a page without dropping its text", async () => {
+    const longCredit = Array.from(
+      { length: 900 },
+      (_unused, index) => `Collection credit ${index + 1}`
+    ).join(" ");
+    const result = await buildChecklistPdf({
+      project: projectWith(["a"]),
+      libraryArtworks: [artwork("a", { locationOrLender: longCredit })],
+      options: OPTIONS,
+      ...seams()
+    });
+
+    expect((await PDFDocument.load(result.bytes)).getPageCount()).toBeGreaterThan(1);
+    expect(result.warnings).toEqual([]);
+  });
+
   it("prints a work whose image is gone, with a warning, rather than throwing", async () => {
     const result = await buildChecklistPdf({
       project: projectWith(["a", "b"]),

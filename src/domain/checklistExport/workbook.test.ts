@@ -42,6 +42,32 @@ describe("writeChecklistCsv", () => {
     expect(text.endsWith("\r\n")).toBe(true);
     expect(text.split("\r\n").filter(Boolean)).toHaveLength(4);
   });
+
+  it("neutralizes formula-leading text while leaving numbers and ordinary text intact", () => {
+    const unsafeTable: ChecklistExportTable = {
+      headers: ["Equals", "Plus", "Minus", "At", "Number", "Ordinary"],
+      rows: [["=1+1", "+cmd", "-2+3", "@SUM(A1:A2)", -42, "Agnes Martin"]]
+    };
+
+    const text = decodeCsv(writeChecklistCsv(unsafeTable)).replace(/^\uFEFF/, "");
+    expect(text).toBe(
+      "Equals,Plus,Minus,At,Number,Ordinary\r\n" +
+        "'=1+1,'+cmd,'-2+3,'@SUM(A1:A2),-42,Agnes Martin\r\n"
+    );
+  });
+
+  it("neutralizes formula markers after leading whitespace", () => {
+    const unsafeTable: ChecklistExportTable = {
+      headers: ["Spaces", "Tab", "Newline", "Safe apostrophe"],
+      rows: [["  =1+1", "\t+cmd", "\n@SUM(A1:A2)", "'=already text"]]
+    };
+
+    const text = decodeCsv(writeChecklistCsv(unsafeTable)).replace(/^\uFEFF/, "");
+    expect(text).toBe(
+      "Spaces,Tab,Newline,Safe apostrophe\r\n" +
+        "'  =1+1,'\t+cmd,\"'\n@SUM(A1:A2)\",'=already text\r\n"
+    );
+  });
 });
 
 describe("writeChecklistXlsx", () => {

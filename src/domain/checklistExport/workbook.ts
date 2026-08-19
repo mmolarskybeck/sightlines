@@ -14,10 +14,21 @@ const SHEET_NAME = "Checklist";
 // otherwise eats) — the quote is free insurance on a curator's " (detail)"
 // suffix.
 const CSV_NEEDS_QUOTING = /[",\r\n]|^\s|\s$/;
+const CSV_FORMULA_PREFIX = /^\s*[=+\-@]/;
+
+function neutralizeCsvFormula(text: string): string {
+  // Spreadsheet apps may evaluate formula markers even when whitespace comes
+  // before them. A leading apostrophe is Excel's text marker; keeping it in
+  // the CSV is the only portable way to make untrusted text inert on open.
+  return CSV_FORMULA_PREFIX.test(text) ? `'${text}` : text;
+}
 
 function csvCell(cell: ChecklistExportCell): string {
   if (cell === null) return "";
-  const text = typeof cell === "number" ? String(cell) : cell;
+  // Numeric cells remain numeric, including negative values. Only strings can
+  // contain an untrusted formula payload that needs neutralizing.
+  const text =
+    typeof cell === "number" ? String(cell) : neutralizeCsvFormula(cell);
   if (!CSV_NEEDS_QUOTING.test(text)) return text;
   return `"${text.replace(/"/g, '""')}"`;
 }
