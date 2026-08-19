@@ -5,7 +5,7 @@ import type {
   Project,
   RoomPlacement
 } from "../../domain/project";
-import type { ChecklistExportOptions } from "../../domain/checklistExport/types";
+import type { ChecklistExportRequest } from "../../domain/checklistExport/types";
 import type { PackageExportMode } from "../../domain/schema/packageSchema";
 import type { EffectiveDocumentSettings } from "../../domain/export/documentSettings";
 import { ArtworkLibraryPicker } from "./library/ArtworkLibrary";
@@ -91,7 +91,7 @@ type AppDialogsProps = {
   handleExportPdfOpenChange: (open: boolean) => void;
   isExportChecklistOpen: boolean;
   setIsExportChecklistOpen: (open: boolean) => void;
-  handleExportChecklist: (options: ChecklistExportOptions) => Promise<void>;
+  handleExportChecklist: (request: ChecklistExportRequest) => Promise<void>;
   isExportingChecklist: boolean;
   handleExportPdf: (settings: EffectiveDocumentSettings) => Promise<void>;
   savedViewThumbnailUrls: UseSavedViewThumbnails["urls"];
@@ -267,7 +267,7 @@ export function AppDialogs({
           checklistCount={project.checklistArtworkIds.length}
           placedCount={placedChecklistCount}
           onOpenChange={setIsExportChecklistOpen}
-          onExport={(options) => void handleExportChecklist(options)}
+          onExport={(request) => void handleExportChecklist(request)}
           busy={isExportingChecklist}
         />
       </Suspense>

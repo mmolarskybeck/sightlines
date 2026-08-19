@@ -3247,6 +3247,41 @@ describe("app store", () => {
       expect(store.getState().error).toBeNull();
     });
 
+    it("builds the checklist PDF through the lazily loaded writer", async () => {
+      const current = store.getState().project!;
+      store.setState({ project: { ...current, title: "Checklist Show" } });
+
+      const result = await store.getState().exportChecklistPdf({
+        format: "pdf",
+        sort: "project",
+        placedOnly: false,
+        numbering: false,
+        accession: false,
+        location: true
+      });
+
+      expect(result?.filename).toBe("checklist-show-checklist.pdf");
+      expect(result?.mimeType).toBe("application/pdf");
+      // %PDF- magic; anything else means the writer silently no-oped.
+      expect([...result!.bytes.slice(0, 5)]).toEqual([0x25, 0x50, 0x44, 0x46, 0x2d]);
+      expect(store.getState().error).toBeNull();
+    });
+
+    it("returns null for the checklist PDF when no document is open", async () => {
+      store.setState({ project: null });
+
+      const result = await store.getState().exportChecklistPdf({
+        format: "pdf",
+        sort: "project",
+        placedOnly: false,
+        numbering: false,
+        accession: false,
+        location: true
+      });
+
+      expect(result).toBeNull();
+    });
+
     it("returns null for the checklist export when no document is open", async () => {
       store.setState({ project: null });
 

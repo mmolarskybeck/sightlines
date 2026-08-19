@@ -275,10 +275,58 @@ lenders, insurers, shippers) work in Excel, not in PDF.
   `filenames.ts`, `workbook.ts`, `buildChecklistExport.ts`) — pure, over
   `getAsset`/`getBlob` seams; `packageSlice.exportChecklistSpreadsheet` wires the
   repositories; `ExportChecklistDialog` is the only DOM.
-- **The PDF checklist deferred in §3.3 is the next sibling slice** and is
-  expected to consume this same `ChecklistExportRow` model rather than
-  re-deriving placement, framing, and dimension text from the project. The row
+- **The PDF checklist (§3.5) consumes this same `ChecklistExportRow` model**
+  rather than re-deriving placement and dimension text from the project. The row
   model is deliberately view-agnostic for that reason.
+
+### 3.5 Checklist PDF (shipped 2026-08-19)
+
+The reading half of §3.4, and the slice §3.3 deferred: the same checklist, laid
+out as a museum "checklist for press" — thumbnail plus caption, four works to a
+US Letter portrait page — instead of a grid. Both formats live behind the one
+**Export checklist…** dialog, because the works, their order, and the
+placed-only filter are the same decisions whichever file comes out.
+
+- **Page.** US Letter portrait (612 × 792pt). Page 1 carries the exhibition
+  title (`project.title`) bold and centred and no running header; later pages
+  carry a small running header — project title left, `Page N of M` right.
+- **Band.** Each work is one band: a 1.9 × 2.1in image well at the left margin
+  (display-tier image, fit aspect-true, top-left anchored, **no crop, no border,
+  and no placeholder glyph** when there is no image), and a caption column
+  starting 3.7in from the left edge. Bands are nominally 2.3in, four to a page.
+- **Flow, not grid.** A caption that wraps past its band makes **that band
+  taller** and pushes the rest down; nothing shrinks and nothing clips. Four per
+  page is the rhythm, not a hard grid.
+- **Caption**, in museum order, blank fields skipped rather than printed as
+  empty lines: optional ordinal (small, bold, above the block), **Artist**
+  (bold), *Title* (italic), Date, Medium, Dimensions, optional accession number,
+  credit line (`locationOrLender`), optional muted `Room · Wall`.
+- **Dimensions** read `H × W[ × D]" (H × W[ × D] cm)` — height first (the
+  caption convention, deliberately the reverse of §3.4's `W × H`), primary in
+  the project's artwork unit with the other system in parentheses, one unit mark
+  per group.
+- **Options.** Sort by and Placed works only, shared with §3.4; plus Show
+  numbering (default off), Show accession number (default off), and Show
+  location (default **on**).
+- **Images.** Display tier only, downscaled to 600px on the longest side
+  (~300dpi at the printed size), one embed per asset — so a 200-work checklist
+  stays a few megabytes. This is a layout decision, not a user control: the
+  spreadsheet's image folder is a deliverable, a PDF thumbnail is not.
+- **Type.** Bundled Geist Regular/SemiBold as everywhere else, falling open to
+  standard Helvetica. Geist ships no italic cut, so the title line is a
+  **synthetic oblique** (pdf-lib's `ySkew` on the text matrix, `drawText`'s
+  `obliqueDeg`), which keeps one type family across the whole document and
+  leaves advance widths — and therefore the measured wrap — unchanged.
+- **Degradation.** A missing image or a deleted library record is a warning and
+  a band that still prints its caption, never a thrown export. An empty
+  selection still produces a title page, never a zero-page file.
+- **Container.** `<project-slug>-checklist.pdf`, always a bare PDF.
+- **Where it lives.** `src/app/export/checklistPdf/` (`caption.ts` pure text,
+  `layout.ts` pure geometry and pagination over an injected `measure`,
+  `buildChecklistPdf.ts` the pdf-lib writer), reached only through
+  `packageSlice.exportChecklistPdf`'s dynamic import so pdf-lib stays out of the
+  entry closure (`scripts/assert-chunk-graph.mjs` enforces it). Font embedding is
+  shared with the Document export via `src/app/export/pdf/embedFonts.ts`.
 
 ## 4. Vocabulary and copy
 
@@ -287,7 +335,7 @@ lenders, insurers, shippers) work in Excel, not in PDF.
 | Raster export of the current view | Export image | Screenshot, snapshot (internal name only), capture |
 | Composed multi-page PDF | Export PDF | Print, report, packet, deck |
 | `.sightlines` package | Backup | Export (unqualified), save file |
-| Spreadsheet of the works in the show | Export checklist | Works list, manifest, inventory, CSV (unqualified) |
+| The works in the show, as a PDF or a spreadsheet | Export checklist | Works list, manifest, inventory, CSV (unqualified) |
 | Saved 3D viewpoint | Saved view (verb: **Save view**) | Camera, bookmark, capture, perspective, view for export |
 | The whole-plan PDF page | Overview | Site plan, master plan |
 | Per-room cropped plan page | Room plan | Detail, zoom, crop |

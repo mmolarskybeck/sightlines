@@ -49,7 +49,7 @@ import type {
 import { isDegeneratePose, resolveSavedViewRoomLabel } from "../domain/savedViews";
 import { faceWallId, parseFaceWallId } from "../domain/geometry/freestandingWalls";
 import { getPartitionClearances } from "../domain/geometry/partitionSpacing";
-import type { ChecklistExportOptions } from "../domain/checklistExport/types";
+import type { ChecklistExportRequest } from "../domain/checklistExport/types";
 import type { PackageExportMode } from "../domain/schema/packageSchema";
 import {
   buildSightlinesDropboxShareUrl,
@@ -305,6 +305,7 @@ export function App() {
   const exportProjectPackage = useAppStore((state) => state.exportProjectPackage);
   const exportProjectPackageById = useAppStore((state) => state.exportProjectPackageById);
   const exportChecklistSpreadsheet = useAppStore((state) => state.exportChecklistSpreadsheet);
+  const exportChecklistPdf = useAppStore((state) => state.exportChecklistPdf);
   const importSightlinesPackage = useAppStore((state) => state.importSightlinesPackage);
   const importSharedSightlinesPackage = useAppStore(
     (state) => state.importSharedSightlinesPackage
@@ -1424,15 +1425,20 @@ export function App() {
     }
   };
 
-  // Checklist spreadsheet (export-spec §3.4). Same delivery contract as
-  // handleExportPackage: the store action catches its own failures onto
-  // `error`, so a null result means "read the banner back out", and the dialog
-  // only closes once bytes were actually delivered.
-  const handleExportChecklist = async (options: ChecklistExportOptions) => {
+  // Checklist export (export-spec §3.4 spreadsheet, §3.5 PDF). Same delivery
+  // contract as handleExportPackage: the store action catches its own failures
+  // onto `error`, so a null result means "read the banner back out", and the
+  // dialog only closes once bytes were actually delivered. The two formats
+  // differ only in which builder runs — everything downstream is one path,
+  // because both return the same {filename, bytes, mimeType, warnings}.
+  const handleExportChecklist = async (request: ChecklistExportRequest) => {
     if (isExportingChecklist) return;
     setIsExportingChecklist(true);
     try {
-      const result = await exportChecklistSpreadsheet(options);
+      const result =
+        request.kind === "pdf"
+          ? await exportChecklistPdf(request.options)
+          : await exportChecklistSpreadsheet(request.options);
       if (result) {
         // Pass a typed Blob rather than the raw bytes: triggerDownload's
         // Uint8Array path stamps application/octet-stream, which loses the

@@ -1512,10 +1512,12 @@ fieldset.export-pdf-body:disabled {
   opacity: 0.55;
 }
 
-/* Checklist spreadsheet export (export-spec §3.4). Four controls, no page tree
-   and no preview, so it stays a narrow single column instead of inheriting the
-   980px workspace-dialog width the PDF export needs. Rows, switch geometry and
-   the setup note are shared with .export-pdf-body above. */
+/* Checklist export (export-spec §3.4 spreadsheet, §3.5 PDF). One column of
+   label-left / control-right rows — no page tree and no preview — so it stays
+   narrow instead of inheriting the 980px workspace-dialog width the PDF export
+   needs. The rows themselves (.export-paper-field, .export-switch-row), the
+   switch geometry and the setup note are .export-pdf-body's, so the two export
+   dialogs read as the same object. */
 .export-checklist-dialog {
   width: min(calc(100vw - 32px), 460px);
 }
@@ -1535,6 +1537,9 @@ fieldset.export-checklist-body:disabled {
   opacity: 0.55;
 }
 
+/* The row stack. Format / Images / Sort by / the switches all sit on the same
+   grid, and the rows that apply to only one format appear and disappear in
+   place rather than moving the ones around them. */
 .export-checklist-group {
   display: flex;
   min-width: 0;

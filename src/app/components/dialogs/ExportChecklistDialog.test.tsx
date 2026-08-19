@@ -85,34 +85,98 @@ function pickOption(label: string, optionLabel: string) {
 }
 
 describe("ExportChecklistDialog", () => {
-  it("exports with the documented defaults", () => {
+  it("defaults to the PDF checklist", () => {
     const { onExport } = renderDialog();
 
     fireEvent.click(screen.getByRole("button", { name: "Export checklist" }));
 
     expect(onExport).toHaveBeenCalledWith({
-      format: "xlsx",
-      images: "display",
-      sort: "project",
-      placedOnly: false
+      kind: "pdf",
+      options: {
+        format: "pdf",
+        sort: "project",
+        placedOnly: false,
+        numbering: false,
+        accession: false,
+        location: true
+      }
     });
   });
 
-  it("passes every chosen option through to the export action", () => {
+  it("passes every chosen PDF option through to the export action", () => {
     const { onExport } = renderDialog();
 
-    fireEvent.click(screen.getByRole("radio", { name: "CSV" }));
+    pickOption("Sort by", "Placement (room, wall)");
+    fireEvent.click(screen.getByRole("switch", { name: "Placed works only" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Show numbering" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Show accession number" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Show location" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export checklist" }));
+
+    expect(onExport).toHaveBeenCalledWith({
+      kind: "pdf",
+      options: {
+        format: "pdf",
+        sort: "placement",
+        placedOnly: true,
+        numbering: true,
+        accession: true,
+        location: false
+      }
+    });
+  });
+
+  it("passes every chosen spreadsheet option through to the export action", () => {
+    const { onExport } = renderDialog();
+
+    pickOption("Format", "CSV");
     pickOption("Images", "Original files");
     pickOption("Sort by", "Placement (room, wall)");
     fireEvent.click(screen.getByRole("switch", { name: "Placed works only" }));
     fireEvent.click(screen.getByRole("button", { name: "Export checklist" }));
 
     expect(onExport).toHaveBeenCalledWith({
-      format: "csv",
-      images: "originals",
-      sort: "placement",
-      placedOnly: true
+      kind: "spreadsheet",
+      options: {
+        format: "csv",
+        images: "originals",
+        sort: "placement",
+        placedOnly: true
+      }
     });
+  });
+
+  // The whole reason this is one dialog and not two menu items: the two
+  // questions both formats ask must be one piece of state.
+  it("keeps sort and the placed-only filter when the format changes", () => {
+    const { onExport } = renderDialog();
+
+    pickOption("Sort by", "Artist");
+    fireEvent.click(screen.getByRole("switch", { name: "Placed works only" }));
+    pickOption("Format", "Excel (.xlsx)");
+    fireEvent.click(screen.getByRole("button", { name: "Export checklist" }));
+
+    expect(onExport).toHaveBeenCalledWith({
+      kind: "spreadsheet",
+      options: {
+        format: "xlsx",
+        images: "display",
+        sort: "artist",
+        placedOnly: true
+      }
+    });
+  });
+
+  it("shows only the controls the chosen format actually uses", () => {
+    renderDialog();
+
+    expect(screen.queryByRole("combobox", { name: "Images" })).toBeNull();
+    expect(screen.getByRole("switch", { name: "Show location" })).toBeTruthy();
+
+    pickOption("Format", "Excel (.xlsx)");
+
+    expect(screen.getByRole("combobox", { name: "Images" })).toBeTruthy();
+    expect(screen.queryByRole("switch", { name: "Show location" })).toBeNull();
   });
 
   it("counts the works the current options will actually export", () => {
@@ -126,6 +190,8 @@ describe("ExportChecklistDialog", () => {
   it("says what the download will be, since that depends on two controls at once", () => {
     renderDialog();
 
+    expect(screen.getByText(/Downloads a single \.pdf file\./)).toBeTruthy();
+    pickOption("Format", "Excel (.xlsx)");
     expect(screen.getByText(/Downloads a \.zip containing checklist\.xlsx and an images folder\./))
       .toBeTruthy();
     pickOption("Images", "No images");

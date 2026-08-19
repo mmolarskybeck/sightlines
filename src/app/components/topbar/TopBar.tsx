@@ -536,7 +536,7 @@ export function TopBar({
               <span className="flex min-w-0 flex-col gap-0.5">
                 <span>Export checklist…</span>
                 <span className="[font-size:var(--type-xs)] leading-snug text-muted-foreground">
-                  Spreadsheet of works with metadata, optional image folder
+                  PDF, Excel or CSV of the works with images and metadata
                 </span>
               </span>
             </DropdownMenuItem>

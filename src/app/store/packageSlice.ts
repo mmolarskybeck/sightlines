@@ -3,7 +3,10 @@ import {
   buildChecklistExport,
   type BuiltChecklistExport
 } from "../../domain/checklistExport/buildChecklistExport";
-import type { ChecklistExportOptions } from "../../domain/checklistExport/types";
+import type {
+  ChecklistExportOptions,
+  ChecklistPdfExportOptions
+} from "../../domain/checklistExport/types";
 import { buildProjectPackage } from "../../domain/package/packageService";
 import {
   finalizePackageImport,
@@ -57,6 +60,13 @@ export type PackageSliceActions = {
   // handed back for the thin UI to download (no DOM here).
   exportChecklistSpreadsheet: (
     options: ChecklistExportOptions
+  ) => Promise<BuiltChecklistExport | null>;
+  // The PDF sibling (docs/export-spec.md §3.5). Same contract and same return
+  // shape as the spreadsheet action, so the UI's delivery path is one branch;
+  // the builder is dynamically imported because it pulls pdf-lib, which
+  // scripts/assert-chunk-graph.mjs keeps out of the entry closure.
+  exportChecklistPdf: (
+    options: ChecklistPdfExportOptions
   ) => Promise<BuiltChecklistExport | null>;
   // Runs the untrusted-file pipeline (docs/plan.md §13) over .sightlines
   // bytes. If §6 artwork conflicts need a decision, the import parks in
@@ -391,6 +401,38 @@ export function createPackageSlice(
           options,
           getAsset: (assetId) => deps.assetRepository.getAsset(assetId),
           getBlob: (key) => deps.assetRepository.getBlob(key)
+        });
+        set({ error: null });
+        return result;
+      } catch (error) {
+        set({
+          error: `Export failed: ${
+            error instanceof Error ? error.message : "the checklist could not be built."
+          }`
+        });
+        return null;
+      }
+    },
+
+    async exportChecklistPdf(options) {
+      const { project, libraryArtworks } = get();
+      if (!project) return null;
+
+      try {
+        // Loaded on demand, in parallel: the writer chunk (pdf-lib + fontkit)
+        // and the bundled Geist bytes, exactly as handleExportPdf does for the
+        // document export. Missing fonts fail open to standard Helvetica.
+        const [{ buildChecklistPdf }, { loadPdfFontBytes }] = await Promise.all([
+          import("../export/checklistPdf/buildChecklistPdf"),
+          import("../export/pdfFonts")
+        ]);
+        const result = await buildChecklistPdf({
+          project,
+          libraryArtworks,
+          options,
+          getAsset: (assetId) => deps.assetRepository.getAsset(assetId),
+          getBlob: (key) => deps.assetRepository.getBlob(key),
+          fontBytes: await loadPdfFontBytes()
         });
         set({ error: null });
         return result;

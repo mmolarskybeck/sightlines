@@ -44,6 +44,7 @@ export type CaptionStyleMetrics = {
   leadingPt: number;
   strong: boolean;
   oblique: boolean;
+  muted: boolean;
 };
 
 // Per-role type. The ordinal is small and tight to the artist line it labels;
@@ -53,11 +54,11 @@ export const CAPTION_STYLE_METRICS: Record<
   ChecklistCaptionStyle,
   CaptionStyleMetrics
 > = {
-  number: { sizePt: 8, leadingPt: 12, strong: true, oblique: false },
-  artist: { sizePt: 10, leadingPt: 13, strong: true, oblique: false },
-  title: { sizePt: 10, leadingPt: 13, strong: false, oblique: true },
-  body: { sizePt: 10, leadingPt: 13, strong: false, oblique: false },
-  muted: { sizePt: 9, leadingPt: 12, strong: false, oblique: false }
+  number: { sizePt: 8, leadingPt: 12, strong: true, oblique: false, muted: false },
+  artist: { sizePt: 10, leadingPt: 13, strong: true, oblique: false, muted: false },
+  title: { sizePt: 10, leadingPt: 13, strong: false, oblique: true, muted: false },
+  body: { sizePt: 10, leadingPt: 13, strong: false, oblique: false, muted: false },
+  muted: { sizePt: 9, leadingPt: 12, strong: false, oblique: false, muted: true }
 };
 
 // Where a line's baseline sits below the top of its slot. Roughly the cap
@@ -154,6 +155,12 @@ export function bandHeightPt(captionPt: number): number {
   );
 }
 
+// Float slack for the fit test below. Every constant here is an inch fraction
+// in points, so four nominal bands sum to a hair MORE than the space they were
+// sized to fill; without this a page silently drops to three works because of
+// binary rounding, which is a visible regression from an invisible cause.
+const FIT_EPSILON_PT = 0.01;
+
 export type ChecklistBandPlacement = {
   pageIndex: number;
   // Top edge of the band, in PDF user space (y up from the page's bottom).
@@ -173,7 +180,10 @@ export function paginateChecklistBands(
   let firstOnPage = true;
 
   for (const heightPt of heightsPt) {
-    if (!firstOnPage && cursor - heightPt < CHECKLIST_LAYOUT.bottomLimitPt) {
+    if (
+      !firstOnPage &&
+      cursor - heightPt < CHECKLIST_LAYOUT.bottomLimitPt - FIT_EPSILON_PT
+    ) {
       pageIndex += 1;
       cursor = CHECKLIST_LAYOUT.pageTopPt;
       firstOnPage = true;
