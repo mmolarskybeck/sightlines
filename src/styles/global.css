@@ -9194,15 +9194,32 @@ body.panels-resizing * {
    Keep after .dialog-content so the equal-specificity width override wins. */
 .import-conflict-dialog { width: min(calc(100vw - 32px), 720px); }
 
-/* Bulk affordance: deliberately quieter than the rows it drives — a label and
-   the same segmented control, sitting on the header's baseline grid. */
+/* Header row above the list: the bulk affordances, deliberately quieter than
+   the rows they drive. "Show all details" sits flush left (its ghost padding
+   pulled back so the label lands on the 24px inset) and the apply-to-all track
+   stays right so its three segments column-align with the row tracks below. */
 .import-conflict-bulk {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: var(--space-10);
   padding: var(--space-12) var(--space-24) 0;
+}
+
+.import-conflict-expand-all {
+  flex: 0 0 auto;
+  margin-inline-start: calc(-1 * var(--space-10));
+  font-weight: var(--weight-medium);
+}
+
+/* margin-left keeps the track right-aligned when the expand-all button is
+   absent (every row's diff empty). */
+.import-conflict-bulk-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  margin-left: auto;
 }
 
 .import-conflict-bulk-label {
@@ -9211,53 +9228,137 @@ body.panels-resizing * {
   font-weight: var(--weight-medium);
 }
 
+/* Rows are two compact lines at rest, so the overlay grammar's spacing-only
+   structure holds: 2px title-to-summary, 8px header-to-detail, 24px between
+   rows (12px gap plus each header's 6px wash padding). No dividers. */
 .import-conflict-list {
+  --conflict-indent: 20px;
+
   display: flex;
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
+  gap: var(--space-12);
   margin: 0;
   padding: var(--space-14) var(--space-24) var(--space-20);
   overflow-y: auto;
   list-style: none;
 }
 
-/* Rows are multi-line now, so spacing alone stops separating them; one
-   hairline divider (not a grid) keeps each work's diff readable as a unit. */
-.import-conflict-row {
+.import-conflict-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-16);
-  padding: var(--space-12) 0;
 }
 
-.import-conflict-row + .import-conflict-row {
-  border-top: 1px solid color-mix(in oklch, var(--line) 60%, transparent);
-}
-
-.import-conflict-identity {
-  display: flex;
+/* Caret column, then title over summary — one text block, and one button when
+   the row has a diff to open. The caret column is held even on rows with no
+   disclosure so every title starts on the same edge. */
+.import-conflict-headtext {
+  display: grid;
   min-width: 0;
-  flex-direction: column;
-  gap: var(--space-6);
+  flex: 1 1 auto;
+  align-items: start;
+  grid-template-columns: 14px minmax(0, 1fr);
+  column-gap: var(--space-6);
+  row-gap: var(--space-2);
+  margin-inline: calc(-1 * var(--space-8));
+  padding: var(--space-6) var(--space-8);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  text-align: left;
+}
+
+button.import-conflict-headtext {
+  cursor: pointer;
+  /* Buttons do not inherit font-family. */
+  font-family: inherit;
+  transition: background-color 120ms var(--ease-soft);
+}
+
+button.import-conflict-headtext:hover {
+  background: var(--surface);
+}
+
+button.import-conflict-headtext:active {
+  background: var(--surface-strong);
+}
+
+button.import-conflict-headtext:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.import-conflict-caret {
+  grid-row: 1;
+  grid-column: 1;
+  /* Optical centering against the 13px title's cap height. */
+  margin-top: 3px;
+  color: var(--subtle);
+  transition: transform 180ms var(--ease-soft);
+}
+
+button.import-conflict-headtext:hover .import-conflict-caret { color: var(--ink); }
+
+.import-conflict-headtext[data-state="open"] .import-conflict-caret {
+  transform: rotate(90deg);
 }
 
 .import-conflict-title {
+  grid-column: 2;
+  overflow: hidden;
   color: var(--ink);
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
   line-height: var(--leading-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Two-column diff: label, then "Yours: … · Theirs: …". Quiet by design — the
-   work's own name stays the primary line. */
+/* What the row says while closed: which fields differ, plus the local work's
+   own size/date when two rows share a label. One line, ellipsised. */
+.import-conflict-summary {
+  grid-column: 2;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: var(--type-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The opened body hangs under the title, not under the caret. */
+.import-conflict-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  padding: var(--space-8) 0 var(--space-8) var(--conflict-indent);
+}
+
+/* One authored motion moment on this surface: Radix's measured height, eased
+   with the app's --ease-soft. The global reduced-motion rule flattens it. */
+.import-conflict-row > .collapsible-content[data-state="open"] {
+  animation: collapsible-open 200ms var(--ease-soft);
+}
+
+.import-conflict-row > .collapsible-content[data-state="closed"] {
+  animation: collapsible-close 200ms var(--ease-soft);
+}
+
+/* Two-column diff: a fixed label column so every row's values start on the
+   same edge, then "Yours: … · Theirs: …" with the side words quieter than the
+   values they introduce. */
 .import-conflict-diff {
   display: grid;
   margin: 0;
-  grid-template-columns: max-content minmax(0, 1fr);
-  column-gap: var(--space-12);
-  row-gap: var(--space-2);
+  /* 7.25rem clears the longest label ("Size includes frame") on one line, so
+     every value in every row starts on the same edge. */
+  grid-template-columns: minmax(0, 7.25rem) minmax(0, 1fr);
+  column-gap: var(--space-10);
+  row-gap: var(--space-4);
 }
 
 .import-conflict-diff > div { display: contents; }
@@ -9266,15 +9367,19 @@ body.panels-resizing * {
   color: var(--muted-foreground);
   font-size: var(--type-xs);
   line-height: var(--leading-ui);
+  overflow-wrap: anywhere;
 }
 
 .import-conflict-diff dd {
   margin: 0;
-  color: var(--muted-foreground);
+  color: var(--ink);
   font-size: var(--type-xs);
+  font-variant-numeric: tabular-nums;
   line-height: var(--leading-ui);
   overflow-wrap: anywhere;
 }
+
+.import-conflict-side { color: var(--muted-foreground); }
 
 /* Aspect-true pair: the pane is a fixed-height square-cornered well and the
    image sits inside it at its own ratio, never cropped or stretched. */
@@ -9282,7 +9387,6 @@ body.panels-resizing * {
   display: flex;
   align-items: flex-start;
   gap: var(--space-12);
-  padding-top: var(--space-2);
 }
 
 .import-conflict-thumb {
@@ -9294,8 +9398,8 @@ body.panels-resizing * {
 
 .import-conflict-thumb-pane {
   display: flex;
-  width: 72px;
-  height: 44px;
+  width: 80px;
+  height: 48px;
   align-items: center;
   justify-content: center;
   padding: var(--space-2);
@@ -9331,7 +9435,8 @@ body.panels-resizing * {
 }
 
 @media (max-width: 640px) {
-  .import-conflict-row { flex-direction: column; align-items: stretch; gap: var(--space-10); }
-  .import-conflict-bulk { justify-content: flex-start; padding-inline: var(--space-16); }
+  .import-conflict-head { flex-direction: column; align-items: stretch; gap: var(--space-10); }
+  .import-conflict-bulk { flex-wrap: wrap; padding-inline: var(--space-16); }
+  .import-conflict-bulk-choice { margin-left: 0; }
   .import-conflict-list { padding-inline: var(--space-16); }
 }

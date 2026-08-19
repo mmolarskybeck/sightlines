@@ -67,6 +67,33 @@ function choiceGroup(label: string) {
   return within(screen.getByRole("radiogroup", { name: label }));
 }
 
+// Rows collapse their diff by default, so the header button is how a test
+// reaches the field list. Its accessible name is the title line plus the
+// collapsed summary, hence the prefix match.
+function rowToggles(titleLine: string) {
+  return screen.queryAllByRole("button", {
+    name: new RegExp(`^${titleLine.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`)
+  });
+}
+
+function expandRow(titleLine: string, index = 0) {
+  fireEvent.click(rowToggles(titleLine)[index]!);
+}
+
+// The diff values and the collapsed summary both mix text with quieter inline
+// spans, so match on the element's full textContent rather than on the direct
+// text nodes getByText reads by default.
+function textOf(selector: string, pattern: RegExp) {
+  return screen.getByText(
+    (_content, element) =>
+      element instanceof HTMLElement &&
+      element.matches(selector) &&
+      pattern.test(element.textContent ?? "")
+  );
+}
+
+// art-2 is byte-identical on both sides: a conflict whose difference lies
+// outside the fields this diff lists, so it has nothing to expand.
 const TWO_CONFLICTS = [
   makeConflict("art-1", { title: "First" }, { title: "First (revised)" }),
   makeConflict("art-2", { title: "Second" }, { title: "Second" })
@@ -142,10 +169,11 @@ describe("ImportConflictDialog", () => {
         { title: "First", date: "1999", accessionNumber: "A.1" }
       )
     ]);
+    expandRow("First, A. Painter");
 
     expect(screen.getByText("Date")).toBeTruthy();
-    expect(screen.getByText(/Yours: 1998/)).toBeTruthy();
-    expect(screen.getByText(/Theirs: 1999/)).toBeTruthy();
+    expect(textOf("dd", /Yours: 1998/)).toBeTruthy();
+    expect(textOf("dd", /Theirs: 1999/)).toBeTruthy();
     // Unchanged fields stay out of the way.
     expect(screen.queryByText("Accession")).toBeNull();
     expect(screen.queryByText("Title")).toBeNull();
@@ -153,8 +181,9 @@ describe("ImportConflictDialog", () => {
 
   it("renders an empty value as an em dash", () => {
     renderDialog([makeConflict("art-1", { locationOrLender: "Vault 2" }, {})]);
-    expect(screen.getByText(/Yours: Vault 2/)).toBeTruthy();
-    expect(screen.getByText(/Theirs: —/)).toBeTruthy();
+    expandRow("Study, A. Painter");
+    expect(textOf("dd", /Yours: Vault 2/)).toBeTruthy();
+    expect(textOf("dd", /Theirs: —/)).toBeTruthy();
   });
 
   it("formats differing dimensions in the artwork unit", () => {
@@ -165,9 +194,10 @@ describe("ImportConflictDialog", () => {
         { dimensions: { widthMm: 254, heightMm: 762, status: "known" } }
       )
     ]);
+    expandRow("Study, A. Painter");
 
     expect(screen.getByText("Dimensions")).toBeTruthy();
-    expect(screen.getByText(/Yours: 10" × 20".*Theirs: 10" × 30"/)).toBeTruthy();
+    expect(textOf("dd", /Yours: 10" × 20".*Theirs: 10" × 30"/)).toBeTruthy();
   });
 
   // Two rows can be two DIFFERENT works whose labels merely match; without the
@@ -177,6 +207,7 @@ describe("ImportConflictDialog", () => {
       makeConflict("art-1", { date: "1998" }, { date: "1998", locationOrLender: "Vault" }),
       makeConflict("art-2", { date: "2004" }, { date: "2004", locationOrLender: "Crate" })
     ]);
+    fireEvent.click(screen.getByRole("button", { name: "Show all details" }));
 
     expect(screen.getAllByText("Dimensions")).toHaveLength(2);
     expect(screen.getAllByText("Accession")).toHaveLength(2);
@@ -216,12 +247,107 @@ describe("ImportConflictDialog", () => {
         getBlob: () => Promise.resolve(new Blob([new Uint8Array([9])], { type: "image/webp" }))
       }
     );
+    expandRow("Study, A. Painter");
 
     expect(screen.getByText("Yours")).toBeTruthy();
     expect(screen.getByText("Theirs")).toBeTruthy();
     // Their thumbnail comes from the package (nothing is in the asset store
     // yet); yours resolves through the shared asset-URL hook.
     await waitFor(() => expect(screen.getAllByRole("presentation")).toHaveLength(2));
+  });
+
+  it("collapses every diff by default and opens one row at a time", () => {
+    renderDialog([
+      makeConflict("art-1", { title: "First", date: "1998" }, { title: "First", date: "1999" })
+    ]);
+
+    expect(screen.queryByText("Date")).toBeNull();
+
+    const toggle = rowToggles("First, A. Painter")[0]!;
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Date")).toBeTruthy();
+    // Radix points the trigger at the body it just mounted (it omits
+    // aria-controls while closed, when there is no body to point at).
+    const controls = toggle.getAttribute("aria-controls");
+    expect(controls && document.getElementById(controls)).toBeTruthy();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Date")).toBeNull();
+  });
+
+  it("names the differing fields in the collapsed summary", () => {
+    renderDialog([
+      makeConflict(
+        "art-1",
+        { title: "First", artist: "A. Painter", matWidthMm: 50 },
+        { title: "First (revised)", artist: "B. Painter", matWidthMm: 80 },
+        true
+      )
+    ]);
+
+    expect(screen.getByText("Differs in title, artist, mat, image")).toBeTruthy();
+  });
+
+  // Two rows can share one label; collapsed, the local work's own size and
+  // date are what tell them apart.
+  it("keeps same-labelled rows tellable apart while collapsed", () => {
+    renderDialog([
+      makeConflict("art-1", { date: "1998" }, { date: "1998", locationOrLender: "Vault" }),
+      makeConflict("art-2", { date: "2004" }, { date: "2004", locationOrLender: "Crate" })
+    ]);
+
+    expect(
+      textOf(".import-conflict-summary", /^Yours is 10" × 20", 1998 · differs in location$/)
+    ).toBeTruthy();
+    expect(
+      textOf(".import-conflict-summary", /^Yours is 10" × 20", 2004 · differs in location$/)
+    ).toBeTruthy();
+  });
+
+  it("expand-all opens every expandable row and flips its label", () => {
+    renderDialog([
+      makeConflict("art-1", { title: "First" }, { title: "First (revised)" }),
+      makeConflict("art-2", { title: "Second" }, { title: "Second (revised)" })
+    ]);
+
+    const button = () => screen.getByRole("button", { name: /all details$/ });
+    fireEvent.click(button());
+
+    expect(button().textContent).toBe("Hide all details");
+    expect(screen.getAllByText("Title")).toHaveLength(2);
+
+    // One row closed again is enough to make the label offer expansion.
+    fireEvent.click(rowToggles("First, A. Painter")[0]!);
+    expect(button().textContent).toBe("Show all details");
+    expect(screen.getAllByText("Title")).toHaveLength(1);
+
+    fireEvent.click(button());
+    expect(screen.getAllByText("Title")).toHaveLength(2);
+  });
+
+  // A conflict can differ only in fields this diff does not list; that row is
+  // a plain header, never a disclosure that opens onto nothing.
+  it("gives a row with no listed difference no disclosure", () => {
+    renderDialog(TWO_CONFLICTS);
+
+    expect(rowToggles("Second, A. Painter")).toHaveLength(0);
+    expect(screen.getByText("Details differ")).toBeTruthy();
+  });
+
+  it("keeps the choice control operable while the row is collapsed", () => {
+    const { onResolve } = renderDialog(TWO_CONFLICTS);
+
+    expect(screen.queryByText("Title")).toBeNull();
+    fireEvent.click(
+      choiceGroup("Resolution for First, A. Painter").getByRole("radio", { name: "Keep both" })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+
+    expect(onResolve).toHaveBeenCalledWith({ "art-1": "both" });
   });
 
   it("cancelling discards the import", () => {

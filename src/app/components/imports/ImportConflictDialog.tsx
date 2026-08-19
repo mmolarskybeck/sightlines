@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import type {
   ArtworkConflict,
   ConflictResolution,
@@ -11,6 +12,7 @@ import { useAssetImageUrls } from "../../hooks/useAssetImageUrls";
 import { formatDimensionsSummary } from "../inspectors/artworkInspectorSummaries";
 import { getScopedUnitContext } from "../shared/scopedUnits";
 import { Button } from "../ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -56,8 +58,17 @@ function matText(artwork: Artwork, unit: DisplayUnit): string {
 
 // One row of the compact field diff. `changed` drives BOTH the copy (a
 // changed field states both sides; an unchanged one states the single shared
-// value) and whether the line is shown at all for non-forced fields.
-type DiffLine = { key: string; label: string; yours: string; theirs: string; changed: boolean };
+// value) and whether the line is shown at all for non-forced fields. `short`
+// is the field's name inside the collapsed one-line summary, where the copy
+// runs as a sentence rather than as a column heading.
+type DiffLine = {
+  key: string;
+  label: string;
+  short: string;
+  yours: string;
+  theirs: string;
+  changed: boolean;
+};
 
 // Fields that make two same-titled works tellable apart. When several rows
 // share one label these are shown even when identical, so the curator can see
@@ -75,6 +86,7 @@ function buildDiffLines(
     {
       key: "title",
       label: "Title",
+      short: "title",
       yours: text(existing.title),
       theirs: text(incoming.title),
       changed: !sameText(existing.title, incoming.title)
@@ -82,6 +94,7 @@ function buildDiffLines(
     {
       key: "artist",
       label: "Artist",
+      short: "artist",
       yours: text(existing.artist),
       theirs: text(incoming.artist),
       changed: !sameText(existing.artist, incoming.artist)
@@ -89,6 +102,7 @@ function buildDiffLines(
     {
       key: "date",
       label: "Date",
+      short: "date",
       yours: text(existing.date),
       theirs: text(incoming.date),
       changed: !sameText(existing.date, incoming.date)
@@ -96,6 +110,7 @@ function buildDiffLines(
     {
       key: "accessionNumber",
       label: "Accession",
+      short: "accession",
       yours: text(existing.accessionNumber),
       theirs: text(incoming.accessionNumber),
       changed: !sameText(existing.accessionNumber, incoming.accessionNumber)
@@ -103,6 +118,7 @@ function buildDiffLines(
     {
       key: "locationOrLender",
       label: "Location / lender",
+      short: "location",
       yours: text(existing.locationOrLender),
       theirs: text(incoming.locationOrLender),
       changed: !sameText(existing.locationOrLender, incoming.locationOrLender)
@@ -110,6 +126,7 @@ function buildDiffLines(
     {
       key: "dimensions",
       label: "Dimensions",
+      short: "dimensions",
       yours: formatDimensionsSummary(existing.dimensions, unit) ?? EM_DASH,
       theirs: formatDimensionsSummary(incoming.dimensions, unit) ?? EM_DASH,
       // Compare the stored millimetres, not the rendered string: two sizes a
@@ -120,6 +137,7 @@ function buildDiffLines(
     {
       key: "matWidthMm",
       label: "Mat",
+      short: "mat",
       yours: matText(existing, unit),
       theirs: matText(incoming, unit),
       changed: (existing.matWidthMm ?? 0) !== (incoming.matWidthMm ?? 0)
@@ -127,6 +145,7 @@ function buildDiffLines(
     {
       key: "frame",
       label: "Frame",
+      short: "frame",
       yours: framingText(existing, unit),
       theirs: framingText(incoming, unit),
       changed:
@@ -136,6 +155,7 @@ function buildDiffLines(
     {
       key: "frameIncludedInImage",
       label: "Size includes frame",
+      short: "frame in size",
       yours: existing.frameIncludedInImage ? "Yes" : "No",
       theirs: incoming.frameIncludedInImage ? "Yes" : "No",
       changed:
@@ -146,6 +166,43 @@ function buildDiffLines(
   return lines.filter(
     (line) => line.changed || (forceIdentityFields && IDENTITY_FIELD_KEYS.has(line.key))
   );
+}
+
+// What the row says while collapsed. Rows start closed, so this line carries
+// the whole decision context: which KIND of difference is being judged, and —
+// when two rows share one label — which of the two works this row is.
+// `identity` is rendered ahead of the phrase, separated by a middot.
+type RowSummary = { identity: string | null; phrase: string };
+
+function sentenceCase(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function buildRowSummary(
+  conflict: ArtworkConflict,
+  lines: DiffLine[],
+  unit: DisplayUnit,
+  disambiguate: boolean
+): RowSummary {
+  // Only genuinely changed fields; the identity lines forced in for
+  // same-labelled rows are context, not differences.
+  const names = lines.filter((line) => line.changed).map((line) => line.short);
+  if (conflict.imageChanged) names.push("image");
+  // A conflict always differs somewhere, but it can differ only in fields this
+  // diff does not list (notes, metadata), which leaves nothing to name.
+  const phrase = names.length > 0 ? `differs in ${names.join(", ")}` : "details differ";
+
+  if (!disambiguate) return { identity: null, phrase: sentenceCase(phrase) };
+
+  const { existing } = conflict;
+  const identityParts = [
+    formatDimensionsSummary(existing.dimensions, unit),
+    existing.date?.trim(),
+    existing.accessionNumber?.trim()
+  ].filter((part): part is string => Boolean(part));
+
+  if (identityParts.length === 0) return { identity: null, phrase: sentenceCase(phrase) };
+  return { identity: identityParts.join(", "), phrase };
 }
 
 // The three choices, in one place so the per-row control and the apply-to-all
@@ -190,6 +247,20 @@ function ResolutionChoice({
         </SegmentedToggleGroupItem>
       ))}
     </SegmentedToggleGroup>
+  );
+}
+
+function RowSummaryText({ summary }: { summary: RowSummary }) {
+  return (
+    <span className="import-conflict-summary">
+      {summary.identity ? (
+        <>
+          Yours is {summary.identity} <span aria-hidden="true">·</span> {summary.phrase}
+        </>
+      ) : (
+        summary.phrase
+      )}
+    </span>
   );
 }
 
@@ -272,6 +343,9 @@ function ConflictReview({
   onDismiss: () => void;
 }) {
   const [resolutions, setResolutions] = useState<Record<string, ConflictResolution>>({});
+  // Rows open closed: the list is a decision queue first and a diff second.
+  // Keyed by the same id as `resolutions`, absent = collapsed.
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   // Artwork sizes read in the artwork scope's unit (in/cm), never the
   // project's feet — a canvas is specced in inches.
@@ -334,6 +408,39 @@ function ConflictReview({
   const resolutionFor = (conflict: ArtworkConflict): ConflictResolution =>
     resolutions[conflict.incoming.id] ?? "mine";
 
+  // One pass over the list: the diff, the collapsed summary, and whether the
+  // row has anything to open at all. A conflict can differ only in fields this
+  // diff does not list, which leaves an empty body — such a row is a plain
+  // header, never a dead disclosure.
+  const rows = useMemo(
+    () =>
+      conflicts.map((conflict) => {
+        const label = artworkLabel(conflict.existing);
+        const duplicate = duplicateLabels.has(label);
+        const lines = buildDiffLines(conflict, displayUnit, duplicate);
+        return {
+          conflict,
+          label,
+          lines,
+          summary: buildRowSummary(conflict, lines, displayUnit, duplicate),
+          expandable: lines.length > 0 || conflict.imageChanged
+        };
+      }),
+    [conflicts, displayUnit, duplicateLabels]
+  );
+
+  const expandableRows = rows.filter((row) => row.expandable);
+  const allExpanded =
+    expandableRows.length > 0 &&
+    expandableRows.every((row) => expanded[row.conflict.incoming.id] === true);
+
+  const toggleAll = () => {
+    const next = !allExpanded;
+    setExpanded(
+      Object.fromEntries(expandableRows.map((row) => [row.conflict.incoming.id, next]))
+    );
+  };
+
   // The apply-to-all control mirrors the rows: it shows the shared choice when
   // every row agrees and nothing when they don't, so it never misreports a
   // list the curator has since touched row by row.
@@ -365,19 +472,29 @@ function ConflictReview({
 
       {conflicts.length > 1 ? (
         <div className="import-conflict-bulk">
-          <span className="import-conflict-bulk-label">Apply to all</span>
-          <ResolutionChoice
-            label="Resolution for all artworks"
-            value={uniformChoice}
-            onChange={applyToAll}
-          />
+          {expandableRows.length > 0 ? (
+            <Button
+              className="import-conflict-expand-all"
+              size="sm"
+              variant="ghost"
+              onClick={toggleAll}
+            >
+              {allExpanded ? "Hide all details" : "Show all details"}
+            </Button>
+          ) : null}
+          <div className="import-conflict-bulk-choice">
+            <span className="import-conflict-bulk-label">Apply to all</span>
+            <ResolutionChoice
+              label="Resolution for all artworks"
+              value={uniformChoice}
+              onChange={applyToAll}
+            />
+          </div>
         </div>
       ) : null}
 
       <ul className="import-conflict-list">
-        {conflicts.map((conflict) => {
-          const label = artworkLabel(conflict.existing);
-          const lines = buildDiffLines(conflict, displayUnit, duplicateLabels.has(label));
+        {rows.map(({ conflict, expandable, label, lines, summary }) => {
           const yoursUrl = conflict.existing.assetId
             ? localUrls.get(conflict.existing.assetId)
             : undefined;
@@ -386,38 +503,28 @@ function ConflictReview({
               localUrls.get(conflict.incoming.assetId)
             : undefined;
 
-          return (
-            <li className="import-conflict-row" key={conflict.incoming.id}>
-              <div className="import-conflict-identity">
-                <span className="import-conflict-title">{label}</span>
-
-                {lines.length > 0 ? (
-                  <dl className="import-conflict-diff">
-                    {lines.map((line) => (
-                      <div key={line.key}>
-                        <dt>{line.label}</dt>
-                        <dd>
-                          {line.changed ? (
-                            <>
-                              Yours: {line.yours} <span aria-hidden="true">·</span> Theirs:{" "}
-                              {line.theirs}
-                            </>
-                          ) : (
-                            line.yours
-                          )}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                ) : null}
-
-                {conflict.imageChanged ? (
-                  <div className="import-conflict-thumbs">
-                    <ConflictThumbnail caption="Yours" url={yoursUrl} />
-                    <ConflictThumbnail caption="Theirs" url={theirsUrl} />
-                  </div>
-                ) : null}
-              </div>
+          // The choice control is a SIBLING of the disclosure trigger, never a
+          // child: a button cannot nest inside a button, and the resolution
+          // has to stay clickable and tabbable while the row is closed.
+          const head = (
+            <div className="import-conflict-head">
+              {expandable ? (
+                <CollapsibleTrigger className="import-conflict-headtext">
+                  <CaretRightIcon
+                    aria-hidden="true"
+                    className="import-conflict-caret"
+                    size={11}
+                    weight="bold"
+                  />
+                  <span className="import-conflict-title">{label}</span>
+                  <RowSummaryText summary={summary} />
+                </CollapsibleTrigger>
+              ) : (
+                <div className="import-conflict-headtext">
+                  <span className="import-conflict-title">{label}</span>
+                  <RowSummaryText summary={summary} />
+                </div>
+              )}
 
               <ResolutionChoice
                 label={`Resolution for ${label}`}
@@ -426,7 +533,62 @@ function ConflictReview({
                   setResolutions((current) => ({ ...current, [conflict.incoming.id]: next }))
                 }
               />
-            </li>
+            </div>
+          );
+
+          if (!expandable) {
+            return (
+              <li className="import-conflict-row" key={conflict.incoming.id}>
+                {head}
+              </li>
+            );
+          }
+
+          return (
+            <Collapsible
+              asChild
+              key={conflict.incoming.id}
+              open={expanded[conflict.incoming.id] === true}
+              onOpenChange={(next) =>
+                setExpanded((current) => ({ ...current, [conflict.incoming.id]: next }))
+              }
+            >
+              <li className="import-conflict-row">
+                {head}
+                <CollapsibleContent>
+                  <div className="import-conflict-detail">
+                    {lines.length > 0 ? (
+                      <dl className="import-conflict-diff">
+                        {lines.map((line) => (
+                          <div key={line.key}>
+                            <dt>{line.label}</dt>
+                            <dd>
+                              {line.changed ? (
+                                <>
+                                  <span className="import-conflict-side">Yours:</span>{" "}
+                                  {line.yours} <span aria-hidden="true">·</span>{" "}
+                                  <span className="import-conflict-side">Theirs:</span>{" "}
+                                  {line.theirs}
+                                </>
+                              ) : (
+                                line.yours
+                              )}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    ) : null}
+
+                    {conflict.imageChanged ? (
+                      <div className="import-conflict-thumbs">
+                        <ConflictThumbnail caption="Yours" url={yoursUrl} />
+                        <ConflictThumbnail caption="Theirs" url={theirsUrl} />
+                      </div>
+                    ) : null}
+                  </div>
+                </CollapsibleContent>
+              </li>
+            </Collapsible>
           );
         })}
       </ul>
