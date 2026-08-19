@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   formatBackupRelativeTime,
+  formatCloudProjectMeta,
   getCloudBackupMenuItem,
   getCloudBackupPopoverState,
+  getCloudProjectActionAriaLabel,
+  getCloudProjectActionLabel,
+  getCloudProjectOpenErrorMessage,
+  getCloudProjectsSectionState,
   getStatusBadgeDisplay,
   getStatusBadgeTooltip
 } from "./cloudBackupCopy";
@@ -282,5 +287,125 @@ describe("getCloudBackupMenuItem", () => {
     expect(getCloudBackupMenuItem({ ...base, lastCloudBackupAt: null })).toMatchObject({
       description: "Waiting for the first backup"
     });
+  });
+});
+
+describe("getCloudProjectsSectionState", () => {
+  const base = {
+    providerStatus: "connected" as const,
+    status: "loaded" as const,
+    count: 2
+  };
+
+  it("heads the section 'In Dropbox' and shows the rows once a listing landed", () => {
+    expect(getCloudProjectsSectionState(base)).toEqual({
+      heading: "In Dropbox",
+      message: null,
+      action: null,
+      actionLabel: null
+    });
+  });
+
+  it("offers Reconnect for a grant that needs reauthorization, from either status", () => {
+    const reconnect = {
+      heading: "In Dropbox",
+      message: "Reconnect Dropbox to browse your cloud backups.",
+      action: "reconnect",
+      actionLabel: "Reconnect"
+    };
+    expect(
+      getCloudProjectsSectionState({ ...base, providerStatus: "reauthorization-required" })
+    ).toEqual(reconnect);
+    expect(getCloudProjectsSectionState({ ...base, status: "reauth-required" })).toEqual(
+      reconnect
+    );
+  });
+
+  it("offers Retry when the listing failed", () => {
+    expect(getCloudProjectsSectionState({ ...base, status: "error" })).toEqual({
+      heading: "In Dropbox",
+      message: "Couldn't reach Dropbox.",
+      action: "retry",
+      actionLabel: "Retry"
+    });
+  });
+
+  it("reads as checking while loading and before the first listing", () => {
+    expect(getCloudProjectsSectionState({ ...base, status: "loading" }).message).toBe(
+      "Checking Dropbox…"
+    );
+    expect(getCloudProjectsSectionState({ ...base, status: "idle" }).message).toBe(
+      "Checking Dropbox…"
+    );
+  });
+
+  it("claims there are no backups only after a successful empty listing", () => {
+    expect(getCloudProjectsSectionState({ ...base, count: 0 }).message).toBe(
+      "No cloud backups yet."
+    );
+    expect(
+      getCloudProjectsSectionState({ ...base, status: "loading", count: 0 }).message
+    ).not.toBe("No cloud backups yet.");
+  });
+});
+
+describe("formatCloudProjectMeta", () => {
+  it("pairs the newest backup's relative time with the copy count", () => {
+    expect(
+      formatCloudProjectMeta({
+        latestBackupIso: "2026-07-19T09:00:00Z",
+        backupCount: 5,
+        now: NOW
+      })
+    ).toBe("Backed up 3 h ago · 5 backups");
+  });
+
+  it("singularizes one backup and drops the time when there is none", () => {
+    expect(
+      formatCloudProjectMeta({ latestBackupIso: "2026-07-19T09:00:00Z", backupCount: 1, now: NOW })
+    ).toBe("Backed up 3 h ago · 1 backup");
+    expect(formatCloudProjectMeta({ latestBackupIso: null, backupCount: 0 })).toBe("0 backups");
+  });
+});
+
+describe("cloud project row actions", () => {
+  it("offers Open only when nothing local looks like the folder", () => {
+    expect(getCloudProjectActionLabel(false)).toBe("Open");
+    expect(getCloudProjectActionLabel(true)).toBe("Save a copy");
+  });
+
+  it("names the folder in the accessible label so repeated rows differ", () => {
+    expect(getCloudProjectActionAriaLabel(false, "Winter Show")).toBe(
+      "Open Winter Show from Dropbox"
+    );
+    expect(getCloudProjectActionAriaLabel(true, "Winter Show")).toBe(
+      "Save a copy of Winter Show from Dropbox"
+    );
+  });
+});
+
+describe("getCloudProjectOpenErrorMessage", () => {
+  it("says the backup is gone rather than offering a pointless retry", () => {
+    expect(getCloudProjectOpenErrorMessage("not-found")).toBe(
+      "That backup is no longer in Dropbox."
+    );
+  });
+
+  it("names the fix for a lapsed grant and backs off on rate limits", () => {
+    expect(getCloudProjectOpenErrorMessage("reauth")).toBe(
+      "Reconnect Dropbox to open this backup."
+    );
+    expect(getCloudProjectOpenErrorMessage("rate-limit")).toBe(
+      "Dropbox is busy. Try opening that backup again in a moment."
+    );
+  });
+
+  it("falls back to one download failure sentence", () => {
+    expect(getCloudProjectOpenErrorMessage("transient")).toBe(
+      "Couldn't download that backup from Dropbox."
+    );
+    expect(getCloudProjectOpenErrorMessage("quota")).toBe(
+      "Couldn't download that backup from Dropbox."
+    );
   });
 });

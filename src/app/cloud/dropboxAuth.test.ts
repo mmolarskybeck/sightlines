@@ -10,7 +10,9 @@ import {
   filesystemSafeTimestamp,
   generateRandomString,
   isReauthorizationFailure,
+  parseProjectFolderName,
   parseRetryAfterMs,
+  projectFolderName,
   projectFolderPath,
   sanitizeDropboxTitle,
   serializeDropboxApiArg,
@@ -71,6 +73,8 @@ describe("dropbox PKCE helpers", () => {
     expect(params.get("state")).toBe("STATE");
     expect(params.get("scope")).toContain("files.content.write");
     expect(params.get("scope")).toContain("sharing.write");
+    // Reading a backup back down is what the cloud project browser runs on.
+    expect(params.get("scope")).toContain("files.content.read");
     expect(params.get("force_reapprove")).toBeNull();
     expect(params.get("include_granted_scopes")).toBeNull();
   });
@@ -89,6 +93,7 @@ describe("dropbox PKCE helpers", () => {
     expect(url.searchParams.get("force_reapprove")).toBe("true");
     expect(url.searchParams.get("include_granted_scopes")).toBe("user");
     expect(url.searchParams.get("scope")).toContain("sharing.write");
+    expect(url.searchParams.get("scope")).toContain("files.content.read");
   });
 
   it("builds a refresh body with client_id only (no secret)", () => {
@@ -116,6 +121,19 @@ describe("dropbox error classification", () => {
     ).toBe("quota");
     expect(classifyApiError(500, {})).toBe("transient");
     expect(classifyApiError(409, { error: "invalid_grant" })).toBe("transient");
+  });
+
+  it("classifies a 409 not_found as not-found, in JSON or bare-text form", () => {
+    expect(
+      classifyApiError(409, { error_summary: "path/not_found/..." })
+    ).toBe("not-found");
+    // Content endpoints answer with plain text, not JSON.
+    expect(classifyApiError(409, "path/not_found/.")).toBe("not-found");
+    // The same summary on another status stays transient — only 409 is Dropbox
+    // saying "this specific request could not be satisfied".
+    expect(classifyApiError(500, { error_summary: "path/not_found/" })).toBe(
+      "transient"
+    );
   });
 
   it("parses Retry-After seconds and dates, null otherwise", () => {
@@ -179,6 +197,38 @@ describe("dropbox path construction", () => {
     ).toBe(
       "/shares/Winter Show — proj-abc/Winter Show 2026-07-19T14-30-05-000Z.sightlines"
     );
+  });
+});
+
+describe("project folder name parsing", () => {
+  it("round-trips a folder name built by projectFolderName", () => {
+    const name = projectFolderName("abc12345-6789-dead-beef", "Winter Show");
+    expect(name).toBe("Winter Show — abc12345");
+    expect(parseProjectFolderName(name)).toEqual({
+      title: "Winter Show",
+      projectIdPrefix: "abc12345"
+    });
+  });
+
+  it("splits at the LAST separator so a title may contain one itself", () => {
+    const name = projectFolderName("zzz99999-0000", "Ways of Seeing — Part II");
+    expect(parseProjectFolderName(name)).toEqual({
+      title: "Ways of Seeing — Part II",
+      projectIdPrefix: "zzz99999"
+    });
+  });
+
+  it("rejects names that are not folder names Sightlines wrote", () => {
+    // No separator at all — a legacy folder named with the bare project id
+    // carries no title to recover.
+    expect(parseProjectFolderName("abc12345-6789-dead-beef")).toBeNull();
+    expect(parseProjectFolderName("Some Other Folder")).toBeNull();
+    // Empty title or empty/oversized suffix.
+    expect(parseProjectFolderName(" — abc12345")).toBeNull();
+    expect(parseProjectFolderName("Winter Show — ")).toBeNull();
+    expect(parseProjectFolderName("Winter Show — abc123456789")).toBeNull();
+    // A suffix with whitespace is prose, not a project id.
+    expect(parseProjectFolderName("Notes — see also")).toBeNull();
   });
 });
 

@@ -150,6 +150,12 @@ import {
   type CloudBackupSliceActions,
   type CloudBackupSliceState
 } from "./store/cloudBackupSlice";
+import {
+  CLOUD_PROJECTS_SLICE_INITIAL,
+  createCloudProjectsSlice,
+  type CloudProjectsSliceActions,
+  type CloudProjectsSliceState
+} from "./store/cloudProjectsSlice";
 import type { CloudBackupProvider } from "./cloud/provider";
 import { createDropboxProvider } from "./cloud/dropbox";
 import {
@@ -356,6 +362,8 @@ export type AppState = ArrangeSliceState &
   ArtworkIntakeSliceActions &
   CloudBackupSliceState &
   CloudBackupSliceActions &
+  CloudProjectsSliceState &
+  CloudProjectsSliceActions &
   DocumentMetaSliceActions &
   PackageSliceActions &
   ProjectManagerSliceActions &
@@ -1958,6 +1966,8 @@ export function createAppStore(deps: AppStoreDeps) {
 
     const cloudBackupSlice = createCloudBackupSlice(set, get, { deps });
 
+    const cloudProjectsSlice = createCloudProjectsSlice(set, get, { deps });
+
     const artworkIntake = createArtworkIntakeSlice(set, get, {
       applyEdit,
       persist,
@@ -1992,6 +2002,7 @@ export function createAppStore(deps: AppStoreDeps) {
       intakeState: "idle",
       ...ARTWORK_INTAKE_SLICE_INITIAL,
       ...CLOUD_BACKUP_SLICE_INITIAL,
+      ...CLOUD_PROJECTS_SLICE_INITIAL,
       pendingPackageImport: null,
       recoveryOffer: null,
 
@@ -2213,6 +2224,8 @@ export function createAppStore(deps: AppStoreDeps) {
       ...packageSlice.actions,
 
       ...cloudBackupSlice.actions,
+
+      ...cloudProjectsSlice.actions,
 
       ...projectManager.actions,
 

@@ -8,6 +8,8 @@
 import type {
   CloudBackupProvider,
   CloudBackupProviderStatus,
+  CloudProjectBackup,
+  CloudProjectFolder,
   UploadBackupInput
 } from "./provider";
 import {
@@ -32,6 +34,8 @@ import {
   generateRandomString,
   isReauthorizationFailure,
   isProjectFolderName,
+  MAX_BACKUP_DOWNLOAD_BYTES,
+  parseProjectFolderName,
   projectFolderPath,
   selectBackupsToPrune,
   serializeDropboxApiArg,
@@ -71,6 +75,7 @@ function readAuth(): DropboxAuthRecord | null {
       expiresAt: typeof record.expiresAt === "number" ? record.expiresAt : 0,
       accountLabel:
         typeof record.accountLabel === "string" ? record.accountLabel : null,
+      ...(typeof record.accountId === "string" ? { accountId: record.accountId } : {}),
       ...(typeof record.scope === "string" ? { scope: record.scope } : {})
     };
   } catch {
@@ -84,6 +89,17 @@ function writeAuth(record: DropboxAuthRecord): void {
 
 function clearAuth(): void {
   window.localStorage.removeItem(DROPBOX_AUTH_STORAGE_KEY);
+}
+
+function grantedScopes(auth: DropboxAuthRecord): Set<string> {
+  return new Set((auth.scope ?? "").split(/\s+/).filter(Boolean));
+}
+
+// Which of the scopes this build asks for are absent from a stored grant. An
+// older record with no `scope` at all counts as missing everything.
+function missingScopes(auth: DropboxAuthRecord): string[] {
+  const granted = grantedScopes(auth);
+  return DROPBOX_SCOPES.split(/\s+/).filter((scope) => !granted.has(scope));
 }
 
 type TokenResponse = {
@@ -111,9 +127,13 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
 
   async startConnect(): Promise<void> {
     const existingAuth = readAuth();
+    // Any scope added after a grant was stored needs a real approval screen —
+    // Dropbox otherwise silently returns the old, narrower grant. Compare the
+    // whole set rather than naming one scope, so the next addition needs no
+    // change here.
     const forceReapprove =
       this.reauthorizationRequired ||
-      (existingAuth !== null && !existingAuth.scope?.split(/\s+/).includes("sharing.write"));
+      (existingAuth !== null && missingScopes(existingAuth).length > 0);
     const verifier = generateRandomString();
     const state = generateRandomString();
     window.sessionStorage.setItem(DROPBOX_PKCE_VERIFIER_KEY, verifier);
@@ -234,7 +254,7 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
   async createShareLink(input: UploadBackupInput): Promise<string> {
     const auth = readAuth();
     if (!auth) throw new CloudBackupError("reauth", "Dropbox is not connected.");
-    if (!auth.scope?.split(/\s+/).includes("sharing.write")) {
+    if (!grantedScopes(auth).has("sharing.write")) {
       this.reauthorizationRequired = true;
       throw new CloudBackupError(
         "reauth",
@@ -264,6 +284,63 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
       throw new CloudBackupError("transient", "Dropbox returned no share link.");
     }
     return body.url;
+  }
+
+  // --- reading back --------------------------------------------------------
+
+  async listCloudProjects(): Promise<CloudProjectFolder[]> {
+    this.requireReadScope();
+    return this.withReauthTracking(async () => {
+      const token = await this.accessToken();
+      // One recursive listing covers the folders and their files; /backups is
+      // two levels deep by construction, so nothing deeper is expected.
+      const entries = await this.listFolder(token, "/backups", { recursive: true });
+      return groupCloudProjects(entries);
+    });
+  }
+
+  async downloadBackup(path: string): Promise<Uint8Array> {
+    this.requireReadScope();
+    return this.withReauthTracking(async () => {
+      const token = await this.accessToken();
+      const response = await fetch(`${DROPBOX_CONTENT_URL}/2/files/download`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Dropbox-API-Arg": serializeDropboxApiArg({ path })
+        }
+      });
+      return ensureOkBinary(response, "download the backup");
+    });
+  }
+
+  // Reading is a scope the first release never asked for, so a stored grant can
+  // be complete for backup and still unable to list or download. Mirrors
+  // createShareLink's gate: flip the sticky flag so every surface offers the
+  // one-time Reconnect, and never spend a request that is certain to fail.
+  private requireReadScope(): void {
+    const auth = readAuth();
+    if (!auth) throw new CloudBackupError("reauth", "Dropbox is not connected.");
+    if (!grantedScopes(auth).has("files.content.read")) {
+      this.reauthorizationRequired = true;
+      throw new CloudBackupError(
+        "reauth",
+        "Reconnect Dropbox once to browse cloud backups."
+      );
+    }
+  }
+
+  // A token rejected mid-flight (401) means the grant died between the refresh
+  // and the call; make it stick so the UI stops presenting the browser as usable.
+  private async withReauthTracking<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      if (error instanceof CloudBackupError && error.kind === "reauth") {
+        this.reauthorizationRequired = true;
+      }
+      throw error;
+    }
   }
 
   // --- token lifecycle -----------------------------------------------------
@@ -337,13 +414,21 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
     });
     if (!response.ok) return;
     const body = (await response.json().catch(() => ({}))) as {
+      account_id?: string;
       name?: { display_name?: string };
     };
     const label = body.name?.display_name;
+    // The account id is captured here so cross-device sync can bind its
+    // bookkeeping to the account rather than the (mutable, ambiguous) display
+    // name without forcing a second reconnect later.
+    const accountId = body.account_id;
     const current = readAuth();
-    if (label && current) {
-      writeAuth({ ...current, accountLabel: label });
-    }
+    if (!current || (!label && !accountId)) return;
+    writeAuth({
+      ...current,
+      ...(label ? { accountLabel: label } : {}),
+      ...(accountId ? { accountId } : {})
+    });
   }
 
   // --- upload paths --------------------------------------------------------
@@ -512,7 +597,8 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
 
   private async listFolder(
     token: string,
-    path: string
+    path: string,
+    options: { recursive?: boolean } = {}
   ): Promise<DropboxFileEntry[]> {
     const entries: DropboxFileEntry[] = [];
     let response = await fetch(`${DROPBOX_API_URL}/2/files/list_folder`, {
@@ -521,7 +607,9 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ path })
+      body: JSON.stringify(
+        options.recursive ? { path, recursive: true } : { path }
+      )
     });
     // A missing folder (nothing uploaded yet, or all pruned) is not an error.
     if (response.status === 409) return [];
@@ -561,7 +649,38 @@ async function ensureOk<T = unknown>(
     return (await response.json().catch(() => ({}))) as T;
   }
   const body = await response.json().catch(() => null);
-  const kind = classifyApiError(response.status, body);
+  throw classifiedError(response.status, body, action);
+}
+
+// The binary sibling of ensureOk for the content endpoints that answer with
+// bytes. Content-endpoint errors arrive as plain text rather than JSON, and
+// classifyApiError already reads a string body, so the two share one
+// classification (and therefore one reauth/quota/not-found vocabulary).
+async function ensureOkBinary(
+  response: Response,
+  action: string
+): Promise<Uint8Array> {
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw classifiedError(response.status, text, action);
+  }
+  const declared = response.headers.get("Content-Length");
+  if (declared !== null && Number(declared) > MAX_BACKUP_DOWNLOAD_BYTES) {
+    throw oversizeError(action);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  // Content-Length is advisory (absent under chunked transfer), so the real
+  // length is the one that decides.
+  if (bytes.byteLength > MAX_BACKUP_DOWNLOAD_BYTES) throw oversizeError(action);
+  return bytes;
+}
+
+function classifiedError(
+  status: number,
+  body: unknown,
+  action: string
+): CloudBackupError {
+  const kind = classifyApiError(status, body);
   const detail =
     kind === "quota"
       ? "Your Dropbox is out of space."
@@ -569,8 +688,95 @@ async function ensureOk<T = unknown>(
         ? "Dropbox is rate-limiting backups; will retry shortly."
         : kind === "reauth"
           ? "Dropbox access has expired. Reconnect to resume backups."
-          : `Dropbox request failed (${response.status}).`;
-  throw new CloudBackupError(kind, `Could not ${action}: ${detail}`);
+          : kind === "not-found"
+            ? "That file is no longer in your Dropbox."
+            : `Dropbox request failed (${status}).`;
+  return new CloudBackupError(kind, `Could not ${action}: ${detail}`);
+}
+
+function oversizeError(action: string): CloudBackupError {
+  return new CloudBackupError(
+    "too-large",
+    `Could not ${action}: that backup is larger than ${
+      MAX_BACKUP_DOWNLOAD_BYTES / (1024 * 1024)
+    } MB and cannot be opened here.`
+  );
+}
+
+// Fold a recursive /backups listing into per-project folders. Depth is read
+// from the entry path rather than trusted from the order Dropbox returns:
+// /backups/<folder> is a project folder, /backups/<folder>/<file> its backup.
+// Paths are lowercased by Dropbox, so the folder segment is the join key.
+function groupCloudProjects(entries: DropboxFileEntry[]): CloudProjectFolder[] {
+  type Group = { folder: CloudProjectFolder; backups: CloudProjectBackup[] };
+  const groups = new Map<string, Group>();
+
+  for (const entry of entries) {
+    if (entry[".tag"] !== "folder") continue;
+    const segments = backupPathSegments(entry);
+    if (segments.length !== 2) continue;
+    const parsed = parseProjectFolderName(entry.name);
+    if (!parsed) continue;
+    groups.set(segments[1], {
+      folder: {
+        folderName: entry.name,
+        title: parsed.title,
+        projectIdPrefix: parsed.projectIdPrefix,
+        backupCount: 0,
+        latestBackup: null
+      },
+      backups: []
+    });
+  }
+
+  for (const entry of entries) {
+    if (entry[".tag"] === "folder") continue;
+    if (!entry.name.toLocaleLowerCase().endsWith(".sightlines")) continue;
+    const segments = backupPathSegments(entry);
+    if (segments.length !== 3) continue;
+    const group = groups.get(segments[1]);
+    const path = entry.path_lower ?? entry.path_display;
+    if (!group || !path) continue;
+    group.backups.push({
+      path,
+      name: entry.name,
+      serverModifiedIso: entry.server_modified ?? null,
+      sizeBytes: typeof entry.size === "number" ? entry.size : null
+    });
+  }
+
+  const folders: CloudProjectFolder[] = [];
+  for (const group of groups.values()) {
+    // ISO timestamps compare lexicographically; an entry without one sorts
+    // last (its "" loses every comparison), so it is never mistaken for newest.
+    group.backups.sort(
+      (a, b) =>
+        (b.serverModifiedIso ?? "").localeCompare(a.serverModifiedIso ?? "") ||
+        a.name.localeCompare(b.name)
+    );
+    folders.push({
+      ...group.folder,
+      backupCount: group.backups.length,
+      latestBackup: group.backups[0] ?? null
+    });
+  }
+
+  // Most recently backed-up project first. A folder with no backups at all
+  // trails every folder that has one, including one Dropbox gave no timestamp
+  // for — "we don't know when" still outranks "there is nothing here".
+  return folders.sort(
+    (a, b) =>
+      Number(b.latestBackup !== null) - Number(a.latestBackup !== null) ||
+      (b.latestBackup?.serverModifiedIso ?? "").localeCompare(
+        a.latestBackup?.serverModifiedIso ?? ""
+      ) ||
+      a.folderName.localeCompare(b.folderName)
+  );
+}
+
+function backupPathSegments(entry: DropboxFileEntry): string[] {
+  const path = entry.path_lower ?? entry.path_display ?? "";
+  return path.toLocaleLowerCase().split("/").filter(Boolean);
 }
 
 // Leave the callback URL for the app root without a reload, dropping the

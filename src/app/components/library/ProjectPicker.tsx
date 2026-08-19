@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import type { ProjectSummary } from "../../../domain/project";
+import type {
+  CloudBackupProviderStatus,
+  CloudProjectFolder
+} from "../../cloud/provider";
+import type { CloudProjectsStatus } from "../../store/cloudProjectsSlice";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { ProjectManager } from "./ProjectManager";
@@ -14,7 +19,15 @@ export function ProjectPicker({
   onRenameProject,
   onDeleteProject,
   onOpenProject,
-  onExportProject
+  onExportProject,
+  cloudBackupConfigured,
+  cloudBackupProviderStatus,
+  cloudProjects,
+  cloudProjectsStatus,
+  cloudProjectOpening,
+  onRefreshCloudProjects,
+  onOpenCloudProject,
+  onReconnectCloudBackup
 }: {
   currentProjectId: string;
   listProjectSummaries: () => Promise<ProjectSummary[]>;
@@ -24,6 +37,14 @@ export function ProjectPicker({
   onDeleteProject: (id: string) => Promise<void>;
   onOpenProject: (id: string) => Promise<void>;
   onExportProject: (id: string) => Promise<void>;
+  cloudBackupConfigured: boolean;
+  cloudBackupProviderStatus: CloudBackupProviderStatus;
+  cloudProjects: CloudProjectFolder[] | null;
+  cloudProjectsStatus: CloudProjectsStatus;
+  cloudProjectOpening: string | null;
+  onRefreshCloudProjects: () => Promise<void>;
+  onOpenCloudProject: (folder: CloudProjectFolder) => Promise<boolean>;
+  onReconnectCloudBackup: () => Promise<void>;
 }) {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -47,6 +68,11 @@ export function ProjectPicker({
       </Tooltip>
 
       <ProjectManager
+        cloudBackupConfigured={cloudBackupConfigured}
+        cloudBackupProviderStatus={cloudBackupProviderStatus}
+        cloudProjectOpening={cloudProjectOpening}
+        cloudProjects={cloudProjects}
+        cloudProjectsStatus={cloudProjectsStatus}
         currentProjectId={currentProjectId}
         listProjectSummaries={listProjectSummaries}
         open={isOpen}
@@ -55,7 +81,10 @@ export function ProjectPicker({
         onDuplicateProject={onDuplicateProject}
         onExportProject={onExportProject}
         onOpenChange={setIsOpen}
+        onOpenCloudProject={onOpenCloudProject}
         onOpenProject={onOpenProject}
+        onReconnectCloudBackup={onReconnectCloudBackup}
+        onRefreshCloudProjects={onRefreshCloudProjects}
         onRenameProject={onRenameProject}
       />
     </>

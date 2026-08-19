@@ -8,6 +8,18 @@ import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import type { ProjectSummary } from "../../../domain/project";
+import {
+  CLOUD_PROJECT_ABSENT_TAG,
+  formatCloudProjectMeta,
+  getCloudProjectActionAriaLabel,
+  getCloudProjectActionLabel,
+  getCloudProjectsSectionState
+} from "../../cloud/cloudBackupCopy";
+import type {
+  CloudBackupProviderStatus,
+  CloudProjectFolder
+} from "../../cloud/provider";
+import type { CloudProjectsStatus } from "../../store/cloudProjectsSlice";
 import { Button } from "../ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
@@ -29,7 +41,15 @@ export function ProjectManager({
   onRenameProject,
   onDeleteProject,
   onOpenProject,
-  onExportProject
+  onExportProject,
+  cloudBackupConfigured,
+  cloudBackupProviderStatus,
+  cloudProjects,
+  cloudProjectsStatus,
+  cloudProjectOpening,
+  onRefreshCloudProjects,
+  onOpenCloudProject,
+  onReconnectCloudBackup
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -41,6 +61,16 @@ export function ProjectManager({
   onDeleteProject: (id: string) => Promise<void>;
   onOpenProject: (id: string) => Promise<void>;
   onExportProject: (id: string) => Promise<void>;
+  cloudBackupConfigured: boolean;
+  cloudBackupProviderStatus: CloudBackupProviderStatus;
+  cloudProjects: CloudProjectFolder[] | null;
+  cloudProjectsStatus: CloudProjectsStatus;
+  cloudProjectOpening: string | null;
+  onRefreshCloudProjects: () => Promise<void>;
+  // Resolves true once the backup has been imported (or parked in the artwork
+  // review dialog), which is when this modal should get out of the way.
+  onOpenCloudProject: (folder: CloudProjectFolder) => Promise<boolean>;
+  onReconnectCloudBackup: () => Promise<void>;
 }) {
   const [summaries, setSummaries] = useState<ProjectSummary[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,6 +79,14 @@ export function ProjectManager({
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+
+  // Disconnected users see nothing new here — Settings owns connecting. A grant
+  // that needs reauthorization still shows the section, because that state has
+  // its own one-click fix and hiding it would just look like nothing is there.
+  const showCloudProjects =
+    cloudBackupConfigured &&
+    (cloudBackupProviderStatus === "connected" ||
+      cloudBackupProviderStatus === "reauthorization-required");
 
   useEffect(() => {
     if (!open) {
@@ -63,11 +101,12 @@ export function ProjectManager({
     void listProjectSummaries().then((result) => {
       if (!cancelled) setSummaries(result);
     });
+    if (showCloudProjects) void onRefreshCloudProjects();
 
     return () => {
       cancelled = true;
     };
-  }, [open, listProjectSummaries]);
+  }, [open, listProjectSummaries, showCloudProjects, onRefreshCloudProjects]);
 
   const refresh = () => {
     void listProjectSummaries().then((result) => setSummaries(result));
@@ -140,6 +179,12 @@ export function ProjectManager({
     } finally {
       setExportingId(null);
     }
+  };
+
+  const handleOpenCloudProject = async (folder: CloudProjectFolder) => {
+    // The import commit opens the document itself; this modal only has to step
+    // aside once the package has been accepted.
+    if (await onOpenCloudProject(folder)) onOpenChange(false);
   };
 
   const handleDuplicate = async (id: string) => {
@@ -361,8 +406,128 @@ export function ProjectManager({
             })
           )}
         </div>
+
+        {showCloudProjects ? (
+          <CloudProjectsSection
+            busy={busy}
+            folders={cloudProjects}
+            localProjectIds={(summaries ?? []).map((summary) => summary.id)}
+            openingFolderName={cloudProjectOpening}
+            providerStatus={cloudBackupProviderStatus}
+            status={cloudProjectsStatus}
+            onOpenFolder={handleOpenCloudProject}
+            onReconnect={onReconnectCloudBackup}
+            onRetry={onRefreshCloudProjects}
+          />
+        ) : null}
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Cloud backup folders from the connected provider, listed under the projects
+// on this device. Stage 1 is read-only: a folder can be restored or copied in,
+// never written back and never used to replace a local project.
+function CloudProjectsSection({
+  busy,
+  folders,
+  localProjectIds,
+  openingFolderName,
+  providerStatus,
+  status,
+  onOpenFolder,
+  onReconnect,
+  onRetry
+}: {
+  busy: boolean;
+  folders: CloudProjectFolder[] | null;
+  localProjectIds: string[];
+  openingFolderName: string | null;
+  providerStatus: CloudBackupProviderStatus;
+  status: CloudProjectsStatus;
+  onOpenFolder: (folder: CloudProjectFolder) => Promise<void>;
+  onReconnect: () => Promise<void>;
+  onRetry: () => Promise<void>;
+}) {
+  const section = getCloudProjectsSectionState({
+    providerStatus,
+    status,
+    count: folders?.length ?? 0
+  });
+
+  return (
+    <section className="project-manager-cloud">
+      <h3 className="project-manager-cloud-heading">{section.heading}</h3>
+
+      {section.message ? (
+        <p className="project-manager-empty">
+          {section.message}
+          {section.action ? (
+            <Button
+              className="project-manager-cloud-inline-action"
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                void (section.action === "reconnect" ? onReconnect() : onRetry());
+              }}
+            >
+              {section.actionLabel}
+            </Button>
+          ) : null}
+        </p>
+      ) : (
+        <div className="project-manager-cloud-list" aria-label="Cloud backups">
+          {(folders ?? []).map((folder) => {
+            // Prefix agreement is a guess about identity, so it only chooses
+            // which offer to make — the import pipeline decides what is written.
+            const matchesLocalProject =
+              folder.projectIdPrefix.length > 0 &&
+              localProjectIds.some((id) => id.startsWith(folder.projectIdPrefix));
+            const isOpening = openingFolderName === folder.folderName;
+
+            return (
+              <div className="project-manager-row" key={folder.folderName}>
+                <div className="project-manager-cloud-summary">
+                  <span className="project-manager-title">
+                    {folder.title}
+                    {matchesLocalProject ? null : (
+                      <span className="project-manager-cloud-tag">
+                        {CLOUD_PROJECT_ABSENT_TAG}
+                      </span>
+                    )}
+                  </span>
+                  <span className="project-manager-meta">
+                    {formatCloudProjectMeta({
+                      latestBackupIso: folder.latestBackup?.serverModifiedIso ?? null,
+                      backupCount: folder.backupCount
+                    })}
+                  </span>
+                </div>
+
+                <div className="project-manager-actions">
+                  <Button
+                    aria-busy={isOpening}
+                    aria-label={getCloudProjectActionAriaLabel(
+                      matchesLocalProject,
+                      folder.title
+                    )}
+                    disabled={busy || openingFolderName !== null}
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void onOpenFolder(folder)}
+                  >
+                    {isOpening ? (
+                      <CircleNotchIcon aria-hidden="true" className="animate-spin" size={14} />
+                    ) : null}
+                    <span>{getCloudProjectActionLabel(matchesLocalProject)}</span>
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 

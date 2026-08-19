@@ -50,6 +50,14 @@ function makeFakeProvider(options: {
     async createShareLink() {
       this.shares += 1;
       return "https://www.dropbox.com/scl/fi/share/project.sightlines?rlkey=test&dl=0";
+    },
+    // The read side is exercised in the cloud-projects tests; here it only has
+    // to satisfy the interface.
+    async listCloudProjects() {
+      return [];
+    },
+    async downloadBackup() {
+      return new Uint8Array();
     }
   };
 }

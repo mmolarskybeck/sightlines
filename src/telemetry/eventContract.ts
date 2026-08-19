@@ -8,6 +8,7 @@ export type TelemetryEventMap = {
   pdf_export_completed: Record<never, never>;
   package_import_completed: Record<never, never>;
   cloud_backup_connected: { provider: "dropbox" };
+  cloud_project_opened: Record<never, never>;
 };
 
 export type TelemetryEventName = keyof TelemetryEventMap;
@@ -21,7 +22,8 @@ export type TelemetryEvent = {
 const EMPTY_EVENT_NAMES = new Set<TelemetryEventName>([
   "project_created",
   "pdf_export_completed",
-  "package_import_completed"
+  "package_import_completed",
+  "cloud_project_opened"
 ]);
 
 function hasExpectedKeys(

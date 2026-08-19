@@ -37,6 +37,15 @@ export type PackageSliceActions = {
   // Same validation and merge pipeline, but always saves a fresh project id so
   // a Dropbox snapshot can never become the sender's identity on this device.
   importSharedSightlinesPackage: (bytes: ArrayBuffer) => Promise<boolean>;
+  // A backup downloaded from the user's own connected cloud provider. Identity
+  // is preserved by default — a project absent from this device should come
+  // back as itself — and `asCopy` forces a fresh id when one that looks like it
+  // is already here. Resolves true once the pipeline has accepted the package,
+  // which includes parking in the artwork conflict dialog.
+  importCloudBackupPackage: (
+    bytes: ArrayBuffer,
+    options?: { asCopy?: boolean }
+  ) => Promise<boolean>;
   resolvePackageImportConflicts: (
     resolutions: Record<string, ConflictResolution>
   ) => Promise<void>;
@@ -311,6 +320,10 @@ export function createPackageSlice(
 
     async importSharedSightlinesPackage(bytes) {
       return runPackageImport(bytes, { forceProjectCopy: true });
+    },
+
+    async importCloudBackupPackage(bytes, options = {}) {
+      return runPackageImport(bytes, { forceProjectCopy: options.asCopy === true });
     },
 
     async resolvePackageImportConflicts(resolutions) {

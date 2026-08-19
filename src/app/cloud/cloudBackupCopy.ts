@@ -7,6 +7,7 @@
 
 import type { CloudBackupProviderStatus } from "./provider";
 import type { CloudBackupUploadStatus } from "../store/cloudBackupSlice";
+import type { CloudProjectsStatus } from "../store/cloudProjectsSlice";
 
 // A terse relative time for a backup timestamp: "just now", "2 m ago",
 // "3 h ago", "5 d ago". Matches the quiet, glanceable register of the popover.
@@ -336,3 +337,130 @@ export function getCloudBackupMenuItem(input: {
     busy: false
   };
 }
+
+// ---------------------------------------------------------------------------
+// Cloud project browser (project manager): the Dropbox backup folders this
+// account holds, listed next to the projects on this device.
+//
+// The vocabulary here is deliberately "cloud projects / backup / restore" and
+// never "sync" (docs/cloud-sync-plan.md staged roadmap — the sync label starts
+// at stage 2, when a canonical head and a conflict model exist). A folder with
+// no local counterpart is "Not on this device", never "orphaned": it is usually
+// exactly what another device made and this one wants.
+// ---------------------------------------------------------------------------
+
+export const CLOUD_PROJECTS_HEADING = "In Dropbox";
+
+// Plain muted text next to the title, mirroring the "Current" tag — a fact
+// about this device, not a warning.
+export const CLOUD_PROJECT_ABSENT_TAG = "Not on this device";
+
+export type CloudProjectsSectionAction = "retry" | "reconnect";
+
+export type CloudProjectsSectionState = {
+  heading: string;
+  // Replaces the rows when set; null means the list itself is what to show.
+  message: string | null;
+  action: CloudProjectsSectionAction | null;
+  actionLabel: string | null;
+};
+
+// The provider's own link status outranks the list status: a grant that needs
+// reauthorization can never produce a list, so offer the one fix that works
+// rather than a Retry that will fail the same way.
+export function getCloudProjectsSectionState(input: {
+  providerStatus: CloudBackupProviderStatus;
+  status: CloudProjectsStatus;
+  count: number;
+}): CloudProjectsSectionState {
+  const heading = CLOUD_PROJECTS_HEADING;
+
+  if (
+    input.providerStatus === "reauthorization-required" ||
+    input.status === "reauth-required"
+  ) {
+    return {
+      heading,
+      message: "Reconnect Dropbox to browse your cloud backups.",
+      action: "reconnect",
+      actionLabel: "Reconnect"
+    };
+  }
+  if (input.status === "error") {
+    return {
+      heading,
+      message: "Couldn't reach Dropbox.",
+      action: "retry",
+      actionLabel: "Retry"
+    };
+  }
+  // "idle" only lasts until the dialog's on-open refresh lands, so it reads as
+  // the same wait rather than a fourth, emptier state.
+  if (input.status === "loading" || input.status === "idle") {
+    return { heading, message: "Checking Dropbox…", action: null, actionLabel: null };
+  }
+  if (input.count === 0) {
+    return { heading, message: "No cloud backups yet.", action: null, actionLabel: null };
+  }
+  return { heading, message: null, action: null, actionLabel: null };
+}
+
+// One row's meta line: when the newest backup landed, and how many the folder
+// keeps. Same relative-time register as the save-status popover.
+export function formatCloudProjectMeta(input: {
+  latestBackupIso: string | null;
+  backupCount: number;
+  now?: number;
+}): string {
+  const copies = `${input.backupCount} backup${input.backupCount === 1 ? "" : "s"}`;
+  if (!input.latestBackupIso) return copies;
+  return `Backed up ${formatBackupRelativeTime(input.latestBackupIso, input.now)} · ${copies}`;
+}
+
+// "Open" restores a project this device doesn't have under its own identity;
+// "Save a copy" is the only offer when the id looks like one already here,
+// because stage 1 never replaces a local project. The match is an 8-char
+// prefix guess, so the label must not promise the two are the same project —
+// the import pipeline re-ids on collision either way.
+export function getCloudProjectActionLabel(matchesLocalProject: boolean): string {
+  return matchesLocalProject ? "Save a copy" : "Open";
+}
+
+// Every row's button carries the same two words, so the accessible name has to
+// name the folder as well as the verb.
+export function getCloudProjectActionAriaLabel(
+  matchesLocalProject: boolean,
+  title: string
+): string {
+  return matchesLocalProject
+    ? `Save a copy of ${title} from Dropbox`
+    : `Open ${title} from Dropbox`;
+}
+
+// The provider-agnostic failure kinds a restore has distinct wording for;
+// anything else a provider can classify collapses into "transient".
+export type CloudProjectOpenErrorKind =
+  | "reauth"
+  | "not-found"
+  | "rate-limit"
+  | "quota"
+  | "transient";
+
+// Failure to download one backup. "not-found" gets no retry affordance — the
+// file is gone, and the list is refreshed instead.
+export function getCloudProjectOpenErrorMessage(
+  kind: CloudProjectOpenErrorKind
+): string {
+  switch (kind) {
+    case "not-found":
+      return "That backup is no longer in Dropbox.";
+    case "reauth":
+      return "Reconnect Dropbox to open this backup.";
+    case "rate-limit":
+      return "Dropbox is busy. Try opening that backup again in a moment.";
+    default:
+      return "Couldn't download that backup from Dropbox.";
+  }
+}
+
+export const CLOUD_PROJECT_NO_BACKUP_MESSAGE = "That folder has no backup to open.";

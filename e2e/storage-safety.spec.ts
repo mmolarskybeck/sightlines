@@ -1,4 +1,4 @@
-import { test, expect, gotoApp } from "./fixtures";
+import { test, expect, gotoApp, addArtwork } from "./fixtures";
 import type { Page } from "playwright/test";
 import { strToU8, zipSync } from "fflate";
 
@@ -11,6 +11,13 @@ import { strToU8, zipSync } from "fflate";
 
 const DROPBOX_AUTH_KEY = "sightlines:dropboxAuth";
 const CURRENT_SCHEMA_VERSION = 5;
+
+// The pre-files.content.read scope grant (see dropboxAuth.ts DROPBOX_SCOPES'
+// history): a stored auth record with this exact scope string predates the
+// cloud-project-browser's read scope, so listCloudProjects()/downloadBackup()
+// must fail closed into the reauth path rather than attempt a doomed request.
+const DROPBOX_OLD_SCOPES =
+  "account_info.read files.content.write files.metadata.read sharing.write";
 
 // A schema-valid project literal for the recovery snapshot (mirrors
 // createBlankProject so parseProject/migrateProject accept it as-is). Inlined
@@ -41,7 +48,11 @@ function validProject(id: string, title: string) {
 // the access token is valid for an hour and no refresh is attempted.
 async function seedDropboxAuth(
   page: Page,
-  { expired = false, accountLabel = "Test Curator" }: { expired?: boolean; accountLabel?: string } = {}
+  {
+    expired = false,
+    accountLabel = "Test Curator",
+    scope = "account_info.read files.content.write files.metadata.read sharing.write files.content.read"
+  }: { expired?: boolean; accountLabel?: string; scope?: string } = {}
 ) {
   const expiresAt = expired ? Date.now() - 60_000 : Date.now() + 3_600_000;
   await page.addInitScript(
@@ -55,18 +66,39 @@ async function seedDropboxAuth(
         accessToken: "seed-access-token",
         expiresAt,
         accountLabel,
-        scope: "account_info.read files.content.write files.metadata.read sharing.write"
+        // Must stay in step with DROPBOX_SCOPES: a stored grant missing any of
+        // them sends startConnect() down the force-reapprove path.
+        scope
       }
     }
   );
 }
 
+// A real single-shot upload's path + bytes, captured off the wire so the
+// cloud-project-browser tests can serve back a REAL package (list_folder +
+// download) instead of hand-rolling one. Filled by installDropboxRoutes when
+// a `capture` record is passed in; left untouched otherwise.
+type UploadCapture = { path: string; bytes: Buffer } | null;
+
 // Mock every Dropbox endpoint the provider can touch. `tokenStatus`/`tokenBody`
 // drive the refresh response so a single helper serves both the happy path
 // (200, never actually called) and the reauth path (400 invalid_grant).
+// `capture`, when supplied, records the most recent single-shot
+// content.dropboxapi.com/2/files/upload (path from its Dropbox-API-Arg header,
+// bytes from its body) and, once populated, makes list_folder describe that
+// one folder/file and download serve those exact bytes back — a real backup
+// round-trip instead of a fake echo.
 async function installDropboxRoutes(
   page: Page,
-  { tokenStatus = 200, tokenBody }: { tokenStatus?: number; tokenBody?: unknown } = {}
+  {
+    tokenStatus = 200,
+    tokenBody,
+    capture
+  }: {
+    tokenStatus?: number;
+    tokenBody?: unknown;
+    capture?: { upload: UploadCapture };
+  } = {}
 ) {
   await page.route("https://api.dropboxapi.com/**", async (route) => {
     const url = route.request().url();
@@ -80,6 +112,37 @@ async function installDropboxRoutes(
       });
     }
     if (url.includes("/2/files/list_folder")) {
+      if (capture?.upload) {
+        const { path } = capture.upload;
+        const lastSlash = path.lastIndexOf("/");
+        const folderPath = path.slice(0, lastSlash);
+        const folderName = folderPath.slice("/backups/".length);
+        const fileName = path.slice(lastSlash + 1);
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            entries: [
+              {
+                ".tag": "folder",
+                name: folderName,
+                path_lower: folderPath.toLowerCase(),
+                path_display: folderPath
+              },
+              {
+                ".tag": "file",
+                name: fileName,
+                path_lower: path.toLowerCase(),
+                path_display: path,
+                server_modified: new Date().toISOString(),
+                size: capture.upload.bytes.byteLength
+              }
+            ],
+            has_more: false,
+            cursor: ""
+          })
+        });
+      }
       return route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -109,8 +172,27 @@ async function installDropboxRoutes(
   });
 
   await page.route("https://content.dropboxapi.com/**", async (route) => {
+    const url = route.request().url();
     const apiArg = route.request().headers()["dropbox-api-arg"];
     const path = apiArg ? JSON.parse(apiArg).path : "/backups/mock";
+
+    if (url.includes("/2/files/download") && capture?.upload) {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/octet-stream",
+        body: capture.upload.bytes
+      });
+    }
+
+    // The single-shot upload path only — upload_session/* (large packages)
+    // is out of scope for these fixtures. Matched by substring rather than
+    // an exact URL because "/2/files/upload" is also a prefix of
+    // "/2/files/upload_session/...".
+    if (capture && url.includes("/2/files/upload") && !url.includes("upload_session")) {
+      const bytes = route.request().postDataBuffer() ?? Buffer.alloc(0);
+      capture.upload = { path: String(path), bytes };
+    }
+
     return route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -392,6 +474,152 @@ test.describe("cloud backup", () => {
       expect.objectContaining({ title: "Shared Exhibition (copy)" })
     );
     expect(storedProjects.some((project) => project.id === "sender-project-id")).toBe(false);
+  });
+});
+
+test.describe("cloud project browser", () => {
+  // Wait for the real single-shot upload response (not the request event,
+  // which can fire before installDropboxRoutes' handler has finished writing
+  // into `capture`) so the caller can rely on capture.upload being populated
+  // the moment this resolves.
+  function waitForUploadCaptured(page: Page) {
+    return page.waitForResponse(
+      (response) =>
+        response.url().includes("content.dropboxapi.com/2/files/upload") &&
+        !response.url().includes("upload_session")
+    );
+  }
+
+  function openProjectManager(page: Page) {
+    return page.getByRole("button", { name: "Manage projects" }).click();
+  }
+
+  test("restores a Dropbox backup under its own identity once the project is gone locally", async ({
+    page,
+    browserName
+  }) => {
+    const capture: { upload: UploadCapture } = { upload: null };
+    await installDropboxRoutes(page, { capture });
+    await seedDropboxAuth(page);
+    await gotoApp(page);
+
+    await renameProject(page, "Cloud Round Trip");
+    // This Playwright-bundled WebKit build cannot store a Blob as an
+    // IndexedDB value at all (a bare put(blob) aborts the transaction with a
+    // null DOMException, reproduced outside the app) — an engine limitation
+    // unrelated to the feature under test, since every other webkit-storage
+    // spec here only ever stores plain JSON records. Skip the artwork step
+    // there so this test still exercises the real restore-identity path on
+    // both engines; artwork survival is verified on chromium-storage.
+    if (browserName !== "webkit") {
+      await addArtwork(page);
+      await expect(page.locator("li.checklist-row")).toHaveCount(1);
+    }
+
+    const uploadCaptured = waitForUploadCaptured(page);
+    await flushCloudBackupOnHide(page);
+    await uploadCaptured;
+    expect(capture.upload).not.toBeNull();
+
+    // Delete the (only, currently open) local project through the manager UI.
+    // deleteProject() falls back to a fresh "Untitled Exhibition" once it
+    // notices nothing else is left, all before this call resolves.
+    await openProjectManager(page);
+    const dialog = page.getByRole("dialog", { name: "Projects" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Delete Cloud Round Trip" }).click();
+    await dialog.getByRole("button", { name: "Delete", exact: true }).click();
+    // Scoped to the local list: the still-open dialog's cloud section was
+    // fetched before the delete and legitimately still names this project
+    // (as a "Save a copy" row) until the reopen below re-asks Dropbox.
+    await expect(dialog.locator(".project-manager-list").getByText("Cloud Round Trip")).toHaveCount(
+      0
+    );
+
+    // Close and reopen so the manager re-lists local projects and re-asks
+    // Dropbox for its folders against the now-empty device.
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await openProjectManager(page);
+    await expect(dialog).toBeVisible();
+
+    await expect(dialog.getByText("In Dropbox")).toBeVisible();
+    await expect(dialog.getByText("Cloud Round Trip")).toBeVisible();
+    await expect(dialog.getByText("Not on this device")).toBeVisible();
+    const openButton = dialog.getByRole("button", { name: "Open Cloud Round Trip from Dropbox" });
+    await expect(openButton).toBeVisible();
+
+    await openButton.click();
+    await expect(dialog).toBeHidden();
+
+    // The restored project opens under its ORIGINAL identity (no "(copy)"
+    // suffix — nothing local collided with it), artwork intact.
+    await expect(page.getByRole("textbox", { name: "Project title" }).first()).toHaveValue(
+      "Cloud Round Trip"
+    );
+    if (browserName !== "webkit") {
+      await expect(page.locator("li.checklist-row")).toHaveCount(1);
+    }
+  });
+
+  test("offers 'Save a copy' (never 'Not on this device') while the project is still local", async ({
+    page
+  }) => {
+    const capture: { upload: UploadCapture } = { upload: null };
+    await installDropboxRoutes(page, { capture });
+    await seedDropboxAuth(page);
+    await gotoApp(page);
+
+    await renameProject(page, "Still Local Show");
+
+    const uploadCaptured = waitForUploadCaptured(page);
+    await flushCloudBackupOnHide(page);
+    await uploadCaptured;
+    expect(capture.upload).not.toBeNull();
+
+    await openProjectManager(page);
+    const dialog = page.getByRole("dialog", { name: "Projects" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText("In Dropbox")).toBeVisible();
+
+    await expect(dialog.getByText("Not on this device")).toHaveCount(0);
+    const copyButton = dialog.getByRole("button", {
+      name: "Save a copy of Still Local Show from Dropbox"
+    });
+    await expect(copyButton).toBeVisible();
+    await expect(
+      dialog.getByRole("button", { name: "Open Still Local Show from Dropbox" })
+    ).toHaveCount(0);
+
+    await copyButton.click();
+    await expect(dialog).toBeHidden();
+
+    // Forced copy: the browser cannot tell whether the folder really is this
+    // device's project, so it never overwrites — it always lands as a copy.
+    await expect(page.getByRole("textbox", { name: "Project title" }).first()).toHaveValue(
+      "Still Local Show (copy)"
+    );
+  });
+
+  test("shows the reconnect offer instead of rows when the grant predates the read scope", async ({
+    page
+  }) => {
+    await installDropboxRoutes(page);
+    await seedDropboxAuth(page, { scope: DROPBOX_OLD_SCOPES });
+    await gotoApp(page);
+
+    await openProjectManager(page);
+    const dialog = page.getByRole("dialog", { name: "Projects" });
+    await expect(dialog).toBeVisible();
+
+    await expect(
+      dialog.getByText("Reconnect Dropbox to browse your cloud backups.")
+    ).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Reconnect" })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: /^Open .* from Dropbox$/ })).toHaveCount(0);
+    await expect(
+      dialog.getByRole("button", { name: /^Save a copy of .* from Dropbox$/ })
+    ).toHaveCount(0);
   });
 });
 

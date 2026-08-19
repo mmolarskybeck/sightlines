@@ -32,8 +32,12 @@ import {
   getStatusBadgeTooltip,
   type CloudBackupCloudIcon
 } from "../../cloud/cloudBackupCopy";
-import type { CloudBackupProviderStatus } from "../../cloud/provider";
+import type {
+  CloudBackupProviderStatus,
+  CloudProjectFolder
+} from "../../cloud/provider";
 import type { CloudBackupUploadStatus } from "../../store/cloudBackupSlice";
+import type { CloudProjectsStatus } from "../../store/cloudProjectsSlice";
 import type { AppState, ViewMode } from "../../store";
 import { ProjectPicker } from "../library/ProjectPicker";
 import { StatusBadge } from "../toolbar";
@@ -86,6 +90,11 @@ type TopBarProps = {
   cloudBackupPending: boolean;
   runCloudBackupNow: () => Promise<void>;
   connectCloudBackup: () => Promise<void>;
+  cloudProjects: CloudProjectFolder[] | null;
+  cloudProjectsStatus: CloudProjectsStatus;
+  cloudProjectOpening: string | null;
+  refreshCloudProjects: () => Promise<void>;
+  openCloudProjectBackup: (folder: CloudProjectFolder) => Promise<boolean>;
   isExportingPackage: boolean;
   isSharingProject: boolean;
   handleExportPackage: (mode: PackageExportMode) => Promise<void>;
@@ -123,6 +132,11 @@ export function TopBar({
   cloudBackupPending,
   runCloudBackupNow,
   connectCloudBackup,
+  cloudProjects,
+  cloudProjectsStatus,
+  cloudProjectOpening,
+  refreshCloudProjects,
+  openCloudProjectBackup,
   isExportingPackage,
   isSharingProject,
   handleExportPackage,
@@ -180,13 +194,21 @@ export function TopBar({
         <div className="project-switcher">
           <ProjectTitleInput title={project.title} onCommit={renameProject} />
           <ProjectPicker
+            cloudBackupConfigured={cloudBackupConfigured}
+            cloudBackupProviderStatus={cloudBackupProviderStatus}
+            cloudProjectOpening={cloudProjectOpening}
+            cloudProjects={cloudProjects}
+            cloudProjectsStatus={cloudProjectsStatus}
             currentProjectId={project.id}
             listProjectSummaries={listProjectSummaries}
             onCreateProject={createProject}
             onDeleteProject={deleteProject}
             onDuplicateProject={duplicateProject}
             onExportProject={handleExportProjectById}
+            onOpenCloudProject={openCloudProjectBackup}
             onOpenProject={openProject}
+            onReconnectCloudBackup={connectCloudBackup}
+            onRefreshCloudProjects={refreshCloudProjects}
             onRenameProject={renameProjectById}
           />
         </div>

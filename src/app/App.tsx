@@ -247,6 +247,11 @@ export function App() {
   const runCloudBackupNow = useAppStore((state) => state.runCloudBackupNow);
   const createCloudShareLink = useAppStore((state) => state.createCloudShareLink);
   const connectCloudBackup = useAppStore((state) => state.connectCloudBackup);
+  const cloudProjects = useAppStore((state) => state.cloudProjects);
+  const cloudProjectsStatus = useAppStore((state) => state.cloudProjectsStatus);
+  const cloudProjectOpening = useAppStore((state) => state.cloudProjectOpening);
+  const refreshCloudProjects = useAppStore((state) => state.refreshCloudProjects);
+  const openCloudProjectBackup = useAppStore((state) => state.openCloudProjectBackup);
   const disconnectCloudBackup = useAppStore((state) => state.disconnectCloudBackup);
   const completeCloudBackupConnect = useAppStore((state) => state.completeCloudBackupConnect);
   const refreshCloudBackupStatus = useAppStore((state) => state.refreshCloudBackupStatus);
@@ -1720,6 +1725,11 @@ export function App() {
         cloudBackupPending={cloudBackupPending}
         runCloudBackupNow={runCloudBackupNow}
         connectCloudBackup={connectCloudBackup}
+        cloudProjects={cloudProjects}
+        cloudProjectsStatus={cloudProjectsStatus}
+        cloudProjectOpening={cloudProjectOpening}
+        refreshCloudProjects={refreshCloudProjects}
+        openCloudProjectBackup={openCloudProjectBackup}
         isExportingPackage={isExportingPackage}
         isSharingProject={isSharingProject}
         handleExportPackage={handleExportPackage}

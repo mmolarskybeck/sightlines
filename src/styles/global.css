@@ -1645,6 +1645,57 @@ fieldset.export-pdf-body:disabled {
   min-height: 32px;
 }
 
+/* Cloud backups, listed under the projects on this device. Same square rows and
+   spacing-not-hairlines separation as the local list; the only new thing is the
+   quiet section heading that says which side of the boundary you're reading. */
+.project-manager-cloud {
+  display: grid;
+  gap: var(--space-4);
+  /* Shrinks with the local list rather than pushing it out of the overlay; a
+     percentage cap can't resolve here (the dialog is max-height, not height). */
+  flex: 0 1 auto;
+  min-height: 0;
+  padding: 0 var(--space-16) var(--space-16);
+  overflow-y: auto;
+}
+
+.project-manager-cloud-heading {
+  margin: 0;
+  padding: var(--space-8) var(--space-10) 0;
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+}
+
+.project-manager-cloud-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.project-manager-cloud-summary {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-10);
+}
+
+/* Plain muted text like the "Current" tag — a fact about this device, not a
+   warning, so it takes the subtle ink rather than any accent. */
+.project-manager-cloud-tag {
+  flex: 0 0 auto;
+  color: var(--subtle);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+}
+
+.project-manager-cloud-inline-action {
+  margin-left: var(--space-6);
+  min-height: 24px;
+  padding: 0 var(--space-6);
+}
+
 .project-manager-rename-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 32px 32px;

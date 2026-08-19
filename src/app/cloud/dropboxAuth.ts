@@ -12,11 +12,14 @@ export const DROPBOX_TOKEN_URL = "https://api.dropboxapi.com/oauth2/token";
 export const DROPBOX_API_URL = "https://api.dropboxapi.com";
 export const DROPBOX_CONTENT_URL = "https://content.dropboxapi.com";
 
-// account_info.read (display name), files.content.write (upload),
-// files.metadata.read (list for retention), sharing.write (create a view-only
-// link for a snapshot). files.content.read is not needed.
+// account_info.read (display name + account id), files.content.write (upload),
+// files.metadata.read (list for retention and for the cloud project browser),
+// sharing.write (create a view-only link for a snapshot), files.content.read
+// (download a backup's bytes — the cloud project browser / restore path).
+// files.content.read arrived after the first release, so a stored grant can be
+// missing it; startConnect() forces one re-approval in that case.
 export const DROPBOX_SCOPES =
-  "account_info.read files.content.write files.metadata.read sharing.write";
+  "account_info.read files.content.write files.metadata.read sharing.write files.content.read";
 
 // Retention: keep this many newest backups per project; older ones are pruned.
 export const CLOUD_BACKUPS_PER_PROJECT = 5;
@@ -26,6 +29,11 @@ export const CLOUD_BACKUPS_PER_PROJECT = 5;
 export const DROPBOX_SINGLE_UPLOAD_MAX_BYTES = 140 * 1024 * 1024;
 // ~8 MB append chunks for the upload-session path.
 export const DROPBOX_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
+
+// Refuse to buffer a download larger than this. Mirrors the share-relay cap in
+// fetchDropboxShare.ts: a package is read whole into memory, so an implausible
+// file must fail before it exhausts the tab.
+export const MAX_BACKUP_DOWNLOAD_BYTES = 256 * 1024 * 1024;
 
 // Refresh an access token this long before it actually expires, so an in-flight
 // request never races the boundary.
@@ -47,12 +55,15 @@ export function serializeDropboxApiArg(value: unknown): string {
 
 // The stored auth record. accessToken/expiresAt are a refreshable cache; the
 // refreshToken is the durable credential. accountLabel is the linked account's
-// display name (best-effort; null until fetched).
+// display name (best-effort; null until fetched). accountId is Dropbox's stable
+// account identifier — records written before it was captured omit it, so every
+// reader must tolerate its absence.
 export type DropboxAuthRecord = {
   refreshToken: string;
   accessToken: string;
   expiresAt: number;
   accountLabel: string | null;
+  accountId?: string;
   scope?: string;
 };
 
@@ -155,19 +166,30 @@ export function isReauthorizationFailure(
   return error === "invalid_grant";
 }
 
-export type DropboxErrorKind = "reauth" | "quota" | "rate-limit" | "transient";
+export type DropboxErrorKind =
+  | "reauth"
+  | "quota"
+  | "rate-limit"
+  | "not-found"
+  | "too-large"
+  | "transient";
 
 // Classify an API/content-endpoint failure. 401 → the access token was rejected
 // mid-flight despite a fresh refresh, treat as reauth. 429 → back off (respect
 // Retry-After); surfaced as transient so a cycle failure never hard-fails the
-// user. insufficient_space anywhere in the error payload → quota. Everything
-// else (5xx, offline, malformed) → transient.
+// user. insufficient_space anywhere in the error payload → quota. A 409 naming
+// not_found → the file is gone, which is a terminal answer, not something to
+// retry. Everything else (5xx, offline, malformed) → transient.
 export function classifyApiError(status: number, body: unknown): DropboxErrorKind {
   if (status === 401) return "reauth";
   if (status === 429) return "rate-limit";
   const text =
     typeof body === "string" ? body : body != null ? JSON.stringify(body) : "";
   if (text.includes("insufficient_space")) return "quota";
+  // Dropbox reports every endpoint-level error as 409; the summary carries the
+  // meaning. Content endpoints send it as bare text, JSON endpoints as
+  // error_summary — matching on the substring covers both.
+  if (status === 409 && text.includes("not_found")) return "not-found";
   if (
     body &&
     typeof body === "object" &&
@@ -263,11 +285,42 @@ export function isProjectFolderName(name: string, projectId: string): boolean {
   );
 }
 
-// A minimal file entry the retention logic needs from list_folder.
+// Invert projectFolderName for the cloud project browser, which sees folder
+// names without knowing any project id. The separator can legitimately occur
+// inside a title ("A — B — abc12345"), so the id suffix is always the segment
+// after the LAST separator. Legacy folders named with the bare project id carry
+// no title and deliberately return null — the next upload from the owning
+// device reconciles them into the readable form.
+//
+// The recovered projectIdPrefix is a display hint, never proof of identity
+// (see CloudProjectFolder in provider.ts).
+export function parseProjectFolderName(
+  name: string
+): { title: string; projectIdPrefix: string } | null {
+  const separatorIndex = name.lastIndexOf(PROJECT_FOLDER_SEPARATOR);
+  if (separatorIndex <= 0) return null;
+  const title = name.slice(0, separatorIndex);
+  const projectIdPrefix = name.slice(separatorIndex + PROJECT_FOLDER_SEPARATOR.length);
+  if (
+    projectIdPrefix.length === 0 ||
+    projectIdPrefix.length > PROJECT_FOLDER_ID_LENGTH ||
+    /\s/.test(projectIdPrefix)
+  ) {
+    return null;
+  }
+  return { title, projectIdPrefix };
+}
+
+// A minimal entry from list_folder: what retention needs, plus the fields the
+// cloud project browser shows or hands back to a download.
 export type DropboxFileEntry = {
   ".tag"?: string;
   name: string;
+  id?: string;
+  rev?: string;
+  size?: number;
   path_lower?: string;
+  path_display?: string;
   server_modified?: string;
 };
 

@@ -22,6 +22,28 @@ export type UploadBackupInput = {
   timestampIso: string;
 };
 
+// One backup file inside a project's backup folder, as listed for the cloud
+// project browser. `path` is the provider path handed back to downloadBackup.
+export type CloudProjectBackup = {
+  path: string;
+  name: string;
+  serverModifiedIso: string | null;
+  sizeBytes: number | null;
+};
+
+// A per-project backup folder in the provider's backup location. Identity here
+// is heuristic: the folder name carries only the first 8 chars of the project
+// UUID, so "matches a local project" is a display-level guess — authoritative
+// identity is the manifest's project id, read only after download. Never treat
+// projectIdPrefix as proof of identity.
+export type CloudProjectFolder = {
+  folderName: string;
+  title: string;
+  projectIdPrefix: string;
+  backupCount: number;
+  latestBackup: CloudProjectBackup | null;
+};
+
 export interface CloudBackupProvider {
   // Stable machine id (e.g. "dropbox") and a human label ("Dropbox").
   readonly id: string;
@@ -62,4 +84,17 @@ export interface CloudBackupProvider {
   // file link. The caller wraps this provider URL in a Sightlines deep link;
   // later project edits never mutate an already-shared snapshot.
   createShareLink(input: UploadBackupInput): Promise<string>;
+
+  // List the provider's per-project backup folders with their newest backup.
+  // Read operations need a scope the original grant didn't include, so this
+  // rejects with a classified "reauth" error when the stored grant predates
+  // the read scope — the caller offers a one-time Reconnect, mirroring
+  // createShareLink's gate.
+  listCloudProjects(): Promise<CloudProjectFolder[]>;
+
+  // Download one backup file's raw bytes for the package-import pipeline.
+  // Rejects with a classified error; a path that no longer exists surfaces as
+  // "not-found" (distinct from transient network trouble) so the caller can
+  // say "that backup is gone" instead of offering a retry.
+  downloadBackup(path: string): Promise<Uint8Array>;
 }
