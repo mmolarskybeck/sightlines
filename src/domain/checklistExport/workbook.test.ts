@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { strFromU8, unzipSync } from "fflate";
 import type { ChecklistExportTable } from "./types";
 import { writeChecklistCsv, writeChecklistXlsx } from "./workbook";
 
@@ -74,7 +75,7 @@ describe("writeChecklistXlsx", () => {
   it("round-trips through SheetJS with numbers still numeric", async () => {
     const bytes = await writeChecklistXlsx(table);
     const XLSX = await import("xlsx");
-    const book = XLSX.read(bytes, { type: "array" });
+    const book = XLSX.read(bytes, { type: "array", cellStyles: true });
 
     expect(book.SheetNames).toEqual(["Checklist"]);
     const sheet = book.Sheets.Checklist;
@@ -86,6 +87,23 @@ describe("writeChecklistXlsx", () => {
     expect(typeof aoa[1][3]).toBe("number");
     expect(aoa[1][2]).toBe('Untitled, "no. 3"');
     expect(aoa[2][3]).toBeNull();
+    expect(sheet["!autofilter"]).toEqual({ ref: "A1:E4" });
+    expect(sheet["!cols"]?.[0]?.wch).toBeCloseTo(6, 0);
+  });
+
+  it("styles and freezes the filterable header row", async () => {
+    const archive = unzipSync(await writeChecklistXlsx(table));
+    const sheetXml = strFromU8(archive["xl/worksheets/sheet1.xml"]);
+    const stylesXml = strFromU8(archive["xl/styles.xml"]);
+
+    expect(sheetXml).toContain('<autoFilter ref="A1:E4"/>');
+    expect(sheetXml).toContain(
+      '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
+    );
+    expect(sheetXml).toMatch(/<row r="1" ht="24" customHeight="1">/);
+    expect(sheetXml).toMatch(/<c s="1" r="A1"/);
+    expect(stylesXml).toContain('fgColor rgb="FF285F63"');
+    expect(stylesXml).toContain('<font><b/><sz val="11"/><color rgb="FFFFFFFF"/>');
   });
 
   it("writes a real zip-backed xlsx (PK header)", async () => {
