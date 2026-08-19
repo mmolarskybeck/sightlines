@@ -1646,17 +1646,26 @@ fieldset.export-pdf-body:disabled {
 }
 
 /* Cloud backups, listed under the projects on this device. Same square rows and
-   spacing-not-hairlines separation as the local list; the only new thing is the
-   quiet section heading that says which side of the boundary you're reading. */
+   spacing-not-hairlines separation WITHIN the list; the hairline above the
+   section is the boundary between two independent scroll regions (local rows
+   clip under it), which row spacing alone can't mark. */
 .project-manager-cloud {
   display: grid;
+  /* Heading pinned, list scrolls beneath it — the section itself must not be
+     the scroll container or the heading scrolls away with the rows. */
+  grid-template-rows: auto minmax(0, 1fr);
   gap: var(--space-4);
-  /* Shrinks with the local list rather than pushing it out of the overlay; a
-     percentage cap can't resolve here (the dialog is max-height, not height). */
+  /* The local list is the dialog's primary region. Left uncapped, flexbox
+     shrinks both lists in proportion to their CONTENT height, so a device with
+     2 local projects and 10 cloud folders crushes the local list to a single
+     clipped row. The fixed cap (a percentage can't resolve here — the dialog
+     is max-height, not height) holds this section to ~4.5 rows, the half row
+     doubling as the scroll affordance; past that, its own rows scroll. */
   flex: 0 1 auto;
+  max-height: 296px;
   min-height: 0;
-  padding: 0 var(--space-16) var(--space-16);
-  overflow-y: auto;
+  padding: var(--space-8) var(--space-16) var(--space-16);
+  border-top: 1px solid var(--line);
 }
 
 .project-manager-cloud-heading {
@@ -1670,6 +1679,9 @@ fieldset.export-pdf-body:disabled {
 .project-manager-cloud-list {
   display: grid;
   gap: var(--space-2);
+  align-content: start;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .project-manager-cloud-summary {
