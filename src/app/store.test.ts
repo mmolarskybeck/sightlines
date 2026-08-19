@@ -3108,6 +3108,79 @@ describe("app store", () => {
       expect(repository.projects.has("incoming-project")).toBe(true);
     });
 
+    // The three resolutions must reach the artwork LIBRARY, not just the plan:
+    // the domain tests cover finalizePackageImport's output, but only a
+    // repository assertion proves the chosen record is what actually got
+    // written (the reported "the choices do nothing" symptom).
+    it("applies mine / theirs / both per row down to the saved library records", async () => {
+      await store
+        .getState()
+        .addArtworksFromFiles([
+          makeImageFile("keep-mine.jpg"),
+          makeImageFile("take-theirs.jpg"),
+          makeImageFile("keep-both.jpg")
+        ]);
+
+      const [mineId, theirsId, bothId] = store.getState().project!.checklistArtworkIds;
+      // Snapshot the sender's side BEFORE the local edits below, so the
+      // package carries the original titles as "theirs".
+      const bytes = await packageBytes({
+        ...store.getState().project!,
+        id: "incoming-project",
+        title: "Incoming"
+      });
+
+      // Diverge every local record; same ids + different content = §6 conflicts.
+      for (const id of [mineId, theirsId, bothId]) {
+        const local = artworkLibraryRepository.artworks.get(id)!;
+        await artworkLibraryRepository.save({ ...local, title: `Local ${local.title}` });
+      }
+      store.setState({ libraryArtworks: await artworkLibraryRepository.list() });
+
+      await store.getState().importSightlinesPackage(bytes);
+
+      const plan = store.getState().pendingPackageImport;
+      expect(plan?.conflicts.map((conflict) => conflict.incoming.id).sort()).toEqual(
+        [mineId, theirsId, bothId].sort()
+      );
+
+      await store.getState().resolvePackageImportConflicts({
+        [mineId]: "mine",
+        [theirsId]: "theirs",
+        [bothId]: "both"
+      });
+
+      expect(store.getState().error).toBeNull();
+
+      // mine: the local record is untouched under its own id.
+      expect(artworkLibraryRepository.artworks.get(mineId)?.title).toBe("Local keep-mine");
+      // theirs: the incoming content overwrites, under the SAME id.
+      expect(artworkLibraryRepository.artworks.get(theirsId)?.title).toBe("take-theirs");
+      // both: the local record survives AND a fresh id carries the incoming one.
+      expect(artworkLibraryRepository.artworks.get(bothId)?.title).toBe("Local keep-both");
+      const duplicates = [...artworkLibraryRepository.artworks.values()].filter(
+        (artwork) => artwork.title === "keep-both"
+      );
+      expect(duplicates).toHaveLength(1);
+      const duplicate = duplicates[0]!;
+      expect(duplicate.id).not.toBe(bothId);
+
+      // The imported project's placements follow the duplicate, not the original.
+      const checklist = store.getState().project!.checklistArtworkIds;
+      expect(checklist).toContain(duplicate.id);
+      expect(checklist).not.toContain(bothId);
+      expect(checklist).toContain(mineId);
+      expect(checklist).toContain(theirsId);
+
+      // And the in-memory library the UI reads matches what was written.
+      const libraryById = new Map(
+        store.getState().libraryArtworks.map((artwork) => [artwork.id, artwork])
+      );
+      expect(libraryById.get(mineId)?.title).toBe("Local keep-mine");
+      expect(libraryById.get(theirsId)?.title).toBe("take-theirs");
+      expect(libraryById.get(duplicate.id)?.title).toBe("keep-both");
+    });
+
     it("aborts before writes when project collision detection cannot list projects", async () => {
       const bytes = await packageBytes({
         ...store.getState().project!,

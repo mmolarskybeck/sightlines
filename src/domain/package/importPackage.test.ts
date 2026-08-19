@@ -294,6 +294,26 @@ describe("planPackageImport — §6 merge rules", () => {
     expect(plan.conflicts).toHaveLength(1);
     expect(plan.conflicts[0].incoming.title).toBe("New Title");
     expect(plan.conflicts[0].existing.title).toBe("Old Title");
+    // Neither side has an image, so the review dialog must not claim one changed.
+    expect(plan.conflicts[0].imageChanged).toBe(false);
+  });
+
+  it("flags imageChanged when only the image content hash differs", () => {
+    const incoming = makeArtwork("art-1", { assetId: "asset-a" });
+    const manifest = makeManifest({
+      artworks: [incoming],
+      assets: [{ assetId: "asset-a", mimeType: "image/jpeg", sha256: "sha-a", tiers: [] }]
+    });
+    const existing: ExistingLibraryState = {
+      artworks: [makeArtwork("art-1", { assetId: "asset-local" })],
+      assetShaById: new Map([["asset-local", "sha-other"]]),
+      projectIds: []
+    };
+
+    const plan = planPackageImport(manifest, noAssets(), existing);
+
+    expect(plan.conflicts).toHaveLength(1);
+    expect(plan.conflicts[0].imageChanged).toBe(true);
   });
 
   it("dedupes identical image content under a different asset id (reuses stored blob)", async () => {
@@ -474,7 +494,7 @@ describe("finalizePackageImport", () => {
       mode: "display" as const,
       artworksToAdd: [],
       reusedArtworkIds: [],
-      conflicts: [{ incoming, existing }],
+      conflicts: [{ incoming, existing, imageChanged: false }],
       assetsToSave: [],
       warnings: []
     };

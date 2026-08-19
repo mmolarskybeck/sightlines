@@ -9186,3 +9186,152 @@ body.panels-resizing * {
   .artwork-library-sort-label { width: 100%; }
   .artwork-library-sort { flex: 1; width: auto; }
 }
+
+/* Package-import conflict review (docs/plan.md §6). Wider than a confirm
+   dialog because each row carries a field-level diff and a three-way choice
+   side by side; the body takes the same 24px inline padding as .dialog-header
+   so rows align with the title, and scrolls inside the fixed dialog frame.
+   Keep after .dialog-content so the equal-specificity width override wins. */
+.import-conflict-dialog { width: min(calc(100vw - 32px), 720px); }
+
+/* Bulk affordance: deliberately quieter than the rows it drives — a label and
+   the same segmented control, sitting on the header's baseline grid. */
+.import-conflict-bulk {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-10);
+  padding: var(--space-12) var(--space-24) 0;
+}
+
+.import-conflict-bulk-label {
+  color: var(--muted-foreground);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+}
+
+.import-conflict-list {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  margin: 0;
+  padding: var(--space-14) var(--space-24) var(--space-20);
+  overflow-y: auto;
+  list-style: none;
+}
+
+/* Rows are multi-line now, so spacing alone stops separating them; one
+   hairline divider (not a grid) keeps each work's diff readable as a unit. */
+.import-conflict-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-16);
+  padding: var(--space-12) 0;
+}
+
+.import-conflict-row + .import-conflict-row {
+  border-top: 1px solid color-mix(in oklch, var(--line) 60%, transparent);
+}
+
+.import-conflict-identity {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.import-conflict-title {
+  color: var(--ink);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-ui);
+}
+
+/* Two-column diff: label, then "Yours: … · Theirs: …". Quiet by design — the
+   work's own name stays the primary line. */
+.import-conflict-diff {
+  display: grid;
+  margin: 0;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: var(--space-12);
+  row-gap: var(--space-2);
+}
+
+.import-conflict-diff > div { display: contents; }
+
+.import-conflict-diff dt {
+  color: var(--muted-foreground);
+  font-size: var(--type-xs);
+  line-height: var(--leading-ui);
+}
+
+.import-conflict-diff dd {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--type-xs);
+  line-height: var(--leading-ui);
+  overflow-wrap: anywhere;
+}
+
+/* Aspect-true pair: the pane is a fixed-height square-cornered well and the
+   image sits inside it at its own ratio, never cropped or stretched. */
+.import-conflict-thumbs {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-12);
+  padding-top: var(--space-2);
+}
+
+.import-conflict-thumb {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.import-conflict-thumb-pane {
+  display: flex;
+  width: 72px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--bg);
+}
+
+.import-conflict-thumb-pane img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.import-conflict-thumb-empty,
+.import-conflict-thumb figcaption {
+  color: var(--muted-foreground);
+  font-size: var(--type-xs);
+  line-height: var(--leading-ui);
+}
+
+/* Segment typography, matching the app-wide compact tracks
+   (.inspector-seg-toggle / .help-input-toggle) — without this the segments
+   inherit the ambient dialog size and read as unstyled. */
+.import-conflict-seg { flex: 0 0 auto; }
+
+.import-conflict-seg .seg-item {
+  min-height: 24px;
+  padding: var(--space-2) var(--space-10);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+}
+
+@media (max-width: 640px) {
+  .import-conflict-row { flex-direction: column; align-items: stretch; gap: var(--space-10); }
+  .import-conflict-bulk { justify-content: flex-start; padding-inline: var(--space-16); }
+  .import-conflict-list { padding-inline: var(--space-16); }
+}

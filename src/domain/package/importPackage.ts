@@ -172,6 +172,12 @@ export type PlanPackageImportOptions = {
 export type ArtworkConflict = {
   incoming: Artwork; // already rebound to its resolved local assetId
   existing: Artwork;
+  // True when the two records' IMAGES differ, decided by the same content-hash
+  // comparison that raised the conflict (assetIds alone can't answer this: a
+  // rebind may point both records at one local asset, and a legacy asset may
+  // carry no hash at all). Carried on the conflict so the review dialog can
+  // say "the image changed" without re-deriving hash state in the UI layer.
+  imageChanged: boolean;
 };
 
 export type ConflictResolution = "mine" | "theirs" | "both";
@@ -358,7 +364,7 @@ export function planPackageImport(
     if (sameImage && artworkContentEquals(artwork, existingArtwork)) {
       reusedArtworkIds.push(artwork.id);
     } else {
-      conflicts.push({ incoming: rebound, existing: existingArtwork });
+      conflicts.push({ incoming: rebound, existing: existingArtwork, imageChanged: !sameImage });
     }
   }
 
