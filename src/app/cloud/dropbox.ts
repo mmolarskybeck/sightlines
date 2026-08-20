@@ -10,6 +10,8 @@ import type {
   CloudBackupProviderStatus,
   CloudProjectBackup,
   CloudProjectFolder,
+  SyncHeadListing,
+  SyncHeadMetadata,
   UploadBackupInput
 } from "./provider";
 import {
@@ -36,10 +38,14 @@ import {
   isBareProjectIdFolderName,
   isProjectFolderName,
   MAX_BACKUP_DOWNLOAD_BYTES,
+  parseDropboxApiResultHeader,
   parseProjectFolderName,
   projectFolderPath,
   selectBackupsToPrune,
   serializeDropboxApiArg,
+  syncHeadPath,
+  SYNC_HEAD_FILENAME,
+  SYNC_PROJECTS_FOLDER,
   type DropboxAuthRecord,
   type DropboxErrorKind,
   type DropboxFileEntry
@@ -108,6 +114,33 @@ type TokenResponse = {
   refresh_token?: string;
   expires_in?: number;
   scope?: string;
+};
+
+// The commit fields Dropbox accepts on files/upload and upload_session/finish.
+// Backup and share writes keep the historical add + autorename behavior (two
+// backups a second apart are two files, by design); sync heads pass a
+// revision-conditional update with autorename OFF, so a stale base fails
+// loudly instead of forking the canonical file.
+type DropboxUploadCommit = {
+  mode: "add" | { ".tag": "update"; update: string };
+  autorename: boolean;
+  mute: boolean;
+  strict_conflict?: boolean;
+};
+
+const BACKUP_UPLOAD_COMMIT: DropboxUploadCommit = {
+  mode: "add",
+  autorename: true,
+  mute: true
+};
+
+// What both upload routes return about the file they just wrote. `rev` is what
+// makes a sync write usable as the next base.
+type DropboxUploadResult = {
+  path_display?: string;
+  rev?: string;
+  size?: number;
+  server_modified?: string;
 };
 
 export class DropboxCloudBackupProvider implements CloudBackupProvider {
@@ -230,6 +263,13 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
     return readAuth()?.accountLabel ?? null;
   }
 
+  accountId(): string | null {
+    // Absent on grants stored before the id was captured; the next token
+    // refresh does not backfill it, so sync stays unavailable until the user
+    // reconnects rather than binding its bookkeeping to nothing.
+    return readAuth()?.accountId ?? null;
+  }
+
   async uploadBackup(input: UploadBackupInput): Promise<void> {
     const token = await this.accessToken();
     const folderPath = await this.reconcileProjectFolder(
@@ -265,7 +305,10 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
 
     const token = await this.accessToken();
     const requestedPath = buildSharePath(input);
-    const uploadedPath = await this.uploadPackage(token, requestedPath, input.blob);
+    const uploaded = await this.uploadPackage(token, requestedPath, input.blob);
+    // autorename is on for shares, so the written path can differ from the
+    // requested one — link the file Dropbox actually created.
+    const uploadedPath = uploaded.path_display ?? requestedPath;
     const response = await fetch(
       `${DROPBOX_API_URL}/2/sharing/create_shared_link_with_settings`,
       {
@@ -315,18 +358,147 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
     });
   }
 
+  // --- cross-device sync ---------------------------------------------------
+
+  async getSyncHead(projectId: string): Promise<SyncHeadMetadata | null> {
+    this.requireReadScope(SYNC_READ_SCOPE_PURPOSE);
+    return this.withReauthTracking(async () => {
+      const token = await this.accessToken();
+      const response = await fetch(`${DROPBOX_API_URL}/2/files/get_metadata`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ path: syncHeadPath(projectId) })
+      });
+      // Dropbox answers every route-level error with 409, so only the summary
+      // says which one this is. not_found is the one answer the state machine
+      // acts on ("never synced", or the head is gone); reading any other 409 as
+      // "no head" would invite silently recreating a head that does exist.
+      if (response.status === 409) {
+        const errorBody = await response.json().catch(() => null);
+        const summary = errorBody === null ? "" : JSON.stringify(errorBody);
+        if (summary.includes("not_found")) return null;
+        throw classifiedError(response.status, errorBody, "check the synced copy");
+      }
+      const body = await ensureOk<DropboxFileEntry>(
+        response,
+        "check the synced copy"
+      );
+      if (!body.rev) {
+        throw new CloudBackupError(
+          "transient",
+          "Could not check the synced copy: Dropbox reported no revision."
+        );
+      }
+      return {
+        rev: body.rev,
+        serverModifiedIso: body.server_modified ?? null,
+        sizeBytes: typeof body.size === "number" ? body.size : null
+      };
+    });
+  }
+
+  async downloadSyncHead(
+    projectId: string
+  ): Promise<{ bytes: Uint8Array; rev: string }> {
+    this.requireReadScope(SYNC_READ_SCOPE_PURPOSE);
+    return this.withReauthTracking(async () => {
+      const token = await this.accessToken();
+      const response = await fetch(`${DROPBOX_CONTENT_URL}/2/files/download`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Dropbox-API-Arg": serializeDropboxApiArg({ path: syncHeadPath(projectId) })
+        }
+      });
+      // The content endpoint carries the file's metadata in a response header
+      // rather than the body; read it before the body is consumed.
+      const metadata = parseDropboxApiResultHeader(
+        response.headers.get("Dropbox-API-Result")
+      );
+      const bytes = await ensureOkBinary(response, "download the synced copy");
+      // Without the rev this device cannot record what its copy is based on,
+      // and an unbased copy would push blind on the next cycle. Fail instead.
+      if (!metadata?.rev) {
+        throw new CloudBackupError(
+          "transient",
+          "Could not download the synced copy: Dropbox reported no revision."
+        );
+      }
+      return { bytes, rev: metadata.rev };
+    });
+  }
+
+  async uploadSyncHead(input: {
+    projectId: string;
+    blob: Blob;
+    baseRev: string | null;
+  }): Promise<SyncHeadMetadata> {
+    this.requireReadScope(SYNC_READ_SCOPE_PURPOSE);
+    return this.withReauthTracking(async () => {
+      const token = await this.accessToken();
+      const result = await this.uploadPackage(
+        token,
+        syncHeadPath(input.projectId),
+        input.blob,
+        {
+          // baseRev null claims the head does not exist yet; strict_conflict
+          // makes "add" refuse an existing file instead of quietly deduping,
+          // so another device's head is reported as a conflict rather than
+          // adopted. A non-null baseRev is the ordinary guarded write.
+          mode:
+            input.baseRev === null
+              ? "add"
+              : { ".tag": "update", update: input.baseRev },
+          autorename: false,
+          mute: true,
+          strict_conflict: true
+        }
+      );
+      if (!result.rev) {
+        throw new CloudBackupError(
+          "transient",
+          "Could not upload the synced copy: Dropbox reported no revision."
+        );
+      }
+      return {
+        rev: result.rev,
+        serverModifiedIso: result.server_modified ?? null,
+        sizeBytes: typeof result.size === "number" ? result.size : null
+      };
+    });
+  }
+
+  async listSyncHeads(): Promise<SyncHeadListing[]> {
+    this.requireReadScope(SYNC_READ_SCOPE_PURPOSE);
+    return this.withReauthTracking(async () => {
+      const token = await this.accessToken();
+      // One recursive listing: the sync location is exactly two levels deep by
+      // construction, so per-folder listings would only multiply requests.
+      const entries = await this.listFolder(token, SYNC_PROJECTS_FOLDER, {
+        recursive: true,
+        action: "list synced projects"
+      });
+      return collectSyncHeads(entries);
+    });
+  }
+
   // Reading is a scope the first release never asked for, so a stored grant can
   // be complete for backup and still unable to list or download. Mirrors
   // createShareLink's gate: flip the sticky flag so every surface offers the
   // one-time Reconnect, and never spend a request that is certain to fail.
-  private requireReadScope(): void {
+  // Sync gates on the same scope even for its metadata-only calls: a sync that
+  // can write but never pull is not sync.
+  private requireReadScope(purpose = "browse cloud backups"): void {
     const auth = readAuth();
     if (!auth) throw new CloudBackupError("reauth", "Dropbox is not connected.");
     if (!grantedScopes(auth).has("files.content.read")) {
       this.reauthorizationRequired = true;
       throw new CloudBackupError(
         "reauth",
-        "Reconnect Dropbox once to browse cloud backups."
+        `Reconnect Dropbox once to ${purpose}.`
       );
     }
   }
@@ -437,42 +609,39 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
   private async uploadPackage(
     token: string,
     path: string,
-    blob: Blob
-  ): Promise<string> {
+    blob: Blob,
+    commit: DropboxUploadCommit = BACKUP_UPLOAD_COMMIT
+  ): Promise<DropboxUploadResult> {
     const bytes = new Uint8Array(await blob.arrayBuffer());
     return bytes.byteLength <= DROPBOX_SINGLE_UPLOAD_MAX_BYTES
-      ? this.uploadSingle(token, path, bytes)
-      : this.uploadSession(token, path, bytes);
+      ? this.uploadSingle(token, path, bytes, commit)
+      : this.uploadSession(token, path, bytes, commit);
   }
 
   private async uploadSingle(
     token: string,
     path: string,
-    bytes: Uint8Array
-  ): Promise<string> {
+    bytes: Uint8Array,
+    commit: DropboxUploadCommit
+  ): Promise<DropboxUploadResult> {
     const response = await fetch(`${DROPBOX_CONTENT_URL}/2/files/upload`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/octet-stream",
-        "Dropbox-API-Arg": serializeDropboxApiArg({
-          path,
-          mode: "add",
-          autorename: true,
-          mute: true
-        })
+        "Dropbox-API-Arg": serializeDropboxApiArg({ path, ...commit })
       },
       body: bytes as BodyInit
     });
-    const body = await ensureOk<{ path_display?: string }>(response, "upload the package");
-    return body.path_display ?? path;
+    return ensureOk<DropboxUploadResult>(response, "upload the package");
   }
 
   private async uploadSession(
     token: string,
     path: string,
-    bytes: Uint8Array
-  ): Promise<string> {
+    bytes: Uint8Array,
+    commit: DropboxUploadCommit
+  ): Promise<DropboxUploadResult> {
     // start
     const firstChunk = bytes.subarray(0, DROPBOX_UPLOAD_CHUNK_BYTES);
     const startResponse = await fetch(
@@ -529,14 +698,13 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
           "Content-Type": "application/octet-stream",
           "Dropbox-API-Arg": serializeDropboxApiArg({
             cursor: { session_id: sessionId, offset },
-            commit: { path, mode: "add", autorename: true, mute: true }
+            commit: { path, ...commit }
           })
         },
         body: lastChunk as BodyInit
       }
     );
-    const body = await ensureOk<{ path_display?: string }>(finishResponse, "finish the upload");
-    return body.path_display ?? path;
+    return ensureOk<DropboxUploadResult>(finishResponse, "finish the upload");
   }
 
   // --- retention -----------------------------------------------------------
@@ -599,8 +767,9 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
   private async listFolder(
     token: string,
     path: string,
-    options: { recursive?: boolean } = {}
+    options: { recursive?: boolean; action?: string } = {}
   ): Promise<DropboxFileEntry[]> {
+    const action = options.action ?? "list backups";
     const entries: DropboxFileEntry[] = [];
     let response = await fetch(`${DROPBOX_API_URL}/2/files/list_folder`, {
       method: "POST",
@@ -621,13 +790,13 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
       const errorBody = await response.json().catch(() => null);
       const summary = errorBody === null ? "" : JSON.stringify(errorBody);
       if (summary.includes("not_found")) return [];
-      throw classifiedError(response.status, errorBody, "list backups");
+      throw classifiedError(response.status, errorBody, action);
     }
     let body = await ensureOk<{
       entries: DropboxFileEntry[];
       has_more: boolean;
       cursor: string;
-    }>(response, "list backups");
+    }>(response, action);
     entries.push(...body.entries);
     while (body.has_more) {
       response = await fetch(`${DROPBOX_API_URL}/2/files/list_folder/continue`, {
@@ -642,12 +811,16 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
         entries: DropboxFileEntry[];
         has_more: boolean;
         cursor: string;
-      }>(response, "list backups");
+      }>(response, action);
       entries.push(...body.entries);
     }
     return entries;
   }
 }
+
+// The reconnect reason shown when a stored grant predates the read scope and
+// the user asked for sync rather than for the backup browser.
+const SYNC_READ_SCOPE_PURPOSE = "sync projects across devices";
 
 // Reject with a classified CloudBackupError on a non-2xx response; otherwise
 // return the parsed JSON body. 429s carry Retry-After through the message.
@@ -700,7 +873,9 @@ function classifiedError(
           ? "Dropbox access has expired. Reconnect to resume backups."
           : kind === "not-found"
             ? "That file is no longer in your Dropbox."
-            : `Dropbox request failed (${status}).`;
+            : kind === "conflict"
+              ? "The version in Dropbox has changed since this device last synced."
+              : `Dropbox request failed (${status}).`;
   return new CloudBackupError(kind, `Could not ${action}: ${detail}`);
 }
 
@@ -805,6 +980,35 @@ function groupCloudProjects(entries: DropboxFileEntry[]): CloudProjectFolder[] {
       ) ||
       a.folderName.localeCompare(b.folderName)
   );
+}
+
+// Fold a recursive /projects listing into the canonical heads. Shape is read
+// from the path, never trusted from listing order: only
+// /projects/<project id>/current.sightlines is a head. The folder name must
+// parse as a project id — sync writes the FULL id, so an unparseable folder is
+// something this app did not write and its contents are not a project of ours
+// to open. An entry Dropbox gave no rev for is skipped for the same reason a
+// download without a rev fails: there would be nothing to base a write on.
+function collectSyncHeads(entries: DropboxFileEntry[]): SyncHeadListing[] {
+  const heads: SyncHeadListing[] = [];
+  for (const entry of entries) {
+    if (entry[".tag"] === "folder") continue;
+    const path = entry.path_lower ?? entry.path_display;
+    if (!path || !entry.rev) continue;
+    const segments = path.toLocaleLowerCase().split("/").filter(Boolean);
+    if (segments.length !== 3) continue;
+    if (`/${segments[0]}` !== SYNC_PROJECTS_FOLDER) continue;
+    if (segments[2] !== SYNC_HEAD_FILENAME) continue;
+    if (!isBareProjectIdFolderName(segments[1])) continue;
+    heads.push({
+      projectId: segments[1],
+      path,
+      rev: entry.rev,
+      serverModifiedIso: entry.server_modified ?? null,
+      sizeBytes: typeof entry.size === "number" ? entry.size : null
+    });
+  }
+  return heads;
 }
 
 function backupPathSegments(entry: DropboxFileEntry): string[] {

@@ -103,6 +103,10 @@ export function SettingsDialog({
     (state) => state.setDefaultCenterlineHeightMm
   );
   const deleteProject = useAppStore((state) => state.deleteProject);
+  // Sync state is read straight from the store like the project fields above —
+  // it belongs to the open project, not to anything App has to hand down.
+  const syncMeta = useAppStore((state) => state.syncMeta);
+  const disableProjectSync = useAppStore((state) => state.disableProjectSync);
 
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [privacySaveFailed, setPrivacySaveFailed] = useState(false);
@@ -228,6 +232,32 @@ export function SettingsDialog({
                   onDisconnect={onDisconnectCloudBackup}
                   onRunBackup={onRunCloudBackup}
                 />
+              ) : null}
+
+              {/* Turning sync OFF lives here, not in the status popover: the
+                  popover is a glance at where the project stands, and an
+                  unlink is a settled decision made deliberately. Only shown
+                  once this project is actually linked — there is nothing to
+                  turn off otherwise (turning it ON is the popover's row). */}
+              {syncMeta ? (
+                <div className="settings-action-row">
+                  <div className="settings-action-text">
+                    <strong className="settings-action-title">Cross-device sync</strong>
+                    <p className="settings-action-desc">
+                      This project syncs with the copy in your Dropbox. Turning it off
+                      leaves that copy in place for your other devices.
+                    </p>
+                  </div>
+                  <div className="settings-action-buttons">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void disableProjectSync()}
+                    >
+                      Turn off sync for this project
+                    </Button>
+                  </div>
+                </div>
               ) : null}
             </SettingsSection>
 

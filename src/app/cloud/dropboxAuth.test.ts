@@ -10,6 +10,7 @@ import {
   filesystemSafeTimestamp,
   generateRandomString,
   isReauthorizationFailure,
+  parseDropboxApiResultHeader,
   parseProjectFolderName,
   parseRetryAfterMs,
   projectFolderName,
@@ -17,6 +18,7 @@ import {
   sanitizeDropboxTitle,
   serializeDropboxApiArg,
   selectBackupsToPrune,
+  syncHeadPath,
   type DropboxFileEntry
 } from "./dropboxAuth";
 
@@ -136,6 +138,45 @@ describe("dropbox error classification", () => {
     );
   });
 
+  it("classifies a 409 conflict as conflict, but never ahead of not_found", () => {
+    expect(
+      classifyApiError(409, { error_summary: "path/conflict/file/..." })
+    ).toBe("conflict");
+    // Content endpoints answer with plain text, not JSON.
+    expect(classifyApiError(409, "path/conflict/file/.")).toBe("conflict");
+    // A conditional write against a path that has been deleted names both; a
+    // missing head is "needs review", not a lost race, so not_found wins.
+    expect(
+      classifyApiError(409, { error_summary: "path/not_found/conflict/" })
+    ).toBe("not-found");
+    // Only 409 means "this specific request could not be satisfied".
+    expect(classifyApiError(500, { error_summary: "path/conflict/file/" })).toBe(
+      "transient"
+    );
+  });
+
+  it("reads rev and server_modified out of the Dropbox-API-Result header", () => {
+    expect(
+      parseDropboxApiResultHeader(
+        JSON.stringify({
+          name: "current.sightlines",
+          rev: "0158f4c3b7a",
+          server_modified: "2026-08-19T10:00:00Z"
+        })
+      )
+    ).toEqual({ rev: "0158f4c3b7a", server_modified: "2026-08-19T10:00:00Z" });
+  });
+
+  it("tolerates an absent, malformed, or field-less API-Result header", () => {
+    expect(parseDropboxApiResultHeader(null)).toBeNull();
+    expect(parseDropboxApiResultHeader("")).toBeNull();
+    expect(parseDropboxApiResultHeader("{not json")).toBeNull();
+    expect(parseDropboxApiResultHeader("[]")).toBeNull();
+    // A header with no rev parses to an empty result rather than throwing —
+    // the caller decides what a missing rev means.
+    expect(parseDropboxApiResultHeader(JSON.stringify({ rev: 7 }))).toEqual({});
+  });
+
   it("parses Retry-After seconds and dates, null otherwise", () => {
     expect(parseRetryAfterMs("30")).toBe(30_000);
     expect(parseRetryAfterMs(null)).toBeNull();
@@ -170,6 +211,15 @@ describe("dropbox path construction", () => {
     expect(projectFolderPath("proj-abc-123", "Winter Show")).toBe(
       "/backups/Winter Show — proj-abc"
     );
+  });
+
+  it("puts the sync head under the full project id, with no title in the path", () => {
+    expect(syncHeadPath("8f14e45f-ceea-467a-9a1e-2b4c0b2f9d31")).toBe(
+      "/projects/8f14e45f-ceea-467a-9a1e-2b4c0b2f9d31/current.sightlines"
+    );
+    // Total: the path is a function of the id alone, so a rename can never
+    // move a project's canonical copy.
+    expect(syncHeadPath("")).toBe("/projects//current.sightlines");
   });
 
   it("reflects the current title while keeping the same identity suffix", () => {

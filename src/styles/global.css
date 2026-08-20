@@ -1719,12 +1719,30 @@ fieldset.export-checklist-body:disabled {
   border-top: 1px solid var(--line);
 }
 
+/* Heading + any section-wide notice, held in the grid's single pinned row so
+   the list below keeps the whole scroll region to itself. */
+.project-manager-cloud-header {
+  display: grid;
+  gap: var(--space-4);
+}
+
 .project-manager-cloud-heading {
   margin: 0;
   padding: var(--space-8) var(--space-10) 0;
   color: var(--muted);
   font-size: var(--type-xs);
   font-weight: var(--weight-medium);
+}
+
+/* Sync state couldn't be read. Caution amber like every other cloud
+   attention state, never destructive red: nothing is lost, the rows below
+   just can't promise they will keep syncing. */
+.project-manager-cloud-notice {
+  margin: 0;
+  padding: 0 var(--space-10);
+  color: var(--caution);
+  font-size: var(--type-xs);
+  line-height: var(--leading-copy);
 }
 
 .project-manager-cloud-list {
@@ -9553,4 +9571,69 @@ button.import-conflict-headtext:hover .import-conflict-caret { color: var(--ink)
   .import-conflict-bulk { flex-wrap: wrap; padding-inline: var(--space-16); }
   .import-conflict-bulk-choice { margin-left: 0; }
   .import-conflict-list { padding-inline: var(--space-16); }
+}
+
+/* Cross-device sync conflict (docs/cloud-sync-plan.md, "Conflict UX"). A
+   confirm-scale overlay, but with no footer: each option is a full-width pane
+   stating its own consequence, because these are four outcomes for the
+   curator's work rather than a confirm/cancel pair. Panes are square-cornered
+   like every other pane in the app; only the overlay itself is rounded.
+   Keep after .dialog-content so the equal-specificity width override wins. */
+.sync-conflict-dialog { width: min(calc(100vw - 32px), 30rem); }
+
+.sync-conflict-body {
+  display: grid;
+  gap: var(--space-12);
+  padding: var(--space-12) var(--space-24) var(--space-24);
+}
+
+.sync-conflict-note {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--type-xs);
+  line-height: var(--leading-copy);
+}
+
+.sync-conflict-choices {
+  display: grid;
+  gap: var(--space-8);
+}
+
+.sync-conflict-choice {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-10) var(--space-12);
+  border: 1px solid var(--line);
+  background: var(--bg);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 150ms ease-out;
+}
+
+.sync-conflict-choice:hover {
+  background: var(--surface);
+}
+
+/* Postponing is a real, persisted outcome, so it stays a pane — quieter than
+   the three that act now, never a footer afterthought. */
+.sync-conflict-choice.is-quiet {
+  border-color: transparent;
+  background: transparent;
+}
+
+.sync-conflict-choice-label {
+  color: var(--ink);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-ui);
+}
+
+.sync-conflict-choice.is-quiet .sync-conflict-choice-label {
+  color: var(--muted);
+}
+
+.sync-conflict-choice-note {
+  color: var(--muted-foreground);
+  font-size: var(--type-xs);
+  line-height: var(--leading-copy);
 }

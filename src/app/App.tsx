@@ -127,6 +127,7 @@ import {
   useCloudBackupScheduler,
   useCloudBackupErrorToast
 } from "./hooks/useCloudBackupScheduler";
+import { useProjectSyncScheduler } from "./hooks/useProjectSyncScheduler";
 import {
   escapeMeasurementState,
   useMeasurementTool
@@ -250,12 +251,23 @@ export function App() {
   const connectCloudBackup = useAppStore((state) => state.connectCloudBackup);
   const cloudProjects = useAppStore((state) => state.cloudProjects);
   const cloudProjectsStatus = useAppStore((state) => state.cloudProjectsStatus);
+  const cloudSyncHeads = useAppStore((state) => state.cloudSyncHeads);
   const cloudProjectOpening = useAppStore((state) => state.cloudProjectOpening);
   const refreshCloudProjects = useAppStore((state) => state.refreshCloudProjects);
   const openCloudProjectBackup = useAppStore((state) => state.openCloudProjectBackup);
+  const openCloudSyncedProject = useAppStore((state) => state.openCloudSyncedProject);
   const disconnectCloudBackup = useAppStore((state) => state.disconnectCloudBackup);
   const completeCloudBackupConnect = useAppStore((state) => state.completeCloudBackupConnect);
   const refreshCloudBackupStatus = useAppStore((state) => state.refreshCloudBackupStatus);
+  const refreshProjectSyncState = useAppStore((state) => state.refreshProjectSyncState);
+  const syncMeta = useAppStore((state) => state.syncMeta);
+  const syncStatus = useAppStore((state) => state.syncStatus);
+  const syncError = useAppStore((state) => state.syncError);
+  const syncConflict = useAppStore((state) => state.syncConflict);
+  const enableProjectSync = useAppStore((state) => state.enableProjectSync);
+  const disableProjectSync = useAppStore((state) => state.disableProjectSync);
+  const checkProjectSync = useAppStore((state) => state.checkProjectSync);
+  const resolveSyncConflict = useAppStore((state) => state.resolveSyncConflict);
   const loadBenchmarkFixture = useAppStore((state) => state.loadBenchmarkFixture);
   const setViewMode = useAppStore((state) => state.setViewMode);
   const selectWall = useAppStore((state) => state.selectWall);
@@ -648,6 +660,11 @@ export function App() {
   useCloudBackupScheduler();
   useCloudBackupErrorToast();
 
+  // Cross-device sync: evaluate the state machine on the settle/interval gates,
+  // on focus/visibility (the device-handoff pull point), and on project open.
+  // Inert unless the open project is linked to the connected account.
+  useProjectSyncScheduler();
+
   // Finish a Dropbox connect redirect once on boot (?code=&state= tail), then
   // fold the provider's link status + this project's stored backup meta into
   // state whenever the open project changes.
@@ -657,7 +674,10 @@ export function App() {
   }, [completeCloudBackupConnect]);
   useEffect(() => {
     refreshCloudBackupStatus();
-  }, [refreshCloudBackupStatus, project?.id]);
+    // The sync half of the same fold: which head (if any) this project's copy
+    // descends from, so the status surfaces have it before any check runs.
+    void refreshProjectSyncState();
+  }, [refreshCloudBackupStatus, refreshProjectSyncState, project?.id]);
 
   // The staged Saved-view pose is a one-shot handoff for a 3D mount (spec §4.3);
   // clear it on leaving 3D so a later re-entry frames the overview, not a stale
@@ -1785,9 +1805,16 @@ export function App() {
         connectCloudBackup={connectCloudBackup}
         cloudProjects={cloudProjects}
         cloudProjectsStatus={cloudProjectsStatus}
+        cloudSyncHeads={cloudSyncHeads}
         cloudProjectOpening={cloudProjectOpening}
         refreshCloudProjects={refreshCloudProjects}
         openCloudProjectBackup={openCloudProjectBackup}
+        openCloudSyncedProject={openCloudSyncedProject}
+        syncLinked={syncMeta !== null}
+        syncStatus={syncStatus}
+        syncError={syncError}
+        enableProjectSync={enableProjectSync}
+        checkProjectSync={checkProjectSync}
         isExportingPackage={isExportingPackage}
         isSharingProject={isSharingProject}
         handleExportPackage={handleExportPackage}
@@ -2863,6 +2890,9 @@ export function App() {
         pendingPackageImport={pendingPackageImport}
         resolvePackageImportConflicts={resolvePackageImportConflicts}
         dismissPackageImport={dismissPackageImport}
+        syncConflict={syncConflict}
+        resolveSyncConflict={resolveSyncConflict}
+        disableProjectSync={disableProjectSync}
         recoveryOffer={recoveryOffer}
         acceptRecovery={acceptRecovery}
         dismissRecovery={dismissRecovery}

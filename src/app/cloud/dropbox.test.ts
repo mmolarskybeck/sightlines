@@ -760,6 +760,357 @@ describe("DropboxCloudBackupProvider", () => {
     });
   });
 
+  describe("sync heads", () => {
+    const PROJECT_ID = "8f14e45f-ceea-467a-9a1e-2b4c0b2f9d31";
+    const HEAD_PATH = `/projects/${PROJECT_ID}/current.sightlines`;
+
+    function syncInput(baseRev: string | null) {
+      return {
+        projectId: PROJECT_ID,
+        blob: fakeBlob(new Uint8Array([1, 2, 3, 4])),
+        baseRev
+      };
+    }
+
+    function uploadArg(fetchMock: ReturnType<typeof vi.fn>) {
+      const call = fetchMock.mock.calls.find(([url]) =>
+        String(url).includes("/files/upload")
+      );
+      return JSON.parse(
+        (call![1]!.headers as Record<string, string>)["Dropbox-API-Arg"]
+      );
+    }
+
+    it("reads the head's revision from get_metadata", async () => {
+      seedAuth();
+      const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+        if (url.includes("/files/get_metadata")) {
+          return jsonResponse(200, {
+            name: "current.sightlines",
+            rev: "0158f4c3b7a",
+            size: 4096,
+            server_modified: "2026-08-19T10:00:00Z"
+          });
+        }
+        return jsonResponse(200, {});
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(makeProvider().getSyncHead(PROJECT_ID)).resolves.toEqual({
+        rev: "0158f4c3b7a",
+        serverModifiedIso: "2026-08-19T10:00:00Z",
+        sizeBytes: 4096
+      });
+      const call = fetchMock.mock.calls.find(([url]) =>
+        String(url).includes("/files/get_metadata")
+      );
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({ path: HEAD_PATH });
+    });
+
+    it("answers null when the project has never been synced", async () => {
+      seedAuth();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => jsonResponse(409, { error_summary: "path/not_found/." }))
+      );
+
+      await expect(makeProvider().getSyncHead(PROJECT_ID)).resolves.toBeNull();
+    });
+
+    // Every route-level Dropbox error is a 409, so reading them all as "no
+    // head" would let sync recreate a head that is actually there.
+    it("surfaces a non-not_found 409 rather than reporting no head", async () => {
+      seedAuth();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          jsonResponse(409, { error_summary: "path/not_folder/..." })
+        )
+      );
+
+      const failure = await makeProvider()
+        .getSyncHead(PROJECT_ID)
+        .catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(CloudBackupError);
+      expect(failure).toMatchObject({ kind: "transient" });
+    });
+
+    it("creates a first head with add + strict_conflict and autorename off", async () => {
+      seedAuth();
+      const fetchMock = vi.fn(async (url: string) => {
+        if (url.includes("/files/upload")) {
+          return jsonResponse(200, {
+            rev: "rev-1",
+            size: 4,
+            server_modified: "2026-08-19T10:00:00Z"
+          });
+        }
+        return jsonResponse(200, {});
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(makeProvider().uploadSyncHead(syncInput(null))).resolves.toEqual({
+        rev: "rev-1",
+        serverModifiedIso: "2026-08-19T10:00:00Z",
+        sizeBytes: 4
+      });
+      expect(uploadArg(fetchMock)).toEqual({
+        path: HEAD_PATH,
+        mode: "add",
+        autorename: false,
+        mute: true,
+        // Without this, "add" would quietly dedupe against an existing head
+        // instead of reporting that another device already created one.
+        strict_conflict: true
+      });
+    });
+
+    it("writes conditionally against the recorded revision", async () => {
+      seedAuth();
+      const fetchMock = vi.fn(async (url: string) => {
+        if (url.includes("/files/upload")) return jsonResponse(200, { rev: "rev-2" });
+        return jsonResponse(200, {});
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await makeProvider().uploadSyncHead(syncInput("rev-1"));
+
+      expect(uploadArg(fetchMock)).toEqual({
+        path: HEAD_PATH,
+        mode: { ".tag": "update", update: "rev-1" },
+        autorename: false,
+        mute: true,
+        strict_conflict: true
+      });
+    });
+
+    it("surfaces a stale base as a conflict instead of overwriting", async () => {
+      seedAuth();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => jsonResponse(409, { error_summary: "path/conflict/file/." }))
+      );
+
+      const error = await makeProvider()
+        .uploadSyncHead(syncInput("rev-stale"))
+        .catch((e) => e);
+      expect(error).toBeInstanceOf(CloudBackupError);
+      expect(error.kind).toBe("conflict");
+    });
+
+    // The backup and share paths must keep spawning timestamped copies; only
+    // the sync head is written conditionally.
+    it("leaves backup uploads on add + autorename", async () => {
+      seedAuth();
+      const fetchMock = vi.fn(async (url: string) => {
+        if (url.includes("/files/upload")) return jsonResponse(200, { path_display: "/x" });
+        if (url.includes("/files/list_folder")) {
+          return jsonResponse(200, { entries: [], has_more: false });
+        }
+        return jsonResponse(200, {});
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await makeProvider().uploadBackup(smallBackupInput());
+
+      const arg = uploadArg(fetchMock);
+      expect(arg.mode).toBe("add");
+      expect(arg.autorename).toBe(true);
+      expect(arg.strict_conflict).toBeUndefined();
+    });
+
+    it("takes the downloaded head's revision from the API-Result header", async () => {
+      seedAuth();
+      const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+        if (url.includes("/files/download")) {
+          return new Response(new Uint8Array([80, 75, 3, 4]) as unknown as BodyInit, {
+            status: 200,
+            headers: {
+              "Dropbox-API-Result": JSON.stringify({
+                rev: "rev-7",
+                server_modified: "2026-08-19T10:00:00Z"
+              })
+            }
+          });
+        }
+        return jsonResponse(200, {});
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const head = await makeProvider().downloadSyncHead(PROJECT_ID);
+
+      expect(head.rev).toBe("rev-7");
+      expect(Array.from(head.bytes)).toEqual([80, 75, 3, 4]);
+      const call = fetchMock.mock.calls.find(([url]) =>
+        String(url).includes("/files/download")
+      );
+      expect(
+        JSON.parse((call![1]!.headers as Record<string, string>)["Dropbox-API-Arg"])
+      ).toEqual({ path: HEAD_PATH });
+    });
+
+    // A pull that cannot record what it is based on would push blind next
+    // cycle, so a header without a rev fails rather than guessing.
+    it("fails a download whose header carries no revision", async () => {
+      seedAuth();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          new Response(new Uint8Array([1]) as unknown as BodyInit, { status: 200 })
+        )
+      );
+
+      const error = await makeProvider()
+        .downloadSyncHead(PROJECT_ID)
+        .catch((e) => e);
+      expect(error).toBeInstanceOf(CloudBackupError);
+      expect(error.kind).toBe("transient");
+    });
+
+    it("classifies a vanished head as not-found on download", async () => {
+      seedAuth();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response("path/not_found/..", { status: 409 }))
+      );
+
+      const error = await makeProvider()
+        .downloadSyncHead(PROJECT_ID)
+        .catch((e) => e);
+      expect(error.kind).toBe("not-found");
+    });
+
+    it("folds one recursive /projects listing into per-project heads", async () => {
+      seedAuth();
+      const otherId = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
+      const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+        if (url.endsWith("/files/list_folder")) {
+          return jsonResponse(200, {
+            entries: [
+              { ".tag": "folder", name: PROJECT_ID, path_lower: `/projects/${PROJECT_ID}` },
+              {
+                ".tag": "file",
+                name: "current.sightlines",
+                rev: "rev-a",
+                size: 2048,
+                server_modified: "2026-08-19T10:00:00Z",
+                path_lower: `/projects/${PROJECT_ID}/current.sightlines`
+              },
+              {
+                ".tag": "file",
+                name: "current.sightlines",
+                rev: "rev-b",
+                path_lower: `/projects/${otherId}/current.sightlines`
+              },
+              // Not a head: wrong filename, wrong depth, and a folder whose
+              // name is not a project id.
+              {
+                ".tag": "file",
+                name: "notes.txt",
+                rev: "rev-c",
+                path_lower: `/projects/${PROJECT_ID}/notes.txt`
+              },
+              {
+                ".tag": "file",
+                name: "current.sightlines",
+                rev: "rev-d",
+                path_lower: `/projects/${PROJECT_ID}/nested/current.sightlines`
+              },
+              {
+                ".tag": "file",
+                name: "current.sightlines",
+                rev: "rev-e",
+                path_lower: "/projects/scratch/current.sightlines"
+              }
+            ],
+            has_more: false
+          });
+        }
+        return jsonResponse(200, {});
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const heads = await makeProvider().listSyncHeads();
+
+      const listCall = fetchMock.mock.calls.find(([url]) =>
+        String(url).endsWith("/files/list_folder")
+      );
+      expect(JSON.parse(String(listCall?.[1]?.body))).toEqual({
+        path: "/projects",
+        recursive: true
+      });
+      expect(heads).toEqual([
+        {
+          projectId: PROJECT_ID,
+          path: `/projects/${PROJECT_ID}/current.sightlines`,
+          rev: "rev-a",
+          serverModifiedIso: "2026-08-19T10:00:00Z",
+          sizeBytes: 2048
+        },
+        {
+          projectId: otherId,
+          path: `/projects/${otherId}/current.sightlines`,
+          rev: "rev-b",
+          serverModifiedIso: null,
+          sizeBytes: null
+        }
+      ]);
+    });
+
+    it("returns an empty list when nothing has ever been synced", async () => {
+      seedAuth();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => jsonResponse(409, { error_summary: "path/not_found/." }))
+      );
+
+      await expect(makeProvider().listSyncHeads()).resolves.toEqual([]);
+    });
+
+    it("requires one reconnect when the stored token predates the read scope", async () => {
+      seedAuth({ scope: LEGACY_SCOPES });
+      const provider = makeProvider();
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      // Sync without a pull path is not sync, so even the metadata-only call
+      // gates on the read scope.
+      await expect(provider.getSyncHead(PROJECT_ID)).rejects.toMatchObject({
+        kind: "reauth",
+        message: "Reconnect Dropbox once to sync projects across devices."
+      });
+      await expect(provider.uploadSyncHead(syncInput(null))).rejects.toMatchObject({
+        kind: "reauth"
+      });
+      await expect(provider.listSyncHeads()).rejects.toMatchObject({ kind: "reauth" });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(provider.getStatus()).toBe("reauthorization-required");
+    });
+
+    it("flips to reauthorization-required when the token dies mid-upload", async () => {
+      seedAuth();
+      const provider = makeProvider();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => jsonResponse(401, { error_summary: "expired_access_token/" }))
+      );
+
+      await expect(provider.uploadSyncHead(syncInput("rev-1"))).rejects.toMatchObject({
+        kind: "reauth"
+      });
+      expect(provider.getStatus()).toBe("reauthorization-required");
+    });
+
+    it("reports the account id sync bookkeeping binds to", () => {
+      seedAuth({ accountId: "dbid:AAA-account" });
+      expect(makeProvider().accountId()).toBe("dbid:AAA-account");
+      // A grant stored before ids were captured has none, and sync must not
+      // invent one from the display name.
+      seedAuth();
+      expect(makeProvider().accountId()).toBeNull();
+    });
+  });
+
   describe("error handling", () => {
     it("surfaces a 429 as a rate-limit CloudBackupError (transient, not hard-fail)", async () => {
       seedAuth();

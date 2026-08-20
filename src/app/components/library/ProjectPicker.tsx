@@ -3,7 +3,8 @@ import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import type { ProjectSummary } from "../../../domain/project";
 import type {
   CloudBackupProviderStatus,
-  CloudProjectFolder
+  CloudProjectFolder,
+  SyncHeadListing
 } from "../../cloud/provider";
 import type { CloudProjectsStatus } from "../../store/cloudProjectsSlice";
 import { Button } from "../ui/button";
@@ -24,9 +25,11 @@ export function ProjectPicker({
   cloudBackupProviderStatus,
   cloudProjects,
   cloudProjectsStatus,
+  cloudSyncHeads,
   cloudProjectOpening,
   onRefreshCloudProjects,
   onOpenCloudProject,
+  onOpenSyncedCloudProject,
   onReconnectCloudBackup
 }: {
   currentProjectId: string;
@@ -41,9 +44,11 @@ export function ProjectPicker({
   cloudBackupProviderStatus: CloudBackupProviderStatus;
   cloudProjects: CloudProjectFolder[] | null;
   cloudProjectsStatus: CloudProjectsStatus;
+  cloudSyncHeads: SyncHeadListing[] | null;
   cloudProjectOpening: string | null;
   onRefreshCloudProjects: () => Promise<void>;
   onOpenCloudProject: (folder: CloudProjectFolder) => Promise<boolean>;
+  onOpenSyncedCloudProject: (head: SyncHeadListing) => Promise<boolean>;
   onReconnectCloudBackup: () => Promise<void>;
 }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -73,6 +78,7 @@ export function ProjectPicker({
         cloudProjectOpening={cloudProjectOpening}
         cloudProjects={cloudProjects}
         cloudProjectsStatus={cloudProjectsStatus}
+        cloudSyncHeads={cloudSyncHeads}
         currentProjectId={currentProjectId}
         listProjectSummaries={listProjectSummaries}
         open={isOpen}
@@ -83,6 +89,7 @@ export function ProjectPicker({
         onOpenChange={setIsOpen}
         onOpenCloudProject={onOpenCloudProject}
         onOpenProject={onOpenProject}
+        onOpenSyncedCloudProject={onOpenSyncedCloudProject}
         onReconnectCloudBackup={onReconnectCloudBackup}
         onRefreshCloudProjects={onRefreshCloudProjects}
         onRenameProject={onRenameProject}

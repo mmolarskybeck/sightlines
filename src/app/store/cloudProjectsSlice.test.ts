@@ -6,17 +6,23 @@ import {
   InMemoryAssetRepository,
   InMemoryProjectRepository,
   InMemoryProjectSnapshotRepository,
+  InMemorySyncMetaRepository,
   makeImageFile
 } from "../../test/inMemoryRepositories";
 import { createSightlinesPackage } from "../../domain/package/buildPackage";
 import type { Project } from "../../domain/project";
 import { CloudBackupError } from "../cloud/dropbox";
 import { MAX_BACKUP_DOWNLOAD_BYTES } from "../cloud/dropboxAuth";
+import {
+  getCloudSyncRowKey,
+  shouldWarnSyncHeadsUnavailable
+} from "../cloud/cloudBackupCopy";
 import { readCloudBackupMeta } from "./cloudBackupMeta";
 import type {
   CloudBackupProvider,
   CloudBackupProviderStatus,
-  CloudProjectFolder
+  CloudProjectFolder,
+  SyncHeadListing
 } from "../cloud/provider";
 import { createInertCrossTabSync } from "../crossTabSync";
 import { createAppStore, type AppStoreDeps } from "../store";
@@ -54,22 +60,55 @@ const FOLDERS: CloudProjectFolder[] = [
   }
 ];
 
+// The sync head for the first folder: a full project id, of which the folder
+// name carries only the first 8 chars.
+const HEAD_PROJECT_ID = "1a2b3c4d-1111-2222-3333-444455556666";
+const HEADS: SyncHeadListing[] = [
+  {
+    projectId: HEAD_PROJECT_ID,
+    path: `/projects/${HEAD_PROJECT_ID}/current.sightlines`,
+    rev: "head-rev-1",
+    serverModifiedIso: "2026-08-19T11:00:00.000Z",
+    sizeBytes: 4096
+  }
+];
+
+// A head with no backup folder behind it — what "new project → sync on → close
+// the tab" leaves in the account, since the head is written at once while the
+// first automatic backup waits out the settle delay. No folder row can carry
+// it, so it gets its own row and its own open.
+const LONE_HEAD_PROJECT_ID = "deadbeef-1111-2222-3333-444455556666";
+const LONE_HEAD: SyncHeadListing = {
+  projectId: LONE_HEAD_PROJECT_ID,
+  path: `/projects/${LONE_HEAD_PROJECT_ID}/current.sightlines`,
+  rev: "lone-rev-1",
+  serverModifiedIso: "2026-08-19T12:00:00.000Z",
+  sizeBytes: 4096
+};
+
 type FakeProviderOptions = {
   status?: CloudBackupProviderStatus;
   list?: () => Promise<CloudProjectFolder[]>;
   download?: () => Promise<Uint8Array>;
+  heads?: () => Promise<SyncHeadListing[]>;
+  downloadHead?: () => Promise<{ bytes: Uint8Array; rev: string }>;
 };
 
 // Hand-written stand-in: the slice is coded against the provider interface, so
 // no Dropbox implementation detail belongs in these tests.
 function makeFakeProvider(
   options: FakeProviderOptions = {}
-): CloudBackupProvider & { lists: number; downloads: string[] } {
+): CloudBackupProvider & {
+  lists: number;
+  downloads: string[];
+  headDownloads: string[];
+} {
   return {
     id: "fake",
     label: "Fake",
     lists: 0,
     downloads: [],
+    headDownloads: [],
     async startConnect() {},
     async completeConnect() {
       return false;
@@ -92,6 +131,26 @@ function makeFakeProvider(
     async downloadBackup(path) {
       this.downloads.push(path);
       return options.download ? await options.download() : new Uint8Array([1, 2, 3]);
+    },
+    accountId() {
+      return "dbid:tester";
+    },
+    // The sync LOOP is exercised in its own slice tests; what this surface
+    // needs from the seam is the head listing and the head download.
+    async getSyncHead() {
+      return null;
+    },
+    async downloadSyncHead(projectId) {
+      this.headDownloads.push(projectId);
+      return options.downloadHead
+        ? await options.downloadHead()
+        : { bytes: new Uint8Array([1, 2, 3]), rev: "head-rev-1" };
+    },
+    async uploadSyncHead() {
+      return { rev: "rev-1", serverModifiedIso: null, sizeBytes: null };
+    },
+    async listSyncHeads() {
+      return options.heads ? await options.heads() : [];
     }
   };
 }
@@ -102,6 +161,7 @@ describe("cloudProjectsSlice", () => {
   let assetRepository: InMemoryAssetRepository;
   let imageProcessor: FakeImageProcessor;
   let projectSnapshotRepository: InMemoryProjectSnapshotRepository;
+  let syncMetaRepository: InMemorySyncMetaRepository;
 
   function makeDeps(overrides: Partial<AppStoreDeps> = {}): AppStoreDeps {
     return {
@@ -110,6 +170,7 @@ describe("cloudProjectsSlice", () => {
       assetRepository,
       imageProcessor,
       projectSnapshotRepository,
+      syncMetaRepository,
       // Every store in this process would otherwise share one BroadcastChannel.
       crossTabSync: createInertCrossTabSync(),
       ...overrides
@@ -130,6 +191,7 @@ describe("cloudProjectsSlice", () => {
     assetRepository = new InMemoryAssetRepository();
     imageProcessor = new FakeImageProcessor();
     projectSnapshotRepository = new InMemoryProjectSnapshotRepository();
+    syncMetaRepository = new InMemorySyncMetaRepository();
   });
 
   it("starts with no listing at all, which is not an empty listing", async () => {
@@ -203,6 +265,49 @@ describe("cloudProjectsSlice", () => {
     expect(store.getState().cloudProjectsStatus).toBe("loaded");
   });
 
+  it("lists the account's sync heads alongside the folders", async () => {
+    const store = await bootStore(makeFakeProvider({ heads: async () => HEADS }));
+
+    await store.getState().refreshCloudProjects();
+
+    expect(store.getState().cloudSyncHeads).toEqual(HEADS);
+  });
+
+  // The heads are an enhancement of this listing; the folders are the listing.
+  // Losing the first must never cost the second.
+  it("keeps the backup listing when the heads listing fails", async () => {
+    const store = await bootStore(
+      makeFakeProvider({
+        heads: async () => {
+          throw new CloudBackupError("transient", "Network down.");
+        }
+      })
+    );
+
+    await store.getState().refreshCloudProjects();
+
+    expect(store.getState().cloudProjectsStatus).toBe("loaded");
+    expect(store.getState().cloudProjects).toEqual(FOLDERS);
+    // Not [] — "we couldn't ask" is not "nothing is synced".
+    expect(store.getState().cloudSyncHeads).toBeNull();
+    // …and the pair reads as a FAILED pass, which is what puts the degraded
+    // notice on screen. A fresh store wears the same null and must not.
+    expect(
+      shouldWarnSyncHeadsUnavailable({
+        status: store.getState().cloudProjectsStatus,
+        syncHeads: store.getState().cloudSyncHeads
+      })
+    ).toBe(true);
+
+    const untouched = await bootStore(makeFakeProvider());
+    expect(
+      shouldWarnSyncHeadsUnavailable({
+        status: untouched.getState().cloudProjectsStatus,
+        syncHeads: untouched.getState().cloudSyncHeads
+      })
+    ).toBe(false);
+  });
+
   it("preserves identity for a folder no local project matches", async () => {
     const provider = makeFakeProvider();
     const store = await bootStore(provider);
@@ -248,6 +353,266 @@ describe("cloudProjectsSlice", () => {
     expect(importCloudBackupPackage).toHaveBeenCalledWith(expect.any(ArrayBuffer), {
       asCopy: true,
       lastBackupIso: FOLDERS[0]!.latestBackup!.serverModifiedIso
+    });
+  });
+
+  // Device handoff (docs/cloud-sync-plan.md stage 2): a project with a
+  // canonical copy in Dropbox and nothing here opens from the HEAD, not from a
+  // timestamped backup — that is what makes the two devices one project.
+  describe("a folder backed by a sync head", () => {
+    async function bootWithHeads() {
+      const provider = makeFakeProvider({ heads: async () => HEADS });
+      const store = await bootStore(provider);
+      await store.getState().refreshCloudProjects();
+      return { store, provider };
+    }
+
+    it("opens the head and links this device, never the newest backup", async () => {
+      const { store, provider } = await bootWithHeads();
+      const importSyncHeadPackage = vi.fn().mockResolvedValue(true);
+      const importCloudBackupPackage = vi.fn().mockResolvedValue(true);
+      store.setState({ importSyncHeadPackage, importCloudBackupPackage });
+
+      expect(await store.getState().openCloudProjectBackup(FOLDERS[0]!)).toBe(true);
+
+      expect(provider.headDownloads).toEqual([HEAD_PROJECT_ID]);
+      expect(provider.downloads).toEqual([]);
+      expect(importCloudBackupPackage).not.toHaveBeenCalled();
+      expect(importSyncHeadPackage).toHaveBeenCalledWith(expect.any(ArrayBuffer), {
+        link: { projectId: HEAD_PROJECT_ID, rev: "head-rev-1" }
+      });
+      expect(store.getState().cloudProjectOpening).toBeNull();
+    });
+
+    // Copies are never linked: a folder that looks like something already here
+    // keeps the stage-1 save-a-copy path untouched, head or no head.
+    it("still copies when a local project id matches the folder's prefix", async () => {
+      const { store, provider } = await bootWithHeads();
+      const project = store.getState().project!;
+      await repository.save({ ...project, id: `${FOLDERS[0]!.projectIdPrefix}-0000-local` });
+      const importSyncHeadPackage = vi.fn().mockResolvedValue(true);
+      const importCloudBackupPackage = vi.fn().mockResolvedValue(true);
+      store.setState({ importSyncHeadPackage, importCloudBackupPackage });
+
+      await store.getState().openCloudProjectBackup(FOLDERS[0]!);
+
+      expect(provider.headDownloads).toEqual([]);
+      expect(importSyncHeadPackage).not.toHaveBeenCalled();
+      expect(importCloudBackupPackage).toHaveBeenCalledWith(expect.any(ArrayBuffer), {
+        asCopy: true,
+        lastBackupIso: FOLDERS[0]!.latestBackup!.serverModifiedIso
+      });
+    });
+
+    // A folder with no head keeps restoring from its backups.
+    it("leaves an unsynced folder on the backup path", async () => {
+      const { store, provider } = await bootWithHeads();
+      const importSyncHeadPackage = vi.fn().mockResolvedValue(true);
+      store.setState({
+        importSyncHeadPackage,
+        importCloudBackupPackage: vi.fn().mockResolvedValue(true)
+      });
+
+      await store.getState().openCloudProjectBackup(FOLDERS[1]!);
+
+      expect(importSyncHeadPackage).not.toHaveBeenCalled();
+      expect(provider.downloads).toEqual([FOLDERS[1]!.latestBackup!.path]);
+    });
+
+    it("refuses an oversized head from the listing alone, without downloading", async () => {
+      const provider = makeFakeProvider({
+        heads: async () => [
+          { ...HEADS[0]!, sizeBytes: MAX_BACKUP_DOWNLOAD_BYTES + 1 }
+        ]
+      });
+      const store = await bootStore(provider);
+      await store.getState().refreshCloudProjects();
+      const importSyncHeadPackage = vi.fn().mockResolvedValue(true);
+      store.setState({ importSyncHeadPackage });
+
+      expect(await store.getState().openCloudProjectBackup(FOLDERS[0]!)).toBe(false);
+
+      expect(provider.headDownloads).toEqual([]);
+      expect(importSyncHeadPackage).not.toHaveBeenCalled();
+      // Named as the project, not as a backup: this is the file the user's
+      // other devices are working against.
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+        "That project is too large to open here. You can download it from dropbox.com."
+      );
+    });
+
+    it("re-lists and says so when the head has vanished", async () => {
+      const provider = makeFakeProvider({
+        heads: async () => HEADS,
+        downloadHead: async () => {
+          throw new CloudBackupError("not-found", "path/not_found");
+        }
+      });
+      const store = await bootStore(provider);
+      await store.getState().refreshCloudProjects();
+      store.setState({ importSyncHeadPackage: vi.fn().mockResolvedValue(true) });
+
+      expect(await store.getState().openCloudProjectBackup(FOLDERS[0]!)).toBe(false);
+
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+        "That project's synced copy is no longer in Dropbox."
+      );
+      expect(provider.lists).toBe(2);
+    });
+
+    // The whole point of the handoff: after this open, the state machine has a
+    // rev to compare against, so the next check pushes or pulls rather than
+    // treating the project as unlinked.
+    it("records the head's rev at the commit, so the device is linked", async () => {
+      let bytes = new Uint8Array();
+      const provider = makeFakeProvider({
+        heads: async () => HEADS,
+        downloadHead: async () => ({ bytes, rev: "head-rev-1" })
+      });
+      const store = await bootStore(provider);
+      await store.getState().refreshCloudProjects();
+      const built = await createSightlinesPackage({
+        project: {
+          ...store.getState().project!,
+          id: HEAD_PROJECT_ID,
+          title: "Winter Show"
+        },
+        libraryArtworks: store.getState().libraryArtworks,
+        mode: "display",
+        getAsset: (id) => assetRepository.getAsset(id),
+        getBlob: (key) => assetRepository.getBlob(key)
+      });
+      bytes = new Uint8Array(built.zip);
+
+      expect(await store.getState().openCloudProjectBackup(FOLDERS[0]!)).toBe(true);
+
+      // Identity preserved — the head IS this project, not a copy of it.
+      expect(store.getState().project?.id).toBe(HEAD_PROJECT_ID);
+      const meta = await syncMetaRepository.get(HEAD_PROJECT_ID);
+      expect(meta?.lastAcceptedRev).toBe("head-rev-1");
+      expect(meta?.accountId).toBe("dbid:tester");
+      expect(meta?.paused).toBe(false);
+      expect(meta?.lastPullAtIso).not.toBeNull();
+      // Observable state follows the commit, so the popover can say it.
+      expect(store.getState().syncMeta?.lastAcceptedRev).toBe("head-rev-1");
+      // The content is already in Dropbox; an auto-backup minutes later would
+      // burn a retention slot on a duplicate of what was just downloaded.
+      expect(readCloudBackupMeta(HEAD_PROJECT_ID).lastCloudBackupAt).not.toBeNull();
+    });
+  });
+
+  // A project the account holds ONLY as a head. There is no folder to route
+  // through and no backup to fall back to, so this is its own action — over the
+  // same head-open implementation the folder rows reach.
+  describe("a project with a head and no backup folder", () => {
+    async function bootWithLoneHead(
+      options: Parameters<typeof makeFakeProvider>[0] = {}
+    ) {
+      const provider = makeFakeProvider({ heads: async () => [LONE_HEAD], ...options });
+      const store = await bootStore(provider);
+      await store.getState().refreshCloudProjects();
+      return { store, provider };
+    }
+
+    it("opens the head and links this device", async () => {
+      const { store, provider } = await bootWithLoneHead();
+      const importSyncHeadPackage = vi.fn().mockResolvedValue(true);
+      const importCloudBackupPackage = vi.fn().mockResolvedValue(true);
+      store.setState({ importSyncHeadPackage, importCloudBackupPackage });
+
+      expect(await store.getState().openCloudSyncedProject(LONE_HEAD)).toBe(true);
+
+      expect(provider.headDownloads).toEqual([LONE_HEAD_PROJECT_ID]);
+      expect(provider.downloads).toEqual([]);
+      expect(importCloudBackupPackage).not.toHaveBeenCalled();
+      expect(importSyncHeadPackage).toHaveBeenCalledWith(expect.any(ArrayBuffer), {
+        link: { projectId: LONE_HEAD_PROJECT_ID, rev: "head-rev-1" }
+      });
+      expect(store.getState().cloudProjectOpening).toBeNull();
+    });
+
+    // The row disables on the same field the folder rows use, keyed so the two
+    // namespaces can never be mistaken for each other.
+    it("claims the open under the row's own key", async () => {
+      let release: (() => void) | null = null;
+      const { store } = await bootWithLoneHead({
+        downloadHead: () =>
+          new Promise((resolve) => {
+            release = () => resolve({ bytes: new Uint8Array([1]), rev: "head-rev-1" });
+          })
+      });
+      store.setState({ importSyncHeadPackage: vi.fn().mockResolvedValue(true) });
+
+      const open = store.getState().openCloudSyncedProject(LONE_HEAD);
+      await Promise.resolve();
+      expect(store.getState().cloudProjectOpening).toBe(
+        getCloudSyncRowKey(LONE_HEAD_PROJECT_ID)
+      );
+      // A second open — of anything — loses the race.
+      expect(await store.getState().openCloudProjectBackup(FOLDERS[0]!)).toBe(false);
+
+      release!();
+      await open;
+      expect(store.getState().cloudProjectOpening).toBeNull();
+    });
+
+    // Linking imports under the project's OWN id, with no snapshot behind it.
+    // A stale row must never talk this path into overwriting the project it
+    // claims is missing.
+    it("refuses when that project is already on this device", async () => {
+      const { store, provider } = await bootWithLoneHead();
+      const project = store.getState().project!;
+      await repository.save({ ...project, id: LONE_HEAD_PROJECT_ID });
+      const importSyncHeadPackage = vi.fn().mockResolvedValue(true);
+      store.setState({ importSyncHeadPackage });
+
+      expect(await store.getState().openCloudSyncedProject(LONE_HEAD)).toBe(false);
+
+      expect(provider.headDownloads).toEqual([]);
+      expect(importSyncHeadPackage).not.toHaveBeenCalled();
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+        "That project is already on this device."
+      );
+      expect(store.getState().cloudProjectOpening).toBeNull();
+    });
+
+    // Fail closed: a device that cannot list its own projects cannot prove this
+    // one is absent, and the copy escape hatch the folder rows have doesn't
+    // exist here.
+    it("refuses when this device's projects can't be read", async () => {
+      const { store, provider } = await bootWithLoneHead();
+      const importSyncHeadPackage = vi.fn().mockResolvedValue(true);
+      store.setState({ importSyncHeadPackage });
+      repository.list = async () => {
+        throw new Error("IndexedDB unavailable.");
+      };
+
+      expect(await store.getState().openCloudSyncedProject(LONE_HEAD)).toBe(false);
+
+      expect(provider.headDownloads).toEqual([]);
+      expect(importSyncHeadPackage).not.toHaveBeenCalled();
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+        "Couldn't check the projects on this device. Try opening that project again."
+      );
+    });
+
+    // Shared implementation, shared ceiling: answered from the listing before
+    // any bytes are spent.
+    it("refuses an oversized head without downloading", async () => {
+      const { store, provider } = await bootWithLoneHead();
+      store.setState({ importSyncHeadPackage: vi.fn().mockResolvedValue(true) });
+
+      expect(
+        await store.getState().openCloudSyncedProject({
+          ...LONE_HEAD,
+          sizeBytes: MAX_BACKUP_DOWNLOAD_BYTES + 1
+        })
+      ).toBe(false);
+
+      expect(provider.headDownloads).toEqual([]);
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+        "That project is too large to open here. You can download it from dropbox.com."
+      );
     });
   });
 

@@ -2,7 +2,13 @@
 
 Design settled 2026-08-19. **Stage 1 (cloud project browser) built 2026-08-19**
 (`feat/cloud-project-browser`, committed `8e7566f` + review-fix follow-up; see
-`docs/status.md`); stages 2–4 are not built. This doc records the agreed architecture and staging so implementation
+`docs/status.md`). **Stage 2 (canonical single-user sync) built 2026-08-19** —
+`/projects/<id>/current.sightlines` heads with rev-conditional writes,
+account-bound sync metadata in IndexedDB (DB v5), the state machine and its
+conflict dialog, replace-mode import with recovery snapshot + drift re-check,
+the popover status row, and head-backed device handoff in the project browser;
+see `docs/status.md` for the file-level summary. Stages 3–4 are not built.
+This doc records the agreed architecture and staging so implementation
 sessions can start from decisions, not re-derivation. It extends the shipped backup system described in
 `docs/cloud-backup-providers.md` and supersedes that doc's "explicit future decision
 required for conflict handling" — the decision is now made.
@@ -193,7 +199,10 @@ phase (stage 4), not a v1 promise.
    Dropbox space is a real problem.
 
 Stage 1 should be described in UI as "cloud projects / restore", **not** "sync" —
-the sync label starts at stage 2.
+the sync label starts at stage 2. As built, stage 2 keeps that split inside one
+list: a project-manager row says "sync" only when a head actually backs it
+(then "Synced … · opens here and keeps syncing"), while `/backups`-only rows
+keep "Backed up … · N backups" and the save-a-copy offer.
 
 ## Out of scope, permanently or for now
 

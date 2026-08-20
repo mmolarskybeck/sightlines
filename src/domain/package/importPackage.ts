@@ -167,6 +167,12 @@ export type PlanPackageImportOptions = {
   // Shared links are snapshots, never identity-preserving transfers. Force a
   // fresh project record even when the sender's id is absent locally.
   forceProjectCopy?: boolean;
+  // The one project this package is allowed to REPLACE, keeping its id even
+  // though that id already exists locally. Only cross-device sync passes it, and
+  // only for a head downloaded from the authenticated account with its revision
+  // recorded (docs/cloud-sync-plan.md, "Trust and safety rules") — a matching id
+  // inside an untrusted package proves nothing, so no other caller may set this.
+  replaceProjectId?: string;
 };
 
 export type ArtworkConflict = {
@@ -244,9 +250,25 @@ export function planPackageImport(
 ): ImportPlan {
   const warnings = [...validated.warnings];
 
-  // Never overwrite a local project on id collision.
+  // A replace target the package does not actually contain is not a version of
+  // that project — it is a different project wearing its file name (tampering,
+  // a corrupted head, or a path/id mix-up). Refuse rather than replace: the
+  // caller is about to overwrite a real local document with these bytes.
+  if (
+    options.replaceProjectId !== undefined &&
+    manifest.project.id !== options.replaceProjectId
+  ) {
+    throw new Error(
+      "this synced file no longer holds the project it is named for; nothing was replaced."
+    );
+  }
+  // Never overwrite a local project on id collision — except on that one
+  // verified replace path, which keeps the incoming id precisely so the two
+  // devices stay one project.
   const projectIds = new Set(existing.projectIds);
-  const projectRenamed = options.forceProjectCopy || projectIds.has(manifest.project.id);
+  const projectRenamed =
+    options.replaceProjectId === undefined &&
+    (options.forceProjectCopy || projectIds.has(manifest.project.id));
   const importedAt = new Date().toISOString();
   const project: Project = projectRenamed
     ? {

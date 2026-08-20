@@ -10,6 +10,10 @@ import {
   type ProjectSnapshotRepository,
   type ProjectSnapshotSummary
 } from "../domain/repositories/projectSnapshotRepository";
+import type {
+  ProjectSyncMeta,
+  SyncMetaRepository
+} from "../domain/repositories/syncMetaRepository";
 import { parseArtwork, parseAsset } from "../domain/schema/artworkSchema";
 import { parseProject } from "../domain/schema/projectSchema";
 
@@ -117,6 +121,26 @@ export class InMemoryProjectSnapshotRepository implements ProjectSnapshotReposit
     for (const key of this.keysFor(projectId)) {
       this.records.delete(key);
     }
+  }
+}
+
+export class InMemorySyncMetaRepository implements SyncMetaRepository {
+  records = new Map<string, ProjectSyncMeta>();
+
+  async get(projectId: string): Promise<ProjectSyncMeta | undefined> {
+    return this.records.get(projectId);
+  }
+
+  async put(record: ProjectSyncMeta): Promise<void> {
+    this.records.set(record.projectId, record);
+  }
+
+  async delete(projectId: string): Promise<void> {
+    this.records.delete(projectId);
+  }
+
+  async list(): Promise<ProjectSyncMeta[]> {
+    return [...this.records.values()];
   }
 }
 

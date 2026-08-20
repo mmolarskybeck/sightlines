@@ -14,6 +14,7 @@ import { OpenWallDialog } from "./dialogs/OpenWallDialog";
 import { RecoveryDialog } from "./dialogs/RecoveryDialog";
 import { ShareProjectDialog } from "./dialogs/ShareProjectDialog";
 import { SharedProjectImportDialog } from "./dialogs/SharedProjectImportDialog";
+import { SyncConflictDialog } from "./dialogs/SyncConflictDialog";
 import { HelpDialog } from "./dialogs/HelpDialog";
 import { ImportConflictDialog } from "./imports/ImportConflictDialog";
 import type { SavedViewRenderHandle } from "./three/SavedViewRenderHost";
@@ -117,6 +118,9 @@ type AppDialogsProps = {
   pendingPackageImport: AppState["pendingPackageImport"];
   resolvePackageImportConflicts: AppState["resolvePackageImportConflicts"];
   dismissPackageImport: AppState["dismissPackageImport"];
+  syncConflict: AppState["syncConflict"];
+  resolveSyncConflict: AppState["resolveSyncConflict"];
+  disableProjectSync: AppState["disableProjectSync"];
   recoveryOffer: AppState["recoveryOffer"];
   acceptRecovery: AppState["acceptRecovery"];
   dismissRecovery: AppState["dismissRecovery"];
@@ -188,6 +192,9 @@ export function AppDialogs({
   pendingPackageImport,
   resolvePackageImportConflicts,
   dismissPackageImport,
+  syncConflict,
+  resolveSyncConflict,
+  disableProjectSync,
   recoveryOffer,
   acceptRecovery,
   dismissRecovery,
@@ -321,6 +328,14 @@ export function AppDialogs({
         unit={project.unit}
         onResolve={(resolutions) => void resolvePackageImportConflicts(resolutions)}
         onDismiss={dismissPackageImport}
+      />
+      {/* The whole-project sync decision. It is deliberately NOT stacked with
+          the artwork review: a pull resolves the layout question here first,
+          and only then does the import park on library conflicts. */}
+      <SyncConflictDialog
+        conflict={syncConflict}
+        onDisableSync={() => void disableProjectSync()}
+        onResolve={(choice) => void resolveSyncConflict(choice)}
       />
       <ShareProjectDialog
         url={shareProjectUrl}

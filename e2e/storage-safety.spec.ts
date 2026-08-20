@@ -1,6 +1,10 @@
 import { test, expect, gotoApp, addArtwork } from "./fixtures";
 import type { Page } from "playwright/test";
 import { strToU8, zipSync } from "fflate";
+// A leaf module with zero imports of its own, so pulling DB_NAME/DB_VERSION
+// in here doesn't drag app source (or its transitive deps) into the spec's
+// Node context the way importing project.ts would.
+import { DB_NAME, DB_VERSION } from "../src/domain/repositories/database";
 
 // End-to-end coverage for the storage-safety slice: Dropbox cloud backup
 // (happy path + reauth), silent snapshot corruption recovery, and the
@@ -458,9 +462,9 @@ test.describe("cloud backup", () => {
     await expect(page.getByRole("textbox", { name: "Project title" }).first()).toHaveValue(
       "Shared Exhibition (copy)"
     );
-    const storedProjects = await page.evaluate(async () => {
+    const storedProjects = await page.evaluate(async (database) => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
-        const request = indexedDB.open("sightlines", 4);
+        const request = indexedDB.open(database.name, database.version);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });
@@ -469,7 +473,7 @@ test.describe("cloud backup", () => {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });
-    });
+    }, { name: DB_NAME, version: DB_VERSION });
     expect(storedProjects).toContainEqual(
       expect.objectContaining({ title: "Shared Exhibition (copy)" })
     );
@@ -630,11 +634,11 @@ test.describe("corruption recovery", () => {
   // record is the newest project boot tries to open.
   async function seedCorruption(page: Page) {
     await gotoApp(page);
-    await page.evaluate(async (schemaVersion) => {
+    await page.evaluate(async ({ schemaVersion, database }) => {
       const corruptId = "corrupt-project-e2e";
       const now = new Date().toISOString();
       const db: IDBDatabase = await new Promise((resolve, reject) => {
-        const request = indexedDB.open("sightlines", 4);
+        const request = indexedDB.open(database.name, database.version);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });
@@ -679,7 +683,7 @@ test.describe("corruption recovery", () => {
         tx.onabort = () => reject(tx.error);
       });
       db.close();
-    }, CURRENT_SCHEMA_VERSION);
+    }, { schemaVersion: CURRENT_SCHEMA_VERSION, database: { name: DB_NAME, version: DB_VERSION } });
     await page.reload();
     await expect(page.locator(".app-main")).toBeVisible();
   }
@@ -798,9 +802,9 @@ test.describe("shared-opening load repair durability", () => {
   // Read the doors back out of IndexedDB — what a reload would actually get,
   // as opposed to what the running app is holding in memory.
   function readStoredDoors(page: Page, projectId: string) {
-    return page.evaluate(async (id) => {
+    return page.evaluate(async ({ id, database }) => {
       const db: IDBDatabase = await new Promise((resolve, reject) => {
-        const request = indexedDB.open("sightlines", 4);
+        const request = indexedDB.open(database.name, database.version);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });
@@ -815,15 +819,15 @@ test.describe("shared-opening load repair durability", () => {
         id: object.id,
         partner: object.connectsToObjectId ?? null
       }));
-    }, projectId);
+    }, { id: projectId, database: { name: DB_NAME, version: DB_VERSION } });
   }
 
   // Every recovery snapshot held for this project, oldest first, reduced to the
   // door links so an assertion can say which document each copy holds.
   function readSnapshotDoors(page: Page, projectId: string) {
-    return page.evaluate(async (id) => {
+    return page.evaluate(async ({ id, database }) => {
       const db: IDBDatabase = await new Promise((resolve, reject) => {
-        const request = indexedDB.open("sightlines", 4);
+        const request = indexedDB.open(database.name, database.version);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });
@@ -848,16 +852,16 @@ test.describe("shared-opening load repair durability", () => {
             partner: object.connectsToObjectId ?? null
           }))
         );
-    }, projectId);
+    }, { id: projectId, database: { name: DB_NAME, version: DB_VERSION } });
   }
 
   // Boot once so the DB and its schema exist, write the unrepaired document in
   // as the newest project, then reload so boot opens it.
   async function seedRepairableProject(page: Page) {
     await gotoApp(page);
-    await page.evaluate(async (project) => {
+    await page.evaluate(async ({ project, database }) => {
       const db: IDBDatabase = await new Promise((resolve, reject) => {
-        const request = indexedDB.open("sightlines", 4);
+        const request = indexedDB.open(database.name, database.version);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });
@@ -869,7 +873,7 @@ test.describe("shared-opening load repair durability", () => {
         tx.onabort = () => reject(tx.error);
       });
       db.close();
-    }, repairableProject());
+    }, { project: repairableProject(), database: { name: DB_NAME, version: DB_VERSION } });
     await page.reload();
     await expect(page.locator(".app-main")).toBeVisible();
   }

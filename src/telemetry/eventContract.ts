@@ -9,7 +9,28 @@ export type TelemetryEventMap = {
   package_import_completed: Record<never, never>;
   cloud_backup_connected: { provider: "dropbox" };
   cloud_project_opened: Record<never, never>;
+  // Cross-device sync, count-only: how often the feature is turned on, and how
+  // curators answer a whole-project conflict. Never which project, which
+  // account, or anything about the content on either side.
+  cloud_sync_enabled: Record<never, never>;
+  cloud_sync_conflict_resolved: { choice: SyncConflictChoiceName };
 };
+
+// Mirrors cloudSyncSlice's SyncConflictChoice. Duplicated rather than imported
+// because this contract is shared with the analytics worker, which must not
+// pull the app's store graph into its bundle.
+export type SyncConflictChoiceName =
+  | "use-dropbox"
+  | "keep-mine"
+  | "keep-both"
+  | "not-now";
+
+const SYNC_CONFLICT_CHOICES: readonly SyncConflictChoiceName[] = [
+  "use-dropbox",
+  "keep-mine",
+  "keep-both",
+  "not-now"
+];
 
 export type TelemetryEventName = keyof TelemetryEventMap;
 export type TelemetryEvent = {
@@ -23,7 +44,8 @@ const EMPTY_EVENT_NAMES = new Set<TelemetryEventName>([
   "project_created",
   "pdf_export_completed",
   "package_import_completed",
-  "cloud_project_opened"
+  "cloud_project_opened",
+  "cloud_sync_enabled"
 ]);
 
 function hasExpectedKeys(
@@ -82,6 +104,15 @@ export function sanitizeTelemetryEvent(
     ) return null;
     return { name, properties: { view } };
   }
+  if (name === "cloud_sync_conflict_resolved") {
+    const choice = record.choice;
+    if (
+      !hasExpectedKeys(record, ["choice"], rejectUnknownProperties) ||
+      typeof choice !== "string" ||
+      !SYNC_CONFLICT_CHOICES.includes(choice as SyncConflictChoiceName)
+    ) return null;
+    return { name, properties: { choice: choice as SyncConflictChoiceName } };
+  }
   if (
     name === "cloud_backup_connected" &&
     hasExpectedKeys(record, ["provider"], rejectUnknownProperties) &&
@@ -102,6 +133,8 @@ export function analyticsDimensions(event: TelemetryEvent): [string, string, str
       return [event.name, event.properties.view, ""];
     case "cloud_backup_connected":
       return [event.name, event.properties.provider, ""];
+    case "cloud_sync_conflict_resolved":
+      return [event.name, event.properties.choice, ""];
     default:
       return [event.name, "", ""];
   }

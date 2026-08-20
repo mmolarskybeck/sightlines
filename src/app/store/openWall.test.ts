@@ -7,7 +7,8 @@ import {
   InMemoryArtworkLibraryRepository,
   InMemoryAssetRepository,
   InMemoryProjectRepository,
-  InMemoryProjectSnapshotRepository
+  InMemoryProjectSnapshotRepository,
+  InMemorySyncMetaRepository
 } from "../../test/inMemoryRepositories";
 import { createInertCrossTabSync } from "../crossTabSync";
 import { createAppStore } from "../store";
@@ -29,6 +30,7 @@ describe("openWall / restoreWall", () => {
       assetRepository: new InMemoryAssetRepository(),
       imageProcessor: new FakeImageProcessor(),
       projectSnapshotRepository: new InMemoryProjectSnapshotRepository(),
+      syncMetaRepository: new InMemorySyncMetaRepository(),
       // Every store in this process would otherwise share one BroadcastChannel.
       crossTabSync: createInertCrossTabSync()
     });
@@ -240,6 +242,7 @@ describe("open walls refuse every placement and re-anchor path", () => {
       assetRepository: new InMemoryAssetRepository(),
       imageProcessor: new FakeImageProcessor(),
       projectSnapshotRepository: new InMemoryProjectSnapshotRepository(),
+      syncMetaRepository: new InMemorySyncMetaRepository(),
       // Every store in this process would otherwise share one BroadcastChannel.
       crossTabSync: createInertCrossTabSync()
     });

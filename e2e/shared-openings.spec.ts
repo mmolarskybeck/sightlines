@@ -1,4 +1,5 @@
 import type { Locator, Page } from "playwright/test";
+import { DB_NAME, DB_VERSION } from "../src/domain/repositories/database";
 import { expect, gotoApp, hideFontLab, test } from "./fixtures";
 
 const SCHEMA_VERSION = 5;
@@ -145,21 +146,24 @@ async function seedProject(page: Page, project: StoredProject) {
   // Boot once so the app creates the current IndexedDB schema, then put this
   // project in as the newest record and reload through the real open path.
   await gotoApp(page);
-  await page.evaluate(async (record) => {
-    const db: IDBDatabase = await new Promise((resolve, reject) => {
-      const request = indexedDB.open("sightlines", 4);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    await new Promise<void>((resolve, reject) => {
-      const transaction = db.transaction("projects", "readwrite");
-      transaction.objectStore("projects").put(record);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    });
-    db.close();
-  }, project);
+  await page.evaluate(
+    async ({ record, database }) => {
+      const db: IDBDatabase = await new Promise((resolve, reject) => {
+        const request = indexedDB.open(database.name, database.version);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction("projects", "readwrite");
+        transaction.objectStore("projects").put(record);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+      db.close();
+    },
+    { record: project, database: { name: DB_NAME, version: DB_VERSION } }
+  );
 
   await page.reload();
   await expect(page.locator(".app-main")).toBeVisible();
@@ -170,20 +174,23 @@ async function seedProject(page: Page, project: StoredProject) {
 }
 
 async function readStoredProject(page: Page, projectId: string) {
-  return page.evaluate(async (id) => {
-    const db: IDBDatabase = await new Promise((resolve, reject) => {
-      const request = indexedDB.open("sightlines", 4);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    const record = await new Promise<StoredProject>((resolve, reject) => {
-      const request = db.transaction("projects", "readonly").objectStore("projects").get(id);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    db.close();
-    return record;
-  }, projectId);
+  return page.evaluate(
+    async ({ id, database }) => {
+      const db: IDBDatabase = await new Promise((resolve, reject) => {
+        const request = indexedDB.open(database.name, database.version);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const record = await new Promise<StoredProject>((resolve, reject) => {
+        const request = db.transaction("projects", "readonly").objectStore("projects").get(id);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      db.close();
+      return record;
+    },
+    { id: projectId, database: { name: DB_NAME, version: DB_VERSION } }
+  );
 }
 
 async function screenPoint(svg: Locator, xMm: number, yMm: number) {

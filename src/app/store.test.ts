@@ -47,6 +47,7 @@ import {
   InMemoryAssetRepository,
   InMemoryProjectRepository,
   InMemoryProjectSnapshotRepository,
+  InMemorySyncMetaRepository,
   makeImageFile
 } from "../test/inMemoryRepositories";
 import { exportProjectJson } from "../test/exportProjectJson";
@@ -115,6 +116,7 @@ describe("app store", () => {
   let assetRepository: InMemoryAssetRepository;
   let imageProcessor: FakeImageProcessor;
   let projectSnapshotRepository: InMemoryProjectSnapshotRepository;
+  let syncMetaRepository: InMemorySyncMetaRepository;
   let crossTabSync: FakeCrossTabSync;
   let store: ReturnType<typeof createAppStore>;
 
@@ -125,6 +127,7 @@ describe("app store", () => {
       assetRepository,
       imageProcessor,
       projectSnapshotRepository,
+      syncMetaRepository,
       crossTabSync: crossTabSync.sync,
       ...overrides
     };
@@ -167,6 +170,7 @@ describe("app store", () => {
     assetRepository = new InMemoryAssetRepository();
     imageProcessor = new FakeImageProcessor();
     projectSnapshotRepository = new InMemoryProjectSnapshotRepository();
+    syncMetaRepository = new InMemorySyncMetaRepository();
     crossTabSync = makeFakeCrossTabSync();
     store = createAppStore(makeDeps());
     await store.getState().boot();

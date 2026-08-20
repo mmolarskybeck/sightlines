@@ -398,6 +398,40 @@ describe("planPackageImport — §6 merge rules", () => {
     expect(plan.project.updatedAt).not.toBe(manifest.project.updatedAt);
   });
 
+  // The sync replace path is the ONLY caller allowed to reuse a local id, and
+  // only for a head downloaded from the authenticated account.
+  it("keeps the incoming id when replacing exactly that project", () => {
+    const manifest = makeManifest();
+    const existing: ExistingLibraryState = {
+      artworks: [],
+      assetShaById: new Map(),
+      projectIds: [manifest.project.id]
+    };
+
+    const plan = planPackageImport(manifest, noAssets(), existing, {
+      replaceProjectId: manifest.project.id
+    });
+
+    expect(plan.projectRenamed).toBe(false);
+    expect(plan.project.id).toBe(manifest.project.id);
+    expect(plan.project.title).toBe(manifest.project.title);
+  });
+
+  it("refuses to replace a project the package does not contain", () => {
+    const manifest = makeManifest();
+    const existing: ExistingLibraryState = {
+      artworks: [],
+      assetShaById: new Map(),
+      projectIds: [manifest.project.id, "other-project"]
+    };
+
+    expect(() =>
+      planPackageImport(manifest, noAssets(), existing, {
+        replaceProjectId: "other-project"
+      })
+    ).toThrow(/no longer holds the project/);
+  });
+
   it("always gives a shared snapshot a fresh independent identity", () => {
     const manifest = makeManifest();
     const plan = planPackageImport(manifest, noAssets(), emptyExisting(), {

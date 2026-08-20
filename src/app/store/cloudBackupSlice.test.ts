@@ -5,7 +5,8 @@ import {
   InMemoryArtworkLibraryRepository,
   InMemoryAssetRepository,
   InMemoryProjectRepository,
-  InMemoryProjectSnapshotRepository
+  InMemoryProjectSnapshotRepository,
+  InMemorySyncMetaRepository
 } from "../../test/inMemoryRepositories";
 import type { CloudBackupProvider } from "../cloud/provider";
 import { createInertCrossTabSync } from "../crossTabSync";
@@ -58,6 +59,22 @@ function makeFakeProvider(options: {
     },
     async downloadBackup() {
       return new Uint8Array();
+    },
+    accountId() {
+      return "dbid:tester";
+    },
+    // Sync is exercised in its own slice tests; these only satisfy the seam.
+    async getSyncHead() {
+      return null;
+    },
+    async downloadSyncHead() {
+      return { bytes: new Uint8Array(), rev: "rev-1" };
+    },
+    async uploadSyncHead() {
+      return { rev: "rev-1", serverModifiedIso: null, sizeBytes: null };
+    },
+    async listSyncHeads() {
+      return [];
     }
   };
 }
@@ -76,6 +93,7 @@ describe("cloudBackupSlice.runCloudBackup", () => {
       assetRepository,
       imageProcessor,
       projectSnapshotRepository,
+      syncMetaRepository: new InMemorySyncMetaRepository(),
       // Every store in this process would otherwise share one BroadcastChannel.
       crossTabSync: createInertCrossTabSync(),
       ...overrides
@@ -213,6 +231,7 @@ describe("cloudBackupSlice.runCloudBackupNow", () => {
       assetRepository,
       imageProcessor,
       projectSnapshotRepository,
+      syncMetaRepository: new InMemorySyncMetaRepository(),
       // Every store in this process would otherwise share one BroadcastChannel.
       crossTabSync: createInertCrossTabSync(),
       ...overrides

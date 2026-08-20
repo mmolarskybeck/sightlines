@@ -2,6 +2,7 @@ import type { Locator, Page } from "playwright/test";
 import { expect, gotoApp, hideFontLab, test } from "./fixtures";
 import { doorSwingPlanGlyph } from "../src/domain/geometry/doorGlyphs";
 import { WALL_OBJECT_PLAN_DEPTH_MM } from "../src/domain/geometry/planObjects";
+import { DB_NAME, DB_VERSION } from "../src/domain/repositories/database";
 import {
   BLOCKED_ZONE_HEIGHT_MM,
   BLOCKED_ZONE_WIDTH_MM,
@@ -132,21 +133,24 @@ function projectWith(
 // current schema, then the seeded record becomes the newest project.
 async function seedProject(page: Page, project: StoredProject) {
   await gotoApp(page);
-  await page.evaluate(async (record) => {
-    const db: IDBDatabase = await new Promise((resolve, reject) => {
-      const request = indexedDB.open("sightlines", 4);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    await new Promise<void>((resolve, reject) => {
-      const transaction = db.transaction("projects", "readwrite");
-      transaction.objectStore("projects").put(record);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    });
-    db.close();
-  }, project);
+  await page.evaluate(
+    async ({ record, database }) => {
+      const db: IDBDatabase = await new Promise((resolve, reject) => {
+        const request = indexedDB.open(database.name, database.version);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction("projects", "readwrite");
+        transaction.objectStore("projects").put(record);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+      db.close();
+    },
+    { record: project, database: { name: DB_NAME, version: DB_VERSION } }
+  );
 
   await page.reload();
   await expect(page.locator(".app-main")).toBeVisible();
@@ -157,20 +161,23 @@ async function seedProject(page: Page, project: StoredProject) {
 }
 
 async function readStoredProject(page: Page, projectId: string) {
-  return page.evaluate(async (id) => {
-    const db: IDBDatabase = await new Promise((resolve, reject) => {
-      const request = indexedDB.open("sightlines", 4);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    const record = await new Promise<StoredProject>((resolve, reject) => {
-      const request = db.transaction("projects", "readonly").objectStore("projects").get(id);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    db.close();
-    return record;
-  }, projectId);
+  return page.evaluate(
+    async ({ id, database }) => {
+      const db: IDBDatabase = await new Promise((resolve, reject) => {
+        const request = indexedDB.open(database.name, database.version);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const record = await new Promise<StoredProject>((resolve, reject) => {
+        const request = db.transaction("projects", "readonly").objectStore("projects").get(id);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      db.close();
+      return record;
+    },
+    { id: projectId, database: { name: DB_NAME, version: DB_VERSION } }
+  );
 }
 
 // Model mm -> live screen pixels, via the plan SVG's own current CTM. Zoom-

@@ -1,15 +1,22 @@
 import { describe, expect, it } from "vitest";
+import type { CloudProjectFolder, SyncHeadListing } from "./provider";
 import {
+  buildCloudProjectRows,
+  CLOUD_SYNC_HEADS_UNAVAILABLE_NOTICE,
   formatBackupRelativeTime,
   formatCloudProjectMeta,
+  formatCloudProjectSyncMeta,
   getCloudBackupMenuItem,
   getCloudBackupPopoverState,
   getCloudProjectActionAriaLabel,
   getCloudProjectActionLabel,
   getCloudProjectOpenErrorMessage,
   getCloudProjectsSectionState,
+  getCloudSyncOpenErrorMessage,
+  getProjectSyncRowState,
   getStatusBadgeDisplay,
-  getStatusBadgeTooltip
+  getStatusBadgeTooltip,
+  shouldWarnSyncHeadsUnavailable
 } from "./cloudBackupCopy";
 
 const NOW = Date.parse("2026-07-19T12:00:00Z");
@@ -416,5 +423,335 @@ describe("getCloudProjectOpenErrorMessage", () => {
     expect(getCloudProjectOpenErrorMessage("quota")).toBe(
       "Couldn't download that backup from Dropbox."
     );
+  });
+});
+
+// The popover's third row: cross-device sync for the OPEN project, kept apart
+// from the backup row above it because they are different promises.
+describe("getProjectSyncRowState", () => {
+  const linked = { connected: true, linked: true, error: null };
+
+  it("renders no row at all without a Dropbox connection", () => {
+    expect(
+      getProjectSyncRowState({
+        connected: false,
+        linked: false,
+        status: "idle",
+        error: null
+      })
+    ).toBeNull();
+  });
+
+  it("offers to turn sync on for a connected but unlinked project", () => {
+    const row = getProjectSyncRowState({
+      connected: true,
+      linked: false,
+      status: "idle",
+      error: null
+    });
+    expect(row?.text).toBe("Off for this project.");
+    expect(row?.action).toBe("enable");
+    expect(row?.actionLabel).toBe("Sync across devices");
+    expect(row?.tone).toBe("muted");
+  });
+
+  it("says where a linked project stands, with Sync now beside it", () => {
+    expect(getProjectSyncRowState({ ...linked, status: "synced" })).toMatchObject({
+      text: "Synced.",
+      icon: "cloud-check",
+      action: "sync-now",
+      actionDisabled: false
+    });
+    expect(getProjectSyncRowState({ ...linked, status: "pending" })?.text).toBe(
+      "Changes waiting to sync."
+    );
+  });
+
+  // One in-flight line for all three round trips: which one is running is the
+  // loop's business, not the curator's.
+  it("collapses checking / pushing / pulling into one busy line", () => {
+    for (const status of ["checking", "pushing", "pulling"] as const) {
+      const row = getProjectSyncRowState({ ...linked, status });
+      expect(row?.text).toBe("Syncing…");
+      expect(row?.icon).toBe("cloud-spinner");
+      expect(row?.actionDisabled).toBe(true);
+    }
+  });
+
+  // Amber attention, never destructive red: the copy on this device is safe in
+  // every one of these states.
+  it("gives conflict, needs-review and errors the caution tone with a way in", () => {
+    expect(getProjectSyncRowState({ ...linked, status: "conflict" })).toMatchObject({
+      text: "This project changed in two places.",
+      tone: "caution",
+      action: "review",
+      actionLabel: "Review"
+    });
+    expect(getProjectSyncRowState({ ...linked, status: "needs-review" })).toMatchObject({
+      text: "Needs review.",
+      tone: "caution",
+      action: "review"
+    });
+    expect(
+      getProjectSyncRowState({ ...linked, status: "error", error: "Dropbox is down." })
+    ).toMatchObject({
+      text: "Dropbox is down.",
+      tone: "caution",
+      action: "sync-now",
+      actionLabel: "Try again"
+    });
+  });
+
+  // A failed enable is the one error with no metadata behind it. Retrying it
+  // with the manual check would no-op — a project with no metadata has nothing
+  // to check — and quietly swap the error for "Off for this project", leaving a
+  // button that appears to do nothing. Retry what actually failed.
+  it("retries a failed enable by enabling, not by running the manual check", () => {
+    const row = getProjectSyncRowState({
+      connected: true,
+      linked: false,
+      status: "error",
+      error: "Dropbox could not be reached."
+    });
+    expect(row).toMatchObject({
+      text: "Dropbox could not be reached.",
+      tone: "caution",
+      action: "enable",
+      actionLabel: "Try again"
+    });
+  });
+
+  // Enabling sync can find a head another device made first, which parks a
+  // conflict before this device has any metadata. That state must surface, not
+  // be swallowed by the not-linked branch.
+  it("surfaces an attention state even with no metadata yet", () => {
+    const row = getProjectSyncRowState({
+      connected: true,
+      linked: false,
+      status: "conflict",
+      error: null
+    });
+    expect(row?.action).toBe("review");
+  });
+});
+
+describe("formatCloudProjectSyncMeta", () => {
+  it("says a head-backed row is synced and what opening it does", () => {
+    expect(
+      formatCloudProjectSyncMeta({ syncedIso: "2026-07-19T09:00:00Z", now: NOW })
+    ).toBe("Synced 3 h ago · opens here and keeps syncing");
+  });
+
+  it("still reads as synced when the provider gave no timestamp", () => {
+    expect(formatCloudProjectSyncMeta({ syncedIso: null, now: NOW })).toBe(
+      "Synced from another device · opens here and keeps syncing"
+    );
+  });
+});
+
+describe("getCloudSyncOpenErrorMessage", () => {
+  // "Backup" would be the wrong noun for the file the user's other devices are
+  // working against.
+  it("names the synced copy for the two kinds that describe the file", () => {
+    expect(getCloudSyncOpenErrorMessage("not-found")).toBe(
+      "That project's synced copy is no longer in Dropbox."
+    );
+    expect(getCloudSyncOpenErrorMessage("too-large")).toBe(
+      "That project is too large to open here. You can download it from dropbox.com."
+    );
+  });
+
+  it("reuses the shared wording for everything else", () => {
+    expect(getCloudSyncOpenErrorMessage("reauth")).toBe(
+      getCloudProjectOpenErrorMessage("reauth")
+    );
+    expect(getCloudSyncOpenErrorMessage("transient")).toBe(
+      getCloudProjectOpenErrorMessage("transient")
+    );
+  });
+});
+
+describe("buildCloudProjectRows", () => {
+  const folder: CloudProjectFolder = {
+    folderName: "Autumn Survey — aabbccdd",
+    title: "Autumn Survey",
+    projectIdPrefix: "aabbccdd",
+    backupCount: 5,
+    latestBackup: {
+      path: "/backups/Autumn Survey — aabbccdd/2026-07-19.sightlines",
+      name: "2026-07-19.sightlines",
+      serverModifiedIso: "2026-07-19T09:00:00Z",
+      sizeBytes: 4096
+    }
+  };
+  const head: SyncHeadListing = {
+    projectId: "aabbccdd-1111-2222-3333-444455556666",
+    path: "/projects/aabbccdd-1111-2222-3333-444455556666/current.sightlines",
+    rev: "rev-1",
+    serverModifiedIso: "2026-07-19T11:00:00Z",
+    sizeBytes: 8192
+  };
+  // A head with no folder anywhere near it: the shape "create project → turn
+  // sync on → close the tab" leaves behind, because the head is written at once
+  // and the first automatic backup never ran.
+  const loneHead: SyncHeadListing = {
+    ...head,
+    projectId: "12345678-9999-8888-7777-666655554444",
+    path: "/projects/12345678-9999-8888-7777-666655554444/current.sightlines",
+    serverModifiedIso: "2026-07-19T10:00:00Z"
+  };
+
+  it("lists a folder with no local counterpart as a restorable backup", () => {
+    const rows = buildCloudProjectRows({
+      folders: [folder],
+      syncHeads: [],
+      localProjectIds: [],
+      now: NOW
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      key: folder.folderName,
+      title: "Autumn Survey",
+      tag: "Not on this device",
+      meta: "Backed up 3 h ago · 5 backups",
+      actionLabel: "Open",
+      actionAriaLabel: "Open Autumn Survey from Dropbox",
+      target: { kind: "folder", folder }
+    });
+  });
+
+  it("words a head-backed folder as synced but still opens it as a folder", () => {
+    const rows = buildCloudProjectRows({
+      folders: [folder],
+      syncHeads: [head],
+      localProjectIds: [],
+      now: NOW
+    });
+
+    expect(rows[0]!.meta).toBe("Synced 1 h ago · opens here and keeps syncing");
+    // The store re-reads this device before choosing head vs. backup, so the
+    // row must not pre-empt that decision by handing back the head.
+    expect(rows[0]!.target).toEqual({ kind: "folder", folder });
+  });
+
+  // The defect this row model exists for: without a synthesized row the
+  // project cannot be reached from any device but the one that made it.
+  it("gives a head with no backup folder a row of its own", () => {
+    const rows = buildCloudProjectRows({
+      folders: [],
+      syncHeads: [loneHead],
+      localProjectIds: [],
+      now: NOW
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      key: "sync:12345678-9999-8888-7777-666655554444",
+      // A head file carries no title, so the row says what it knows and lets
+      // the short code separate two of them.
+      title: "Synced project",
+      tag: "12345678",
+      meta: "Synced 2 h ago · opens here and keeps syncing",
+      actionLabel: "Open",
+      actionAriaLabel: "Open synced project 12345678 from Dropbox",
+      target: { kind: "sync-head", head: loneHead }
+    });
+  });
+
+  it("skips a head whose project is already on this device", () => {
+    const rows = buildCloudProjectRows({
+      folders: [],
+      syncHeads: [loneHead],
+      localProjectIds: [loneHead.projectId],
+      now: NOW
+    });
+
+    expect(rows).toEqual([]);
+  });
+
+  // An unread device is not an empty one: synthesizing here would offer an
+  // import that writes over the project it duplicates.
+  it("withholds head rows until this device's projects are known", () => {
+    const rows = buildCloudProjectRows({
+      folders: [folder],
+      syncHeads: [loneHead],
+      localProjectIds: null,
+      now: NOW
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.target).toEqual({ kind: "folder", folder });
+  });
+
+  it("never doubles a project that already has a folder row", () => {
+    const rows = buildCloudProjectRows({
+      folders: [folder],
+      syncHeads: [head, loneHead],
+      localProjectIds: [],
+      now: NOW
+    });
+
+    expect(rows.map((row) => row.key)).toEqual([
+      folder.folderName,
+      "sync:12345678-9999-8888-7777-666655554444"
+    ]);
+  });
+
+  it("keeps the copy offer, and restore language, when a local project matches", () => {
+    const rows = buildCloudProjectRows({
+      folders: [folder],
+      syncHeads: [head],
+      localProjectIds: ["aabbccdd-1111-2222-3333-444455556666"],
+      now: NOW
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      tag: null,
+      meta: "Backed up 3 h ago · 5 backups",
+      actionLabel: "Save a copy"
+    });
+  });
+
+  it("orders head rows newest first, with the id as a stable tiebreak", () => {
+    const older: SyncHeadListing = {
+      ...loneHead,
+      projectId: "00000000-1111-2222-3333-444455556666",
+      serverModifiedIso: "2026-07-18T10:00:00Z"
+    };
+    const undated: SyncHeadListing = {
+      ...loneHead,
+      projectId: "ffffffff-1111-2222-3333-444455556666",
+      serverModifiedIso: null
+    };
+
+    const rows = buildCloudProjectRows({
+      folders: [],
+      syncHeads: [undated, older, loneHead],
+      localProjectIds: [],
+      now: NOW
+    });
+
+    expect(rows.map((row) => row.tag)).toEqual(["12345678", "00000000", "ffffffff"]);
+  });
+});
+
+describe("shouldWarnSyncHeadsUnavailable", () => {
+  it("warns only when a completed listing came back without heads", () => {
+    expect(shouldWarnSyncHeadsUnavailable({ status: "loaded", syncHeads: null })).toBe(true);
+    // A successful heads listing stores an array, empty included.
+    expect(shouldWarnSyncHeadsUnavailable({ status: "loaded", syncHeads: [] })).toBe(false);
+  });
+
+  it("stays quiet for a listing that never ran", () => {
+    for (const status of ["idle", "loading", "error", "reauth-required"] as const) {
+      expect(shouldWarnSyncHeadsUnavailable({ status, syncHeads: null })).toBe(false);
+    }
+  });
+
+  it("names the consequence and the way back", () => {
+    expect(CLOUD_SYNC_HEADS_UNAVAILABLE_NOTICE).toContain("may open here without syncing");
+    expect(CLOUD_SYNC_HEADS_UNAVAILABLE_NOTICE).toContain("turn syncing on after it opens");
   });
 });

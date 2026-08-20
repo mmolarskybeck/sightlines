@@ -171,6 +171,7 @@ export type DropboxErrorKind =
   | "quota"
   | "rate-limit"
   | "not-found"
+  | "conflict"
   | "too-large"
   | "transient";
 
@@ -179,7 +180,9 @@ export type DropboxErrorKind =
 // Retry-After); surfaced as transient so a cycle failure never hard-fails the
 // user. insufficient_space anywhere in the error payload → quota. A 409 naming
 // not_found → the file is gone, which is a terminal answer, not something to
-// retry. Everything else (5xx, offline, malformed) → transient.
+// retry. A 409 naming conflict → a rev-conditional write lost the race, which
+// sync must read as "the remote moved on", never as a retryable blip.
+// Everything else (5xx, offline, malformed) → transient.
 export function classifyApiError(status: number, body: unknown): DropboxErrorKind {
   if (status === 401) return "reauth";
   if (status === 429) return "rate-limit";
@@ -190,6 +193,11 @@ export function classifyApiError(status: number, body: unknown): DropboxErrorKin
   // meaning. Content endpoints send it as bare text, JSON endpoints as
   // error_summary — matching on the substring covers both.
   if (status === 409 && text.includes("not_found")) return "not-found";
+  // Order matters: a conditional write against a path that has been deleted
+  // reports not_found, and that is a missing head (needs review), not a write
+  // conflict. Only a summary that has nothing to say about not_found and does
+  // say conflict (path/conflict/file) is a lost race.
+  if (status === 409 && text.includes("conflict")) return "conflict";
   if (
     body &&
     typeof body === "object" &&
@@ -198,6 +206,30 @@ export function classifyApiError(status: number, body: unknown): DropboxErrorKin
     return "reauth";
   }
   return "transient";
+}
+
+// File metadata a content endpoint returns in the Dropbox-API-Result response
+// header (JSON). The download route carries the file's `rev` only here, and
+// sync lineage IS the rev — so the parser is total: an absent, non-JSON, or
+// non-object header answers null and the caller decides what a missing rev
+// means, rather than a parse throwing mid-download.
+export function parseDropboxApiResultHeader(
+  headerValue: string | null
+): { rev?: string; server_modified?: string } | null {
+  if (!headerValue) return null;
+  try {
+    const parsed = JSON.parse(headerValue) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const record = parsed as { rev?: unknown; server_modified?: unknown };
+    return {
+      ...(typeof record.rev === "string" ? { rev: record.rev } : {}),
+      ...(typeof record.server_modified === "string"
+        ? { server_modified: record.server_modified }
+        : {})
+    };
+  } catch {
+    return null;
+  }
 }
 
 // Parse a Retry-After header (seconds or HTTP-date) into milliseconds, or null.
@@ -276,6 +308,19 @@ export function buildSharePath(input: {
 
 export function projectFolderPath(projectId: string, projectTitle: string): string {
   return `/backups/${projectFolderName(projectId, projectTitle)}`;
+}
+
+// The canonical synced copy of a project — one file per project, a third
+// concept alongside /backups (immutable history) and /shares (frozen handoff).
+// The path carries the FULL project id and never the title: sync identity has
+// to survive a rename, and the 8-char folder suffix stays a backup-folder
+// concern. Project ids are UUIDs, so no sanitization applies, but nothing here
+// depends on that — any id yields exactly one path.
+export const SYNC_PROJECTS_FOLDER = "/projects";
+export const SYNC_HEAD_FILENAME = "current.sightlines";
+
+export function syncHeadPath(projectId: string): string {
+  return `${SYNC_PROJECTS_FOLDER}/${projectId}/${SYNC_HEAD_FILENAME}`;
 }
 
 export function isProjectFolderName(name: string, projectId: string): boolean {

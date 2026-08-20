@@ -9,15 +9,16 @@ import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import type { ProjectSummary } from "../../../domain/project";
 import {
-  CLOUD_PROJECT_ABSENT_TAG,
-  formatCloudProjectMeta,
-  getCloudProjectActionAriaLabel,
-  getCloudProjectActionLabel,
-  getCloudProjectsSectionState
+  buildCloudProjectRows,
+  CLOUD_SYNC_HEADS_UNAVAILABLE_NOTICE,
+  getCloudProjectsSectionState,
+  shouldWarnSyncHeadsUnavailable,
+  type CloudProjectRow
 } from "../../cloud/cloudBackupCopy";
 import type {
   CloudBackupProviderStatus,
-  CloudProjectFolder
+  CloudProjectFolder,
+  SyncHeadListing
 } from "../../cloud/provider";
 import type { CloudProjectsStatus } from "../../store/cloudProjectsSlice";
 import { Button } from "../ui/button";
@@ -46,9 +47,11 @@ export function ProjectManager({
   cloudBackupProviderStatus,
   cloudProjects,
   cloudProjectsStatus,
+  cloudSyncHeads,
   cloudProjectOpening,
   onRefreshCloudProjects,
   onOpenCloudProject,
+  onOpenSyncedCloudProject,
   onReconnectCloudBackup
 }: {
   open: boolean;
@@ -65,11 +68,17 @@ export function ProjectManager({
   cloudBackupProviderStatus: CloudBackupProviderStatus;
   cloudProjects: CloudProjectFolder[] | null;
   cloudProjectsStatus: CloudProjectsStatus;
+  // The account's synced projects. A folder backed by one of these opens the
+  // canonical copy instead of a timestamped backup, so the row says so — and a
+  // head with no folder behind it is a row in its own right.
+  cloudSyncHeads: SyncHeadListing[] | null;
   cloudProjectOpening: string | null;
   onRefreshCloudProjects: () => Promise<void>;
   // Resolves true once the backup has been imported (or parked in the artwork
   // review dialog), which is when this modal should get out of the way.
   onOpenCloudProject: (folder: CloudProjectFolder) => Promise<boolean>;
+  // The same contract for a row that exists only because a head does.
+  onOpenSyncedCloudProject: (head: SyncHeadListing) => Promise<boolean>;
   onReconnectCloudBackup: () => Promise<void>;
 }) {
   const [summaries, setSummaries] = useState<ProjectSummary[] | null>(null);
@@ -181,10 +190,16 @@ export function ProjectManager({
     }
   };
 
-  const handleOpenCloudProject = async (folder: CloudProjectFolder) => {
+  const handleOpenCloudRow = async (row: CloudProjectRow) => {
     // The import commit opens the document itself; this modal only has to step
-    // aside once the package has been accepted.
-    if (await onOpenCloudProject(folder)) onOpenChange(false);
+    // aside once the package has been accepted. Which action to call is the
+    // row's own business — a folder still routes through the folder path, which
+    // re-reads this device before choosing the head over a backup.
+    const accepted =
+      row.target.kind === "folder"
+        ? await onOpenCloudProject(row.target.folder)
+        : await onOpenSyncedCloudProject(row.target.head);
+    if (accepted) onOpenChange(false);
   };
 
   const handleDuplicate = async (id: string) => {
@@ -411,11 +426,15 @@ export function ProjectManager({
           <CloudProjectsSection
             busy={busy}
             folders={cloudProjects}
-            localProjectIds={(summaries ?? []).map((summary) => summary.id)}
-            openingFolderName={cloudProjectOpening}
+            syncHeads={cloudSyncHeads}
+            // null, not [], while this device's own list is still loading: an
+            // unread device is not an empty one, and the row model withholds
+            // rows it cannot prove are absent from here.
+            localProjectIds={summaries?.map((summary) => summary.id) ?? null}
+            openingRowKey={cloudProjectOpening}
             providerStatus={cloudBackupProviderStatus}
             status={cloudProjectsStatus}
-            onOpenFolder={handleOpenCloudProject}
+            onOpenRow={handleOpenCloudRow}
             onReconnect={onReconnectCloudBackup}
             onRetry={onRefreshCloudProjects}
           />
@@ -425,39 +444,61 @@ export function ProjectManager({
   );
 }
 
-// Cloud backup folders from the connected provider, listed under the projects
-// on this device. Stage 1 is read-only: a folder can be restored or copied in,
-// never written back and never used to replace a local project.
+// The account's projects in Dropbox, listed under the ones on this device: the
+// backup folders and the sync heads, merged into one row list (a project can be
+// in either). Read-only in the stage-1 sense — a row can be restored, copied, or
+// linked in, never written back and never used to replace a local project.
+//
+// The list's accessible name is "Projects in Dropbox", not "Cloud backups": a
+// row here may be a backup folder or a project the account holds only as a
+// synced copy, and the second has no backup to name.
 function CloudProjectsSection({
   busy,
   folders,
+  syncHeads,
   localProjectIds,
-  openingFolderName,
+  openingRowKey,
   providerStatus,
   status,
-  onOpenFolder,
+  onOpenRow,
   onReconnect,
   onRetry
 }: {
   busy: boolean;
   folders: CloudProjectFolder[] | null;
-  localProjectIds: string[];
-  openingFolderName: string | null;
+  syncHeads: SyncHeadListing[] | null;
+  localProjectIds: string[] | null;
+  openingRowKey: string | null;
   providerStatus: CloudBackupProviderStatus;
   status: CloudProjectsStatus;
-  onOpenFolder: (folder: CloudProjectFolder) => Promise<void>;
+  onOpenRow: (row: CloudProjectRow) => Promise<void>;
   onReconnect: () => Promise<void>;
   onRetry: () => Promise<void>;
 }) {
+  const rows = buildCloudProjectRows({ folders, syncHeads, localProjectIds });
   const section = getCloudProjectsSectionState({
     providerStatus,
     status,
-    count: folders?.length ?? 0
+    // The rows, not the folders: an account whose only synced project has no
+    // backup folder yet still has something here, and must not be told there is
+    // nothing.
+    count: rows.length
   });
+  const headsUnavailable = shouldWarnSyncHeadsUnavailable({ status, syncHeads });
 
   return (
     <section className="project-manager-cloud">
-      <h3 className="project-manager-cloud-heading">{section.heading}</h3>
+      {/* Heading and notice share the section's ONE pinned row: the grid's
+          second row is the scroll region, so a third child would take it and
+          the heading would scroll away with the rows. */}
+      <div className="project-manager-cloud-header">
+        <h3 className="project-manager-cloud-heading">{section.heading}</h3>
+        {/* Above the rows, not inside them: what failed is the section's
+            knowledge of syncing, and every row below is affected by it. */}
+        {headsUnavailable ? (
+          <p className="project-manager-cloud-notice">{CLOUD_SYNC_HEADS_UNAVAILABLE_NOTICE}</p>
+        ) : null}
+      </div>
 
       {section.message ? (
         <p className="project-manager-empty">
@@ -476,50 +517,35 @@ function CloudProjectsSection({
           ) : null}
         </p>
       ) : (
-        <div className="project-manager-cloud-list" aria-label="Cloud backups">
-          {(folders ?? []).map((folder) => {
-            // Prefix agreement is a guess about identity, so it only chooses
-            // which offer to make — the import pipeline decides what is written.
-            const matchesLocalProject =
-              folder.projectIdPrefix.length > 0 &&
-              localProjectIds.some((id) => id.startsWith(folder.projectIdPrefix));
-            const isOpening = openingFolderName === folder.folderName;
+        <div className="project-manager-cloud-list" aria-label="Projects in Dropbox">
+          {rows.map((row) => {
+            const isOpening = openingRowKey === row.key;
 
             return (
-              <div className="project-manager-row" key={folder.folderName}>
+              <div className="project-manager-row" key={row.key}>
                 <div className="project-manager-cloud-summary">
                   <span className="project-manager-title">
-                    {folder.title}
-                    {matchesLocalProject ? null : (
-                      <span className="project-manager-cloud-tag">
-                        {CLOUD_PROJECT_ABSENT_TAG}
-                      </span>
-                    )}
+                    {row.title}
+                    {row.tag ? (
+                      <span className="project-manager-cloud-tag">{row.tag}</span>
+                    ) : null}
                   </span>
-                  <span className="project-manager-meta">
-                    {formatCloudProjectMeta({
-                      latestBackupIso: folder.latestBackup?.serverModifiedIso ?? null,
-                      backupCount: folder.backupCount
-                    })}
-                  </span>
+                  <span className="project-manager-meta">{row.meta}</span>
                 </div>
 
                 <div className="project-manager-actions">
                   <Button
                     aria-busy={isOpening}
-                    aria-label={getCloudProjectActionAriaLabel(
-                      matchesLocalProject,
-                      folder.title
-                    )}
-                    disabled={busy || openingFolderName !== null}
+                    aria-label={row.actionAriaLabel}
+                    disabled={busy || openingRowKey !== null}
                     size="sm"
                     variant="ghost"
-                    onClick={() => void onOpenFolder(folder)}
+                    onClick={() => void onOpenRow(row)}
                   >
                     {isOpening ? (
                       <CircleNotchIcon aria-hidden="true" className="animate-spin" size={14} />
                     ) : null}
-                    <span>{getCloudProjectActionLabel(matchesLocalProject)}</span>
+                    <span>{row.actionLabel}</span>
                   </Button>
                 </div>
               </div>

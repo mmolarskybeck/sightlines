@@ -4,7 +4,7 @@
 // in one place.
 
 export const DB_NAME = "sightlines";
-export const DB_VERSION = 4;
+export const DB_VERSION = 5;
 
 export const PROJECT_STORE = "projects";
 export const ARTWORK_STORE = "artworks";
@@ -24,6 +24,11 @@ export const SAVED_VIEW_THUMBNAIL_STORE = "savedViewThumbnails";
 // IndexedDB origin, so it guards against a malformed record or a bad migration —
 // not eviction — and is surfaced only when a project fails to load.
 export const PROJECT_SNAPSHOT_STORE = "projectSnapshots";
+// Per-project cross-device sync bookkeeping: which Dropbox account and
+// revision this device's copy is based on (see syncMetaRepository.ts). In-line
+// keys on "projectId". It lives in IndexedDB rather than localStorage because
+// losing it silently would make a device push blind over another device's work.
+export const SYNC_META_STORE = "syncMeta";
 
 let databasePromise: Promise<IDBDatabase> | undefined;
 
@@ -67,6 +72,12 @@ export function openDatabase(): Promise<IDBDatabase> {
       // pattern as the two stores above.
       if (!db.objectStoreNames.contains(PROJECT_SNAPSHOT_STORE)) {
         db.createObjectStore(PROJECT_SNAPSHOT_STORE);
+      }
+
+      // v4 → v5: cross-device sync metadata. In-line keys on "projectId",
+      // like the project/artwork/asset stores — one record per project.
+      if (!db.objectStoreNames.contains(SYNC_META_STORE)) {
+        db.createObjectStore(SYNC_META_STORE, { keyPath: "projectId" });
       }
     };
 

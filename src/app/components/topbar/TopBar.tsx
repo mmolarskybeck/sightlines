@@ -29,16 +29,20 @@ import {
 import {
   getCloudBackupMenuItem,
   getCloudBackupPopoverState,
+  getProjectSyncRowState,
   getStatusBadgeDisplay,
   getStatusBadgeTooltip,
-  type CloudBackupCloudIcon
+  type CloudBackupCloudIcon,
+  type ProjectSyncRowAction
 } from "../../cloud/cloudBackupCopy";
 import type {
   CloudBackupProviderStatus,
-  CloudProjectFolder
+  CloudProjectFolder,
+  SyncHeadListing
 } from "../../cloud/provider";
 import type { CloudBackupUploadStatus } from "../../store/cloudBackupSlice";
 import type { CloudProjectsStatus } from "../../store/cloudProjectsSlice";
+import type { ProjectSyncStatus } from "../../store/cloudSyncSlice";
 import type { AppState, ViewMode } from "../../store";
 import { ProjectPicker } from "../library/ProjectPicker";
 import { StatusBadge } from "../toolbar";
@@ -93,9 +97,20 @@ type TopBarProps = {
   connectCloudBackup: () => Promise<void>;
   cloudProjects: CloudProjectFolder[] | null;
   cloudProjectsStatus: CloudProjectsStatus;
+  cloudSyncHeads: SyncHeadListing[] | null;
   cloudProjectOpening: string | null;
   refreshCloudProjects: () => Promise<void>;
   openCloudProjectBackup: (folder: CloudProjectFolder) => Promise<boolean>;
+  // The sibling open for a project the account holds only as a sync head.
+  openCloudSyncedProject: (head: SyncHeadListing) => Promise<boolean>;
+  // Cross-device sync for the OPEN project: linked = this device holds usable
+  // sync metadata for it. Status and error are the sync loop's own, kept apart
+  // from the backup upload status they sit beside in the popover.
+  syncLinked: boolean;
+  syncStatus: ProjectSyncStatus;
+  syncError: string | null;
+  enableProjectSync: () => Promise<void>;
+  checkProjectSync: (options?: { manual?: boolean }) => Promise<void>;
   isExportingPackage: boolean;
   isSharingProject: boolean;
   handleExportPackage: (mode: PackageExportMode) => Promise<void>;
@@ -136,9 +151,16 @@ export function TopBar({
   connectCloudBackup,
   cloudProjects,
   cloudProjectsStatus,
+  cloudSyncHeads,
   cloudProjectOpening,
   refreshCloudProjects,
   openCloudProjectBackup,
+  openCloudSyncedProject,
+  syncLinked,
+  syncStatus,
+  syncError,
+  enableProjectSync,
+  checkProjectSync,
   isExportingPackage,
   isSharingProject,
   handleExportPackage,
@@ -178,6 +200,21 @@ export function TopBar({
         pending: cloudBackupPending
       })
     : null;
+  const syncRow = getProjectSyncRowState({
+    connected: cloudConnected,
+    linked: syncLinked,
+    status: syncStatus,
+    error: syncError
+  });
+  // "Review" is the same gesture as a manual check: it clears a postponed
+  // ("Not now") project and re-evaluates, which re-parks the conflict dialog
+  // when the two versions really have both moved on. "Enable" covers both
+  // turning sync on and retrying an enable that failed — the row layer decides
+  // which retry an error gets, because it knows whether any metadata exists.
+  const runSyncAction = (action: ProjectSyncRowAction) => {
+    if (action === "enable") void enableProjectSync();
+    else void checkProjectSync({ manual: true });
+  };
   // The cloud row / export item share one action router so the two surfaces
   // can't route the same intent differently.
   const runCloudAction = (action: "backup-now" | "reconnect" | "retry" | "setup") => {
@@ -202,6 +239,7 @@ export function TopBar({
             cloudProjectOpening={cloudProjectOpening}
             cloudProjects={cloudProjects}
             cloudProjectsStatus={cloudProjectsStatus}
+            cloudSyncHeads={cloudSyncHeads}
             currentProjectId={project.id}
             listProjectSummaries={listProjectSummaries}
             onCreateProject={createProject}
@@ -210,6 +248,7 @@ export function TopBar({
             onExportProject={handleExportProjectById}
             onOpenCloudProject={openCloudProjectBackup}
             onOpenProject={openProject}
+            onOpenSyncedCloudProject={openCloudSyncedProject}
             onReconnectCloudBackup={connectCloudBackup}
             onRefreshCloudProjects={refreshCloudProjects}
             onRenameProject={renameProjectById}
@@ -319,6 +358,32 @@ export function TopBar({
                   ) : null}
                 </div>
               </section>
+              {/* Sync is a third promise, not a mode of the backup above it:
+                  backups keep history, sync keeps one copy in step across the
+                  curator's devices. Own row, own vocabulary. Turning sync OFF
+                  lives in Settings — this row stays status + one next step. */}
+              {syncRow ? (
+                <section
+                  className={`storage-popover-destination storage-popover-cloud-${syncRow.tone}`}
+                >
+                  <CloudRowIcon icon={syncRow.icon} />
+                  <div className="storage-popover-destination-copy">
+                    <h4>Cross-device sync</h4>
+                    <p>{syncRow.text}</p>
+                    {syncRow.action ? (
+                      <Button
+                        className="storage-popover-row-action"
+                        disabled={syncRow.actionDisabled}
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => runSyncAction(syncRow.action!)}
+                      >
+                        {syncRow.actionLabel}
+                      </Button>
+                    ) : null}
+                  </div>
+                </section>
+              ) : null}
             </div>
             <div className="storage-popover-footer">
               <Button

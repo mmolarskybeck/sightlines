@@ -97,6 +97,8 @@ import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetR
 import { IndexedDbProjectRepository } from "../domain/repositories/indexedDbProjectRepository";
 import { IndexedDbProjectSnapshotRepository } from "../domain/repositories/indexedDbProjectSnapshotRepository";
 import { IndexedDbSavedViewThumbnailRepository } from "../domain/repositories/indexedDbSavedViewThumbnailRepository";
+import { IndexedDbSyncMetaRepository } from "../domain/repositories/indexedDbSyncMetaRepository";
+import type { SyncMetaRepository } from "../domain/repositories/syncMetaRepository";
 import type { ProjectRepository } from "../domain/repositories/projectRepository";
 import { ProjectValidationError } from "../domain/repositories/indexedDbProjectRepository";
 import type { ProjectSnapshotRepository } from "../domain/repositories/projectSnapshotRepository";
@@ -156,6 +158,12 @@ import {
   type CloudProjectsSliceActions,
   type CloudProjectsSliceState
 } from "./store/cloudProjectsSlice";
+import {
+  CLOUD_SYNC_SLICE_INITIAL,
+  createCloudSyncSlice,
+  type CloudSyncSliceActions,
+  type CloudSyncSliceState
+} from "./store/cloudSyncSlice";
 import type { CloudBackupProvider } from "./cloud/provider";
 import { createDropboxProvider } from "./cloud/dropbox";
 import {
@@ -373,6 +381,8 @@ export type AppState = ArrangeSliceState &
   CloudBackupSliceActions &
   CloudProjectsSliceState &
   CloudProjectsSliceActions &
+  CloudSyncSliceState &
+  CloudSyncSliceActions &
   DocumentMetaSliceActions &
   PackageSliceActions &
   ProjectManagerSliceActions &
@@ -627,6 +637,9 @@ export type AppStoreDeps = {
   assetRepository: AssetRepository;
   imageProcessor: ImageProcessor;
   projectSnapshotRepository: ProjectSnapshotRepository;
+  // Per-project cross-device sync bookkeeping (account id + accepted revision).
+  // Device-local, never part of the project document.
+  syncMetaRepository: SyncMetaRepository;
   // Cloud-backup provider seam. Absent (or unconfigured) leaves the whole
   // feature inert — status stays "disconnected" and the UI hides it.
   cloudBackupProvider?: CloudBackupProvider;
@@ -1978,6 +1991,8 @@ export function createAppStore(deps: AppStoreDeps) {
 
     const cloudProjectsSlice = createCloudProjectsSlice(set, get, { deps });
 
+    const cloudSyncSlice = createCloudSyncSlice(set, get, { deps });
+
     const artworkIntake = createArtworkIntakeSlice(set, get, {
       applyEdit,
       persist,
@@ -2013,6 +2028,7 @@ export function createAppStore(deps: AppStoreDeps) {
       ...ARTWORK_INTAKE_SLICE_INITIAL,
       ...CLOUD_BACKUP_SLICE_INITIAL,
       ...CLOUD_PROJECTS_SLICE_INITIAL,
+      ...CLOUD_SYNC_SLICE_INITIAL,
       pendingPackageImport: null,
       recoveryOffer: null,
 
@@ -2236,6 +2252,8 @@ export function createAppStore(deps: AppStoreDeps) {
       ...cloudBackupSlice.actions,
 
       ...cloudProjectsSlice.actions,
+
+      ...cloudSyncSlice.actions,
 
       ...projectManager.actions,
 
@@ -4061,6 +4079,7 @@ export const useAppStore = createAppStore({
   assetRepository: new IndexedDbAssetRepository(),
   imageProcessor: createBrowserImageProcessor(),
   projectSnapshotRepository: new IndexedDbProjectSnapshotRepository(),
+  syncMetaRepository: new IndexedDbSyncMetaRepository(),
   cloudBackupProvider: createDropboxProvider() ?? undefined,
   onProjectDeleted: async (projectId) => {
     const { deleteStoredDocumentExportPreferences } = await import(

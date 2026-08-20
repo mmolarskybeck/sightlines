@@ -12,6 +12,7 @@ import {
   InMemoryAssetRepository,
   InMemoryProjectRepository,
   InMemoryProjectSnapshotRepository,
+  InMemorySyncMetaRepository,
   makeImageFile
 } from "../../test/inMemoryRepositories";
 import { createInertCrossTabSync } from "../crossTabSync";
@@ -117,6 +118,7 @@ function makeStore() {
     assetRepository: new InMemoryAssetRepository(),
     imageProcessor: new FakeImageProcessor(),
     projectSnapshotRepository: new InMemoryProjectSnapshotRepository(),
+    syncMetaRepository: new InMemorySyncMetaRepository(),
     // Every store in this process would otherwise share one BroadcastChannel.
     crossTabSync: createInertCrossTabSync()
   });

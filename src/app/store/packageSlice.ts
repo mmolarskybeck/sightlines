@@ -18,10 +18,13 @@ import {
 } from "../../domain/package/importPackage";
 import type { Artwork, Project } from "../../domain/project";
 import { AssetNotFoundError } from "../../domain/repositories/assetRepository";
+import { SYNC_PROTOCOL_VERSION } from "../../domain/repositories/syncMetaRepository";
+import { syncHeadPath } from "../cloud/dropboxAuth";
 import type { PackageExportMode } from "../../domain/schema/packageSchema";
 import { migrateProjectJsonWithReport } from "../../domain/schema/projectSchema";
 import type { AppState, AppStoreDeps } from "../store";
 import { selectBackupFingerprint } from "./cloudBackupSlice";
+import { BOOKKEEPING_MESSAGE } from "./cloudSyncSlice";
 import { writeCloudBackupMeta } from "./cloudBackupMeta";
 import { telemetry } from "../telemetry/telemetry";
 
@@ -30,13 +33,52 @@ import { telemetry } from "../telemetry/telemetry";
 // downloaded. Absent for every other import path.
 export type CloudRestoreContext = { lastBackupIso: string | null };
 
+// Set when the bytes came from this account's own sync head and are meant to
+// REPLACE the project already on this device (docs/cloud-sync-plan.md, "Replace
+// mode is real new work"). This is the only context that authorizes overwriting
+// an existing project, and the commit re-verifies its prerequisites rather than
+// trusting them: a parked artwork review can sit open while the user keeps
+// working.
+export type SyncPullContext = {
+  targetProjectId: string;
+  // The rev of the downloaded head — becomes lastAcceptedRev at commit. Revs
+  // are the whole lineage mechanism; without recording it the pulled copy would
+  // read as diverged the moment it lands.
+  rev: string;
+  // The target's fingerprint when the pull was decided. The commit re-checks it
+  // and aborts on drift, so an edit made while the review dialog was open is
+  // never silently discarded.
+  expectedLocalFingerprint: string;
+};
+
+// Set when the bytes came from a sync head for a project this device does NOT
+// have yet (the cloud browser's device-handoff row). Identity-preserving, but
+// nothing is replaced — the commit only seeds sync bookkeeping so the new
+// device is linked from its first open.
+export type SyncLinkContext = {
+  projectId: string;
+  rev: string;
+};
+
 // A parked import: the pure plan the dialog reviews, plus the provenance the
 // commit still needs once the user resolves it. The plan alone is not enough —
-// a cloud restore's bookkeeping (and its telemetry) has to survive the park,
-// which can end in a commit or a dismissal minutes later.
+// a cloud restore's bookkeeping (and its telemetry), or a pull's replace
+// prerequisites, have to survive the park, which can end in a commit or a
+// dismissal minutes later.
 export type PendingPackageImport = {
   plan: ImportPlan;
   cloudRestore?: CloudRestoreContext;
+  syncPull?: SyncPullContext;
+  syncLink?: SyncLinkContext;
+};
+
+// The provenance half of an import, carried from the pipeline through any park
+// to the commit. At most one sync context is ever set: a pull replaces a
+// project that is here, a link imports one that is not.
+type ImportProvenance = {
+  cloudRestore?: CloudRestoreContext;
+  syncPull?: SyncPullContext;
+  syncLink?: SyncLinkContext;
 };
 
 export type PackageSliceActions = {
@@ -83,6 +125,16 @@ export type PackageSliceActions = {
   importCloudBackupPackage: (
     bytes: ArrayBuffer,
     options?: { asCopy?: boolean; lastBackupIso?: string | null }
+  ) => Promise<boolean>;
+  // A package downloaded from this account's own sync head. `replace` supersedes
+  // the OPEN project with the same id (recovery snapshot + drift re-check at
+  // commit); `link` imports a project this device doesn't have yet. Both
+  // preserve identity and record the head's rev, which is what keeps the two
+  // devices one project. Resolves true once the pipeline has accepted the
+  // package — including when it parked in the artwork conflict dialog.
+  importSyncHeadPackage: (
+    bytes: ArrayBuffer,
+    context: { replace: SyncPullContext } | { link: SyncLinkContext }
   ) => Promise<boolean>;
   resolvePackageImportConflicts: (
     resolutions: Record<string, ConflictResolution>
@@ -149,18 +201,121 @@ export function createPackageSlice(
   // untrusted-file pipeline has succeeded and any conflicts are resolved
   // (docs/plan.md §13 — nothing is written before then). Shared by the
   // no-conflict fast path and the dialog resolution path.
+  // The replace path's prerequisites, in the order docs/cloud-sync-plan.md
+  // fixes them. Validation (1) and artwork conflicts (2) are behind us by the
+  // time a commit runs; this is (3) the recovery snapshot of the copy about to
+  // be overwritten and (4) the re-check that nothing moved while a review dialog
+  // was open. Either failing ABORTS the whole commit — nothing has been written
+  // yet, so the existing copy is left exactly as it was.
+  async function prepareSyncReplace(syncPull: SyncPullContext): Promise<void> {
+    // v1 scope: a pull only ever replaces the OPEN project. Replacing a project
+    // in the background would mean a document on screen silently diverging from
+    // its stored record, so refuse instead of widening the blast radius.
+    const open = get().project;
+    if (!open || open.id !== syncPull.targetProjectId) {
+      throw new Error(
+        "the project this Dropbox version belongs to is no longer open on this device."
+      );
+    }
+
+    // Snapshot the CURRENT STORED target, not the open document: the stored
+    // record is what the replace is about to overwrite. A load or snapshot
+    // failure aborts — replacing with no recovery copy behind it is the one
+    // outcome this path exists to prevent.
+    const stored = await deps.projectRepository.load(syncPull.targetProjectId);
+    await deps.projectSnapshotRepository.add({
+      projectId: stored.id,
+      createdAt: new Date().toISOString(),
+      projectTitle: stored.title,
+      fingerprint: selectBackupFingerprint(stored, get().libraryArtworks),
+      project: stored
+    });
+
+    // Drift check last, so it reads the freshest state: an edit that landed
+    // while the artwork review sat open would otherwise be thrown away by a
+    // decision made against a version of the project that no longer exists.
+    // The caller re-runs the sync check, which re-assesses honestly.
+    const currentFingerprint = selectBackupFingerprint(open, get().libraryArtworks);
+    if (currentFingerprint !== syncPull.expectedLocalFingerprint) {
+      throw new Error(
+        "this project changed on this device while the review was open; nothing was replaced."
+      );
+    }
+  }
+
+  // Record that the opened project descends from a specific head revision. Both
+  // sync contexts land here: a pull replaced what was on this device, a link put
+  // a project here for the first time, and either way the rev is the ancestry
+  // the next check compares against.
+  async function seedSyncMeta(
+    opened: Project,
+    libraryArtworks: Artwork[],
+    rev: string
+  ): Promise<void> {
+    const accountId = deps.cloudBackupProvider?.accountId() ?? null;
+    // Sync metadata is bound to the account it came from. With no account id
+    // there is nothing honest to bind to, so the project simply reads as
+    // unlinked — the import itself still stands.
+    if (!accountId) return;
+
+    // The (opened, libraryArtworks) pair is exactly what the state machine will
+    // fingerprint next cycle, so "unchanged since the pull" is true by
+    // construction rather than by a re-derivation that could disagree.
+    const fingerprintAtRev = selectBackupFingerprint(opened, libraryArtworks);
+    const nowIso = new Date().toISOString();
+    let existing;
+    try {
+      existing = await deps.syncMetaRepository.get(opened.id);
+    } catch {
+      existing = undefined;
+    }
+    await deps.syncMetaRepository.put({
+      projectId: opened.id,
+      provider: "dropbox",
+      accountId,
+      remotePath: syncHeadPath(opened.id),
+      lastAcceptedRev: rev,
+      fingerprintAtRev,
+      lastPullAtIso: nowIso,
+      lastPushAtIso: existing?.lastPushAtIso ?? null,
+      protocolVersion: SYNC_PROTOCOL_VERSION,
+      // Whatever "Not now" paused, this pull resolved.
+      paused: false
+    });
+  }
+
   async function commitPackageImport(
     plan: ImportPlan,
     resolutions: Record<string, ConflictResolution>,
-    cloudRestore?: CloudRestoreContext
+    provenance: ImportProvenance = {}
   ) {
+    const { cloudRestore, syncPull, syncLink } = provenance;
+    // Prerequisites BEFORE anything is finalized or written. finalize is pure,
+    // but ordering the abort ahead of it keeps "nothing happened" literal.
+    if (syncPull) await prepareSyncReplace(syncPull);
+
     const commit = finalizePackageImport(plan, resolutions);
 
-    // Persist the project first and let failures reject. This keeps a failed
-    // project save from writing library data or opening a document that will
-    // disappear on reload. Later repository failures remain visible to the
-    // caller and leave a recoverable project with potentially missing images.
-    if (!(await persist(commit.project))) {
+    // Which end of the write sequence the project record belongs at depends on
+    // what a half-finished commit would cost, and the two imports have opposite
+    // answers:
+    //
+    //  - An ORDINARY import writes a NEW project. Persisting it first keeps a
+    //    failed project save from writing library data or opening a document
+    //    that will disappear on reload; assets/artworks that land afterwards
+    //    belong to a project that really exists.
+    //  - A REPLACE (a sync pull) overwrites a project the user already has.
+    //    Persisting first would mean a mid-loop asset failure leaves the stored
+    //    project already replaced with its images missing — the plan doc's
+    //    "if any prerequisite fails, the existing copy is preserved untouched"
+    //    inverted. So the replacing record is written LAST, as the single
+    //    commit point. The tradeoff is accepted deliberately: assets and
+    //    artworks here are additive and newly id'd, so a failure before the
+    //    commit point orphans some unreferenced blobs — harmless junk — while
+    //    the project the user is looking at is exactly as it was.
+    const replacing = syncPull !== undefined;
+
+    if (!replacing && !(await persist(commit.project))) {
       throw new Error(get().error ?? "The imported project could not be saved.");
     }
 
@@ -176,12 +331,23 @@ export function createPackageSlice(
     }
 
     const libraryArtworks = await deps.artworkLibraryRepository.list();
+
+    // The replace's commit point, after every read that could still fail. Past
+    // this line the replacement HAS happened, which is what lets the sync slice
+    // say "this project was not replaced" whenever the import reports failure —
+    // nothing below throws.
+    if (replacing && !(await persist(commit.project))) {
+      throw new Error(get().error ?? "The imported project could not be saved.");
+    }
+
     const opened = setDocument(commit.project, { viewMode: "plan", libraryArtworks });
     // This path persists BEFORE it opens (the write above has to precede the
     // asset/artwork writes), so a load repair lands after the record is
     // already down. A second write is the only way the stored project matches
-    // the one on screen. No recovery snapshot: an import writes its own newly
-    // finalized project, so there is no earlier document of the user's at risk.
+    // the one on screen. No recovery snapshot HERE: an ordinary import writes
+    // its own newly finalized project, so there is no earlier document of the
+    // user's at risk — the one path that does overwrite (a sync pull) took its
+    // snapshot in prepareSyncReplace before anything was written.
     //
     // A false return here must NOT throw or unwind: the document is already
     // open and the assets/artworks are already on disk, so the import really
@@ -222,8 +388,52 @@ export function createPackageSlice(
     // counter's, so this always fires.
     telemetry.track("package_import_completed", {});
 
-    if (!cloudRestore) return;
+    if (cloudRestore) {
+      seedCloudRestoreMeta(plan, opened, libraryArtworks, cloudRestore);
+    }
 
+    // Sync bookkeeping is the last thing written, and only after the document is
+    // really open: a rev recorded for a commit that failed would claim this
+    // device holds content it does not.
+    const syncRev = syncPull?.rev ?? syncLink?.rev ?? null;
+    if (syncRev === null) return;
+    try {
+      await seedSyncMeta(opened, libraryArtworks, syncRev);
+      if (!cloudRestore) {
+        // The pulled content is already in Dropbox, so an auto-backup minutes
+        // later would burn one of the five retention slots on a duplicate of what
+        // was just downloaded. Same reasoning as a cloud restore's seed; only the
+        // source file differs.
+        writeCloudBackupMeta(opened.id, {
+          lastCloudBackupAt: new Date().toISOString(),
+          backedUpFingerprint: selectBackupFingerprint(opened, libraryArtworks)
+        });
+      }
+      // Fold the new meta into observable state here rather than at the call site:
+      // a pull that parked in the artwork review commits minutes later, long after
+      // the sync slice stopped waiting on it.
+      await get().refreshProjectSyncState();
+    } catch {
+      // The import itself is DONE — the document is open, the record is down —
+      // so this must not unwind into the caller's "Import failed" path, which
+      // would tell the user nothing changed while their project sits replaced
+      // on screen. Report the true, narrower problem instead: this device
+      // cannot prove which revision its copy descends from, so the next check
+      // reads as a conflict rather than as licence to overwrite Dropbox — the
+      // safe direction, and the same message the sync slice uses when its own
+      // metadata write fails.
+      set({ syncStatus: "error", syncError: BOOKKEEPING_MESSAGE });
+    }
+  }
+
+  // Cloud-restore bookkeeping, unchanged by sync: kept as its own function only
+  // so the commit's tail reads as one decision per provenance.
+  function seedCloudRestoreMeta(
+    plan: ImportPlan,
+    opened: Project,
+    libraryArtworks: Artwork[],
+    cloudRestore: CloudRestoreContext
+  ): void {
     // A restore only counts here, at the commit — the parked-in-conflicts path
     // can still be dismissed, and counting that as an opened project inflates
     // the number with restores the user cancelled. Both restore shapes
@@ -252,8 +462,13 @@ export function createPackageSlice(
 
   async function runPackageImport(
     bytes: ArrayBuffer,
-    options: { forceProjectCopy?: boolean; cloudRestore?: CloudRestoreContext } = {}
+    options: { forceProjectCopy?: boolean } & ImportProvenance = {}
   ): Promise<boolean> {
+    const provenance: ImportProvenance = {
+      ...(options.cloudRestore ? { cloudRestore: options.cloudRestore } : {}),
+      ...(options.syncPull ? { syncPull: options.syncPull } : {}),
+      ...(options.syncLink ? { syncLink: options.syncLink } : {})
+    };
     set({ intakeState: "processing" });
     try {
       // 1-2. Zip safety + staged manifest pipeline (extract enforces the
@@ -290,24 +505,27 @@ export function createPackageSlice(
           assetShaById,
           projectIds: summaries.map((summary) => summary.id)
         },
-        { forceProjectCopy: options.forceProjectCopy }
+        {
+          forceProjectCopy: options.forceProjectCopy,
+          // The replace authorization, and the id-mismatch guard with it: the
+          // planner throws if these bytes are not the project being replaced.
+          ...(options.syncPull
+            ? { replaceProjectId: options.syncPull.targetProjectId }
+            : {})
+        }
       );
 
       if (plan.conflicts.length > 0) {
         // Park for ONE review step in the conflict dialog — nothing has
         // been persisted yet, so dismissing discards the import cleanly.
-        // The restore provenance parks with the plan so the commit that may
-        // follow can still tell where these bytes came from.
-        set({
-          pendingPackageImport: {
-            plan,
-            ...(options.cloudRestore ? { cloudRestore: options.cloudRestore } : {})
-          }
-        });
+        // The restore/sync provenance parks with the plan so the commit that
+        // may follow can still tell where these bytes came from, and a pull
+        // re-checks its replace prerequisites there rather than here.
+        set({ pendingPackageImport: { plan, ...provenance } });
         return true;
       }
 
-      await commitPackageImport(plan, {}, options.cloudRestore);
+      await commitPackageImport(plan, {}, provenance);
       return true;
     } catch (error) {
       const message = `Import failed: ${
@@ -461,12 +679,23 @@ export function createPackageSlice(
       });
     },
 
+    async importSyncHeadPackage(bytes, context) {
+      return runPackageImport(
+        bytes,
+        "replace" in context ? { syncPull: context.replace } : { syncLink: context.link }
+      );
+    },
+
     async resolvePackageImportConflicts(resolutions) {
       const pending = get().pendingPackageImport;
       if (!pending) return;
       set({ pendingPackageImport: null });
       try {
-        await commitPackageImport(pending.plan, resolutions, pending.cloudRestore);
+        await commitPackageImport(pending.plan, resolutions, {
+          ...(pending.cloudRestore ? { cloudRestore: pending.cloudRestore } : {}),
+          ...(pending.syncPull ? { syncPull: pending.syncPull } : {}),
+          ...(pending.syncLink ? { syncLink: pending.syncLink } : {})
+        });
       } catch (error) {
         const message = `Import failed: ${
           error instanceof Error ? error.message : "the package could not be saved."

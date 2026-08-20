@@ -5,9 +5,14 @@
 // helpers are the ONLY place they're folded into presentation, so a copy or
 // priority change lands in one file.
 
-import type { CloudBackupProviderStatus } from "./provider";
+import type {
+  CloudBackupProviderStatus,
+  CloudProjectFolder,
+  SyncHeadListing
+} from "./provider";
 import type { CloudBackupUploadStatus } from "../store/cloudBackupSlice";
 import type { CloudProjectsStatus } from "../store/cloudProjectsSlice";
+import type { ProjectSyncStatus } from "../store/cloudSyncSlice";
 
 // A terse relative time for a backup timestamp: "just now", "2 m ago",
 // "3 h ago", "5 d ago". Matches the quiet, glanceable register of the popover.
@@ -265,6 +270,146 @@ export function getCloudBackupPopoverState(input: {
 }
 
 // ---------------------------------------------------------------------------
+// Save-status popover, second cloud row: cross-device sync for the OPEN project
+// (docs/cloud-sync-plan.md stage 2). Backup and sync are different promises —
+// one keeps history, the other keeps one canonical copy in step — so they are
+// two rows with two vocabularies, never one merged status.
+//
+// This is the first surface allowed to say "sync" (the stage-1 browser rows
+// deliberately say backup/restore), and only ever about a project whose head
+// this device is linked to.
+// ---------------------------------------------------------------------------
+
+export type ProjectSyncRowAction = "enable" | "sync-now" | "review";
+
+export type ProjectSyncRowState = {
+  text: string;
+  // Same three tones the backup row uses, so the two rows tint identically:
+  // caution is amber attention, never destructive red — the copy on this
+  // device is safe in every one of these states.
+  tone: CloudBackupPopoverTone;
+  icon: CloudBackupCloudIcon;
+  action: ProjectSyncRowAction | null;
+  actionLabel: string | null;
+  actionDisabled: boolean;
+};
+
+const SYNC_ROW_FALLBACK_ERROR = "Sync stopped. Try again.";
+
+// null means "render no sync row at all": with no provider connection there is
+// nothing true to say about syncing, and the backup row above already explains
+// the disconnected account.
+//
+// `linked` is metadata-on-this-device, but it does NOT gate the attention
+// states: enabling sync can find a head another device created first, which
+// parks a conflict before any metadata exists. Those states are surfaced on
+// their own terms, ahead of the not-linked branch — `linked` only decides
+// WHICH retry an error offers, since a project with no metadata has nothing for
+// the manual check to check.
+export function getProjectSyncRowState(input: {
+  connected: boolean;
+  linked: boolean;
+  status: ProjectSyncStatus;
+  error: string | null;
+}): ProjectSyncRowState | null {
+  if (!input.connected) return null;
+
+  if (input.status === "error") {
+    return {
+      text: input.error ?? SYNC_ROW_FALLBACK_ERROR,
+      tone: "caution",
+      icon: "cloud-warning",
+      // Which retry actually retries depends on how far this project got. A
+      // failed ENABLE leaves no metadata behind, and the manual check is a
+      // no-op for an unlinked project — it would quietly reset the row to "Off
+      // for this project", taking the error message with it and leaving the
+      // button doing nothing. Retry the gesture that failed: turning sync on.
+      // Once linked, the manual check is the right retry for everything.
+      action: input.linked ? "sync-now" : "enable",
+      actionLabel: "Try again",
+      actionDisabled: false
+    };
+  }
+  if (input.status === "conflict") {
+    return {
+      text: "This project changed in two places.",
+      tone: "caution",
+      icon: "cloud-warning",
+      action: "review",
+      actionLabel: "Review",
+      actionDisabled: false
+    };
+  }
+  if (input.status === "needs-review") {
+    return {
+      text: "Needs review.",
+      tone: "caution",
+      icon: "cloud-warning",
+      action: "review",
+      actionLabel: "Review",
+      actionDisabled: false
+    };
+  }
+
+  if (!input.linked) {
+    return {
+      text: "Off for this project.",
+      tone: "muted",
+      icon: "cloud",
+      action: "enable",
+      actionLabel: "Sync across devices",
+      actionDisabled: false
+    };
+  }
+
+  if (
+    input.status === "checking" ||
+    input.status === "pushing" ||
+    input.status === "pulling"
+  ) {
+    return {
+      text: "Syncing…",
+      tone: "info",
+      icon: "cloud-spinner",
+      action: "sync-now",
+      actionLabel: "Sync now",
+      actionDisabled: true
+    };
+  }
+  if (input.status === "pending") {
+    return {
+      text: "Changes waiting to sync.",
+      tone: "muted",
+      icon: "cloud",
+      action: "sync-now",
+      actionLabel: "Sync now",
+      actionDisabled: false
+    };
+  }
+  if (input.status === "synced") {
+    return {
+      text: "Synced.",
+      tone: "muted",
+      icon: "cloud-check",
+      action: "sync-now",
+      actionLabel: "Sync now",
+      actionDisabled: false
+    };
+  }
+  // "idle" with metadata on hand: linked, but this device hasn't evaluated the
+  // state machine yet (the moment after a project opens). Say the durable fact
+  // and offer the check rather than claiming a standing that hasn't been read.
+  return {
+    text: "Sync is on for this project.",
+    tone: "muted",
+    icon: "cloud",
+    action: "sync-now",
+    actionLabel: "Sync now",
+    actionDisabled: false
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Export menu: one top-level cloud item, shown only when configured.
 // ---------------------------------------------------------------------------
 
@@ -417,6 +562,21 @@ export function formatCloudProjectMeta(input: {
   return `Backed up ${formatBackupRelativeTime(input.latestBackupIso, input.now)} · ${copies}`;
 }
 
+// The meta line for a row backed by a SYNC HEAD rather than by the folder's
+// backup history: the same row, but pressing Open links this device to the
+// canonical copy instead of restoring a timestamped file. "sync" is allowed
+// here precisely because a head exists — the /backups-only rows above keep
+// restore language (docs/cloud-sync-plan.md, stage-1 label rule).
+export function formatCloudProjectSyncMeta(input: {
+  syncedIso: string | null;
+  now?: number;
+}): string {
+  const when = input.syncedIso
+    ? `Synced ${formatBackupRelativeTime(input.syncedIso, input.now)}`
+    : "Synced from another device";
+  return `${when} · opens here and keeps syncing`;
+}
+
 // "Open" restores a project this device doesn't have under its own identity;
 // "Save a copy" is the only offer when the id looks like one already here,
 // because stage 1 never replaces a local project. The match is an 8-char
@@ -435,6 +595,178 @@ export function getCloudProjectActionAriaLabel(
   return matchesLocalProject
     ? `Save a copy of ${title} from Dropbox`
     : `Open ${title} from Dropbox`;
+}
+
+// ---------------------------------------------------------------------------
+// The section's row model. The listing is TWO listings — the account's backup
+// folders and its sync heads — and a project can be in either, or both. Deriving
+// rows from the folders alone (what stage 1 did) makes a project with a head and
+// no backup folder invisible, and that is not a hypothetical: enabling sync
+// writes the head immediately while the first automatic backup waits out the
+// settle delay, so "new project → sync on → close the tab" leaves exactly that
+// shape — the very handoff this section exists to serve.
+//
+// Pure and component-free on purpose: which rows exist, and what each one says,
+// is the part worth testing directly.
+// ---------------------------------------------------------------------------
+
+// A head file is /projects/<id>/current.sightlines — it carries no title, and
+// this section refuses to invent one. Say what is known (a project, synced, from
+// somewhere else) and let the short code below tell two of them apart.
+export const CLOUD_PROJECT_UNTITLED_SYNC_TITLE = "Synced project";
+
+// The same 8 chars the backup folder names carry, for the same reason: enough
+// to distinguish two rows, never presented as something to act on.
+export function formatSyncHeadShortId(projectId: string): string {
+  return projectId.slice(0, 8);
+}
+
+// Row identity for a head-only row. Prefixed so it can share one "which row is
+// opening" field with the folder rows (keyed by folder name) without the two
+// namespaces ever colliding.
+export function getCloudSyncRowKey(projectId: string): string {
+  return `sync:${projectId}`;
+}
+
+// What pressing a row's action opens. A folder row hands the FOLDER back even
+// when a head stands behind it: the store re-reads this device before choosing
+// between the head and the newest backup, and that authoritative read — not this
+// display model — is what may link a device.
+export type CloudProjectRowTarget =
+  | { kind: "folder"; folder: CloudProjectFolder }
+  | { kind: "sync-head"; head: SyncHeadListing };
+
+export type CloudProjectRow = {
+  key: string;
+  title: string;
+  // Muted text beside the title: "Not on this device" for a folder row that has
+  // no local counterpart, the short project code for a titleless synced one.
+  tag: string | null;
+  meta: string;
+  actionLabel: string;
+  actionAriaLabel: string;
+  target: CloudProjectRowTarget;
+};
+
+// The one head whose project id starts with this folder's prefix. Exactly one,
+// or none: the 8-char prefix is a display heuristic, and two heads sharing it
+// means a row cannot honestly claim to know which project it opens. The store
+// makes the same call for the same reason — here it only decides wording.
+export function matchOneSyncHead(
+  heads: SyncHeadListing[] | null,
+  prefix: string
+): SyncHeadListing | null {
+  if (!heads || prefix.length === 0) return null;
+  const matches = heads.filter((head) => head.projectId.startsWith(prefix));
+  return matches.length === 1 ? matches[0]! : null;
+}
+
+export function buildCloudProjectRows(input: {
+  folders: CloudProjectFolder[] | null;
+  syncHeads: SyncHeadListing[] | null;
+  // null means this device's own projects have not been read yet — NOT that
+  // there are none. Head rows are withheld while it is null: a synthesized row
+  // for a project already here would offer an import that overwrites it.
+  localProjectIds: string[] | null;
+  now?: number;
+}): CloudProjectRow[] {
+  const localIds = input.localProjectIds;
+  const folders = input.folders ?? [];
+
+  const folderRows = folders.map((folder): CloudProjectRow => {
+    // Prefix agreement is a guess about identity, so it only chooses which
+    // offer to make — the import pipeline decides what is written.
+    const matchesLocalProject =
+      folder.projectIdPrefix.length > 0 &&
+      (localIds ?? []).some((id) => id.startsWith(folder.projectIdPrefix));
+    // Only a row that is NOT here already can open from the head: a prefix
+    // match keeps the save-a-copy path, and copies are never linked.
+    const head = matchesLocalProject
+      ? null
+      : matchOneSyncHead(input.syncHeads, folder.projectIdPrefix);
+
+    return {
+      key: folder.folderName,
+      title: folder.title,
+      tag: matchesLocalProject ? null : CLOUD_PROJECT_ABSENT_TAG,
+      meta: head
+        ? formatCloudProjectSyncMeta({ syncedIso: head.serverModifiedIso, now: input.now })
+        : formatCloudProjectMeta({
+            latestBackupIso: folder.latestBackup?.serverModifiedIso ?? null,
+            backupCount: folder.backupCount,
+            now: input.now
+          }),
+      actionLabel: getCloudProjectActionLabel(matchesLocalProject),
+      actionAriaLabel: getCloudProjectActionAriaLabel(matchesLocalProject, folder.title),
+      target: { kind: "folder", folder }
+    };
+  });
+
+  if (!input.syncHeads || localIds === null) return folderRows;
+
+  const headRows = input.syncHeads
+    .filter((head) => {
+      // Already on this device: full id against full id, since a head's file
+      // name IS the project id. Nothing useful could be offered here — the
+      // project is open or openable from the list above, and importing it again
+      // would write over it.
+      if (localIds.includes(head.projectId)) return false;
+      // A folder already speaks for this project. When exactly one head sits
+      // under that folder's prefix the folder row opens the head itself; when
+      // two do, the folder row falls back to restore language and this head goes
+      // unrepresented — accepted, because two ids sharing 8 chars is a far
+      // rarer event than the duplicate rows the alternative would produce.
+      return !folders.some(
+        (folder) =>
+          folder.projectIdPrefix.length > 0 &&
+          head.projectId.startsWith(folder.projectIdPrefix)
+      );
+    })
+    // Newest first, id as the tiebreak so the order is stable across refreshes
+    // (timestamps are display only — this is ordering, never ancestry).
+    .sort((a, b) => {
+      const byTime = (b.serverModifiedIso ?? "").localeCompare(a.serverModifiedIso ?? "");
+      return byTime !== 0 ? byTime : a.projectId.localeCompare(b.projectId);
+    })
+    .map((head): CloudProjectRow => {
+      const shortId = formatSyncHeadShortId(head.projectId);
+      return {
+        key: getCloudSyncRowKey(head.projectId),
+        title: CLOUD_PROJECT_UNTITLED_SYNC_TITLE,
+        tag: shortId,
+        meta: formatCloudProjectSyncMeta({
+          syncedIso: head.serverModifiedIso,
+          now: input.now
+        }),
+        actionLabel: getCloudProjectActionLabel(false),
+        actionAriaLabel: `Open synced project ${shortId} from Dropbox`,
+        target: { kind: "sync-head", head }
+      };
+    });
+
+  return [...folderRows, ...headRows];
+}
+
+// A heads listing that failed leaves this section unable to tell a project that
+// syncs from one that only has backups — so an Open here may quietly bring a
+// project in without linking it. Restoring beats blocking recovery, so the rows
+// still open; this line is the part that must not be silent. The fix afterwards
+// is the sync row's own "Sync across devices", which finds the head and parks
+// the two copies in the conflict dialog.
+export const CLOUD_SYNC_HEADS_UNAVAILABLE_NOTICE =
+  "Couldn't check which projects sync across devices. One that does may open here " +
+  "without syncing — you can turn syncing on after it opens.";
+
+// Only after a listing pass that actually ran. "Never fetched" wears the same
+// null (the dialog's first paint, a disconnected provider), and a notice about a
+// failure that hasn't happened is its own kind of lie. A finished folder listing
+// is the proof a pass ran: heads and folders are fetched together, and every
+// successful heads fetch stores an array — empty included.
+export function shouldWarnSyncHeadsUnavailable(input: {
+  status: CloudProjectsStatus;
+  syncHeads: SyncHeadListing[] | null;
+}): boolean {
+  return input.status === "loaded" && input.syncHeads === null;
 }
 
 // The provider-agnostic failure kinds a restore has distinct wording for;
@@ -471,3 +803,29 @@ export function getCloudProjectOpenErrorMessage(
 }
 
 export const CLOUD_PROJECT_NO_BACKUP_MESSAGE = "That folder has no backup to open.";
+
+// The same failures, for a row opening from the project's SYNCED copy. Two
+// kinds need their own sentence because "backup" would be the wrong noun: the
+// file at stake is the one the user's other devices are working against, and
+// naming it a backup would understate what is missing.
+export function getCloudSyncOpenErrorMessage(
+  kind: CloudProjectOpenErrorKind
+): string {
+  switch (kind) {
+    case "not-found":
+      return "That project's synced copy is no longer in Dropbox.";
+    case "too-large":
+      return "That project is too large to open here. You can download it from dropbox.com.";
+    default:
+      return getCloudProjectOpenErrorMessage(kind);
+  }
+}
+
+// The two ways a head-only row can refuse before any bytes are spent. Opening a
+// head imports under the project's OWN id, so a project already on this device
+// must never take this path — and a device whose projects can't be read is the
+// same refusal, since it cannot prove otherwise.
+export const CLOUD_SYNC_PROJECT_ALREADY_HERE_MESSAGE =
+  "That project is already on this device.";
+export const CLOUD_SYNC_LOCAL_CHECK_FAILED_MESSAGE =
+  "Couldn't check the projects on this device. Try opening that project again.";

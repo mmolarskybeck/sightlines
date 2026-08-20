@@ -47,6 +47,24 @@ export type CloudProjectFolder = {
   latestBackup: CloudProjectBackup | null;
 };
 
+// The state of one project's canonical synced copy ("sync head") as the
+// provider reports it. `rev` is the whole lineage mechanism: a device records
+// the rev its local copy is based on and writes conditionally against it, so
+// two devices can never silently overwrite each other. Timestamps are display
+// only — clocks disagree and upload order is not ancestry.
+export type SyncHeadMetadata = {
+  rev: string;
+  serverModifiedIso: string | null;
+  sizeBytes: number | null;
+};
+
+// A sync head as seen from a listing, which knows the project id (it is the
+// folder name) and the provider path.
+export type SyncHeadListing = SyncHeadMetadata & {
+  projectId: string;
+  path: string;
+};
+
 export interface CloudBackupProvider {
   // Stable machine id (e.g. "dropbox") and a human label ("Dropbox").
   readonly id: string;
@@ -76,6 +94,14 @@ export interface CloudBackupProvider {
   // Display name for the linked account, or null when not connected / unknown.
   accountLabel(): string | null;
 
+  // Stable machine identifier for the linked account, or null when not
+  // connected / unknown. Sync bookkeeping binds to THIS, never to
+  // accountLabel(): a display name is mutable and ambiguous, so relinking to a
+  // different account under the same name would otherwise resurrect another
+  // account's revisions. Records written before the id was captured have none,
+  // which is why null is a legitimate answer for a connected provider.
+  accountId(): string | null;
+
   // Build the package into the provider's backup location and prune old copies
   // to the retention cap. Resolves on a successful UPLOAD even if pruning fails
   // (pruning retries next cycle). Rejects on a failed upload; the thrown error
@@ -100,4 +126,38 @@ export interface CloudBackupProvider {
   // "not-found" (distinct from transient network trouble) so the caller can
   // say "that backup is gone" instead of offering a retry.
   downloadBackup(path: string): Promise<Uint8Array>;
+
+  // --- cross-device sync ----------------------------------------------------
+  //
+  // The sync head is one canonical file per project, separate from the backup
+  // history and from shared snapshots. Every method here is scope-gated the
+  // same way the read side is: sync that cannot pull is useless.
+
+  // Current state of a project's head, or null IFF it does not exist — a
+  // project that has never been synced, or whose head was removed. Every other
+  // failure rejects with a classified error, because "no head" is a decision
+  // the caller acts on and must never be a guess about a failed request.
+  getSyncHead(projectId: string): Promise<SyncHeadMetadata | null>;
+
+  // Fetch the head's bytes together with the rev they came from — the rev the
+  // pulling device will record as its base. Rejects "not-found" when the head
+  // vanished between the check and the download, and enforces the same
+  // download size ceiling as downloadBackup.
+  downloadSyncHead(projectId: string): Promise<{ bytes: Uint8Array; rev: string }>;
+
+  // Write the head as a revision-conditional upload. `baseRev` null means this
+  // device is creating the head; a non-null baseRev asserts "the head is still
+  // at this revision". Either way the write must FAIL, classified "conflict",
+  // rather than overwrite a head that moved on or spawn a "(1)" copy — the
+  // failure is what makes the conflict visible to the user.
+  uploadSyncHead(input: {
+    projectId: string;
+    blob: Blob;
+    baseRev: string | null;
+  }): Promise<SyncHeadMetadata>;
+
+  // Every synced project in the account, for the cloud project browser's
+  // device-handoff rows. An empty list means no project has ever been synced
+  // (the sync location does not exist yet), not that listing failed.
+  listSyncHeads(): Promise<SyncHeadListing[]>;
 }
