@@ -15,12 +15,20 @@ const FIELD_ALIASES: Record<ImportField, string[]> = {
     "accession number",
     "object number",
     "object no",
+    // Collection exports routinely head this column with nothing but a hash.
+    // It survives normalization only via the raw-label branch in scoreHeader —
+    // and it is why our OWN spreadsheet export heads its row index "Row"
+    // rather than "#" (see checklistExportHeaders + the round-trip test).
+    "#",
+    "loan number",
+    "loan no",
     "inventory number",
     "inv no",
     "catalog number",
     "cat no"
   ],
   locationOrLender: ["location", "current location", "gallery", "lender", "owner", "collection"],
+  creditLine: ["credit line", "credit", "courtesy", "courtesy of", "lender credit"],
   dimensions: ["dimensions", "dims", "size", "measurements", "display dimensions"],
   height: ["height", "h", "height cm", "height in", "height mm"],
   width: ["width", "w", "width cm", "width in", "width mm"],
@@ -40,6 +48,7 @@ const FIELD_ORDER: ImportField[] = [
   "depth",
   "imageFilename",
   "locationOrLender",
+  "creditLine",
   "medium"
 ];
 
@@ -160,6 +169,20 @@ const UNIT_TOKENS = new Set(["cm", "mm", "in", "inch", "inches", "ft", "feet", "
 const UNIT_BONUS_FIELDS = new Set<ImportField>(["height", "width", "depth"]);
 
 function scoreHeader(field: ImportField, label: string): { score: number; reason?: string } {
+  // Punctuation-only headers ("#") normalize to nothing, so the token walk
+  // below can never see them. Compare the raw header against the raw alias
+  // first — but ONLY for aliases that are themselves token-less, so every
+  // ordinary alias keeps scoring exactly as before.
+  const rawLabel = label.trim().toLowerCase();
+  if (rawLabel) {
+    for (const alias of FIELD_ALIASES[field]) {
+      const rawAlias = alias.trim().toLowerCase();
+      if (rawAlias === rawLabel && tokensOf(rawAlias).size === 0) {
+        return { score: 60, reason: `header matches "${alias}"` };
+      }
+    }
+  }
+
   const labelTokens = tokensOf(label);
   if (labelTokens.size === 0) return { score: 0 };
   const compactLabel = [...labelTokens].join("");

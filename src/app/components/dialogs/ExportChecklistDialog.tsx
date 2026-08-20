@@ -46,7 +46,7 @@ const SORT_OPTIONS: { value: ChecklistExportSort; label: string }[] = [
   { value: "project", label: "Checklist order" },
   { value: "artist", label: "Artist" },
   { value: "title", label: "Title" },
-  { value: "accession", label: "Accession number" },
+  { value: "accession", label: "Object number" },
   { value: "placement", label: "Placement (room, wall)" }
 ];
 
@@ -61,7 +61,8 @@ type ChecklistDialogState = {
   images: ChecklistExportImageMode;
   numbering: boolean;
   accession: boolean;
-  location: boolean;
+  locationOrLender: boolean;
+  placement: boolean;
 };
 
 const INITIAL_STATE: ChecklistDialogState = {
@@ -71,7 +72,8 @@ const INITIAL_STATE: ChecklistDialogState = {
   images: DEFAULT_CHECKLIST_EXPORT_OPTIONS.images,
   numbering: DEFAULT_CHECKLIST_PDF_EXPORT_OPTIONS.numbering,
   accession: DEFAULT_CHECKLIST_PDF_EXPORT_OPTIONS.accession,
-  location: DEFAULT_CHECKLIST_PDF_EXPORT_OPTIONS.location
+  locationOrLender: DEFAULT_CHECKLIST_PDF_EXPORT_OPTIONS.locationOrLender,
+  placement: DEFAULT_CHECKLIST_PDF_EXPORT_OPTIONS.placement
 };
 
 export function checklistExportRequest(
@@ -86,7 +88,8 @@ export function checklistExportRequest(
         placedOnly: state.placedOnly,
         numbering: state.numbering,
         accession: state.accession,
-        location: state.location
+        locationOrLender: state.locationOrLender,
+        placement: state.placement
       }
     };
   }
@@ -150,7 +153,8 @@ export function ExportChecklistDialog({
   const placedOnlyId = useId();
   const numberingId = useId();
   const accessionId = useId();
-  const locationId = useId();
+  const locationOrLenderId = useId();
+  const placementId = useId();
 
   const update = (patch: Partial<ChecklistDialogState>) =>
     setState((current) => ({ ...current, ...patch }));
@@ -264,23 +268,46 @@ export function ExportChecklistDialog({
                   />
                 </label>
                 <label className="export-switch-row" htmlFor={accessionId}>
-                  <strong>Show accession number</strong>
+                  <strong>Show object number</strong>
                   <Switch
-                    aria-label="Show accession number"
+                    aria-label="Show object number"
                     checked={state.accession}
                     className="export-switch-control"
                     id={accessionId}
                     onCheckedChange={(checked) => update({ accession: checked })}
                   />
                 </label>
-                <label className="export-switch-row" htmlFor={locationId}>
-                  <strong>Show location</strong>
+                {/* Two different "where" questions, so both say which one they
+                    mean: the registrar's lender/location line, and the room and
+                    wall this show hangs it on. */}
+                <label className="export-switch-row" htmlFor={locationOrLenderId}>
+                  <span className="export-switch-text">
+                    <strong>Show location / lender</strong>
+                    <span className="export-switch-hint">
+                      Registrar’s location or lender, printed after the credit line
+                    </span>
+                  </span>
                   <Switch
-                    aria-label="Show location"
-                    checked={state.location}
+                    aria-label="Show location / lender"
+                    checked={state.locationOrLender}
                     className="export-switch-control"
-                    id={locationId}
-                    onCheckedChange={(checked) => update({ location: checked })}
+                    id={locationOrLenderId}
+                    onCheckedChange={(checked) => update({ locationOrLender: checked })}
+                  />
+                </label>
+                <label className="export-switch-row" htmlFor={placementId}>
+                  <span className="export-switch-text">
+                    <strong>Show placement</strong>
+                    <span className="export-switch-hint">
+                      Room and wall where the work is hung
+                    </span>
+                  </span>
+                  <Switch
+                    aria-label="Show placement"
+                    checked={state.placement}
+                    className="export-switch-control"
+                    id={placementId}
+                    onCheckedChange={(checked) => update({ placement: checked })}
                   />
                 </label>
               </>

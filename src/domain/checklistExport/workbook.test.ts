@@ -4,7 +4,7 @@ import type { ChecklistExportTable } from "./types";
 import { writeChecklistCsv, writeChecklistXlsx } from "./workbook";
 
 const table: ChecklistExportTable = {
-  headers: ["#", "Artist", "Title", "Height (cm)", "Notes"],
+  headers: ["Row", "Artist", "Title", "Height (cm)", "Notes"],
   rows: [
     [1, "Agnes Martin", 'Untitled, "no. 3"', 40, null],
     [2, "Brâncuși", "Line one\nline two", null, " padded "],
@@ -27,7 +27,7 @@ describe("writeChecklistCsv", () => {
 
   it("quotes per RFC 4180 and doubles embedded quotes", () => {
     const lines = decodeCsv(writeChecklistCsv(table)).replace(/^\uFEFF/, "").split("\r\n");
-    expect(lines[0]).toBe("#,Artist,Title,Height (cm),Notes");
+    expect(lines[0]).toBe("Row,Artist,Title,Height (cm),Notes");
     expect(lines[1]).toBe('1,Agnes Martin,"Untitled, ""no. 3""",40,');
   });
 
@@ -81,7 +81,7 @@ describe("writeChecklistXlsx", () => {
     const sheet = book.Sheets.Checklist;
     const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null });
 
-    expect(aoa[0]).toEqual(["#", "Artist", "Title", "Height (cm)", "Notes"]);
+    expect(aoa[0]).toEqual(["Row", "Artist", "Title", "Height (cm)", "Notes"]);
     expect(aoa[1][0]).toBe(1);
     expect(aoa[1][3]).toBe(40);
     expect(typeof aoa[1][3]).toBe("number");

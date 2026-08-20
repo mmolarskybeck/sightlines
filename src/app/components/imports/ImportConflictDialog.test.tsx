@@ -175,7 +175,7 @@ describe("ImportConflictDialog", () => {
     expect(textOf("dd", /Yours: 1998/)).toBeTruthy();
     expect(textOf("dd", /Theirs: 1999/)).toBeTruthy();
     // Unchanged fields stay out of the way.
-    expect(screen.queryByText("Accession")).toBeNull();
+    expect(screen.queryByText("Object no.")).toBeNull();
     expect(screen.queryByText("Title")).toBeNull();
   });
 
@@ -210,7 +210,7 @@ describe("ImportConflictDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show all details" }));
 
     expect(screen.getAllByText("Dimensions")).toHaveLength(2);
-    expect(screen.getAllByText("Accession")).toHaveLength(2);
+    expect(screen.getAllByText("Object no.")).toHaveLength(2);
     expect(screen.getByText("1998")).toBeTruthy();
     expect(screen.getByText("2004")).toBeTruthy();
   });

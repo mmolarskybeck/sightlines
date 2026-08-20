@@ -151,7 +151,8 @@ the hash of that specific tier's bytes.
   `migrateProject`'s in `projectSchema.ts`, run before full-shape validation.
   Today v1 is the only version, so no chain exists yet.
 - Additive, optional fields inside the embedded `Project`/`Artwork` (e.g. the
-  `metadata` bag, framing) do **not** require a package-version bump — they are
+  `metadata` bag, framing, `Artwork.creditLine`) do **not** require a
+  package-version bump — they are
   absorbed by the existing per-document schemas (docs/plan.md §4.4).
 
 ## Import behavior

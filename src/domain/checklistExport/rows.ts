@@ -225,7 +225,10 @@ function collectExtraMetadataHeaders(
 // these strings is a round-trip change, not a wording change.
 export function checklistExportHeaders(unit: DisplayUnit): string[] {
   return [
-    "#",
+    // "Row", not "#": the import wizard treats a bare "#" header as an object
+    // number (FIELD_ALIASES.accessionNumber), so heading our own export's row
+    // index that way would map it straight into accessionNumber on re-import.
+    "Row",
     "Artist",
     "Title",
     "Date",
@@ -234,8 +237,9 @@ export function checklistExportHeaders(unit: DisplayUnit): string[] {
     axisHeader("Height", unit),
     axisHeader("Width", unit),
     axisHeader("Depth", unit),
-    "Accession number",
+    "Object number",
     "Location / Lender",
+    "Credit line",
     "Framing",
     "Status",
     "Room",
@@ -289,6 +293,7 @@ export function buildChecklistExportTable({
         toUnitNumber(dimensions?.depthMm, unit),
         artwork?.accessionNumber ?? "",
         artwork?.locationOrLender ?? "",
+        artwork?.creditLine ?? "",
         formatChecklistFraming(artwork, unit),
         row.placement ? "Placed" : "Unplaced",
         row.placement?.roomName ?? "",

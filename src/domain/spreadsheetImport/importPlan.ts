@@ -196,6 +196,7 @@ function createDraft({
     date: value("date"),
     accessionNumber: value("accessionNumber"),
     locationOrLender: value("locationOrLender"),
+    creditLine: value("creditLine"),
     dimensions: dimensionResult?.dimensions ?? { status: "unknown", displayUnit: projectUnit },
     ...(frameInclusive ? { frameIncludedInImage: true } : {}),
     metadata: {

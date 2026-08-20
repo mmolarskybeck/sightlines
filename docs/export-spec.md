@@ -237,14 +237,20 @@ lenders, insurers, shippers) work in Excel, not in PDF.
   stays off the critical path — `scripts/assert-chunk-graph.mjs` enforces it) or
   CSV (UTF-8 **with a BOM**, CRLF, RFC 4180 quoting, so Excel opens a non-ASCII
   artist name correctly).
-- **Columns**, in order: `#`, `Artist`, `Title`, `Date`, `Medium`, `Dimensions`,
-  `Height (unit)`, `Width (unit)`, `Depth (unit)`, `Accession number`,
-  `Location / Lender`, `Framing`, `Status`, `Room`, `Wall`, `Image file`, then
+- **Columns**, in order: `Row`, `Artist`, `Title`, `Date`, `Medium`,
+  `Dimensions`, `Height (unit)`, `Width (unit)`, `Depth (unit)`,
+  `Object number`, `Location / Lender`, `Credit line`, `Framing`, `Status`,
+  `Room`, `Wall`, `Image file`, then
   one trailing column per extra `artwork.metadata` key. **The header strings are
   a round-trip contract**, chosen to match `FIELD_ALIASES` in
   `domain/spreadsheetImport/columnMapping.ts` so an exported file re-imports
   through the wizard without hand-mapping; the unit in the axis headers is part
-  of that (it is scored as evidence for height/width/depth). The axis cells are
+  of that (it is scored as evidence for height/width/depth). The index column is
+  headed `Row`, not `#`, for the same reason: a bare `#` is one of the
+  object-number aliases (collection exports head that column with nothing else),
+  so heading our own row index that way would re-import the row numbers as
+  object numbers. The user-facing name for `artwork.accessionNumber` is **Object
+  number** everywhere; the stored field keeps its name. The axis cells are
   bare **numbers** in the project's artwork unit (cm on metric projects, inches
   on imperial) — summable and sortable — while `Dimensions` carries the same
   formatted `W × H` text the checklist panel draws. Unknown dimensions are blank
@@ -253,7 +259,7 @@ lenders, insurers, shippers) work in Excel, not in PDF.
   nothing draws. Internal importer keys (`dimensionSourceText`, `dimensionRole`,
   `medium`) never re-export; `source:*` keys shed their prefix and are dropped
   when the resulting header would duplicate a core column.
-- **Sorts.** Checklist order (default), artist, title, accession number, or
+- **Sorts.** Checklist order (default), artist, title, object number, or
   **placement** — rooms in floor order → walls in room order → left-to-right
   along each wall → floor works by room → unplaced last. Every sort ends in
   checklist order, so the result is a total order.
@@ -299,15 +305,21 @@ placed-only filter are the same decisions whichever file comes out.
   page is the rhythm, not a hard grid.
 - **Caption**, in museum order, blank fields skipped rather than printed as
   empty lines: optional ordinal (small, bold, above the block), **Artist**
-  (bold), *Title* (italic), Date, Medium, Dimensions, optional accession number,
-  credit line (`locationOrLender`), optional muted `Room · Wall`.
+  (bold), *Title* (italic), Date, Medium, Dimensions, optional object number,
+  **credit line (`artwork.creditLine`)**, optional `Location / lender`
+  (`artwork.locationOrLender`), optional muted `Room · Wall`. The credit line is
+  the credit as it should PRINT; `locationOrLender` is registrar data (where the
+  record or the loan lives) and no longer prints by default, so an internal
+  lender note can't slip into a document handed to a printer.
 - **Dimensions** read `H × W[ × D]" (H × W[ × D] cm)` — height first (the
   caption convention, deliberately the reverse of §3.4's `W × H`), primary in
   the project's artwork unit with the other system in parentheses, one unit mark
   per group.
 - **Options.** Sort by and Placed works only, shared with §3.4; plus Show
-  numbering (default off), Show accession number (default off), and Show
-  location (default **on**).
+  numbering (default off), Show object number (default off), Show location /
+  lender (default off — the registrar line described above), and Show placement
+  (default **on** — the muted `Room · Wall` line; help text "Room and wall where
+  the work is hung", so the two "where" switches can't be confused).
 - **Images.** Display tier only, downscaled to 600px on the longest side
   (~300dpi at the printed size), one embed per asset — so a 200-work checklist
   stays a few megabytes. This is a layout decision, not a user control: the
@@ -790,7 +802,7 @@ blob can also be missing or unreadable at export time. Either way, the
 work renders as a **vector placeholder**: the correct framed footprint,
 neutral fill and border, the text **Image unavailable** (omitted for
 deliberately image-less works — nothing is "unavailable"), and the work's
-best identifying metadata (title, accession number, then artist). When no
+best identifying metadata (title, object number, then artist). When no
 identifying metadata exists, placeholders receive deterministic page-local
 labels in wall order (**Untitled work 1**, **Untitled work 2**, …) so two
 anonymous works remain distinguishable. These labels are shown even though

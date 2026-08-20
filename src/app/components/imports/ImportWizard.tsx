@@ -88,8 +88,9 @@ const FIELD_LABELS: Record<ImportField, string> = {
   artist: "Artist",
   title: "Title",
   date: "Date",
-  accessionNumber: "Accession",
+  accessionNumber: "Object no.",
   locationOrLender: "Location / lender",
+  creditLine: "Credit line",
   dimensions: "Dimensions",
   height: "Height",
   width: "Width",
@@ -109,6 +110,7 @@ const MAPPABLE_FIELDS: ImportField[] = [
   "depth",
   "imageFilename",
   "locationOrLender",
+  "creditLine",
   "medium"
 ];
 

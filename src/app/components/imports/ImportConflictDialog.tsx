@@ -109,8 +109,8 @@ function buildDiffLines(
     },
     {
       key: "accessionNumber",
-      label: "Accession",
-      short: "accession",
+      label: "Object no.",
+      short: "object no.",
       yours: text(existing.accessionNumber),
       theirs: text(incoming.accessionNumber),
       changed: !sameText(existing.accessionNumber, incoming.accessionNumber)
@@ -122,6 +122,14 @@ function buildDiffLines(
       yours: text(existing.locationOrLender),
       theirs: text(incoming.locationOrLender),
       changed: !sameText(existing.locationOrLender, incoming.locationOrLender)
+    },
+    {
+      key: "creditLine",
+      label: "Credit line",
+      short: "credit line",
+      yours: text(existing.creditLine),
+      theirs: text(incoming.creditLine),
+      changed: !sameText(existing.creditLine, incoming.creditLine)
     },
     {
       key: "dimensions",

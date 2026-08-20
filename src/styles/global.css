@@ -1417,6 +1417,22 @@ input:focus-visible {
   line-height: var(--leading-ui);
 }
 
+/* Two-line variant: a label whose meaning isn't self-evident carries one line
+   of help under it. The switch stays in the second grid column, vertically
+   centred against the pair. */
+.export-switch-text {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.export-switch-hint {
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-copy);
+}
+
 .export-setup-note {
   color: var(--muted);
   font-size: var(--type-xs);

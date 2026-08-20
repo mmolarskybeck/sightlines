@@ -133,7 +133,7 @@ export async function writeChecklistXlsx(
   sheet["!cols"] = table.headers.map((header, column) => {
     // Keep the stable exported-order column, but let it read as a compact index
     // beside Excel's own row labels rather than a second full-width data field.
-    if (header === "#") return { wch: 6 };
+    if (header === "Row") return { wch: 6 };
     const longest = table.rows.reduce((max, row) => {
       const cell = row[column];
       return Math.max(max, cell === undefined || cell === null ? 0 : String(cell).length);

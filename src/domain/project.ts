@@ -35,6 +35,13 @@ export type Artwork = {
   date?: string;
   accessionNumber?: string;
   locationOrLender?: string;
+  // The credit as it should PRINT — "Courtesy of the artist and Gallery X".
+  // Distinct from locationOrLender, which is registrar data (where the record
+  // or the loan lives); this is publication copy and is what the checklist PDF
+  // caption prints after the dimensions. Additive and optional (mirrors
+  // placementForm / matWidthMm): absent on every pre-existing artwork document,
+  // which still validates, so no schema-version bump.
+  creditLine?: string;
   dimensions: Dimensions;
   // Whether this work hangs on a wall or sits on the floor, as an explicit
   // curator override. Absent by default — the effective form is then DERIVED

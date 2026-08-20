@@ -48,11 +48,17 @@ export type ChecklistPdfExportOptions = {
   // A small bold ordinal above each artist line. Off by default: a numbered
   // checklist implies a hang sequence, which is only true for some documents.
   numbering: boolean;
-  // Adds the accession number after the dimensions line.
+  // Adds the object number after the dimensions line.
   accession: boolean;
-  // Appends a muted "Room · Wall" line for placed works. On by default — the
-  // thing this app knows that a collection database does not.
-  location: boolean;
+  // Adds the registrar's Location / lender as its own line after the credit
+  // line. Off by default: the credit line is the PUBLISHED credit, and where a
+  // loan physically lives is internal information that must not slip into a
+  // document handed to a printer by accident.
+  locationOrLender: boolean;
+  // Appends a muted "Room · Wall" line for placed works — the room and wall the
+  // work hangs on. On by default: the thing this app knows that a collection
+  // database does not.
+  placement: boolean;
 };
 
 export const DEFAULT_CHECKLIST_PDF_EXPORT_OPTIONS: ChecklistPdfExportOptions = {
@@ -61,7 +67,8 @@ export const DEFAULT_CHECKLIST_PDF_EXPORT_OPTIONS: ChecklistPdfExportOptions = {
   placedOnly: false,
   numbering: false,
   accession: false,
-  location: true
+  locationOrLender: false,
+  placement: true
 };
 
 // What the one Export-checklist dialog hands back. A discriminated union rather

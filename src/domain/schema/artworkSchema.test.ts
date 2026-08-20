@@ -74,6 +74,21 @@ describe("artworkSchema", () => {
     }
   });
 
+  it("round-trips a credit line, and accepts a legacy artwork without one", () => {
+    const artwork = {
+      ...createSampleArtwork(),
+      creditLine: "Courtesy of the artist and Gallery X"
+    };
+
+    expect(parseArtwork(artwork).creditLine).toBe("Courtesy of the artist and Gallery X");
+    expect(migrateArtwork(artwork)).toEqual(artwork);
+
+    // Additive, no schema-version bump: a document written before the field
+    // existed still validates and parses to undefined.
+    const { creditLine: _creditLine, ...legacy } = artwork;
+    expect(parseArtwork(legacy).creditLine).toBeUndefined();
+  });
+
   it("accepts an artwork with no placementForm (additive field — old documents unchanged)", () => {
     const artwork = createSampleArtwork();
     expect("placementForm" in artwork).toBe(false);

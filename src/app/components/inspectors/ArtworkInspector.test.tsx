@@ -331,3 +331,71 @@ describe("ArtworkInspector overall disclosure", () => {
     expect(screen.getByRole("textbox", { name: "Overall H" })).toBeInTheDocument();
   });
 });
+
+describe("ArtworkInspector metadata fields", () => {
+  it("edits Medium in the identity block, committing it as the virtual medium key", () => {
+    const onCommitField = vi.fn();
+    renderInspector({
+      artwork: { ...baseArtwork, metadata: { medium: "Oil on canvas" } },
+      onCommitField
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
+
+    // Medium is stored at artwork.metadata.medium, not as a column on Artwork —
+    // the field reads it from there and commits it back under the same name.
+    const mediumInput = screen.getByRole("textbox", { name: "Medium" });
+    expect(mediumInput).toHaveValue("Oil on canvas");
+
+    fireEvent.change(mediumInput, { target: { value: "Acrylic on linen" } });
+    fireEvent.blur(mediumInput);
+
+    expect(onCommitField).toHaveBeenCalledWith({ medium: "Acrylic on linen" });
+  });
+
+  it("clears Medium to undefined so the store deletes the metadata key", () => {
+    const onCommitField = vi.fn();
+    renderInspector({
+      artwork: { ...baseArtwork, metadata: { medium: "Oil on canvas" } },
+      onCommitField
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
+    const mediumInput = screen.getByRole("textbox", { name: "Medium" });
+    fireEvent.change(mediumInput, { target: { value: "   " } });
+    fireEvent.blur(mediumInput);
+
+    expect(onCommitField).toHaveBeenCalledWith({ medium: undefined });
+  });
+
+  it("keeps Details collapsed by default and offers Object no. / Location / Credit line inside it", () => {
+    const onCommitField = vi.fn();
+    const artwork = { ...baseArtwork, accessionNumber: "1990.12" };
+
+    // Collapsed by default: App owns the open flags, and "details" has no
+    // entry here, so the section falls back to closed.
+    const { unmount } = renderInspector({ artwork, onCommitField });
+    expect(screen.queryByRole("textbox", { name: "Credit line" })).not.toBeInTheDocument();
+    unmount();
+
+    renderInspector({ artwork, onCommitField, sectionsOpen: { details: true } });
+
+    expect(screen.getByRole("textbox", { name: "Object no." })).toHaveValue("1990.12");
+    expect(screen.getByRole("textbox", { name: "Location / lender" })).toBeInTheDocument();
+
+    const creditInput = screen.getByRole("textbox", { name: "Credit line" });
+    expect(creditInput).toHaveAttribute(
+      "placeholder",
+      "Courtesy of the artist and Gallery X"
+    );
+
+    fireEvent.change(creditInput, {
+      target: { value: "Courtesy of the artist and Gallery X" }
+    });
+    fireEvent.blur(creditInput);
+
+    expect(onCommitField).toHaveBeenCalledWith({
+      creditLine: "Courtesy of the artist and Gallery X"
+    });
+  });
+});

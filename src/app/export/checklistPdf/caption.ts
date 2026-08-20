@@ -6,8 +6,13 @@
 // Line ORDER is the museum caption convention (artist, title, date, medium,
 // dimensions, credit) and is not configurable. What IS configurable is which
 // optional lines join it, and those all sit where the convention puts them: the
-// ordinal above the block, the accession number with the object data, the
-// location last because it describes this show rather than the work.
+// ordinal above the block, the object number with the object data, the
+// registrar's location/lender after the printed credit, and the placement last
+// because it describes this show rather than the work.
+//
+// The credit line is `artwork.creditLine` — the credit as it should PRINT.
+// `locationOrLender` is registrar data and no longer prints by default; it joins
+// as its own line only when the export dialog's switch asks for it.
 import type { ChecklistExportRow } from "../../../domain/checklistExport/types";
 import type { Artwork, DisplayUnit } from "../../../domain/project";
 import { formatLength } from "../../../domain/units/length";
@@ -30,7 +35,10 @@ export type ChecklistCaptionOptions = {
   // The 1-based ordinal to print above the artist line. Absent = no ordinal.
   number?: number;
   accession: boolean;
-  location: boolean;
+  // Print the registrar's Location / lender as its own line after the credit.
+  locationOrLender: boolean;
+  // Print the muted "Room · Wall" line for a placed work.
+  placement: boolean;
 };
 
 // The artwork-scope units, which are the only two a caption ever prints: a
@@ -83,7 +91,7 @@ export function formatCaptionDimensions(
 
 // "Room · Wall" for a wall placement, the room alone for a floor one, nothing
 // for an unplaced work or a placement whose room no longer resolves.
-export function formatCaptionLocation(row: ChecklistExportRow): string {
+export function formatCaptionPlacement(row: ChecklistExportRow): string {
   const placement = row.placement;
   if (!placement) return "";
   const room = placement.roomName?.trim();
@@ -117,9 +125,12 @@ export function buildChecklistCaptionLines(
     ...(options.accession
       ? [{ text: text(artwork?.accessionNumber), style: "body" as const }]
       : []),
-    { text: text(artwork?.locationOrLender), style: "body" },
-    ...(options.location
-      ? [{ text: formatCaptionLocation(row), style: "muted" as const }]
+    { text: text(artwork?.creditLine), style: "body" },
+    ...(options.locationOrLender
+      ? [{ text: text(artwork?.locationOrLender), style: "body" as const }]
+      : []),
+    ...(options.placement
+      ? [{ text: formatCaptionPlacement(row), style: "muted" as const }]
       : [])
   ];
 

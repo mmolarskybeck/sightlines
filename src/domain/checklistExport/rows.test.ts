@@ -186,7 +186,9 @@ describe("buildChecklistExportTable", () => {
 
   it("uses headers the import wizard's aliases recognize", () => {
     expect(checklistExportHeaders("in")).toEqual([
-      "#",
+      // "Row", not "#": a bare "#" header is an object-number alias in the
+      // import wizard, so our own index column must not wear it.
+      "Row",
       "Artist",
       "Title",
       "Date",
@@ -195,8 +197,9 @@ describe("buildChecklistExportTable", () => {
       "Height (in)",
       "Width (in)",
       "Depth (in)",
-      "Accession number",
+      "Object number",
       "Location / Lender",
+      "Credit line",
       "Framing",
       "Status",
       "Room",
@@ -246,7 +249,7 @@ describe("buildChecklistExportTable", () => {
       artwork("art-wall", {
         metadata: {
           medium: "Oil on canvas",
-          "source:Credit line": "Gift of the artist",
+          "source:Provenance": "Gift of the artist",
           dimensionSourceText: "20 x 16 in",
           dimensionRole: "framed",
           Insurance: 12000
@@ -255,13 +258,13 @@ describe("buildChecklistExportTable", () => {
     ]);
     const table = buildChecklistExportTable({ project, rows: [rows[0]] });
 
-    expect(table.headers).toContain("Credit line");
+    expect(table.headers).toContain("Provenance");
     expect(table.headers).toContain("Insurance");
     expect(table.headers).not.toContain("dimensionSourceText");
     expect(table.headers).not.toContain("dimensionRole");
     expect(table.headers.filter((header) => header === "Medium")).toHaveLength(1);
     expect(table.rows[0][table.headers.indexOf("Medium")]).toBe("Oil on canvas");
-    expect(table.rows[0][table.headers.indexOf("Credit line")]).toBe("Gift of the artist");
+    expect(table.rows[0][table.headers.indexOf("Provenance")]).toBe("Gift of the artist");
     expect(table.rows[0][table.headers.indexOf("Insurance")]).toBe(12000);
   });
 
@@ -269,12 +272,19 @@ describe("buildChecklistExportTable", () => {
     const project = projectWithPlacements();
     const rows = buildChecklistExportRows(project, [
       artwork("art-wall", {
-        metadata: { "source:Height": "16 in", "source:Artist": "Agnes Martin" }
+        metadata: {
+          "source:Height": "16 in",
+          "source:Artist": "Agnes Martin",
+          // Credit line is a CORE column now, so the imported source column
+          // that shares its name must not grow a second one beside it.
+          "source:Credit line": "Gift of the artist"
+        }
       })
     ]);
     const table = buildChecklistExportTable({ project, rows: [rows[0]] });
 
     expect(table.headers).not.toContain("Height");
     expect(table.headers.filter((header) => header === "Artist")).toHaveLength(1);
+    expect(table.headers.filter((header) => header === "Credit line")).toHaveLength(1);
   });
 });

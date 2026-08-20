@@ -323,13 +323,22 @@ type UpdateArtworkChanges = Partial<
     | "date"
     | "accessionNumber"
     | "locationOrLender"
+    | "creditLine"
     | "dimensions"
     | "placementForm"
     | "matWidthMm"
     | "frame"
     | "frameIncludedInImage"
   >
->;
+> & {
+  // VIRTUAL field. Medium is not a column on Artwork: it lives at
+  // metadata.medium, the key the spreadsheet import wizard writes
+  // (domain/spreadsheetImport/importPlan.ts) and the key every export reads.
+  // updateArtwork translates it into that metadata slot so an inspector edit
+  // and an import land in exactly the same place. `undefined` (or blank)
+  // DELETES the key rather than storing an empty string.
+  medium?: string;
+};
 
 // The subset a bulk mat/frame apply can write across many works at once. Narrower
 // than UpdateArtworkChanges: identity/dimension/placement metadata is per-work,
@@ -2234,12 +2243,26 @@ export function createAppStore(deps: AppStoreDeps) {
         const before = get().libraryArtworks.find((artwork) => artwork.id === artworkId);
         if (!before) return;
 
-        const next: Artwork = { ...before, ...changes };
-        const touchedKeys = Object.keys(changes) as (keyof UpdateArtworkChanges)[];
+        // `medium` is virtual (see UpdateArtworkChanges): peel it off before the
+        // spread so it can never land as a stray Artwork column, then write it
+        // into the metadata slot every importer and exporter already reads.
+        const { medium, ...direct } = changes;
+        const next: Artwork = { ...before, ...direct };
+        if ("medium" in changes) {
+          const metadata = { ...before.metadata };
+          const trimmed = medium?.trim() ?? "";
+          if (trimmed.length === 0) delete metadata.medium;
+          else metadata.medium = trimmed;
+          next.metadata = metadata;
+        }
+
+        const touchedKeys = Object.keys(direct) as (keyof Artwork)[];
         const changedKeys = touchedKeys.filter(
           (key) => JSON.stringify(before[key]) !== JSON.stringify(next[key])
         );
-        if (changedKeys.length === 0) return;
+        const metadataChanged =
+          JSON.stringify(before.metadata) !== JSON.stringify(next.metadata);
+        if (changedKeys.length === 0 && !metadataChanged) return;
         const dimensionsChanged = changedKeys.includes("dimensions");
         // frameIncludedInImage flips the outer footprint (a flagged work drops
         // its mat/frame band via effectiveFraming), so toggling it must trigger

@@ -48,6 +48,41 @@ describe("createArtworkImportPlan", () => {
     expect(plan.drafts[0].imageFile?.name).toBe("mona-lisa.jpg");
   });
 
+  it("maps a credit-line column onto artwork.creditLine, beside the medium metadata", () => {
+    const table: ImportTable = {
+      sourceFilename: "metadata.csv",
+      sheetName: "Sheet1",
+      headerRowIndex: 0,
+      columns: [
+        { index: 0, label: "Title" },
+        { index: 1, label: "Medium" },
+        { index: 2, label: "Credit Line" },
+        { index: 3, label: "Lender" }
+      ],
+      rows: [
+        {
+          sourceRowIndex: 2,
+          values: [
+            "Untitled",
+            "Acrylic and graphite on canvas",
+            "Courtesy of the artist and Gallery X",
+            "Private collection"
+          ]
+        }
+      ]
+    };
+
+    const plan = createArtworkImportPlan({ table, imageFiles: [], projectUnit: "in" });
+    const { artwork } = plan.drafts[0];
+
+    expect(plan.mapping.creditLine).toBe(2);
+    // creditLine is a column on Artwork; medium stays in metadata (the key the
+    // inspector and every export read).
+    expect(artwork.creditLine).toBe("Courtesy of the artist and Gallery X");
+    expect(artwork.locationOrLender).toBe("Private collection");
+    expect(artwork.metadata.medium).toBe("Acrylic and graphite on canvas");
+  });
+
   it("reads cm-labeled height/width columns as centimeters even on an imperial project (Mona Lisa regression)", () => {
     const table: ImportTable = {
       sourceFilename: "metadata.csv",

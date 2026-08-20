@@ -50,23 +50,61 @@ import {
   SelectValue
 } from "../ui/select";
 
-type ArtworkTextFieldKey = "title" | "artist" | "date" | "accessionNumber" | "locationOrLender";
+type ArtworkTextFieldKey =
+  | "title"
+  | "artist"
+  | "date"
+  | "accessionNumber"
+  | "locationOrLender"
+  | "creditLine";
+
+// "medium" is a VIRTUAL key: it is stored at artwork.metadata.medium (the key
+// the spreadsheet import wizard writes and every export reads), not as a column
+// on Artwork. The store's updateArtwork translates it — see UpdateArtworkChanges
+// — so a typed edit and an imported column land in the same slot.
+type ArtworkEditableFieldKey = ArtworkTextFieldKey | "medium";
+
+export type ArtworkFieldChanges = Partial<Pick<Artwork, ArtworkTextFieldKey>> & {
+  medium?: string;
+};
+
+type ArtworkFieldSpec = {
+  key: ArtworkEditableFieldKey;
+  label: string;
+  placeholder?: string;
+};
 
 // Identity (what the work is) reads at the top beside the thumbnail and is
 // never collapsible — it anchors the panel. Registrar data (where its
 // record/loan lives — provenance) sinks to the bottom as the collapsed-by-
 // default "Details" section, since it's reference data a curator consults
 // less often than the physical measurements or day-to-day arranging.
-const IDENTITY_FIELDS: { key: ArtworkTextFieldKey; label: string }[] = [
+const IDENTITY_FIELDS: ArtworkFieldSpec[] = [
   { key: "title", label: "Title" },
   { key: "artist", label: "Artist" },
-  { key: "date", label: "Date" }
+  { key: "date", label: "Date" },
+  { key: "medium", label: "Medium", placeholder: "Oil on canvas" }
 ];
 
-const DETAILS_FIELDS: { key: ArtworkTextFieldKey; label: string }[] = [
-  { key: "accessionNumber", label: "Accession no." },
-  { key: "locationOrLender", label: "Location / lender" }
+const DETAILS_FIELDS: ArtworkFieldSpec[] = [
+  { key: "accessionNumber", label: "Object no." },
+  { key: "locationOrLender", label: "Location / lender" },
+  {
+    key: "creditLine",
+    label: "Credit line",
+    placeholder: "Courtesy of the artist and Gallery X"
+  }
 ];
+
+// The stored value behind an editable field key, virtual keys included.
+function artworkFieldValue(
+  artwork: Artwork,
+  key: ArtworkEditableFieldKey
+): string | undefined {
+  if (key !== "medium") return artwork[key];
+  const value = artwork.metadata.medium;
+  return typeof value === "string" ? value : undefined;
+}
 
 type DimensionAxisKey = "widthMm" | "heightMm" | "depthMm";
 
@@ -130,9 +168,7 @@ export function ArtworkInspector({
   // stored default (see useViewPreferences); its fallback is derived below.
   sectionsOpen: Record<string, boolean>;
   onCommitDimensions: (dimensions: Dimensions) => void;
-  onCommitField: (
-    changes: Partial<Pick<Artwork, ArtworkTextFieldKey>>
-  ) => void;
+  onCommitField: (changes: ArtworkFieldChanges) => void;
   // Changes the wall-vs-floor placement. Distinct from onCommitField's metadata
   // edits: this is a single-purpose commit the segmented control fires on
   // change. For a PLACED work it converts the placement itself in one undo step
@@ -264,7 +300,8 @@ export function ArtworkInspector({
               key={field.key}
               fieldKey={field.key}
               label={field.label}
-              value={artwork[field.key]}
+              placeholder={field.placeholder}
+              value={artworkFieldValue(artwork, field.key)}
               onCommitField={onCommitField}
             />
           ))}
@@ -319,7 +356,7 @@ function ArtworkIdentity({
   aspect: PixelAspect;
   thumbnailUrl?: string;
   unit: DisplayUnit;
-  onCommitField: (changes: Partial<Pick<Artwork, ArtworkTextFieldKey>>) => void;
+  onCommitField: (changes: ArtworkFieldChanges) => void;
 }) {
   const complete = isArtworkRecordComplete(artwork);
   // Explicit-edit latch, separate from `!complete`: once a record is complete
@@ -389,7 +426,8 @@ function ArtworkIdentity({
               key={field.key}
               fieldKey={field.key}
               label={field.label}
-              value={artwork[field.key]}
+              placeholder={field.placeholder}
+              value={artworkFieldValue(artwork, field.key)}
               onCommitField={onCommitField}
               // Anti-yank: focusing any identity field latches edit mode, so a
               // record turning complete mid-tab-through never collapses the
@@ -408,16 +446,18 @@ function TextField({
   label,
   onCommitField,
   onFocus,
+  placeholder,
   value
 }: {
-  fieldKey: ArtworkTextFieldKey;
+  fieldKey: ArtworkEditableFieldKey;
   label: string;
-  onCommitField: (
-    changes: Partial<Pick<Artwork, ArtworkTextFieldKey>>
-  ) => void;
+  onCommitField: (changes: ArtworkFieldChanges) => void;
   // Identity fields wire this to latch the edit state (anti-yank); the
   // registrar fields, which never compact, leave it out.
   onFocus?: () => void;
+  // Ghost example for fields whose expected shape isn't obvious from the label
+  // ("Credit line"). Omitted where the label already says it ("Title").
+  placeholder?: string;
   value: string | undefined;
 }) {
   const [input, setInput] = useState(value ?? "");
@@ -438,12 +478,13 @@ function TextField({
 
     if (nextValue === (value ?? undefined)) return;
 
-    onCommitField({ [fieldKey]: nextValue } as Partial<Pick<Artwork, ArtworkTextFieldKey>>);
+    onCommitField({ [fieldKey]: nextValue } as ArtworkFieldChanges);
   };
 
   return (
     <Field label={label}>
       <Input
+        placeholder={placeholder}
         value={input}
         onBlur={commit}
         onChange={(event) => setInput(event.target.value)}

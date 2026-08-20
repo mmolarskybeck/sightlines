@@ -98,7 +98,8 @@ describe("ExportChecklistDialog", () => {
         placedOnly: false,
         numbering: false,
         accession: false,
-        location: true
+        locationOrLender: false,
+        placement: true
       }
     });
   });
@@ -109,8 +110,9 @@ describe("ExportChecklistDialog", () => {
     pickOption("Sort by", "Placement (room, wall)");
     fireEvent.click(screen.getByRole("switch", { name: "Placed works only" }));
     fireEvent.click(screen.getByRole("switch", { name: "Show numbering" }));
-    fireEvent.click(screen.getByRole("switch", { name: "Show accession number" }));
-    fireEvent.click(screen.getByRole("switch", { name: "Show location" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Show object number" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Show location / lender" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Show placement" }));
     fireEvent.click(screen.getByRole("button", { name: "Export checklist" }));
 
     expect(onExport).toHaveBeenCalledWith({
@@ -121,7 +123,8 @@ describe("ExportChecklistDialog", () => {
         placedOnly: true,
         numbering: true,
         accession: true,
-        location: false
+        locationOrLender: true,
+        placement: false
       }
     });
   });
@@ -171,12 +174,14 @@ describe("ExportChecklistDialog", () => {
     renderDialog();
 
     expect(screen.queryByRole("combobox", { name: "Images" })).toBeNull();
-    expect(screen.getByRole("switch", { name: "Show location" })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "Show placement" })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "Show location / lender" })).toBeTruthy();
 
     pickOption("Format", "Excel (.xlsx)");
 
     expect(screen.getByRole("combobox", { name: "Images" })).toBeTruthy();
-    expect(screen.queryByRole("switch", { name: "Show location" })).toBeNull();
+    expect(screen.queryByRole("switch", { name: "Show placement" })).toBeNull();
+    expect(screen.queryByRole("switch", { name: "Show location / lender" })).toBeNull();
   });
 
   it("counts the works the current options will actually export", () => {

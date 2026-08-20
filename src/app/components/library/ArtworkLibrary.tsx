@@ -407,7 +407,7 @@ export function ArtworkLibraryPicker({
 }
 
 function SearchField({ value, onChange, autoFocus = false }: { value: string; onChange: (value: string) => void; autoFocus?: boolean }) {
-  return <label className="artwork-library-search"><MagnifyingGlassIcon aria-hidden="true" size={16} /><span className="visually-hidden">Search artworks</span><Input autoFocus={autoFocus} placeholder="Search title, artist, date, or accession number" type="search" value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+  return <label className="artwork-library-search"><MagnifyingGlassIcon aria-hidden="true" size={16} /><span className="visually-hidden">Search artworks</span><Input autoFocus={autoFocus} placeholder="Search title, artist, date, or object number" type="search" value={value} onChange={(event) => onChange(event.target.value)} /></label>;
 }
 
 function ArtworkTable({ artworks, checklistIds, thumbnails, unit, selected, sort, onSort, onSelectionChange, projectMembershipsByArtworkId, onOpenProject, onEditArtwork, onAdd }: { artworks: Artwork[]; checklistIds: Set<string>; thumbnails: Map<string, string>; unit: DisplayUnit; selected: Set<string>; sort: { key: LibrarySort; direction: SortDirection }; onSort: (key: LibrarySort) => void; onSelectionChange: (selected: Set<string>) => void; projectMembershipsByArtworkId?: Map<string, ProjectSummary[]> | Record<string, ProjectSummary[]>; onOpenProject?: (projectId: string) => void; onEditArtwork?: (artworkId: string) => void; onAdd: (id: string) => void }) {

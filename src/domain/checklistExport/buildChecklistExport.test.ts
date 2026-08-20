@@ -90,7 +90,7 @@ describe("buildChecklistExport", () => {
     const text = await readSheetText(result.bytes, "checklist.csv");
 
     const lines = text.replace(/^\uFEFF/, "").trim().split("\r\n");
-    expect(lines[0].startsWith("#,Artist,Title,Date,Medium,Dimensions,")).toBe(true);
+    expect(lines[0].startsWith("Row,Artist,Title,Date,Medium,Dimensions,")).toBe(true);
     expect(lines[1]).toContain("images/001_Artwork-art-placed.webp");
     expect(lines[1]).toContain("Placed");
     expect(lines[2]).toContain("Unplaced");

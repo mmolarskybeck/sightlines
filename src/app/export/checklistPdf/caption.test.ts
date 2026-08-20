@@ -5,7 +5,7 @@ import {
   buildChecklistCaptionLines,
   captionUnitsFor,
   formatCaptionDimensions,
-  formatCaptionLocation
+  formatCaptionPlacement
 } from "./caption";
 
 function artwork(overrides: Partial<Artwork> = {}): Artwork {
@@ -31,7 +31,7 @@ function row(overrides: Partial<ChecklistExportRow> = {}): ChecklistExportRow {
   };
 }
 
-const OPTIONS = { accession: false, location: true };
+const OPTIONS = { accession: false, locationOrLender: false, placement: true };
 
 describe("formatCaptionDimensions", () => {
   it("prints height first, one unit mark per group, with the other system in parentheses", () => {
@@ -89,7 +89,7 @@ describe("captionUnitsFor", () => {
   });
 });
 
-describe("formatCaptionLocation", () => {
+describe("formatCaptionPlacement", () => {
   const placement = {
     kind: "wall" as const,
     roomName: "Gallery 2",
@@ -100,21 +100,21 @@ describe("formatCaptionLocation", () => {
   };
 
   it("joins room and wall for a wall placement", () => {
-    expect(formatCaptionLocation(row({ placement }))).toBe("Gallery 2 · North");
+    expect(formatCaptionPlacement(row({ placement }))).toBe("Gallery 2 · North");
   });
 
   it("gives the room alone for a floor placement, which has no wall", () => {
     expect(
-      formatCaptionLocation(
+      formatCaptionPlacement(
         row({ placement: { ...placement, kind: "floor", wallName: null, wallIndex: -1 } })
       )
     ).toBe("Gallery 2");
   });
 
   it("says nothing for an unplaced work or an unresolvable room", () => {
-    expect(formatCaptionLocation(row())).toBe("");
+    expect(formatCaptionPlacement(row())).toBe("");
     expect(
-      formatCaptionLocation(row({ placement: { ...placement, roomName: null } }))
+      formatCaptionPlacement(row({ placement: { ...placement, roomName: null } }))
     ).toBe("");
   });
 });
@@ -124,6 +124,7 @@ describe("buildChecklistCaptionLines", () => {
     const lines = buildChecklistCaptionLines(
       row({
         artwork: artwork({
+          creditLine: "Courtesy of the artist and Gallery X",
           locationOrLender: "Collection of the artist",
           dimensions: { status: "known", widthMm: 209.55, heightMm: 269.875 }
         }),
@@ -146,9 +147,33 @@ describe("buildChecklistCaptionLines", () => {
       { text: "1990", style: "body" },
       { text: "Acrylic and graphite on canvas", style: "body" },
       { text: '10 5/8 × 8 1/4" (27 × 21 cm)', style: "body" },
-      { text: "Collection of the artist", style: "body" },
+      // The printed credit is creditLine. locationOrLender is registrar data
+      // and stays OFF the page unless its own switch asks for it.
+      { text: "Courtesy of the artist and Gallery X", style: "body" },
       { text: "Gallery 2 · North", style: "muted" }
     ]);
+  });
+
+  it("keeps location / lender off the page by default and slots it after the credit when asked", () => {
+    const base = row({
+      artwork: artwork({
+        creditLine: "Courtesy of the artist and Gallery X",
+        locationOrLender: "Collection of the artist"
+      })
+    });
+
+    expect(
+      buildChecklistCaptionLines(base, "in", OPTIONS).map((line) => line.text)
+    ).not.toContain("Collection of the artist");
+
+    const texts = buildChecklistCaptionLines(base, "in", {
+      ...OPTIONS,
+      locationOrLender: true
+    }).map((line) => line.text);
+
+    expect(texts.indexOf("Collection of the artist")).toBe(
+      texts.indexOf("Courtesy of the artist and Gallery X") + 1
+    );
   });
 
   it("drops blank fields rather than printing empty lines", () => {
@@ -193,7 +218,7 @@ describe("buildChecklistCaptionLines", () => {
     );
   });
 
-  it("omits the location line entirely when the switch is off", () => {
+  it("omits the placement line entirely when the switch is off", () => {
     const lines = buildChecklistCaptionLines(
       row({
         placement: {
@@ -206,7 +231,7 @@ describe("buildChecklistCaptionLines", () => {
         }
       }),
       "in",
-      { accession: false, location: false }
+      { accession: false, locationOrLender: false, placement: false }
     );
 
     expect(lines.some((line) => line.style === "muted")).toBe(false);

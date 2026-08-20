@@ -74,7 +74,8 @@ export function formatFramingSummary(
   return parts.join(" · ");
 }
 
-// Accession number when set; location/lender as the fallback scent; null
+// Object number (artwork.accessionNumber) when set; location/lender as the
+// fallback scent; null
 // (no summary at all) when the registrar cluster is empty.
 export function formatDetailsSummary(
   accessionNumber: string | undefined,

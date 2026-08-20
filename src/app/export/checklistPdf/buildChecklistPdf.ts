@@ -228,7 +228,8 @@ export async function buildChecklistPdf(
       buildChecklistCaptionLines(row, project.unit, {
         ...(options.numbering ? { number: index + 1 } : {}),
         accession: options.accession,
-        location: options.location
+        locationOrLender: options.locationOrLender,
+        placement: options.placement
       }),
       CHECKLIST_LAYOUT.captionWidthPt,
       measure

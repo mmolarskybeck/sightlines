@@ -15,6 +15,10 @@ export const artworkSchema = z.object({
   date: z.string().optional(),
   accessionNumber: z.string().optional(),
   locationOrLender: z.string().optional(),
+  // Additive, no schema-version bump (mirrors placementForm): absent on every
+  // legacy document, which validates and parses to undefined. Meaning lives on
+  // Artwork.creditLine (project.ts).
+  creditLine: z.string().optional(),
   dimensions: dimensionsSchema,
   // Optional placement-form override (wall vs floor). Additive: absent on every
   // pre-existing document, which still validates — no schema version bump.

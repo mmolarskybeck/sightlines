@@ -60,7 +60,8 @@ const OPTIONS: ChecklistPdfExportOptions = {
   placedOnly: false,
   numbering: false,
   accession: false,
-  location: true
+  locationOrLender: false,
+  placement: true
 };
 
 function seams(overrides: {
@@ -134,7 +135,7 @@ describe("buildChecklistPdf", () => {
     ).join(" ");
     const result = await buildChecklistPdf({
       project: projectWith(["a"]),
-      libraryArtworks: [artwork("a", { locationOrLender: longCredit })],
+      libraryArtworks: [artwork("a", { creditLine: longCredit })],
       options: OPTIONS,
       ...seams()
     });

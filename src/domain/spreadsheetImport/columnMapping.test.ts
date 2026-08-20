@@ -253,10 +253,10 @@ describe("guessColumnMapping", () => {
       columns: [
         { index: 0, label: "Object Number" },
         { index: 1, label: "Display Dimensions" },
-        { index: 2, label: "Credit Line" }
+        { index: 2, label: "Rights Statement" }
       ],
       rows: [
-        { sourceRowIndex: 1, values: ["1979.620.1", "24 x 30 in", "Gift of the artist"] }
+        { sourceRowIndex: 1, values: ["1979.620.1", "24 x 30 in", "Public domain"] }
       ]
     };
 
@@ -369,6 +369,72 @@ describe("guessColumnMapping", () => {
     for (let index = 0; index <= 6; index++) {
       expect(claimedColumns.has(index)).toBe(false);
     }
+  });
+
+  it("maps every object-number spelling the field answers to, punctuation included", () => {
+    // One header per case, each in its own single-column table: the greedy
+    // assignment gives one column per field, so testing them together would
+    // only prove which alias scores highest.
+    for (const header of [
+      "Accession Number",
+      "Object Number",
+      "Object No.",
+      "#",
+      "Loan Number",
+      "Loan No."
+    ]) {
+      const table: ImportTable = {
+        sourceFilename: "metadata.csv",
+        sheetName: "Sheet1",
+        headerRowIndex: 0,
+        columns: [{ index: 0, label: header }],
+        rows: [{ sourceRowIndex: 1, values: ["1979.620.1"] }]
+      };
+
+      expect([header, guessColumnMapping(table).mapping.accessionNumber]).toEqual([header, 0]);
+    }
+  });
+
+  it("maps the credit line's aliases and keeps it clear of location / lender", () => {
+    for (const header of [
+      "Credit Line",
+      "Credit",
+      "Courtesy",
+      "Courtesy Of",
+      "Lender Credit"
+    ]) {
+      const table: ImportTable = {
+        sourceFilename: "metadata.csv",
+        sheetName: "Sheet1",
+        headerRowIndex: 0,
+        columns: [{ index: 0, label: header }],
+        rows: [
+          { sourceRowIndex: 1, values: ["Courtesy of the artist and Gallery X"] }
+        ]
+      };
+
+      expect([header, guessColumnMapping(table).mapping.creditLine]).toEqual([header, 0]);
+    }
+
+    const both: ImportTable = {
+      sourceFilename: "metadata.csv",
+      sheetName: "Sheet1",
+      headerRowIndex: 0,
+      columns: [
+        { index: 0, label: "Credit Line" },
+        { index: 1, label: "Lender" }
+      ],
+      rows: [
+        {
+          sourceRowIndex: 1,
+          values: ["Courtesy of the artist and Gallery X", "Private collection"]
+        }
+      ]
+    };
+
+    const { mapping } = guessColumnMapping(both);
+    expect(mapping.creditLine).toBe(0);
+    expect(mapping.locationOrLender).toBe(1);
   });
 
   it("maps numeric accessions via header alias but not via a bare numeric column with no alias", () => {

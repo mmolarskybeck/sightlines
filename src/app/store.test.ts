@@ -3257,7 +3257,8 @@ describe("app store", () => {
         placedOnly: false,
         numbering: false,
         accession: false,
-        location: true
+        locationOrLender: false,
+        placement: true
       });
 
       expect(result?.filename).toBe("checklist-show-checklist.pdf");
@@ -3276,7 +3277,8 @@ describe("app store", () => {
         placedOnly: false,
         numbering: false,
         accession: false,
-        location: true
+        locationOrLender: false,
+        placement: true
       });
 
       expect(result).toBeNull();
@@ -3701,6 +3703,59 @@ describe("app store", () => {
       expect(
         artworkLibraryRepository.artworks.get(artworkId)?.dimensions.widthMm
       ).toBeUndefined();
+    });
+
+    it("writes the virtual medium field into metadata, and deletes the key when cleared", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const read = () => store.getState().libraryArtworks.find((a) => a.id === artworkId)!;
+
+      await store.getState().updateArtwork(artworkId, { medium: "Oil on canvas" });
+
+      // Medium is not a column on Artwork: it lands at metadata.medium, the
+      // slot the import wizard writes and every export reads.
+      expect(store.getState().error).toBeNull();
+      expect(read().metadata.medium).toBe("Oil on canvas");
+      expect(artworkLibraryRepository.artworks.get(artworkId)?.metadata.medium).toBe(
+        "Oil on canvas"
+      );
+      expect("medium" in read()).toBe(false);
+
+      const undoStackBefore = store.getState().undoStack.length;
+      // Blank clears rather than storing "": an empty key would export as an
+      // empty Medium column and re-import as a real (blank) value.
+      await store.getState().updateArtwork(artworkId, { medium: "  " });
+
+      expect("medium" in read().metadata).toBe(false);
+      expect(store.getState().undoStack).toHaveLength(undoStackBefore + 1);
+
+      await store.getState().undo();
+      expect(read().metadata.medium).toBe("Oil on canvas");
+    });
+
+    it("makes a metadata-only re-commit of the same medium a no-op", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      await store.getState().updateArtwork(artworkId, { medium: "Oil on canvas" });
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().updateArtwork(artworkId, { medium: "Oil on canvas" });
+
+      expect(store.getState().undoStack).toHaveLength(undoStackBefore);
+    });
+
+    it("round-trips a credit line through the library record", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+
+      await store.getState().updateArtwork(artworkId, {
+        creditLine: "Courtesy of the artist and Gallery X"
+      });
+
+      expect(store.getState().error).toBeNull();
+      expect(
+        artworkLibraryRepository.artworks.get(artworkId)?.creditLine
+      ).toBe("Courtesy of the artist and Gallery X");
     });
 
     it("is a no-op (no undo entry) when nothing actually changes", async () => {

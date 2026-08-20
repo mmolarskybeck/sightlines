@@ -20,7 +20,8 @@ function libraryArtwork(id: string, overrides: Partial<Artwork> = {}): Artwork {
     title: `Untitled ${id}`,
     date: "1974",
     accessionNumber: `1979.620.${id}`,
-    locationOrLender: "Gift of the artist",
+    locationOrLender: "Collection of the artist",
+    creditLine: "Courtesy of the artist and Gallery X",
     dimensions: { status: "known", widthMm: 1830, heightMm: 1830 },
     metadata: { medium: "Acrylic and graphite on canvas" },
     ...overrides
@@ -61,8 +62,9 @@ const EXPECTED: [ImportField, string][] = [
   ["height", "Height (in)"],
   ["width", "Width (in)"],
   ["depth", "Depth (in)"],
-  ["accessionNumber", "Accession number"],
+  ["accessionNumber", "Object number"],
   ["locationOrLender", "Location / Lender"],
+  ["creditLine", "Credit line"],
   ["imageFilename", "Image file"]
 ];
 
@@ -90,9 +92,36 @@ describe("checklist export → import wizard round trip", () => {
     const fields = await mappedFields(writeChecklistCsv(table), "checklist.csv");
     const claimed = new Set(fields.values());
 
-    // "#", Framing, Status, Room and Wall describe the export, not the work.
-    for (const header of ["#", "Framing", "Status", "Room", "Wall"]) {
+    // Row, Framing, Status, Room and Wall describe the export, not the work.
+    for (const header of ["Row", "Framing", "Status", "Room", "Wall"]) {
       expect(claimed.has(header)).toBe(false);
     }
+  });
+
+  // A bare "#" IS an object-number alias (collection exports head that column
+  // with nothing else), so the index column has to be headed "Row" or our own
+  // file would re-import its row numbers as object numbers. This is the
+  // assertion that keeps the two decisions in step.
+  it("keeps its row index out of the object-number field", async () => {
+    const { table } = exportedTable();
+    expect(table.headers[0]).toBe("Row");
+
+    const fields = await mappedFields(writeChecklistCsv(table), "checklist.csv");
+    expect(fields.get("accessionNumber")).toBe("Object number");
+
+    // Proof the hazard is real rather than hypothetical: with no other
+    // object-number column in the file, a bare "#" header claims the field —
+    // which is exactly what our index column would have done to itself.
+    const objectNumberIndex = table.headers.indexOf("Object number");
+    const withoutObjectNumber = <T,>(cells: T[]) =>
+      cells.filter((_cell, index) => index !== objectNumberIndex);
+    const hashTable = {
+      headers: withoutObjectNumber(table.headers).map((header, index) =>
+        index === 0 ? "#" : header
+      ),
+      rows: table.rows.map(withoutObjectNumber)
+    };
+    const hashFields = await mappedFields(writeChecklistCsv(hashTable), "hash.csv");
+    expect(hashFields.get("accessionNumber")).toBe("#");
   });
 });

@@ -6,6 +6,7 @@ export type ImportField =
   | "date"
   | "accessionNumber"
   | "locationOrLender"
+  | "creditLine"
   | "dimensions"
   | "height"
   | "width"
