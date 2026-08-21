@@ -1810,7 +1810,7 @@ export function App() {
         refreshCloudProjects={refreshCloudProjects}
         openCloudProjectBackup={openCloudProjectBackup}
         openCloudSyncedProject={openCloudSyncedProject}
-        syncLinked={syncMeta !== null}
+        syncLinked={syncMeta !== null && syncMeta.projectId === project?.id}
         syncStatus={syncStatus}
         syncError={syncError}
         enableProjectSync={enableProjectSync}

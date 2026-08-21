@@ -19,6 +19,7 @@ import {
 import type { Artwork, Project } from "../../domain/project";
 import { AssetNotFoundError } from "../../domain/repositories/assetRepository";
 import { SYNC_PROTOCOL_VERSION } from "../../domain/repositories/syncMetaRepository";
+import { CLOUD_SYNC_PROJECT_ALREADY_HERE_MESSAGE } from "../cloud/cloudBackupCopy";
 import { syncHeadPath } from "../cloud/dropboxAuth";
 import type { PackageExportMode } from "../../domain/schema/packageSchema";
 import { migrateProjectJsonWithReport } from "../../domain/schema/projectSchema";
@@ -27,6 +28,9 @@ import { selectBackupFingerprint } from "./cloudBackupSlice";
 import { BOOKKEEPING_MESSAGE } from "./cloudSyncSlice";
 import { writeCloudBackupMeta } from "./cloudBackupMeta";
 import { telemetry } from "../telemetry/telemetry";
+
+const INCOMPLETE_SYNC_IMPORT_MESSAGE =
+  "The Dropbox project opened, but some of its information could not be saved. Try syncing again.";
 
 // Set when the bytes being imported came from this account's own cloud backup
 // (the cloud project browser), carrying the timestamp of the file that was
@@ -144,6 +148,7 @@ export type PackageSliceActions = {
 
 export type PackageSliceInternals = {
   persist: (project: Project) => Promise<boolean>;
+  persistIfAbsent: (project: Project) => Promise<"created" | "exists" | "failed">;
   // Returns the document actually opened, which may differ from the one handed
   // in: setDocument runs the shared-opening load repair. Anything persisted
   // after a swap must be that return value.
@@ -156,7 +161,7 @@ export function createPackageSlice(
   get: () => AppState,
   internals: PackageSliceInternals
 ): { actions: PackageSliceActions } {
-  const { persist, setDocument, deps } = internals;
+  const { persist, persistIfAbsent, setDocument, deps } = internals;
 
   // Shared by exportProjectPackage (the open document) and
   // exportProjectPackageById (any saved project, via the repository) — the
@@ -290,6 +295,16 @@ export function createPackageSlice(
     provenance: ImportProvenance = {}
   ) {
     const { cloudRestore, syncPull, syncLink } = provenance;
+    // Backstop for the pipeline's link guard: a plan can sit parked in the
+    // artwork review for minutes and only the PLAN is replayed here, so the
+    // identity is re-checked against the authorization one last time rather
+    // than assumed to have been checked upstream. A link that isn't the project
+    // it is named for must write nothing at all.
+    if (syncLink && plan.project.id !== syncLink.projectId) {
+      throw new Error(
+        "the synced copy in Dropbox does not match the project it is named for."
+      );
+    }
     // Prerequisites BEFORE anything is finalized or written. finalize is pure,
     // but ordering the abort ahead of it keeps "nothing happened" literal.
     if (syncPull) await prepareSyncReplace(syncPull);
@@ -309,14 +324,53 @@ export function createPackageSlice(
     //    project already replaced with its images missing — the plan doc's
     //    "if any prerequisite fails, the existing copy is preserved untouched"
     //    inverted. So the replacing record is written LAST, as the single
-    //    commit point. The tradeoff is accepted deliberately: assets and
-    //    artworks here are additive and newly id'd, so a failure before the
-    //    commit point orphans some unreferenced blobs — harmless junk — while
-    //    the project the user is looking at is exactly as it was.
+    //    commit point.
+    //
+    // What may precede that commit point is therefore only what a failed
+    // commit can afford to leave behind. Assets and ADDED artworks qualify:
+    // they are newly id'd records nothing yet references, so an abort orphans
+    // some unreferenced blobs — harmless junk — while the project the user is
+    // looking at is exactly as it was. A "theirs" resolution does NOT qualify:
+    // it saves conflict.incoming under the EXISTING id, overwriting a library
+    // record other projects may show. Writing that before the commit point
+    // would make "this project was not replaced" true of the project and false
+    // of the library, with nothing to roll it back to (prepareSyncReplace
+    // snapshots the project, not the library). So the overwrites move to the
+    // far side of the commit point — see below.
     const replacing = syncPull !== undefined;
 
-    if (!replacing && !(await persist(commit.project))) {
-      throw new Error(get().error ?? "The imported project could not be saved.");
+    // Exactly the records that already exist on this device: a conflict is
+    // raised only for an incoming artwork whose id is already in the library,
+    // and finalize keeps that id for "theirs" (a "both" duplicate carries a
+    // fresh one, and artworksToAdd are absent by definition). Read from the
+    // plan, never re-read from the repository — the split has to describe the
+    // same decision the user reviewed.
+    const conflictedArtworkIds = new Set(
+      plan.conflicts.map((conflict) => conflict.incoming.id)
+    );
+    const artworkOverwrites = replacing
+      ? commit.artworksToSave.filter((artwork) => conflictedArtworkIds.has(artwork.id))
+      : [];
+    const artworksBeforeCommit = replacing
+      ? commit.artworksToSave.filter((artwork) => !conflictedArtworkIds.has(artwork.id))
+      : commit.artworksToSave;
+
+    if (!replacing) {
+      if (syncLink) {
+        // The earlier list check gives prompt feedback, but only IndexedDB's
+        // create-only add closes the cross-tab race: another tab may create or
+        // restore this id while the artwork review is parked. Claim the id
+        // atomically before writing any assets or shared artwork records.
+        const result = await persistIfAbsent(commit.project);
+        if (result === "exists") {
+          throw new Error(CLOUD_SYNC_PROJECT_ALREADY_HERE_MESSAGE);
+        }
+        if (result === "failed") {
+          throw new Error(get().error ?? "The imported project could not be saved.");
+        }
+      } else if (!(await persist(commit.project))) {
+        throw new Error(get().error ?? "The imported project could not be saved.");
+      }
     }
 
     for (const prepared of commit.assetsToSave) {
@@ -326,11 +380,16 @@ export function createPackageSlice(
         thumbnail: bytesToBlob(prepared.blobs.thumbnail.bytes, prepared.blobs.thumbnail.mimeType)
       });
     }
-    for (const artwork of commit.artworksToSave) {
+    for (const artwork of artworksBeforeCommit) {
       await deps.artworkLibraryRepository.save(artwork);
     }
 
-    const libraryArtworks = await deps.artworkLibraryRepository.list();
+    // Listed BEFORE the commit point on purpose: this read can still fail, and
+    // failing here still unwinds cleanly (nothing decisive is written yet).
+    // After the commit point it is re-read so the open document sees the
+    // overwrites, but that re-read may no longer unwind — hence two variables.
+    const preCommitLibraryArtworks = await deps.artworkLibraryRepository.list();
+    let libraryArtworks = preCommitLibraryArtworks;
 
     // The replace's commit point, after every read that could still fail. Past
     // this line the replacement HAS happened, which is what lets the sync slice
@@ -340,11 +399,52 @@ export function createPackageSlice(
       throw new Error(get().error ?? "The imported project could not be saved.");
     }
 
+    // A Dropbox rev may be acknowledged only if the durable project + shared
+    // artwork records reproduce the head exactly. Once the project commit point
+    // has passed, degradations no longer unwind the import, but they DO withhold
+    // ancestry so the state machine cannot call a mixed local/remote result
+    // synced or upload it as though the user had chosen that result.
+    let syncHeadAppliedExactly = true;
+
+    if (artworkOverwrites.length > 0) {
+      // The "theirs" overwrites, deliberately after the commit point. The
+      // project document references the same artwork id either way, so a
+      // failure here degrades coherently: the replace stands and the library
+      // simply keeps this device's version of that record — a visible,
+      // recoverable difference, not a half-replaced project. Nothing unwinds,
+      // and no failure is reported as an import failure.
+      let keptLocal = 0;
+      for (const artwork of artworkOverwrites) {
+        try {
+          await deps.artworkLibraryRepository.save(artwork);
+        } catch {
+          keptLocal += 1;
+          syncHeadAppliedExactly = false;
+        }
+      }
+      try {
+        libraryArtworks = await deps.artworkLibraryRepository.list();
+      } catch {
+        // A stale list is degraded — the document may show the pre-overwrite
+        // records until the next load — but the replace is done, so this must
+        // not unwind. Fall back to the list read before the commit point.
+        libraryArtworks = preCommitLibraryArtworks;
+        syncHeadAppliedExactly = false;
+      }
+      if (keptLocal > 0) {
+        toast.warning(
+          keptLocal === 1
+            ? "The project was replaced, but one artwork record kept this device’s version: it could not be saved."
+            : `The project was replaced, but ${keptLocal} artwork records kept this device’s version: they could not be saved.`
+        );
+      }
+    }
+
     const opened = setDocument(commit.project, { viewMode: "plan", libraryArtworks });
-    // This path persists BEFORE it opens (the write above has to precede the
-    // asset/artwork writes), so a load repair lands after the record is
-    // already down. A second write is the only way the stored project matches
-    // the one on screen. No recovery snapshot HERE: an ordinary import writes
+    // Both orders persist BEFORE they open (an ordinary import first, a
+    // replace at its commit point), so a load repair always lands after the
+    // record is already down. A second write is the only way the stored
+    // project matches the one on screen. No recovery snapshot HERE: an ordinary import writes
     // its own newly finalized project, so there is no earlier document of the
     // user's at risk — the one path that does overwrite (a sync pull) took its
     // snapshot in prepareSyncReplace before anything was written.
@@ -357,6 +457,7 @@ export function createPackageSlice(
     // repairSaved just gates the toast below so it doesn't call that a
     // success.
     const repairSaved = opened === commit.project || (await persist(opened));
+    if (!repairSaved) syncHeadAppliedExactly = false;
 
     // A successful import — even a degraded one — is not an error, so it
     // no longer rides the red `error` banner (see docs/status.md). Both
@@ -397,6 +498,13 @@ export function createPackageSlice(
     // device holds content it does not.
     const syncRev = syncPull?.rev ?? syncLink?.rev ?? null;
     if (syncRev === null) return;
+    if (!syncHeadAppliedExactly) {
+      // Keep the previous accepted rev (or no link, for a first-device import)
+      // and do not seed backup metadata. The retry action re-runs the normal
+      // rev matrix from the last ancestry this device can actually prove.
+      set({ syncStatus: "error", syncError: INCOMPLETE_SYNC_IMPORT_MESSAGE });
+      return;
+    }
     try {
       await seedSyncMeta(opened, libraryArtworks, syncRev);
       if (!cloudRestore) {
@@ -475,6 +583,21 @@ export function createPackageSlice(
       // caps pre-inflation; readPackageManifest migrates embedded docs).
       const { manifest, files } = await openSightlinesPackage(new Uint8Array(bytes));
 
+      // Link mode's authorization check, the sibling of the replace path's
+      // replaceProjectId guard (which the planner enforces): a head file is
+      // named for exactly one project, so a head holding a DIFFERENT project is
+      // a corrupted or mixed-up file, not a version of anything. Refuse the
+      // whole import rather than import the stranger: committing it would seed
+      // this device's sync bookkeeping with the head's rev under the imported
+      // project's identity and head path — a lineage no later check can
+      // untangle, and one that parks bogus conflicts against a path this
+      // project was never synced to.
+      if (options.syncLink && manifest.project.id !== options.syncLink.projectId) {
+        throw new Error(
+          "the synced copy in Dropbox does not match the project it is named for."
+        );
+      }
+
       // 3. Asset intake validation: re-hash, MIME allowlist, decode guards.
       const validated = await validatePackageAssets(manifest, files);
 
@@ -495,6 +618,19 @@ export function createPackageSlice(
       // intentionally tolerant, but treating a failed read as an empty
       // repository here could overwrite an existing project.
       const summaries = await deps.projectRepository.list();
+
+      // Link mode is identity-preserving BY CONTRACT, so the planner's
+      // rename-on-collision fallback is not an acceptable outcome here: a
+      // renamed import would record the head's rev against a brand-new id while
+      // the project the head is actually named for sits untouched beside it.
+      // The cloud browser already routes a local match to save-a-copy, but it
+      // reads this device before the download (the state can change in between)
+      // and the folder rows it shares a path with match on an id PREFIX, so the
+      // authoritative refusal belongs here, full id against full id. Same
+      // wording as that surface, so one refusal doesn't read as two rules.
+      if (options.syncLink && summaries.some((summary) => summary.id === manifest.project.id)) {
+        throw new Error(CLOUD_SYNC_PROJECT_ALREADY_HERE_MESSAGE);
+      }
 
       // 4-5. §6 merge rules + project identity, as one pure plan.
       const plan = planPackageImport(

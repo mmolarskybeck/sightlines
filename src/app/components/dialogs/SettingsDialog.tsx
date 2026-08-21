@@ -105,8 +105,15 @@ export function SettingsDialog({
   const deleteProject = useAppStore((state) => state.deleteProject);
   // Sync state is read straight from the store like the project fields above —
   // it belongs to the open project, not to anything App has to hand down.
-  const syncMeta = useAppStore((state) => state.syncMeta);
+  const storedSyncMeta = useAppStore((state) => state.syncMeta);
   const disableProjectSync = useAppStore((state) => state.disableProjectSync);
+  // Defense in depth against a stale async refresh: only metadata that names
+  // the OPEN project counts as "this project is linked" — offering "Turn off
+  // sync" here against another project's record would unlink the wrong one.
+  const syncMeta =
+    storedSyncMeta !== null && storedSyncMeta.projectId === project?.id
+      ? storedSyncMeta
+      : null;
 
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [privacySaveFailed, setPrivacySaveFailed] = useState(false);

@@ -8,6 +8,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { createSightlinesPackage } from "../../domain/package/buildPackage";
 import type { Project } from "../../domain/project";
+import {
+  SYNC_PROTOCOL_VERSION,
+  type ProjectSyncMeta
+} from "../../domain/repositories/syncMetaRepository";
 import { syncHeadPath } from "../cloud/dropboxAuth";
 import type { CloudBackupProvider } from "../cloud/provider";
 import { createInertCrossTabSync } from "../crossTabSync";
@@ -133,6 +137,7 @@ describe("packageSlice sync imports", () => {
 
   beforeEach(() => {
     vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.warning).mockClear();
     window.localStorage.clear();
     repository = new InMemoryProjectRepository();
     artworkLibraryRepository = new InMemoryArtworkLibraryRepository();
@@ -376,6 +381,150 @@ describe("packageSlice sync imports", () => {
     });
   });
 
+  // A "theirs" resolution is the one write in a replace that is NOT additive:
+  // it saves the incoming record under an id the library already has, so it
+  // overwrites a work every project on this device may show. That is why it
+  // sits on the far side of the commit point, unlike the assets and newly id'd
+  // artworks around it.
+  describe("a replace whose artwork review kept the other device's record", () => {
+    // Sets up the one shape that produces a "theirs" overwrite: the same
+    // artwork id on both sides with different content, so the pull parks for
+    // review instead of committing straight through.
+    async function setUpTheirsConflict(store: Awaited<ReturnType<typeof bootStore>>) {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().libraryArtworks[0]!.id;
+      const incoming = store.getState().libraryArtworks[0]!;
+      const target = store.getState().project!;
+      await repository.save(target);
+      const bytes = await packageBytesOf(
+        { ...target, title: "From the other device" },
+        store.getState().libraryArtworks
+      );
+
+      // Diverge the local record AFTER the package was built, so the two sides
+      // differ by exactly this edit.
+      await artworkLibraryRepository.save({ ...incoming, title: "Local piece" });
+      store.setState({ libraryArtworks: await artworkLibraryRepository.list() });
+
+      return {
+        artworkId,
+        target,
+        bytes,
+        incomingTitle: incoming.title,
+        // Read after the local edit: the drift check compares against what is
+        // on this device at the moment the pull is decided.
+        expectedLocalFingerprint: selectBackupFingerprint(
+          store.getState().project!,
+          store.getState().libraryArtworks
+        )
+      };
+    }
+
+    it("overwrites the shared library record only after the project is replaced", async () => {
+      const store = await bootStore();
+      const { artworkId, target, bytes, incomingTitle, expectedLocalFingerprint } =
+        await setUpTheirsConflict(store);
+
+      expect(
+        await store.getState().importSyncHeadPackage(bytes, {
+          replace: { targetProjectId: target.id, rev: "rev-9", expectedLocalFingerprint }
+        })
+      ).toBe(true);
+      expect(store.getState().pendingPackageImport?.plan.conflicts).toHaveLength(1);
+
+      // What the stored project looked like at the instant each library write
+      // ran — the ordering claim, observed rather than asserted about code.
+      const storedTitleAtSave: string[] = [];
+      const realSave = artworkLibraryRepository.save.bind(artworkLibraryRepository);
+      artworkLibraryRepository.save = async (artwork) => {
+        storedTitleAtSave.push(repository.projects.get(target.id)!.title);
+        await realSave(artwork);
+      };
+
+      await store.getState().resolvePackageImportConflicts({ [artworkId]: "theirs" });
+
+      expect(storedTitleAtSave).toEqual(["From the other device"]);
+      // The overwrite really did land, and the open document sees it: the list
+      // that feeds setDocument is re-read after the post-commit writes.
+      expect((await artworkLibraryRepository.get(artworkId)).title).toBe(incomingTitle);
+      expect(store.getState().libraryArtworks[0]?.title).toBe(incomingTitle);
+      expect((await repository.load(target.id)).title).toBe("From the other device");
+    });
+
+    it("leaves the shared library record alone when the replacing save fails", async () => {
+      const store = await bootStore();
+      const { artworkId, target, bytes, expectedLocalFingerprint } =
+        await setUpTheirsConflict(store);
+
+      expect(
+        await store.getState().importSyncHeadPackage(bytes, {
+          replace: { targetProjectId: target.id, rev: "rev-9", expectedLocalFingerprint }
+        })
+      ).toBe(true);
+
+      repository.save = async () => {
+        throw new Error("project store unavailable");
+      };
+      await store.getState().resolvePackageImportConflicts({ [artworkId]: "theirs" });
+
+      // Nothing was replaced — and because the overwrite waits for the commit
+      // point, "nothing was replaced" is true of the library too.
+      expect(vi.mocked(toast.error)).toHaveBeenCalled();
+      expect(repository.projects.get(target.id)?.title).toBe("On this device");
+      expect((await artworkLibraryRepository.get(artworkId)).title).toBe("Local piece");
+      expect(await syncMetaRepository.get(target.id)).toBeUndefined();
+    });
+
+    it("keeps the replace when a post-commit overwrite fails, and says which record", async () => {
+      const store = await bootStore();
+      const { artworkId, target, bytes, expectedLocalFingerprint } =
+        await setUpTheirsConflict(store);
+      const previousMeta: ProjectSyncMeta = {
+        projectId: target.id,
+        provider: "dropbox" as const,
+        accountId: "dbid:tester",
+        remotePath: syncHeadPath(target.id),
+        lastAcceptedRev: "rev-8",
+        fingerprintAtRev: expectedLocalFingerprint,
+        lastPullAtIso: null,
+        lastPushAtIso: "2026-08-19T10:00:00.000Z",
+        protocolVersion: SYNC_PROTOCOL_VERSION,
+        paused: false
+      };
+      await syncMetaRepository.put(previousMeta);
+      store.setState({ syncMeta: previousMeta, syncStatus: "synced" });
+
+      expect(
+        await store.getState().importSyncHeadPackage(bytes, {
+          replace: { targetProjectId: target.id, rev: "rev-9", expectedLocalFingerprint }
+        })
+      ).toBe(true);
+
+      artworkLibraryRepository.save = async () => {
+        throw new Error("library store unavailable");
+      };
+      await store.getState().resolvePackageImportConflicts({ [artworkId]: "theirs" });
+
+      // The replace happened, so nothing unwinds and nothing may claim the
+      // import failed. The library keeps this device's version of the record,
+      // which the warning names in project language.
+      expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
+      expect((await repository.load(target.id)).title).toBe("From the other device");
+      expect(store.getState().project?.title).toBe("From the other device");
+      expect((await artworkLibraryRepository.get(artworkId)).title).toBe("Local piece");
+      // The downloaded rev describes the incoming artwork too. Because that
+      // record did not land, preserve the last ancestry this device can prove
+      // instead of pairing rev-9 with a fingerprint of the kept-local mixture.
+      expect(await syncMetaRepository.get(target.id)).toEqual(previousMeta);
+      expect(readCloudBackupMeta(target.id).backedUpFingerprint).toBeNull();
+      expect(store.getState().syncStatus).toBe("error");
+      expect(store.getState().syncError).toContain("could not be saved");
+      expect(vi.mocked(toast.warning)).toHaveBeenCalledWith(
+        expect.stringContaining("one artwork record kept this device’s version")
+      );
+    });
+  });
+
   describe("a sync link for a project this device does not have", () => {
     it("imports under its own identity and links it to the head", async () => {
       const store = await bootStore();
@@ -404,6 +553,98 @@ describe("packageSlice sync imports", () => {
       // earlier document of the user's here to preserve.
       const snapshots = await projectSnapshotRepository.listByProject("cloud-only-project");
       expect(snapshots.map((snapshot) => snapshot.projectTitle)).toEqual(["Only in Dropbox"]);
+    });
+
+    // A head's file name IS the project id, so a head holding a different
+    // project is a corrupt or mixed-up file, never a version of anything.
+    // Importing it would record this head's rev under the stranger's identity
+    // and head path — a lineage no later check can untangle.
+    it("refuses a head whose package is a different project than it is named for", async () => {
+      const store = await bootStore();
+      const open = store.getState().project!;
+      const bytes = await packageBytesOf({
+        ...open,
+        id: "some-other-project",
+        title: "Not what the head is named for"
+      });
+
+      const accepted = await store.getState().importSyncHeadPackage(bytes, {
+        link: { projectId: "cloud-only-project", rev: "rev-3" }
+      });
+
+      expect(accepted).toBe(false);
+      expect(store.getState().project?.id).toBe(open.id);
+      expect([...repository.projects.keys()]).toEqual([open.id]);
+      expect(await syncMetaRepository.get("cloud-only-project")).toBeUndefined();
+      expect(await syncMetaRepository.get("some-other-project")).toBeUndefined();
+    });
+
+    // Link mode is identity-preserving by contract, so the planner's
+    // rename-on-collision fallback is not an acceptable outcome: it would bind
+    // the head's rev to a brand-new id while the project the head is named for
+    // sits untouched beside it.
+    it("refuses to link a project that is already on this device", async () => {
+      const store = await bootStore();
+      const open = store.getState().project!;
+      const bytes = await packageBytesOf({ ...open, title: "From the other device" });
+
+      const accepted = await store.getState().importSyncHeadPackage(bytes, {
+        link: { projectId: open.id, rev: "rev-3" }
+      });
+
+      expect(accepted).toBe(false);
+      // Neither renamed into a fresh id nor overwritten in place.
+      expect([...repository.projects.keys()]).toEqual([open.id]);
+      expect((await repository.load(open.id)).title).toBe("On this device");
+      expect(store.getState().project?.title).toBe("On this device");
+      expect(await syncMetaRepository.get(open.id)).toBeUndefined();
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+        "Import failed: That project is already on this device."
+      );
+    });
+
+    it("refuses a project created while the artwork review is open", async () => {
+      const store = await bootStore();
+      const open = store.getState().project!;
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const localArtwork = store.getState().libraryArtworks[0]!;
+      const incomingArtwork = { ...localArtwork, title: "Dropbox piece" };
+      const incomingProject: Project = {
+        ...open,
+        id: "cloud-only-project",
+        title: "Only in Dropbox",
+        checklistArtworkIds: [localArtwork.id]
+      };
+      const bytes = await packageBytesOf(incomingProject, [incomingArtwork]);
+
+      expect(
+        await store.getState().importSyncHeadPackage(bytes, {
+          link: { projectId: incomingProject.id, rev: "rev-3" }
+        })
+      ).toBe(true);
+      expect(store.getState().pendingPackageImport?.plan.conflicts).toHaveLength(1);
+
+      // Another tab creates/restores this identity while the dialog is parked.
+      await repository.save({
+        ...incomingProject,
+        title: "Created in another tab",
+        checklistArtworkIds: []
+      });
+      await store
+        .getState()
+        .resolvePackageImportConflicts({ [localArtwork.id]: "theirs" });
+
+      expect((await repository.load(incomingProject.id)).title).toBe(
+        "Created in another tab"
+      );
+      expect((await artworkLibraryRepository.get(localArtwork.id)).title).toBe(
+        localArtwork.title
+      );
+      expect(store.getState().project?.id).toBe(open.id);
+      expect(await syncMetaRepository.get(incomingProject.id)).toBeUndefined();
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+        "Import failed: That project is already on this device."
+      );
     });
 
     it("still imports, but links nothing, when the account id is unknown", async () => {

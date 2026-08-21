@@ -193,13 +193,20 @@ export function createCloudSyncSlice(
   async function saveMeta(next: ProjectSyncMeta): Promise<boolean> {
     try {
       await deps.syncMetaRepository.put(next);
-      set({ syncMeta: next });
+      // The write is real either way, but observable state always describes
+      // the OPEN project — a slow save finishing after a project switch must
+      // not stamp another project's link onto whoever is on screen now.
+      if (get().project?.id === next.projectId) set({ syncMeta: next });
       return true;
     } catch {
       // The head write already landed, so the remote is ahead of what this
       // device can prove it descends from. The next check therefore reads as a
       // conflict rather than as license to overwrite — the safe direction.
-      set({ syncStatus: "error", syncError: BOOKKEEPING_MESSAGE });
+      // Same paint guard as above: the failure belongs to `next`'s project,
+      // and its next open re-derives it honestly.
+      if (get().project?.id === next.projectId) {
+        set({ syncStatus: "error", syncError: BOOKKEEPING_MESSAGE });
+      }
       return false;
     }
   }
@@ -364,9 +371,14 @@ export function createCloudSyncSlice(
       if (!(await saveMeta(next))) return "failed";
 
       const current = get().project;
+      if (current === null || current.id !== project.id) {
+        // The push really happened and its lineage is recorded above — but the
+        // project it belongs to is no longer on screen, so its outcome must
+        // not be stamped onto whoever is. Repaint what IS open instead.
+        await actions.refreshProjectSyncState();
+        return "ok";
+      }
       const stillSame =
-        current !== null &&
-        current.id === project.id &&
         selectBackupFingerprint(current, get().libraryArtworks) === capturedFingerprint;
       set({
         syncStatus: stillSame ? "synced" : "pending",
@@ -500,6 +512,11 @@ export function createCloudSyncSlice(
         return;
       }
       const meta = await loadUsableMeta(project);
+      // The open project can change while the metadata read is in flight, and
+      // the switch triggers its own refresh — the NEWER refresh owns the
+      // state. Applying this one anyway would paint one project's link status
+      // (or clear a link) onto another.
+      if (get().project?.id !== project.id) return;
       if (!meta) {
         set({ ...CLOUD_SYNC_SLICE_INITIAL });
         return;
@@ -543,14 +560,27 @@ export function createCloudSyncSlice(
     async disableProjectSync() {
       const project = get().project;
       if (!project) return;
+      const projectId = project.id;
       try {
-        await deps.syncMetaRepository.delete(project.id);
+        await deps.syncMetaRepository.delete(projectId);
       } catch {
+        // The failure belongs to the project whose metadata we tried to delete,
+        // not to whichever project may have opened while storage was pending.
+        if (get().project?.id !== projectId) {
+          await actions.refreshProjectSyncState();
+          return;
+        }
         set({ syncStatus: "error", syncError: BOOKKEEPING_MESSAGE });
         return;
       }
       // The remote head stays exactly where it is: other devices are still
       // syncing against it, and unlinking here must never destroy it.
+      if (get().project?.id !== projectId) {
+        // The unlink really happened for the captured project. Repaint the one
+        // now on screen instead of clearing its valid metadata and status.
+        await actions.refreshProjectSyncState();
+        return;
+      }
       set({ ...CLOUD_SYNC_SLICE_INITIAL });
     },
 
@@ -563,6 +593,14 @@ export function createCloudSyncSlice(
       if (get().syncStatus === "checking" || writing()) return;
 
       let meta = await loadUsableMeta(project);
+      // A project switch during the metadata read means this evaluation is
+      // about a project that is no longer on screen — clearing or painting
+      // state now would hit the wrong one. The switch's own refresh (and the
+      // next poll point) cover whatever is open.
+      if (get().project?.id !== project.id) {
+        await abandon();
+        return;
+      }
       if (!meta) {
         set({ ...CLOUD_SYNC_SLICE_INITIAL });
         return;
@@ -586,6 +624,12 @@ export function createCloudSyncSlice(
         head = await active.getSyncHead(project.id);
         remoteRev = head?.rev ?? null;
       } catch (error) {
+        // Same stale-window rule as above: a head-read failure for a project
+        // that is no longer open belongs to nobody on screen.
+        if (get().project?.id !== project.id) {
+          await abandon();
+          return;
+        }
         const kind = errorKind(error);
         if (kind === "rate-limit") {
           set({ syncStatus: statusForFingerprint(meta, project) });

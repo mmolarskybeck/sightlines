@@ -744,6 +744,72 @@ describe("cloudSyncSlice", () => {
     });
   });
 
+  describe("stale async paints", () => {
+    // The refresh reads the repository, and the open project can change while
+    // it does. The NEWER refresh owns the state: a slow read for the previous
+    // project must never paint its link status over whoever is open now.
+    it("discards a metadata refresh that finishes after a project switch", async () => {
+      const provider = makeSyncProvider();
+      const store = await bootStore(provider);
+      await store.getState().enableProjectSync();
+      const projectA = store.getState().project!;
+
+      // Gate project A's metadata read so its refresh resolves LAST.
+      let releaseA: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        releaseA = resolve;
+      });
+      const realGet = syncMetaRepository.get.bind(syncMetaRepository);
+      syncMetaRepository.get = async (projectId) => {
+        if (projectId === projectA.id) await gate;
+        return realGet(projectId);
+      };
+
+      const staleRefresh = store.getState().refreshProjectSyncState();
+      const other: Project = { ...projectA, id: "another-project", title: "Another show" };
+      await repository.save(other);
+      store.setState({ project: other });
+      // The switch's own refresh completes first: B is unlinked.
+      await store.getState().refreshProjectSyncState();
+      expect(store.getState().syncMeta).toBeNull();
+
+      releaseA();
+      await staleRefresh;
+
+      // A's metadata did not clobber B's state.
+      expect(store.getState().syncMeta).toBeNull();
+      expect(store.getState().syncStatus).toBe("idle");
+    });
+
+    // A push that finishes after the curator moved on really happened — its
+    // lineage is recorded for its own project — but its outcome must not be
+    // stamped onto the project now on screen.
+    it("repaints the open project when a push completes after a switch", async () => {
+      let duringUpload: (() => void) | null = null;
+      const provider = makeSyncProvider({ onUpload: () => duringUpload?.() });
+      const store = await bootStore(provider);
+      await store.getState().enableProjectSync();
+      const projectA = store.getState().project!;
+      const revBefore = (await syncMetaRepository.get(projectA.id))!.lastAcceptedRev;
+
+      editLocally(store, "Edited before the push");
+      const other: Project = { ...projectA, id: "another-project", title: "Another show" };
+      await repository.save(other);
+      duringUpload = () => store.setState({ project: other });
+
+      await store.getState().pushProjectSync();
+
+      // The push landed and A's lineage advanced in the repository…
+      const metaAfter = await syncMetaRepository.get(projectA.id);
+      expect(metaAfter!.lastAcceptedRev).not.toBe(revBefore);
+      // …but the state describes B, which is unlinked — not A's "synced"
+      // (or a bogus "pending") stamped onto it.
+      expect(store.getState().project?.id).toBe("another-project");
+      expect(store.getState().syncMeta).toBeNull();
+      expect(store.getState().syncStatus).toBe("idle");
+    });
+  });
+
   describe("turning sync off", () => {
     it("unlinks this device and leaves the canonical copy alone", async () => {
       const provider = makeSyncProvider();
@@ -758,6 +824,81 @@ describe("cloudSyncSlice", () => {
       expect(store.getState().syncStatus).toBe("idle");
       // Other devices are still syncing against it.
       expect(provider.heads.get(project.id)?.rev).toBe("rev-uploaded-1");
+    });
+
+    it("repaints the new project when deletion finishes after a switch", async () => {
+      const provider = makeSyncProvider();
+      const store = await bootStore(provider);
+      await store.getState().enableProjectSync();
+      const projectA = store.getState().project!;
+
+      let releaseDelete: () => void = () => {};
+      const deleteGate = new Promise<void>((resolve) => {
+        releaseDelete = resolve;
+      });
+      const realDelete = syncMetaRepository.delete.bind(syncMetaRepository);
+      syncMetaRepository.delete = async (projectId) => {
+        if (projectId === projectA.id) await deleteGate;
+        await realDelete(projectId);
+      };
+
+      const pendingDisable = store.getState().disableProjectSync();
+      const projectB: Project = {
+        ...projectA,
+        id: "another-project",
+        title: "Another show"
+      };
+      await repository.save(projectB);
+      store.setState({ project: projectB });
+      await store.getState().enableProjectSync();
+      expect(store.getState().syncMeta?.projectId).toBe(projectB.id);
+
+      releaseDelete();
+      await pendingDisable;
+
+      expect(await syncMetaRepository.get(projectA.id)).toBeUndefined();
+      expect((await syncMetaRepository.get(projectB.id))?.projectId).toBe(projectB.id);
+      expect(store.getState().syncMeta?.projectId).toBe(projectB.id);
+      expect(store.getState().syncStatus).toBe("synced");
+      expect(store.getState().syncError).toBeNull();
+    });
+
+    it("does not show the old project's deletion failure after a switch", async () => {
+      const provider = makeSyncProvider();
+      const store = await bootStore(provider);
+      await store.getState().enableProjectSync();
+      const projectA = store.getState().project!;
+
+      let releaseDelete: () => void = () => {};
+      const deleteGate = new Promise<void>((resolve) => {
+        releaseDelete = resolve;
+      });
+      syncMetaRepository.delete = async (projectId) => {
+        if (projectId === projectA.id) await deleteGate;
+        throw new Error("metadata store unavailable");
+      };
+
+      const pendingDisable = store.getState().disableProjectSync();
+      const projectB: Project = {
+        ...projectA,
+        id: "another-project",
+        title: "Another show"
+      };
+      await repository.save(projectB);
+      store.setState({ project: projectB });
+      await store.getState().enableProjectSync();
+      expect(store.getState().syncMeta?.projectId).toBe(projectB.id);
+
+      releaseDelete();
+      await pendingDisable;
+
+      // A remains linked because its deletion failed, while the visible state
+      // remains B's successful link rather than A's unrelated error.
+      expect((await syncMetaRepository.get(projectA.id))?.projectId).toBe(projectA.id);
+      expect((await syncMetaRepository.get(projectB.id))?.projectId).toBe(projectB.id);
+      expect(store.getState().syncMeta?.projectId).toBe(projectB.id);
+      expect(store.getState().syncStatus).toBe("synced");
+      expect(store.getState().syncError).toBeNull();
     });
   });
 });

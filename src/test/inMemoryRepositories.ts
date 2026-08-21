@@ -26,6 +26,13 @@ export class InMemoryProjectRepository implements ProjectRepository {
     return project;
   }
 
+  async create(project: Project): Promise<boolean> {
+    parseProject(project);
+    if (this.projects.has(project.id)) return false;
+    this.projects.set(project.id, project);
+    return true;
+  }
+
   async save(project: Project): Promise<void> {
     parseProject(project);
     this.projects.set(project.id, project);

@@ -971,47 +971,81 @@ export function createAppStore(deps: AppStoreDeps) {
       }
     }
 
+    function finishProjectPersist(project: Project): void {
+      // Clear any prior save failure — a successful persist is the recovery.
+      set({ saveState: "saved", saveError: null });
+      // Tell the other tabs what is now in storage, so the one holding a stale
+      // copy of THIS project can reload instead of overwriting us later.
+      getCrossTabSync().announceProjectSaved(project.id, project.updatedAt);
+      // Fire-and-forget: an interval snapshot must never affect saving.
+      void maybeIntervalSnapshot(project);
+      // A reload we owed but deferred may be flushable now that this save is
+      // done (the "saving" gate above is one of the reasons it can be stuck).
+      void flushExternalReload("save");
+    }
+
+    function failProjectPersist(
+      error: unknown,
+      retry: () => Promise<void>
+    ): void {
+      // A ZodError's .message is the JSON-stringified issue array, which is
+      // what used to be dumped into the banner and the retry toast. Show the
+      // issue's own sentence instead — unlike formatZodIssue (used on the
+      // artwork path, where the path names an editable field), a schema
+      // path here is an internal object id the user cannot act on.
+      const message =
+        error instanceof z.ZodError
+          ? `Couldn't save: ${formatZodIssueMessage(error)}`
+          : error instanceof Error
+            ? error.message
+            : "Could not save project.";
+      set({
+        saveState: "error",
+        error: message,
+        saveError: {
+          scope: "project",
+          message,
+          retry
+        }
+      });
+    }
+
     async function persist(project: Project): Promise<boolean> {
       set({ saveState: "saving", error: null });
 
       try {
         await deps.projectRepository.save(project);
-        // Clear any prior save failure — a successful persist is the recovery.
-        set({ saveState: "saved", saveError: null });
-        // Tell the other tabs what is now in storage, so the one holding a stale
-        // copy of THIS project can reload instead of overwriting us later.
-        getCrossTabSync().announceProjectSaved(project.id, project.updatedAt);
-        // Fire-and-forget: an interval snapshot must never affect saving.
-        void maybeIntervalSnapshot(project);
-        // A reload we owed but deferred may be flushable now that this save is
-        // done (the "saving" gate above is one of the reasons it can be stuck).
-        void flushExternalReload("save");
+        finishProjectPersist(project);
         return true;
       } catch (error) {
-        // A ZodError's .message is the JSON-stringified issue array, which is
-        // what used to be dumped into the banner and the retry toast. Show the
-        // issue's own sentence instead — unlike formatZodIssue (used on the
-        // artwork path, where the path names an editable field), a schema
-        // path here is an internal object id the user cannot act on.
-        const message =
-          error instanceof z.ZodError
-            ? `Couldn't save: ${formatZodIssueMessage(error)}`
-            : error instanceof Error
-              ? error.message
-              : "Could not save project.";
-        set({
-          saveState: "error",
-          error: message,
-          // Retry re-saves this exact project document.
-          saveError: {
-            scope: "project",
-            message,
-            retry: async () => {
-              await persist(project);
-            }
-          }
+        failProjectPersist(error, async () => {
+          await persist(project);
         });
         return false;
+      }
+    }
+
+    async function persistIfAbsent(
+      project: Project
+    ): Promise<"created" | "exists" | "failed"> {
+      set({ saveState: "saving", error: null });
+
+      try {
+        const created = await deps.projectRepository.create(project);
+        if (!created) {
+          // A create-only collision is an import refusal, not a failure to save
+          // the document already open in this tab. Leave no red save badge or
+          // retry that could later turn the guarded insert into an overwrite.
+          set({ saveState: "saved", error: null, saveError: null });
+          return "exists";
+        }
+        finishProjectPersist(project);
+        return "created";
+      } catch (error) {
+        failProjectPersist(error, async () => {
+          await persistIfAbsent(project);
+        });
+        return "failed";
       }
     }
 
@@ -1985,7 +2019,12 @@ export function createAppStore(deps: AppStoreDeps) {
       offerRecovery
     });
 
-    const packageSlice = createPackageSlice(set, get, { persist, setDocument, deps });
+    const packageSlice = createPackageSlice(set, get, {
+      persist,
+      persistIfAbsent,
+      setDocument,
+      deps
+    });
 
     const cloudBackupSlice = createCloudBackupSlice(set, get, { deps });
 

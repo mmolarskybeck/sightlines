@@ -45,6 +45,35 @@ export class IndexedDbProjectRepository implements ProjectRepository {
     }
   }
 
+  async create(project: Project): Promise<boolean> {
+    // `add`, unlike `put`, fails when the inline project id already exists. That
+    // makes the link-import backstop atomic across tabs instead of a list-then-
+    // save check with a race in between.
+    parseProject(project);
+
+    const db = await openDatabase();
+    const tx = db.transaction(PROJECT_STORE, "readwrite");
+    const done = transactionDone(tx);
+    try {
+      await requestToPromise(tx.objectStore(PROJECT_STORE).add(project));
+      await done;
+      return true;
+    } catch (error) {
+      // Consume the transaction's abort rejection when the request itself was
+      // the failure we observed above.
+      await done.catch(() => undefined);
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        error.name === "ConstraintError"
+      ) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
   async save(project: Project): Promise<void> {
     // Never persist a document that fails the current schema — invalid state
     // written here would poison every future load.
