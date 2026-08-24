@@ -48,20 +48,90 @@ export type ProjectSyncStatus =
   | "needs-review"
   | "error";
 
-// What a single sync operation is bound to: the project it was decided for,
-// and that project's fingerprint at the moment the decision was taken. Every
-// step after the decision — a download, a replace, a conflict dialog resolved
-// minutes later — carries this binding instead of re-reading the store, because
-// re-reading is exactly how the two failure modes happen:
+// Two monotonic counters, because an in-flight operation has two different
+// questions to answer before it may act:
+//   - The LINK epoch, counted PER PROJECT, is "is the authorization this
+//     operation started under still the user's word?" Only linking and
+//     unlinking change it, and a metadata write is refused across the change:
+//     an unlink whose record a late push re-creates would turn sync back on
+//     against an explicit instruction.
+//     Per project because an unlink withdraws authorization for exactly ONE
+//     project. Every other project's in-flight write is still the user's word,
+//     and refusing its metadata put would leave a head sitting in Dropbox that
+//     this device cannot prove its copy descends from — which the next check
+//     reads as a conflict of that project with itself, and presents as a
+//     decision the curator never had to make.
+//   - `operation` is "does this operation's outcome still belong on screen?"
+//     Every document swap changes that as well — a pull's replace, a cross-tab
+//     refresh, opening another project — because the state a paint would land
+//     on is no longer the state the operation was decided against. Project
+//     identity alone cannot answer it: unlink→relink, and switching A → B → A
+//     during an await, both leave an id-only guard passing on stale data.
+// A link change bumps its project's counter AND `operation`, so a matching
+// `operation` implies a matching link epoch for the same project.
+//
+// Neither counter is store state, deliberately: several reset sites spread
+// CLOUD_SYNC_SLICE_INITIAL, and a counter that a reset could put back would
+// eventually collide with a value some superseded operation still holds.
+// Monotonic here is a property of the closure, not a discipline every future
+// reset site has to remember to keep.
+export type SyncEpoch = {
+  readonly operation: number;
+  // Never linked or unlinked in this session reads as 0, so an authorization
+  // captured for an untouched project matches until that project's link moves.
+  linkEpochFor(projectId: string): number;
+  // Linking or unlinking one project: supersedes that project's metadata
+  // writes, and every paint.
+  linkChanged(projectId: string): void;
+  // A document swap: supersedes paints only. A head write that already landed
+  // still records the revision it created, because that record describes what
+  // is in Dropbox and stays true whichever project is on screen now.
+  documentSwapped(): void;
+};
+
+export function createSyncEpoch(): SyncEpoch {
+  let operation = 0;
+  const linkEpochs = new Map<string, number>();
+  return {
+    get operation() {
+      return operation;
+    },
+    linkEpochFor(projectId) {
+      return linkEpochs.get(projectId) ?? 0;
+    },
+    linkChanged(projectId) {
+      linkEpochs.set(projectId, (linkEpochs.get(projectId) ?? 0) + 1);
+      operation += 1;
+    },
+    documentSwapped() {
+      operation += 1;
+    }
+  };
+}
+
+// What authorizes an operation to act: the project it was decided for, and the
+// epochs current when that decision was taken.
+export type SyncAuthorization = {
+  projectId: string;
+  operationEpoch: number;
+  linkEpoch: number;
+};
+
+// What a single sync operation is bound to: its authorization, plus that
+// project's fingerprint at the moment the decision was taken. Every step after
+// the decision — a download, a replace, a conflict dialog resolved minutes
+// later — carries this binding instead of re-reading the store, because
+// re-reading is exactly how the failure modes happen:
 //   - Re-deriving the fingerprint later LAUNDERS an edit that landed in
 //     between into the "expected" value, so the commit's drift check waves
 //     through a replace that silently discards it.
 //   - The open project can change mid-flight. An operation decided for one
 //     project must never download, replace, or write the head of another.
-// A binding that no longer matches the open project is not an error: the
-// curator simply moved on, and the next poll point evaluates what is open now.
-export type SyncOperationBinding = {
-  projectId: string;
+//   - The authorization itself can be withdrawn mid-flight (unlink, relink,
+//     document swap) while the id still matches.
+// A binding that no longer holds is not an error: the curator simply moved on,
+// and the next poll point evaluates what is open now.
+export type SyncOperationBinding = SyncAuthorization & {
   localFingerprint: string;
 };
 
@@ -90,6 +160,12 @@ export type CloudSyncSliceState = {
   syncMeta: ProjectSyncMeta | null;
   syncStatus: ProjectSyncStatus;
   syncError: string | null;
+  // Which project the current error is ABOUT. A sync error can be the whole
+  // truth about a project that has no metadata record behind it — a degraded
+  // sync import, a metadata write that failed before any record existed — and
+  // the refresh that follows must be able to tell that error apart from a
+  // leftover about a project the curator has left.
+  syncErrorProjectId: string | null;
   syncConflict: SyncConflictRecord | null;
 };
 
@@ -114,6 +190,7 @@ export const CLOUD_SYNC_SLICE_INITIAL: CloudSyncSliceState = {
   syncMeta: null,
   syncStatus: "idle",
   syncError: null,
+  syncErrorProjectId: null,
   syncConflict: null
 };
 
@@ -124,6 +201,19 @@ const RECONNECT_MESSAGE =
 export const BOOKKEEPING_MESSAGE =
   "This device could not record where the synced copy stands. Try syncing again.";
 
+// Every sync error paint goes through here, so the ownership field can never be
+// left behind by a future paint that forgets it. Exported because the import
+// commit paints sync errors too (packageSlice's degraded-import and
+// failed-bookkeeping states), and those are precisely the errors that have no
+// metadata record behind them for a later refresh to re-derive.
+//
+// One caller overrides the status it returns: a conflict whose "keep both"
+// fork could not be saved stays PARKED (status "conflict") while carrying the
+// error that says why. The ownership field still comes from here.
+export function errorFor(projectId: string, message: string): Partial<AppState> {
+  return { syncStatus: "error", syncError: message, syncErrorProjectId: projectId };
+}
+
 // What a head write did, from the caller's point of view. "quiet" is expected
 // backpressure (rate limiting): not a failure to show anyone, just a reason to
 // stay pending and retry next cycle. "abandoned" is the bound project no longer
@@ -132,6 +222,9 @@ type HeadWriteOutcome = "ok" | "conflict" | "quiet" | "failed" | "abandoned";
 
 export type CloudSyncSliceInternals = {
   deps: AppStoreDeps;
+  // Owned by the store so the document-swap bump can live in setDocument, the
+  // one choke point every document entry path goes through.
+  syncEpoch: SyncEpoch;
 };
 
 export function createCloudSyncSlice(
@@ -139,10 +232,53 @@ export function createCloudSyncSlice(
   get: () => AppState,
   internals: CloudSyncSliceInternals
 ): { actions: CloudSyncSliceActions } {
-  const { deps } = internals;
+  const { deps, syncEpoch } = internals;
 
   function provider(): CloudBackupProvider | null {
     return deps.cloudBackupProvider ?? null;
+  }
+
+  // Paired with every paint that clears the error: ownership must not outlive
+  // the message it belongs to.
+  const NO_ERROR = { syncError: null, syncErrorProjectId: null } as const;
+
+  // The unlinked resting state — except that an error ABOUT this project
+  // survives it. "No metadata" is not evidence the error was resolved: the
+  // degraded-import and failed-bookkeeping errors are precisely the states
+  // where there is no record to find, and resetting them a beat after they
+  // were painted would erase the only thing telling the user to act.
+  function unlinked(projectId: string): Partial<AppState> {
+    const { syncStatus, syncError, syncErrorProjectId } = get();
+    if (syncStatus !== "error" || syncErrorProjectId !== projectId) {
+      return { ...CLOUD_SYNC_SLICE_INITIAL };
+    }
+    return { ...CLOUD_SYNC_SLICE_INITIAL, syncStatus, syncError, syncErrorProjectId };
+  }
+
+  // The authorization an operation starts under.
+  function authFor(projectId: string): SyncAuthorization {
+    return {
+      projectId,
+      operationEpoch: syncEpoch.operation,
+      linkEpoch: syncEpoch.linkEpochFor(projectId)
+    };
+  }
+
+  // May this operation still act on, or paint over, what is on screen? A link
+  // change bumps the operation epoch too, so this covers both counters.
+  function authorized(auth: SyncAuthorization): boolean {
+    return (
+      syncEpoch.operation === auth.operationEpoch && get().project?.id === auth.projectId
+    );
+  }
+
+  // The narrower question, asked only of metadata writes: has THIS PROJECT's
+  // link moved since this operation was authorized? Neither a project switch
+  // nor a link change made about another project has withdrawn anything — a
+  // head write that already landed must still record the revision it created,
+  // or the next check reads that push as a conflict with itself.
+  function linkUnchanged(auth: SyncAuthorization): boolean {
+    return syncEpoch.linkEpochFor(auth.projectId) === auth.linkEpoch;
   }
 
   function errorKind(error: unknown): string {
@@ -190,13 +326,26 @@ export function createCloudSyncSlice(
     return meta;
   }
 
-  async function saveMeta(next: ProjectSyncMeta): Promise<boolean> {
+  // CONTRACT: the authorization is checked HERE, not at the call sites. The
+  // repository put must not happen at all once the link has been turned off or
+  // relinked under the operation — a put that lands after an unlink re-creates
+  // the record the user just deleted, and sync turns itself back on. Keeping
+  // the check inside is what stops a future caller forgetting it.
+  //
+  // A `false` return can mean either "nothing was written" or "the write
+  // failed": both leave this device unable to prove what the remote descends
+  // from, and every caller treats them the same way.
+  async function saveMeta(
+    auth: SyncAuthorization,
+    next: ProjectSyncMeta
+  ): Promise<boolean> {
+    if (!linkUnchanged(auth)) return false;
     try {
       await deps.syncMetaRepository.put(next);
       // The write is real either way, but observable state always describes
       // the OPEN project — a slow save finishing after a project switch must
       // not stamp another project's link onto whoever is on screen now.
-      if (get().project?.id === next.projectId) set({ syncMeta: next });
+      if (authorized(auth)) set({ syncMeta: next });
       return true;
     } catch {
       // The head write already landed, so the remote is ahead of what this
@@ -204,9 +353,7 @@ export function createCloudSyncSlice(
       // conflict rather than as license to overwrite — the safe direction.
       // Same paint guard as above: the failure belongs to `next`'s project,
       // and its next open re-derives it honestly.
-      if (get().project?.id === next.projectId) {
-        set({ syncStatus: "error", syncError: BOOKKEEPING_MESSAGE });
-      }
+      if (authorized(auth)) set(errorFor(next.projectId, BOOKKEEPING_MESSAGE));
       return false;
     }
   }
@@ -225,13 +372,18 @@ export function createCloudSyncSlice(
     const project = get().project;
     if (!project) return null;
     return {
-      projectId: project.id,
+      ...authFor(project.id),
       localFingerprint: selectBackupFingerprint(project, get().libraryArtworks)
     };
   }
 
-  function stillOpen(binding: SyncOperationBinding): boolean {
-    return get().project?.id === binding.projectId;
+  // Re-bind mid-operation: a FRESH fingerprint, but only while `auth` still
+  // holds. Binding again without that check is how a superseded operation
+  // launders itself back into authorization — the new binding would carry the
+  // CURRENT epochs and pass every guard after it.
+  function rebindFor(auth: SyncAuthorization): SyncOperationBinding | null {
+    if (!authorized(auth)) return null;
+    return bindToOpenProject();
   }
 
   // The bound project is no longer open. Quietly re-derive the status of
@@ -254,30 +406,29 @@ export function createCloudSyncSlice(
   // The parked record gets a FRESH binding: this is a new decision point, and
   // whatever the user chooses next is a choice about the project as it stands
   // now, not as it stood when the losing write began.
-  async function parkRemoteState(projectId: string): Promise<void> {
+  async function parkRemoteState(auth: SyncAuthorization): Promise<void> {
     const active = provider();
     if (!active) return;
-    if (get().project?.id !== projectId) {
+    if (!authorized(auth)) {
       await abandon();
       return;
     }
     let head;
     try {
-      head = await active.getSyncHead(projectId);
+      head = await active.getSyncHead(auth.projectId);
     } catch (error) {
-      if (get().project?.id !== projectId) {
+      if (!authorized(auth)) {
         await abandon();
         return;
       }
       set({
         ...mirrorProviderStatus(),
-        syncStatus: "error",
-        syncError: errorMessage(error, "Dropbox could not be reached.")
+        ...errorFor(auth.projectId, errorMessage(error, "Dropbox could not be reached."))
       });
       return;
     }
-    const binding = bindToOpenProject();
-    if (!binding || binding.projectId !== projectId) {
+    const binding = rebindFor(auth);
+    if (!binding) {
       await abandon();
       return;
     }
@@ -321,13 +472,13 @@ export function createCloudSyncSlice(
     const active = provider();
     const project = get().project;
     if (!active || !project) return "failed";
-    if (project.id !== binding.projectId) {
+    if (!authorized(binding)) {
       await abandon();
       return "abandoned";
     }
     const accountId = active.accountId();
     if (!accountId) {
-      set({ syncStatus: "error", syncError: RECONNECT_MESSAGE });
+      set(errorFor(binding.projectId, RECONNECT_MESSAGE));
       return "failed";
     }
 
@@ -337,7 +488,7 @@ export function createCloudSyncSlice(
     // leaves a project edited mid-upload correctly reading as "push" again.
     const capturedFingerprint = selectBackupFingerprint(project, get().libraryArtworks);
     const previous = get().syncMeta;
-    set({ syncStatus: "pushing", syncError: null });
+    set({ syncStatus: "pushing", ...NO_ERROR });
     try {
       const { blob } = await buildProjectPackage({
         project,
@@ -368,13 +519,14 @@ export function createCloudSyncSlice(
         // A successful push is the answer to whatever "Not now" postponed.
         paused: false
       };
-      if (!(await saveMeta(next))) return "failed";
+      if (!(await saveMeta(binding, next))) return "failed";
 
       const current = get().project;
-      if (current === null || current.id !== project.id) {
+      if (!current || !authorized(binding)) {
         // The push really happened and its lineage is recorded above — but the
-        // project it belongs to is no longer on screen, so its outcome must
-        // not be stamped onto whoever is. Repaint what IS open instead.
+        // project it belongs to is no longer the one this state describes, so
+        // its outcome must not be stamped onto whoever is. Repaint what IS
+        // open instead.
         await actions.refreshProjectSyncState();
         return "ok";
       }
@@ -382,13 +534,24 @@ export function createCloudSyncSlice(
         selectBackupFingerprint(current, get().libraryArtworks) === capturedFingerprint;
       set({
         syncStatus: stillSame ? "synced" : "pending",
-        syncError: null,
+        ...NO_ERROR,
         syncConflict: null
       });
       return "ok";
     } catch (error) {
       const kind = errorKind(error);
+      // Returned before the guard on purpose: a lost race is answered by the
+      // CALLER against the same binding, and every caller re-checks it before
+      // acting on the answer.
       if (kind === "conflict") return "conflict";
+      if (!authorized(binding)) {
+        // The failure belongs to a project the curator has left, or to a link
+        // that no longer exists. Painting it here would leave a sticky error
+        // on a project this write never touched — and the popover's retry for
+        // that error offers to LINK whatever is open now.
+        await abandon();
+        return "failed";
+      }
       if (kind === "rate-limit") {
         // Expected backpressure, not a failure to surface: stay pending.
         set({ syncStatus: "pending" });
@@ -396,8 +559,10 @@ export function createCloudSyncSlice(
       }
       set({
         ...mirrorProviderStatus(),
-        syncStatus: "error",
-        syncError: errorMessage(error, "This project could not be synced to Dropbox.")
+        ...errorFor(
+          binding.projectId,
+          errorMessage(error, "This project could not be synced to Dropbox.")
+        )
       });
       return "failed";
     }
@@ -413,17 +578,17 @@ export function createCloudSyncSlice(
   async function pullHead(binding: SyncOperationBinding): Promise<void> {
     const active = provider();
     if (!active) return;
-    if (!stillOpen(binding)) {
+    if (!authorized(binding)) {
       await abandon();
       return;
     }
 
-    set({ syncStatus: "pulling", syncError: null, syncConflict: null });
+    set({ syncStatus: "pulling", ...NO_ERROR, syncConflict: null });
     let downloaded: { bytes: Uint8Array; rev: string };
     try {
       downloaded = await active.downloadSyncHead(binding.projectId);
     } catch (error) {
-      if (!stillOpen(binding)) {
+      if (!authorized(binding)) {
         await abandon();
         return;
       }
@@ -448,13 +613,15 @@ export function createCloudSyncSlice(
       }
       set({
         ...mirrorProviderStatus(),
-        syncStatus: "error",
-        syncError: errorMessage(error, "The Dropbox version could not be downloaded.")
+        ...errorFor(
+          binding.projectId,
+          errorMessage(error, "The Dropbox version could not be downloaded.")
+        )
       });
       return;
     }
 
-    if (!stillOpen(binding)) {
+    if (!authorized(binding)) {
       await abandon();
       return;
     }
@@ -479,7 +646,10 @@ export function createCloudSyncSlice(
       }
     });
     if (!accepted) {
-      if (!stillOpen(binding)) {
+      // A refusal never reaches the import's commit point, so no document swap
+      // has happened here and the binding still holds unless the curator moved
+      // on under it.
+      if (!authorized(binding)) {
         await abandon();
         return;
       }
@@ -492,16 +662,20 @@ export function createCloudSyncSlice(
       // part-way through can still have added incoming artwork records to the
       // shared library — the deliberate, harmless side of the replace ordering,
       // but not something to deny.
-      set({
-        syncStatus: "error",
-        syncError:
+      set(
+        errorFor(
+          binding.projectId,
           "The Dropbox version could not be opened here, so this project was not replaced."
-      });
+        )
+      );
       return;
     }
-    // A pull that parked in the artwork review is still in flight: the commit
-    // (and the sync-state refresh that follows it) happens when the user
-    // resolves it, which may be minutes from now.
+    // Nothing is re-checked after an accepted import, deliberately: the commit
+    // swapped the document, which supersedes this operation by design, and the
+    // commit's own tail (seed metadata, then refresh) is what paints the
+    // result. A pull that parked in the artwork review is still in flight —
+    // that tail happens when the user resolves it, which may be minutes from
+    // now.
   }
 
   const actions: CloudSyncSliceActions = {
@@ -511,20 +685,22 @@ export function createCloudSyncSlice(
         set({ ...CLOUD_SYNC_SLICE_INITIAL });
         return;
       }
+      const auth = authFor(project.id);
       const meta = await loadUsableMeta(project);
-      // The open project can change while the metadata read is in flight, and
-      // the switch triggers its own refresh — the NEWER refresh owns the
-      // state. Applying this one anyway would paint one project's link status
-      // (or clear a link) onto another.
-      if (get().project?.id !== project.id) return;
+      // The open project — and the link itself — can change while the metadata
+      // read is in flight, and each of those changes triggers its own refresh.
+      // The NEWER one owns the state. Applying this one anyway would paint a
+      // stale link status (or clear a live link) over it, and identity alone
+      // cannot tell that apart: A → B → A leaves the id matching.
+      if (!authorized(auth)) return;
       if (!meta) {
-        set({ ...CLOUD_SYNC_SLICE_INITIAL });
+        set(unlinked(project.id));
         return;
       }
       set({
         syncMeta: meta,
         syncConflict: null,
-        syncError: null,
+        ...NO_ERROR,
         syncStatus: statusForFingerprint(meta, project)
       });
     },
@@ -535,11 +711,15 @@ export function createCloudSyncSlice(
       if (!active || !project) return;
       if (active.getStatus() !== "connected") return;
       if (!active.accountId()) {
-        set({ syncStatus: "error", syncError: RECONNECT_MESSAGE });
+        set(errorFor(project.id, RECONNECT_MESSAGE));
         return;
       }
       if (writing()) return;
 
+      // Linking is the user's explicit word about THIS project's link, so it
+      // supersedes whatever was in flight under the previous one — including
+      // an unlink whose own storage write has not landed yet.
+      syncEpoch.linkChanged(project.id);
       const binding = bindToOpenProject();
       if (!binding) return;
       // baseRev null: this device is CREATING the head, and the write must fail
@@ -554,28 +734,36 @@ export function createCloudSyncSlice(
       // A head is already there — another device linked this project first.
       // There is no common base, but the same whole-project choices apply, and
       // "keep mine" writes against the rev we are about to read.
-      await parkRemoteState(binding.projectId);
+      await parkRemoteState(binding);
     },
 
     async disableProjectSync() {
       const project = get().project;
       if (!project) return;
       const projectId = project.id;
+      // FIRST, before any await, and whether or not the delete below succeeds:
+      // an operation already past its own guard is holding metadata it would
+      // otherwise write back. A push whose saveMeta lands after this would
+      // re-create the record being deleted — sync turning itself back on
+      // against an explicit instruction — and a check whose assessment lands
+      // after it would replace the project the user just unlinked.
+      syncEpoch.linkChanged(projectId);
+      const auth = authFor(projectId);
       try {
         await deps.syncMetaRepository.delete(projectId);
       } catch {
         // The failure belongs to the project whose metadata we tried to delete,
         // not to whichever project may have opened while storage was pending.
-        if (get().project?.id !== projectId) {
+        if (!authorized(auth)) {
           await actions.refreshProjectSyncState();
           return;
         }
-        set({ syncStatus: "error", syncError: BOOKKEEPING_MESSAGE });
+        set(errorFor(projectId, BOOKKEEPING_MESSAGE));
         return;
       }
       // The remote head stays exactly where it is: other devices are still
       // syncing against it, and unlinking here must never destroy it.
-      if (get().project?.id !== projectId) {
+      if (!authorized(auth)) {
         // The unlink really happened for the captured project. Repaint the one
         // now on screen instead of clearing its valid metadata and status.
         await actions.refreshProjectSyncState();
@@ -592,17 +780,18 @@ export function createCloudSyncSlice(
       // Single-flight: an evaluation already owns the project.
       if (get().syncStatus === "checking" || writing()) return;
 
+      const auth = authFor(project.id);
       let meta = await loadUsableMeta(project);
-      // A project switch during the metadata read means this evaluation is
-      // about a project that is no longer on screen — clearing or painting
-      // state now would hit the wrong one. The switch's own refresh (and the
-      // next poll point) cover whatever is open.
-      if (get().project?.id !== project.id) {
+      // A project switch or a link change during the metadata read means this
+      // evaluation is about something that is no longer on screen — clearing
+      // or painting state now would hit the wrong one. The switch's own
+      // refresh (and the next poll point) cover whatever is open.
+      if (!authorized(auth)) {
         await abandon();
         return;
       }
       if (!meta) {
-        set({ ...CLOUD_SYNC_SLICE_INITIAL });
+        set(unlinked(project.id));
         return;
       }
       if (meta.paused) {
@@ -613,11 +802,11 @@ export function createCloudSyncSlice(
           return;
         }
         const resumed: ProjectSyncMeta = { ...meta, paused: false };
-        if (!(await saveMeta(resumed))) return;
+        if (!(await saveMeta(auth, resumed))) return;
         meta = resumed;
       }
 
-      set({ syncMeta: meta, syncStatus: "checking", syncError: null });
+      set({ syncMeta: meta, syncStatus: "checking", ...NO_ERROR });
       let remoteRev: string | null;
       let head;
       try {
@@ -625,8 +814,9 @@ export function createCloudSyncSlice(
         remoteRev = head?.rev ?? null;
       } catch (error) {
         // Same stale-window rule as above: a head-read failure for a project
-        // that is no longer open belongs to nobody on screen.
-        if (get().project?.id !== project.id) {
+        // that is no longer open, or for a link that is gone, belongs to
+        // nobody on screen.
+        if (!authorized(auth)) {
           await abandon();
           return;
         }
@@ -637,8 +827,7 @@ export function createCloudSyncSlice(
         }
         set({
           ...mirrorProviderStatus(),
-          syncStatus: "error",
-          syncError: errorMessage(error, "Dropbox could not be reached.")
+          ...errorFor(project.id, errorMessage(error, "Dropbox could not be reached."))
         });
         return;
       }
@@ -649,10 +838,13 @@ export function createCloudSyncSlice(
       // land, and both have to be visible to the assessment rather than folded
       // in silently afterwards: an edit during the head read must make this a
       // conflict, not a pull whose "expected" fingerprint quietly includes it.
-      const binding = bindToOpenProject();
-      if (!binding || binding.projectId !== project.id) {
-        // A different project is open now. This evaluation was about the old
-        // one; the poll points will evaluate the new one on their own.
+      // The re-bind is against `auth`, never free-standing: this evaluation's
+      // authorization is the one from BEFORE the network work.
+      const binding = rebindFor(auth);
+      if (!binding) {
+        // A different project is open now, or the link is gone. This
+        // evaluation was about neither; the poll points will evaluate whatever
+        // is open on their own.
         await abandon();
         return;
       }
@@ -708,12 +900,13 @@ export function createCloudSyncSlice(
       if (!active || !project) return;
       if (active.getStatus() !== "connected") return;
       if (writing()) return;
+      const auth = authFor(project.id);
       const meta = await loadUsableMeta(project);
       if (!meta || meta.paused) return;
       // Bound after the metadata load, for the same reason the check binds after
       // its head read: the project on screen may have changed during it.
-      const binding = bindToOpenProject();
-      if (!binding || binding.projectId !== project.id) {
+      const binding = rebindFor(auth);
+      if (!binding) {
         await abandon();
         return;
       }
@@ -724,11 +917,12 @@ export function createCloudSyncSlice(
       const conflict = get().syncConflict;
       const project = get().project;
       if (!conflict || !project) return;
-      // The dialog can sit open across a project switch. Every choice below acts
-      // on a specific project — replacing it, forking it, writing its head — so
-      // a resolution that no longer matches the parked binding does nothing at
-      // all rather than applying the decision to whatever is open now.
-      if (conflict.binding.projectId !== project.id) {
+      // The dialog can sit open across a project switch, or across the link
+      // being turned off. Every choice below acts on a specific project —
+      // replacing it, forking it, writing its head — so a resolution the
+      // parked binding no longer authorizes does nothing at all rather than
+      // applying the decision to whatever is open now.
+      if (!authorized(conflict.binding)) {
         await abandon();
         return;
       }
@@ -744,8 +938,15 @@ export function createCloudSyncSlice(
             return;
           }
           const paused: ProjectSyncMeta = { ...meta, paused: true };
-          if (!(await saveMeta(paused))) return;
-          set({ syncConflict: null, syncStatus: "needs-review", syncError: null });
+          if (!(await saveMeta(conflict.binding, paused))) return;
+          // The pause is recorded either way — it describes the project, not
+          // the screen — but "needs review" is about what is on screen, and a
+          // swap during the write means that is no longer this project.
+          if (!authorized(conflict.binding)) {
+            await abandon();
+            return;
+          }
+          set({ syncConflict: null, syncStatus: "needs-review", ...NO_ERROR });
           return;
         }
 
@@ -758,7 +959,7 @@ export function createCloudSyncSlice(
             conflict.binding,
             conflict.remoteMissing ? null : conflict.remoteRev
           );
-          if (outcome === "conflict") await parkRemoteState(conflict.binding.projectId);
+          if (outcome === "conflict") await parkRemoteState(conflict.binding);
           return;
         }
 
@@ -777,14 +978,24 @@ export function createCloudSyncSlice(
           try {
             await deps.projectRepository.save(copy);
           } catch (error) {
+            // A swap during the fork's write took the parked conflict with it
+            // (setDocument clears it), so re-parking the status here would
+            // leave a "Review" row with no decision behind it.
+            if (!authorized(conflict.binding)) {
+              await abandon();
+              return;
+            }
             // The conflict stays parked: pulling now would destroy the very copy
             // the user asked to keep.
             set({
-              syncStatus: "conflict",
-              syncError: errorMessage(
-                error,
-                "This device's version could not be saved as a separate project, so nothing was replaced."
-              )
+              ...errorFor(
+                conflict.binding.projectId,
+                errorMessage(
+                  error,
+                  "This device's version could not be saved as a separate project, so nothing was replaced."
+                )
+              ),
+              syncStatus: "conflict"
             });
             return;
           }
@@ -796,8 +1007,8 @@ export function createCloudSyncSlice(
           // written to the fork. The fork IS the recovery, so aborting would
           // only strand the user back in the conflict having lost nothing but
           // the resolution they asked for.
-          const rebound = bindToOpenProject();
-          if (!rebound || rebound.projectId !== conflict.binding.projectId) {
+          const rebound = rebindFor(conflict.binding);
+          if (!rebound) {
             await abandon();
             return;
           }
@@ -829,6 +1040,13 @@ export function createCloudSyncSlice(
   ): Promise<void> {
     const outcome = await writeHead(binding, meta.lastAcceptedRev);
     if (outcome !== "conflict") return;
+    // The lost race belongs to this binding: if it no longer holds, the
+    // re-evaluation would be about a different project — or about a link that
+    // no longer exists — and the "pending" below would paint onto it.
+    if (!authorized(binding)) {
+      await abandon();
+      return;
+    }
     set({ syncStatus: "pending" });
     await actions.checkProjectSync();
   }

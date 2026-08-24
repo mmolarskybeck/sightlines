@@ -25,7 +25,7 @@ import type { PackageExportMode } from "../../domain/schema/packageSchema";
 import { migrateProjectJsonWithReport } from "../../domain/schema/projectSchema";
 import type { AppState, AppStoreDeps } from "../store";
 import { selectBackupFingerprint } from "./cloudBackupSlice";
-import { BOOKKEEPING_MESSAGE } from "./cloudSyncSlice";
+import { BOOKKEEPING_MESSAGE, errorFor, type SyncEpoch } from "./cloudSyncSlice";
 import { writeCloudBackupMeta } from "./cloudBackupMeta";
 import { telemetry } from "../telemetry/telemetry";
 
@@ -64,6 +64,18 @@ export type SyncLinkContext = {
   rev: string;
 };
 
+// The link authorization a sync import's bookkeeping may be written under.
+// Captured when the import's sync provenance is established — deliberately
+// BEFORE any park, not at the commit — because the race it closes is exactly an
+// unlink made while the artwork review sat open: the commit that follows would
+// otherwise re-create the metadata record the user just deleted and turn sync
+// back on against an explicit instruction.
+//
+// Link epochs are per project, so the authorization names the project whose
+// record this import will write: a link change made about any OTHER project is
+// not an instruction about this one.
+type SyncSeedAuthorization = { projectId: string; linkEpoch: number };
+
 // A parked import: the pure plan the dialog reviews, plus the provenance the
 // commit still needs once the user resolves it. The plan alone is not enough —
 // a cloud restore's bookkeeping (and its telemetry), or a pull's replace
@@ -74,6 +86,7 @@ export type PendingPackageImport = {
   cloudRestore?: CloudRestoreContext;
   syncPull?: SyncPullContext;
   syncLink?: SyncLinkContext;
+  syncSeedAuth?: SyncSeedAuthorization;
 };
 
 // The provenance half of an import, carried from the pipeline through any park
@@ -83,7 +96,17 @@ type ImportProvenance = {
   cloudRestore?: CloudRestoreContext;
   syncPull?: SyncPullContext;
   syncLink?: SyncLinkContext;
+  // Set whenever one of the sync contexts above is.
+  syncSeedAuth?: SyncSeedAuthorization;
 };
+
+// The open document's save bookkeeping, captured so a write that turns out not
+// to belong to it can be undone whole.
+type SaveBookkeeping = Pick<AppState, "saveState" | "error" | "saveError">;
+
+// What a link commit has to hand back if it cannot finish: the id its
+// create-only insert claimed, and the save bookkeeping that claim painted over.
+type LinkCreateClaim = { projectId: string; saveBookkeeping: SaveBookkeeping };
 
 export type PackageSliceActions = {
   importProjectJson: (text: string) => Promise<void>;
@@ -154,6 +177,9 @@ export type PackageSliceInternals = {
   // after a swap must be that return value.
   setDocument: (project: Project, extras?: Partial<AppState>) => Project;
   deps: AppStoreDeps;
+  // Read-only here: an import never links or unlinks anything, it only has to
+  // know whether the link it was authorized under is still the user's word.
+  syncEpoch: SyncEpoch;
 };
 
 export function createPackageSlice(
@@ -161,7 +187,7 @@ export function createPackageSlice(
   get: () => AppState,
   internals: PackageSliceInternals
 ): { actions: PackageSliceActions } {
-  const { persist, persistIfAbsent, setDocument, deps } = internals;
+  const { persist, persistIfAbsent, setDocument, deps, syncEpoch } = internals;
 
   // Shared by exportProjectPackage (the open document) and
   // exportProjectPackageById (any saved project, via the repository) — the
@@ -252,16 +278,43 @@ export function createPackageSlice(
   // sync contexts land here: a pull replaced what was on this device, a link put
   // a project here for the first time, and either way the rev is the ancestry
   // the next check compares against.
+  //
+  // CONTRACT, mirroring the sync slice's own saveMeta: the authorization is
+  // checked HERE, immediately before the put, not at the call sites. A commit
+  // that resolves minutes after its review dialog opened can land after the
+  // user has turned sync off for this project, and a put that lands then
+  // re-creates the record the unlink just deleted — sync turning itself back on
+  // against the newer instruction. Checking inside is what stops a future
+  // caller forgetting it.
+  //
+  // A refusal is not an error and must never be painted as one: the unlink IS
+  // the user's decision, and unlinked is the correct end state. The commit's
+  // trailing refreshProjectSyncState repaints it honestly.
+  //
+  // RETURNS whether the record was written, because a caller's own bookkeeping
+  // may only claim what this one actually did.
   async function seedSyncMeta(
     opened: Project,
     libraryArtworks: Artwork[],
-    rev: string
-  ): Promise<void> {
+    rev: string,
+    auth: SyncSeedAuthorization | undefined
+  ): Promise<boolean> {
+    // Fail closed, and only for THIS project: an authorization taken out for a
+    // different id says nothing about the record about to be written here.
+    function stillAuthorized(): boolean {
+      return (
+        auth !== undefined &&
+        auth.projectId === opened.id &&
+        auth.linkEpoch === syncEpoch.linkEpochFor(opened.id)
+      );
+    }
+    if (!stillAuthorized()) return false;
+
     const accountId = deps.cloudBackupProvider?.accountId() ?? null;
     // Sync metadata is bound to the account it came from. With no account id
     // there is nothing honest to bind to, so the project simply reads as
     // unlinked — the import itself still stands.
-    if (!accountId) return;
+    if (!accountId) return false;
 
     // The (opened, libraryArtworks) pair is exactly what the state machine will
     // fingerprint next cycle, so "unchanged since the pull" is true by
@@ -274,6 +327,9 @@ export function createPackageSlice(
     } catch {
       existing = undefined;
     }
+    // The read above is an await, and an unlink that completes inside it would
+    // otherwise have its record re-created by the put below.
+    if (!stillAuthorized()) return false;
     await deps.syncMetaRepository.put({
       projectId: opened.id,
       provider: "dropbox",
@@ -287,6 +343,52 @@ export function createPackageSlice(
       // Whatever "Not now" paused, this pull resolved.
       paused: false
     });
+    return true;
+  }
+
+  // Undo the link path's create-only claim on an id. That claim is deliberately
+  // the FIRST write of a link commit (it is the only thing that closes the
+  // cross-tab race), so every step after it runs with a durable project record
+  // already on this device — and a failure in that stretch would leave one
+  // holding no images and no sync metadata. Nothing surfaces it as broken: it
+  // just sits there, while every retry of the same handoff is refused by the
+  // two "already on this device" checks. The record is provably this tab's —
+  // an atomic create-only insert that succeeded moments ago, on an id nothing
+  // else can have claimed since — so deleting it cannot destroy another tab's
+  // work.
+  //
+  // Best effort BY CONTRACT: the caller rethrows the ORIGINAL failure whether
+  // or not the delete lands, because that is the failure the user has to act
+  // on. A delete that fails leaves exactly the orphan the retry trips over —
+  // no worse than never having tried.
+  //
+  // The ordinary (non-link) import deliberately keeps its half-written project
+  // instead: its id is the planner's to rename, so a retry imports cleanly
+  // beside the leftover rather than being refused, and the leftover is visible
+  // in the project manager. Identity preservation is what makes the link path's
+  // leftover unrecoverable, so only that path unwinds.
+  async function unwindLinkCreate(claim: LinkCreateClaim): Promise<void> {
+    try {
+      await deps.projectRepository.delete(claim.projectId);
+    } catch {
+      // Swallowed on purpose: see above.
+    }
+    // persistIfAbsent paints this tab's save bookkeeping — it is the same
+    // function the open document's own saves go through — but the record it
+    // wrote was never the open document, and no longer exists. The open
+    // document was not touched by this import, so its badge (including a save
+    // failure it already had) must read exactly as it did before.
+    //
+    // INVARIANT: the capture may only be put back while the bookkeeping still
+    // reads as the claim's own success left it — "saved", with no save failure
+    // behind it. Anything else was written by a save of the OPEN document that
+    // started or finished during the writes above, and that is both newer than
+    // the capture and about a document this import never touched. Rolling it
+    // back would drop a failure whose retry closure is the curator's only way
+    // out of it — the exact loss this restore exists to prevent, inverted.
+    const { saveState, saveError } = get();
+    if (saveState !== "saved" || saveError !== null) return;
+    set(claim.saveBookkeeping);
   }
 
   async function commitPackageImport(
@@ -294,7 +396,7 @@ export function createPackageSlice(
     resolutions: Record<string, ConflictResolution>,
     provenance: ImportProvenance = {}
   ) {
-    const { cloudRestore, syncPull, syncLink } = provenance;
+    const { cloudRestore, syncPull, syncLink, syncSeedAuth } = provenance;
     // Backstop for the pipeline's link guard: a plan can sit parked in the
     // artwork review for minutes and only the PLAN is replayed here, so the
     // identity is re-checked against the authorization one last time rather
@@ -355,12 +457,20 @@ export function createPackageSlice(
       ? commit.artworksToSave.filter((artwork) => !conflictedArtworkIds.has(artwork.id))
       : commit.artworksToSave;
 
+    // Set only on the link path, and only once its create-only claim has landed.
+    let linkClaim: LinkCreateClaim | null = null;
+
     if (!replacing) {
       if (syncLink) {
         // The earlier list check gives prompt feedback, but only IndexedDB's
         // create-only add closes the cross-tab race: another tab may create or
         // restore this id while the artwork review is parked. Claim the id
         // atomically before writing any assets or shared artwork records.
+        const saveBookkeeping: SaveBookkeeping = {
+          saveState: get().saveState,
+          error: get().error,
+          saveError: get().saveError
+        };
         const result = await persistIfAbsent(commit.project);
         if (result === "exists") {
           throw new Error(CLOUD_SYNC_PROJECT_ALREADY_HERE_MESSAGE);
@@ -368,27 +478,41 @@ export function createPackageSlice(
         if (result === "failed") {
           throw new Error(get().error ?? "The imported project could not be saved.");
         }
+        linkClaim = { projectId: commit.project.id, saveBookkeeping };
       } else if (!(await persist(commit.project))) {
         throw new Error(get().error ?? "The imported project could not be saved.");
       }
     }
 
-    for (const prepared of commit.assetsToSave) {
-      await deps.assetRepository.saveAsset(prepared.asset, {
-        original: bytesToBlob(prepared.blobs.original.bytes, prepared.blobs.original.mimeType),
-        display: bytesToBlob(prepared.blobs.display.bytes, prepared.blobs.display.mimeType),
-        thumbnail: bytesToBlob(prepared.blobs.thumbnail.bytes, prepared.blobs.thumbnail.mimeType)
-      });
-    }
-    for (const artwork of artworksBeforeCommit) {
-      await deps.artworkLibraryRepository.save(artwork);
-    }
+    // Guarded because a link commit is already holding a durable, empty project
+    // record by now (see unwindLinkCreate). Only these three steps need the
+    // guard: everything below them is either replace-only — which a link import
+    // never runs — or past the point where the document is open and the import
+    // really did happen.
+    let preCommitLibraryArtworks: Artwork[];
+    try {
+      for (const prepared of commit.assetsToSave) {
+        await deps.assetRepository.saveAsset(prepared.asset, {
+          original: bytesToBlob(prepared.blobs.original.bytes, prepared.blobs.original.mimeType),
+          display: bytesToBlob(prepared.blobs.display.bytes, prepared.blobs.display.mimeType),
+          thumbnail: bytesToBlob(prepared.blobs.thumbnail.bytes, prepared.blobs.thumbnail.mimeType)
+        });
+      }
+      for (const artwork of artworksBeforeCommit) {
+        await deps.artworkLibraryRepository.save(artwork);
+      }
 
-    // Listed BEFORE the commit point on purpose: this read can still fail, and
-    // failing here still unwinds cleanly (nothing decisive is written yet).
-    // After the commit point it is re-read so the open document sees the
-    // overwrites, but that re-read may no longer unwind — hence two variables.
-    const preCommitLibraryArtworks = await deps.artworkLibraryRepository.list();
+      // Listed BEFORE the commit point on purpose: this read can still fail, and
+      // failing here still unwinds cleanly (nothing decisive is written yet).
+      // After the commit point it is re-read so the open document sees the
+      // overwrites, but that re-read may no longer unwind — hence two variables.
+      preCommitLibraryArtworks = await deps.artworkLibraryRepository.list();
+    } catch (error) {
+      if (linkClaim) await unwindLinkCreate(linkClaim);
+      // The original failure, never the cleanup's: it is the one the user has
+      // to act on, and the caller turns it into the "Import failed" message.
+      throw error;
+    }
     let libraryArtworks = preCommitLibraryArtworks;
 
     // The replace's commit point, after every read that could still fail. Past
@@ -502,12 +626,22 @@ export function createPackageSlice(
       // Keep the previous accepted rev (or no link, for a first-device import)
       // and do not seed backup metadata. The retry action re-runs the normal
       // rev matrix from the last ancestry this device can actually prove.
-      set({ syncStatus: "error", syncError: INCOMPLETE_SYNC_IMPORT_MESSAGE });
+      // Painted for `opened`, the document this degradation is ABOUT: for a
+      // first-device import there is no metadata record behind the error, so
+      // ownership is the only thing that keeps the next refresh from reading
+      // "no link" as "nothing to report" and clearing it.
+      if (get().project?.id === opened.id) {
+        set(errorFor(opened.id, INCOMPLETE_SYNC_IMPORT_MESSAGE));
+      }
       return;
     }
     try {
-      await seedSyncMeta(opened, libraryArtworks, syncRev);
-      if (!cloudRestore) {
+      const seeded = await seedSyncMeta(opened, libraryArtworks, syncRev, syncSeedAuth);
+      // Only alongside a link that was really recorded. Stamping "backed up
+      // just now" for a project that ended up unlinked claims a file in its
+      // backup folder that nothing put there, and blocks the auto-backup that
+      // would have created one.
+      if (seeded && !cloudRestore) {
         // The pulled content is already in Dropbox, so an auto-backup minutes
         // later would burn one of the five retention slots on a duplicate of what
         // was just downloaded. Same reasoning as a cloud restore's seed; only the
@@ -529,8 +663,13 @@ export function createPackageSlice(
       // cannot prove which revision its copy descends from, so the next check
       // reads as a conflict rather than as licence to overwrite Dropbox — the
       // safe direction, and the same message the sync slice uses when its own
-      // metadata write fails.
-      set({ syncStatus: "error", syncError: BOOKKEEPING_MESSAGE });
+      // metadata write fails. Owned by `opened` for the same reason as above:
+      // the failure IS that no record exists to re-derive it from. Painted only
+      // while `opened` is still the document on screen — the reads above are
+      // awaits, and a swap inside them makes this someone else's badge.
+      if (get().project?.id === opened.id) {
+        set(errorFor(opened.id, BOOKKEEPING_MESSAGE));
+      }
     }
   }
 
@@ -572,10 +711,28 @@ export function createPackageSlice(
     bytes: ArrayBuffer,
     options: { forceProjectCopy?: boolean } & ImportProvenance = {}
   ): Promise<boolean> {
+    // The identity the commit will seed bookkeeping for: a pull replaces the
+    // project it names, a link imports the project it names, and both refuse
+    // outright if the package inside turns out to be anything else. Naming it
+    // here is what lets the capture below be about one project's link.
+    const syncSeedProjectId =
+      options.syncPull?.targetProjectId ?? options.syncLink?.projectId ?? null;
     const provenance: ImportProvenance = {
       ...(options.cloudRestore ? { cloudRestore: options.cloudRestore } : {}),
       ...(options.syncPull ? { syncPull: options.syncPull } : {}),
-      ...(options.syncLink ? { syncLink: options.syncLink } : {})
+      ...(options.syncLink ? { syncLink: options.syncLink } : {}),
+      // Captured HERE, where the sync provenance is established, rather than at
+      // the commit: a commit can run minutes later, on the far side of an
+      // artwork review the user left open, and the unlink this guards against
+      // is one they can make in exactly that window.
+      ...(syncSeedProjectId !== null
+        ? {
+            syncSeedAuth: {
+              projectId: syncSeedProjectId,
+              linkEpoch: syncEpoch.linkEpochFor(syncSeedProjectId)
+            }
+          }
+        : {})
     };
     set({ intakeState: "processing" });
     try {
@@ -657,7 +814,20 @@ export function createPackageSlice(
         // The restore/sync provenance parks with the plan so the commit that
         // may follow can still tell where these bytes came from, and a pull
         // re-checks its replace prerequisites there rather than here.
+        const replaced = get().pendingPackageImport;
         set({ pendingPackageImport: { plan, ...provenance } });
+        // A record that is gone has the same debt a dismissal settles: the pull
+        // that parked it left "pulling" on the status, and nothing is going to
+        // resolve that review any more. An import that carries its own sync
+        // provenance owns the status instead, and is still in flight.
+        if (
+          replaced &&
+          (replaced.syncPull || replaced.syncLink) &&
+          !provenance.syncPull &&
+          !provenance.syncLink
+        ) {
+          await get().refreshProjectSyncState();
+        }
         return true;
       }
 
@@ -712,6 +882,11 @@ export function createPackageSlice(
       }
       // The load repair may have changed the document; persist what was opened.
       await persist(opened);
+      // The swap cleared this document's sync state, and an id-preserving
+      // re-import of a linked project's own export leaves App's project-keyed
+      // refresh with nothing to fire on. Without this the project reads as
+      // unlinked — and the scheduler's gates keep it that way until a reload.
+      await get().refreshProjectSyncState();
     },
 
     async exportProjectPackage(mode) {
@@ -830,7 +1005,8 @@ export function createPackageSlice(
         await commitPackageImport(pending.plan, resolutions, {
           ...(pending.cloudRestore ? { cloudRestore: pending.cloudRestore } : {}),
           ...(pending.syncPull ? { syncPull: pending.syncPull } : {}),
-          ...(pending.syncLink ? { syncLink: pending.syncLink } : {})
+          ...(pending.syncLink ? { syncLink: pending.syncLink } : {}),
+          ...(pending.syncSeedAuth ? { syncSeedAuth: pending.syncSeedAuth } : {})
         });
       } catch (error) {
         const message = `Import failed: ${
@@ -838,14 +1014,41 @@ export function createPackageSlice(
         }`;
         set({ error: message });
         toast.error(message);
+        // The other way a parked sync import ends, and the same debt as a
+        // dismissal: the operation that painted "pulling" is over. Safe to run
+        // here because the commit has already thrown — there is no half-done
+        // import left for this refresh to race, and the refresh only reads.
+        if (pending.syncPull || pending.syncLink) {
+          await get().refreshProjectSyncState();
+        }
       }
     },
 
     dismissPackageImport() {
+      const pending = get().pendingPackageImport;
       // Dropping the whole parked record discards the plan AND its provenance:
       // a cancelled restore leaves no trace, and in particular never counts as
-      // an opened cloud project.
+      // an opened cloud project. Cleared FIRST, so nothing below can see an
+      // import that is still parked.
       set({ pendingPackageImport: null });
+      if (!pending?.syncPull && !pending?.syncLink) return;
+
+      // A pull sets "pulling" and deliberately leaves it while the review sits
+      // open, because the operation really is still in flight. Once the review
+      // is dismissed it is not, and "pulling" reads as in-flight to the gate on
+      // the check, the push AND linking — so leaving it there would kill sync
+      // for this project until the page is reloaded, off a keystroke as routine
+      // as Esc.
+      //
+      // Re-derived from storage rather than set to a chosen status: a pull
+      // target still has its metadata, so it comes back pending or synced —
+      // right, because nothing was imported. Run for a dismissed LINK too: that
+      // one parks without touching the status (it has no project here to be
+      // about), so the refresh only restates what is open, and one rule for
+      // both is worth more than a branch that has to stay true. Fire-and-forget
+      // because this is a dialog dismissal, synchronous by contract; the
+      // refresh only reads, and the parked record is already gone above.
+      void get().refreshProjectSyncState();
     }
   };
 

@@ -161,6 +161,7 @@ import {
 import {
   CLOUD_SYNC_SLICE_INITIAL,
   createCloudSyncSlice,
+  createSyncEpoch,
   type CloudSyncSliceActions,
   type CloudSyncSliceState
 } from "./store/cloudSyncSlice";
@@ -663,6 +664,12 @@ export type RecoveryOffer = {
 
 export function createAppStore(deps: AppStoreDeps) {
   return create<AppState>((set, get) => {
+    // Which authorization in-flight sync operations were started under. It
+    // lives out here because setDocument — the choke point every document
+    // entry path goes through — has to bump it, while the sync slice does the
+    // checking. Deliberately not store state: see createSyncEpoch.
+    const syncEpoch = createSyncEpoch();
+
     function projectWithArtworkFootprints(
       project: Project,
       artworks: Artwork[] = get().libraryArtworks
@@ -921,6 +928,12 @@ export function createAppStore(deps: AppStoreDeps) {
       // because the repaired copy is genuinely not what storage holds, and the
       // user's next edit writes it.
       setDocument(loaded, { saveState: "saved" });
+
+      // The project id has not changed, so App's project-keyed refresh will not
+      // run — and the document this tab now holds is the other tab's, whose
+      // fingerprint decides whether this project still reads as synced. Nothing
+      // is written here: the refresh only reads the metadata record.
+      await get().refreshProjectSyncState();
     }
 
     async function refreshLibraryArtworks(): Promise<void> {
@@ -984,21 +997,24 @@ export function createAppStore(deps: AppStoreDeps) {
       void flushExternalReload("save");
     }
 
+    // A ZodError's .message is the JSON-stringified issue array, which is
+    // what used to be dumped into the banner and the retry toast. Show the
+    // issue's own sentence instead — unlike formatZodIssue (used on the
+    // artwork path, where the path names an editable field), a schema
+    // path here is an internal object id the user cannot act on.
+    function describeSaveError(error: unknown): string {
+      return error instanceof z.ZodError
+        ? `Couldn't save: ${formatZodIssueMessage(error)}`
+        : error instanceof Error
+          ? error.message
+          : "Could not save project.";
+    }
+
     function failProjectPersist(
       error: unknown,
       retry: () => Promise<void>
     ): void {
-      // A ZodError's .message is the JSON-stringified issue array, which is
-      // what used to be dumped into the banner and the retry toast. Show the
-      // issue's own sentence instead — unlike formatZodIssue (used on the
-      // artwork path, where the path names an editable field), a schema
-      // path here is an internal object id the user cannot act on.
-      const message =
-        error instanceof z.ZodError
-          ? `Couldn't save: ${formatZodIssueMessage(error)}`
-          : error instanceof Error
-            ? error.message
-            : "Could not save project.";
+      const message = describeSaveError(error);
       set({
         saveState: "error",
         error: message,
@@ -1028,23 +1044,53 @@ export function createAppStore(deps: AppStoreDeps) {
     async function persistIfAbsent(
       project: Project
     ): Promise<"created" | "exists" | "failed"> {
+      // The record this call writes is NOT the open document — it is an import
+      // claiming an id — so an outcome that writes nothing at all must leave
+      // the open document's save bookkeeping reading exactly as it did before.
+      // Captured before the "saving" paint below overwrites it.
+      const beforeCall: Pick<AppState, "saveState" | "error" | "saveError"> = {
+        saveState: get().saveState,
+        error: get().error,
+        saveError: get().saveError
+      };
       set({ saveState: "saving", error: null });
+
+      // INVARIANT: the capture goes back only while the bookkeeping still reads
+      // as this call's own entry left it — "saving", over the same save failure
+      // (or absence of one) it found. Anything else means a save of the OPEN
+      // document wrote in between, and its outcome is both newer than the
+      // capture and about a document this call never touched: putting "saving"
+      // back over a save that has since finished leaves a badge spinning with
+      // nothing in flight, and putting "saved" back over one that has since
+      // failed drops the retry closure that is the curator's only way out.
+      const restoreBookkeeping = (): void => {
+        if (get().saveState !== "saving" || get().saveError !== beforeCall.saveError) return;
+        set(beforeCall);
+      };
 
       try {
         const created = await deps.projectRepository.create(project);
         if (!created) {
           // A create-only collision is an import refusal, not a failure to save
           // the document already open in this tab. Leave no red save badge or
-          // retry that could later turn the guarded insert into an overwrite.
-          set({ saveState: "saved", error: null, saveError: null });
+          // retry that could later turn the guarded insert into an overwrite —
+          // and equally, do not report "Saved" over a save failure the open
+          // document already had, whose retry closure is the user's way back.
+          restoreBookkeeping();
           return "exists";
         }
         finishProjectPersist(project);
         return "created";
       } catch (error) {
-        failProjectPersist(error, async () => {
-          await persistIfAbsent(project);
-        });
+        // No saveError, and so no retry: the only thing that closure could
+        // re-run is this create, which would put the import's project record on
+        // this device with no assets, no artworks and no sync metadata behind
+        // it — the unrecoverable orphan the import's own unwind exists to
+        // prevent, one toast click away. The import reports its own failure,
+        // and retrying it re-runs the whole handoff, which now has no record in
+        // its way. Only the banner carries the reason the caller reports.
+        restoreBookkeeping();
+        set({ error: describeSaveError(error) });
         return "failed";
       }
     }
@@ -1215,6 +1261,14 @@ export function createAppStore(deps: AppStoreDeps) {
     // passed in. A caller that persists after a swap must persist THIS, or it
     // writes the pre-repair document and then reports "Saved".
     function setDocument(project: Project, extras: Partial<AppState> = {}): Project {
+      // A swap supersedes every sync operation in flight: whatever it decided
+      // was decided against a document that is no longer here, so its outcome
+      // must not paint over this one. Bumped before the state below is written
+      // so nothing can bind to the new document under the old authorization.
+      // Synchronous and storage-free, like the rest of this function —
+      // loadBenchmarkFixture depends on that.
+      syncEpoch.documentSwapped();
+
       const repair = repairSharedOpeningsOnLoad(project, newId);
       const repaired = repair.project !== project;
 
@@ -1260,6 +1314,14 @@ export function createAppStore(deps: AppStoreDeps) {
         saveError: null,
         pendingDuplicateUploads: [],
         pendingPackageImport: null,
+        // Sync state describes the document that was here, down to the rev its
+        // copy descends from, so none of it survives a swap. What the NEW
+        // document's link is gets re-derived by refreshProjectSyncState (App
+        // runs it on every project change); a caller that swaps in the same
+        // project id, where that effect will not fire, owes the refresh
+        // itself. The one thing a caller may intentionally paint over this is
+        // an error about the incoming document — those paints come after.
+        ...CLOUD_SYNC_SLICE_INITIAL,
         ...extras,
         // AFTER extras on purpose. Several callers pass saveState:"saved"
         // because the document they handed over is what is in storage — but a
@@ -2023,14 +2085,15 @@ export function createAppStore(deps: AppStoreDeps) {
       persist,
       persistIfAbsent,
       setDocument,
-      deps
+      deps,
+      syncEpoch
     });
 
     const cloudBackupSlice = createCloudBackupSlice(set, get, { deps });
 
     const cloudProjectsSlice = createCloudProjectsSlice(set, get, { deps });
 
-    const cloudSyncSlice = createCloudSyncSlice(set, get, { deps });
+    const cloudSyncSlice = createCloudSyncSlice(set, get, { deps, syncEpoch });
 
     const artworkIntake = createArtworkIntakeSlice(set, get, {
       applyEdit,
@@ -4069,6 +4132,9 @@ export function createAppStore(deps: AppStoreDeps) {
           // awaited pre-restore snapshot above already covers.
           // The snapshot deliberately records the copy as it was restored.
           void snapshotOnOpen(project);
+          // Same-id swap, so App's project-keyed refresh will not run: re-derive
+          // the sync status against the copy that was just restored.
+          await get().refreshProjectSyncState();
         } catch (error) {
           const message = `Could not restore that copy (${
             error instanceof Error ? error.message : "unknown error"

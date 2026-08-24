@@ -55,9 +55,10 @@ type FakeSyncProviderOptions = {
   accountId?: string | null;
   status?: CloudBackupProviderStatus;
   // Fires at the START of a head write, so a test can advance the remote in the
-  // window between the check that decided to push and the write itself.
-  onUpload?: () => void;
-  onGetHead?: () => void;
+  // window between the check that decided to push and the write itself. Awaited,
+  // so a hook may drive the store through its own async actions.
+  onUpload?: () => void | Promise<void>;
+  onGetHead?: () => void | Promise<void>;
   failDownload?: CloudBackupError;
 };
 
@@ -107,7 +108,7 @@ function makeSyncProvider(options: FakeSyncProviderOptions = {}): FakeSyncProvid
     },
     async getSyncHead(projectId) {
       this.headReads += 1;
-      options.onGetHead?.();
+      await options.onGetHead?.();
       const head = this.heads.get(projectId);
       if (!head) return null;
       return {
@@ -125,7 +126,7 @@ function makeSyncProvider(options: FakeSyncProviderOptions = {}): FakeSyncProvid
     },
     async uploadSyncHead({ projectId, blob, baseRev }): Promise<SyncHeadMetadata> {
       this.uploads += 1;
-      options.onUpload?.();
+      await options.onUpload?.();
       const existing = this.heads.get(projectId);
       // Exactly the two ways a rev-conditional write loses: creating a head that
       // is already there, or updating one that has moved on.
@@ -215,6 +216,17 @@ describe("cloudSyncSlice", () => {
 
   function editLocally(store: ReturnType<typeof createAppStore>, title: string): void {
     store.setState({ project: { ...store.getState().project!, title } });
+  }
+
+  // A project switch the way the app makes one — through the document swap that
+  // every entry path goes through, and that supersedes the operations in
+  // flight. A raw setState of `project` leaves that untouched, which is exactly
+  // the state a guard comparing ids alone cannot tell from a current one.
+  async function switchTo(
+    store: ReturnType<typeof createAppStore>,
+    project: Project
+  ): Promise<void> {
+    await store.getState().openProject(project.id);
   }
 
   beforeEach(() => {
@@ -435,7 +447,7 @@ describe("cloudSyncSlice", () => {
       await seedRemoteEdit(provider, project, "From the other device", "rev-remote-2");
       const other: Project = { ...project, id: "another-project", title: "Another show" };
       await repository.save(other);
-      duringHeadRead = () => store.setState({ project: other });
+      duringHeadRead = () => switchTo(store, other);
 
       await store.getState().checkProjectSync();
 
@@ -584,6 +596,32 @@ describe("cloudSyncSlice", () => {
       expect(store.getState().project?.title).toBe("Edited here");
     });
 
+    // The fork's save is an await like any other, and the re-park that answers
+    // its failure is a paint: a "Review" row on a project whose conflict the
+    // swap already cleared is a decision with no dialog behind it.
+    it("says nothing about a failed “keep both” once another project is open", async () => {
+      const { provider, store, project } = await bootConflicted();
+      const other: Project = { ...project, id: "another-project", title: "Another show" };
+      await repository.save(other);
+      const downloadsBefore = provider.downloads;
+      const realSave = repository.save.bind(repository);
+      let forkAttempted = false;
+      repository.save = async (candidate) => {
+        if (forkAttempted) return realSave(candidate);
+        forkAttempted = true;
+        await switchTo(store, other);
+        throw new Error("IndexedDB unavailable");
+      };
+
+      await store.getState().resolveSyncConflict("keep-both");
+
+      expect(store.getState().project?.id).toBe("another-project");
+      expect(store.getState().syncStatus).toBe("idle");
+      expect(store.getState().syncError).toBeNull();
+      expect(store.getState().syncConflict).toBeNull();
+      expect(provider.downloads).toBe(downloadsBefore);
+    });
+
     // The dialog can sit open for minutes. A choice taken against one version of
     // the project must not silently apply to a newer one: the parked conflict
     // carries the fingerprint it was parked with, and the commit's drift check
@@ -624,7 +662,11 @@ describe("cloudSyncSlice", () => {
       const { provider, store, project } = await bootConflicted();
       const other: Project = { ...project, id: "another-project", title: "Another show" };
       await repository.save(other);
-      store.setState({ project: other });
+      // A real swap clears the parked conflict on its way past; put it back so
+      // what is under test is the binding guard rather than that clearing.
+      const parked = store.getState().syncConflict!;
+      await switchTo(store, other);
+      store.setState({ syncConflict: parked });
       const downloadsBefore = provider.downloads;
 
       await store.getState().resolveSyncConflict("use-dropbox");
@@ -665,6 +707,30 @@ describe("cloudSyncSlice", () => {
       await store.getState().checkProjectSync({ manual: true });
       expect((await syncMetaRepository.get(project.id))?.paused).toBe(false);
       expect(store.getState().syncStatus).toBe("conflict");
+    });
+
+    // The pause belongs to the project it was taken about, but "needs review"
+    // is about what is on screen — and by the time the write lands that can be
+    // a project with no link at all.
+    it("does not paint needs review onto a project opened while “not now” saved", async () => {
+      const { store, project } = await bootConflicted();
+      const other: Project = { ...project, id: "another-project", title: "Another show" };
+      await repository.save(other);
+      const realPut = syncMetaRepository.put.bind(syncMetaRepository);
+      let switched = false;
+      syncMetaRepository.put = async (record) => {
+        await realPut(record);
+        if (switched) return;
+        switched = true;
+        await switchTo(store, other);
+      };
+
+      await store.getState().resolveSyncConflict("not-now");
+
+      expect((await syncMetaRepository.get(project.id))?.paused).toBe(true);
+      expect(store.getState().project?.id).toBe("another-project");
+      expect(store.getState().syncStatus).toBe("idle");
+      expect(store.getState().syncMeta).toBeNull();
     });
 
     it("re-creates a vanished head for “keep this device's version”", async () => {
@@ -768,7 +834,7 @@ describe("cloudSyncSlice", () => {
       const staleRefresh = store.getState().refreshProjectSyncState();
       const other: Project = { ...projectA, id: "another-project", title: "Another show" };
       await repository.save(other);
-      store.setState({ project: other });
+      await switchTo(store, other);
       // The switch's own refresh completes first: B is unlinked.
       await store.getState().refreshProjectSyncState();
       expect(store.getState().syncMeta).toBeNull();
@@ -795,7 +861,7 @@ describe("cloudSyncSlice", () => {
       editLocally(store, "Edited before the push");
       const other: Project = { ...projectA, id: "another-project", title: "Another show" };
       await repository.save(other);
-      duringUpload = () => store.setState({ project: other });
+      duringUpload = () => switchTo(store, other);
 
       await store.getState().pushProjectSync();
 
@@ -807,6 +873,244 @@ describe("cloudSyncSlice", () => {
       expect(store.getState().project?.id).toBe("another-project");
       expect(store.getState().syncMeta).toBeNull();
       expect(store.getState().syncStatus).toBe("idle");
+    });
+
+    // Link authorization is per project, and for good reason: refusing A's
+    // metadata write because B was just linked would leave A's own upload
+    // sitting in Dropbox at a rev this device cannot prove it descends from —
+    // which the next check reads as A conflicting with itself and puts in front
+    // of the curator as a decision they never had to make.
+    it("records a completed push even though another project was linked mid-write", async () => {
+      const provider = makeSyncProvider();
+      const store = await bootStore(provider);
+      await store.getState().enableProjectSync();
+      const projectA = store.getState().project!;
+      const projectB: Project = {
+        ...projectA,
+        id: "another-project",
+        title: "Another show"
+      };
+      await repository.save(projectB);
+      editLocally(store, "Edited here");
+      await repository.save(store.getState().project!);
+      const revBefore = (await syncMetaRepository.get(projectA.id))!.lastAcceptedRev;
+
+      const upload = provider.uploadSyncHead.bind(provider);
+      let linkedB = false;
+      provider.uploadSyncHead = async (input) => {
+        if (!linkedB) {
+          linkedB = true;
+          // The curator moves to another project and turns sync on for THAT
+          // one while A's upload is still in flight.
+          await switchTo(store, projectB);
+          await store.getState().enableProjectSync();
+        }
+        return upload(input);
+      };
+
+      await store.getState().pushProjectSync();
+
+      // A's upload landed, and the rev it created is recorded against A.
+      const metaA = await syncMetaRepository.get(projectA.id);
+      expect(metaA!.lastAcceptedRev).not.toBe(revBefore);
+      expect(metaA!.lastAcceptedRev).toBe(provider.heads.get(projectA.id)!.rev);
+      // So reopening A reads as synced rather than as a conflict with its own
+      // upload — nothing to decide, and nothing to overwrite.
+      await switchTo(store, projectA);
+      await store.getState().checkProjectSync();
+      expect(store.getState().syncStatus).toBe("synced");
+      expect(store.getState().syncConflict).toBeNull();
+    });
+
+    // The failure arm of the same window. A sticky error on B is worse than a
+    // wrong badge: the popover's only action for an unlinked project in error
+    // is "Try again", which LINKS it — B would be pushed to Dropbox because
+    // A's upload failed.
+    it("says nothing about a failed upload once another project is open", async () => {
+      const provider = makeSyncProvider();
+      const store = await bootStore(provider);
+      await store.getState().enableProjectSync();
+      const projectA = store.getState().project!;
+      const other: Project = { ...projectA, id: "another-project", title: "Another show" };
+      await repository.save(other);
+      editLocally(store, "Edited before the push");
+      provider.uploadSyncHead = async () => {
+        await switchTo(store, other);
+        throw new CloudBackupError("transient", "Dropbox could not be reached.");
+      };
+
+      await store.getState().pushProjectSync();
+
+      expect(store.getState().project?.id).toBe("another-project");
+      expect(store.getState().syncStatus).toBe("idle");
+      expect(store.getState().syncError).toBeNull();
+      expect(store.getState().syncMeta).toBeNull();
+    });
+
+    // Rate limiting takes its own arm out of the same catch, and "pending"
+    // painted onto an unlinked project reads as "waiting to sync" for a
+    // project that is not synced at all.
+    it("does not leave the new project pending when a rate-limited upload lands", async () => {
+      const provider = makeSyncProvider();
+      const store = await bootStore(provider);
+      await store.getState().enableProjectSync();
+      const projectA = store.getState().project!;
+      const other: Project = { ...projectA, id: "another-project", title: "Another show" };
+      await repository.save(other);
+      editLocally(store, "Edited before the push");
+      provider.uploadSyncHead = async () => {
+        await switchTo(store, other);
+        throw new CloudBackupError("rate-limit", "Too many requests.");
+      };
+
+      await store.getState().pushProjectSync();
+
+      expect(store.getState().syncStatus).toBe("idle");
+      expect(store.getState().syncMeta).toBeNull();
+    });
+
+    // The guard above must not have made the ordinary failure silent.
+    it("still shows an upload failure for the project that is open", async () => {
+      const provider = makeSyncProvider();
+      const store = await bootStore(provider);
+      await store.getState().enableProjectSync();
+      editLocally(store, "Edited before the push");
+      provider.uploadSyncHead = async () => {
+        throw new CloudBackupError("transient", "Dropbox could not be reached.");
+      };
+
+      await store.getState().pushProjectSync();
+
+      expect(store.getState().syncStatus).toBe("error");
+      expect(store.getState().syncError).toBe("Dropbox could not be reached.");
+    });
+
+    // Identity alone cannot tell a stale answer from a current one: leave a
+    // project and come back, and the id guard passes on data read before the
+    // detour — here, before the link was turned off.
+    it("discards a metadata refresh that finishes after the project was reopened", async () => {
+      const provider = makeSyncProvider();
+      const store = await bootStore(provider);
+      await store.getState().enableProjectSync();
+      const projectA = store.getState().project!;
+      const other: Project = { ...projectA, id: "another-project", title: "Another show" };
+      await repository.save(other);
+
+      // Read A's metadata now, hand it back after the detour.
+      let releaseA: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        releaseA = resolve;
+      });
+      const realGet = syncMetaRepository.get.bind(syncMetaRepository);
+      let gated = true;
+      syncMetaRepository.get = async (projectId) => {
+        if (projectId !== projectA.id || !gated) return realGet(projectId);
+        gated = false;
+        const stale = await realGet(projectId);
+        await gate;
+        return stale;
+      };
+
+      const staleRefresh = store.getState().refreshProjectSyncState();
+      await store.getState().disableProjectSync();
+      await store.getState().openProject(other.id);
+      await store.getState().openProject(projectA.id);
+
+      releaseA();
+      await staleRefresh;
+
+      // A is open again and A's id matches — but A is not linked any more.
+      expect(store.getState().syncMeta).toBeNull();
+      expect(store.getState().syncStatus).toBe("idle");
+      expect(await syncMetaRepository.get(projectA.id)).toBeUndefined();
+    });
+
+    // setDocument is where every document entry path lands, and it is
+    // synchronous: nothing about the outgoing project's link — not its
+    // metadata, not a parked conflict, not an error — may still be on screen
+    // when the new one arrives. openProject does not refresh sync state (App
+    // does, keyed on the project id), so this is the swap doing it.
+    it("clears sync state when the document is swapped", async () => {
+      const provider = makeSyncProvider();
+      const store = await bootStore(provider);
+      await store.getState().enableProjectSync();
+      const projectA = store.getState().project!;
+      const other: Project = { ...projectA, id: "another-project", title: "Another show" };
+      await repository.save(other);
+      store.setState({
+        syncStatus: "error",
+        syncError: "Something about project A.",
+        syncErrorProjectId: projectA.id
+      });
+
+      await store.getState().openProject(other.id);
+
+      expect(store.getState().project?.id).toBe("another-project");
+      expect(store.getState().syncMeta).toBeNull();
+      expect(store.getState().syncStatus).toBe("idle");
+      expect(store.getState().syncError).toBeNull();
+      expect(store.getState().syncErrorProjectId).toBeNull();
+      expect(store.getState().syncConflict).toBeNull();
+    });
+  });
+
+  // A sync error can be the whole truth about a project with no metadata
+  // record behind it: a degraded sync import (packageSlice withholds the rev
+  // on purpose), or a bookkeeping write that failed before any record existed.
+  // The refresh that follows must not read "no record" as "nothing to say".
+  describe("an error with no metadata behind it", () => {
+    it("keeps an error that belongs to the open project across a refresh", async () => {
+      const provider = makeSyncProvider();
+      const store = await bootStore(provider);
+      const project = store.getState().project!;
+      store.setState({
+        syncStatus: "error",
+        syncError: "Some of the synced copy could not be applied here.",
+        syncErrorProjectId: project.id
+      });
+
+      await store.getState().refreshProjectSyncState();
+
+      expect(store.getState().syncStatus).toBe("error");
+      expect(store.getState().syncError).toBe(
+        "Some of the synced copy could not be applied here."
+      );
+      // Still unlinked: the error is preserved, not promoted into a link.
+      expect(store.getState().syncMeta).toBeNull();
+    });
+
+    it("drops an error left behind by a project the curator has left", async () => {
+      const provider = makeSyncProvider();
+      const store = await bootStore(provider);
+      store.setState({
+        syncStatus: "error",
+        syncError: "Some of the synced copy could not be applied here.",
+        syncErrorProjectId: "a-project-that-is-not-open"
+      });
+
+      await store.getState().refreshProjectSyncState();
+
+      expect(store.getState().syncStatus).toBe("idle");
+      expect(store.getState().syncError).toBeNull();
+      expect(store.getState().syncErrorProjectId).toBeNull();
+    });
+
+    it("clears the error once a check finds usable metadata", async () => {
+      const provider = makeSyncProvider();
+      const store = await bootStore(provider);
+      const project = store.getState().project!;
+      await store.getState().enableProjectSync();
+      store.setState({
+        syncStatus: "error",
+        syncError: "Some of the synced copy could not be applied here.",
+        syncErrorProjectId: project.id
+      });
+
+      await store.getState().refreshProjectSyncState();
+
+      expect(store.getState().syncStatus).toBe("synced");
+      expect(store.getState().syncError).toBeNull();
+      expect(store.getState().syncErrorProjectId).toBeNull();
     });
   });
 
@@ -824,6 +1128,58 @@ describe("cloudSyncSlice", () => {
       expect(store.getState().syncStatus).toBe("idle");
       // Other devices are still syncing against it.
       expect(provider.heads.get(project.id)?.rev).toBe("rev-uploaded-1");
+    });
+
+    // The push is already past its own guard, holding the metadata it is about
+    // to write. Putting that record back would re-create the link the user just
+    // deleted — sync turning itself back on against an explicit instruction.
+    it("does not let a push in flight re-create the record it deleted", async () => {
+      const provider = makeSyncProvider();
+      const store = await bootStore(provider);
+      await store.getState().enableProjectSync();
+      const project = store.getState().project!;
+      editLocally(store, "Edited here");
+      const upload = provider.uploadSyncHead.bind(provider);
+      // The unlink completes mid-write, after the push read its metadata and
+      // bound itself to the project.
+      provider.uploadSyncHead = async (input) => {
+        await store.getState().disableProjectSync();
+        return upload(input);
+      };
+
+      await store.getState().pushProjectSync();
+
+      expect(await syncMetaRepository.get(project.id)).toBeUndefined();
+      expect(store.getState().syncMeta).toBeNull();
+      expect(store.getState().syncStatus).toBe("idle");
+      expect(store.getState().syncError).toBeNull();
+      // The write itself really happened, and unlinking never destroys the
+      // canonical copy — other devices are still syncing against it.
+      expect(provider.heads.get(project.id)?.rev).toBe("rev-uploaded-2");
+    });
+
+    // The check holds its metadata in the same way, and its next step is a
+    // PULL: acting on that assessment would replace the project the user just
+    // unlinked with the Dropbox version.
+    it("does not let a check in flight act after the link is gone", async () => {
+      const provider = makeSyncProvider();
+      const store = await bootStore(provider);
+      await store.getState().enableProjectSync();
+      const project = store.getState().project!;
+      await seedRemoteEdit(provider, project, "From the other device", "rev-remote-2");
+      const readHead = provider.getSyncHead.bind(provider);
+      provider.getSyncHead = async (projectId) => {
+        await store.getState().disableProjectSync();
+        return readHead(projectId);
+      };
+
+      await store.getState().checkProjectSync();
+
+      expect(provider.downloads).toBe(0);
+      expect(store.getState().project?.title).toBe("On this device");
+      expect(await syncMetaRepository.get(project.id)).toBeUndefined();
+      expect(store.getState().syncMeta).toBeNull();
+      expect(store.getState().syncStatus).toBe("idle");
     });
 
     it("repaints the new project when deletion finishes after a switch", async () => {
@@ -849,7 +1205,7 @@ describe("cloudSyncSlice", () => {
         title: "Another show"
       };
       await repository.save(projectB);
-      store.setState({ project: projectB });
+      await switchTo(store, projectB);
       await store.getState().enableProjectSync();
       expect(store.getState().syncMeta?.projectId).toBe(projectB.id);
 
@@ -885,7 +1241,7 @@ describe("cloudSyncSlice", () => {
         title: "Another show"
       };
       await repository.save(projectB);
-      store.setState({ project: projectB });
+      await switchTo(store, projectB);
       await store.getState().enableProjectSync();
       expect(store.getState().syncMeta?.projectId).toBe(projectB.id);
 

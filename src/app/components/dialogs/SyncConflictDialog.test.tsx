@@ -5,9 +5,15 @@ import { SyncConflictDialog } from "./SyncConflictDialog";
 
 afterEach(cleanup);
 
-// The binding rides along on every parked conflict (which project, and how it
-// fingerprinted when the decision was parked); the dialog itself never reads it.
-const BINDING = { projectId: "project-1", localFingerprint: "fp-local" };
+// The binding rides along on every parked conflict (which project, under which
+// authorization, and how it fingerprinted when the decision was parked); the
+// dialog itself never reads it.
+const BINDING = {
+  projectId: "project-1",
+  operationEpoch: 0,
+  linkEpoch: 0,
+  localFingerprint: "fp-local"
+};
 
 const BOTH_CHANGED: SyncConflictRecord = {
   remoteRev: "0123456789abcdef",
