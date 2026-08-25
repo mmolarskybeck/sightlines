@@ -1,9 +1,9 @@
 // Shared, pure copy helpers for the cloud-backup UI surfaces (the topbar status
 // badge, the save-status popover, the Export menu item, and the Settings
 // block), so the four never drift and the wording is unit-testable. The store
-// keeps two separate status models (link status + upload lifecycle); these
-// helpers are the ONLY place they're folded into presentation, so a copy or
-// priority change lands in one file.
+// keeps three separate status models (link status + upload lifecycle + the
+// per-project sync loop); these helpers are the ONLY place they're folded into
+// presentation, so a copy or priority change lands in one file.
 
 import type {
   CloudBackupProviderStatus,
@@ -137,7 +137,7 @@ export function getStatusBadgeTooltip(
     return "Your project could not be saved on this device. Open for details.";
   }
   if (display.tone === "attention") {
-    return "Saved on this device. Dropbox backup needs attention. Open for details.";
+    return "Saved on this device. Dropbox needs attention. Open for details.";
   }
   if (display.tone === "idle") {
     return "Not saved on this device yet. Open for details.";
@@ -152,39 +152,72 @@ export function getStatusBadgeTooltip(
 }
 
 // ---------------------------------------------------------------------------
-// Save-status popover: a structured cloud row (icon + text + inline action).
+// Save-status popover: ONE Dropbox row (icon + text + one inline action).
+//
+// Backup and sync stay separate machinery — one keeps timestamped history, the
+// other keeps a single canonical copy in step — but they are not two promises
+// to the curator. The promise is "this project is in Dropbox, and it's on your
+// other devices"; the automatic safety copies are a detail that row mentions,
+// never a second status to reconcile. Two rows made the user diff them.
+//
+// The row is worst-state-first: whatever most needs a decision wins, and the
+// single action is that state's one next step.
 // ---------------------------------------------------------------------------
 
 export type CloudBackupPopoverTone = "muted" | "info" | "caution";
-export type CloudBackupPopoverAction = "backup-now" | "reconnect" | "retry" | "setup";
 export type CloudBackupCloudIcon =
   | "cloud"
   | "cloud-check"
   | "cloud-warning"
   | "cloud-spinner";
 
-export type CloudBackupPopoverState = {
+// One union across both features, because one row dispatches it: the first four
+// are provider/backup gestures, the last three are sync gestures.
+export type DropboxRowAction =
+  | "setup"
+  | "reconnect"
+  | "backup-retry"
+  | "backup-now"
+  | "enable"
+  | "sync-now"
+  | "review";
+
+export type DropboxRowState = {
   text: string;
+  // caution is amber attention, never destructive red — the copy on this
+  // device is safe in every one of these states.
   tone: CloudBackupPopoverTone;
   icon: CloudBackupCloudIcon;
-  action: CloudBackupPopoverAction | null;
+  action: DropboxRowAction | null;
   actionLabel: string | null;
   actionDisabled: boolean;
 };
 
-// The Dropbox row is always present so the popover consistently explains the
-// second, optional save destination. It carries an inline action per state.
-export function getCloudBackupPopoverState(input: {
-  configured: boolean;
-  status: CloudBackupProviderStatus;
-  uploadStatus: CloudBackupUploadStatus;
-  lastCloudBackupAt: string | null;
-  pending: boolean;
-  now?: number;
-}): CloudBackupPopoverState {
-  if (!input.configured) {
+const SYNC_ROW_FALLBACK_ERROR = "Sync stopped. Try again.";
+
+export function getDropboxRowState(input: {
+  backup: {
+    configured: boolean;
+    status: CloudBackupProviderStatus;
+    uploadStatus: CloudBackupUploadStatus;
+    lastCloudBackupAt: string | null;
+    pending: boolean;
+    now?: number;
+  };
+  // `linked` is sync metadata on THIS device. It does not gate the attention
+  // states below it: enabling sync can find a head another device created
+  // first, which parks a conflict before any metadata exists.
+  sync: {
+    linked: boolean;
+    status: ProjectSyncStatus;
+    error: string | null;
+  };
+}): DropboxRowState {
+  const { backup, sync } = input;
+
+  if (!backup.configured) {
     return {
-      text: "Not connected. Automatic backup is off.",
+      text: "Not connected. Connect to keep this project safe and open it on your other devices.",
       tone: "muted",
       icon: "cloud",
       action: "setup",
@@ -193,9 +226,11 @@ export function getCloudBackupPopoverState(input: {
     };
   }
 
-  if (input.status === "reauthorization-required") {
+  // Provider trouble outranks everything below: it breaks both features, and
+  // reconnecting is the only gesture that can fix either.
+  if (backup.status === "reauthorization-required") {
     return {
-      text: "Automatic backup paused. Reconnect Dropbox.",
+      text: "Paused. Reconnect Dropbox.",
       tone: "caution",
       icon: "cloud-warning",
       action: "reconnect",
@@ -203,10 +238,12 @@ export function getCloudBackupPopoverState(input: {
       actionDisabled: false
     };
   }
-
-  if (input.status === "disconnected") {
+  // "Disconnected" is the first-run state (the build ships configured, the
+  // account isn't linked yet), so this line is most users' introduction to the
+  // row — it has to carry the pitch, not just the standing.
+  if (backup.status === "disconnected") {
     return {
-      text: "Automatic backup is off.",
+      text: "Off. Turn on to keep this project safe and open it on your other devices.",
       tone: "muted",
       icon: "cloud",
       action: "setup",
@@ -215,122 +252,25 @@ export function getCloudBackupPopoverState(input: {
     };
   }
 
-  // connected
-  if (input.uploadStatus === "uploading") {
+  // Sync attention states ahead of backup trouble: these are decisions only the
+  // curator can make, while a failed safety copy is a retry.
+  if (sync.status === "error") {
     return {
-      text: "Backing up changes…",
-      tone: "info",
-      icon: "cloud-spinner",
-      action: "backup-now",
-      actionLabel: "Back up now",
-      actionDisabled: true
-    };
-  }
-  if (input.uploadStatus === "error") {
-    return {
-      text: "Automatic backup paused. Last backup didn't finish.",
-      tone: "caution",
-      icon: "cloud-warning",
-      action: "retry",
-      actionLabel: "Retry",
-      actionDisabled: false
-    };
-  }
-  if (input.pending) {
-    return {
-      text: "Automatic backup on. Changes waiting to back up.",
-      tone: "muted",
-      icon: "cloud",
-      action: "backup-now",
-      actionLabel: "Back up now",
-      actionDisabled: false
-    };
-  }
-  if (input.lastCloudBackupAt) {
-    return {
-      text: `Automatic backup on. Last backup ${formatBackupRelativeTime(
-        input.lastCloudBackupAt,
-        input.now
-      )}.`,
-      tone: "muted",
-      icon: "cloud-check",
-      action: "backup-now",
-      actionLabel: "Back up now",
-      actionDisabled: false
-    };
-  }
-  return {
-    text: "Automatic backup on. Waiting for the first backup.",
-    tone: "muted",
-    icon: "cloud",
-    action: "backup-now",
-    actionLabel: "Back up now",
-    actionDisabled: false
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Save-status popover, second cloud row: cross-device sync for the OPEN project
-// (docs/cloud-sync-plan.md stage 2). Backup and sync are different promises —
-// one keeps history, the other keeps one canonical copy in step — so they are
-// two rows with two vocabularies, never one merged status.
-//
-// This is the first surface allowed to say "sync" (the stage-1 browser rows
-// deliberately say backup/restore), and only ever about a project whose head
-// this device is linked to.
-// ---------------------------------------------------------------------------
-
-export type ProjectSyncRowAction = "enable" | "sync-now" | "review";
-
-export type ProjectSyncRowState = {
-  text: string;
-  // Same three tones the backup row uses, so the two rows tint identically:
-  // caution is amber attention, never destructive red — the copy on this
-  // device is safe in every one of these states.
-  tone: CloudBackupPopoverTone;
-  icon: CloudBackupCloudIcon;
-  action: ProjectSyncRowAction | null;
-  actionLabel: string | null;
-  actionDisabled: boolean;
-};
-
-const SYNC_ROW_FALLBACK_ERROR = "Sync stopped. Try again.";
-
-// null means "render no sync row at all": with no provider connection there is
-// nothing true to say about syncing, and the backup row above already explains
-// the disconnected account.
-//
-// `linked` is metadata-on-this-device, but it does NOT gate the attention
-// states: enabling sync can find a head another device created first, which
-// parks a conflict before any metadata exists. Those states are surfaced on
-// their own terms, ahead of the not-linked branch — `linked` only decides
-// WHICH retry an error offers, since a project with no metadata has nothing for
-// the manual check to check.
-export function getProjectSyncRowState(input: {
-  connected: boolean;
-  linked: boolean;
-  status: ProjectSyncStatus;
-  error: string | null;
-}): ProjectSyncRowState | null {
-  if (!input.connected) return null;
-
-  if (input.status === "error") {
-    return {
-      text: input.error ?? SYNC_ROW_FALLBACK_ERROR,
+      text: sync.error ?? SYNC_ROW_FALLBACK_ERROR,
       tone: "caution",
       icon: "cloud-warning",
       // Which retry actually retries depends on how far this project got. A
       // failed ENABLE leaves no metadata behind, and the manual check is a
-      // no-op for an unlinked project — it would quietly reset the row to "Off
-      // for this project", taking the error message with it and leaving the
-      // button doing nothing. Retry the gesture that failed: turning sync on.
-      // Once linked, the manual check is the right retry for everything.
-      action: input.linked ? "sync-now" : "enable",
+      // no-op for an unlinked project — it would quietly reset the row to the
+      // sync-off line, taking the error message with it and leaving the button
+      // doing nothing. Retry the gesture that failed: turning sync on. Once
+      // linked, the manual check is the right retry for everything.
+      action: sync.linked ? "sync-now" : "enable",
       actionLabel: "Try again",
       actionDisabled: false
     };
   }
-  if (input.status === "conflict") {
+  if (sync.status === "conflict") {
     return {
       text: "This project changed in two places.",
       tone: "caution",
@@ -340,7 +280,7 @@ export function getProjectSyncRowState(input: {
       actionDisabled: false
     };
   }
-  if (input.status === "needs-review") {
+  if (sync.status === "needs-review") {
     return {
       text: "Needs review.",
       tone: "caution",
@@ -351,22 +291,40 @@ export function getProjectSyncRowState(input: {
     };
   }
 
-  if (!input.linked) {
+  const syncInFlight =
+    sync.status === "checking" || sync.status === "pushing" || sync.status === "pulling";
+
+  // Turning sync on takes seconds (build the package, upload the head), and
+  // `linked` only becomes true once that upload lands — so the enable gesture
+  // used to leave the row saying "off" with a live button the whole time. An
+  // UNLINKED project can only be mid-round-trip because an enable is in flight
+  // (or a keep-mine resolution of an enable-time conflict, which is the same
+  // gesture finishing), so this state is the honest reading of that window.
+  if (!sync.linked && syncInFlight) {
     return {
-      text: "Off for this project.",
-      tone: "muted",
-      icon: "cloud",
+      text: "Turning on… Sending this project to Dropbox…",
+      tone: "info",
+      icon: "cloud-spinner",
       action: "enable",
-      actionLabel: "Sync across devices",
+      actionLabel: "Turning on…",
+      actionDisabled: true
+    };
+  }
+
+  if (backup.uploadStatus === "error") {
+    return {
+      text: "Last safety copy didn't finish.",
+      tone: "caution",
+      icon: "cloud-warning",
+      action: "backup-retry",
+      actionLabel: "Retry",
       actionDisabled: false
     };
   }
 
-  if (
-    input.status === "checking" ||
-    input.status === "pushing" ||
-    input.status === "pulling"
-  ) {
+  // One in-flight line for all three round trips: which one is running is the
+  // loop's business, not the curator's.
+  if (sync.linked && syncInFlight) {
     return {
       text: "Syncing…",
       tone: "info",
@@ -376,9 +334,43 @@ export function getProjectSyncRowState(input: {
       actionDisabled: true
     };
   }
-  if (input.status === "pending") {
+  if (backup.uploadStatus === "uploading") {
     return {
-      text: "Changes waiting to sync.",
+      text: "Backing up changes…",
+      tone: "info",
+      icon: "cloud-spinner",
+      action: "backup-now",
+      actionLabel: "Back up now",
+      actionDisabled: true
+    };
+  }
+
+  if (sync.linked) {
+    if (sync.status === "pending") {
+      return {
+        text: "Changes waiting to sync.",
+        tone: "muted",
+        icon: "cloud",
+        action: "sync-now",
+        actionLabel: "Sync now",
+        actionDisabled: false
+      };
+    }
+    if (sync.status === "synced") {
+      return {
+        text: "Up to date on your other devices.",
+        tone: "muted",
+        icon: "cloud-check",
+        action: "sync-now",
+        actionLabel: "Sync now",
+        actionDisabled: false
+      };
+    }
+    // "idle" with metadata on hand: linked, but this device hasn't evaluated
+    // the state machine yet (the moment after a project opens). Say the durable
+    // fact and offer the check rather than claiming a standing never read.
+    return {
+      text: "Sync is on for this project.",
       tone: "muted",
       icon: "cloud",
       action: "sync-now",
@@ -386,25 +378,40 @@ export function getProjectSyncRowState(input: {
       actionDisabled: false
     };
   }
-  if (input.status === "synced") {
+
+  // Not linked, nothing wrong: the backup side is working and the offer is the
+  // thing this project does NOT have yet. Pending outranks the timestamp for
+  // the same reason it always did — a last-backup time must never imply the
+  // newest work is already in Dropbox.
+  if (backup.pending) {
     return {
-      text: "Synced.",
+      text: "Changes waiting to back up. Not on your other devices yet.",
       tone: "muted",
-      icon: "cloud-check",
-      action: "sync-now",
-      actionLabel: "Sync now",
+      icon: "cloud",
+      action: "enable",
+      actionLabel: "Use on other devices",
       actionDisabled: false
     };
   }
-  // "idle" with metadata on hand: linked, but this device hasn't evaluated the
-  // state machine yet (the moment after a project opens). Say the durable fact
-  // and offer the check rather than claiming a standing that hasn't been read.
+  if (backup.lastCloudBackupAt) {
+    return {
+      text: `Backed up ${formatBackupRelativeTime(
+        backup.lastCloudBackupAt,
+        backup.now
+      )}. Not on your other devices yet.`,
+      tone: "muted",
+      icon: "cloud-check",
+      action: "enable",
+      actionLabel: "Use on other devices",
+      actionDisabled: false
+    };
+  }
   return {
-    text: "Sync is on for this project.",
+    text: "Not on your other devices yet.",
     tone: "muted",
     icon: "cloud",
-    action: "sync-now",
-    actionLabel: "Sync now",
+    action: "enable",
+    actionLabel: "Use on other devices",
     actionDisabled: false
   };
 }
@@ -751,8 +758,8 @@ export function buildCloudProjectRows(input: {
 // syncs from one that only has backups — so an Open here may quietly bring a
 // project in without linking it. Restoring beats blocking recovery, so the rows
 // still open; this line is the part that must not be silent. The fix afterwards
-// is the sync row's own "Sync across devices", which finds the head and parks
-// the two copies in the conflict dialog.
+// is the Dropbox row's own "Use on other devices", which finds the head and
+// parks the two copies in the conflict dialog.
 export const CLOUD_SYNC_HEADS_UNAVAILABLE_NOTICE =
   "Couldn't check which projects sync across devices. One that does may open here " +
   "without syncing — you can turn syncing on after it opens.";

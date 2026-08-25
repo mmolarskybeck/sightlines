@@ -260,7 +260,7 @@ test.describe("cloud backup", () => {
     expect(status).toBe(400);
   });
 
-  test("separates automatic local save from optional Dropbox backup", async ({ page }) => {
+  test("separates automatic local save from the optional Dropbox row", async ({ page }) => {
     await gotoApp(page);
     await openStoragePopover(page);
 
@@ -269,8 +269,11 @@ test.describe("cloud backup", () => {
     await expect(
       page.getByText("Saved automatically in this browser.", { exact: false })
     ).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Dropbox backup" })).toBeVisible();
-    await expect(page.getByText("Automatic backup is off.", { exact: false })).toBeVisible();
+    // One Dropbox row, carrying both promises (safe copy + other devices).
+    // Dropbox is configured in this build but not connected, so the row is the
+    // off state with the one way back on.
+    await expect(page.getByRole("heading", { name: "Dropbox", exact: true })).toBeVisible();
+    await expect(page.locator(".storage-popover-destinations")).toContainText("Off.");
     await expect(page.getByRole("button", { name: /Connect|Turn on/ })).toBeVisible();
     await expect(page.getByRole("button", { name: "Export backup file" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Storage settings" })).toBeVisible();
@@ -292,10 +295,14 @@ test.describe("cloud backup", () => {
     await flushCloudBackupOnHide(page);
     await uploadRequest;
 
-    // The save-status popover reports the backup.
+    // The save-status popover reports the backup, and says the project is not
+    // on the curator's other devices yet (sync is a separate opt-in).
     await openStoragePopover(page);
     await expect(page.locator(".storage-popover-destinations")).toContainText(
-      "Automatic backup on. Last backup"
+      "Backed up "
+    );
+    await expect(page.locator(".storage-popover-destinations")).toContainText(
+      "Not on your other devices yet."
     );
 
     // Settings shows the connected account.
@@ -345,7 +352,10 @@ test.describe("cloud backup", () => {
     await expect(page.locator("svg.plan-svg")).toBeVisible();
   });
 
-  test("backs up on demand from the save-status popover", async ({ page }) => {
+  // The merged Dropbox row spends its one action on sync, so the manual backup
+  // gesture lives in the Export menu — this covers that route end to end and
+  // then checks the row reflects the upload.
+  test("backs up on demand and reflects it in the Dropbox row", async ({ page }) => {
     await installDropboxRoutes(page);
     await seedDropboxAuth(page);
     await gotoApp(page);
@@ -354,17 +364,22 @@ test.describe("cloud backup", () => {
     await renameProject(page, "Manual Backup");
     await expect(page.locator("button.status-badge")).toHaveText(/Saved/);
 
-    // "Back up now" in the popover triggers a real (mocked) upload.
     await openStoragePopover(page);
+    await expect(page.locator(".storage-popover-destinations")).toContainText(
+      "Changes waiting to back up. Not on your other devices yet."
+    );
+    await page.keyboard.press("Escape");
+
     const uploadRequest = page.waitForRequest((request) =>
       request.url().includes("content.dropboxapi.com/2/files/upload")
     );
-    await page.getByRole("button", { name: "Back up now" }).click();
+    await page.getByRole("button", { name: "Export", exact: true }).click();
+    await page.getByRole("menuitem", { name: /Back up to Dropbox/ }).click();
     await uploadRequest;
 
-    // The row settles into the backed-up state without reopening the popover.
+    await openStoragePopover(page);
     await expect(page.locator(".storage-popover-destinations")).toContainText(
-      "Automatic backup on. Last backup"
+      "Backed up "
     );
   });
 

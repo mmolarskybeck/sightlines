@@ -249,10 +249,10 @@ export function SettingsDialog({
               {syncMeta ? (
                 <div className="settings-action-row">
                   <div className="settings-action-text">
-                    <strong className="settings-action-title">Cross-device sync</strong>
+                    <strong className="settings-action-title">On your other devices</strong>
                     <p className="settings-action-desc">
-                      This project syncs with the copy in your Dropbox. Turning it off
-                      leaves that copy in place for your other devices.
+                      This project stays in step with the copy in your Dropbox. Turning it
+                      off leaves that copy in place for your other devices.
                     </p>
                   </div>
                   <div className="settings-action-buttons">
@@ -261,7 +261,7 @@ export function SettingsDialog({
                       variant="outline"
                       onClick={() => void disableProjectSync()}
                     >
-                      Turn off sync for this project
+                      Turn off for this project
                     </Button>
                   </div>
                 </div>

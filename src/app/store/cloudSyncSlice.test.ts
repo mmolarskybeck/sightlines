@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { createSightlinesPackage } from "../../domain/package/buildPackage";
 import type { Project } from "../../domain/project";
 import type { ProjectSyncMeta } from "../../domain/repositories/syncMetaRepository";
-import { getProjectSyncRowState } from "../cloud/cloudBackupCopy";
+import { getDropboxRowState } from "../cloud/cloudBackupCopy";
 import { CloudBackupError } from "../cloud/dropbox";
 import { syncHeadPath } from "../cloud/dropboxAuth";
 import type {
@@ -750,9 +750,30 @@ describe("cloudSyncSlice", () => {
     });
   });
 
+  // The popover's merged Dropbox row, read off the store exactly as TopBar
+  // reads it — so what the curator would actually see is asserted, not a
+  // hand-built approximation of it.
+  function dropboxRowOf(store: ReturnType<typeof createAppStore>) {
+    const state = store.getState();
+    return getDropboxRowState({
+      backup: {
+        configured: true,
+        status: state.cloudBackupProviderStatus,
+        uploadStatus: state.cloudBackupStatus,
+        lastCloudBackupAt: state.lastCloudBackupAt,
+        pending: state.cloudBackupPending
+      },
+      sync: {
+        linked: state.syncMeta !== null,
+        status: state.syncStatus,
+        error: state.syncError
+      }
+    });
+  }
+
   // A failed enable leaves the one state where the popover's retry can't be the
   // manual check: there is no metadata for a check to read, so it would no-op
-  // and quietly replace the error with "Off for this project".
+  // and quietly replace the error with the sync-off line.
   describe("a failed enable", () => {
     it("leaves an error the popover row retries by enabling again", async () => {
       const provider = makeSyncProvider();
@@ -765,23 +786,18 @@ describe("cloudSyncSlice", () => {
 
       expect(store.getState().syncStatus).toBe("error");
       expect(store.getState().syncMeta).toBeNull();
-      const row = getProjectSyncRowState({
-        connected: true,
-        linked: store.getState().syncMeta !== null,
-        status: store.getState().syncStatus,
-        error: store.getState().syncError
-      });
-      expect(row?.action).toBe("enable");
-      expect(row?.actionLabel).toBe("Try again");
-      expect(row?.text).toBe("Dropbox could not be reached.");
+      const row = dropboxRowOf(store);
+      expect(row.action).toBe("enable");
+      expect(row.actionLabel).toBe("Try again");
+      expect(row.text).toBe("Dropbox could not be reached.");
     });
 
     it("mirrors a mid-write reauth into provider status so the UI can offer Reconnect", async () => {
       // A 401 mid-upload flips the provider's sticky reauth flag. Until that
       // lands in observable state, the row keeps offering a retry whose
       // getStatus() guard silently no-ops — the exact inert-"Try again" bug.
-      // Mirrored, the sync row (gated on connected) yields to the Dropbox
-      // row's Reconnect affordance.
+      // Mirrored, the provider's own trouble outranks the sync error and the
+      // row offers Reconnect, the one gesture that fixes anything here.
       const provider = makeSyncProvider();
       let revoked = false;
       provider.uploadSyncHead = async () => {
@@ -799,15 +815,44 @@ describe("cloudSyncSlice", () => {
       expect(store.getState().cloudBackupProviderStatus).toBe(
         "reauthorization-required"
       );
-      const row = getProjectSyncRowState({
-        connected:
-          store.getState().cloudBackupProviderStatus === "connected",
-        linked: store.getState().syncMeta !== null,
-        status: store.getState().syncStatus,
-        error: store.getState().syncError
+      expect(dropboxRowOf(store)).toMatchObject({
+        action: "reconnect",
+        actionLabel: "Reconnect"
       });
-      expect(row).toBeNull();
     });
+  });
+
+  // Turning sync on is a multi-second round trip (build the package, upload the
+  // head) and `linked` stays false until it lands. The row must say so the
+  // instant the button is pressed, or the gesture reads as doing nothing.
+  it("paints the turning-on row before the enable upload has finished", async () => {
+    let releaseUpload: () => void = () => {};
+    const uploadGate = new Promise<void>((resolve) => {
+      releaseUpload = resolve;
+    });
+    const provider = makeSyncProvider({ onUpload: () => uploadGate });
+    const store = await bootStore(provider);
+    // The wiring mirrors the provider's link status whenever the project
+    // changes; the row reads that mirror, not the provider.
+    store.getState().refreshCloudBackupStatus();
+
+    // No await: the status must be visible in the same tick as the click, not
+    // one microtask later.
+    const enabling = store.getState().enableProjectSync();
+    expect(store.getState().syncStatus).toBe("pushing");
+    expect(store.getState().syncMeta).toBeNull();
+    expect(dropboxRowOf(store)).toMatchObject({
+      text: "Turning on… Sending this project to Dropbox…",
+      icon: "cloud-spinner",
+      actionDisabled: true
+    });
+
+    releaseUpload();
+    await enabling;
+    expect(store.getState().syncMeta).not.toBeNull();
+    expect(dropboxRowOf(store).text).toBe(
+      "Up to date on your other devices."
+    );
   });
 
   describe("stale async paints", () => {

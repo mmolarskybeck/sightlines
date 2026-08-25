@@ -28,12 +28,11 @@ import {
 } from "../../hooks/useStoragePersistence";
 import {
   getCloudBackupMenuItem,
-  getCloudBackupPopoverState,
-  getProjectSyncRowState,
+  getDropboxRowState,
   getStatusBadgeDisplay,
   getStatusBadgeTooltip,
   type CloudBackupCloudIcon,
-  type ProjectSyncRowAction
+  type DropboxRowAction
 } from "../../cloud/cloudBackupCopy";
 import type {
   CloudBackupProviderStatus,
@@ -103,9 +102,9 @@ type TopBarProps = {
   openCloudProjectBackup: (folder: CloudProjectFolder) => Promise<boolean>;
   // The sibling open for a project the account holds only as a sync head.
   openCloudSyncedProject: (head: SyncHeadListing) => Promise<boolean>;
-  // Cross-device sync for the OPEN project: linked = this device holds usable
-  // sync metadata for it. Status and error are the sync loop's own, kept apart
-  // from the backup upload status they sit beside in the popover.
+  // Sync for the OPEN project: linked = this device holds usable sync metadata
+  // for it. Status and error are the sync loop's own, kept apart from the
+  // backup upload status they are folded together with for display only.
   syncLinked: boolean;
   syncStatus: ProjectSyncStatus;
   syncError: string | null;
@@ -185,13 +184,6 @@ export function TopBar({
     cloudBackupConfigured && cloudBackupProviderStatus === "connected";
   const exportBusy = isExportingPackage || isSharingProject;
   const badgeTooltip = getStatusBadgeTooltip(badgeDisplay, cloudConnected);
-  const cloudPopover = getCloudBackupPopoverState({
-    configured: cloudBackupConfigured,
-    status: cloudBackupProviderStatus,
-    uploadStatus: cloudBackupStatus,
-    lastCloudBackupAt,
-    pending: cloudBackupPending
-  });
   const cloudMenu = cloudBackupConfigured
     ? getCloudBackupMenuItem({
         status: cloudBackupProviderStatus,
@@ -200,21 +192,16 @@ export function TopBar({
         pending: cloudBackupPending
       })
     : null;
-  const syncRow = getProjectSyncRowState({
-    connected: cloudConnected,
-    linked: syncLinked,
-    status: syncStatus,
-    error: syncError
+  const dropboxRow = getDropboxRowState({
+    backup: {
+      configured: cloudBackupConfigured,
+      status: cloudBackupProviderStatus,
+      uploadStatus: cloudBackupStatus,
+      lastCloudBackupAt,
+      pending: cloudBackupPending
+    },
+    sync: { linked: syncLinked, status: syncStatus, error: syncError }
   });
-  // "Review" is the same gesture as a manual check: it clears a postponed
-  // ("Not now") project and re-evaluates, which re-parks the conflict dialog
-  // when the two versions really have both moved on. "Enable" covers both
-  // turning sync on and retrying an enable that failed — the row layer decides
-  // which retry an error gets, because it knows whether any metadata exists.
-  const runSyncAction = (action: ProjectSyncRowAction) => {
-    if (action === "enable") void enableProjectSync();
-    else void checkProjectSync({ manual: true });
-  };
   // The cloud row / export item share one action router so the two surfaces
   // can't route the same intent differently.
   const runCloudAction = (action: "backup-now" | "reconnect" | "retry" | "setup") => {
@@ -225,6 +212,19 @@ export function TopBar({
     } else {
       void runCloudBackupNow();
     }
+  };
+  // One dispatcher for the merged row's union. "Review" is the same gesture as
+  // a manual check: it clears a postponed ("Not now") project and re-evaluates,
+  // which re-parks the conflict dialog when the two versions really have both
+  // moved on. "Enable" covers both turning sync on and retrying an enable that
+  // failed — the row layer decides which retry an error gets, because it knows
+  // whether any metadata exists.
+  const runDropboxRowAction = (action: DropboxRowAction) => {
+    if (action === "enable") void enableProjectSync();
+    else if (action === "sync-now" || action === "review") {
+      void checkProjectSync({ manual: true });
+    } else if (action === "backup-retry") runCloudAction("retry");
+    else runCloudAction(action);
   };
   return (
     <header className="topbar">
@@ -338,52 +338,32 @@ export function TopBar({
                   <p>{getStorageNoteCopy(storagePersistence)}</p>
                 </div>
               </section>
+              {/* One Dropbox row, not one per mechanism: the curator is owed a
+                  single answer about the copy in Dropbox — is it there, and is
+                  it on the other devices. Backup and sync remain separate
+                  machinery behind it; the row states whichever needs a decision
+                  first and offers that state's one next step. Turning sync OFF
+                  lives in Settings — this row stays status + next step. */}
               <section
-                className={`storage-popover-destination storage-popover-cloud-${cloudPopover.tone}`}
+                className={`storage-popover-destination storage-popover-cloud-${dropboxRow.tone}`}
               >
-                <CloudRowIcon icon={cloudPopover.icon} />
+                <CloudRowIcon icon={dropboxRow.icon} />
                 <div className="storage-popover-destination-copy">
-                  <h4>Dropbox backup</h4>
-                  <p>{cloudPopover.text}</p>
-                  {cloudPopover.action ? (
+                  <h4>Dropbox</h4>
+                  <p>{dropboxRow.text}</p>
+                  {dropboxRow.action ? (
                     <Button
                       className="storage-popover-row-action"
-                      disabled={cloudPopover.actionDisabled}
+                      disabled={dropboxRow.actionDisabled}
                       size="sm"
                       variant="ghost"
-                      onClick={() => runCloudAction(cloudPopover.action!)}
+                      onClick={() => runDropboxRowAction(dropboxRow.action!)}
                     >
-                      {cloudPopover.actionLabel}
+                      {dropboxRow.actionLabel}
                     </Button>
                   ) : null}
                 </div>
               </section>
-              {/* Sync is a third promise, not a mode of the backup above it:
-                  backups keep history, sync keeps one copy in step across the
-                  curator's devices. Own row, own vocabulary. Turning sync OFF
-                  lives in Settings — this row stays status + one next step. */}
-              {syncRow ? (
-                <section
-                  className={`storage-popover-destination storage-popover-cloud-${syncRow.tone}`}
-                >
-                  <CloudRowIcon icon={syncRow.icon} />
-                  <div className="storage-popover-destination-copy">
-                    <h4>Cross-device sync</h4>
-                    <p>{syncRow.text}</p>
-                    {syncRow.action ? (
-                      <Button
-                        className="storage-popover-row-action"
-                        disabled={syncRow.actionDisabled}
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => runSyncAction(syncRow.action!)}
-                      >
-                        {syncRow.actionLabel}
-                      </Button>
-                    ) : null}
-                  </div>
-                </section>
-              ) : null}
             </div>
             <div className="storage-popover-footer">
               <Button

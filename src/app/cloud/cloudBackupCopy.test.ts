@@ -7,13 +7,12 @@ import {
   formatCloudProjectMeta,
   formatCloudProjectSyncMeta,
   getCloudBackupMenuItem,
-  getCloudBackupPopoverState,
   getCloudProjectActionAriaLabel,
   getCloudProjectActionLabel,
   getCloudProjectOpenErrorMessage,
   getCloudProjectsSectionState,
   getCloudSyncOpenErrorMessage,
-  getProjectSyncRowState,
+  getDropboxRowState,
   getStatusBadgeDisplay,
   getStatusBadgeTooltip,
   shouldWarnSyncHeadsUnavailable
@@ -152,7 +151,7 @@ describe("getStatusBadgeTooltip", () => {
       "Your project could not be saved on this device. Open for details."
     );
     expect(getStatusBadgeTooltip({ tone: "attention", cloud: "attention" }, true)).toBe(
-      "Saved on this device. Dropbox backup needs attention. Open for details."
+      "Saved on this device. Dropbox needs attention. Open for details."
     );
     expect(getStatusBadgeTooltip({ tone: "saved", cloud: "ok" }, true)).toBe(
       "Saved automatically on this device and backed up to Dropbox. Open for details."
@@ -166,8 +165,10 @@ describe("getStatusBadgeTooltip", () => {
   });
 });
 
-describe("getCloudBackupPopoverState", () => {
-  const base = {
+// The popover's one cloud row: backup and sync folded into a single status,
+// worst/most-actionable first, with exactly one inline action.
+describe("getDropboxRowState", () => {
+  const backup = {
     configured: true,
     status: "connected" as const,
     uploadStatus: "idle" as const,
@@ -175,73 +176,225 @@ describe("getCloudBackupPopoverState", () => {
     pending: false,
     now: NOW
   };
+  const unlinked = { linked: false, status: "idle" as const, error: null };
+  const linked = { linked: true, status: "idle" as const, error: null };
 
-  it("explains and offers optional Dropbox backup when unconfigured", () => {
-    expect(getCloudBackupPopoverState({ ...base, configured: false })).toMatchObject({
-      text: "Not connected. Automatic backup is off.",
+  it("offers the whole promise when Dropbox is not connected", () => {
+    expect(
+      getDropboxRowState({ backup: { ...backup, configured: false }, sync: unlinked })
+    ).toMatchObject({
+      text: "Not connected. Connect to keep this project safe and open it on your other devices.",
+      tone: "muted",
+      icon: "cloud",
       action: "setup",
       actionLabel: "Connect"
     });
   });
 
-  it("offers reconnect on reauth with a caution tone", () => {
-    const state = getCloudBackupPopoverState({ ...base, status: "reauthorization-required" });
-    expect(state).toMatchObject({
+  it("puts reauth ahead of every sync state, since it breaks both", () => {
+    expect(
+      getDropboxRowState({
+        backup: { ...backup, status: "reauthorization-required", uploadStatus: "error" },
+        sync: { linked: true, status: "conflict", error: null }
+      })
+    ).toMatchObject({
+      text: "Paused. Reconnect Dropbox.",
       tone: "caution",
       icon: "cloud-warning",
       action: "reconnect",
       actionLabel: "Reconnect"
     });
-    expect(state.text).toContain("Reconnect Dropbox");
   });
 
-  it("shows the off state with no action when disconnected", () => {
-    expect(getCloudBackupPopoverState({ ...base, status: "disconnected" })).toMatchObject({
-      text: "Automatic backup is off.",
+  it("says off, with a way back on, when the account is disconnected", () => {
+    expect(
+      getDropboxRowState({ backup: { ...backup, status: "disconnected" }, sync: linked })
+    ).toMatchObject({
+      text: "Off. Turn on to keep this project safe and open it on your other devices.",
+      tone: "muted",
+      icon: "cloud",
       action: "setup",
-      actionLabel: "Turn on",
-      icon: "cloud"
+      actionLabel: "Turn on"
     });
   });
 
-  it("disables the action while uploading", () => {
-    expect(getCloudBackupPopoverState({ ...base, uploadStatus: "uploading" })).toMatchObject({
+  // A decision only the curator can make outranks a safety copy that can simply
+  // be retried.
+  it("puts conflict and needs-review ahead of a failed backup upload", () => {
+    expect(
+      getDropboxRowState({
+        backup: { ...backup, uploadStatus: "error" },
+        sync: { linked: true, status: "conflict", error: null }
+      })
+    ).toMatchObject({
+      text: "This project changed in two places.",
+      tone: "caution",
+      action: "review",
+      actionLabel: "Review"
+    });
+    expect(
+      getDropboxRowState({
+        backup: { ...backup, uploadStatus: "error" },
+        sync: { linked: true, status: "needs-review", error: null }
+      })
+    ).toMatchObject({ text: "Needs review.", action: "review" });
+  });
+
+  // Enabling sync can find a head another device made first, which parks a
+  // conflict before this device has any metadata. That state must surface, not
+  // be swallowed by the unlinked branches below it.
+  it("surfaces an attention state even with no metadata yet", () => {
+    expect(
+      getDropboxRowState({ backup, sync: { linked: false, status: "conflict", error: null } })
+    ).toMatchObject({ action: "review", actionLabel: "Review" });
+  });
+
+  it("shows a sync error verbatim, with a fallback sentence", () => {
+    expect(
+      getDropboxRowState({
+        backup,
+        sync: { linked: true, status: "error", error: "Dropbox is down." }
+      })
+    ).toMatchObject({
+      text: "Dropbox is down.",
+      tone: "caution",
+      icon: "cloud-warning",
+      action: "sync-now",
+      actionLabel: "Try again"
+    });
+    expect(
+      getDropboxRowState({ backup, sync: { linked: true, status: "error", error: null } }).text
+    ).toBe("Sync stopped. Try again.");
+  });
+
+  // A failed enable is the one error with no metadata behind it. Retrying it
+  // with the manual check would no-op — a project with no metadata has nothing
+  // to check — and quietly swap the error for the sync-off line, leaving a
+  // button that appears to do nothing. Retry what actually failed.
+  it("retries a failed enable by enabling, not by running the manual check", () => {
+    expect(
+      getDropboxRowState({
+        backup,
+        sync: { linked: false, status: "error", error: "Dropbox could not be reached." }
+      })
+    ).toMatchObject({
+      text: "Dropbox could not be reached.",
+      action: "enable",
+      actionLabel: "Try again"
+    });
+  });
+
+  // The enable gesture takes seconds and does not set `linked` until the head
+  // upload lands. Without this branch the row keeps saying "not on your other
+  // devices yet" — with a live button — for the whole upload.
+  it("shows a disabled turning-on state while an unlinked project is mid-round-trip", () => {
+    for (const status of ["checking", "pushing", "pulling"] as const) {
+      expect(
+        getDropboxRowState({ backup, sync: { linked: false, status, error: null } })
+      ).toMatchObject({
+        text: "Turning on… Sending this project to Dropbox…",
+        tone: "info",
+        icon: "cloud-spinner",
+        action: "enable",
+        actionLabel: "Turning on…",
+        actionDisabled: true
+      });
+    }
+  });
+
+  // Same statuses, opposite reading: a LINKED project mid-round-trip is the
+  // routine loop, not the one-time enable.
+  it("reads the same in-flight statuses as routine syncing once linked", () => {
+    for (const status of ["checking", "pushing", "pulling"] as const) {
+      expect(
+        getDropboxRowState({ backup, sync: { linked: true, status, error: null } })
+      ).toMatchObject({
+        text: "Syncing…",
+        tone: "info",
+        icon: "cloud-spinner",
+        action: "sync-now",
+        actionDisabled: true
+      });
+    }
+  });
+
+  it("puts a failed safety copy ahead of routine syncing", () => {
+    expect(
+      getDropboxRowState({
+        backup: { ...backup, uploadStatus: "error" },
+        sync: { linked: true, status: "pushing", error: null }
+      })
+    ).toMatchObject({
+      text: "Last safety copy didn't finish.",
+      tone: "caution",
+      icon: "cloud-warning",
+      action: "backup-retry",
+      actionLabel: "Retry"
+    });
+  });
+
+  it("shows the backup upload only when sync has nothing to report", () => {
+    expect(
+      getDropboxRowState({
+        backup: { ...backup, uploadStatus: "uploading" },
+        sync: linked
+      })
+    ).toMatchObject({
       text: "Backing up changes…",
+      tone: "info",
       icon: "cloud-spinner",
       action: "backup-now",
       actionDisabled: true
     });
   });
 
-  it("offers Retry on an upload error", () => {
-    expect(getCloudBackupPopoverState({ ...base, uploadStatus: "error" })).toMatchObject({
-      tone: "caution",
-      icon: "cloud-warning",
-      action: "retry",
-      actionLabel: "Retry"
-    });
-  });
-
-  it("prefers pending over the last-backup time", () => {
-    expect(getCloudBackupPopoverState({ ...base, pending: true })).toMatchObject({
-      text: "Automatic backup on. Changes waiting to back up.",
-      action: "backup-now"
-    });
-  });
-
-  it("shows the relative last-backup time with a Back up now action", () => {
-    expect(getCloudBackupPopoverState(base)).toMatchObject({
-      text: "Automatic backup on. Last backup 2 m ago.",
-      icon: "cloud-check",
-      action: "backup-now",
-      actionLabel: "Back up now"
-    });
-  });
-
-  it("handles connected-but-never-backed-up", () => {
+  it("says where a linked project stands, with Sync now beside it", () => {
     expect(
-      getCloudBackupPopoverState({ ...base, lastCloudBackupAt: null }).text
-    ).toContain("Waiting for the first backup");
+      getDropboxRowState({ backup, sync: { ...linked, status: "synced" } })
+    ).toMatchObject({
+      text: "Up to date on your other devices.",
+      icon: "cloud-check",
+      action: "sync-now",
+      actionLabel: "Sync now",
+      actionDisabled: false
+    });
+    expect(
+      getDropboxRowState({ backup, sync: { ...linked, status: "pending" } }).text
+    ).toBe("Changes waiting to sync.");
+    // "idle" is linked-but-not-yet-evaluated: state the durable fact rather
+    // than claiming a standing this device has never read.
+    expect(getDropboxRowState({ backup, sync: linked })).toMatchObject({
+      text: "Sync is on for this project.",
+      icon: "cloud",
+      action: "sync-now"
+    });
+  });
+
+  it("frames a healthy, unlinked project around the devices it is not on yet", () => {
+    expect(getDropboxRowState({ backup, sync: unlinked })).toMatchObject({
+      text: "Backed up 2 m ago. Not on your other devices yet.",
+      tone: "muted",
+      icon: "cloud-check",
+      action: "enable",
+      actionLabel: "Use on other devices"
+    });
+    // Never let a timestamp imply the newest work is already in Dropbox.
+    expect(
+      getDropboxRowState({ backup: { ...backup, pending: true }, sync: unlinked })
+    ).toMatchObject({
+      text: "Changes waiting to back up. Not on your other devices yet.",
+      action: "enable"
+    });
+    expect(
+      getDropboxRowState({
+        backup: { ...backup, lastCloudBackupAt: null },
+        sync: unlinked
+      })
+    ).toMatchObject({
+      text: "Not on your other devices yet.",
+      icon: "cloud",
+      action: "enable"
+    });
   });
 });
 
@@ -423,115 +576,6 @@ describe("getCloudProjectOpenErrorMessage", () => {
     expect(getCloudProjectOpenErrorMessage("quota")).toBe(
       "Couldn't download that backup from Dropbox."
     );
-  });
-});
-
-// The popover's third row: cross-device sync for the OPEN project, kept apart
-// from the backup row above it because they are different promises.
-describe("getProjectSyncRowState", () => {
-  const linked = { connected: true, linked: true, error: null };
-
-  it("renders no row at all without a Dropbox connection", () => {
-    expect(
-      getProjectSyncRowState({
-        connected: false,
-        linked: false,
-        status: "idle",
-        error: null
-      })
-    ).toBeNull();
-  });
-
-  it("offers to turn sync on for a connected but unlinked project", () => {
-    const row = getProjectSyncRowState({
-      connected: true,
-      linked: false,
-      status: "idle",
-      error: null
-    });
-    expect(row?.text).toBe("Off for this project.");
-    expect(row?.action).toBe("enable");
-    expect(row?.actionLabel).toBe("Sync across devices");
-    expect(row?.tone).toBe("muted");
-  });
-
-  it("says where a linked project stands, with Sync now beside it", () => {
-    expect(getProjectSyncRowState({ ...linked, status: "synced" })).toMatchObject({
-      text: "Synced.",
-      icon: "cloud-check",
-      action: "sync-now",
-      actionDisabled: false
-    });
-    expect(getProjectSyncRowState({ ...linked, status: "pending" })?.text).toBe(
-      "Changes waiting to sync."
-    );
-  });
-
-  // One in-flight line for all three round trips: which one is running is the
-  // loop's business, not the curator's.
-  it("collapses checking / pushing / pulling into one busy line", () => {
-    for (const status of ["checking", "pushing", "pulling"] as const) {
-      const row = getProjectSyncRowState({ ...linked, status });
-      expect(row?.text).toBe("Syncing…");
-      expect(row?.icon).toBe("cloud-spinner");
-      expect(row?.actionDisabled).toBe(true);
-    }
-  });
-
-  // Amber attention, never destructive red: the copy on this device is safe in
-  // every one of these states.
-  it("gives conflict, needs-review and errors the caution tone with a way in", () => {
-    expect(getProjectSyncRowState({ ...linked, status: "conflict" })).toMatchObject({
-      text: "This project changed in two places.",
-      tone: "caution",
-      action: "review",
-      actionLabel: "Review"
-    });
-    expect(getProjectSyncRowState({ ...linked, status: "needs-review" })).toMatchObject({
-      text: "Needs review.",
-      tone: "caution",
-      action: "review"
-    });
-    expect(
-      getProjectSyncRowState({ ...linked, status: "error", error: "Dropbox is down." })
-    ).toMatchObject({
-      text: "Dropbox is down.",
-      tone: "caution",
-      action: "sync-now",
-      actionLabel: "Try again"
-    });
-  });
-
-  // A failed enable is the one error with no metadata behind it. Retrying it
-  // with the manual check would no-op — a project with no metadata has nothing
-  // to check — and quietly swap the error for "Off for this project", leaving a
-  // button that appears to do nothing. Retry what actually failed.
-  it("retries a failed enable by enabling, not by running the manual check", () => {
-    const row = getProjectSyncRowState({
-      connected: true,
-      linked: false,
-      status: "error",
-      error: "Dropbox could not be reached."
-    });
-    expect(row).toMatchObject({
-      text: "Dropbox could not be reached.",
-      tone: "caution",
-      action: "enable",
-      actionLabel: "Try again"
-    });
-  });
-
-  // Enabling sync can find a head another device made first, which parks a
-  // conflict before this device has any metadata. That state must surface, not
-  // be swallowed by the not-linked branch.
-  it("surfaces an attention state even with no metadata yet", () => {
-    const row = getProjectSyncRowState({
-      connected: true,
-      linked: false,
-      status: "conflict",
-      error: null
-    });
-    expect(row?.action).toBe("review");
   });
 });
 
