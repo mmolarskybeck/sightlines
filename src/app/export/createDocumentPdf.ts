@@ -70,6 +70,7 @@ import {
   drawElevationWallText,
   drawElevationCase,
   drawElevationFloorCaseGhost,
+  drawElevationMonitorGhost,
   drawElevationSuspendedArtworkGhost,
   drawElevationPartitionProfile,
   drawArtworkPlaceholder
@@ -439,6 +440,11 @@ export async function createDocumentPdf(
       // behind-the-wall-objects paint slot.
       for (const ghost of scene.suspendedArtworkGhosts) {
         drawElevationSuspendedArtworkGhost(page, transform, ghost, scene.wallHeightMm);
+      }
+      // Box monitors standing in front of the wall, same slot: pedestal +
+      // cabinet + screen, rising from the floor line.
+      for (const ghost of scene.monitorGhosts) {
+        drawElevationMonitorGhost(page, transform, ghost);
       }
       // Partitions standing clear of the wall ghost here too; the abutting ones
       // are drawn after the wall objects below (canvas paint order).

@@ -12,7 +12,10 @@ import {
   DEFAULT_WALL_CASE_CENTER_Y_MM,
   DEFAULT_WALL_CASE_DEPTH_MM,
   DEFAULT_WALL_CASE_HEIGHT_MM,
-  DEFAULT_WALL_CASE_WIDTH_MM
+  DEFAULT_WALL_CASE_WIDTH_MM,
+  MONITOR_ASPECT_RATIO,
+  MONITOR_DEPTH_MM,
+  MONITOR_PEDESTAL_HEIGHT_MM
 } from "../domain/project";
 import type { Project, WallObject } from "../domain/project";
 import type { ArtworkImportDraft } from "../domain/spreadsheetImport/types";
@@ -7237,6 +7240,84 @@ describe("app store", () => {
       if (after.kind === "artwork") {
         expect(after.imageFaces).toEqual([]);
       }
+    });
+
+    // ─── Box monitors (Artwork.displayAs === "monitor") ────────────────────
+    // The floor object of a monitor work is the CABINET, not the work: these
+    // pin the two routes onto the floor to the same 4:3 / MONITOR_DEPTH_MM
+    // source, and the absent-means-pedestal rule for the per-placement support.
+
+    async function addMonitorArtwork() {
+      await store.getState().addArtworksFromFiles([makeImageFile("video.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      await store.getState().updateArtwork(artworkId, { displayAs: "monitor" });
+      return artworkId;
+    }
+
+    it("seeds a monitor placement from the cabinet's geometry, not the work's", async () => {
+      const artworkId = await addMonitorArtwork();
+      await store.getState().placeArtworkOnFloor(artworkId, 4000, 4000);
+
+      const placed = store.getState().project!.floorObjects[0]!;
+      expect(placed.depthMm).toBe(MONITOR_DEPTH_MM);
+      expect(placed.widthMm / placed.heightMm).toBeCloseTo(MONITOR_ASPECT_RATIO, 6);
+      // The pedestal is deliberately NOT in heightMm — it is added by the
+      // renderers from monitorSupport, so toggling it rewrites no geometry.
+      expect(placed.heightMm).toBeLessThan(MONITOR_PEDESTAL_HEIGHT_MM);
+    });
+
+    it("re-seeds an already-placed work's box when it becomes a monitor", async () => {
+      await store.getState().addArtworksFromFiles([makeImageFile("video.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      await store.getState().placeArtworkOnFloor(artworkId, 4000, 4000);
+      const objectId = store.getState().project!.floorObjects[0]!.id;
+      await store.getState().updateFloorObject(objectId, { depthMm: 20 });
+
+      await store.getState().updateArtwork(artworkId, { displayAs: "monitor" });
+
+      const placed = store.getState().project!.floorObjects.find((o) => o.id === objectId)!;
+      // A paper-thin board would render as a CRT with no tube.
+      expect(placed.depthMm).toBe(MONITOR_DEPTH_MM);
+      expect(placed.widthMm / placed.heightMm).toBeCloseTo(MONITOR_ASPECT_RATIO, 6);
+    });
+
+    it("re-seeds the cabinet when a monitor work is converted from a wall to the floor", async () => {
+      const { artworkId, placementId } = await placeArtworkOnWall(1000, 1450);
+      await store.getState().updateArtwork(artworkId, { displayAs: "monitor" });
+
+      await store
+        .getState()
+        .commitPlanMove(placementId, { anchor: "floor", xMm: 4000, yMm: 4000 });
+
+      const placed = store.getState().project!.floorObjects.find((o) => o.id === placementId)!;
+      expect(placed.depthMm).toBe(MONITOR_DEPTH_MM);
+      expect(placed.widthMm / placed.heightMm).toBeCloseTo(MONITOR_ASPECT_RATIO, 6);
+    });
+
+    it("leaves monitorSupport ABSENT until the curator overrides the pedestal default", async () => {
+      const artworkId = await addMonitorArtwork();
+      await store.getState().placeArtworkOnFloor(artworkId, 4000, 4000);
+      const objectId = store.getState().project!.floorObjects[0]!.id;
+
+      const placed = store.getState().project!.floorObjects[0]!;
+      expect("monitorSupport" in placed).toBe(false);
+
+      // Re-choosing the resolved default is a no-op: absence stays absence, so
+      // a clean project's hash never dirties and no dead undo entry is pushed.
+      await store.getState().setFloorArtworkMonitorSupport(objectId, "pedestal");
+      expect(
+        "monitorSupport" in store.getState().project!.floorObjects.find((o) => o.id === objectId)!
+      ).toBe(false);
+
+      await store.getState().setFloorArtworkMonitorSupport(objectId, "floor");
+      const onFloor = store.getState().project!.floorObjects.find((o) => o.id === objectId)!;
+      expect(onFloor.kind === "artwork" && onFloor.monitorSupport).toBe("floor");
+
+      // ...and back to an EXPLICIT pedestal, which now differs from the stored
+      // value and therefore does get written.
+      await store.getState().setFloorArtworkMonitorSupport(objectId, "pedestal");
+      const back = store.getState().project!.floorObjects.find((o) => o.id === objectId)!;
+      expect(back.kind === "artwork" && back.monitorSupport).toBe("pedestal");
     });
 
     it("still inherits the source wall's angle on a first-ever wall → floor conversion", async () => {

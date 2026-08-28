@@ -14,6 +14,11 @@ import {
   wallTextPlanGlyph
 } from "../../../domain/geometry/caseGlyphs";
 import {
+  isMonitorArtwork,
+  monitorElevationGlyph,
+  monitorPlanGlyph
+} from "../../../domain/geometry/monitorGlyphs";
+import {
   doorElevationGlyph,
   type DoorSwingPlanGlyph
 } from "../../../domain/geometry/doorGlyphs";
@@ -276,6 +281,9 @@ function planObjectMarks(
   rect: PlanRect,
   kind: string,
   isFloor: boolean,
+  // This artwork is displayed on a CRT / box monitor — same flag, same reason
+  // as PlanObject's and drawPlanObject's.
+  isMonitor: boolean,
   xf: Transform,
   key: string,
   // A hinged door's swing glyph off the plan scene (PlanSceneWallObject
@@ -290,7 +298,31 @@ function planObjectMarks(
   const halfD = rect.depthMm / 2;
   const inner: JSX.Element[] = [];
 
-  if (kind === "artwork") {
+  if (kind === "artwork" && isMonitor) {
+    // The CRT's screen line just inside the front edge, off the same shared
+    // glyph the canvas and the PDF writer use (monitorGlyphs.ts) — the preview
+    // drifting from the artifact it previews is exactly what that rule exists
+    // to prevent.
+    const { screen } = monitorPlanGlyph({
+      widthMm: rect.widthMm,
+      depthMm: rect.depthMm
+    });
+    if (screen) {
+      const a = world(screen.x1Mm, screen.yMm);
+      const b = world(screen.x2Mm, screen.yMm);
+      inner.push(
+        <line
+          key={`${key}-screen`}
+          x1={a.x}
+          y1={a.y}
+          x2={b.x}
+          y2={b.y}
+          stroke={SUBTLE}
+          strokeWidth={0.5}
+        />
+      );
+    }
+  } else if (kind === "artwork") {
     const inset = Math.min(rect.widthMm, rect.depthMm) * 0.22;
     const insetRect: PlanRect = {
       ...rect,
@@ -568,6 +600,9 @@ function planPageMarks(
             painted.entry.renderedRect,
             painted.entry.object.kind,
             false,
+            // A monitor work hung on a wall is a plain image there — the
+            // cabinet is a floor rendering (see PlanObject's isMonitor).
+            false,
             xf,
             `wobj-${i}`,
             painted.entry.doorSwing
@@ -579,6 +614,7 @@ function planPageMarks(
             painted.entry.rect,
             painted.entry.object.kind,
             true,
+            isMonitorArtwork(painted.entry.artwork),
             xf,
             `fobj-${i}`
           )
@@ -719,6 +755,46 @@ function elevationPageMarks(
         opacity={GHOST_OPACITY}
       />
     );
+  });
+
+  // Box-monitor ghosts: pedestal + cabinet + screen, standing on the floor line
+  // — the print twin of drawElevationMonitorGhost / the canvas component, off
+  // the same shared glyph, in the same behind-the-wall-objects slot.
+  scene.monitorGhosts.forEach((ghost, i) => {
+    const widthMm = Math.max(0, ghost.xMaxMm - ghost.xMinMm);
+    const glyph = monitorElevationGlyph({
+      widthMm,
+      monitorHeightMm: ghost.monitorHeightMm,
+      pedestalHeightMm: ghost.pedestalHeightMm
+    });
+    // This preview's own space is SVG-y-down from the wall top, and the glyph
+    // is local-y-down from the assembly's top, so both flips are one addition.
+    const topSvgYMm = scene.wallHeightMm - glyph.totalHeightMm;
+    const parts = [
+      glyph.pedestal ? { key: "pedestal", rect: glyph.pedestal } : null,
+      { key: "cabinet", rect: glyph.monitor },
+      glyph.screen ? { key: "screen", rect: glyph.screen } : null
+    ].filter((part): part is { key: string; rect: { xMm: number; yMm: number; widthMm: number; heightMm: number } } => part !== null);
+    for (const part of parts) {
+      const a = xf.point({
+        xMm: ghost.xMinMm + part.rect.xMm,
+        yMm: topSvgYMm + part.rect.yMm
+      });
+      marks.push(
+        <rect
+          key={`monitor-ghost-${part.key}-${i}`}
+          x={a.x}
+          y={a.y}
+          width={part.rect.widthMm * xf.scalePtPerMm}
+          height={part.rect.heightMm * xf.scalePtPerMm}
+          fill="none"
+          stroke={SUBTLE}
+          strokeWidth={GHOST_STROKE_WIDTH}
+          strokeDasharray={GHOST_DASH}
+          opacity={GHOST_OPACITY}
+        />
+      );
+    }
   });
 
   // Free-standing partitions projected onto this wall. Non-abutting ones ghost

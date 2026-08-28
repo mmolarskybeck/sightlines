@@ -6,9 +6,11 @@ import type {
 import type { PlanRect } from "../../../domain/geometry/planObjects";
 import {
   CASE_LEG_SIZE_MM,
-  CASE_WALL_THICKNESS_MM
+  CASE_WALL_THICKNESS_MM,
+  MONITOR_BEZEL_MM
 } from "../../../domain/project";
 import { casePlanGlyph, wallTextPlanGlyph } from "../../../domain/geometry/caseGlyphs";
+import { monitorPlanGlyph } from "../../../domain/geometry/monitorGlyphs";
 import type { DoorSwingPlanGlyph } from "../../../domain/geometry/doorGlyphs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 
@@ -36,6 +38,7 @@ export function PlanObject({
   isFloorPlaced = false,
   isGhost = false,
   isInvalid = false,
+  isMonitor = false,
   isSelected = false,
   kind,
   onBeginDrag,
@@ -65,6 +68,12 @@ export function PlanObject({
   // dropped off every wall): paints the danger token. Overrides selection/ghost
   // strokes — the refusal must read regardless of the object's other state.
   isInvalid?: boolean;
+  // This artwork is displayed on a CRT / box monitor (Artwork.displayAs ===
+  // "monitor"). Not a `kind`: the placement really is an ordinary artwork
+  // object — same rect, same drag, same selection — and only its inner glyph
+  // changes, so making it a seventh kind would fork every kind-keyed branch in
+  // the app for a drawing difference. Ignored for every kind but "artwork".
+  isMonitor?: boolean;
   isSelected?: boolean;
   kind: "door" | "window" | "blocked-zone" | "artwork" | "wall-text" | "case";
   // Starts a pointer-drag move of this object (PlanView owns the live preview
@@ -154,7 +163,44 @@ export function PlanObject({
         x={x}
         y={y}
       />
-      {kind === "artwork" ? (
+      {kind === "artwork" && isMonitor ? (
+        // A CRT / box monitor, top-down: the footprint outline above IS the
+        // cabinet (and, at the same width and depth, the pedestal under it —
+        // one rect is the honest drawing, since the two footprints are equal by
+        // construction), and this single line just inside the FRONT edge is the
+        // screen. Together with the front-face marker below that is the whole
+        // glyph: which way the screen points is the only thing a plan can say
+        // about a monitor that its rectangle doesn't already say.
+        //
+        // Structure comes from the shared mm-space module (monitorGlyphs.ts) so
+        // this and the PDF draw the same mark, exactly as the case glyph does;
+        // only the zoom clamp on the bezel is the screen's own.
+        <g className="plan-object-mark plan-object-mark--monitor">
+          {(() => {
+            const bezelMm = clampMm(
+              pixelsPerMm,
+              MONITOR_BEZEL_MM,
+              3,
+              Math.min(planRect.widthMm, planRect.depthMm) * 0.25
+            );
+            const { screen } = monitorPlanGlyph({
+              widthMm: planRect.widthMm,
+              depthMm: planRect.depthMm,
+              bezelMm
+            });
+            if (!screen) return null;
+            return (
+              <line
+                vectorEffect="non-scaling-stroke"
+                x1={midX + screen.x1Mm}
+                x2={midX + screen.x2Mm}
+                y1={midY + screen.yMm}
+                y2={midY + screen.yMm}
+              />
+            );
+          })()}
+        </g>
+      ) : kind === "artwork" ? (
         <rect
           className="plan-object-mark plan-object-mark--artwork"
           height={insetDepthMm}

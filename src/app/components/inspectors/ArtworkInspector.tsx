@@ -3,7 +3,13 @@ import { LinkBreakIcon } from "@phosphor-icons/react/dist/csr/LinkBreak";
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/csr/LockSimple";
 import { LockSimpleOpenIcon } from "@phosphor-icons/react/dist/csr/LockSimpleOpen";
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
-import type { Artwork, ArtworkFrame, Dimensions, DisplayUnit } from "../../../domain/project";
+import type {
+  Artwork,
+  ArtworkDisplayAs,
+  ArtworkFrame,
+  Dimensions,
+  DisplayUnit
+} from "../../../domain/project";
 import type { PlacementForm } from "../../../domain/placement/artworkForm";
 import {
   applyAspectFill,
@@ -64,9 +70,23 @@ type ArtworkTextFieldKey =
 // — so a typed edit and an imported column land in the same slot.
 type ArtworkEditableFieldKey = ArtworkTextFieldKey | "medium";
 
-export type ArtworkFieldChanges = Partial<Pick<Artwork, ArtworkTextFieldKey>> & {
+export type ArtworkFieldChanges = Partial<
+  Pick<Artwork, ArtworkTextFieldKey | "displayAs">
+> & {
   medium?: string;
 };
+
+// The "Display" dropdown's options. `undefined` is the framed-image default and
+// cannot be a Radix Select value (it reserves the empty string), so the control
+// speaks in these two literals and translates at the edge — one place, right
+// below, so nothing else has to know about the substitution.
+const DISPLAY_AS_FRAMED = "framed";
+type DisplayAsOption = typeof DISPLAY_AS_FRAMED | ArtworkDisplayAs;
+
+const DISPLAY_AS_OPTIONS: { value: DisplayAsOption; label: string }[] = [
+  { value: DISPLAY_AS_FRAMED, label: "Framed image" },
+  { value: "monitor", label: "Box monitor" }
+];
 
 type ArtworkFieldSpec = {
   key: ArtworkEditableFieldKey;
@@ -124,6 +144,7 @@ export function ArtworkInspector({
   disabledPlacementForm,
   disabledPlacementFormReason,
   isPlaced,
+  monitorSupportControl,
   placementForm,
   placementSection,
   placementTitle,
@@ -147,6 +168,14 @@ export function ArtworkInspector({
   disabledPlacementForm?: PlacementForm;
   disabledPlacementFormReason?: string;
   isPlaced: boolean;
+  // The pedestal control for a BOX-MONITOR work, injected by App the same way
+  // placementSection is — and for the same reason: it writes to the PLACEMENT
+  // (ArtworkFloorObject.monitorSupport), not to the artwork record this
+  // component owns. Absent when the work isn't a monitor or isn't standing on
+  // the floor: with no floor object there is nothing to write to, and the
+  // default (pedestal) is what a later placement will get anyway. Rendered
+  // inside Display's own section, where the question belongs.
+  monitorSupportControl?: ReactNode;
   // The wall- or floor-position FIELDS (WallPlacementFields /
   // FloorPlacementFields) for a placed artwork, null/undefined when unplaced.
   // App supplies the bare fields and the section title separately
@@ -203,6 +232,13 @@ export function ArtworkInspector({
   // stays out of the way until a curator expands it.
   const hasMatOrFrame = artwork.matWidthMm !== undefined || artwork.frame !== undefined;
 
+  // A box monitor has no mat and no frame — the section is then entirely about
+  // the display type and its pedestal, so it opens at rest: the Display
+  // dropdown is meant to be reachable at a glance (it is the control that says
+  // what this work even IS in the room), and leaving it folded behind a summary
+  // that reads "Box monitor" would hide the only way back out of that choice.
+  const isMonitor = artwork.displayAs === "monitor";
+
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
       {scopeNote ? <p className="artwork-inspector-scope">{scopeNote}</p> : null}
@@ -243,14 +279,21 @@ export function ArtworkInspector({
         {/* Mat + frame ride right below dimensions — they change the physical
             size a work occupies on the wall. */}
         <InspectorSection
-          open={isOpen("matframe", hasMatOrFrame)}
-          summary={formatFramingSummary(
-            artwork.matWidthMm,
-            artwork.frame,
-            artwork.dimensions,
-            summaryUnit,
-            artwork.frameIncludedInImage
-          )}
+          open={isOpen("matframe", hasMatOrFrame || isMonitor)}
+          summary={
+            isMonitor
+              ? // The framing summary would read "No mat or frame" for a
+                // monitor, which is true and useless. Name the display type
+                // instead — that is what the section now decides.
+                "Box monitor"
+              : formatFramingSummary(
+                  artwork.matWidthMm,
+                  artwork.frame,
+                  artwork.dimensions,
+                  summaryUnit,
+                  artwork.frameIncludedInImage
+                )
+          }
           title="Framing"
           onOpenChange={(open) => onSectionOpenChange("matframe", open)}
         >
@@ -259,9 +302,12 @@ export function ArtworkInspector({
           <FramingSection
             key={artwork.id}
             dimensions={artwork.dimensions}
+            displayAs={artwork.displayAs}
             frame={artwork.frame}
             matWidthMm={artwork.matWidthMm}
             frameIncludedInImage={artwork.frameIncludedInImage}
+            monitorSupportControl={monitorSupportControl}
+            onCommitDisplayAs={(displayAs) => onCommitField({ displayAs })}
             onCommitFraming={onCommitFraming}
             unit={unit}
           />
@@ -709,16 +755,22 @@ const DEFAULT_FRAME_WIDTH_MM = 25.4;
 // Overall footprint, quiet at rest with a disclosure to edit it).
 function FramingSection({
   dimensions,
+  displayAs,
   frame,
   matWidthMm,
   frameIncludedInImage,
+  monitorSupportControl,
+  onCommitDisplayAs,
   onCommitFraming,
   unit
 }: {
   dimensions: Dimensions;
+  displayAs?: ArtworkDisplayAs;
   frame?: ArtworkFrame;
   matWidthMm?: number;
   frameIncludedInImage?: boolean;
+  monitorSupportControl?: ReactNode;
+  onCommitDisplayAs: (displayAs: ArtworkDisplayAs | undefined) => void;
   onCommitFraming: (
     changes: Partial<Pick<Artwork, "matWidthMm" | "frame" | "frameIncludedInImage">>
   ) => void;
@@ -777,8 +829,70 @@ function FramingSection({
     });
   };
 
+  // A box monitor has no mat, no frame band and no overall framed footprint —
+  // it is equipment the work plays on. Those controls are HIDDEN rather than
+  // disabled (contrast `framingLocked`, where the fields still describe a
+  // stored mat/frame the flag is overriding): here they describe nothing at
+  // all, and a row of greyed-out inputs would only invite the question of what
+  // would happen if they were enabled. Any stored mat/frame survives untouched
+  // and reappears the moment the work goes back to a framed image.
+  const isMonitor = displayAs === "monitor";
+
+  // Hoisted so the mat/frame body below keeps its original shape (and its
+  // original indentation) instead of being wrapped in a conditional: the
+  // monitor branch returns EARLY with just this header, and the framed-image
+  // path renders it followed by everything that was always there.
+  const displayHeader = (
+    <>
+      {/* The DISPLAY TYPE leads the section: it decides what everything below
+          it even means. Always rendered — including for an unplaced work, which
+          is exactly when a curator is likeliest to be recording what a video
+          actually is. */}
+      <Field compact label="Display">
+        <Select
+          value={displayAs ?? DISPLAY_AS_FRAMED}
+          onValueChange={(value) =>
+            // "framed" is the absence of a display type, not a stored value —
+            // see DISPLAY_AS_FRAMED. Translating here keeps every consumer's
+            // "absent = framed image" reading intact.
+            onCommitDisplayAs(
+              value === DISPLAY_AS_FRAMED ? undefined : (value as ArtworkDisplayAs)
+            )
+          }
+        >
+          <SelectTrigger aria-label="Display type">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {DISPLAY_AS_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+    </>
+  );
+
+  if (isMonitor) {
+    return (
+      <>
+        {displayHeader}
+        {/* Pedestal-or-floor, injected by App because it writes to the
+            PLACEMENT. Absent while the work is unplaced — the default
+            (pedestal) applies when it lands. */}
+        {monitorSupportControl}
+        <p className="field-hint">
+          Shown as a black monitor with the image on its screen.
+        </p>
+      </>
+    );
+  }
+
   return (
     <>
+      {displayHeader}
       {/* Reuses the Dimensions "Approximate" checkbox-row styling (see
           .artwork-dimensions-approximate) rather than adding CSS. */}
       <label className="artwork-dimensions-approximate">

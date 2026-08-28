@@ -1,8 +1,10 @@
 import type {
   Artwork,
+  ArtworkDisplayAs,
   Dimensions,
   FloorObject,
   FloorObjectFace,
+  MonitorSupport,
   Project,
   RoomPlacement,
   WallObject
@@ -117,6 +119,18 @@ export type FloorObject3d = {
   // that distinction and hard-code today's default into every derived scene.
   // The render layer resolves it (floorObjectImageFaces.ts).
   imageFaces?: FloorObjectFace[];
+  // How this work is displayed (Artwork.displayAs — artwork only). Emitted ONLY
+  // when the work states one, so a plain work's scene entry keeps exactly the
+  // key set it had before display types existed and the render layer's
+  // dispatch (SceneRooms) stays a single equality test. "monitor" makes the
+  // render layer draw a CRT cabinet instead of the neutral image box.
+  displayAs?: ArtworkDisplayAs;
+  // What a monitor placement stands on (ArtworkFloorObject.monitorSupport).
+  // Passed through VERBATIM, absent included: absent means "never chosen" and
+  // resolves to a pedestal (resolveMonitorSupport). Resolving it here would
+  // hard-code today's default into every derived scene — the same rule
+  // imageFaces above follows.
+  monitorSupport?: MonitorSupport;
   // The WORK's own recorded dimensions (artwork only) — deliberately NOT the
   // same numbers as widthMm/heightMm below, which size the OBJECT STANDING ON
   // THE FLOOR (a projection board, a plinth, a sculpture's bounding box). The
@@ -318,6 +332,12 @@ export function deriveScene3d(
               // had before image faces existed — same "absence is the
               // encoding" rule baseHeightMm follows below.
               ...(object.imageFaces ? { imageFaces: object.imageFaces } : {}),
+              // Same absence discipline: only a stated display type and a
+              // stated support reach the scene.
+              ...(artwork?.displayAs ? { displayAs: artwork.displayAs } : {}),
+              ...(object.monitorSupport
+                ? { monitorSupport: object.monitorSupport }
+                : {}),
               // Per axis, and only when recorded — see artworkWidthMm's note.
               ...(artwork?.dimensions.widthMm !== undefined
                 ? { artworkWidthMm: artwork.dimensions.widthMm }

@@ -4,6 +4,7 @@ import {
   caseFloorGhostGlyph
 } from "../../../domain/geometry/caseGlyphs";
 import { doorElevationGlyph } from "../../../domain/geometry/doorGlyphs";
+import { monitorElevationGlyph } from "../../../domain/geometry/monitorGlyphs";
 import {
   SUSPENSION_WIRE_INSET_FRACTION,
   SUSPENSION_WIRE_INSET_MM,
@@ -348,6 +349,69 @@ export function drawElevationFloorCaseGhost(
       COLORS.subtle,
       GHOST_DASH
     );
+  }
+}
+
+// The elevation shadow of a floor-standing BOX MONITOR — the print twin of
+// ElevationMonitorGhost.tsx, off the same shared glyph. Stands on the floor
+// line like the case ghost. Model space here is wall-local y-UP with the floor
+// at 0, while the glyph is local y-DOWN from the assembly's top, so a local y
+// maps to model (totalHeightMm − localY) — the same flip drawElevationFloorCase
+// Ghost applies just above.
+export function drawElevationMonitorGhost(
+  page: PDFPage,
+  transform: ElevationTransform,
+  ghost: ElevationScene["monitorGhosts"][number]
+) {
+  const widthMm = Math.max(0, ghost.xMaxMm - ghost.xMinMm);
+  const glyph = monitorElevationGlyph({
+    widthMm,
+    monitorHeightMm: ghost.monitorHeightMm,
+    pedestalHeightMm: ghost.pedestalHeightMm
+  });
+  const dash = {
+    borderColor: COLORS.subtle,
+    borderWidth: GHOST_BORDER_WIDTH_PT,
+    borderDashArray: GHOST_DASH
+  };
+  // A glyph rect's model-space BOTTOM edge: its top is (total − yMm), so its
+  // bottom is that minus its own height.
+  const bottomMm = (yMm: number, heightMm: number) =>
+    glyph.totalHeightMm - yMm - heightMm;
+
+  if (glyph.pedestal) {
+    page.drawRectangle({
+      ...elevationRect(
+        transform,
+        ghost.xMinMm + glyph.pedestal.xMm,
+        bottomMm(glyph.pedestal.yMm, glyph.pedestal.heightMm),
+        glyph.pedestal.widthMm,
+        glyph.pedestal.heightMm
+      ),
+      ...dash
+    });
+  }
+  page.drawRectangle({
+    ...elevationRect(
+      transform,
+      ghost.xMinMm + glyph.monitor.xMm,
+      bottomMm(glyph.monitor.yMm, glyph.monitor.heightMm),
+      glyph.monitor.widthMm,
+      glyph.monitor.heightMm
+    ),
+    ...dash
+  });
+  if (glyph.screen) {
+    page.drawRectangle({
+      ...elevationRect(
+        transform,
+        ghost.xMinMm + glyph.screen.xMm,
+        bottomMm(glyph.screen.yMm, glyph.screen.heightMm),
+        glyph.screen.widthMm,
+        glyph.screen.heightMm
+      ),
+      ...dash
+    });
   }
 }
 

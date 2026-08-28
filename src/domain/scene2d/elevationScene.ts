@@ -12,6 +12,10 @@ import type {
 import { getPlacementFootprintMm } from "../framing";
 import type { FloorPartition } from "../geometry/freestandingWalls";
 import {
+  isMonitorArtwork,
+  monitorPedestalHeightMm
+} from "../geometry/monitorGlyphs";
+import {
   getFloorObjectPlanRect,
   segmentPlanRect,
   type PlanRect
@@ -172,6 +176,31 @@ export type ElevationSceneSuspendedArtworkGhost = {
   baseHeightMm: number;
   // The board's own height; its top edge is baseHeightMm + heightMm.
   heightMm: number;
+};
+
+// The elevation "shadow" of a floor-standing BOX MONITOR: the cabinet, its
+// screen, and the pedestal under it, projected along the wall exactly like the
+// floor-case ghost beside it.
+//
+// This is the one narrow exception to the DECISION recorded above — that
+// floor-RESTING artwork emits no elevation ghost — and it is granted on the
+// same grounds the floor case earned its unconditional rule. A monitor is
+// waist-to-eye-height equipment standing against a wall, and the thing a
+// curator needs the elevation for is precisely whether the screen's centre
+// lines up with the hung work beside it; nothing else in the app answers that.
+// The exception stays narrow by construction: it is keyed on displayAs ===
+// "monitor", so no existing project grows a single new dashed outline.
+export type ElevationSceneMonitorGhost = {
+  object: ArtworkFloorObject;
+  xMinMm: number;
+  xMaxMm: number;
+  // The cabinet's own height (the placement's heightMm — the pedestal is NOT
+  // in it; see CrtMonitorMesh for why the two are stored apart).
+  monitorHeightMm: number;
+  // The plinth beneath, or 0 when the monitor stands on the bare floor.
+  // Resolved here (absent monitorSupport ⇒ pedestal) so the canvas and the PDF
+  // can't disagree about whether there is anything under the box.
+  pedestalHeightMm: number;
 };
 
 // A plan rect's shadow on one wall: the along-wall extent plus how the
@@ -367,6 +396,12 @@ export type ElevationScene = {
   // this wall, same projection, floating y-span. Empty unless the caller
   // supplies floorArtworks + the wall's floor-space endpoints.
   suspendedArtworkGhosts: ElevationSceneSuspendedArtworkGhost[];
+  // Floor-standing box monitors in front of this wall, same projection, rising
+  // from the floor line (pedestal + cabinet). Empty unless the caller supplies
+  // floorArtworks, artworksById — the display type lives on the WORK, so
+  // without the join no placement can be recognised as a monitor — and the
+  // wall's floor-space endpoints.
+  monitorGhosts: ElevationSceneMonitorGhost[];
   // Free-standing partitions in front of this wall, projected onto its
   // along-axis. Empty unless the caller supplies partitions + the wall's
   // floor-space endpoints.
@@ -496,6 +531,12 @@ export function buildElevationScene(
   const suspendedArtworkGhosts: ElevationSceneSuspendedArtworkGhost[] = [];
   if (floorArtworks && wallStartFloorMm && wallEndFloorMm) {
     for (const floorArtwork of floorArtworks) {
+      // A monitor never suspends — it stands on a pedestal or on the floor, and
+      // the inspector withholds the "Height off floor" field for it (the same
+      // rule CaseMesh/FloorCaseMesh apply to cases). A stale baseHeightMm on a
+      // work that was later switched to a monitor must therefore not float it
+      // here: it ghosts below, as a monitor.
+      if (isMonitorArtwork(artworksById?.get(floorArtwork.artworkId))) continue;
       const baseHeightMm = floorArtwork.baseHeightMm ?? 0;
       if (baseHeightMm <= 0) continue;
       const range = projectFloorObjectOntoWall(floorArtwork, wallStartFloorMm, wallEndFloorMm);
@@ -506,6 +547,26 @@ export function buildElevationScene(
         xMaxMm: range.xMaxMm,
         baseHeightMm,
         heightMm: floorArtwork.heightMm
+      });
+    }
+  }
+
+  // Box-monitor ghosts: same projection and same wall-extent filter as the two
+  // above, gated on the JOINED work's display type (a placement carries no
+  // display type of its own), and standing on the floor line like the case
+  // ghost rather than floating like the suspended board.
+  const monitorGhosts: ElevationSceneMonitorGhost[] = [];
+  if (floorArtworks && wallStartFloorMm && wallEndFloorMm) {
+    for (const floorArtwork of floorArtworks) {
+      if (!isMonitorArtwork(artworksById?.get(floorArtwork.artworkId))) continue;
+      const range = projectFloorObjectOntoWall(floorArtwork, wallStartFloorMm, wallEndFloorMm);
+      if (!range) continue;
+      monitorGhosts.push({
+        object: floorArtwork,
+        xMinMm: range.xMinMm,
+        xMaxMm: range.xMaxMm,
+        monitorHeightMm: floorArtwork.heightMm,
+        pedestalHeightMm: monitorPedestalHeightMm(floorArtwork.monitorSupport)
       });
     }
   }
@@ -531,6 +592,7 @@ export function buildElevationScene(
     cases,
     floorCaseGhosts,
     suspendedArtworkGhosts,
+    monitorGhosts,
     partitionProfiles
   };
 }

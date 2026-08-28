@@ -56,6 +56,31 @@ describe("effectivePlacementForm — override precedence", () => {
   });
 });
 
+describe("effectivePlacementForm — display type", () => {
+  const monitor = (dimensions: Dimensions, placementForm?: "wall" | "floor"): Artwork => ({
+    ...makeArtwork(dimensions, placementForm),
+    displayAs: "monitor"
+  });
+
+  it("stands a box monitor on the floor even with no recorded depth", () => {
+    expect(
+      effectivePlacementForm(monitor({ widthMm: 500, heightMm: 375, status: "known" }))
+    ).toBe("floor");
+  });
+
+  it("an explicit 'wall' override still beats the monitor display type", () => {
+    expect(
+      effectivePlacementForm(monitor({ widthMm: 500, status: "known" }, "wall"))
+    ).toBe("wall");
+  });
+
+  it("leaves a framed image on the depth heuristic (absent displayAs)", () => {
+    expect(
+      effectivePlacementForm(makeArtwork({ widthMm: 500, status: "known" }))
+    ).toBe("wall");
+  });
+});
+
 describe("effectiveFloorDepthMm — depth fallback", () => {
   it("uses the real depth when known", () => {
     expect(effectiveFloorDepthMm({ widthMm: 500, depthMm: 300, status: "known" })).toBe(300);

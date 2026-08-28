@@ -80,6 +80,8 @@ import { ElevationEmptyState } from "./components/elevation/ElevationEmptyState"
 import { FloorCaseInspector, WallCaseInspector } from "./components/inspectors/CaseInspector";
 import { FloorObjectInspector, FloorPlacementFields } from "./components/inspectors/FloorObjectInspector";
 import { FloorArtworkImageFacesField } from "./components/inspectors/FloorArtworkImageFacesField";
+import { MonitorSupportField } from "./components/inspectors/MonitorSupportField";
+import { isMonitorArtwork } from "../domain/geometry/monitorGlyphs";
 import { FloorArtworkImageSizeNote } from "./components/inspectors/FloorArtworkImageSizeNote";
 import { FreestandingWallInspector } from "./components/inspectors/FreestandingWallInspector";
 import {
@@ -363,6 +365,8 @@ export function App() {
   const commitPlanMove = useAppStore((state) => state.commitPlanMove);
   const updateFloorObject = useAppStore((state) => state.updateFloorObject);
   const setFloorArtworkImageFaces = useAppStore((state) => state.setFloorArtworkImageFaces);
+  const setFloorArtworkMonitorSupport = useAppStore(
+    (state) => state.setFloorArtworkMonitorSupport
   );
   const pairFloorArtworksBackToBack = useAppStore(
     (state) => state.pairFloorArtworksBackToBack
@@ -1086,6 +1090,10 @@ export function App() {
           floorObject.kind === "artwork" && floorObject.artworkId === selectedArtwork.id
       ) ?? null)
     : null;
+  // Whether the selected work is displayed on a CRT / box monitor. Read from
+  // the RECORD (the display type travels with the work, not the placement), so
+  // it is answerable for an unplaced work too.
+  const selectedArtworkIsMonitor = isMonitorArtwork(selectedArtwork ?? undefined);
   const isArtworkPlaced = placedWallObject !== null || placedFloorArtwork !== null;
   // Remove the artwork from whichever surface currently owns it.
   const artworkPlacementId = placedWallObject?.id ?? placedFloorArtwork?.id ?? null;
@@ -2544,6 +2552,23 @@ export function App() {
                     : undefined
                 }
                 isPlaced={isArtworkPlaced}
+                // Pedestal-or-floor is a fact about THIS installation, so the
+                // control writes to the floor placement and only exists when
+                // there is one. An unplaced monitor gets the default (pedestal)
+                // when it lands — see ArtworkFloorObject.monitorSupport.
+                monitorSupportControl={
+                  selectedArtworkIsMonitor && placedFloorArtwork ? (
+                    <MonitorSupportField
+                      monitorSupport={placedFloorArtwork.monitorSupport}
+                      onChange={(monitorSupport) =>
+                        void setFloorArtworkMonitorSupport(
+                          placedFloorArtwork.id,
+                          monitorSupport
+                        )
+                      }
+                    />
+                  ) : undefined
+                }
                 placementForm={artworkPlacementForm}
                 disabledPlacementForm={
                   noWallToHangSelectedArtworkOn ? "wall" : undefined
@@ -2597,36 +2622,58 @@ export function App() {
                         onCommitRotation={(rotationDeg) =>
                           void updateFloorObject(placedFloorArtwork.id, { rotationDeg })
                         }
-                        onCommitBaseHeight={(baseHeightMm) =>
-                          void updateFloorObject(placedFloorArtwork.id, { baseHeightMm })
-                        }
+                        // A box monitor stands on a pedestal or on the floor
+                        // — never on wires. Withholding the prop hides the
+                        // "Height off floor" field entirely, the same way a
+                        // display case is denied it (see FloorPlacementFields'
+                        // onCommitBaseHeight and CrtMonitorMesh, which ignores
+                        // baseHeightMm for the same reason).
+                        {...(selectedArtworkIsMonitor
+                          ? {}
+                          : {
+                              onCommitBaseHeight: (baseHeightMm: number) =>
+                                void updateFloorObject(placedFloorArtwork.id, {
+                                  baseHeightMm
+                                })
+                            })}
                       />
-                      {/* The box's Width/Height size the object standing on the
-                          floor; the work has its own recorded size, and 3D
-                          draws the image at THAT size. This note appears only
-                          once the two have drifted apart, and offers the way
-                          back. */}
-                      <FloorArtworkImageSizeNote
-                        dimensions={selectedArtwork.dimensions}
-                        objectWidthMm={placedFloorArtwork.widthMm}
-                        objectHeightMm={placedFloorArtwork.heightMm}
-                        unit={project.unit}
-                        onMatchSizeToWork={(widthMm, heightMm) =>
-                          void updateFloorObject(placedFloorArtwork.id, {
-                            widthMm,
-                            heightMm
-                          })
-                        }
-                      />
-                      {/* Which box faces carry the image — a box-specific
-                          question a wall-hung placement (a plane, not a box)
-                          never has, so it rides only this floor branch. */}
-                      <FloorArtworkImageFacesField
-                        imageFaces={placedFloorArtwork.imageFaces}
-                        onChange={(faces) =>
-                          void setFloorArtworkImageFaces(placedFloorArtwork.id, faces)
-                        }
-                      />
+                      {/* Both of the remaining floor controls are about the
+                          neutral image BOX, which a monitor placement isn't:
+                          its box is the cabinet (sized from the 4:3 face, not
+                          from the work), and a monitor shows its picture on one
+                          screen — "match the box to the work" and a six-face
+                          picker would both be offering to break it. */}
+                      {selectedArtworkIsMonitor ? null : (
+                        <>
+                          {/* The box's Width/Height size the object standing on
+                              the floor; the work has its own recorded size, and
+                              3D draws the image at THAT size. This note appears
+                              only once the two have drifted apart, and offers
+                              the way back. */}
+                          <FloorArtworkImageSizeNote
+                            dimensions={selectedArtwork.dimensions}
+                            objectWidthMm={placedFloorArtwork.widthMm}
+                            objectHeightMm={placedFloorArtwork.heightMm}
+                            unit={project.unit}
+                            onMatchSizeToWork={(widthMm, heightMm) =>
+                              void updateFloorObject(placedFloorArtwork.id, {
+                                widthMm,
+                                heightMm
+                              })
+                            }
+                          />
+                          {/* Which box faces carry the image — a box-specific
+                              question a wall-hung placement (a plane, not a
+                              box) never has, so it rides only this floor
+                              branch. */}
+                          <FloorArtworkImageFacesField
+                            imageFaces={placedFloorArtwork.imageFaces}
+                            onChange={(faces) =>
+                              void setFloorArtworkImageFaces(placedFloorArtwork.id, faces)
+                            }
+                          />
+                        </>
+                      )}
                     </>
                   ) : null
                 }

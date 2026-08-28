@@ -23,6 +23,12 @@ export const artworkSchema = z.object({
   // Optional placement-form override (wall vs floor). Additive: absent on every
   // pre-existing document, which still validates — no schema version bump.
   placementForm: z.enum(["wall", "floor"]).optional(),
+  // How the work is displayed. Additive, no schema-version bump (mirrors
+  // placementForm): absent on every legacy document, which validates and parses
+  // to undefined ⇒ the framed-image reading, exactly as before. A one-member
+  // enum on purpose — future display types extend it, they don't replace it
+  // (see ArtworkDisplayAs in project.ts).
+  displayAs: z.enum(["monitor"]).optional(),
   // Optional, additive framing (no schema-version bump) — absent on legacy records.
   matWidthMm: z.number().positive().optional(),
   frame: z

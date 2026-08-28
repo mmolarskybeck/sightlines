@@ -27,6 +27,18 @@ export type ArtworkFrame = {
   finish: FrameFinish;
 };
 
+// How a work is DISPLAYED, as an explicit curator choice on the record itself
+// (the inspector's "Display" dropdown). Absent — every legacy record, and the
+// default for a new one — means the framed-image reading this app has always
+// had: a flat plane on a wall, or a plain box on the floor.
+//
+// "monitor" is a CRT/box monitor: a black box with a 4:3 screen on its front
+// face showing the work's image, standing on a plain white pedestal (or, by
+// per-placement choice, directly on the floor). Typed as a union rather than a
+// boolean so future display types (flatscreen, projection) slot in without a
+// second field or a migration — see MONITOR_* below for its geometry.
+export type ArtworkDisplayAs = "monitor";
+
 export type Artwork = {
   id: string;
   schemaVersion: number;
@@ -48,6 +60,18 @@ export type Artwork = {
   // from dimensions.depthMm (see domain/placement/artworkForm.ts). Additive and
   // optional, so pre-existing artwork documents validate unchanged.
   placementForm?: "wall" | "floor";
+  // How the work is displayed (see ArtworkDisplayAs). Absent = framed image,
+  // which is what every record was before this field existed. Additive and
+  // optional, so pre-existing artwork documents validate unchanged — no
+  // schema-version bump.
+  //
+  // It travels with the WORK, not with a placement: a video on a CRT is a video
+  // on a CRT whether or not it is in a room yet, which is also why the
+  // inspector's Display dropdown is visible for an unplaced work. The
+  // per-PLACEMENT half of the decision — pedestal or bare floor — lives on
+  // ArtworkFloorObject.monitorSupport, because that is a fact about this
+  // installation of it, not about the work.
+  displayAs?: ArtworkDisplayAs;
   // Optional, additive framing (no schema-version bump): a mat band width and
   // a frame spec. Both absent on legacy records, which then load and render
   // exactly as before (see getArtworkOuterDimensionsMm).
@@ -530,8 +554,29 @@ export type ArtworkFloorObject = FloorObjectBase & {
   // object's floorMemory (see ArtworkFloorMemory) — a capture must not be able
   // to rewrite a curatorial choice into the default.
   imageFaces?: FloorObjectFace[];
+  // What a BOX-MONITOR work (Artwork.displayAs === "monitor") stands on in
+  // THIS installation: a plain white pedestal, or the bare floor. Meaningless —
+  // and ignored by every renderer — for any other work.
+  //
+  // ABSENT MEANS PEDESTAL, deliberately, and the default is resolved at READ
+  // time (resolveMonitorSupport in geometry/monitorGlyphs.ts) exactly as
+  // `imageFaces` absent means front+back: baking "pedestal" in at write time
+  // would lose the "never chosen" reading, and a later change to the default
+  // could then never reach the placements that never expressed an opinion.
+  // Unlike imageFaces there is no third state — the union has two members, so
+  // "floor" is always an explicit choice.
+  //
+  // Lives on the PLACEMENT, not the Artwork, because it is a fact about how the
+  // work is installed here (this room has plinths, that one doesn't), the same
+  // split the projection board draws between imageFaces and the work itself.
+  monitorSupport?: MonitorSupport;
   displayDimensionsOverride?: Dimensions;
 };
+
+// What a box-monitor placement stands on. See
+// ArtworkFloorObject.monitorSupport — absent is a third, distinct value there
+// ("never chosen"), resolving to "pedestal".
+export type MonitorSupport = "pedestal" | "floor";
 
 export type BlockedZoneFloorObject = FloorObjectBase & {
   kind: "blocked-zone";
@@ -570,6 +615,35 @@ export const CASE_GLASS_THICKNESS_MM = 6; // inset glass cap/lid thickness
 export const CASE_LEG_SIZE_MM = 40; // floor-case leg footprint (square, in plan)
 export const CASE_LEG_INSET_MM = 40; // distance from the footprint edge to a leg's center
 export const CASE_BASE_SLAB_THICKNESS_MM = 24; // floor-case base slab thickness
+
+// ─── CRT / box-monitor construction ────────────────────────────────────────
+//
+// Curatorial defaults for a work displayed on a CRT box monitor
+// (Artwork.displayAs === "monitor"), in the same spirit as the case defaults
+// above: a first placement a curator adjusts numerically afterwards. Shared by
+// the 3D mesh (three/CrtMonitorMesh.tsx), the 2D plan/elevation glyphs
+// (geometry/monitorGlyphs.ts) and the store's placement seeding, so no view can
+// invent its own monitor.
+
+// The monitor face's aspect — 4:3, the whole point of the type. Width drives
+// height (and vice versa) through this one ratio; nothing else may hard-code it.
+export const MONITOR_ASPECT_RATIO = 4 / 3;
+// Face width when the work records no usable dimension at all — roughly a
+// 25-inch gallery CRT, giving a 375mm-tall face at 4:3.
+export const MONITOR_DEFAULT_WIDTH_MM = 500;
+// Front-to-back depth of the box. A CRT is deep — deeper than it is tall — and
+// drawing it shallow is what makes a plan read as a flatscreen instead.
+// Constant, not derived: tube depth doesn't scale with screen size the way the
+// face does.
+export const MONITOR_DEPTH_MM = 450;
+// The black surround between the box's front face and the picture, on every
+// side. The screen area is the face inset by this; the image is then CONTAINED
+// inside that area, so letterboxing costs nothing extra — it is just more of
+// the same black box.
+export const MONITOR_BEZEL_MM = 30;
+// Pedestal height, floor to the monitor's underside. Standard plinth height:
+// puts a seated 375mm face's centre near a standing eyeline.
+export const MONITOR_PEDESTAL_HEIGHT_MM = 800;
 
 // Suspension-rigging constants, shared by the 3D wires (three/SuspensionWires
 // .tsx) and the elevation ghost's wires (elevation/ElevationSuspendedArtwork

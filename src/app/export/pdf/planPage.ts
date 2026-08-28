@@ -5,6 +5,10 @@ import {
   casePlanGlyph,
   wallTextPlanGlyph
 } from "../../../domain/geometry/caseGlyphs";
+import {
+  isMonitorArtwork,
+  monitorPlanGlyph
+} from "../../../domain/geometry/monitorGlyphs";
 import type { DoorSwingPlanGlyph } from "../../../domain/geometry/doorGlyphs";
 import { isPointInPolygon } from "../../../domain/geometry/polygon";
 import { getWallGeometry, outwardWallNormal } from "../../../domain/geometry/walls";
@@ -139,6 +143,9 @@ function drawPlanObject(
   rect: PlanRect,
   kind: "artwork" | "door" | "window" | "blocked-zone" | "wall-text" | "case",
   isFloorPlaced: boolean,
+  // This artwork is displayed on a CRT / box monitor — the same flag the canvas
+  // passes to PlanObject, and for the same reason it isn't a `kind` there.
+  isMonitor: boolean,
   // A hinged door's swing glyph, straight off the plan scene
   // (PlanSceneWallObject.doorSwing) — never recomputed here, so print and
   // screen sweep the identical arc. Undefined for a plain doorway (which keeps
@@ -158,7 +165,24 @@ function drawPlanObject(
   const world = (xMm: number, yMm: number) =>
     transform.point(planRectWorldPoint(rect, { xMm, yMm }));
 
-  if (kind === "artwork") {
+  if (kind === "artwork" && isMonitor) {
+    // The monitor's screen line, just inside the front edge — the print twin of
+    // PlanObject's plan-object-mark--monitor, off the same shared glyph. No
+    // live zoom here, so the raw MONITOR_BEZEL_MM drives the inset directly.
+    const { screen } = monitorPlanGlyph({
+      widthMm: rect.widthMm,
+      depthMm: rect.depthMm
+    });
+    if (screen) {
+      drawLine(
+        page,
+        world(screen.x1Mm, screen.yMm),
+        world(screen.x2Mm, screen.yMm),
+        0.5,
+        COLORS.subtle
+      );
+    }
+  } else if (kind === "artwork") {
     const inset = Math.min(rect.widthMm, rect.depthMm) * 0.22;
     const insetRect: PlanRect = {
       ...rect,
@@ -323,11 +347,21 @@ export function drawPlanScene(
         },
         entry.object.kind,
         false,
+        // A monitor work HUNG on a wall is a plain image there (intent-wins
+        // drops let that happen); the cabinet is a floor rendering.
+        false,
         entry.doorSwing
       );
     } else {
       const entry = painted.entry;
-      drawPlanObject(page, transform, entry.rect, entry.object.kind, true);
+      drawPlanObject(
+        page,
+        transform,
+        entry.rect,
+        entry.object.kind,
+        true,
+        isMonitorArtwork(entry.artwork)
+      );
     }
   }
   return transform;

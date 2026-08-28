@@ -10,8 +10,24 @@ import {
 // Explicit placement form overrides the depth-based default.
 export type PlacementForm = "wall" | "floor";
 
+// PRECEDENCE, in the order the reads happen below:
+//   1. `placementForm` — the curator's own explicit answer, from the Type row.
+//      It wins over everything, including a monitor: the row exists to say "no,
+//      hang this", and a display type must not be able to overrule the one
+//      control whose entire job is this question.
+//   2. `displayAs === "monitor"` — a box monitor is a piece of equipment that
+//      STANDS on something (pedestal or floor). It beats the depth heuristic
+//      below because that heuristic is a guess about the work and this is a
+//      stated fact about how it is displayed.
+//   3. the depth heuristic — a recorded depth means it stands up.
+//
+// (Intent-wins still applies at drop time: dropping a monitor work on a wall
+// places it on the wall, as a plain image. This resolves the DEFAULT — what the
+// inspector reads back and what an unplaced work is understood to be — not what
+// a deliberate gesture is allowed to do. See dropTarget.ts.)
 export function effectivePlacementForm(artwork: Artwork): PlacementForm {
   if (artwork.placementForm) return artwork.placementForm;
+  if (artwork.displayAs === "monitor") return "floor";
   const depthMm = artwork.dimensions.depthMm;
   return typeof depthMm === "number" && depthMm > 0 ? "floor" : "wall";
 }

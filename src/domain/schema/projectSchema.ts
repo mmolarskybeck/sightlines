@@ -176,6 +176,12 @@ const artworkFloorObjectSchema = floorObjectBaseSchema.extend({
   // An empty array is deliberately legal — it means every face was turned off,
   // which is different from "never chosen"; see ArtworkFloorObject.imageFaces.
   imageFaces: z.array(floorObjectFaceSchema).optional(),
+  // What a box-monitor placement stands on. Optional and additive (absent =
+  // pedestal, resolved at read time — see ArtworkFloorObject.monitorSupport),
+  // so no schema-version bump. Only meaningful when the joined artwork's
+  // displayAs is "monitor"; a stray value on any other work is inert rather
+  // than invalid, since the join isn't available at parse time.
+  monitorSupport: z.enum(["pedestal", "floor"]).optional(),
   displayDimensionsOverride: dimensionsSchema.optional()
 });
 

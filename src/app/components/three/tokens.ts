@@ -85,6 +85,21 @@ export const FLOOR_COLOR = "#b4b8bc";
 // reads as a distinct volume against both.
 export const BOX_COLOR = "#d5d8db";
 
+// A CRT / box monitor's cabinet (CrtMonitorMesh.tsx). Near-black rather than
+// pure black: Lambert shading on a true #000 box is still #000 on every face,
+// so the volume collapses to a silhouette against the grey floor and you lose
+// which way it points. A hair off black keeps the lit face separable from the
+// shadowed one while still reading unambiguously as a black monitor against
+// the white walls and BOX_COLOR neighbours.
+export const MONITOR_BODY_COLOR = "#1a1a1a";
+
+// The dead screen behind the artwork image: what shows in the picture area when
+// the work has no asset (or it hasn't loaded), and what the image is contained
+// INSIDE when its aspect doesn't match 4:3. A very dark cool grey — a switched
+// -off tube is never as black as its own bezel, and the step is what makes the
+// screen read as glass set into the cabinet rather than as a hole in it.
+export const MONITOR_SCREEN_COLOR = "#26292c";
+
 // Neutral placeholder for artworks whose image is missing or still loading —
 // a shade between the wall white and the floor grey so it reads as "a work
 // goes here" rather than a hole in the wall.

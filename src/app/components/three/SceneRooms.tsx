@@ -5,6 +5,7 @@ import type { Artwork } from "../../../domain/project";
 import type { Scene3d } from "../../../domain/geometry/scene3d";
 import { FloorCaseMesh } from "./CaseMesh";
 import { CLICK_DRAG_TOLERANCE_PX } from "./sceneConstants";
+import { CrtMonitorMesh } from "./CrtMonitorMesh";
 import { FloorObjectBox } from "./FloorObjectBox";
 import { FloorSurface } from "./FloorSurface";
 import { PartitionSlab } from "./PartitionSlab";
@@ -135,6 +136,23 @@ export function SceneRooms({
             <FloorCaseMesh
               key={object.objectId}
               object={object}
+              isSelected={isSelected}
+              onSelect={onSelectObject}
+            />
+          );
+        }
+        // A work displayed on a CRT draws as the cabinet (+ its pedestal)
+        // instead of the neutral image box. Dispatch only — every coordinate
+        // and every stored field is the same ArtworkFloorObject's; see
+        // CrtMonitorMesh for why this is a rendering, not a new object kind.
+        if (object.displayAs === "monitor") {
+          return (
+            <CrtMonitorMesh
+              key={object.objectId}
+              object={object}
+              texture={
+                object.assetId ? texturesByAssetId.get(object.assetId) : undefined
+              }
               isSelected={isSelected}
               onSelect={onSelectObject}
             />

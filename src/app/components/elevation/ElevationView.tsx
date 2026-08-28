@@ -111,6 +111,7 @@ import { ElevationOpening } from "./ElevationOpening";
 import { ElevationCase, ElevationFloorCaseGhost } from "./ElevationCase";
 import { ElevationPartitionProfile } from "./ElevationPartitionProfile";
 import { ElevationSuspendedArtworkGhost } from "./ElevationSuspendedArtworkGhost";
+import { ElevationMonitorGhost } from "./ElevationMonitorGhost";
 import { ElevationWallText } from "./ElevationWallText";
 import {
   ArtworkTooltipContent,
@@ -715,6 +716,8 @@ export function ElevationView({
   const visibleSuspendedArtworkGhosts = ghostsVisible
     ? elevationScene.suspendedArtworkGhosts
     : [];
+  // Box monitors ride the same one gate as the other two ghost families.
+  const visibleMonitorGhosts = ghostsVisible ? elevationScene.monitorGhosts : [];
   // Abutting slabs are architecture, not projection: they stay in every state.
   const visiblePartitionProfiles = selectVisiblePartitionProfiles(
     elevationScene.partitionProfiles,
@@ -1834,6 +1837,21 @@ export function ElevationView({
       widthMm: ghost.xMaxMm - ghost.xMinMm,
       heightMm: ghost.heightMm
     })),
+    // A monitor bounds a gap line for the floor case's exact reason — it is
+    // waist-to-eye-height equipment a curator hangs work above and beside. Its
+    // extent is the WHOLE assembly (pedestal + cabinet), standing on the floor,
+    // because that is the volume a dimension has to stop at.
+    ...visibleMonitorGhosts.map((ghost) => {
+      const totalHeightMm = ghost.pedestalHeightMm + ghost.monitorHeightMm;
+      return {
+        id: ghost.object.id,
+        wallId: wallId ?? "",
+        xMm: (ghost.xMinMm + ghost.xMaxMm) / 2,
+        yMm: totalHeightMm / 2,
+        widthMm: ghost.xMaxMm - ghost.xMinMm,
+        heightMm: totalHeightMm
+      };
+    }),
     // Projected partitions bound a gap line for exactly the same reason — more
     // strongly, in fact, for an abutting one: the hanging zone it creates ENDS
     // at the slab, and a dimension running past it would describe wall the
@@ -2027,6 +2045,19 @@ export function ElevationView({
             key={ghost.object.id}
             baseHeightMm={ghost.baseHeightMm}
             heightMm={ghost.heightMm}
+            wallHeightMm={wallHeightMm}
+            xMaxMm={ghost.xMaxMm}
+            xMinMm={ghost.xMinMm}
+          />
+        ))}
+        {/* Box monitors standing in front of this wall: the same behind-the-
+            wall-objects paint slot, inert and dashed, but standing on the floor
+            line (pedestal + cabinet) rather than floating. */}
+        {visibleMonitorGhosts.map((ghost) => (
+          <ElevationMonitorGhost
+            key={ghost.object.id}
+            monitorHeightMm={ghost.monitorHeightMm}
+            pedestalHeightMm={ghost.pedestalHeightMm}
             wallHeightMm={wallHeightMm}
             xMaxMm={ghost.xMaxMm}
             xMinMm={ghost.xMinMm}

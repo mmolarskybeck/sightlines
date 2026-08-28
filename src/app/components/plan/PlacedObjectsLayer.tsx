@@ -17,6 +17,7 @@ import type { PlanPlacement } from "../../../domain/snapping/planSnapTargets";
 import type { PlanRect } from "../../../domain/geometry/planObjects";
 import type { Vector2 } from "../../../domain/geometry/dragResize";
 import { PlanObject } from "./PlanObject";
+import { isMonitorArtwork } from "../../../domain/geometry/monitorGlyphs";
 import {
   ArtworkTooltipContent,
   CaseTooltipContent,
@@ -317,7 +318,11 @@ export function PlacedObjectsLayer({
           />
         );
         };
-        const renderFloorObject = ({ object: floorObject, rect: restRect }: PlanSceneFloorObject) => {
+        const renderFloorObject = ({
+          object: floorObject,
+          artwork: floorArtwork,
+          rect: restRect
+        }: PlanSceneFloorObject) => {
         const groupPreviewRect = objectDrag?.members
           ? objectDrag.previewRectById?.get(floorObject.id)
           : undefined;
@@ -355,6 +360,9 @@ export function PlacedObjectsLayer({
             hitMinSizeMm={objectHitMinMm}
             isFloorPlaced={isFloorPlaced}
             isInvalid={isInvalid}
+            // The joined record decides the glyph — the placement stores no
+            // display type of its own (see Artwork.displayAs).
+            isMonitor={isMonitorArtwork(floorArtwork)}
             isSelected={isSelected}
             key={floorObject.id}
             kind={floorObject.kind}

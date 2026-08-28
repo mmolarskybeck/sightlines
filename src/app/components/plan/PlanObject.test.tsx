@@ -242,3 +242,58 @@ describe("PlanObject — front-face marker", () => {
     }
   });
 });
+
+describe("PlanObject — box-monitor glyph", () => {
+  const monitorRect: PlanRect = {
+    centerXMm: 2000,
+    centerYMm: 1000,
+    widthMm: 500,
+    depthMm: 450,
+    angleDeg: 0
+  };
+
+  it("replaces the generic artwork inset with the screen line", () => {
+    const { container } = renderPlanObject({
+      kind: "artwork",
+      isFloorPlaced: true,
+      isMonitor: true,
+      planRect: monitorRect
+    });
+
+    expect(container.querySelector(".plan-object-mark--monitor line")).not.toBeNull();
+    // The 0.22 inset rect describes a framed work's image, which a cabinet has
+    // no equivalent of — drawing both would read as a screen inside a screen.
+    expect(container.querySelector(".plan-object-mark--artwork")).toBeNull();
+    // The front-face marker stays: it is the orientation cue the screen line
+    // sits on, and it applies to every floor-placed work.
+    expect(container.querySelector(".plan-object-mark--front-face")).not.toBeNull();
+  });
+
+  it("puts the screen line on the FRONT (+depth) side of the centre", () => {
+    const { container } = renderPlanObject({
+      kind: "artwork",
+      isFloorPlaced: true,
+      isMonitor: true,
+      planRect: monitorRect
+    });
+
+    const line = container.querySelector(".plan-object-mark--monitor line")!;
+    // A sign flip here would mark the BACK of the cabinet as the screen — the
+    // one error this glyph can make that still looks plausible.
+    expect(Number(line.getAttribute("y1"))).toBeGreaterThan(monitorRect.centerYMm);
+    expect(Number(line.getAttribute("y1"))).toBeLessThan(
+      monitorRect.centerYMm + monitorRect.depthMm / 2
+    );
+  });
+
+  it("leaves a non-monitor artwork drawing exactly what it drew before", () => {
+    const { container } = renderPlanObject({
+      kind: "artwork",
+      isFloorPlaced: true,
+      planRect: monitorRect
+    });
+
+    expect(container.querySelector(".plan-object-mark--monitor")).toBeNull();
+    expect(container.querySelector(".plan-object-mark--artwork")).not.toBeNull();
+  });
+});

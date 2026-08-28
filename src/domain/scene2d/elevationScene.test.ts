@@ -8,6 +8,7 @@ import type {
   ConnectableOpeningWallObject,
   WallObject
 } from "../project";
+import { MONITOR_DEPTH_MM, MONITOR_PEDESTAL_HEIGHT_MM } from "../project";
 import type { FloorPartition } from "../geometry/freestandingWalls";
 import {
   buildElevationScene,
@@ -361,6 +362,110 @@ describe("buildElevationScene suspended-artwork ghosts", () => {
     // box, slab, legs) — a board must never land in that array.
     expect(scene.floorCaseGhosts.map((ghost) => ghost.object.id)).toEqual(["floor-case"]);
     expect(scene.suspendedArtworkGhosts.map((ghost) => ghost.object.id)).toEqual(["floor-board"]);
+  });
+});
+
+// A floor-standing box monitor: the CABINET's geometry (a 4:3 face, 450 deep),
+// resting on the floor. `monitorSupport` absent = pedestal, the default.
+function monitorPlacement(overrides: Partial<ArtworkFloorObject> = {}): ArtworkFloorObject {
+  return {
+    id: "floor-monitor",
+    kind: "artwork",
+    artworkId: "art-monitor",
+    xMm: 3000,
+    yMm: 1500,
+    widthMm: 500,
+    depthMm: MONITOR_DEPTH_MM,
+    rotationDeg: 0,
+    heightMm: 375,
+    wallYMm: 1450,
+    ...overrides
+  };
+}
+
+const MONITOR_ARTWORKS: ReadonlyMap<string, Artwork> = new Map([
+  [
+    "art-monitor",
+    {
+      id: "art-monitor",
+      schemaVersion: 1,
+      dimensions: { status: "unknown" },
+      displayAs: "monitor",
+      metadata: {}
+    } as Artwork
+  ]
+]);
+
+describe("buildElevationScene monitor ghosts", () => {
+  it("ghosts a floor-RESTING monitor, standing on the floor with its pedestal", () => {
+    const scene = buildElevationScene([], {
+      ...WALL,
+      artworksById: MONITOR_ARTWORKS,
+      floorArtworks: [monitorPlacement()],
+      wallStartFloorMm: WALL_START,
+      wallEndFloorMm: WALL_END
+    });
+
+    expect(scene.monitorGhosts).toHaveLength(1);
+    expect(scene.monitorGhosts[0]).toMatchObject({
+      xMinMm: 2750, // center 3000 ± halfWidth 250
+      xMaxMm: 3250,
+      monitorHeightMm: 375,
+      // Absent monitorSupport resolves to a pedestal, HERE, at read time.
+      pedestalHeightMm: MONITOR_PEDESTAL_HEIGHT_MM
+    });
+  });
+
+  it("drops the plinth when the monitor stands on the bare floor", () => {
+    const scene = buildElevationScene([], {
+      ...WALL,
+      artworksById: MONITOR_ARTWORKS,
+      floorArtworks: [monitorPlacement({ monitorSupport: "floor" })],
+      wallStartFloorMm: WALL_START,
+      wallEndFloorMm: WALL_END
+    });
+
+    expect(scene.monitorGhosts[0]!.pedestalHeightMm).toBe(0);
+  });
+
+  it("emits nothing without the artwork join — the display type lives on the WORK", () => {
+    const scene = buildElevationScene([], {
+      ...WALL,
+      floorArtworks: [monitorPlacement()],
+      wallStartFloorMm: WALL_START,
+      wallEndFloorMm: WALL_END
+    });
+
+    expect(scene.monitorGhosts).toHaveLength(0);
+    // ...and it must not fall through into the suspended bucket either.
+    expect(scene.suspendedArtworkGhosts).toHaveLength(0);
+  });
+
+  it("never floats a monitor as a suspended board, even with a stale baseHeightMm", () => {
+    const scene = buildElevationScene([], {
+      ...WALL,
+      artworksById: MONITOR_ARTWORKS,
+      floorArtworks: [monitorPlacement({ baseHeightMm: 900 })],
+      wallStartFloorMm: WALL_START,
+      wallEndFloorMm: WALL_END
+    });
+
+    expect(scene.suspendedArtworkGhosts).toHaveLength(0);
+    expect(scene.monitorGhosts.map((ghost) => ghost.object.id)).toEqual(["floor-monitor"]);
+  });
+
+  it("leaves an ordinary floor-resting artwork emitting no ghost at all", () => {
+    // The narrow-exception guard: only displayAs === "monitor" ghosts, so no
+    // existing project grows dashed outlines it never had.
+    const scene = buildElevationScene([], {
+      ...WALL,
+      floorArtworks: [suspendedBoard({ baseHeightMm: undefined })],
+      wallStartFloorMm: WALL_START,
+      wallEndFloorMm: WALL_END
+    });
+
+    expect(scene.monitorGhosts).toHaveLength(0);
+    expect(scene.suspendedArtworkGhosts).toHaveLength(0);
   });
 });
 

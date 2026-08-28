@@ -63,6 +63,11 @@ import {
   effectiveFloorDepthMm,
   type PlacementForm
 } from "../domain/placement/artworkForm";
+import {
+  isMonitorArtwork,
+  monitorBoxSizeMm,
+  resolveMonitorSupport
+} from "../domain/geometry/monitorGlyphs";
 import { withArtworkFootprintFromMap } from "../domain/framing";
 import type { PixelAspect } from "../domain/units/aspectFill";
 import type { PlacementWarning } from "../domain/placement/validatePlacement";
@@ -86,6 +91,7 @@ import {
   type FloorObject,
   type FloorObjectBase,
   type FloorObjectFace,
+  type MonitorSupport,
   type Project,
   type ProjectSummary,
   type WallObject
@@ -335,6 +341,7 @@ type UpdateArtworkChanges = Partial<
     | "creditLine"
     | "dimensions"
     | "placementForm"
+    | "displayAs"
     | "matWidthMm"
     | "frame"
     | "frameIncludedInImage"
@@ -604,6 +611,16 @@ export type AppState = ArrangeSliceState &
   // mis-handle — two equal face sets are never reference-equal, so every
   // commit would look like a change and pile up undo entries.
   setFloorArtworkImageFaces: (objectId: string, faces: FloorObjectFace[]) => Promise<void>;
+  // What a box-monitor placement stands on (pedestal or bare floor). Its own
+  // action for the same reason as setFloorArtworkImageFaces: monitorSupport
+  // lives on ArtworkFloorObject, not FloorObjectBase, so updateFloorObject's
+  // FloorObjectBase-shaped change set cannot express it. Writes the literal
+  // value — "pedestal" from the control is a STATED choice, distinct from the
+  // absent "never chosen" that also resolves to pedestal.
+  setFloorArtworkMonitorSupport: (
+    objectId: string,
+    monitorSupport: MonitorSupport
+  ) => Promise<void>;
   // Snaps two floor-placed artworks together as one two-sided panel: the
   // moving board lands flat against the ANCHOR board's back face, rotated
   // 180°, so each work shows on an opposite side of the combined panel (the
@@ -1799,8 +1816,26 @@ export function createAppStore(deps: AppStoreDeps) {
 
       let newFloorObject: FloorObject;
       if (wallObject.kind === "artwork") {
+        // A monitor work coming down onto the floor re-seeds the CABINET's
+        // geometry rather than inheriting the flat wall plane's width/height
+        // and a nominal depth — the wall placement was a plain image (the
+        // intent-wins drop law lets a monitor work hang), and standing it up
+        // means standing up the equipment. Same size source as
+        // placeArtworkOnFloor, so both routes onto the floor agree.
+        const monitorArtwork = get().libraryArtworks.find(
+          (candidate) => candidate.id === wallObject.artworkId
+        );
+        const monitorSizeMm = isMonitorArtwork(monitorArtwork)
+          ? monitorBoxSizeMm(monitorArtwork?.dimensions)
+          : undefined;
         newFloorObject = {
           ...base,
+          ...(monitorSizeMm
+            ? {
+                widthMm: monitorSizeMm.widthMm,
+                heightMm: monitorSizeMm.heightMm
+              }
+            : {}),
           kind: "artwork",
           artworkId: wallObject.artworkId,
           // `!== undefined` and a copy, mirroring the write side: an empty
@@ -1810,7 +1845,7 @@ export function createAppStore(deps: AppStoreDeps) {
           ...(wallObject.floorMemory?.imageFaces !== undefined
             ? { imageFaces: [...wallObject.floorMemory.imageFaces] }
             : {}),
-          depthMm: floorDepthForWallArtwork(wallObject),
+          depthMm: monitorSizeMm?.depthMm ?? floorDepthForWallArtwork(wallObject),
           ...(wallObject.displayDimensionsOverride
             ? { displayDimensionsOverride: wallObject.displayDimensionsOverride }
             : {})
@@ -2419,6 +2454,7 @@ export function createAppStore(deps: AppStoreDeps) {
           changedKeys.includes("matWidthMm") ||
           changedKeys.includes("frame") ||
           changedKeys.includes("frameIncludedInImage");
+        const displayAsChanged = changedKeys.includes("displayAs");
 
         let parsed: Artwork;
         try {
@@ -2473,6 +2509,53 @@ export function createAppStore(deps: AppStoreDeps) {
               updatedAt: new Date().toISOString()
             };
             projectEdit = { before: project, after };
+          }
+        }
+
+        // Turning a work INTO a box monitor changes the placement's geometry,
+        // not just its look: a monitor's floor object is the CABINET (a 4:3
+        // face, MONITOR_DEPTH_MM deep), while a framed image's is the work
+        // itself. Without this re-seed a flat 20mm-deep board would keep its
+        // paper-thin footprint and render as a CRT with no tube.
+        //
+        // One-directional on purpose. Switching AWAY from monitor leaves the box
+        // alone: the only sizes available then are the work's own dimensions,
+        // which may be entirely unrecorded, and replacing a real box with a
+        // placeholder is a worse answer than leaving a box the curator can drag
+        // or retype. (Placing fresh always seeds correctly — placeArtworkOnFloor.)
+        if (project && displayAsChanged && parsed.displayAs === "monitor") {
+          const base = projectEdit?.after ?? project;
+          let floorChanged = false;
+          const nextFloorObjects = base.floorObjects.map((object) => {
+            if (object.kind !== "artwork" || object.artworkId !== artworkId) return object;
+            const size = monitorBoxSizeMm(parsed.dimensions);
+            if (
+              object.widthMm === size.widthMm &&
+              object.heightMm === size.heightMm &&
+              object.depthMm === size.depthMm
+            ) {
+              return object;
+            }
+            floorChanged = true;
+            return {
+              ...object,
+              widthMm: size.widthMm,
+              heightMm: size.heightMm,
+              depthMm: size.depthMm
+            };
+          });
+          if (floorChanged) {
+            // Floor objects carry no wall bounds to validate (see
+            // placeArtworkOnFloor), so this only extends the edit — it never
+            // joins affectedIds.
+            projectEdit = {
+              before: projectEdit?.before ?? project,
+              after: {
+                ...base,
+                floorObjects: nextFloorObjects,
+                updatedAt: new Date().toISOString()
+              }
+            };
           }
         }
 
@@ -3513,8 +3596,23 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
-        const aspect = await loadArtworkAspect(artwork);
-        const { widthMm, heightMm } = getEffectivePlacementSizeMm(artwork.dimensions, aspect);
+        // A box monitor's floor object is the CABINET, not the work: a 4:3 face
+        // scaled off whatever the work records, MONITOR_DEPTH_MM deep. It
+        // deliberately does NOT take the flat-artwork path — the image's own
+        // aspect and depth describe the video, not the equipment playing it.
+        // (The pedestal is not part of this height; it is added by the
+        // renderers from monitorSupport — see CrtMonitorMesh.)
+        const isMonitor = isMonitorArtwork(artwork);
+        const aspect = isMonitor ? undefined : await loadArtworkAspect(artwork);
+        const { widthMm, heightMm, depthMm } = isMonitor
+          ? monitorBoxSizeMm(artwork.dimensions)
+          : {
+              ...getEffectivePlacementSizeMm(artwork.dimensions, aspect),
+              // A floor-standing work's real depth if known, else a squarish
+              // footprint off its width, else the editable default (see
+              // effectiveFloorDepthMm — shared with plan/3D rendering).
+              depthMm: effectiveFloorDepthMm(artwork.dimensions)
+            };
         const floorObject: ArtworkFloorObject = {
           id: newId(),
           kind: "artwork",
@@ -3522,10 +3620,7 @@ export function createAppStore(deps: AppStoreDeps) {
           xMm,
           yMm,
           widthMm,
-          // A floor-standing work's real depth if known, else a squarish
-          // footprint off its width, else the editable default (see
-          // effectiveFloorDepthMm — shared with plan/3D rendering).
-          depthMm: effectiveFloorDepthMm(artwork.dimensions),
+          depthMm,
           rotationDeg: 0,
           heightMm,
           // Remembered hang-height center for a later floor→wall conversion.
@@ -3900,6 +3995,36 @@ export function createAppStore(deps: AppStoreDeps) {
         );
 
         await applyEdit("Edit image faces", (current) => ({
+          ...current,
+          floorObjects: nextFloorObjects
+        }));
+      },
+
+      async setFloorArtworkMonitorSupport(objectId, monitorSupport) {
+        const project = get().project;
+        if (!project) return;
+
+        const target = project.floorObjects.find((object) => object.id === objectId);
+        // Kind-gated at the write, exactly like setFloorArtworkImageFaces:
+        // monitorSupport is only representable on ArtworkFloorObject, so a
+        // stray call for a case or a blocked zone is dropped rather than stored
+        // somewhere every reader would then have to remember to ignore.
+        if (!target || target.kind !== "artwork") return;
+
+        // Compare against the RESOLVED value, not the stored one: an untouched
+        // placement is already showing a pedestal, so re-choosing "pedestal"
+        // must not push a dead undo entry. It does still get WRITTEN the first
+        // time it differs from absent in nothing but explicitness — that is why
+        // this is a resolved-value comparison and not `target.monitorSupport
+        // === monitorSupport`. (Absent + "pedestal" therefore stays absent,
+        // which is the honest record: the curator never overrode the default.)
+        if (resolveMonitorSupport(target.monitorSupport) === monitorSupport) return;
+
+        const nextFloorObjects = project.floorObjects.map((object) =>
+          object.id === objectId ? { ...object, monitorSupport } : object
+        );
+
+        await applyEdit("Edit monitor support", (current) => ({
           ...current,
           floorObjects: nextFloorObjects
         }));
