@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { WallText3d } from "../../../domain/geometry/scene3d";
 import { computeWallTextSkeleton } from "../../../domain/scene2d/wallTextSkeleton";
 import { mmToWorld } from "./coordinates";
+import { CLICK_DRAG_TOLERANCE_PX } from "./sceneConstants";
 import { SelectionRectOutline } from "./UncertaintyOutline";
 import {
   GHOST_OPACITY,
@@ -61,7 +62,7 @@ export function WallTextPanel({
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
     // A drag's release also fires click; only a true click selects.
-    if (event.delta > 6) return;
+    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
     const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
     onSelect(wallText.objectId, { additive: shiftKey || metaKey || ctrlKey });
   };

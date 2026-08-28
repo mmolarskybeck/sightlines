@@ -59,6 +59,33 @@ export function keyboardZoomFactor(direction: "in" | "out"): number {
   return direction === "out" ? KEYBOARD_ZOOM_STEP : 1 / KEYBOARD_ZOOM_STEP;
 }
 
+// Scale a raw dolly factor so the resulting orbit radius lands INSIDE the
+// envelope rather than skipping past a bound: at the clamp the step shrinks to
+// exactly the remaining distance, and once there it collapses to 1 (a no-op the
+// callers use to bail early, and the zoom buttons use to disable themselves).
+// Shared by the wheel dolly, the Cmd/Ctrl +/- shortcut and the viewport's zoom
+// buttons so all three stop at the same wall.
+export function clampZoomFactorToEnvelope(
+  currentDistance: number,
+  factor: number
+): number {
+  if (currentDistance <= 0) return factor;
+  const desired = currentDistance * factor;
+  const clamped = MathUtils.clamp(desired, ORBIT_MIN_DISTANCE, ORBIT_MAX_DISTANCE);
+  return clamped === desired ? factor : clamped / currentDistance;
+}
+
+// Whether a one-step dolly in this direction would still move the camera —
+// what the viewport's +/- buttons read to disable themselves at the envelope's
+// ends, mirroring the 2D cluster's canZoomIn/canZoomOut.
+export function canZoomStep(currentDistance: number, direction: "in" | "out"): boolean {
+  const factor = clampZoomFactorToEnvelope(
+    currentDistance,
+    keyboardZoomFactor(direction)
+  );
+  return Math.abs(factor - 1) >= 1e-6;
+}
+
 export function clampFocusDistance(currentDistance: number): number {
   return MathUtils.clamp(currentDistance, FOCUS_MIN_DISTANCE, FOCUS_MAX_DISTANCE);
 }

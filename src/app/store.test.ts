@@ -3945,6 +3945,86 @@ describe("app store", () => {
     });
   });
 
+  // The 3D pointer drag's commit: both wall axes AND a possible wall change, in
+  // one undo entry.
+  describe("moveWallObjectPlacement", () => {
+    async function placeOnFirstWall() {
+      await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+      const artworkId = store.getState().project!.checklistArtworkIds[0];
+      const wallId = getSelectedWall(
+        store.getState().project!,
+        store.getState().wallContextId
+      )!.id;
+      await store.getState().placeArtwork(artworkId, wallId, 1000, 1450);
+      return {
+        wallId,
+        placementId: store.getState().project!.wallObjects[0].id
+      };
+    }
+
+    it("moves in both wall axes on the same wall, in one undo entry", async () => {
+      const { wallId, placementId } = await placeOnFirstWall();
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().moveWallObjectPlacement(placementId, wallId, 2000, 1600);
+
+      let state = store.getState();
+      expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+      expect(state.project!.wallObjects[0]).toMatchObject({
+        wallId,
+        xMm: 2000,
+        yMm: 1600
+      });
+
+      await store.getState().undo();
+      expect(store.getState().project!.wallObjects[0]).toMatchObject({
+        wallId,
+        xMm: 1000,
+        yMm: 1450
+      });
+    });
+
+    it("re-anchors onto another wall and carries the new hang height", async () => {
+      const { wallId, placementId } = await placeOnFirstWall();
+      const otherWall = store
+        .getState()
+        .project!.floor.rooms[0].room.walls.find((wall) => wall.id !== wallId)!;
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store
+        .getState()
+        .moveWallObjectPlacement(placementId, otherWall.id, 800, 1700);
+
+      const state = store.getState();
+      expect(state.undoStack).toHaveLength(undoStackBefore + 1);
+      expect(state.project!.wallObjects[0]).toMatchObject({
+        wallId: otherWall.id,
+        xMm: 800,
+        yMm: 1700
+      });
+    });
+
+    it("is a no-op when nothing changed — a click must not push an undo entry", async () => {
+      const { wallId, placementId } = await placeOnFirstWall();
+      const undoStackBefore = store.getState().undoStack.length;
+
+      await store.getState().moveWallObjectPlacement(placementId, wallId, 1000, 1450);
+
+      expect(store.getState().undoStack).toHaveLength(undoStackBefore);
+    });
+
+    it("moves the height alone when only yMm changed", async () => {
+      const { wallId, placementId } = await placeOnFirstWall();
+
+      await store.getState().moveWallObjectPlacement(placementId, wallId, 1000, 1900);
+
+      expect(store.getState().project!.wallObjects[0]).toMatchObject({
+        xMm: 1000,
+        yMm: 1900
+      });
+    });
+  });
+
   describe("removePlacement", () => {
     it("removes the wall object but keeps checklist membership", async () => {
       await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);

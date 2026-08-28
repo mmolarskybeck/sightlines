@@ -413,3 +413,46 @@ describe("dropGhostTransform", () => {
     expect(transform.position).toEqual([0, 0, 0]);
   });
 });
+
+// The grab offset a MOVE carries (objectDrag.ts) rides through this same
+// resolver, so the two paths can never disagree about the wall clamp.
+describe("resolveThreeDrop with a grab offset", () => {
+  it("applies a wall offset BEFORE the clamp", () => {
+    const walls = wallsFor(boxRoom("ccw"));
+    const result = resolveThreeDrop({
+      point: worldHit(1000, 1000, 0),
+      tag: { kind: "wall", wallId: "wall-0" },
+      walls,
+      dims,
+      offsetMm: { xMm: 250, yMm: -400 }
+    });
+    expect(result!.xMm).toBeCloseTo(1250);
+    expect(result!.yMm).toBeCloseTo(600);
+  });
+
+  it("still keeps the offset placement whole on the wall", () => {
+    const walls = wallsFor(boxRoom("ccw"));
+    const result = resolveThreeDrop({
+      point: worldHit(3900, 1000, 0),
+      tag: { kind: "wall", wallId: "wall-0" },
+      walls,
+      dims,
+      offsetMm: { xMm: 400, yMm: 0 }
+    });
+    // 4300 raw, clamped to (wall length 4000) - half of the 600mm footprint.
+    expect(result!.xMm).toBeCloseTo(3700);
+  });
+
+  it("applies a floor offset in floor space, and to the ghost as well", () => {
+    const walls = wallsFor(boxRoom("ccw"));
+    const result = resolveThreeDrop({
+      point: worldHit(1800, 0, 900),
+      tag: { kind: "floor", roomId: "room-1" },
+      walls,
+      dims,
+      offsetMm: { xMm: -300, yMm: 150 }
+    });
+    expect(result).toMatchObject({ anchor: "floor", xMm: 1500, yMm: 1050 });
+    expect(result!.ghost).toMatchObject({ centerXMm: 1500, centerYMm: 1050 });
+  });
+});

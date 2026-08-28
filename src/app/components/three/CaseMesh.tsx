@@ -12,6 +12,8 @@ import {
   FLOOR_CASE_BOX_HEIGHT_MM
 } from "../../../domain/project";
 import { mmToWorld } from "./coordinates";
+import { objectDragPointerDown, useThreeObjectDrag } from "./objectDragContext";
+import { CLICK_DRAG_TOLERANCE_PX } from "./sceneConstants";
 import { WALL_OFFSET_MM } from "./framingGeometry";
 import { SelectionBoxOutline } from "./UncertaintyOutline";
 import { CASE_BODY_COLOR, CASE_FRAME_COLOR, CASE_GLASS_COLOR, CASE_GLASS_OPACITY } from "./tokens";
@@ -57,7 +59,7 @@ const GLASS_MATERIAL_PROPS = {
 } as const;
 
 // One freestanding floor vitrine. Mirrors FloorObjectBox's selection/click
-// conventions (event.delta > 6 orbit-drag guard, outline-only selection, no
+// conventions (the CLICK_DRAG_TOLERANCE_PX drag guard, outline-only selection, no
 // texture/emissive tint) but is composed of several stacked meshes instead of
 // one box, so the click handler and hover state are shared across the pieces
 // that make up the case rather than living on a single mesh.
@@ -89,11 +91,17 @@ export function FloorCaseMesh({
 
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
-    // An orbit drag's release also fires click — only a true click selects.
-    if (event.delta > 6) return;
+    // A drag's release also fires click — only a true click selects.
+    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
     const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
     onSelect(object.objectId, { additive: shiftKey || metaKey || ctrlKey });
   };
+
+  // Every piece of the case (legs, slab, tray walls, glass) arms the same
+  // floor-plane drag, so a vitrine moves by grabbing any part of it.
+  const drag = useThreeObjectDrag();
+  const handlePointerDown = objectDragPointerDown(drag, object.objectId);
+  const pointerProps = { onClick: handleClick, onPointerDown: handlePointerDown };
 
   const legHeightMm = Math.max(
     object.heightMm - FLOOR_CASE_BOX_HEIGHT_MM - CASE_BASE_SLAB_THICKNESS_MM,
@@ -138,14 +146,14 @@ export function FloorCaseMesh({
       {legCorners.map(([legX, legZ], index) => (
         <mesh
           key={index}
-          onClick={handleClick}
+          {...pointerProps}
           position={[mmToWorld(legX), mmToWorld(legHeightMm / 2), mmToWorld(legZ)]}
         >
           <boxGeometry args={[mmToWorld(CASE_LEG_SIZE_MM), mmToWorld(legHeightMm), mmToWorld(CASE_LEG_SIZE_MM)]} />
           <meshLambertMaterial color={CASE_FRAME_COLOR} />
         </mesh>
       ))}
-      <mesh onClick={handleClick} position={[0, mmToWorld(legHeightMm + CASE_BASE_SLAB_THICKNESS_MM / 2), 0]}>
+      <mesh {...pointerProps} position={[0, mmToWorld(legHeightMm + CASE_BASE_SLAB_THICKNESS_MM / 2), 0]}>
         <boxGeometry
           args={[mmToWorld(object.widthMm), mmToWorld(CASE_BASE_SLAB_THICKNESS_MM), mmToWorld(object.depthMm)]}
         />
@@ -155,7 +163,7 @@ export function FloorCaseMesh({
           plus an inset glass cap. onClick lives on this wrapping group so
           every tray piece (and the glass) is one clickable hit target,
           matching the single-mesh click target the old box provided. */}
-      <group onClick={handleClick}>
+      <group {...pointerProps}>
         {/* Back/front walls (thin in z, full width). */}
         <mesh position={[0, mmToWorld(trayWallCenterYMm), mmToWorld(-(halfDepthMm - CASE_WALL_THICKNESS_MM / 2))]}>
           <boxGeometry args={[mmToWorld(object.widthMm), mmToWorld(boxHeightMm), mmToWorld(CASE_WALL_THICKNESS_MM)]} />
@@ -223,10 +231,15 @@ export function WallCaseMesh({
 
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
-    if (event.delta > 6) return;
+    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
     const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
     onSelect(wallCase.objectId, { additive: shiftKey || metaKey || ctrlKey });
   };
+
+  // A wall case slides along its wall exactly as a hung work does — same store
+  // path (it is an ordinary wall object), so it drags in 3D too.
+  const drag = useThreeObjectDrag();
+  const handlePointerDown = objectDragPointerDown(drag, wallCase.objectId);
 
   const widthMm = wallCase.widthMm;
   const heightMm = wallCase.heightMm;
@@ -265,7 +278,7 @@ export function WallCaseMesh({
       {/* onClick lives on this wrapping group so every tray piece (slab,
           walls, glass) is one clickable hit target, matching the single-mesh
           click target the old flush box provided. */}
-      <group onClick={handleClick}>
+      <group onClick={handleClick} onPointerDown={handlePointerDown}>
         <mesh position={[0, mmToWorld(slabCenterYMm), mmToWorld(depthMm / 2)]}>
           <boxGeometry args={[mmToWorld(widthMm), mmToWorld(CASE_WALL_THICKNESS_MM), mmToWorld(depthMm)]} />
           <meshLambertMaterial color={CASE_FRAME_COLOR} />

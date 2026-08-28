@@ -21,6 +21,7 @@ import { WallTextPanel } from "./WallTextPanel";
 import { mmToWorld, MM_TO_WORLD } from "./coordinates";
 import { DROP_TARGET_USER_DATA_KEY } from "./dropTarget";
 import { openingPickBandRects } from "./openingPickBand";
+import { CLICK_DRAG_TOLERANCE_PX } from "./sceneConstants";
 import {
   BoxEdgeOutline,
   SelectionBoxOutline,
@@ -187,7 +188,7 @@ export function WallPanel({
   const handleWallClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
     // An orbit drag's release also fires click — only a true click selects.
-    if (event.delta > 6) return;
+    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
     onSelectWall(wall.wallId);
   };
 
@@ -354,7 +355,7 @@ function OpeningCapPlane({
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
     // An orbit drag's release also fires click — only a true click selects.
-    if (event.delta > 6) return;
+    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
     const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
     onSelect(hole.objectId, { additive: shiftKey || metaKey || ctrlKey });
   };
@@ -419,7 +420,7 @@ function OpeningPickBand({
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
     // An orbit drag's release also fires click — only a true click selects.
-    if (event.delta > 6) return;
+    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
     const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
     onSelect(hole.objectId, { additive: shiftKey || metaKey || ctrlKey });
   };
@@ -481,7 +482,7 @@ function WallBlockedZoneWash({
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
     // An orbit drag's release also fires click — only a true click selects.
-    if (event.delta > 6) return;
+    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
     const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
     onSelect(zone.objectId, { additive: shiftKey || metaKey || ctrlKey });
   };
@@ -588,7 +589,7 @@ function DoorLeafMesh({
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
     // An orbit drag's release also fires click — only a true click selects.
-    if (event.delta > 6) return;
+    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
     const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
     onSelect(hole.objectId, { additive: shiftKey || metaKey || ctrlKey });
   };

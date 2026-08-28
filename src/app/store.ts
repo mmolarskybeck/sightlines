@@ -457,6 +457,20 @@ export type AppState = ArrangeSliceState &
     yMm: number,
     allowOverlap?: boolean
   ) => Promise<void>;
+  // Move a wall object in BOTH wall axes AND (optionally) onto another wall, in
+  // one undo entry. The 3D pointer drag's commit: neither existing action fits
+  // it alone, because moveArtworkPlacement moves x/y but can't change walls and
+  // commitPlanMove changes walls but has no hang height (plan can't see one).
+  // Routes through the same wall→wall handler commitPlanMove uses, so the
+  // open-wall refusal, shared-opening partner sync and pair normalization are
+  // the drag's too rather than a second copy.
+  moveWallObjectPlacement: (
+    wallObjectId: string,
+    wallId: string,
+    xMm: number,
+    yMm: number,
+    allowOverlap?: boolean
+  ) => Promise<void>;
   removePlacement: (wallObjectId: string) => Promise<void>;
   addOpening: (wallId: string, kind: InsertToolKind) => Promise<void>;
   // Both return how the request was adjusted to stay on the wall, so the
@@ -1601,17 +1615,30 @@ export function createAppStore(deps: AppStoreDeps) {
 
     // --- commitPlanMove case handlers ----------------------------------------
 
-    // wall → wall: same wall (x only) or re-anchor to another wall. Either way
-    // the hang height (yMm) and size carry over unchanged — an artwork keeps
-    // its height across a wall change. No-op if nothing moved. Runs the shared
-    // collision gate via commitWallObjectEdit (identical warnings/label/error).
+    // wall → wall: same wall (x only) or re-anchor to another wall. No-op if
+    // nothing moved. Runs the shared collision gate via commitWallObjectEdit
+    // (identical warnings/label/error).
+    //
+    // `heightMm` is the OPTIONAL new hang height, and its absence is the plan
+    // view's case: plan has no notion of height, so an object dragged there
+    // carries its own yMm across a wall change untouched. The 3D drag DOES move
+    // in both wall axes at once, so it passes one — reusing this handler rather
+    // than growing a parallel one, because everything else about the commit
+    // (open-wall refusal, shared-opening partner sync, pair normalization, the
+    // wall-context write) is identical whichever surface asked for the move.
     async function planMoveWithinWalls(
       project: Project,
       wallObject: WallObject,
       placement: Extract<PlanPlacement, { anchor: "wall" }>,
-      allowOverlap: boolean
+      allowOverlap: boolean,
+      heightMm?: number
     ): Promise<void> {
-      if (wallObject.wallId === placement.wallId && wallObject.xMm === placement.xMm) {
+      const nextYMm = heightMm ?? wallObject.yMm;
+      if (
+        wallObject.wallId === placement.wallId &&
+        wallObject.xMm === placement.xMm &&
+        wallObject.yMm === nextYMm
+      ) {
         return;
       }
       // Re-anchoring onto an open wall is refused the same as creating there.
@@ -1619,7 +1646,7 @@ export function createAppStore(deps: AppStoreDeps) {
 
       const movedWallObjects = project.wallObjects.map((object) =>
         object.id === wallObject.id
-          ? { ...object, wallId: placement.wallId, xMm: placement.xMm }
+          ? { ...object, wallId: placement.wallId, xMm: placement.xMm, yMm: nextYMm }
           : object
       );
 
@@ -1641,7 +1668,7 @@ export function createAppStore(deps: AppStoreDeps) {
           movedWallObjects,
           wallObject,
           placement.xMm,
-          wallObject.yMm,
+          nextYMm,
           placement.wallId
         );
         if (synced.status === "blocked") {
@@ -2633,6 +2660,19 @@ export function createAppStore(deps: AppStoreDeps) {
           [wallObjectId],
           allowOverlap
         );
+      },
+
+      async moveWallObjectPlacement(wallObjectId, wallId, xMm, yMm, allowOverlap = false) {
+        const project = get().project;
+        if (!project) return;
+
+        const target = project.wallObjects.find((wallObject) => wallObject.id === wallObjectId);
+        if (!target) return;
+
+        // Same contract as moveArtworkPlacement: the UI previews the drag
+        // locally and calls this exactly once on release, so one call here is
+        // already one undo entry.
+        await planMoveWithinWalls(project, target, { anchor: "wall", wallId, xMm }, allowOverlap, yMm);
       },
 
       async removePlacement(wallObjectId) {

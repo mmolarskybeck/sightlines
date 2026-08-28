@@ -363,10 +363,12 @@ export function App() {
   const commitPlanMove = useAppStore((state) => state.commitPlanMove);
   const updateFloorObject = useAppStore((state) => state.updateFloorObject);
   const setFloorArtworkImageFaces = useAppStore((state) => state.setFloorArtworkImageFaces);
+  );
   const pairFloorArtworksBackToBack = useAppStore(
     (state) => state.pairFloorArtworksBackToBack
   );
   const updateWallCase = useAppStore((state) => state.updateWallCase);
+  const moveWallObjectPlacement = useAppStore((state) => state.moveWallObjectPlacement);
   const moveWallObjectsGroup = useAppStore((state) => state.moveWallObjectsGroup);
   const movePlanObjectsGroup = useAppStore((state) => state.movePlanObjectsGroup);
   const removeSelectedPlacements = useAppStore((state) => state.removeSelectedPlacements);
@@ -2339,6 +2341,27 @@ export function App() {
                 onPlaceArtworkOnFloor={(artworkId, xMm, yMm) =>
                   void placeArtworkOnFloor(artworkId, xMm, yMm)
                 }
+                // One release, one undo entry. A wall move needs BOTH axes and
+                // possibly a new wall, which only moveWallObjectPlacement does;
+                // a floor move is the same commitPlanMove the plan drag uses,
+                // so the two surfaces commit through one path.
+                onCommitObjectMove={(objectId, move) => {
+                  if (move.anchor === "wall") {
+                    void moveWallObjectPlacement(
+                      objectId,
+                      move.wallId,
+                      move.xMm,
+                      move.yMm,
+                      allowOverlappingPlacement
+                    );
+                    return;
+                  }
+                  void commitPlanMove(
+                    objectId,
+                    { anchor: "floor", xMm: move.xMm, yMm: move.yMm },
+                    allowOverlappingPlacement
+                  );
+                }}
                 actionsRef={threeDActionsRef}
                 initialPose={pendingViewPose ?? undefined}
               />

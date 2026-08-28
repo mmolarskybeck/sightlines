@@ -4,6 +4,7 @@ import type { Texture, Vector3 } from "three";
 import type { Artwork } from "../../../domain/project";
 import type { Scene3d } from "../../../domain/geometry/scene3d";
 import { FloorCaseMesh } from "./CaseMesh";
+import { CLICK_DRAG_TOLERANCE_PX } from "./sceneConstants";
 import { FloorObjectBox } from "./FloorObjectBox";
 import { FloorSurface } from "./FloorSurface";
 import { PartitionSlab } from "./PartitionSlab";
@@ -74,7 +75,7 @@ export function SceneRooms({
   // orbit drag's release (delta > a few px) never clears.
   const handleFloorClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
-    if (event.delta > 6) return;
+    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
     onClearSelection();
   };
 

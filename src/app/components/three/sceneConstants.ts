@@ -21,3 +21,14 @@ export const CAMERA_FAR = 1000;
 export const AMBIENT_LIGHT_INTENSITY = 2.9;
 export const KEY_LIGHT_INTENSITY = 0.4;
 export const KEY_LIGHT_POSITION: [number, number, number] = [-6, 8, 6];
+
+// The one pointer-travel threshold (CSS px) the whole 3D view discriminates a
+// CLICK from a DRAG with. Below it a press-and-release is a selection; above it
+// the gesture is a camera orbit (empty space) or an object drag (on an object).
+//
+// It lived as an inline `6` repeated in every selectable mesh's click handler
+// plus ThreeDView's onPointerMissed. Object dragging made that literal
+// load-bearing in two directions at once — the same number now decides both
+// "was that a click?" and "has the drag started?" — so it is a named constant
+// here, in the leaf module both the view and its meshes already import.
+export const CLICK_DRAG_TOLERANCE_PX = 6;

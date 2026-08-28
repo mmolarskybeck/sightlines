@@ -1,5 +1,5 @@
 import { OrbitControls } from "@react-three/drei";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import {
   useEffect,
   useMemo,
@@ -11,6 +11,7 @@ import {
   Box3,
   DoubleSide,
   MathUtils,
+  MOUSE,
   PerspectiveCamera,
   Plane,
   Raycaster,
@@ -50,6 +51,7 @@ import {
   subscribeArtworkTouchDrag
 } from "../library/artworkDragSession";
 import { useArtworkAspect } from "../../hooks/useArtworkAspect";
+import { useDragGesture } from "../../hooks/useDragGesture";
 import {
   dropGhostTransform,
   pickDropSurface,
@@ -58,11 +60,25 @@ import {
   type DropGhost3d,
   type DropGhostTransform
 } from "./dropTarget";
+import {
+  dragMoveIsMeaningful,
+  exceedsDragThreshold,
+  grabOffsetMm,
+  projectWithDragPreview,
+  resolveDragMove,
+  type DragSurfaceHit,
+  type ThreeDragMove,
+  type ThreeDragSource
+} from "./objectDrag";
+import { ThreeObjectDragContext, type ThreeObjectDragApi } from "./objectDragContext";
+import { ThreeDViewportControls } from "./ThreeDViewportControls";
 import { fitDistance } from "./cameraFit";
 import {
   ORBIT_MAX_DISTANCE,
   ORBIT_MIN_DISTANCE,
+  canZoomStep,
   clampFocusDistance,
+  clampZoomFactorToEnvelope,
   eyeLevelArtworkDistanceMm,
   eyeLevelWallDistanceMm,
   sightlineOccluders,
@@ -80,6 +96,7 @@ import {
   CAMERA_FAR,
   CAMERA_FOV_DEG,
   CAMERA_NEAR,
+  CLICK_DRAG_TOLERANCE_PX,
   KEY_LIGHT_INTENSITY,
   KEY_LIGHT_POSITION
 } from "./sceneConstants";
@@ -96,9 +113,9 @@ const FIT_AZIMUTH_DEG = 45;
 // spatial continuity.
 const FLIGHT_MS = 600;
 
-// A click that traveled further than this (px) was an orbit drag, not a
-// selection (browsers still fire click after a drag on the same element).
-const CLICK_DRAG_TOLERANCE_PX = 6;
+// CLICK_DRAG_TOLERANCE_PX now lives in sceneConstants.ts: with pointer-dragging
+// of placed objects it is no longer only "was that click an orbit release?" but
+// also "has the object's own drag begun?", and the meshes need the same number.
 const ACTIVE_FRAME_GAP_MAX_MS = 100;
 const FRAME_SAMPLE_LIMIT = 256;
 
@@ -254,6 +271,12 @@ type CameraRigApi = {
   focus: (target: Vector3) => void;
   frameRoom: (room: Room3d) => void;
   focusFloorUnderCursor: (clientX: number, clientY: number) => void;
+  // One dolly step in/out, anchored on the orbit target (there is no cursor to
+  // anchor on when the step comes from a button or a keystroke). The single
+  // implementation behind BOTH the Cmd/Ctrl +/- shortcut and the viewport's
+  // +/- buttons, so the two can never drift on step size or on where the
+  // envelope clamp bites.
+  zoomStep: (direction: "in" | "out") => void;
   // Move to an explicit stored pose (Saved views open-in-3D, spec §4.3):
   // animated by default, an instant cut when `immediate` (reduced motion).
   flyToPose: (pose: CameraPose, options?: { immediate?: boolean }) => void;
@@ -275,6 +298,10 @@ export type ThreeDViewActions = {
   // (spec §8.2). Null when no camera is active yet. The caller persists it via
   // the store; this reads, it never writes.
   getCurrentPose: () => SavedViewPose | null;
+  // One dolly step, for a caller outside the viewport (the view toolbar, a
+  // future zoom control in the topbar). Same function the in-viewport +/-
+  // buttons and Cmd/Ctrl +/- run.
+  zoomStep: (direction: "in" | "out") => void;
 };
 
 // World-space bounding box of one room's floor + wall heights, including its
@@ -595,6 +622,24 @@ function CameraRig({
         const pose = overviewPose(sceneRef.current, aspect());
         if (pose) flyTo(pose);
       },
+      zoomStep: (direction) => {
+        if (!controls) return;
+        // Same >1-dollies-out/<1-dollies-in convention as CursorZoom, and the
+        // same envelope clamp — the step shrinks to land exactly on the bound
+        // rather than skipping it, and collapses to a no-op once there.
+        const currentDistance = camera.position.distanceTo(controls.target);
+        const factor = clampZoomFactorToEnvelope(
+          currentDistance,
+          keyboardZoomFactor(direction)
+        );
+        if (Math.abs(factor - 1) < 1e-6) return;
+        // point === target, so the target lerp is a no-op and the camera simply
+        // slides along the view ray — the "zoom at centre" read for an orbit rig.
+        camera.position.lerp(controls.target, 1 - factor);
+        updateCameraClipping(camera, camera.position.distanceTo(controls.target));
+        controls.update();
+        invalidate();
+      },
       focus: focusPoint,
       focusFloorUnderCursor: (clientX, clientY) => {
         // Empty-space double-click: nothing under the cursor to hit, so fly
@@ -672,12 +717,12 @@ function CursorZoom() {
       event.stopPropagation();
 
       const currentDistance = camera.position.distanceTo(controls.target);
-      let factor = zoomFactorFromDelta(normalizeWheelDeltaY(event));
-      // Clamp the resulting orbit radius to the dolly envelope; scale the step
-      // to land exactly on the bound rather than skipping it.
-      const desired = currentDistance * factor;
-      const clamped = MathUtils.clamp(desired, ORBIT_MIN_DISTANCE, ORBIT_MAX_DISTANCE);
-      if (clamped !== desired && currentDistance > 0) factor = clamped / currentDistance;
+      // Clamp the resulting orbit radius to the dolly envelope; the step scales
+      // to land exactly on the bound rather than skipping it (cameraNav.ts).
+      const factor = clampZoomFactorToEnvelope(
+        currentDistance,
+        zoomFactorFromDelta(normalizeWheelDeltaY(event))
+      );
       if (Math.abs(factor - 1) < 1e-6) return;
 
       // World point under the cursor: nearest mesh hit, else the y=0 floor,
@@ -714,40 +759,56 @@ function CursorZoom() {
 // controls.target instead of CursorZoom's raycast hit: with point ===
 // target the target lerp below is a no-op and the camera simply slides
 // along the view ray, which is the "zoom at center" read for an orbit rig.
-function KeyboardZoom() {
-  const camera = useThree((state) => state.camera);
-  const controls = useThree((state) => state.controls) as OrbitControlsImpl | null;
-  const invalidate = useThree((state) => state.invalidate);
-
+function KeyboardZoom({
+  apiRef
+}: {
+  apiRef: React.MutableRefObject<CameraRigApi | null>;
+}) {
   useEffect(() => {
-    if (!controls) return;
-
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
       if (event.key !== "=" && event.key !== "+" && event.key !== "-") return;
       if (isEditableTarget(event.target)) return;
       // Block the browser's own page zoom in/out.
       event.preventDefault();
-
-      // Same >1-dollies-out/<1-dollies-in convention as CursorZoom.
-      let factor = keyboardZoomFactor(event.key === "-" ? "out" : "in");
-      const currentDistance = camera.position.distanceTo(controls.target);
-      // Clamp the resulting orbit radius to the dolly envelope; scale the
-      // step to land exactly on the bound rather than skipping past it.
-      const desired = currentDistance * factor;
-      const clamped = MathUtils.clamp(desired, ORBIT_MIN_DISTANCE, ORBIT_MAX_DISTANCE);
-      if (clamped !== desired && currentDistance > 0) factor = clamped / currentDistance;
-      if (Math.abs(factor - 1) < 1e-6) return;
-
-      camera.position.lerp(controls.target, 1 - factor);
-      updateCameraClipping(camera, camera.position.distanceTo(controls.target));
-      controls.update();
-      invalidate();
+      // The rig owns the step (CameraRigApi.zoomStep) so the shortcut and the
+      // viewport's +/- buttons are literally the same motion.
+      apiRef.current?.zoomStep(event.key === "-" ? "out" : "in");
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [camera, controls, invalidate]);
+  }, [apiRef]);
+
+  return null;
+}
+
+// Publishes whether a further dolly step in each direction would still move the
+// camera, so the viewport's +/- buttons can disable themselves at the ends of
+// the envelope exactly as the 2D cluster's do. Runs in useFrame — under
+// frameloop="demand" that is precisely "whenever the camera moved" — and only
+// calls back when the answer actually flips, so it never re-renders per frame.
+function ZoomBoundsTracker({
+  onChange
+}: {
+  onChange: (bounds: { canZoomIn: boolean; canZoomOut: boolean }) => void;
+}) {
+  const camera = useThree((state) => state.camera);
+  const controls = useThree((state) => state.controls) as OrbitControlsImpl | null;
+  const last = useRef<string | null>(null);
+
+  useFrame(() => {
+    if (!controls) return;
+    const distance = camera.position.distanceTo(controls.target);
+    const next = {
+      canZoomIn: canZoomStep(distance, "in"),
+      canZoomOut: canZoomStep(distance, "out")
+    };
+    const key = `${next.canZoomIn}|${next.canZoomOut}`;
+    if (key === last.current) return;
+    last.current = key;
+    onChange(next);
+  });
 
   return null;
 }
@@ -1131,6 +1192,7 @@ export function ThreeDView({
   draggingArtworkId = null,
   onPlaceArtwork,
   onPlaceArtworkOnFloor,
+  onCommitObjectMove,
   actionsRef,
   initialPose
 }: {
@@ -1150,6 +1212,11 @@ export function ThreeDView({
   draggingArtworkId?: string | null;
   onPlaceArtwork?: (artworkId: string, wallId: string, xMm: number, yMm: number) => void;
   onPlaceArtworkOnFloor?: (artworkId: string, xMm: number, yMm: number) => void;
+  // Commit of a pointer-drag of an ALREADY-PLACED object, called exactly once
+  // on release (the view previews the move locally until then), so one drag is
+  // one undo entry. Absent => 3D stays view-only, which is what the offscreen
+  // render hosts want.
+  onCommitObjectMove?: (objectId: string, move: ThreeDragMove) => void;
   actionsRef?: { current: ThreeDViewActions | null };
   // A Saved-view pose to seat as the initial camera when this view mounts to
   // open a view while 3D wasn't yet the active mode (spec §4.3 handoff).
@@ -1160,10 +1227,231 @@ export function ThreeDView({
     resetBenchmarkMetrics();
     benchmarkProjectId.current = project.id;
   }
+
+  // --- Live three.js handles ------------------------------------------------
+  //
+  // Declared up here (rather than beside the features that read them) because
+  // the object-drag gesture below needs the controls and the raycaster before
+  // the scene is even derived — a drag mutates the project the derivation runs
+  // on. The refs themselves are filled after commit by LiveCameraTracker and
+  // DropRaycastTracker, both mounted inside the Canvas.
+  const rigApi = useRef<CameraRigApi | null>(null);
+  // The live camera/controls/size, kept current by LiveCameraTracker below —
+  // captureSnapshot reads these directly (they're the actual mutable three.js
+  // objects, so there is no lag versus what the user is looking at).
+  const liveCameraRef = useRef<PerspectiveCamera | null>(null);
+  const liveControlsRef = useRef<OrbitControlsImpl | null>(null);
+  const liveSizeRef = useRef<{ width: number; height: number }>({ width: 1, height: 1 });
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const dropRaycastRef = useRef<DropRaycastApi | null>(null);
+
+  // The authored placeable surfaces (perimeter walls ∪ partition faces, open
+  // walls excluded) in floor space. Face ids are `${partitionId}#a|#b`, exactly
+  // the wallIds the scene's panels carry, so partitions need no special case.
+  // Shared by the checklist drop and the object drag — both resolve a pointer
+  // onto exactly the same set of surfaces.
+  const placeableWalls = useMemo(
+    () => getPlaceableFloorWalls(project.floor),
+    [project.floor]
+  );
+
+  // The nearest placement surface under a client point, looking THROUGH
+  // anything hanging on it (pickDropSurface walks near->far for the first
+  // tagged wall/floor). The one raycast both the drop and the drag run.
+  function pickSurfaceUnderCursor(clientX: number, clientY: number): DragSurfaceHit | null {
+    const api = dropRaycastRef.current;
+    if (!api) return null;
+    api.raycaster.setFromCamera(cursorNdc(api.canvas, clientX, clientY), api.camera);
+    return pickDropSurface(api.raycaster.intersectObjects(api.scene.children, true));
+  }
+
+  // --- Pointer-drag of placed objects (full 3D editing) ---------------------
+  //
+  // 3D is an editing surface, not only a placement one: a placed work can be
+  // picked up and moved with the pointer, the same direct manipulation plan and
+  // elevation have always had. Scope of this round, deliberately narrow:
+  //   * WALL objects (hung works, wall cases) slide in both wall axes and MAY
+  //     HOP to another wall — the store's wall→wall handler already re-anchors.
+  //   * FLOOR objects (works, monitors, vitrines, blocked zones) slide on the
+  //     floor plane. Rotation is untouched.
+  //   * NO SNAPPING and NO overlap barriers, matching the 3D drop's contract:
+  //     elevation and the inspector remain the precision surfaces.
+  //   * Wall<->floor CONVERSION mid-drag, group drag and touch drag are NOT in
+  //     this round (see objectDrag.ts and the notes on OrbitControls below).
+  //
+  // GESTURE ARBITRATION. A pointerdown that lands ON an object wins outright:
+  // it disables OrbitControls for the gesture, so neither orbit nor the hand
+  // tool's pan can steal it. Empty space keeps its old behaviour (orbit, or pan
+  // while the hand tool is on). Middle/right buttons never arm a drag, so the
+  // camera stays reachable with the cursor over an object.
+  type ObjectDragState = {
+    source: ThreeDragSource;
+    offsetMm: { xMm: number; yMm: number };
+    startClientX: number;
+    startClientY: number;
+    // Has the pointer travelled past CLICK_DRAG_TOLERANCE_PX yet? Until it has,
+    // this is still a click and nothing moves.
+    active: boolean;
+    move: ThreeDragMove | null;
+  };
+
+  // The dragged object's identity and footprint. Only the kinds whose meshes
+  // arm a drag can produce one; anything else returns null and the press stays
+  // an ordinary click.
+  function dragSourceFor(objectId: string): ThreeDragSource | null {
+    const wallObject = project.wallObjects.find((object) => object.id === objectId);
+    if (wallObject) {
+      if (wallObject.kind !== "artwork" && wallObject.kind !== "case") return null;
+      // The wall clamp is governed by the OUTER (mat + frame) box, exactly as
+      // the drop's is — read through effectiveFraming so a work whose stored
+      // size already includes its frame doesn't double-count.
+      const record =
+        wallObject.kind === "artwork" ? artworksById.get(wallObject.artworkId) : undefined;
+      const framing = effectiveFraming(record);
+      const outer = getArtworkOuterDimensionsMm(
+        wallObject.widthMm,
+        wallObject.heightMm,
+        framing.matWidthMm,
+        framing.frame
+      );
+      return {
+        anchor: "wall",
+        objectId,
+        wallId: wallObject.wallId,
+        xMm: wallObject.xMm,
+        yMm: wallObject.yMm,
+        dims: {
+          wallWidthMm: outer.widthMm,
+          wallHeightMm: outer.heightMm,
+          floorWidthMm: wallObject.widthMm,
+          floorDepthMm: DEFAULT_FLOOR_OBJECT_DEPTH_MM
+        }
+      };
+    }
+
+    const floorObject = project.floorObjects.find((object) => object.id === objectId);
+    if (!floorObject) return null;
+    return {
+      anchor: "floor",
+      objectId,
+      xMm: floorObject.xMm,
+      yMm: floorObject.yMm,
+      dims: {
+        wallWidthMm: floorObject.widthMm,
+        wallHeightMm: floorObject.heightMm,
+        floorWidthMm: floorObject.widthMm,
+        floorDepthMm: floorObject.depthMm
+      }
+    };
+  }
+
+  const {
+    drag: objectDrag,
+    dragRef: objectDragRef,
+    beginDrag: startObjectDrag
+  } = useDragGesture<ObjectDragState>({
+    onMove: (current, event) => {
+      const active =
+        current.active ||
+        exceedsDragThreshold(
+          event.clientX - current.startClientX,
+          event.clientY - current.startClientY,
+          CLICK_DRAG_TOLERANCE_PX
+        );
+      if (!active) return null;
+
+      // Crossing the threshold also SELECTS the object, matching plan: you can
+      // pick something up and move it in one gesture. Modifier-aware additive
+      // selection stays with the click path — a drag replaces the selection
+      // only when the object isn't already in it, so shift-dragging a member of
+      // a multi-selection can't silently collapse it.
+      if (!current.active && !isObjectSelected(current.source.objectId)) {
+        onSelectObject(current.source.objectId, { additive: false });
+      }
+
+      const move =
+        resolveDragMove({
+          surface: pickSurfaceUnderCursor(event.clientX, event.clientY),
+          source: current.source,
+          offsetMm: current.offsetMm,
+          walls: placeableWalls
+        }) ?? current.move;
+
+      // frameloop="demand": nothing redraws unless we ask, and the preview is
+      // a re-derived scene, not an animation.
+      dropRaycastRef.current?.invalidate();
+      if (current.active && move === current.move) return null;
+      return { ...current, active: true, move };
+    },
+    onRelease: (final) => {
+      // Hand the camera back whatever happened — a cancelled gesture must never
+      // leave the controls dead.
+      if (liveControlsRef.current) liveControlsRef.current.enabled = true;
+      if (!final.active || !final.move) return;
+      if (!dragMoveIsMeaningful(final.source, final.move)) return;
+      onCommitObjectMove?.(final.source.objectId, final.move);
+    }
+  });
+
+  function isObjectSelected(objectId: string): boolean {
+    return selectedObjectIds.includes(objectId);
+  }
+
+  function beginObjectDrag(objectId: string, event: ThreeEvent<PointerEvent>) {
+    if (!onCommitObjectMove) return;
+    if (objectDragRef.current) return;
+    const source = dragSourceFor(objectId);
+    if (!source) return;
+
+    const { clientX, clientY } = event.nativeEvent;
+    // Suppress orbit (and hand-pan) for this gesture immediately — the
+    // declarative `enabled` prop below says the same thing one render later,
+    // but a pointermove can beat that render.
+    if (liveControlsRef.current) liveControlsRef.current.enabled = false;
+
+    startObjectDrag({
+      source,
+      // Keep the grip: the object moves BY the pointer, it doesn't teleport its
+      // centre TO the pointer.
+      offsetMm: grabOffsetMm({
+        surface: pickSurfaceUnderCursor(clientX, clientY),
+        source,
+        walls: placeableWalls
+      }),
+      startClientX: clientX,
+      startClientY: clientY,
+      active: false,
+      move: null
+    });
+  }
+
+  // Stable context value over a ref to the latest handler, so arming a drag
+  // never re-renders every mesh in the scene.
+  const beginObjectDragRef = useRef(beginObjectDrag);
+  beginObjectDragRef.current = beginObjectDrag;
+  const objectDragApi = useMemo<ThreeObjectDragApi>(
+    () => ({ begin: (objectId, event) => beginObjectDragRef.current(objectId, event) }),
+    []
+  );
+
+  // The project as the live preview would leave it. Deriving the scene from
+  // THIS rather than painting a stand-in ghost is what makes the dragged thing
+  // move as itself — real framing, real texture, real suspension wires, real
+  // eye-level ghosting — and it keeps preview and commit provably identical,
+  // since both read the same resolved placement. Outside a drag it is the
+  // project by reference, so the memo below is untouched.
+  const previewProject = useMemo(
+    () =>
+      objectDrag?.active
+        ? projectWithDragPreview(project, objectDrag.source.objectId, objectDrag.move)
+        : project,
+    [project, objectDrag]
+  );
+
   const scene = useMemo(
     () => {
       const startedAt = performance.now();
-      const nextScene = deriveScene3d(project, artworksById);
+      const nextScene = deriveScene3d(previewProject, artworksById);
       benchmarkMetrics.sceneDerivationMs = performance.now() - startedAt;
       benchmarkMetrics.roomCount = nextScene.rooms.length;
       benchmarkMetrics.wallCount = nextScene.rooms.reduce(
@@ -1184,15 +1472,8 @@ export function ThreeDView({
         ) + nextScene.floorObjects.filter((object) => object.kind === "artwork").length;
       return nextScene;
     },
-    [project, artworksById]
+    [previewProject, artworksById]
   );
-  const rigApi = useRef<CameraRigApi | null>(null);
-  // The live camera/controls/size, kept current by LiveCameraTracker below —
-  // captureSnapshot reads these directly (they're the actual mutable three.js
-  // objects, so there is no lag versus what the user is looking at).
-  const liveCameraRef = useRef<PerspectiveCamera | null>(null);
-  const liveControlsRef = useRef<OrbitControlsImpl | null>(null);
-  const liveSizeRef = useRef<{ width: number; height: number }>({ width: 1, height: 1 });
   const [snapshotRequest, setSnapshotRequest] = useState<SnapshotRequest | null>(null);
   // Synchronous guard (state is async) so a second captureSnapshot call while
   // one is in flight fails fast instead of silently orphaning the first
@@ -1213,6 +1494,59 @@ export function ThreeDView({
     setGhostedWallIds((current) => (current.size === 0 ? current : new Set()));
   };
 
+  // --- Viewport controls (hand tool + zoom steps) ---------------------------
+  //
+  // Right-drag pans and the wheel dollies, but nobody finds either. The hand
+  // tool re-binds LEFT-drag to pan for as long as it is on, and the +/- chips
+  // put the dolly on screen — the same discoverability move the 2D surfaces'
+  // zoom cluster makes, in the shape an orbit rig can honour.
+  const [handActive, setHandActive] = useState(false);
+  // Live at the ends of the dolly envelope, so the chips grey out where the
+  // camera can no longer go (ZoomBoundsTracker keeps this current).
+  const [zoomBounds, setZoomBounds] = useState({ canZoomIn: true, canZoomOut: true });
+  // A hand-pan gesture in flight, purely for the grabbing cursor.
+  const [panning, setPanning] = useState(false);
+
+  // Escape leaves the hand tool, the same way every armed tool in the 2D
+  // surfaces releases. Ignored while typing in an inspector field.
+  useEffect(() => {
+    if (!handActive) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (isEditableTarget(event.target)) return;
+      setHandActive(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handActive]);
+
+  // The pan gesture's own lifetime: a pointerup anywhere ends it, including
+  // outside the viewport (a pan that leaves the window must not leave the
+  // grabbing cursor stuck on).
+  useEffect(() => {
+    if (!panning) return;
+    const end = () => setPanning(false);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    return () => {
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+  }, [panning]);
+
+  // Left-drag pans while the hand tool is on; middle and right keep their
+  // bindings either way, so dolly and pan stay reachable without it.
+  // screenSpacePanning stays false — pan slides along the ground plane, which
+  // is the whole point of the gesture in a room.
+  const mouseButtons = useMemo(
+    () => ({
+      LEFT: handActive ? MOUSE.PAN : MOUSE.ROTATE,
+      MIDDLE: MOUSE.DOLLY,
+      RIGHT: MOUSE.PAN
+    }),
+    [handActive]
+  );
+
   // --- Checklist drop-to-place (docs/interaction-improvements-2026-08.md §4) --
   //
   // 3D is a placement surface now, not only a preview: a work released over a
@@ -1220,17 +1554,7 @@ export function ThreeDView({
   // there. No snapping — elevation and the inspector stay the precision
   // surfaces, and the whole point of the 3D drop is "roughly there, in the
   // room I'm looking at".
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const dropRaycastRef = useRef<DropRaycastApi | null>(null);
   const [dropGhost, setDropGhost] = useState<DropGhostTransform | null>(null);
-
-  // The authored placeable surfaces (perimeter walls ∪ partition faces, open
-  // walls excluded) in floor space. Face ids are `${partitionId}#a|#b`, exactly
-  // the wallIds the scene's panels carry, so partitions need no special case.
-  const placeableWalls = useMemo(
-    () => getPlaceableFloorWalls(project.floor),
-    [project.floor]
-  );
 
   // The dragged work's image aspect, so a partial/unknown-dimension work
   // previews at its true proportions — the same read placeArtwork itself makes
@@ -1277,10 +1601,7 @@ export function ThreeDView({
   // wall/floor, so a hit on an artwork plane, a pick band or a door leaf falls
   // through to the surface behind it instead of killing the drop.
   function resolveDropUnderCursor(clientX: number, clientY: number, artworkId: string | null) {
-    const api = dropRaycastRef.current;
-    if (!api) return null;
-    api.raycaster.setFromCamera(cursorNdc(api.canvas, clientX, clientY), api.camera);
-    const surface = pickDropSurface(api.raycaster.intersectObjects(api.scene.children, true));
+    const surface = pickSurfaceUnderCursor(clientX, clientY);
     if (!surface) return null;
     return resolveThreeDrop({
       point: surface.point,
@@ -1530,6 +1851,7 @@ export function ThreeDView({
           target: { x: target.x, y: target.y, z: target.z }
         };
       },
+      zoomStep: (direction) => rigApi.current?.zoomStep(direction),
       flyToPose: (pose) => {
         // Opening a Saved view ends any live eye-level ghost session, then
         // moves to the stored pose — a flight, or a cut under reduced motion.
@@ -1564,10 +1886,23 @@ export function ThreeDView({
     // The surrounding workspace chrome stays white — this greys only the WebGL
     // viewport, not the app.
     <div
-      className="three-view"
+      className={[
+        "three-view",
+        // Grab/grabbing follow the 2D surfaces' convention. An object drag
+        // outranks the hand tool, so the open hand drops the moment a press
+        // lands on something movable.
+        handActive && !objectDrag ? "is-pan-ready" : "",
+        panning ? "is-panning" : ""
+      ]
+        .filter(Boolean)
+        .join(" ")}
       ref={containerRef}
       onPointerDown={(event) => {
         pointerDownAt.current = { x: event.clientX, y: event.clientY };
+        // R3F's own listener sits on the canvas, so by the time this bubbling
+        // handler runs an object drag has already armed itself — which is what
+        // keeps the pan cursor off a press that is really a move.
+        if (handActive && event.button === 0 && !objectDragRef.current) setPanning(true);
       }}
       // HTML5 drag events never become R3F pointer events, so the checklist
       // drop lives on the wrapper div and raycasts by hand (see above).
@@ -1630,6 +1965,10 @@ export function ThreeDView({
             without shadows. */}
         <ambientLight intensity={AMBIENT_LIGHT_INTENSITY} />
         <directionalLight intensity={KEY_LIGHT_INTENSITY} position={KEY_LIGHT_POSITION} />
+        {/* Provider inside the Canvas: R3F reconciles its own tree, and the
+            offscreen render hosts mount SceneRooms with no provider at all, so
+            their meshes stay inert by construction. */}
+        <ThreeObjectDragContext.Provider value={objectDragApi}>
         <SceneRooms
           scene={scene}
           getBlob={getBlob}
@@ -1646,9 +1985,16 @@ export function ThreeDView({
           }}
           ghostedWallIds={ghostedWallIds}
         />
+        </ThreeObjectDragContext.Provider>
         <OrbitControls
           makeDefault
           enableDamping
+          // An object drag owns the pointer for its whole gesture: orbit AND
+          // hand-pan stand down, so the camera can never slide out from under
+          // the thing being moved. beginObjectDrag also sets this imperatively,
+          // because a pointermove can beat this render.
+          enabled={objectDrag === null}
+          mouseButtons={mouseButtons}
           dampingFactor={0.1}
           minDistance={ORBIT_MIN_DISTANCE}
           maxDistance={ORBIT_MAX_DISTANCE}
@@ -1684,8 +2030,9 @@ export function ThreeDView({
         />
         <ContextLossRecovery />
         <CursorZoom />
-        <KeyboardZoom />
+        <KeyboardZoom apiRef={rigApi} />
         <KeyboardTravel />
+        <ZoomBoundsTracker onChange={setZoomBounds} />
         {benchmarkEnabled ? <BenchmarkFrameProbe /> : null}
         <CameraRig
           scene={scene}
@@ -1701,6 +2048,17 @@ export function ThreeDView({
         <DropRaycastTracker apiRef={dropRaycastRef} />
         {dropGhost ? <DropGhostPlane transform={dropGhost} /> : null}
       </Canvas>
+      {/* Sibling of the Canvas, inside the already-relative .three-view — and
+          therefore below the empty-state early return, so an empty project
+          shows no controls for a camera that isn't there. */}
+      <ThreeDViewportControls
+        handActive={handActive}
+        onToggleHand={() => setHandActive((active) => !active)}
+        canZoomIn={zoomBounds.canZoomIn}
+        canZoomOut={zoomBounds.canZoomOut}
+        onZoomIn={() => rigApi.current?.zoomStep("in")}
+        onZoomOut={() => rigApi.current?.zoomStep("out")}
+      />
     </div>
   );
 

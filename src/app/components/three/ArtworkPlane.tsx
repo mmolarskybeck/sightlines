@@ -11,6 +11,8 @@ import type { ArtworkFrame } from "../../../domain/project";
 import type { WallArtwork3d } from "../../../domain/geometry/scene3d";
 import { fitArtworkImageSizeMm, textureNativeAspect } from "./artworkFit";
 import { mmToWorld } from "./coordinates";
+import { objectDragPointerDown, useThreeObjectDrag } from "./objectDragContext";
+import { CLICK_DRAG_TOLERANCE_PX } from "./sceneConstants";
 import { getFrameFinishTexture } from "./frameFinishTextures";
 import { framingLayout } from "./framingGeometry";
 import { mitredFrameBarGeometries } from "./frameMitreGeometry";
@@ -181,13 +183,25 @@ export function ArtworkPlane({
 
   // Event precedence (spec §4.3): the artwork consumes its click so the wall
   // beneath doesn't also select, and the canvas miss-handler doesn't clear.
-  // event.delta > a few px means this "click" was an orbit drag's release.
+  // event.delta > the tolerance means this "click" was the release of a drag —
+  // an orbit before, and now also a move of this very work.
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
-    if (event.delta > 6) return;
+    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
     const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
     onSelect(artwork.objectId, { additive: shiftKey || metaKey || ctrlKey });
   };
+
+  // Direct manipulation: press and drag this work along its wall (or onto
+  // another one). Inert unless a ThreeObjectDragContext provider is above —
+  // the offscreen snapshot renderers mount this same component with none.
+  const drag = useThreeObjectDrag();
+  const handlePointerDown = objectDragPointerDown(drag, artwork.objectId);
+
+  // Every clickable layer of the framing stack carries the same pair, so a
+  // press on the image, the mat, a frame bar or a deep work's body all arm the
+  // same gesture rather than only the frontmost one happening to work.
+  const pointerProps = { onClick: handleClick, onPointerDown: handlePointerDown };
 
   return (
     // Group sits AT the wall surface (z = 0); each layer carries its own
@@ -203,7 +217,7 @@ export function ArtworkPlane({
         // the size it always has, just further off the wall.
         <mesh
           position={[0, 0, mmToWorld(body.backZMm + body.depthMm / 2)]}
-          onClick={handleClick}
+          {...pointerProps}
           onPointerOver={() => setHovered(true)}
           onPointerOut={() => setHovered(false)}
         >
@@ -234,7 +248,7 @@ export function ArtworkPlane({
         // would stay pinned to the wall, buried inside its own body.
         <group position={[0, 0, mmToWorld(body?.frontZMm ?? 0)]}>
           {frameBarGeometries.map((geometry, index) => (
-            <mesh key={index} geometry={geometry} onClick={handleClick}>
+            <mesh key={index} geometry={geometry} {...pointerProps}>
               <meshLambertMaterial
                 key={frameMaterialKey}
                 color={frameTexture ? "#ffffff" : frameFill}
@@ -300,7 +314,7 @@ export function ArtworkPlane({
         // Mat: an off-white board covering the frame's inner opening (image +
         // mat band), recessed a step behind the frame's front face. Lambert so
         // it takes the scene light like a physical board.
-        <mesh position={[0, 0, mmToWorld(layout.matZMm as number)]} onClick={handleClick}>
+        <mesh position={[0, 0, mmToWorld(layout.matZMm as number)]} {...pointerProps}>
           <planeGeometry
             args={[mmToWorld(layout.openingWidthMm), mmToWorld(layout.openingHeightMm)]}
           />
@@ -315,7 +329,7 @@ export function ArtworkPlane({
       ) : null}
       <mesh
         position={[0, 0, mmToWorld(layout.imageZMm)]}
-        onClick={handleClick}
+        {...pointerProps}
         onPointerOver={() => setHovered(true)}
         onPointerOut={() => setHovered(false)}
       >

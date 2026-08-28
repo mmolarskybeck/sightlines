@@ -162,19 +162,29 @@ export function resolveThreeDrop(args: {
   tag: DropSurfaceTag;
   walls: readonly FloorWall[];
   dims: DropDimsMm;
+  // Grab offset, in the SAME units as the resolved placement (wall-local
+  // x/height for a wall hit, floor-space x/y for a floor hit). A checklist drop
+  // has no offset — the cursor IS the placement — but MOVING an already-placed
+  // object grabs it somewhere other than its centre, and the object must keep
+  // that grip instead of teleporting its centre under the cursor. Applied
+  // BEFORE the clamp, so an offset placement is still kept whole on its wall.
+  offsetMm?: { xMm: number; yMm: number };
 }): ThreeDropResolution | null {
   const { point, tag, walls, dims } = args;
+  const offsetMm = args.offsetMm ?? { xMm: 0, yMm: 0 };
   const floorPointMm = worldToFloorMm(point);
 
   if (tag.kind === "floor") {
+    const xMm = floorPointMm.xMm + offsetMm.xMm;
+    const yMm = floorPointMm.yMm + offsetMm.yMm;
     return {
       anchor: "floor",
-      xMm: floorPointMm.xMm,
-      yMm: floorPointMm.yMm,
+      xMm,
+      yMm,
       ghost: {
         kind: "floor",
-        centerXMm: floorPointMm.xMm,
-        centerYMm: floorPointMm.yMm,
+        centerXMm: xMm,
+        centerYMm: yMm,
         centerHeightMm: 0,
         rotationYRad: 0,
         widthMm: dims.floorWidthMm,
@@ -187,8 +197,16 @@ export function resolveThreeDrop(args: {
   if (!wall || wall.lengthMm <= 0) return null;
 
   const projection = projectPointToWall(floorPointMm, wall);
-  const xMm = clampSpan(projection.xAlongMm, dims.wallWidthMm, wall.lengthMm);
-  const yMm = clampSpan(worldHeightToMm(point), dims.wallHeightMm, wall.heightMm);
+  const xMm = clampSpan(
+    projection.xAlongMm + offsetMm.xMm,
+    dims.wallWidthMm,
+    wall.lengthMm
+  );
+  const yMm = clampSpan(
+    worldHeightToMm(point) + offsetMm.yMm,
+    dims.wallHeightMm,
+    wall.heightMm
+  );
 
   // The ghost rides the clamped x (not the raw hit), so the preview shows the
   // placement that will actually commit.

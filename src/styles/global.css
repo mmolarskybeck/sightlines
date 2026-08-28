@@ -9676,3 +9676,57 @@ button.import-conflict-headtext:hover .import-conflict-caret { color: var(--ink)
   font-size: var(--type-xs);
   line-height: var(--leading-copy);
 }
+
+/* ==========================================================================
+   3D viewport: pan (hand) tool + floating control cluster
+   ==========================================================================
+   The 3D surface gained the same kind of floating chip cluster the 2D drawing
+   surfaces carry (.viewport-zoom above), so it inherits that block's geometry,
+   raised-chip ground and hover states wholesale — .three-view-controls only
+   marks the 3D instance for anything that has to differ, and nothing does yet.
+   It is kept as a hook rather than dropped so the two clusters can diverge
+   (the 3D one has no percentage readout and no Fit chip) without having to
+   re-introduce a selector later. */
+.three-view-controls {
+  /* Intentionally empty of overrides — see above. */
+  pointer-events: auto;
+}
+
+/* The hand tool's on-state. The shared Button `inspector` variant has no
+   pressed look of its own, and a floating chip can't borrow the topbar's
+   underline, so the active chip takes the same petrol-soft fill the rail's
+   active tool wears (button.tsx, variant `rail`). aria-pressed drives it, so
+   the visual state and the accessible state cannot drift. */
+.viewport-zoom .viewport-zoom-step[aria-pressed="true"] {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.viewport-zoom .viewport-zoom-step[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--primary-soft);
+  filter: brightness(0.97);
+}
+
+/* Pan affordance over the WebGL viewport, mirroring the 2D surfaces'
+   .drawing-surface.is-pan-ready / .is-panning pair. There is no SVG child tree
+   to override here — the canvas is one element — so the cursor is set on the
+   wrapper and on the canvas itself, the latter because r3f/drei set their own
+   cursor on hover over selectable meshes (useCursor) and that inline style
+   would otherwise win over an inherited one.
+
+   The control cluster deliberately keeps its own pointer cursor: it floats
+   above the viewport and is not part of the pan surface. */
+.three-view.is-pan-ready,
+.three-view.is-pan-ready canvas {
+  cursor: grab;
+}
+
+.three-view.is-panning,
+.three-view.is-panning canvas {
+  cursor: grabbing;
+}
+
+.three-view.is-pan-ready .viewport-zoom,
+.three-view.is-panning .viewport-zoom {
+  cursor: default;
+}

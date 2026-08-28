@@ -13,6 +13,10 @@ import {
   eyeLevelWallDistanceMm,
   sightlineOccluders,
   clampFocusDistance,
+  clampZoomFactorToEnvelope,
+  canZoomStep,
+  ORBIT_MAX_DISTANCE,
+  ORBIT_MIN_DISTANCE,
   KEYBOARD_ZOOM_STEP,
   keyboardZoomFactor,
   normalizeWheelDeltaY,
@@ -182,5 +186,38 @@ describe("sightlineOccluders", () => {
   it("ignores segments parallel to the sightline", () => {
     const parallel = { id: "p", start: { xMm: 100, yMm: 0 }, end: { xMm: 100, yMm: 4000 } };
     expect(sightlineOccluders(camera, target, [parallel])).toEqual([]);
+  });
+});
+
+describe("clampZoomFactorToEnvelope / canZoomStep", () => {
+  it("leaves a step that lands inside the envelope alone", () => {
+    expect(clampZoomFactorToEnvelope(10, 1.25)).toBe(1.25);
+    expect(clampZoomFactorToEnvelope(10, 1 / 1.25)).toBe(1 / 1.25);
+  });
+
+  it("shrinks a step so it lands exactly ON the far bound, never past it", () => {
+    const distance = ORBIT_MAX_DISTANCE / 1.1;
+    const factor = clampZoomFactorToEnvelope(distance, 1.25);
+    expect(distance * factor).toBeCloseTo(ORBIT_MAX_DISTANCE, 9);
+  });
+
+  it("shrinks a step so it lands exactly ON the near bound", () => {
+    const distance = ORBIT_MIN_DISTANCE * 1.1;
+    const factor = clampZoomFactorToEnvelope(distance, 1 / 1.25);
+    expect(distance * factor).toBeCloseTo(ORBIT_MIN_DISTANCE, 9);
+  });
+
+  it("collapses to a no-op once the camera sits on a bound", () => {
+    expect(clampZoomFactorToEnvelope(ORBIT_MIN_DISTANCE, 1 / 1.25)).toBe(1);
+    expect(clampZoomFactorToEnvelope(ORBIT_MAX_DISTANCE, 1.25)).toBe(1);
+  });
+
+  it("disables only the direction that has run out of envelope", () => {
+    expect(canZoomStep(ORBIT_MIN_DISTANCE, "in")).toBe(false);
+    expect(canZoomStep(ORBIT_MIN_DISTANCE, "out")).toBe(true);
+    expect(canZoomStep(ORBIT_MAX_DISTANCE, "out")).toBe(false);
+    expect(canZoomStep(ORBIT_MAX_DISTANCE, "in")).toBe(true);
+    expect(canZoomStep(10, "in")).toBe(true);
+    expect(canZoomStep(10, "out")).toBe(true);
   });
 });

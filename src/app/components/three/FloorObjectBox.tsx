@@ -11,6 +11,8 @@ import {
   floorObjectImagePanels,
   resolveFloorObjectImageFaces
 } from "./floorObjectImageFaces";
+import { objectDragPointerDown, useThreeObjectDrag } from "./objectDragContext";
+import { CLICK_DRAG_TOLERANCE_PX } from "./sceneConstants";
 import {
   planSuspensionWires,
   suspendedCenterYMm,
@@ -94,17 +96,26 @@ export function FloorObjectBox({
   // a fresh object only when the project actually changed) so the wire vertex
   // buffer downstream isn't rebuilt on every orbit frame.
   const wires = useMemo(() => planSuspensionWires(object), [object]);
+  const drag = useThreeObjectDrag();
 
   // Not a hook, so it can sit either side of the early return — but both
   // branches need it, and it is identical for both: the object selects itself
   // and stops, so the floor beneath never sees the click and never clears.
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
-    // An orbit drag's release also fires click — only a true click selects.
-    if (event.delta > 6) return;
+    // A drag's release also fires click — only a true click selects. (The drag
+    // is an orbit when it started on empty space, and a move of THIS object
+    // when it started here.)
+    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
     const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
     onSelect(object.objectId, { additive: shiftKey || metaKey || ctrlKey });
   };
+
+  // Direct manipulation: press and drag this object across the floor. Also not
+  // a hook, and shared by both branches below for the same reason handleClick
+  // is. Inert without a ThreeObjectDragContext provider (offscreen renderers).
+  const handlePointerDown = objectDragPointerDown(drag, object.objectId);
+  const pointerProps = { onClick: handleClick, onPointerDown: handlePointerDown };
 
   if (object.kind === "blocked-zone") {
     // A blocked zone deliberately IGNORES baseHeightMm and stays on the floor.
@@ -123,7 +134,7 @@ export function FloorObjectBox({
         rotation={[-Math.PI / 2, 0, yaw]}
       >
         <mesh
-          onClick={handleClick}
+          {...pointerProps}
           onPointerOver={() => setHovered(true)}
           onPointerOut={() => setHovered(false)}
         >
@@ -180,7 +191,7 @@ export function FloorObjectBox({
       rotation={[0, yaw, 0]}
     >
       <mesh
-        onClick={handleClick}
+        {...pointerProps}
         onPointerOver={() => setHovered(true)}
         onPointerOut={() => setHovered(false)}
       >
