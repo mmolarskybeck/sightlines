@@ -1416,7 +1416,10 @@ export function App() {
     try {
       const result = await exportProjectPackage(mode);
       if (result) {
-        const outcome = await triggerDownload(result.zip, result.filename);
+        const outcome = await triggerDownload(result.zip, result.filename, {
+          mimeType: "application/octet-stream",
+          description: "Sightlines project package"
+        });
         if (outcome === "cancelled") {
           // The user dismissed the save dialog — no file, no toast.
         } else if (result.warnings.length > 0) {
@@ -1465,7 +1468,8 @@ export function App() {
         // .xlsx/.zip type the save picker offers.
         const outcome = await triggerDownload(
           new Blob([result.bytes.slice()], { type: result.mimeType }),
-          result.filename
+          result.filename,
+          { mimeType: result.mimeType }
         );
         if (outcome === "cancelled") {
           // The user dismissed the save dialog — no file, no toast.
@@ -1499,7 +1503,10 @@ export function App() {
     try {
       const result = await exportProjectPackageById(id, "display");
       if (result) {
-        const outcome = await triggerDownload(result.zip, result.filename);
+        const outcome = await triggerDownload(result.zip, result.filename, {
+          mimeType: "application/octet-stream",
+          description: "Sightlines project package"
+        });
         if (outcome === "cancelled") {
           // The user dismissed the save dialog — no file, no toast.
         } else if (result.warnings.length > 0) {
@@ -1571,7 +1578,10 @@ export function App() {
       }
       const extension = format === "jpeg" ? "jpg" : "png";
       const filename = `${project.title} — ${viewLabel}.${extension}`;
-      const outcome = await triggerDownload(blob, filename);
+      const outcome = await triggerDownload(blob, filename, {
+        mimeType: format === "jpeg" ? "image/jpeg" : "image/png",
+        description: format === "jpeg" ? "JPEG image" : "PNG image"
+      });
       if (outcome !== "cancelled") {
         toast.success(`Exported ${filename}`);
       }
@@ -1664,7 +1674,8 @@ export function App() {
       const filename = `${project.title}.pdf`;
       const outcome = await triggerDownload(
         new Blob([result.bytes.slice()], { type: "application/pdf" }),
-        filename
+        filename,
+        { mimeType: "application/pdf", description: "PDF document" }
       );
       if (outcome === "cancelled") {
         // Dismissing the save dialog behaves like the dialog's own cancel:
