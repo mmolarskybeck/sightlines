@@ -136,6 +136,17 @@ function renderDialog(project: Project = projectWithExportContent()) {
   return handlers;
 }
 
+// A room's wall list now defaults to collapsed (so a multi-room project's
+// Elevations section doesn't push "3D views" off the bottom of the dialog —
+// see ExportPdfDialog.tsx), so tests that reach into a specific wall
+// checkbox must open its room's disclosure first: Radix's Collapsible.Content
+// doesn't mount its children at all while closed.
+function expandRoomWalls(roomName: string) {
+  fireEvent.click(
+    screen.getByRole("button", { name: `Toggle ${roomName} walls` })
+  );
+}
+
 describe("ExportPdfDialog", () => {
   it("renders the specified sections, defaults, live page count, and Saved view placeholder", () => {
     renderDialog();
@@ -173,6 +184,33 @@ describe("ExportPdfDialog", () => {
     );
   });
 
+  it("defaults each room's elevation wall list to collapsed, expandable per room", () => {
+    renderDialog();
+
+    // Individual wall checkboxes aren't mounted until the room's disclosure
+    // opens — collapsing every room by default is what keeps a multi-room,
+    // multi-wall project's "3D views" header within reach without scrolling
+    // (see the ExportPdfDialog.tsx comment on the Elevations Collapsible).
+    const toggle = screen.getByRole("button", {
+      name: "Toggle Main Gallery walls"
+    });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByRole("checkbox", {
+        name: "Include Main Gallery, East wall elevation"
+      })
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Include Main Gallery, East wall elevation"
+      })
+    ).toBeInTheDocument();
+  });
+
   it("keeps the 3D views rows to inclusion only — no rename or delete actions", () => {
     renderDialog();
 
@@ -198,6 +236,7 @@ describe("ExportPdfDialog", () => {
     const elevations = screen.getByRole("checkbox", {
       name: "Include Elevations"
     });
+    expandRoomWalls("Main Gallery");
 
     // Starts indeterminate (one wall pre-included by default). Clicking an
     // indeterminate/unchecked parent selects every child.
@@ -241,6 +280,7 @@ describe("ExportPdfDialog", () => {
     });
     const elevationsRow = elevations.closest(".export-section-row");
     if (!elevationsRow) throw new Error("Elevations row not found");
+    expandRoomWalls("Main Gallery");
 
     // Clear the section entirely first.
     fireEvent.click(elevations);

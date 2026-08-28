@@ -1112,6 +1112,35 @@ input:focus-visible {
   scrollbar-gutter: stable;
 }
 
+/* Signposts that Contents continues below the fold (Overview / Room plans /
+   Elevations / 3D views can otherwise scroll out of sight with no visual
+   cue). `.export-contents-fade` is a sticky sibling that follows the section
+   list, so `bottom: 0` pins it to whichever ancestor is the active scroll
+   container's viewport edge — see the <760px override below. The negative
+   margin pulls it up to overlap the trailing content instead of adding to
+   the scrollable height; ExportPdfDialog toggles `data-visible` from a
+   scroll/resize-driven measurement, so it's absent both when content already
+   fits and once the user has scrolled to the end. */
+.export-contents-fade {
+  position: sticky;
+  z-index: 1;
+  bottom: 0;
+  height: 48px;
+  margin-top: -48px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    #ffffff 70%
+  );
+  opacity: 0;
+  transition: opacity 150ms var(--ease-soft);
+  pointer-events: none;
+}
+
+.export-contents-fade[data-visible="true"] {
+  opacity: 1;
+}
+
 .export-group-title {
   margin: 0 0 var(--space-8);
   color: var(--ink);
@@ -9140,6 +9169,16 @@ body.panels-resizing * {
   .export-contents {
     min-height: 360px;
     padding-right: 0;
+  }
+
+  /* The linearized layout makes `.export-pdf-body` itself the scroller (see
+     above), so the contents list must stop scrolling internally — otherwise
+     a scroller-in-a-scroller traps two-finger/wheel scrolling once the
+     cursor lands inside it. `.export-contents-fade` stays correct without
+     any extra rule: `position: sticky` resolves against the nearest
+     scrolling ancestor, which is now `.export-pdf-body`. */
+  .export-contents-scroll {
+    overflow-y: visible;
   }
 
   .export-setup {

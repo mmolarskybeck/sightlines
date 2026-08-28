@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
 import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
@@ -77,6 +77,66 @@ const EXPORT_UNIT_OPTIONS: { value: DocumentExportUnitPreference; label: string 
     { value: "mm", label: "Millimeters (mm)" }
   ];
 
+// Signposts that the Contents list continues below the fold. The fade lives
+// on `.export-contents-scroll` at the ≥760px breakpoint, but that container
+// switches to `overflow-y: visible` under the linearized <760px layout (see
+// global.css) so `.export-pdf-body` becomes the sole scroller there — this
+// reads whichever element is actually the active overflow container instead
+// of assuming one. Content growth (a Collapsible opening) doesn't resize
+// `scrollEl`'s own box, so a ResizeObserver on `scrollEl` wouldn't fire; it
+// observes the inner list wrapper instead, whose natural (unclipped) height
+// changes with every section toggle.
+function useContentsScrollFade(
+  bodyRef: React.RefObject<HTMLElement | null>,
+  scrollRef: React.RefObject<HTMLElement | null>,
+  listRef: React.RefObject<HTMLElement | null>,
+  fadeRef: React.RefObject<HTMLElement | null>
+) {
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    const scrollEl = scrollRef.current;
+    const listEl = listRef.current;
+    const fadeEl = fadeRef.current;
+    if (!body || !scrollEl || !listEl || !fadeEl) return;
+
+    let frameId: number | null = null;
+
+    const activeScroller = () =>
+      window.getComputedStyle(scrollEl).overflowY === "visible" ? body : scrollEl;
+
+    const update = () => {
+      frameId = null;
+      const el = activeScroller();
+      const overflow = el.scrollHeight - el.clientHeight;
+      const nearEnd = overflow <= 1 || el.scrollTop >= overflow - 1;
+      fadeEl.dataset.visible = overflow > 1 && !nearEnd ? "true" : "false";
+    };
+
+    const schedule = () => {
+      if (frameId !== null) return;
+      frameId = requestAnimationFrame(update);
+    };
+
+    update();
+    // Capture phase: scroll events don't bubble, but a capturing listener on
+    // an ancestor still observes them on the way down regardless of which
+    // descendant (scrollEl vs. body itself) is the one actually scrolling.
+    body.addEventListener("scroll", schedule, { capture: true, passive: true });
+    window.addEventListener("resize", schedule);
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedule);
+    resizeObserver?.observe(listEl);
+    resizeObserver?.observe(body);
+
+    return () => {
+      body.removeEventListener("scroll", schedule, true);
+      window.removeEventListener("resize", schedule);
+      resizeObserver?.disconnect();
+      if (frameId !== null) cancelAnimationFrame(frameId);
+    };
+  });
+}
+
 type ExportPdfDialogProps = {
   open: boolean;
   project: Project;
@@ -113,6 +173,17 @@ export function ExportPdfDialog({
   });
   const pageCount = countDocumentPages(settings);
   const isExporting = exportState != null;
+
+  const bodyRef = useRef<HTMLFieldSetElement>(null);
+  const contentsScrollRef = useRef<HTMLDivElement>(null);
+  const contentsListRef = useRef<HTMLDivElement>(null);
+  const contentsFadeRef = useRef<HTMLDivElement>(null);
+  useContentsScrollFade(
+    bodyRef,
+    contentsScrollRef,
+    contentsListRef,
+    contentsFadeRef
+  );
 
   const setPreferences = (
     update: (current: DocumentExportPreferences) => DocumentExportPreferences
@@ -192,268 +263,276 @@ export function ExportPdfDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <fieldset className="export-pdf-body" disabled={isExporting}>
+        <fieldset
+          className="export-pdf-body"
+          disabled={isExporting}
+          ref={bodyRef}
+        >
           <section className="export-contents" aria-labelledby="export-contents-title">
             <h3 id="export-contents-title" className="export-group-title">
               Contents
             </h3>
-            <div className="export-contents-scroll">
-              <div className="export-section-row export-section-overview">
-                <span className="export-disclosure-spacer" aria-hidden="true" />
-                <Checkbox
-                  aria-label="Include Overview"
-                  checked={settings.sections.overview}
-                  onCheckedChange={(checked) =>
-                    setSection("overview", checked === true)
+            <div className="export-contents-scroll" ref={contentsScrollRef}>
+              <div className="export-contents-list" ref={contentsListRef}>
+                <div className="export-section-row export-section-overview">
+                  <span className="export-disclosure-spacer" aria-hidden="true" />
+                  <Checkbox
+                    aria-label="Include Overview"
+                    checked={settings.sections.overview}
+                    onCheckedChange={(checked) =>
+                      setSection("overview", checked === true)
+                    }
+                  />
+                  <button
+                    className="export-section-label"
+                    type="button"
+                    onClick={() =>
+                      setSection("overview", !settings.sections.overview)
+                    }
+                  >
+                    Overview
+                  </button>
+                </div>
+                <ExportSection
+                  count={roomPlanValues.filter(Boolean).length}
+                  countTotal={settings.rooms.length}
+                  label="Room plans"
+                  open={openSections.roomPlans}
+                  sectionState={selectionState(roomPlanValues)}
+                  onOpenChange={(next) =>
+                    setOpenSections((current) => ({
+                      ...current,
+                      roomPlans: next
+                    }))
                   }
-                />
-                <button
-                  className="export-section-label"
-                  type="button"
-                  onClick={() =>
-                    setSection("overview", !settings.sections.overview)
+                  onToggle={() =>
+                    handleParentToggle({
+                      values: roomPlanValues,
+                      setAll: (included) =>
+                        setRoomPlans(
+                          settings.rooms.map((room) => room.roomId),
+                          included
+                        )
+                    })
                   }
                 >
-                  Overview
-                </button>
-              </div>
-
-              <ExportSection
-                count={roomPlanValues.filter(Boolean).length}
-                countTotal={settings.rooms.length}
-                label="Room plans"
-                open={openSections.roomPlans}
-                sectionState={selectionState(roomPlanValues)}
-                onOpenChange={(next) =>
-                  setOpenSections((current) => ({
-                    ...current,
-                    roomPlans: next
-                  }))
-                }
-                onToggle={() =>
-                  handleParentToggle({
-                    values: roomPlanValues,
-                    setAll: (included) =>
-                      setRoomPlans(
-                        settings.rooms.map((room) => room.roomId),
-                        included
-                      )
-                  })
-                }
-              >
-                {settings.rooms.map((room) => (
-                  <div className="export-tree-row export-tree-room" key={room.roomId}>
-                    <Checkbox
-                      aria-label={`Include ${room.name} room plan`}
-                      checked={room.planIncluded}
-                      onCheckedChange={(checked) =>
-                        setRoomPlans([room.roomId], checked === true)
-                      }
-                    />
-                    <button
-                      className="export-tree-label"
-                      type="button"
-                      onClick={() =>
-                        setRoomPlans([room.roomId], !room.planIncluded)
-                      }
-                    >
-                      {room.name}
-                    </button>
-                  </div>
-                ))}
-              </ExportSection>
-
-              <ExportSection
-                count={wallValues.filter(Boolean).length}
-                countTotal={wallValues.length}
-                label="Elevations"
-                open={openSections.elevations}
-                sectionState={selectionState(wallValues)}
-                onOpenChange={(next) =>
-                  setOpenSections((current) => ({
-                    ...current,
-                    elevations: next
-                  }))
-                }
-                onToggle={() =>
-                  handleParentToggle({
-                    values: wallValues,
-                    setAll: (included) =>
-                      setElevations(
-                        settings.rooms.flatMap((room) =>
-                          selectableWalls(room).map((wall) => wall.wallId)
-                        ),
-                        included
-                      )
-                  })
-                }
-              >
-                {settings.rooms.map((room) => {
-                  const roomWallValues = selectableWalls(room).map(
-                    (wall) => wall.included
-                  );
-                  const roomState = selectionState(roomWallValues);
-                  return (
-                    <Collapsible
-                      className="export-tree-room-group"
-                      defaultOpen={settings.rooms.length <= 3}
-                      key={room.roomId}
-                    >
-                      <div className="export-tree-row export-tree-room export-tree-parent">
-                        <CollapsibleTrigger asChild>
-                          <button
-                            aria-label={`Toggle ${room.name} walls`}
-                            className="export-tree-disclosure"
-                            type="button"
-                          >
-                            <CaretDownIcon aria-hidden="true" size={13} />
-                          </button>
-                        </CollapsibleTrigger>
-                        <Checkbox
-                          aria-label={`Include all elevations for ${room.name}`}
-                          checked={roomState}
-                          onCheckedChange={() =>
-                            setElevations(
-                              selectableWalls(room).map((wall) => wall.wallId),
-                              roomState !== true
-                            )
-                          }
-                        />
-                        <button
-                          className="export-tree-label"
-                          type="button"
-                          onClick={() =>
-                            setElevations(
-                              selectableWalls(room).map((wall) => wall.wallId),
-                              roomState !== true
-                            )
-                          }
-                        >
-                          {room.name}
-                        </button>
-                        <span className="export-tree-count">
-                          {roomWallValues.filter(Boolean).length} of{" "}
-                          {roomWallValues.length}
-                        </span>
-                      </div>
-                      <CollapsibleContent>
-                        <div className="export-wall-list">
-                          {/* Open walls render as explicit disabled rows rather
-                              than vanishing: a wall the user knows exists,
-                              silently missing from the tree, reads as a bug. */}
-                          {room.walls.map((wall) => (
-                            <div
-                              className="export-tree-row export-tree-wall"
-                              data-open={wall.isOpenSide ? "true" : undefined}
-                              key={wall.wallId}
+                  {settings.rooms.map((room) => (
+                    <div className="export-tree-row export-tree-room" key={room.roomId}>
+                      <Checkbox
+                        aria-label={`Include ${room.name} room plan`}
+                        checked={room.planIncluded}
+                        onCheckedChange={(checked) =>
+                          setRoomPlans([room.roomId], checked === true)
+                        }
+                      />
+                      <button
+                        className="export-tree-label"
+                        type="button"
+                        onClick={() =>
+                          setRoomPlans([room.roomId], !room.planIncluded)
+                        }
+                      >
+                        {room.name}
+                      </button>
+                    </div>
+                  ))}
+                </ExportSection>
+                <ExportSection
+                  count={wallValues.filter(Boolean).length}
+                  countTotal={wallValues.length}
+                  label="Elevations"
+                  open={openSections.elevations}
+                  sectionState={selectionState(wallValues)}
+                  onOpenChange={(next) =>
+                    setOpenSections((current) => ({
+                      ...current,
+                      elevations: next
+                    }))
+                  }
+                  onToggle={() =>
+                    handleParentToggle({
+                      values: wallValues,
+                      setAll: (included) =>
+                        setElevations(
+                          settings.rooms.flatMap((room) =>
+                            selectableWalls(room).map((wall) => wall.wallId)
+                          ),
+                          included
+                        )
+                    })
+                  }
+                >
+                  {settings.rooms.map((room) => {
+                    const roomWallValues = selectableWalls(room).map(
+                      (wall) => wall.included
+                    );
+                    const roomState = selectionState(roomWallValues);
+                    return (
+                      <Collapsible
+                        className="export-tree-room-group"
+                        defaultOpen={false}
+                        key={room.roomId}
+                      >
+                        <div className="export-tree-row export-tree-room export-tree-parent">
+                          <CollapsibleTrigger asChild>
+                            <button
+                              aria-label={`Toggle ${room.name} walls`}
+                              className="export-tree-disclosure"
+                              type="button"
                             >
-                              <Checkbox
-                                aria-label={`Include ${room.name}, ${wall.name} elevation`}
-                                checked={wall.included}
-                                disabled={wall.isOpenSide}
-                                onCheckedChange={(checked) =>
-                                  setElevations(
-                                    [wall.wallId],
-                                    checked === true
-                                  )
-                                }
-                              />
-                              <button
-                                className="export-tree-label"
-                                type="button"
-                                disabled={wall.isOpenSide}
-                                onClick={() =>
-                                  setElevations(
-                                    [wall.wallId],
-                                    !wall.included
-                                  )
-                                }
-                              >
-                                {wall.name}
-                              </button>
-                              {wall.isOpenSide ? (
-                                <span className="export-tree-tag">Open</span>
-                              ) : null}
-                            </div>
-                          ))}
-                        </div>
-                      </CollapsibleContent>
-                    </Collapsible>
-                  );
-                })}
-              </ExportSection>
-
-              <ExportSection
-                count={savedViewValues.filter(Boolean).length}
-                countTotal={validSavedViews.length}
-                disabled={validSavedViews.length === 0}
-                label="3D views"
-                open={openSections.threeDViews}
-                sectionState={selectionState(savedViewValues)}
-                onOpenChange={(next) =>
-                  setOpenSections((current) => ({
-                    ...current,
-                    threeDViews: next
-                  }))
-                }
-                onToggle={() =>
-                  handleParentToggle({
-                    values: savedViewValues,
-                    setAll: (included) =>
-                      setSavedViews(
-                        validSavedViews.map((choice) => choice.view.id),
-                        included
-                      )
-                  })
-                }
-              >
-                {settings.savedViews.length > 0 ? (
-                  <div className="export-saved-view-list">
-                    {settings.savedViews.map((choice) => {
-                      const { composedLabel, defaultTitle, isRenamed } =
-                        composeSavedViewLabel(project, choice.view);
-                      return (
-                        <div
-                          className="export-saved-view-row"
-                          data-invalid={!choice.valid ? "" : undefined}
-                          key={choice.view.id}
-                        >
+                              <CaretDownIcon aria-hidden="true" size={13} />
+                            </button>
+                          </CollapsibleTrigger>
                           <Checkbox
-                            aria-label={`Include ${composedLabel}`}
-                            checked={choice.included}
-                            disabled={!choice.valid}
-                            onCheckedChange={(checked) =>
-                              setSavedViews(
-                                [choice.view.id],
-                                checked === true
+                            aria-label={`Include all elevations for ${room.name}`}
+                            checked={roomState}
+                            onCheckedChange={() =>
+                              setElevations(
+                                selectableWalls(room).map((wall) => wall.wallId),
+                                roomState !== true
                               )
                             }
                           />
-                          <SavedViewThumbnail
-                            label={composedLabel}
-                            src={thumbnailUrls[choice.view.id]}
-                          />
-                          <div className="export-saved-view-copy">
-                            <strong>{composedLabel}</strong>
-                            {choice.valid ? (
-                              isRenamed && <span>{defaultTitle}</span>
-                            ) : (
-                              <span>
-                                <WarningIcon aria-hidden="true" size={13} />
-                                Invalid camera pose. Excluded from export.
-                              </span>
-                            )}
-                          </div>
+                          <button
+                            className="export-tree-label"
+                            type="button"
+                            onClick={() =>
+                              setElevations(
+                                selectableWalls(room).map((wall) => wall.wallId),
+                                roomState !== true
+                              )
+                            }
+                          >
+                            {room.name}
+                          </button>
+                          <span className="export-tree-count">
+                            {roomWallValues.filter(Boolean).length} of{" "}
+                            {roomWallValues.length}
+                          </span>
                         </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="export-empty-hint">
-                    Save views from the 3D view to include them here.
-                  </p>
-                )}
-              </ExportSection>
+                        <CollapsibleContent>
+                          <div className="export-wall-list">
+                            {/* Open walls render as explicit disabled rows rather
+                                than vanishing: a wall the user knows exists,
+                                silently missing from the tree, reads as a bug. */}
+                            {room.walls.map((wall) => (
+                              <div
+                                className="export-tree-row export-tree-wall"
+                                data-open={wall.isOpenSide ? "true" : undefined}
+                                key={wall.wallId}
+                              >
+                                <Checkbox
+                                  aria-label={`Include ${room.name}, ${wall.name} elevation`}
+                                  checked={wall.included}
+                                  disabled={wall.isOpenSide}
+                                  onCheckedChange={(checked) =>
+                                    setElevations(
+                                      [wall.wallId],
+                                      checked === true
+                                    )
+                                  }
+                                />
+                                <button
+                                  className="export-tree-label"
+                                  type="button"
+                                  disabled={wall.isOpenSide}
+                                  onClick={() =>
+                                    setElevations(
+                                      [wall.wallId],
+                                      !wall.included
+                                    )
+                                  }
+                                >
+                                  {wall.name}
+                                </button>
+                                {wall.isOpenSide ? (
+                                  <span className="export-tree-tag">Open</span>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    );
+                  })}
+                </ExportSection>
+                <ExportSection
+                  count={savedViewValues.filter(Boolean).length}
+                  countTotal={validSavedViews.length}
+                  disabled={validSavedViews.length === 0}
+                  label="3D views"
+                  open={openSections.threeDViews}
+                  sectionState={selectionState(savedViewValues)}
+                  onOpenChange={(next) =>
+                    setOpenSections((current) => ({
+                      ...current,
+                      threeDViews: next
+                    }))
+                  }
+                  onToggle={() =>
+                    handleParentToggle({
+                      values: savedViewValues,
+                      setAll: (included) =>
+                        setSavedViews(
+                          validSavedViews.map((choice) => choice.view.id),
+                          included
+                        )
+                    })
+                  }
+                >
+                  {settings.savedViews.length > 0 ? (
+                    <div className="export-saved-view-list">
+                      {settings.savedViews.map((choice) => {
+                        const { composedLabel, defaultTitle, isRenamed } =
+                          composeSavedViewLabel(project, choice.view);
+                        return (
+                          <div
+                            className="export-saved-view-row"
+                            data-invalid={!choice.valid ? "" : undefined}
+                            key={choice.view.id}
+                          >
+                            <Checkbox
+                              aria-label={`Include ${composedLabel}`}
+                              checked={choice.included}
+                              disabled={!choice.valid}
+                              onCheckedChange={(checked) =>
+                                setSavedViews(
+                                  [choice.view.id],
+                                  checked === true
+                                )
+                              }
+                            />
+                            <SavedViewThumbnail
+                              label={composedLabel}
+                              src={thumbnailUrls[choice.view.id]}
+                            />
+                            <div className="export-saved-view-copy">
+                              <strong>{composedLabel}</strong>
+                              {choice.valid ? (
+                                isRenamed && <span>{defaultTitle}</span>
+                              ) : (
+                                <span>
+                                  <WarningIcon aria-hidden="true" size={13} />
+                                  Invalid camera pose. Excluded from export.
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="export-empty-hint">
+                      Save views from the 3D view to include them here.
+                    </p>
+                  )}
+                </ExportSection>
+              </div>
+              <div
+                aria-hidden="true"
+                className="export-contents-fade"
+                ref={contentsFadeRef}
+              />
             </div>
           </section>
 

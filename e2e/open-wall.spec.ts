@@ -149,6 +149,10 @@ test.describe("open walls", () => {
       .click();
     await page.getByRole("menuitem").filter({ hasText: /Export PDF/i }).first().click();
 
+    // Per-room wall lists default collapsed (2026-08-28 discoverability pass) —
+    // expand the room group before looking for wall rows.
+    await page.locator(".export-tree-disclosure").first().click();
+
     const row = page.locator('.export-tree-wall[data-open="true"]');
     await expect(row).toHaveCount(1);
     await expect(row).toContainText("Open");
