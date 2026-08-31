@@ -8,7 +8,7 @@ import {
 import type { Vector2 } from "../../domain/geometry/dragResize";
 import type { FloorWall } from "../../domain/geometry/planObjects";
 import { roomIdContainingPoint } from "../../domain/geometry/freestandingWalls";
-import { getArtworkOuterDimensionsMm } from "../../domain/framing";
+import { effectiveFraming, getArtworkOuterDimensionsMm } from "../../domain/framing";
 import {
   effectiveFloorDepthMm,
   effectiveWallArtworkDepthMm
@@ -116,11 +116,15 @@ export function usePlanArtworkDrop(options: {
       // the image width, so the frame band can never reach
       // effectiveFloorDepthMm's width fallback and land on the depth axis, which
       // it has no physical relationship to.
+      // effectiveFraming, not the raw fields: a frame-inclusive work and a
+      // frameless display type (projection / sculpture) both add no band, so
+      // the drop ghost is the width the placement will actually occupy.
+      const framing = effectiveFraming(artwork);
       const wallFootprintWidthMm = getArtworkOuterDimensionsMm(
         widthMm,
         heightMm,
-        artwork.matWidthMm,
-        artwork.frame
+        framing.matWidthMm,
+        framing.frame
       ).widthMm;
       return {
         widthMm,

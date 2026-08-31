@@ -139,6 +139,55 @@ describe("effectiveFraming (single interpreter of frameIncludedInImage)", () => 
   it("returns empty bands for a missing artwork record", () => {
     expect(effectiveFraming(undefined)).toEqual({});
   });
+
+  describe("frameless display types", () => {
+    const record = { matWidthMm: 75, frame, metadata: {} };
+
+    it("suppresses both bands for a projection and a sculpture", () => {
+      expect(effectiveFraming({ ...record, displayAs: "projection" })).toEqual({});
+      expect(effectiveFraming({ ...record, displayAs: "sculpture" })).toEqual({});
+    });
+
+    it("suppresses them for a MEDIUM-derived frameless type too", () => {
+      // No stored displayAs at all — but a mat is on the record, and the mat
+      // guard makes that read as framed. Only an explicit choice can strip the
+      // bands off a work someone actually matted.
+      expect(effectiveFraming({ ...record, metadata: { medium: "Film/video" } })).toEqual({
+        matWidthMm: 75,
+        frame
+      });
+      // Without a stored mat/frame there is nothing to suppress, but the
+      // resolution still has to run cleanly.
+      expect(effectiveFraming({ metadata: { medium: "Sculpture" } })).toEqual({});
+    });
+
+    it("NEVER deletes the stored values — flipping back restores them", () => {
+      const projection = { ...record, displayAs: "projection" as const };
+      expect(effectiveFraming(projection)).toEqual({});
+      // Same record object, one field changed: the mat and frame are still
+      // there to come back to.
+      expect(projection.matWidthMm).toBe(75);
+      expect(projection.frame).toBe(frame);
+      expect(effectiveFraming({ ...projection, displayAs: "framed" })).toEqual({
+        matWidthMm: 75,
+        frame
+      });
+    });
+
+    it("keeps a frameless work's wall footprint at its image size", () => {
+      // The derivation every surface reads (elevation, plan, 3D, PDF): no band
+      // is added, so the placement occupies exactly the image it stores.
+      const placement = { wallId: "wall-1", widthMm: 600, heightMm: 400 };
+      expect(
+        getPlacementFootprintMm(placement, { ...record, displayAs: "projection" })
+      ).toEqual({ widthMm: 600, heightMm: 400 });
+      // ...against the framed reading of the very same record.
+      expect(getPlacementFootprintMm(placement, { ...record, displayAs: "framed" })).toEqual({
+        widthMm: 800,
+        heightMm: 600
+      });
+    });
+  });
 });
 
 describe("deriveFrameWidthFromOverallMm", () => {

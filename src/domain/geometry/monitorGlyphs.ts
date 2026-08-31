@@ -23,19 +23,25 @@ import {
   MONITOR_DEFAULT_WIDTH_MM,
   MONITOR_DEPTH_MM,
   MONITOR_PEDESTAL_HEIGHT_MM,
-  type Artwork,
   type Dimensions,
   type MonitorSupport
 } from "../project";
+import {
+  effectiveDisplayAs,
+  type DisplayAsSource
+} from "../placement/artworkForm";
 
 // Whether a work is displayed as a box monitor. One predicate, so no renderer
-// has to remember the field name or the absent-means-framed rule; tolerant of
-// an undefined record (a placement whose artwork failed to join reads as a
-// plain box, never as a monitor with no image).
-export function isMonitorArtwork(
-  artwork: Pick<Artwork, "displayAs"> | undefined
-): boolean {
-  return artwork?.displayAs === "monitor";
+// has to remember the field name or the auto-resolution rule; tolerant of an
+// undefined record (a placement whose artwork failed to join reads as a plain
+// box, never as a monitor with no image).
+//
+// Routed through effectiveDisplayAs for consistency with every other display
+// question, not for a behavior change: no medium resolves to "monitor", so
+// this is true for exactly the records `displayAs === "monitor"` was true for.
+// A monitor is equipment the curator states they have; it is never inferred.
+export function isMonitorArtwork(artwork: DisplayAsSource | undefined): boolean {
+  return artwork !== undefined && effectiveDisplayAs(artwork) === "monitor";
 }
 
 // ABSENT MEANS PEDESTAL. Resolved here, at read time, rather than baked in at

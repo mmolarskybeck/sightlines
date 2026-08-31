@@ -3807,6 +3807,146 @@ describe("app store", () => {
         store.getState().placementWarnings.some((w) => w.wallObjectId === placementId)
       ).toBe(false);
     });
+
+    // ─── Floor rebake on a dimension edit ──────────────────────────────────
+    // A floor placement's box is a SEPARATE measurement from the work (a board,
+    // a plinth, a cabinet), so it follows a dimension edit only while it still
+    // equals what placement seeded it with. Once a curator has resized it, the
+    // work's numbers must not silently drag it back.
+    describe("floor placements follow dimension edits only while undiverged", () => {
+      async function placeFloorWork(
+        dimensions: { widthMm: number; heightMm: number; depthMm?: number },
+        displayAs?: "monitor"
+      ) {
+        await store.getState().addArtworksFromFiles([makeImageFile("board.jpg")]);
+        const artworkId = store.getState().project!.checklistArtworkIds[0];
+        await store.getState().updateArtwork(artworkId, {
+          dimensions: { ...dimensions, status: "known" },
+          ...(displayAs ? { displayAs } : {})
+        });
+        await store.getState().placeArtworkOnFloor(artworkId, 4000, 4000);
+        return { artworkId, objectId: store.getState().project!.floorObjects[0]!.id };
+      }
+
+      const floorObject = (objectId: string) =>
+        store.getState().project!.floorObjects.find((o) => o.id === objectId)!;
+
+      it("resizes an untouched box, in the same undo step as the artwork edit", async () => {
+        const { artworkId, objectId } = await placeFloorWork({
+          widthMm: 500,
+          heightMm: 400,
+          depthMm: 300
+        });
+        expect(floorObject(objectId)).toMatchObject({
+          widthMm: 500,
+          heightMm: 400,
+          depthMm: 300
+        });
+        const undoStackBefore = store.getState().undoStack.length;
+
+        await store.getState().updateArtwork(artworkId, {
+          dimensions: { widthMm: 800, heightMm: 600, depthMm: 200, status: "known" }
+        });
+
+        expect(floorObject(objectId)).toMatchObject({
+          widthMm: 800,
+          heightMm: 600,
+          depthMm: 200
+        });
+        // One entry, not two: the artwork edit and the placement rebake are a
+        // single undoable step.
+        expect(store.getState().undoStack).toHaveLength(undoStackBefore + 1);
+
+        await store.getState().undo();
+        expect(floorObject(objectId)).toMatchObject({
+          widthMm: 500,
+          heightMm: 400,
+          depthMm: 300
+        });
+      });
+
+      it("leaves a widened board alone", async () => {
+        const { artworkId, objectId } = await placeFloorWork({
+          widthMm: 500,
+          heightMm: 400,
+          depthMm: 300
+        });
+        // The curator made the board wider than the work — the exact state the
+        // "Match size to work" hint exists to explain.
+        await store.getState().updateFloorObject(objectId, { widthMm: 2000 });
+
+        await store.getState().updateArtwork(artworkId, {
+          dimensions: { widthMm: 800, heightMm: 600, depthMm: 300, status: "known" }
+        });
+
+        const after = floorObject(objectId);
+        expect(after.widthMm).toBe(2000);
+        // The face travels as a pair, so the height stays put with it.
+        expect(after.heightMm).toBe(400);
+        // Depth is its own concern (how thick the board is) and was untouched,
+        // so it still follows — here to the same 300.
+        expect(after.depthMm).toBe(300);
+      });
+
+      it("leaves a re-thicknessed board's depth alone while the face still follows", async () => {
+        const { artworkId, objectId } = await placeFloorWork({
+          widthMm: 500,
+          heightMm: 400,
+          depthMm: 300
+        });
+        await store.getState().updateFloorObject(objectId, { depthMm: 40 });
+
+        await store.getState().updateArtwork(artworkId, {
+          dimensions: { widthMm: 800, heightMm: 600, depthMm: 250, status: "known" }
+        });
+
+        expect(floorObject(objectId)).toMatchObject({
+          widthMm: 800,
+          heightMm: 600,
+          depthMm: 40
+        });
+      });
+
+      it("follows a monitor's cabinet through monitorBoxSizeMm", async () => {
+        const { artworkId, objectId } = await placeFloorWork(
+          { widthMm: 500, heightMm: 400 },
+          "monitor"
+        );
+        const seeded = floorObject(objectId);
+        expect(seeded.widthMm).toBe(500);
+        expect(seeded.depthMm).toBe(MONITOR_DEPTH_MM);
+
+        await store.getState().updateArtwork(artworkId, {
+          dimensions: { widthMm: 900, heightMm: 700, status: "known" }
+        });
+
+        const after = floorObject(objectId);
+        // The cabinet is always 4:3 off the WIDTH — the work's own 900×700 is
+        // the picture, not the box.
+        expect(after.widthMm).toBe(900);
+        expect(after.heightMm).toBeCloseTo(900 / MONITOR_ASPECT_RATIO, 6);
+        expect(after.depthMm).toBe(MONITOR_DEPTH_MM);
+      });
+
+      it("leaves a resized cabinet alone, all three axes together", async () => {
+        const { artworkId, objectId } = await placeFloorWork(
+          { widthMm: 500, heightMm: 400 },
+          "monitor"
+        );
+        await store.getState().updateFloorObject(objectId, { widthMm: 1200 });
+
+        await store.getState().updateArtwork(artworkId, {
+          dimensions: { widthMm: 900, heightMm: 700, status: "known" }
+        });
+
+        const after = floorObject(objectId);
+        // A cabinet is one indivisible piece of equipment: a diverged width
+        // freezes its height and depth too, or the box would stop being 4:3.
+        expect(after.widthMm).toBe(1200);
+        expect(after.heightMm).toBe(500 / MONITOR_ASPECT_RATIO);
+        expect(after.depthMm).toBe(MONITOR_DEPTH_MM);
+      });
+    });
   });
 
   describe("placeArtwork", () => {

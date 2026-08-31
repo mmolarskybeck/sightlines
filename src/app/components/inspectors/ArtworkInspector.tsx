@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type KeyboardEvent, type ReactNode } from "react";
 import { LinkBreakIcon } from "@phosphor-icons/react/dist/csr/LinkBreak";
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/csr/LockSimple";
 import { LockSimpleOpenIcon } from "@phosphor-icons/react/dist/csr/LockSimpleOpen";
@@ -10,7 +10,11 @@ import type {
   Dimensions,
   DisplayUnit
 } from "../../../domain/project";
-import type { PlacementForm } from "../../../domain/placement/artworkForm";
+import {
+  effectiveDisplayAs,
+  type PlacementForm
+} from "../../../domain/placement/artworkForm";
+import { MEDIUM_SUGGESTIONS } from "../../../domain/placement/mediumCategory";
 import {
   applyAspectFill,
   imageAspectRatio,
@@ -43,6 +47,7 @@ import { ScaleStateBadge } from "./ScaleStateBadge";
 import { LengthField } from "../shared/LengthField";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
+import { Combobox } from "../ui/combobox";
 import { Field } from "../ui/field";
 import { Input } from "../ui/input";
 import { Toggle } from "../ui/toggle";
@@ -76,22 +81,32 @@ export type ArtworkFieldChanges = Partial<
   medium?: string;
 };
 
-// The "Display" dropdown's options. `undefined` is the framed-image default and
-// cannot be a Radix Select value (it reserves the empty string), so the control
-// speaks in these two literals and translates at the edge — one place, right
-// below, so nothing else has to know about the substitution.
-const DISPLAY_AS_FRAMED = "framed";
-type DisplayAsOption = typeof DISPLAY_AS_FRAMED | ArtworkDisplayAs;
-
-const DISPLAY_AS_OPTIONS: { value: DisplayAsOption; label: string }[] = [
-  { value: DISPLAY_AS_FRAMED, label: "Framed image" },
-  { value: "monitor", label: "Box monitor" }
+// The "Display" dropdown's options. Every one of them is a storable value now:
+// the control shows the RESOLVED type (effectiveDisplayAs, which answers the
+// medium-derived or framed default when the record states nothing), and picking
+// any entry writes it explicitly. There is deliberately no "Auto" row — a
+// curator reading this panel wants to know what the work IS in the room, and
+// pinning the answer they can already see is the harmless case.
+const DISPLAY_AS_OPTIONS: { value: ArtworkDisplayAs; label: string }[] = [
+  { value: "framed", label: "Wall work" },
+  { value: "projection", label: "Wall projection" },
+  { value: "monitor", label: "Box monitor" },
+  { value: "sculpture", label: "Sculpture" }
 ];
 
 type ArtworkFieldSpec = {
   key: ArtworkEditableFieldKey;
   label: string;
   placeholder?: string;
+  // Strings offered in a free-solo combobox (ui/combobox.tsx). Medium stays
+  // FREE TEXT — prose like "Oil on canvas" is the common case and must keep
+  // working — and the suggestions exist only so the handful of strings that
+  // carry a display default (see domain/placement/mediumCategory.ts) are
+  // reachable without guessing at spelling. The combobox is what makes that
+  // true in both directions: unlike the native <datalist> it replaced, a
+  // committed suggestion still shows all the others, so switching medium is a
+  // matter of picking rather than deleting first.
+  suggestions?: string[];
 };
 
 // Identity (what the work is) reads at the top beside the thumbnail and is
@@ -103,7 +118,12 @@ const IDENTITY_FIELDS: ArtworkFieldSpec[] = [
   { key: "title", label: "Title" },
   { key: "artist", label: "Artist" },
   { key: "date", label: "Date" },
-  { key: "medium", label: "Medium", placeholder: "Oil on canvas" }
+  {
+    key: "medium",
+    label: "Medium",
+    placeholder: "Oil on canvas",
+    suggestions: MEDIUM_SUGGESTIONS
+  }
 ];
 
 const DETAILS_FIELDS: ArtworkFieldSpec[] = [
@@ -144,7 +164,6 @@ export function ArtworkInspector({
   disabledPlacementForm,
   disabledPlacementFormReason,
   isPlaced,
-  monitorSupportControl,
   placementForm,
   placementSection,
   placementTitle,
@@ -168,14 +187,6 @@ export function ArtworkInspector({
   disabledPlacementForm?: PlacementForm;
   disabledPlacementFormReason?: string;
   isPlaced: boolean;
-  // The pedestal control for a BOX-MONITOR work, injected by App the same way
-  // placementSection is — and for the same reason: it writes to the PLACEMENT
-  // (ArtworkFloorObject.monitorSupport), not to the artwork record this
-  // component owns. Absent when the work isn't a monitor or isn't standing on
-  // the floor: with no floor object there is nothing to write to, and the
-  // default (pedestal) is what a later placement will get anyway. Rendered
-  // inside Display's own section, where the question belongs.
-  monitorSupportControl?: ReactNode;
   // The wall- or floor-position FIELDS (WallPlacementFields /
   // FloorPlacementFields) for a placed artwork, null/undefined when unplaced.
   // App supplies the bare fields and the section title separately
@@ -232,12 +243,13 @@ export function ArtworkInspector({
   // stays out of the way until a curator expands it.
   const hasMatOrFrame = artwork.matWidthMm !== undefined || artwork.frame !== undefined;
 
-  // A box monitor has no mat and no frame — the section is then entirely about
-  // the display type and its pedestal, so it opens at rest: the Display
-  // dropdown is meant to be reachable at a glance (it is the control that says
-  // what this work even IS in the room), and leaving it folded behind a summary
-  // that reads "Box monitor" would hide the only way back out of that choice.
-  const isMonitor = artwork.displayAs === "monitor";
+  // Framing is a question only a WALL WORK has. A projection has no mat, a
+  // sculpture has no frame, and a monitor is a cabinet — for all three the
+  // section would describe nothing at all, so it does not render. Nothing is
+  // deleted: a stored mat/frame survives on the record (effectiveFraming
+  // suppresses it at read time) and the whole section reappears the moment the
+  // Display dropdown goes back to "Wall work".
+  const showFraming = effectiveDisplayAs(artwork) === "framed";
 
   return (
     <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
@@ -277,41 +289,33 @@ export function ArtworkInspector({
         </InspectorSection>
 
         {/* Mat + frame ride right below dimensions — they change the physical
-            size a work occupies on the wall. */}
-        <InspectorSection
-          open={isOpen("matframe", hasMatOrFrame || isMonitor)}
-          summary={
-            isMonitor
-              ? // The framing summary would read "No mat or frame" for a
-                // monitor, which is true and useless. Name the display type
-                // instead — that is what the section now decides.
-                "Box monitor"
-              : formatFramingSummary(
-                  artwork.matWidthMm,
-                  artwork.frame,
-                  artwork.dimensions,
-                  summaryUnit,
-                  artwork.frameIncludedInImage
-                )
-          }
-          title="Framing"
-          onOpenChange={(open) => onSectionOpenChange("matframe", open)}
-        >
-          {/* Keyed on the artwork id so the Overall disclosure closes when the
-              selection changes rather than carrying its open state across. */}
-          <FramingSection
-            key={artwork.id}
-            dimensions={artwork.dimensions}
-            displayAs={artwork.displayAs}
-            frame={artwork.frame}
-            matWidthMm={artwork.matWidthMm}
-            frameIncludedInImage={artwork.frameIncludedInImage}
-            monitorSupportControl={monitorSupportControl}
-            onCommitDisplayAs={(displayAs) => onCommitField({ displayAs })}
-            onCommitFraming={onCommitFraming}
-            unit={unit}
-          />
-        </InspectorSection>
+            size a work occupies on the wall. Wall works only (see showFraming). */}
+        {showFraming ? (
+          <InspectorSection
+            open={isOpen("matframe", hasMatOrFrame)}
+            summary={formatFramingSummary(
+              artwork.matWidthMm,
+              artwork.frame,
+              artwork.dimensions,
+              summaryUnit,
+              artwork.frameIncludedInImage
+            )}
+            title="Framing"
+            onOpenChange={(open) => onSectionOpenChange("matframe", open)}
+          >
+            {/* Keyed on the artwork id so the Overall disclosure closes when the
+                selection changes rather than carrying its open state across. */}
+            <FramingSection
+              key={artwork.id}
+              dimensions={artwork.dimensions}
+              frame={artwork.frame}
+              matWidthMm={artwork.matWidthMm}
+              frameIncludedInImage={artwork.frameIncludedInImage}
+              onCommitFraming={onCommitFraming}
+              unit={unit}
+            />
+          </InspectorSection>
+        ) : null}
 
         {/* Daily-use arranging outranks registrar metadata, so placement
             rides above Details. The section renders only when the work is
@@ -341,9 +345,13 @@ export function ArtworkInspector({
           title="Details"
           onOpenChange={(open) => onSectionOpenChange("details", open)}
         >
+          {/* Keyed on the artwork id (like ArtworkIdentity/FramingSection):
+              TextField seeds its draft once per mount, so without the id in
+              the key a selection change kept showing — and could commit —
+              the PREVIOUS artwork's value. */}
           {DETAILS_FIELDS.map((field) => (
             <TextField
-              key={field.key}
+              key={`${artwork.id}:${field.key}`}
               fieldKey={field.key}
               label={field.label}
               placeholder={field.placeholder}
@@ -415,6 +423,14 @@ function ArtworkIdentity({
   const date = artwork.date?.trim();
   const { displayUnit } = getScopedUnitContext(unit, "artwork");
   const dimensions = formatDimensionsSummary(artwork.dimensions, displayUnit);
+  // Named only when it isn't the plain default: "Wall work" on every painting
+  // would be noise, but a compacted record whose Display control is folded
+  // away still needs to say it's a Box monitor.
+  const resolvedDisplayAs = effectiveDisplayAs(artwork);
+  const displayLabel =
+    resolvedDisplayAs === "framed"
+      ? undefined
+      : DISPLAY_AS_OPTIONS.find((option) => option.value === resolvedDisplayAs)?.label;
 
   return (
     <div className="artwork-inspector-header">
@@ -443,7 +459,9 @@ function ArtworkIdentity({
         <span className="artwork-tombstone-byline">
           {[artist, date].filter(Boolean).join(" · ") || "Artist and date not recorded"}
         </span>
-        <span className="artwork-tombstone-dimensions">{dimensions}</span>
+        <span className="artwork-tombstone-dimensions">
+          {[dimensions, displayLabel].filter(Boolean).join(" · ")}
+        </span>
         {complete ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -465,6 +483,13 @@ function ArtworkIdentity({
         ) : null}
       </div>
 
+      {/* Display collapses WITH the text fields (user decision 2026-08-31):
+          it reads as part of the record — open while the record is incomplete,
+          folded away behind the pencil once it compacts. What keeps the
+          collapsed state honest is the tombstone above, which names any
+          non-default display type, so a compacted "Box monitor" still says so
+          at a glance. Rendering Display last keeps it directly under Medium,
+          the field whose value can imply it. */}
       {editing ? (
         <div className="field-group artwork-inspector-identity">
           {IDENTITY_FIELDS.map((field) => (
@@ -473,6 +498,7 @@ function ArtworkIdentity({
               fieldKey={field.key}
               label={field.label}
               placeholder={field.placeholder}
+              suggestions={field.suggestions}
               value={artworkFieldValue(artwork, field.key)}
               onCommitField={onCommitField}
               // Anti-yank: focusing any identity field latches edit mode, so a
@@ -481,6 +507,27 @@ function ArtworkIdentity({
               onFocus={() => setUserEditing(true)}
             />
           ))}
+
+          <Field compact label="Display">
+            <Select
+              // The RESOLVED type, so the control always states an answer — an
+              // untouched video reads "Wall projection" rather than blank — and
+              // choosing anything pins that answer explicitly.
+              value={effectiveDisplayAs(artwork)}
+              onValueChange={(value) => onCommitField({ displayAs: value as ArtworkDisplayAs })}
+            >
+              <SelectTrigger aria-label="Display type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DISPLAY_AS_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
         </div>
       ) : null}
     </div>
@@ -493,6 +540,7 @@ function TextField({
   onCommitField,
   onFocus,
   placeholder,
+  suggestions,
   value
 }: {
   fieldKey: ArtworkEditableFieldKey;
@@ -504,19 +552,25 @@ function TextField({
   // Ghost example for fields whose expected shape isn't obvious from the label
   // ("Credit line"). Omitted where the label already says it ("Title").
   placeholder?: string;
+  // Offered strings (see ArtworkFieldSpec.suggestions). Their presence swaps the
+  // plain input for a free-solo combobox — same input, same commit path, with a
+  // list that only offers.
+  suggestions?: string[];
   value: string | undefined;
 }) {
   const [input, setInput] = useState(value ?? "");
 
   // Local input is seeded once per mount from `value` and thereafter owns the
-  // text until commit; the parent keys the identity/framing subtrees on
-  // artwork.id, so a selection change remounts and reseeds. Registrar fields
-  // never remount on their own, but an external write to the same field is
-  // rare enough that not mirroring it mid-edit is acceptable — a commit always
-  // wins from the field's own value.
+  // text until commit; every render site keys this component on artwork.id
+  // (identity/framing via their keyed subtrees, registrar fields via their own
+  // keys), so a selection change remounts and reseeds. An external write to
+  // the same field mid-edit is rare enough that not mirroring it is
+  // acceptable — a commit always wins from the field's own value.
 
-  const commit = () => {
-    const trimmed = input.trim();
+  // Takes the text explicitly so picking a suggestion can commit in the same
+  // tick it fills the field, without waiting a render for the state to land.
+  const commit = (raw: string) => {
+    const trimmed = raw.trim();
     // Unlike the project title (always required), these fields are optional
     // curatorial metadata — clearing one is a legitimate edit, so an empty
     // commit is `undefined`, not a revert to the previous value.
@@ -527,20 +581,39 @@ function TextField({
     onCommitField({ [fieldKey]: nextValue } as ArtworkFieldChanges);
   };
 
+  const sharedProps = {
+    placeholder,
+    onBlur: () => commit(input),
+    onFocus,
+    onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      event.currentTarget.blur();
+    }
+  };
+
   return (
     <Field label={label}>
-      <Input
-        placeholder={placeholder}
-        value={input}
-        onBlur={commit}
-        onChange={(event) => setInput(event.target.value)}
-        onFocus={onFocus}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          event.currentTarget.blur();
-        }}
-      />
+      {suggestions ? (
+        <Combobox
+          {...sharedProps}
+          suggestions={suggestions}
+          value={input}
+          onValueChange={setInput}
+          // Picking is also a commit: the Display default derives from Medium,
+          // so it has to fire now rather than on some later blur.
+          onSelectSuggestion={(next) => {
+            setInput(next);
+            commit(next);
+          }}
+        />
+      ) : (
+        <Input
+          {...sharedProps}
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+        />
+      )}
     </Field>
   );
 }
@@ -755,22 +828,16 @@ const DEFAULT_FRAME_WIDTH_MM = 25.4;
 // Overall footprint, quiet at rest with a disclosure to edit it).
 function FramingSection({
   dimensions,
-  displayAs,
   frame,
   matWidthMm,
   frameIncludedInImage,
-  monitorSupportControl,
-  onCommitDisplayAs,
   onCommitFraming,
   unit
 }: {
   dimensions: Dimensions;
-  displayAs?: ArtworkDisplayAs;
   frame?: ArtworkFrame;
   matWidthMm?: number;
   frameIncludedInImage?: boolean;
-  monitorSupportControl?: ReactNode;
-  onCommitDisplayAs: (displayAs: ArtworkDisplayAs | undefined) => void;
   onCommitFraming: (
     changes: Partial<Pick<Artwork, "matWidthMm" | "frame" | "frameIncludedInImage">>
   ) => void;
@@ -829,70 +896,12 @@ function FramingSection({
     });
   };
 
-  // A box monitor has no mat, no frame band and no overall framed footprint —
-  // it is equipment the work plays on. Those controls are HIDDEN rather than
-  // disabled (contrast `framingLocked`, where the fields still describe a
-  // stored mat/frame the flag is overriding): here they describe nothing at
-  // all, and a row of greyed-out inputs would only invite the question of what
-  // would happen if they were enabled. Any stored mat/frame survives untouched
-  // and reappears the moment the work goes back to a framed image.
-  const isMonitor = displayAs === "monitor";
-
-  // Hoisted so the mat/frame body below keeps its original shape (and its
-  // original indentation) instead of being wrapped in a conditional: the
-  // monitor branch returns EARLY with just this header, and the framed-image
-  // path renders it followed by everything that was always there.
-  const displayHeader = (
-    <>
-      {/* The DISPLAY TYPE leads the section: it decides what everything below
-          it even means. Always rendered — including for an unplaced work, which
-          is exactly when a curator is likeliest to be recording what a video
-          actually is. */}
-      <Field compact label="Display">
-        <Select
-          value={displayAs ?? DISPLAY_AS_FRAMED}
-          onValueChange={(value) =>
-            // "framed" is the absence of a display type, not a stored value —
-            // see DISPLAY_AS_FRAMED. Translating here keeps every consumer's
-            // "absent = framed image" reading intact.
-            onCommitDisplayAs(
-              value === DISPLAY_AS_FRAMED ? undefined : (value as ArtworkDisplayAs)
-            )
-          }
-        >
-          <SelectTrigger aria-label="Display type">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {DISPLAY_AS_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </Field>
-    </>
-  );
-
-  if (isMonitor) {
-    return (
-      <>
-        {displayHeader}
-        {/* Pedestal-or-floor, injected by App because it writes to the
-            PLACEMENT. Absent while the work is unplaced — the default
-            (pedestal) applies when it lands. */}
-        {monitorSupportControl}
-        <p className="field-hint">
-          Shown as a black monitor with the image on its screen.
-        </p>
-      </>
-    );
-  }
-
+  // This section only ever renders for a work whose effective display type is
+  // "framed" (see showFraming in ArtworkInspector), so there is no display
+  // branch here any more — the Display dropdown itself moved up beside Medium,
+  // where the question of what a work IS belongs.
   return (
     <>
-      {displayHeader}
       {/* Reuses the Dimensions "Approximate" checkbox-row styling (see
           .artwork-dimensions-approximate) rather than adding CSS. */}
       <label className="artwork-dimensions-approximate">

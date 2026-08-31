@@ -61,6 +61,7 @@ import { createFloorCase, createWallCase } from "../domain/placement/createCase"
 import { createArtworkPlacement, getEffectivePlacementSizeMm } from "../domain/placement/placeArtwork";
 import {
   effectiveFloorDepthMm,
+  SIZE_MATCH_TOLERANCE_MM,
   type PlacementForm
 } from "../domain/placement/artworkForm";
 import {
@@ -319,6 +320,15 @@ function findWallSlotBlocker(
     .sort((a, b) => a.id.localeCompare(b.id));
   // A door or window explains itself better than a blocked zone does.
   return overlapping.find(isConnectableOpening) ?? overlapping[0] ?? null;
+}
+
+// Whether a stored placement axis still equals the value placement seeded it
+// with. Shares SIZE_MATCH_TOLERANCE_MM with the inspector's "Match size to
+// work" hint on purpose: that hint appears exactly when a floor placement has
+// DIVERGED from the work, and the dimension-edit rebake follows a placement
+// exactly while it has NOT. One tolerance, so a box can never be both.
+function matchesSeededMm(storedMm: number, seededMm: number): boolean {
+  return Math.abs(storedMm - seededMm) < SIZE_MATCH_TOLERANCE_MM;
 }
 
 // Enforce one placement only when adding; preserve duplicates already loaded.
@@ -2469,8 +2479,9 @@ export function createAppStore(deps: AppStoreDeps) {
           return;
         }
 
-        // Resize wall placements without display overrides. Floor footprints
-        // remain stored as-is; artwork and placement changes share one undo entry.
+        // Resize wall placements without display overrides, and follow FLOOR
+        // placements that have not diverged from the size they were seeded at.
+        // Artwork and placement changes share one undo entry.
         const project = get().project;
         let projectEdit: { before: Project; after: Project } | undefined;
         let placementWarnings: PlacementWarning[] = [];
@@ -2479,9 +2490,14 @@ export function createAppStore(deps: AppStoreDeps) {
         if (project && dimensionsChanged) {
           // A derived axis needs the image ratio; skip the asset fetch on the
           // common both-known path (no axis to derive) so a plain dimension
-          // edit stays synchronous-cheap.
-          const needsAspect =
-            parsed.dimensions.widthMm === undefined || parsed.dimensions.heightMm === undefined;
+          // edit stays synchronous-cheap. BOTH sides are checked because the
+          // floor rebake below reconstructs the OLD seeded size as well — a
+          // half-known "before" needs the same ratio the seeding used, or the
+          // comparison would read every placement as diverged.
+          const needsAspect = [parsed.dimensions, before.dimensions].some(
+            (dimensions) =>
+              dimensions.widthMm === undefined || dimensions.heightMm === undefined
+          );
           const aspect = needsAspect ? await loadArtworkAspect(parsed) : undefined;
 
           const nextWallObjects = project.wallObjects.map((wallObject) => {
@@ -2502,10 +2518,82 @@ export function createAppStore(deps: AppStoreDeps) {
             return { ...wallObject, widthMm: size.widthMm, heightMm: size.heightMm };
           });
 
-          if (affectedIds.size > 0) {
+          // A floor placement's box is a SEPARATE measurement from the work
+          // (see FloorArtworkImageSizeNote): the box is the thing standing on
+          // the floor — a projection board, a plinth, a cabinet — and a curator
+          // may legitimately have resized it. So this follows a dimension edit
+          // only while the box still equals what placement seeded it with; once
+          // it has diverged, retyping the work's height must not silently shrink
+          // the board back. Divergence is judged against the OLD dimensions,
+          // reconstructed through exactly the sources that seeded it
+          // (monitorBoxSizeMm for a cabinet, getEffectivePlacementSizeMm +
+          // effectiveFloorDepthMm for everything else), so the two can't drift.
+          const isMonitor = isMonitorArtwork(parsed);
+          const seededBefore = isMonitor
+            ? monitorBoxSizeMm(before.dimensions)
+            : {
+                ...getEffectivePlacementSizeMm(before.dimensions, aspect),
+                depthMm: effectiveFloorDepthMm(before.dimensions)
+              };
+          const seededAfter = isMonitor
+            ? monitorBoxSizeMm(parsed.dimensions)
+            : {
+                ...getEffectivePlacementSizeMm(parsed.dimensions, aspect),
+                depthMm: effectiveFloorDepthMm(parsed.dimensions)
+              };
+
+          let floorChanged = false;
+          const nextFloorObjects = project.floorObjects.map((object) => {
+            if (
+              object.kind !== "artwork" ||
+              object.artworkId !== artworkId ||
+              // Same exemption the wall path makes: an explicit display size is
+              // the curator's own answer about how big this placement reads.
+              object.displayDimensionsOverride
+            ) {
+              return object;
+            }
+
+            // A monitor's cabinet is one indivisible object — its face is 4:3
+            // by construction — so all three axes move together or none do.
+            // Everything else is judged per CONCERN: the face (width × height,
+            // which the work's own dimensions size) and the depth (how thick
+            // the board or plinth is, which effectiveFloorDepthMm sizes) are
+            // two different questions a curator answers separately in
+            // FloorPlacementFields, so each follows on its own.
+            const faceMatches =
+              matchesSeededMm(object.widthMm, seededBefore.widthMm) &&
+              matchesSeededMm(object.heightMm, seededBefore.heightMm);
+            const depthMatches = matchesSeededMm(object.depthMm, seededBefore.depthMm);
+            const followFace = faceMatches && (!isMonitor || depthMatches);
+            const followDepth = isMonitor ? followFace : depthMatches;
+
+            const next = {
+              ...object,
+              ...(followFace
+                ? { widthMm: seededAfter.widthMm, heightMm: seededAfter.heightMm }
+                : {}),
+              ...(followDepth ? { depthMm: seededAfter.depthMm } : {})
+            };
+            if (
+              next.widthMm === object.widthMm &&
+              next.heightMm === object.heightMm &&
+              next.depthMm === object.depthMm
+            ) {
+              return object;
+            }
+            floorChanged = true;
+            return next;
+          });
+
+          if (affectedIds.size > 0 || floorChanged) {
             const after = {
               ...project,
-              wallObjects: nextWallObjects,
+              ...(affectedIds.size > 0 ? { wallObjects: nextWallObjects } : {}),
+              // Floor objects carry no wall bounds to validate (see
+              // placeArtworkOnFloor), so this extends the edit without ever
+              // joining affectedIds.
+              ...(floorChanged ? { floorObjects: nextFloorObjects } : {}),
               updatedAt: new Date().toISOString()
             };
             projectEdit = { before: project, after };

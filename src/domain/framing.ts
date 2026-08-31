@@ -5,6 +5,7 @@ import type {
   WallObject,
   WallObjectBase
 } from "./project";
+import { effectiveDisplayAs } from "./placement/artworkForm";
 
 // Schematic, flat mockup colors — deliberately NOT photoreal frame textures
 // (docs/quick-todos.md). One tasteful flat value per finish, shared by the
@@ -125,19 +126,40 @@ export function getArtworkOuterDimensionsMm(
   };
 }
 
-// The mat/frame that geometry and the renderer should actually use. When the
-// work's dimensions already include the frame (frameIncludedInImage), there is
-// nothing to add or draw: the frame is part of the photo/size as given, so both
-// bands read as absent. Legacy/unflagged records return their own mat/frame
-// unchanged. This is the ONLY place the flag is interpreted — geometry, render,
-// tooltip, and inspector all route through here, so a flagged work can never
-// double-count (footprint == image size) or draw a schematic band over a photo
-// that already shows a frame. A missing artwork (dangling id) contributes no
-// bands, same as today.
+// What effectiveFraming reads. The display half is `Partial` so a caller
+// holding only the framing columns (a bulk-edit row, a test fixture) can still
+// ask — such a record resolves to "framed" and behaves exactly as before.
+export type FramingSource = Pick<
+  Artwork,
+  "matWidthMm" | "frame" | "frameIncludedInImage"
+> &
+  Partial<Pick<Artwork, "displayAs" | "metadata">>;
+
+// The mat/frame that geometry and the renderer should actually use. Two
+// suppressions, both resolved HERE and nowhere else, so geometry, render,
+// tooltip, PDF, checklist and inspector can never disagree:
+//
+//  1. frameIncludedInImage — the work's dimensions already contain the frame
+//     (often because the photo itself shows it), so there is nothing to add or
+//     draw. This is the ONLY place the flag is interpreted, which is what keeps
+//     a flagged work from double-counting (footprint == image size) or painting
+//     a schematic band over a photo that already shows one.
+//  2. a frameless DISPLAY TYPE — a wall projection and a sculpture have no mat
+//     and no frame on any surface. Nothing is deleted from the record: a stored
+//     mat/frame survives untouched and reappears the moment the work goes back
+//     to "framed", exactly as with the flag above. (A monitor never reaches a
+//     framing consumer at all — its renderers branch to the cabinet first — but
+//     it is listed with the others so the rule reads as one rule.)
+//
+// Legacy/unflagged records return their own mat/frame unchanged; a missing
+// artwork (dangling id) contributes no bands, same as today.
 export function effectiveFraming(
-  artwork?: Pick<Artwork, "matWidthMm" | "frame" | "frameIncludedInImage">
+  artwork?: FramingSource
 ): { matWidthMm?: number; frame?: ArtworkFrame } {
   if (!artwork || artwork.frameIncludedInImage) {
+    return {};
+  }
+  if (effectiveDisplayAs(artwork) !== "framed") {
     return {};
   }
   return { matWidthMm: artwork.matWidthMm, frame: artwork.frame };
@@ -156,7 +178,7 @@ export function effectiveFraming(
 // until artworks carry an explicit orientation.
 export function getPlacementFootprintMm(
   placement: Pick<WallObjectBase, "widthMm" | "heightMm"> & { wallId: string },
-  artwork?: Pick<Artwork, "matWidthMm" | "frame" | "frameIncludedInImage">
+  artwork?: FramingSource
 ): OuterDimensionsMm {
   const { matWidthMm, frame } = effectiveFraming(artwork);
   return getArtworkOuterDimensionsMm(
@@ -173,7 +195,7 @@ export function getPlacementFootprintMm(
 // objects pass through by identity.
 export function withArtworkFootprint<T extends WallObject>(
   object: T,
-  artwork?: Pick<Artwork, "matWidthMm" | "frame" | "frameIncludedInImage">
+  artwork?: FramingSource
 ): T {
   if (object.kind !== "artwork" || !artwork) {
     return object;

@@ -2552,23 +2552,6 @@ export function App() {
                     : undefined
                 }
                 isPlaced={isArtworkPlaced}
-                // Pedestal-or-floor is a fact about THIS installation, so the
-                // control writes to the floor placement and only exists when
-                // there is one. An unplaced monitor gets the default (pedestal)
-                // when it lands — see ArtworkFloorObject.monitorSupport.
-                monitorSupportControl={
-                  selectedArtworkIsMonitor && placedFloorArtwork ? (
-                    <MonitorSupportField
-                      monitorSupport={placedFloorArtwork.monitorSupport}
-                      onChange={(monitorSupport) =>
-                        void setFloorArtworkMonitorSupport(
-                          placedFloorArtwork.id,
-                          monitorSupport
-                        )
-                      }
-                    />
-                  ) : undefined
-                }
                 placementForm={artworkPlacementForm}
                 disabledPlacementForm={
                   noWallToHangSelectedArtworkOn ? "wall" : undefined
@@ -2637,42 +2620,58 @@ export function App() {
                                 })
                             })}
                       />
-                      {/* Both of the remaining floor controls are about the
-                          neutral image BOX, which a monitor placement isn't:
-                          its box is the cabinet (sized from the 4:3 face, not
-                          from the work), and a monitor shows its picture on one
-                          screen — "match the box to the work" and a six-face
-                          picker would both be offering to break it. */}
+                      {/* Pedestal-or-floor is a fact about THIS installation —
+                          it writes to the floor placement (monitorSupport), so
+                          it lives with the other placement fields rather than
+                          in the identity block, and stays reachable when the
+                          record up there has compacted. An unplaced monitor
+                          gets the default (pedestal) when it lands. */}
+                      {selectedArtworkIsMonitor ? (
+                        <MonitorSupportField
+                          monitorSupport={placedFloorArtwork.monitorSupport}
+                          onChange={(monitorSupport) =>
+                            void setFloorArtworkMonitorSupport(
+                              placedFloorArtwork.id,
+                              monitorSupport
+                            )
+                          }
+                        />
+                      ) : null}
+                      {/* The box's Width/Height size the object standing on the
+                          floor; the work has its own recorded size, and 3D draws
+                          the image at THAT size. This note appears only once the
+                          two have drifted apart, and offers the way back. A
+                          monitor asks the same question about its CABINET, whose
+                          target is the 4:3 box the work implies — see the note's
+                          own monitor branch. */}
+                      <FloorArtworkImageSizeNote
+                        dimensions={selectedArtwork.dimensions}
+                        isMonitor={selectedArtworkIsMonitor}
+                        objectWidthMm={placedFloorArtwork.widthMm}
+                        objectHeightMm={placedFloorArtwork.heightMm}
+                        objectDepthMm={placedFloorArtwork.depthMm}
+                        unit={project.unit}
+                        onMatchSizeToWork={(widthMm, heightMm, depthMm) =>
+                          void updateFloorObject(placedFloorArtwork.id, {
+                            widthMm,
+                            heightMm,
+                            ...(depthMm !== undefined ? { depthMm } : {})
+                          })
+                        }
+                      />
+                      {/* Which box faces carry the image — a box-specific
+                          question a wall-hung placement (a plane, not a box)
+                          never has, so it rides only this floor branch. A
+                          monitor is excluded on its own terms: it shows its
+                          picture on ONE screen, so a six-face picker would be
+                          offering to break it. */}
                       {selectedArtworkIsMonitor ? null : (
-                        <>
-                          {/* The box's Width/Height size the object standing on
-                              the floor; the work has its own recorded size, and
-                              3D draws the image at THAT size. This note appears
-                              only once the two have drifted apart, and offers
-                              the way back. */}
-                          <FloorArtworkImageSizeNote
-                            dimensions={selectedArtwork.dimensions}
-                            objectWidthMm={placedFloorArtwork.widthMm}
-                            objectHeightMm={placedFloorArtwork.heightMm}
-                            unit={project.unit}
-                            onMatchSizeToWork={(widthMm, heightMm) =>
-                              void updateFloorObject(placedFloorArtwork.id, {
-                                widthMm,
-                                heightMm
-                              })
-                            }
-                          />
-                          {/* Which box faces carry the image — a box-specific
-                              question a wall-hung placement (a plane, not a
-                              box) never has, so it rides only this floor
-                              branch. */}
-                          <FloorArtworkImageFacesField
-                            imageFaces={placedFloorArtwork.imageFaces}
-                            onChange={(faces) =>
-                              void setFloorArtworkImageFaces(placedFloorArtwork.id, faces)
-                            }
-                          />
-                        </>
+                        <FloorArtworkImageFacesField
+                          imageFaces={placedFloorArtwork.imageFaces}
+                          onChange={(faces) =>
+                            void setFloorArtworkImageFaces(placedFloorArtwork.id, faces)
+                          }
+                        />
                       )}
                     </>
                   ) : null

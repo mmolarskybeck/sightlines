@@ -28,16 +28,28 @@ export type ArtworkFrame = {
 };
 
 // How a work is DISPLAYED, as an explicit curator choice on the record itself
-// (the inspector's "Display" dropdown). Absent — every legacy record, and the
-// default for a new one — means the framed-image reading this app has always
-// had: a flat plane on a wall, or a plain box on the floor.
+// (the inspector's "Display" dropdown, which sits under Medium). Absent — every
+// legacy record — means AUTO: the effective type is derived from the work's
+// medium, or from whether it carries a mat/frame, by effectiveDisplayAs
+// (domain/placement/artworkForm.ts). Nothing reads this field raw except that
+// resolver and the schema.
 //
-// "monitor" is a CRT/box monitor: a black box with a 4:3 screen on its front
-// face showing the work's image, standing on a plain white pedestal (or, by
-// per-placement choice, directly on the floor). Typed as a union rather than a
-// boolean so future display types (flatscreen, projection) slot in without a
-// second field or a migration — see MONITOR_* below for its geometry.
-export type ArtworkDisplayAs = "monitor";
+// - "framed": the reading this app has always had — a flat plane on a wall (or
+//   a plain box on the floor), with the schematic mat/frame bands if the record
+//   carries them. Storable EXPLICITLY, unlike before: choosing it in the
+//   dropdown pins the work as a wall work even when its medium or its depth
+//   would have said otherwise.
+// - "projection": a wall projection. Renders exactly like an unframed wall work
+//   in v1 — no mat, no frame, no soft-edge treatment yet — and its mat/frame
+//   are suppressed at read time (effectiveFraming), never deleted.
+// - "monitor": a CRT/box monitor — a black box with a 4:3 screen on its front
+//   face showing the work's image, standing on a plain white pedestal (or, by
+//   per-placement choice, directly on the floor). See MONITOR_* below for its
+//   geometry.
+// - "sculpture": a freestanding object. Stands on the floor by default and
+//   never draws a mat or frame; hung on a wall it follows the deep-wall-artwork
+//   pipeline, frameless.
+export type ArtworkDisplayAs = "framed" | "projection" | "monitor" | "sculpture";
 
 export type Artwork = {
   id: string;
@@ -60,10 +72,11 @@ export type Artwork = {
   // from dimensions.depthMm (see domain/placement/artworkForm.ts). Additive and
   // optional, so pre-existing artwork documents validate unchanged.
   placementForm?: "wall" | "floor";
-  // How the work is displayed (see ArtworkDisplayAs). Absent = framed image,
-  // which is what every record was before this field existed. Additive and
-  // optional, so pre-existing artwork documents validate unchanged — no
-  // schema-version bump.
+  // How the work is displayed (see ArtworkDisplayAs). Absent = AUTO: derived
+  // from the medium (and from a stored mat/frame) by effectiveDisplayAs, which
+  // answers "framed" for every record that predates medium categories, so old
+  // projects read exactly as they always did. Additive and optional, so
+  // pre-existing artwork documents validate unchanged — no schema-version bump.
   //
   // It travels with the WORK, not with a placement: a video on a CRT is a video
   // on a CRT whether or not it is in a room yet, which is also why the

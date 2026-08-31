@@ -11,6 +11,7 @@ import {
 import { WALL_OBJECT_PLAN_DEPTH_MM } from "../geometry/planObjects";
 import { getArtworkOuterDimensionsMm } from "../framing";
 import {
+  effectiveDisplayAs,
   effectiveFloorDepthMm,
   effectivePlacementForm,
   effectiveWallArtworkDepthMm,
@@ -26,6 +27,47 @@ function makeArtwork(dimensions: Dimensions, placementForm?: "wall" | "floor"): 
     metadata: {}
   };
 }
+
+// Medium is virtual — it lives at metadata.medium, the slot the importer writes.
+function withMedium(artwork: Artwork, medium: string): Artwork {
+  return { ...artwork, metadata: { ...artwork.metadata, medium } };
+}
+
+const FLAT: Dimensions = { widthMm: 600, heightMm: 800, status: "known" };
+const DEEP: Dimensions = { widthMm: 600, heightMm: 800, depthMm: 450, status: "known" };
+
+describe("effectiveDisplayAs — resolution ladder", () => {
+  it("lets an explicit choice win over everything", () => {
+    const stated = { ...withMedium(makeArtwork(FLAT), "Sculpture"), displayAs: "framed" as const };
+    expect(effectiveDisplayAs(stated)).toBe("framed");
+  });
+
+  it("GUARD: a stored mat or frame reads as framed, whatever the medium says", () => {
+    // The protection for existing real projects: a work someone matted and
+    // framed must not silently restage itself because its medium string
+    // happens to name a category.
+    const matted = { ...withMedium(makeArtwork(FLAT), "Sculpture"), matWidthMm: 75 };
+    expect(effectiveDisplayAs(matted)).toBe("framed");
+
+    const framed = {
+      ...withMedium(makeArtwork(FLAT), "Film/video"),
+      frame: { widthMm: 25, finish: "black" as const }
+    };
+    expect(effectiveDisplayAs(framed)).toBe("framed");
+  });
+
+  it("derives from the medium when nothing is stated and nothing is framed", () => {
+    expect(effectiveDisplayAs(withMedium(makeArtwork(FLAT), "Photograph"))).toBe("framed");
+    expect(effectiveDisplayAs(withMedium(makeArtwork(FLAT), "Film/video"))).toBe("projection");
+    expect(effectiveDisplayAs(withMedium(makeArtwork(FLAT), "Sculpture"))).toBe("sculpture");
+    expect(effectiveDisplayAs(withMedium(makeArtwork(FLAT), "Installation"))).toBe("sculpture");
+  });
+
+  it("falls back to framed for prose and for an unrecorded medium", () => {
+    expect(effectiveDisplayAs(withMedium(makeArtwork(FLAT), "Oil on canvas"))).toBe("framed");
+    expect(effectiveDisplayAs(makeArtwork(FLAT))).toBe("framed");
+  });
+});
 
 describe("effectivePlacementForm — inference", () => {
   it("infers 'floor' when depth is a positive number", () => {
@@ -78,6 +120,52 @@ describe("effectivePlacementForm — display type", () => {
     expect(
       effectivePlacementForm(makeArtwork({ widthMm: 500, status: "known" }))
     ).toBe("wall");
+  });
+
+  it("stands a sculpture on the floor, and throws a projection at a wall", () => {
+    const sculpture = { ...makeArtwork(FLAT), displayAs: "sculpture" as const };
+    expect(effectivePlacementForm(sculpture)).toBe("floor");
+
+    const projection = { ...makeArtwork(DEEP), displayAs: "projection" as const };
+    expect(effectivePlacementForm(projection)).toBe("wall");
+  });
+
+  it("lets an EXPLICIT 'framed' pin a deep work to the wall", () => {
+    // "Wall work" chosen in the dropdown is an answer, not a guess: a deep
+    // stretcher or shadow box stays hung.
+    const pinned = { ...makeArtwork(DEEP), displayAs: "framed" as const };
+    expect(effectivePlacementForm(pinned)).toBe("wall");
+  });
+
+  it("PRESERVES the depth heuristic for a merely-DERIVED 'framed'", () => {
+    // The whole compatibility guarantee: nothing in a project that predates
+    // display types moves. A deep painting with no stored displayAs still
+    // stands up, exactly as it always did — a derived "framed" must not reach
+    // the explicit-pin rule above.
+    expect(effectivePlacementForm(withMedium(makeArtwork(DEEP), "Painting"))).toBe("floor");
+    expect(effectivePlacementForm(makeArtwork(DEEP))).toBe("floor");
+    // ...and a matted deep work, whose "framed" comes from the mat guard.
+    expect(
+      effectivePlacementForm({ ...makeArtwork(DEEP), matWidthMm: 75 })
+    ).toBe("floor");
+  });
+
+  it("follows a medium-derived display type with no displayAs stored at all", () => {
+    expect(effectivePlacementForm(withMedium(makeArtwork(FLAT), "Film/video"))).toBe("wall");
+    expect(effectivePlacementForm(withMedium(makeArtwork(FLAT), "Sculpture"))).toBe("floor");
+    // ...and a flat photograph is still a wall work, as before.
+    expect(effectivePlacementForm(withMedium(makeArtwork(FLAT), "Photograph"))).toBe("wall");
+  });
+
+  it("keeps the Type row's explicit override above every display type", () => {
+    expect(
+      effectivePlacementForm({
+        ...withMedium(makeArtwork(FLAT, "wall"), "Sculpture")
+      })
+    ).toBe("wall");
+    expect(
+      effectivePlacementForm({ ...makeArtwork(FLAT, "floor"), displayAs: "projection" })
+    ).toBe("floor");
   });
 });
 

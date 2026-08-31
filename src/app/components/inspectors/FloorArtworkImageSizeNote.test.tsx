@@ -103,7 +103,10 @@ describe("FloorArtworkImageSizeNote", () => {
     fireEvent.click(screen.getByRole("button", MATCH_BUTTON));
 
     expect(onMatchSizeToWork).toHaveBeenCalledTimes(1);
-    expect(onMatchSizeToWork).toHaveBeenCalledWith(1524, 1219.2);
+    // The third argument is the depth, and it is `undefined` here on purpose:
+    // only the monitor branch (whose cabinet is one indivisible box) hands one
+    // back, and App spreads it in only when it is present.
+    expect(onMatchSizeToWork).toHaveBeenCalledWith(1524, 1219.2, undefined);
   });
 
   it("says nothing when the work's own size is half-unknown", () => {

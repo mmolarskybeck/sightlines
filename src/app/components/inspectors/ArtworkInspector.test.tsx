@@ -2,6 +2,7 @@ import type { ComponentProps, ReactElement } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Artwork } from "../../../domain/project";
+import { MEDIUM_SUGGESTIONS } from "../../../domain/placement/mediumCategory";
 import { ArtworkInspector } from "./ArtworkInspector";
 import { TooltipProvider } from "../ui/tooltip";
 
@@ -344,7 +345,10 @@ describe("ArtworkInspector metadata fields", () => {
 
     // Medium is stored at artwork.metadata.medium, not as a column on Artwork —
     // the field reads it from there and commits it back under the same name.
-    const mediumInput = screen.getByRole("textbox", { name: "Medium" });
+    // Its role is "combobox", not "textbox": the field carries a suggestion
+    // list. It is still an ordinary free-text input — the list only offers, and
+    // typed prose commits on blur exactly as every other identity field does.
+    const mediumInput = screen.getByRole("combobox", { name: "Medium" });
     expect(mediumInput).toHaveValue("Oil on canvas");
 
     fireEvent.change(mediumInput, { target: { value: "Acrylic on linen" } });
@@ -361,11 +365,99 @@ describe("ArtworkInspector metadata fields", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
-    const mediumInput = screen.getByRole("textbox", { name: "Medium" });
+    const mediumInput = screen.getByRole("combobox", { name: "Medium" });
     fireEvent.change(mediumInput, { target: { value: "   " } });
     fireEvent.blur(mediumInput);
 
     expect(onCommitField).toHaveBeenCalledWith({ medium: undefined });
+  });
+
+  // The bug the combobox replaced the native <datalist> to fix: a browser
+  // filters a datalist against the committed value, so "Photograph" filtered
+  // the list down to "Photograph" and the field looked like it had no other
+  // options left. An exact match must show every suggestion.
+  it("shows all medium suggestions when the committed value already is one", () => {
+    renderInspector({
+      artwork: { ...baseArtwork, metadata: { medium: "Photograph" } },
+      onCommitField: vi.fn()
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
+    const mediumInput = screen.getByRole("combobox", { name: "Medium" });
+    expect(mediumInput).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.keyDown(mediumInput, { key: "ArrowDown" });
+
+    expect(mediumInput).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(
+      MEDIUM_SUGGESTIONS
+    );
+    // Arrow-down landed on the first row, and the input — which keeps focus —
+    // is what points at it.
+    expect(mediumInput).toHaveAttribute(
+      "aria-activedescendant",
+      screen.getByRole("option", { name: "Photograph" }).id
+    );
+  });
+
+  it("filters the medium list only while the typed value matches nothing exactly", () => {
+    renderInspector({
+      artwork: { ...baseArtwork, metadata: { medium: "Photograph" } },
+      onCommitField: vi.fn()
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
+    const mediumInput = screen.getByRole("combobox", { name: "Medium" });
+    fireEvent.change(mediumInput, { target: { value: "paint" } });
+
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Painting"
+    ]);
+
+    // Prose matches nothing, so there is nothing to offer and no popup.
+    fireEvent.change(mediumInput, { target: { value: "Oil on canvas" } });
+
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+    expect(mediumInput).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("commits a picked medium suggestion immediately, without waiting for a blur", () => {
+    const onCommitField = vi.fn();
+    renderInspector({
+      artwork: { ...baseArtwork, metadata: { medium: "Photograph" } },
+      onCommitField
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
+    const mediumInput = screen.getByRole("combobox", { name: "Medium" });
+    fireEvent.click(mediumInput);
+    fireEvent.click(screen.getByRole("option", { name: "Film/video" }));
+
+    // The Display default derives from Medium, so the pick has to reach the
+    // store now rather than on some later blur.
+    expect(onCommitField).toHaveBeenCalledWith({ medium: "Film/video" });
+    expect(mediumInput).toHaveValue("Film/video");
+    expect(mediumInput).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("closes the medium list on Escape without clobbering the typed text", () => {
+    const onCommitField = vi.fn();
+    renderInspector({ artwork: baseArtwork, onCommitField });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
+    const mediumInput = screen.getByRole("combobox", { name: "Medium" });
+    fireEvent.change(mediumInput, { target: { value: "Paint" } });
+    fireEvent.keyDown(mediumInput, { key: "ArrowDown" });
+    fireEvent.keyDown(mediumInput, { key: "Escape" });
+
+    expect(mediumInput).toHaveValue("Paint");
+    expect(mediumInput).toHaveAttribute("aria-expanded", "false");
+    expect(onCommitField).not.toHaveBeenCalled();
+
+    // Escape dismissed the list, not the edit: the field still commits its own
+    // text on blur.
+    fireEvent.blur(mediumInput);
+    expect(onCommitField).toHaveBeenCalledWith({ medium: "Paint" });
   });
 
   it("keeps Details collapsed by default and offers Object no. / Location / Credit line inside it", () => {
@@ -397,5 +489,36 @@ describe("ArtworkInspector metadata fields", () => {
     expect(onCommitField).toHaveBeenCalledWith({
       creditLine: "Courtesy of the artist and Gallery X"
     });
+  });
+  // Regression: TextField seeds its draft once per mount, and the Details
+  // fields used to be keyed on field.key alone — so changing the selection
+  // kept every subsequently selected artwork showing (and, on blur, able to
+  // commit) the PREVIOUS artwork's object number. The key must carry the
+  // artwork id so a selection change remounts and reseeds the inputs.
+  it("reseeds the Details inputs when the selected artwork changes", () => {
+    const { rerender, props } = renderInspector({
+      artwork: { ...baseArtwork, accessionNumber: "1787.2001" },
+      sectionsOpen: { details: true }
+    });
+
+    expect(screen.getByRole("textbox", { name: "Object no." })).toHaveValue(
+      "1787.2001"
+    );
+
+    rerender(
+      <ArtworkInspector
+        {...props}
+        artwork={{
+          ...baseArtwork,
+          id: "artwork-2",
+          title: "Smoky City",
+          accessionNumber: "325.1963"
+        }}
+      />
+    );
+
+    expect(screen.getByRole("textbox", { name: "Object no." })).toHaveValue(
+      "325.1963"
+    );
   });
 });

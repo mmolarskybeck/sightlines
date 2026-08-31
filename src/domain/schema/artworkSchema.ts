@@ -25,10 +25,13 @@ export const artworkSchema = z.object({
   placementForm: z.enum(["wall", "floor"]).optional(),
   // How the work is displayed. Additive, no schema-version bump (mirrors
   // placementForm): absent on every legacy document, which validates and parses
-  // to undefined ⇒ the framed-image reading, exactly as before. A one-member
-  // enum on purpose — future display types extend it, they don't replace it
-  // (see ArtworkDisplayAs in project.ts).
-  displayAs: z.enum(["monitor"]).optional(),
+  // to undefined ⇒ auto, which resolves to the framed-image reading for every
+  // record that predates medium categories. The enum GROWS rather than being
+  // replaced — "framed" joined it once it became storable as an explicit pin
+  // (see ArtworkDisplayAs in project.ts), and a document written by a newer app
+  // carrying a member this one doesn't know still fails closed here rather than
+  // silently loading as something else.
+  displayAs: z.enum(["framed", "projection", "monitor", "sculpture"]).optional(),
   // Optional, additive framing (no schema-version bump) — absent on legacy records.
   matWidthMm: z.number().positive().optional(),
   frame: z

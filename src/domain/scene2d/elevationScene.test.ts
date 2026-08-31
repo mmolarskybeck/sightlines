@@ -132,6 +132,30 @@ describe("buildElevationScene", () => {
     expect(scene.artworks[0]!.outOfBounds).toBe(true);
   });
 
+  it("draws a projection with no frame band, while the stored frame survives on the record", () => {
+    // Same record, same placement, same wall as the framed case above — only
+    // the display type differs, and with it the whole framing derivation
+    // (effectiveFraming). A projection has no mat and no frame on any surface,
+    // so the footprint that overhung the wall no longer does.
+    const artwork = {
+      ...artworkRecord(),
+      matWidthMm: 75,
+      frame: { widthMm: 25, finish: "black" as const },
+      displayAs: "projection" as const
+    };
+    const scene = buildElevationScene(
+      [placement({ xMm: 550 })],
+      { ...WALL, artworksById: new Map([[artwork.id, artwork]]) }
+    );
+
+    expect(scene.artworks[0]!.sizeMm).toEqual({ widthMm: 1000, heightMm: 800 });
+    expect(scene.artworks[0]!.outOfBounds).toBe(false);
+    // Suppressed at READ time, never deleted: the joined record still carries
+    // both bands, so flipping back to "Wall work" restores them.
+    expect(scene.artworks[0]!.artwork?.matWidthMm).toBe(75);
+    expect(scene.artworks[0]!.artwork?.frame).toEqual({ widthMm: 25, finish: "black" });
+  });
+
   it("joins the artwork record when it resolves and leaves it undefined when dangling", () => {
     const artwork = artworkRecord();
     const scene = buildElevationScene(

@@ -2,24 +2,92 @@ import { WALL_OBJECT_PLAN_DEPTH_MM } from "../geometry/planObjects";
 import {
   DEFAULT_FLOOR_OBJECT_DEPTH_MM,
   type Artwork,
+  type ArtworkDisplayAs,
   type ArtworkWallObject,
   type Dimensions,
   type WallObject
 } from "../project";
+import { defaultDisplayAsForCategory, mediumCategory } from "./mediumCategory";
 
 // Explicit placement form overrides the depth-based default.
 export type PlacementForm = "wall" | "floor";
 
+// How far apart two mm lengths may sit and still count as "the same size".
+// Both sides are curator-entered lengths already rounded to whole millimetres
+// by LengthField, so anything under half a millimetre is float dust from a
+// unit round-trip, not a difference anyone typed.
+//
+// Lives here, beside the placement resolvers, because two very different
+// consumers must agree on it: the inspector's "Match size to work" hint (which
+// appears only once a placement has DIVERGED from the work) and the store's
+// dimension-edit rebake (which follows a placement only while it has NOT). One
+// tolerance, or a placement could be simultaneously too far from the work to
+// rebake and too close to admit it.
+export const SIZE_MATCH_TOLERANCE_MM = 0.5;
+
+// Everything effectiveDisplayAs reads. Typed as a shape rather than
+// `Pick<Artwork, …>` so callers holding a partial record (a test fixture, a
+// scene entry, a bulk-edit row) can ask the question without inventing an id
+// and a schemaVersion.
+export type DisplayAsSource = {
+  displayAs?: ArtworkDisplayAs;
+  matWidthMm?: number;
+  frame?: Artwork["frame"];
+  metadata?: Artwork["metadata"];
+};
+
+// The medium string a record carries, if it carries one. Medium is VIRTUAL —
+// stored at metadata.medium, the slot the spreadsheet importer writes and every
+// export reads — so this is the only correct way to read it.
+export function artworkMedium(artwork: DisplayAsSource | undefined): string | undefined {
+  const value = artwork?.metadata?.medium;
+  return typeof value === "string" ? value : undefined;
+}
+
+// How a work is displayed, resolving the AUTO case. PRECEDENCE:
+//
+//   1. an explicit `displayAs` — the curator answered the Display dropdown, and
+//      that answer is final.
+//   2. a stored mat or frame ⇒ "framed". THE GUARD: an explicitly framed work
+//      must never silently restage itself because its medium string happens to
+//      match a category. A curator who typed "Sculpture" into Medium on a work
+//      they already matted and framed gets to keep the frame; they can still
+//      say "Sculpture" in the dropdown, which is step 1.
+//   3. the medium's own default (mediumCategory → defaultDisplayAsForCategory),
+//      which is undefined for prose and for an unrecorded medium.
+//   4. "framed" — the reading every record had before this field existed.
+//
+// Note what steps 2–4 have in common: they are DERIVED, and the derivation is
+// visible in the dropdown (it shows the resolved value, not "Auto"). Picking
+// anything there writes it explicitly and lands on step 1.
+export function effectiveDisplayAs(artwork: DisplayAsSource): ArtworkDisplayAs {
+  if (artwork.displayAs) return artwork.displayAs;
+  if (artwork.matWidthMm !== undefined || artwork.frame !== undefined) return "framed";
+  return defaultDisplayAsForCategory(mediumCategory(artworkMedium(artwork))) ?? "framed";
+}
+
 // PRECEDENCE, in the order the reads happen below:
 //   1. `placementForm` — the curator's own explicit answer, from the Type row.
-//      It wins over everything, including a monitor: the row exists to say "no,
-//      hang this", and a display type must not be able to overrule the one
+//      It wins over everything, including a display type: the row exists to say
+//      "no, hang this", and a display type must not be able to overrule the one
 //      control whose entire job is this question.
-//   2. `displayAs === "monitor"` — a box monitor is a piece of equipment that
-//      STANDS on something (pedestal or floor). It beats the depth heuristic
-//      below because that heuristic is a guess about the work and this is a
-//      stated fact about how it is displayed.
-//   3. the depth heuristic — a recorded depth means it stands up.
+//   2. the EFFECTIVE display type, for the three types that state a surface:
+//      "monitor" and "sculpture" stand on something (a monitor is equipment on
+//      a pedestal or the floor; a sculpture is an object in the room), and
+//      "projection" is thrown at a wall. These beat the depth heuristic below
+//      because that heuristic is a guess about the work and this is a stated
+//      (or medium-derived) fact about how it is displayed.
+//   3. an EXPLICIT `displayAs === "framed"` — the curator picked "Wall work" in
+//      the dropdown, which pins the work to the wall even when it records a
+//      real depth (a deep stretcher, a shadow box).
+//   4. the depth heuristic — a recorded depth means it stands up.
+//
+// STEP 3 IS DELIBERATELY EXPLICIT-ONLY. A merely-DERIVED "framed" (a mat, a
+// medium of "Painting", or the bare default) falls through to step 4, so every
+// record that predates display types and medium categories resolves exactly as
+// it always did: a 450mm-deep painting with no stored displayAs still stands on
+// the floor. Widening step 3 to the derived case would silently re-place works
+// in existing projects.
 //
 // (Intent-wins still applies at drop time: dropping a monitor work on a wall
 // places it on the wall, as a plain image. This resolves the DEFAULT — what the
@@ -27,7 +95,12 @@ export type PlacementForm = "wall" | "floor";
 // a deliberate gesture is allowed to do. See dropTarget.ts.)
 export function effectivePlacementForm(artwork: Artwork): PlacementForm {
   if (artwork.placementForm) return artwork.placementForm;
-  if (artwork.displayAs === "monitor") return "floor";
+
+  const displayAs = effectiveDisplayAs(artwork);
+  if (displayAs === "monitor" || displayAs === "sculpture") return "floor";
+  if (displayAs === "projection") return "wall";
+  if (artwork.displayAs === "framed") return "wall";
+
   const depthMm = artwork.dimensions.depthMm;
   return typeof depthMm === "number" && depthMm > 0 ? "floor" : "wall";
 }

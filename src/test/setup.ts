@@ -43,6 +43,13 @@ function installWorkingStorage(propertyName: "localStorage" | "sessionStorage") 
 installWorkingStorage("localStorage");
 installWorkingStorage("sessionStorage");
 
+// cmdk keeps its highlighted row in view with scrollIntoView, which jsdom does
+// not implement at all (not even as a no-op). Same deal as ResizeObserver
+// below: there is no layout to scroll here, only a method that must exist.
+if (typeof Element.prototype.scrollIntoView !== "function") {
+  Element.prototype.scrollIntoView = function scrollIntoView() {};
+}
+
 // Radix needs ResizeObserver; jsdom layout tests only need an inert contract.
 if (typeof globalThis.ResizeObserver === "undefined") {
   globalThis.ResizeObserver = class ResizeObserver {

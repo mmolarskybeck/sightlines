@@ -1,4 +1,4 @@
-import { getArtworkOuterDimensionsMm } from "../framing";
+import { effectiveFraming, getArtworkOuterDimensionsMm } from "../framing";
 import { doorSwingPlanGlyphFor, type DoorSwingPlanGlyph } from "../geometry/doorGlyphs";
 import {
   getFloorPartitions,
@@ -210,17 +210,24 @@ export function svgPolygonPoints(polygonMm: Point[]): string {
 export function getRenderedWallObjectPlanRect(
   planRect: PlanRect,
   kind: WallObject["kind"],
-  artwork: Pick<Artwork, "matWidthMm" | "frame"> | undefined,
+  artwork:
+    | (Pick<Artwork, "matWidthMm" | "frame"> &
+        Partial<Pick<Artwork, "frameIncludedInImage" | "displayAs" | "metadata">>)
+    | undefined,
   minDepthMm: number,
   sizing: "image" | "outer" = "image"
 ): PlanRect {
+  // Read through effectiveFraming, the single interpreter: a frame-inclusive
+  // work and a frameless display type (projection / sculpture) both add no
+  // band, so the plan rect agrees with what elevation, 3D and the PDF draw.
+  const framing = effectiveFraming(artwork);
   const framedWidthMm =
     kind === "artwork" && sizing === "image"
       ? getArtworkOuterDimensionsMm(
           planRect.widthMm,
           planRect.widthMm,
-          artwork?.matWidthMm,
-          artwork?.frame
+          framing.matWidthMm,
+          framing.frame
         ).widthMm
       : planRect.widthMm;
 
