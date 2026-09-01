@@ -168,6 +168,7 @@ import { getWallDimensionLink, getWallNames } from "./projectWalls";
 import { getArrangeEligibility } from "./store/arrangeEligibility";
 import type { ThreeDViewActions } from "./components/three/ThreeDView";
 import type { SavedViewRenderHandle } from "./components/three/SavedViewRenderHost";
+import { createSavedViewRenderRef } from "./savedViewRenderRef";
 import { useSavedViewThumbnails } from "./hooks/useSavedViewThumbnails";
 import type { EffectiveDocumentSettings } from "../domain/export/documentSettings";
 import { rendererBenchmarkEnabled } from "./rendererBenchmarkFlag";
@@ -435,21 +436,16 @@ export function App() {
   // The render host's handle. Exposed both as a live ref (the PDF export path
   // reads `.current` synchronously) and as state (so useSavedViewThumbnails's
   // processing loop re-runs when the host mounts and the handle attaches). The
-  // memoized wrapper mirrors every write into both.
+  // wrapper mirrors every write into both, and `whenReady` lets the PDF export
+  // wait out the host's lazy mount (three chunk fetch + Suspense + attach
+  // effect) instead of failing a 3D page to a placeholder because Export was
+  // clicked before the handle existed.
   const [savedViewRenderHandle, setSavedViewRenderHandle] =
     useState<SavedViewRenderHandle | null>(null);
-  const savedViewRenderRef = useMemo(() => {
-    let value: SavedViewRenderHandle | null = null;
-    return {
-      get current() {
-        return value;
-      },
-      set current(next: SavedViewRenderHandle | null) {
-        value = next;
-        setSavedViewRenderHandle(next);
-      }
-    };
-  }, []);
+  const savedViewRenderRef = useMemo(
+    () => createSavedViewRenderRef(setSavedViewRenderHandle),
+    []
+  );
 
   // Prevent re-entry while package assets are hashed and zipped.
   const [isExportingPackage, setIsExportingPackage] = useState(false);
@@ -1650,8 +1646,10 @@ export function App() {
     // queue between each; without this hold the stage would drop and recreate
     // its WebGL context per view, and a many-view document could exhaust the
     // browser's context budget and evict the live 3D canvas. Released in the
-    // finally below so an abort or error frees it too.
-    const releaseRenderBatch =
+    // finally below so an abort or error frees it too. `let`, not `const`:
+    // when the host hasn't mounted yet (fresh session, three chunk still
+    // loading) the hold is taken later, by the first renderSavedView call.
+    let releaseRenderBatch =
       savedViewRenderRef.current?.beginRenderBatch() ?? null;
     try {
       // Dynamic imports keep pdf-lib/fontkit (the "pdf" manual chunk) out of
@@ -1670,13 +1668,18 @@ export function App() {
         // Bundled Geist for PDF text; undefined on fetch failure, which falls
         // back to the writer's standard-Helvetica path (see pdfFonts.ts).
         fontBytes: await loadPdfFontBytes(),
-        renderSavedView: (view, size) => {
-          const handle = savedViewRenderRef.current;
-          if (!handle) {
-            return Promise.reject(
-              new Error("The 3D renderer is not ready to render Saved views.")
-            );
-          }
+        renderSavedView: async (view, size) => {
+          // The host mounts lazily once the export begins (pdfExportProgress
+          // gates it in AppDialogs) and attaches its handle in an effect, so a
+          // fresh session can reach the first 3D page before the handle
+          // exists. Wait for it — abortable, bounded — instead of failing the
+          // page to a placeholder; on timeout the writer's placeholder path
+          // still applies per view.
+          const handle = await savedViewRenderRef.whenReady(controller.signal);
+          // The batch hold above couldn't be taken while the host was
+          // unmounted; take it on first render so the rest of the batch still
+          // shares one WebGL context.
+          releaseRenderBatch ??= handle.beginRenderBatch();
           return handle.renderSavedView(view, size);
         },
         signal: controller.signal,
