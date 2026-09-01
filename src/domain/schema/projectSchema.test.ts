@@ -31,6 +31,28 @@ describe("projectSchema", () => {
     expect(parseProject(createSampleProject()).title).toBe("Untitled Exhibition");
   });
 
+  it("round-trips the checklist view and leaves it absent when unset", () => {
+    const project = createSampleProject();
+    project.checklistView = { sort: "artist", groupByArtist: true };
+    expect(parseProject(project).checklistView).toEqual({
+      sort: "artist",
+      groupByArtist: true
+    });
+    // Absent means "no explicit choice yet" — it must stay absent, never be
+    // defaulted in, or the group-show default would stop applying.
+    const { checklistView: _view, ...unset } = project;
+    expect(parseProject(unset).checklistView).toBeUndefined();
+  });
+
+  it("rejects an unknown checklist sort", () => {
+    const project = createSampleProject();
+    project.checklistView = {
+      sort: "size" as never,
+      groupByArtist: false
+    };
+    expect(() => parseProject(project)).toThrow(/checklistView/i);
+  });
+
   it("validates and defaults reference measurements", () => {
     const project = createSampleProject();
     project.referenceMeasurements = [{

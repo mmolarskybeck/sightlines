@@ -121,6 +121,20 @@ export type Asset = {
   sha256?: string;
 };
 
+// How the workspace checklist panel orders its rows.
+export type ChecklistSort = "project" | "title" | "artist" | "status";
+
+// The checklist panel's explicit sort/grouping choice. Project data (USER
+// DECISION 2026-08-31): it rides `.sightlines` packages and cloud sync so the
+// preferred reading of a checklist travels with the exhibition, at the cost
+// of a sort change dirtying the document like any other edit. Absent means
+// "no choice made yet" — the app then derives a default (a group show, two or
+// more artists each with multiple works, opens grouped by artist).
+export type ChecklistViewPreferences = {
+  sort: ChecklistSort;
+  groupByArtist: boolean;
+};
+
 export type Project = {
   id: string;
   schemaVersion: number;
@@ -130,6 +144,7 @@ export type Project = {
   defaultCenterlineHeightMm: number;
   floor: Floor;
   checklistArtworkIds: string[];
+  checklistView?: ChecklistViewPreferences;
   wallObjects: WallObject[];
   floorObjects: FloorObject[];
   referenceMeasurements?: ReferenceMeasurement[];

@@ -1,6 +1,11 @@
+import { useState } from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import type { Artwork, Project } from "../../../domain/project";
+import type {
+  Artwork,
+  ChecklistViewPreferences,
+  Project
+} from "../../../domain/project";
 import { createSampleProject } from "../../../domain/sample/sampleProject";
 import { TooltipProvider } from "../ui/tooltip";
 import type { ChecklistRowData } from "./ChecklistPanel";
@@ -313,6 +318,106 @@ describe("ChecklistPanel temporary views", () => {
   });
 });
 
+describe("ChecklistPanel project-held sort and grouping", () => {
+  // The standard fixture is NOT a group show (only Boyun Jang has multiple
+  // works), so it must open flat — the heuristic default is covered by the
+  // group-show fixture below.
+  it("opens flat for a checklist that is not a group show", () => {
+    renderChecklist();
+    expect(screen.queryByRole("button", { name: /Boyun Jang, 2 works/ })).toBeNull();
+  });
+
+  it("opens a group show grouped by artist and records turning it off as a project edit", async () => {
+    const onChangeChecklistView = vi.fn();
+    renderChecklist({
+      project: groupShowProject(),
+      libraryArtworks: groupShowArtworks,
+      onChangeChecklistView
+    });
+    expect(
+      screen.getByRole("button", { name: "Boyun Jang, 2 works" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Alma Thomas, 2 works" })
+    ).toBeInTheDocument();
+    // The default is derived, never written: nothing has changed the project.
+    expect(onChangeChecklistView).not.toHaveBeenCalled();
+
+    // Turning grouping off is an explicit choice, handed up as a complete
+    // view record for the store to put on the project.
+    await openChecklistOptions();
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Group by artist" }));
+    expect(onChangeChecklistView).toHaveBeenCalledWith({
+      sort: "artist",
+      groupByArtist: false
+    });
+    expect(screen.queryByRole("button", { name: "Boyun Jang, 2 works" })).toBeNull();
+  });
+
+  it("hands an explicit sort choice up as a complete view record", async () => {
+    const onChangeChecklistView = vi.fn();
+    renderChecklist({ onChangeChecklistView });
+    await openChecklistOptions();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Title" }));
+    expect(onChangeChecklistView).toHaveBeenCalledWith({
+      sort: "title",
+      groupByArtist: false
+    });
+    expect(
+      screen.getByRole("button", { name: "Checklist options. Sort: Title" })
+    ).toBeInTheDocument();
+  });
+
+  it("renders the project's stored view instead of the group-show default", () => {
+    // A group show whose project already records a flat Title sort — the
+    // stored choice (what a reopened or synced project carries) must beat
+    // the heuristic.
+    renderChecklist({
+      project: {
+        ...groupShowProject(),
+        checklistView: { sort: "title", groupByArtist: false }
+      },
+      libraryArtworks: groupShowArtworks
+    });
+    expect(screen.queryByRole("button", { name: /, \d+ works?$/ })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Checklist options. Sort: Title" })
+    ).toBeInTheDocument();
+  });
+
+  it("renders a stored grouped view for a checklist that is not a group show", () => {
+    renderChecklist({
+      project: {
+        ...createSampleProject(),
+        id: "checklist-test",
+        checklistArtworkIds: panelArtworks.map((item) => item.id),
+        checklistView: { sort: "artist", groupByArtist: true }
+      }
+    });
+    expect(
+      screen.getByRole("button", { name: "Boyun Jang, 2 works" })
+    ).toBeInTheDocument();
+  });
+});
+
+// A group show by the default's definition: two artists each with more than
+// one work (plus the unattributed stragglers, which must not count).
+function groupShowProject(): Project {
+  return {
+    ...createSampleProject(),
+    id: "group-show-test",
+    checklistArtworkIds: groupShowArtworks.map((item) => item.id)
+  };
+}
+
+const groupShowArtworks: Artwork[] = [
+  artwork("boyun-landscape", "Landscape Study", "Boyun Jang"),
+  artwork("boyun-interior", "Interior Study", "Boyun Jang"),
+  artwork("alma-wind", "Wind Study", "Alma Thomas"),
+  artwork("alma-sky", "Sky Study", "Alma Thomas"),
+  artwork("unknown", "Untitled Study")
+];
+
 const panelArtworks: Artwork[] = [
   artwork("boyun-landscape", "Landscape Study", "Boyun Jang", {
     metadata: { subject: "landscape" }
@@ -339,14 +444,34 @@ function artwork(
   };
 }
 
-function buildChecklistElement(project: Project, selectedArtworkId: string | null) {
+// Sort/grouping are project data now (project.checklistView), so the panel is
+// controlled: an explicit choice only shows once the parent re-renders it with
+// an updated project. This harness plays the store's role — it holds the view
+// in state and feeds choices back into the project prop — so interaction tests
+// see toggles take effect the way they do in the app.
+function ChecklistHarness({
+  project,
+  selectedArtworkId,
+  libraryArtworks = panelArtworks,
+  onChangeChecklistView
+}: {
+  project: Project;
+  selectedArtworkId: string | null;
+  libraryArtworks?: Artwork[];
+  onChangeChecklistView?: (view: ChecklistViewPreferences) => void;
+}) {
+  const [checklistView, setChecklistView] = useState(project.checklistView);
   return (
     <TooltipProvider>
       <ChecklistPanel
         getBlob={vi.fn(async () => new Blob())}
         intakeState="idle"
-        libraryArtworks={panelArtworks}
+        libraryArtworks={libraryArtworks}
         onAddArtworksFromFiles={vi.fn(async () => undefined)}
+        onChangeChecklistView={async (view) => {
+          setChecklistView(view);
+          onChangeChecklistView?.(view);
+        }}
         onConfirmDuplicateUploads={vi.fn(async () => undefined)}
         onDismissDuplicateUploads={vi.fn()}
         onOpenArtworkLibrary={vi.fn()}
@@ -355,28 +480,50 @@ function buildChecklistElement(project: Project, selectedArtworkId: string | nul
         onRemovePlacement={vi.fn(async () => undefined)}
         onSelectArtwork={vi.fn()}
         pendingDuplicateUploads={[]}
-        project={project}
+        project={{ ...project, checklistView }}
         selectedArtworkId={selectedArtworkId}
       />
     </TooltipProvider>
   );
 }
 
-function renderChecklist(overrides: { project?: Project; selectedArtworkId?: string | null } = {}) {
+function renderChecklist(
+  overrides: {
+    project?: Project;
+    selectedArtworkId?: string | null;
+    libraryArtworks?: Artwork[];
+    onChangeChecklistView?: (view: ChecklistViewPreferences) => void;
+  } = {}
+) {
   const project = overrides.project ?? {
     ...createSampleProject(),
     id: "checklist-test",
     checklistArtworkIds: panelArtworks.map((item) => item.id)
   };
-  const result = render(buildChecklistElement(project, overrides.selectedArtworkId ?? null));
+  const result = render(
+    <ChecklistHarness
+      libraryArtworks={overrides.libraryArtworks}
+      project={project}
+      selectedArtworkId={overrides.selectedArtworkId ?? null}
+      onChangeChecklistView={overrides.onChangeChecklistView}
+    />
+  );
   return {
     ...result,
     // Re-renders the SAME element tree with a different selection — used to
     // simulate the selection changing from outside the panel (canvas/plan/3D)
     // without remounting, since that's exactly the path the auto-expand and
-    // scroll-into-view effects key off of.
+    // scroll-into-view effects key off of. The harness keeps its view state
+    // across this re-render, just as the store keeps the project's.
     rerenderWithSelection: (selectedArtworkId: string | null) =>
-      result.rerender(buildChecklistElement(project, selectedArtworkId))
+      result.rerender(
+        <ChecklistHarness
+          libraryArtworks={overrides.libraryArtworks}
+          project={project}
+          selectedArtworkId={selectedArtworkId}
+          onChangeChecklistView={overrides.onChangeChecklistView}
+        />
+      )
   };
 }
 

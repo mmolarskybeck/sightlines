@@ -25,6 +25,12 @@ import {
   endArtworkDragSession
 } from "../library/artworkDragSession";
 import { UncertaintyIndicator } from "./UncertaintyIndicator";
+import {
+  CHECKLIST_SORTS,
+  defaultChecklistView,
+  type ChecklistSort,
+  type ChecklistViewPreferences
+} from "./checklistViewPreferences";
 import { Button } from "../ui/button";
 import {
   DropdownMenu,
@@ -63,9 +69,7 @@ const ALREADY_PLACED_DRAG_MESSAGE =
   "Already placed. Remove the current placement before dragging again.";
 
 type ChecklistFilter = "all" | "placed" | "unplaced";
-export type ChecklistSort = "project" | "title" | "artist" | "status";
-
-const CHECKLIST_SORTS: ChecklistSort[] = ["project", "title", "artist", "status"];
+export type { ChecklistSort } from "./checklistViewPreferences";
 
 const SORT_LABELS: Record<ChecklistSort, string> = {
   project: "Project order",
@@ -109,6 +113,7 @@ export function ChecklistPanel({
   onArtworkDragStateChange,
   onConfirmDuplicateUploads,
   onDismissDuplicateUploads,
+  onChangeChecklistView,
   onOpenImportWizard,
   onOpenArtworkLibrary,
   onRemoveArtworkFromChecklist,
@@ -131,6 +136,10 @@ export function ChecklistPanel({
   // payloads are unreadable until drop. Fired with the artworkId on
   // dragstart and null on dragend.
   onArtworkDragStateChange?: (artworkId: string | null) => void;
+  // Sort/grouping are project data (project.checklistView); the panel renders
+  // whatever the project carries and hands explicit choices back up as a
+  // complete view record — it never writes the project itself.
+  onChangeChecklistView: (view: ChecklistViewPreferences) => Promise<void>;
   onRemoveArtworkFromChecklist: (artworkId: string) => Promise<void>;
   onRemovePlacement: (wallObjectId: string) => Promise<void>;
   onSelectArtwork: (artworkId: string) => void;
@@ -138,8 +147,6 @@ export function ChecklistPanel({
 }) {
   const [isDropActive, setIsDropActive] = useState(false);
   const [filter, setFilter] = useState<ChecklistFilter>("all");
-  const [sort, setSort] = useState<ChecklistSort>("project");
-  const [groupByArtist, setGroupByArtist] = useState(false);
   const [collapsedArtistKeys, setCollapsedArtistKeys] = useState<Set<string>>(
     () => new Set()
   );
@@ -244,6 +251,14 @@ export function ChecklistPanel({
     ]
   );
 
+  // Sort and grouping are project data: an explicit choice lives at
+  // project.checklistView and travels with the exhibition. Until one is made,
+  // a checklist that reads as a group show — two or more artists each with
+  // multiple works — opens grouped by artist; anything else opens in project
+  // order.
+  const checklistView = project.checklistView ?? defaultChecklistView(rows);
+  const { sort, groupByArtist } = checklistView;
+
   const searchMatchedRows = rows.filter((row) => checklistRowMatchesQuery(row, searchQuery));
   const placedCount = searchMatchedRows.filter((row) => row.isPlaced).length;
   const unplacedCount = searchMatchedRows.length - placedCount;
@@ -282,15 +297,15 @@ export function ChecklistPanel({
     if (isSearchOpen) searchInputRef.current?.focus();
   }, [isSearchOpen]);
 
-  // Search and artist disclosures are temporary workspace aids. A project
-  // switch must never carry a stale query or a previous exhibition's hidden
-  // artists into the newly opened checklist.
+  // Search, filter, and artist disclosures are temporary workspace aids. A
+  // project switch must never carry a stale query or a previous exhibition's
+  // hidden artists into the newly opened checklist. Sort and grouping are NOT
+  // reset here: they are project data (project.checklistView), so the newly
+  // opened project brings its own.
   useEffect(() => {
     if (previousProjectIdRef.current === project.id) return;
     previousProjectIdRef.current = project.id;
     setFilter("all");
-    setSort("project");
-    setGroupByArtist(false);
     setCollapsedArtistKeys(new Set());
     setSearchQuery("");
     setIsSearchOpen(false);
@@ -597,8 +612,11 @@ export function ChecklistPanel({
                 value={sort}
                 onValueChange={(value) => {
                   const nextSort = value as ChecklistSort;
-                  setSort(nextSort);
-                  if (nextSort !== "artist") setGroupByArtist(false);
+                  void onChangeChecklistView(
+                    nextSort === "artist"
+                      ? { ...checklistView, sort: nextSort }
+                      : { sort: nextSort, groupByArtist: false }
+                  );
                 }}
               >
                 {CHECKLIST_SORTS.map((value) => (
@@ -612,8 +630,11 @@ export function ChecklistPanel({
                 checked={groupByArtist}
                 onCheckedChange={(checked) => {
                   const enabled = checked === true;
-                  setGroupByArtist(enabled);
-                  if (enabled) setSort("artist");
+                  void onChangeChecklistView(
+                    enabled
+                      ? { sort: "artist", groupByArtist: true }
+                      : { ...checklistView, groupByArtist: false }
+                  );
                 }}
               >
                 Group by artist

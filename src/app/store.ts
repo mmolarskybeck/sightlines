@@ -85,6 +85,7 @@ import {
   type ArtworkWallObject,
   type BlockedZoneFloorObject,
   type CaseWallObject,
+  type ChecklistViewPreferences,
   type ConnectableOpeningWallObject,
   type DisplayUnit,
   type DoorLeaf,
@@ -450,6 +451,10 @@ export type AppState = ArrangeSliceState &
   setUnit: (unit: DisplayUnit) => Promise<void>;
   setDefaultWallHeightMm: (heightMm: number) => Promise<void>;
   setDefaultCenterlineHeightMm: (heightMm: number) => Promise<void>;
+  // Records the checklist panel's explicit sort/grouping choice on the
+  // project (project.checklistView) — an undoable edit like any other, so it
+  // travels with the exhibition through packages and sync.
+  setChecklistView: (view: ChecklistViewPreferences) => Promise<void>;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   updateArtwork: (artworkId: string, changes: UpdateArtworkChanges) => Promise<void>;
@@ -2382,6 +2387,21 @@ export function createAppStore(deps: AppStoreDeps) {
         await applyEdit("Change default eyeline height", (current) => ({
           ...current,
           defaultCenterlineHeightMm: heightMm
+        }));
+      },
+
+      async setChecklistView(view) {
+        const project = get().project;
+        if (
+          !project ||
+          (project.checklistView?.sort === view.sort &&
+            project.checklistView?.groupByArtist === view.groupByArtist)
+        )
+          return;
+
+        await applyEdit("Change checklist sorting", (current) => ({
+          ...current,
+          checklistView: view
         }));
       },
 

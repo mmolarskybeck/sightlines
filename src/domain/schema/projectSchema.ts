@@ -389,6 +389,16 @@ const roomPlacementSchema = z
     }
   });
 
+// The checklist panel's explicit sort/grouping choice (2026-08-31). Optional
+// and PURELY ADDITIVE — absent means "no explicit choice yet" (the app derives
+// a default), so no schema-version bump: an older build simply strips the key
+// on open and the curator is back to the derived default, never a broken
+// document.
+const checklistViewSchema = z.object({
+  sort: z.enum(["project", "title", "artist", "status"]),
+  groupByArtist: z.boolean()
+});
+
 export const projectSchema = z
   .object({
     id: z.string().min(1),
@@ -402,6 +412,7 @@ export const projectSchema = z
       rooms: z.array(roomPlacementSchema)
     }),
     checklistArtworkIds: z.array(z.string()),
+    checklistView: checklistViewSchema.optional(),
     wallObjects: z.array(wallObjectSchema).default([]),
     floorObjects: z.array(floorObjectSchema).default([]),
     referenceMeasurements: z.array(referenceMeasurementSchema).default([]),

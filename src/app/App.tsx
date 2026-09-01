@@ -309,6 +309,7 @@ export function App() {
   const openWall = useAppStore((state) => state.openWall);
   const restoreWall = useAppStore((state) => state.restoreWall);
   const setUnit = useAppStore((state) => state.setUnit);
+  const setChecklistView = useAppStore((state) => state.setChecklistView);
   const resizeSelectedWall = useAppStore((state) => state.resizeSelectedWall);
   const resizeRoomHeight = useAppStore((state) => state.resizeRoomHeight);
   const resizeWall = useAppStore((state) => state.resizeWall);
@@ -1918,6 +1919,7 @@ export function App() {
             pendingDuplicateUploads={pendingDuplicateUploads}
             onAddArtworksFromFiles={addArtworksFromFiles}
             onArtworkDragStateChange={setDraggingArtworkId}
+            onChangeChecklistView={setChecklistView}
             onConfirmDuplicateUploads={confirmDuplicateUploads}
             onDismissDuplicateUploads={dismissDuplicateUploads}
             onOpenImportWizard={() => {
