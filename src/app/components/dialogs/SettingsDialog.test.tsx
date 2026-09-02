@@ -4,6 +4,22 @@ import type { Project } from "../../../domain/project";
 import { useAppStore } from "../../store";
 import { SettingsDialog } from "./SettingsDialog";
 
+// The privacy switches now read the module-level preference store directly.
+// Stub the hook so a save can be made to fail on demand without reaching into
+// localStorage (whose spies silently no-op on Node 22).
+const privacy = vi.hoisted(() => ({
+  preferences: { usageAnalytics: false, crashReports: false },
+  setPreferences: vi.fn(() => true)
+}));
+vi.mock("../../telemetry/privacyPreferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../telemetry/privacyPreferences")>()),
+  usePrivacyPreferences: () => ({
+    decision: "unset" as const,
+    preferences: privacy.preferences,
+    setPreferences: privacy.setPreferences
+  })
+}));
+
 // The status copy is provided by the storage-persistence hook; stub it so this
 // suite is standalone (and independent of the copy's exact wording) and so a
 // distinctive per-state string is easy to assert against.
@@ -88,7 +104,10 @@ function seedStore(overrides: Record<string, unknown> = {}) {
     setUnit: vi.fn().mockResolvedValue(undefined),
     setDefaultWallHeightMm: vi.fn().mockResolvedValue(undefined),
     setDefaultCenterlineHeightMm: vi.fn().mockResolvedValue(undefined),
-    deleteProject: vi.fn().mockResolvedValue(undefined)
+    deleteProject: vi.fn().mockResolvedValue(undefined),
+    connectCloudBackup: vi.fn().mockResolvedValue(undefined),
+    disconnectCloudBackup: vi.fn(),
+    runCloudBackupNow: vi.fn().mockResolvedValue(undefined)
   };
   useAppStore.setState({
     project: fakeProject(),
@@ -98,7 +117,9 @@ function seedStore(overrides: Record<string, unknown> = {}) {
   return actions;
 }
 
-type CloudProps = {
+// Everything but `configured` (a build-time env read App still owns) is store
+// state the dialog subscribes to itself, so the cloud cases seed the store.
+type CloudSetup = {
   cloudBackupConfigured?: boolean;
   cloudBackupProviderStatus?: "disconnected" | "connected" | "reauthorization-required";
   cloudBackupAccountLabel?: string | null;
@@ -110,7 +131,7 @@ type RenderOverrides = {
   open?: boolean;
   storageState?: "unsupported" | "granted" | "denied" | "pending";
   store?: Record<string, unknown>;
-  cloud?: CloudProps;
+  cloud?: CloudSetup;
 };
 
 function renderDialog({
@@ -119,35 +140,32 @@ function renderDialog({
   store = {},
   cloud = {}
 }: RenderOverrides = {}) {
-  const actions = seedStore(store);
+  privacy.setPreferences.mockClear();
+  privacy.setPreferences.mockReturnValue(true);
+  const actions = seedStore({
+    cloudBackupProviderStatus: cloud.cloudBackupProviderStatus ?? "disconnected",
+    cloudBackupAccountLabel: cloud.cloudBackupAccountLabel ?? null,
+    cloudBackupStatus: cloud.cloudBackupStatus ?? "idle",
+    lastCloudBackupAt: cloud.lastCloudBackupAt ?? null,
+    ...store
+  });
   const handlers = {
     onOpenChange: vi.fn(),
     onRetryStorage: vi.fn(),
-    onConnectCloudBackup: vi.fn(async () => {}),
-    onDisconnectCloudBackup: vi.fn(),
-    onRunCloudBackup: vi.fn(async () => {}),
     resetPreferences: vi.fn(),
     onExport: vi.fn(),
     onImport: vi.fn(),
-    onOpenHelp: vi.fn(),
-    onUsageAnalyticsChange: vi.fn(() => true),
-    onCrashReportsChange: vi.fn(() => true)
+    onOpenHelp: vi.fn()
   };
   render(
     <SettingsDialog
       open={open}
       storageState={storageState}
       cloudBackupConfigured={cloud.cloudBackupConfigured ?? false}
-      cloudBackupProviderStatus={cloud.cloudBackupProviderStatus ?? "disconnected"}
-      cloudBackupAccountLabel={cloud.cloudBackupAccountLabel ?? null}
-      cloudBackupStatus={cloud.cloudBackupStatus ?? "idle"}
-      lastCloudBackupAt={cloud.lastCloudBackupAt ?? null}
-      usageAnalyticsEnabled={false}
-      crashReportsEnabled={false}
       {...handlers}
     />
   );
-  return { ...actions, ...handlers };
+  return { ...actions, ...handlers, setPrivacyPreferences: privacy.setPreferences };
 }
 
 describe("SettingsDialog", () => {
@@ -219,14 +237,19 @@ describe("SettingsDialog", () => {
   });
 
   it("changes anonymous usage and crash reporting independently", () => {
-    const { onUsageAnalyticsChange, onCrashReportsChange } = renderDialog();
+    const { setPrivacyPreferences } = renderDialog();
 
     fireEvent.click(screen.getByRole("switch", { name: "Anonymous usage analytics" }));
-    expect(onUsageAnalyticsChange).toHaveBeenCalledWith(true);
-    expect(onCrashReportsChange).not.toHaveBeenCalled();
+    expect(setPrivacyPreferences).toHaveBeenCalledWith({
+      usageAnalytics: true,
+      crashReports: false
+    });
 
     fireEvent.click(screen.getByRole("switch", { name: "Anonymous crash reports" }));
-    expect(onCrashReportsChange).toHaveBeenCalledWith(true);
+    expect(setPrivacyPreferences).toHaveBeenLastCalledWith({
+      usageAnalytics: false,
+      crashReports: true
+    });
     expect(screen.getByRole("link", { name: "Read the privacy policy" })).toHaveAttribute(
       "href",
       "https://sightlines.art/privacy"
@@ -234,7 +257,7 @@ describe("SettingsDialog", () => {
   });
 
   it("shows the connected cloud block with a working Back up now action", () => {
-    const { onRunCloudBackup, onDisconnectCloudBackup } = renderDialog({
+    const { runCloudBackupNow, disconnectCloudBackup } = renderDialog({
       cloud: {
         cloudBackupConfigured: true,
         cloudBackupProviderStatus: "connected",
@@ -246,10 +269,10 @@ describe("SettingsDialog", () => {
     expect(screen.getByText("Connected as Test Curator")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Back up now" }));
-    expect(onRunCloudBackup).toHaveBeenCalledTimes(1);
+    expect(runCloudBackupNow).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
-    expect(onDisconnectCloudBackup).toHaveBeenCalledTimes(1);
+    expect(disconnectCloudBackup).toHaveBeenCalledTimes(1);
   });
 
   it("disables Back up now while an upload is in flight", () => {
@@ -265,7 +288,7 @@ describe("SettingsDialog", () => {
   });
 
   it("offers reconnect with a caution note when reauthorization is required", () => {
-    const { onConnectCloudBackup } = renderDialog({
+    const { connectCloudBackup } = renderDialog({
       cloud: {
         cloudBackupConfigured: true,
         cloudBackupProviderStatus: "reauthorization-required"
@@ -273,12 +296,12 @@ describe("SettingsDialog", () => {
     });
     expect(screen.getByText(/Dropbox access expired/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Reconnect Dropbox" }));
-    expect(onConnectCloudBackup).toHaveBeenCalledTimes(1);
+    expect(connectCloudBackup).toHaveBeenCalledTimes(1);
   });
 
   it("surfaces preference write failures", () => {
-    const { onUsageAnalyticsChange } = renderDialog();
-    onUsageAnalyticsChange.mockReturnValue(false);
+    const { setPrivacyPreferences } = renderDialog();
+    setPrivacyPreferences.mockReturnValue(false);
     fireEvent.click(screen.getByRole("switch", { name: "Anonymous usage analytics" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Reporting remains off");
   });

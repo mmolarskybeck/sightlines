@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import type { ArrangeSession } from "../store";
 import type { Selection } from "../store/selectionSlice";
 import { isEditableTarget } from "./isEditableTarget";
+import type { DialogsHandle } from "./useDialogs";
 import { shouldDeleteRoomOnKey, summarizeRoomContents } from "../roomDeletion";
 import { buildOpenWallRequest, shouldOpenWallOnKey } from "../wallOpening";
 import type { Project } from "../../domain/project";
@@ -15,17 +16,12 @@ export type UseDeleteAndEscapeShortcutsParams = {
   deleteFreestandingWall: (wallId: string) => Promise<void>;
   deleteRoom: (roomId: string) => Promise<void>;
   reshapeRoomId: string | null;
-  confirmDeleteRoomId: string | null;
-  confirmOpenWallId: string | null;
-  setConfirmOpenWallId: (wallId: string | null) => void;
   draggingArtworkId: string | null;
-  isHelpOpen: boolean;
   removeSelectedPlacements: () => Promise<void>;
   clearObjectSelection: () => void;
   arrangeSession: ArrangeSession | null;
   cancelArrangeSession: () => void;
-  setIsHelpOpen: (open: boolean) => void;
-  setConfirmDeleteRoomId: (roomId: string | null) => void;
+  dialogs: DialogsHandle;
 };
 
 // Escape reverts a live arrange session first (leaving the selection intact
@@ -44,27 +40,22 @@ export function useDeleteAndEscapeShortcuts({
   deleteFreestandingWall,
   deleteRoom,
   reshapeRoomId,
-  confirmDeleteRoomId,
-  confirmOpenWallId,
-  setConfirmOpenWallId,
   draggingArtworkId,
-  isHelpOpen,
   removeSelectedPlacements,
   clearObjectSelection,
   arrangeSession,
   cancelArrangeSession,
-  setIsHelpOpen,
-  setConfirmDeleteRoomId
+  dialogs
 }: UseDeleteAndEscapeShortcutsParams) {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      // The help dialog (Radix) closes itself on Escape; setting the same
-      // false here is idempotent. The branch stays because the early return
+      // The help dialog (Radix) closes itself on Escape; closing it again
+      // here is idempotent. The branch stays because the early return
       // is what keeps Esc-priority: while help is open, no key may fall
       // through to the delete/clear-selection handling below.
-      if (isHelpOpen) {
+      if (dialogs.isOpen("help")) {
         if (event.key === "Escape") {
-          setIsHelpOpen(false);
+          dialogs.close("help");
         }
         return;
       }
@@ -72,7 +63,7 @@ export function useDeleteAndEscapeShortcuts({
       // Either confirm dialog owns the keyboard while open: Radix itself closes
       // on Escape (this handler must not ALSO clear the selection), and Delete
       // must not re-trigger a branch below while the question is on screen.
-      if (confirmDeleteRoomId || confirmOpenWallId) return;
+      if (dialogs.isOpen("deleteRoom") || dialogs.isOpen("openWall")) return;
 
       // Escape now clears ANY selection kind — objects, an unplaced checklist
       // pick, or a room focus (previously only the multi-object slot cleared
@@ -134,7 +125,7 @@ export function useDeleteAndEscapeShortcuts({
         const request = buildOpenWallRequest(project, wallIdToOpen);
         if (!request) return;
         event.preventDefault();
-        setConfirmOpenWallId(wallIdToOpen);
+        dialogs.open("openWall", { wallId: wallIdToOpen });
         return;
       }
 
@@ -158,7 +149,7 @@ export function useDeleteAndEscapeShortcuts({
         if (summarizeRoomContents(project, placement).isEmpty) {
           void deleteRoom(roomIdToDelete);
         } else {
-          setConfirmDeleteRoomId(roomIdToDelete);
+          dialogs.open("deleteRoom", { roomId: roomIdToDelete });
         }
       }
     }
@@ -173,16 +164,11 @@ export function useDeleteAndEscapeShortcuts({
     deleteFreestandingWall,
     deleteRoom,
     reshapeRoomId,
-    confirmDeleteRoomId,
-    confirmOpenWallId,
-    setConfirmOpenWallId,
     draggingArtworkId,
-    isHelpOpen,
     removeSelectedPlacements,
     clearObjectSelection,
     arrangeSession,
     cancelArrangeSession,
-    setIsHelpOpen,
-    setConfirmDeleteRoomId
+    dialogs
   ]);
 }

@@ -50,6 +50,7 @@ import { isDegeneratePose, resolveSavedViewRoomLabel } from "../domain/savedView
 import { faceWallId, parseFaceWallId } from "../domain/geometry/freestandingWalls";
 import { getPartitionClearances } from "../domain/geometry/partitionSpacing";
 import { readDropboxShareUrl } from "./cloud/dropboxShare";
+import { CLOUD_BACKUP_CONFIGURED } from "./cloud/configured";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import {
   displayUnitForSystem,
@@ -116,6 +117,7 @@ import {
 } from "./components/inspectors/WallPlacementFields";
 import { WallInspector } from "./components/inspectors/WallInspector";
 import { WallTextInspector } from "./components/inspectors/WallTextInspector";
+import { useArtworksById } from "./hooks/useArtworksById";
 import { useStoragePersistence } from "./hooks/useStoragePersistence";
 import { useSaveErrorToast } from "./hooks/useSaveErrorToast";
 import {
@@ -141,10 +143,9 @@ import { isEditableTarget } from "./hooks/isEditableTarget";
 import { useUndoRedoShortcuts } from "./hooks/useUndoRedoShortcuts";
 import { useArrangeNudgeShortcuts } from "./hooks/useArrangeNudgeShortcuts";
 import { useDeleteAndEscapeShortcuts } from "./hooks/useDeleteAndEscapeShortcuts";
+import { useDialogs } from "./hooks/useDialogs";
 import { useToolbarShortcuts } from "./hooks/useToolbarShortcuts";
 import { deriveArrangeReadout } from "./hooks/arrangeReadout";
-import { summarizeRoomContents } from "./roomDeletion";
-import { buildOpenWallRequest } from "./wallOpening";
 import {
   freestandingWallIdOf,
   getProjectWalls,
@@ -222,47 +223,17 @@ export function App() {
   const lastInsetAnchor = useAppStore((state) => state.lastInsetAnchor);
   const lastEvenZone = useAppStore((state) => state.lastEvenZone);
   const viewMode = useAppStore((state) => state.viewMode);
-  const saveState = useAppStore((state) => state.saveState);
   const error = useAppStore((state) => state.error);
   const placementWarnings = useAppStore((state) => state.placementWarnings);
   const lastGeometryEdit = useAppStore((state) => state.lastGeometryEdit);
-  const undoStack = useAppStore((state) => state.undoStack);
-  const redoStack = useAppStore((state) => state.redoStack);
   const libraryArtworks = useAppStore((state) => state.libraryArtworks);
   const intakeState = useAppStore((state) => state.intakeState);
   const pendingDuplicateUploads = useAppStore((state) => state.pendingDuplicateUploads);
-  const pendingPackageImport = useAppStore((state) => state.pendingPackageImport);
-  const recoveryOffer = useAppStore((state) => state.recoveryOffer);
-  const acceptRecovery = useAppStore((state) => state.acceptRecovery);
-  const dismissRecovery = useAppStore((state) => state.dismissRecovery);
   const boot = useAppStore((state) => state.boot);
-  const cloudBackupProviderStatus = useAppStore((state) => state.cloudBackupProviderStatus);
-  const cloudBackupAccountLabel = useAppStore((state) => state.cloudBackupAccountLabel);
-  const lastCloudBackupAt = useAppStore((state) => state.lastCloudBackupAt);
-  const cloudBackupPending = useAppStore((state) => state.cloudBackupPending);
-  const cloudBackupStatus = useAppStore((state) => state.cloudBackupStatus);
-  const runCloudBackupNow = useAppStore((state) => state.runCloudBackupNow);
   const createCloudShareLink = useAppStore((state) => state.createCloudShareLink);
-  const connectCloudBackup = useAppStore((state) => state.connectCloudBackup);
-  const cloudProjects = useAppStore((state) => state.cloudProjects);
-  const cloudProjectsStatus = useAppStore((state) => state.cloudProjectsStatus);
-  const cloudSyncHeads = useAppStore((state) => state.cloudSyncHeads);
-  const cloudProjectOpening = useAppStore((state) => state.cloudProjectOpening);
-  const refreshCloudProjects = useAppStore((state) => state.refreshCloudProjects);
-  const openCloudProjectBackup = useAppStore((state) => state.openCloudProjectBackup);
-  const openCloudSyncedProject = useAppStore((state) => state.openCloudSyncedProject);
-  const disconnectCloudBackup = useAppStore((state) => state.disconnectCloudBackup);
   const completeCloudBackupConnect = useAppStore((state) => state.completeCloudBackupConnect);
   const refreshCloudBackupStatus = useAppStore((state) => state.refreshCloudBackupStatus);
   const refreshProjectSyncState = useAppStore((state) => state.refreshProjectSyncState);
-  const syncMeta = useAppStore((state) => state.syncMeta);
-  const syncStatus = useAppStore((state) => state.syncStatus);
-  const syncError = useAppStore((state) => state.syncError);
-  const syncConflict = useAppStore((state) => state.syncConflict);
-  const enableProjectSync = useAppStore((state) => state.enableProjectSync);
-  const disableProjectSync = useAppStore((state) => state.disableProjectSync);
-  const checkProjectSync = useAppStore((state) => state.checkProjectSync);
-  const resolveSyncConflict = useAppStore((state) => state.resolveSyncConflict);
   const loadBenchmarkFixture = useAppStore((state) => state.loadBenchmarkFixture);
   const setViewMode = useAppStore((state) => state.setViewMode);
   const selectWall = useAppStore((state) => state.selectWall);
@@ -296,7 +267,6 @@ export function App() {
   const setFreestandingWallHeight = useAppStore((state) => state.setFreestandingWallHeight);
   const setFreestandingWallClearance = useAppStore((state) => state.setFreestandingWallClearance);
   const deleteFreestandingWall = useAppStore((state) => state.deleteFreestandingWall);
-  const renameProject = useAppStore((state) => state.renameProject);
   const renameRoom = useAppStore((state) => state.renameRoom);
   const deleteRoom = useAppStore((state) => state.deleteRoom);
   const openWall = useAppStore((state) => state.openWall);
@@ -315,20 +285,9 @@ export function App() {
   const exportChecklistSpreadsheet = useAppStore((state) => state.exportChecklistSpreadsheet);
   const exportChecklistPdf = useAppStore((state) => state.exportChecklistPdf);
   const importSightlinesPackage = useAppStore((state) => state.importSightlinesPackage);
-  const importSharedSightlinesPackage = useAppStore(
-    (state) => state.importSharedSightlinesPackage
-  );
-  const resolvePackageImportConflicts = useAppStore((state) => state.resolvePackageImportConflicts);
-  const dismissPackageImport = useAppStore((state) => state.dismissPackageImport);
-  const listProjectSummaries = useAppStore((state) => state.listProjectSummaries);
   const listArtworkProjectMemberships = useAppStore((state) => state.listArtworkProjectMemberships);
   const openProject = useAppStore((state) => state.openProject);
-  const createProject = useAppStore((state) => state.createProject);
-  const duplicateProject = useAppStore((state) => state.duplicateProject);
-  const renameProjectById = useAppStore((state) => state.renameProjectById);
-  const deleteProject = useAppStore((state) => state.deleteProject);
   const addArtworksFromFiles = useAppStore((state) => state.addArtworksFromFiles);
-  const importArtworkDrafts = useAppStore((state) => state.importArtworkDrafts);
   const addExistingArtworksToChecklist = useAppStore((state) => state.addExistingArtworksToChecklist);
   const confirmDuplicateUploads = useAppStore((state) => state.confirmDuplicateUploads);
   const dismissDuplicateUploads = useAppStore((state) => state.dismissDuplicateUploads);
@@ -395,17 +354,15 @@ export function App() {
   const planSvgElementRef = useRef<SVGSVGElement | null>(null);
   const elevationSvgElementRef = useRef<SVGSVGElement | null>(null);
   const [snapshotExportMode, setSnapshotExportMode] = useState(false);
-  const [importWizardOpen, setImportWizardOpen] = useState(false);
+  // Every workspace dialog's open state, in one registry: the confirms carry
+  // their subject, and `anyOpen` is the single "a dialog owns the keyboard" flag
+  // the shortcut hooks below stand down on.
+  const dialogs = useDialogs();
   const [importDestination, setImportDestination] = useState<"library" | "checklist">("checklist");
-  const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
   const [projectMembershipsByArtworkId, setProjectMembershipsByArtworkId] = useState<
     Map<string, ProjectSummary[]>
   >(() => new Map());
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
-  const [isHelpOpen, setIsHelpOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isExportPdfOpen, setIsExportPdfOpen] = useState(false);
-  const [isExportChecklistOpen, setIsExportChecklistOpen] = useState(false);
   const {
     preferences: privacyPreferences,
     decision: privacyDecision,
@@ -469,12 +426,6 @@ export function App() {
       cancelled = true;
     };
   }, [libraryArtworks, listArtworkProjectMemberships, viewMode, project]);
-  // Transient confirmation state; empty rooms delete immediately.
-  const [confirmDeleteRoomId, setConfirmDeleteRoomId] = useState<string | null>(null);
-  // Transient confirm state for opening a wall. Every wall confirms (no
-  // empty-wall fast path — an empty wall can still be shared), and a blocked
-  // wall gets an explanatory dialog rather than a no-op action.
-  const [confirmOpenWallId, setConfirmOpenWallId] = useState<string | null>(null);
   // Mutually exclusive, transient plan tools must not persist or enter undo history.
   const {
     mode: planMode,
@@ -650,7 +601,6 @@ export function App() {
   // Finish a Dropbox connect redirect once on boot (?code=&state= tail), then
   // fold the provider's link status + this project's stored backup meta into
   // state whenever the open project changes.
-  const cloudBackupConfigured = Boolean(import.meta.env.VITE_DROPBOX_CLIENT_ID);
   useEffect(() => {
     void completeCloudBackupConnect();
   }, [completeCloudBackupConnect]);
@@ -701,17 +651,12 @@ export function App() {
     deleteFreestandingWall,
     deleteRoom,
     reshapeRoomId,
-    confirmDeleteRoomId,
     draggingArtworkId,
-    isHelpOpen,
     removeSelectedPlacements,
     clearObjectSelection,
     arrangeSession,
     cancelArrangeSession,
-    setIsHelpOpen,
-    setConfirmDeleteRoomId,
-    confirmOpenWallId,
-    setConfirmOpenWallId
+    dialogs
   });
 
   useArrangeNudgeShortcuts({
@@ -735,14 +680,7 @@ export function App() {
     viewMode,
     // Any open workspace dialog owns the keyboard — stand down so a toolbar
     // letter never fires behind it.
-    suspended:
-      isHelpOpen ||
-      isSettingsOpen ||
-      isExportPdfOpen ||
-      isExportChecklistOpen ||
-      importWizardOpen ||
-      confirmDeleteRoomId !== null ||
-      confirmOpenWallId !== null,
+    suspended: dialogs.anyOpen,
     insertDisabled: elevationInsertBlocked,
     activeTool,
     armOpeningTool,
@@ -765,14 +703,7 @@ export function App() {
 
   useTemporaryMeasurementShortcuts({
     active: measurementActive,
-    suspended:
-      isHelpOpen ||
-      isSettingsOpen ||
-      isExportPdfOpen ||
-      isExportChecklistOpen ||
-      importWizardOpen ||
-      confirmDeleteRoomId !== null ||
-      confirmOpenWallId !== null,
+    suspended: dialogs.anyOpen,
     state: measurement.state,
     dispatch: measurement.dispatch
   });
@@ -786,13 +717,7 @@ export function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       if (
-        isHelpOpen ||
-        isSettingsOpen ||
-        isExportPdfOpen ||
-        isExportChecklistOpen ||
-        importWizardOpen ||
-        confirmDeleteRoomId !== null ||
-        confirmOpenWallId !== null ||
+        dialogs.anyOpen ||
         isEditableTarget(event.target) ||
         (event.target instanceof Element &&
           event.target.closest('[role="dialog"], [role="menu"], [role="listbox"]'))
@@ -816,13 +741,7 @@ export function App() {
     measurement.state,
     measurement.dispatch,
     disarmPlanMode,
-    isHelpOpen,
-    isSettingsOpen,
-    isExportPdfOpen,
-    isExportChecklistOpen,
-    importWizardOpen,
-    confirmDeleteRoomId,
-    confirmOpenWallId
+    dialogs.anyOpen
   ]);
 
   const selectedWallRoomPlacement =
@@ -835,10 +754,7 @@ export function App() {
     project && selectedWall
       ? getWallDimensionLink(project, selectedWall.id)
       : null;
-  const artworksById = useMemo(
-    () => new Map(libraryArtworks.map((artwork) => [artwork.id, artwork])),
-    [libraryArtworks]
-  );
+  const artworksById = useArtworksById();
 
   // The Saved views collection pane is a thumbnail consumer alongside the
   // Export dialog (saved-views spec §3.4): its rows show the same cached
@@ -856,7 +772,7 @@ export function App() {
   } = useSavedViewThumbnails({
     project,
     renderHandle: savedViewRenderHandle,
-    active: isExportPdfOpen || savedViewsPaneVisible
+    active: dialogs.isOpen("exportPdf") || savedViewsPaneVisible
   });
 
   // Elevation navigation includes perimeter walls and partition faces in room order.
@@ -995,8 +911,7 @@ export function App() {
     elevationSvgElementRef,
     savedViewRenderRef,
     setSnapshotExportMode,
-    setIsExportChecklistOpen,
-    setIsExportPdfOpen
+    dialogs
   });
 
   if (!project) {
@@ -1033,20 +948,6 @@ export function App() {
       : null;
   const selectedRoomDimensions = selectedRoomPlacement
     ? getRectangleRoomDimensions(selectedRoomPlacement.room)
-    : null;
-  // A stale pending-delete id closes the dialog safely.
-  const confirmDeleteRoomPlacement = confirmDeleteRoomId
-    ? (project.floor.rooms.find(
-        (placement) => placement.roomId === confirmDeleteRoomId
-      ) ?? null)
-    : null;
-  const confirmDeleteRoomSummary = confirmDeleteRoomPlacement
-    ? summarizeRoomContents(project, confirmDeleteRoomPlacement)
-    : null;
-  // Same idiom: a stale pending-open id (after an undo, or a room delete that
-  // took the wall with it) resolves to null and closes the dialog safely.
-  const openWallRequest = confirmOpenWallId
-    ? buildOpenWallRequest(project, confirmOpenWallId)
     : null;
   const selectedRoomWallIds = new Set(
     selectedRoomPlacement?.room.walls.map((wall) => wall.id) ?? []
@@ -1517,8 +1418,8 @@ export function App() {
         onSelectLeftPanel={selectLeftPanel}
         isLibraryView={viewMode === "library"}
         onOpenLibrary={() => setViewMode("library")}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-        onOpenHelp={() => setIsHelpOpen(true)}
+        onOpenSettings={() => dialogs.open("settings")}
+        onOpenHelp={() => dialogs.open("help")}
         issueCount={placementWarnings.length + sharedOpeningIssues.length}
         onSelectFirstIssue={selectFirstWarningObject}
       />
@@ -1528,38 +1429,7 @@ export function App() {
         viewMode={viewMode}
         setViewMode={setViewMode}
         selectedWall={selectedWall}
-        saveState={saveState}
-        undoStack={undoStack}
-        redoStack={redoStack}
-        undo={undo}
-        redo={redo}
-        renameProject={renameProject}
-        listProjectSummaries={listProjectSummaries}
-        createProject={createProject}
-        deleteProject={deleteProject}
-        duplicateProject={duplicateProject}
-        openProject={openProject}
-        renameProjectById={renameProjectById}
         storagePersistence={storagePersistence}
-        cloudBackupConfigured={cloudBackupConfigured}
-        cloudBackupProviderStatus={cloudBackupProviderStatus}
-        cloudBackupStatus={cloudBackupStatus}
-        lastCloudBackupAt={lastCloudBackupAt}
-        cloudBackupPending={cloudBackupPending}
-        runCloudBackupNow={runCloudBackupNow}
-        connectCloudBackup={connectCloudBackup}
-        cloudProjects={cloudProjects}
-        cloudProjectsStatus={cloudProjectsStatus}
-        cloudSyncHeads={cloudSyncHeads}
-        cloudProjectOpening={cloudProjectOpening}
-        refreshCloudProjects={refreshCloudProjects}
-        openCloudProjectBackup={openCloudProjectBackup}
-        openCloudSyncedProject={openCloudSyncedProject}
-        syncLinked={syncMeta !== null && syncMeta.projectId === project?.id}
-        syncStatus={syncStatus}
-        syncError={syncError}
-        enableProjectSync={enableProjectSync}
-        checkProjectSync={checkProjectSync}
         isExportingPackage={isExportingPackage}
         isSharingProject={isSharingProject}
         handleExportPackage={handleExportPackage}
@@ -1567,9 +1437,9 @@ export function App() {
         handleExportProjectById={handleExportProjectById}
         handleExportImage={handleExportImage}
         handleImportFile={handleImportFile}
-        setIsSettingsOpen={setIsSettingsOpen}
-        setIsExportPdfOpen={setIsExportPdfOpen}
-        setIsExportChecklistOpen={setIsExportChecklistOpen}
+        onOpenSettings={() => dialogs.open("settings")}
+        onOpenExportPdf={() => dialogs.open("exportPdf")}
+        onOpenExportChecklist={() => dialogs.open("exportChecklist")}
         fileInputRef={fileInputRef}
       />
 
@@ -1647,9 +1517,9 @@ export function App() {
             onDismissDuplicateUploads={dismissDuplicateUploads}
             onOpenImportWizard={() => {
               setImportDestination("checklist");
-              setImportWizardOpen(true);
+              dialogs.open("importWizard");
             }}
-            onOpenArtworkLibrary={() => setLibraryPickerOpen(true)}
+            onOpenArtworkLibrary={() => dialogs.open("libraryPicker")}
             onRemoveArtworkFromChecklist={removeArtworkFromChecklist}
             onRemovePlacement={removePlacement}
             onSelectArtwork={selectArtwork}
@@ -2050,7 +1920,7 @@ export function App() {
               }}
               onOpenImportWizard={() => {
                 setImportDestination("library");
-                setImportWizardOpen(true);
+                dialogs.open("importWizard");
               }}
             />
           ) : null}
@@ -2598,7 +2468,7 @@ export function App() {
               // the user clicked a labelled control inside a panel headed by
               // that wall's name, and the confirm names it again. The rule
               // protects the implicit gesture — a bare keypress — not this one.
-              onOpenWall={() => setConfirmOpenWallId(selectedWall.id)}
+              onOpenWall={() => dialogs.open("openWall", { wallId: selectedWall.id })}
               onRestoreWall={() => void restoreWall(selectedWall.id)}
               onAddCase={() => void addWallCase(selectedWall.id)}
               onAddOpening={(kind) => void addOpening(selectedWall.id, kind)}
@@ -2634,41 +2504,20 @@ export function App() {
       </section>
       </div>
       <AppDialogs
-        project={project}
-        viewMode={viewMode}
-        isHelpOpen={isHelpOpen}
-        setIsHelpOpen={setIsHelpOpen}
-        importWizardOpen={importWizardOpen}
-        setImportWizardOpen={setImportWizardOpen}
+        dialogs={dialogs}
         importDestination={importDestination}
-        intakeState={intakeState}
-        importArtworkDrafts={importArtworkDrafts}
-        addArtworksFromFiles={addArtworksFromFiles}
-        isSettingsOpen={isSettingsOpen}
-        setIsSettingsOpen={setIsSettingsOpen}
         storagePersistence={storagePersistence}
         retryStoragePersistence={retryStoragePersistence}
-        cloudBackupConfigured={cloudBackupConfigured}
-        cloudBackupProviderStatus={cloudBackupProviderStatus}
-        cloudBackupAccountLabel={cloudBackupAccountLabel}
-        cloudBackupStatus={cloudBackupStatus}
-        lastCloudBackupAt={lastCloudBackupAt}
-        connectCloudBackup={connectCloudBackup}
-        disconnectCloudBackup={disconnectCloudBackup}
-        runCloudBackupNow={runCloudBackupNow}
+        cloudBackupConfigured={CLOUD_BACKUP_CONFIGURED}
         resetPreferences={resetPreferences}
         handleExportPackage={handleExportPackage}
         shareProjectUrl={shareProjectUrl}
         shareProjectWarningCount={shareProjectWarningCount}
         onCloseShareProject={() => setShareProjectUrl(null)}
         incomingDropboxShareUrl={incomingDropboxShareUrl}
-        importSharedSightlinesPackage={importSharedSightlinesPackage}
         onLeaveIncomingShare={leaveIncomingShare}
         fileInputRef={fileInputRef}
-        isExportPdfOpen={isExportPdfOpen}
         handleExportPdfOpenChange={handleExportPdfOpenChange}
-        isExportChecklistOpen={isExportChecklistOpen}
-        setIsExportChecklistOpen={setIsExportChecklistOpen}
         handleExportChecklist={handleExportChecklist}
         isExportingChecklist={isExportingChecklist}
         handleExportPdf={handleExportPdf}
@@ -2677,38 +2526,8 @@ export function App() {
         handleCancelExportPdf={handleCancelExportPdf}
         savedViewsPaneVisible={savedViewsPaneVisible}
         thumbnailsPending={thumbnailsPending}
-        artworksById={artworksById}
         getAssetBlob={getAssetBlob}
         savedViewRenderRef={savedViewRenderRef}
-        libraryPickerOpen={libraryPickerOpen}
-        setLibraryPickerOpen={setLibraryPickerOpen}
-        libraryArtworks={libraryArtworks}
-        addExistingArtworksToChecklist={addExistingArtworksToChecklist}
-        confirmDeleteRoomId={confirmDeleteRoomId}
-        setConfirmDeleteRoomId={setConfirmDeleteRoomId}
-        confirmDeleteRoomPlacement={confirmDeleteRoomPlacement}
-        confirmDeleteRoomSummary={confirmDeleteRoomSummary}
-        deleteRoom={deleteRoom}
-        openWallRequest={openWallRequest}
-        setConfirmOpenWallId={setConfirmOpenWallId}
-        openWall={openWall}
-        pendingPackageImport={pendingPackageImport}
-        resolvePackageImportConflicts={resolvePackageImportConflicts}
-        dismissPackageImport={dismissPackageImport}
-        syncConflict={syncConflict}
-        resolveSyncConflict={resolveSyncConflict}
-        disableProjectSync={disableProjectSync}
-        recoveryOffer={recoveryOffer}
-        acceptRecovery={acceptRecovery}
-        dismissRecovery={dismissRecovery}
-        usageAnalyticsEnabled={privacyPreferences.usageAnalytics}
-        crashReportsEnabled={privacyPreferences.crashReports}
-        onUsageAnalyticsChange={(usageAnalytics) =>
-          setPrivacyPreferences({ ...privacyPreferences, usageAnalytics })
-        }
-        onCrashReportsChange={(crashReports) =>
-          setPrivacyPreferences({ ...privacyPreferences, crashReports })
-        }
       />
     </main>
     </TooltipProvider>

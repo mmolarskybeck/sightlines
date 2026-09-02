@@ -11,6 +11,8 @@ import {
 } from "../../cloud/cloudBackupCopy";
 import type { CloudBackupProviderStatus } from "../../cloud/provider";
 import type { CloudBackupUploadStatus } from "../../store/cloudBackupSlice";
+import { useLinkedSyncMeta } from "../../hooks/useSyncLink";
+import { usePrivacyPreferences } from "../../telemetry/privacyPreferences";
 import { useAppStore } from "../../store";
 import { LengthField } from "../shared/LengthField";
 import { getScopedUnitContext } from "../shared/scopedUnits";
@@ -39,21 +41,10 @@ interface SettingsDialogProps {
   storageState: StoragePersistenceState;
   onRetryStorage: () => void;
   cloudBackupConfigured: boolean;
-  cloudBackupProviderStatus: CloudBackupProviderStatus;
-  cloudBackupAccountLabel: string | null;
-  cloudBackupStatus: CloudBackupUploadStatus;
-  lastCloudBackupAt: string | null;
-  onConnectCloudBackup: () => Promise<void>;
-  onDisconnectCloudBackup: () => void;
-  onRunCloudBackup: () => Promise<void>;
   resetPreferences: () => void;
   onExport: () => void;
   onImport: () => void;
   onOpenHelp: () => void;
-  usageAnalyticsEnabled: boolean;
-  crashReportsEnabled: boolean;
-  onUsageAnalyticsChange: (enabled: boolean) => boolean;
-  onCrashReportsChange: (enabled: boolean) => boolean;
 }
 
 // The four display units, spelled out. There's no display-name helper in
@@ -67,33 +58,22 @@ const UNIT_OPTIONS: { value: DisplayUnit; label: string }[] = [
 ];
 
 // A settings surface, not a wizard: two stacked sections (Project, Storage &
-// data) inside the shared .dialog-content overlay. Project data and the store
-// actions are read straight from useAppStore; everything that reaches back
-// into App (storage retry, export/import, reset, help) arrives as a prop so
-// the wiring pass owns those side effects. The delete-project confirmation is
-// a sibling Dialog gated by local state — the destructive path never fires
-// without a second, explicit click.
+// data) inside the shared .dialog-content overlay. Project data, the store
+// actions and the privacy preferences are read straight from their stores;
+// everything that reaches back into App (storage retry, export/import, reset,
+// help) arrives as a prop so the wiring pass owns those side effects. The
+// delete-project confirmation is a sibling Dialog gated by local state — the
+// destructive path never fires without a second, explicit click.
 export function SettingsDialog({
   open,
   onOpenChange,
   storageState,
   onRetryStorage,
   cloudBackupConfigured,
-  cloudBackupProviderStatus,
-  cloudBackupAccountLabel,
-  cloudBackupStatus,
-  lastCloudBackupAt,
-  onConnectCloudBackup,
-  onDisconnectCloudBackup,
-  onRunCloudBackup,
   resetPreferences,
   onExport,
   onImport,
-  onOpenHelp,
-  usageAnalyticsEnabled,
-  crashReportsEnabled,
-  onUsageAnalyticsChange,
-  onCrashReportsChange
+  onOpenHelp
 }: SettingsDialogProps) {
   const project = useAppStore((state) => state.project);
   const renameProject = useAppStore((state) => state.renameProject);
@@ -103,17 +83,24 @@ export function SettingsDialog({
     (state) => state.setDefaultCenterlineHeightMm
   );
   const deleteProject = useAppStore((state) => state.deleteProject);
-  // Sync state is read straight from the store like the project fields above —
-  // it belongs to the open project, not to anything App has to hand down.
-  const storedSyncMeta = useAppStore((state) => state.syncMeta);
+  // Cloud and sync state is read straight from the store like the project
+  // fields above — it belongs to the open project, not to anything App has to
+  // hand down. Whether this project is linked is the one shared derivation.
+  const cloudBackupProviderStatus = useAppStore(
+    (state) => state.cloudBackupProviderStatus
+  );
+  const cloudBackupAccountLabel = useAppStore((state) => state.cloudBackupAccountLabel);
+  const cloudBackupStatus = useAppStore((state) => state.cloudBackupStatus);
+  const lastCloudBackupAt = useAppStore((state) => state.lastCloudBackupAt);
+  const connectCloudBackup = useAppStore((state) => state.connectCloudBackup);
+  const disconnectCloudBackup = useAppStore((state) => state.disconnectCloudBackup);
+  const runCloudBackupNow = useAppStore((state) => state.runCloudBackupNow);
   const disableProjectSync = useAppStore((state) => state.disableProjectSync);
-  // Defense in depth against a stale async refresh: only metadata that names
-  // the OPEN project counts as "this project is linked" — offering "Turn off
-  // sync" here against another project's record would unlink the wrong one.
-  const syncMeta =
-    storedSyncMeta !== null && storedSyncMeta.projectId === project?.id
-      ? storedSyncMeta
-      : null;
+  const syncMeta = useLinkedSyncMeta();
+  // The privacy store is a useSyncExternalStore over a module singleton, so
+  // reading it here and in App's consent notice is one source, two readers.
+  const { preferences: privacyPreferences, setPreferences: setPrivacyPreferences } =
+    usePrivacyPreferences();
 
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [privacySaveFailed, setPrivacySaveFailed] = useState(false);
@@ -235,9 +222,9 @@ export function SettingsDialog({
                   uploadStatus={cloudBackupStatus}
                   accountLabel={cloudBackupAccountLabel}
                   lastCloudBackupAt={lastCloudBackupAt}
-                  onConnect={onConnectCloudBackup}
-                  onDisconnect={onDisconnectCloudBackup}
-                  onRunBackup={onRunCloudBackup}
+                  onConnect={connectCloudBackup}
+                  onDisconnect={disconnectCloudBackup}
+                  onRunBackup={runCloudBackupNow}
                 />
               ) : null}
 
@@ -271,22 +258,26 @@ export function SettingsDialog({
             <SettingsSection title="Analytics">
               <div className="settings-switch-group">
                 <SwitchRow
-                  checked={usageAnalyticsEnabled}
+                  checked={privacyPreferences.usageAnalytics}
                   description="Share anonymous feature-use and performance data. Never includes project or artwork content."
                   note="Turning this off reloads Sightlines."
                   id="settings-usage-analytics"
                   label="Anonymous usage analytics"
-                  onCheckedChange={(enabled) =>
-                    setPrivacySaveFailed(!onUsageAnalyticsChange(enabled))
+                  onCheckedChange={(usageAnalytics) =>
+                    setPrivacySaveFailed(
+                      !setPrivacyPreferences({ ...privacyPreferences, usageAnalytics })
+                    )
                   }
                 />
                 <SwitchRow
-                  checked={crashReportsEnabled}
+                  checked={privacyPreferences.crashReports}
                   description="Send sanitized error reports when Sightlines stops working. Not active yet — this saves your choice for launch."
                   id="settings-crash-reports"
                   label="Anonymous crash reports"
-                  onCheckedChange={(enabled) =>
-                    setPrivacySaveFailed(!onCrashReportsChange(enabled))
+                  onCheckedChange={(crashReports) =>
+                    setPrivacySaveFailed(
+                      !setPrivacyPreferences({ ...privacyPreferences, crashReports })
+                    )
                   }
                 />
               </div>

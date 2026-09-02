@@ -14,6 +14,7 @@ import { deliverExport } from "../export/deliverExport";
 import { telemetry } from "../telemetry/telemetry";
 import type { ThreeDViewActions } from "../components/three/ThreeDView";
 import type { SavedViewRenderRef } from "../savedViewRenderRef";
+import type { DialogsHandle } from "./useDialogs";
 
 export type UseExportActionsParams = {
   project: Project | null;
@@ -33,13 +34,15 @@ export type UseExportActionsParams = {
   elevationSvgElementRef: React.MutableRefObject<SVGSVGElement | null>;
   savedViewRenderRef: SavedViewRenderRef;
   setSnapshotExportMode: (value: boolean) => void;
-  setIsExportChecklistOpen: (open: boolean) => void;
-  setIsExportPdfOpen: (open: boolean) => void;
+  // The two export dialogs a finished export closes, and whose open state
+  // handleExportPdfOpenChange drives. snapshotExportMode is NOT one of them —
+  // it is a render mode, not a dialog.
+  dialogs: DialogsHandle;
 };
 
 // Owns every export/share handler and the state that exists only for them. The
-// dialogs' open flags stay with App (other code reads them), so the two that a
-// finished export closes come in as setters.
+// dialogs' open state lives in App's registry (other code reads it), so the
+// handle comes in.
 export function useExportActions({
   project,
   viewMode,
@@ -57,8 +60,7 @@ export function useExportActions({
   elevationSvgElementRef,
   savedViewRenderRef,
   setSnapshotExportMode,
-  setIsExportChecklistOpen,
-  setIsExportPdfOpen
+  dialogs
 }: UseExportActionsParams) {
   // Prevent re-entry while package assets are hashed and zipped.
   const [isExportingPackage, setIsExportingPackage] = useState(false);
@@ -127,7 +129,7 @@ export function useExportActions({
           filename: result.filename,
           mimeType: result.mimeType,
           warnings: result.warnings,
-          onDelivered: () => setIsExportChecklistOpen(false)
+          onDelivered: () => dialogs.close("exportChecklist")
         });
       } else {
         toast.error(
@@ -284,7 +286,7 @@ export function useExportActions({
         warnings: result.warnings,
         onDelivered: () => {
           telemetry.track("pdf_export_completed", {});
-          setIsExportPdfOpen(false);
+          dialogs.close("exportPdf");
         }
       });
     } catch (error) {
@@ -314,7 +316,7 @@ export function useExportActions({
       pdfExportAbortRef.current.abort();
       return;
     }
-    setIsExportPdfOpen(open);
+    dialogs.setOpen("exportPdf")(open);
   };
 
   return {

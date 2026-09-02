@@ -5,14 +5,11 @@ import { ArchiveIcon } from "@phosphor-icons/react/dist/csr/Archive";
 import { CameraIcon } from "@phosphor-icons/react/dist/csr/Camera";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
-import { CloudIcon } from "@phosphor-icons/react/dist/csr/Cloud";
 import { CloudArrowUpIcon } from "@phosphor-icons/react/dist/csr/CloudArrowUp";
-import { CloudCheckIcon } from "@phosphor-icons/react/dist/csr/CloudCheck";
 import { CloudWarningIcon } from "@phosphor-icons/react/dist/csr/CloudWarning";
 import { FilePdfIcon } from "@phosphor-icons/react/dist/csr/FilePdf";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import { FileDashedIcon } from "@phosphor-icons/react/dist/csr/FileDashed";
-import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { MapTrifoldIcon } from "@phosphor-icons/react/dist/csr/MapTrifold";
 import { PackageIcon } from "@phosphor-icons/react/dist/csr/Package";
 import { PresentationIcon } from "@phosphor-icons/react/dist/csr/Presentation";
@@ -22,29 +19,11 @@ import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
 import { UploadSimpleIcon } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import type { Project, Wall } from "../../../domain/project";
 import type { PackageExportMode } from "../../../domain/schema/packageSchema";
-import {
-  getStorageNoteCopy,
-  type StoragePersistenceState
-} from "../../hooks/useStoragePersistence";
-import {
-  getCloudBackupMenuItem,
-  getDropboxRowState,
-  getStatusBadgeDisplay,
-  getStatusBadgeTooltip,
-  type CloudBackupCloudIcon,
-  type DropboxRowAction
-} from "../../cloud/cloudBackupCopy";
-import type {
-  CloudBackupProviderStatus,
-  CloudProjectFolder,
-  SyncHeadListing
-} from "../../cloud/provider";
-import type { CloudBackupUploadStatus } from "../../store/cloudBackupSlice";
-import type { CloudProjectsStatus } from "../../store/cloudProjectsSlice";
-import type { ProjectSyncStatus } from "../../store/cloudSyncSlice";
-import type { AppState, ViewMode } from "../../store";
+import type { StoragePersistenceState } from "../../hooks/useStoragePersistence";
+import { getCloudBackupMenuItem } from "../../cloud/cloudBackupCopy";
+import { CLOUD_BACKUP_CONFIGURED } from "../../cloud/configured";
+import { useAppStore, type AppState, type ViewMode } from "../../store";
 import { ProjectPicker } from "../library/ProjectPicker";
-import { StatusBadge } from "../toolbar";
 import { ToolbarTooltipKbd } from "../toolbar/ToolbarTooltipKbd";
 import { Button } from "../ui/button";
 import {
@@ -57,7 +36,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger
 } from "../ui/dropdown-menu";
-import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import {
   UnderlineToggleGroup,
   UnderlineToggleGroupItem
@@ -67,49 +45,16 @@ import {
   TooltipContent,
   TooltipTrigger
 } from "../ui/tooltip";
+import { CloudStatusPopover } from "./CloudStatusPopover";
 import { ProjectTitleInput } from "./ProjectTitleInput";
+import { useCloudActions } from "./useCloudActions";
 
 type TopBarProps = {
   project: Project;
   viewMode: ViewMode;
   setViewMode: AppState["setViewMode"];
   selectedWall: Wall | null;
-  saveState: AppState["saveState"];
-  undoStack: AppState["undoStack"];
-  redoStack: AppState["redoStack"];
-  undo: AppState["undo"];
-  redo: AppState["redo"];
-  renameProject: AppState["renameProject"];
-  listProjectSummaries: AppState["listProjectSummaries"];
-  createProject: AppState["createProject"];
-  deleteProject: AppState["deleteProject"];
-  duplicateProject: AppState["duplicateProject"];
-  openProject: AppState["openProject"];
-  renameProjectById: AppState["renameProjectById"];
   storagePersistence: StoragePersistenceState;
-  cloudBackupConfigured: boolean;
-  cloudBackupProviderStatus: CloudBackupProviderStatus;
-  cloudBackupStatus: CloudBackupUploadStatus;
-  lastCloudBackupAt: string | null;
-  cloudBackupPending: boolean;
-  runCloudBackupNow: () => Promise<void>;
-  connectCloudBackup: () => Promise<void>;
-  cloudProjects: CloudProjectFolder[] | null;
-  cloudProjectsStatus: CloudProjectsStatus;
-  cloudSyncHeads: SyncHeadListing[] | null;
-  cloudProjectOpening: string | null;
-  refreshCloudProjects: () => Promise<void>;
-  openCloudProjectBackup: (folder: CloudProjectFolder) => Promise<boolean>;
-  // The sibling open for a project the account holds only as a sync head.
-  openCloudSyncedProject: (head: SyncHeadListing) => Promise<boolean>;
-  // Sync for the OPEN project: linked = this device holds usable sync metadata
-  // for it. Status and error are the sync loop's own, kept apart from the
-  // backup upload status they are folded together with for display only.
-  syncLinked: boolean;
-  syncStatus: ProjectSyncStatus;
-  syncError: string | null;
-  enableProjectSync: () => Promise<void>;
-  checkProjectSync: (options?: { manual?: boolean }) => Promise<void>;
   isExportingPackage: boolean;
   isSharingProject: boolean;
   handleExportPackage: (mode: PackageExportMode) => Promise<void>;
@@ -117,9 +62,9 @@ type TopBarProps = {
   handleExportProjectById: (id: string) => Promise<void>;
   handleExportImage: (format?: "png" | "jpeg") => Promise<void>;
   handleImportFile: (file: File) => Promise<void>;
-  setIsSettingsOpen: (open: boolean) => void;
-  setIsExportPdfOpen: (open: boolean) => void;
-  setIsExportChecklistOpen: (open: boolean) => void;
+  onOpenSettings: () => void;
+  onOpenExportPdf: () => void;
+  onOpenExportChecklist: () => void;
   fileInputRef: RefObject<HTMLInputElement>;
 };
 
@@ -128,38 +73,7 @@ export function TopBar({
   viewMode,
   setViewMode,
   selectedWall,
-  saveState,
-  undoStack,
-  redoStack,
-  undo,
-  redo,
-  renameProject,
-  listProjectSummaries,
-  createProject,
-  deleteProject,
-  duplicateProject,
-  openProject,
-  renameProjectById,
   storagePersistence,
-  cloudBackupConfigured,
-  cloudBackupProviderStatus,
-  cloudBackupStatus,
-  lastCloudBackupAt,
-  cloudBackupPending,
-  runCloudBackupNow,
-  connectCloudBackup,
-  cloudProjects,
-  cloudProjectsStatus,
-  cloudSyncHeads,
-  cloudProjectOpening,
-  refreshCloudProjects,
-  openCloudProjectBackup,
-  openCloudSyncedProject,
-  syncLinked,
-  syncStatus,
-  syncError,
-  enableProjectSync,
-  checkProjectSync,
   isExportingPackage,
   isSharingProject,
   handleExportPackage,
@@ -167,24 +81,46 @@ export function TopBar({
   handleExportProjectById,
   handleExportImage,
   handleImportFile,
-  setIsSettingsOpen,
-  setIsExportPdfOpen,
-  setIsExportChecklistOpen,
+  onOpenSettings,
+  onOpenExportPdf,
+  onOpenExportChecklist,
   fileInputRef
 }: TopBarProps) {
-  const badgeDisplay = getStatusBadgeDisplay({
-    saveState,
-    configured: cloudBackupConfigured,
-    providerStatus: cloudBackupProviderStatus,
-    uploadStatus: cloudBackupStatus,
-    pending: cloudBackupPending,
-    lastCloudBackupAt
-  });
+  const undoStack = useAppStore((state) => state.undoStack);
+  const redoStack = useAppStore((state) => state.redoStack);
+  const undo = useAppStore((state) => state.undo);
+  const redo = useAppStore((state) => state.redo);
+  const renameProject = useAppStore((state) => state.renameProject);
+  const listProjectSummaries = useAppStore((state) => state.listProjectSummaries);
+  const createProject = useAppStore((state) => state.createProject);
+  const deleteProject = useAppStore((state) => state.deleteProject);
+  const duplicateProject = useAppStore((state) => state.duplicateProject);
+  const openProject = useAppStore((state) => state.openProject);
+  const renameProjectById = useAppStore((state) => state.renameProjectById);
+  // The cloud fields the picker's "open from Dropbox" list and the Export
+  // menu's cloud item need; the status badge reads its own inside
+  // CloudStatusPopover.
+  const cloudBackupProviderStatus = useAppStore(
+    (state) => state.cloudBackupProviderStatus
+  );
+  const cloudBackupStatus = useAppStore((state) => state.cloudBackupStatus);
+  const lastCloudBackupAt = useAppStore((state) => state.lastCloudBackupAt);
+  const cloudBackupPending = useAppStore((state) => state.cloudBackupPending);
+  const connectCloudBackup = useAppStore((state) => state.connectCloudBackup);
+  const cloudProjects = useAppStore((state) => state.cloudProjects);
+  const cloudProjectsStatus = useAppStore((state) => state.cloudProjectsStatus);
+  const cloudSyncHeads = useAppStore((state) => state.cloudSyncHeads);
+  const cloudProjectOpening = useAppStore((state) => state.cloudProjectOpening);
+  const refreshCloudProjects = useAppStore((state) => state.refreshCloudProjects);
+  const openCloudProjectBackup = useAppStore((state) => state.openCloudProjectBackup);
+  // The sibling open for a project the account holds only as a sync head.
+  const openCloudSyncedProject = useAppStore((state) => state.openCloudSyncedProject);
+  const { runCloudAction } = useCloudActions({ onOpenSettings });
+
   const cloudConnected =
-    cloudBackupConfigured && cloudBackupProviderStatus === "connected";
+    CLOUD_BACKUP_CONFIGURED && cloudBackupProviderStatus === "connected";
   const exportBusy = isExportingPackage || isSharingProject;
-  const badgeTooltip = getStatusBadgeTooltip(badgeDisplay, cloudConnected);
-  const cloudMenu = cloudBackupConfigured
+  const cloudMenu = CLOUD_BACKUP_CONFIGURED
     ? getCloudBackupMenuItem({
         status: cloudBackupProviderStatus,
         uploadStatus: cloudBackupStatus,
@@ -192,40 +128,6 @@ export function TopBar({
         pending: cloudBackupPending
       })
     : null;
-  const dropboxRow = getDropboxRowState({
-    backup: {
-      configured: cloudBackupConfigured,
-      status: cloudBackupProviderStatus,
-      uploadStatus: cloudBackupStatus,
-      lastCloudBackupAt,
-      pending: cloudBackupPending
-    },
-    sync: { linked: syncLinked, status: syncStatus, error: syncError }
-  });
-  // The cloud row / export item share one action router so the two surfaces
-  // can't route the same intent differently.
-  const runCloudAction = (action: "backup-now" | "reconnect" | "retry" | "setup") => {
-    if (action === "reconnect") {
-      void connectCloudBackup();
-    } else if (action === "setup") {
-      setIsSettingsOpen(true);
-    } else {
-      void runCloudBackupNow();
-    }
-  };
-  // One dispatcher for the merged row's union. "Review" is the same gesture as
-  // a manual check: it clears a postponed ("Not now") project and re-evaluates,
-  // which re-parks the conflict dialog when the two versions really have both
-  // moved on. "Enable" covers both turning sync on and retrying an enable that
-  // failed — the row layer decides which retry an error gets, because it knows
-  // whether any metadata exists.
-  const runDropboxRowAction = (action: DropboxRowAction) => {
-    if (action === "enable") void enableProjectSync();
-    else if (action === "sync-now" || action === "review") {
-      void checkProjectSync({ manual: true });
-    } else if (action === "backup-retry") runCloudAction("retry");
-    else runCloudAction(action);
-  };
   return (
     <header className="topbar">
       <div className="topbar-left">
@@ -234,7 +136,7 @@ export function TopBar({
         <div className="project-switcher">
           <ProjectTitleInput title={project.title} onCommit={renameProject} />
           <ProjectPicker
-            cloudBackupConfigured={cloudBackupConfigured}
+            cloudBackupConfigured={CLOUD_BACKUP_CONFIGURED}
             cloudBackupProviderStatus={cloudBackupProviderStatus}
             cloudProjectOpening={cloudProjectOpening}
             cloudProjects={cloudProjects}
@@ -306,84 +208,11 @@ export function TopBar({
       </div>
 
       <div className="topbar-right" aria-label="Project actions">
-        <Popover>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <PopoverTrigger asChild>
-                <StatusBadge
-                  state={saveState}
-                  tone={badgeDisplay.tone}
-                  label={badgeDisplay.label}
-                  cloud={badgeDisplay.cloud}
-                />
-              </PopoverTrigger>
-            </TooltipTrigger>
-            <TooltipContent className="toolbar-tooltip" side="bottom">
-              {badgeTooltip}
-            </TooltipContent>
-          </Tooltip>
-          <PopoverContent side="bottom" align="end" className="storage-popover">
-            <div className="storage-popover-heading">
-              <h3>Save &amp; backup</h3>
-            </div>
-            <div className="storage-popover-destinations">
-              <section className="storage-popover-destination">
-                <FloppyDiskIcon
-                  aria-hidden="true"
-                  className="storage-popover-destination-icon"
-                  size={16}
-                />
-                <div className="storage-popover-destination-copy">
-                  <h4>On this device</h4>
-                  <p>{getStorageNoteCopy(storagePersistence)}</p>
-                </div>
-              </section>
-              {/* One Dropbox row, not one per mechanism: the curator is owed a
-                  single answer about the copy in Dropbox — is it there, and is
-                  it on the other devices. Backup and sync remain separate
-                  machinery behind it; the row states whichever needs a decision
-                  first and offers that state's one next step. Turning sync OFF
-                  lives in Settings — this row stays status + next step. */}
-              <section
-                className={`storage-popover-destination storage-popover-cloud-${dropboxRow.tone}`}
-              >
-                <CloudRowIcon icon={dropboxRow.icon} />
-                <div className="storage-popover-destination-copy">
-                  <h4>Dropbox</h4>
-                  <p>{dropboxRow.text}</p>
-                  {dropboxRow.action ? (
-                    <Button
-                      className="storage-popover-row-action"
-                      disabled={dropboxRow.actionDisabled}
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => runDropboxRowAction(dropboxRow.action!)}
-                    >
-                      {dropboxRow.actionLabel}
-                    </Button>
-                  ) : null}
-                </div>
-              </section>
-            </div>
-            <div className="storage-popover-footer">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void handleExportPackage("display")}
-              >
-                <DownloadSimpleIcon aria-hidden="true" size={15} />
-                Export backup file
-              </Button>
-              <button
-                className="settings-link"
-                type="button"
-                onClick={() => setIsSettingsOpen(true)}
-              >
-                Storage settings
-              </button>
-            </div>
-          </PopoverContent>
-        </Popover>
+        <CloudStatusPopover
+          storagePersistence={storagePersistence}
+          onExportBackup={() => void handleExportPackage("display")}
+          onOpenSettings={onOpenSettings}
+        />
         <div className="toolbar-group">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -562,7 +391,7 @@ export function TopBar({
             <DropdownMenuItem
               className="dropdown-menu-item-stacked"
               disabled={project.floor.rooms.length === 0}
-              onSelect={() => setIsExportPdfOpen(true)}
+              onSelect={onOpenExportPdf}
             >
               <FilePdfIcon aria-hidden="true" size={16} />
               <span className="flex min-w-0 flex-col gap-0.5">
@@ -575,7 +404,7 @@ export function TopBar({
             <DropdownMenuItem
               className="dropdown-menu-item-stacked"
               disabled={project.checklistArtworkIds.length === 0}
-              onSelect={() => setIsExportChecklistOpen(true)}
+              onSelect={onOpenExportChecklist}
             >
               <TableIcon aria-hidden="true" size={16} />
               <span className="flex min-w-0 flex-col gap-0.5">
@@ -704,26 +533,4 @@ export function TopBar({
       </div>
     </header>
   );
-}
-
-// The state-matched cloud glyph for the save-status popover row. The spinner
-// reuses the shared animate-spin (suppressed under reduced motion in
-// global.css); every glyph is decorative, so the row's text carries meaning.
-function CloudRowIcon({ icon }: { icon: CloudBackupCloudIcon }) {
-  if (icon === "cloud-spinner") {
-    return (
-      <CircleNotchIcon
-        aria-hidden="true"
-        className="storage-popover-cloud-icon animate-spin"
-        size={15}
-      />
-    );
-  }
-  const Glyph =
-    icon === "cloud-check"
-      ? CloudCheckIcon
-      : icon === "cloud-warning"
-        ? CloudWarningIcon
-        : CloudIcon;
-  return <Glyph aria-hidden="true" className="storage-popover-cloud-icon" size={15} />;
 }

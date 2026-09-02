@@ -9,6 +9,7 @@ import {
   useDeleteAndEscapeShortcuts,
   type UseDeleteAndEscapeShortcutsParams
 } from "./useDeleteAndEscapeShortcuts";
+import type { DialogName, DialogsHandle } from "./useDialogs";
 
 afterEach(cleanup);
 
@@ -43,17 +44,33 @@ function makeProject(): Project {
   };
 }
 
-function renderHarness(overrides: Partial<UseDeleteAndEscapeShortcutsParams> = {}) {
+// A stand-in registry: only which dialogs are already open matters here, so the
+// state is fixed per render and the mutators are spies.
+function makeDialogs(openNames: DialogName[] = []) {
+  const isOpen = (name: DialogName) => openNames.includes(name);
+  return {
+    isOpen,
+    open: vi.fn(),
+    close: vi.fn(),
+    payload: () => null,
+    setOpen: () => () => {},
+    anyOpen: openNames.length > 0
+  } satisfies DialogsHandle;
+}
+
+function renderHarness(
+  overrides: Partial<UseDeleteAndEscapeShortcutsParams> & { openDialogs?: DialogName[] } = {}
+) {
   cleanup();
+  const { openDialogs, ...paramOverrides } = overrides;
+  const dialogs = makeDialogs(openDialogs);
   const spies = {
-    setConfirmOpenWallId: vi.fn(),
-    setConfirmDeleteRoomId: vi.fn(),
+    dialogs,
     deleteFreestandingWall: vi.fn().mockResolvedValue(undefined),
     deleteRoom: vi.fn().mockResolvedValue(undefined),
     removeSelectedPlacements: vi.fn().mockResolvedValue(undefined),
     clearObjectSelection: vi.fn(),
-    cancelArrangeSession: vi.fn(),
-    setIsHelpOpen: vi.fn()
+    cancelArrangeSession: vi.fn()
   };
 
   const params: UseDeleteAndEscapeShortcutsParams = {
@@ -62,13 +79,10 @@ function renderHarness(overrides: Partial<UseDeleteAndEscapeShortcutsParams> = {
     selectedObjectIds: [],
     selectedFreestandingWallId: null,
     reshapeRoomId: null,
-    confirmDeleteRoomId: null,
-    confirmOpenWallId: null,
     draggingArtworkId: null,
-    isHelpOpen: false,
     arrangeSession: null,
     ...spies,
-    ...overrides
+    ...paramOverrides
   };
 
   function Harness() {
@@ -87,7 +101,7 @@ describe("Delete on a wall", () => {
 
     fireEvent.keyDown(window, { key: "Delete" });
 
-    expect(spies.setConfirmOpenWallId).toHaveBeenCalledWith(WALL_NORTH);
+    expect(spies.dialogs.open).toHaveBeenCalledWith("openWall", { wallId: WALL_NORTH });
   });
 
   // THE safety test. getSelectedWall falls back to walls[0], so the inspector
@@ -99,8 +113,7 @@ describe("Delete on a wall", () => {
 
     fireEvent.keyDown(window, { key: "Delete" });
 
-    expect(spies.setConfirmOpenWallId).not.toHaveBeenCalled();
-    expect(spies.setConfirmDeleteRoomId).not.toHaveBeenCalled();
+    expect(spies.dialogs.open).not.toHaveBeenCalled();
   });
 
   it("is inert on an already-open wall — Restore is a button, not a key", () => {
@@ -110,7 +123,7 @@ describe("Delete on a wall", () => {
 
     fireEvent.keyDown(window, { key: "Delete" });
 
-    expect(spies.setConfirmOpenWallId).not.toHaveBeenCalled();
+    expect(spies.dialogs.open).not.toHaveBeenCalled();
   });
 
   it("is inert for a stale wall id", () => {
@@ -118,7 +131,7 @@ describe("Delete on a wall", () => {
 
     fireEvent.keyDown(window, { key: "Delete" });
 
-    expect(spies.setConfirmOpenWallId).not.toHaveBeenCalled();
+    expect(spies.dialogs.open).not.toHaveBeenCalled();
   });
 
   it("lets a placed selection win — the objects branch comes first", () => {
@@ -130,7 +143,7 @@ describe("Delete on a wall", () => {
     fireEvent.keyDown(window, { key: "Delete" });
 
     expect(spies.removeSelectedPlacements).toHaveBeenCalledTimes(1);
-    expect(spies.setConfirmOpenWallId).not.toHaveBeenCalled();
+    expect(spies.dialogs.open).not.toHaveBeenCalled();
   });
 
   it("stands down while edit-shape is armed — vertex removal owns the key", () => {
@@ -138,23 +151,36 @@ describe("Delete on a wall", () => {
 
     fireEvent.keyDown(window, { key: "Delete" });
 
-    expect(spies.setConfirmOpenWallId).not.toHaveBeenCalled();
+    expect(spies.dialogs.open).not.toHaveBeenCalled();
   });
 
   it("stands down while either confirm dialog is open", () => {
     const withOwnDialog = renderHarness({
       selection: pickWall(),
-      confirmOpenWallId: WALL_NORTH
+      openDialogs: ["openWall"]
     });
     fireEvent.keyDown(window, { key: "Delete" });
-    expect(withOwnDialog.setConfirmOpenWallId).not.toHaveBeenCalled();
+    expect(withOwnDialog.dialogs.open).not.toHaveBeenCalled();
 
     const withRoomDialog = renderHarness({
       selection: pickWall(),
-      confirmDeleteRoomId: "room-a"
+      openDialogs: ["deleteRoom"]
     });
     fireEvent.keyDown(window, { key: "Delete" });
-    expect(withRoomDialog.setConfirmOpenWallId).not.toHaveBeenCalled();
+    expect(withRoomDialog.dialogs.open).not.toHaveBeenCalled();
+  });
+
+  // Help owns the keyboard outright: Escape closes it and nothing else, and
+  // Delete never reaches the branches below.
+  it("stands down while Help is open, closing it on Escape", () => {
+    const spies = renderHarness({ selection: pickWall(), openDialogs: ["help"] });
+
+    fireEvent.keyDown(window, { key: "Delete" });
+    expect(spies.dialogs.open).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(spies.dialogs.close).toHaveBeenCalledWith("help");
+    expect(spies.clearObjectSelection).not.toHaveBeenCalled();
   });
 
   it("stands down for a focused editable target", () => {
@@ -164,7 +190,7 @@ describe("Delete on a wall", () => {
 
     fireEvent.keyDown(input, { key: "Backspace" });
 
-    expect(spies.setConfirmOpenWallId).not.toHaveBeenCalled();
+    expect(spies.dialogs.open).not.toHaveBeenCalled();
     input.remove();
   });
 
@@ -174,6 +200,6 @@ describe("Delete on a wall", () => {
     fireEvent.keyDown(window, { key: "Escape" });
 
     expect(spies.clearObjectSelection).toHaveBeenCalledTimes(1);
-    expect(spies.setConfirmOpenWallId).not.toHaveBeenCalled();
+    expect(spies.dialogs.open).not.toHaveBeenCalled();
   });
 });
