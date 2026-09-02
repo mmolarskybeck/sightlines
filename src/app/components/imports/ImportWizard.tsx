@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useReducer, useState, type KeyboardEvent, type ReactNode } from "react";
 import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
@@ -13,15 +13,19 @@ import { createArtworkImportPlan } from "../../../domain/spreadsheetImport/impor
 import type { ImportDimensionUnit } from "../../../domain/spreadsheetImport/dimensions";
 import type {
   ArtworkImportDraft,
-  ColumnMapping,
   DimensionOrder,
   ImportField,
   ImportPlan,
   ImportTable,
-  ImportWorkbookPreview,
   ImageMatchCandidate
 } from "../../../domain/spreadsheetImport/types";
 import { createImportTable, parseImportWorkbook } from "../../../domain/spreadsheetImport/workbook";
+import {
+  IMPORT_WIZARD_STEP_ORDER,
+  importWizardReducer,
+  initialImportWizardState,
+  type ImportWizardStep
+} from "./importWizardReducer";
 import type { DisplayUnit } from "../../../domain/project";
 import { formatLength } from "../../../domain/units/length";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../../domain/units/unitSystem";
@@ -42,10 +46,9 @@ import {
   SelectValue
 } from "../ui/select";
 
-type Step = "upload" | "map" | "review";
+type Step = ImportWizardStep;
 type StepState = "complete" | "active" | "upcoming";
 
-const STEP_ORDER: Step[] = ["upload", "map", "review"];
 const STEP_COPY: Record<Step, { title: string; description: string }> = {
   upload: {
     title: "Choose source files",
@@ -133,35 +136,31 @@ export default function ImportWizard({
 }) {
   const spreadsheetInputId = "import-spreadsheet-input";
   const imageInputId = "import-image-input";
-  const [step, setStep] = useState<Step>("upload");
-  const [workbook, setWorkbook] = useState<ImportWorkbookPreview | null>(null);
-  const [spreadsheetFile, setSpreadsheetFile] = useState<File | null>(null);
-  const [selectedSheet, setSelectedSheet] = useState<string | null>(null);
-  const [headerRowIndex, setHeaderRowIndex] = useState<number | undefined>(undefined);
-  const [imageFiles, setImageFiles] = useState<File[]>([]);
-  const [mapping, setMapping] = useState<ColumnMapping>({});
-  const [dimensionOrder, setDimensionOrder] = useState<DimensionOrder>("auto");
-  // "auto" defers to the project default; any other value manually forces the
-  // unit for bare (unit-less) dimension numbers. Inline units and column-header
-  // hints still take precedence over this override.
-  const [unitOverride, setUnitOverride] = useState<ImportDimensionUnit | "auto">("auto");
-  // Filename → width/height ratio, filled asynchronously from the uploaded
-  // image bitmaps. "auto" dimension order consults this to settle whether a
-  // combined "12 x 13" cell is H x W or W x H.
-  const [imageAspectByName, setImageAspectByName] = useState<ReadonlyMap<string, number>>(
-    new Map()
-  );
-  const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(new Set());
-  const [imageChoiceByDraftId, setImageChoiceByDraftId] = useState<Record<string, string>>({});
-  const [error, setError] = useState<string | null>(null);
+  // One reducer holds every field that participates in a step transition or a
+  // reset, so the "what else has to change when this changes" rules live in
+  // importWizardReducer.ts rather than being spread across call sites.
+  const [state, dispatch] = useReducer(importWizardReducer, initialImportWizardState);
+  const {
+    step,
+    workbook,
+    spreadsheetFile,
+    selectedSheet,
+    headerRowIndex,
+    imageFiles,
+    mapping,
+    dimensionOrder,
+    unitOverride,
+    imageAspectByName,
+    selectedDraftIds,
+    imageChoiceByDraftId,
+    error,
+    sampleRowIndex
+  } = state;
   // Which upload tile a drag is currently hovering, so the drop-target style
-  // can light up before the drop event fires.
+  // can light up before the drop event fires. Purely local hover feedback: it
+  // survives no transition and is cleared by the drop itself, so it stays out
+  // of the reducer rather than dispatching on every dragover.
   const [dragTarget, setDragTarget] = useState<"spreadsheet" | "images" | null>(null);
-  // Which draft the Map step's sample card is showing. Reset on table
-  // identity (a new sheet/header row genuinely changes what's being
-  // previewed) but deliberately NOT on mapping edits — watching one row
-  // respond live as fields get (un)mapped is the point of the card.
-  const [sampleRowIndex, setSampleRowIndex] = useState(0);
 
   const imageUrls = useFileImageUrls(imageFiles);
   const stepCopy = STEP_COPY[step];
@@ -172,15 +171,17 @@ export default function ImportWizard({
     "artwork"
   ).parseUnit;
 
-  const currentStepIndex = STEP_ORDER.indexOf(step);
+  const currentStepIndex = IMPORT_WIZARD_STEP_ORDER.indexOf(step);
   function stepState(target: Step): StepState {
-    const targetIndex = STEP_ORDER.indexOf(target);
+    const targetIndex = IMPORT_WIZARD_STEP_ORDER.indexOf(target);
     if (targetIndex === currentStepIndex) return "active";
     return targetIndex < currentStepIndex ? "complete" : "upcoming";
   }
 
+  // Closing the dialog empties the wizard: reopening always starts on upload
+  // with nothing carried over from the previous run.
   useEffect(() => {
-    if (!open) reset();
+    if (!open) dispatch({ type: "reset" });
   }, [open]);
 
   const table = useMemo<ImportTable | null>(() => {
@@ -217,11 +218,7 @@ export default function ImportWizard({
         }
       }
       if (cancelled || measured.size === 0) return;
-      setImageAspectByName((current) => {
-        const next = new Map(current);
-        for (const [name, ratio] of measured) next.set(name, ratio);
-        return next;
-      });
+      dispatch({ type: "image-aspects-measured", aspects: measured });
     })();
 
     return () => {
@@ -255,11 +252,14 @@ export default function ImportWizard({
     [plan, mapping, imageFiles]
   );
 
+  // Draft ids are regenerated whenever the plan changes shape, so selection and
+  // per-row image choices are re-seeded from the new drafts rather than merged.
   useEffect(() => {
     if (!plan) return;
-    setSelectedDraftIds(new Set(plan.drafts.map((draft) => draft.id)));
-    setImageChoiceByDraftId(
-      Object.fromEntries(
+    dispatch({
+      type: "drafts-planned",
+      draftIds: plan.drafts.map((draft) => draft.id),
+      imageChoiceByDraftId: Object.fromEntries(
         plan.drafts.map((draft) => [
           draft.id,
           draft.imageFile?.name ??
@@ -268,19 +268,22 @@ export default function ImportWizard({
               : NO_IMAGE)
         ])
       )
-    );
+    });
   }, [planSignature]);
 
+  // A rebuilt table means new columns: re-guess the mapping and rewind the
+  // sample card. Keyed on the `table` memo, which only recomputes when the
+  // workbook, sheet or header row actually changed — a mapping edit must NOT
+  // land here, since watching one row respond live as fields get (un)mapped is
+  // the whole point of the sample card.
   useEffect(() => {
-    setSampleRowIndex(0);
-    if (!table) return;
-    const nextPlan = createArtworkImportPlan({
-      table,
-      imageFiles,
-      projectUnit
+    dispatch({
+      type: "table-rebuilt",
+      mapping: table
+        ? createArtworkImportPlan({ table, imageFiles, projectUnit }).mapping
+        : null
     });
-    setMapping(nextPlan.mapping);
-  }, [table?.sourceFilename, table?.sheetName, table?.headerRowIndex]);
+  }, [table]);
 
   const selectedSheetRows = workbook?.sheets.find((sheet) => sheet.name === selectedSheet)?.rows;
   const maxHeaderRow = Math.min(10, selectedSheetRows?.length ?? 0);
@@ -302,11 +305,7 @@ export default function ImportWizard({
   const sampleImageUrl = sampleImageFile ? imageUrls.get(sampleImageFile.name) : undefined;
 
   function stepSample(delta: number) {
-    if (sampleDrafts.length === 0) return;
-    setSampleRowIndex((current) => {
-      const clamped = Math.min(current, sampleDrafts.length - 1);
-      return Math.max(0, Math.min(sampleDrafts.length - 1, clamped + delta));
-    });
+    dispatch({ type: "sample-row-stepped", delta, total: sampleDrafts.length });
   }
 
   const uploadRowCount = table?.rows.length ?? 0;
@@ -319,19 +318,19 @@ export default function ImportWizard({
         : { caution: false, text: `${uploadRowCount} rows detected` };
 
   async function readSpreadsheet(file: File) {
-    setError(null);
+    dispatch({ type: "error-cleared" });
     try {
       const parsed = await parseImportWorkbook(await file.arrayBuffer(), file.name);
       if (parsed.sheets.length === 0) {
-        setError("No readable sheets found.");
+        dispatch({ type: "error-raised", message: "No readable sheets found." });
         return;
       }
-      setSpreadsheetFile(file);
-      setWorkbook(parsed);
-      setSelectedSheet(parsed.sheets[0].name);
-      setHeaderRowIndex(undefined);
+      dispatch({ type: "workbook-loaded", file, workbook: parsed });
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Could not read that spreadsheet.");
+      dispatch({
+        type: "error-raised",
+        message: error instanceof Error ? error.message : "Could not read that spreadsheet."
+      });
     }
   }
 
@@ -345,32 +344,13 @@ export default function ImportWizard({
   }
 
   function handleImageFiles(files: FileList | File[]) {
-    const matched = Array.from(files).filter(isImportImageFile);
-    if (matched.length > 0) {
-      setImageFiles((current) => [...current, ...matched]);
-    }
+    dispatch({ type: "images-added", files: Array.from(files).filter(isImportImageFile) });
   }
 
   function activateUploadLabel(event: KeyboardEvent<HTMLLabelElement>) {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
     event.currentTarget.click();
-  }
-
-  function clearSpreadsheet() {
-    setWorkbook(null);
-    setSpreadsheetFile(null);
-    setSelectedSheet(null);
-    setHeaderRowIndex(undefined);
-    setMapping({});
-    setSelectedDraftIds(new Set());
-    setImageChoiceByDraftId({});
-    setSampleRowIndex(0);
-    setError(null);
-  }
-
-  function removeImageFile(indexToRemove: number) {
-    setImageFiles((current) => current.filter((_, index) => index !== indexToRemove));
   }
 
   async function importImagesOnly() {
@@ -390,23 +370,6 @@ export default function ImportWizard({
     onOpenChange(false);
   }
 
-  function reset() {
-    setStep("upload");
-    setWorkbook(null);
-    setSpreadsheetFile(null);
-    setSelectedSheet(null);
-    setHeaderRowIndex(undefined);
-    setImageFiles([]);
-    setMapping({});
-    setDimensionOrder("auto");
-    setUnitOverride("auto");
-    setImageAspectByName(new Map());
-    setSelectedDraftIds(new Set());
-    setImageChoiceByDraftId({});
-    setError(null);
-    setSampleRowIndex(0);
-  }
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="import-dialog">
@@ -416,14 +379,14 @@ export default function ImportWizard({
           </DialogTitle>
           <DialogDescription className="visually-hidden">{stepCopy.description}</DialogDescription>
           <div className="import-steps" aria-label="Import steps">
-            <StepButton index={1} label="Upload" state={stepState("upload")} onClick={() => setStep("upload")} />
+            <StepButton index={1} label="Upload" state={stepState("upload")} onClick={() => dispatch({ type: "step-changed", step: "upload" })} />
             <CaretRightIcon aria-hidden="true" className="import-step-caret" size={14} />
             <StepButton
               disabled={!table}
               index={2}
               label="Map"
               state={stepState("map")}
-              onClick={() => setStep("map")}
+              onClick={() => dispatch({ type: "step-changed", step: "map" })}
             />
             <CaretRightIcon aria-hidden="true" className="import-step-caret" size={14} />
             <StepButton
@@ -431,7 +394,7 @@ export default function ImportWizard({
               index={3}
               label="Review"
               state={stepState("review")}
-              onClick={() => setStep("review")}
+              onClick={() => dispatch({ type: "step-changed", step: "review" })}
             />
           </div>
           <p className="import-destination-note">
@@ -509,7 +472,7 @@ export default function ImportWizard({
                     <Button asChild size="sm" variant="outline">
                       <label htmlFor={spreadsheetInputId}>Replace</label>
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={clearSpreadsheet}>
+                    <Button size="sm" variant="ghost" onClick={() => dispatch({ type: "workbook-cleared" })}>
                       Clear
                     </Button>
                   </div>
@@ -576,7 +539,7 @@ export default function ImportWizard({
                           type="button"
                           aria-label={`Remove ${file.name}`}
                           className="import-upload-file-remove"
-                          onClick={() => removeImageFile(index)}
+                          onClick={() => dispatch({ type: "image-removed", index })}
                         >
                           <XIcon aria-hidden="true" size={13} />
                         </button>
@@ -587,7 +550,7 @@ export default function ImportWizard({
                     <Button asChild size="sm" variant="outline">
                       <label htmlFor={imageInputId}>Add more</label>
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setImageFiles([])}>
+                    <Button size="sm" variant="ghost" onClick={() => dispatch({ type: "images-cleared" })}>
                       Clear all
                     </Button>
                   </div>
@@ -629,8 +592,7 @@ export default function ImportWizard({
                   <Select
                     value={selectedSheet ?? undefined}
                     onValueChange={(value) => {
-                      setSelectedSheet(value);
-                      setHeaderRowIndex(undefined);
+                      dispatch({ type: "sheet-selected", sheet: value });
                     }}
                   >
                     <SelectTrigger>
@@ -649,7 +611,9 @@ export default function ImportWizard({
                   <span>Header row</span>
                   <Select
                     value={String(table.headerRowIndex)}
-                    onValueChange={(value) => setHeaderRowIndex(Number(value))}
+                    onValueChange={(value) =>
+                      dispatch({ type: "header-row-selected", headerRowIndex: Number(value) })
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -668,7 +632,12 @@ export default function ImportWizard({
                     <span>Dimension order</span>
                     <Select
                       value={dimensionOrder}
-                      onValueChange={(value) => setDimensionOrder(value as DimensionOrder)}
+                      onValueChange={(value) =>
+                        dispatch({
+                          type: "dimension-order-changed",
+                          dimensionOrder: value as DimensionOrder
+                        })
+                      }
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -690,7 +659,10 @@ export default function ImportWizard({
                     <Select
                       value={unitOverride}
                       onValueChange={(value) =>
-                        setUnitOverride(value as ImportDimensionUnit | "auto")
+                        dispatch({
+                          type: "unit-override-changed",
+                          unitOverride: value as ImportDimensionUnit | "auto"
+                        })
                       }
                     >
                       <SelectTrigger>
@@ -726,10 +698,11 @@ export default function ImportWizard({
                             mapping[field] === undefined ? NO_COLUMN : String(mapping[field])
                           }
                           onValueChange={(value) =>
-                            setMapping((current) => ({
-                              ...current,
-                              [field]: value === NO_COLUMN ? undefined : Number(value)
-                            }))
+                            dispatch({
+                              type: "mapping-field-changed",
+                              field,
+                              columnIndex: value === NO_COLUMN ? undefined : Number(value)
+                            })
                           }
                         >
                           <SelectTrigger>
@@ -780,14 +753,17 @@ export default function ImportWizard({
                       selected={selectedDraftIds.has(draft.id)}
                       thumbnailUrl={imageFile ? imageUrls.get(imageFile.name) : undefined}
                       onImageChoice={(value) =>
-                        setImageChoiceByDraftId((current) => ({ ...current, [draft.id]: value }))
+                        dispatch({
+                          type: "draft-image-choice-changed",
+                          draftId: draft.id,
+                          choice: value
+                        })
                       }
                       onSelectedChange={(selected) =>
-                        setSelectedDraftIds((current) => {
-                          const next = new Set(current);
-                          if (selected) next.add(draft.id);
-                          else next.delete(draft.id);
-                          return next;
+                        dispatch({
+                          type: "draft-selection-changed",
+                          draftId: draft.id,
+                          selected
                         })
                       }
                     />
@@ -811,7 +787,7 @@ export default function ImportWizard({
               variant="primary"
               onClick={() => {
                 if (table && table.rows.length > 0) {
-                  setStep("map");
+                  dispatch({ type: "step-changed", step: "map" });
                   return;
                 }
                 void importImagesOnly();
@@ -825,7 +801,7 @@ export default function ImportWizard({
             </Button>
           ) : null}
           {step === "map" ? (
-            <Button disabled={!plan} variant="primary" onClick={() => setStep("review")}>
+            <Button disabled={!plan} variant="primary" onClick={() => dispatch({ type: "step-changed", step: "review" })}>
               Review
             </Button>
           ) : null}
