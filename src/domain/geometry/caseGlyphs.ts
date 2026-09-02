@@ -15,14 +15,18 @@
 //   footprint center), x rightward, y downward — the frame both the screen
 //   <g transform="rotate(...)"> and the PDF planRectWorldPoint expect.
 
-import {
-  CASE_BASE_SLAB_THICKNESS_MM,
-  CASE_GLASS_THICKNESS_MM,
-  CASE_LEG_INSET_MM,
-  CASE_LEG_SIZE_MM,
-  CASE_WALL_THICKNESS_MM,
-  FLOOR_CASE_BOX_HEIGHT_MM
-} from "../project";
+// The glass box portion at the top; the legs fill (heightMm − this) below it.
+export const FLOOR_CASE_BOX_HEIGHT_MM = 300;
+
+// Case construction constants shared by the 3D mesh (CaseMesh.tsx) and the 2D
+// plan/elevation glyphs (PlanObject.tsx, ElevationCase.tsx) — the 2D views
+// echo the true 3D geometry rather than using arbitrary insets. Colors stay
+// out of this file; 2D keeps using CSS tokens, 3D keeps its own tokens.ts.
+export const CASE_WALL_THICKNESS_MM = 20; // tray wall / bottom-slab thickness
+export const CASE_GLASS_THICKNESS_MM = 6; // inset glass cap/lid thickness
+export const CASE_LEG_SIZE_MM = 40; // floor-case leg footprint (square, in plan)
+export const CASE_LEG_INSET_MM = 40; // distance from the footprint edge to a leg's center
+export const CASE_BASE_SLAB_THICKNESS_MM = 24; // floor-case base slab thickness
 
 // Display-case defaults (curatorial, not code minimums — a first placement a
 // curator immediately adjusts numerically, same spirit as the opening

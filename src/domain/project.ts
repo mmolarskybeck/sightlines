@@ -633,18 +633,17 @@ export {
   DEFAULT_FLOOR_CASE_DEPTH_MM,
   DEFAULT_FLOOR_CASE_HEIGHT_MM
 } from "./geometry/caseGlyphs";
-// The glass box portion at the top; the legs fill (heightMm − this) below it.
-export const FLOOR_CASE_BOX_HEIGHT_MM = 300;
-
-// Case construction constants shared by the 3D mesh (CaseMesh.tsx) and the 2D
-// plan/elevation glyphs (PlanObject.tsx, ElevationCase.tsx) — the 2D views
-// echo the true 3D geometry rather than using arbitrary insets. Colors stay
-// out of this file; 2D keeps using CSS tokens, 3D keeps its own tokens.ts.
-export const CASE_WALL_THICKNESS_MM = 20; // tray wall / bottom-slab thickness
-export const CASE_GLASS_THICKNESS_MM = 6; // inset glass cap/lid thickness
-export const CASE_LEG_SIZE_MM = 40; // floor-case leg footprint (square, in plan)
-export const CASE_LEG_INSET_MM = 40; // distance from the footprint edge to a leg's center
-export const CASE_BASE_SLAB_THICKNESS_MM = 24; // floor-case base slab thickness
+// Case construction constants (box height, wall/glass thickness, legs) live
+// with the glyph geometry too — see caseGlyphs.ts. Re-exported here for the
+// same one-import reason as the defaults above.
+export {
+  FLOOR_CASE_BOX_HEIGHT_MM,
+  CASE_WALL_THICKNESS_MM,
+  CASE_GLASS_THICKNESS_MM,
+  CASE_LEG_SIZE_MM,
+  CASE_LEG_INSET_MM,
+  CASE_BASE_SLAB_THICKNESS_MM
+} from "./geometry/caseGlyphs";
 
 // CRT / box-monitor curatorial defaults live beside the glyph geometry that
 // consumes them — see monitorGlyphs.ts.
