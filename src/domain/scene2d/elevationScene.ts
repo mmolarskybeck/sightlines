@@ -157,17 +157,11 @@ export type ElevationSceneFloorCaseGhost = {
 // suspension wires rather than the case's glass-box/slab/legs glyph.
 //
 // DECISION — only SUSPENDED artworks ghost (baseHeightMm > 0); a floor-resting
-// artwork emits nothing. Weighed both ways: the floor-case precedent ghosts
-// unconditionally, and a floor-resting sculpture near a wall is arguably worth
-// aligning against too. But (a) every existing project with floor artwork would
-// suddenly grow dashed outlines on up to four wall elevations — a look
-// regression for work no one asked to see there, where the plan view already
-// says exactly where those objects sit; and (b) the thing that makes a
-// suspended board need an elevation at all is that it occupies air in front of
-// the wall, at the same heights as hung work, which no other view shows. The
-// case ghost earned its unconditional rule by being a waist-height vitrine you
-// hang work above. If floor-resting artwork should ghost later, this is one
-// predicate — deliberately not a silent default.
+// artwork emits nothing, because it is the suspension itself — occupying air
+// in front of the wall, at the same heights as hung work — that no other view
+// already shows; a floor-resting object's footprint is fully covered by the
+// plan. If floor-resting artwork should ghost later, this is one predicate —
+// deliberately not a silent default.
 export type ElevationSceneSuspendedArtworkGhost = {
   object: ArtworkFloorObject;
   xMinMm: number;
@@ -183,13 +177,12 @@ export type ElevationSceneSuspendedArtworkGhost = {
 // floor-case ghost beside it.
 //
 // This is the one narrow exception to the DECISION recorded above — that
-// floor-RESTING artwork emits no elevation ghost — and it is granted on the
-// same grounds the floor case earned its unconditional rule. A monitor is
-// waist-to-eye-height equipment standing against a wall, and the thing a
-// curator needs the elevation for is precisely whether the screen's centre
-// lines up with the hung work beside it; nothing else in the app answers that.
-// The exception stays narrow by construction: it is keyed on displayAs ===
-// "monitor", so no existing project grows a single new dashed outline.
+// floor-RESTING artwork emits no elevation ghost. A monitor is waist-to-eye-
+// height equipment standing against a wall, and the thing a curator needs the
+// elevation for is precisely whether the screen's centre lines up with the
+// hung work beside it; nothing else in the app answers that. The exception
+// stays narrow by construction: it is keyed on displayAs === "monitor", so no
+// existing project grows a single new dashed outline.
 export type ElevationSceneMonitorGhost = {
   object: ArtworkFloorObject;
   xMinMm: number;

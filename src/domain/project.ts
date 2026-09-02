@@ -471,15 +471,16 @@ export type WallObject =
   | WallTextWallObject
   | CaseWallObject;
 
-// Display-case defaults (curatorial, not code minimums — a first placement a
-// curator immediately adjusts numerically, same spirit as the opening
-// defaults). Wall cases sit at waist height (a fixed 950mm mount center, kept
-// deliberately below the artwork centerline: real wall vitrines are lower than
-// hung work), and are shallow, wide boxes.
-export const DEFAULT_WALL_CASE_WIDTH_MM = 1500;
-export const DEFAULT_WALL_CASE_HEIGHT_MM = 180; // vertical box thickness
-export const DEFAULT_WALL_CASE_DEPTH_MM = 450; // protrusion from the wall
-export const DEFAULT_WALL_CASE_CENTER_Y_MM = 950; // waist-height mount center
+// Display-case curatorial defaults live beside the glyph geometry that
+// consumes them — see caseGlyphs.ts. Re-exported here so schema/placement
+// code and tests can keep importing case shapes and their defaults from one
+// place.
+export {
+  DEFAULT_WALL_CASE_WIDTH_MM,
+  DEFAULT_WALL_CASE_HEIGHT_MM,
+  DEFAULT_WALL_CASE_DEPTH_MM,
+  DEFAULT_WALL_CASE_CENTER_Y_MM
+} from "./geometry/caseGlyphs";
 
 // Editable default depth for floor-placed objects (doors/windows have a
 // fixed nominal wall-object thickness instead; see WALL_OBJECT_PLAN_DEPTH_MM).
@@ -626,11 +627,12 @@ export type CaseFloorObject = FloorObjectBase & {
 // they only ever exist as WallObjects.
 export type FloorObject = ArtworkFloorObject | BlockedZoneFloorObject | CaseFloorObject;
 
-// Floor-case defaults (curatorial, adjusted numerically after placement, same
-// spirit as the opening/wall-case defaults). A tall, table-like vitrine.
-export const DEFAULT_FLOOR_CASE_WIDTH_MM = 1800;
-export const DEFAULT_FLOOR_CASE_DEPTH_MM = 600;
-export const DEFAULT_FLOOR_CASE_HEIGHT_MM = 950; // overall, floor to box top
+// Floor-case curatorial defaults: see caseGlyphs.ts.
+export {
+  DEFAULT_FLOOR_CASE_WIDTH_MM,
+  DEFAULT_FLOOR_CASE_DEPTH_MM,
+  DEFAULT_FLOOR_CASE_HEIGHT_MM
+} from "./geometry/caseGlyphs";
 // The glass box portion at the top; the legs fill (heightMm − this) below it.
 export const FLOOR_CASE_BOX_HEIGHT_MM = 300;
 
@@ -644,34 +646,15 @@ export const CASE_LEG_SIZE_MM = 40; // floor-case leg footprint (square, in plan
 export const CASE_LEG_INSET_MM = 40; // distance from the footprint edge to a leg's center
 export const CASE_BASE_SLAB_THICKNESS_MM = 24; // floor-case base slab thickness
 
-// ─── CRT / box-monitor construction ────────────────────────────────────────
-//
-// Curatorial defaults for a work displayed on a CRT box monitor
-// (Artwork.displayAs === "monitor"), in the same spirit as the case defaults
-// above: a first placement a curator adjusts numerically afterwards. Shared by
-// the 3D mesh (three/CrtMonitorMesh.tsx), the 2D plan/elevation glyphs
-// (geometry/monitorGlyphs.ts) and the store's placement seeding, so no view can
-// invent its own monitor.
-
-// The monitor face's aspect — 4:3, the whole point of the type. Width drives
-// height (and vice versa) through this one ratio; nothing else may hard-code it.
-export const MONITOR_ASPECT_RATIO = 4 / 3;
-// Face width when the work records no usable dimension at all — roughly a
-// 25-inch gallery CRT, giving a 375mm-tall face at 4:3.
-export const MONITOR_DEFAULT_WIDTH_MM = 500;
-// Front-to-back depth of the box. A CRT is deep — deeper than it is tall — and
-// drawing it shallow is what makes a plan read as a flatscreen instead.
-// Constant, not derived: tube depth doesn't scale with screen size the way the
-// face does.
-export const MONITOR_DEPTH_MM = 450;
-// The black surround between the box's front face and the picture, on every
-// side. The screen area is the face inset by this; the image is then CONTAINED
-// inside that area, so letterboxing costs nothing extra — it is just more of
-// the same black box.
-export const MONITOR_BEZEL_MM = 30;
-// Pedestal height, floor to the monitor's underside. Standard plinth height:
-// puts a seated 375mm face's centre near a standing eyeline.
-export const MONITOR_PEDESTAL_HEIGHT_MM = 800;
+// CRT / box-monitor curatorial defaults live beside the glyph geometry that
+// consumes them — see monitorGlyphs.ts.
+export {
+  MONITOR_ASPECT_RATIO,
+  MONITOR_DEFAULT_WIDTH_MM,
+  MONITOR_DEPTH_MM,
+  MONITOR_BEZEL_MM,
+  MONITOR_PEDESTAL_HEIGHT_MM
+} from "./geometry/monitorGlyphs";
 
 // Suspension-rigging constants, shared by the 3D wires (three/SuspensionWires
 // .tsx) and the elevation ghost's wires (elevation/ElevationSuspendedArtwork

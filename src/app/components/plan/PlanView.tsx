@@ -28,10 +28,12 @@ import { getDefaultInsertToolSizeMm } from "../../../domain/placement/createWall
 import { effectiveWallObjectPlanDepthMm } from "../../../domain/placement/artworkForm";
 import {
   DEFAULT_FLOOR_CASE_DEPTH_MM,
-  DEFAULT_FLOOR_OBJECT_DEPTH_MM,
   DEFAULT_WALL_CASE_DEPTH_MM,
   DEFAULT_WALL_CASE_HEIGHT_MM,
-  DEFAULT_WALL_CASE_WIDTH_MM,
+  DEFAULT_WALL_CASE_WIDTH_MM
+} from "../../../domain/geometry/caseGlyphs";
+import {
+  DEFAULT_FLOOR_OBJECT_DEPTH_MM,
   type Artwork,
   type ReferenceMeasurement
 } from "../../../domain/project";

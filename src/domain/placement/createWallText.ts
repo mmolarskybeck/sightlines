@@ -1,8 +1,8 @@
+import type { WallTextWallObject } from "../project";
 import {
   DEFAULT_FLOOR_CASE_HEIGHT_MM,
-  DEFAULT_FLOOR_CASE_WIDTH_MM,
-  type WallTextWallObject
-} from "../project";
+  DEFAULT_FLOOR_CASE_WIDTH_MM
+} from "../geometry/caseGlyphs";
 import { newId } from "../id";
 import {
   getDefaultOpeningSizeMm,

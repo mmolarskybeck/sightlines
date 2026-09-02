@@ -24,6 +24,22 @@ import {
   FLOOR_CASE_BOX_HEIGHT_MM
 } from "../project";
 
+// Display-case defaults (curatorial, not code minimums — a first placement a
+// curator immediately adjusts numerically, same spirit as the opening
+// defaults). Wall cases sit at waist height (a fixed 950mm mount center, kept
+// deliberately below the artwork centerline: real wall vitrines are lower than
+// hung work), and are shallow, wide boxes.
+export const DEFAULT_WALL_CASE_WIDTH_MM = 1500;
+export const DEFAULT_WALL_CASE_HEIGHT_MM = 180; // vertical box thickness
+export const DEFAULT_WALL_CASE_DEPTH_MM = 450; // protrusion from the wall
+export const DEFAULT_WALL_CASE_CENTER_Y_MM = 950; // waist-height mount center
+
+// Floor-case defaults (curatorial, adjusted numerically after placement, same
+// spirit as the opening/wall-case defaults). A tall, table-like vitrine.
+export const DEFAULT_FLOOR_CASE_WIDTH_MM = 1800;
+export const DEFAULT_FLOOR_CASE_DEPTH_MM = 600;
+export const DEFAULT_FLOOR_CASE_HEIGHT_MM = 950; // overall, floor to box top
+
 // ─── Wall-case elevation (front face) ──────────────────────────────────────
 
 export type CaseElevationGlyph = {

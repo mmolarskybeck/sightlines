@@ -8,7 +8,7 @@ import type {
   ConnectableOpeningWallObject,
   WallObject
 } from "../project";
-import { MONITOR_DEPTH_MM, MONITOR_PEDESTAL_HEIGHT_MM } from "../project";
+import { MONITOR_DEPTH_MM, MONITOR_PEDESTAL_HEIGHT_MM } from "../geometry/monitorGlyphs";
 import type { FloorPartition } from "../geometry/freestandingWalls";
 import {
   buildElevationScene,

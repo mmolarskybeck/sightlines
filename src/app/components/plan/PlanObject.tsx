@@ -6,11 +6,10 @@ import type {
 import type { PlanRect } from "../../../domain/geometry/planObjects";
 import {
   CASE_LEG_SIZE_MM,
-  CASE_WALL_THICKNESS_MM,
-  MONITOR_BEZEL_MM
+  CASE_WALL_THICKNESS_MM
 } from "../../../domain/project";
 import { casePlanGlyph, wallTextPlanGlyph } from "../../../domain/geometry/caseGlyphs";
-import { monitorPlanGlyph } from "../../../domain/geometry/monitorGlyphs";
+import { monitorPlanGlyph, MONITOR_BEZEL_MM } from "../../../domain/geometry/monitorGlyphs";
 import type { DoorSwingPlanGlyph } from "../../../domain/geometry/doorGlyphs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 

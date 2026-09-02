@@ -1,3 +1,4 @@
+import type { CaseFloorObject, CaseWallObject } from "../project";
 import {
   DEFAULT_FLOOR_CASE_DEPTH_MM,
   DEFAULT_FLOOR_CASE_HEIGHT_MM,
@@ -5,10 +6,8 @@ import {
   DEFAULT_WALL_CASE_CENTER_Y_MM,
   DEFAULT_WALL_CASE_DEPTH_MM,
   DEFAULT_WALL_CASE_HEIGHT_MM,
-  DEFAULT_WALL_CASE_WIDTH_MM,
-  type CaseFloorObject,
-  type CaseWallObject
-} from "../project";
+  DEFAULT_WALL_CASE_WIDTH_MM
+} from "../geometry/caseGlyphs";
 import { newId } from "../id";
 
 // Factory helpers for the two display-case kinds (spec: one armed "Case" insert

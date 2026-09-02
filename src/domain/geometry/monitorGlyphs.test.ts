@@ -7,17 +7,14 @@ import {
   monitorPedestalHeightMm,
   monitorPlanGlyph,
   monitorScreenRectMm,
-  resolveMonitorSupport
-} from "./monitorGlyphs";
-import {
-  CURRENT_ARTWORK_SCHEMA_VERSION,
+  resolveMonitorSupport,
   MONITOR_ASPECT_RATIO,
   MONITOR_BEZEL_MM,
   MONITOR_DEFAULT_WIDTH_MM,
   MONITOR_DEPTH_MM,
-  MONITOR_PEDESTAL_HEIGHT_MM,
-  type Artwork
-} from "../project";
+  MONITOR_PEDESTAL_HEIGHT_MM
+} from "./monitorGlyphs";
+import { CURRENT_ARTWORK_SCHEMA_VERSION, type Artwork } from "../project";
 
 function artwork(displayAs?: Artwork["displayAs"]): Artwork {
   return {

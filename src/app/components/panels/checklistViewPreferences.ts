@@ -1,7 +1,5 @@
-import type {
-  ChecklistSort,
-  ChecklistViewPreferences
-} from "../../../domain/project";
+import type { Artwork, ChecklistSort, ChecklistViewPreferences } from "../../../domain/project";
+import { compareChecklistText } from "../../../domain/checklistExport/sort";
 
 // The checklist panel's sort/grouping preference. The choice itself lives ON
 // THE PROJECT (`project.checklistView`, USER DECISION 2026-08-31) so it rides
@@ -14,6 +12,26 @@ import type {
 // the exhibition.
 
 export type { ChecklistSort, ChecklistViewPreferences };
+
+export type ChecklistRowData = {
+  artworkId: string;
+  artwork: Artwork | null;
+  isPlaced: boolean;
+  projectIndex: number;
+  // The wall a placed artwork lives on, resolved to a human name — null when
+  // unplaced, or when the placement points at a wall that no longer exists.
+  wallName: string | null;
+  // Every placement (wall or floor) referencing this artwork — in practice
+  // there's at most one, but the menu's "Remove from wall" removes all of
+  // them so a row never ends up half-unplaced.
+  placementIds: string[];
+};
+
+export type ChecklistArtistGroup = {
+  key: string;
+  label: string;
+  rows: ChecklistRowData[];
+};
 
 export const CHECKLIST_SORTS: ChecklistSort[] = [
   "project",
@@ -54,4 +72,72 @@ export function defaultChecklistView(
   return shouldDefaultToArtistGrouping(rows)
     ? { sort: "artist", groupByArtist: true }
     : { sort: "project", groupByArtist: false };
+}
+
+export function sortChecklistRows(
+  rows: ChecklistRowData[],
+  sort: ChecklistSort
+): ChecklistRowData[] {
+  return [...rows].sort((a, b) => {
+    switch (sort) {
+      case "title":
+        return compareChecklistText(a.artwork?.title, b.artwork?.title) || byProjectOrder(a, b);
+      case "artist":
+        return (
+          compareChecklistText(a.artwork?.artist, b.artwork?.artist) ||
+          compareChecklistText(a.artwork?.title, b.artwork?.title) ||
+          byProjectOrder(a, b)
+        );
+      case "status":
+        return Number(a.isPlaced) - Number(b.isPlaced) || byProjectOrder(a, b);
+      case "project":
+      default:
+        return byProjectOrder(a, b);
+    }
+  });
+}
+
+export function checklistRowMatchesQuery(row: ChecklistRowData, query: string): boolean {
+  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  if (!row.artwork) return false;
+
+  const artwork = row.artwork;
+  const searchableText = [
+    artwork.title,
+    artwork.artist,
+    artwork.date,
+    artwork.accessionNumber,
+    artwork.locationOrLender,
+    ...Object.values(artwork.metadata)
+  ]
+    .filter((value) => value !== undefined)
+    .map(String)
+    .join("\n")
+    .toLocaleLowerCase();
+
+  return terms.every((term) => searchableText.includes(term));
+}
+
+export function groupChecklistRowsByArtist(
+  rows: ChecklistRowData[]
+): ChecklistArtistGroup[] {
+  const groups = new Map<string, ChecklistArtistGroup>();
+  for (const row of rows) {
+    const identity = artistGroupIdentity(row);
+    const existing = groups.get(identity.key);
+    if (existing) existing.rows.push(row);
+    else groups.set(identity.key, { ...identity, rows: [row] });
+  }
+  return [...groups.values()];
+}
+
+export function artistGroupIdentity(row: ChecklistRowData): { key: string; label: string } {
+  const artist = row.artwork?.artist?.trim();
+  if (!artist) return { key: "missing-artist", label: "Artist not recorded" };
+  return { key: `artist:${artist.toLocaleLowerCase()}`, label: artist };
+}
+
+function byProjectOrder(a: ChecklistRowData, b: ChecklistRowData) {
+  return a.projectIndex - b.projectIndex;
 }

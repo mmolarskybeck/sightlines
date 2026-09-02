@@ -14,7 +14,6 @@ import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { ACCEPTED_IMAGE_MIME_TYPES } from "../../../domain/assets/imageIntake";
 import type { Artwork, DisplayUnit, Project } from "../../../domain/project";
-import { compareChecklistText } from "../../../domain/checklistExport/sort";
 import { formatLength } from "../../../domain/units/length";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../../domain/units/unitSystem";
 import { useAssetImageUrls } from "../../hooks/useAssetImageUrls";
@@ -27,7 +26,13 @@ import {
 import { UncertaintyIndicator } from "./UncertaintyIndicator";
 import {
   CHECKLIST_SORTS,
+  artistGroupIdentity,
+  checklistRowMatchesQuery,
   defaultChecklistView,
+  groupChecklistRowsByArtist,
+  sortChecklistRows,
+  type ChecklistArtistGroup,
+  type ChecklistRowData,
   type ChecklistSort,
   type ChecklistViewPreferences
 } from "./checklistViewPreferences";
@@ -69,33 +74,12 @@ const ALREADY_PLACED_DRAG_MESSAGE =
   "Already placed. Remove the current placement before dragging again.";
 
 type ChecklistFilter = "all" | "placed" | "unplaced";
-export type { ChecklistSort } from "./checklistViewPreferences";
 
 const SORT_LABELS: Record<ChecklistSort, string> = {
   project: "Project order",
   title: "Title",
   artist: "Artist",
   status: "Status"
-};
-
-export type ChecklistRowData = {
-  artworkId: string;
-  artwork: Artwork | null;
-  isPlaced: boolean;
-  projectIndex: number;
-  // The wall a placed artwork lives on, resolved to a human name — null when
-  // unplaced, or when the placement points at a wall that no longer exists.
-  wallName: string | null;
-  // Every placement (wall or floor) referencing this artwork — in practice
-  // there's at most one, but the menu's "Remove from wall" removes all of
-  // them so a row never ends up half-unplaced.
-  placementIds: string[];
-};
-
-export type ChecklistArtistGroup = {
-  key: string;
-  label: string;
-  rows: ChecklistRowData[];
 };
 
 // The left workspace pane (docs/plan.md §3.5, §4.1): checklist membership is
@@ -804,79 +788,11 @@ function duplicateNoticeCopy(
   return `${pending.length} images look identical to works already in the checklist: ${titles}. Add them anyway?`;
 }
 
-export function sortChecklistRows(
-  rows: ChecklistRowData[],
-  sort: ChecklistSort
-): ChecklistRowData[] {
-  return [...rows].sort((a, b) => {
-    switch (sort) {
-      case "title":
-        return compareChecklistText(a.artwork?.title, b.artwork?.title) || byProjectOrder(a, b);
-      case "artist":
-        return (
-          compareChecklistText(a.artwork?.artist, b.artwork?.artist) ||
-          compareChecklistText(a.artwork?.title, b.artwork?.title) ||
-          byProjectOrder(a, b)
-        );
-      case "status":
-        return Number(a.isPlaced) - Number(b.isPlaced) || byProjectOrder(a, b);
-      case "project":
-      default:
-        return byProjectOrder(a, b);
-    }
-  });
-}
-
-export function checklistRowMatchesQuery(row: ChecklistRowData, query: string): boolean {
-  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return true;
-  if (!row.artwork) return false;
-
-  const artwork = row.artwork;
-  const searchableText = [
-    artwork.title,
-    artwork.artist,
-    artwork.date,
-    artwork.accessionNumber,
-    artwork.locationOrLender,
-    ...Object.values(artwork.metadata)
-  ]
-    .filter((value) => value !== undefined)
-    .map(String)
-    .join("\n")
-    .toLocaleLowerCase();
-
-  return terms.every((term) => searchableText.includes(term));
-}
-
-export function groupChecklistRowsByArtist(
-  rows: ChecklistRowData[]
-): ChecklistArtistGroup[] {
-  const groups = new Map<string, ChecklistArtistGroup>();
-  for (const row of rows) {
-    const identity = artistGroupIdentity(row);
-    const existing = groups.get(identity.key);
-    if (existing) existing.rows.push(row);
-    else groups.set(identity.key, { ...identity, rows: [row] });
-  }
-  return [...groups.values()];
-}
-
-function artistGroupIdentity(row: ChecklistRowData): { key: string; label: string } {
-  const artist = row.artwork?.artist?.trim();
-  if (!artist) return { key: "missing-artist", label: "Artist not recorded" };
-  return { key: `artist:${artist.toLocaleLowerCase()}`, label: artist };
-}
-
 // Artwork ids are generated (nanoid-style), never author-supplied, so this
 // is a defensive belt-and-suspenders rather than a real threat model — still
 // cheaper than pulling in CSS.escape's jsdom quirks for a one-line query.
 function cssAttributeEscape(value: string): string {
   return value.replace(/["\\]/g, "\\$&");
-}
-
-function byProjectOrder(a: ChecklistRowData, b: ChecklistRowData) {
-  return a.projectIndex - b.projectIndex;
 }
 
 function ArtistChecklistGroup({

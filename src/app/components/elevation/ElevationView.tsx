@@ -560,8 +560,7 @@ export function ElevationView({
 
   // The marquee state machine: a pending rubber-band (marquee) selection on the
   // elevation background, tracked as two wall-local-mm pointer samples (start +
-  // current). Collapsed via useDragGesture from the extracted copies in PlanView
-  // and ElevationView.
+  // current).
   const { drag: marquee, dragRef: marqueeRef, beginDrag: beginMarqueeGesture, isDragging: isMarqueeragging } = useDragGesture<MarqueeState>({
     onMove: (current, event) => {
       const pointerMm = toWallLocalMm(event.clientX, event.clientY);
@@ -591,13 +590,12 @@ export function ElevationView({
   });
 
   // The shared 2D viewport gesture engine (pan / zoom / pinch / wheel /
-  // keyboard), formerly a ~350-line copy inline here and in PlanView. It works
-  // EXCLUSIVELY in SVG userspace (y-down); the elevation y-flip stays in this
-  // view's own toWallLocalMm below. A single finger's pan-start is delegated
-  // back to this view's bubble-phase background handler (beginMarquee →
-  // beginTouchPan), and a stationary background tap clears the selection via
-  // onGestureEnd (elevation has no svg click handler, so unlike plan the clear
-  // can't ride a trailing click).
+  // keyboard). It works EXCLUSIVELY in SVG userspace (y-down); the elevation
+  // y-flip stays in this view's own toWallLocalMm below. A single finger's
+  // pan-start is delegated back to this view's bubble-phase background handler
+  // (beginMarquee → beginTouchPan), and a stationary background tap clears the
+  // selection via onGestureEnd (elevation has no svg click handler, so unlike
+  // plan the clear can't ride a trailing click).
   const {
     isSpaceDown,
     panning,

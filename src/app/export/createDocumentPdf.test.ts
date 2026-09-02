@@ -9,7 +9,7 @@ import type {
 import { createSampleProject } from "../../domain/sample/sampleProject";
 import { createFloorCase, createWallCase } from "../../domain/placement/createCase";
 import { createWallTextPlacement } from "../../domain/placement/createWallText";
-import { DEFAULT_WALL_CASE_CENTER_Y_MM } from "../../domain/project";
+import { DEFAULT_WALL_CASE_CENTER_Y_MM } from "../../domain/geometry/caseGlyphs";
 import {
   caseElevationGlyph,
   casePlanGlyph
