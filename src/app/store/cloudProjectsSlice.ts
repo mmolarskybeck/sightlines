@@ -1,28 +1,10 @@
-// Cloud project browser (docs/cloud-sync-plan.md stage 1): lists the provider's
-// backup folders for the project manager and restores one into this device.
-// Read-only semantics — nothing here ever replaces a local project. A folder
-// whose id prefix looks like a project already on this device can only be
-// opened as a copy; everything else opens under its own identity.
-//
-// The 8-char prefix carried by a backup folder name is a DISPLAY heuristic, not
-// proof of identity: it decides a label and which import option is offered,
-// never whether a write is safe. The import pipeline stays the authority — it
-// re-ids on collision, so a wrong guess costs a redundant copy, not data.
-//
-// Stage 2 adds one thing and keeps that rule: when the account also holds a
-// SYNC HEAD for a project this device doesn't have, the row opens the head
-// instead of the newest backup and the device ends up linked to it. Still
-// nothing here replaces a local project — a folder that looks like something
-// already on this device can only ever be copied in.
-//
-// A head can also exist with NO backup folder behind it (sync writes the head
-// at once; the first automatic backup waits out the settle delay), so the
-// listing this surface shows is the union of the two — see buildCloudProjectRows
-// in cloudBackupCopy.ts. Those rows open through openCloudSyncedProject, which
-// shares this file's one head-open implementation.
+// Cloud project browser (docs/cloud-sync-plan.md stage 1-2): lists the
+// provider's backup folders plus sync heads for the project manager, and
+// restores/links one into this device. Read-only — nothing here ever replaces
+// a local project; a folder that looks like one already on this device only
+// ever opens as a copy.
 
 import { toast } from "sonner";
-import { CloudBackupError } from "../cloud/dropbox";
 import {
   CLOUD_PROJECT_NO_BACKUP_MESSAGE,
   CLOUD_SYNC_LOCAL_CHECK_FAILED_MESSAGE,
@@ -33,13 +15,15 @@ import {
   matchOneSyncHead,
   type CloudProjectOpenErrorKind
 } from "../cloud/cloudBackupCopy";
-import { MAX_BACKUP_DOWNLOAD_BYTES } from "../cloud/dropboxAuth";
-import type {
-  CloudBackupProvider,
-  CloudProjectFolder,
-  SyncHeadListing
+import {
+  CloudBackupError,
+  toStandaloneArrayBuffer,
+  type CloudBackupProvider,
+  type CloudProjectFolder,
+  type SyncHeadListing
 } from "../cloud/provider";
 import type { AppState, AppStoreDeps } from "../store";
+import { providerStatusPatch } from "./cloudBackupSlice";
 
 export type CloudProjectsStatus =
   | "idle"
@@ -122,6 +106,27 @@ export function createCloudProjectsSlice(
     }
   }
 
+  function downloadCeiling(active: CloudBackupProvider): number {
+    return active.maxDownloadBytes;
+  }
+
+  // Shared tail of a failed backup/head download: mirror provider status
+  // (flipping into reauth-required on that kind), toast the surface-specific
+  // message, and refresh the listing when the file it claimed existed is gone.
+  async function reportOpenFailure(
+    active: CloudBackupProvider,
+    error: unknown,
+    messageFor: (kind: CloudProjectOpenErrorKind) => string
+  ): Promise<void> {
+    const kind = openErrorKind(error);
+    set({
+      ...providerStatusPatch(active),
+      ...(kind === "reauth" ? { cloudProjectsStatus: "reauth-required" as const } : {})
+    });
+    toast.error(messageFor(kind));
+    if (kind === "not-found") await actions.refreshCloudProjects();
+  }
+
   // null means the device's projects could not be read — never "there are
   // none". Treating a failed read as an empty device is the direction that
   // could turn a copy into an identity-preserving import.
@@ -158,7 +163,7 @@ export function createCloudProjectsSlice(
   ): Promise<boolean> {
     // Same ceiling, same reason as a backup download (this tab has to buffer
     // the whole file), answered from the listing before spending the bytes.
-    if (typeof head.sizeBytes === "number" && head.sizeBytes > MAX_BACKUP_DOWNLOAD_BYTES) {
+    if (typeof head.sizeBytes === "number" && head.sizeBytes > downloadCeiling(active)) {
       toast.error(getCloudSyncOpenErrorMessage("too-large"));
       return false;
     }
@@ -167,22 +172,11 @@ export function createCloudProjectsSlice(
     try {
       downloaded = await active.downloadSyncHead(head.projectId);
     } catch (error) {
-      const kind = openErrorKind(error);
-      set({
-        cloudBackupProviderStatus: active.getStatus(),
-        ...(kind === "reauth" ? { cloudProjectsStatus: "reauth-required" as const } : {})
-      });
-      toast.error(getCloudSyncOpenErrorMessage(kind));
-      // The listing is what claimed this head existed; a gone file makes the
-      // whole listing suspect, not just this row.
-      if (kind === "not-found") await actions.refreshCloudProjects();
+      await reportOpenFailure(active, error, getCloudSyncOpenErrorMessage);
       return false;
     }
 
-    // Copy into a standalone ArrayBuffer: the provider may hand back a view
-    // into a pooled buffer, and the import pipeline keeps the bytes.
-    const buffer = new ArrayBuffer(downloaded.bytes.byteLength);
-    new Uint8Array(buffer).set(downloaded.bytes);
+    const buffer = toStandaloneArrayBuffer(downloaded.bytes);
 
     // `link`, never `replace`: there is no local project to supersede here, so
     // the commit only seeds the sync bookkeeping (rev + fingerprint) that makes
@@ -212,10 +206,7 @@ export function createCloudProjectsSlice(
     // backup can legitimately exist that this surface can never open. Say so
     // from the listing's own size, before spending the bytes: the download
     // would only fail the same way after a long wait.
-    if (
-      typeof latest.sizeBytes === "number" &&
-      latest.sizeBytes > MAX_BACKUP_DOWNLOAD_BYTES
-    ) {
+    if (typeof latest.sizeBytes === "number" && latest.sizeBytes > downloadCeiling(active)) {
       toast.error(getCloudProjectOpenErrorMessage("too-large"));
       return false;
     }
@@ -224,23 +215,14 @@ export function createCloudProjectsSlice(
     try {
       bytes = await active.downloadBackup(latest.path);
     } catch (error) {
-      const kind = openErrorKind(error);
-      set({
-        cloudBackupProviderStatus: active.getStatus(),
-        ...(kind === "reauth" ? { cloudProjectsStatus: "reauth-required" as const } : {})
-      });
-      toast.error(getCloudProjectOpenErrorMessage(kind));
-      // The listing is what claimed this file existed, so a gone file makes
-      // the whole listing suspect, not just this row.
-      if (kind === "not-found") await actions.refreshCloudProjects();
+      await reportOpenFailure(active, error, getCloudProjectOpenErrorMessage);
       return false;
     }
 
     const matches =
       knownMatchesLocalProject ?? (await matchesLocalProject(folder.projectIdPrefix));
 
-    const buffer = new ArrayBuffer(bytes.byteLength);
-    new Uint8Array(buffer).set(bytes);
+    const buffer = toStandaloneArrayBuffer(bytes);
 
     // lastBackupIso is the timestamp of the very file being restored: on a
     // commit that preserves identity, the import seeds this device's
@@ -299,7 +281,7 @@ export function createCloudProjectsSlice(
         folders.reason instanceof CloudBackupError ? folders.reason.kind : "transient";
       set({
         cloudProjectsStatus: kind === "reauth" ? "reauth-required" : "error",
-        cloudBackupProviderStatus: active.getStatus()
+        ...providerStatusPatch(active)
       });
     },
 

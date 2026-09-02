@@ -7,6 +7,8 @@
 // full-page PKCE redirect with token_access_type=offline, refresh via a direct
 // POST carrying only client_id (no secret).
 
+import type { CloudErrorKind } from "./provider";
+
 export const DROPBOX_AUTHORIZE_URL = "https://www.dropbox.com/oauth2/authorize";
 export const DROPBOX_TOKEN_URL = "https://api.dropboxapi.com/oauth2/token";
 export const DROPBOX_API_URL = "https://api.dropboxapi.com";
@@ -166,15 +168,6 @@ export function isReauthorizationFailure(
   return error === "invalid_grant";
 }
 
-export type DropboxErrorKind =
-  | "reauth"
-  | "quota"
-  | "rate-limit"
-  | "not-found"
-  | "conflict"
-  | "too-large"
-  | "transient";
-
 // Classify an API/content-endpoint failure. 401 → the access token was rejected
 // mid-flight despite a fresh refresh, treat as reauth. 429 → back off (respect
 // Retry-After); surfaced as transient so a cycle failure never hard-fails the
@@ -183,7 +176,7 @@ export type DropboxErrorKind =
 // retry. A 409 naming conflict → a rev-conditional write lost the race, which
 // sync must read as "the remote moved on", never as a retryable blip.
 // Everything else (5xx, offline, malformed) → transient.
-export function classifyApiError(status: number, body: unknown): DropboxErrorKind {
+export function classifyApiError(status: number, body: unknown): CloudErrorKind {
   if (status === 401) return "reauth";
   if (status === 429) return "rate-limit";
   const text =

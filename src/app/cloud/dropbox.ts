@@ -5,14 +5,15 @@
 // browser side effects (storage, redirect, fetch) and the retention/upload
 // orchestration.
 
-import type {
-  CloudBackupProvider,
-  CloudBackupProviderStatus,
-  CloudProjectBackup,
-  CloudProjectFolder,
-  SyncHeadListing,
-  SyncHeadMetadata,
-  UploadBackupInput
+import {
+  CloudBackupError,
+  type CloudBackupProvider,
+  type CloudBackupProviderStatus,
+  type CloudProjectBackup,
+  type CloudProjectFolder,
+  type SyncHeadListing,
+  type SyncHeadMetadata,
+  type UploadBackupInput
 } from "./provider";
 import {
   base64UrlEncode,
@@ -47,20 +48,12 @@ import {
   SYNC_HEAD_FILENAME,
   SYNC_PROJECTS_FOLDER,
   type DropboxAuthRecord,
-  type DropboxErrorKind,
   type DropboxFileEntry
 } from "./dropboxAuth";
 
-// A typed error so the slice can tell reauth/quota/rate-limit/transient apart
-// without re-parsing HTTP details.
-export class CloudBackupError extends Error {
-  kind: DropboxErrorKind;
-  constructor(kind: DropboxErrorKind, message: string) {
-    super(message);
-    this.name = "CloudBackupError";
-    this.kind = kind;
-  }
-}
+// Re-exported for callers (and this module's own test) that reach it through
+// the Dropbox provider file rather than the provider seam directly.
+export { CloudBackupError };
 
 function readAuth(): DropboxAuthRecord | null {
   if (typeof window === "undefined") return null;
@@ -142,6 +135,73 @@ type DropboxUploadResult = {
   size?: number;
   server_modified?: string;
 };
+
+type DropboxListFolderPage = {
+  entries: DropboxFileEntry[];
+  has_more: boolean;
+  cursor: string;
+};
+
+// The shared envelope for every api.dropboxapi.com JSON route: bearer auth,
+// JSON content-type, JSON body, ok/error mapping via ensureOk. `on409` lets a
+// caller intercept Dropbox's overloaded 409 status before that mapping runs —
+// see classify409 for why that parse has to be exact.
+async function postJson<T>(
+  token: string,
+  route: string,
+  body: unknown,
+  action: string,
+  on409?: (response: Response) => Promise<T>
+): Promise<T> {
+  const response = await fetch(`${DROPBOX_API_URL}${route}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+  if (on409 && response.status === 409) return on409(response);
+  return ensureOk<T>(response, action);
+}
+
+// The content.dropboxapi.com sibling: the API argument goes in the
+// Dropbox-API-Arg header (byte-string safe via serializeDropboxApiArg)
+// instead of the body, and the body carries the raw bytes being written.
+async function postContent<T>(
+  token: string,
+  route: string,
+  apiArg: unknown,
+  action: string,
+  body?: Uint8Array
+): Promise<T> {
+  const response = await fetch(`${DROPBOX_CONTENT_URL}${route}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Dropbox-API-Arg": serializeDropboxApiArg(apiArg),
+      ...(body !== undefined ? { "Content-Type": "application/octet-stream" } : {})
+    },
+    body: body as BodyInit | undefined
+  });
+  return ensureOk<T>(response, action);
+}
+
+// Dropbox answers EVERY route-level error with 409 — not_found, not_folder, a
+// malformed path — so only the body says which one this is. Misreading any
+// 409 as not-found would let sync silently recreate a head (or a browse
+// silently report "empty") that is actually there; only a body that says
+// not_found may return the caller's not-found marker, and only from here.
+async function classify409<T>(
+  response: Response,
+  action: string,
+  notFound: T
+): Promise<T> {
+  const errorBody = await response.json().catch(() => null);
+  const summary = errorBody === null ? "" : JSON.stringify(errorBody);
+  if (summary.includes("not_found")) return notFound;
+  throw classifiedError(response.status, errorBody, action);
+}
 
 export class DropboxCloudBackupProvider implements CloudBackupProvider {
   readonly id = "dropbox";
@@ -309,21 +369,12 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
     // autorename is on for shares, so the written path can differ from the
     // requested one — link the file Dropbox actually created.
     const uploadedPath = uploaded.path_display ?? requestedPath;
-    const response = await fetch(
-      `${DROPBOX_API_URL}/2/sharing/create_shared_link_with_settings`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          path: uploadedPath,
-          settings: { requested_visibility: "public" }
-        })
-      }
+    const body = await postJson<{ url?: string }>(
+      token,
+      "/2/sharing/create_shared_link_with_settings",
+      { path: uploadedPath, settings: { requested_visibility: "public" } },
+      "create the share link"
     );
-    const body = await ensureOk<{ url?: string }>(response, "create the share link");
     if (!body.url) {
       throw new CloudBackupError("transient", "Dropbox returned no share link.");
     }
@@ -364,28 +415,17 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
     this.requireReadScope(SYNC_READ_SCOPE_PURPOSE);
     return this.withReauthTracking(async () => {
       const token = await this.accessToken();
-      const response = await fetch(`${DROPBOX_API_URL}/2/files/get_metadata`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ path: syncHeadPath(projectId) })
-      });
-      // Dropbox answers every route-level error with 409, so only the summary
-      // says which one this is. not_found is the one answer the state machine
-      // acts on ("never synced", or the head is gone); reading any other 409 as
-      // "no head" would invite silently recreating a head that does exist.
-      if (response.status === 409) {
-        const errorBody = await response.json().catch(() => null);
-        const summary = errorBody === null ? "" : JSON.stringify(errorBody);
-        if (summary.includes("not_found")) return null;
-        throw classifiedError(response.status, errorBody, "check the synced copy");
-      }
-      const body = await ensureOk<DropboxFileEntry>(
-        response,
-        "check the synced copy"
+      // not_found is the one 409 the state machine acts on ("never synced", or
+      // the head is gone); any other 409 must surface as an error rather than
+      // be read as "no head" and invite recreating one that does exist.
+      const body = await postJson<DropboxFileEntry | null>(
+        token,
+        "/2/files/get_metadata",
+        { path: syncHeadPath(projectId) },
+        "check the synced copy",
+        (response) => classify409<DropboxFileEntry | null>(response, "check the synced copy", null)
       );
+      if (body === null) return null;
       if (!body.rev) {
         throw new CloudBackupError(
           "transient",
@@ -484,6 +524,12 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
       return collectSyncHeads(entries);
     });
   }
+
+  remotePathFor(projectId: string): string {
+    return syncHeadPath(projectId);
+  }
+
+  readonly maxDownloadBytes = MAX_BACKUP_DOWNLOAD_BYTES;
 
   // Reading is a scope the first release never asked for, so a stored grant can
   // be complete for backup and still unable to list or download. Mirrors
@@ -624,16 +670,13 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
     bytes: Uint8Array,
     commit: DropboxUploadCommit
   ): Promise<DropboxUploadResult> {
-    const response = await fetch(`${DROPBOX_CONTENT_URL}/2/files/upload`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/octet-stream",
-        "Dropbox-API-Arg": serializeDropboxApiArg({ path, ...commit })
-      },
-      body: bytes as BodyInit
-    });
-    return ensureOk<DropboxUploadResult>(response, "upload the package");
+    return postContent<DropboxUploadResult>(
+      token,
+      "/2/files/upload",
+      { path, ...commit },
+      "upload the package",
+      bytes
+    );
   }
 
   private async uploadSession(
@@ -644,21 +687,12 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
   ): Promise<DropboxUploadResult> {
     // start
     const firstChunk = bytes.subarray(0, DROPBOX_UPLOAD_CHUNK_BYTES);
-    const startResponse = await fetch(
-      `${DROPBOX_CONTENT_URL}/2/files/upload_session/start`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/octet-stream",
-          "Dropbox-API-Arg": serializeDropboxApiArg({ close: false })
-        },
-        body: firstChunk as BodyInit
-      }
-    );
-    const startBody = await ensureOk<{ session_id: string }>(
-      startResponse,
-      "start the upload"
+    const startBody = await postContent<{ session_id: string }>(
+      token,
+      "/2/files/upload_session/start",
+      { close: false },
+      "start the upload",
+      firstChunk
     );
     const sessionId = startBody.session_id;
 
@@ -668,43 +702,25 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
       const chunk = bytes.subarray(offset, offset + DROPBOX_UPLOAD_CHUNK_BYTES);
       const isLast = offset + chunk.byteLength >= bytes.byteLength;
       if (isLast) break;
-      const appendResponse = await fetch(
-        `${DROPBOX_CONTENT_URL}/2/files/upload_session/append_v2`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/octet-stream",
-            "Dropbox-API-Arg": serializeDropboxApiArg({
-              cursor: { session_id: sessionId, offset },
-              close: false
-            })
-          },
-          body: chunk as BodyInit
-        }
+      await postContent(
+        token,
+        "/2/files/upload_session/append_v2",
+        { cursor: { session_id: sessionId, offset }, close: false },
+        "upload the backup",
+        chunk
       );
-      await ensureOk(appendResponse, "upload the backup");
       offset += chunk.byteLength;
     }
 
     // finish with the trailing chunk
     const lastChunk = bytes.subarray(offset);
-    const finishResponse = await fetch(
-      `${DROPBOX_CONTENT_URL}/2/files/upload_session/finish`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/octet-stream",
-          "Dropbox-API-Arg": serializeDropboxApiArg({
-            cursor: { session_id: sessionId, offset },
-            commit: { path, ...commit }
-          })
-        },
-        body: lastChunk as BodyInit
-      }
+    return postContent<DropboxUploadResult>(
+      token,
+      "/2/files/upload_session/finish",
+      { cursor: { session_id: sessionId, offset }, commit: { path, ...commit } },
+      "finish the upload",
+      lastChunk
     );
-    return ensureOk<DropboxUploadResult>(finishResponse, "finish the upload");
   }
 
   // --- retention -----------------------------------------------------------
@@ -731,19 +747,12 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
     );
     if (!existing) return desiredPath;
 
-    const response = await fetch(`${DROPBOX_API_URL}/2/files/move_v2`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        from_path: `/backups/${existing.name}`,
-        to_path: desiredPath,
-        autorename: false
-      })
-    });
-    await ensureOk(response, "rename the project backup folder");
+    await postJson(
+      token,
+      "/2/files/move_v2",
+      { from_path: `/backups/${existing.name}`, to_path: desiredPath, autorename: false },
+      "rename the project backup folder"
+    );
     return desiredPath;
   }
 
@@ -751,16 +760,11 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
     const entries = await this.listFolder(token, folderPath);
     const toDelete = selectBackupsToPrune(entries);
     for (const path of toDelete) {
-      const response = await fetch(`${DROPBOX_API_URL}/2/files/delete_v2`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ path })
-      });
-      // A prune delete failing (e.g. already gone) doesn't matter — swallow.
-      await response.json().catch(() => ({}));
+      // A prune delete failing (e.g. already gone) doesn't matter — swallow,
+      // and keep pruning the rest.
+      await postJson(token, "/2/files/delete_v2", { path }, "prune old backups").catch(
+        () => {}
+      );
     }
   }
 
@@ -771,48 +775,26 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
   ): Promise<DropboxFileEntry[]> {
     const action = options.action ?? "list backups";
     const entries: DropboxFileEntry[] = [];
-    let response = await fetch(`${DROPBOX_API_URL}/2/files/list_folder`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(
-        options.recursive ? { path, recursive: true } : { path }
-      )
-    });
-    // Dropbox answers EVERY route-level error with 409 — not_folder, a
-    // malformed path, a disallowed name — so only the body says which one this
-    // is. A missing folder (nothing uploaded yet, or all pruned) is genuinely
-    // an empty listing; anything else is a real rejection and must surface as
+    // A missing folder (nothing uploaded yet, or all pruned) is genuinely an
+    // empty listing; any other 409 is a real rejection and must surface as
     // one, or the browser renders a rejected request as "No cloud backups yet."
-    if (response.status === 409) {
-      const errorBody = await response.json().catch(() => null);
-      const summary = errorBody === null ? "" : JSON.stringify(errorBody);
-      if (summary.includes("not_found")) return [];
-      throw classifiedError(response.status, errorBody, action);
-    }
-    let body = await ensureOk<{
-      entries: DropboxFileEntry[];
-      has_more: boolean;
-      cursor: string;
-    }>(response, action);
-    entries.push(...body.entries);
-    while (body.has_more) {
-      response = await fetch(`${DROPBOX_API_URL}/2/files/list_folder/continue`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ cursor: body.cursor })
-      });
-      body = await ensureOk<{
-        entries: DropboxFileEntry[];
-        has_more: boolean;
-        cursor: string;
-      }>(response, action);
-      entries.push(...body.entries);
+    let page = await postJson<DropboxListFolderPage | DropboxFileEntry[]>(
+      token,
+      "/2/files/list_folder",
+      options.recursive ? { path, recursive: true } : { path },
+      action,
+      (response) => classify409<DropboxFileEntry[]>(response, action, [])
+    );
+    if (Array.isArray(page)) return page;
+    entries.push(...page.entries);
+    while (page.has_more) {
+      page = await postJson<DropboxListFolderPage>(
+        token,
+        "/2/files/list_folder/continue",
+        { cursor: page.cursor },
+        action
+      );
+      entries.push(...page.entries);
     }
     return entries;
   }

@@ -27,6 +27,8 @@ import type {
 import { createInertCrossTabSync } from "../crossTabSync";
 import { createAppStore, type AppStoreDeps } from "../store";
 import { telemetry } from "../telemetry/telemetry";
+import { makeFakeCloudBackupProvider } from "../../test/fakeCloudBackupProvider";
+import { createTestAppStore } from "../../test/testAppStore";
 
 // The slice owns its own sonner toasts; capture them without rendering.
 vi.mock("sonner", () => ({
@@ -104,26 +106,14 @@ function makeFakeProvider(
   headDownloads: string[];
 } {
   return {
-    id: "fake",
-    label: "Fake",
+    ...makeFakeCloudBackupProvider({
+      getStatus() {
+        return options.status ?? "connected";
+      }
+    }),
     lists: 0,
     downloads: [],
     headDownloads: [],
-    async startConnect() {},
-    async completeConnect() {
-      return false;
-    },
-    disconnect() {},
-    getStatus() {
-      return options.status ?? "connected";
-    },
-    accountLabel() {
-      return "Tester";
-    },
-    async uploadBackup() {},
-    async createShareLink() {
-      return "https://www.dropbox.com/scl/fi/share/project.sightlines?rlkey=test&dl=0";
-    },
     async listCloudProjects() {
       this.lists += 1;
       return options.list ? await options.list() : FOLDERS;
@@ -132,22 +122,13 @@ function makeFakeProvider(
       this.downloads.push(path);
       return options.download ? await options.download() : new Uint8Array([1, 2, 3]);
     },
-    accountId() {
-      return "dbid:tester";
-    },
     // The sync LOOP is exercised in its own slice tests; what this surface
     // needs from the seam is the head listing and the head download.
-    async getSyncHead() {
-      return null;
-    },
     async downloadSyncHead(projectId) {
       this.headDownloads.push(projectId);
       return options.downloadHead
         ? await options.downloadHead()
         : { bytes: new Uint8Array([1, 2, 3]), rev: "head-rev-1" };
-    },
-    async uploadSyncHead() {
-      return { rev: "rev-1", serverModifiedIso: null, sizeBytes: null };
     },
     async listSyncHeads() {
       return options.heads ? await options.heads() : [];
@@ -186,12 +167,13 @@ describe("cloudProjectsSlice", () => {
   beforeEach(() => {
     vi.mocked(toast.error).mockClear();
     window.localStorage.clear();
-    repository = new InMemoryProjectRepository();
-    artworkLibraryRepository = new InMemoryArtworkLibraryRepository();
-    assetRepository = new InMemoryAssetRepository();
-    imageProcessor = new FakeImageProcessor();
-    projectSnapshotRepository = new InMemoryProjectSnapshotRepository();
-    syncMetaRepository = new InMemorySyncMetaRepository();
+    const testStore = createTestAppStore();
+    repository = testStore.projectRepository;
+    artworkLibraryRepository = testStore.artworkLibraryRepository;
+    assetRepository = testStore.assetRepository;
+    imageProcessor = testStore.imageProcessor;
+    projectSnapshotRepository = testStore.projectSnapshotRepository;
+    syncMetaRepository = testStore.syncMetaRepository;
   });
 
   it("starts with no listing at all, which is not an empty listing", async () => {

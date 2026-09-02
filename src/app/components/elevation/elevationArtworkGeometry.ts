@@ -4,11 +4,7 @@ import {
   type ArtworkSizeMm,
   type SvgRectMm
 } from "../../../domain/scene2d/elevationScene";
-import {
-  getArtworkOuterDimensionsMm,
-  withArtworkFootprint
-} from "../../../domain/framing";
-import { getEffectivePlacementSizeMm } from "../../../domain/placement/placeArtwork";
+import { artworkDropOuterMm, withArtworkFootprint } from "../../../domain/framing";
 import type { Artwork, WallObject } from "../../../domain/project";
 import type { PixelAspect } from "../../../domain/units/aspectFill";
 
@@ -47,20 +43,14 @@ export function getElevationFootprintObjects<T extends WallObject>(
   );
 }
 
-// A checklist drop has no placement record yet. Resolve the image size exactly
-// as placement creation does, then widen it for the elevation ghost so its
-// edges match the framed work that appears after drop.
+// Ghost edges must match the work that appears after the drop, including
+// frame suppression for projection/sculpture/frame-in-image works.
 export function getElevationDropGhostSizeMm(
-  artwork: Pick<Artwork, "dimensions" | "matWidthMm" | "frame">,
+  artwork: Pick<Artwork, "dimensions" | "matWidthMm" | "frame" | "frameIncludedInImage"> &
+    Partial<Pick<Artwork, "displayAs" | "metadata">>,
   aspect?: PixelAspect
 ): ArtworkSizeMm {
-  const imageSize = getEffectivePlacementSizeMm(artwork.dimensions, aspect);
-  return getArtworkOuterDimensionsMm(
-    imageSize.widthMm,
-    imageSize.heightMm,
-    artwork.matWidthMm,
-    artwork.frame
-  );
+  return artworkDropOuterMm(artwork, aspect);
 }
 
 // Union of every selected object's SVG rect (via getArtworkRectSvg above),

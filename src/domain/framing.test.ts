@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   FRAME_FINISHES,
   FRAME_FINISH_HEX,
+  artworkDropOuterMm,
   deriveFrameWidthFromOverallMm,
   effectiveFraming,
   getArtworkOuterDimensionsMm,
@@ -186,6 +187,53 @@ describe("effectiveFraming (single interpreter of frameIncludedInImage)", () => 
         widthMm: 800,
         heightMm: 600
       });
+    });
+  });
+});
+
+describe("artworkDropOuterMm", () => {
+  const frame: ArtworkFrame = { widthMm: 25, finish: "black" };
+
+  it("widens a framed work's known dimensions by mat and frame", () => {
+    const artwork = {
+      dimensions: { widthMm: 600, heightMm: 400, status: "known" as const },
+      matWidthMm: 50,
+      frame
+    };
+    // (50 + 25) * 2 = 150mm added per axis.
+    expect(artworkDropOuterMm(artwork)).toEqual({ widthMm: 750, heightMm: 550 });
+  });
+
+  it("does NOT widen a projection even with mat and frame stored", () => {
+    const artwork = {
+      dimensions: { widthMm: 600, heightMm: 400, status: "known" as const },
+      matWidthMm: 50,
+      frame,
+      displayAs: "projection" as const
+    };
+    expect(artworkDropOuterMm(artwork)).toEqual({ widthMm: 600, heightMm: 400 });
+  });
+
+  it("does NOT widen a work whose image already includes the frame", () => {
+    const artwork = {
+      dimensions: { widthMm: 600, heightMm: 400, status: "known" as const },
+      matWidthMm: 50,
+      frame,
+      frameIncludedInImage: true
+    };
+    expect(artworkDropOuterMm(artwork)).toEqual({ widthMm: 600, heightMm: 400 });
+  });
+
+  it("derives a missing axis from the aspect override, then widens by mat", () => {
+    const artwork = {
+      dimensions: { widthMm: 600, heightMm: undefined, status: "approximate" as const },
+      matWidthMm: 50,
+      frame: undefined
+    };
+    // aspect 3:2 → height = 600 / 1.5 = 400, then +100mm per axis for the mat.
+    expect(artworkDropOuterMm(artwork, { widthPx: 300, heightPx: 200 })).toEqual({
+      widthMm: 700,
+      heightMm: 500
     });
   });
 });

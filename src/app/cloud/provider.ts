@@ -12,6 +12,27 @@ export type CloudBackupProviderStatus =
   | "connected"
   | "reauthorization-required";
 
+export type CloudErrorKind =
+  | "reauth"
+  | "quota"
+  | "rate-limit"
+  | "not-found"
+  | "conflict"
+  | "too-large"
+  | "transient";
+
+// A typed error so a caller can tell reauth/quota/rate-limit/transient apart
+// without re-parsing provider-specific HTTP details. Every CloudBackupProvider
+// implementation throws this shape.
+export class CloudBackupError extends Error {
+  kind: CloudErrorKind;
+  constructor(kind: CloudErrorKind, message: string) {
+    super(message);
+    this.name = "CloudBackupError";
+    this.kind = kind;
+  }
+}
+
 // A single backup to push: the pre-built package blob plus the identity the
 // provider needs to key retention (full project id) and name the file (title +
 // timestamp). The provider owns path construction and pruning.
@@ -65,6 +86,15 @@ export type SyncHeadListing = SyncHeadMetadata & {
   path: string;
 };
 
+// Copy a provider's downloaded bytes into a standalone ArrayBuffer: a provider
+// may hand back a view into a pooled buffer it reuses, and a caller (the
+// import pipeline) needs to keep the bytes after this call returns.
+export function toStandaloneArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
 export interface CloudBackupProvider {
   // Stable machine id (e.g. "dropbox") and a human label ("Dropbox").
   readonly id: string;
@@ -101,6 +131,13 @@ export interface CloudBackupProvider {
   // account's revisions. Records written before the id was captured have none,
   // which is why null is a legitimate answer for a connected provider.
   accountId(): string | null;
+
+  // The provider path a project's sync head lives at, and the ceiling on a
+  // single download this tab can safely buffer. OPTIONAL: a caller falls back
+  // to its own default when a provider (e.g. a test fake) does not implement
+  // one, since only the real Dropbox provider needs to be asked.
+  remotePathFor(projectId: string): string;
+  maxDownloadBytes: number;
 
   // Build the package into the provider's backup location and prune old copies
   // to the retention cap. Resolves on a successful UPLOAD even if pruning fails

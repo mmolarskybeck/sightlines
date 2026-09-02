@@ -1,6 +1,3 @@
-import { useCursor } from "@react-three/drei";
-import type { ThreeEvent } from "@react-three/fiber";
-import { useState } from "react";
 import { MathUtils } from "three";
 import type { Texture } from "three";
 import type { FloorObject3d } from "../../../domain/geometry/scene3d";
@@ -11,9 +8,8 @@ import {
 } from "../../../domain/geometry/monitorGlyphs";
 import { textureNativeAspect } from "./artworkFit";
 import { mmToWorld } from "./coordinates";
-import { objectDragPointerDown, useThreeObjectDrag } from "./objectDragContext";
-import { CLICK_DRAG_TOLERANCE_PX } from "./sceneConstants";
 import { SelectionBoxOutline } from "./UncertaintyOutline";
+import { useSelectableFloorObject } from "./useSelectableFloorObject";
 import { CASE_BODY_COLOR, MONITOR_BODY_COLOR, MONITOR_SCREEN_COLOR } from "./tokens";
 
 // Plan-space rotation (CCW in plan x/y) to a three.js yaw about +y — the same
@@ -67,9 +63,6 @@ export function CrtMonitorMesh({
   isSelected: boolean;
   onSelect: (objectId: string, opts: { additive: boolean }) => void;
 }) {
-  const [hovered, setHovered] = useState(false);
-  useCursor(hovered);
-
   const x = mmToWorld(object.xMm);
   const z = mmToWorld(object.yMm);
   const yaw = planRotationToYaw(object.rotationDeg);
@@ -95,29 +88,14 @@ export function CrtMonitorMesh({
       ? monitorImageSizeMm(screen.widthMm, screen.heightMm, nativeAspect)
       : undefined;
 
-  // The whole assembly selects as one: clicking the pedestal, the cabinet or
-  // the picture selects the placement, and stops, so the floor beneath never
-  // sees the click and never clears the selection (FloorObjectBox's rule).
-  const handleClick = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
-    // A drag's release also fires click — only a true click selects.
-    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
-    const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
-    onSelect(object.objectId, { additive: shiftKey || metaKey || ctrlKey });
-  };
-
-  // The whole assembly drags as one too: the placement is an ordinary
-  // ArtworkFloorObject, so pressing the pedestal, the cabinet or the picture
-  // arms the same floor-plane move every other floor object gets.
-  const drag = useThreeObjectDrag();
-  const handlePointerDown = objectDragPointerDown(drag, object.objectId);
-
-  const pointerProps = {
-    onClick: handleClick,
-    onPointerDown: handlePointerDown,
-    onPointerOver: () => setHovered(true),
-    onPointerOut: () => setHovered(false)
-  };
+  // The whole assembly selects, drags and hovers as one: clicking, pressing or
+  // hovering the pedestal, the cabinet or the picture all act on the
+  // placement — same hook FloorObjectBox and FloorCaseMesh share
+  // (useSelectableFloorObject.ts). The floor beneath never sees the click and
+  // never clears the selection (FloorObjectBox's rule).
+  const { pointerProps: selectableProps, onPointerOver, onPointerOut } =
+    useSelectableFloorObject(object.objectId, onSelect);
+  const pointerProps = { ...selectableProps, onPointerOver, onPointerOut };
 
   const halfDepthMm = object.depthMm / 2;
 

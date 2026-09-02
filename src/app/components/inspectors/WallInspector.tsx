@@ -156,7 +156,7 @@ export function WallInspector({
                   <SegmentedToggleGroup
                     aria-describedby={lengthAnchorHintId}
                     aria-labelledby={lengthAnchorLabelId}
-                    className="wall-length-anchor-toggle"
+                    className="wall-length-anchor-toggle seg-compact--lg"
                     type="single"
                     value={movingEndpoint}
                     onValueChange={(value) => {

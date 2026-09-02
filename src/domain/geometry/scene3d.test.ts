@@ -1078,6 +1078,42 @@ describe("deriveScene3d — floor objects (M2)", () => {
     expect("imageFaces" in facesOf(undefined)).toBe(false);
   });
 
+  it("emits the RESOLVED display type, collapsing the 'framed' default to absence", () => {
+    function displayAsOf(overrides: Partial<Artwork>) {
+      const artwork = makeArtwork("art-1", overrides);
+      const scene = deriveScene3d(
+        makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))], {
+          floorObjects: [
+            {
+              id: "fobj-1",
+              kind: "artwork",
+              artworkId: "art-1",
+              xMm: 2000,
+              yMm: 1500,
+              widthMm: 900,
+              depthMm: 400,
+              heightMm: 1200,
+              rotationDeg: 0,
+              wallYMm: 1450
+            }
+          ]
+        }),
+        new Map([[artwork.id, artwork]])
+      );
+      return scene.floorObjects[0]!;
+    }
+
+    // An explicit monitor choice resolves to itself and reaches the scene —
+    // the one value SceneRooms's dispatch actually keys off.
+    expect(displayAsOf({ displayAs: "monitor" }).displayAs).toBe("monitor");
+
+    // An explicitly framed work resolves to "framed" too, but that is the
+    // fallback every record without a stated type already reads as
+    // (effectiveDisplayAs's own last resort), so the key stays absent —
+    // same "absence is the encoding" discipline as an untouched record.
+    expect("displayAs" in displayAsOf({ displayAs: "framed" })).toBe(false);
+  });
+
   it("carries the WORK's own dimensions alongside the box's, per axis", () => {
     function sizesOf(dimensions: Artwork["dimensions"]) {
       const artwork = makeArtwork("art-1", { dimensions });

@@ -394,7 +394,7 @@ export function OpeningInspector({
             // Re-fits the topbar-tuned track for the inspector column: equal
             // half-width segments at the panel's own label type size, instead
             // of an inline-flex track demanding its content's width.
-            className="inspector-seg-toggle"
+            className="inspector-seg-toggle seg-compact--lg"
             type="single"
             value={leaf ? "hinged" : "doorway"}
             onValueChange={(value) => {

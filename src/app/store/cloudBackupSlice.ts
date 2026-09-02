@@ -10,11 +10,11 @@
 // project dirty for the next cycle.
 
 import { toast } from "sonner";
-import { CloudBackupError } from "../cloud/dropbox";
 import { formatBackupRelativeTime } from "../cloud/cloudBackupCopy";
-import type {
-  CloudBackupProvider,
-  CloudBackupProviderStatus
+import {
+  CloudBackupError,
+  type CloudBackupProvider,
+  type CloudBackupProviderStatus
 } from "../cloud/provider";
 import {
   collectReferencedAssetIds,
@@ -89,6 +89,19 @@ export type CloudBackupSliceInternals = {
   deps: AppStoreDeps;
 };
 
+// The provider link status + account label, mirrored into observable state.
+// Shared by every cloud slice so a paint after a provider call always uses
+// the same two fields, in the same shape.
+export function providerStatusPatch(active: CloudBackupProvider): {
+  cloudBackupProviderStatus: CloudBackupProviderStatus;
+  cloudBackupAccountLabel: string | null;
+} {
+  return {
+    cloudBackupProviderStatus: active.getStatus(),
+    cloudBackupAccountLabel: active.accountLabel()
+  };
+}
+
 export function createCloudBackupSlice(
   set: (partial: Partial<AppState>) => void,
   get: () => AppState,
@@ -114,8 +127,7 @@ export function createCloudBackupSlice(
       ? readCloudBackupMeta(project.id)
       : { lastCloudBackupAt: null, backedUpFingerprint: null };
     set({
-      cloudBackupProviderStatus: active.getStatus(),
-      cloudBackupAccountLabel: active.accountLabel(),
+      ...providerStatusPatch(active),
       lastCloudBackupAt: meta.lastCloudBackupAt
     });
   }
@@ -209,8 +221,7 @@ export function createCloudBackupSlice(
           lastCloudBackupAt: timestampIso,
           // Still dirty if an edit landed mid-upload.
           cloudBackupPending: !stillSame,
-          cloudBackupProviderStatus: active.getStatus(),
-          cloudBackupAccountLabel: active.accountLabel()
+          ...providerStatusPatch(active)
         });
       } catch (error) {
         const message =
@@ -223,18 +234,13 @@ export function createCloudBackupSlice(
         // problem, or a transient network error — is a real failure the user
         // should see, on the cloud-backup toast surface.
         if (kind === "rate-limit") {
-          set({
-            cloudBackupStatus: "idle",
-            cloudBackupProviderStatus: active.getStatus(),
-            cloudBackupAccountLabel: active.accountLabel()
-          });
+          set({ cloudBackupStatus: "idle", ...providerStatusPatch(active) });
           return;
         }
         set({
           cloudBackupStatus: "error",
           cloudBackupError: message,
-          cloudBackupProviderStatus: active.getStatus(),
-          cloudBackupAccountLabel: active.accountLabel()
+          ...providerStatusPatch(active)
         });
       }
     },
@@ -332,17 +338,10 @@ export function createCloudBackupSlice(
           blob,
           timestampIso: new Date().toISOString()
         });
-        set({
-          cloudBackupProviderStatus: active.getStatus(),
-          cloudBackupAccountLabel: active.accountLabel(),
-          cloudBackupError: null
-        });
+        set({ ...providerStatusPatch(active), cloudBackupError: null });
         return { url, warnings };
       } catch (error) {
-        set({
-          cloudBackupProviderStatus: active.getStatus(),
-          cloudBackupAccountLabel: active.accountLabel()
-        });
+        set(providerStatusPatch(active));
         throw error;
       }
     }

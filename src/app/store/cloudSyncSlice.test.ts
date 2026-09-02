@@ -10,7 +10,6 @@ import type { Project } from "../../domain/project";
 import type { ProjectSyncMeta } from "../../domain/repositories/syncMetaRepository";
 import { getDropboxRowState } from "../cloud/cloudBackupCopy";
 import { CloudBackupError } from "../cloud/dropbox";
-import { syncHeadPath } from "../cloud/dropboxAuth";
 import type {
   CloudBackupProvider,
   CloudBackupProviderStatus,
@@ -28,6 +27,8 @@ import {
   InMemoryProjectSnapshotRepository,
   InMemorySyncMetaRepository
 } from "../../test/inMemoryRepositories";
+import { makeFakeCloudBackupProvider } from "../../test/fakeCloudBackupProvider";
+import { createTestAppStore } from "../../test/testAppStore";
 
 // The import pipeline a pull runs through owns its own toasts.
 vi.mock("sonner", () => ({
@@ -73,38 +74,20 @@ type FakeSyncProvider = CloudBackupProvider & {
 function makeSyncProvider(options: FakeSyncProviderOptions = {}): FakeSyncProvider {
   let revCounter = 0;
   return {
-    id: "fake",
-    label: "Fake",
+    ...makeFakeCloudBackupProvider({
+      getStatus() {
+        return options.status ?? "connected";
+      },
+      accountId() {
+        return options.accountId === undefined ? "dbid:tester" : options.accountId;
+      }
+    }),
     heads: new Map<string, StoredHead>(),
     uploads: 0,
     downloads: 0,
     headReads: 0,
     setHead(projectId, bytes, rev) {
       this.heads.set(projectId, { bytes, rev, serverModifiedIso: "2026-08-19T09:00:00.000Z" });
-    },
-    async startConnect() {},
-    async completeConnect() {
-      return false;
-    },
-    disconnect() {},
-    getStatus() {
-      return options.status ?? "connected";
-    },
-    accountLabel() {
-      return "Tester";
-    },
-    accountId() {
-      return options.accountId === undefined ? "dbid:tester" : options.accountId;
-    },
-    async uploadBackup() {},
-    async createShareLink() {
-      return "https://www.dropbox.com/scl/fi/share/project.sightlines?rlkey=test&dl=0";
-    },
-    async listCloudProjects() {
-      return [];
-    },
-    async downloadBackup() {
-      return new Uint8Array();
     },
     async getSyncHead(projectId) {
       this.headReads += 1;
@@ -145,9 +128,6 @@ function makeSyncProvider(options: FakeSyncProviderOptions = {}): FakeSyncProvid
         serverModifiedIso: "2026-08-19T12:00:00.000Z"
       });
       return { rev, serverModifiedIso: "2026-08-19T12:00:00.000Z", sizeBytes: bytes.byteLength };
-    },
-    async listSyncHeads() {
-      return [];
     }
   };
 }
@@ -232,12 +212,13 @@ describe("cloudSyncSlice", () => {
   beforeEach(() => {
     vi.mocked(toast.error).mockClear();
     window.localStorage.clear();
-    repository = new InMemoryProjectRepository();
-    artworkLibraryRepository = new InMemoryArtworkLibraryRepository();
-    assetRepository = new InMemoryAssetRepository();
-    imageProcessor = new FakeImageProcessor();
-    projectSnapshotRepository = new InMemoryProjectSnapshotRepository();
-    syncMetaRepository = new InMemorySyncMetaRepository();
+    const testStore = createTestAppStore();
+    repository = testStore.projectRepository;
+    artworkLibraryRepository = testStore.artworkLibraryRepository;
+    assetRepository = testStore.assetRepository;
+    imageProcessor = testStore.imageProcessor;
+    projectSnapshotRepository = testStore.projectSnapshotRepository;
+    syncMetaRepository = testStore.syncMetaRepository;
   });
 
   describe("enabling sync", () => {
@@ -253,7 +234,7 @@ describe("cloudSyncSlice", () => {
       const meta = await syncMetaRepository.get(project.id);
       expect(meta?.lastAcceptedRev).toBe("rev-uploaded-1");
       expect(meta?.accountId).toBe("dbid:tester");
-      expect(meta?.remotePath).toBe(syncHeadPath(project.id));
+      expect(meta?.remotePath).toBe(provider.remotePathFor(project.id));
       expect(meta?.fingerprintAtRev).toBe(selectBackupFingerprint(project, []));
       expect(meta?.lastPushAtIso).not.toBeNull();
       expect(store.getState().syncStatus).toBe("synced");

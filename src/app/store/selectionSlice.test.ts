@@ -6,17 +6,8 @@ import type {
   OpeningWallObject,
   Project
 } from "../../domain/project";
-import {
-  FakeImageProcessor,
-  InMemoryArtworkLibraryRepository,
-  InMemoryAssetRepository,
-  InMemoryProjectRepository,
-  InMemoryProjectSnapshotRepository,
-  InMemorySyncMetaRepository,
-  makeImageFile
-} from "../../test/inMemoryRepositories";
-import { createInertCrossTabSync } from "../crossTabSync";
-import { createAppStore } from "../store";
+import { makeImageFile } from "../../test/inMemoryRepositories";
+import { createTestAppStore } from "../../test/testAppStore";
 import {
   getSelectedArtworkId,
   getSelectedOpeningId,
@@ -112,16 +103,7 @@ describe("selection helpers", () => {
 });
 
 function makeStore() {
-  return createAppStore({
-    projectRepository: new InMemoryProjectRepository(),
-    artworkLibraryRepository: new InMemoryArtworkLibraryRepository(),
-    assetRepository: new InMemoryAssetRepository(),
-    imageProcessor: new FakeImageProcessor(),
-    projectSnapshotRepository: new InMemoryProjectSnapshotRepository(),
-    syncMetaRepository: new InMemorySyncMetaRepository(),
-    // Every store in this process would otherwise share one BroadcastChannel.
-    crossTabSync: createInertCrossTabSync()
-  });
+  return createTestAppStore().store;
 }
 
 describe("selection transitions through the store", () => {

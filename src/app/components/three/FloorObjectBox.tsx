@@ -1,6 +1,4 @@
-import { useCursor } from "@react-three/drei";
-import type { ThreeEvent } from "@react-three/fiber";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { MathUtils } from "three";
 import type { Texture } from "three";
 import type { FloorObject3d } from "../../../domain/geometry/scene3d";
@@ -11,13 +9,12 @@ import {
   floorObjectImagePanels,
   resolveFloorObjectImageFaces
 } from "./floorObjectImageFaces";
-import { objectDragPointerDown, useThreeObjectDrag } from "./objectDragContext";
-import { CLICK_DRAG_TOLERANCE_PX } from "./sceneConstants";
 import {
   planSuspensionWires,
   suspendedCenterYMm,
   SuspensionWires
 } from "./SuspensionWires";
+import { useSelectableFloorObject } from "./useSelectableFloorObject";
 import {
   DashedBoxOutline,
   isUncertain,
@@ -86,36 +83,18 @@ export function FloorObjectBox({
   const x = mmToWorld(object.xMm);
   const z = mmToWorld(object.yMm);
   const yaw = planRotationToYaw(object.rotationDeg);
-  const [hovered, setHovered] = useState(false);
-  // Every kind this component draws is selectable now, so the cursor is no
-  // longer gated on the kind — which also keeps the hook itself
-  // kind-independent, like the two below it.
-  useCursor(hovered);
   // Above the blocked-zone early return so the hook order never depends on the
   // object's kind. Memoized on the scene entry itself (deriveScene3d hands out
   // a fresh object only when the project actually changed) so the wire vertex
   // buffer downstream isn't rebuilt on every orbit frame.
   const wires = useMemo(() => planSuspensionWires(object), [object]);
-  const drag = useThreeObjectDrag();
-
-  // Not a hook, so it can sit either side of the early return — but both
-  // branches need it, and it is identical for both: the object selects itself
-  // and stops, so the floor beneath never sees the click and never clears.
-  const handleClick = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
-    // A drag's release also fires click — only a true click selects. (The drag
-    // is an orbit when it started on empty space, and a move of THIS object
-    // when it started here.)
-    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
-    const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
-    onSelect(object.objectId, { additive: shiftKey || metaKey || ctrlKey });
-  };
-
-  // Direct manipulation: press and drag this object across the floor. Also not
-  // a hook, and shared by both branches below for the same reason handleClick
-  // is. Inert without a ThreeObjectDragContext provider (offscreen renderers).
-  const handlePointerDown = objectDragPointerDown(drag, object.objectId);
-  const pointerProps = { onClick: handleClick, onPointerDown: handlePointerDown };
+  // Hover, drag-arm and click-to-select, shared with FloorCaseMesh and
+  // CrtMonitorMesh (useSelectableFloorObject.ts) — identical for both branches
+  // below, which is why it sits above the early return.
+  const { pointerProps, onPointerOver, onPointerOut } = useSelectableFloorObject(
+    object.objectId,
+    onSelect
+  );
 
   if (object.kind === "blocked-zone") {
     // A blocked zone deliberately IGNORES baseHeightMm and stays on the floor.
@@ -135,8 +114,8 @@ export function FloorObjectBox({
       >
         <mesh
           {...pointerProps}
-          onPointerOver={() => setHovered(true)}
-          onPointerOut={() => setHovered(false)}
+          onPointerOver={onPointerOver}
+          onPointerOut={onPointerOut}
         >
           <planeGeometry args={[mmToWorld(object.widthMm), mmToWorld(object.depthMm)]} />
           <meshBasicMaterial
@@ -192,8 +171,8 @@ export function FloorObjectBox({
     >
       <mesh
         {...pointerProps}
-        onPointerOver={() => setHovered(true)}
-        onPointerOut={() => setHovered(false)}
+        onPointerOver={onPointerOver}
+        onPointerOut={onPointerOut}
       >
         <boxGeometry
           args={[mmToWorld(object.widthMm), height, mmToWorld(object.depthMm)]}

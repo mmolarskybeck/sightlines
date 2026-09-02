@@ -412,14 +412,6 @@ input:focus-visible {
   justify-self: start;
 }
 
-/* Compact segments for the dialog-width track. */
-.help-input-toggle .seg-item {
-  min-height: 24px;
-  padding: var(--space-2) var(--space-10);
-  font-size: var(--type-xs);
-  font-weight: var(--weight-medium);
-}
-
 .help-tabs {
   display: grid;
   gap: var(--space-14);
@@ -906,7 +898,7 @@ input:focus-visible {
   left: 50%;
   z-index: 50;
   display: flex;
-  width: min(calc(100vw - 32px), 980px);
+  width: min(calc(100vw - 32px), var(--dialog-width, 980px));
   max-height: min(760px, calc(100dvh - 32px));
   flex-direction: column;
   transform: translate(-50%, -50%);
@@ -917,16 +909,14 @@ input:focus-visible {
   box-shadow: var(--shadow-overlay);
 }
 
-/* Keep after .dialog-content so the equal-specificity width override wins. */
 .help-dialog-content {
-  width: min(calc(100vw - 32px), 560px);
+  --dialog-width: 560px;
   /* Fixed height keeps Help and Settings the same size. */
   height: min(760px, calc(100dvh - 32px));
 }
 
-/* Compact confirms; keep after .dialog-content for cascade order. */
 .dialog-alert {
-  width: min(calc(100vw - 32px), 26.5rem);
+  --dialog-width: 26.5rem;
 }
 
 /* Dropbox sharing is a compact handoff, not a document-scale workflow. Keep
@@ -934,7 +924,7 @@ input:focus-visible {
    primitive only pads headers and footers because large wizards own their
    body layouts independently. */
 .share-project-dialog {
-  width: min(calc(100vw - 32px), 34rem);
+  --dialog-width: 34rem;
 }
 
 .share-project-body {
@@ -996,7 +986,7 @@ input:focus-visible {
 
 /* Scroll long project lists within a compact dialog. Keep after the base. */
 .project-manager-dialog {
-  width: min(calc(100vw - 32px), 620px);
+  --dialog-width: 620px;
   max-height: min(640px, calc(100dvh - 32px));
 }
 
@@ -1005,7 +995,7 @@ input:focus-visible {
    left rail / collection pane / canvas / inspector remain the background
    topology; these are task columns, not replacement app panes. */
 .export-pdf-dialog {
-  width: min(calc(100vw - 32px), 1000px);
+  --dialog-width: 1000px;
   height: min(880px, calc(100dvh - 32px));
 }
 
@@ -1564,7 +1554,7 @@ fieldset.export-pdf-body:disabled {
    switch geometry and the setup note are .export-pdf-body's, so the two export
    dialogs read as the same object. */
 .export-checklist-dialog {
-  width: min(calc(100vw - 32px), 460px);
+  --dialog-width: 460px;
 }
 
 /* Same fieldset-for-:disabled trick as .export-pdf-body — no chrome of its own. */
@@ -3193,7 +3183,7 @@ body.panels-resizing * {
 }
 
 .import-dialog {
-  width: min(calc(100vw - 32px), 1060px);
+  --dialog-width: 1060px;
 }
 
 .import-dialog-header {
@@ -4430,6 +4420,25 @@ body.panels-resizing * {
   transition:
     background-color 150ms ease-out,
     color 150ms ease-out;
+}
+
+/* Compact segmented-toggle sizing, shared by dialogs (help/import-conflict
+   segments) and the inspector's narrow column. Apply alongside the
+   component's own class — that class stays free to add per-instance
+   declarations (layout, extra typography) the shared size doesn't cover. */
+.seg-compact .seg-item {
+  min-height: 24px;
+  padding: var(--space-2) var(--space-10);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+}
+
+.seg-compact--lg .seg-item {
+  min-height: 26px;
+  padding: 0 var(--space-6);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
 }
 
 .seg-item:hover:not(:disabled) {
@@ -7112,16 +7121,13 @@ body.panels-resizing * {
 
 /* min-width: 0 is load-bearing, not defensive: a grid item's default
    min-width: auto refuses to shrink below its (nowrap) content, so the longer
-   segment would push the track wide again and undo the column split. */
+   segment would push the track wide again and undo the column split. Shared
+   sizing (min-height, padding, font, line-height) lives in .seg-compact--lg,
+   applied alongside these classes. */
 .inspector-seg-toggle .seg-item,
 .wall-length-anchor-toggle .seg-item {
   gap: var(--space-6);
   min-width: 0;
-  min-height: 26px;
-  padding: 0 var(--space-6);
-  font-size: var(--type-xs);
-  font-weight: var(--weight-semibold);
-  line-height: 1;
 }
 
 .wall-length-anchor-icon {
@@ -8627,7 +8633,7 @@ body.panels-resizing * {
 
 /* Scroll the body independently so header and footer stay visible. */
 .settings-dialog {
-  width: min(calc(100vw - 32px), 560px);
+  --dialog-width: 560px;
   /* Match Help height and keep the footer pinned. */
   height: min(760px, calc(100dvh - 32px));
 }
@@ -9361,9 +9367,8 @@ body.panels-resizing * {
 /* Package-import conflict review (docs/plan.md §6). Wider than a confirm
    dialog because each row carries a field-level diff and a three-way choice
    side by side; the body takes the same 24px inline padding as .dialog-header
-   so rows align with the title, and scrolls inside the fixed dialog frame.
-   Keep after .dialog-content so the equal-specificity width override wins. */
-.import-conflict-dialog { width: min(calc(100vw - 32px), 720px); }
+   so rows align with the title, and scrolls inside the fixed dialog frame. */
+.import-conflict-dialog { --dialog-width: 720px; }
 
 /* Header row above the list: the bulk affordances, deliberately quieter than
    the rows they drive. "Show all details" sits flush left (its ghost padding
@@ -9592,16 +9597,12 @@ button.import-conflict-headtext:hover .import-conflict-caret { color: var(--ink)
   line-height: var(--leading-ui);
 }
 
-/* Segment typography, matching the app-wide compact tracks
-   (.inspector-seg-toggle / .help-input-toggle) — without this the segments
-   inherit the ambient dialog size and read as unstyled. */
 .import-conflict-seg { flex: 0 0 auto; }
 
+/* Shared sizing lives in .seg-compact, applied alongside this class; only
+   the extra line-height (unneeded by the other .seg-compact consumer) stays
+   here. */
 .import-conflict-seg .seg-item {
-  min-height: 24px;
-  padding: var(--space-2) var(--space-10);
-  font-size: var(--type-xs);
-  font-weight: var(--weight-medium);
   line-height: 1;
 }
 
@@ -9616,9 +9617,8 @@ button.import-conflict-headtext:hover .import-conflict-caret { color: var(--ink)
    confirm-scale overlay, but with no footer: each option is a full-width pane
    stating its own consequence, because these are four outcomes for the
    curator's work rather than a confirm/cancel pair. Panes are square-cornered
-   like every other pane in the app; only the overlay itself is rounded.
-   Keep after .dialog-content so the equal-specificity width override wins. */
-.sync-conflict-dialog { width: min(calc(100vw - 32px), 30rem); }
+   like every other pane in the app; only the overlay itself is rounded. */
+.sync-conflict-dialog { --dialog-width: 30rem; }
 
 .sync-conflict-body {
   display: grid;

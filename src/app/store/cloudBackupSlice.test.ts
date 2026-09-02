@@ -14,6 +14,8 @@ import { createAppStore, type AppStoreDeps } from "../store";
 import { readCloudBackupMeta } from "./cloudBackupMeta";
 import { selectBackupFingerprint } from "./cloudBackupSlice";
 import { telemetry } from "../telemetry/telemetry";
+import { makeFakeCloudBackupProvider } from "../../test/fakeCloudBackupProvider";
+import { createTestAppStore } from "../../test/testAppStore";
 
 // runCloudBackupNow owns its own sonner toasts; capture them without rendering.
 vi.mock("sonner", () => ({
@@ -28,21 +30,13 @@ function makeFakeProvider(options: {
   completeHandled?: boolean;
 } = {}): CloudBackupProvider & { uploads: number; shares: number } {
   return {
-    id: "fake",
-    label: "Fake",
+    ...makeFakeCloudBackupProvider({
+      async completeConnect() {
+        return options.completeHandled ?? false;
+      }
+    }),
     uploads: 0,
     shares: 0,
-    async startConnect() {},
-    async completeConnect() {
-      return options.completeHandled ?? false;
-    },
-    disconnect() {},
-    getStatus() {
-      return "connected";
-    },
-    accountLabel() {
-      return "Tester";
-    },
     async uploadBackup() {
       this.uploads += 1;
       options.onUpload?.();
@@ -51,30 +45,6 @@ function makeFakeProvider(options: {
     async createShareLink() {
       this.shares += 1;
       return "https://www.dropbox.com/scl/fi/share/project.sightlines?rlkey=test&dl=0";
-    },
-    // The read side is exercised in the cloud-projects tests; here it only has
-    // to satisfy the interface.
-    async listCloudProjects() {
-      return [];
-    },
-    async downloadBackup() {
-      return new Uint8Array();
-    },
-    accountId() {
-      return "dbid:tester";
-    },
-    // Sync is exercised in its own slice tests; these only satisfy the seam.
-    async getSyncHead() {
-      return null;
-    },
-    async downloadSyncHead() {
-      return { bytes: new Uint8Array(), rev: "rev-1" };
-    },
-    async uploadSyncHead() {
-      return { rev: "rev-1", serverModifiedIso: null, sizeBytes: null };
-    },
-    async listSyncHeads() {
-      return [];
     }
   };
 }
@@ -85,6 +55,7 @@ describe("cloudBackupSlice.runCloudBackup", () => {
   let assetRepository: InMemoryAssetRepository;
   let imageProcessor: FakeImageProcessor;
   let projectSnapshotRepository: InMemoryProjectSnapshotRepository;
+  let syncMetaRepository: InMemorySyncMetaRepository;
 
   function makeDeps(overrides: Partial<AppStoreDeps> = {}): AppStoreDeps {
     return {
@@ -93,7 +64,7 @@ describe("cloudBackupSlice.runCloudBackup", () => {
       assetRepository,
       imageProcessor,
       projectSnapshotRepository,
-      syncMetaRepository: new InMemorySyncMetaRepository(),
+      syncMetaRepository,
       // Every store in this process would otherwise share one BroadcastChannel.
       crossTabSync: createInertCrossTabSync(),
       ...overrides
@@ -121,11 +92,13 @@ describe("cloudBackupSlice.runCloudBackup", () => {
     vi.mocked(toast.success).mockClear();
     vi.mocked(toast.error).mockClear();
     window.localStorage.clear();
-    repository = new InMemoryProjectRepository();
-    artworkLibraryRepository = new InMemoryArtworkLibraryRepository();
-    assetRepository = new InMemoryAssetRepository();
-    imageProcessor = new FakeImageProcessor();
-    projectSnapshotRepository = new InMemoryProjectSnapshotRepository();
+    const testStore = createTestAppStore();
+    repository = testStore.projectRepository;
+    artworkLibraryRepository = testStore.artworkLibraryRepository;
+    assetRepository = testStore.assetRepository;
+    imageProcessor = testStore.imageProcessor;
+    projectSnapshotRepository = testStore.projectSnapshotRepository;
+    syncMetaRepository = testStore.syncMetaRepository;
   });
 
   it("records a successful Dropbox connection", async () => {
@@ -223,6 +196,7 @@ describe("cloudBackupSlice.runCloudBackupNow", () => {
   let assetRepository: InMemoryAssetRepository;
   let imageProcessor: FakeImageProcessor;
   let projectSnapshotRepository: InMemoryProjectSnapshotRepository;
+  let syncMetaRepository: InMemorySyncMetaRepository;
 
   function makeDeps(overrides: Partial<AppStoreDeps> = {}): AppStoreDeps {
     return {
@@ -231,7 +205,7 @@ describe("cloudBackupSlice.runCloudBackupNow", () => {
       assetRepository,
       imageProcessor,
       projectSnapshotRepository,
-      syncMetaRepository: new InMemorySyncMetaRepository(),
+      syncMetaRepository,
       // Every store in this process would otherwise share one BroadcastChannel.
       crossTabSync: createInertCrossTabSync(),
       ...overrides
@@ -258,11 +232,13 @@ describe("cloudBackupSlice.runCloudBackupNow", () => {
     vi.mocked(toast.success).mockClear();
     vi.mocked(toast.error).mockClear();
     window.localStorage.clear();
-    repository = new InMemoryProjectRepository();
-    artworkLibraryRepository = new InMemoryArtworkLibraryRepository();
-    assetRepository = new InMemoryAssetRepository();
-    imageProcessor = new FakeImageProcessor();
-    projectSnapshotRepository = new InMemoryProjectSnapshotRepository();
+    const testStore = createTestAppStore();
+    repository = testStore.projectRepository;
+    artworkLibraryRepository = testStore.artworkLibraryRepository;
+    assetRepository = testStore.assetRepository;
+    imageProcessor = testStore.imageProcessor;
+    projectSnapshotRepository = testStore.projectSnapshotRepository;
+    syncMetaRepository = testStore.syncMetaRepository;
   });
 
   it("uploads and confirms when there are changes to back up", async () => {

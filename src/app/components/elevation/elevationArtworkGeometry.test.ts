@@ -61,6 +61,16 @@ describe("getElevationDropGhostSizeMm", () => {
     expect(renderedOutline?.getAttribute("width")).toBe(String(ghostSize.widthMm));
     expect(renderedOutline?.getAttribute("height")).toBe(String(ghostSize.heightMm));
   });
+
+  it("does not widen a projection's drop ghost even with mat/frame stored", () => {
+    const artwork = {
+      dimensions: { widthMm: 400, heightMm: 300, status: "known" as const },
+      matWidthMm: 75,
+      frame: { widthMm: 25, finish: "black" as const },
+      displayAs: "projection" as const
+    };
+    expect(getElevationDropGhostSizeMm(artwork)).toEqual({ widthMm: 400, heightMm: 300 });
+  });
 });
 
 describe("framed elevation selection geometry", () => {

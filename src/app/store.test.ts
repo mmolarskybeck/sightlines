@@ -56,7 +56,7 @@ import {
 import { exportProjectJson } from "../test/exportProjectJson";
 import { ProjectValidationError } from "../domain/repositories/indexedDbProjectRepository";
 import { SNAPSHOT_MIN_INTERVAL_MS } from "../domain/repositories/projectSnapshotRepository";
-import type { CrossTabMessage, CrossTabSync } from "./crossTabSync";
+import { createTestAppStore, type FakeCrossTabSync } from "../test/testAppStore";
 import type { AppStoreDeps, SaveError } from "./store";
 import { shouldAnnounceSaveError } from "./hooks/useSaveErrorToast";
 import {
@@ -70,48 +70,6 @@ import {
   OVERLAP_BLOCKED_MESSAGE,
   roomIdOf
 } from "./store";
-
-// A CrossTabSync stand-in: it records what this store told the other tabs, and
-// `deliver` plays another tab's announcement back into it.
-//
-// Injected into EVERY store built here, not just the cross-tab tests: a vitest
-// process is one browsing context, so stores sharing the real BroadcastChannel
-// would hear each other's saves — and since they all open "sample-gallery" from
-// their own repository, that cross-talk would be about the same project id.
-type FakeCrossTabSync = {
-  sync: CrossTabSync;
-  announced: CrossTabMessage[];
-  deliver: (message: CrossTabMessage) => Promise<void>;
-};
-
-function makeFakeCrossTabSync(): FakeCrossTabSync {
-  const handlers = new Set<(message: CrossTabMessage) => void>();
-  const announced: CrossTabMessage[] = [];
-  return {
-    announced,
-    async deliver(message) {
-      for (const handler of [...handlers]) handler(message);
-      // The store's handler is async and started with `void`; a macrotask turn
-      // lets its storage read and setDocument finish before the test asserts.
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    },
-    sync: {
-      announceProjectSaved(projectId, updatedAt) {
-        announced.push({ kind: "project-saved", projectId, updatedAt });
-      },
-      announceArtworksSaved() {
-        announced.push({ kind: "artworks-saved" });
-      },
-      subscribe(handler) {
-        handlers.add(handler);
-        return () => handlers.delete(handler);
-      },
-      close() {
-        handlers.clear();
-      }
-    }
-  };
-}
 
 describe("app store", () => {
   let repository: InMemoryProjectRepository;
@@ -168,14 +126,15 @@ describe("app store", () => {
   }
 
   beforeEach(async () => {
-    repository = new InMemoryProjectRepository();
-    artworkLibraryRepository = new InMemoryArtworkLibraryRepository();
-    assetRepository = new InMemoryAssetRepository();
-    imageProcessor = new FakeImageProcessor();
-    projectSnapshotRepository = new InMemoryProjectSnapshotRepository();
-    syncMetaRepository = new InMemorySyncMetaRepository();
-    crossTabSync = makeFakeCrossTabSync();
-    store = createAppStore(makeDeps());
+    const testStore = createTestAppStore();
+    repository = testStore.projectRepository;
+    artworkLibraryRepository = testStore.artworkLibraryRepository;
+    assetRepository = testStore.assetRepository;
+    imageProcessor = testStore.imageProcessor;
+    projectSnapshotRepository = testStore.projectSnapshotRepository;
+    syncMetaRepository = testStore.syncMetaRepository;
+    crossTabSync = testStore.crossTab;
+    store = testStore.store;
     await store.getState().boot();
   });
 

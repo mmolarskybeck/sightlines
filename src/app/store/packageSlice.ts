@@ -20,12 +20,16 @@ import type { Artwork, Project } from "../../domain/project";
 import { AssetNotFoundError } from "../../domain/repositories/assetRepository";
 import { SYNC_PROTOCOL_VERSION } from "../../domain/repositories/syncMetaRepository";
 import { CLOUD_SYNC_PROJECT_ALREADY_HERE_MESSAGE } from "../cloud/cloudBackupCopy";
-import { syncHeadPath } from "../cloud/dropboxAuth";
 import type { PackageExportMode } from "../../domain/schema/packageSchema";
 import { migrateProjectJsonWithReport } from "../../domain/schema/projectSchema";
 import type { AppState, AppStoreDeps } from "../store";
 import { selectBackupFingerprint } from "./cloudBackupSlice";
-import { BOOKKEEPING_MESSAGE, errorFor, type SyncEpoch } from "./cloudSyncSlice";
+import {
+  BOOKKEEPING_MESSAGE,
+  errorFor,
+  remotePathForProject,
+  type SyncEpoch
+} from "./cloudSyncSlice";
 import { writeCloudBackupMeta } from "./cloudBackupMeta";
 import { telemetry } from "../telemetry/telemetry";
 
@@ -310,11 +314,12 @@ export function createPackageSlice(
     }
     if (!stillAuthorized()) return false;
 
-    const accountId = deps.cloudBackupProvider?.accountId() ?? null;
+    const active = deps.cloudBackupProvider ?? null;
+    const accountId = active?.accountId() ?? null;
     // Sync metadata is bound to the account it came from. With no account id
     // there is nothing honest to bind to, so the project simply reads as
     // unlinked — the import itself still stands.
-    if (!accountId) return false;
+    if (!active || !accountId) return false;
 
     // The (opened, libraryArtworks) pair is exactly what the state machine will
     // fingerprint next cycle, so "unchanged since the pull" is true by
@@ -334,7 +339,7 @@ export function createPackageSlice(
       projectId: opened.id,
       provider: "dropbox",
       accountId,
-      remotePath: syncHeadPath(opened.id),
+      remotePath: remotePathForProject(active, opened.id),
       lastAcceptedRev: rev,
       fingerprintAtRev,
       lastPullAtIso: nowIso,
@@ -346,27 +351,10 @@ export function createPackageSlice(
     return true;
   }
 
-  // Undo the link path's create-only claim on an id. That claim is deliberately
-  // the FIRST write of a link commit (it is the only thing that closes the
-  // cross-tab race), so every step after it runs with a durable project record
-  // already on this device — and a failure in that stretch would leave one
-  // holding no images and no sync metadata. Nothing surfaces it as broken: it
-  // just sits there, while every retry of the same handoff is refused by the
-  // two "already on this device" checks. The record is provably this tab's —
-  // an atomic create-only insert that succeeded moments ago, on an id nothing
-  // else can have claimed since — so deleting it cannot destroy another tab's
-  // work.
-  //
-  // Best effort BY CONTRACT: the caller rethrows the ORIGINAL failure whether
-  // or not the delete lands, because that is the failure the user has to act
-  // on. A delete that fails leaves exactly the orphan the retry trips over —
-  // no worse than never having tried.
-  //
-  // The ordinary (non-link) import deliberately keeps its half-written project
-  // instead: its id is the planner's to rename, so a retry imports cleanly
-  // beside the leftover rather than being refused, and the leftover is visible
-  // in the project manager. Identity preservation is what makes the link path's
-  // leftover unrecoverable, so only that path unwinds.
+  // Undo the link path's create-only claim on an id. Best effort BY CONTRACT:
+  // the caller rethrows the ORIGINAL failure whether or not this delete lands
+  // — a failed delete just leaves the orphan the next retry's "already on this
+  // device" checks skip past, no worse than never having tried.
   async function unwindLinkCreate(claim: LinkCreateClaim): Promise<void> {
     try {
       await deps.projectRepository.delete(claim.projectId);
@@ -565,21 +553,10 @@ export function createPackageSlice(
     }
 
     const opened = setDocument(commit.project, { viewMode: "plan", libraryArtworks });
-    // Both orders persist BEFORE they open (an ordinary import first, a
-    // replace at its commit point), so a load repair always lands after the
-    // record is already down. A second write is the only way the stored
-    // project matches the one on screen. No recovery snapshot HERE: an ordinary import writes
-    // its own newly finalized project, so there is no earlier document of the
-    // user's at risk — the one path that does overwrite (a sync pull) took its
-    // snapshot in prepareSyncReplace before anything was written.
-    //
-    // A false return here must NOT throw or unwind: the document is already
-    // open and the assets/artworks are already on disk, so the import really
-    // did happen — only the repaired record's write-back failed. persist()
-    // has already flipped saveState to "error" and queued a saveError with
-    // its own retry closure (the badge + retry toast own announcing that).
-    // repairSaved just gates the toast below so it doesn't call that a
-    // success.
+    // A second write to match the load-repaired record. A false return here
+    // must NOT throw or unwind: the import already landed on disk, and
+    // persist() has already flipped saveState/queued its own retry — this
+    // only gates the toast below from calling a failed write-back a success.
     const repairSaved = opened === commit.project || (await persist(opened));
     if (!repairSaved) syncHeadAppliedExactly = false;
 
@@ -656,17 +633,9 @@ export function createPackageSlice(
       // the sync slice stopped waiting on it.
       await get().refreshProjectSyncState();
     } catch {
-      // The import itself is DONE — the document is open, the record is down —
-      // so this must not unwind into the caller's "Import failed" path, which
-      // would tell the user nothing changed while their project sits replaced
-      // on screen. Report the true, narrower problem instead: this device
-      // cannot prove which revision its copy descends from, so the next check
-      // reads as a conflict rather than as licence to overwrite Dropbox — the
-      // safe direction, and the same message the sync slice uses when its own
-      // metadata write fails. Owned by `opened` for the same reason as above:
-      // the failure IS that no record exists to re-derive it from. Painted only
-      // while `opened` is still the document on screen — the reads above are
-      // awaits, and a swap inside them makes this someone else's badge.
+      // Must NOT unwind into the caller's "Import failed" path: the document
+      // already landed. Report BOOKKEEPING_MESSAGE instead, owned by `opened`,
+      // and only while it is still on screen (the awaits above may have swapped it).
       if (get().project?.id === opened.id) {
         set(errorFor(opened.id, BOOKKEEPING_MESSAGE));
       }

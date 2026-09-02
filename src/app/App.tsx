@@ -49,12 +49,7 @@ import type {
 import { isDegeneratePose, resolveSavedViewRoomLabel } from "../domain/savedViews";
 import { faceWallId, parseFaceWallId } from "../domain/geometry/freestandingWalls";
 import { getPartitionClearances } from "../domain/geometry/partitionSpacing";
-import type { ChecklistExportRequest } from "../domain/checklistExport/types";
-import type { PackageExportMode } from "../domain/schema/packageSchema";
-import {
-  buildSightlinesDropboxShareUrl,
-  readDropboxShareUrl
-} from "./cloud/dropboxShare";
+import { readDropboxShareUrl } from "./cloud/dropboxShare";
 import { IndexedDbAssetRepository } from "../domain/repositories/indexedDbAssetRepository";
 import {
   displayUnitForSystem,
@@ -90,8 +85,6 @@ import {
 } from "./components/inspectors/OpeningInspector";
 import { PlanEmptyState } from "./components/plan/PlanEmptyState";
 import { PlanView } from "./components/plan/PlanView";
-import { captureSvgSnapshot } from "./export/captureSnapshot";
-import { triggerDownload } from "./export/triggerDownload";
 import {
   DrawPicker,
   InsertPicker,
@@ -169,10 +162,9 @@ import { getArrangeEligibility } from "./store/arrangeEligibility";
 import type { ThreeDViewActions } from "./components/three/ThreeDView";
 import type { SavedViewRenderHandle } from "./components/three/SavedViewRenderHost";
 import { createSavedViewRenderRef } from "./savedViewRenderRef";
+import { useExportActions } from "./hooks/useExportActions";
 import { useSavedViewThumbnails } from "./hooks/useSavedViewThumbnails";
-import type { EffectiveDocumentSettings } from "../domain/export/documentSettings";
 import { rendererBenchmarkEnabled } from "./rendererBenchmarkFlag";
-import { telemetry } from "./telemetry/telemetry";
 
 const ElevationView = lazy(() =>
   import("./components/elevation/ElevationView").then((module) => ({ default: module.ElevationView }))
@@ -426,13 +418,6 @@ export function App() {
   const [pendingViewPose, setPendingViewPose] = useState<SavedViewPose | null>(
     null
   );
-  // Determinate progress for the in-flight PDF export; null when idle (§6.2).
-  const [pdfExportProgress, setPdfExportProgress] = useState<
-    { done: number; total: number } | null
-  >(null);
-  // Aborts the in-flight PDF export; a cancel or a mid-export dialog dismissal
-  // trips it, delivering nothing (§12).
-  const pdfExportAbortRef = useRef<AbortController | null>(null);
   // The render host's handle. Exposed both as a live ref (the PDF export path
   // reads `.current` synchronously) and as state (so useSavedViewThumbnails's
   // processing loop re-runs when the host mounts and the handle attaches). The
@@ -447,12 +432,6 @@ export function App() {
     []
   );
 
-  // Prevent re-entry while package assets are hashed and zipped.
-  const [isExportingPackage, setIsExportingPackage] = useState(false);
-  const [isExportingChecklist, setIsExportingChecklist] = useState(false);
-  const [isSharingProject, setIsSharingProject] = useState(false);
-  const [shareProjectUrl, setShareProjectUrl] = useState<string | null>(null);
-  const [shareProjectWarningCount, setShareProjectWarningCount] = useState(0);
   const [incomingDropboxShareUrl, setIncomingDropboxShareUrl] = useState<string | null>(() =>
     readDropboxShareUrl(window.location.href)
   );
@@ -694,24 +673,13 @@ export function App() {
     toggleMeasure();
   };
 
-  // Safety net for a stranded checklist-drag flag. `draggingArtworkId` is set
-  // on native dragstart and normally cleared by the source row's onDragEnd —
-  // but the row stops being draggable the instant its work lands on a wall
-  // (isDraggable = !isPlaced), so React drops that onDragEnd handler before the
-  // browser fires dragend (desktop re-render race), and iPadOS/WebKit may not
-  // fire dragend at all (the same unreliability artworkDragSession's lingering
-  // timer exists to absorb). Either way the flag would strand non-null, and its
-  // guards in the delete/nudge shortcuts then silently swallow Delete and
-  // arrow-key nudges for the rest of the session. Clear it from the window,
-  // independent of the row: `drop` clears it the moment a work lands (this is
-  // what unblocks a nudge/Delete on a just-dropped, auto-selected work when no
-  // dragend follows), `dragend` covers a drag that ends off any target, and a
-  // trailing pointerdown reclaims the flag if neither fired — a fresh
-  // pointerdown can only land once the drag is truly over, since native DnD
-  // suppresses pointer events for its duration. Clearing on `drop` is safe:
-  // the drop targets resolve the placed work from dataTransfer/the drag
-  // session, and their React drop handlers keep this render's flag value in
-  // closure (setState is async), so the state reset can't disturb placement.
+  // Safety net for a stranded checklist-drag flag. The source row's onDragEnd
+  // is unreliable (the row stops being draggable the moment its work lands, so
+  // React drops the handler before dragend; iPadOS may never fire dragend), and
+  // a stranded flag makes the delete/nudge shortcuts swallow input for the rest
+  // of the session. `drop` covers a landed work, `dragend` a drag that ends off
+  // target, and a trailing pointerdown reclaims it if neither fired. Clearing
+  // on `drop` is safe: drop handlers close over this render's flag value.
   useEffect(() => {
     if (draggingArtworkId === null) return;
     const clearDragFlag = () => setDraggingArtworkId(null);
@@ -944,13 +912,8 @@ export function App() {
 
   // Everything the opening inspector needs to say about the wall this opening
   // shares — assembled here so the component stays a renderer and the words
-  // stay in the app's copy layer.
-  //
-  // Memoized for the same reason sharedOpeningIssues above is, and declared in
-  // the same place and for the same reason: a hook below the `if (!project)`
-  // return runs only on renders that have a document, which changes the hook
-  // count between renders and tears the component down. The null guards live
-  // inside the memo, not around it.
+  // stay in the app's copy layer. Memoized and placed above the early return
+  // for the same reasons as sharedOpeningIssues.
   const sharedOpeningSection: OpeningSharedSection | null = useMemo(() => {
     if (!project || !selectedOpeningId) return null;
     const opening = project.wallObjects.find((object) => object.id === selectedOpeningId);
@@ -997,6 +960,44 @@ export function App() {
     splitSharedOpening,
     keepThisOpeningOnly
   ]);
+
+  // Above the early return, like every hook here (see sharedOpeningIssues).
+  const {
+    isExportingPackage,
+    isExportingChecklist,
+    isSharingProject,
+    shareProjectUrl,
+    setShareProjectUrl,
+    shareProjectWarningCount,
+    pdfExportProgress,
+    handleExportPackage,
+    handleExportChecklist,
+    handleExportProjectById,
+    handleShareProject,
+    handleExportImage,
+    handleExportPdf,
+    handleCancelExportPdf,
+    handleExportPdfOpenChange
+  } = useExportActions({
+    project,
+    viewMode,
+    libraryArtworks,
+    selectedWall,
+    exportProjectPackage,
+    exportProjectPackageById,
+    exportChecklistSpreadsheet,
+    exportChecklistPdf,
+    createCloudShareLink,
+    getAsset: (assetId) => assetRepository.getAsset(assetId),
+    getBlob: getAssetBlob,
+    threeDActionsRef,
+    planSvgElementRef,
+    elevationSvgElementRef,
+    savedViewRenderRef,
+    setSnapshotExportMode,
+    setIsExportChecklistOpen,
+    setIsExportPdfOpen
+  });
 
   if (!project) {
     return (
@@ -1417,185 +1418,9 @@ export function App() {
     toggleInspectorCollapsed();
   };
 
-  const handleExportPackage = async (mode: PackageExportMode) => {
-    if (isExportingPackage) return;
-    setIsExportingPackage(true);
-    try {
-      const result = await exportProjectPackage(mode);
-      if (result) {
-        const outcome = await triggerDownload(result.zip, result.filename, {
-          mimeType: "application/octet-stream",
-          description: "Sightlines project package"
-        });
-        if (outcome === "cancelled") {
-          // The user dismissed the save dialog — no file, no toast.
-        } else if (result.warnings.length > 0) {
-          toast.warning(
-            `Exported ${result.filename} with ${result.warnings.length} warning${
-              result.warnings.length === 1 ? "" : "s"
-            }: ${result.warnings.join(" ")}`
-          );
-        } else {
-          toast.success(`Exported ${result.filename}`);
-        }
-      } else {
-        // exportProjectPackage catches its own failures and records them on
-        // `error` (see store.ts) rather than throwing — read that message
-        // back out so the toast and the banner agree.
-        toast.error(useAppStore.getState().error ?? "Export failed: the package could not be built.");
-      }
-    } catch (error) {
-      // Guards anything unexpected outside exportProjectPackage's own try/
-      // catch — e.g. triggerDownload failing on the returned blob.
-      toast.error(
-        `Export failed: ${error instanceof Error ? error.message : "the package could not be built."}`
-      );
-    } finally {
-      setIsExportingPackage(false);
-    }
-  };
-
-  // Checklist export (export-spec §3.4 spreadsheet, §3.5 PDF). Same delivery
-  // contract as handleExportPackage: the store action catches its own failures
-  // onto `error`, so a null result means "read the banner back out", and the
-  // dialog only closes once bytes were actually delivered. The two formats
-  // differ only in which builder runs — everything downstream is one path,
-  // because both return the same {filename, bytes, mimeType, warnings}.
-  const handleExportChecklist = async (request: ChecklistExportRequest) => {
-    if (isExportingChecklist) return;
-    setIsExportingChecklist(true);
-    try {
-      const result =
-        request.kind === "pdf"
-          ? await exportChecklistPdf(request.options)
-          : await exportChecklistSpreadsheet(request.options);
-      if (result) {
-        // Pass a typed Blob rather than the raw bytes: triggerDownload's
-        // Uint8Array path stamps application/octet-stream, which loses the
-        // .xlsx/.zip type the save picker offers.
-        const outcome = await triggerDownload(
-          new Blob([result.bytes.slice()], { type: result.mimeType }),
-          result.filename,
-          { mimeType: result.mimeType }
-        );
-        if (outcome === "cancelled") {
-          // The user dismissed the save dialog — no file, no toast.
-        } else if (result.warnings.length > 0) {
-          setIsExportChecklistOpen(false);
-          toast.warning(
-            `Exported ${result.filename} with ${result.warnings.length} warning${
-              result.warnings.length === 1 ? "" : "s"
-            }: ${result.warnings.join(" ")}`
-          );
-        } else {
-          setIsExportChecklistOpen(false);
-          toast.success(`Exported ${result.filename}`);
-        }
-      } else {
-        toast.error(
-          useAppStore.getState().error ?? "Export failed: the checklist could not be built."
-        );
-      }
-    } catch (error) {
-      toast.error(
-        `Export failed: ${error instanceof Error ? error.message : "the checklist could not be built."}`
-      );
-    } finally {
-      setIsExportingChecklist(false);
-    }
-  };
-
-  // Project-row quick export uses the standard display-quality mode.
-  const handleExportProjectById = async (id: string) => {
-    try {
-      const result = await exportProjectPackageById(id, "display");
-      if (result) {
-        const outcome = await triggerDownload(result.zip, result.filename, {
-          mimeType: "application/octet-stream",
-          description: "Sightlines project package"
-        });
-        if (outcome === "cancelled") {
-          // The user dismissed the save dialog — no file, no toast.
-        } else if (result.warnings.length > 0) {
-          toast.warning(
-            `Exported ${result.filename} with ${result.warnings.length} warning${
-              result.warnings.length === 1 ? "" : "s"
-            }: ${result.warnings.join(" ")}`
-          );
-        } else {
-          toast.success(`Exported ${result.filename}`);
-        }
-      } else {
-        toast.error(useAppStore.getState().error ?? "Export failed: the package could not be built.");
-      }
-    } catch (error) {
-      toast.error(
-        `Export failed: ${error instanceof Error ? error.message : "the package could not be built."}`
-      );
-    }
-  };
-
-  const handleShareProject = async () => {
-    if (isSharingProject) return;
-    setIsSharingProject(true);
-    try {
-      const result = await createCloudShareLink();
-      const appRoot = new URL(import.meta.env.BASE_URL || "/", window.location.origin).toString();
-      setShareProjectUrl(buildSightlinesDropboxShareUrl(result.url, appRoot));
-      setShareProjectWarningCount(result.warnings.length);
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Could not create the Dropbox share link."
-      );
-    } finally {
-      setIsSharingProject(false);
-    }
-  };
-
   const leaveIncomingShare = () => {
     window.history.replaceState(null, "", import.meta.env.BASE_URL || "/");
     setIncomingDropboxShareUrl(null);
-  };
-
-  const handleExportImage = async (format: "png" | "jpeg" = "png") => {
-    if (!project) return;
-    try {
-      let blob: Blob;
-      let viewLabel: string;
-      if (viewMode === "3d") {
-        if (!threeDActionsRef.current) return;
-        blob = await threeDActionsRef.current.captureSnapshot(format);
-        viewLabel = "3D view";
-      } else if (viewMode === "elevation") {
-        if (!elevationSvgElementRef.current || !selectedWall) return;
-        setSnapshotExportMode(true);
-        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-        blob = await captureSvgSnapshot(elevationSvgElementRef.current, { format: "png" });
-        setSnapshotExportMode(false);
-        viewLabel = `${selectedWall.name} elevation`;
-      } else if (viewMode === "plan") {
-        if (!planSvgElementRef.current) return;
-        setSnapshotExportMode(true);
-        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-        blob = await captureSvgSnapshot(planSvgElementRef.current, { format: "png" });
-        setSnapshotExportMode(false);
-        viewLabel = "Plan";
-      } else {
-        return;
-      }
-      const extension = format === "jpeg" ? "jpg" : "png";
-      const filename = `${project.title} — ${viewLabel}.${extension}`;
-      const outcome = await triggerDownload(blob, filename, {
-        mimeType: format === "jpeg" ? "image/jpeg" : "image/png",
-        description: format === "jpeg" ? "JPEG image" : "PNG image"
-      });
-      if (outcome !== "cancelled") {
-        toast.success(`Exported ${filename}`);
-      }
-    } catch (error) {
-      setSnapshotExportMode(false);
-      toast.error(`Export failed: ${error instanceof Error ? error.message : "the image could not be created."}`);
-    }
   };
 
   // Save view: a single-click camera bookmark for the 3D view (spec §8.2). No
@@ -1630,111 +1455,6 @@ export function App() {
     }
     setPendingViewPose(view.pose);
     if (viewMode !== "3d") setViewMode("3d");
-  };
-
-  // Compose and deliver the document PDF (spec §5, §12, §13). App owns the async
-  // so the dialog can reflect progress and cancel synchronously; exportDocumentPdf
-  // owns the abort contract and the determinate progress arithmetic.
-  const handleExportPdf = async (settings: EffectiveDocumentSettings) => {
-    // Re-entry guard: a live controller means an export is already in flight.
-    if (!project || pdfExportAbortRef.current) return;
-    const controller = new AbortController();
-    pdfExportAbortRef.current = controller;
-    setPdfExportProgress({ done: 0, total: 1 });
-    // Hold the Saved-view render stage mounted for the whole export. The
-    // exporter renders any 3D Saved views sequentially, emptying the host's
-    // queue between each; without this hold the stage would drop and recreate
-    // its WebGL context per view, and a many-view document could exhaust the
-    // browser's context budget and evict the live 3D canvas. Released in the
-    // finally below so an abort or error frees it too. `let`, not `const`:
-    // when the host hasn't mounted yet (fresh session, three chunk still
-    // loading) the hold is taken later, by the first renderSavedView call.
-    let releaseRenderBatch =
-      savedViewRenderRef.current?.beginRenderBatch() ?? null;
-    try {
-      // Dynamic imports keep pdf-lib/fontkit (the "pdf" manual chunk) out of
-      // the entry closure — they load on first export, like three does for
-      // the 3D view. assert-chunk-graph enforces this.
-      const [{ exportDocumentPdf }, { loadPdfFontBytes }] = await Promise.all([
-        import("./export/exportDocumentPdf"),
-        import("./export/pdfFonts")
-      ]);
-      const result = await exportDocumentPdf({
-        project,
-        settings,
-        artworks: libraryArtworks,
-        getAsset: (assetId) => assetRepository.getAsset(assetId),
-        getBlob: getAssetBlob,
-        // Bundled Geist for PDF text; undefined on fetch failure, which falls
-        // back to the writer's standard-Helvetica path (see pdfFonts.ts).
-        fontBytes: await loadPdfFontBytes(),
-        renderSavedView: async (view, size) => {
-          // The host mounts lazily once the export begins (pdfExportProgress
-          // gates it in AppDialogs) and attaches its handle in an effect, so a
-          // fresh session can reach the first 3D page before the handle
-          // exists. Wait for it — abortable, bounded — instead of failing the
-          // page to a placeholder; on timeout the writer's placeholder path
-          // still applies per view.
-          const handle = await savedViewRenderRef.whenReady(controller.signal);
-          // The batch hold above couldn't be taken while the host was
-          // unmounted; take it on first render so the rest of the batch still
-          // shares one WebGL context.
-          releaseRenderBatch ??= handle.beginRenderBatch();
-          return handle.renderSavedView(view, size);
-        },
-        signal: controller.signal,
-        onProgress: setPdfExportProgress
-      });
-      const filename = `${project.title}.pdf`;
-      const outcome = await triggerDownload(
-        new Blob([result.bytes.slice()], { type: "application/pdf" }),
-        filename,
-        { mimeType: "application/pdf", description: "PDF document" }
-      );
-      if (outcome === "cancelled") {
-        // Dismissing the save dialog behaves like the dialog's own cancel:
-        // no file, no toast, and the dialog stays open in its ready state.
-        return;
-      }
-      telemetry.track("pdf_export_completed", {});
-      setIsExportPdfOpen(false);
-      if (result.warnings.length > 0) {
-        toast.warning(
-          `Exported ${filename} with ${result.warnings.length} warning${
-            result.warnings.length === 1 ? "" : "s"
-          }: ${result.warnings.join(" ")}`
-        );
-      } else {
-        toast.success(`Exported ${filename}`);
-      }
-    } catch (error) {
-      // A cancel leaves the dialog open in its ready state — no file, no error
-      // toast (§12). Any other failure surfaces the one plain-language message;
-      // the cause goes to the console because the toast copy deliberately
-      // carries no diagnostics.
-      if (!(error instanceof DOMException && error.name === "AbortError")) {
-        console.error("Export PDF failed:", error);
-        toast.error("Couldn't create the PDF. Your project is unchanged.");
-      }
-    } finally {
-      releaseRenderBatch?.();
-      pdfExportAbortRef.current = null;
-      setPdfExportProgress(null);
-    }
-  };
-
-  const handleCancelExportPdf = () => {
-    pdfExportAbortRef.current?.abort();
-  };
-
-  // Esc/overlay dismissal while exporting aborts and keeps the dialog open (it
-  // returns to its ready state once the abort settles); otherwise it closes.
-  const handleExportPdfOpenChange = (open: boolean) => {
-    if (!open && pdfExportAbortRef.current) {
-      pdfExportAbortRef.current.abort();
-      return;
-    }
-    setIsExportPdfOpen(open);
   };
 
   // Detect package vs. project JSON by zip magic, not file extension.

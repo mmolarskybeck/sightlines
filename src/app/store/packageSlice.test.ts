@@ -29,6 +29,8 @@ import {
   InMemorySyncMetaRepository,
   makeImageFile
 } from "../../test/inMemoryRepositories";
+import { makeFakeCloudBackupProvider } from "../../test/fakeCloudBackupProvider";
+import { createTestAppStore } from "../../test/testAppStore";
 
 // The import pipeline owns its own sonner toasts; capture them without rendering.
 vi.mock("sonner", () => ({
@@ -37,46 +39,9 @@ vi.mock("sonner", () => ({
 
 // Only the account id matters here: it is what sync metadata binds to.
 function makeFakeProvider(accountId: string | null = "dbid:tester"): CloudBackupProvider {
-  return {
-    id: "fake",
-    label: "Fake",
-    async startConnect() {},
-    async completeConnect() {
-      return false;
-    },
-    disconnect() {},
-    getStatus() {
-      return "connected";
-    },
-    accountLabel() {
-      return "Tester";
-    },
-    accountId() {
-      return accountId;
-    },
-    async uploadBackup() {},
-    async createShareLink() {
-      return "https://www.dropbox.com/scl/fi/share/project.sightlines?rlkey=test&dl=0";
-    },
-    async listCloudProjects() {
-      return [];
-    },
-    async downloadBackup() {
-      return new Uint8Array();
-    },
-    async getSyncHead() {
-      return null;
-    },
-    async downloadSyncHead() {
-      return { bytes: new Uint8Array(), rev: "rev-1" };
-    },
-    async uploadSyncHead() {
-      return { rev: "rev-1", serverModifiedIso: null, sizeBytes: null };
-    },
-    async listSyncHeads() {
-      return [];
-    }
-  };
+  return makeFakeCloudBackupProvider({
+    accountId: () => accountId
+  });
 }
 
 describe("packageSlice sync imports", () => {
@@ -140,12 +105,13 @@ describe("packageSlice sync imports", () => {
     vi.mocked(toast.error).mockClear();
     vi.mocked(toast.warning).mockClear();
     window.localStorage.clear();
-    repository = new InMemoryProjectRepository();
-    artworkLibraryRepository = new InMemoryArtworkLibraryRepository();
-    assetRepository = new InMemoryAssetRepository();
-    imageProcessor = new FakeImageProcessor();
-    projectSnapshotRepository = new InMemoryProjectSnapshotRepository();
-    syncMetaRepository = new InMemorySyncMetaRepository();
+    const testStore = createTestAppStore();
+    repository = testStore.projectRepository;
+    artworkLibraryRepository = testStore.artworkLibraryRepository;
+    assetRepository = testStore.assetRepository;
+    imageProcessor = testStore.imageProcessor;
+    projectSnapshotRepository = testStore.projectSnapshotRepository;
+    syncMetaRepository = testStore.syncMetaRepository;
   });
 
   describe("a sync pull that replaces the open project", () => {
@@ -177,7 +143,7 @@ describe("packageSlice sync imports", () => {
       const meta = await syncMetaRepository.get(target.id);
       expect(meta?.lastAcceptedRev).toBe("rev-9");
       expect(meta?.accountId).toBe("dbid:tester");
-      expect(meta?.remotePath).toBe(syncHeadPath(target.id));
+      expect(meta?.remotePath).toBe(makeFakeProvider().remotePathFor(target.id));
       expect(meta?.paused).toBe(false);
       expect(meta?.lastPullAtIso).not.toBeNull();
       // The recorded fingerprint describes exactly what is now open, so the next

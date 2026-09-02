@@ -1,5 +1,4 @@
 import { useCursor } from "@react-three/drei";
-import type { ThreeEvent } from "@react-three/fiber";
 import { useEffect, useMemo, useState } from "react";
 import { Path, Shape, ShapeGeometry, type Texture } from "three";
 import {
@@ -21,7 +20,7 @@ import { WallTextPanel } from "./WallTextPanel";
 import { mmToWorld, MM_TO_WORLD } from "./coordinates";
 import { DROP_TARGET_USER_DATA_KEY } from "./dropTarget";
 import { openingPickBandRects } from "./openingPickBand";
-import { CLICK_DRAG_TOLERANCE_PX } from "./sceneConstants";
+import { makeClickToSelect } from "./selectOnClick";
 import {
   BoxEdgeOutline,
   SelectionBoxOutline,
@@ -185,12 +184,9 @@ export function WallPanel({
   // cases, wall texts, and now openings and blocked zones too — consumes its
   // own click before this fires; a click on BARE wall selects the wall and
   // stops so the canvas miss-handler doesn't also clear the selection.
-  const handleWallClick = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
-    // An orbit drag's release also fires click — only a true click selects.
-    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
-    onSelectWall(wall.wallId);
-  };
+  // onSelectWall takes no modifier flag, unlike onSelectObject — wrap it so
+  // the shared click helper can still be used.
+  const handleWallClick = makeClickToSelect(wall.wallId, (wallId) => onSelectWall(wallId));
 
   return (
     <group position={[originX, 0, originZ]} rotation={[0, rotationY, 0]}>
@@ -352,13 +348,7 @@ function OpeningCapPlane({
   const [hovered, setHovered] = useState(false);
   useCursor(hovered && !ghosted);
 
-  const handleClick = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
-    // An orbit drag's release also fires click — only a true click selects.
-    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
-    const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
-    onSelect(hole.objectId, { additive: shiftKey || metaKey || ctrlKey });
-  };
+  const handleClick = makeClickToSelect(hole.objectId, onSelect);
 
   return (
     <mesh
@@ -417,13 +407,7 @@ function OpeningPickBand({
 
   const rects = useMemo(() => openingPickBandRects(hole), [hole]);
 
-  const handleClick = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
-    // An orbit drag's release also fires click — only a true click selects.
-    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
-    const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
-    onSelect(hole.objectId, { additive: shiftKey || metaKey || ctrlKey });
-  };
+  const handleClick = makeClickToSelect(hole.objectId, onSelect);
 
   return (
     <group
@@ -479,13 +463,7 @@ function WallBlockedZoneWash({
   const centerXMm = (zone.xMinMm + zone.xMaxMm) / 2;
   const centerYMm = (zone.yMinMm + zone.yMaxMm) / 2;
 
-  const handleClick = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
-    // An orbit drag's release also fires click — only a true click selects.
-    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
-    const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
-    onSelect(zone.objectId, { additive: shiftKey || metaKey || ctrlKey });
-  };
+  const handleClick = makeClickToSelect(zone.objectId, onSelect);
 
   return (
     <group position={[mmToWorld(centerXMm), mmToWorld(centerYMm), 0]}>
@@ -586,13 +564,7 @@ function DoorLeafMesh({
   // practice, but this stays right if that ever changes.
   const knobYMm = hole.yMinMm + DOOR_KNOB_HEIGHT_MM;
 
-  const handleClick = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
-    // An orbit drag's release also fires click — only a true click selects.
-    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
-    const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
-    onSelect(hole.objectId, { additive: shiftKey || metaKey || ctrlKey });
-  };
+  const handleClick = makeClickToSelect(hole.objectId, onSelect);
 
   return (
     <group

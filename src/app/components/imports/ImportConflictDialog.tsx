@@ -239,7 +239,7 @@ function ResolutionChoice({
   return (
     <SegmentedToggleGroup
       aria-label={label}
-      className="import-conflict-seg"
+      className="import-conflict-seg seg-compact"
       type="single"
       value={value}
       onValueChange={(next) => {

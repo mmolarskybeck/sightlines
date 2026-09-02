@@ -21,7 +21,11 @@ import {
   Vector3
 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
-import { effectiveFraming, getArtworkOuterDimensionsMm } from "../../../domain/framing";
+import {
+  artworkDropOuterMm,
+  effectiveFraming,
+  getArtworkOuterDimensionsMm
+} from "../../../domain/framing";
 import { parseFaceWallId } from "../../../domain/geometry/freestandingWalls";
 import { getPlaceableFloorWalls } from "../../../domain/geometry/planObjects";
 import {
@@ -1577,17 +1581,9 @@ export function ThreeDView({
     const aspect = artworkId === draggingArtworkId ? draggingArtworkAspect : undefined;
     const { widthMm, heightMm } = getEffectivePlacementSizeMm(artwork.dimensions, aspect);
     // Framing is WALL-ONLY geometry (docs/framing-dimension-contract.md §3):
-    // the outer box travels in the wall fields only, and the floor footprint
-    // keeps the bare image size. The library placementForm is not consulted —
-    // the anchor the drop resolves to decides which pair is read, same as the
-    // plan drop (usePlanArtworkDrop), so a framed work hanging via a 3D drop
-    // ghosts and clamps at its true outer width whatever its form says.
-    const outer = getArtworkOuterDimensionsMm(
-      widthMm,
-      heightMm,
-      artwork.matWidthMm,
-      artwork.frame
-    );
+    // the outer box travels in the wall fields; the floor footprint keeps the
+    // bare image size.
+    const outer = artworkDropOuterMm(artwork, aspect);
     return {
       wallWidthMm: outer.widthMm,
       wallHeightMm: outer.heightMm,

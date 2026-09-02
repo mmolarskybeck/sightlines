@@ -9,7 +9,7 @@ import type {
   RoomPlacement,
   WallObject
 } from "../project";
-import { effectiveWallArtworkDepthMm } from "../placement/artworkForm";
+import { effectiveDisplayAs, effectiveWallArtworkDepthMm } from "../placement/artworkForm";
 import { getFreestandingFaces } from "./freestandingWalls";
 import { buildFloorWallsById, evaluateOpeningPairWith } from "./openingConnections";
 import { isPointInPolygon, signedAreaMm2 } from "./polygon";
@@ -119,11 +119,15 @@ export type FloorObject3d = {
   // that distinction and hard-code today's default into every derived scene.
   // The render layer resolves it (floorObjectImageFaces.ts).
   imageFaces?: FloorObjectFace[];
-  // How this work is displayed (Artwork.displayAs — artwork only). Emitted ONLY
-  // when the work states one, so a plain work's scene entry keeps exactly the
-  // key set it had before display types existed and the render layer's
-  // dispatch (SceneRooms) stays a single equality test. "monitor" makes the
-  // render layer draw a CRT cabinet instead of the neutral image box.
+  // How this work is displayed — the RESOLVED type (effectiveDisplayAs), same
+  // as plan/elevation/PDF, not the raw Artwork.displayAs field: an auto work
+  // (medium-derived, or "framed" by mat/frame) resolves here exactly as it
+  // does everywhere else, so this key can never disagree with what those views
+  // draw. Emitted ONLY when the resolved type is not "framed" — the fallback
+  // every record already reads as — so a plain work's scene entry keeps
+  // exactly the key set it had before display types existed and the render
+  // layer's dispatch (SceneRooms) stays a single equality test. "monitor"
+  // makes the render layer draw a CRT cabinet instead of the neutral image box.
   displayAs?: ArtworkDisplayAs;
   // What a monitor placement stands on (ArtworkFloorObject.monitorSupport).
   // Passed through VERBATIM, absent included: absent means "never chosen" and
@@ -319,6 +323,15 @@ export function deriveScene3d(
     floorObjects: project.floorObjects.map((object) => {
       const artwork =
         object.kind === "artwork" ? artworksById.get(object.artworkId) : undefined;
+      // Resolved, not raw: plan, elevation and PDF all read displayAs through
+      // effectiveDisplayAs (it settles the auto case — a medium-derived or
+      // mat/frame-implied type — the same way), so the 3D scene must resolve
+      // it too rather than seeing only an explicit curator choice. "framed" is
+      // excluded because it is the fallback every record already reads as
+      // (effectiveDisplayAs's own last resort) and the render layer has no
+      // separate treatment for it — only a resolved type that actually
+      // changes SceneRooms's dispatch (monitor today) is worth stating.
+      const resolvedDisplayAs = artwork ? effectiveDisplayAs(artwork) : undefined;
       return {
         objectId: object.id,
         kind: object.kind,
@@ -332,9 +345,11 @@ export function deriveScene3d(
               // had before image faces existed — same "absence is the
               // encoding" rule baseHeightMm follows below.
               ...(object.imageFaces ? { imageFaces: object.imageFaces } : {}),
-              // Same absence discipline: only a stated display type and a
-              // stated support reach the scene.
-              ...(artwork?.displayAs ? { displayAs: artwork.displayAs } : {}),
+              // Same absence discipline: only a stated (non-"framed") display
+              // type and a stated support reach the scene.
+              ...(resolvedDisplayAs && resolvedDisplayAs !== "framed"
+                ? { displayAs: resolvedDisplayAs }
+                : {}),
               ...(object.monitorSupport
                 ? { monitorSupport: object.monitorSupport }
                 : {}),

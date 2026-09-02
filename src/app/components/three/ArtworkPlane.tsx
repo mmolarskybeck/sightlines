@@ -1,5 +1,4 @@
 import { useCursor } from "@react-three/drei";
-import type { ThreeEvent } from "@react-three/fiber";
 import { useEffect, useMemo, useState } from "react";
 import type { Texture } from "three";
 import {
@@ -12,7 +11,7 @@ import type { WallArtwork3d } from "../../../domain/geometry/scene3d";
 import { fitArtworkImageSizeMm, textureNativeAspect } from "./artworkFit";
 import { mmToWorld } from "./coordinates";
 import { objectDragPointerDown, useThreeObjectDrag } from "./objectDragContext";
-import { CLICK_DRAG_TOLERANCE_PX } from "./sceneConstants";
+import { makeClickToSelect } from "./selectOnClick";
 import { getFrameFinishTexture } from "./frameFinishTextures";
 import { framingLayout } from "./framingGeometry";
 import { mitredFrameBarGeometries } from "./frameMitreGeometry";
@@ -185,12 +184,7 @@ export function ArtworkPlane({
   // beneath doesn't also select, and the canvas miss-handler doesn't clear.
   // event.delta > the tolerance means this "click" was the release of a drag —
   // an orbit before, and now also a move of this very work.
-  const handleClick = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
-    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
-    const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
-    onSelect(artwork.objectId, { additive: shiftKey || metaKey || ctrlKey });
-  };
+  const handleClick = makeClickToSelect(artwork.objectId, onSelect);
 
   // Direct manipulation: press and drag this work along its wall (or onto
   // another one). Inert unless a ThreeObjectDragContext provider is above —

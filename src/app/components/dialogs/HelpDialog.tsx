@@ -85,7 +85,7 @@ export function HelpDialog({
 
           <SegmentedToggleGroup
             aria-label="Input method"
-            className="help-input-toggle"
+            className="help-input-toggle seg-compact"
             type="single"
             value={inputMode}
             onValueChange={(value) => {

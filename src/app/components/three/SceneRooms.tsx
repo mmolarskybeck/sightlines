@@ -4,11 +4,11 @@ import type { Texture, Vector3 } from "three";
 import type { Artwork } from "../../../domain/project";
 import type { Scene3d } from "../../../domain/geometry/scene3d";
 import { FloorCaseMesh } from "./CaseMesh";
-import { CLICK_DRAG_TOLERANCE_PX } from "./sceneConstants";
 import { CrtMonitorMesh } from "./CrtMonitorMesh";
 import { FloorObjectBox } from "./FloorObjectBox";
 import { FloorSurface } from "./FloorSurface";
 import { PartitionSlab } from "./PartitionSlab";
+import { makeClickToClear } from "./selectOnClick";
 import { useArtworkTextures } from "./useArtworkTextures";
 import { WallPanel } from "./WallPanel";
 
@@ -73,12 +73,8 @@ export function SceneRooms({
 
   // Clicking bare floor settles/clears the object selection, same semantics
   // as Plan (spec §4.3). Floor objects consume their own clicks first; an
-  // orbit drag's release (delta > a few px) never clears.
-  const handleFloorClick = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
-    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
-    onClearSelection();
-  };
+  // orbit drag's release never clears (see selectOnClick.ts).
+  const handleFloorClick = makeClickToClear(onClearSelection);
 
   // One root-level double-click handler covers every surface: r3f reports the
   // nearest intersection's world point, so walls, floors, partitions, artworks

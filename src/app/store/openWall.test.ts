@@ -2,15 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { CURRENT_ARTWORK_SCHEMA_VERSION, type Project } from "../../domain/project";
 import { createRectangularRoomPlacement } from "../../domain/geometry/createRoom";
 import { isWallOpen } from "../../domain/geometry/wallCascade";
-import {
-  FakeImageProcessor,
-  InMemoryArtworkLibraryRepository,
-  InMemoryAssetRepository,
-  InMemoryProjectRepository,
-  InMemoryProjectSnapshotRepository,
-  InMemorySyncMetaRepository
-} from "../../test/inMemoryRepositories";
-import { createInertCrossTabSync } from "../crossTabSync";
+import { createTestAppStore } from "../../test/testAppStore";
 import { createAppStore } from "../store";
 import { NO_SELECTION } from "./selectionSlice";
 
@@ -24,16 +16,7 @@ describe("openWall / restoreWall", () => {
   let store: ReturnType<typeof createAppStore>;
 
   beforeEach(async () => {
-    store = createAppStore({
-      projectRepository: new InMemoryProjectRepository(),
-      artworkLibraryRepository: new InMemoryArtworkLibraryRepository(),
-      assetRepository: new InMemoryAssetRepository(),
-      imageProcessor: new FakeImageProcessor(),
-      projectSnapshotRepository: new InMemoryProjectSnapshotRepository(),
-      syncMetaRepository: new InMemorySyncMetaRepository(),
-      // Every store in this process would otherwise share one BroadcastChannel.
-      crossTabSync: createInertCrossTabSync()
-    });
+    store = createTestAppStore().store;
     await store.getState().boot();
   });
 
@@ -236,16 +219,7 @@ describe("open walls refuse every placement and re-anchor path", () => {
   let store: ReturnType<typeof createAppStore>;
 
   beforeEach(async () => {
-    store = createAppStore({
-      projectRepository: new InMemoryProjectRepository(),
-      artworkLibraryRepository: new InMemoryArtworkLibraryRepository(),
-      assetRepository: new InMemoryAssetRepository(),
-      imageProcessor: new FakeImageProcessor(),
-      projectSnapshotRepository: new InMemoryProjectSnapshotRepository(),
-      syncMetaRepository: new InMemorySyncMetaRepository(),
-      // Every store in this process would otherwise share one BroadcastChannel.
-      crossTabSync: createInertCrossTabSync()
-    });
+    store = createTestAppStore().store;
     await store.getState().boot();
     const base = store.getState().project!;
     store.setState({

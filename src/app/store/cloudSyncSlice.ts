@@ -25,12 +25,10 @@ import {
   type ProjectSyncMeta
 } from "../../domain/repositories/syncMetaRepository";
 import { assessSync } from "../../domain/sync/syncAssessment";
-import { CloudBackupError } from "../cloud/dropbox";
-import { syncHeadPath } from "../cloud/dropboxAuth";
-import type { CloudBackupProvider } from "../cloud/provider";
+import { CloudBackupError, toStandaloneArrayBuffer, type CloudBackupProvider } from "../cloud/provider";
 import { telemetry } from "../telemetry/telemetry";
 import type { AppState, AppStoreDeps } from "../store";
-import { selectBackupFingerprint } from "./cloudBackupSlice";
+import { providerStatusPatch, selectBackupFingerprint } from "./cloudBackupSlice";
 
 export type ProjectSyncStatus =
   // Not linked (or not usable: no provider, wrong account, no meta).
@@ -70,11 +68,8 @@ export type ProjectSyncStatus =
 // A link change bumps its project's counter AND `operation`, so a matching
 // `operation` implies a matching link epoch for the same project.
 //
-// Neither counter is store state, deliberately: several reset sites spread
-// CLOUD_SYNC_SLICE_INITIAL, and a counter that a reset could put back would
-// eventually collide with a value some superseded operation still holds.
-// Monotonic here is a property of the closure, not a discipline every future
-// reset site has to remember to keep.
+// Neither counter is store state: a reset that could put a counter back would
+// let it collide with a value some superseded operation still holds.
 export type SyncEpoch = {
   readonly operation: number;
   // Never linked or unlinked in this session reads as 0, so an authorization
@@ -227,6 +222,11 @@ export type CloudSyncSliceInternals = {
   syncEpoch: SyncEpoch;
 };
 
+// Shared with packageSlice, which seeds the same metadata from a link/pull commit.
+export function remotePathForProject(active: CloudBackupProvider, projectId: string): string {
+  return active.remotePathFor(projectId);
+}
+
 export function createCloudSyncSlice(
   set: (partial: Partial<AppState>) => void,
   get: () => AppState,
@@ -297,11 +297,7 @@ export function createCloudSyncSlice(
   // "Reconnect" affordance instead.
   function mirrorProviderStatus(): Partial<AppState> {
     const active = provider();
-    if (!active) return {};
-    return {
-      cloudBackupProviderStatus: active.getStatus(),
-      cloudBackupAccountLabel: active.accountLabel()
-    };
+    return active ? providerStatusPatch(active) : {};
   }
 
   // The metadata this device may act on for `project`, or null when sync is
@@ -509,7 +505,7 @@ export function createCloudSyncSlice(
         projectId: project.id,
         provider: "dropbox",
         accountId,
-        remotePath: syncHeadPath(project.id),
+        remotePath: remotePathForProject(active, project.id),
         lastAcceptedRev: head.rev,
         fingerprintAtRev: capturedFingerprint,
         lastPullAtIso:
@@ -626,10 +622,7 @@ export function createCloudSyncSlice(
       return;
     }
 
-    // Copy into a standalone ArrayBuffer: the provider may hand back a view into
-    // a pooled buffer, and the import pipeline keeps the bytes.
-    const buffer = new ArrayBuffer(downloaded.bytes.byteLength);
-    new Uint8Array(buffer).set(downloaded.bytes);
+    const buffer = toStandaloneArrayBuffer(downloaded.bytes);
 
     const accepted = await get().importSyncHeadPackage(buffer, {
       replace: {

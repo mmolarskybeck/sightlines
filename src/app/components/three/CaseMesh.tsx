@@ -1,5 +1,4 @@
 import { useCursor } from "@react-three/drei";
-import type { ThreeEvent } from "@react-three/fiber";
 import { useState } from "react";
 import { MathUtils } from "three";
 import type { FloorObject3d, WallCase3d } from "../../../domain/geometry/scene3d";
@@ -13,9 +12,10 @@ import {
 } from "../../../domain/project";
 import { mmToWorld } from "./coordinates";
 import { objectDragPointerDown, useThreeObjectDrag } from "./objectDragContext";
-import { CLICK_DRAG_TOLERANCE_PX } from "./sceneConstants";
+import { makeClickToSelect } from "./selectOnClick";
 import { WALL_OFFSET_MM } from "./framingGeometry";
 import { SelectionBoxOutline } from "./UncertaintyOutline";
+import { useSelectableFloorObject } from "./useSelectableFloorObject";
 import { CASE_BODY_COLOR, CASE_FRAME_COLOR, CASE_GLASS_COLOR, CASE_GLASS_OPACITY } from "./tokens";
 
 // A freestanding vitrine (spec: floor `case` objects) — MoMA table-vitrine
@@ -27,18 +27,9 @@ import { CASE_BODY_COLOR, CASE_FRAME_COLOR, CASE_GLASS_COLOR, CASE_GLASS_OPACITY
 //
 // The display "box" is built as an open-top TRAY rather than a single
 // BoxGeometry: a ring of four opaque side walls around the footprint's
-// perimeter, plus a separate inset glass cap at the very top. History: a
-// single box with a 6-slot material array (5 opaque faces + 1 glass) needed
-// DoubleSide on the opaque faces so the interior read correctly through the
-// glass top (single-sided faces were backface-culled, making the case look
-// bottomless) — but DoubleSide then made that box's bottom face z-fight
-// against the base slab's top face, since both are full-footprint planes at
-// the same height. A tray has no such coincident plane: the ring walls only
-// touch the slab along a thin perimeter strip that's never simultaneously
-// visible from both sides, the glass cap is inset and offset in height from
-// every opaque face it neighbors, and plain FrontSide materials suffice
-// because every opaque piece is itself a closed box (renders correctly from
-// any angle without DoubleSide).
+// perimeter, plus a separate inset glass cap at the very top — every opaque
+// piece is itself a closed box, so plain FrontSide materials render correctly
+// from any angle with no coincident plane to z-fight the base slab's top.
 
 // Plan-space rotation (CCW in plan x/y) to a three.js yaw about +y — identical
 // convention to FloorObjectBox's planRotationToYaw (duplicated locally rather
@@ -59,10 +50,10 @@ const GLASS_MATERIAL_PROPS = {
 } as const;
 
 // One freestanding floor vitrine. Mirrors FloorObjectBox's selection/click
-// conventions (the CLICK_DRAG_TOLERANCE_PX drag guard, outline-only selection, no
-// texture/emissive tint) but is composed of several stacked meshes instead of
-// one box, so the click handler and hover state are shared across the pieces
-// that make up the case rather than living on a single mesh.
+// conventions (useSelectableFloorObject's drag guard, outline-only selection,
+// no texture/emissive tint) but is composed of several stacked meshes instead
+// of one box, so the click handler and hover state are shared across the
+// pieces that make up the case rather than living on a single mesh.
 //
 // DECISION: a floor case deliberately IGNORES FloorObjectBase.baseHeightMm and
 // always stands on the floor, unlike the suspended artwork boxes FloorObjectBox
@@ -86,22 +77,16 @@ export function FloorCaseMesh({
   const x = mmToWorld(object.xMm);
   const z = mmToWorld(object.yMm);
   const yaw = planRotationToYaw(object.rotationDeg);
-  const [hovered, setHovered] = useState(false);
-  useCursor(hovered);
-
-  const handleClick = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
-    // A drag's release also fires click — only a true click selects.
-    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
-    const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
-    onSelect(object.objectId, { additive: shiftKey || metaKey || ctrlKey });
-  };
-
   // Every piece of the case (legs, slab, tray walls, glass) arms the same
-  // floor-plane drag, so a vitrine moves by grabbing any part of it.
-  const drag = useThreeObjectDrag();
-  const handlePointerDown = objectDragPointerDown(drag, object.objectId);
-  const pointerProps = { onClick: handleClick, onPointerDown: handlePointerDown };
+  // hover/drag/click wiring, so a vitrine moves and selects by grabbing any
+  // part of it — same hook FloorObjectBox and CrtMonitorMesh share. Hover
+  // lives on the wrapping group below, so its pointerOver must stop
+  // propagation the way FloorObjectBox's per-mesh one doesn't need to.
+  const { pointerProps, onPointerOver, onPointerOut } = useSelectableFloorObject(
+    object.objectId,
+    onSelect,
+    { stopHoverPropagation: true }
+  );
 
   const legHeightMm = Math.max(
     object.heightMm - FLOOR_CASE_BOX_HEIGHT_MM - CASE_BASE_SLAB_THICKNESS_MM,
@@ -137,11 +122,8 @@ export function FloorCaseMesh({
     <group
       position={[x, 0, z]}
       rotation={[0, yaw, 0]}
-      onPointerOver={(event) => {
-        event.stopPropagation();
-        setHovered(true);
-      }}
-      onPointerOut={() => setHovered(false)}
+      onPointerOver={onPointerOver}
+      onPointerOut={onPointerOut}
     >
       {legCorners.map(([legX, legZ], index) => (
         <mesh
@@ -229,12 +211,7 @@ export function WallCaseMesh({
   const [hovered, setHovered] = useState(false);
   useCursor(hovered && !ghosted);
 
-  const handleClick = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
-    if (event.delta > CLICK_DRAG_TOLERANCE_PX) return;
-    const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
-    onSelect(wallCase.objectId, { additive: shiftKey || metaKey || ctrlKey });
-  };
+  const handleClick = makeClickToSelect(wallCase.objectId, onSelect);
 
   // A wall case slides along its wall exactly as a hung work does — same store
   // path (it is an ordinary wall object), so it drags in 3D too.

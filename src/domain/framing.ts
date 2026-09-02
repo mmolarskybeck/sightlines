@@ -6,6 +6,8 @@ import type {
   WallObjectBase
 } from "./project";
 import { effectiveDisplayAs } from "./placement/artworkForm";
+import { getEffectivePlacementSizeMm } from "./placement/placeArtwork";
+import type { PixelAspect } from "./units/aspectFill";
 
 // Schematic, flat mockup colors — deliberately NOT photoreal frame textures
 // (docs/quick-todos.md). One tasteful flat value per finish, shared by the
@@ -163,6 +165,18 @@ export function effectiveFraming(
     return {};
   }
   return { matWidthMm: artwork.matWidthMm, frame: artwork.frame };
+}
+
+// Outer box for a checklist drop, which has no placement record yet: resolve
+// the image size as placement creation does, then widen through
+// effectiveFraming so projection/sculpture/frame-in-image works get no band.
+export function artworkDropOuterMm(
+  artwork: FramingSource & Pick<Artwork, "dimensions">,
+  aspect?: PixelAspect
+): OuterDimensionsMm {
+  const { widthMm, heightMm } = getEffectivePlacementSizeMm(artwork.dimensions, aspect);
+  const framing = effectiveFraming(artwork);
+  return getArtworkOuterDimensionsMm(widthMm, heightMm, framing.matWidthMm, framing.frame);
 }
 
 // Placement width/height are always the persisted image footprint. Framing is
