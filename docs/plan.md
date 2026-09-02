@@ -1,6 +1,6 @@
 # Sightlines Rebuild Plan
 
-This is the product/architecture plan and roadmap source of truth. For where the build currently stands and what's next, see `docs/status.md` (the single living status doc); the chronological build log through 2026-07-10 is frozen at `docs/archive/progress.md`.
+This is the product/architecture plan and roadmap source of truth. For where the build currently stands and what's next, see `docs/status.md` (the single living status doc); the chronological build log through 2026-07-10 is frozen at `docs/archive/progress.md`. Sections that describe shipped behavior are kept current as the contract of record; dated "shipped" notes mark where the roadmap (§9) has caught up with the build. Last reconciled against the app: 2026-09-01.
 
 ## 0. Why this rebuild, in one paragraph
 
@@ -10,9 +10,9 @@ The first build had two architectural failures: it wasn't structured for eventua
 
 ## 1. Product Positioning
 
-> Sightlines is a private-by-design exhibition planning tool. Projects and artwork images stay on your device — no account required. You can export a project package at any time to back it up or share it manually, and generate a standalone viewer file anyone can open to look at your layout.
+> Sightlines is a super user-friendly, intuitive way to plan exhibition layouts without complex 3D or CAD software. Projects and artwork images stay on your device — no account required. Share a `.sightlines` package or a Dropbox link; a colleague opens it, edits the plan, and sends back a new link or an exported PDF.
 
-Not a CAD program, not a SketchUp clone, not a collection-management system. A scaled layout instrument for moving between bird's-eye plan, wall elevation, and simple 3D preview — and, deliberately, *not* a registrar/loan-tracking tool. Institutions keep using their own collections-management software for that; Sightlines is about spatial and curatorial thinking.
+The claim is workflow, not technology (`PRODUCT.md`, 2026-08-19): privacy and portability — local-first storage, portable packages, the user's own Dropbox rather than a Sightlines server — support the simplicity; they do not lead it. Not a CAD program, not a SketchUp clone, not a collection-management system. A scaled layout instrument for moving between bird's-eye plan, wall elevation, and simple 3D preview — and, deliberately, *not* a registrar/loan-tracking tool. Institutions keep using their own collections-management software for that; Sightlines is about spatial and curatorial thinking.
 
 ---
 
@@ -92,8 +92,8 @@ Migration alone assumes the input is at least structurally sound — not a safe 
 | State | Zustand | Drop the TanStack Store hedge — Zustand fits this. |
 | Local storage | IndexedDB (project docs, artwork library, metadata, thumbnails, asset blobs) | localStorage only for trivial prefs (theme, last-opened project, default unit). OPFS remains a future optimization seam for larger image blobs, not the current storage backend. |
 | Project package format | `.sightlines` (zip: `project.json` + `assets/`) | Export/import/backup format; also the eventual desktop save format. The whole sharing mechanism — see §6. |
-| Sync | Dropbox API, OAuth 2.0 + PKCE, no backend | See §6 — confirmed viable without a server. |
-| Exports | Client-side: canvas→PNG, pdf-lib/jsPDF | No server, no function timeouts, no compute cost. |
+| Sync | Dropbox API, OAuth 2.0 + PKCE, no backend | See §6 — shipped: versioned backups, one-way share links, cloud project browser, and canonical cross-device sync. The only server code is a small stateless relay on the Cloudflare worker that serves share-link downloads. |
+| Exports | Client-side: SVG→PNG snapshots, pdf-lib + fontkit PDFs, SheetJS xlsx, fflate zips | No server, no function timeouts, no compute cost. All four heavy libraries (three, pdf-lib/fontkit, xlsx) are lazy chunks; `scripts/assert-chunk-graph.mjs` fails the build if any reaches the eager graph. |
 | Desktop/mobile-native (optional, not v1) | Tauri | Supports iOS/Android from the same codebase as of Tauri 2.0, if native distribution is ever wanted — but still means App Store review, which cuts against the no-install positioning. PWA stays the primary path on iPad too — see §3.5. |
 
 No Supabase, no R2, no auth, no backend in v1.
@@ -153,13 +153,24 @@ type Artwork = {
   date?: string
   accessionNumber?: string
   locationOrLender?: string
+  creditLine?: string
   dimensions: Dimensions
   assetId?: string
 
-  // open extension point — see 4.4
+  // additive presentation fields — all optional, none bumped the schema version
+  placementForm?: "wall" | "floor"      // speaks only while the work is unplaced
+  displayAs?: "framed" | "projection" | "monitor" | "sculpture"   // absent = derived
+  matWidthMm?: number
+  frame?: { widthMm: number; finish: "gold" | "white" | "black" | "silver" | "wood" }
+  frameIncludedInImage?: boolean
+
+  // open extension point — see 4.4. `metadata.medium` is the free-text Medium
+  // field: a §4.4-convention key that never needed promotion.
   metadata: Record<string, string | number | boolean>
 }
 ```
+
+**Display type is derived unless stated (shipped 2026-08-28 → 31).** `effectiveDisplayAs` resolves explicit `displayAs` > any mat/frame set ⇒ `"framed"` (an existing framed work never loses its frame because its medium string happens to match a category) > a category derived from an exact-match Medium (`domain/placement/mediumCategory.ts`: photograph/painting/drawing-print → wall work, film/video → projection, sculpture/installation → sculpture; no substring matching) > `"framed"`. `effectivePlacementForm` then resolves explicit `placementForm` > monitor/sculpture → floor, projection → wall > an *explicit* `"framed"` → wall > the depth heuristic; a merely derived `"framed"` falls through, which is what keeps every project written before display types existed behaving identically. Projection and sculpture render frameless through `effectiveFraming` in `domain/framing.ts`, the single derivation point for 3D, elevation, PDF, tooltips and footprints. A box monitor is a black 4:3 cabinet whose placement `heightMm` is the cabinet only — the pedestal is added by renderers from the placement's `monitorSupport` (absent = pedestal). Floor placements re-seed from record-dimension edits only while undiverged (±0.5 mm) from their seeded size, composed with the wall rebake into one undo entry.
 
 Naming the mm fields explicitly (`widthMm`, not `width` + a separate `unit`) closes off the exact ambiguity the canonical-storage rule in §2 is meant to prevent — a bare `width: 20` field invites the question "20 what?" months later; `widthMm` doesn't. `unit` becomes purely a display/entry preference, never part of the measurement truth. Kept as one status for the whole `Dimensions` object in v1 rather than per-field (height known, depth unknown, etc.) — real museum data sometimes wants that granularity, but the structure doesn't block adding it later; it just isn't solved now.
 
@@ -179,7 +190,11 @@ type Project = {
   defaultCenterlineHeightMm: number
   floor: Floor
   checklistArtworkIds: string[]   // checklist membership (§4.1) — references into the library
+  checklistView?: { sort: ChecklistSort; groupByArtist: boolean }  // absent = live group-show default
   wallObjects: WallObject[]       // all placements, flat at project level — see note below
+  floorObjects: FloorObject[]     // floor-standing works, blocked zones, cases — see below
+  referenceMeasurements: ReferenceMeasurement[]   // measurement tool (docs/measurement-tool-spec.md)
+  savedViews: SavedView[]         // 3D camera bookmarks; thumbnails cached outside the project
   createdAt: string
   updatedAt: string
 }
@@ -215,7 +230,27 @@ type Wall = {
   endVertexId: string
   heightMm: number
   defaultCenterlineHeightMm?: number
+  isOpenSide?: boolean     // explicit full-span open wall (schema v5 exists only so downgrades refuse it)
 }
+
+type FloorObjectBase = {
+  id: string
+  roomId: string
+  xMm: number; yMm: number; rotationDeg: number   // room-local
+  widthMm: number; depthMm: number; heightMm: number   // the object on the floor, not the work
+  wallYMm: number          // hang-height centre to restore on a floor → wall conversion
+  baseHeightMm?: number    // bottom edge above the floor; absent = resting (blocked zones ignore it)
+}
+
+type ArtworkFloorObject = FloorObjectBase & {
+  kind: "artwork"
+  artworkId: string
+  imageFaces?: Face[]                 // absent = front + back; [] = every face deliberately off
+  monitorSupport?: "pedestal" | "floor"   // box monitors only; absent = pedestal
+  displayDimensionsOverride?: Dimensions
+}
+
+type FloorObject = ArtworkFloorObject | (FloorObjectBase & { kind: "blocked-zone" | "case" })
 ```
 
 (Field names carry their unit — `offsetXMm`, `rotationDeg` — per the same rule as `widthMm` in §4.1: a bare `offsetX: 240` invites "240 what?"; the suffix doesn't.)
@@ -249,7 +284,15 @@ type ArtworkWallObject = WallObjectBase & {
   artworkId: string
   // display/provenance metadata only; geometry uses stored width/height
   displayDimensionsOverride?: Dimensions
+  // dormant floor-space memory (angle, suspension height, image faces) kept
+  // across a floor → wall conversion so the return trip restores what was authored
+  floorMemory?: { rotationDeg?: number; baseHeightMm?: number; imageFaces?: Face[] }
 }
+
+// Also in the union, both schema v4 (2026-07-18): `kind: "wall-text"` didactic
+// panels and `kind: "case"` wall-mounted vitrines. Their construction lives in
+// pure glyph modules (`caseGlyphs.ts`, `doorGlyphs.ts`, `monitorGlyphs.ts`) so
+// canvas, PDF and the export preview cannot drift.
 
 type OpeningWallObject = WallObjectBase & {
   kind: "door" | "window" | "blocked-zone"
@@ -399,7 +442,8 @@ Import needs explicit merge rules against the recipient's own library, not silen
 
 - **`.sightlines` export/import** (§9, MVP2) is the whole sharing mechanism: attach it, Dropbox-link it, hand someone a USB drive, whatever's convenient. Larger files are fine — see §4.5, exports default to the display image tier, with full-resolution originals as an explicit opt-in; a Dropbox link absorbs any size that would be awkward over email.
 - **Dropbox backup**, for keeping versioned editable project packages off-device without hosting anything yourself. The technical-pilot implementation uses OAuth 2.0 with PKCE, offline access, and Dropbox App Folder scope; it uploads complete packages after edits settle and retains the last five copies per project. This is backup rather than live co-editing. A refresh token in browser storage remains a meaningful XSS risk, so the provider seam must keep the App Folder blast radius small and surface reauthorization explicitly. Real-time multiplayer stays out of scope (§12). Potential Google Drive and OneDrive providers require separate feasibility and approval work.
-- **Cross-device sync (designed 2026-08-19, not built):** single-user pull/push sync over the same Dropbox account — a canonical `/projects/<id>/current.sightlines` head per project, revision-conditional writes, and whole-project conflict choices (no layout merging, ever; the artwork library reconciles separately because works are shared across projects). Full design, conflict UX, and staged roadmap: `docs/cloud-sync-plan.md`. This replaces the self-share-link workaround for moving projects between devices; public share links stay one-way snapshot handoffs that always open as a copy.
+- **Share links (shipped 2026-08-11):** "Share project…" writes a frozen display-tier snapshot under `/shares` in the app folder and mints a Dropbox shared link; the recipient's app fetches it through a small stateless relay on the Cloudflare worker and always opens it as a new copy. A matching project id in a shared package proves nothing (it is untrusted input), so share links stay fork-only forever. `/shares` is never auto-pruned — the files back live links.
+- **Cross-device sync (stages 1–2 shipped 2026-08-19 → 20; stages 3–4 designed):** single-user pull/push sync over the same Dropbox account — a cloud project browser in the project manager (open a project absent locally under its own identity, save-a-copy otherwise), a canonical `/projects/<id>/current.sightlines` head per project, revision-conditional writes, and whole-project conflict choices (no layout merging, ever; the artwork library reconciles separately because works are shared across projects). Backup, share links and sync fold into one "Dropbox" row in the save-status popover. Full design, conflict UX, and the staged roadmap: `docs/cloud-sync-plan.md`.
 
 **Deferred, not designed out:** a standalone zero-install viewer export (embedded JSON in a self-contained HTML file, à la §4's schema) and lightweight comment/annotation pins remain a clean future add if the "recipient shouldn't need to visit the app at all" case becomes a real ask. One constraint to remember if this is revisited: a browser-opened static HTML file can't rewrite itself in place across Safari/Firefox/Chromium — the flow would need to be "reviewer downloads an annotated copy or a separate comments file, curator reimports that," not an assumption that the same file mutates. Nothing in the current architecture blocks any of this later, it's just not being built now.
 
@@ -418,7 +462,7 @@ Because layout is one serializable document mutated through defined actions, thi
 ## 8. Things Worth Deciding Now, Cheap to Build In, Expensive to Retrofit
 
 - **Image tiers:** see §4.5 for the full design — thumbnail/display/original, display used for rendering and default exports.
-- **Sync conflict safety:** never silently discard a version. Decided 2026-08-19 (`docs/cloud-sync-plan.md`): conflicts are resolved at whole-project granularity — use the Dropbox version / keep this device's version / keep both / not now — with Dropbox `rev`-conditional writes as the guard, a recovery snapshot before every replacement, and no structural merging of layouts. The artwork library reconciles separately through the existing import conflict dialog.
+- **Sync conflict safety:** never silently discard a version. Decided and shipped 2026-08-19 (`docs/cloud-sync-plan.md`): conflicts are resolved at whole-project granularity — use the Dropbox version / keep this device's version / keep both / not now — with Dropbox `rev`-conditional writes as the guard, a recovery snapshot before every replacement, and no structural merging of layouts. The artwork library reconciles separately through the existing import conflict dialog.
 - **Corruption/recovery baseline:** a partially-corrupted `.sightlines` zip or an interrupted IndexedDB write should fail loudly with a clear error, not silently lose data. Three concrete rules that follow from this: (1) **validate before save** — the repository never writes a document that fails the current schema, so invalid state can't persist and poison the next load; (2) **one corrupt record can't take down the list** — `list()` skips-and-reports a project that fails validation rather than throwing wholesale; (3) **boot never silently substitutes** — if the saved project can't load, say so visibly; don't quietly show a fresh sample while the user's data sits unreachable in IndexedDB.
 - **Equal distribution / spacing:** alongside center/edge/neighbor snapping, add "distribute N selected objects evenly across a span" — one of the most common curatorial moves after grouping, and easy to miss if you only build the snap-target list from the original spec.
 - **Toggleable visual grids in plan and elevation views.** Grid display is a view-layer alignment aid, not project geometry. It should be available in both bird's-eye plan and wall elevation views, share the same precision vocabulary as snap/nudge increments (§5.5), and be easy to turn on/off independently from snap-to-grid without changing persisted layout data.
@@ -428,7 +472,7 @@ Because layout is one serializable document mutated through defined actions, thi
 - **Room templates (maybe, later):** if curators reuse the same gallery across shows, saving a room as a reusable template avoids redrawing it. Not urgent; the `Floor`/`Room` split in §4.2 doesn't block adding this later.
 - **Library-wide export, not just per-project.** Since artwork now lives in a global library shared across projects (§4.1), a single project's `.sightlines` export doesn't capture an artwork sitting in the library but not yet added to any project's checklist. Add `exportAll()`/`importAll()` to the repository interface (§2) alongside the per-project versions — cheap to design in now, painful to retrofit once real libraries exist.
 - **PWA update mechanics.** No server to migrate everyone centrally — a browser tab can keep running stale cached app code via its service worker after a schema change ships. Plan an explicit "a new version is available — reload to update" prompt rather than silently swapping code under an open tab, and think through what happens if a migration runs while an old app version is still loaded.
-- **Privacy-preserving analytics and observability are an approved direction, not yet implemented.** Sightlines will measure the app rather than the person: external uptime checks, consent-controlled aggregate usage events, and an optional errors-only Sentry integration, with no project/artwork/Dropbox content, identifiers, replay, or free-form payloads. The policy contract, event allowlist, implementation phases, and required public-disclosure updates live in `docs/privacy-preserving-analytics.md`; telemetry must not ship ahead of those disclosures and controls.
+- **Privacy-preserving analytics and observability (shipped 2026-07-19).** Sightlines measures the app rather than the person: external uptime checks (Sentry Uptime), consent-controlled aggregate usage events through a typed gateway (both categories default off), and a separate crash-report preference whose Sentry browser SDK is still deferred — with no project/artwork/Dropbox content, identifiers, replay, or free-form payloads. The policy contract, event allowlist, and public-disclosure obligations live in `docs/privacy-preserving-analytics.md`; any new event must be added to the allowlist and the disclosures before it ships.
 
 ---
 
@@ -461,15 +505,17 @@ MVP1 bundles a lot — geometry, artwork/checklist, snapping/collision/undo, and
 - **Shipped (2026-07-12):** `.sightlines` export/import as a self-contained `SightlinesPackage` (§6) — embeds the artwork snapshot the project actually needs, not just references into the local library — and the import safety pipeline (§13) applied to that path. Library-wide `exportAll()`/`importAll()` (§8) alongside per-project export is not yet built.
 - **Shipped (2026-07-16 → 17):** Saved camera views (create in 3D, thumbnail cache, left-rail collection pane); PNG export (Export image) for plan, elevation, and 3D view; Export PDF — multi-page document (Overview, room plans, per-wall elevations, Saved-view 3D pages) with automatic dimension lines and bundled-font text, per `docs/export-spec.md`.
 - **Shipped (2026-07-19):** `navigator.storage.persist()` and Settings' "Export backup". The storage-safety follow-up, reshaped from an always-visible status message into **Dropbox cloud backup + silent snapshot recovery** (§11, `docs/cloud-backup-providers.md`), is now fully shipped: spike passed and retired, snapshot layer, package-service/error-provenance, Dropbox provider/scheduler/UI, and e2e (chromium + webkit) all built, verified, and live on app.sightlines.art (technical-pilot stage).
-- **Shipped (2026-08-19):** Checklist exports — spreadsheet (xlsx/CSV + optional images folder, `docs/export-spec.md` §3.4) and the PDF checklist sibling slice (§3.3, `src/app/export/checklistPdf/`), sharing one row model in `src/domain/checklistExport/`.
-- Missing/approximate-data readiness report — not yet built.
+- **Shipped (2026-07-18 → 08-11):** display cases (schema v4), wall-text panels, the measurement tool (slice 1, `docs/measurement-tool-spec.md`), the snapping and dimension-line redesign, frame finishes, deep wall works, suspended floor works with per-face images and back-to-back pairing, the Wall|Floor conversion toggle, 3D selectability and drop-to-place, cross-tab refresh, and Dropbox share links.
+- **Shipped (2026-08-19 → 24):** Checklist exports — spreadsheet (xlsx/CSV + optional images folder, `docs/export-spec.md` §3.4) and the PDF checklist sibling slice (§3.3, `src/app/export/checklistPdf/`), sharing one row model in `src/domain/checklistExport/`; the import conflict dialog redesign; the Dropbox cloud project browser and canonical cross-device sync (stages 1–2 of `docs/cloud-sync-plan.md`); the unified Dropbox popover row.
+- **Shipped (2026-08-28 → 31):** the first outside feedback round (`docs/feedback-round-2026-08-28.md`) — Windows export-extension fix, PDF dialog discoverability, CRT box monitor and the four-way display model with a Medium combobox, 3D viewport controls and pointer-drag editing — plus checklist sort/grouping stored on the project and the inspector Details stale-draft fix.
+- Missing/approximate-data readiness report and library-wide `exportAll()`/`importAll()` (§8) — not yet built. Guided onboarding (sample-project walkthrough) is the next product slice; see `docs/status.md` Near-Term Order.
 
 ### MVP 4 — Tablet + professional workflow depth
 - **Responsive/touch-adapted layout for iPad** (§3.5): touch-sized handles, gesture disambiguation, bottom-sheet panels, on-screen shortcut equivalents, 3D validated on real tablet hardware
 - Dropbox backup (PKCE + offline access, App Folder-scoped — §6) shipped 2026-07-19 and is in technical pilot via the §11 storage-safety slice. Additional providers (Drive/OneDrive/Box): see `docs/cloud-backup-providers.md` for approval landscape + rollout staging.
-- **Cross-device Dropbox sync** — design settled 2026-08-19, staged in `docs/cloud-sync-plan.md`: (1) cloud project browser (`files.content.read` scope, open-latest-when-absent, save-as-copy otherwise — kills the self-share-link workaround); (2) canonical `/projects/` head with rev-conditional writes and whole-project conflict choices; (3) shared-link management + cautious legacy cleanup; (4) optional content-addressed cloud assets. No layout merging; v1 syncs display-tier packages with an explicit "originals stay where they were added" promise.
+- **Cross-device Dropbox sync** — staged in `docs/cloud-sync-plan.md`: (1) cloud project browser and (2) canonical `/projects/` head with rev-conditional writes and whole-project conflict choices **shipped 2026-08-19 → 20**; (3) shared-link management + cautious legacy cleanup and (4) optional content-addressed cloud assets remain. No layout merging; v1 syncs display-tier packages with an explicit "originals stay where they were added" promise.
 - EXIF/IPTC metadata auto-fill on upload
-- Full checklist metadata editing, all sort modes, drag-reorder in custom mode
+- Full checklist metadata editing and drag-reorder in custom mode (sort + group-by-artist shipped 2026-08-31 as project data; a custom order would be one more `checklistView.sort` value)
 - Scale-accurate PDF wall elevation + floor plan export (true ratio, tiling)
 - Project packet export (cover page + checklist + plans + elevations + 3D views)
 - Command palette, context menus, better inspector

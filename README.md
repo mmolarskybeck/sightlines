@@ -37,8 +37,8 @@ Sightlines should let a user:
 * See warnings when works overlap architectural constraints or fall outside wall bounds.
 * Edit measurements either tactically by dragging or precisely through numeric fields.
 * Move between plan view, elevation view, checklist, and simple 3D preview without losing context.
-* Export portable project files for backup or manual sharing.
-* Back up project packages directly to the user’s Dropbox account (technical pilot).
+* Export portable project files, PDF documents, and checklist spreadsheets for backup, handoff, or manual sharing.
+* Back up project packages directly to the user’s Dropbox account, share a one-way snapshot link, and keep one project in sync across the user’s own devices (technical pilot).
 
 ## Core Workflow
 
@@ -181,17 +181,19 @@ Implemented or substantially underway:
 * Centerline, neighbor, floor, and grid snapping for wall objects.
 * Transaction-bounded drag commits.
 * Door, window, and blocked-zone wall objects.
-* Paired door/window connections across rooms with advisory alignment status.
-* Framing and matting previews with adjustable band widths and finishes.
+* Shared doors and windows across rooms as one physical opening with two synchronized faces, optional hinged door leaves, and explicitly open walls.
+* Floor and wall display cases, wall-text panels, and a measurement tool for reference distances.
+* Framing and matting previews with adjustable band widths and shaded finishes, in elevation and 3D.
+* Four display types — wall work, wall projection, box monitor, sculpture — derived from a free-text Medium field with an explicit override.
 * Neighbor-aware dimension lines between placed works.
 * Placement warnings for overlaps and out-of-bounds works.
-* Floor objects in plan view with snapping and drag-to-wall conversion.
+* Floor objects in plan view with snapping, rotation, suspension height, per-face images, back-to-back pairing, and wall ⇄ floor conversion.
 * Multi-select, group drag, and equal wall distribution.
-* Checklist filtering and sorting.
+* Checklist search, filtering, sorting, and artist grouping, with sort and grouping stored on the project.
 * Stable measurement-field conversion hints.
 * More legible plan-view placement markers.
-* Read-only derived 3D preview with artwork textures, door/window cutouts (see-through when aligned pairs connect rooms), partition slabs, and camera presets.
-* 3D navigation: cursor-directed wheel dolly, WASD travel, double-click focus flights, and touch pan.
+* Derived 3D preview with artwork textures, true shared openings, hinged leaves, partition slabs, cases, monitors, and camera presets — editable by drop-to-place, arrow nudge, and pointer drag, with numeric precision left to the inspector and elevation.
+* 3D navigation: cursor-directed wheel dolly, WASD travel, double-click focus flights, touch pan, a hand tool, and zoom controls.
 * Touch drag-and-drop artwork placement for iPad/iPhone.
 * Cross-project artwork library view and a settings dialog with durable-storage request.
 * Focus-aware keyboard guards so text fields, selects, SVG workspace focus, and panel resize handles keep their own shortcuts.
@@ -200,9 +202,13 @@ Implemented or substantially underway:
 * Saved views collection with editable titles, live room labels, and thumbnail caching.
 * PNG/JPG image snapshots (one-click export of the current view).
 * PDF document export with configurable contents (overview plan, room details, wall elevations, 3D views), automatic dimension lines, and vector output with embedded artwork.
+* Checklist export as a PDF works list or as xlsx/CSV (optional images folder) whose headers round-trip through the import wizard.
 * Bulk mat/frame editing for artwork selections with live preview.
 * Dropbox cloud backup with automatic settled-edit uploads, five retained copies per project,
   reconnection handling, and save-status visibility.
+* Dropbox share links (one-way snapshot handoffs that always open as a copy), a cloud project browser, and canonical cross-device sync with revision-conditional writes and whole-project conflict choices.
+* Cross-tab refresh so two tabs on the same project never overwrite each other with stale copies.
+* Consent-gated, allowlisted usage analytics and an independent crash-report preference (both off by default).
 
 ## Deployment
 
@@ -227,10 +233,10 @@ The detailed roadmap lives in `docs/plan.md` §9 (source of truth); the current 
 
 * **MVP 1 — Spatial editor + checklist core: shipped.** Geometry spine, artwork library/checklist, placement with snapping and collision flagging, multi-select/group/arrange, simple derived 3D preview.
 * **MVP 2 — Room shape tools + multi-room flow: shipped** (a benchmark-triggered renderer-scalability gate remains open). Polygon rooms and reshaping, partitions, paired door/window connections with honest 3D see-through/capped treatment, multi-room placement, 3D navigation.
-* **MVP 3 — Project packages, sharing, polish: shipping.** `.sightlines` export/import with the untrusted-file safety pipeline (shipped 2026-07-12), PNG/PDF snapshot and document exports with automatic dimension lines (shipped 2026-07-17), saved views collection, bulk mat/frame editing, and readiness reporting.
-* **MVP 4/5 — Tablet depth, then phone tier.** iPad-adapted layout, richer checklist workflows, command palette; phone viewing later. Dropbox backup is shipped in technical pilot; folder-level sync semantics remain a separate follow-up.
+* **MVP 3 — Project packages, sharing, polish: shipping.** `.sightlines` export/import with the untrusted-file safety pipeline (2026-07-12), PNG/PDF exports with automatic dimension lines (2026-07-17), Dropbox backup (2026-07-19), share links (2026-08-11), checklist exports and cross-device sync (2026-08-19), the display-type model and 3D editing (2026-08-28 → 31). Still open: readiness reporting, guided onboarding, library-wide export.
+* **MVP 4/5 — Tablet depth, then phone tier.** iPad-adapted layout, richer checklist workflows, scale-accurate tiled printing, command palette; phone viewing later. Sync stages 3–4 (share-link management, content-addressed cloud assets) are designed in `docs/cloud-sync-plan.md`.
 * **Future provider expansion:** evaluate Google Drive and OneDrive after the Dropbox pilot. Each requires its own OAuth, verification, institutional-admin, and token-lifecycle review.
-* **Backlog (real demand only):** hosted accounts/cloud, real-time collaboration, registrar-level collections management, full 3D editing, curved walls.
+* **Backlog (real demand only):** hosted accounts/cloud, real-time collaboration, registrar-level collections management, 3D transform gizmos and 3D snapping, curved walls.
 
 ## Tech Stack
 
@@ -277,10 +283,12 @@ npm run build
 Recommended docs structure:
 
 * `README.md` — concise project overview, current status, setup, roadmap.
+* `CLAUDE.md` / `AGENTS.md` — working rules for coding agents and the index of which doc owns what.
 * `PRODUCT.md` — product purpose, users, brand personality, design principles.
 * `DESIGN.md` — visual language, tokens, component philosophy.
 * `docs/plan.md` — full architecture and roadmap source of truth.
 * `docs/status.md` — the single living status doc: current state, recent shipping, near-term order.
+* `docs/export-spec.md`, `docs/package-format.md`, `docs/cloud-sync-plan.md`, `docs/cloud-backup-providers.md`, `docs/deployment.md` — behavior contracts for exports, the `.sightlines` format, Dropbox sync, provider rollout, and deploys.
 * `docs/quick-todos.md` — small open scraps that don't fit the roadmap.
 * `docs/archive/` — frozen historical docs (build log through 2026-07-10, completed specs).
 
