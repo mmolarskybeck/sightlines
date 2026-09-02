@@ -1,6 +1,6 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { useDialogs } from "./useDialogs";
+import { useDialogs, type DialogsHandle } from "./useDialogs";
 
 afterEach(cleanup);
 
@@ -70,16 +70,19 @@ describe("useDialogs", () => {
   });
 
   it("types the payload per dialog", () => {
-    const { result } = renderHook(() => useDialogs());
-
-    // @ts-expect-error a confirm cannot open without its subject
-    result.current.open("deleteRoom");
-    // @ts-expect-error a plain dialog carries nothing
-    result.current.open("help", { roomId: "room-a" });
-    // @ts-expect-error the payload shape is per dialog
-    result.current.open("deleteRoom", { wallId: "wall-a" });
-    // @ts-expect-error setOpen only drives dialogs that need no subject
-    result.current.setOpen("deleteRoom");
+    // Compile-time only: tsc checks every @ts-expect-error line, and the
+    // function is never called, so the invalid calls never touch a store.
+    function typeChecks(dialogs: DialogsHandle) {
+      // @ts-expect-error a confirm cannot open without its subject
+      dialogs.open("deleteRoom");
+      // @ts-expect-error a plain dialog carries nothing
+      dialogs.open("help", { roomId: "room-a" });
+      // @ts-expect-error the payload shape is per dialog
+      dialogs.open("deleteRoom", { wallId: "wall-a" });
+      // @ts-expect-error setOpen only drives dialogs that need no subject
+      dialogs.setOpen("deleteRoom");
+    }
+    expect(typeof typeChecks).toBe("function");
   });
 
   it("drives Radix onOpenChange through a stable per-name handle", () => {
