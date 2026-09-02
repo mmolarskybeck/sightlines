@@ -507,3 +507,134 @@ describe("arrange-session settle matrix (rows missing from store.test.ts)", () =
     expect(state.undoStack.at(-1)?.label).toBe("Move artwork");
   });
 });
+
+describe("selection", () => {
+  let store: ReturnType<typeof makeStore>;
+
+  beforeEach(async () => {
+    store = makeStore();
+    await store.getState().boot();
+  });
+
+  // Selection validates against live opening IDs.
+  async function addRealOpening(): Promise<string> {
+    await store.getState().addOpening("wall-north", "door");
+    return store.getState().project!.wallObjects.find((object) => object.kind === "door")!.id;
+  }
+
+  it("selectWall clears any selected artwork", () => {
+    store.getState().selectArtwork("some-artwork");
+    expect(
+      getSelectedArtworkId(store.getState().project, store.getState().selection)
+    ).toBe("some-artwork");
+
+    store.getState().selectWall("wall-east");
+
+    expect(store.getState().wallContextId).toBe("wall-east");
+    expect(
+      getSelectedArtworkId(store.getState().project, store.getState().selection)
+    ).toBeNull();
+  });
+
+  it("selectArtwork sets the selected artwork without touching the selected wall", () => {
+    const wallId = store.getState().wallContextId;
+
+    store.getState().selectArtwork("artwork-x");
+
+    expect(
+      getSelectedArtworkId(store.getState().project, store.getState().selection)
+    ).toBe("artwork-x");
+    expect(store.getState().wallContextId).toBe(wallId);
+  });
+
+  it("selectOpening clears the selected artwork but not the selected wall", async () => {
+    const openingId = await addRealOpening();
+    const wallId = store.getState().wallContextId;
+    store.getState().selectArtwork("some-artwork");
+    expect(
+      getSelectedArtworkId(store.getState().project, store.getState().selection)
+    ).toBe("some-artwork");
+
+    store.getState().selectOpening(openingId);
+
+    expect(
+      getSelectedOpeningId(store.getState().project, store.getState().selection)
+    ).toBe(openingId);
+    expect(
+      getSelectedArtworkId(store.getState().project, store.getState().selection)
+    ).toBeNull();
+    expect(store.getState().wallContextId).toBe(wallId);
+  });
+
+  it("selectWall clears the selected opening", async () => {
+    const openingId = await addRealOpening();
+    store.getState().selectOpening(openingId);
+    expect(
+      getSelectedOpeningId(store.getState().project, store.getState().selection)
+    ).toBe(openingId);
+
+    store.getState().selectWall("wall-east");
+
+    expect(
+      getSelectedOpeningId(store.getState().project, store.getState().selection)
+    ).toBeNull();
+  });
+
+  it("selectArtwork clears the selected opening", async () => {
+    const openingId = await addRealOpening();
+    store.getState().selectOpening(openingId);
+
+    store.getState().selectArtwork("some-artwork");
+
+    expect(
+      getSelectedOpeningId(store.getState().project, store.getState().selection)
+    ).toBeNull();
+  });
+
+  it("selectRoom clears the selected wall, artwork, opening, and multi-select", async () => {
+    const openingId = await addRealOpening();
+    store.getState().selectOpening(openingId);
+
+    store.getState().selectRoom("room-main");
+
+    const state = store.getState();
+    expect(roomIdOf(state.selection)).toBe("room-main");
+    expect(state.wallContextId).toBeNull();
+    expect(getSelectedArtworkId(state.project, state.selection)).toBeNull();
+    expect(getSelectedOpeningId(state.project, state.selection)).toBeNull();
+    expect(objectIdsOf(state.selection)).toEqual([]);
+  });
+
+  it("selectWall clears the selected room", () => {
+    store.getState().selectRoom("room-main");
+
+    store.getState().selectWall("wall-east");
+
+    expect(roomIdOf(store.getState().selection)).toBeNull();
+  });
+
+  it("selectArtwork clears the selected room", () => {
+    store.getState().selectRoom("room-main");
+
+    store.getState().selectArtwork("some-artwork");
+
+    expect(roomIdOf(store.getState().selection)).toBeNull();
+  });
+
+  it("selectOpening clears the selected room", async () => {
+    const openingId = await addRealOpening();
+    store.getState().selectRoom("room-main");
+
+    store.getState().selectOpening(openingId);
+
+    expect(roomIdOf(store.getState().selection)).toBeNull();
+  });
+
+  it("clearObjectSelection clears the selected room even with no objects selected", () => {
+    store.getState().selectRoom("room-main");
+
+    store.getState().clearObjectSelection();
+
+    expect(roomIdOf(store.getState().selection)).toBeNull();
+  });
+});
