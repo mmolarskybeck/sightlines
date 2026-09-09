@@ -3,24 +3,10 @@ import {
   useMemo,
   useRef,
   useState,
-  type PointerEvent as ReactPointerEvent
+  type RefObject
 } from "react";
 import type { Vector2 } from "../../../domain/geometry/dragResize";
-import {
-  getNeighborAwareSegments,
-  getSpacingSegments
-} from "../../../domain/placement/arrangeOnWall";
-import {
-  getWallObjectBoundsMm,
-  type RectBoundsMm
-} from "../../../domain/placement/collision";
-import {
-  resolveDragBarriers,
-  WALL_BARRIER_EDGE_IDS,
-  type BarrierObstacle
-} from "../../../domain/placement/dragBarriers";
-import { getGroupBounds, getIdsIntersectingRect } from "../../../domain/placement/groupBounds";
-import { getOverlapRule } from "../../../domain/placement/overlapPolicy";
+import { getGroupBounds } from "../../../domain/placement/groupBounds";
 import { type InsertToolKind } from "../../../domain/placement/createOpening";
 import { WALL_TEXT_DEFAULT_NAME } from "../../../domain/placement/createWallText";
 import {
@@ -47,12 +33,7 @@ import {
   selectVisiblePartitionProfiles
 } from "../../../domain/placement/partitionNeighbors";
 import { isPointInPolygon } from "../../../domain/geometry/polygon";
-import { resolveArtworkSnap } from "../../../domain/snapping/artworkSnapTargets";
-import {
-  quantizeXToCleanIncrement,
-  quantizeYToCleanIncrement
-} from "../../../domain/snapping/cleanIncrement";
-import type { Guide, SnapTargetIds } from "../../../domain/snapping/resolveSnap";
+import type { Guide } from "../../../domain/snapping/resolveSnap";
 import { formatLength } from "../../../domain/units/length";
 import { getMajorGridIntervalMm, getMinorGridIntervalMm } from "../../../domain/units/precision";
 import { type MeasureCandidateSources } from "../../../domain/measurement/measurement";
@@ -67,7 +48,6 @@ import {
 } from "../../../domain/viewport/viewport2d";
 import { useAssetImageUrls } from "../../hooks/useAssetImageUrls";
 import { useContainerSize } from "../../hooks/useContainerSize";
-import { useDragGesture } from "../../hooks/useDragGesture";
 import { getNudgeStepMm } from "../../hooks/nudgeStep";
 import { useSelectSuppression } from "../../hooks/useSelectSuppression";
 import { useSvgViewportGestures } from "../../hooks/useSvgViewportGestures";
@@ -78,7 +58,6 @@ import {
   type MeasurementToolAction,
   type MeasurementToolState
 } from "../../hooks/useMeasurementTool";
-import { shouldCancelMeasurementForViewportClaim } from "../../hooks/planMeasurementPolicy";
 import { useAppStore } from "../../store";
 import { ElevationArtwork } from "./ElevationArtwork";
 import { ElevationOpening } from "./ElevationOpening";
@@ -93,7 +72,7 @@ import {
   OpeningTooltipContent,
   WallTextTooltipContent
 } from "../shared/PlacementTooltip";
-import { marqueeRectMm, type MarqueeState } from "../shared/marqueeRect";
+import { marqueeRectMm } from "../shared/marqueeRect";
 import { buildElevationScene } from "../../../domain/scene2d/elevationScene";
 import {
   getElevationFootprintObjects,
@@ -103,17 +82,17 @@ import {
 } from "./elevationArtworkGeometry";
 import { GridOverlay } from "../shared/GridOverlay";
 import { GroupDimensionLines } from "./GroupDimensionLines";
-import {
-  deriveVerticalNeighborGaps,
-  type DimensionParticipant
-} from "../../../domain/dimensions/orthogonalNeighbors";
 import { VerticalGapDimensionLines } from "./VerticalGapDimensionLines";
+import { buildElevationDimensionModel } from "./elevationDimensionModel";
 import { MeasurementOverlay, type MeasurementEndpoint } from "../measurement/MeasurementOverlay";
-import { Button } from "../ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { ViewportZoomControls } from "../shared/ViewportZoomControls";
 import { type WallSwitcherEntry } from "./WallSwitcher";
 import { WallSwitcherChip, canSwitchWalls } from "./WallSwitcherChip";
+import {
+  useElevationMoveDrag,
+  type DropGhostState,
+  type MoveDragState
+} from "./useElevationMoveDrag";
 
 // Re-exported for backward compatibility — this used to be defined here,
 // and nothing outside this file depends on the distinction between "defined
@@ -147,68 +126,6 @@ const EMPTY_REFERENCE_MEASUREMENTS: ReferenceMeasurement[] = [];
 // wallObjects rationale above) — floor cases in front of this wall become the
 // elevation ghost outlines.
 const EMPTY_FLOOR_OBJECTS: FloorObject[] = [];
-
-// A pointer-drag move of an existing placement, transient until release
-// (docs/plan.md §7: live preview, exactly one store commit on release).
-// Mirrors PlanView's DragState shape/naming for the resize-handle drag.
-// Generalized over wall object kind (artwork or opening) — `kind` decides
-// which store action commits on release, everything else about the drag
-// (preview, snapping, sub-threshold no-op) is identical either way.
-type MoveDragState = {
-  wallObjectId: string;
-  kind: WallObject["kind"];
-  sizeMm: { widthMm: number; heightMm: number };
-  startPointerMm: Vector2;
-  startCenterMm: Vector2;
-  previewCenterMm: Vector2;
-  // Per-axis hysteresis ids: x and y snap independently (centerline in y
-  // while the grid holds x), so each axis remembers its own active target.
-  previousSnapTargetIds?: SnapTargetIds;
-  activeGuides: Guide[];
-  // Group drag: when the pressed object belongs to a multi-selection, the whole
-  // group translates rigidly. `members` records each member's kind and its
-  // offset from the group's union-box center (member size is never read — the
-  // group resolves and paints as one virtual object sized by the union box);
-  // for a group drag startCenterMm / previewCenterMm track that union-box
-  // center (and sizeMm is the union box's size, fed to resolveArtworkSnap as
-  // one virtual object). Absent for a single-object drag — that path is left
-  // exactly as it was.
-  members?: {
-    id: string;
-    kind: WallObject["kind"];
-    offsetFromGroupCenterMm: Vector2;
-  }[];
-  startGroupCenterMm?: Vector2;
-  // Alt-drag of one member of a multi-selection: the drag moves only the
-  // pressed object, but the release must still suppress the trailing click
-  // (the same suppressNextSelect mechanism group drags use) so the browser's
-  // post-drag click can't collapse the multi-selection to that one member.
-  preserveSelection?: boolean;
-  // Drag-barrier hysteresis (see dragBarriers.ts): the set of obstacle / wall-
-  // edge ids this drag has already "popped" past (or started overlapping).
-  // Carried frame-to-frame so a broken barrier stays broken until the object
-  // separates from it, and re-arms once it does.
-  brokenBarrierIds?: string[];
-};
-
-
-// The HTML5-drop preview for a not-yet-placed artwork being dragged in from
-// the checklist. Separate from MoveDragState because it has no existing
-// wallObjectId/startCenterMm — it's a brand-new placement, not a move — but
-// it flows through the exact same resolveElevationPlacement call (snap →
-// quantize → drag barriers) so a drop can never land somewhere the ghost didn't
-// just show: same resolver, same broken-barrier set threaded frame-to-frame,
-// same final point handed to the commit.
-type DropGhostState = {
-  centerMm: Vector2;
-  sizeMm: { widthMm: number; heightMm: number };
-  previousSnapTargetIds?: SnapTargetIds;
-  activeGuides: Guide[];
-  // Drag-barrier hysteresis, mirroring MoveDragState.brokenBarrierIds. A fresh
-  // ghost starts with an empty set; each dragover frame carries the resolver's
-  // returned set back in.
-  brokenBarrierIds?: string[];
-};
 
 type OpeningToolGhostState = {
   centerMm: Vector2;
@@ -422,143 +339,11 @@ export function ElevationView({
   const snapThresholdMm = pixelsPerMm > 0 ? SNAP_THRESHOLD_PX / pixelsPerMm : 0;
   const barrierBreakMm = pixelsPerMm > 0 ? BARRIER_BREAK_PX / pixelsPerMm : 0;
 
-  // The moveDrag state machine: pointer-drag move of an existing placement,
-  // transient until release (docs/plan.md §7: live preview, exactly one store
-  // commit on release). Collapsed via useDragGesture from the extracted copies
-  // in PlanView and ElevationView.
-  const { drag: moveDrag, dragRef: moveDragRef, beginDrag: beginMoveDragGesture, isDragging: isMoveDragging } = useDragGesture<MoveDragState>({
-    onMove: (current, event) => {
-      const pointerMm = toWallLocalMm(event.clientX, event.clientY);
-      if (!pointerMm) return null;
-
-      const proposedCenterMm: Vector2 = {
-        xMm: current.startCenterMm.xMm + (pointerMm.xMm - current.startPointerMm.xMm),
-        yMm: current.startCenterMm.yMm + (pointerMm.yMm - current.startPointerMm.yMm)
-      };
-
-      // For a group drag exclude every member from the neighbor pool (the group
-      // must never snap to its own members); for a single drag just the one.
-      const memberIds = current.members
-        ? new Set(current.members.map((member) => member.id))
-        : null;
-      const neighbors = wallObjectsOnThisWall.filter((wallObject) =>
-        memberIds ? !memberIds.has(wallObject.id) : wallObject.id !== current.wallObjectId
-      );
-
-      // ⌘/Ctrl held mid-drag → momentary precision bypass (fully free move,
-      // Figma convention). Read live off each pointer event so it can toggle
-      // during the drag. Alt is untouched (alt-drag = solo-move a group member).
-      const precisionBypass = event.metaKey || event.ctrlKey;
-
-      // Barriers need the REAL moving kinds (a group carrying an opening must
-      // get that opening's stricter barriers); the SNAP call still passes
-      // "artwork" for a group per the size rationale above. Member entries carry
-      // their own kind, so no store lookup is needed here.
-      const movingKinds: WallObject["kind"][] = current.members
-        ? current.members.map((member) => member.kind)
-        : [current.kind];
-
-      const snapResult = resolveElevationPlacement(
-        proposedCenterMm,
-        // For a group, sizeMm is the union box and the whole thing resolves as
-        // one virtual artwork (no per-kind floor tier — a mixed group has no
-        // single kind); a single object keeps its own size and kind-gated floor.
-        current.sizeMm,
-        neighbors,
-        current.members ? "artwork" : current.kind,
-        movingKinds,
-        current.previousSnapTargetIds,
-        precisionBypass,
-        new Set(current.brokenBarrierIds)
-      );
-
-      // A hard barrier that couldn't be resolved from here (wedged between two,
-      // or clamping off one shoved the rect into another) → hold the preview at
-      // the last legal position rather than commit an illegal one. Everything
-      // else (including the freshly re-armed broken set) stays put too.
-      if (snapResult.blocked) return { ...current };
-
-      return {
-        ...current,
-        previewCenterMm: snapResult.point,
-        previousSnapTargetIds: snapResult.snapTargetIds,
-        activeGuides: snapResult.activeGuides,
-        brokenBarrierIds: snapResult.brokenBarrierIds
-      };
-    },
-    onRelease: (current, event) => {
-      // Sub-threshold release is a no-op — a click-without-real-movement
-      // must not produce a phantom undo entry (docs/plan.md §7).
-      const movedMm = Math.hypot(
-        current.previewCenterMm.xMm - current.startCenterMm.xMm,
-        current.previewCenterMm.yMm - current.startCenterMm.yMm
-      );
-      if (movedMm < 0.5) return;
-
-      // Group drag: one commit carrying every member's final center (both kinds
-      // through the single onMoveWallObjects prop). Member center = the snapped
-      // group center plus that member's stored offset.
-      if (current.members) {
-        // Whether or not the commit survives the collision gate, the trailing
-        // click must not collapse the multi-selection (see suppressNextSelect).
-        suppressNextSelect();
-        const moves = current.members.map((member) => ({
-          id: member.id,
-          xMm: current.previewCenterMm.xMm + member.offsetFromGroupCenterMm.xMm,
-          yMm: current.previewCenterMm.yMm + member.offsetFromGroupCenterMm.yMm
-        }));
-        onMoveWallObjects?.(moves);
-        return;
-      }
-
-      // Alt-drag of one group member: same single-object commit below, but the
-      // trailing click must not collapse the multi-selection it came from.
-      if (current.preserveSelection) suppressNextSelect();
-
-      // A drag released with an additive-select modifier still down (⌘/Ctrl
-      // precision drag, or Shift held) ends with the browser's trailing click,
-      // which would otherwise read as an additive toggle and deselect the
-      // object that was just moved.
-      if (event.metaKey || event.ctrlKey || event.shiftKey) suppressNextSelect();
-
-      if (current.kind === "artwork") {
-        onMovePlacement?.(current.wallObjectId, current.previewCenterMm.xMm, current.previewCenterMm.yMm);
-      } else {
-        onMoveOpening?.(current.wallObjectId, current.previewCenterMm.xMm, current.previewCenterMm.yMm);
-      }
-    }
-  });
-
-  // The marquee state machine: a pending rubber-band (marquee) selection on the
-  // elevation background, tracked as two wall-local-mm pointer samples (start +
-  // current).
-  const { drag: marquee, dragRef: marqueeRef, beginDrag: beginMarqueeGesture, isDragging: isMarqueeragging } = useDragGesture<MarqueeState>({
-    onMove: (current, event) => {
-      const pointerMm = toWallLocalMm(event.clientX, event.clientY);
-      if (!pointerMm) return null;
-
-      return { ...current, currentMm: pointerMm };
-    },
-    onRelease: (current, event) => {
-      const rect = marqueeRectMm(current);
-      // A sub-threshold rect is a plain background click, not a drag: clear the
-      // selection rather than marquee-select an empty band. The threshold is
-      // the same pointer slop the snap plumbing uses (SNAP_THRESHOLD_PX in mm).
-      const draggedMm = Math.hypot(rect.maxXMm - rect.minXMm, rect.maxYMm - rect.minYMm);
-      if (draggedMm < snapThresholdMm) {
-        onClearSelection?.();
-        return;
-      }
-
-      onMarqueeSelect?.(
-        getIdsIntersectingRect(
-          getElevationFootprintObjects(wallObjectsOnThisWall, artworksById),
-          rect
-        ),
-        event.shiftKey
-      );
-    }
-  });
+  // The viewport engine's pinch guard has to read the move-drag state, but the
+  // move-drag hook is called later (it needs elevationScene-derived inputs).
+  // This box holds that hook's ref; the guard only ever runs from an event, by
+  // which time the assignment below has happened.
+  const moveDragRefBox = useRef<RefObject<MoveDragState | null> | null>(null);
 
   // The shared 2D viewport gesture engine (pan / zoom / pinch / wheel /
   // keyboard). It works EXCLUSIVELY in SVG userspace (y-down); the elevation
@@ -586,7 +371,7 @@ export function ElevationView({
     zoomLimits: ELEVATION_ZOOM_LIMITS,
     // A 2nd finger landing over an in-flight move-drag blocks rather than
     // starting a pinch — defer to that edit (preserves the old capture guard).
-    isPinchBlocked: () => Boolean(moveDragRef.current),
+    isPinchBlocked: () => Boolean(moveDragRefBox.current?.current),
     onGestureEnd: ({ kind, isTap, startedOnBackground }) => {
       if (kind === "touch" && isTap && startedOnBackground) {
         onClearSelection?.();
@@ -803,6 +588,58 @@ export function ElevationView({
   const assetIds = elevationScene.artworks.map((entry) => entry.artwork?.assetId);
   const imageUrlsByAssetId = useAssetImageUrls(assetIds, getBlob ?? NO_OP_GET_BLOB, "display");
 
+  // The browser fires a `click` on the grabbed element right after a drag's
+  // pointerup. For a single object that click merely re-selects it (today's
+  // behavior, harmless); after a real GROUP drag the same click would call
+  // onSelectObject non-additively and collapse the whole multi-selection to
+  // Select suppression: when a pointer release triggers a trailing click that
+  // must not collapse a multi-selection (group drags, etc.), mark it here so
+  // the click handler can skip the selection.
+  const { suppressNextSelect, consumeSelectSuppression } =
+    useSelectSuppression();
+
+
+  const {
+    moveDrag,
+    moveDragRef,
+    marquee,
+    resolveElevationPlacement,
+    beginMarquee,
+    handleSvgPointerDownCapture,
+    beginMoveDrag
+  } = useElevationMoveDrag({
+    toWallLocalMm,
+    wallObjectsOnThisWall,
+    artworksById,
+    withResolvedArtworkFootprint,
+    partitionNeighborShims,
+    allowOverlappingPlacement,
+    centerlineMm,
+    wallLengthMm,
+    wallHeightMm,
+    minorGridMm,
+    snapToGrid,
+    snapThresholdMm,
+    barrierBreakMm,
+    selectedObjectIds,
+    onMovePlacement,
+    onMoveOpening,
+    onMoveWallObjects,
+    onMarqueeSelect,
+    onClearSelection,
+    suppressNextSelect,
+    canvasToolArmed,
+    dropGhost,
+    beginTouchPan,
+    beginMousePan,
+    handlePointerDownCapture,
+    measurementActive,
+    measurementGestureRef,
+    cancelMeasurementPointerGesture,
+    handleMeasurementPointerDown
+  });
+  moveDragRefBox.current = moveDragRef;
+
   const { handleDragOver, handleDragLeave, handleDrop } = useElevationArtworkDrop({
     wallId,
     artworksById,
@@ -833,166 +670,6 @@ export function ElevationView({
 
 
 
-  // Per-neighbor barrier hardness for a moving object/group. The barrier is only
-  // as soft as the STRICTEST rule allows across every moving kind vs this
-  // neighbor's kind (a mixed group's union box uses the harshest member — the
-  // union-box over-approximation is accepted; per-member resolution is a
-  // non-goal): any "forbidden" pair (opening×opening) is always HARD; a
-  // "blockable" pair (anything involving an artwork) is HARD when overlap isn't
-  // allowed and YIELDING when it is. That keeps the drag feel in lockstep with
-  // the commit gate — a barrier is hard exactly when a release there would be
-  // rejected.
-  function barrierHardnessFor(
-    movingKinds: WallObject["kind"][],
-    neighborKind: WallObject["kind"]
-  ): BarrierObstacle["hardness"] {
-    let hard = false;
-    for (const movingKind of movingKinds) {
-      const rule = getOverlapRule(movingKind, neighborKind);
-      if (rule === "forbidden") return "hard";
-      if (rule === "blockable" && !allowOverlappingPlacement) hard = true;
-    }
-    return hard ? "hard" : "yielding";
-  }
-
-  // The elevation placement pipeline shared by the move-drag preview and the
-  // checklist drop-ghost. Three composed passes (docs: dragBarriers.ts):
-  //   1. alignment snaps (floor/centerline/neighbor) keep priority;
-  //   2. any axis a snap target did NOT capture is quantized to a clean
-  //      measurement instead of left free — grid targets are deliberately
-  //      excluded (snapToGrid: false to resolveArtworkSnap) since center-on-grid
-  //      snapping re-creates the 1/16" edge problem, so the quantizer is the new
-  //      lowest tier, gated on the real snapToGrid preference; then
-  //   3. drag barriers clamp the snapped/quantized point flush against
-  //      obstacles and the wall edges (macOS-window feel), popping soft barriers
-  //      only on a deliberate shove past barrierBreakMm.
-  // A held ⌘/Ctrl (precisionBypass) skips snapping AND quantization for a fully
-  // free move — but still runs the barrier pass with includeYielding:false, so
-  // HARD barriers survive the precision drag (otherwise a ⌘-drag would sail into
-  // a forbidden overlap and simply die at the commit gate on release).
-  function resolveElevationPlacement(
-    proposed: Vector2,
-    sizeMm: { widthMm: number; heightMm: number },
-    neighbors: WallObject[],
-    // The kind fed to resolveArtworkSnap: a group passes "artwork" (one virtual
-    // object, no per-kind floor tier — see the onMove call site).
-    movingKind: WallObject["kind"],
-    // The REAL moving kinds, for barrier hardness only: a singleton for a solo
-    // drag, every member's kind for a group (so a group carrying an opening gets
-    // that opening's stricter barriers even though it snaps as "artwork").
-    movingKinds: WallObject["kind"][],
-    previousSnapTargetIds: SnapTargetIds | undefined,
-    precisionBypass: boolean,
-    brokenBarrierIds: ReadonlySet<string>
-  ): {
-    point: Vector2;
-    activeGuides: Guide[];
-    snapTargetIds: SnapTargetIds;
-    brokenBarrierIds: string[];
-    blocked: boolean;
-  } {
-    // Keep the scene inventory image-sized for Phase 4 consumers. This
-    // interaction-only list widens the exact neighbor boundary shared by snap,
-    // clean-increment quantization and drag barriers.
-    const footprintNeighbors = neighbors.map(withResolvedArtworkFootprint);
-    const obstacles: BarrierObstacle[] = footprintNeighbors.map((neighbor) => ({
-      id: neighbor.id,
-      boundsMm: getWallObjectBoundsMm(neighbor),
-      hardness: barrierHardnessFor(movingKinds, neighbor.kind)
-    }));
-    // A partition standing at (or near) this wall ends the hanging zone, so it
-    // should capture a drag exactly like a real neighbor: its edges and center
-    // become snap targets, and the clean-increment quantizer measures the gap
-    // from its edge rather than sailing past it to the wall end. Note where this
-    // list is NOT used — `obstacles` above stays wall-objects-only, keeping the
-    // projection visual-only for placement legality (USER DECISION).
-    const snapNeighbors: WallObjectBase[] = [
-      ...footprintNeighbors,
-      ...partitionNeighborShims
-    ];
-
-    if (precisionBypass) {
-      // Free move, but hard barriers still apply (yielding + wall container are
-      // skipped by includeYielding:false). No guides / snap ids under precision.
-      const barriers = resolveDragBarriers({
-        proposedCenterMm: proposed,
-        movingSizeMm: sizeMm,
-        obstacles,
-        wallSizeMm: { lengthMm: wallLengthMm, heightMm: wallHeightMm },
-        breakThresholdMm: barrierBreakMm,
-        brokenBarrierIds,
-        includeYielding: false
-      });
-      return {
-        point: barriers.point,
-        activeGuides: [],
-        snapTargetIds: {},
-        brokenBarrierIds: barriers.brokenBarrierIds,
-        blocked: barriers.blocked
-      };
-    }
-
-    const snapResult = resolveArtworkSnap(proposed, {
-      centerlineYMm: centerlineMm,
-      wallLengthMm,
-      wallHeightMm,
-      gridIntervalMm: minorGridMm,
-      neighbors: snapNeighbors,
-      movingSize: sizeMm,
-      movingKind,
-      // Grid tier removed for elevation placement — the quantizer replaces it.
-      snapToGrid: false,
-      thresholdMm: snapThresholdMm,
-      previousSnapTargetIds
-    });
-
-    // snapToGrid OFF reproduces the pre-quantizer behavior: alignment snaps
-    // only. Either way `point` then feeds the barrier pass below.
-    const point: Vector2 = { ...snapResult.point };
-    if (snapToGrid) {
-      const incrementMm = minorGridMm;
-      // Quantize y first so the (band-filtered) x pass reads the object's settled
-      // vertical position; an axis a snap captured is left exactly as snapped.
-      if (snapResult.snapTargetIds.y === undefined) {
-        point.yMm = quantizeYToCleanIncrement(
-          { xMm: proposed.xMm, yMm: proposed.yMm },
-          sizeMm,
-          incrementMm
-        );
-      }
-      if (snapResult.snapTargetIds.x === undefined) {
-        point.xMm = quantizeXToCleanIncrement(
-          { xMm: proposed.xMm, yMm: point.yMm },
-          sizeMm,
-          incrementMm,
-          wallLengthMm,
-          snapNeighbors
-        );
-      }
-    }
-
-    // Final pass: settle flush against obstacles / wall edges. Yielding barriers
-    // are in play (includeYielding) so a normal drag can pop a soft one with a
-    // deliberate shove; the wall container keeps the object on-wall.
-    const barriers = resolveDragBarriers({
-      proposedCenterMm: point,
-      movingSizeMm: sizeMm,
-      obstacles,
-      wallSizeMm: { lengthMm: wallLengthMm, heightMm: wallHeightMm },
-      breakThresholdMm: barrierBreakMm,
-      brokenBarrierIds,
-      includeYielding: true
-    });
-
-    return {
-      point: barriers.point,
-      activeGuides: snapResult.activeGuides,
-      snapTargetIds: snapResult.snapTargetIds,
-      brokenBarrierIds: barriers.brokenBarrierIds,
-      blocked: barriers.blocked
-    };
-  }
-
   const { handleOpeningToolPointerMove, handleOpeningToolPointerLeave, handleOpeningToolClick } =
     useElevationOpeningTool({
       activeTool,
@@ -1007,214 +684,6 @@ export function ElevationView({
       marquee,
       dropGhost
     });
-
-
-  // Pre-seed the broken-barrier set at grab time with every neighbor the moving
-  // object/group already overlaps and every wall edge it already overhangs. This
-  // is the legacy-data escape hatch: an object stored overlapping (or hanging
-  // off the wall) can be dragged out smoothly instead of being yanked flush the
-  // instant resolution runs, and each barrier re-arms the moment the object
-  // clears it (dragBarriers.ts step 4). The tests here mirror that rebuild
-  // exactly — STRICT overlap (edge-touch doesn't count) and the same edge ids.
-  function seedBrokenBarrierIds(
-    boxBoundsMm: RectBoundsMm,
-    neighbors: WallObject[]
-  ): string[] {
-    const ids: string[] = [];
-    for (const neighbor of neighbors) {
-      const nb = getWallObjectBoundsMm(withResolvedArtworkFootprint(neighbor));
-      if (
-        boxBoundsMm.leftMm < nb.rightMm &&
-        boxBoundsMm.rightMm > nb.leftMm &&
-        boxBoundsMm.bottomMm < nb.topMm &&
-        boxBoundsMm.topMm > nb.bottomMm
-      ) {
-        ids.push(neighbor.id);
-      }
-    }
-    if (boxBoundsMm.leftMm < 0) ids.push(WALL_BARRIER_EDGE_IDS.left);
-    if (boxBoundsMm.rightMm > wallLengthMm) ids.push(WALL_BARRIER_EDGE_IDS.right);
-    if (boxBoundsMm.bottomMm < 0) ids.push(WALL_BARRIER_EDGE_IDS.bottom);
-    if (boxBoundsMm.topMm > wallHeightMm) ids.push(WALL_BARRIER_EDGE_IDS.top);
-    return ids;
-  }
-
-
-  // The browser fires a `click` on the grabbed element right after a drag's
-  // pointerup. For a single object that click merely re-selects it (today's
-  // behavior, harmless); after a real GROUP drag the same click would call
-  // onSelectObject non-additively and collapse the whole multi-selection to
-  // Select suppression: when a pointer release triggers a trailing click that
-  // must not collapse a multi-selection (group drags, etc.), mark it here so
-  // the click handler can skip the selection.
-  const { suppressNextSelect, consumeSelectSuppression, suppressNextSelectRef } =
-    useSelectSuppression();
-
-
-  function beginMarquee(event: ReactPointerEvent<SVGSVGElement>) {
-    if (canvasToolArmed) return;
-    // Touch: a finger on true background pans the canvas instead of marqueeing
-    // (the marquee is a mouse-only gesture on tablets). A pinch's 2nd finger was
-    // already claimed (stopPropagation) in the capture handler, so it never
-    // reaches here; the hook decides tap-vs-pan on release. Returns
-    // unconditionally for touch so a finger never falls through into the marquee
-    // path below.
-    if (event.pointerType === "touch") {
-      beginTouchPan(event.clientX, event.clientY);
-      return;
-    }
-
-    // ⌘/Ctrl + primary-button background drag pans the canvas — the modifier-
-    // click sibling of Space/middle-mouse pan, which the user asked for. This
-    // deliberately claims the gesture away from the replace-marquee it would
-    // otherwise start (that marquee is redundant: a plain background drag
-    // already does it, and a plain click still clears). ⌘/Ctrl on an OBJECT
-    // press stays the precision/additive-select modifier — those never reach
-    // here (they stopPropagation). Shift-background-drag stays the additive
-    // marquee. On macOS a Ctrl-click is button 2 / contextmenu, so it never
-    // matches button 0; ctrlKey serves Windows/Linux. The trailing click a
-    // (even zero-move) pan fires is inert here — elevation has no svg click
-    // handler, so a stationary ⌘-press simply leaves the selection intact.
-    if ((event.metaKey || event.ctrlKey) && event.button === 0) {
-      beginMousePan(event.clientX, event.clientY);
-      event.preventDefault();
-      return;
-    }
-
-    // Only true background reaches here: placements/openings stopPropagation in
-    // their own pointerdown. Gated on the multi-select handlers being wired so
-    // that pre-wiring a background press stays inert (no marquee, no clear),
-    // exactly as today. Never start over an in-flight move or HTML5 drop.
-    if (!onMarqueeSelect && !onClearSelection) return;
-    if (moveDrag || dropGhost) return;
-
-    const startMm = toWallLocalMm(event.clientX, event.clientY);
-    if (!startMm) return;
-
-    // Suppress the browser's default press-drag semantics for this gesture:
-    // without this, dragging across the svg selects its text nodes (the
-    // <title>, the chip label), and the NEXT marquee that starts inside that
-    // stale selection becomes a native drag of the selected text — Chrome
-    // then fires pointercancel and kills the gesture mid-flight.
-    event.preventDefault();
-    beginMarqueeGesture({ startMm, currentMm: startMm });
-  }
-
-  function handleSvgPointerDownCapture(event: ReactPointerEvent<SVGSVGElement>) {
-    if (event.pointerType !== "touch") {
-      event.currentTarget.focus({ preventScroll: true });
-    }
-
-    // Pan/pinch gets first refusal, mirroring PlanView. The first touch is
-    // recorded before Measure sees it, so a second touch can promote the
-    // gesture to a pinch; that promotion cancels any one-finger measurement in
-    // flight (touch only — mouse/pen keep their existing behavior via
-    // shouldCancelMeasurementForViewportClaim's pointer-type guard).
-    if (handlePointerDownCapture(event)) {
-      if (
-        shouldCancelMeasurementForViewportClaim(
-          event.pointerType,
-          measurementGestureRef.current !== null
-        )
-      ) {
-        cancelMeasurementPointerGesture();
-      }
-      return;
-    }
-
-    if (measurementActive) {
-      const target = event.target as Element;
-      // Measurement handles/body own the more specific interaction. Their
-      // target handlers run after capture and must not be mistaken for a new
-      // point on the underlying wall.
-      if (target.closest(".measurement-overlay")) return;
-      if (handleMeasurementPointerDown(event)) return;
-      // Rejected measurement presses (Space-pan, secondary buttons) already
-      // went through the viewport engine above.
-    }
-  }
-
-  function beginMoveDrag(wallObject: WallObject, event: ReactPointerEvent<SVGGElement>) {
-    event.stopPropagation();
-    const startPointerMm = toWallLocalMm(event.clientX, event.clientY);
-    if (!startPointerMm) return;
-
-    // Alt-drag opts out of the group branch: one member moves alone while the
-    // multi-selection survives the release (preserveSelection below).
-    const altSoloDrag =
-      event.altKey &&
-      selectedObjectIds.includes(wallObject.id) &&
-      selectedObjectIds.length > 1;
-
-    // Group drag: the pressed object is part of a multi-selection. Resolve the
-    // live members from this wall (stale ids simply drop out), size the union
-    // box, and remember each member's offset from that box's center. Everything
-    // downstream then treats the group as one virtual object.
-    if (!altSoloDrag && selectedObjectIds.includes(wallObject.id) && selectedObjectIds.length > 1) {
-      const groupMembers: WallObject[] = wallObjectsOnThisWall.filter((object) =>
-        selectedObjectIds.includes(object.id)
-      );
-      if (groupMembers.length > 1) {
-        const footprintGroupMembers = groupMembers.map(withResolvedArtworkFootprint);
-        const box = getGroupBounds(footprintGroupMembers);
-        const groupCenterMm: Vector2 = { xMm: box.centerXMm, yMm: box.centerYMm };
-        // Seed against the union box vs every non-member neighbor.
-        const memberIds = new Set(groupMembers.map((member) => member.id));
-        const groupNeighbors = wallObjectsOnThisWall.filter(
-          (object) => !memberIds.has(object.id)
-        );
-        beginMoveDragGesture({
-          wallObjectId: wallObject.id,
-          kind: wallObject.kind,
-          sizeMm: { widthMm: box.widthMm, heightMm: box.heightMm },
-          startPointerMm,
-          startCenterMm: groupCenterMm,
-          previewCenterMm: groupCenterMm,
-          previousSnapTargetIds: undefined,
-          activeGuides: [],
-          brokenBarrierIds: seedBrokenBarrierIds(
-            {
-              leftMm: box.centerXMm - box.widthMm / 2,
-              rightMm: box.centerXMm + box.widthMm / 2,
-              bottomMm: box.centerYMm - box.heightMm / 2,
-              topMm: box.centerYMm + box.heightMm / 2
-            },
-            groupNeighbors
-          ),
-          members: groupMembers.map((member) => ({
-            id: member.id,
-            kind: member.kind,
-            offsetFromGroupCenterMm: {
-              xMm: member.xMm - groupCenterMm.xMm,
-              yMm: member.yMm - groupCenterMm.yMm
-            }
-          })),
-          startGroupCenterMm: groupCenterMm
-        });
-        return;
-      }
-    }
-
-    const footprintWallObject = withResolvedArtworkFootprint(wallObject);
-    beginMoveDragGesture({
-      wallObjectId: wallObject.id,
-      kind: wallObject.kind,
-      sizeMm: {
-        widthMm: footprintWallObject.widthMm,
-        heightMm: footprintWallObject.heightMm
-      },
-      startPointerMm,
-      startCenterMm: { xMm: wallObject.xMm, yMm: wallObject.yMm },
-      previewCenterMm: { xMm: wallObject.xMm, yMm: wallObject.yMm },
-      previousSnapTargetIds: undefined,
-      activeGuides: [],
-      preserveSelection: altSoloDrag,
-      brokenBarrierIds: seedBrokenBarrierIds(
-        getWallObjectBoundsMm(footprintWallObject),
-        wallObjectsOnThisWall.filter((object) => object.id !== wallObject.id)
-      )
-    });
-  }
 
 
   const activeGuides =
@@ -1293,124 +762,28 @@ export function ElevationView({
     );
   }
 
-  // The dimension lines describe what ARRANGE affects. For a multi-selection
-  // that's the ARTWORK members only (openings are architecture — arrange never
-  // moves them, so they don't get gap lines). A single selection of ANY kind
-  // gets its own outer margins (useful to read a lone door/window/work's space
-  // on the wall too). "others" for the neighbour-aware outer segments is every
-  // effective wall object on this wall that isn't a dimension member.
-  const dimensionMemberSource =
-    selectedObjectIds.length === 1
-      ? selectedMembersOnThisWall
-      : selectedMembersOnThisWall.filter((wallObject) => wallObject.kind === "artwork");
-  const isDimensionLinesEligible =
-    dimensionMemberSource.length >= 1 && selectionAllOnThisWall;
-  const effectiveDimensionMembers: WallObjectBase[] = getElevationFootprintObjects(
-    dimensionMemberSource.map((wallObject) => applyDragPreview(wallObject) as WallObject),
-    artworksById
-  );
-  const dimensionMemberIds = new Set(dimensionMemberSource.map((wallObject) => wallObject.id));
-  const dimensionOthers: WallObject[] = wallObjectsOnThisWall
-    .filter((wallObject) => !dimensionMemberIds.has(wallObject.id))
-    .map((wallObject) => applyDragPreview(wallObject) as WallObject);
-  // Projected floor-object ghosts (freestanding cases, suspended artwork) are
-  // alignment aids projected onto this wall — never selectable, never
-  // dimension MEMBERS (they aren't wall objects at all) — but a gap line
-  // should still stop at one exactly like it would at a real neighbor, so a
-  // hung work reads as "close to the case below it" rather than "open to the
-  // wall". Synthesized as bare WallObjectBase shapes (no `kind`, since
-  // getNeighborAwareSegments/deriveVerticalNeighborGaps below only ever read
-  // xMm/yMm/widthMm/heightMm off an "other").
-  const dimensionOtherGhosts: WallObjectBase[] = [
-    ...visibleFloorCaseGhosts.map((ghost) => ({
-      id: ghost.object.id,
-      wallId: wallId ?? "",
-      xMm: (ghost.xMinMm + ghost.xMaxMm) / 2,
-      yMm: ghost.heightMm / 2,
-      widthMm: ghost.xMaxMm - ghost.xMinMm,
-      heightMm: ghost.heightMm
-    })),
-    // Suspended boards join the same pool for the same reason — but their
-    // center is baseHeightMm ABOVE the floor, not heightMm/2 off it. Getting
-    // that wrong would silently drop a vertical gap line onto the floor.
-    ...visibleSuspendedArtworkGhosts.map((ghost) => ({
-      id: ghost.object.id,
-      wallId: wallId ?? "",
-      xMm: (ghost.xMinMm + ghost.xMaxMm) / 2,
-      yMm: ghost.baseHeightMm + ghost.heightMm / 2,
-      widthMm: ghost.xMaxMm - ghost.xMinMm,
-      heightMm: ghost.heightMm
-    })),
-    // A monitor bounds a gap line for the floor case's exact reason — it is
-    // waist-to-eye-height equipment a curator hangs work above and beside. Its
-    // extent is the WHOLE assembly (pedestal + cabinet), standing on the floor,
-    // because that is the volume a dimension has to stop at.
-    ...visibleMonitorGhosts.map((ghost) => {
-      const totalHeightMm = ghost.pedestalHeightMm + ghost.monitorHeightMm;
-      return {
-        id: ghost.object.id,
-        wallId: wallId ?? "",
-        xMm: (ghost.xMinMm + ghost.xMaxMm) / 2,
-        yMm: totalHeightMm / 2,
-        widthMm: ghost.xMaxMm - ghost.xMinMm,
-        heightMm: totalHeightMm
-      };
-    }),
-    // Projected partitions bound a gap line for exactly the same reason — more
-    // strongly, in fact, for an abutting one: the hanging zone it creates ENDS
-    // at the slab, and a dimension running past it would describe wall the
-    // curator can't use. Both tiers participate while ghosts are shown; with
-    // ghosts hidden only the abutting tier survives (see visiblePartitionProfiles).
-    // partitionProfileNeighborShims adds the proximity rule on top: a partition
-    // standing more than PARTITION_NEIGHBOR_MAX_GAP_MM out in the room still
-    // ghosts, but is too far off the wall to bound a measurement on it.
-    ...partitionNeighborShims
-  ];
-  const effectiveDimensionOthers: WallObjectBase[] = [
-    ...getElevationFootprintObjects(dimensionOthers, artworksById),
-    ...dimensionOtherGhosts
-  ];
-  // Idle, or an active "From edges"/"Between works" session → neighbour-aware
-  // (stop at the nearest window/door/work — "From edges" measures to that same
-  // detected boundary, and "Between works" re-spaces about a fixed centre so
-  // its outer edges close on the neighbours; either way the lines should show
-  // the space actually beside the works, per-side falling back to the wall
-  // edge when nothing is there — see getNeighborAwareSegments). Only an active
-  // "Space evenly" session → wall-edge segments, matching that mode's still
-  // wall-only Calculated readout (it solves the whole-wall/open-zone spread).
-  const dimensionSegments =
-    arrangeSessionMode === "equal"
-      ? getSpacingSegments(effectiveDimensionMembers, wallLengthMm)
-      : getNeighborAwareSegments(
-          effectiveDimensionMembers,
-          effectiveDimensionOthers,
-          wallLengthMm
-        );
-  // Vertical spacing for stacked works — the same §9.6 corridor engine the
-  // document PDF uses. Every wall object participates (an unselected neighbor
-  // above/below still bounds and blocks, exactly like the horizontal
-  // neighbour-aware segments), then only gaps touching a dimension member
-  // render, keeping the display selection-driven. `kind` is irrelevant to the
-  // vertical pass (it only drives boundary margins and center heights, which
-  // this caller never derives), so all participants pass as "artwork".
-  const verticalGapDimensions = isDimensionLinesEligible
-    ? deriveVerticalNeighborGaps(
-        [...effectiveDimensionMembers, ...effectiveDimensionOthers].map(
-          (wallObject): DimensionParticipant => ({
-            id: wallObject.id,
-            kind: "artwork",
-            rect: {
-              xMm: wallObject.xMm - wallObject.widthMm / 2,
-              yMm: wallObject.yMm - wallObject.heightMm / 2,
-              widthMm: wallObject.widthMm,
-              heightMm: wallObject.heightMm
-            }
-          })
-        )
-      ).filter(
-        (gap) => dimensionMemberIds.has(gap.aId) || dimensionMemberIds.has(gap.bId)
-      )
-    : [];
+  // The dimension-line derivations live in elevationDimensionModel.ts (pure,
+  // no React) — same computations, same order, called plainly each render.
+  const {
+    isDimensionLinesEligible,
+    effectiveDimensionMembers,
+    dimensionSegments,
+    verticalGapDimensions
+  } = buildElevationDimensionModel({
+    selectedObjectIds,
+    selectedMembersOnThisWall,
+    selectionAllOnThisWall,
+    applyDragPreview,
+    artworksById,
+    wallObjectsOnThisWall,
+    visibleFloorCaseGhosts,
+    visibleSuspendedArtworkGhosts,
+    visibleMonitorGhosts,
+    partitionNeighborShims,
+    wallId,
+    wallLengthMm,
+    arrangeSessionMode
+  });
 
   // Wall switcher wiring for the chip — see WallSwitcherChip, which the open-
   // wall empty state renders too so the switcher survives navigating to a wall
