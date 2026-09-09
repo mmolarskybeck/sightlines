@@ -302,4 +302,3 @@ function IconTooltip({
     </Tooltip>
   );
 }
-

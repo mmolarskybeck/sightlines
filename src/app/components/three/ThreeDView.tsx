@@ -23,7 +23,7 @@ import {
   getArtworkOuterDimensionsMm
 } from "../../../domain/framing";
 import { getPlaceableFloorWalls } from "../../../domain/geometry/planObjects";
-import { deriveScene3d, type Scene3d } from "../../../domain/geometry/scene3d";
+import { deriveScene3d } from "../../../domain/geometry/scene3d";
 import { effectiveFloorDepthMm } from "../../../domain/placement/artworkForm";
 import {
   getEffectivePlacementSizeMm,
@@ -64,23 +64,11 @@ import {
 } from "./objectDrag";
 import { ThreeObjectDragContext, type ThreeObjectDragApi } from "./objectDragContext";
 import { ThreeDViewportControls } from "./ThreeDViewportControls";
-import { fitDistance } from "./cameraFit";
 import {
   ORBIT_MAX_DISTANCE,
   ORBIT_MIN_DISTANCE,
-  canZoomStep,
-  clampFocusDistance,
-  clampZoomFactorToEnvelope,
-  eyeLevelArtworkDistanceMm,
-  eyeLevelWallDistanceMm,
   sightlineOccluders,
-  type CameraPose,
-  type SightlineSegment,
-  keyboardZoomFactor,
-  normalizeWheelDeltaY,
-  travelStepDistance,
-  updateCameraClipping,
-  zoomFactorFromDelta
+  type CameraPose
 } from "./cameraNav";
 import { MM_TO_WORLD } from "./coordinates";
 import {

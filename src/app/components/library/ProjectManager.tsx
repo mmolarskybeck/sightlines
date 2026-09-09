@@ -597,4 +597,3 @@ function formatUpdatedAt(updatedAt: string): string {
 
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
-

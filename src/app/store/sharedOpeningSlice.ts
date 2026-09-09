@@ -1,6 +1,6 @@
 import { parseFaceWallId } from "../../domain/geometry/freestandingWalls";
 import { areSharedBoundaryWalls, mirrorOpeningXMm } from "../../domain/geometry/sharedWalls";
-import { isConnectableOpening } from "../../domain/geometry/sharedOpeningStatus";
+import { isConnectableOpening } from "../../domain/geometry/openingGuards";
 import { newId } from "../../domain/id";
 import { isStructurallyValidPair } from "../../domain/placement/openingPairs";
 import { isOpeningSlotFree } from "../../domain/placement/openingSlots";

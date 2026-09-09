@@ -1,5 +1,5 @@
 import { parseFaceWallId } from "../geometry/freestandingWalls";
-import { isConnectableOpening } from "../geometry/sharedOpeningStatus";
+import { isConnectableOpening } from "../geometry/openingGuards";
 import { getOpenWallIds } from "../geometry/wallCascade";
 import {
   buildFloorWallsById,

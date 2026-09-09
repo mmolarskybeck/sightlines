@@ -161,13 +161,9 @@ export function App() {
   const selection = useAppStore((state) => state.selection);
   const wallContextId = useAppStore((state) => state.wallContextId);
   const arrangeSession = useAppStore((state) => state.arrangeSession);
-  const lastArrangeMode = useAppStore((state) => state.lastArrangeMode);
-  const lastInsetAnchor = useAppStore((state) => state.lastInsetAnchor);
-  const lastEvenZone = useAppStore((state) => state.lastEvenZone);
   const viewMode = useAppStore((state) => state.viewMode);
   const error = useAppStore((state) => state.error);
   const placementWarnings = useAppStore((state) => state.placementWarnings);
-  const lastGeometryEdit = useAppStore((state) => state.lastGeometryEdit);
   const libraryArtworks = useAppStore((state) => state.libraryArtworks);
   const intakeState = useAppStore((state) => state.intakeState);
   const pendingDuplicateUploads = useAppStore((state) => state.pendingDuplicateUploads);
@@ -185,13 +181,9 @@ export function App() {
   const focusWallContext = useAppStore((state) => state.focusWallContext);
   const selectArtwork = useAppStore((state) => state.selectArtwork);
   const selectOpening = useAppStore((state) => state.selectOpening);
-  const addReferenceMeasurement = useAppStore((state) => state.addReferenceMeasurement);
-  const updateReferenceMeasurement = useAppStore((state) => state.updateReferenceMeasurement);
-  const deleteReferenceMeasurement = useAppStore((state) => state.deleteReferenceMeasurement);
   const saveView = useAppStore((state) => state.saveView);
   const renameSavedView = useAppStore((state) => state.renameSavedView);
   const deleteSavedView = useAppStore((state) => state.deleteSavedView);
-  const viewFreestandingFace = useAppStore((state) => state.viewFreestandingFace);
   const selectObject = useAppStore((state) => state.selectObject);
   const setObjectSelection = useAppStore((state) => state.setObjectSelection);
   const clearObjectSelection = useAppStore((state) => state.clearObjectSelection);
@@ -202,23 +194,13 @@ export function App() {
   const duplicateFreestandingWall = useAppStore((state) => state.duplicateFreestandingWall);
   const moveFreestandingWall = useAppStore((state) => state.moveFreestandingWall);
   const moveFreestandingWallEndpoint = useAppStore((state) => state.moveFreestandingWallEndpoint);
-  const rotateFreestandingWall = useAppStore((state) => state.rotateFreestandingWall);
-  const centerFreestandingWall = useAppStore((state) => state.centerFreestandingWall);
-  const setFreestandingWallThickness = useAppStore((state) => state.setFreestandingWallThickness);
-  const setFreestandingWallLength = useAppStore((state) => state.setFreestandingWallLength);
-  const setFreestandingWallHeight = useAppStore((state) => state.setFreestandingWallHeight);
-  const setFreestandingWallClearance = useAppStore((state) => state.setFreestandingWallClearance);
   const deleteFreestandingWall = useAppStore((state) => state.deleteFreestandingWall);
   const renameRoom = useAppStore((state) => state.renameRoom);
   const deleteRoom = useAppStore((state) => state.deleteRoom);
-  const openWall = useAppStore((state) => state.openWall);
   const restoreWall = useAppStore((state) => state.restoreWall);
   const setUnit = useAppStore((state) => state.setUnit);
   const setChecklistView = useAppStore((state) => state.setChecklistView);
-  const resizeSelectedWall = useAppStore((state) => state.resizeSelectedWall);
-  const resizeRoomHeight = useAppStore((state) => state.resizeRoomHeight);
   const resizeWall = useAppStore((state) => state.resizeWall);
-  const setPolygonWallLength = useAppStore((state) => state.setPolygonWallLength);
   const undo = useAppStore((state) => state.undo);
   const redo = useAppStore((state) => state.redo);
   const importProjectJson = useAppStore((state) => state.importProjectJson);
@@ -235,52 +217,24 @@ export function App() {
   const dismissDuplicateUploads = useAppStore((state) => state.dismissDuplicateUploads);
   const removeArtworkFromChecklist = useAppStore((state) => state.removeArtworkFromChecklist);
   const deleteLibraryArtworks = useAppStore((state) => state.deleteLibraryArtworks);
-  const updateArtwork = useAppStore((state) => state.updateArtwork);
   const updateArtworksMatFrame = useAppStore((state) => state.updateArtworksMatFrame);
   const placeArtwork = useAppStore((state) => state.placeArtwork);
   const placeArtworkOnFloor = useAppStore((state) => state.placeArtworkOnFloor);
-  const setArtworkPlacementForm = useAppStore((state) => state.setArtworkPlacementForm);
   const moveArtworkPlacement = useAppStore((state) => state.moveArtworkPlacement);
   const removePlacement = useAppStore((state) => state.removePlacement);
-  const addOpening = useAppStore((state) => state.addOpening);
-  const addWallCase = useAppStore((state) => state.addWallCase);
   const moveOpening = useAppStore((state) => state.moveOpening);
-  const resizeOpening = useAppStore((state) => state.resizeOpening);
-  const fitOpeningToAvailableSpan = useAppStore((state) => state.fitOpeningToAvailableSpan);
-  const updateDoorLeaf = useAppStore((state) => state.updateDoorLeaf);
   // The five shared-opening resolutions. Each one re-derives its own guard from
   // the current project inside the store — the inspector only ever asks.
-  const resolveSharedOpening = useAppStore((state) => state.resolveSharedOpening);
-  const completeSharedOpening = useAppStore((state) => state.completeSharedOpening);
-  const realignSharedOpening = useAppStore((state) => state.realignSharedOpening);
-  const splitSharedOpening = useAppStore((state) => state.splitSharedOpening);
-  const keepThisOpeningOnly = useAppStore((state) => state.keepThisOpeningOnly);
-  const renameWallText = useAppStore((state) => state.renameWallText);
   const placeOpeningOnElevation = useAppStore((state) => state.placeOpeningOnElevation);
   const commitPlanMove = useAppStore((state) => state.commitPlanMove);
-  const updateFloorObject = useAppStore((state) => state.updateFloorObject);
-  const setFloorArtworkImageFaces = useAppStore((state) => state.setFloorArtworkImageFaces);
-  const setFloorArtworkMonitorSupport = useAppStore(
-    (state) => state.setFloorArtworkMonitorSupport
-  );
-  const pairFloorArtworksBackToBack = useAppStore(
-    (state) => state.pairFloorArtworksBackToBack
-  );
-  const updateWallCase = useAppStore((state) => state.updateWallCase);
   const moveWallObjectPlacement = useAppStore((state) => state.moveWallObjectPlacement);
   const moveWallObjectsGroup = useAppStore((state) => state.moveWallObjectsGroup);
   const movePlanObjectsGroup = useAppStore((state) => state.movePlanObjectsGroup);
   const removeSelectedPlacements = useAppStore((state) => state.removeSelectedPlacements);
   const beginArrangeSession = useAppStore((state) => state.beginArrangeSession);
-  const setArrangeAnchor = useAppStore((state) => state.setArrangeAnchor);
-  const setArrangeEvenZone = useAppStore((state) => state.setArrangeEvenZone);
-  const updateArrangeSession = useAppStore((state) => state.updateArrangeSession);
   const setArrangeSessionPreview = useAppStore((state) => state.setArrangeSessionPreview);
   const commitArrangeSession = useAppStore((state) => state.commitArrangeSession);
   const cancelArrangeSession = useAppStore((state) => state.cancelArrangeSession);
-  const centerSelectionBetweenBoundaries = useAppStore(
-    (state) => state.centerSelectionBetweenBoundaries
-  );
   // Selection union is the source of truth; single-subject ids resolve live.
   const selectedObjectIds = objectIdsOf(selection);
   const selectedRoomId = roomIdOf(selection);
