@@ -102,7 +102,7 @@ export function useArrangeNudgeShortcuts({
         event.key === "ArrowUp" ||
         event.key === "ArrowDown";
       if (!isArrow) return;
-      // 3D is a nudge surface too now (docs/interaction-improvements-2026-08.md
+      // 3D is a nudge surface too now (docs/archive/interaction-improvements-2026-08.md
       // §4), but only for the single wall-artwork case below: the multi-select
       // path opens an arrange session whose preview renders in ELEVATION only,
       // so in 3D it would move works with nothing on screen to show for it.

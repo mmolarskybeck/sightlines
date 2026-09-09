@@ -6,7 +6,7 @@ It is the sharing and backup format (docs/plan.md §6), designed so a project ca
 travel to another machine with a different — or empty — artwork library and still
 open completely.
 
-This document describes the **export** format. Import is a later slice; every
+This document describes the export format and the import pipeline; every
 decision here is made to keep that pipeline (docs/plan.md §13:
 parse → validate shape → migrate → validate → persist, dedupe by sha256, graceful
 missing-asset degradation) straightforward to build.
@@ -15,7 +15,7 @@ Relevant code:
 - `src/domain/schema/packageSchema.ts` — the manifest zod contract (`SightlinesPackage`).
 - `src/domain/package/buildPackage.ts` — pure manifest + file-list derivation.
 - `src/domain/package/zipPackage.ts` — the fflate zip writer / reader.
-- `src/app/store.ts` — `exportProjectPackage(mode)` action wiring it to repositories.
+- `src/app/store/packageSlice.ts` — `exportProjectPackage(mode)` action wiring it to repositories.
 
 ## Zip layout
 
@@ -166,7 +166,7 @@ commit step; cancelling the conflict dialog discards the import completely.
 Relevant code: `src/domain/package/extractPackage.ts` (zip safety),
 `readPackageManifest` in `packageSchema.ts` (staged manifest parse),
 `src/domain/package/importPackage.ts` (asset validation, merge planning,
-finalize), `importSightlinesPackage` in `src/app/store.ts` (wiring + persistence),
+finalize), `importSightlinesPackage` in `src/app/store/packageSlice.ts` (wiring + persistence),
 `src/app/components/imports/ImportConflictDialog.tsx` (one-step conflict review).
 
 ### Zip safety caps (enforced on declared sizes, BEFORE inflation)
@@ -204,7 +204,7 @@ documents. Import therefore parses in stages:
    artworks: unknown[], assets }` validates the wrapper only.
 3. **Migrate embedded documents** — the embedded project and artworks run the
    SAME migration chains the app uses when loading from IndexedDB
-   (`migrateProject` v1→v3, `migrateArtwork`), so a v1-era package opens exactly
+   (`migrateProject` v1→v5, `migrateArtwork`), so a v1-era package opens exactly
    like a v1-era local file.
 4. **Strict validation** — the assembled, fully-migrated manifest must pass the
    same contract export writes.

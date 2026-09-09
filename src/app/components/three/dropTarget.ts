@@ -154,7 +154,7 @@ function clampSpan(rawMm: number, spanMm: number, extentMm: number): number {
 // placeable (an open wall, or one from another floor/stale scene) — the drop
 // is then a no-op, matching plan's rejected-drop behavior.
 //
-// INTENT WINS (docs/interaction-improvements-2026-08.md §3): the artwork's own
+// INTENT WINS (docs/archive/interaction-improvements-2026-08.md §3): the artwork's own
 // placementForm is never consulted. A wall hit places on the wall and a floor
 // hit places on the floor, for any work.
 export function resolveThreeDrop(args: {

@@ -8,7 +8,7 @@
 
 **Tech Stack:** React 18 + TypeScript strict, zustand 5, vitest (jsdom), Vite 6 build.
 
-**Spec:** `docs/superpowers/specs/2026-07-07-store-selection-normalization-design.md` — read it before starting any task.
+**Spec:** `docs/archive/2026-07-07-store-selection-normalization-design.md` — read it before starting any task.
 
 ## Global Constraints
 

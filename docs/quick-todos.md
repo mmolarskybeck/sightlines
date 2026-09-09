@@ -1,62 +1,31 @@
 # Quick Todos
 
-Here is where I gather small, actionable tasks and scraps for future implementation, things that don't fit cleanly into the overall roadmap and aren't necessarily part of major features.
+Small, actionable scraps that don't fit the roadmap (`docs/plan.md` §9) or the Near-Term Order in `docs/status.md`. Cross an item off by deleting it — shipped work is recorded in `docs/status.md`, not here.
 
-## Open Scraps
+## UI / UX
 
-### ui / ux
+* Polish the single-artwork inspector view and move Arrange higher up so it is easier to reach.
+* Plan-view placement rectangles are still hard to see; petrol may be the wrong wall-select color (not enough contrast against black).
+* Dimension lines only appear on selection. Add an always-visible option (elevation: spacing between every object on the visible wall, with intelligent changes on drag), and a switchable floor-to-bottom-of-work dimension family — noisy most of the time, wanted on PDF/PNG export.
+* Hand tool for plan/elevation: 2D pan is gesture-only (space-drag, middle/right-drag). If the 3D hand tool tests well, add the same button for consistency.
 
-* polish single artwork inspector view and make arrange higher up so it's easier to access / has better ui/ux?
+## Project management
 
-## project management
+* Bulk edit of projects in the project manager.
+* Preview image per project row (overhead 3D or plan-view thumbnail).
 
-* bulk edit of projects in the project manager?
-* add preview image to project management? either a 3d preview overhead view or plan view preview?
+## Display types and floor objects (deferred from the 2026-08-28 feedback round)
 
-## possible adds
+* Pedestal options: colors/materials, custom pedestal dimensions, and possibly a standalone placeable plinth that other floor works can sit on.
+* More display types: wall-mounted flatscreen (slim black bezel, no frame options), projection with a soft-edged image or projector-beam glyph. Both are approximable today as plain wall works — build only when the approximation falls short.
+* Medium auto-detect nudge: a one-time "Looks like a video work — display as monitor?" suggestion. Rejected as the primary mechanism; fine as a discoverability nudge.
+* CRT niceties: screen glow/emissive so a "playing" monitor reads as lit in 3D; multi-monitor stacks and video walls.
+* Elevation ghosts for floor-resting works (`baseHeightMm = 0`) — the monitor is the one family that has one; generalize to all floor artworks.
 
-* By default, dimension lines currently appear when objects/works are selected, but we should have an option to have these visible all the time (w maybe intelligent changes on drag, to change which dims are visible?) - by default this would show the spacing in between every object/artwork on the visible wall (in elevation mode)
-* and a way to switch on other dimension lines being visible, line the space from the floor to the bottom of each work? this is noisy most of the time but there are scenarios where you’d want to see it (especially also on export as pdf or elevation png)
+## Mobile / phone view
 
-## mobile / phone view
-
-* Drawing room tool - needs better feedback, way to unplace a point or rearrange it maybe? Easy to make mistakes (current behavior on touch/iOS seems to require one gesture to draw line, and a second one to place the point down? This feels a bit weird but idk how to improve it)
-* No backspace so we have a little floating delete button OR maybe better context menu on long press to delete?
-* If we remove scale dropdown or move it up to main nav bar, or somewhere, maybe we have room for whole toolbar
-* Consider making left rail a bit narrower ?
-* for phones or very small viewports, we should make checklist, rooms & walls, and the inspector into sheets/drawers
-
-### 3d objects & sculptures
-
-* add plinths and make floor objects placeable on top of them?
-* 3d/floor objects need a way to be rotated
-
-## Done / Folded Back Into Status
-
-(Shipped items are summarized in `docs/status.md`; fuller detail kept here until it stops being useful.)
-
-* (2026-07-12 batch) Doors pinned to the floorline in elevation: elevation placement ignores pointer y for doors (ghost rides the floor), `moveOpening` hard-clamps door `yMm = heightMm/2`, height edits keep the bottom on the floor, and the door inspector hides the pinned Y field. Windows/blocked-zones untouched.
-* (2026-07-12 batch) Toasts via shadcn sonner (`ui/sonner.tsx`, light theme, bottom-center; overrides scoped under `.sonner-toaster` beat sonner's runtime stylesheet; no richColors — white card, semantic color on icon/border only). Export success/failure and import success/warnings/failure now toast (import successes no longer misuse the red error banner). Placed checklist rows warn via toast on an actual drag attempt — press must travel past the touch-drag slop or escape the row while held; a plain selection click stays silent.
-* (2026-07-12 batch) Elevation wall switcher redesigned (`WallSwitcher.tsx` on Radix DropdownMenu with new Sub/Radio wrappers): current room's perimeter walls inline + indented "Partitions" section (faces from `getRoomPlaceableWalls`), other rooms as submenus, flat list for single-room projects, trigger shows "Room · Wall" when multi-room. Prev/next stepping walks perimeter → faces → next room unchanged.
-* (2026-07-12 batch) Project manager modal (`ProjectManager.tsx`, Radix Dialog; ProjectPicker reduced to the trigger): per-row open, inline pencil rename (`renameProjectById`, syncs the open project), two-step inline delete confirm (no window.confirm), quick `.sightlines` export without opening (`exportProjectPackageById`, shares `buildPackageZip` with the main export, toasts on success/failure). `ProjectSummary` gained `roomCount`/`artworkCount`, populated cheaply in `toProjectSummary`.
-* (2026-07-12 batch, clearance model reworked same day after Marina's review) Partition alignment package: `partitionSpacing.ts` computes FOUR-SIDED, face-accurate clearances — normal-axis gaps ray-cast from the slab faces, span-axis gaps from the endpoints — against room perimeter PLUS every other partition's slab outline (neighboring partitions count as boundaries everywhere). "Center between walls" / "Center along span" inspector buttons via `centerFreestandingWallBetweenWalls` (+ `centerFreestandingWall` store action through `runPartitionEdit`, undo free; errors "Nothing on both sides to center between." when a ray misses) — centering equalizes the true displayed gaps, respecting partition neighbors. Move-drags snap to per-world-axis equidistant-between-neighbors targets (midpoint of the two extent-point hits, so the snapped position reads equal gaps; skipped when the partition is >15° off-axis) plus sibling-partition midpoint alignment, guides through the existing `.snap-guide` chain; endpoint drags wall-kiss via `snapDrawPointToRooms` (Shift-lock > wall-kiss > grid). `PartitionDimensionLines.tsx` renders all four side gaps at rest when selected; during a move drag only the axes actually moved show (per-axis latch at half the snap threshold, no dims until real travel). Centering buttons speak world-axis language — "Center left–right" / "Center up–down" via `partitionAxisForWorldAxis` (dominant-component mapping, 45° tie documented). Partition snap guides are clipped to the containing room's bounds (`Guide.extentMm`, ~200mm overshoot); other drags' guides untouched.
-
-* Added an eyeline (centerline) show/hide toggle in elevation mode, mirroring the grid toggle's state, storage, and UI pattern; centerline alignment snapping stays active while hidden, matching how grid snap stays independent of grid visibility.
-* Added framing + matting previews. Optional additive `matWidthMm` + `frame` ({widthMm, finish}) on the artwork record (no schema-version bump). Elevation draws flat frame ring → off-white mat ring → image, with a thin bevel hairline at the mat opening; selection outline wraps the outer rect. Plan widens the artwork's along-wall extent by the outer width ("simple dim change"). Finishes via dropdown (gold/white/black/silver/wood); mat/frame fields carry band-width placeholder examples (3"/1", 75/25 mm); "Overall" W × H are editable LengthFields that solve for the frame band (mat untouched; overall = image + 2·mat clears the frame, smaller errors in the field's message slot). Frame band always reads via thin hairlines at its outer edge and the frame/mat (or frame/image) boundary. Pure `getArtworkOuterDimensionsMm` + `deriveFrameWidthFromOverallMm` helpers in `src/domain/framing.ts`. Artwork inspector reworked into collapsible `InspectorSection` rows (Radix Collapsible; Dimensions / Mat & frame / Position / Details) with at-rest summaries and per-section open state persisted in view preferences. Wall-placement validation, snapping, barriers, ghosts, marquee, outlines, fit-selected, arrangement, neighbor detection, spacing readouts, and dimension lines now use outer framed footprints; floor-placed artwork in plan remains deliberately unframed pending the representation decision in `docs/framing-dimension-contract.md`.
-* Fixed dims input UI/UX: length fields now reserve a stable message slot for conversion previews/errors.
-* Added plan-wall click selection without conflicting with object selection or armed placement tools.
-* Moved plan-mode door/window/blocked-zone placement into the top-bar insert workflow.
-* Made the thin rectangle SVGs defining placement of art/objects in plan mode more visible and distinguishable --> let's refine and improve this, they are hard to see - also maybe petrol is not a good select color for wall select, bc not enough contrast w black
-* when an artwork is dragged into the workspace, the little thumbnail that appears should be at the correct aspect ratio (currently squished)
-* (shipped, dim lines) between-works tab now shows neighbour-aware outer dim lines: when the selected group has an artwork/group beside it on a side, the outer dim line stops at that neighbour's nearest edge (per-side fallback to the wall edge when nothing is beside it). The between-works inspector body mirrors this with two per-side calculated distance readouts (Neighbor-tagged when the target is a work). Reused getNeighborAwareSegments / detectBoundary — no new "neighbor" notion.
-  * NOTE re: granular numeric adjustment of the left/right gaps to neighbour groups — this ALREADY exists via the "From edges" tab: its left/right/both anchors measure to and slide the group against detectBoundary's target, which is the nearest neighbour edge (wall only when there's no neighbour). So the "version of from wall edges but treating the neighbour groups as targets" is the From-edges tab today. Only remaining question is whether that adjustment should also be reachable from inside the between-works tab itself (currently between-works stays center-fixed and edits interior gap only); left as-is since it would duplicate From-edges.
-* we need some sort of way to resolve/handle when dims don't perfectly match the aspect ratio of the image
-  * for instance, we could add an option to arrive image aspect ratio w the accurate dims, but we don't want to the resulting image preview to appear squished/distorted
-* (shipped) checklist sort dropdown redesigned as a petrol-tinted trigger subordinate to the filter tabs (`checklist-sort-trigger`, `ChecklistPanel.tsx`).
-* (shipped) imperial/metric switch replaced by a proper Settings "Display units" select — no longer a thin double-pill toggle.
-* (shipped) "add to this wall" door/window/blocked-zone buttons are now equally sized chips with hover tooltips (`opening-add-chip`, `WallInspector.tsx`).
-* (shipped) checklist/rooms&walls pane is resizable (`PanelResizeHandle`) and the inspector pane is resizable and collapsible (`right-collapsed` state, `App.tsx`).
-* (shipped) entering one artwork dimension (width or height) autopopulates the other from the image's aspect ratio on blur/return, still manually editable (`applyAspectFill`/`isAspectLocked`, `domain/units/aspectFill.ts`).
-* (shipped) artwork dim entry fields reserve a stable message slot for conversion previews/errors so layout doesn't shift (`LengthField.tsx`).
-* (shipped) artwork inspector shows an aspect-true thumbnail next to the work's name, and Dimensions is now the first section (Framing, then Details below it) (`ArtworkInspector.tsx`).
-* (shipped) frames and mats now render in 3D: `ArtworkPlane` extrudes a real frame ring + mat band with finish-aware edge hairlines and a wall-contact seam.
+* Room-drawing tool needs better touch feedback and a way to undo or move a point; iOS currently seems to need one gesture to draw the line and another to place the point.
+* No Backspace on touch: a floating delete button, or a long-press context menu with delete.
+* If the scale dropdown moves to the main nav, the whole toolbar may fit.
+* Consider a narrower left rail.
+* On phones or very small viewports, make checklist, rooms & walls, and the inspector into sheets/drawers.

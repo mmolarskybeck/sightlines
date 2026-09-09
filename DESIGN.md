@@ -80,7 +80,7 @@ Sightlines mixes square workspace structure with softer floating surfaces: recta
 - Borderless selected fills, rail buttons, and menu rows may use a 10px radius.
 - Soft-control grammar (this branch's speculative reroll):
   - **Navigation** — the topbar Plan/Elevation/3D tabs — uses transparent
-    underline tabs whose 2px petrol underline *slides* between tabs (220ms
+    underline tabs whose 3px petrol underline *slides* between tabs (220ms
     `--ease-soft`, suppressed under reduced motion): the original petrol
     identity plus the sliding motion.
   - **Value pickers** — checklist filters, units, arrange modes,
@@ -168,7 +168,7 @@ Use the primitive variants first. Add bespoke CSS only when the component is can
 - Use Radix Switch only when the binary state benefits from a switch; the unit selector is intentionally a two-label segmented switch.
 - Use petrol-filled primary buttons sparingly. `Import` is currently the main solid CTA in the workspace.
 - Every interactive control needs hover, pressed/active, disabled, and focus-visible states.
-- Toolbar verbs carry single-key shortcuts in the 2D views (never 3D, where WASD travels): D door, W window, B blocked zone, P partition, R rectangle room and ⇧R room outline (Plan), G grid, S snap, O overlap, E eyeline (Elevation) — `useToolbarShortcuts.ts`, suppressed while typing or while a dialog is open. Every toolbar tooltip echoes its key in a shared `Kbd` chip (for example, "Insert door" followed by `D`); an armed tool's tooltip teaches its gesture and exit instead (for example, "Click to place door" followed by `Esc`).
+- Toolbar verbs carry single-key shortcuts in the 2D views (never 3D, where WASD travels): D door, W window, B blocked zone, P partition, R rectangle room and ⇧R room outline (Plan), G grid, S snap, O overlap, E eyeline and H ghosts (Elevation), T wall text, C display case (Plan), M measure — `useToolbarShortcuts.ts`, suppressed while typing or while a dialog is open. Every toolbar tooltip echoes its key in a shared `Kbd` chip (for example, "Insert door" followed by `D`); an armed tool's tooltip teaches its gesture and exit instead (for example, "Click to place door" followed by `Esc`).
 - Toolbar controls that disable use `aria-disabled`, staying focusable with clicks inert, and the reason rides the same styled toolbar tooltip on hover and focus — never a native `title`. Either cluster's compact trigger shows the armed tool's own glyph and name ("Rectangle room") so armed identity survives the narrow tiers.
 - Dialogs and wizards follow the overlay grammar: rounded 12px shell, soft shadow, a compact inline stepper or breadcrumb for multi-step flows (never a full-width bordered tab grid), centered rounded drop targets for uploads, and a single subtle top rule grounding the footer actions. Section structure inside the body comes from spacing, not rules.
 

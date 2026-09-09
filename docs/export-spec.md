@@ -358,9 +358,10 @@ image**, **Export PDF**, or **Export backup**. The Settings dialog's existing
 
 ## 5. Entry points
 
-- A single **Export** affordance in the workspace chrome opens a small menu:
-  **Export image** (with the current view named, e.g. "Export image of
-  elevation") and **Export PDF…**. The ellipsis signals that only the PDF
+- **Export image** (with the current view named, e.g. "Export image of
+  elevation") is a one-click topbar button; the adjacent **Export** menu holds
+  **Export PDF…**, **Export checklist…**, and the Project backup (`.sightlines`)
+  submenu. The ellipsis signals that only the PDF
   path opens a dialog.
 - In the 3D view, **Save view** lives alongside Export image; it is the
   bookmark action for §8 and gives immediate feedback (§8.2) rather than
@@ -425,7 +426,7 @@ and degrade gracefully (scrolling sub-lists) at 10 rooms / 40 walls.
   assembly runs affect the project, never the in-flight document — the
   delivered PDF always describes exactly one coherent state.
 - If every section is unchecked, the primary action is disabled with inline
-  text: **Choose at least one section.**
+  text: **Select at least one page.**
 
 ### 6.3 Persistence boundary
 

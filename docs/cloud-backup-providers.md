@@ -29,8 +29,8 @@ Dropbox backup does not merge simultaneous edits or provide collaborative editin
 The conflict-handling decision has since been made (2026-08-19): cross-device sync
 will use a canonical per-project file with revision-conditional writes and
 whole-project conflict choices — no layout merging. Design and staged roadmap:
-`docs/cloud-sync-plan.md` (not yet built; the shipped behavior remains versioned
-file backup as described here).
+`docs/cloud-sync-plan.md` — stages 1–2 (cloud project browser, canonical sync
+head) shipped 2026-08-19 → 20; stages 3–4 remain designed, not built.
 
 Share links are snapshot handoffs, not collaboration. Sightlines writes each shared
 snapshot under `/shares` in the user's Dropbox app folder, outside automatic backup
@@ -48,7 +48,7 @@ of feature parity or a target release date. The next provider should preserve th
 same local-first package contract while satisfying its own OAuth, token storage,
 verification, and institutional-admin requirements.
 
-**Deployment note:** OAuth redirect URIs are exact-match per origin. The Dropbox app must list every origin the app is served from — currently `https://app.sightlines.art/`, the temporary Vercel mirror `https://sightlines-three.vercel.app/` (corporate-firewall workaround while the domain is <30 days old; no CSP applies there since `public/_headers` is Cloudflare-only), and `http://localhost:5173/` for dev. Browser storage is per-origin, but backups from all origins land in the same Dropbox app folder — cloud backup is the bridge between origins and the migration path when the mirror is retired (~Aug 2026).
+**Deployment note:** OAuth redirect URIs are exact-match per origin. The Dropbox app must list every origin the app is served from — currently `https://app.sightlines.art/`, the temporary Vercel mirror `https://sightlines-three.vercel.app/` (corporate-firewall workaround while the domain is <30 days old; the mirror carries its own header set incl. CSP from `vercel.json`, while Cloudflare uses `public/_headers`), and `http://localhost:5173/` for dev. Browser storage is per-origin, but backups from all origins land in the same Dropbox app folder — cloud backup is the bridge between origins and the migration path when the mirror is retired (~Aug 2026).
 
 
 There are really three different "approval" layers, and the providers emphasize different ones:

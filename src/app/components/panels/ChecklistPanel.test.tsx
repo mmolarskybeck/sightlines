@@ -120,7 +120,7 @@ describe("ChecklistPanel temporary views", () => {
     );
   });
 
-  // Regression coverage for the bug in docs/interaction-improvements-2026-08.md
+  // Regression coverage for the bug in docs/archive/interaction-improvements-2026-08.md
   // §1: the auto-expand-on-selection effect used to depend on an unmemoized
   // `rows` array, so it re-fired on every render — including the render
   // caused by the user's own collapse click — and immediately re-opened the

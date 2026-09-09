@@ -15,8 +15,8 @@ required for conflict handling" — the decision is now made.
 
 ## Problem
 
-Dropbox backup today is upload-only (the scopes deliberately exclude
-`files.content.read`), so there is no way to pull a project onto another device.
+Before stage 1, Dropbox backup was upload-only (the scopes excluded
+`files.content.read`), so there was no way to pull a project onto another device.
 In practice the user works around this by sending themselves share links — and every
 share-link open forcibly mints a new project UUID (`forceProjectCopy`), which creates
 a new `/backups/<Title> — <id8>/` folder with its own five-copy retention. Working on
@@ -124,7 +124,7 @@ if artwork records actually conflict.
 ## Replace mode is real new work
 
 The current import commit path never overwrites anything — that is why
-`packageSlice.ts`'s commit carries a "No recovery snapshot" comment, and why the
+`projectManagerSlice.ts`'s commit carries a "No recovery snapshot" comment, and why the
 commit sequence is a non-atomic multi-step write (project record → assets →
 artworks → repair re-persist). That rationale inverts the moment a replace mode
 exists. Prerequisites for any replacement, in order:

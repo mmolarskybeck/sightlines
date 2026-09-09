@@ -1,3 +1,5 @@
+> **Archived 2026-09-08.** Everything in scope here shipped (see `docs/status.md` Shipped rounds); the deferred ideas were moved to `docs/quick-todos.md` and the decisions to `docs/decisions.md`. Kept as the record of what was asked and why.
+
 # Interaction improvements — August 2026
 
 Plan for five interaction items requested 2026-08-11. Ordered by dependency and

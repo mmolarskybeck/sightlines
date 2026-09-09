@@ -155,7 +155,8 @@ curl --resolve sightlines.art:443:192.0.2.1 https://sightlines.art/
   styles for parts of the editor UI.
 - Root `public/robots.txt` and `public/.well-known/security.txt` are trust
   signals.
-- `worker/index.ts` handles `/api/analytics`; all other requests are served by
+- `worker/index.ts` handles `/api/analytics` and `/api/dropbox-share` (the
+  share-link relay); all other requests are served by
   the static asset binding.
 
 ### General

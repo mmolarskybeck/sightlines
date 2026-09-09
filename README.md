@@ -8,17 +8,15 @@ Sightlines is not a CAD program, a SketchUp clone, a generic room planner, or a 
 
 ## Current Status
 
-Sightlines is in active rebuild.
+Sightlines is deployed at app.sightlines.art and in daily curatorial use by its author on real exhibitions; the detailed current read and next steps live in `docs/status.md`.
 
-The current direction is **browser-first and local-first**:
+The direction is **browser-first and local-first**:
 
-* No account required in v1.
-* No hosted project data in v1.
-* Artwork images and project data stay on the user’s device.
-* Projects autosave locally in the browser.
-* Explicit export/backup paths are part of the product, not an afterthought.
+* No account and no Sightlines backend.
+* Artwork images and project data stay on the user’s device; projects autosave locally in the browser.
+* Explicit export/backup paths are part of the product: `.sightlines` packages, PDF and image exports, and optional Dropbox backup, share links, and cross-device sync through the user's own account.
 
-Cloud accounts, hosted collaboration, public snapshot links, subscriptions, and admin tooling are intentionally deferred until there is real demand.
+Hosted accounts, real-time collaboration, subscriptions, and admin tooling are intentionally deferred until there is real demand.
 
 ## Product Goals
 
@@ -155,10 +153,7 @@ Examples:
 
 ## Current Feature Set
 
-Implemented or substantially underway:
 
-* Vite + React + TypeScript app shell.
-* Local-first project repository.
 * IndexedDB-backed project storage.
 * Versioned project schema validation with Zod.
 * Project-level undo/redo.
@@ -167,8 +162,6 @@ Implemented or substantially underway:
 * Irregular polygon room drawing, vertex reshape, wall split/delete, and wall-slide reshaping.
 * Free-standing partition walls with double-sided faces.
 * Numeric wall and room dimension editing.
-* Tactile rectangle resize handles.
-* Shared units parser and formatter.
 * Imperial and metric display units.
 * Precision grid system with show/snap preferences.
 * Pure snapping system with snap priorities and hysteresis.
@@ -179,7 +172,6 @@ Implemented or substantially underway:
 * Known / approximate / unknown dimension status.
 * Drag artwork from checklist to wall elevation.
 * Centerline, neighbor, floor, and grid snapping for wall objects.
-* Transaction-bounded drag commits.
 * Door, window, and blocked-zone wall objects.
 * Shared doors and windows across rooms as one physical opening with two synchronized faces, optional hinged door leaves, and explicitly open walls.
 * Floor and wall display cases, wall-text panels, and a measurement tool for reference distances.
@@ -190,8 +182,6 @@ Implemented or substantially underway:
 * Floor objects in plan view with snapping, rotation, suspension height, per-face images, back-to-back pairing, and wall ⇄ floor conversion.
 * Multi-select, group drag, and equal wall distribution.
 * Checklist search, filtering, sorting, and artist grouping, with sort and grouping stored on the project.
-* Stable measurement-field conversion hints.
-* More legible plan-view placement markers.
 * Derived 3D preview with artwork textures, true shared openings, hinged leaves, partition slabs, cases, monitors, and camera presets — editable by drop-to-place, arrow nudge, and pointer drag, with numeric precision left to the inspector and elevation.
 * 3D navigation: cursor-directed wheel dolly, WASD travel, double-click focus flights, touch pan, a hand tool, and zoom controls.
 * Touch drag-and-drop artwork placement for iPad/iPhone.
@@ -214,7 +204,7 @@ Implemented or substantially underway:
 
 Sightlines is prepared for Cloudflare Workers static-assets deployment with Wrangler. See [docs/deployment.md](docs/deployment.md) for login, dry-run, deploy, and Cloudflare build settings.
 
-## Development
+## Pre-commit hook
 
 After cloning, run `npm run hooks:install` once to activate the repository's
 pre-commit checks. The current guard rejects raw NUL bytes in staged source and
@@ -280,17 +270,18 @@ npm run build
 
 ## Repository Notes
 
-Recommended docs structure:
+`CLAUDE.md` holds the full index of which doc owns what and when to update it. In brief:
 
 * `README.md` — concise project overview, current status, setup, roadmap.
 * `CLAUDE.md` / `AGENTS.md` — working rules for coding agents and the index of which doc owns what.
 * `PRODUCT.md` — product purpose, users, brand personality, design principles.
 * `DESIGN.md` — visual language, tokens, component philosophy.
 * `docs/plan.md` — full architecture and roadmap source of truth.
-* `docs/status.md` — the single living status doc: current state, recent shipping, near-term order.
+* `docs/status.md` — the single living status doc: current state, shipped rounds, near-term order, known follow-ups.
+* `docs/decisions.md` — decisions of record, invariants, and traps by area.
 * `docs/export-spec.md`, `docs/package-format.md`, `docs/cloud-sync-plan.md`, `docs/cloud-backup-providers.md`, `docs/deployment.md` — behavior contracts for exports, the `.sightlines` format, Dropbox sync, provider rollout, and deploys.
 * `docs/quick-todos.md` — small open scraps that don't fit the roadmap.
-* `docs/archive/` — frozen historical docs (build log through 2026-07-10, completed specs).
+* `docs/archive/` — frozen historical docs (build logs through 2026-09-01, completed specs and plans).
 
 ## Product Promise
 

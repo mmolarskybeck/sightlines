@@ -36,7 +36,7 @@ Sightlines should not feel like a CAD program, a SketchUp clone, a generic SaaS 
 
 ## Evidence on Hand
 
-The maker is a working curator dogfooding Sightlines on real exhibitions. A 10-room / 200-work benchmark project ran acceptably in 2D and 3D. There are no external users, testimonials, case studies, or press yet; future work must not fabricate any. An onboarding sample-project walkthrough is planned.
+The maker is a working curator dogfooding Sightlines on real exhibitions. A 10-room / 200-work benchmark project ran acceptably in 2D and 3D. One outside feedback round has run (2026-08-28, a colleague's use); there are no testimonials, case studies, or press yet; future work must not fabricate any. An onboarding sample-project walkthrough is planned.
 
 ## Design Principles
 

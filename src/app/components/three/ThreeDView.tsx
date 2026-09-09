@@ -1551,7 +1551,7 @@ export function ThreeDView({
     [handActive]
   );
 
-  // --- Checklist drop-to-place (docs/interaction-improvements-2026-08.md §4) --
+  // --- Checklist drop-to-place (docs/archive/interaction-improvements-2026-08.md §4) --
   //
   // 3D is a placement surface now, not only a preview: a work released over a
   // wall hangs there at the hit height, a work released over the floor stands
