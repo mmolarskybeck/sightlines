@@ -39,7 +39,7 @@ export type SharedOpeningStatus =
 
 const EXPOSED: SharedOpeningStatus = { kind: "exposed" };
 
-function isConnectableOpening(
+export function isConnectableOpening(
   wallObject: WallObject | undefined
 ): wallObject is ConnectableOpeningWallObject {
   return wallObject?.kind === "door" || wallObject?.kind === "window";

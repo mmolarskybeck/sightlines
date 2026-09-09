@@ -13,6 +13,7 @@ import type { Project } from "../../../domain/project";
 import { formatLength } from "../../../domain/units/length";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../../domain/units/unitSystem";
 import { RoomDimensionFields } from "../inspectors/RoomDimensionFields";
+import { pluralize } from "../shared/pluralize";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
@@ -302,6 +303,3 @@ function IconTooltip({
   );
 }
 
-function pluralize(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
-}

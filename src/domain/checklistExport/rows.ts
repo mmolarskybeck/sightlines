@@ -11,6 +11,7 @@
 import { effectiveFraming, FRAME_FINISHES } from "../framing";
 import { getRoomPlaceableWalls } from "../geometry/placeableWalls";
 import { isPointInPolygon, type Point } from "../geometry/polygon";
+import { roomFloorPolygon } from "../geometry/roomFloorPolygon";
 import type { Artwork, DisplayUnit, Project, RoomPlacement } from "../project";
 import { normalizeImportText } from "../spreadsheetImport/columnMapping";
 import { formatLength } from "../units/length";
@@ -53,19 +54,6 @@ function toUnitNumber(mm: number | undefined, unit: DisplayUnit): number | null 
   if (mm === undefined || !Number.isFinite(mm)) return null;
   const value = unit === "in" || unit === "ft" ? mm / 25.4 : mm / 10;
   return Math.round(value * 100) / 100;
-}
-
-// One placement's floor polygon in floor-space millimetres (rotation then
-// offset). Mirrors savedViews.roomFloorPolygon; winding is irrelevant to
-// point-in-polygon so vertices stay as authored.
-function roomFloorPolygon(placement: RoomPlacement): Point[] {
-  const rad = (placement.rotationDeg * Math.PI) / 180;
-  const cos = Math.cos(rad);
-  const sin = Math.sin(rad);
-  return placement.room.vertices.map((vertex) => ({
-    xMm: vertex.xMm * cos - vertex.yMm * sin + placement.offsetXMm,
-    yMm: vertex.xMm * sin + vertex.yMm * cos + placement.offsetYMm
-  }));
 }
 
 type WallLocation = {

@@ -21,6 +21,7 @@ import type {
   SyncHeadListing
 } from "../../cloud/provider";
 import type { CloudProjectsStatus } from "../../store/cloudProjectsSlice";
+import { pluralize } from "../shared/pluralize";
 import { Button } from "../ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
@@ -597,6 +598,3 @@ function formatUpdatedAt(updatedAt: string): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function pluralize(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
-}

@@ -46,6 +46,7 @@ One line per round, oldest first. Full narrative for every row: `docs/archive/bu
 | 2026-08-28 → 31 | Feedback round | Windows export extensions fix, PDF dialog discoverability, CRT box monitor → four-way display model with Medium combobox, 3D hand/zoom + pointer drag. |
 | 2026-08-31 | Checklist view prefs + fixes | Sort/group stored on the project (`checklistView`), inspector Details stale-draft fix, PDF 3D mount race. |
 | 2026-09-01 | Refactor pass | Placement/shared-opening/floor-object slices, dialog registry + real-App test, export delivery helper, provider seam cleanup, Dropbox request scaffolding, R3F helpers, `store.test.ts` split, ImportWizard reducer. |
+| 2026-09-08 | Large-file split | `InspectorPane` out of `App.tsx` (2535→1582), three elevation gesture hooks (`useElevation{MeasurementGestures,OpeningTool,ArtworkDrop}`), `ThreeDView` split into `sceneCamera`/`cameraControls`/`rendererBenchmark`, `artworkEditSlice`, nine duplicated helpers merged. Behavior-preserving. |
 
 ## Near-Term Order (as of 2026-09-01)
 

@@ -12,17 +12,8 @@ import {
   caseElevationGlyph,
   caseFloorGhostGlyph
 } from "../../../domain/geometry/caseGlyphs";
+import { clampMm } from "../shared/glyphScale";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
-
-// px → mm at the current zoom, or 0 with no zoom context (pixelsPerMm
-// absent/0) — see PlanObject.tsx's identical helper for the rationale.
-function mmForPx(pixelsPerMm: number, px: number): number {
-  return pixelsPerMm > 0 ? px / pixelsPerMm : 0;
-}
-
-function clampMm(pixelsPerMm: number, realMm: number, minPx: number, maxMm: number): number {
-  return Math.min(Math.max(realMm, mmForPx(pixelsPerMm, minPx)), maxMm);
-}
 
 // Renders one wall display case (vitrine) in elevation — the case counterpart
 // to ElevationOpening, reusing the same rect-geometry helper so a case and an

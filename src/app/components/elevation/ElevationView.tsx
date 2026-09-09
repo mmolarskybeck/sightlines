@@ -3,9 +3,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type DragEvent as ReactDragEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent
 } from "react";
 import type { Vector2 } from "../../../domain/geometry/dragResize";
@@ -24,15 +21,8 @@ import {
 } from "../../../domain/placement/dragBarriers";
 import { getGroupBounds, getIdsIntersectingRect } from "../../../domain/placement/groupBounds";
 import { getOverlapRule } from "../../../domain/placement/overlapPolicy";
-import {
-  PLACEHOLDER_ARTWORK_HEIGHT_MM,
-  PLACEHOLDER_ARTWORK_WIDTH_MM
-} from "../../../domain/placement/placeArtwork";
 import { type InsertToolKind } from "../../../domain/placement/createOpening";
-import {
-  getDefaultInsertToolSizeMm,
-  WALL_TEXT_DEFAULT_NAME
-} from "../../../domain/placement/createWallText";
+import { WALL_TEXT_DEFAULT_NAME } from "../../../domain/placement/createWallText";
 import {
   effectiveFraming,
   getPlacementFootprintMm,
@@ -65,13 +55,7 @@ import {
 import type { Guide, SnapTargetIds } from "../../../domain/snapping/resolveSnap";
 import { formatLength } from "../../../domain/units/length";
 import { getMajorGridIntervalMm, getMinorGridIntervalMm } from "../../../domain/units/precision";
-import {
-  buildMeasurePointCandidates,
-  constrainMeasurePointToAxis,
-  resolveMeasurePoint,
-  type MeasureCandidateSources,
-  type MeasurePoint
-} from "../../../domain/measurement/measurement";
+import { type MeasureCandidateSources } from "../../../domain/measurement/measurement";
 import {
   ELEVATION_ZOOM_LIMITS,
   FIT_VIEWPORT,
@@ -81,31 +65,21 @@ import {
   ZOOM_STEP,
   type Viewport2D
 } from "../../../domain/viewport/viewport2d";
-import { useArtworkAspect } from "../../hooks/useArtworkAspect";
 import { useAssetImageUrls } from "../../hooks/useAssetImageUrls";
 import { useContainerSize } from "../../hooks/useContainerSize";
 import { useDragGesture } from "../../hooks/useDragGesture";
 import { getNudgeStepMm } from "../../hooks/nudgeStep";
 import { useSelectSuppression } from "../../hooks/useSelectSuppression";
 import { useSvgViewportGestures } from "../../hooks/useSvgViewportGestures";
+import { useElevationMeasurementGestures } from "../../hooks/useElevationMeasurementGestures";
+import { useElevationOpeningTool } from "../../hooks/useElevationOpeningTool";
+import { useElevationArtworkDrop } from "../../hooks/useElevationArtworkDrop";
 import {
-  MEASURE_DRAG_SLOP_PX,
   type MeasurementToolAction,
   type MeasurementToolState
 } from "../../hooks/useMeasurementTool";
-import { isMeasurementCreationArrowKey } from "../../hooks/measurementCreationKey";
-import { getElevationMeasurementCreationKeyAction } from "../../hooks/elevationMeasurementPolicy";
-import {
-  planMeasurementCancelAction,
-  shouldCancelMeasurementForViewportClaim
-} from "../../hooks/planMeasurementPolicy";
+import { shouldCancelMeasurementForViewportClaim } from "../../hooks/planMeasurementPolicy";
 import { useAppStore } from "../../store";
-import {
-  ARTWORK_DRAG_MIME,
-  consumeArtworkDragSession,
-  peekArtworkDragSession,
-  subscribeArtworkTouchDrag
-} from "../library/artworkDragSession";
 import { ElevationArtwork } from "./ElevationArtwork";
 import { ElevationOpening } from "./ElevationOpening";
 import { ElevationCase, ElevationFloorCaseGhost } from "./ElevationCase";
@@ -122,7 +96,6 @@ import {
 import { marqueeRectMm, type MarqueeState } from "../shared/marqueeRect";
 import { buildElevationScene } from "../../../domain/scene2d/elevationScene";
 import {
-  getElevationDropGhostSizeMm,
   getElevationFootprintObjects,
   getFitSelectionBoundsSvg,
   isArtworkOutOfWallBounds,
@@ -412,8 +385,6 @@ export function ElevationView({
   const [openingToolGhost, setOpeningToolGhost] = useState<OpeningToolGhostState | null>(null);
   const [measurementSnappedEndpoint, setMeasurementSnappedEndpoint] =
     useState<MeasurementEndpoint | null>(null);
-  const openingToolSnapTargetIdsRef = useRef<SnapTargetIds | undefined>(undefined);
-  const measurementSnapTargetIdRef = useRef<string | undefined>(undefined);
   const measurementGestureRef = useRef<{
     pointerId: number;
     startClientX: number;
@@ -797,73 +768,54 @@ export function ElevationView({
     return { points, segments };
   }, [artworksById, centerlineMm, centerlineVisible, wallHeightMm, wallLengthMm, wallObjectsOnThisWall]);
 
-  function resolveMeasurementPoint(raw: MeasurePoint, event: Pick<PointerEvent, "shiftKey" | "metaKey" | "ctrlKey">) {
-    // Clamp to wall face: xMm into [0, wallLengthMm], yMm into [0, wallHeightMm]
-    const clamped: MeasurePoint = {
-      xMm: Math.min(Math.max(raw.xMm, 0), wallLengthMm),
-      yMm: Math.min(Math.max(raw.yMm, 0), wallHeightMm)
-    };
+  const {
+    handleMeasurementPointerDown,
+    handleMeasurementPointerMove,
+    handleMeasurementPointerUp,
+    cancelMeasurementPointerGesture,
+    beginMeasurementRefinement,
+    handleMeasurementEndpointKeyDown,
+    handleMeasureSurfaceKeyDown
+  } = useElevationMeasurementGestures({
+    measurementActive,
+    measurementState,
+    onMeasurementDispatch,
+    measurementGestureRef,
+    setMeasurementSnappedEndpoint,
+    measurementSources,
+    toWallLocalMm,
+    svgRef,
+    isSpaceDown,
+    snapThresholdMm,
+    minorGridMm,
+    gridVisible,
+    snapToGrid,
+    gridPrecisionFloorMm,
+    unit,
+    wallId,
+    wallLengthMm,
+    wallHeightMm,
+    viewBoxBounds
+  });
 
-    const anchor = measurementState?.phase === "drawing"
-      ? measurementState.start
-      : measurementState?.phase === "refining"
-        ? measurementState[measurementState.endpoint === "start" ? "end" : "start"]
-        : null;
-    const proposed = event.shiftKey && anchor ? constrainMeasurePointToAxis(anchor, clamped) : clamped;
-    if (event.metaKey || event.ctrlKey) {
-      measurementSnapTargetIdRef.current = undefined;
-      return { point: proposed, snapped: false };
-    }
-    const sources: MeasureCandidateSources = gridVisible && snapToGrid
-      ? {
-          ...measurementSources,
-          points: [
-            ...(measurementSources.points ?? []),
-            {
-              id: `grid:${Math.round(proposed.xMm / minorGridMm)}:${Math.round(proposed.yMm / minorGridMm)}`,
-              kind: "grid",
-              point: {
-                xMm: Math.round(proposed.xMm / minorGridMm) * minorGridMm,
-                yMm: Math.round(proposed.yMm / minorGridMm) * minorGridMm
-              }
-            }
-          ]
-        }
-      : measurementSources;
-    const result = resolveMeasurePoint(proposed, buildMeasurePointCandidates(proposed, sources), {
-      thresholdMm: snapThresholdMm,
-      previousTargetId: measurementSnapTargetIdRef.current
-    });
-    measurementSnapTargetIdRef.current = result.target?.id;
-    return result;
-  }
   const withResolvedArtworkFootprint = (object: WallObject): WallObject =>
     withArtworkFootprintFromMap(object, artworksById);
   const assetIds = elevationScene.artworks.map((entry) => entry.artwork?.assetId);
   const imageUrlsByAssetId = useAssetImageUrls(assetIds, getBlob ?? NO_OP_GET_BLOB, "display");
 
-  // The dragged artwork's image aspect, so a partial/unknown-dimension work's
-  // drop ghost is sized at its true proportions (matching what placeArtwork
-  // bakes) instead of the raw placeholder box. Only the currently-dragged
-  // artwork is loaded, keyed off draggingArtworkId's asset.
-  const draggingArtworkAspect = useArtworkAspect(
-    draggingArtworkId ? artworksById?.get(draggingArtworkId)?.assetId : undefined
-  );
+  const { handleDragOver, handleDragLeave, handleDrop } = useElevationArtworkDrop({
+    wallId,
+    artworksById,
+    draggingArtworkId,
+    onPlaceArtwork,
+    containerRef,
+    toWallLocalMm,
+    wallObjectsOnThisWall,
+    dropGhost,
+    setDropGhost,
+    resolveElevationPlacement
+  });
 
-  // The size to show for a not-yet-placed drop ghost: the real artwork's
-  // effective size if the checklist told us which one is being dragged
-  // (draggingArtworkId), otherwise the same placeholder size placement
-  // itself falls back to (docs/plan.md §1.5: place before dimensions are
-  // known).
-  function effectiveSizeForArtworkId(artworkId: string | null): { widthMm: number; heightMm: number } {
-    const artwork = artworkId ? artworksById?.get(artworkId) : undefined;
-    if (artwork) {
-      // The aspect only applies to the artwork we actually loaded it for.
-      const aspect = artworkId === draggingArtworkId ? draggingArtworkAspect : undefined;
-      return getElevationDropGhostSizeMm(artwork, aspect);
-    }
-    return { widthMm: PLACEHOLDER_ARTWORK_WIDTH_MM, heightMm: PLACEHOLDER_ARTWORK_HEIGHT_MM };
-  }
 
   function toWallLocalMm(clientX: number, clientY: number): Vector2 | null {
     // The client→SVG-userspace step is the hook's shared CTM conversion; only
@@ -879,217 +831,7 @@ export function ElevationView({
     return { xMm: svgPoint.xMm, yMm: wallLocalYToSvgY(wallHeightMm, svgPoint.yMm) };
   }
 
-  function resolvedMeasurementPointer(event: ReactPointerEvent<SVGElement>) {
-    const raw = toWallLocalMm(event.clientX, event.clientY);
-    if (!raw) return null;
-    const resolved = resolveMeasurementPoint(raw, event);
-    const endpoint: MeasurementEndpoint =
-      measurementState?.phase === "refining"
-        ? measurementState.endpoint === "start" ? "a" : "b"
-        : "b";
-    setMeasurementSnappedEndpoint(resolved.snapped ? endpoint : null);
-    return resolved.point;
-  }
 
-  function handleMeasurementPointerDown(event: ReactPointerEvent<SVGSVGElement>) {
-    if (
-      !measurementActive ||
-      isSpaceDown ||
-      event.isPrimary === false ||
-      (event.button !== undefined && event.button !== 0)
-    ) {
-      return false;
-    }
-    const point = resolvedMeasurementPointer(event);
-    if (!point) return true;
-    event.preventDefault();
-    event.stopPropagation();
-
-    // A press while already drawing is the completing click of click-click;
-    // defer it to pointer-up (mirrors Plan) so the rubber band doesn't
-    // resolve before the browser delivers the matching up event.
-    const startedDrawing = measurementState?.phase !== "drawing";
-    if (startedDrawing) onMeasurementDispatch?.({ type: "begin", point });
-    measurementGestureRef.current = {
-      pointerId: event.pointerId,
-      startClientX: event.clientX,
-      startClientY: event.clientY,
-      startedDrawing
-    };
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    return true;
-  }
-
-  function handleMeasurementPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
-    if (!measurementActive) return false;
-    const gesture = measurementGestureRef.current;
-    if (gesture?.refining && gesture.pointerId === event.pointerId) {
-      const point = resolvedMeasurementPointer(event);
-      if (point) onMeasurementDispatch?.({ type: "preview-refinement", point });
-      return true;
-    }
-    if (measurementState?.phase === "drawing") {
-      const point = resolvedMeasurementPointer(event);
-      if (point) onMeasurementDispatch?.({ type: "preview", point });
-      return true;
-    }
-    return Boolean(gesture);
-  }
-
-  function handleMeasurementPointerUp(event: ReactPointerEvent<SVGSVGElement>) {
-    const gesture = measurementGestureRef.current;
-    if (!measurementActive || !gesture || gesture.pointerId !== event.pointerId) return false;
-    measurementGestureRef.current = null;
-    if (gesture.refining) {
-      onMeasurementDispatch?.({ type: "commit-refinement" });
-      return true;
-    }
-    const movedPx = Math.hypot(
-      event.clientX - gesture.startClientX,
-      event.clientY - gesture.startClientY
-    );
-    // The second click completes regardless of slop. A first press completes
-    // only when it was a genuine drag; jitter stays in click-click drawing
-    // (mirrors Plan's handleMeasurePointerUpCapture).
-    if (!gesture.startedDrawing || movedPx > MEASURE_DRAG_SLOP_PX) {
-      const point = resolvedMeasurementPointer(event);
-      if (point) onMeasurementDispatch?.({ type: "complete", point });
-    }
-    return true;
-  }
-
-  // Mirror of PlanView's cancelMeasurePointerGesture. When a second touch
-  // promotes the viewport gesture to a pinch, drop the one-finger measurement
-  // in flight: clear the transient gesture ref, release the captured pointer,
-  // and dispatch the phase-appropriate clear so no stray measurement is
-  // committed on the trailing pointerup.
-  function cancelMeasurementPointerGesture() {
-    const gesture = measurementGestureRef.current;
-    const action = measurementState ? planMeasurementCancelAction(measurementState) : null;
-    if (action) onMeasurementDispatch?.(action);
-    measurementGestureRef.current = null;
-    measurementSnapTargetIdRef.current = undefined;
-    setMeasurementSnappedEndpoint(null);
-    if (gesture) svgRef.current?.releasePointerCapture?.(gesture.pointerId);
-  }
-
-  function beginMeasurementRefinement(
-    endpoint: MeasurementEndpoint,
-    event: ReactPointerEvent<SVGCircleElement>
-  ) {
-    if (!measurementActive || measurementState?.phase !== "armed-complete") return;
-    const stateEndpoint = endpoint === "a" ? "start" : "end";
-    onMeasurementDispatch?.({ type: "begin-refinement", endpoint: stateEndpoint });
-    measurementGestureRef.current = {
-      pointerId: event.pointerId,
-      startClientX: event.clientX,
-      startClientY: event.clientY,
-      startedDrawing: false,
-      refining: endpoint
-    };
-    svgRef.current?.setPointerCapture?.(event.pointerId);
-  }
-
-  function handleMeasurementEndpointKeyDown(
-    endpoint: MeasurementEndpoint,
-    event: ReactKeyboardEvent<SVGCircleElement>
-  ) {
-    if (!measurementActive || !measurementState || !onMeasurementDispatch) return;
-    if (event.key === "Enter" && measurementState.phase === "refining") {
-      event.preventDefault();
-      event.stopPropagation();
-      onMeasurementDispatch({ type: "commit-refinement" });
-      return;
-    }
-    if (
-      (measurementState.phase !== "armed-complete" && measurementState.phase !== "refining") ||
-      !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
-    ) {
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    const stepMm = getNudgeStepMm({
-      unit,
-      snapToGrid,
-      gridPrecisionFloorMm,
-      shiftKey: event.shiftKey,
-      altKey: event.altKey
-    });
-    const key = endpoint === "a" ? "start" : "end";
-    if (measurementState.phase === "refining" && measurementState.endpoint !== key) return;
-    const current = measurementState[key];
-    const point = {
-      xMm:
-        current.xMm +
-        (event.key === "ArrowRight" ? stepMm : event.key === "ArrowLeft" ? -stepMm : 0),
-      // Wall-local y grows upward, so ArrowUp is positive.
-      yMm:
-        current.yMm +
-        (event.key === "ArrowUp" ? stepMm : event.key === "ArrowDown" ? -stepMm : 0)
-    };
-    // Clamp to wall face before dispatching
-    const clampedPoint: MeasurePoint = {
-      xMm: Math.min(Math.max(point.xMm, 0), wallLengthMm),
-      yMm: Math.min(Math.max(point.yMm, 0), wallHeightMm)
-    };
-    if (measurementState.phase === "armed-complete") {
-      onMeasurementDispatch({ type: "begin-refinement", endpoint: key });
-    }
-    onMeasurementDispatch({ type: "preview-refinement", point: clampedPoint });
-  }
-
-  // Keyboard-only creation on the SVG surface. Ignores keys bubbling from a
-  // focused child (the endpoint handles own their refinement keys) and never
-  // touches Escape (App.tsx owns that).
-  function handleMeasureSurfaceKeyDown(event: ReactKeyboardEvent<SVGSVGElement>) {
-    if (!measurementActive || !measurementState || !onMeasurementDispatch) return;
-    if (event.target !== event.currentTarget) return;
-    if (event.key !== "Enter" && !isMeasurementCreationArrowKey(event.key)) return;
-    // Begin at the visible-viewport centre in wall-local coordinates, clamped
-    // to the wall face so the origin is always a valid endpoint.
-    const centreSvg = {
-      xMm: viewBoxBounds.x + viewBoxBounds.width / 2,
-      yMm: viewBoxBounds.y + viewBoxBounds.height / 2
-    };
-    const origin = {
-      xMm: Math.min(Math.max(centreSvg.xMm, 0), wallLengthMm),
-      yMm: Math.min(Math.max(wallLocalYToSvgY(wallHeightMm, centreSvg.yMm), 0), wallHeightMm)
-    };
-    const action = getElevationMeasurementCreationKeyAction(
-      measurementState,
-      event.key,
-      origin,
-      wallLengthMm,
-      wallHeightMm,
-      unit,
-      gridPrecisionFloorMm,
-      event.shiftKey,
-      snapToGrid,
-      event.altKey
-    );
-    if (!action) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const completing = action.type === "complete";
-    onMeasurementDispatch(action);
-    if (completing) {
-      requestAnimationFrame(() => {
-        const handle = svgRef.current?.querySelector<SVGCircleElement>(
-          '.measurement-endpoint[data-endpoint="b"] .measurement-handle-hit'
-        );
-        handle?.focus();
-      });
-    }
-  }
-
-  useEffect(() => {
-    if (!measurementActive) {
-      measurementGestureRef.current = null;
-      measurementSnapTargetIdRef.current = undefined;
-      setMeasurementSnappedEndpoint(null);
-    }
-  }, [measurementActive, wallId]);
 
   // Per-neighbor barrier hardness for a moving object/group. The barrier is only
   // as soft as the STRICTEST rule allows across every moving kind vs this
@@ -1251,87 +993,21 @@ export function ElevationView({
     };
   }
 
-  const openingToolSize = activeTool ? getDefaultInsertToolSizeMm(activeTool) : null;
-
-  // Opening insertion uses the same live snap/barrier resolver as an elevation
-  // move. The only difference is that the preview starts from the pointer and
-  // the committed result creates a new wall object instead of moving one.
-  // Doors must sit on the floorline, so their preview y is pinned to heightMm/2.
-  function resolveOpeningTool(proposed: Vector2) {
-    if (!activeTool || !openingToolSize) return null;
-    const result = resolveElevationPlacement(
-      proposed,
-      openingToolSize,
-      wallObjectsOnThisWall,
+  const { handleOpeningToolPointerMove, handleOpeningToolPointerLeave, handleOpeningToolClick } =
+    useElevationOpeningTool({
       activeTool,
-      [activeTool],
-      openingToolSnapTargetIdsRef.current,
-      false,
-      new Set()
-    );
-    openingToolSnapTargetIdsRef.current = result.snapTargetIds;
-
-    // Doors sit on the floorline: pin their preview y to the center position
-    // (bottom edge at y=0 means center at height/2).
-    if (activeTool === "door") {
-      return {
-        ...result,
-        point: {
-          ...result.point,
-          yMm: openingToolSize.heightMm / 2
-        }
-      };
-    }
-
-    return result;
-  }
-
-  function handleOpeningToolPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
-    if (!activeTool || !openingToolSize || moveDrag || marquee || dropGhost) return;
-    const pointerMm = toWallLocalMm(event.clientX, event.clientY);
-    if (!pointerMm) return;
-
-    const result = resolveOpeningTool(pointerMm);
-    if (!result) return;
-    setOpeningToolGhost({
-      centerMm: result.point,
-      sizeMm: openingToolSize,
-      activeGuides: result.activeGuides
+      wallId,
+      onToolChange,
+      onPlaceOpeningOnElevation,
+      setOpeningToolGhost,
+      toWallLocalMm,
+      wallObjectsOnThisWall,
+      resolveElevationPlacement,
+      moveDrag,
+      marquee,
+      dropGhost
     });
-  }
 
-  function handleOpeningToolPointerLeave() {
-    setOpeningToolGhost(null);
-    openingToolSnapTargetIdsRef.current = undefined;
-  }
-
-  function handleOpeningToolClick(event: ReactMouseEvent<SVGSVGElement>) {
-    if (!activeTool || !openingToolSize || !wallId || !onPlaceOpeningOnElevation) return;
-    if (moveDrag || marquee) return;
-
-    const pointerMm = toWallLocalMm(event.clientX, event.clientY);
-    if (!pointerMm) return;
-    const result = resolveOpeningTool(pointerMm);
-    if (!result || result.blocked) return;
-
-    const kind = activeTool;
-    onToolChange?.(null);
-    void onPlaceOpeningOnElevation(kind, wallId, result.point.xMm, result.point.yMm);
-  }
-
-  useEffect(() => {
-    setOpeningToolGhost(null);
-    openingToolSnapTargetIdsRef.current = undefined;
-  }, [activeTool, wallId]);
-
-  useEffect(() => {
-    if (!activeTool) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onToolChange?.(null);
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeTool, onToolChange]);
 
   // Pre-seed the broken-barrier set at grab time with every neighbor the moving
   // object/group already overlaps and every wall edge it already overhangs. This
@@ -1540,176 +1216,6 @@ export function ElevationView({
     });
   }
 
-  // Shared by the HTML5 dragover handler and the touch-drag subscription: given
-  // client coordinates and the dragged artwork, resolve the placement and paint
-  // the drop ghost. No-ops with no wall selected. Caller has gated on an active
-  // drag; bypassSnap comes from ⌘/Ctrl on the mouse path, false on touch.
-  //
-  // Every work is droppable here, whatever its library form. This used to refuse
-  // a floor work outright — no ghost, no-drop cursor, no commit — on the reading
-  // that a floor work never hangs. That was reversed by USER DECISION along with
-  // the plan-view policy (see floatPolicyForKind): dropping onto a wall IS the
-  // statement that this thing hangs, and a depth-bearing work on a wall is the
-  // supported deep-wall path. The library placementForm flag is not written on
-  // the way through — App derives the effective type from where the object
-  // actually lives.
-  function updateArtworkDropGhost(
-    clientX: number,
-    clientY: number,
-    artworkId: string | null,
-    bypassSnap: boolean
-  ) {
-    if (!wallId) return;
-    const pointerMm = toWallLocalMm(clientX, clientY);
-    if (!pointerMm) return;
-
-    const sizeMm = effectiveSizeForArtworkId(artworkId);
-    // A checklist drag-in is always an artwork: eyeline first, floor just below
-    // it (see getArtworkSnapTargets' kind-dependent floor rank). ⌘/Ctrl held
-    // over the surface bypasses snapping/quantization, same as a move-drag. The
-    // broken-barrier set carries frame-to-frame like a move-drag's (a fresh
-    // ghost starts empty), and neighbors are every object on the wall.
-    const snapResult = resolveElevationPlacement(
-      pointerMm,
-      sizeMm,
-      wallObjectsOnThisWall,
-      "artwork",
-      ["artwork"],
-      dropGhost?.previousSnapTargetIds,
-      bypassSnap,
-      new Set(dropGhost?.brokenBarrierIds)
-    );
-
-    // A blocked resolve (dropped-into an unresolvable hard overlap) still paints
-    // the best-effort ghost — unlike a move it has no "last legal" preview to
-    // hold, and the commit gate is the final backstop on drop.
-    setDropGhost({
-      centerMm: snapResult.point,
-      sizeMm,
-      previousSnapTargetIds: snapResult.snapTargetIds,
-      activeGuides: snapResult.activeGuides,
-      brokenBarrierIds: snapResult.brokenBarrierIds
-    });
-  }
-
-  // Shared by the HTML5 drop handler and the touch-drag subscription: commit the
-  // placement. Guards wallId (this view needs it to place); the caller has
-  // already validated the artworkId resolves to a known artwork.
-  function completeArtworkDrop(
-    clientX: number,
-    clientY: number,
-    artworkId: string,
-    bypassSnap: boolean
-  ) {
-    if (!wallId) return;
-    const pointerMm = toWallLocalMm(clientX, clientY);
-    if (!pointerMm) return;
-
-    const sizeMm = effectiveSizeForArtworkId(artworkId);
-    // Must land exactly where the ghost showed — same resolver, same bypass, and
-    // the SAME broken-barrier set the ghost last carried (read off the closed-
-    // over dropGhost, still the last rendered value here even though handleDrop
-    // has queued setDropGhost(null)). Without threading it, the final resolve
-    // could re-arm a barrier the ghost had already popped and snap the drop back.
-    const snapResult = resolveElevationPlacement(
-      pointerMm,
-      sizeMm,
-      wallObjectsOnThisWall,
-      "artwork",
-      ["artwork"],
-      undefined,
-      bypassSnap,
-      new Set(dropGhost?.brokenBarrierIds)
-    );
-
-    onPlaceArtwork?.(artworkId, wallId, snapResult.point.xMm, snapResult.point.yMm);
-  }
-
-  function handleDragOver(event: ReactDragEvent<HTMLDivElement>) {
-    // iPadOS Safari hides custom MIME types during dragover/drop, so fall back
-    // to the app-level drag state (draggingArtworkId), and further to the
-    // module-level drag session for when WebKit's event ordering leaves that
-    // state already cleared by the time dragover/drop fires.
-    if (
-      !wallId ||
-      (!event.dataTransfer.types.includes(ARTWORK_DRAG_MIME) &&
-        !draggingArtworkId &&
-        !peekArtworkDragSession())
-    )
-      return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-    updateArtworkDropGhost(
-      event.clientX,
-      event.clientY,
-      draggingArtworkId,
-      event.metaKey || event.ctrlKey
-    );
-  }
-
-  function handleDragLeave(event: ReactDragEvent<HTMLDivElement>) {
-    // Only clear when the pointer actually leaves the surface, not when it
-    // moves between child elements within it (those also fire dragleave).
-    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-    setDropGhost(null);
-  }
-
-  function handleDrop(event: ReactDragEvent<HTMLDivElement>) {
-    const artworkId =
-      event.dataTransfer.getData(ARTWORK_DRAG_MIME) || draggingArtworkId || peekArtworkDragSession();
-    consumeArtworkDragSession();
-    setDropGhost(null);
-    if (!artworkId || !wallId) return;
-    if (!artworksById?.get(artworkId)) return;
-    event.preventDefault();
-    completeArtworkDrop(event.clientX, event.clientY, artworkId, event.metaKey || event.ctrlKey);
-  }
-
-  // The touch/pen drag path (iOS/iPadOS, where HTML5 DnD is unavailable/
-  // unreliable) reaches this drop target through the module-level session rather
-  // than DOM drag events. The handlers close over live state/props, so route
-  // them through a ref refreshed each render and subscribe once.
-  const touchDropRef = useRef({
-    updateGhost: updateArtworkDropGhost,
-    complete: completeArtworkDrop,
-    isValidArtwork: (id: string) => Boolean(artworksById?.get(id))
-  });
-  touchDropRef.current = {
-    updateGhost: updateArtworkDropGhost,
-    complete: completeArtworkDrop,
-    isValidArtwork: (id: string) => Boolean(artworksById?.get(id))
-  };
-
-  useEffect(() => {
-    return subscribeArtworkTouchDrag((dragEvent) => {
-      const container = containerRef.current;
-      const handlers = touchDropRef.current;
-      if (!container) return;
-      if (dragEvent.type === "cancel") {
-        setDropGhost(null);
-        return;
-      }
-      const rect = container.getBoundingClientRect();
-      const inside =
-        dragEvent.clientX >= rect.left &&
-        dragEvent.clientX <= rect.right &&
-        dragEvent.clientY >= rect.top &&
-        dragEvent.clientY <= rect.bottom;
-      if (dragEvent.type === "move") {
-        // Touch has no modifier keys, so never bypass snapping.
-        if (inside) handlers.updateGhost(dragEvent.clientX, dragEvent.clientY, dragEvent.artworkId, false);
-        else setDropGhost(null);
-        return;
-      }
-      // drop: always clear the ghost; place only if it landed inside and the id
-      // still resolves to a known artwork (mirrors the HTML5 drop guard).
-      setDropGhost(null);
-      if (inside && handlers.isValidArtwork(dragEvent.artworkId)) {
-        handlers.complete(dragEvent.clientX, dragEvent.clientY, dragEvent.artworkId, false);
-      }
-    });
-    // containerRef is stable; the effect subscribes once for the component's life.
-  }, [containerRef]);
 
   const activeGuides =
     moveDrag?.activeGuides ?? dropGhost?.activeGuides ?? openingToolGhost?.activeGuides ?? [];

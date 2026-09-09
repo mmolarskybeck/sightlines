@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useAppStore } from "../store";
 import { selectBackupFingerprint } from "../store/cloudBackupSlice";
+import { readMsEnv } from "./readMsEnv";
 
 // Idle settle after the last change before syncing (~20s).
 export const CLOUD_SYNC_SETTLE_MS = readMsEnv(
@@ -25,12 +26,6 @@ export const CLOUD_SYNC_MIN_INTERVAL_MS = readMsEnv(
 );
 // How often the scheduler re-evaluates the gates.
 const CHECK_INTERVAL_MS = 5_000;
-
-function readMsEnv(raw: string | undefined, fallback: number): number {
-  if (raw === undefined) return fallback;
-  const value = Number(raw);
-  return Number.isFinite(value) && value >= 0 ? value : fallback;
-}
 
 export type ShouldSyncNowInput = {
   connected: boolean;

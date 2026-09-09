@@ -2,6 +2,7 @@
 // resolution from a stored camera pose, and live room-label resolution. No
 // React, no three.js — poses arrive as plain world-space numbers.
 
+import { roomFloorPolygon } from "./geometry/roomFloorPolygon";
 import type { Point } from "./geometry/polygon";
 import { isPointInPolygon } from "./geometry/polygon";
 import type { Project, RoomPlacement, SavedView, SavedViewPose } from "./project";
@@ -36,19 +37,6 @@ export function isDegeneratePose(pose: SavedViewPose): boolean {
   const dy = pose.position.y - pose.target.y;
   const dz = pose.position.z - pose.target.z;
   return Math.hypot(dx, dy, dz) <= COINCIDENT_EPSILON_M;
-}
-
-// One placement's floor polygon in floor-space millimetres. Mirrors
-// scene3d's transformPoint (rotation then offset); winding is irrelevant to
-// point-in-polygon so it is left as authored.
-function roomFloorPolygon(placement: RoomPlacement): Point[] {
-  const rad = (placement.rotationDeg * Math.PI) / 180;
-  const cos = Math.cos(rad);
-  const sin = Math.sin(rad);
-  return placement.room.vertices.map((vertex) => ({
-    xMm: vertex.xMm * cos - vertex.yMm * sin + placement.offsetXMm,
-    yMm: vertex.xMm * sin + vertex.yMm * cos + placement.offsetYMm
-  }));
 }
 
 // The id of the first room whose floor polygon contains a world-space
