@@ -64,7 +64,7 @@ via custom domain binding. The deployment also configures the
 
 ## Production and Branch Previews
 
-Cloudflare Workers Builds should be the deployment authority for Sightlines. GitHub Actions, if added later, should run checks only.
+Cloudflare Workers Builds are the deployment authority for Sightlines. GitHub Actions (`.github/workflows/e2e.yml`) runs checks only: `npm run check`, `check:nuls`, `test`, `build` (which includes the bundle-size assertion), and `test:e2e`, with a 20-minute job timeout. See "Branch Protection and Rollback" below for how the two connect.
 
 ### Landing Site
 
