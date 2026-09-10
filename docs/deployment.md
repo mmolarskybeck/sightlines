@@ -103,6 +103,20 @@ What this does:
 - Landing branch previews are not currently configured because
   `landing/package.json` does not yet provide a preview-upload script.
 
+## Branch Protection and Rollback
+
+`main` is protected on GitHub (set 2026-09-09): the `test` job in
+`.github/workflows/e2e.yml` must pass before a pull request can merge, and
+force-pushes and deletions are blocked. Admin enforcement is off, so the repo
+owner can still push straight to `main` without CI; treat that as an emergency
+path, not the normal route.
+Because Cloudflare deploys from `main`, a red CI now blocks the deploy instead
+of racing it.
+
+To roll back production, use Cloudflare `Workers & Pages > sightlines >
+Deployments` and promote the previous version, or run
+`npx wrangler rollback` from the repository root.
+
 ## Manual Commands
 
 Local commands for the landing site:

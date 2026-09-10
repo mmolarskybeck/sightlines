@@ -1,11 +1,13 @@
-import { WALL_OBJECT_PLAN_DEPTH_MM } from "../geometry/planObjects";
 import {
   DEFAULT_FLOOR_OBJECT_DEPTH_MM,
-  type Artwork,
-  type ArtworkDisplayAs,
-  type ArtworkWallObject,
-  type Dimensions,
-  type WallObject
+  WALL_OBJECT_PLAN_DEPTH_MM
+} from "../geometry/planObjects";
+import type {
+  Artwork,
+  ArtworkDisplayAs,
+  ArtworkWallObject,
+  Dimensions,
+  WallObject
 } from "../project";
 import { defaultDisplayAsForCategory, mediumCategory } from "./mediumCategory";
 

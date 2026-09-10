@@ -13,13 +13,7 @@ import {
   applySharedOpeningActions,
   type SharedOpeningScope
 } from "../domain/placement/sharedOpeningAnalysis";
-import { normalizeOpeningPairs } from "../domain/placement/openingPairs";
-import { isBlockingKind } from "../domain/placement/overlapPolicy";
 import { repairSharedOpeningsOnLoad } from "../domain/placement/sharedOpeningLoadRepair";
-import {
-  effectiveFloorDepthMm,
-  SIZE_MATCH_TOLERANCE_MM
-} from "../domain/placement/artworkForm";
 import { withArtworkFootprintFromMap } from "../domain/framing";
 import type { PixelAspect } from "../domain/units/aspectFill";
 import type { PlacementWarning } from "../domain/placement/validatePlacement";
@@ -52,7 +46,6 @@ import { selectReferencedArtworks } from "../domain/package/buildPackage";
 import { collectReferencedAssetIds, computeBackupFingerprint } from "../domain/backup/fingerprint";
 import { migrateProject } from "../domain/schema/projectSchema";
 import { createSampleProject } from "../domain/sample/sampleProject";
-import { parseArtwork } from "../domain/schema/artworkSchema";
 import { getFirstWall } from "./projectWalls";
 export { getProjectWalls, getSelectedWall } from "./projectWalls";
 import { createCrossTabSync, type CrossTabMessage, type CrossTabSync } from "./crossTabSync";
@@ -1151,7 +1144,7 @@ export function createAppStore(deps: AppStoreDeps) {
         await persist(project);
       }
     });
-    const { settleArrangeSession, autoAcceptArrangeSession } = arrange;
+    const { autoAcceptArrangeSession } = arrange;
 
     const documentMeta = createDocumentMetaSlice(set, get, { applyEdit });
 

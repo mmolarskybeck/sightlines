@@ -12,7 +12,7 @@ import { effectiveFraming, FRAME_FINISHES } from "../framing";
 import { getRoomPlaceableWalls } from "../geometry/placeableWalls";
 import { isPointInPolygon, type Point } from "../geometry/polygon";
 import { roomFloorPolygon } from "../geometry/roomFloorPolygon";
-import type { Artwork, DisplayUnit, Project, RoomPlacement } from "../project";
+import type { Artwork, DisplayUnit, Project } from "../project";
 import { normalizeImportText } from "../spreadsheetImport/columnMapping";
 import { formatLength } from "../units/length";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../units/unitSystem";

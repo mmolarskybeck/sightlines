@@ -21,7 +21,6 @@ import {
   GRID_TARGET_PT,
   drawLine,
   drawWrappedCenteredText,
-  gridStart,
   type PdfFonts
 } from "./primitives";
 import { elevationRect, type ElevationTransform } from "./transforms";

@@ -256,7 +256,6 @@ export function App() {
   >(() => new Map());
   const [draggingArtworkId, setDraggingArtworkId] = useState<string | null>(null);
   const {
-    preferences: privacyPreferences,
     decision: privacyDecision,
     setPreferences: setPrivacyPreferences
   } = usePrivacyPreferences();

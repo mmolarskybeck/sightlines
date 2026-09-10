@@ -135,6 +135,8 @@ Decisions of record, invariants, and traps distilled from the 2026-07-09 → 202
 - **2026-09-01** `updateArtwork` stays in store.ts because its record edit and placement rebake are one undo entry.
 - **2026-09-01** TRAP: the mapping re-guess keys on the table memo, so a same-named replacement spreadsheet no longer keeps stale column indices.
 - **2026-09-01** Geometry modules must not import from the schema module — `project.ts` re-exports the case/monitor constants that now live in `caseGlyphs.ts`/`monitorGlyphs.ts`, and the reverse direction is a runtime import cycle.
+- **2026-09-08** `npm run check` fails on any static runtime import cycle reachable from `src/main.tsx` or `worker/index.ts` (`check:cycles`; `import type` and dynamic-import edges are ignored, so store⇄slice type cycles are fine). Break a new cycle by moving the shared value next to its geometry (`DEFAULT_FLOOR_OBJECT_DEPTH_MM` lives in `planObjects.ts`, `findVertex` in `walls.ts`) and re-exporting from the old home.
+- **2026-09-08** `build` fails if a tracked chunk (`index`, `vendor`, `three`, `pdf`, `fontkit`, `xlsx`) grows >10% over `scripts/bundle-size-baseline.json`; rebase with `node scripts/assert-bundle-size.mjs --update` only alongside the change that earns it.
 
 ## UI and design
 

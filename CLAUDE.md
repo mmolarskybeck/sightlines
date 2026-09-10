@@ -34,10 +34,10 @@ Read the owning doc before changing an area, and update it when a shipped change
 ## Commands
 
 ```bash
-npm run check        # tsc for app + worker
+npm run check        # tsc for app + worker (noUnused* on) + check:cycles (dpdm, static runtime cycles only: type-only and dynamic-import edges ignored; app + worker entries)
 npm run test         # vitest (~3.7k tests, ~20 s)
-npm run build        # tsc + vite build + chunk-graph assertion (three/pdf/fontkit/xlsx must stay lazy)
-npm run test:e2e     # Playwright (chromium on 5199; storage specs also on webkit via 5198)
+npm run build        # tsc + vite build + chunk-graph + bundle-size assertions (scripts/bundle-size-baseline.json, --update to rebase)
+npm run test:e2e     # Playwright (chromium on 5199; storage specs also on webkit via 5198); pdf-preview-visual.spec.ts compares PNGs in e2e/__screenshots__/
 npm run check:nuls   # rejects raw NUL bytes — agents have embedded them in string literals before
 npm run dev          # verify served code on 127.0.0.1, not localhost
 ```

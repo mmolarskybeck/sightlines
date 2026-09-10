@@ -10,10 +10,7 @@ import type { ResizeAnchor } from "../../../domain/geometry/editRoom";
 import type { InsertToolKind } from "../../../domain/placement/createOpening";
 import type { DisplayUnit } from "../../../domain/project";
 import { formatLength } from "../../../domain/units/length";
-import {
-  getScopeUnits,
-  unitSystemFromDisplayUnit
-} from "../../../domain/units/unitSystem";
+import { getScopeUnits } from "../../../domain/units/unitSystem";
 import { getScopedUnitContext } from "../shared/scopedUnits";
 // Same glyph the Case insert tool uses, so the chip and the toolbar name the
 // same object.

@@ -394,7 +394,7 @@ function buildWallGridCandidates(
 }
 
 function resolveOnWall(
-  proposedCenterFloorMm: Point,
+  _proposedCenterFloorMm: Point,
   captured: { wall: FloorWall; xAlongMm: number },
   args: {
     wallObjects: WallObjectBase[];

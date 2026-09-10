@@ -675,7 +675,7 @@ export function ThreeDView({
     }
     // The aspect only applies to the artwork it was loaded for.
     const aspect = artworkId === draggingArtworkId ? draggingArtworkAspect : undefined;
-    const { widthMm, heightMm } = getEffectivePlacementSizeMm(artwork.dimensions, aspect);
+    const { widthMm } = getEffectivePlacementSizeMm(artwork.dimensions, aspect);
     // Framing is WALL-ONLY geometry (docs/framing-dimension-contract.md §3):
     // the outer box travels in the wall fields; the floor footprint keeps the
     // bare image size.
