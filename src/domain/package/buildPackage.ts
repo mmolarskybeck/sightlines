@@ -1,5 +1,6 @@
 import type { Artwork, Asset, Project } from "../project";
 import { sha256Hex } from "../assets/sha256";
+import { tierBlobKey } from "../assets/tierBlobKey";
 import {
   PACKAGE_SCHEMA_VERSION,
   parseSightlinesPackage,
@@ -73,17 +74,6 @@ export function selectReferencedArtworks(
 ): Artwork[] {
   const ids = selectReferencedArtworkIds(project);
   return libraryArtworks.filter((artwork) => ids.has(artwork.id));
-}
-
-function tierBlobKey(asset: Asset, tier: AssetTier): string {
-  switch (tier) {
-    case "original":
-      return asset.originalKey;
-    case "display":
-      return asset.displayKey;
-    case "thumbnail":
-      return asset.thumbnailKey;
-  }
 }
 
 // Originals retain their type; derivative fallback is WebP.

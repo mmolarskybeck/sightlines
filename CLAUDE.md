@@ -6,7 +6,7 @@ Sightlines is a private-by-design exhibition planning tool: scaled room plans, w
 
 @AGENTS.md
 
-Those rules apply to every session: feature branches named `feat/…`, leave completed work uncommitted for manual review, run the relevant checks before calling a chunk done, keep doc changes proportional, never edit skill packages under `.claude/skills/` or `.agents/skills/` during feature work.
+Those rules apply to every session: feature branches named `feat/…`, leave completed work uncommitted for manual review, `main` is protected and only changes through a CI-green pull request, run the relevant checks before calling a chunk done, keep doc changes proportional, never edit skill packages under `.claude/skills/` or `.agents/skills/` during feature work.
 
 ## Where things are documented
 
@@ -24,7 +24,7 @@ Read the owning doc before changing an area, and update it when a shipped change
 | `docs/package-format.md` | `.sightlines` package format and import/merge rules. | The package manifest, tiers, or import behavior changes. |
 | `docs/cloud-sync-plan.md` | Cross-device sync design, conflict UX, staged roadmap (stages 1–2 shipped, 3–4 designed). | Sync behavior or the remaining stages change. |
 | `docs/cloud-backup-providers.md` | Dropbox scopes, rollout staging, production-approval gates, other providers' constraints. | Scopes, provider state, or rollout stage change. |
-| `docs/deployment.md` | Cloudflare Workers deploy, env baking, Vercel mirror. | Deploy mechanics change. |
+| `docs/deployment.md` | Cloudflare Workers deploy, env baking, Vercel mirror, GitHub CI job, `main` branch protection, rollback. | Deploy mechanics, CI steps, or branch rules change. |
 | `docs/privacy-preserving-analytics.md` | Analytics policy contract and event allowlist. | Any new telemetry event — update allowlist and public disclosures before it ships. |
 | `docs/framing-dimension-contract.md`, `docs/measurement-tool-spec.md`, `docs/saved-views-collection-spec.md` | Feature contracts of record: framing footprints, the measurement tool (slice 2 unbuilt), saved views + thumbnail cache. | That feature's contract changes. |
 | `docs/quick-todos.md` | Small open scraps that don't fit the roadmap, including ideas deferred from feedback rounds. | Crossing one off (delete the line) or adding one. |
@@ -34,13 +34,15 @@ Read the owning doc before changing an area, and update it when a shipped change
 ## Commands
 
 ```bash
-npm run check        # tsc for app + worker
+npm run check        # tsc for app + worker (noUnused* on) + check:cycles (dpdm, static runtime cycles only: type-only and dynamic-import edges ignored; app + worker entries)
 npm run test         # vitest (~3.7k tests, ~20 s)
-npm run build        # tsc + vite build + chunk-graph assertion (three/pdf/fontkit/xlsx must stay lazy)
-npm run test:e2e     # Playwright (chromium on 5199; storage specs also on webkit via 5198)
+npm run build        # tsc + vite build + chunk-graph + bundle-size assertions (scripts/bundle-size-baseline.json, --update to rebase)
+npm run test:e2e     # Playwright (chromium on 5199; storage specs also on webkit via 5198); pdf-preview-visual.spec.ts compares PNGs in e2e/__screenshots__/
 npm run check:nuls   # rejects raw NUL bytes — agents have embedded them in string literals before
 npm run dev          # verify served code on 127.0.0.1, not localhost
 ```
+
+CI (`.github/workflows/e2e.yml`, 20-minute timeout) runs check, check:nuls, test, build, and test:e2e on every push and pull request; the `test` job is a required status check for merging to `main` (`docs/deployment.md`).
 
 Ad-hoc in-app verification uses the local `verify` skill (`.claude/skills/verify/driver.mjs smoke --port 5199`). One-off Playwright scripts live under `.playwright-mcp/` (gitignored) so `import "playwright"` resolves.
 

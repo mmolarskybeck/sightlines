@@ -1,5 +1,5 @@
 import type { DisplayUnit } from "../../../domain/project";
-import type { MeasurementScope, UnitSystem } from "../../../domain/units/unitSystem";
+import type { MeasurementScope } from "../../../domain/units/unitSystem";
 import {
   getPlaceholderForScope,
   getScopeUnits,

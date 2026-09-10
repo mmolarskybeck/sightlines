@@ -1,5 +1,6 @@
 import { parseFaceWallId } from "../../domain/geometry/freestandingWalls";
 import { areSharedBoundaryWalls, mirrorOpeningXMm } from "../../domain/geometry/sharedWalls";
+import { isConnectableOpening } from "../../domain/geometry/openingGuards";
 import { newId } from "../../domain/id";
 import { isStructurallyValidPair } from "../../domain/placement/openingPairs";
 import { isOpeningSlotFree } from "../../domain/placement/openingSlots";
@@ -45,12 +46,6 @@ export const SHARED_OPENING_TARGET_UNAVAILABLE_MESSAGE =
 
 export const SHARED_OPENING_ALREADY_PAIRED_MESSAGE =
   "This is already one half of a shared opening.";
-
-function isConnectableOpening(
-  object: WallObject | undefined
-): object is ConnectableOpeningWallObject {
-  return object?.kind === "door" || object?.kind === "window";
-}
 
 // Structural equality on the discriminated union. The resolver compares a
 // caller-supplied target against a freshly derived candidate list, and those

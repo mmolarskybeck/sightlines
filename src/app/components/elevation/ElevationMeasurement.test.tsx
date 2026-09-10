@@ -236,7 +236,6 @@ describe("Elevation temporary measurement", () => {
     expect(cxAfterNudge).toBeLessThanOrEqual(8535); // ~8534.4mm (28 feet)
 
     // Now test the y-axis boundary by nudging down
-    const before = Number(screen.getByRole("button", { name: /Measurement end point/ }).getAttribute("cy"));
     for (let i = 0; i < 500; i++) {
       fireEvent.keyDown(end, { key: "ArrowDown" });
     }

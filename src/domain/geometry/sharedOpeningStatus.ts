@@ -6,7 +6,8 @@ import {
   type SharedOpeningConflictReason,
   type SharedOpeningTarget
 } from "../placement/sharedOpeningAnalysis";
-import type { ConnectableOpeningWallObject, Project, WallObject } from "../project";
+import { isConnectableOpening } from "./openingGuards";
+import type { ConnectableOpeningWallObject, Project } from "../project";
 
 // What the inspector needs to know about ONE selected opening, as structured
 // data. Deliberately no copy: sentences, room names and button labels are the
@@ -38,12 +39,6 @@ export type SharedOpeningStatus =
     };
 
 const EXPOSED: SharedOpeningStatus = { kind: "exposed" };
-
-function isConnectableOpening(
-  wallObject: WallObject | undefined
-): wallObject is ConnectableOpeningWallObject {
-  return wallObject?.kind === "door" || wallObject?.kind === "window";
-}
 
 // The partner this opening is CURRENTLY joined to, or null. Structural validity
 // only — the same pointer-level test `normalizeOpeningPairs` uses — because a

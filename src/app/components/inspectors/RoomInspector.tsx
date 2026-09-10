@@ -5,7 +5,6 @@ import { getScopedUnitContext } from "../shared/scopedUnits";
 import { LengthField } from "../shared/LengthField";
 import { RoomDimensionFields } from "./RoomDimensionFields";
 import { InspectorSection } from "./InspectorSection";
-import { InspectorActionGroup } from "./InspectorActionGroup";
 import { Button } from "../ui/button";
 import { Kbd } from "../ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";

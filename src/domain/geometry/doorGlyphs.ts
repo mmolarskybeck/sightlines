@@ -137,7 +137,6 @@ export function doorSwingPlanGlyph({
   // multiples of 90° — written out rather than atan2'd so the four combinations
   // are readable, and so a zero-width door cannot produce NaN.
   const startAngleDeg = swingSign * 90;
-  const endAngleDeg = latchSign > 0 ? 0 : 180;
   // A quarter turn whose direction is the product of the two flags: flipping
   // either flag reverses it, flipping both leaves it unchanged (which is
   // exactly the mirrored-twin case — see mirrorDoorLeaf).

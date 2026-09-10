@@ -3,22 +3,17 @@
 // editRoom.ts, and reshapeRoom.ts. Everything here is pure and id-keyed —
 // no geometry construction — so it has no reason to depend on anything but
 // the project schema types plus walls.ts's wall-geometry builder.
-import type { Project, Room, RoomVertex } from "../project";
-import { getWallsWithGeometry } from "./walls";
+import type { Project } from "../project";
+import { findVertex, getWallsWithGeometry } from "./walls";
+
+// findVertex lives in walls.ts (walls.ts needs it, and importing it back from
+// here was the walls⇄wallLoop runtime cycle); re-exported for existing callers.
+export { findVertex };
 
 // Canonical vertex-by-id lookup for a room. Walls (and callers reshaping a
 // room) reference vertices by id rather than embedding them, so this is the
 // one place that resolves the reference and throws if a room's vertex/wall
 // data is inconsistent.
-export function findVertex(room: Room, vertexId: string): RoomVertex {
-  const vertex = room.vertices.find((candidate) => candidate.id === vertexId);
-
-  if (!vertex) {
-    throw new Error(`Vertex not found: ${vertexId}`);
-  }
-
-  return vertex;
-}
 
 // Which walls' lengths differ between two revisions of an entire PROJECT
 // (every room, not just one) — same 0.5mm epsilon and id-matching semantics

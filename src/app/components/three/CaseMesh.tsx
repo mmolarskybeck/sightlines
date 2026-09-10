@@ -1,6 +1,5 @@
 import { useCursor } from "@react-three/drei";
 import { useState } from "react";
-import { MathUtils } from "three";
 import type { FloorObject3d, WallCase3d } from "../../../domain/geometry/scene3d";
 import {
   CASE_BASE_SLAB_THICKNESS_MM,
@@ -12,6 +11,7 @@ import {
 } from "../../../domain/project";
 import { mmToWorld } from "./coordinates";
 import { objectDragPointerDown, useThreeObjectDrag } from "./objectDragContext";
+import { planRotationToYaw } from "./planRotation";
 import { makeClickToSelect } from "./selectOnClick";
 import { WALL_OFFSET_MM } from "./framingGeometry";
 import { SelectionBoxOutline } from "./UncertaintyOutline";
@@ -30,14 +30,6 @@ import { CASE_BODY_COLOR, CASE_FRAME_COLOR, CASE_GLASS_COLOR, CASE_GLASS_OPACITY
 // perimeter, plus a separate inset glass cap at the very top — every opaque
 // piece is itself a closed box, so plain FrontSide materials render correctly
 // from any angle with no coincident plane to z-fight the base slab's top.
-
-// Plan-space rotation (CCW in plan x/y) to a three.js yaw about +y — identical
-// convention to FloorObjectBox's planRotationToYaw (duplicated locally rather
-// than exported/shared, to keep this file's only coupling to FloorObjectBox
-// at zero).
-function planRotationToYaw(rotationDeg: number): number {
-  return -MathUtils.degToRad(rotationDeg);
-}
 
 // Never let legs invert to a negative height on a very short case.
 const MIN_LEG_HEIGHT_MM = 20;

@@ -3,6 +3,10 @@ import type { Point } from "../snapping/resolveSnap";
 import { getRoomPlaceableWalls } from "./placeableWalls";
 import type { WallWithGeometry } from "./walls";
 
+// Editable default depth for floor-placed objects (doors/windows have a
+// fixed nominal wall-object thickness instead; see WALL_OBJECT_PLAN_DEPTH_MM).
+export const DEFAULT_FLOOR_OBJECT_DEPTH_MM = 400;
+
 // Doors/windows render as zero-thickness lines in plan view, so their rects
 // need a nominal frame/leaf depth to be visible/clickable — fixed (not
 // editable), unlike floor objects' DEFAULT_FLOOR_OBJECT_DEPTH_MM.

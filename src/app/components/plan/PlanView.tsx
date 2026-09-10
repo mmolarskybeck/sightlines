@@ -5,8 +5,7 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
-  type Dispatch,
-  type KeyboardEvent as ReactKeyboardEvent
+  type Dispatch
 } from "react";
 import { type Vector2 } from "../../../domain/geometry/dragResize";
 import { applyPlanPreview, type PlanPreview } from "../../../domain/geometry/planPreview";
@@ -14,8 +13,7 @@ import { getFloorBounds } from "../../../domain/geometry/walls";
 import {
   getPlaceableFloorWalls,
   getWallObjectPlanRect,
-  WALL_OBJECT_PLAN_DEPTH_MM,
-  type PlanRect
+  WALL_OBJECT_PLAN_DEPTH_MM
 } from "../../../domain/geometry/planObjects";
 import {
   buildPlanScene,
@@ -43,21 +41,19 @@ import {
   roomIdContainingPoint
 } from "../../../domain/geometry/freestandingWalls";
 import { computePartitionChainsFloor } from "../../../domain/geometry/partitionChains";
-import { isPointInPolygon, type Point } from "../../../domain/geometry/polygon";
+import type { Point } from "../../../domain/geometry/polygon";
 import { getGridSnapTargets } from "../../../domain/snapping/gridSnapTargets";
-import { partitionAxisForWorldAxis } from "../../../domain/geometry/partitionSpacing";
 import {
   resolvePlanPlacement,
   WALL_CAPTURE_PX,
   type FloatPolicy,
-  type PlanPlacement,
-  type ResolvedPlacement
+  type PlanPlacement
 } from "../../../domain/snapping/planSnapTargets";
 import {
   resolvePlanObjectNudge,
   type PlanGroupMember
 } from "../../../domain/snapping/planGroupMove";
-import { resolveSnap, type Guide, type SnapTarget, type SnapTargetIds } from "../../../domain/snapping/resolveSnap";
+import { resolveSnap, type SnapTarget, type SnapTargetIds } from "../../../domain/snapping/resolveSnap";
 import { buildPlanMeasureSources } from "../../../domain/measurement/planMeasurementGeometry";
 import {
   getMajorGridIntervalMm,
@@ -347,7 +343,6 @@ export function PlanView({
   // Rubber-band selection on the plan background.
   const {
     drag: marquee,
-    dragRef: marqueeRef,
     beginDrag: startMarquee
   } = useDragGesture<MarqueeState>({
     onMove: (current, event) => {
@@ -1190,7 +1185,7 @@ export function PlanView({
   // Select suppression: when a pointer release triggers a trailing click that
   // must not collapse a multi-selection (group drags, marquee selection, etc.),
   // mark it here so the click handler can skip the selection.
-  const { suppressNextSelect, consumeSelectSuppression, suppressNextSelectRef } =
+  const { suppressNextSelect, consumeSelectSuppression } =
     useSelectSuppression();
 
   // Placement ids whose rendered plan rects intersect the marquee. No object

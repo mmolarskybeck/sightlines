@@ -164,7 +164,7 @@ export function ExportPdfDialog({
   exportState,
   onCancelExport
 }: ExportPdfDialogProps) {
-  const { preferences, settings, updatePreferences } =
+  const { settings, updatePreferences } =
     useDocumentExportPreferences(project, onPersistenceError);
   const [openSections, setOpenSections] = useState({
     roomPlans: true,

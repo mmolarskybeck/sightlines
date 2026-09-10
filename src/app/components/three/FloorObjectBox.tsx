@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { MathUtils } from "three";
 import type { Texture } from "three";
 import type { FloorObject3d } from "../../../domain/geometry/scene3d";
 import { textureNativeAspect } from "./artworkFit";
@@ -9,6 +8,7 @@ import {
   floorObjectImagePanels,
   resolveFloorObjectImageFaces
 } from "./floorObjectImageFaces";
+import { planRotationToYaw } from "./planRotation";
 import {
   planSuspensionWires,
   suspendedCenterYMm,
@@ -38,12 +38,6 @@ const BLOCKED_ZONE_OUTLINE_LIFT_MM = 2;
 // Outset of the selection outline from the rect it wraps, total across both
 // sides. The same 20mm every other selected thing in the 3D view wears.
 const SELECTION_OUTLINE_OUTSET_MM = 20;
-
-// Plan-space rotation (CCW in plan x/y) to a three.js yaw about +y: plan y
-// maps to world +z, which flips handedness — the one place that sign lives.
-function planRotationToYaw(rotationDeg: number): number {
-  return -MathUtils.degToRad(rotationDeg);
-}
 
 // One floor-placed object: a neutral artwork box carrying the work's image on
 // the faces the curator chose (ArtworkFloorObject.imageFaces — front + back by

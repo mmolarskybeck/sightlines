@@ -1,4 +1,5 @@
 import { parseFaceWallId } from "../geometry/freestandingWalls";
+import { isConnectableOpening } from "../geometry/openingGuards";
 import { getOpenWallIds } from "../geometry/wallCascade";
 import {
   buildFloorWallsById,
@@ -121,12 +122,6 @@ export type AppliedSharedOpeningActions = {
   createdOpeningIds: string[];
   realignedIds: string[];
 };
-
-function isConnectableOpening(
-  wallObject: WallObject | undefined
-): wallObject is ConnectableOpeningWallObject {
-  return wallObject?.kind === "door" || wallObject?.kind === "window";
-}
 
 function byIdAscending(a: { id: string }, b: { id: string }): number {
   return a.id.localeCompare(b.id);

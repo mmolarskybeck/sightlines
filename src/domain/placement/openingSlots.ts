@@ -1,11 +1,6 @@
 import type { WallWithGeometry } from "../geometry/walls";
 import type { Project } from "../project";
-import {
-  findFreeOpeningCenterXMm,
-  getDefaultOpeningCenterYMm,
-  getDefaultOpeningSizeMm,
-  type OpeningKind
-} from "./createOpening";
+import { findFreeOpeningCenterXMm } from "./createOpening";
 import { isBlockingKind } from "./overlapPolicy";
 
 // "Is this slot on this wall clear of a forbidden opening×opening overlap?"

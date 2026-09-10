@@ -223,13 +223,6 @@ describe("getIdsIntersectingRect", () => {
       makeMember({ id: "a", xMm: 500, yMm: 500, widthMm: 100, heightMm: 100 })
     ];
 
-    const result = getIdsIntersectingRect(members, {
-      minXMm: 600,
-      maxXMm: 550,
-      minYMm: 600,
-      maxYMm: 550
-    });
-
     const result2 = getIdsIntersectingRect(members, {
       minXMm: 400,
       maxXMm: 450,

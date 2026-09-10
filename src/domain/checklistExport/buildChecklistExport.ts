@@ -10,6 +10,7 @@
 // zipper itself).
 import { tiersForMode, type PackageZipFile } from "../package/buildPackage";
 import { writeSightlinesZip } from "../package/zipPackage";
+import { tierBlobKey } from "../assets/tierBlobKey";
 import type { Artwork, Asset, Project } from "../project";
 import type { AssetTier } from "../schema/packageSchema";
 import {
@@ -62,17 +63,6 @@ export function checklistExportSlug(project: Project): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
   return slug || "project";
-}
-
-function tierBlobKey(asset: Asset, tier: AssetTier): string {
-  switch (tier) {
-    case "original":
-      return asset.originalKey;
-    case "display":
-      return asset.displayKey;
-    case "thumbnail":
-      return asset.thumbnailKey;
-  }
 }
 
 // Tier preference order, best first. Reusing tiersForMode keeps this honest

@@ -10,6 +10,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -24,6 +25,9 @@ jobs:
       # this is the copy that actually binds.
       - run: npm run check:nuls
       - run: npm test
+      # Build runs the bundle-size assertion (scripts/assert-bundle-size.mjs),
+      # so a chunk regression fails here instead of at deploy time.
+      - run: npm run build
       - run: npm run test:e2e
       - if: failure()
         uses: actions/upload-artifact@v5
