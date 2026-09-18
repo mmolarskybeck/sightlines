@@ -318,6 +318,8 @@ describe("App shell", () => {
 
     expect(await screen.findByText("Support")).toBeInTheDocument();
     expect(screen.getByText("Hung on the wall")).toBeInTheDocument();
+    // Not yet standing on a shelf: the Center button names the wall.
+    expect(screen.getByRole("button", { name: "Center on wall" })).toBeInTheDocument();
 
     await act(async () => {
       await useAppStore.getState().addShelfUnderWallArtwork("support-row-placement");
@@ -327,6 +329,38 @@ describe("App shell", () => {
     });
 
     expect(await screen.findByText("Shelf")).toBeInTheDocument();
+
+    // addShelfUnderWallArtwork seats the shelf exactly under the work, so slide
+    // the rider off-center first (still well within the shelf's x-overlap) —
+    // otherwise clicking Center would be a no-op that proves nothing.
+    const shelf = useAppStore
+      .getState()
+      .project!.wallObjects.find((object) => object.kind === "shelf")!;
+    const riderYBeforeMove = useAppStore
+      .getState()
+      .project!.wallObjects.find((object) => object.id === "support-row-placement")!.yMm;
+    await act(async () => {
+      await useAppStore
+        .getState()
+        .moveArtworkPlacement("support-row-placement", shelf.xMm + 100, riderYBeforeMove);
+      useAppStore.getState().setObjectSelection(["support-row-placement"]);
+    });
+
+    // Still a rider (still names the shelf, not the wall), and the Center
+    // button now names the shelf too.
+    expect(await screen.findByText("Shelf")).toBeInTheDocument();
+    const centerOnShelfButton = screen.getByRole("button", { name: "Center on shelf" });
+
+    fireEvent.click(centerOnShelfButton);
+
+    await waitFor(() => {
+      const rider = useAppStore
+        .getState()
+        .project!.wallObjects.find((object) => object.id === "support-row-placement")!;
+      expect(rider.xMm).toBe(shelf.xMm);
+      expect(rider.yMm).toBe(riderYBeforeMove);
+    });
+
     fireEvent.click(screen.getByRole("button", { name: "Select shelf" }));
 
     const shelfId = useAppStore

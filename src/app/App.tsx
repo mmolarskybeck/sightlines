@@ -1484,6 +1484,20 @@ export function App() {
                 // so the two surfaces commit through one path.
                 onCommitObjectMove={(objectId, move) => {
                   if (move.anchor === "wall") {
+                    // A shelf arrives with its riders: slab and works commit as
+                    // ONE batch, so one undo entry puts the assembly back
+                    // together and no work is ever left hanging where the slab
+                    // used to be.
+                    if (move.riders?.length) {
+                      void moveWallObjectsGroup(
+                        [
+                          { id: objectId, wallId: move.wallId, xMm: move.xMm, yMm: move.yMm },
+                          ...move.riders.map((rider) => ({ ...rider, wallId: move.wallId }))
+                        ],
+                        allowOverlappingPlacement
+                      );
+                      return;
+                    }
                     void moveWallObjectPlacement(
                       objectId,
                       move.wallId,

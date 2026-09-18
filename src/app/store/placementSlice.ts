@@ -173,8 +173,11 @@ export type PlacementSliceActions = OpeningPlacementSliceActions & {
     placement: PlanPlacement,
     allowOverlap?: boolean
   ) => Promise<void>;
+  // A group of wall objects moved in BOTH wall axes in one undo entry. `wallId`
+  // re-anchors a member onto another wall (the 3D shelf-assembly drag's hop);
+  // absent, the member stays on its own wall.
   moveWallObjectsGroup: (
-    moves: { id: string; xMm: number; yMm: number }[],
+    moves: { id: string; xMm: number; yMm: number; wallId?: string }[],
     allowOverlap?: boolean
   ) => Promise<void>;
   movePlanObjectsGroup: (
@@ -781,7 +784,7 @@ export function createPlacementSlice(
   // Synchronous all-or-nothing batch commit. Persistence stays caller-owned
   // because arrange settling must finish state changes before awaiting.
   function commitWallObjectMoves(
-    moves: { id: string; xMm: number; yMm: number }[],
+    moves: { id: string; xMm: number; yMm: number; wallId?: string }[],
     label: string | ((movedCount: number) => string),
     allowOverlap: boolean,
     extras: EditExtras = {}
@@ -800,15 +803,29 @@ export function createPlacementSlice(
     );
     if (applicable.length === 0) return { status: "no-op" };
 
+    // A batch can re-anchor several members onto a foreign wall at once (the
+    // 3D shelf assembly hopping walls). Refuse the WHOLE batch if any target
+    // wall is open — committing the legal half would split the group apart,
+    // the same all-or-nothing rule movePlanObjectsGroup applies.
+    for (const move of applicable) {
+      if (move.wallId && refuseOpenWall(project, move.wallId)) return { status: "blocked" };
+    }
+
     const moveById = new Map(applicable.map((move) => [move.id, move]));
     const movedIds: string[] = [];
     const nextWallObjects = project.wallObjects.map((wallObject) => {
       const move = moveById.get(wallObject.id);
-      if (!move || (wallObject.xMm === move.xMm && wallObject.yMm === move.yMm)) {
+      if (!move) return wallObject;
+      const nextWallId = move.wallId ?? wallObject.wallId;
+      if (
+        wallObject.wallId === nextWallId &&
+        wallObject.xMm === move.xMm &&
+        wallObject.yMm === move.yMm
+      ) {
         return wallObject;
       }
       movedIds.push(wallObject.id);
-      return { ...wallObject, xMm: move.xMm, yMm: move.yMm };
+      return { ...wallObject, wallId: nextWallId, xMm: move.xMm, yMm: move.yMm };
     });
     if (movedIds.length === 0) return { status: "no-op" };
 
@@ -824,9 +841,13 @@ export function createPlacementSlice(
 
     // Reconcile the batch's own architecture before the gate, scoped to the
     // walls it touched, so a created twin is validated with everything else.
-    const touchedOpeningWallIds = project.wallObjects
-      .filter((object) => movedIds.includes(object.id) && isOpeningKind(object.kind))
-      .map((object) => object.wallId);
+    const touchedOpeningWallIds = [
+      ...new Set(
+        [...project.wallObjects, ...nextWallObjects]
+          .filter((object) => movedIds.includes(object.id) && isOpeningKind(object.kind))
+          .map((object) => object.wallId)
+      )
+    ];
     const reconciled =
       touchedOpeningWallIds.length > 0
         ? reconcileSharedOpenings(project, paired.nextWallObjects, touchedOpeningWallIds)

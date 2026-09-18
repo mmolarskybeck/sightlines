@@ -13,6 +13,7 @@
 // is unit-testable without a canvas.
 
 import { projectPointToWall, type FloorWall } from "../../../domain/geometry/planObjects";
+import { clamp } from "../../../domain/geometry/scalar";
 import type { Project, WallObject } from "../../../domain/project";
 import {
   resolveThreeDrop,
@@ -41,6 +42,18 @@ export type ThreeDragSource =
       xMm: number;
       yMm: number;
       dims: DropDimsMm;
+      // The works standing on this object, when it is a SHELF (shelfRiders.ts
+      // derives them at gesture start, as every other move path does). Offsets
+      // are measured from the slab's centre in the wall's own axes, and the
+      // sizes are FRAMED footprints — the same box the rider test and the
+      // elevation barriers use — so the assembly is clamped by what is
+      // visible, not by the stored image box.
+      riders?: {
+        id: string;
+        offsetMm: { xMm: number; yMm: number };
+        widthMm: number;
+        heightMm: number;
+      }[];
     }
   | {
       anchor: "floor";
@@ -63,6 +76,11 @@ export type ThreeDragMove =
       // The shelf this move stands the work ON, when the drag was captured by
       // one. The view lights that slab up for the rest of the gesture.
       shelfId?: string;
+      // Where the shelf's riders land, absolute and on the SAME wall as the
+      // slab: one common delta, never a per-member clamp, so their spacing is
+      // byte-identical before and after (the plan's rule of record,
+      // resolveShelfAssemblyMove).
+      riders?: { id: string; xMm: number; yMm: number }[];
     }
   | { anchor: "floor"; xMm: number; yMm: number };
 
@@ -133,6 +151,11 @@ export function grabOffsetMm(args: {
 // another wall re-anchors there. The grab offset is dropped on the hop (it was
 // measured in the origin wall's frame and means nothing in another's), so the
 // work centres under the cursor from that moment on.
+//
+// A SHELF ASSEMBLY is the one thing that hops reluctantly: it is wide, it
+// carries works, and the cursor crosses a neighbouring wall constantly while
+// sliding a slab toward a corner. `stickToWallId` keeps it on its own wall
+// until the view decides the curator meant it (SHELF_WALL_HOP_PX below).
 export function resolveDragMove(args: {
   surface: DragSurfaceHit | null;
   source: ThreeDragSource;
@@ -143,6 +166,9 @@ export function resolveDragMove(args: {
   // on the source being an artwork, because only an artwork can be a rider.
   wallObjects?: readonly WallObject[];
   seatOnShelves?: boolean;
+  // Resolve a SHELF against this wall whatever the cursor is over. Ignored for
+  // every other kind, which keeps hopping the instant the pointer crosses.
+  stickToWallId?: string;
 }): ThreeDragMove | null {
   const { surface, source, offsetMm, walls } = args;
   if (!surface) return null;
@@ -160,13 +186,24 @@ export function resolveDragMove(args: {
     return { anchor: "floor", xMm: resolved.xMm, yMm: resolved.yMm };
   }
 
-  if (surface.tag.kind !== "wall") return null;
+  // Which wall this move resolves against. Ordinarily the one under the cursor;
+  // for a stuck shelf, its own wall — the world point still projects onto it
+  // (projectPointToWall clamps along the run), so the slab slides to that
+  // wall's end and stays there instead of jumping to the neighbour.
+  const stickToWallId = source.kind === "shelf" ? args.stickToWallId : undefined;
+  const hitWallId = surface.tag.kind === "wall" ? surface.tag.wallId : null;
+  const resolvedWallId =
+    hitWallId !== null && (stickToWallId === undefined || hitWallId === source.wallId)
+      ? hitWallId
+      : stickToWallId;
+  if (resolvedWallId === undefined) return null;
+
   const resolved = resolveThreeDrop({
     point: surface.point,
-    tag: surface.tag,
+    tag: { kind: "wall", wallId: resolvedWallId },
     walls,
     dims: source.dims,
-    offsetMm: surface.tag.wallId === source.wallId ? offsetMm : { xMm: 0, yMm: 0 },
+    offsetMm: resolvedWallId === source.wallId ? offsetMm : { xMm: 0, yMm: 0 },
     wallObjects: args.wallObjects,
     seatOnShelves: Boolean(args.seatOnShelves) && source.kind === "artwork",
     movingId: source.objectId
@@ -175,14 +212,98 @@ export function resolveDragMove(args: {
   // stale scene) — the drag holds its last placement rather than committing to
   // a wall the store would refuse.
   if (!resolved || resolved.anchor !== "wall") return null;
+
+  const riders = source.riders;
+  if (!riders || riders.length === 0) {
+    return {
+      anchor: "wall",
+      wallId: resolved.wallId,
+      xMm: resolved.xMm,
+      yMm: resolved.yMm,
+      shelfId: resolved.shelfId
+    };
+  }
+
+  // RIGID ASSEMBLY (USER DECISION, planGroupMove.ts): the slab and its riders
+  // take ONE common delta, and the clamp that keeps the group on the wall acts
+  // on the UNION, never on each member — clamping per member is exactly what
+  // squashes an assembly against a corner.
+  const wall = walls.find((candidate) => candidate.id === resolved.wallId);
+  if (!wall) return null;
+  const union = assemblyUnionMm(source.dims, riders);
+  // A union wider than a FOREIGN wall cannot be made to fit without deforming
+  // it, so the hop is refused outright (the drag holds its last placement) —
+  // the same refusal the plan drag makes. Its own wall is never refused: the
+  // assembly is already there.
+  if (
+    resolved.wallId !== source.wallId &&
+    union.maxXMm - union.minXMm > wall.lengthMm
+  ) {
+    return null;
+  }
+  const xMm = fitUnionSpan(resolved.xMm, union.minXMm, union.maxXMm, wall.lengthMm);
+  const yMm = fitUnionSpan(resolved.yMm, union.minYMm, union.maxYMm, wall.heightMm);
   return {
     anchor: "wall",
     wallId: resolved.wallId,
-    xMm: resolved.xMm,
-    yMm: resolved.yMm,
-    shelfId: resolved.shelfId
+    xMm,
+    yMm,
+    riders: riders.map((rider) => ({
+      id: rider.id,
+      xMm: xMm + rider.offsetMm.xMm,
+      yMm: yMm + rider.offsetMm.yMm
+    }))
   };
 }
+
+// The assembly's extent in slab-centre-relative mm, both axes: the slab's own
+// box (its clamp footprint) unioned with every rider's framed footprint.
+function assemblyUnionMm(
+  dims: DropDimsMm,
+  riders: readonly {
+    offsetMm: { xMm: number; yMm: number };
+    widthMm: number;
+    heightMm: number;
+  }[]
+): { minXMm: number; maxXMm: number; minYMm: number; maxYMm: number } {
+  const union = {
+    minXMm: -dims.wallWidthMm / 2,
+    maxXMm: dims.wallWidthMm / 2,
+    minYMm: -dims.wallHeightMm / 2,
+    maxYMm: dims.wallHeightMm / 2
+  };
+  for (const rider of riders) {
+    union.minXMm = Math.min(union.minXMm, rider.offsetMm.xMm - rider.widthMm / 2);
+    union.maxXMm = Math.max(union.maxXMm, rider.offsetMm.xMm + rider.widthMm / 2);
+    union.minYMm = Math.min(union.minYMm, rider.offsetMm.yMm - rider.heightMm / 2);
+    union.maxYMm = Math.max(union.maxYMm, rider.offsetMm.yMm + rider.heightMm / 2);
+  }
+  return union;
+}
+
+// The slab centre that keeps the whole union inside [0, extentMm]. When the
+// union simply does not fit that extent there is no such centre, and the
+// assembly keeps the position it already has rather than being squeezed into
+// an impossible span — overhanging rigidly is the honest drawing.
+function fitUnionSpan(
+  centreMm: number,
+  minOffsetMm: number,
+  maxOffsetMm: number,
+  extentMm: number
+): number {
+  const lowMm = -minOffsetMm;
+  const highMm = extentMm - maxOffsetMm;
+  if (highMm < lowMm) return centreMm;
+  return clamp(centreMm, lowMm, highMm);
+}
+
+// How far the pointer must travel while held over ONE foreign wall before a
+// shelf assembly is allowed to re-anchor onto it. A slab is wide and its
+// riders are wider still, so the cursor crosses the neighbouring wall on the
+// way to almost every corner: hopping on the first frame over it made the
+// assembly bounce between walls. Past this distance the crossing is no longer
+// incidental — it is where the curator is going.
+export const SHELF_WALL_HOP_PX = 120;
 
 // Did the drag actually move the object? A sub-millimetre release is a click
 // that wobbled, and must not push an undo entry (plan's own commit applies the
@@ -221,18 +342,23 @@ export function projectWithDragPreview(
   if (!move) return project;
 
   if (move.anchor === "wall") {
+    // A shelf's riders travel WITH the slab in the preview, on the same wall —
+    // a slab sliding out from under its works, only to snap back to them on
+    // release, would misdescribe the gesture for its whole length.
+    const riderById = new Map((move.riders ?? []).map((rider) => [rider.id, rider]));
     let changed = false;
     const wallObjects = project.wallObjects.map((object) => {
-      if (object.id !== objectId) return object;
+      const target = object.id === objectId ? move : riderById.get(object.id);
+      if (!target) return object;
       if (
         object.wallId === move.wallId &&
-        object.xMm === move.xMm &&
-        object.yMm === move.yMm
+        object.xMm === target.xMm &&
+        object.yMm === target.yMm
       ) {
         return object;
       }
       changed = true;
-      return { ...object, wallId: move.wallId, xMm: move.xMm, yMm: move.yMm };
+      return { ...object, wallId: move.wallId, xMm: target.xMm, yMm: target.yMm };
     });
     return changed ? { ...project, wallObjects } : project;
   }

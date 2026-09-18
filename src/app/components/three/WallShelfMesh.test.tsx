@@ -2,13 +2,11 @@ import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WallShelf3d } from "../../../domain/geometry/scene3d";
 
-// The two claims this mesh makes, and the second is the load-bearing one:
-// a shelf is SELECTABLE in 3D and deliberately NOT DRAGGABLE this round (USER
-// DECISION) — a shelf carries the works standing on it on every other move
-// path, and 3D's drag machinery moves one object at a time. That absence is
-// invisible in a screenshot and easy to "fix" by copying WallCaseMesh, so it is
-// asserted here: the drag context is never read and the shared pointerdown
-// handler is never built.
+// The two claims this mesh makes: a shelf is SELECTABLE in 3D, and it is
+// DRAGGABLE through the same shared pointerdown handler every other draggable
+// mesh installs (ThreeDView turns that press into an assembly drag that carries
+// the slab's riders). Both are invisible in a screenshot, so both are asserted
+// on the wiring here.
 //
 // R3F intrinsics (<group>, <mesh>, <boxGeometry>) render as inert unknown
 // elements in jsdom, which is all this needs — the wiring, not the pixels.
@@ -60,11 +58,22 @@ describe("WallShelfMesh", () => {
     expect(makeClickToSelect).toHaveBeenCalledWith(shelf.objectId, onSelect);
   });
 
-  it("installs NO drag handler", () => {
-    render(<WallShelfMesh shelf={shelf} isSelected={false} onSelect={() => {}} />);
+  it("arms the shared object drag on its slab", () => {
+    const { container } = render(
+      <WallShelfMesh shelf={shelf} isSelected={false} onSelect={() => {}} />
+    );
 
-    expect(useThreeObjectDrag).not.toHaveBeenCalled();
-    expect(objectDragPointerDown).not.toHaveBeenCalled();
+    expect(useThreeObjectDrag).toHaveBeenCalled();
+    // Built for the SHELF's own object id — a slab that armed a drag on
+    // anything else would move the wrong thing.
+    expect(objectDragPointerDown).toHaveBeenCalledWith(
+      expect.anything(),
+      shelf.objectId
+    );
+    // jsdom renders R3F intrinsics as inert unknown elements and drops their
+    // function props, so the handler's PRESENCE is asserted through the mock
+    // above; this only pins that there is still exactly one slab to hang it on.
+    expect(container.querySelectorAll("mesh")).toHaveLength(1);
   });
 
   it("draws a selection outline only when selected", () => {

@@ -3542,5 +3542,90 @@ describe("placement slice", () => {
           expect(shelfTopYMm(shelf)).toBe(DEFAULT_SHELF_TOP_MM);
         });
       });
+
+      // The commit side of the 3D assembly drag: a whole shelf assembly hopping
+      // to another wall arrives as ONE batch, so the slab and the works standing
+      // on it can never land on different walls or in two undo entries.
+      describe("moveWallObjectsGroup across walls", () => {
+        async function assemblyOnNorthWall(): Promise<{
+          shelfId: string;
+          workId: string;
+        }> {
+          const workId = await placeWork({ xMm: 2000, yMm: 1500 });
+          await store.getState().addShelfUnderWallArtwork(workId);
+          return { shelfId: shelfOf().id, workId };
+        }
+
+        it("re-anchors a whole assembly onto another wall in one undo entry", async () => {
+          const { shelfId, workId } = await assemblyOnNorthWall();
+          const shelf = objectById(shelfId);
+          const work = objectById(workId);
+          const offsetXMm = work.xMm - shelf.xMm;
+          const offsetYMm = work.yMm - shelf.yMm;
+          const undoBefore = store.getState().undoStack.length;
+
+          await store.getState().moveWallObjectsGroup([
+            { id: shelfId, wallId: "wall-east", xMm: 1200, yMm: shelf.yMm },
+            {
+              id: workId,
+              wallId: "wall-east",
+              xMm: 1200 + offsetXMm,
+              yMm: shelf.yMm + offsetYMm
+            }
+          ]);
+
+          const state = store.getState();
+          expect(state.error).toBeNull();
+          expect(state.undoStack).toHaveLength(undoBefore + 1);
+          expect(objectById(shelfId)).toMatchObject({ wallId: "wall-east", xMm: 1200 });
+          expect(objectById(workId)).toMatchObject({
+            wallId: "wall-east",
+            xMm: 1200 + offsetXMm
+          });
+          // The work is still standing on the slab by the rider test's own
+          // definition — the assembly arrived intact, not merely nearby.
+          expect(
+            getShelfRiders(shelfOf(), state.project!.wallObjects).map((rider) => rider.id)
+          ).toEqual([workId]);
+
+          store.getState().undo();
+          expect(objectById(shelfId)).toMatchObject({ wallId: "wall-north" });
+          expect(objectById(workId)).toMatchObject({ wallId: "wall-north" });
+        });
+
+        it("refuses the whole batch when a target wall is open", async () => {
+          const { shelfId, workId } = await assemblyOnNorthWall();
+          const base = store.getState().project!;
+          store.setState({
+            project: {
+              ...base,
+              floor: {
+                ...base.floor,
+                rooms: base.floor.rooms.map((placement) => ({
+                  ...placement,
+                  room: {
+                    ...placement.room,
+                    walls: placement.room.walls.map((wall) =>
+                      wall.id === "wall-east" ? { ...wall, isOpenSide: true } : wall
+                    )
+                  }
+                }))
+              }
+            }
+          });
+          const undoBefore = store.getState().undoStack.length;
+
+          await store.getState().moveWallObjectsGroup([
+            { id: shelfId, wallId: "wall-east", xMm: 1200, yMm: objectById(shelfId).yMm },
+            { id: workId, wallId: "wall-east", xMm: 1200, yMm: objectById(workId).yMm }
+          ]);
+
+          const state = store.getState();
+          expect(state.error).toMatch(/open/i);
+          expect(state.undoStack).toHaveLength(undoBefore);
+          expect(objectById(shelfId).wallId).toBe("wall-north");
+          expect(objectById(workId).wallId).toBe("wall-north");
+        });
+      });
     });
 });

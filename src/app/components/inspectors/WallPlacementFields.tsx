@@ -29,7 +29,8 @@ export const CENTER_BUTTON_LABEL: Record<WallPlacementCenterBoundaryKind, string
   // between one and whatever bounds the other side is centering IN a bay, and
   // the label has to say so — otherwise the button silently stops meaning
   // "center on the wall" the moment a partition goes up.
-  bay: "Center in bay"
+  bay: "Center in bay",
+  shelf: "Center on shelf"
 };
 
 export function getWallPlacementEdges(
@@ -215,8 +216,10 @@ export function getWallPlacementNeighborEdges(
 }
 
 // "open" covers doors, windows, and blocked zones without mislabeling them as
-// works; "bay" covers the run a projected partition closes off.
-export type WallPlacementCenterBoundaryKind = "wall" | "works" | "open" | "bay";
+// works; "bay" covers the run a projected partition closes off; "shelf" covers
+// a rider centering on the shelf slab it stands on (InspectorPane substitutes
+// this target directly — `getWallPlacementCenterBoundaryKind` never returns it).
+export type WallPlacementCenterBoundaryKind = "wall" | "works" | "open" | "bay" | "shelf";
 
 // What the two detected boundaries make the Center button MEAN. Kept apart from
 // the geometry below so both callers — the single placement and the

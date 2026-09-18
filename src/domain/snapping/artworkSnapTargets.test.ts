@@ -35,6 +35,47 @@ describe("getArtworkSnapTargets", () => {
     ]);
   });
 
+  it("seats a SHELF's top face on the centerline, not its middle", () => {
+    // A 40mm-thick slab: centre 20mm below the eyeline puts the top face on it.
+    const targets = getArtworkSnapTargets({
+      centerlineYMm: 1450,
+      wallLengthMm: 4000,
+      wallHeightMm: 3000,
+      gridIntervalMm: 0,
+      neighbors: [],
+      movingSize: { widthMm: 1200, heightMm: 40 },
+      movingKind: "shelf"
+    });
+
+    expect(targets.filter((target) => target.kind === "centerline")).toEqual([
+      {
+        id: "centerline",
+        kind: "centerline",
+        axis: "y",
+        point: { xMm: 0, yMm: 1430 },
+        // The line still reads at the eyeline, where the top face lands.
+        guidePositionMm: 1450
+      }
+    ]);
+  });
+
+  it("keeps centre-on-centerline for every other kind", () => {
+    for (const movingKind of ["artwork", "door", "case", "wall-text"] as const) {
+      const targets = getArtworkSnapTargets({
+        centerlineYMm: 1450,
+        wallLengthMm: 4000,
+        wallHeightMm: 3000,
+        gridIntervalMm: 0,
+        neighbors: [],
+        movingSize: { widthMm: 300, heightMm: 400 },
+        movingKind
+      });
+      const centerline = targets.find((target) => target.kind === "centerline");
+      expect(centerline?.point.yMm).toBe(1450);
+      expect(centerline?.guidePositionMm).toBeUndefined();
+    }
+  });
+
   it("produces neighbor-center targets on both axes per neighbor", () => {
     const targets = getArtworkSnapTargets({
       centerlineYMm: 1450,

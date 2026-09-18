@@ -125,13 +125,24 @@ export function getArtworkSnapTargets(args: {
       point: { xMm: 0, yMm: movingSize.heightMm / 2 }
     },
     // The curatorial convention (docs/plan.md §5.5): a work's CENTER lands
-    // on the centerline, not its top or bottom edge.
-    {
-      id: "centerline",
-      kind: "centerline",
-      axis: "y",
-      point: { xMm: 0, yMm: centerlineYMm }
-    }
+    // on the centerline, not its top or bottom edge — EXCEPT for a shelf,
+    // whose useful line is the TOP FACE (that is where works stand and where
+    // the eye reads the slab). So a shelf seats its top face on the eyeline
+    // and the guide is drawn there, not through the slab's middle.
+    movingKind === "shelf"
+      ? {
+          id: "centerline",
+          kind: "centerline",
+          axis: "y",
+          point: { xMm: 0, yMm: centerlineYMm - movingSize.heightMm / 2 },
+          guidePositionMm: centerlineYMm
+        }
+      : {
+          id: "centerline",
+          kind: "centerline",
+          axis: "y",
+          point: { xMm: 0, yMm: centerlineYMm }
+        }
   ];
 
   // Shelf tops: the center-y that stands the moving object's BOTTOM edge on a

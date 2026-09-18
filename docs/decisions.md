@@ -47,6 +47,7 @@ Decisions of record, invariants, and traps distilled from the 2026-07-09 → 202
 - **2026-09-18** Seating a work on a shelf is one gesture in every view — drop or drag it over the slab — and the slab announces capture in the selection petrol everywhere (elevation `.snap-target`, plan `.is-snap-target`, 3D outline). The elevation shelf-top guide carries `guidePositionMm` (the top face) and `extentMm` (the slab span) and an "On shelf" label, so it can never be mistaken for the centerline guide; the elevation guide renderer honors `extentMm` on both axes.
 - **2026-09-18** A plan checklist drop over a shelf's footprint seats on it (`seatOnAnyOverlappingShelf`, widest x-overlap wins); a plan MOVE of a placed wall work stays x-only and never re-seats — USER-FACING RULE, do not "fix". ⌘/Ctrl bypasses seating on every drop and drag path, as it already bypassed every other snap.
 - **2026-09-18** `placeArtwork` takes `opts.seatOnShelfId` and re-seats the bottom edge on that slab AFTER `loadArtworkAspect` bakes the real size: a drop ghost may have been placeholder-sized, and a work whose bottom misses the top face by half a height difference is not a rider.
+- **2026-09-18** A shelf snaps in elevation by its TOP face: the centerline target for `movingKind === "shelf"` seats the top face on the eyeline with the guide drawn there. A shelf assembly (slab + riders, pressed on the slab) snaps as the SLAB via `snapProxy` on `resolveElevationPlacement`, never as the union box, and a shelf proxy is offered no shelf-top target. A rider's Center button is "Center on shelf" (`boundaryKind: "shelf"`, x = slab centre).
 
 ## Floor objects and display types
 
@@ -95,7 +96,7 @@ Decisions of record, invariants, and traps distilled from the 2026-07-09 → 202
 - **2026-08-28** `CLICK_DRAG_TOLERANCE_PX = 6` is the one discriminator between click, orbit-release and drag everywhere in 3D; an object drag disables OrbitControls for the gesture and commits as one store call = one undo.
 - **2026-08-28** Deferred in 3D drag: wall↔floor conversion mid-drag, group drag, touch drag, and snapping or barriers.
 - **2026-08-31** Known disagreement: elevation wires end at the viewed wall's top while 3D wires go to room height.
-- **2026-09-18** A shelf is selectable in 3D but NOT draggable this round — `WallShelfMesh` deliberately has no drag handler, so a 3D drag cannot move a slab out from under its riders. Rider-aware 3D shelf drag is a tracked follow-up.
+- **2026-09-18** ~~A shelf is selectable in 3D but NOT draggable this round~~ SUPERSEDED the same day: `WallShelfMesh` arms the shared object drag; the drag carries riders as one rigid assembly and commits through `moveWallObjectsGroup` with `wallId`. A shelf STICKS to its wall: a foreign-wall hit resolves against the origin wall (`stickToWallId`) until the pointer has travelled `SHELF_WALL_HOP_PX` = 120 px across that one foreign wall, then it hops, refused when the union does not fit (same rule as the plan reanchor). Artworks and cases still hop on the first frame. Original entry: A shelf is selectable in 3D but NOT draggable this round — `WallShelfMesh` deliberately has no drag handler, so a 3D drag cannot move a slab out from under its riders. Rider-aware 3D shelf drag is a tracked follow-up.
 
 ## Exports (PNG, PDF, checklist, packages)
 

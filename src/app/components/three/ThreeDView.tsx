@@ -20,11 +20,13 @@ import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import {
   artworkDropOuterMm,
   effectiveFraming,
-  getArtworkOuterDimensionsMm
+  getArtworkOuterDimensionsMm,
+  withArtworkFootprintFromMap
 } from "../../../domain/framing";
 import { getPlaceableFloorWalls } from "../../../domain/geometry/planObjects";
 import { deriveScene3d } from "../../../domain/geometry/scene3d";
 import { effectiveFloorDepthMm } from "../../../domain/placement/artworkForm";
+import { getShelfRiders } from "../../../domain/placement/shelfRiders";
 import {
   getEffectivePlacementSizeMm,
   PLACEHOLDER_ARTWORK_HEIGHT_MM,
@@ -58,6 +60,7 @@ import {
   grabOffsetMm,
   projectWithDragPreview,
   resolveDragMove,
+  SHELF_WALL_HOP_PX,
   type DragSurfaceHit,
   type ThreeDragMove,
   type ThreeDragSource
@@ -399,6 +402,13 @@ export function ThreeDView({
     // this is still a click and nothing moves.
     active: boolean;
     move: ThreeDragMove | null;
+    // FORCEFUL HOP (shelf only): the foreign wall the cursor is currently over
+    // and the client point where it first crossed onto it. A shelf assembly
+    // stays on its own wall until the pointer has travelled SHELF_WALL_HOP_PX
+    // since that crossing, so brushing the neighbouring wall on the way to a
+    // corner doesn't tear the assembly off its own. Null whenever the cursor is
+    // back over the source wall (or over no wall at all).
+    foreignWall: { wallId: string; sinceClientX: number; sinceClientY: number } | null;
   };
 
   // The dragged object's identity and footprint. Only the kinds whose meshes
@@ -407,13 +417,53 @@ export function ThreeDView({
   function dragSourceFor(objectId: string): ThreeDragSource | null {
     const wallObject = project.wallObjects.find((object) => object.id === objectId);
     if (wallObject) {
-      // A SHELF is deliberately absent from this list (USER DECISION): it is
-      // selectable in 3D and not draggable this round, because a shelf carries
-      // the works standing on it on every other move path and this drag moves
-      // one object at a time. WallShelfMesh installs no drag handler either, so
-      // a press on a slab can never reach here — this guard is the second half
-      // of the same decision, not a redundancy.
-      if (wallObject.kind !== "artwork" && wallObject.kind !== "case") return null;
+      if (
+        wallObject.kind !== "artwork" &&
+        wallObject.kind !== "case" &&
+        wallObject.kind !== "shelf"
+      ) {
+        return null;
+      }
+
+      // A SHELF drags as an ASSEMBLY: the slab plus the works standing on it,
+      // derived here at gesture start exactly as every other move path derives
+      // them (shelfRiders.ts). Its own clamp footprint is the slab — width and
+      // thickness — while the riders' framed footprints widen and heighten the
+      // union the clamp actually keeps on the wall.
+      if (wallObject.kind === "shelf") {
+        return {
+          anchor: "wall",
+          objectId,
+          kind: wallObject.kind,
+          wallId: wallObject.wallId,
+          xMm: wallObject.xMm,
+          yMm: wallObject.yMm,
+          dims: {
+            wallWidthMm: wallObject.widthMm,
+            wallHeightMm: wallObject.heightMm,
+            floorWidthMm: wallObject.widthMm,
+            floorDepthMm: DEFAULT_FLOOR_OBJECT_DEPTH_MM
+          },
+          riders: getShelfRiders(wallObject, project.wallObjects, artworksById).map(
+            (rider) => {
+              const footprint = withArtworkFootprintFromMap(rider, artworksById);
+              return {
+                id: rider.id,
+                // withArtworkFootprintFromMap grows the box about its own
+                // centre, so an offset read from the framed footprint is the
+                // offset of the STORED centre the commit writes back.
+                offsetMm: {
+                  xMm: footprint.xMm - wallObject.xMm,
+                  yMm: footprint.yMm - wallObject.yMm
+                },
+                widthMm: footprint.widthMm,
+                heightMm: footprint.heightMm
+              };
+            }
+          )
+        };
+      }
+
       // The wall clamp is governed by the OUTER (mat + frame) box, exactly as
       // the drop's is — read through effectiveFraming so a work whose stored
       // size already includes its frame doesn't double-count.
@@ -485,9 +535,40 @@ export function ThreeDView({
         onSelectObject(current.source.objectId, { additive: false });
       }
 
+      const surface = pickSurfaceUnderCursor(event.clientX, event.clientY);
+
+      // A shelf assembly is STICKY to its wall: it re-anchors only once the
+      // pointer has kept travelling over one foreign wall for
+      // SHELF_WALL_HOP_PX. Artworks and cases keep hopping on the first frame
+      // across — they are small, and their crossings are never incidental.
+      const shelfSource =
+        current.source.anchor === "wall" && current.source.kind === "shelf"
+          ? current.source
+          : null;
+      let foreignWall = current.foreignWall;
+      let hopArmed = false;
+      if (shelfSource) {
+        const hitWallId = surface?.tag.kind === "wall" ? surface.tag.wallId : null;
+        if (hitWallId === null || hitWallId === shelfSource.wallId) {
+          foreignWall = null;
+        } else if (!foreignWall || foreignWall.wallId !== hitWallId) {
+          foreignWall = {
+            wallId: hitWallId,
+            sinceClientX: event.clientX,
+            sinceClientY: event.clientY
+          };
+        } else {
+          hopArmed =
+            Math.hypot(
+              event.clientX - foreignWall.sinceClientX,
+              event.clientY - foreignWall.sinceClientY
+            ) >= SHELF_WALL_HOP_PX;
+        }
+      }
+
       const move =
         resolveDragMove({
-          surface: pickSurfaceUnderCursor(event.clientX, event.clientY),
+          surface,
           source: current.source,
           offsetMm: current.offsetMm,
           walls: placeableWalls,
@@ -495,14 +576,17 @@ export function ThreeDView({
           // slab, the same gesture as in elevation and plan. ⌘/Ctrl is the same
           // precision bypass elevation uses — held, the work hangs freely.
           wallObjects: project.wallObjects,
-          seatOnShelves: !(event.metaKey || event.ctrlKey)
+          seatOnShelves: !(event.metaKey || event.ctrlKey),
+          ...(shelfSource && !hopArmed ? { stickToWallId: shelfSource.wallId } : {})
         }) ?? current.move;
 
       // frameloop="demand": nothing redraws unless we ask, and the preview is
       // a re-derived scene, not an animation.
       dropRaycastRef.current?.invalidate();
-      if (current.active && move === current.move) return null;
-      return { ...current, active: true, move };
+      if (current.active && move === current.move && foreignWall === current.foreignWall) {
+        return null;
+      }
+      return { ...current, active: true, move, foreignWall };
     },
     onRelease: (final) => {
       // Hand the camera back whatever happened — a cancelled gesture must never
@@ -542,7 +626,8 @@ export function ThreeDView({
       startClientX: clientX,
       startClientY: clientY,
       active: false,
-      move: null
+      move: null,
+      foreignWall: null
     });
   }
 

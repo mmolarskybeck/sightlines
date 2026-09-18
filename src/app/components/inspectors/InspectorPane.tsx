@@ -409,9 +409,12 @@ export function InspectorPane({
         placedWallObjectPartitions
       )
     : { leftNeighborRightEdgeMm: undefined, rightNeighborLeftEdgeMm: undefined };
-  // Centering boundaries include every wall-object kind.
-  const wallPlacementCenterTarget =
-    placedWallObjectFootprint && placedWallObjectWall
+  // Centering boundaries include every wall-object kind. A rider centers on
+  // the shelf slab it stands on instead — that reading beats every other
+  // boundary because standing on a shelf is the more specific relationship.
+  const wallPlacementCenterTarget = standingShelf
+    ? { xMm: standingShelf.xMm, boundaryKind: "shelf" as const }
+    : placedWallObjectFootprint && placedWallObjectWall
       ? getWallPlacementCenterTarget(
           placedWallObjectFootprint,
           wallPlacementGeometryObjects,

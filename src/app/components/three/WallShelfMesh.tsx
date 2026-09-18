@@ -2,6 +2,7 @@ import { useCursor } from "@react-three/drei";
 import { useState } from "react";
 import type { WallShelf3d } from "../../../domain/geometry/scene3d";
 import { mmToWorld } from "./coordinates";
+import { objectDragPointerDown, useThreeObjectDrag } from "./objectDragContext";
 import { makeClickToSelect } from "./selectOnClick";
 import { WALL_OFFSET_MM } from "./framingGeometry";
 import { SelectionBoxOutline } from "./UncertaintyOutline";
@@ -15,13 +16,8 @@ import { CASE_BODY_COLOR } from "./tokens";
 // a shelf has no interior to see into, so there is nothing to build out of
 // separate pieces and no glass to inset.
 //
-// NOT DRAGGABLE THIS ROUND (USER DECISION): a shelf is selectable in 3D, and
-// deliberately installs no useThreeObjectDrag / objectDragPointerDown. A shelf
-// carries the works standing on it on every other move path (shelfRiders.ts),
-// and 3D's drag machinery moves one object at a time — a slab sliding out from
-// under its works would be a worse answer than not dragging it here at all.
-// Recorded as a follow-up in docs/status.md; do not "fix" it by wiring the drag
-// without also carrying the riders.
+// Dragging the slab carries its riders: ThreeDView derives them (shelfRiders.ts)
+// and the assembly moves as one rigid body.
 export function WallShelfMesh({
   shelf,
   isSelected,
@@ -47,6 +43,11 @@ export function WallShelfMesh({
 
   const handleClick = makeClickToSelect(shelf.objectId, onSelect);
 
+  // Direct manipulation, same pair as ArtworkPlane: press and drag the slab
+  // along its wall. Inert unless a ThreeObjectDragContext provider is above —
+  // the offscreen snapshot renderers mount this component with none.
+  const handlePointerDown = objectDragPointerDown(useThreeObjectDrag(), shelf.objectId);
+
   return (
     <group
       position={[mmToWorld(shelf.xMm), mmToWorld(shelf.yMm), mmToWorld(WALL_OFFSET_MM)]}
@@ -63,6 +64,7 @@ export function WallShelfMesh({
       <mesh
         position={[0, 0, mmToWorld(shelf.depthMm / 2)]}
         onClick={handleClick}
+        onPointerDown={handlePointerDown}
       >
         <boxGeometry
           args={[mmToWorld(shelf.widthMm), mmToWorld(shelf.heightMm), mmToWorld(shelf.depthMm)]}

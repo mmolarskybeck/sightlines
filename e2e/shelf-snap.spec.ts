@@ -297,6 +297,57 @@ test("a work seats on the shelf top over a competing centerline, and the assembl
   expect(rightAfterLift.y - rightBeforeLift.y).toBeCloseTo(-400, 0);
   expect(mmBottom(leftAfterLift)).toBeCloseTo((await mmBoxOf(slab)).y, 0);
 
+  // --- Drag the SHELF onto the eyeline: it aligns by its own TOP FACE. ----
+  // The assembly is three objects tall by now, so the union box's centre sits
+  // well above the slab. Snapping the union would park that centre on the
+  // eyeline and leave the slab somewhere below it; what the curator is aiming
+  // is the surface the works stand on. Park the top face 60 mm under the
+  // eyeline — inside the capture radius, and far enough that a union-box snap
+  // could not be mistaken for this one — then push it up.
+  const HOVER_BELOW_CENTERLINE_MM = 60;
+  await topHeight.fill(
+    `${((wall.height - (centerlineY + HOVER_BELOW_CENTERLINE_MM)) / 1000).toFixed(4)} m`
+  );
+  await topHeight.press("Enter");
+  await expect
+    .poll(async () => Math.round((await mmBoxOf(slab)).y - centerlineY))
+    .toBe(HOVER_BELOW_CENTERLINE_MM);
+
+  const slabScreenBeforeSnap = await boxOf(slab);
+  const snapGrab = {
+    x: slabScreenBeforeSnap.x + slabScreenBeforeSnap.width * 0.06,
+    y: slabScreenBeforeSnap.y + slabScreenBeforeSnap.height / 2
+  };
+  await page.mouse.move(snapGrab.x, snapGrab.y);
+  await page.mouse.down();
+  await page.mouse.move(
+    snapGrab.x,
+    snapGrab.y - HOVER_BELOW_CENTERLINE_MM / mmPerScreenY,
+    { steps: 16 }
+  );
+
+  // Mid-drag: one horizontal guide, on the eyeline — drawn where the top face
+  // lands, not through the middle of the slab or of the union box.
+  const snapGuides = await elevation.locator("line.snap-guide").evaluateAll((lines) =>
+    lines
+      .map((element) => {
+        const line = element as SVGLineElement;
+        return { y1: line.y1.baseVal.value, y2: line.y2.baseVal.value };
+      })
+      .filter((line) => Math.abs(line.y1 - line.y2) < 0.01)
+  );
+  expect(snapGuides).toHaveLength(1);
+  expect(snapGuides[0].y1).toBeCloseTo(centerlineY, 0);
+
+  await page.mouse.up();
+
+  // Committed: the slab's top face is ON the eyeline, and both works are still
+  // standing on it (the riders rode the snapped move, not the raw pointer).
+  await expect.poll(async () => Math.round((await mmBoxOf(slab)).y)).toBe(Math.round(centerlineY));
+  const [leftOnEyeline, rightOnEyeline] = await sortedWorkBoxes();
+  expect(mmBottom(leftOnEyeline)).toBeCloseTo(centerlineY, 0);
+  expect(mmBottom(rightOnEyeline)).toBeCloseTo(centerlineY, 0);
+
   // --- Plan: dragging the shelf carries the same two riders. -------------
   // Plan is a different move path entirely (usePlanObjectMove plus the rigid
   // planGroupMove entry), so it gets its own gesture rather than a re-render

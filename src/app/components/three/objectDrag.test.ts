@@ -392,3 +392,172 @@ describe("resolveDragMove shelf seating", () => {
     expect(move!.anchor === "wall" && move!.shelfId).toBeUndefined();
   });
 });
+
+// A SHELF ASSEMBLY dragged in 3D: the slab plus the works standing on it, moved
+// as one rigid body (the plan's rule of record, resolveShelfAssemblyMove), and
+// STICKY to its own wall until the view arms a hop (SHELF_WALL_HOP_PX).
+describe("resolveDragMove shelf assembly", () => {
+  const noOffset = { xMm: 0, yMm: 0 };
+
+  // A 1200-wide slab centred at 2000 along wall-0, carrying two works: one
+  // overhanging the left end by 50mm, one reaching 50mm past the right end.
+  // Union along the wall is therefore [-650, +650] about the slab centre, and
+  // [-20, +820] vertically (the taller work's top).
+  const assemblySource: ThreeDragSource = {
+    anchor: "wall",
+    objectId: "shelf-1",
+    kind: "shelf",
+    wallId: "wall-0",
+    xMm: 2000,
+    yMm: 980,
+    dims: { wallWidthMm: 1200, wallHeightMm: 40, floorWidthMm: 1200, floorDepthMm: 300 },
+    riders: [
+      { id: "work-a", offsetMm: { xMm: -400, yMm: 420 }, widthMm: 500, heightMm: 800 },
+      { id: "work-b", offsetMm: { xMm: 450, yMm: 320 }, widthMm: 400, heightMm: 600 }
+    ]
+  };
+
+  it("stays on its own wall while stuck, sliding to that wall's end", () => {
+    // Cursor is over wall-1, 1500 along it — but the slab is stuck to wall-0,
+    // so the same world point projects onto wall-0 (past its end) and the
+    // assembly parks with its widest member flush to the corner.
+    const move = resolveDragMove({
+      surface: wallSurface("wall-1", 4000, 1200, 1500),
+      source: assemblySource,
+      offsetMm: noOffset,
+      walls,
+      stickToWallId: "wall-0"
+    });
+
+    expect(move).toMatchObject({ anchor: "wall", wallId: "wall-0", xMm: 3350, yMm: 1200 });
+    // The union's right edge sits exactly on the wall's end, not the slab's.
+    expect(move!.anchor === "wall" && move!.riders).toEqual([
+      { id: "work-a", xMm: 2950, yMm: 1620 },
+      { id: "work-b", xMm: 3800, yMm: 1520 }
+    ]);
+  });
+
+  it("hops when the view arms it, carrying the riders at their own offsets", () => {
+    const move = resolveDragMove({
+      surface: wallSurface("wall-1", 4000, 1200, 1500),
+      source: assemblySource,
+      offsetMm: noOffset,
+      walls
+    });
+
+    expect(move).toMatchObject({ anchor: "wall", wallId: "wall-1", xMm: 1500 });
+    const riders = move!.anchor === "wall" ? move!.riders! : [];
+    expect(riders.map((rider) => rider.xMm - 1500)).toEqual([-400, 450]);
+    expect(riders.map((rider) => rider.yMm - move!.yMm)).toEqual([420, 320]);
+  });
+
+  it("refuses a hop onto a wall the assembly cannot fit", () => {
+    const tooWide: ThreeDragSource = {
+      ...assemblySource,
+      riders: [
+        { id: "work-a", offsetMm: { xMm: -1600, yMm: 420 }, widthMm: 500, heightMm: 800 },
+        { id: "work-b", offsetMm: { xMm: 1600, yMm: 420 }, widthMm: 500, heightMm: 800 }
+      ]
+    };
+
+    // 3700 of union against wall-1's 3000: there is no placement that keeps it
+    // whole, so the drag holds its last move rather than deforming the group.
+    expect(
+      resolveDragMove({
+        surface: wallSurface("wall-1", 4000, 1200, 1500),
+        source: tooWide,
+        offsetMm: noOffset,
+        walls
+      })
+    ).toBeNull();
+    // Its OWN wall is never refused — the assembly is already standing there.
+    expect(
+      resolveDragMove({
+        surface: wallSurface("wall-0", 2000, 1200, 0),
+        source: tooWide,
+        offsetMm: noOffset,
+        walls
+      })
+    ).toMatchObject({ wallId: "wall-0" });
+  });
+
+  it("clamps vertically on the UNION, so the tallest rider stays on the wall", () => {
+    const move = resolveDragMove({
+      // Dragged near the top of a 3000-high wall.
+      surface: wallSurface("wall-0", 2000, 2900, 0),
+      source: assemblySource,
+      offsetMm: noOffset,
+      walls
+    });
+
+    expect(move).toMatchObject({ yMm: 2180 });
+    const riders = move!.anchor === "wall" ? move!.riders! : [];
+    // work-a is 800 tall, centred 420 above the slab: its top lands exactly on
+    // the wall's ceiling rather than being clipped by it.
+    expect(riders[0]!.yMm + 800 / 2).toBe(3000);
+  });
+
+  it("keeps the grip while stuck and drops it on a hop", () => {
+    const grip = { xMm: 300, yMm: 100 };
+    const stuck = resolveDragMove({
+      surface: wallSurface("wall-0", 1000, 1200, 0),
+      source: assemblySource,
+      offsetMm: grip,
+      walls,
+      stickToWallId: "wall-0"
+    });
+    expect(stuck).toMatchObject({ xMm: 1300, yMm: 1300 });
+
+    const hopped = resolveDragMove({
+      surface: wallSurface("wall-1", 4000, 1200, 1000),
+      source: assemblySource,
+      offsetMm: grip,
+      walls
+    });
+    expect(hopped).toMatchObject({ wallId: "wall-1", xMm: 1000, yMm: 1200 });
+  });
+});
+
+describe("projectWithDragPreview shelf riders", () => {
+  const assemblyProject = {
+    id: "p2",
+    floor,
+    wallObjects: [
+      {
+        id: "shelf-1",
+        kind: "shelf",
+        wallId: "wall-0",
+        xMm: 2000,
+        yMm: 980,
+        widthMm: 1200,
+        heightMm: 40,
+        depthMm: 300
+      },
+      {
+        id: "work-a",
+        kind: "artwork",
+        artworkId: "a1",
+        wallId: "wall-0",
+        xMm: 1600,
+        yMm: 1400,
+        widthMm: 500,
+        heightMm: 800
+      }
+    ],
+    floorObjects: []
+  } as unknown as Project;
+
+  it("moves the riders with the slab, onto the slab's wall", () => {
+    const next = projectWithDragPreview(assemblyProject, "shelf-1", {
+      anchor: "wall",
+      wallId: "wall-1",
+      xMm: 900,
+      yMm: 1180,
+      riders: [{ id: "work-a", xMm: 500, yMm: 1600 }]
+    });
+
+    expect(next).not.toBe(assemblyProject);
+    expect(next.wallObjects[0]).toMatchObject({ wallId: "wall-1", xMm: 900, yMm: 1180 });
+    expect(next.wallObjects[1]).toMatchObject({ wallId: "wall-1", xMm: 500, yMm: 1600 });
+  });
+});

@@ -59,6 +59,11 @@ export type MoveDragState = {
     offsetFromGroupCenterMm: Vector2;
   }[];
   startGroupCenterMm?: Vector2;
+  // Group drag only: the member the SNAP passes should actually resolve, when
+  // the union box is the wrong thing to align. A shelf assembly is the case —
+  // the curator is aiming the slab, not the bounding box of the slab plus
+  // whatever happens to stand on it (see ElevationSnapProxy).
+  snapProxy?: ElevationSnapProxy;
   // The pressed object belongs to a multi-selection, so the release must
   // suppress the trailing click (the same suppressNextSelect mechanism group
   // drags use) — otherwise the browser's post-drag click collapses the
@@ -93,6 +98,18 @@ export type DropGhostState = {
   brokenBarrierIds?: string[];
 };
 
+
+// Resolve the snap against ONE member of a moving group instead of its union
+// box. `offsetFromCenterMm` is that member's offset from the group centre, so
+// the pipeline can move into the member's frame (proposed + offset), run the
+// snap and quantize passes there with the member's own size and kind, and move
+// back out (− offset) before the barrier pass, which still clamps the whole
+// union. Guides come out in wall space either way, so they need no translation.
+export type ElevationSnapProxy = {
+  offsetFromCenterMm: Vector2;
+  sizeMm: { widthMm: number; heightMm: number };
+  kind: WallObject["kind"];
+};
 
 export type ElevationPlacementResolution = {
   point: Vector2;
@@ -155,7 +172,8 @@ export type ElevationMoveDragResult = {
     movingKinds: WallObject["kind"][],
     previousSnapTargetIds: SnapTargetIds | undefined,
     precisionBypass: boolean,
-    brokenBarrierIds: ReadonlySet<string>
+    brokenBarrierIds: ReadonlySet<string>,
+    snapProxy?: ElevationSnapProxy
   ) => ElevationPlacementResolution;
   seedBrokenBarrierIds: (boxBoundsMm: RectBoundsMm, neighbors: WallObject[]) => string[];
   beginMarquee: (event: ReactPointerEvent<SVGSVGElement>) => void;
@@ -245,7 +263,11 @@ export function useElevationMoveDrag({
         movingKinds,
         current.previousSnapTargetIds,
         precisionBypass,
-        new Set(current.brokenBarrierIds)
+        new Set(current.brokenBarrierIds),
+        // A shelf assembly aligns by its SLAB, not by the union box of slab
+        // plus riders (which is taller than the slab and moves with whatever
+        // stands on it).
+        current.snapProxy
       );
 
       // A hard barrier that couldn't be resolved from here (wedged between two,
@@ -388,7 +410,10 @@ export function useElevationMoveDrag({
     movingKinds: WallObject["kind"][],
     previousSnapTargetIds: SnapTargetIds | undefined,
     precisionBypass: boolean,
-    brokenBarrierIds: ReadonlySet<string>
+    brokenBarrierIds: ReadonlySet<string>,
+    // Optional: align ONE member of the group rather than the union box (a
+    // shelf assembly aims the slab). See ElevationSnapProxy.
+    snapProxy?: ElevationSnapProxy
   ): {
     point: Vector2;
     activeGuides: Guide[];
@@ -423,10 +448,23 @@ export function useElevationMoveDrag({
     // parameter). The pre-filter is the shared predicate from shelfRiders.ts,
     // so "this work is over that shelf" means exactly the same thing here as
     // it does when the shelf later decides what it carries.
+    //
+    // With a snap proxy in play every alignment pass runs in the proxy's frame:
+    // its centre, its size, its kind. `snapKind` is therefore what gates the
+    // shelf tier — a shelf proxy offers none, because a shelf never stands on
+    // a shelf.
+    const snapSizeMm = snapProxy ? snapProxy.sizeMm : sizeMm;
+    const snapKind = snapProxy ? snapProxy.kind : movingKind;
+    const snapProposed: Vector2 = snapProxy
+      ? {
+          xMm: proposed.xMm + snapProxy.offsetFromCenterMm.xMm,
+          yMm: proposed.yMm + snapProxy.offsetFromCenterMm.yMm
+        }
+      : proposed;
     const shelves =
-      movingKind === "artwork" && wallId
+      snapKind === "artwork" && wallId
         ? getShelfSnapCandidates(
-            { wallId, xMm: proposed.xMm, widthMm: sizeMm.widthMm },
+            { wallId, xMm: snapProposed.xMm, widthMm: snapSizeMm.widthMm },
             footprintNeighbors
           )
         : [];
@@ -452,14 +490,14 @@ export function useElevationMoveDrag({
       };
     }
 
-    const snapResult = resolveArtworkSnap(proposed, {
+    const snapResult = resolveArtworkSnap(snapProposed, {
       centerlineYMm: centerlineMm,
       wallLengthMm,
       wallHeightMm,
       gridIntervalMm: minorGridMm,
       neighbors: snapNeighbors,
-      movingSize: sizeMm,
-      movingKind,
+      movingSize: snapSizeMm,
+      movingKind: snapKind,
       shelves,
       // Grid tier removed for elevation placement — the quantizer replaces it.
       snapToGrid: false,
@@ -476,20 +514,27 @@ export function useElevationMoveDrag({
       // vertical position; an axis a snap captured is left exactly as snapped.
       if (snapResult.snapTargetIds.y === undefined) {
         point.yMm = quantizeYToCleanIncrement(
-          { xMm: proposed.xMm, yMm: proposed.yMm },
-          sizeMm,
+          { xMm: snapProposed.xMm, yMm: snapProposed.yMm },
+          snapSizeMm,
           incrementMm
         );
       }
       if (snapResult.snapTargetIds.x === undefined) {
         point.xMm = quantizeXToCleanIncrement(
-          { xMm: proposed.xMm, yMm: point.yMm },
-          sizeMm,
+          { xMm: snapProposed.xMm, yMm: point.yMm },
+          snapSizeMm,
           incrementMm,
           wallLengthMm,
           snapNeighbors
         );
       }
+    }
+
+    // Back out of the proxy's frame: everything below (and the caller) works in
+    // the group's own centre, with the union size.
+    if (snapProxy) {
+      point.xMm -= snapProxy.offsetFromCenterMm.xMm;
+      point.yMm -= snapProxy.offsetFromCenterMm.yMm;
     }
 
     // Final pass: settle flush against obstacles / wall edges. Yielding barriers
@@ -692,6 +737,23 @@ export function useElevationMoveDrag({
             groupNeighbors
           ),
           preserveSelection: inMultiSelection,
+          // Pressing the slab means aiming the slab: snap resolves against it,
+          // not the union box. A multi-selection pressed anywhere else keeps
+          // the union-box alignment.
+          snapProxy:
+            wallObject.kind === "shelf"
+              ? {
+                  offsetFromCenterMm: {
+                    xMm: wallObject.xMm - groupCenterMm.xMm,
+                    yMm: wallObject.yMm - groupCenterMm.yMm
+                  },
+                  sizeMm: {
+                    widthMm: wallObject.widthMm,
+                    heightMm: wallObject.heightMm
+                  },
+                  kind: "shelf"
+                }
+              : undefined,
           members: groupMembers.map((member) => ({
             id: member.id,
             kind: member.kind,

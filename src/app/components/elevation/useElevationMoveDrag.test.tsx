@@ -247,3 +247,61 @@ describe("useElevationMoveDrag — shelf-top snapping", () => {
     expect(resolution.snapTargetIds.y).not.toBe(`shelf-top:${shelf.id}`);
   });
 });
+
+describe("useElevationMoveDrag — shelf assembly snapping", () => {
+  // The union box of the shelf (centre 1180, 40 thick) and its rider (centre
+  // 1400, 400 tall): 1160..1600, so a centre of 1380, with the slab 200mm
+  // below it. An assembly that snapped by its union box would put THAT centre
+  // on the eyeline; what the curator is aiming is the slab's top face.
+  const PROXY = {
+    offsetFromCenterMm: { xMm: 0, yMm: -200 },
+    sizeMm: { widthMm: shelf.widthMm, heightMm: shelf.heightMm },
+    kind: "shelf" as const
+  };
+  const UNION_SIZE = { widthMm: 1200, heightMm: 440 };
+
+  it("lands the PROXY's top face on the centerline, not the union box's centre", () => {
+    const { holder } = renderMoveDrag({ snapThresholdMm: 60 });
+
+    // Group centre proposed 30mm below where the slab's top face on the
+    // eyeline (1500) would put it: slab centre 1480 → group centre 1680.
+    const resolution = holder.api!.resolveElevationPlacement(
+      { xMm: 2000, yMm: 1650 },
+      UNION_SIZE,
+      [hungWork],
+      "artwork",
+      ["shelf", "artwork"],
+      undefined,
+      false,
+      new Set(),
+      PROXY
+    );
+
+    expect(resolution.snapTargetIds.y).toBe("centerline");
+    // Group centre back in the group's own frame...
+    expect(resolution.point.yMm).toBeCloseTo(1680);
+    // ...which is the slab's top face exactly on the eyeline.
+    const slabCentreYMm = resolution.point.yMm + PROXY.offsetFromCenterMm.yMm;
+    expect(slabCentreYMm + shelf.heightMm / 2).toBeCloseTo(1500);
+  });
+
+  it("offers no shelf-top target to a shelf proxy (a shelf never stands on a shelf)", () => {
+    const { holder } = renderMoveDrag({ snapThresholdMm: 60 });
+
+    // Slab centre proposed where standing ON the existing shelf's top face
+    // (1200) would put it, were that ever offered.
+    const resolution = holder.api!.resolveElevationPlacement(
+      { xMm: 2000, yMm: 1420 },
+      UNION_SIZE,
+      [shelf],
+      "artwork",
+      ["shelf", "artwork"],
+      undefined,
+      false,
+      new Set(),
+      PROXY
+    );
+
+    expect(resolution.snapTargetIds.y).not.toBe(`shelf-top:${shelf.id}`);
+  });
+});
