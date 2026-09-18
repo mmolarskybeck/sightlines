@@ -76,8 +76,10 @@ import { ElevationEmptyState } from "./components/elevation/ElevationEmptyState"
 import { FloorCaseInspector, WallCaseInspector } from "./components/inspectors/CaseInspector";
 import { FloorObjectInspector, FloorPlacementFields } from "./components/inspectors/FloorObjectInspector";
 import { FloorArtworkImageFacesField } from "./components/inspectors/FloorArtworkImageFacesField";
-import { MonitorSupportField } from "./components/inspectors/MonitorSupportField";
+import { StandsOnField } from "./components/inspectors/StandsOnField";
+import { FloorSupportFields } from "./components/inspectors/FloorSupportFields";
 import { isMonitorArtwork } from "../domain/geometry/monitorGlyphs";
+import { resolveFloorSupport } from "../domain/geometry/supportGlyphs";
 import { FloorArtworkImageSizeNote } from "./components/inspectors/FloorArtworkImageSizeNote";
 import { FreestandingWallInspector } from "./components/inspectors/FreestandingWallInspector";
 import {
@@ -318,8 +320,9 @@ export function App() {
   const commitPlanMove = useAppStore((state) => state.commitPlanMove);
   const updateFloorObject = useAppStore((state) => state.updateFloorObject);
   const setFloorArtworkImageFaces = useAppStore((state) => state.setFloorArtworkImageFaces);
-  const setFloorArtworkMonitorSupport = useAppStore(
-    (state) => state.setFloorArtworkMonitorSupport
+  const setFloorArtworkStandsOn = useAppStore((state) => state.setFloorArtworkStandsOn);
+  const updateFloorArtworkSupport = useAppStore(
+    (state) => state.updateFloorArtworkSupport
   );
   const pairFloorArtworksBackToBack = useAppStore(
     (state) => state.pairFloorArtworksBackToBack
@@ -993,6 +996,16 @@ export function App() {
   // the RECORD (the display type travels with the work, not the placement), so
   // it is answerable for an unplaced work too.
   const selectedArtworkIsMonitor = isMonitorArtwork(selectedArtwork ?? undefined);
+  // The pedestal/plinth under the selected floor placement, resolved the one
+  // correct way (an untouched box monitor still stands on its implicit 800mm
+  // pedestal — see resolveFloorSupport). Drives both the support fields and the
+  // withheld "Height off floor": a support and a suspension height are
+  // mutually exclusive states, and with a support present every renderer
+  // ignores baseHeightMm, so offering the field would be offering a number
+  // nothing draws.
+  const placedFloorArtworkSupport = placedFloorArtwork
+    ? resolveFloorSupport(placedFloorArtwork, selectedArtwork ?? undefined)
+    : null;
   const isArtworkPlaced = placedWallObject !== null || placedFloorArtwork !== null;
   // Remove the artwork from whichever surface currently owns it.
   const artworkPlacementId = placedWallObject?.id ?? placedFloorArtwork?.id ?? null;
@@ -2201,12 +2214,17 @@ export function App() {
                           void updateFloorObject(placedFloorArtwork.id, { rotationDeg })
                         }
                         // A box monitor stands on a pedestal or on the floor
-                        // — never on wires. Withholding the prop hides the
-                        // "Height off floor" field entirely, the same way a
-                        // display case is denied it (see FloorPlacementFields'
-                        // onCommitBaseHeight and CrtMonitorMesh, which ignores
-                        // baseHeightMm for the same reason).
-                        {...(selectedArtworkIsMonitor
+                        // — never on wires. A work standing on a support is
+                        // the same case: its bottom edge IS the support's top
+                        // face and every renderer ignores baseHeightMm, so the
+                        // field would edit a number nothing draws (and "Stands
+                        // on" below is how the work gets back into the air).
+                        // Withholding the prop hides the field entirely, the
+                        // same way a display case is denied it (see
+                        // FloorPlacementFields' onCommitBaseHeight and
+                        // CrtMonitorMesh, which ignores baseHeightMm for the
+                        // same reason).
+                        {...(selectedArtworkIsMonitor || placedFloorArtworkSupport
                           ? {}
                           : {
                               onCommitBaseHeight: (baseHeightMm: number) =>
@@ -2215,19 +2233,32 @@ export function App() {
                                 })
                             })}
                       />
-                      {/* Pedestal-or-floor is a fact about THIS installation —
-                          it writes to the floor placement (monitorSupport), so
-                          it lives with the other placement fields rather than
-                          in the identity block, and stays reachable when the
-                          record up there has compacted. An unplaced monitor
-                          gets the default (pedestal) when it lands. */}
-                      {selectedArtworkIsMonitor ? (
-                        <MonitorSupportField
-                          monitorSupport={placedFloorArtwork.monitorSupport}
-                          onChange={(monitorSupport) =>
-                            void setFloorArtworkMonitorSupport(
+                      {/* What the work stands on is a fact about THIS
+                          installation — it writes to the floor placement
+                          (support / baseHeightMm / monitorSupport), so it lives
+                          with the other placement fields rather than in the
+                          identity block, and stays reachable when the record up
+                          there has compacted. An unplaced work gets the default
+                          (floor, or a monitor's pedestal) when it lands. */}
+                      <StandsOnField
+                        artwork={selectedArtwork}
+                        floorObject={placedFloorArtwork}
+                        isMonitor={selectedArtworkIsMonitor}
+                        onChange={(standsOn) =>
+                          void setFloorArtworkStandsOn(placedFloorArtwork.id, standsOn)
+                        }
+                      />
+                      {/* The support BOX's own numbers, under the fields that
+                          size the WORK. Only when there is one to edit. */}
+                      {placedFloorArtworkSupport ? (
+                        <FloorSupportFields
+                          floorObject={placedFloorArtwork}
+                          support={placedFloorArtworkSupport}
+                          unit={project.unit}
+                          onChange={(changes) =>
+                            void updateFloorArtworkSupport(
                               placedFloorArtwork.id,
-                              monitorSupport
+                              changes
                             )
                           }
                         />

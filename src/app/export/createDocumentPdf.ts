@@ -72,6 +72,7 @@ import {
   drawElevationFloorCaseGhost,
   drawElevationMonitorGhost,
   drawElevationSuspendedArtworkGhost,
+  drawElevationSupportedArtworkGhost,
   drawElevationPartitionProfile,
   drawArtworkPlaceholder
 } from "./pdf/elevationPage";
@@ -440,6 +441,11 @@ export async function createDocumentPdf(
       // behind-the-wall-objects paint slot.
       for (const ghost of scene.suspendedArtworkGhosts) {
         drawElevationSuspendedArtworkGhost(page, transform, ghost, scene.wallHeightMm);
+      }
+      // Works standing on a pedestal or plinth, same slot: support block +
+      // work + optional bonnet, rising from the floor line.
+      for (const ghost of scene.supportedArtworkGhosts) {
+        drawElevationSupportedArtworkGhost(page, transform, ghost);
       }
       // Box monitors standing in front of the wall, same slot: pedestal +
       // cabinet + screen, rising from the floor line.

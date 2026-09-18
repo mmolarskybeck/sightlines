@@ -1,6 +1,7 @@
 import type {
   Artwork,
   ArtworkFloorObject,
+  FloorSupport,
   ArtworkWallObject,
   CaseFloorObject,
   CaseWallObject,
@@ -11,10 +12,12 @@ import type {
 } from "../project";
 import { getPlacementFootprintMm } from "../framing";
 import type { FloorPartition } from "../geometry/freestandingWalls";
+import { isMonitorArtwork } from "../geometry/monitorGlyphs";
 import {
-  isMonitorArtwork,
-  monitorPedestalHeightMm
-} from "../geometry/monitorGlyphs";
+  assemblyPlanRect,
+  resolveFloorSupport,
+  supportPlanRect
+} from "../geometry/supportGlyphs";
 import {
   getFloorObjectPlanRect,
   segmentPlanRect,
@@ -191,9 +194,66 @@ export type ElevationSceneMonitorGhost = {
   // in it; see CrtMonitorMesh for why the two are stored apart).
   monitorHeightMm: number;
   // The plinth beneath, or 0 when the monitor stands on the bare floor.
-  // Resolved here (absent monitorSupport ⇒ pedestal) so the canvas and the PDF
-  // can't disagree about whether there is anything under the box.
+  // Resolved here through resolveFloorSupport (absent monitorSupport ⇒ pedestal,
+  // but an EXPLICIT pedestal/plinth on the cabinet wins) so the canvas and the
+  // PDF can't disagree about what, if anything, is under the box.
   pedestalHeightMm: number;
+  // The PLINTH's own along-wall span, which the plinth and the bonnet are drawn
+  // across — xMin/xMax above stay the CABINET's, because a monitor on a wide
+  // plinth is still a monitor of its own width.
+  //
+  // For the monitor default (a pedestal sized and centred on its cabinet) these
+  // equal xMinMm/xMaxMm exactly, so every legacy monitor draws what it always
+  // drew; they diverge only once a curator authors an explicit support with its
+  // own footprint or offset — which plan already draws and elevation used to
+  // silently shrink back to the cabinet.
+  supportXMinMm: number;
+  supportXMaxMm: number;
+  // The plexi bonnet's height above the plinth's top face, absent when there is
+  // none. Like the supported-artwork ghost's: a LOCKED bonnet may be SHORTER
+  // than the cabinet, and the cabinet is then drawn straight through it.
+  bonnetHeightMm?: number;
+};
+
+// The elevation "shadow" of a floor work STANDING ON A SUPPORT: the pedestal or
+// plinth block, the work above it, and the plexi bonnet over both when there is
+// one. The second narrow exception to the "floor-resting artwork emits no
+// ghost" DECISION above, and for the same reason the monitor is the first: a
+// sculpture on a pedestal is waist-to-eye-height matter standing against this
+// wall, and whether its centre lines up with the work hung beside it is exactly
+// what the elevation is for.
+//
+// MONITORS ARE NOT IN THIS FAMILY — they keep ElevationSceneMonitorGhost, which
+// draws the cabinet and its screen; a monitor on a plinth is still a monitor.
+//
+// Two spans, not one: the assembly's (the union of work and support footprints,
+// which is WIDER than either whenever the work overhangs or the support is
+// bigger) bounds the support box and the bonnet, while the work's own span
+// bounds the work outline drawn above it. Collapsing them would draw a
+// sculpture as wide as its plinth.
+export type ElevationSceneSupportedArtworkGhost = {
+  kind: "supported-artwork";
+  objectId: string;
+  // The ASSEMBLY's along-wall span, clamped to the wall extent.
+  xMinMm: number;
+  xMaxMm: number;
+  // Floor to the support's top face; the work's bottom edge sits on it.
+  supportHeightMm: number;
+  // The work's own height, rising from supportHeightMm.
+  workHeightMm: number;
+  // The bonnet's height above the support's top face, absent when there is no
+  // bonnet. A LOCKED bonnet may be SHORTER than the work — the consumer draws
+  // the work outline straight through and past it rather than clipping.
+  bonnetHeightMm?: number;
+  // The WORK's own along-wall span, clamped to the wall extent.
+  workXMinMm: number;
+  workXMaxMm: number;
+  // The SUPPORT's own along-wall span: what the support block and the bonnet
+  // (bonnet footprint = support footprint) are drawn across. Narrower than the
+  // assembly span whenever the work overhangs — drawing the block across the
+  // assembly would widen a pedestal to its sculpture.
+  supportXMinMm: number;
+  supportXMaxMm: number;
 };
 
 // A plan rect's shadow on one wall: the along-wall extent plus how the
@@ -300,6 +360,67 @@ export function projectFloorObjectOntoWall(
   return { xMinMm: projection.xMinMm, xMaxMm: projection.xMaxMm };
 }
 
+// The supported-assembly twin of projectFloorObjectOntoWall: the union of the
+// work's footprint and its support's projected onto the wall, PLUS the work's
+// own span inside it. Returns null when the assembly doesn't overlap the wall
+// at all.
+//
+// Both spans come from the one corner formula in projectPlanRectOntoWall, so a
+// rotated pedestal reports the same wider |w·cos| + |d·sin| span its work does.
+export function projectSupportedFootprintOntoWall(
+  object: FloorObject,
+  support: FloorSupport,
+  wallStartFloorMm: Point,
+  wallEndFloorMm: Point
+): {
+  xMinMm: number;
+  xMaxMm: number;
+  workXMinMm: number;
+  workXMaxMm: number;
+  supportXMinMm: number;
+  supportXMaxMm: number;
+} | null {
+  const assembly = projectPlanRectOntoWall(
+    assemblyPlanRect(object, support),
+    wallStartFloorMm,
+    wallEndFloorMm
+  );
+  if (!assembly) return null;
+
+  // The assembly contains both boxes, so an overlapping assembly with a
+  // non-overlapping part means that part hangs entirely past one end of this
+  // wall. Pin it to that end as a zero-width span rather than letting it
+  // inherit the assembly's — a support whose work is off the page should show
+  // the support, not a work outline as wide as it, and the same holds for a
+  // plinth that has slid off the end under a work still on it.
+  const dirX = wallEndFloorMm.xMm - wallStartFloorMm.xMm;
+  const dirY = wallEndFloorMm.yMm - wallStartFloorMm.yMm;
+  const wallLengthMm = Math.hypot(dirX, dirY);
+  const spanOf = (rect: PlanRect): { minMm: number; maxMm: number } => {
+    const projection = projectPlanRectOntoWall(rect, wallStartFloorMm, wallEndFloorMm);
+    if (projection) return { minMm: projection.xMinMm, maxMm: projection.xMaxMm };
+    const alongMm =
+      wallLengthMm === 0
+        ? 0
+        : ((rect.centerXMm - wallStartFloorMm.xMm) * dirX +
+            (rect.centerYMm - wallStartFloorMm.yMm) * dirY) /
+          wallLengthMm;
+    const pinnedMm = alongMm <= 0 ? assembly.xMinMm : assembly.xMaxMm;
+    return { minMm: pinnedMm, maxMm: pinnedMm };
+  };
+
+  const work = spanOf(getFloorObjectPlanRect(object));
+  const supportSpan = spanOf(supportPlanRect(object, support));
+  return {
+    xMinMm: assembly.xMinMm,
+    xMaxMm: assembly.xMaxMm,
+    workXMinMm: work.minMm,
+    workXMaxMm: work.maxMm,
+    supportXMinMm: supportSpan.minMm,
+    supportXMaxMm: supportSpan.maxMm
+  };
+}
+
 // A partition standing in front of this wall gets a projected profile rather
 // than nothing at all: from the wall's own elevation it is architecture that
 // divides the surface into hanging zones, and until now it left no trace.
@@ -389,6 +510,12 @@ export type ElevationScene = {
   // this wall, same projection, floating y-span. Empty unless the caller
   // supplies floorArtworks + the wall's floor-space endpoints.
   suspendedArtworkGhosts: ElevationSceneSuspendedArtworkGhost[];
+  // Non-monitor floor artworks STANDING ON a pedestal or plinth in front of
+  // this wall, same projection, rising from the floor line. Empty unless the
+  // caller supplies floorArtworks + the wall's floor-space endpoints; the
+  // artworksById join only decides monitor-vs-not, so an explicit support
+  // ghosts with or without it.
+  supportedArtworkGhosts: ElevationSceneSupportedArtworkGhost[];
   // Floor-standing box monitors in front of this wall, same projection, rising
   // from the floor line (pedestal + cabinet). Empty unless the caller supplies
   // floorArtworks, artworksById — the display type lives on the WORK, so
@@ -530,6 +657,13 @@ export function buildElevationScene(
       // work that was later switched to a monitor must therefore not float it
       // here: it ghosts below, as a monitor.
       if (isMonitorArtwork(artworksById?.get(floorArtwork.artworkId))) continue;
+      // Nor does a work standing on a pedestal: its bottom edge IS the support's
+      // top face and baseHeightMm is ignored (see ArtworkFloorObject.support),
+      // so a stale suspension height left on a work that was later stood on a
+      // plinth must ghost as supported below, never float here.
+      if (resolveFloorSupport(floorArtwork, artworksById?.get(floorArtwork.artworkId))) {
+        continue;
+      }
       const baseHeightMm = floorArtwork.baseHeightMm ?? 0;
       if (baseHeightMm <= 0) continue;
       const range = projectFloorObjectOntoWall(floorArtwork, wallStartFloorMm, wallEndFloorMm);
@@ -551,15 +685,90 @@ export function buildElevationScene(
   const monitorGhosts: ElevationSceneMonitorGhost[] = [];
   if (floorArtworks && wallStartFloorMm && wallEndFloorMm) {
     for (const floorArtwork of floorArtworks) {
-      if (!isMonitorArtwork(artworksById?.get(floorArtwork.artworkId))) continue;
-      const range = projectFloorObjectOntoWall(floorArtwork, wallStartFloorMm, wallEndFloorMm);
+      const artwork = artworksById?.get(floorArtwork.artworkId);
+      if (!isMonitorArtwork(artwork)) continue;
+      // One resolver for what is under the cabinet: the absent-means-pedestal
+      // default and an explicitly authored pedestal/plinth both arrive here as
+      // a support, and null means the cabinet really is on the bare floor.
+      const support = resolveFloorSupport(floorArtwork, artwork);
+      if (!support) {
+        const range = projectFloorObjectOntoWall(
+          floorArtwork,
+          wallStartFloorMm,
+          wallEndFloorMm
+        );
+        if (!range) continue;
+        monitorGhosts.push({
+          object: floorArtwork,
+          xMinMm: range.xMinMm,
+          xMaxMm: range.xMaxMm,
+          monitorHeightMm: floorArtwork.heightMm,
+          pedestalHeightMm: 0,
+          // No plinth to span; the cabinet's own span is the inert answer, and
+          // consumers gate the plinth on pedestalHeightMm > 0 anyway.
+          supportXMinMm: range.xMinMm,
+          supportXMaxMm: range.xMaxMm
+        });
+        continue;
+      }
+      // With a support the ASSEMBLY decides whether this monitor shows on this
+      // wall at all — a cabinet just past the end on a plinth still standing in
+      // front of the wall is one installation, and plan already draws it whole.
+      // For the monitor default the assembly IS the cabinet, so nothing legacy
+      // changes here.
+      const range = projectSupportedFootprintOntoWall(
+        floorArtwork,
+        support,
+        wallStartFloorMm,
+        wallEndFloorMm
+      );
       if (!range) continue;
       monitorGhosts.push({
         object: floorArtwork,
+        xMinMm: range.workXMinMm,
+        xMaxMm: range.workXMaxMm,
+        monitorHeightMm: floorArtwork.heightMm,
+        pedestalHeightMm: support.heightMm,
+        supportXMinMm: range.supportXMinMm,
+        supportXMaxMm: range.supportXMaxMm,
+        ...(support.bonnetHeightMm !== undefined
+          ? { bonnetHeightMm: support.bonnetHeightMm }
+          : {})
+      });
+    }
+  }
+
+  // Supported-artwork ghosts: every NON-monitor floor work standing on a
+  // pedestal or plinth, projected as the union of work + support so the drawn
+  // block is the real footprint against this wall.
+  const supportedArtworkGhosts: ElevationSceneSupportedArtworkGhost[] = [];
+  if (floorArtworks && wallStartFloorMm && wallEndFloorMm) {
+    for (const floorArtwork of floorArtworks) {
+      const artwork = artworksById?.get(floorArtwork.artworkId);
+      if (isMonitorArtwork(artwork)) continue;
+      const support = resolveFloorSupport(floorArtwork, artwork);
+      if (!support) continue;
+      const range = projectSupportedFootprintOntoWall(
+        floorArtwork,
+        support,
+        wallStartFloorMm,
+        wallEndFloorMm
+      );
+      if (!range) continue;
+      supportedArtworkGhosts.push({
+        kind: "supported-artwork",
+        objectId: floorArtwork.id,
         xMinMm: range.xMinMm,
         xMaxMm: range.xMaxMm,
-        monitorHeightMm: floorArtwork.heightMm,
-        pedestalHeightMm: monitorPedestalHeightMm(floorArtwork.monitorSupport)
+        supportHeightMm: support.heightMm,
+        workHeightMm: floorArtwork.heightMm,
+        ...(support.bonnetHeightMm !== undefined
+          ? { bonnetHeightMm: support.bonnetHeightMm }
+          : {}),
+        workXMinMm: range.workXMinMm,
+        workXMaxMm: range.workXMaxMm,
+        supportXMinMm: range.supportXMinMm,
+        supportXMaxMm: range.supportXMaxMm
       });
     }
   }
@@ -585,6 +794,7 @@ export function buildElevationScene(
     cases,
     floorCaseGhosts,
     suspendedArtworkGhosts,
+    supportedArtworkGhosts,
     monitorGhosts,
     partitionProfiles
   };

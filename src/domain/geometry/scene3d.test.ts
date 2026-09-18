@@ -1161,6 +1161,73 @@ describe("deriveScene3d — floor objects (M2)", () => {
     expect("artworkHeightMm" in neither).toBe(false);
   });
 
+  it("emits the RESOLVED support, and nothing at all without one", () => {
+    function supportOf(
+      object: Partial<ArtworkFloorObject>,
+      artworkOverrides?: Partial<Artwork>
+    ) {
+      const artwork = makeArtwork("art-1", artworkOverrides ?? {});
+      const scene = deriveScene3d(
+        makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))], {
+          floorObjects: [
+            {
+              id: "fobj-1",
+              kind: "artwork",
+              artworkId: "art-1",
+              xMm: 2000,
+              yMm: 1500,
+              widthMm: 500,
+              depthMm: 450,
+              heightMm: 375,
+              rotationDeg: 0,
+              wallYMm: 1450,
+              ...object
+            }
+          ]
+        }),
+        artworkOverrides ? new Map([[artwork.id, artwork]]) : undefined
+      );
+      return scene.floorObjects[0]!;
+    }
+
+    // An explicit block reaches the scene whole, tagged explicit.
+    expect(
+      supportOf({
+        support: {
+          kind: "plinth",
+          widthMm: 900,
+          depthMm: 900,
+          heightMm: 150,
+          bonnetHeightMm: 450
+        }
+      }).support
+    ).toEqual({
+      kind: "plinth",
+      widthMm: 900,
+      depthMm: 900,
+      heightMm: 150,
+      bonnetHeightMm: 450,
+      source: "explicit"
+    });
+
+    // A box monitor's absent-means-pedestal default is RESOLVED here, unlike
+    // imageFaces and displayAs: the alternative is every mesh re-deriving it.
+    expect(supportOf({}, { displayAs: "monitor" }).support).toEqual({
+      kind: "pedestal",
+      widthMm: 500,
+      depthMm: 450,
+      heightMm: 800,
+      source: "monitor-default"
+    });
+    expect(supportOf({ monitorSupport: "floor" }, { displayAs: "monitor" })).not.toHaveProperty(
+      "support"
+    );
+
+    // An ordinary work keeps exactly the key set it had before supports existed.
+    expect(supportOf({})).not.toHaveProperty("support");
+    expect(supportOf({}, { displayAs: "sculpture" })).not.toHaveProperty("support");
+  });
+
   it("emits an empty floorObjects array when there are none", () => {
     const scene = deriveScene3d(
       makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))])

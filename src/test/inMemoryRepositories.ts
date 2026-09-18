@@ -2,7 +2,10 @@ import type { ImageProcessor, ProcessedImage } from "../domain/assets/imageIntak
 import type { Artwork, Asset, Project, ProjectSummary } from "../domain/project";
 import type { ArtworkLibraryRepository } from "../domain/repositories/artworkLibraryRepository";
 import { AssetNotFoundError, type AssetRepository } from "../domain/repositories/assetRepository";
-import type { ProjectRepository } from "../domain/repositories/projectRepository";
+import type {
+  ProjectLoadReport,
+  ProjectRepository
+} from "../domain/repositories/projectRepository";
 import {
   projectSnapshotKey,
   SNAPSHOTS_PER_PROJECT,
@@ -15,7 +18,7 @@ import type {
   SyncMetaRepository
 } from "../domain/repositories/syncMetaRepository";
 import { parseArtwork, parseAsset } from "../domain/schema/artworkSchema";
-import { parseProject } from "../domain/schema/projectSchema";
+import { normalizeProjectFloorSupports, parseProject } from "../domain/schema/projectSchema";
 
 export class InMemoryProjectRepository implements ProjectRepository {
   projects = new Map<string, Project>();
@@ -24,6 +27,19 @@ export class InMemoryProjectRepository implements ProjectRepository {
     const project = this.projects.get(id);
     if (!project) throw new Error(`Project not found: ${id}`);
     return project;
+  }
+
+  // Runs the load boundary's support normaliser and nothing else. The real
+  // repository's report falls out of migrating on read; the fake cannot re-parse
+  // here without breaking load()'s identity guarantee (tests assert a clean
+  // document comes back byte-identical, where a real IndexedDB read always hands
+  // back a structured clone). normalizeProjectFloorSupports is the same function
+  // the real load boundary runs, and it returns the stored object unchanged when
+  // there is nothing to repair.
+  async loadWithReport(id: string): Promise<ProjectLoadReport> {
+    const stored = await this.load(id);
+    const { project, supportRepairCount } = normalizeProjectFloorSupports(stored);
+    return { project, supportRepairCount, stored };
   }
 
   async create(project: Project): Promise<boolean> {

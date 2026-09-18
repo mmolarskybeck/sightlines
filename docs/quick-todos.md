@@ -16,11 +16,11 @@ Small, actionable scraps that don't fit the roadmap (`docs/plan.md` §9) or the 
 
 ## Display types and floor objects (deferred from the 2026-08-28 feedback round)
 
-* Pedestal options: colors/materials, custom pedestal dimensions, and possibly a standalone placeable plinth that other floor works can sit on.
+* Pedestal options: colors/materials. Stretch: a standalone plinth floor object that other supports/works can stack on; independent plan drag of the support rect (today the assembly is one hit target and the offset is typed in the inspector); a bonnet footprint distinct from the pedestal's.
 * More display types: wall-mounted flatscreen (slim black bezel, no frame options), projection with a soft-edged image or projector-beam glyph. Both are approximable today as plain wall works — build only when the approximation falls short.
 * Medium auto-detect nudge: a one-time "Looks like a video work — display as monitor?" suggestion. Rejected as the primary mechanism; fine as a discoverability nudge.
 * CRT niceties: screen glow/emissive so a "playing" monitor reads as lit in 3D; multi-monitor stacks and video walls.
-* Elevation ghosts for floor-resting works (`baseHeightMm = 0`) — the monitor is the one family that has one; generalize to all floor artworks.
+* Elevation ghosts for floor-resting works (`baseHeightMm = 0`) with nothing under them — monitors and supported works now draw one; generalize to the remaining bare-floor artworks.
 
 ## Mobile / phone view
 

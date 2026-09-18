@@ -1,6 +1,6 @@
-import { migrateProject, parseProject } from "../schema/projectSchema";
+import { migrateProjectWithReport, parseProject } from "../schema/projectSchema";
 import type { Project, ProjectSummary } from "../project";
-import type { ProjectRepository } from "./projectRepository";
+import type { ProjectLoadReport, ProjectRepository } from "./projectRepository";
 import { openDatabase, PROJECT_STORE, requestToPromise, transactionDone } from "./database";
 
 // A loaded record exists but fails to parse or migrate to the current schema —
@@ -21,6 +21,13 @@ export class ProjectValidationError extends Error {
 
 export class IndexedDbProjectRepository implements ProjectRepository {
   async load(id: string): Promise<Project> {
+    return (await this.loadWithReport(id)).project;
+  }
+
+  // The same read as `load`, keeping the load report instead of dropping it, so
+  // an ordinary open can announce a support repair the way a snapshot restore
+  // and a JSON import already do.
+  async loadWithReport(id: string): Promise<ProjectLoadReport> {
     const db = await openDatabase();
     // Operational IDB errors here (read failure, closed connection) propagate
     // as-is — they are not a corruption signal.
@@ -35,7 +42,8 @@ export class IndexedDbProjectRepository implements ProjectRepository {
     // Parse/migration failures are the corruption signal — wrap them so callers
     // can offer recovery without catching every possible load error.
     try {
-      return migrateProject(value);
+      const { project, supportRepairCount, stored } = migrateProjectWithReport(value);
+      return { project, supportRepairCount, stored };
     } catch (error) {
       throw new ProjectValidationError(
         error instanceof Error ? error.message : "the project could not be read.",

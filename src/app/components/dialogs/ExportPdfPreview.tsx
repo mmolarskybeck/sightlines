@@ -277,7 +277,10 @@ function rectPolyPoints(rect: PlanRect, xf: Transform): string {
     .join(" ");
 }
 
-function planObjectMarks(
+// Exported for test: the preview's per-object marks are the one place this card
+// could silently drift from the artifact it previews, so they are asserted
+// directly rather than through a rendered card.
+export function planObjectMarks(
   rect: PlanRect,
   kind: string,
   isFloor: boolean,
@@ -290,7 +293,10 @@ function planObjectMarks(
   // .doorSwing) — the same object the canvas and the PDF writer draw. Never
   // recomputed here: the preview drifting from the artifact it previews is
   // exactly the failure this module's shared-glyph rule exists to prevent.
-  swing?: DoorSwingPlanGlyph
+  swing?: DoorSwingPlanGlyph,
+  // The pedestal/plinth this floor placement stands on, off the same scene
+  // entry the canvas and the PDF writer read (PlanSceneFloorObject.support).
+  support?: { rect: PlanRect; hasBonnet: boolean }
 ): JSX.Element {
   const world = (xMm: number, yMm: number) =>
     xf.point(localToWorld(rect, xMm, yMm));
@@ -468,6 +474,28 @@ function planObjectMarks(
 
   return (
     <Fragment key={key}>
+      {/* The support first, beneath the work, so the work's own outline
+          overdraws the seam where the two meet — the canvas's and the PDF
+          writer's paint order. Lighter stroke than the object standing on it;
+          the bonnet is the same footprint, dashed, since a plan cannot show
+          its height (USER DECISION 2026-09-17). */}
+      {support ? (
+        <polygon
+          points={rectPolyPoints(support.rect, xf)}
+          fill={FILL_WEAK}
+          stroke={MUTED}
+          strokeWidth={0.55}
+        />
+      ) : null}
+      {support?.hasBonnet ? (
+        <polygon
+          points={rectPolyPoints(support.rect, xf)}
+          fill="none"
+          stroke={SUBTLE}
+          strokeWidth={0.5}
+          strokeDasharray="3 2"
+        />
+      ) : null}
       <polygon
         points={rectPolyPoints(rect, xf)}
         fill={kind === "blocked-zone" ? FILL_WEAK : "#ffffff"}
@@ -616,7 +644,9 @@ function planPageMarks(
             true,
             isMonitorArtwork(painted.entry.artwork),
             xf,
-            `fobj-${i}`
+            `fobj-${i}`,
+            undefined,
+            painted.entry.support
           )
         );
       }
@@ -637,7 +667,8 @@ function svgPolygonPointsScreen(
   return polygonMm.map((p) => xf.point(p)).map((p) => `${p.x},${p.y}`).join(" ");
 }
 
-function elevationPageMarks(
+// Exported for test, same reason as planObjectMarks above.
+export function elevationPageMarks(
   scene: ElevationScene,
   bounds: DocumentBoundsMm,
   xf: Transform,
@@ -757,6 +788,63 @@ function elevationPageMarks(
     );
   });
 
+  // Supported-artwork ghosts: a pedestal/plinth block on the floor line, the
+  // work standing on it, an optional plexi bonnet over both — the print twin of
+  // drawElevationSupportedArtworkGhost / the canvas component, same
+  // behind-the-wall-objects slot. TWO SPANS: the support's own bounds the
+  // support and the bonnet, the work's own bounds the work rect above it, and a LOCKED
+  // bonnet shorter than its work leaves the work drawn straight through it.
+  scene.supportedArtworkGhosts.forEach((ghost, i) => {
+    const supportWidthMm = Math.max(0, ghost.supportXMaxMm - ghost.supportXMinMm);
+    const workWidthMm = Math.max(0, ghost.workXMaxMm - ghost.workXMinMm);
+    // This preview's own space is SVG-y-down from the wall top, so each box's
+    // top edge is the wall height less its own top in wall-local y-up.
+    const topY = (bottomMm: number, heightMm: number) =>
+      xf.point({ xMm: 0, yMm: scene.wallHeightMm - (bottomMm + heightMm) }).y;
+    marks.push(
+      <rect
+        key={`supported-ghost-support-${i}`}
+        x={xf.point({ xMm: ghost.supportXMinMm, yMm: 0 }).x}
+        y={topY(0, ghost.supportHeightMm)}
+        width={supportWidthMm * xf.scalePtPerMm}
+        height={ghost.supportHeightMm * xf.scalePtPerMm}
+        fill="none"
+        stroke={SUBTLE}
+        strokeWidth={GHOST_STROKE_WIDTH}
+        strokeDasharray={GHOST_DASH}
+        opacity={GHOST_OPACITY}
+      />,
+      <rect
+        key={`supported-ghost-work-${i}`}
+        x={xf.point({ xMm: ghost.workXMinMm, yMm: 0 }).x}
+        y={topY(ghost.supportHeightMm, ghost.workHeightMm)}
+        width={workWidthMm * xf.scalePtPerMm}
+        height={ghost.workHeightMm * xf.scalePtPerMm}
+        fill="none"
+        stroke={SUBTLE}
+        strokeWidth={GHOST_STROKE_WIDTH}
+        strokeDasharray={GHOST_DASH}
+        opacity={GHOST_OPACITY}
+      />
+    );
+    if (ghost.bonnetHeightMm !== undefined) {
+      marks.push(
+        <rect
+          key={`supported-ghost-bonnet-${i}`}
+          x={xf.point({ xMm: ghost.supportXMinMm, yMm: 0 }).x}
+          y={topY(ghost.supportHeightMm, ghost.bonnetHeightMm)}
+          width={supportWidthMm * xf.scalePtPerMm}
+          height={ghost.bonnetHeightMm * xf.scalePtPerMm}
+          fill="none"
+          stroke={SUBTLE}
+          strokeWidth={GHOST_WIRE_WIDTH}
+          strokeDasharray={GHOST_WIRE_DASH}
+          opacity={GHOST_WIRE_OPACITY}
+        />
+      );
+    }
+  });
+
   // Box-monitor ghosts: pedestal + cabinet + screen, standing on the floor line
   // — the print twin of drawElevationMonitorGhost / the canvas component, off
   // the same shared glyph, in the same behind-the-wall-objects slot.
@@ -765,7 +853,13 @@ function elevationPageMarks(
     const glyph = monitorElevationGlyph({
       widthMm,
       monitorHeightMm: ghost.monitorHeightMm,
-      pedestalHeightMm: ghost.pedestalHeightMm
+      pedestalHeightMm: ghost.pedestalHeightMm,
+      // Plinth and bonnet span the SUPPORT, not the cabinet — the same two
+      // spans the canvas and the PDF page use, collapsing to one for a legacy
+      // monitor's own default pedestal.
+      pedestalXMm: ghost.supportXMinMm - ghost.xMinMm,
+      pedestalWidthMm: Math.max(0, ghost.supportXMaxMm - ghost.supportXMinMm),
+      bonnetHeightMm: ghost.bonnetHeightMm
     });
     // This preview's own space is SVG-y-down from the wall top, and the glyph
     // is local-y-down from the assembly's top, so both flips are one addition.
@@ -792,6 +886,28 @@ function elevationPageMarks(
           strokeWidth={GHOST_STROKE_WIDTH}
           strokeDasharray={GHOST_DASH}
           opacity={GHOST_OPACITY}
+        />
+      );
+    }
+    // The plexi bonnet over the cabinet, at the plinth's span, in the finer
+    // wire weight the screen and the supported-artwork bonnet take.
+    if (glyph.bonnet) {
+      const a = xf.point({
+        xMm: ghost.xMinMm + glyph.bonnet.xMm,
+        yMm: topSvgYMm + glyph.bonnet.yMm
+      });
+      marks.push(
+        <rect
+          key={`monitor-ghost-bonnet-${i}`}
+          x={a.x}
+          y={a.y}
+          width={glyph.bonnet.widthMm * xf.scalePtPerMm}
+          height={glyph.bonnet.heightMm * xf.scalePtPerMm}
+          fill="none"
+          stroke={SUBTLE}
+          strokeWidth={GHOST_WIRE_WIDTH}
+          strokeDasharray={GHOST_WIRE_DASH}
+          opacity={GHOST_WIRE_OPACITY}
         />
       );
     }
