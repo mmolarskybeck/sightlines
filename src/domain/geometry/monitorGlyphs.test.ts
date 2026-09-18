@@ -4,7 +4,6 @@ import {
   monitorBoxSizeMm,
   monitorElevationGlyph,
   monitorImageSizeMm,
-  monitorPedestalHeightMm,
   monitorPlanGlyph,
   monitorScreenRectMm,
   resolveMonitorSupport,
@@ -40,20 +39,17 @@ describe("isMonitorArtwork", () => {
   });
 });
 
-describe("resolveMonitorSupport / monitorPedestalHeightMm", () => {
+describe("resolveMonitorSupport", () => {
   it("absent means pedestal", () => {
     expect(resolveMonitorSupport(undefined)).toBe("pedestal");
-    expect(monitorPedestalHeightMm(undefined)).toBe(MONITOR_PEDESTAL_HEIGHT_MM);
   });
 
   it("an explicit pedestal is the same answer as absent", () => {
     expect(resolveMonitorSupport("pedestal")).toBe("pedestal");
-    expect(monitorPedestalHeightMm("pedestal")).toBe(MONITOR_PEDESTAL_HEIGHT_MM);
   });
 
-  it("standing on the bare floor leaves no plinth height", () => {
+  it("standing on the bare floor is the only way to lose the pedestal", () => {
     expect(resolveMonitorSupport("floor")).toBe("floor");
-    expect(monitorPedestalHeightMm("floor")).toBe(0);
   });
 });
 
@@ -215,5 +211,65 @@ describe("monitorElevationGlyph — pedestal + cabinet + screen", () => {
       monitorElevationGlyph({ widthMm: 40, monitorHeightMm: 30, pedestalHeightMm: 0 })
         .screen
     ).toBeNull();
+  });
+
+  it("LEGACY: the plinth defaults to the cabinet's own span, and there is no bonnet", () => {
+    // Every pre-support call site passes neither, and a legacy monitor's own
+    // default pedestal really is sized to its cabinet — so the defaults ARE the
+    // old behaviour, bit for bit.
+    const glyph = monitorElevationGlyph({
+      widthMm: 500,
+      monitorHeightMm: 375,
+      pedestalHeightMm: MONITOR_PEDESTAL_HEIGHT_MM
+    });
+    expect(glyph.pedestal).toMatchObject({ xMm: 0, widthMm: 500 });
+    expect(glyph.bonnet).toBeNull();
+  });
+
+  it("puts the plinth at ITS OWN span, not the cabinet's", () => {
+    const glyph = monitorElevationGlyph({
+      widthMm: 500,
+      monitorHeightMm: 375,
+      pedestalHeightMm: 150,
+      pedestalXMm: -100,
+      pedestalWidthMm: 900
+    });
+    expect(glyph.pedestal).toEqual({ xMm: -100, yMm: 375, widthMm: 900, heightMm: 150 });
+    // The cabinet is untouched by a wider plinth under it.
+    expect(glyph.monitor).toEqual({ xMm: 0, yMm: 0, widthMm: 500, heightMm: 375 });
+  });
+
+  it("rises the bonnet from the plinth's top at the plinth's own span", () => {
+    const glyph = monitorElevationGlyph({
+      widthMm: 500,
+      monitorHeightMm: 375,
+      pedestalHeightMm: 150,
+      pedestalXMm: -100,
+      pedestalWidthMm: 900,
+      bonnetHeightMm: 450
+    });
+    // Assembly: 150 plinth + a 450 bonnet that out-tops the 375 cabinet = 600.
+    expect(glyph.totalHeightMm).toBe(600);
+    expect(glyph.bonnet).toEqual({ xMm: -100, yMm: 0, widthMm: 900, heightMm: 450 });
+    // The cabinet drops by the bonnet's overtop (450 − 375), and the screen
+    // rides down with it rather than staying pinned to the assembly's top.
+    expect(glyph.monitor.yMm).toBe(75);
+    expect(glyph.screen!.yMm).toBe(75 + MONITOR_BEZEL_MM);
+  });
+
+  it("leaves a LOCKED bonnet shorter than its cabinet sticking out of the glass", () => {
+    // USER DECISION 2026-09-17: the normaliser warns rather than growing a
+    // locked bonnet, so the drawing has to show the collision — the assembly is
+    // as tall as the CABINET and the cabinet stays at the top.
+    const glyph = monitorElevationGlyph({
+      widthMm: 500,
+      monitorHeightMm: 375,
+      pedestalHeightMm: 150,
+      bonnetHeightMm: 200
+    });
+    expect(glyph.totalHeightMm).toBe(150 + 375);
+    expect(glyph.monitor.yMm).toBe(0);
+    // Bonnet top = 150 + 200 off the floor, i.e. 175 down from the 525 top.
+    expect(glyph.bonnet).toEqual({ xMm: 0, yMm: 175, widthMm: 500, heightMm: 200 });
   });
 });

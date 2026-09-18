@@ -53,10 +53,22 @@ Decisions of record, invariants, and traps distilled from the 2026-07-09 → 202
 - **2026-08-28** Round 1 ships CRT box monitor only; flatscreens and projections are already approximable as plain wall works, so build them only when the approximation falls short — USER DECISION.
 - **2026-08-28** A monitor defaults to a white pedestal; placement `heightMm` is the cabinet only and the pedestal is added by renderers, so toggling support rewrites no geometry — USER DECISION.
 - **2026-08-28** The monitor elevation ghost is the one deliberate exception to "floor-resting artwork emits no ghost".
-- **2026-08-28** Known v1 lossiness: `monitorSupport` is not stashed in `ArtworkFloorMemory`, so an explicit "on floor" choice captured onto a wall reverts to the pedestal default on return.
+- **2026-08-28** Known v1 lossiness: `monitorSupport` was not stashed in `ArtworkFloorMemory`, so an explicit "on floor" choice captured onto a wall reverted to the pedestal default on return — closed 2026-09-17, floor memory now parks both `support` and `monitorSupport`.
 - **2026-08-31** Medium→Display derivation uses exact category matching with light aliases and no substring matching (`domain/placement/mediumCategory.ts`); medium itself stays free text for labels, exports and import.
 - **2026-08-31** Projection and sculpture render frameless via `effectiveFraming` at the derivation layer, so stored mat/frame survive a flip back.
 - **2026-09-01** Deliberately deferred: a display-kind descriptor table waits until a fifth display kind lands.
+- **2026-09-17** A pedestal/plinth is an **attached support block on the floor placement**, not a standalone floor object; one `xMm`/`yMm`/`rotationDeg` carries both boxes and `support.offsetXMm/offsetYMm` are stored support-relative in the placement's rotated local frame — USER DECISION.
+- **2026-09-17** Vertical is always locked: the work's bottom edge IS the support top. Only the horizontal offset may overhang, and the two footprints must always overlap on both axes (`|offset|` clamped to `(supportSize + workSize)/2 − 1 mm`) — a pedestal standing beside its sculpture is not a state.
+- **2026-09-17** Overhang off means the support CONTAINS the work: a support edit below the work footprint grows the support (never shrinks the work, never silently centres the work over an edge) and offsets clamp to `±(supportSize − workSize)/2`.
+- **2026-09-17** A plexi bonnet's footprint IS the support's, it clears `overhangAllowed`, and the work must fit inside the glass (`supportSize ≥ workSize + 2 × (CASE_GLASS_THICKNESS_MM + BONNET_CLEARANCE_MM)`, growing the support) — USER DECISION.
+- **2026-09-17** Bonnet height tracks the work (`work height + BONNET_HEADROOM_MM`, always re-derived so a stale imported number never survives) unless locked; a LOCKED bonnet shorter than the work warns (`bonnetTooShortByMm`) rather than growing — USER DECISION.
+- **2026-09-17** The relational support invariants live ONLY in `normalizeFloorSupport` (`domain/geometry/supportGlyphs.ts`), run by every store write and at the load boundary; the zod schema stays structural, because the rules read the placement's own dimensions.
+- **2026-09-17** `support` supersedes `monitorSupport`: a monitor with no explicit support still resolves to its 800 mm cabinet-width pedestal (`resolveFloorSupport`, source `"monitor-default"`), and choosing Floor writes `monitorSupport: "floor"` because absence would resolve back to the pedestal.
+- **2026-09-17** `baseHeightMm` is ignored while a support is present (as cases and monitors already ignore it): support and suspension are mutually exclusive states, so the inspector withholds "Height off floor" rather than offering a number nothing reads.
+- **2026-09-17** A default pedestal's height derives from the project's `defaultCenterlineHeightMm` (`clamp(centerline − workHeight/2, 600, 1400)`, 1100 fallback) — "near eye level" against the project's own datum rather than a fixed number.
+- **2026-09-17** The assembly is ONE hit target: in plan the support rect carries the work's pointer handlers and the selection outline, hit-testing and rotate handle anchor to `assemblyPlanRect`; in 3D every sub-mesh shares `useSelectableFloorObject` and the selection box wraps the union.
+- **2026-09-17** The supported-artwork elevation ghost joins the H ghost family (monitor/suspended/floor-case) rather than taking a toggle of its own; it is the second deliberate exception to "floor-resting artwork emits no ghost".
+- **2026-09-17** Schema v6 exists for DOWNGRADE REFUSAL only (`MIGRATIONS[5]` is a pure version stamp): a v5 build would accept the file, strip `support`, draw the work on the floor and re-save the loss — the same rationale as `isOpenSide` at v4→v5.
 
 ## Views: plan, elevation, 3D
 
@@ -118,6 +130,7 @@ Decisions of record, invariants, and traps distilled from the 2026-07-09 → 202
 - **2026-08-11** TRAP: broken-image glyphs inside exported PNGs came from revoked-but-still-painted blob URLs and a production CSP `connect-src` without `blob:`; the live view looks fine either way. PDF export was never affected (it takes Blobs from the repository).
 - **2026-09-01** `remotePathFor` and `maxDownloadBytes` are required members of `CloudBackupProvider`, and no store slice may import a Dropbox module.
 - **2026-09-01** `ProjectSyncMeta.provider` stays the `"dropbox"` literal until a second provider is planned.
+- **2026-09-17** `ProjectRepository.loadWithReport` is the ordinary open's way of keeping the load report (`supportRepairCount`) that plain `load` drops, so boot and `openProject` announce a re-fitted support the way a snapshot restore and a JSON import already do; the in-memory fake runs the same `normalizeProjectFloorSupports` rather than re-parsing, because `load` must keep handing seeded documents back by reference.
 
 ## App shell, store and hooks
 

@@ -2587,6 +2587,87 @@ describe("placement slice", () => {
         }
       });
 
+      // A pedestal is a sized, curator-authored object: losing it on a stray
+      // drag onto a wall is the same class of loss as losing the plan angle,
+      // and worse, because the restored work silently drops to the floor.
+      it("carries a floor support through a floor → wall → floor capture unchanged", async () => {
+        const objectId = await placeFloorArtwork();
+        await store.getState().setFloorArtworkStandsOn(objectId, "pedestal");
+        await store.getState().updateFloorArtworkSupport(objectId, { offsetXMm: 40 });
+        const before = store.getState().project!.floorObjects.find((o) => o.id === objectId)!;
+        const supportBefore = before.kind === "artwork" ? before.support : undefined;
+        expect(supportBefore).toBeDefined();
+
+        await captureOntoWallEast(objectId);
+        // Parked in the memory slot, not rendered from there (see FloorMemory).
+        const captured = store.getState().project!.wallObjects.find((o) => o.id === objectId)!;
+        expect(captured.kind === "artwork" && captured.floorMemory?.support).toEqual(
+          supportBefore
+        );
+
+        await store
+          .getState()
+          .commitPlanMove(objectId, { anchor: "floor", xMm: 4200, yMm: 4100 });
+
+        const after = store.getState().project!.floorObjects.find((o) => o.id === objectId)!;
+        expect(after.kind === "artwork" && after.support).toEqual(supportBefore);
+      });
+
+      it("re-fits a restored support against a work that was resized on the wall", async () => {
+        await store.getState().addArtworksFromFiles([makeImageFile("bronze.jpg")]);
+        const artworkId = store.getState().project!.checklistArtworkIds[0];
+        await store.getState().updateArtwork(artworkId, {
+          dimensions: { widthMm: 400, heightMm: 600, depthMm: 400, status: "known" }
+        });
+        await store.getState().placeArtworkOnFloor(artworkId, 4000, 4000);
+        const objectId = store.getState().project!.floorObjects[0].id;
+        await store.getState().setFloorArtworkStandsOn(objectId, "pedestal");
+        // 400mm work + 100mm reveal per side.
+        expect(
+          store.getState().project!.floorObjects[0].kind === "artwork" &&
+            (store.getState().project!.floorObjects[0] as { support?: { widthMm: number } })
+              .support?.widthMm
+        ).toBe(600);
+
+        await captureOntoWallEast(objectId);
+        // Unlike baseHeightMm, the WORK's own width is editable while it hangs
+        // on the wall (the dimension rebake follows the placement), so the
+        // parked support can be stale by the time it comes back down.
+        await store.getState().updateArtwork(artworkId, {
+          dimensions: { widthMm: 1200, heightMm: 600, depthMm: 400, status: "known" }
+        });
+
+        await store
+          .getState()
+          .commitPlanMove(objectId, { anchor: "floor", xMm: 4200, yMm: 4100 });
+
+        const after = store.getState().project!.floorObjects.find((o) => o.id === objectId)!;
+        // Grow the support, never shrink the work: a 600mm pedestal cannot hold
+        // a 1200mm work with overhang off.
+        expect(after.widthMm).toBe(1200);
+        expect(after.kind === "artwork" && after.support!.widthMm).toBe(1200);
+      });
+
+      it("leaves a support-less work support-less across the round trip", async () => {
+        const objectId = await placeFloorArtwork();
+
+        await captureOntoWallEast(objectId);
+        const captured = store.getState().project!.wallObjects.find((o) => o.id === objectId)!;
+        expect(
+          captured.kind === "artwork" && "support" in (captured.floorMemory ?? {})
+        ).toBe(false);
+
+        await store
+          .getState()
+          .commitPlanMove(objectId, { anchor: "floor", xMm: 4200, yMm: 4100 });
+
+        const after = store.getState().project!.floorObjects.find((o) => o.id === objectId)!;
+        // Absence is how this codebase records "never chosen" — a spurious key
+        // would dirty a clean project's cloud-backup fingerprint.
+        expect("support" in after).toBe(false);
+        expect("monitorSupport" in after).toBe(false);
+      });
+
       // ─── Box monitors (Artwork.displayAs === "monitor") ────────────────────
       // The floor object of a monitor work is the CABINET, not the work: these
       // pin the two routes onto the floor to the same 4:3 / MONITOR_DEPTH_MM

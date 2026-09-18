@@ -110,17 +110,6 @@ export function monitorBoxSizeMm(
   };
 }
 
-// How tall the pedestal under a monitor is: its real height, or 0 when the
-// curator stood the monitor on the floor. A single resolver so plan, elevation,
-// 3D and the PDF agree on whether there is anything under the box at all.
-export function monitorPedestalHeightMm(
-  monitorSupport: MonitorSupport | undefined
-): number {
-  return resolveMonitorSupport(monitorSupport) === "pedestal"
-    ? MONITOR_PEDESTAL_HEIGHT_MM
-    : 0;
-}
-
 // ─── Screen rect (shared by 3D and elevation) ──────────────────────────────
 
 export type MonitorScreenRectMm = {
@@ -230,17 +219,29 @@ export function monitorPlanGlyph({
 // ─── Elevation glyph ───────────────────────────────────────────────────────
 
 export type MonitorElevationGlyph = {
-  // The black box, at the top of the assembly (local origin).
+  // The black box. Local y 0 is the top of the ASSEMBLY, which is the cabinet's
+  // own top in every case but one: a bonnet taller than the cabinet rises above
+  // it, and then the cabinet starts that much further down.
   monitor: { xMm: number; yMm: number; widthMm: number; heightMm: number };
   // The picture area inside it, already offset into the assembly's local frame
   // (not the face's) so a caller only ever adds the assembly origin. Null when
   // the face is too small for a bezel — the caller then draws the box alone.
   screen: MonitorScreenRectMm | null;
-  // The plinth beneath, same footprint width as the monitor. Null when the
-  // placement stands on the bare floor.
+  // The plinth beneath, at the SUPPORT's own projected span — which equals the
+  // cabinet's for the monitor default (a pedestal sized to its monitor) and
+  // diverges the moment a curator stands the cabinet on a named, offset plinth.
+  // Null when the placement stands on the bare floor.
   pedestal: { xMm: number; yMm: number; widthMm: number; heightMm: number } | null;
-  // The assembly's full vertical extent, floor to the top of the monitor. The
-  // number an elevation ghost spans and a dimension line measures against.
+  // The plexi bonnet over the cabinet, at the support's footprint (bonnet
+  // footprint = support footprint, USER DECISION 2026-09-17) rising from the
+  // support's top face. Null when there is no bonnet. A LOCKED bonnet may be
+  // SHORTER than the cabinet — the caller draws the cabinet in full through it
+  // rather than clipping, because that collision is what the inspector warns
+  // about.
+  bonnet: { xMm: number; yMm: number; widthMm: number; heightMm: number } | null;
+  // The assembly's full vertical extent, floor to the top of whatever rises off
+  // the plinth (the cabinet, or a taller bonnet over it). The number an
+  // elevation ghost spans and a dimension line measures against.
   totalHeightMm: number;
 };
 
@@ -253,11 +254,22 @@ export function monitorElevationGlyph({
   widthMm,
   monitorHeightMm,
   pedestalHeightMm,
+  pedestalXMm = 0,
+  pedestalWidthMm = widthMm,
+  bonnetHeightMm,
   bezelMm = MONITOR_BEZEL_MM
 }: {
   widthMm: number;
   monitorHeightMm: number;
   pedestalHeightMm: number;
+  // The plinth's span in the assembly's local frame, measured from the
+  // CABINET's left edge. Defaulting to the cabinet's own span is what keeps
+  // every pre-support call site (and every legacy monitor, whose default
+  // pedestal IS sized to its cabinet) drawing exactly what it drew before.
+  pedestalXMm?: number;
+  pedestalWidthMm?: number;
+  // The bonnet's height above the plinth's top face; absent = no bonnet.
+  bonnetHeightMm?: number;
   bezelMm?: number;
 }): MonitorElevationGlyph {
   const screen = monitorScreenRectMm({
@@ -266,17 +278,34 @@ export function monitorElevationGlyph({
     bezelMm
   });
   const hasPedestal = pedestalHeightMm > 0;
+  const plinthHeightMm = Math.max(0, pedestalHeightMm);
+  // How far BELOW the assembly's top the cabinet's own top sits: zero unless a
+  // bonnet stands taller than the cabinet it covers, which is the only thing in
+  // this construction that can rise above the box.
+  const cabinetDropMm = Math.max(0, (bonnetHeightMm ?? 0) - monitorHeightMm);
+  const totalHeightMm =
+    plinthHeightMm + Math.max(monitorHeightMm, bonnetHeightMm ?? 0);
   return {
-    monitor: { xMm: 0, yMm: 0, widthMm, heightMm: monitorHeightMm },
-    screen,
+    monitor: { xMm: 0, yMm: cabinetDropMm, widthMm, heightMm: monitorHeightMm },
+    // The screen rides with the cabinet, so it takes the same drop.
+    screen: screen ? { ...screen, yMm: screen.yMm + cabinetDropMm } : null,
     pedestal: hasPedestal
       ? {
-          xMm: 0,
-          yMm: monitorHeightMm,
-          widthMm,
-          heightMm: pedestalHeightMm
+          xMm: pedestalXMm,
+          yMm: totalHeightMm - plinthHeightMm,
+          widthMm: pedestalWidthMm,
+          heightMm: plinthHeightMm
         }
       : null,
-    totalHeightMm: monitorHeightMm + Math.max(0, pedestalHeightMm)
+    bonnet:
+      bonnetHeightMm !== undefined
+        ? {
+            xMm: pedestalXMm,
+            yMm: totalHeightMm - plinthHeightMm - bonnetHeightMm,
+            widthMm: pedestalWidthMm,
+            heightMm: bonnetHeightMm
+          }
+        : null,
+    totalHeightMm
   };
 }

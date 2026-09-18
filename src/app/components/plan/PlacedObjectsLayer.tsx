@@ -51,6 +51,35 @@ type BeginObjectDragParams = {
   initialPlanRect: PlanRect;
 };
 
+// Where a support rect goes once a preview has moved or turned the work it
+// carries. The scene's rect is the REST position, so a live drag or rotate would
+// otherwise leave the pedestal behind while the sculpture slides off it: the
+// pair shares ONE placement (ArtworkFloorObject.support) and has to travel as
+// one body. The support is therefore re-placed by the same rigid transform the
+// preview applied to the work — the translation, plus the angle change taken
+// about the work's own center — and never re-derived from the support's numbers.
+//
+// Exactly the identity when nothing is previewing: planRect === restRect gives
+// cos 1 / sin 0, so the scene's rect comes back bit for bit.
+function previewSupportRect(
+  supportRect: PlanRect,
+  restRect: PlanRect,
+  planRect: PlanRect
+): PlanRect {
+  const deltaRad = ((planRect.angleDeg - restRect.angleDeg) * Math.PI) / 180;
+  const cos = Math.cos(deltaRad);
+  const sin = Math.sin(deltaRad);
+  const dxMm = supportRect.centerXMm - restRect.centerXMm;
+  const dyMm = supportRect.centerYMm - restRect.centerYMm;
+  return {
+    centerXMm: planRect.centerXMm + dxMm * cos - dyMm * sin,
+    centerYMm: planRect.centerYMm + dxMm * sin + dyMm * cos,
+    widthMm: supportRect.widthMm,
+    depthMm: supportRect.depthMm,
+    angleDeg: planRect.angleDeg
+  };
+}
+
 export type PlacedObjectsLayerProps = {
   openingConnections: PlanSceneOpeningConnection[];
   wallObjects: PlanSceneWallObject[];
@@ -321,7 +350,8 @@ export function PlacedObjectsLayer({
         const renderFloorObject = ({
           object: floorObject,
           artwork: floorArtwork,
-          rect: restRect
+          rect: restRect,
+          support
         }: PlanSceneFloorObject) => {
         const groupPreviewRect = objectDrag?.members
           ? objectDrag.previewRectById?.get(floorObject.id)
@@ -368,6 +398,16 @@ export function PlacedObjectsLayer({
             kind={floorObject.kind}
             pixelsPerMm={pixelsPerMm}
             planRect={planRect}
+            // The pedestal/plinth under this work, carried along by whatever
+            // preview moved the work itself (see previewSupportRect).
+            support={
+              support
+                ? {
+                    rect: previewSupportRect(support.rect, restRect, planRect),
+                    hasBonnet: support.hasBonnet
+                  }
+                : undefined
+            }
             tooltip={
               floorObject.kind === "artwork" ? (
                 artworkTooltip(floorObject.artworkId, floorObject.displayDimensionsOverride)

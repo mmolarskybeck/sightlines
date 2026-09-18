@@ -150,8 +150,34 @@ function drawPlanObject(
   // (PlanSceneWallObject.doorSwing) — never recomputed here, so print and
   // screen sweep the identical arc. Undefined for a plain doorway (which keeps
   // its chevron) and for every other kind.
-  swing?: DoorSwingPlanGlyph
+  swing?: DoorSwingPlanGlyph,
+  // The pedestal/plinth this floor placement stands on, straight off the plan
+  // scene (PlanSceneFloorObject.support) — footprint, offset and bonnet all
+  // settled in mm-space by supportGlyphs.ts. Never re-derived here: this print
+  // draws the rect the canvas draws.
+  support?: { rect: PlanRect; hasBonnet: boolean }
 ) {
+  if (support) {
+    // Beneath the work, so the work's own outline overdraws the seam where the
+    // two meet — the canvas's paint order. Lighter border than the object on
+    // top of it: the support is what carries the thing being read.
+    page.drawSvgPath(polygonPath(planRectCorners(support.rect).map(transform.point)), {
+      color: COLORS.surfaceStrong,
+      borderColor: COLORS.muted,
+      borderWidth: 0.55
+    });
+    // The bonnet's footprint IS the support's (USER DECISION 2026-09-17), so
+    // from above it is the same rectangle and the dash is the whole of what
+    // says "there is glass over this".
+    if (support.hasBonnet) {
+      page.drawSvgPath(polygonPath(planRectCorners(support.rect).map(transform.point)), {
+        borderColor: COLORS.subtle,
+        borderWidth: 0.5,
+        borderDashArray: [3, 2]
+      });
+    }
+  }
+
   const corners = planRectCorners(rect).map(transform.point);
   page.drawSvgPath(polygonPath(corners), {
     color: kind === "blocked-zone" ? COLORS.surfaceStrong : COLORS.white,
@@ -360,7 +386,9 @@ export function drawPlanScene(
         entry.rect,
         entry.object.kind,
         true,
-        isMonitorArtwork(entry.artwork)
+        isMonitorArtwork(entry.artwork),
+        undefined,
+        entry.support
       );
     }
   }
