@@ -9,6 +9,7 @@ import { FloorObjectBox } from "./FloorObjectBox";
 import { FloorSurface } from "./FloorSurface";
 import { PartitionSlab } from "./PartitionSlab";
 import { makeClickToClear } from "./selectOnClick";
+import { SupportMesh } from "./SupportMesh";
 import { useArtworkTextures } from "./useArtworkTextures";
 import { WallPanel } from "./WallPanel";
 
@@ -40,6 +41,7 @@ export function SceneRooms({
   artworksById,
   selectedObjectIds,
   shelfSnapTargetId,
+  supportSnapTargetId,
   selectedArtworkId,
   selectedWallId,
   onSelectWall,
@@ -59,6 +61,11 @@ export function SceneRooms({
   // through seatOnShelfTop). Pass-through only: it reaches WallShelfMesh, which
   // outlines that slab exactly as a selected one.
   shelfSnapTargetId?: string | null;
+  // The floor twin: the support a live 3D drag of a floor artwork would seat
+  // it on (ThreeDView resolves it through resolveFloorArtworkDragSeat).
+  // Pass-through only: it reaches SupportMesh, which outlines that support
+  // exactly as a selected one.
+  supportSnapTargetId?: string | null;
   selectedArtworkId: string | null;
   selectedWallId: string | null;
   onSelectWall: (wallId: string) => void;
@@ -140,6 +147,17 @@ export function SceneRooms({
               key={object.objectId}
               object={object}
               isSelected={isSelected}
+              onSelect={onSelectObject}
+            />
+          );
+        }
+        if (object.kind === "support") {
+          return (
+            <SupportMesh
+              key={object.objectId}
+              object={object}
+              isSelected={isSelected}
+              isSnapTarget={object.objectId === supportSnapTargetId}
               onSelect={onSelectObject}
             />
           );

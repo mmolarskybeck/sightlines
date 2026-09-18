@@ -15,6 +15,10 @@ import {
 import { getOpeningKindLabel } from "../../../domain/placement/createOpening";
 import { derivePartitionNeighborShimsForFloorWall } from "../../../domain/placement/partitionNeighbors";
 import { getShelfRiders } from "../../../domain/placement/shelfRiders";
+import {
+  getSupportRiders,
+  resolveFloorStandsOn
+} from "../../../domain/placement/floorRiders";
 import { withArtworkFootprintFromMap } from "../../../domain/framing";
 import type {
   Artwork,
@@ -27,13 +31,13 @@ import type {
   FreestandingWall,
   OpeningWallObject,
   ShelfWallObject,
+  SupportFloorObject,
   WallTextWallObject
 } from "../../../domain/project";
 import { shelfCenterYMmForTop } from "../../../domain/geometry/shelfGlyphs";
 import { faceWallId, parseFaceWallId } from "../../../domain/geometry/freestandingWalls";
 import { getPartitionClearances } from "../../../domain/geometry/partitionSpacing";
 import { isMonitorArtwork } from "../../../domain/geometry/monitorGlyphs";
-import { resolveFloorSupport } from "../../../domain/geometry/supportGlyphs";
 import { COMPASS_WALL_NAMES } from "../../../domain/geometry/createRoom";
 import { ArtworkInspector } from "./ArtworkInspector";
 import {
@@ -52,9 +56,9 @@ import { ShelfGlyph } from "../toolbar/toolbarGlyphs";
 import { Button } from "../ui/button";
 import { FloorObjectInspector, FloorPlacementFields } from "./FloorObjectInspector";
 import { FloorArtworkImageFacesField } from "./FloorArtworkImageFacesField";
-import { StandsOnField } from "./StandsOnField";
-import { FloorSupportFields } from "./FloorSupportFields";
-import { FloorArtworkImageSizeNote } from "./FloorArtworkImageSizeNote";
+import { FloorArtworkFootprintRow } from "./FloorArtworkFootprintRow";
+import { FloorArtworkSupportRow } from "./FloorArtworkSupportRow";
+import { SupportInspector } from "./SupportInspector";
 import { FreestandingWallInspector } from "./FreestandingWallInspector";
 import {
   OpeningInspector,
@@ -172,10 +176,19 @@ export function InspectorPane({
   const renameWall = useAppStore((state) => state.renameWall);
   const updateFloorObject = useAppStore((state) => state.updateFloorObject);
   const setFloorArtworkImageFaces = useAppStore((state) => state.setFloorArtworkImageFaces);
-  const setFloorArtworkStandsOn = useAppStore((state) => state.setFloorArtworkStandsOn);
-  const updateFloorArtworkSupport = useAppStore(
-    (state) => state.updateFloorArtworkSupport
+  // The stands-on verbs. None of them WRITES what a work stands on — that is
+  // derived from geometry (resolveFloorStandsOn); each one moves the geometry
+  // that produces the reading, in one undo entry (floor-supports spec §7).
+  const putFloorArtworkOnSupport = useAppStore((state) => state.putFloorArtworkOnSupport);
+  const setFloorArtworkOnFloor = useAppStore((state) => state.setFloorArtworkOnFloor);
+  const suspendFloorArtwork = useAppStore((state) => state.suspendFloorArtwork);
+  const centerFloorArtworkOnSupport = useAppStore(
+    (state) => state.centerFloorArtworkOnSupport
   );
+  const setSupportKind = useAppStore((state) => state.setSupportKind);
+  const setSupportBonnet = useAppStore((state) => state.setSupportBonnet);
+  const setSupportOverhangAllowed = useAppStore((state) => state.setSupportOverhangAllowed);
+  const fitSupportToWorks = useAppStore((state) => state.fitSupportToWorks);
   const pairFloorArtworksBackToBack = useAppStore(
     (state) => state.pairFloorArtworksBackToBack
   );
@@ -331,16 +344,6 @@ export function InspectorPane({
   // the RECORD (the display type travels with the work, not the placement), so
   // it is answerable for an unplaced work too.
   const selectedArtworkIsMonitor = isMonitorArtwork(selectedArtwork ?? undefined);
-  // The pedestal/plinth under the selected floor placement, resolved the one
-  // correct way (an untouched box monitor still stands on its implicit 800mm
-  // pedestal — see resolveFloorSupport). Drives both the support fields and the
-  // withheld "Height off floor": a support and a suspension height are
-  // mutually exclusive states, and with a support present every renderer
-  // ignores baseHeightMm, so offering the field would be offering a number
-  // nothing draws.
-  const placedFloorArtworkSupport = placedFloorArtwork
-    ? resolveFloorSupport(placedFloorArtwork, selectedArtwork ?? undefined)
-    : null;
   const isArtworkPlaced = placedWallObject !== null || placedFloorArtwork !== null;
   // Remove the artwork from whichever surface currently owns it.
   const artworkPlacementId = placedWallObject?.id ?? placedFloorArtwork?.id ?? null;
@@ -356,6 +359,12 @@ export function InspectorPane({
       : selectedArtwork
         ? effectivePlacementForm(selectedArtwork)
         : "wall";
+  // What the selected floor work is standing on, re-derived on every render
+  // from geometry alone: nothing is stored on either side of the relationship,
+  // so the inspector's Support row is a READING, never a bound field.
+  const floorArtworkStandsOn = placedFloorArtwork
+    ? resolveFloorStandsOn(placedFloorArtwork, project.floorObjects, artworksById)
+    : null;
   // Open walls have no surface, so a project made entirely of them offers a
   // standing work nowhere to go. The store refuses that conversion anyway; this
   // disables the segment so the refusal is never the way a curator finds out.
@@ -470,6 +479,19 @@ export function InspectorPane({
           floorObject.kind === "case" && floorObject.id === selectedOpeningId
       ) ?? null)
     : null;
+
+  // A pedestal or plinth shares the opening-selection id space with the floor
+  // case above and resolves the same way, for the same reason: its own
+  // inspector. Floor-only, so there is no wall counterpart.
+  const selectedFloorSupport: SupportFloorObject | null = selectedOpeningId
+    ? (project.floorObjects.find(
+        (floorObject): floorObject is SupportFloorObject =>
+          floorObject.kind === "support" && floorObject.id === selectedOpeningId
+      ) ?? null)
+    : null;
+  const selectedFloorSupportRiders = selectedFloorSupport
+    ? getSupportRiders(selectedFloorSupport, project.floorObjects, artworksById)
+    : [];
 
   // A shelf shares the opening-selection id space with the cases above and is
   // resolved out of `selectedOpening` the same way, for the same reason: it has
@@ -651,6 +673,7 @@ export function InspectorPane({
               selectedOpening ||
               selectedFloorBlockedZone ||
               selectedFloorCase ||
+              selectedFloorSupport ||
               selectedWallCase ||
               selectedWallShelf ||
               selectedRoomPlacement ||
@@ -666,6 +689,10 @@ export function InspectorPane({
                         ? getOpeningKindLabel(selectedFloorBlockedZone.kind)
                         : selectedFloorCase || selectedWallCase
                           ? "Display case"
+                          : selectedFloorSupport
+                          ? selectedFloorSupport.supportKind === "plinth"
+                            ? "Plinth"
+                            : "Pedestal"
                           : selectedWallShelf
                           ? "Shelf"
                           : selectedRoomPlacement
@@ -679,7 +706,7 @@ export function InspectorPane({
                       ? "Opening"
                       : selectedFloorBlockedZone
                         ? "Floor object"
-                        : selectedFloorCase
+                        : selectedFloorCase || selectedFloorSupport
                           ? "Floor object"
                           : selectedWallCase || selectedWallShelf
                             ? "Wall object"
@@ -704,6 +731,7 @@ export function InspectorPane({
                 selectedOpening?.id ??
                 selectedWallCase?.id ??
                 selectedWallShelf?.id ??
+                selectedFloorSupport?.id ??
                 selectedWallText?.id ??
                 null
               }
@@ -896,93 +924,61 @@ export function InspectorPane({
                     </>
                   ) : placedFloorArtwork ? (
                     <>
+                      {/* Position only. The box's own Width/Depth/Height live
+                          in the Footprint row below, where they sit beside the
+                          statement of whether they still agree with the work —
+                          asking for them twice on one panel is what the old
+                          fields-plus-drift-note pairing did. "Height off floor"
+                          is withheld too: the Support row owns suspension now,
+                          and a bare number field beside a row that says "On the
+                          floor" would be two answers to one question. */}
                       <FloorPlacementFields
                         floorObject={placedFloorArtwork}
                         unit={project.unit}
                         onCommitPosition={(xMm, yMm) =>
                           void updateFloorObject(placedFloorArtwork.id, { xMm, yMm })
                         }
-                        onCommitSize={(widthMm, depthMm) =>
-                          void updateFloorObject(placedFloorArtwork.id, { widthMm, depthMm })
-                        }
-                        onCommitHeight={(heightMm) =>
-                          void updateFloorObject(placedFloorArtwork.id, { heightMm })
-                        }
                         onCommitRotation={(rotationDeg) =>
                           void updateFloorObject(placedFloorArtwork.id, { rotationDeg })
                         }
-                        // A box monitor stands on a pedestal or on the floor
-                        // — never on wires. A work standing on a support is
-                        // the same case: its bottom edge IS the support's top
-                        // face and every renderer ignores baseHeightMm, so the
-                        // field would edit a number nothing draws (and "Stands
-                        // on" below is how the work gets back into the air).
-                        // Withholding the prop hides the field entirely, the
-                        // same way a display case is denied it (see
-                        // FloorPlacementFields' onCommitBaseHeight and
-                        // CrtMonitorMesh, which ignores baseHeightMm for the
-                        // same reason).
-                        {...(selectedArtworkIsMonitor || placedFloorArtworkSupport
-                          ? {}
-                          : {
-                              onCommitBaseHeight: (baseHeightMm: number) =>
-                                void updateFloorObject(placedFloorArtwork.id, {
-                                  baseHeightMm
-                                })
-                            })}
                       />
-                      {/* What the work stands on is a fact about THIS
-                          installation — it writes to the floor placement
-                          (support / baseHeightMm / monitorSupport), so it lives
-                          with the other placement fields rather than in the
-                          identity block, and stays reachable when the record up
-                          there has compacted. An unplaced work gets the default
-                          (floor, or a monitor's pedestal) when it lands. */}
-                      <StandsOnField
-                        artwork={selectedArtwork}
-                        floorObject={placedFloorArtwork}
-                        isMonitor={selectedArtworkIsMonitor}
-                        onChange={(standsOn) =>
-                          void setFloorArtworkStandsOn(placedFloorArtwork.id, standsOn)
-                        }
-                      />
-                      {/* The support BOX's own numbers, under the fields that
-                          size the WORK. Only when there is one to edit. */}
-                      {placedFloorArtworkSupport ? (
-                        <FloorSupportFields
-                          floorObject={placedFloorArtwork}
-                          support={placedFloorArtworkSupport}
-                          unit={project.unit}
-                          onChange={(changes) =>
-                            void updateFloorArtworkSupport(
-                              placedFloorArtwork.id,
-                              changes
-                            )
-                          }
-                        />
-                      ) : null}
-                      {/* The box's Width/Height size the object standing on the
-                          floor; the work has its own recorded size, and 3D draws
-                          the image at THAT size. This note appears only once the
-                          two have drifted apart, and offers the way back. A
-                          monitor asks the same question about its CABINET, whose
-                          target is the 4:3 box the work implies — see the note's
-                          own monitor branch. */}
-                      <FloorArtworkImageSizeNote
+                      <FloorArtworkFootprintRow
                         dimensions={selectedArtwork.dimensions}
                         isMonitor={selectedArtworkIsMonitor}
-                        objectWidthMm={placedFloorArtwork.widthMm}
-                        objectHeightMm={placedFloorArtwork.heightMm}
-                        objectDepthMm={placedFloorArtwork.depthMm}
+                        placementId={placedFloorArtwork.id}
+                        widthMm={placedFloorArtwork.widthMm}
+                        depthMm={placedFloorArtwork.depthMm}
+                        heightMm={placedFloorArtwork.heightMm}
                         unit={project.unit}
-                        onMatchSizeToWork={(widthMm, heightMm, depthMm) =>
-                          void updateFloorObject(placedFloorArtwork.id, {
-                            widthMm,
-                            heightMm,
-                            ...(depthMm !== undefined ? { depthMm } : {})
-                          })
+                        onCommit={(changes) =>
+                          void updateFloorObject(placedFloorArtwork.id, changes)
                         }
                       />
+                      {floorArtworkStandsOn ? (
+                        <FloorArtworkSupportRow
+                          isMonitor={selectedArtworkIsMonitor}
+                          placementId={placedFloorArtwork.id}
+                          standsOn={floorArtworkStandsOn}
+                          unit={project.unit}
+                          onCenterOnSupport={() =>
+                            void centerFloorArtworkOnSupport(placedFloorArtwork.id)
+                          }
+                          onCommitSuspensionHeight={(baseHeightMm) =>
+                            void updateFloorObject(placedFloorArtwork.id, { baseHeightMm })
+                          }
+                          onPutOnSupport={(kind) =>
+                            void putFloorArtworkOnSupport(placedFloorArtwork.id, kind)
+                          }
+                          onSelectSupport={() => {
+                            if (floorArtworkStandsOn.kind !== "support") return;
+                            selectOpening(floorArtworkStandsOn.support.id);
+                          }}
+                          onSetOnFloor={() =>
+                            void setFloorArtworkOnFloor(placedFloorArtwork.id)
+                          }
+                          onSuspend={() => void suspendFloorArtwork(placedFloorArtwork.id)}
+                        />
+                      ) : null}
                       {/* Which box faces carry the image — a box-specific
                           question a wall-hung placement (a plane, not a box)
                           never has, so it rides only this floor branch. A
@@ -1091,6 +1087,39 @@ export function InspectorPane({
                 void updateFloorObject(selectedFloorCase.id, { rotationDeg })
               }
               onDelete={() => void removePlacement(selectedFloorCase.id)}
+            />
+          ) : selectedFloorSupport ? (
+            <SupportInspector
+              support={selectedFloorSupport}
+              riderCount={selectedFloorSupportRiders.length}
+              unit={project.unit}
+              onSelectRiders={() =>
+                setObjectSelection(selectedFloorSupportRiders.map((rider) => rider.id))
+              }
+              onCommitKind={(kind) => void setSupportKind(selectedFloorSupport.id, kind)}
+              onCommitPosition={(xMm, yMm) =>
+                void updateFloorObject(selectedFloorSupport.id, { xMm, yMm })
+              }
+              onCommitSize={(widthMm, depthMm) =>
+                void updateFloorObject(selectedFloorSupport.id, { widthMm, depthMm })
+              }
+              // heightMm IS the TOP FACE height on a support — the number a
+              // standing work's baseHeightMm matches — so the store carries the
+              // works it holds up or down with it in the same edit.
+              onCommitTop={(heightMm) =>
+                void updateFloorObject(selectedFloorSupport.id, { heightMm })
+              }
+              onCommitRotation={(rotationDeg) =>
+                void updateFloorObject(selectedFloorSupport.id, { rotationDeg })
+              }
+              onCommitOverhangAllowed={(allowed) =>
+                void setSupportOverhangAllowed(selectedFloorSupport.id, allowed)
+              }
+              onCommitBonnet={(changes) =>
+                void setSupportBonnet(selectedFloorSupport.id, changes)
+              }
+              onFitToWorks={() => void fitSupportToWorks(selectedFloorSupport.id)}
+              onDelete={() => void removePlacement(selectedFloorSupport.id)}
             />
           ) : selectedWallCase ? (
             <WallCaseInspector

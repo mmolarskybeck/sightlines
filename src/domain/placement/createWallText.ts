@@ -7,6 +7,10 @@ import {
   DEFAULT_SHELF_THICKNESS_MM,
   DEFAULT_SHELF_WIDTH_MM
 } from "../geometry/shelfGlyphs";
+import {
+  PEDESTAL_FALLBACK_HEIGHT_MM,
+  PEDESTAL_MIN_FOOTPRINT_MM
+} from "../geometry/supportGlyphs";
 import { newId } from "../id";
 import {
   getDefaultOpeningSizeMm,
@@ -46,6 +50,14 @@ export function getDefaultInsertToolSizeMm(kind: InsertToolKind): {
   // crashes the moment it reads widthMm.
   if (kind === "shelf") {
     return { widthMm: DEFAULT_SHELF_WIDTH_MM, heightMm: DEFAULT_SHELF_THICKNESS_MM };
+  }
+  // A pedestal's ghost is its footprint seen from above: the smallest standard
+  // gallery box, square, at the pedestal fallback height. Same reason the shelf
+  // branch exists — without it the cast below hands "support" to
+  // getDefaultOpeningSizeMm, whose switch returns undefined and the armed ghost
+  // crashes on widthMm.
+  if (kind === "support") {
+    return { widthMm: PEDESTAL_MIN_FOOTPRINT_MM, heightMm: PEDESTAL_FALLBACK_HEIGHT_MM };
   }
   return getDefaultOpeningSizeMm(kind as OpeningKind);
 }

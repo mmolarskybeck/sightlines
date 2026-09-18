@@ -14,7 +14,7 @@
 
 import { projectPointToWall, type FloorWall } from "../../../domain/geometry/planObjects";
 import { clamp } from "../../../domain/geometry/scalar";
-import type { Project, WallObject } from "../../../domain/project";
+import type { FloorObject, Project, WallObject } from "../../../domain/project";
 import {
   resolveThreeDrop,
   worldHeightToMm,
@@ -23,6 +23,7 @@ import {
   type DropSurfaceTag,
   type WorldPoint
 } from "./dropTarget";
+import { resolveFloorArtworkDragSeat, translateSupportRiders } from "./supportDrag";
 
 // Where a drag STARTED: which object, which surface it currently occupies, and
 // (for a wall object) the footprint the wall clamp must keep whole.
@@ -58,10 +59,29 @@ export type ThreeDragSource =
   | {
       anchor: "floor";
       objectId: string;
-      // Floor-space centre.
+      // The floor object's own kind, so the resolver knows whether this is a
+      // SUPPORT (carries riders, never itself seated) or an ARTWORK (may
+      // itself be captured by one). Optional for callers with none to hand.
+      kind?: FloorObject["kind"];
+      // Floor-space centre, and the object's own orientation — the latter is
+      // only read by the support-seating arithmetic below (an ordinary floor
+      // move never rotates), never for the plain positional move every floor
+      // kind already made.
       xMm: number;
       yMm: number;
+      rotationDeg: number;
       dims: DropDimsMm;
+      // A SUPPORT's riders (getSupportRiders, derived at gesture start), each
+      // one's offset from the support's own drag-start centre — the floor
+      // twin of the wall shelf's `riders` above, minus width/height: a floor
+      // drag never clamps to a wall run, so there is no assembly union to
+      // keep whole, only a rigid translation (translateSupportRiders).
+      riders?: { id: string; offsetMm: { xMm: number; yMm: number } }[];
+      // An ARTWORK that started the gesture standing on a support (its own
+      // resolveFloorStandsOn) — that support's id, so the drag keeps clamping
+      // the work onto it (floor-supports spec §4 "Overhang") instead of
+      // treating every frame as a fresh drop.
+      startingSupportId?: string;
     };
 
 // A resolved placement for the dragged object. The wall variant carries yMm
@@ -82,7 +102,29 @@ export type ThreeDragMove =
       // resolveShelfAssemblyMove).
       riders?: { id: string; xMm: number; yMm: number }[];
     }
-  | { anchor: "floor"; xMm: number; yMm: number };
+  | {
+      anchor: "floor";
+      xMm: number;
+      yMm: number;
+      // A SUPPORT's riders, carried rigidly to the same delta (see
+      // ThreeDragSource.riders / translateSupportRiders).
+      riders?: { id: string; xMm: number; yMm: number }[];
+      // The support a dragged ARTWORK is currently captured by (floor-
+      // supports spec §4's "any drop or drag end... seats it"), so the view
+      // can light that support up exactly as a shelf lights up under a
+      // captured work. Absent when the work overlaps no support, or the
+      // precision bypass is held.
+      supportId?: string;
+      // The height the dragged artwork should PREVIEW at — the support's top
+      // face when `supportId` is set, so the box visibly lifts onto it before
+      // the release commits anything. Absent means "leave the object's own
+      // baseHeightMm alone"; only the commit ever WRITES the value.
+      previewBaseHeightMm?: number;
+      // The ⌘/Ctrl precision bypass, carried through to the commit so
+      // App.tsx's floor branch can pass it straight to commitPlanMove —
+      // there is no live modifier state left to read again at release.
+      bypassSeating?: boolean;
+    };
 
 // What the raycast found under the cursor, in the shape pickDropSurface returns.
 export type DragSurfaceHit = { tag: DropSurfaceTag; point: WorldPoint };
@@ -169,6 +211,12 @@ export function resolveDragMove(args: {
   // Resolve a SHELF against this wall whatever the cursor is over. Ignored for
   // every other kind, which keeps hopping the instant the pointer crosses.
   stickToWallId?: string;
+  // Support seating, the floor twin of `seatOnShelves`: opt-in from the view,
+  // dropped while the precision-bypass modifier is held. Gated again here on
+  // the source being an artwork — a support is never itself a rider, and a
+  // case/blocked-zone cannot be one either.
+  floorObjects?: readonly FloorObject[];
+  seatOnSupports?: boolean;
 }): ThreeDragMove | null {
   const { surface, source, offsetMm, walls } = args;
   if (!surface) return null;
@@ -183,7 +231,53 @@ export function resolveDragMove(args: {
       offsetMm
     });
     if (!resolved || resolved.anchor !== "floor") return null;
-    return { anchor: "floor", xMm: resolved.xMm, yMm: resolved.yMm };
+
+    // A SUPPORT carries its riders as one rigid assembly (floor-supports spec
+    // §4) and is never itself seated — nothing else to resolve.
+    if (source.riders) {
+      return {
+        anchor: "floor",
+        xMm: resolved.xMm,
+        yMm: resolved.yMm,
+        riders: translateSupportRiders(resolved.xMm, resolved.yMm, source.riders)
+      };
+    }
+
+    // Only an ARTWORK can stand on a support — every other floor kind (case,
+    // blocked-zone, or a legacy caller with no kind to hand) simply moves,
+    // exactly as before supports existed.
+    if (source.kind !== "artwork") {
+      return { anchor: "floor", xMm: resolved.xMm, yMm: resolved.yMm };
+    }
+
+    // The precision bypass (⌘/Ctrl): held, the work drags free of both the
+    // starting-support clamp and the seat lookup. `bypassSeating` only rides
+    // the move when it is actually true, so a caller that never opted into
+    // seating (or the seated branch below, which sets it explicitly false)
+    // keeps the plain floor-move shape.
+    if (!(args.seatOnSupports ?? false)) {
+      return { anchor: "floor", xMm: resolved.xMm, yMm: resolved.yMm, bypassSeating: true };
+    }
+
+    const seat = resolveFloorArtworkDragSeat({
+      objectId: source.objectId,
+      xMm: resolved.xMm,
+      yMm: resolved.yMm,
+      widthMm: source.dims.floorWidthMm,
+      depthMm: source.dims.floorDepthMm,
+      rotationDeg: source.rotationDeg,
+      startingSupportId: source.startingSupportId,
+      floorObjects: args.floorObjects ?? [],
+      bypassSeating: false
+    });
+    return {
+      anchor: "floor",
+      xMm: seat.xMm,
+      yMm: seat.yMm,
+      supportId: seat.supportId,
+      previewBaseHeightMm: seat.baseHeightMm,
+      bypassSeating: false
+    };
   }
 
   // Which wall this move resolves against. Ordinarily the one under the cursor;
@@ -363,12 +457,33 @@ export function projectWithDragPreview(
     return changed ? { ...project, wallObjects } : project;
   }
 
+  // A SUPPORT's riders travel WITH it in the preview, the floor twin of the
+  // shelf branch above — same rigid-assembly rule, no wall to re-anchor onto.
+  const riderById = new Map((move.riders ?? []).map((rider) => [rider.id, rider]));
   let changed = false;
   const floorObjects = project.floorObjects.map((object) => {
-    if (object.id !== objectId) return object;
-    if (object.xMm === move.xMm && object.yMm === move.yMm) return object;
+    if (object.id === objectId) {
+      // previewBaseHeightMm lifts a captured ARTWORK onto the support it is
+      // hovering (floor-supports spec §5): absent means "leave baseHeightMm
+      // alone", so a work that overlaps no support keeps drawing at its own
+      // stored height rather than snapping flat mid-gesture.
+      const nextBaseHeightMm =
+        move.previewBaseHeightMm !== undefined ? move.previewBaseHeightMm : object.baseHeightMm;
+      if (
+        object.xMm === move.xMm &&
+        object.yMm === move.yMm &&
+        object.baseHeightMm === nextBaseHeightMm
+      ) {
+        return object;
+      }
+      changed = true;
+      return { ...object, xMm: move.xMm, yMm: move.yMm, baseHeightMm: nextBaseHeightMm };
+    }
+    const rider = riderById.get(object.id);
+    if (!rider) return object;
+    if (object.xMm === rider.xMm && object.yMm === rider.yMm) return object;
     changed = true;
-    return { ...object, xMm: move.xMm, yMm: move.yMm };
+    return { ...object, xMm: rider.xMm, yMm: rider.yMm };
   });
   return changed ? { ...project, floorObjects } : project;
 }

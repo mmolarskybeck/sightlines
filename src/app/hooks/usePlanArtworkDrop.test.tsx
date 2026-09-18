@@ -148,7 +148,12 @@ describe("plan checklist drop — the drop point decides the surface", () => {
     });
 
     expect(onPlaceArtwork).not.toHaveBeenCalled();
-    expect(onPlaceArtworkOnFloor).toHaveBeenCalledWith(FLAT_WALL_WORK.id, 4000, 2500);
+    // The fourth argument is the seating bypass: ⌘/Ctrl was not held, so a
+    // pedestal under the drop point would have taken the work (the store
+    // resolves that seat itself, once the real size is baked).
+    expect(onPlaceArtworkOnFloor).toHaveBeenCalledWith(FLAT_WALL_WORK.id, 4000, 2500, {
+      bypassSeating: false
+    });
   });
 
   it("still widens a framed wall work to its outer width once a wall captures it", () => {

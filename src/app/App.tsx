@@ -1120,14 +1120,14 @@ export function App() {
                       variant="full"
                       activeTool={activeTool}
                       disabled={elevationInsertBlocked}
-                      excludedTools={viewMode === "elevation" ? ["case"] : undefined}
+                      excludedTools={viewMode === "elevation" ? ["case", "support"] : undefined}
                       onToolChange={armOpeningTool}
                     />
                     <InsertPicker
                       variant="compact"
                       activeTool={activeTool}
                       disabled={elevationInsertBlocked}
-                      excludedTools={viewMode === "elevation" ? ["case"] : undefined}
+                      excludedTools={viewMode === "elevation" ? ["case", "support"] : undefined}
                       onToolChange={armOpeningTool}
                     />
                     <ViewOptionButton
@@ -1280,19 +1280,24 @@ export function App() {
                   measurement.state.context.kind === "plan" ? measurement.state : undefined
                 }
                 onMeasurementAction={measurement.dispatch}
-                onCommitPlanMove={(objectId, placement) =>
-                  void commitPlanMove(objectId, placement, allowOverlappingPlacement)
+                onCommitPlanMove={(objectId, placement, bypassSeating) =>
+                  void commitPlanMove(
+                    objectId,
+                    placement,
+                    allowOverlappingPlacement,
+                    bypassSeating
+                  )
                 }
                 onPlaceArtwork={(artworkId, wallId, xMm, yMm, seatOnShelfId) =>
                   void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement, { seatOnShelfId })
                 }
-                onPlaceArtworkOnFloor={(artworkId, xMm, yMm) =>
-                  void placeArtworkOnFloor(artworkId, xMm, yMm)
+                onPlaceArtworkOnFloor={(artworkId, xMm, yMm, opts) =>
+                  void placeArtworkOnFloor(artworkId, xMm, yMm, opts)
                 }
                 onToolChange={armOpeningTool}
                 selectedObjectIds={selectedObjectIds}
-                onCommitPlanMoveGroup={(moves) =>
-                  void movePlanObjectsGroup(moves, allowOverlappingPlacement)
+                onCommitPlanMoveGroup={(moves, bypassSeating) =>
+                  void movePlanObjectsGroup(moves, allowOverlappingPlacement, bypassSeating)
                 }
                 onMarqueeSelect={(ids, additive) =>
                   // An additive (shift) marquee extends the selection; a plain
@@ -1507,10 +1512,27 @@ export function App() {
                     );
                     return;
                   }
+                  // A support arrives with its riders: the pedestal and the
+                  // works standing on it commit as ONE batch (floor-supports
+                  // spec §4's rigid-assembly rule), mirroring the wall
+                  // shelf's group commit above. movePlanObjectsGroup also
+                  // carries any rider NOT in the batch by the support's own
+                  // delta, but the 3D drag always lists them explicitly.
+                  if (move.riders?.length) {
+                    void movePlanObjectsGroup(
+                      [
+                        { id: objectId, xMm: move.xMm, yMm: move.yMm },
+                        ...move.riders.map((rider) => ({ id: rider.id, xMm: rider.xMm, yMm: rider.yMm }))
+                      ],
+                      allowOverlappingPlacement
+                    );
+                    return;
+                  }
                   void commitPlanMove(
                     objectId,
                     { anchor: "floor", xMm: move.xMm, yMm: move.yMm },
-                    allowOverlappingPlacement
+                    allowOverlappingPlacement,
+                    move.bypassSeating
                   );
                 }}
                 actionsRef={threeDActionsRef}

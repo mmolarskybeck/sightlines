@@ -33,7 +33,7 @@ export function PlanObject({
   onSelect,
   pixelsPerMm = 0,
   planRect,
-  support,
+  hasBonnet = false,
   swing,
   tooltip,
   tooltipDisabled = false
@@ -71,7 +71,15 @@ export function PlanObject({
   // visible in plan too. Independent of selection: the shelf need not be
   // selected, and a selected shelf still shows the capture.
   isSnapTarget?: boolean;
-  kind: "door" | "window" | "blocked-zone" | "artwork" | "wall-text" | "case" | "shelf";
+  kind:
+    | "door"
+    | "window"
+    | "blocked-zone"
+    | "artwork"
+    | "wall-text"
+    | "case"
+    | "shelf"
+    | "support";
   // Starts a pointer-drag move of this object (PlanView owns the live preview
   // + commit-on-release). A click without real movement still falls through to
   // onSelect — the drag release is a no-op below its movement threshold.
@@ -85,18 +93,12 @@ export function PlanObject({
   // no clamping."
   pixelsPerMm?: number;
   planRect: PlanRect;
-  // The block this floor placement STANDS ON, straight off the plan scene
-  // (PlanSceneFloorObject.support) — an explicit pedestal/plinth, or a box
-  // monitor's resolved default. Absent for anything standing on the bare floor,
-  // and never synthesized here: the footprint, the offset and whether there is
-  // a bonnet are all settled in mm-space by supportGlyphs.ts, so the canvas and
-  // the PDF cannot disagree about what is under a work.
-  //
-  // `rect` is in the same floor space as `planRect` and at the same angle. It
-  // is drawn FIRST, beneath the work, and sits inside this component's one
-  // pointer-handling group: the assembly is ONE object, so grabbing the
-  // pedestal grabs the work standing on it.
-  support?: { rect: PlanRect; hasBonnet: boolean };
+  // This support carries a plexi bonnet (PlanSceneFloorObject.hasBonnet).
+  // Ignored for every kind but "support". Plan is a top-down drawing, so the
+  // bonnet has no outline of its own — its footprint IS the support's (USER
+  // DECISION 2026-09-17) and the dash at that same rect is the whole of what
+  // says "there is glass over this".
+  hasBonnet?: boolean;
   // A hinged door's swing glyph (planScene.ts's PlanSceneWallObject.doorSwing)
   // — undefined for a plain doorway, which keeps drawing the void chevron
   // exactly as before. Ignored for every kind other than "door". See the
@@ -155,50 +157,6 @@ export function PlanObject({
       }
       transform={`rotate(${planRect.angleDeg} ${planRect.centerXMm} ${planRect.centerYMm})`}
     >
-      {support && !isGhost ? (
-        // The pedestal / plinth, top-down: the first thing painted, so the
-        // work's own outline overdraws the seam where the two meet instead of
-        // disappearing under it, and a support wider than its work reads as a
-        // reveal around it.
-        //
-        // The two rotations are how an ABSOLUTE floor-space rect gets drawn
-        // inside a group that already rotates about the WORK's center: the
-        // first undoes that outer rotation, the second applies the support's
-        // own. Net transform is exactly rotate(supportAngle, supportCenter).
-        // Doing it declaratively rather than un-rotating the offset by hand
-        // keeps this view free of trig and correct even if the two rects' angles
-        // ever diverge — supportPlanRect currently guarantees they don't.
-        <g
-          className="plan-object-support-group"
-          transform={
-            `rotate(${-planRect.angleDeg} ${planRect.centerXMm} ${planRect.centerYMm})` +
-            ` rotate(${support.rect.angleDeg} ${support.rect.centerXMm} ${support.rect.centerYMm})`
-          }
-        >
-          <rect
-            className="plan-object-support"
-            height={support.rect.depthMm}
-            vectorEffect="non-scaling-stroke"
-            width={support.rect.widthMm}
-            x={support.rect.centerXMm - support.rect.widthMm / 2}
-            y={support.rect.centerYMm - support.rect.depthMm / 2}
-          />
-          {/* The plexi bonnet. Its footprint IS the support's (USER DECISION
-              2026-09-17), so from above it is the same rectangle — the dash is
-              the whole of what says "there is glass over this", since a plan
-              cannot show the bonnet's height. */}
-          {support.hasBonnet ? (
-            <rect
-              className="plan-object-support-bonnet"
-              height={support.rect.depthMm}
-              vectorEffect="non-scaling-stroke"
-              width={support.rect.widthMm}
-              x={support.rect.centerXMm - support.rect.widthMm / 2}
-              y={support.rect.centerYMm - support.rect.depthMm / 2}
-            />
-          ) : null}
-        </g>
-      ) : null}
       {isGhost ? null : (
         <rect
           className="plan-object-hit"
@@ -216,6 +174,19 @@ export function PlanObject({
         x={x}
         y={y}
       />
+      {kind === "support" && hasBonnet ? (
+        // The plexi bonnet over a pedestal or plinth, at the SAME footprint as
+        // the box itself: from above there is nothing else to draw, so the dash
+        // carries the whole statement.
+        <rect
+          className="plan-object-support-bonnet"
+          height={planRect.depthMm}
+          vectorEffect="non-scaling-stroke"
+          width={planRect.widthMm}
+          x={x}
+          y={y}
+        />
+      ) : null}
       {kind === "artwork" && isMonitor ? (
         // A CRT / box monitor, top-down: the footprint outline above IS the
         // cabinet, and this single line just inside the FRONT edge is the
@@ -223,12 +194,9 @@ export function PlanObject({
         // glyph: which way the screen points is the only thing a plan can say
         // about a monitor that its rectangle doesn't already say.
         //
-        // What is UNDER the cabinet is no longer this glyph's business: the
-        // pedestal arrives as `support` off the scene and is drawn above like
-        // any other support. It used to be assumed here that the two footprints
-        // were equal by construction, so one rect could honestly stand for
-        // both — true of the monitor default, false the moment a curator puts a
-        // cabinet on a wider plinth.
+        // What is UNDER the cabinet is not this glyph's business: a pedestal is
+        // its own floor object (schema v8) with its own plan entry, drawn before
+        // the works standing on it.
         //
         // Structure comes from the shared mm-space module (monitorGlyphs.ts) so
         // this and the PDF draw the same mark, exactly as the case glyph does;

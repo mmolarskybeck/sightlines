@@ -17,3 +17,12 @@ export function isBlockingKind(kind: WallObject["kind"]): boolean {
 export function getOverlapRule(a: WallObject["kind"], b: WallObject["kind"]): OverlapRule {
   return isBlockingKind(a) && isBlockingKind(b) ? "forbidden" : "blockable";
 }
+
+// FLOOR objects are deliberately absent from this module, and that is the whole
+// floor overlap policy (floor-supports spec §4): floor placements carry no wall
+// bounds and run no collision gate at all in v1 (see placeArtworkOnFloor's
+// empty validate-ids list), so support↔artwork is ALLOWED everywhere — which it
+// has to be, since a work standing on a pedestal overlaps it by definition —
+// and support↔support and support↔case are judged exactly as artwork↔artwork
+// is: not at all. Nothing here needs a "support" arm; adding one would imply a
+// gate that does not exist.

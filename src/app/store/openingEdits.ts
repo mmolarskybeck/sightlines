@@ -27,6 +27,7 @@ import {
 } from "../../domain/placement/sharedOpeningAnalysis";
 import { isOpeningSlotFree } from "../../domain/placement/openingSlots";
 import { isBlockingKind } from "../../domain/placement/overlapPolicy";
+import type { PlanMovingKind } from "../../domain/snapping/planSnapTargets";
 import type {
   ConnectableOpeningWallObject,
   DoorLeaf,
@@ -52,11 +53,15 @@ export function openingNoun(kind: OpeningKind): string {
 // Lowercase noun for any placeable object (wall or floor), so a plan move's
 // label reads "Move artwork" / "Move door" / "Move blocked zone" the same way
 // whether the object is wall-anchored or floor-placed.
-export function moveObjectNoun(kind: WallObject["kind"]): string {
+export function moveObjectNoun(kind: PlanMovingKind): string {
   if (kind === "artwork") return "artwork";
   if (kind === "wall-text") return "wall text";
   if (kind === "case") return "display case";
   if (kind === "shelf") return "shelf";
+  // Both pedestal and plinth: the undo label names the family, because the two
+  // are the same box and a curator who switched kinds mid-session should not
+  // find two different verbs in the history.
+  if (kind === "support") return "pedestal";
   return openingNoun(kind);
 }
 

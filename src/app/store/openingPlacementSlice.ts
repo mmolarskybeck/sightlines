@@ -17,6 +17,11 @@ import {
   type OpeningFit
 } from "../../domain/placement/fitOpeningOnWall";
 import { createShelf } from "../../domain/placement/createShelf";
+import { createSupport } from "../../domain/placement/createSupport";
+import {
+  PEDESTAL_FALLBACK_HEIGHT_MM,
+  PEDESTAL_MIN_FOOTPRINT_MM
+} from "../../domain/geometry/supportGlyphs";
 import { withDoorLeaf } from "../../domain/placement/sharedOpeningAnalysis";
 import {
   type BlockedZoneFloorObject,
@@ -214,6 +219,14 @@ export function createOpeningPlacementSlice(
             get().wallContextId
           )
         });
+        return;
+      }
+
+      // A pedestal is the shelf's mirror image: FLOOR-only, with no wall form
+      // to fall back to. "Add to this wall" therefore cannot mean anything for
+      // one, and a click that silently did nothing would read as a broken app.
+      if (kind === "support") {
+        set({ error: "A pedestal stands on the floor. Click the floor in plan to place it." });
         return;
       }
 
@@ -577,6 +590,40 @@ export function createOpeningPlacementSlice(
         return;
       }
 
+      // A pedestal is the shelf's inverse: it stands on the FLOOR, so a click
+      // that captured a wall places nothing and says so, exactly the shape of
+      // the shelf's refusal above. Otherwise it lands at the click as the
+      // smallest standard gallery box at the pedestal fallback height, and the
+      // inspector's Kind select turns it into a plinth.
+      if (kind === "support") {
+        if (placement.anchor !== "floor") {
+          set({ error: "A pedestal stands on the floor. Click the floor in plan to place it." });
+          return;
+        }
+        const support = createSupport({
+          kind: "pedestal",
+          xMm: placement.xMm,
+          yMm: placement.yMm,
+          rotationDeg: 0,
+          widthMm: PEDESTAL_MIN_FOOTPRINT_MM,
+          depthMm: PEDESTAL_MIN_FOOTPRINT_MM,
+          heightMm: PEDESTAL_FALLBACK_HEIGHT_MM
+        });
+        const nextFloorObjects = [...project.floorObjects, support];
+        // No wallObjects change, so an empty validate-ids list is a trivial
+        // no-collision pass — this just rides the shared commit path for the
+        // floorObjects append + select (cf. the blocked-zone floor branch).
+        await commitWallObjectEdit("Add pedestal", project, project.wallObjects, [], true, {
+          nextFloorObjects,
+          extras: selectionWrite(
+            { ...project, floorObjects: nextFloorObjects },
+            { kind: "objects", ids: [support.id] },
+            get().wallContextId
+          )
+        });
+        return;
+      }
+
       if (placement.anchor === "floor") {
         // Only blocked zones can float. Doors and windows are excluded from
         // floor placement by the domain (FloorObject has no door/window
@@ -723,6 +770,16 @@ export function createOpeningPlacementSlice(
             get().wallContextId
           )
         });
+        return;
+      }
+
+      // A pedestal has no elevation form: it stands on the floor, and the
+      // elevation canvas has no floor to click. The tool is filtered out of the
+      // elevation Insert cluster, so this is a guard rather than a user path —
+      // but it says the same sentence the plan refusal does rather than
+      // throwing, because the two are the same mistake.
+      if (kind === "support") {
+        set({ error: "A pedestal stands on the floor. Click the floor in plan to place it." });
         return;
       }
 

@@ -30,6 +30,7 @@ import {
   expandWithShelfRiders,
   getShelfRiders
 } from "../../../domain/placement/shelfRiders";
+import { expandWithSupportRiders } from "../../../domain/placement/floorRiders";
 import {
   DEFAULT_FLOOR_CASE_DEPTH_MM,
   DEFAULT_WALL_CASE_DEPTH_MM,
@@ -49,7 +50,7 @@ import {
 } from "../../../domain/geometry/freestandingWalls";
 import { computePartitionChainsFloor } from "../../../domain/geometry/partitionChains";
 import type { Point } from "../../../domain/geometry/polygon";
-import { assemblyPlanRect, resolveFloorSupport } from "../../../domain/geometry/supportGlyphs";
+import { PEDESTAL_MIN_FOOTPRINT_MM } from "../../../domain/geometry/supportGlyphs";
 import { getGridSnapTargets } from "../../../domain/snapping/gridSnapTargets";
 import {
   resolvePlanPlacement,
@@ -232,12 +233,19 @@ export function PlanView({
   gridPrecisionFloorMm: number | null;
   gridVisible: boolean;
   // Atomically handles same-wall moves, re-anchoring, and wall/floor conversion.
-  onCommitPlanMove?: (objectId: string, placement: PlanPlacement) => void;
+  onCommitPlanMove?: (
+    objectId: string,
+    placement: PlanPlacement,
+    // ⌘/Ctrl held at release: the precision bypass, which skips floor-support
+    // seating exactly as it skips every other snap.
+    bypassSeating?: boolean
+  ) => void;
   // Wall moves omit yMm; floor moves include their new center. A wallId marks a
   // wall member re-anchored onto a different wall (artwork dragged onto another
   // wall); absent, the member stays on its own wall.
   onCommitPlanMoveGroup?: (
-    moves: { id: string; xMm: number; yMm?: number; wallId?: string }[]
+    moves: { id: string; xMm: number; yMm?: number; wallId?: string }[],
+    bypassSeating?: boolean
   ) => void;
   onPlaceArtwork?: (
     artworkId: string,
@@ -246,7 +254,14 @@ export function PlanView({
     yMm: number,
     seatOnShelfId?: string
   ) => void;
-  onPlaceArtworkOnFloor?: (artworkId: string, xMm: number, yMm: number) => void;
+  onPlaceArtworkOnFloor?: (
+    artworkId: string,
+    xMm: number,
+    yMm: number,
+    // ⌘/Ctrl at drop: the precision bypass, which skips standing the work on a
+    // pedestal under the drop point exactly as it skips every other snap.
+    opts?: { bypassSeating?: boolean }
+  ) => void;
   // IDs are placements, never artwork-library records.
   onMarqueeSelect?: (ids: string[], additive: boolean) => void;
   onToolChange: (tool: InsertToolKind | null) => void;
@@ -699,7 +714,11 @@ export function PlanView({
           ? DEFAULT_FLOOR_CASE_DEPTH_MM
           : activeTool === "shelf"
             ? DEFAULT_SHELF_DEPTH_MM
-            : WALL_OBJECT_PLAN_DEPTH_MM;
+            // A pedestal's ghost is its square footprint seen from above, so
+            // its depth is its own width, never the through-wall band.
+            : activeTool === "support"
+              ? PEDESTAL_MIN_FOOTPRINT_MM
+              : WALL_OBJECT_PLAN_DEPTH_MM;
     return { widthMm, heightMm, depthMm };
   }, [activeTool]);
 
@@ -772,7 +791,16 @@ export function PlanView({
       // branch below. Idempotent, so a selection that already holds the riders
       // is unchanged.
       const selectedSet = new Set(
-        expandWithShelfRiders(selectedObjectIds, project.wallObjects, artworksById)
+        // Both rider expansions, in the same shape the pointer drag uses
+        // (beginObjectDrag): a selected shelf brings the works standing on it,
+        // a selected PEDESTAL brings the works standing on it. Both are
+        // idempotent and neither narrows, so composing them is safe and a
+        // selection that already holds the riders is unchanged.
+        expandWithSupportRiders(
+          expandWithShelfRiders(selectedObjectIds, project.wallObjects, artworksById),
+          project.floorObjects,
+          artworksById
+        )
       );
       // Which shelf each rider stands on — derived here, never stored, and
       // declared on the member so resolvePlanObjectNudge's group branch keeps
@@ -826,9 +854,9 @@ export function PlanView({
 
       event.preventDefault();
       if (nudge.kind === "single") {
-        onCommitPlanMove?.(nudge.objectId, nudge.placement);
+        onCommitPlanMove?.(nudge.objectId, nudge.placement, false);
       } else {
-        onCommitPlanMoveGroup?.(nudge.moves);
+        onCommitPlanMoveGroup?.(nudge.moves, false);
       }
     }
 
@@ -867,13 +895,6 @@ export function PlanView({
   // field — and a multi-selection gets none, because a group rotation is a
   // different gesture (each member would need its own pivot policy) and this
   // handle must not quietly imply it.
-  //
-  // `rect` is the WHOLE ASSEMBLY's footprint when the placement stands on a
-  // support (assemblyPlanRect): the handle hangs off the rect it is given, so
-  // anchoring it to the bare work rect would bury it inside the pedestal that
-  // is drawn around it. The rotation itself is unchanged — it still pivots
-  // about the placement, and the support travels with it because the offset is
-  // stored in the placement's rotated local frame.
   const rotateHandleTarget = useMemo(() => {
     if (exportMode) return null;
     const selected = planScene.floorObjects.filter(
@@ -1053,11 +1074,13 @@ export function PlanView({
       // case: it is wall-only, so a click clear of every wall must resolve to a
       // floor anchor the store REFUSES with a hint, rather than being flung
       // onto whichever wall happens to be nearest (floatPolicyForKind).
-      floatPolicy: (activeTool === "blocked-zone" ||
-      activeTool === "case" ||
-      activeTool === "shelf"
-        ? "float"
-        : "capture-any") as FloatPolicy,
+      // A pedestal is floor-only and stands against walls all the time, so it
+      // never captures a wall: every click resolves to a floor anchor.
+      floatPolicy: (activeTool === "support"
+        ? "floor-only"
+        : activeTool === "blocked-zone" || activeTool === "case" || activeTool === "shelf"
+          ? "float"
+          : "capture-any") as FloatPolicy,
       // The protrusion a wall-anchored ghost draws. A wall case's is always the
       // wall-case depth (the open-floor footprint in `size` says nothing about
       // it); a shelf's is its own default depth, since its `size` carries the
@@ -1500,7 +1523,19 @@ export function PlanView({
           // The slab a checklist drop is currently captured over: the shelf's
           // plan glyph lights up while the work would land on it, the plan
           // half of "a surface announces itself".
-          snapTargetObjectId={exportMode ? null : (dropGhost?.shelfId ?? null)}
+          // The surface a gesture is currently captured over: the slab a
+          // checklist drop would seat the work on, the pedestal that drop would
+          // stand it on, or — during a plan drag of a floor work — the pedestal
+          // the release would seat it on. One prop, because only one of the
+          // three gestures can be live at a time.
+          snapTargetObjectId={
+            exportMode
+              ? null
+              : (dropGhost?.shelfId ??
+                dropGhost?.supportId ??
+                objectMove.objectDrag?.seatSupportId ??
+                null)
+          }
           consumeSelectSuppression={consumeSelectSuppression}
           beginObjectDrag={objectMove.beginObjectDrag}
           onSelectObject={onSelectObject}
@@ -1676,23 +1711,18 @@ function getPlanViewPaddingMm(bounds: { width: number; height: number }): number
 // "./PlanView" keeps resolving unchanged.
 export { getPartitionMovedAxes };
 
-// The rect the rotate handle hangs off, at a given rotation: the WHOLE
-// ASSEMBLY's footprint (assemblyPlanRect) for a placement that stands on a
-// pedestal / plinth / monitor default, and the work's own rect otherwise. The
-// handle is drawn outside the rect it is given, so anchoring it to the bare
-// work rect would bury the stem and chip inside the support drawn around the
-// work. Taken at a rotation rather than read off the scene because an offset
-// support's union moves as the placement turns (the offset lives in the
-// placement's rotated local frame) — the drag preview has to re-evaluate it.
-// Exported only for unit testing; not a shared utility.
+// The rect the rotate handle hangs off, at a given rotation: the object's OWN
+// footprint (getFloorObjectPlanRect via the scene entry). A pedestal is its own
+// object now (schema v8), so there is no assembly union to take — the handle on
+// a work is the work's, and the handle on a support is the support's. Taken at
+// a rotation rather than read straight off the scene because the drag preview
+// re-evaluates it as the object turns. Exported only for unit testing; not a
+// shared utility.
 export function rotateHandleRectAt(
   entry: PlanSceneFloorObject,
   rotationDeg: number
 ): PlanRect {
-  const support = resolveFloorSupport(entry.object, entry.artwork);
-  return support
-    ? assemblyPlanRect({ ...entry.object, rotationDeg }, support)
-    : { ...entry.rect, angleDeg: rotationDeg };
+  return { ...entry.rect, angleDeg: rotationDeg };
 }
 
 // The padded floor bounds, expanded (never shrunk) so neither axis is

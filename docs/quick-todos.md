@@ -16,7 +16,7 @@ Small, actionable scraps that don't fit the roadmap (`docs/plan.md` §9) or the 
 
 ## Display types and floor objects (deferred from the 2026-08-28 feedback round)
 
-* Pedestal options: colors/materials. Stretch: a standalone plinth floor object that other supports/works can stack on; independent plan drag of the support rect (today the assembly is one hit target and the offset is typed in the inspector); a bonnet footprint distinct from the pedestal's.
+* Pedestal options: colors/materials; a bonnet footprint distinct from the pedestal's. Stretch: a support standing on another support (e.g. a pedestal on a shelf) — explicitly out of scope for the 2026-09-18 floor-supports round.
 * More display types: wall-mounted flatscreen (slim black bezel, no frame options), projection with a soft-edged image or projector-beam glyph. Both are approximable today as plain wall works — build only when the approximation falls short.
 * Medium auto-detect nudge: a one-time "Looks like a video work — display as monitor?" suggestion. Rejected as the primary mechanism; fine as a discoverability nudge.
 * CRT niceties: screen glow/emissive so a "playing" monitor reads as lit in 3D; multi-monitor stacks and video walls.

@@ -4,18 +4,16 @@ import type {
   Dimensions,
   FloorObject,
   FloorObjectFace,
+  FloorSupportKind,
   Project,
   RoomPlacement,
   WallObject
 } from "../project";
 import { effectiveDisplayAs, effectiveWallArtworkDepthMm } from "../placement/artworkForm";
+import { resolveFloorStandsOn } from "../placement/floorRiders";
 import { getFreestandingFaces } from "./freestandingWalls";
 import { buildFloorWallsById, evaluateOpeningPairWith } from "./openingConnections";
 import { isPointInPolygon, signedAreaMm2 } from "./polygon";
-import {
-  resolveFloorSupport,
-  type ResolvedFloorSupport
-} from "./supportGlyphs";
 import { unitLeftNormalOrZero } from "./vector";
 import { getWallsWithGeometry } from "./walls";
 
@@ -111,7 +109,9 @@ export type FloorObject3d = {
   objectId: string;
   // "case" is a freestanding vitrine: the render layer draws a glass box
   // (FLOOR_CASE_BOX_HEIGHT_MM tall at the top) on legs filling the remainder.
-  kind: "artwork" | "blocked-zone" | "case";
+  // "support" is a pedestal or plinth: the render layer draws a plain box to
+  // its top face, plus the case-glass bonnet when one is present.
+  kind: "artwork" | "blocked-zone" | "case" | "support";
   artworkId?: string;
   assetId?: string;
   status?: Dimensions["status"];
@@ -132,18 +132,15 @@ export type FloorObject3d = {
   // layer's dispatch (SceneRooms) stays a single equality test. "monitor"
   // makes the render layer draw a CRT cabinet instead of the neutral image box.
   displayAs?: ArtworkDisplayAs;
-  // The RESOLVED block this work stands on — an explicit pedestal/plinth, or a
-  // box monitor's default pedestal — already normalised into a box with a size,
-  // an offset and an optional bonnet (resolveFloorSupport). Unlike imageFaces
-  // and displayAs this IS resolved here rather than passed through raw, because
-  // the alternative is every mesh re-deriving the monitor default and the 3D
-  // model disagreeing with the plan about whether there is a plinth at all.
+  // Support-only (kind === "support"), so every other entry keeps exactly the
+  // key set it had before supports became objects. `heightMm` below is the
+  // support's TOP FACE; the bonnet rises from there.
   //
-  // Emitted ONLY when there is a support, so a floor-resting object's entry
-  // keeps exactly the key set it had before supports existed. When present, the
-  // work's bottom edge sits at support.heightMm and baseHeightMm is ignored —
-  // the two never appear together (see ArtworkFloorObject.support).
-  support?: ResolvedFloorSupport;
+  // Nothing on a rider says it is a rider: a work standing on a pedestal simply
+  // has baseHeightMm equal to the pedestal's heightMm, which is where the
+  // render layer already puts it.
+  supportKind?: FloorSupportKind;
+  bonnetHeightMm?: number;
   // The WORK's own recorded dimensions (artwork only) — deliberately NOT the
   // same numbers as widthMm/heightMm below, which size the OBJECT STANDING ON
   // THE FLOOR (a projection board, a plinth, a sculpture's bounding box). The
@@ -357,7 +354,6 @@ export function deriveScene3d(
       // separate treatment for it — only a resolved type that actually
       // changes SceneRooms's dispatch (monitor today) is worth stating.
       const resolvedDisplayAs = artwork ? effectiveDisplayAs(artwork) : undefined;
-      const resolvedSupport = resolveFloorSupport(object, artwork);
       return {
         objectId: object.id,
         kind: object.kind,
@@ -372,11 +368,10 @@ export function deriveScene3d(
               // encoding" rule baseHeightMm follows below.
               ...(object.imageFaces ? { imageFaces: object.imageFaces } : {}),
               // Same absence discipline: only a stated (non-"framed") display
-              // type and a stated support reach the scene.
+              // type reaches the scene.
               ...(resolvedDisplayAs && resolvedDisplayAs !== "framed"
                 ? { displayAs: resolvedDisplayAs }
                 : {}),
-              ...(resolvedSupport ? { support: resolvedSupport } : {}),
               // Per axis, and only when recorded — see artworkWidthMm's note.
               ...(artwork?.dimensions.widthMm !== undefined
                 ? { artworkWidthMm: artwork.dimensions.widthMm }
@@ -386,13 +381,21 @@ export function deriveScene3d(
                 : {})
             }
           : {}),
+        ...(object.kind === "support"
+          ? {
+              supportKind: object.supportKind,
+              ...(object.bonnetHeightMm !== undefined
+                ? { bonnetHeightMm: object.bonnetHeightMm }
+                : {})
+            }
+          : {}),
         xMm: object.xMm,
         yMm: object.yMm,
         widthMm: object.widthMm,
         depthMm: object.depthMm,
         heightMm: object.heightMm,
         rotationDeg: object.rotationDeg,
-        ...suspensionFields(object, rooms)
+        ...suspensionFields(object, rooms, project.floorObjects)
       };
     })
   };
@@ -404,10 +407,19 @@ export function deriveScene3d(
 // for why absence rather than 0 is the encoding).
 function suspensionFields(
   object: FloorObject,
-  rooms: Room3d[]
+  rooms: Room3d[],
+  floorObjects: readonly FloorObject[]
 ): { baseHeightMm?: number; suspensionAnchorHeightMm?: number } {
   const baseHeightMm = object.baseHeightMm ?? 0;
   if (baseHeightMm <= 0) return {};
+
+  // A RIDER is lifted, not hung: its bottom edge is a pedestal's top face, so it
+  // gets its height and deliberately NO anchor — planSuspensionWires reads the
+  // missing anchor as "nothing to hang from" and draws no wires over the
+  // pedestal holding it up.
+  if (resolveFloorStandsOn(object, floorObjects).kind === "support") {
+    return { baseHeightMm };
+  }
 
   // First containing room wins. Room footprints may overlap in floor space
   // (nothing forbids it, and a doorway-joined pair shares a boundary), so a

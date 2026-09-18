@@ -142,7 +142,15 @@ function drawPlanObject(
   page: PDFPage,
   transform: PlanTransform,
   rect: PlanRect,
-  kind: "artwork" | "door" | "window" | "blocked-zone" | "wall-text" | "case" | "shelf",
+  kind:
+    | "artwork"
+    | "door"
+    | "window"
+    | "blocked-zone"
+    | "wall-text"
+    | "case"
+    | "shelf"
+    | "support",
   isFloorPlaced: boolean,
   // This artwork is displayed on a CRT / box monitor — the same flag the canvas
   // passes to PlanObject, and for the same reason it isn't a `kind` there.
@@ -152,40 +160,33 @@ function drawPlanObject(
   // screen sweep the identical arc. Undefined for a plain doorway (which keeps
   // its chevron) and for every other kind.
   swing?: DoorSwingPlanGlyph,
-  // The pedestal/plinth this floor placement stands on, straight off the plan
-  // scene (PlanSceneFloorObject.support) — footprint, offset and bonnet all
-  // settled in mm-space by supportGlyphs.ts. Never re-derived here: this print
-  // draws the rect the canvas draws.
-  support?: { rect: PlanRect; hasBonnet: boolean }
+  // This SUPPORT carries a plexi bonnet (PlanSceneFloorObject.hasBonnet).
+  // Ignored for every other kind. Never re-derived here: this print draws the
+  // footprint the canvas draws.
+  hasBonnet?: boolean
 ) {
-  if (support) {
-    // Beneath the work, so the work's own outline overdraws the seam where the
-    // two meet — the canvas's paint order. Lighter border than the object on
-    // top of it: the support is what carries the thing being read.
-    page.drawSvgPath(polygonPath(planRectCorners(support.rect).map(transform.point)), {
-      color: COLORS.surfaceStrong,
-      borderColor: COLORS.muted,
-      borderWidth: 0.55
-    });
-    // The bonnet's footprint IS the support's (USER DECISION 2026-09-17), so
-    // from above it is the same rectangle and the dash is the whole of what
-    // says "there is glass over this".
-    if (support.hasBonnet) {
-      page.drawSvgPath(polygonPath(planRectCorners(support.rect).map(transform.point)), {
-        borderColor: COLORS.subtle,
-        borderWidth: 0.5,
-        borderDashArray: [3, 2]
-      });
-    }
-  }
-
   const corners = planRectCorners(rect).map(transform.point);
+  // A support is drawn like the canvas draws it: an opaque volume seen from
+  // above with a lighter border than the works standing on it, and the plan
+  // scene emits it BEFORE them so their outlines overdraw the seam where the
+  // two meet.
   page.drawSvgPath(polygonPath(corners), {
-    color: kind === "blocked-zone" ? COLORS.surfaceStrong : COLORS.white,
+    color:
+      kind === "blocked-zone" || kind === "support" ? COLORS.surfaceStrong : COLORS.white,
     borderColor: COLORS.muted,
-    borderWidth: 0.8,
-    ...(isFloorPlaced ? { borderDashArray: [3, 2] } : {})
+    borderWidth: kind === "support" ? 0.55 : 0.8,
+    ...(isFloorPlaced && kind !== "support" ? { borderDashArray: [3, 2] } : {})
   });
+  // The bonnet's footprint IS the support's (USER DECISION 2026-09-17), so from
+  // above it is the same rectangle and the dash is the whole of what says
+  // "there is glass over this".
+  if (kind === "support" && hasBonnet) {
+    page.drawSvgPath(polygonPath(corners), {
+      borderColor: COLORS.subtle,
+      borderWidth: 0.5,
+      borderDashArray: [3, 2]
+    });
+  }
 
   const halfW = rect.widthMm / 2;
   const halfD = rect.depthMm / 2;
@@ -407,7 +408,7 @@ export function drawPlanScene(
         true,
         isMonitorArtwork(entry.artwork),
         undefined,
-        entry.support
+        entry.hasBonnet
       );
     }
   }

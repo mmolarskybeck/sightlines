@@ -18,7 +18,7 @@
 //   is the face the screen is on.
 
 import { isPositive } from "./isPositive";
-import type { Dimensions, MonitorSupport } from "../project";
+import type { Dimensions } from "../project";
 import {
   effectiveDisplayAs,
   type DisplayAsSource
@@ -61,16 +61,6 @@ export const MONITOR_PEDESTAL_HEIGHT_MM = 800;
 // A monitor is equipment the curator states they have; it is never inferred.
 export function isMonitorArtwork(artwork: DisplayAsSource | undefined): boolean {
   return artwork !== undefined && effectiveDisplayAs(artwork) === "monitor";
-}
-
-// ABSENT MEANS PEDESTAL. Resolved here, at read time, rather than baked in at
-// write time — see ArtworkFloorObject.monitorSupport for why. Every renderer
-// goes through this rather than testing the field, so "never chosen" and an
-// explicit "pedestal" can never diverge.
-export function resolveMonitorSupport(
-  monitorSupport: MonitorSupport | undefined
-): MonitorSupport {
-  return monitorSupport ?? "pedestal";
 }
 
 export type MonitorBoxSizeMm = {

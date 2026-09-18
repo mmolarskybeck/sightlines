@@ -89,3 +89,18 @@ export function CaseGlyph(props: GlyphProps) {
     </Glyph>
   );
 }
+
+// A pedestal: a solid block standing on the floor line, with the work it
+// carries sketched as a small square on top. Filled like the shelf's slab (it
+// is a built box, not glass), which is what keeps it distinct from the display
+// case's legged, hollow vitrine at 16px — and the floor line is what says it
+// stands on the ground rather than hanging off a wall.
+export function PedestalGlyph(props: GlyphProps) {
+  return (
+    <Glyph {...props}>
+      <line x1="2" y1="13.25" x2="14" y2="13.25" />
+      <rect x="5" y="6.5" width="6" height="6.75" fill="currentColor" stroke="none" />
+      <rect x="6.5" y="3.25" width="3" height="3.25" />
+    </Glyph>
+  );
+}

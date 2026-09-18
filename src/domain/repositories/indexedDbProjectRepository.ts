@@ -1,7 +1,14 @@
 import { migrateProjectWithReport, parseProject } from "../schema/projectSchema";
 import type { Project, ProjectSummary } from "../project";
 import type { ProjectLoadReport, ProjectRepository } from "./projectRepository";
-import { openDatabase, PROJECT_STORE, requestToPromise, transactionDone } from "./database";
+import {
+  ARTWORK_STORE,
+  openDatabase,
+  PROJECT_STORE,
+  requestToPromise,
+  transactionDone
+} from "./database";
+import { CURRENT_SCHEMA_VERSION } from "../project";
 
 // A loaded record exists but fails to parse or migrate to the current schema —
 // a malformed document or a migration that can't run. Distinct from operational
@@ -19,14 +26,22 @@ export class ProjectValidationError extends Error {
   }
 }
 
+// Whether a stored record predates the current schema and therefore has a
+// migration chain to run. Deliberately tolerant: an unreadable schemaVersion
+// falls through to `true`, so the migration gets its context on exactly the
+// records that might need it.
+function needsArtworkContext(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return true;
+  const schemaVersion = (value as { schemaVersion?: unknown }).schemaVersion;
+  return typeof schemaVersion !== "number" || schemaVersion < CURRENT_SCHEMA_VERSION;
+}
+
 export class IndexedDbProjectRepository implements ProjectRepository {
   async load(id: string): Promise<Project> {
     return (await this.loadWithReport(id)).project;
   }
 
-  // The same read as `load`, keeping the load report instead of dropping it, so
-  // an ordinary open can announce a support repair the way a snapshot restore
-  // and a JSON import already do.
+  // The same read as `load`, keeping the load report instead of dropping it.
   async loadWithReport(id: string): Promise<ProjectLoadReport> {
     const db = await openDatabase();
     // Operational IDB errors here (read failure, closed connection) propagate
@@ -39,11 +54,22 @@ export class IndexedDbProjectRepository implements ProjectRepository {
       throw new Error(`Project not found: ${id}`);
     }
 
+    // The v7→v8 step has to know which floor placements are box monitors, and a
+    // project document has never carried its artworks — so an OLD record gets
+    // the library read alongside it (see ProjectMigrationContext). Gated on the
+    // stored version so the everyday open of an up-to-date project still costs
+    // exactly one read.
+    const artworks = needsArtworkContext(value)
+      ? await requestToPromise<unknown[]>(
+          db.transaction(ARTWORK_STORE, "readonly").objectStore(ARTWORK_STORE).getAll()
+        )
+      : undefined;
+
     // Parse/migration failures are the corruption signal — wrap them so callers
     // can offer recovery without catching every possible load error.
     try {
-      const { project, supportRepairCount, stored } = migrateProjectWithReport(value);
-      return { project, supportRepairCount, stored };
+      const { project, stored } = migrateProjectWithReport(value, { artworks });
+      return { project, stored };
     } catch (error) {
       throw new ProjectValidationError(
         error instanceof Error ? error.message : "the project could not be read.",

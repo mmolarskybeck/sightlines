@@ -7,6 +7,7 @@ import type { InsertToolKind } from "../../../domain/placement/createOpening";
 import {
   CaseGlyph,
   PartitionGlyph,
+  PedestalGlyph,
   RectangleRoomGlyph,
   ShelfGlyph,
   WindowGlyph
@@ -24,7 +25,10 @@ export type InsertToolMeta = {
   label: string;
   hint: string;
   armed: string;
-  kbd: string;
+  // OPTIONAL: the pedestal tool deliberately has no accelerator (USER DECISION
+  // 2026-09-18). Absent means the resting tooltip shows the hint alone, with no
+  // key chip — never an empty chip, which would read as a broken shortcut.
+  kbd?: string;
   icon: ReactNode;
 };
 
@@ -34,7 +38,8 @@ export const OPENING_TOOL_ORDER: InsertToolKind[] = [
   "blocked-zone",
   "wall-text",
   "case",
-  "shelf"
+  "shelf",
+  "support"
 ];
 
 export const OPENING_TOOL_META: Record<InsertToolKind, InsertToolMeta> = {
@@ -89,6 +94,18 @@ export const OPENING_TOOL_META: Record<InsertToolKind, InsertToolMeta> = {
     // L, because S is the snap-to-grid toggle (see useToolbarShortcuts).
     kbd: "L",
     icon: <ShelfGlyph aria-hidden="true" size={16} />
+  },
+  support: {
+    key: "support",
+    label: "Pedestal",
+    hint: "Insert a pedestal",
+    // "Click the floor", not "Click to place": a pedestal is FLOOR-only (the
+    // mirror of the shelf), so a click that captures a wall places nothing, and
+    // the armed tooltip is where that is cheapest to learn.
+    armed: "Click the floor to place a pedestal",
+    // No kbd: USER DECISION 2026-09-18 — the remaining single letters all
+    // collide with existing shortcuts, and a pedestal is not a per-minute tool.
+    icon: <PedestalGlyph aria-hidden="true" size={16} />
   }
 };
 

@@ -9,8 +9,8 @@ import { newId } from "../id";
 export type OpeningKind = OpeningWallObject["kind"];
 
 // Everything the Insert cluster can arm: openings plus wall text plus the
-// display case plus the shelf. Artworks are placed from the checklist, not the
-// Insert cluster, so they are excluded. The armed-tool plumbing (PlanMode,
+// display case plus the shelf plus the pedestal. Artworks are placed from the
+// checklist, not the Insert cluster, so they are excluded. The armed-tool plumbing (PlanMode,
 // toolbar shortcuts, ghost previews) is keyed on this widened kind; only the
 // object-CREATION step branches wall-text, case and shelf away from the opening
 // builders (openings pair/mirror and block placement; wall text, cases and
@@ -22,7 +22,12 @@ export type InsertToolKind =
   | OpeningKind
   | WallTextWallObject["kind"]
   | "case"
-  | ShelfWallObject["kind"];
+  | ShelfWallObject["kind"]
+  // A pedestal (SupportFloorObject). The mirror image of the shelf: FLOOR-only
+  // rather than wall-only, so a click that captures a wall places nothing and
+  // says why. It has no keyboard accelerator at all — USER DECISION
+  // 2026-09-18 — which is why InsertToolMeta.kbd is optional.
+  | "support";
 
 // Curatorial defaults, not architectural code minimums — close enough for a
 // first placement that a curator will immediately adjust numerically anyway

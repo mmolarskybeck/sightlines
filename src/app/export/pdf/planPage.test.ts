@@ -5,15 +5,17 @@ import {
   type DocumentBoundsMm
 } from "../../../domain/export/pageComposition";
 import type { PlanRect } from "../../../domain/geometry/planObjects";
-import type { ArtworkFloorObject } from "../../../domain/project";
+import type {
+  ArtworkFloorObject,
+  SupportFloorObject
+} from "../../../domain/project";
 import type { PlanScene, PlanSceneFloorObject } from "../../../domain/scene2d/planScene";
 import { drawPlanScene } from "./planPage";
 import { polygonPath } from "./transforms";
 
-// The support's plan footprint reaches the printed page from the scene entry
-// (PlanSceneFloorObject.support, built by supportPlanRect) and nothing else —
-// the drawer must never reconstruct it from the placement's own size, which is
-// the "pedestal footprint == cabinet" assumption the canvas just lost.
+// A support's plan footprint reaches the printed page from its OWN scene entry
+// (a `kind: "support"` PlanSceneFloorObject) and nothing else — the drawer must
+// never reconstruct it from the placement of a work standing on it.
 
 const BOUNDS: DocumentBoundsMm = {
   minXMm: 0,
@@ -35,9 +37,7 @@ const workRect: PlanRect = {
   angleDeg: 0
 };
 
-function floorEntry(
-  support?: PlanSceneFloorObject["support"]
-): PlanSceneFloorObject {
+function floorEntry(): PlanSceneFloorObject {
   return {
     object: {
       id: "fobj-1",
@@ -50,18 +50,45 @@ function floorEntry(
       heightMm: 375,
       rotationDeg: 0
     } as ArtworkFloorObject,
-    rect: workRect,
-    ...(support ? { support } : {})
+    rect: workRect
   };
 }
 
-function sceneWith(support?: PlanSceneFloorObject["support"]): PlanScene {
+// A support is its OWN plan entry now (schema v8), and the plan scene emits it
+// before the works standing on it.
+function supportEntry(
+  rect: PlanRect,
+  hasBonnet: boolean
+): PlanSceneFloorObject {
+  return {
+    object: {
+      id: "support-1",
+      kind: "support",
+      supportKind: "plinth",
+      xMm: rect.centerXMm,
+      yMm: rect.centerYMm,
+      widthMm: rect.widthMm,
+      depthMm: rect.depthMm,
+      rotationDeg: rect.angleDeg,
+      heightMm: 1100,
+      wallYMm: 0,
+      ...(hasBonnet ? { bonnetHeightMm: 975 } : {})
+    } as SupportFloorObject,
+    rect,
+    supportKind: "plinth",
+    hasBonnet
+  };
+}
+
+function sceneWith(support?: { rect: PlanRect; hasBonnet: boolean }): PlanScene {
   return {
     rooms: [],
     partitions: [],
     openingConnections: [],
     wallObjects: [],
-    floorObjects: [floorEntry(support)]
+    floorObjects: support
+      ? [supportEntry(support.rect, support.hasBonnet), floorEntry()]
+      : [floorEntry()]
   };
 }
 
@@ -83,7 +110,7 @@ function expectedPath(rect: PlanRect): string {
 }
 
 describe("drawPlanScene — floor supports", () => {
-  it("draws the support's own footprint from the scene entry, beneath the work", async () => {
+  it("draws the support's own footprint from its scene entry, beneath the work", async () => {
     const page = await freshPage();
     const pathSpy = vi.spyOn(page, "drawSvgPath");
     // Deliberately NOT the work's footprint: a wider plinth is exactly what a
@@ -92,7 +119,7 @@ describe("drawPlanScene — floor supports", () => {
 
     drawPlanScene(
       page,
-      sceneWith({ rect: supportRect, hasBonnet: false, kind: "plinth" }),
+      sceneWith({ rect: supportRect, hasBonnet: false }),
       BOUNDS,
       RECT,
       "cm",
@@ -122,7 +149,7 @@ describe("drawPlanScene — floor supports", () => {
     const plainSpy = vi.spyOn(plainPage, "drawSvgPath");
     drawPlanScene(
       plainPage,
-      sceneWith({ rect: supportRect, hasBonnet: false, kind: "pedestal" }),
+      sceneWith({ rect: supportRect, hasBonnet: false }),
       BOUNDS,
       RECT,
       "cm",
@@ -137,7 +164,7 @@ describe("drawPlanScene — floor supports", () => {
     const bonnetSpy = vi.spyOn(bonnetPage, "drawSvgPath");
     drawPlanScene(
       bonnetPage,
-      sceneWith({ rect: supportRect, hasBonnet: true, kind: "pedestal" }),
+      sceneWith({ rect: supportRect, hasBonnet: true }),
       BOUNDS,
       RECT,
       "cm",

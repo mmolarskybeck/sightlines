@@ -2,7 +2,8 @@ import { z } from "zod";
 import { CURRENT_SCHEMA_VERSION, type Project } from "../project";
 import { parseFaceWallId } from "../geometry/freestandingWalls";
 import { normalizeOpeningPairs } from "../placement/openingPairs";
-import { normalizeFloorSupport } from "../geometry/supportGlyphs";
+import { isMonitorArtwork, MONITOR_PEDESTAL_HEIGHT_MM } from "../geometry/monitorGlyphs";
+import { newId } from "../id";
 
 const displayUnitSchema = z.enum(["in", "ft", "cm", "m"]);
 
@@ -70,40 +71,12 @@ const floorMemorySchema = z.object({
 // malformed claim about physical construction worth rejecting loudly, whereas
 // stripping imageFaces from a blocked zone's dormant memory is the correct
 // outcome anyway — there is no image, no reader, and nothing drawn changes.
-// The attached pedestal/plinth block (ArtworkFloorObject.support). Purely
-// STRUCTURAL, like every other schema here: whether this support actually holds
-// the work standing on it — footprint containment, offset clamps, bonnet
-// clearance and the derived bonnet height — is a RELATIONAL invariant between
-// the support and the placement's own dimensions, and lives in exactly one
-// place, normalizeFloorSupport (geometry/supportGlyphs.ts), which the load
-// boundary below runs over every parsed document. Encoding those rules here as
-// refinements would make a repairable document unopenable.
-//
-// Every member beyond kind/size is optional and absence is meaningful, so this
-// is additive in SHAPE — but it still rides the v5 -> v6 bump, for the DOWNGRADE
-// direction only: see MIGRATIONS.
-const floorSupportSchema = z.object({
-  kind: z.enum(["pedestal", "plinth"]),
-  widthMm: z.number().positive(),
-  depthMm: z.number().positive(),
-  heightMm: z.number().positive(),
-  // Signed: the work may be displaced either way along either local axis.
-  offsetXMm: z.number().finite().optional(),
-  offsetYMm: z.number().finite().optional(),
-  overhangAllowed: z.boolean().optional(),
-  // Positive, not non-negative: a zero-height bonnet is the absence of a
-  // bonnet, and absence is already how that is written.
-  bonnetHeightMm: z.number().positive().optional(),
-  bonnetHeightLocked: z.boolean().optional()
-});
-
+// A capture parks NO support state (schema v8): a pedestal is its own floor
+// object and stays standing on the floor while the work hangs on a wall, so the
+// restore re-seats the work from `baseHeightMm` alone. MIGRATIONS[7] strips the
+// v7 `support`/`monitorSupport` keys from every floorMemory.
 const artworkFloorMemorySchema = floorMemorySchema.extend({
-  imageFaces: z.array(floorObjectFaceSchema).optional(),
-  // Parked floor support + monitor choice, mirroring the live fields they
-  // shadow so the memory cannot hold a value that would fail validation the
-  // moment it is restored onto a floor object.
-  support: floorSupportSchema.optional(),
-  monitorSupport: z.enum(["pedestal", "floor"]).optional()
+  imageFaces: z.array(floorObjectFaceSchema).optional()
 });
 
 const artworkWallObjectSchema = wallObjectBaseSchema.extend({
@@ -218,15 +191,10 @@ const artworkFloorObjectSchema = floorObjectBaseSchema.extend({
   // An empty array is deliberately legal — it means every face was turned off,
   // which is different from "never chosen"; see ArtworkFloorObject.imageFaces.
   imageFaces: z.array(floorObjectFaceSchema).optional(),
-  // What a box-monitor placement stands on. Optional and additive (absent =
-  // pedestal, resolved at read time — see ArtworkFloorObject.monitorSupport),
-  // so no schema-version bump. Only meaningful when the joined artwork's
-  // displayAs is "monitor"; a stray value on any other work is inert rather
-  // than invalid, since the join isn't available at parse time.
-  monitorSupport: z.enum(["pedestal", "floor"]).optional(),
-  // The attached pedestal/plinth this work stands on. Structurally optional,
-  // but it rides the v5 -> v6 bump — see MIGRATIONS.
-  support: floorSupportSchema.optional(),
+  // Nothing here records what the work stands on: a support is its own floor
+  // object and the relationship is derived from geometry (floor-supports spec
+  // §2/§3, placement/floorRiders.ts). The v7 `support`/`monitorSupport` keys
+  // are rewritten by MIGRATIONS[7] and are no longer accepted.
   displayDimensionsOverride: dimensionsSchema.optional()
 });
 
@@ -240,10 +208,31 @@ const caseFloorObjectSchema = floorObjectBaseSchema.extend({
   kind: z.literal("case")
 });
 
+// A pedestal or plinth standing on the floor: a NEW union member carrying a
+// required `supportKind`, so it is not purely additive and rides the v7->v8
+// bump (see MIGRATIONS[7], which also rewrites every v7 attached support into
+// one of these). Purely STRUCTURAL, like every other schema here — whether a
+// rider actually fits on the top face is a relational question the inspector
+// and the drag clamps answer, never a parse-time refusal that would make a
+// hand-edited document unopenable.
+//
+// `heightMm` (inherited) is the TOP FACE height above the floor; `wallYMm` is
+// written 0 and `baseHeightMm` is never set (a support does not hang).
+const supportFloorObjectSchema = floorObjectBaseSchema.extend({
+  kind: z.literal("support"),
+  supportKind: z.enum(["pedestal", "plinth"]),
+  // Positive, not non-negative: a zero-height bonnet is the absence of a
+  // bonnet, and absence is already how that is written.
+  bonnetHeightMm: z.number().positive().optional(),
+  bonnetHeightLocked: z.boolean().optional(),
+  overhangAllowed: z.boolean().optional()
+});
+
 const floorObjectSchema = z.discriminatedUnion("kind", [
   artworkFloorObjectSchema,
   blockedZoneFloorObjectSchema,
-  caseFloorObjectSchema
+  caseFloorObjectSchema,
+  supportFloorObjectSchema
 ]);
 
 const measurementPointSchema = z.object({
@@ -570,16 +559,21 @@ function formatApproxMegabytes(lengthInUtf16Units: number): string {
 }
 
 // External JSON follows parse → minimal validation → migration → current validation.
-export function migrateProjectJson(text: string): Project {
-  return migrateProjectJsonWithReport(text).project;
+export function migrateProjectJson(
+  text: string,
+  context: ProjectMigrationContext = {}
+): Project {
+  return migrateProjectJsonWithReport(text, context).project;
 }
 
 // migrateProjectJson plus the shared-opening repair count, so an imported file
 // that had to be changed on the way in can say so.
-export function migrateProjectJsonWithReport(text: string): {
+export function migrateProjectJsonWithReport(
+  text: string,
+  context: ProjectMigrationContext = {}
+): {
   project: Project;
   repairedCount: number;
-  supportRepairCount: number;
 } {
   if (typeof text !== "string") {
     throw new Error("no file content was provided.");
@@ -599,13 +593,27 @@ export function migrateProjectJsonWithReport(text: string): {
     throw new Error("the file is not valid JSON.");
   }
 
-  return migrateProjectWithReport(parsed);
+  return migrateProjectWithReport(parsed, context);
 }
 
 type Doc = Record<string, unknown>;
 
+// What a migration step may need BESIDE the document. Today: the artwork
+// library, because v7→v8 has to know which floor placements are box monitors
+// and a project document has never carried its artworks (they live in their own
+// IndexedDB store, and in a package manifest they are the project's SIBLING).
+//
+// Optional everywhere, and every caller that has the library passes it: the
+// IndexedDB load, the snapshot restore and the package manifest reader. The
+// one path that genuinely cannot is a bare project-JSON import, which has no
+// artworks in the file at all — a monitor there loses its implicit pedestal,
+// which is the honest outcome when the file never said the work was a monitor.
+export type ProjectMigrationContext = {
+  artworks?: readonly unknown[];
+};
+
 // Migrations are keyed by source version and each step advances schemaVersion.
-const MIGRATIONS: Record<number, (doc: Doc) => Doc> = {
+const MIGRATIONS: Record<number, (doc: Doc, context: ProjectMigrationContext) => Doc> = {
   // v1 had no floor objects.
   1: (doc) => ({ ...doc, floorObjects: [], schemaVersion: 2 }),
   // v3 adds partitions and replaces the never-written connectsToWallId field.
@@ -634,8 +642,199 @@ const MIGRATIONS: Record<number, (doc: Doc) => Doc> = {
   // for the DOWNGRADE direction, the same rationale as isOpenSide and support
   // above: a v6 build would accept the file, STRIP every shelf, leave the works
   // that stood on them floating in mid-air and re-save that loss.
-  6: (doc) => ({ ...doc, schemaVersion: 7 })
+  6: (doc) => ({ ...doc, schemaVersion: 7 }),
+  // v8 turns the v7 ATTACHED support (ArtworkFloorObject.support) into a
+  // standalone SupportFloorObject, and drops ArtworkFloorObject.monitorSupport.
+  // A real rewrite, not a version stamp — see migrateV7ToV8.
+  7: (doc, context) => migrateV7ToV8(doc, context)
 };
+
+// ─── v7 -> v8: attached supports become floor objects ──────────────────────
+//
+// The v7 shapes this step reads, declared locally: the LIVE types no longer
+// have these keys (that is the point of the migration), so typing against
+// ArtworkFloorObject here would silently compile to `never` and skip the work.
+type V7FloorSupport = {
+  kind?: unknown;
+  widthMm?: unknown;
+  depthMm?: unknown;
+  heightMm?: unknown;
+  offsetXMm?: unknown;
+  offsetYMm?: unknown;
+  overhangAllowed?: unknown;
+  bonnetHeightMm?: unknown;
+  bonnetHeightLocked?: unknown;
+};
+
+type V7ArtworkFloorObject = {
+  kind?: unknown;
+  artworkId?: unknown;
+  xMm?: unknown;
+  yMm?: unknown;
+  widthMm?: unknown;
+  depthMm?: unknown;
+  heightMm?: unknown;
+  rotationDeg?: unknown;
+  support?: V7FloorSupport;
+  monitorSupport?: unknown;
+};
+
+function numberOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+// The v7 support's footprint centre in floor space, EXACTLY as the deleted
+// supportPlanRect computed it: the offset is stated in the placement's ROTATED
+// LOCAL frame (x along the work's width, y toward its front face), so it has to
+// be rotated by the placement's own angle before it can be added to the
+// placement's centre. Getting this wrong would slide every pedestal under a
+// rotated work sideways, silently, on first open.
+function v7SupportCenterMm(
+  placement: { xMm: number; yMm: number; rotationDeg: number },
+  offsetXMm: number,
+  offsetYMm: number
+): { xMm: number; yMm: number } {
+  const angleRad = (placement.rotationDeg * Math.PI) / 180;
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+  return {
+    xMm: placement.xMm + offsetXMm * cos - offsetYMm * sin,
+    yMm: placement.yMm + offsetXMm * sin + offsetYMm * cos
+  };
+}
+
+// Pedestals and plinths stop being a block bolted to one artwork and become
+// floor objects of their own (floor-supports spec §2, USER DECISION
+// 2026-09-18). Three things happen to every v7 document:
+//
+//  1. an attached `support` becomes a SupportFloorObject at the footprint the
+//     old offset put it at, inserted IMMEDIATELY BEFORE its artwork so it keeps
+//     drawing beneath the work, with the work's `baseHeightMm` set to the
+//     support's height — which is exactly what "stands on it" now means;
+//  2. a BOX MONITOR that was resolving the absent-means-pedestal default gets
+//     the 800mm cabinet-footprint pedestal that default used to draw, so no
+//     monitor silently drops to the floor. Detecting one needs the WORK, not
+//     the placement, so this joins through the ARTWORK LIBRARY the caller hands
+//     in (ProjectMigrationContext.artworks) — the same isMonitorArtwork
+//     predicate every renderer uses. Without it no placement is recognised as a
+//     monitor and none gains a pedestal, which is the honest outcome for the
+//     one caller that has no library to give (a bare project-JSON import);
+//  3. `monitorSupport` is deleted everywhere, including from the dormant copies
+//     parked in wall objects' floorMemory.
+//
+// Downgrade refusal follows the v6/v7 pattern: a v7 build handed this file
+// would accept it, strip every support object, drop the sculptures to the floor
+// and re-save that loss.
+function migrateV7ToV8(doc: Doc, context: ProjectMigrationContext): Doc {
+  const artworks = context.artworks ?? [];
+  const monitorArtworkIds = new Set<string>();
+  for (const artwork of artworks) {
+    if (typeof artwork !== "object" || artwork === null) continue;
+    const id = (artwork as Doc).id;
+    if (typeof id !== "string") continue;
+    if (isMonitorArtwork(artwork as Parameters<typeof isMonitorArtwork>[0])) {
+      monitorArtworkIds.add(id);
+    }
+  }
+
+  const floorObjects = Array.isArray(doc.floorObjects) ? (doc.floorObjects as unknown[]) : [];
+  const nextFloorObjects: unknown[] = [];
+  for (const entry of floorObjects) {
+    if (typeof entry !== "object" || entry === null) {
+      nextFloorObjects.push(entry);
+      continue;
+    }
+    const object = entry as V7ArtworkFloorObject & Doc;
+    if (object.kind !== "artwork") {
+      nextFloorObjects.push(entry);
+      continue;
+    }
+
+    const { support, monitorSupport, ...rest } = object;
+    const placement = {
+      xMm: numberOr(object.xMm, 0),
+      yMm: numberOr(object.yMm, 0),
+      rotationDeg: numberOr(object.rotationDeg, 0)
+    };
+
+    if (support && typeof support === "object") {
+      const center = v7SupportCenterMm(
+        placement,
+        numberOr(support.offsetXMm, 0),
+        numberOr(support.offsetYMm, 0)
+      );
+      const heightMm = numberOr(support.heightMm, 0);
+      nextFloorObjects.push({
+        id: newId(),
+        kind: "support",
+        supportKind: support.kind === "plinth" ? "plinth" : "pedestal",
+        xMm: center.xMm,
+        yMm: center.yMm,
+        widthMm: numberOr(support.widthMm, numberOr(object.widthMm, 0)),
+        depthMm: numberOr(support.depthMm, numberOr(object.depthMm, 0)),
+        rotationDeg: placement.rotationDeg,
+        heightMm,
+        wallYMm: 0,
+        ...(typeof support.bonnetHeightMm === "number"
+          ? { bonnetHeightMm: support.bonnetHeightMm }
+          : {}),
+        ...(typeof support.bonnetHeightLocked === "boolean"
+          ? { bonnetHeightLocked: support.bonnetHeightLocked }
+          : {}),
+        ...(typeof support.overhangAllowed === "boolean"
+          ? { overhangAllowed: support.overhangAllowed }
+          : {})
+      });
+      nextFloorObjects.push({ ...rest, baseHeightMm: heightMm });
+      continue;
+    }
+
+    const artworkId = typeof object.artworkId === "string" ? object.artworkId : undefined;
+    if (
+      artworkId !== undefined &&
+      monitorArtworkIds.has(artworkId) &&
+      monitorSupport !== "floor"
+    ) {
+      nextFloorObjects.push({
+        id: newId(),
+        kind: "support",
+        supportKind: "pedestal",
+        xMm: placement.xMm,
+        yMm: placement.yMm,
+        widthMm: numberOr(object.widthMm, 0),
+        depthMm: numberOr(object.depthMm, 0),
+        rotationDeg: placement.rotationDeg,
+        heightMm: MONITOR_PEDESTAL_HEIGHT_MM,
+        wallYMm: 0
+      });
+      nextFloorObjects.push({ ...rest, baseHeightMm: MONITOR_PEDESTAL_HEIGHT_MM });
+      continue;
+    }
+
+    nextFloorObjects.push(rest);
+  }
+
+  const wallObjects = Array.isArray(doc.wallObjects) ? (doc.wallObjects as unknown[]) : undefined;
+  const nextWallObjects = wallObjects?.map((entry) => {
+    if (typeof entry !== "object" || entry === null) return entry;
+    const object = entry as Doc;
+    const floorMemory = object.floorMemory;
+    if (typeof floorMemory !== "object" || floorMemory === null) return entry;
+    const {
+      support: _support,
+      monitorSupport: _monitorSupport,
+      ...restMemory
+    } = floorMemory as Doc;
+    return { ...object, floorMemory: restMemory };
+  });
+
+  return {
+    ...doc,
+    floorObjects: nextFloorObjects,
+    ...(nextWallObjects ? { wallObjects: nextWallObjects } : {}),
+    schemaVersion: 8
+  };
+}
 
 function migrateV2ToV3(doc: Doc): Doc {
   const floor = (doc.floor as Doc | undefined) ?? undefined;
@@ -666,27 +865,27 @@ function migrateV2ToV3(doc: Doc): Doc {
   };
 }
 
-export function migrateProject(input: unknown): Project {
-  return migrateProjectWithReport(input).project;
+export function migrateProject(
+  input: unknown,
+  context: ProjectMigrationContext = {}
+): Project {
+  return migrateProjectWithReport(input, context).project;
 }
 
 // migrateProject plus a count of shared-opening pairs that had to be
 // disconnected to make the document valid. Local documents repair silently;
 // the package-import path surfaces the count, since an imported file that
 // changed on the way in should say so.
-export function migrateProjectWithReport(input: unknown): {
+export function migrateProjectWithReport(
+  input: unknown,
+  context: ProjectMigrationContext = {}
+): {
   project: Project;
   repairedCount: number;
-  // Floor placements whose attached support had to be normalised on the way in
-  // (a detached pedestal, an undersized overhang-off box, a stale bonnet
-  // height). DELIBERATELY NOT folded into repairedCount, whose user-facing copy
-  // means "invalid shared-opening pairs disconnected" and would become a lie.
-  supportRepairCount: number;
-  // The parsed, migrated document BEFORE the support repair — what storage
-  // actually holds. The SAME reference as `project` when supportRepairCount is
-  // 0. An open path snapshots this and, when it differs from `project`, writes
-  // the repaired copy back; without it the repair would live only in memory and
-  // the stored record would trigger the same repair (and warning) on every open.
+  // The parsed, migrated document. Kept as a separate key (always the SAME
+  // reference as `project` now that supports are plain floor objects with no
+  // load-boundary repair) because every open path snapshots what storage holds
+  // and compares it against what it is about to render.
   stored: Project;
 } {
   const versioned = versionedDocumentSchema.safeParse(input);
@@ -718,7 +917,7 @@ export function migrateProjectWithReport(input: unknown): {
         `this project uses an old schema version (${version}) that this app can no longer open.`
       );
     }
-    migrated = step(migrated);
+    migrated = step(migrated, context);
     version += 1;
   }
 
@@ -730,13 +929,8 @@ export function migrateProjectWithReport(input: unknown): {
   const { project: repaired, repairedCount } = normalizeOpeningPairs(migrated as unknown as Project);
 
   try {
-    // Structural validation first, then the RELATIONAL support invariants: the
-    // normaliser reads the placement's own dimensions, so it can only run on a
-    // document already known to have them. See floorSupportSchema for why the
-    // rules are not zod refinements.
     const stored = parseProject(repaired);
-    const { project, supportRepairCount } = normalizeProjectFloorSupports(stored);
-    return { project, repairedCount, supportRepairCount, stored };
+    return { project: stored, repairedCount, stored };
   } catch (error) {
     if (error instanceof z.ZodError) {
       const [issue] = error.issues;
@@ -747,33 +941,4 @@ export function migrateProjectWithReport(input: unknown): {
     }
     throw error;
   }
-}
-
-// Runs the ONE support normaliser (geometry/supportGlyphs.ts) over every floor
-// placement carrying a support, at the load boundary, and reports how many had
-// to change. Hand-edited files, a package written by a build with a different
-// default, and an undo history replayed out of a stale document all arrive
-// here; the alternative is a pedestal that renders detached from its sculpture
-// in plan and only snaps back the next time someone happens to edit it.
-//
-// Returns the SAME project object when nothing changed, so a clean document's
-// identity (and its cloud-backup fingerprint) is untouched.
-//
-// Exported for the in-memory project repository (src/test/inMemoryRepositories),
-// whose loadWithReport has to produce the same report as the real read without
-// re-parsing a document the tests hand back by reference.
-export function normalizeProjectFloorSupports(project: Project): {
-  project: Project;
-  supportRepairCount: number;
-} {
-  let supportRepairCount = 0;
-  const floorObjects = project.floorObjects.map((object) => {
-    if (object.kind !== "artwork" || !object.support) return object;
-    const { support, changed } = normalizeFloorSupport(object, object.support);
-    if (!changed) return object;
-    supportRepairCount += 1;
-    return { ...object, support };
-  });
-  if (supportRepairCount === 0) return { project, supportRepairCount: 0 };
-  return { project: { ...project, floorObjects }, supportRepairCount };
 }

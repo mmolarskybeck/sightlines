@@ -11,6 +11,7 @@ import type {
   DoorWallObject,
   Project,
   ShelfWallObject,
+  SupportFloorObject,
   WindowWallObject
 } from "../project";
 import { createSampleProject } from "../sample/sampleProject";
@@ -547,10 +548,23 @@ describe("buildPlanScene floor objects", () => {
     });
   });
 
-  it("emits the support rect beneath a supported work, offset in the local frame", () => {
+  it("emits a support as its own entry, before the works standing on it", () => {
     const project = createSampleProject();
-    const floorArtwork: ArtworkFloorObject = {
-      id: "fo-supported",
+    const support: SupportFloorObject = {
+      id: "fo-pedestal",
+      kind: "support",
+      supportKind: "pedestal",
+      xMm: 1000,
+      yMm: 2000,
+      widthMm: 600,
+      depthMm: 500,
+      rotationDeg: 90,
+      heightMm: 1100,
+      wallYMm: 0,
+      bonnetHeightMm: 975
+    };
+    const rider: ArtworkFloorObject = {
+      id: "fo-rider",
       kind: "artwork",
       artworkId: "art-1",
       xMm: 1000,
@@ -560,41 +574,50 @@ describe("buildPlanScene floor objects", () => {
       heightMm: 900,
       rotationDeg: 90,
       wallYMm: 1450,
-      support: {
-        kind: "pedestal",
-        widthMm: 600,
-        depthMm: 500,
-        heightMm: 1100,
-        offsetXMm: 100,
-        bonnetHeightMm: 975
-      }
+      baseHeightMm: 1100
     };
-    project.floorObjects.push(floorArtwork);
+    // Stored the WRONG way round on purpose: draw order is the scene's job.
+    project.floorObjects.push(rider, support);
 
     const scene = buildPlanScene(project);
+    const ids = scene.floorObjects.map((entry) => entry.object.id);
+    expect(ids.indexOf("fo-pedestal")).toBeLessThan(ids.indexOf("fo-rider"));
 
-    const entry = scene.floorObjects.find((candidate) => candidate.object.id === "fo-supported");
-    // The WORK's rect is untouched — a support never resizes what it carries.
+    const entry = scene.floorObjects.find((candidate) => candidate.object.id === "fo-pedestal");
     expect(entry!.rect).toEqual({
       centerXMm: 1000,
       centerYMm: 2000,
-      widthMm: 400,
-      depthMm: 300,
+      widthMm: 600,
+      depthMm: 500,
       angleDeg: 90
     });
-    expect(entry!.support!.kind).toBe("pedestal");
-    expect(entry!.support!.hasBonnet).toBe(true);
-    expect(entry!.support!.rect.widthMm).toBe(600);
-    expect(entry!.support!.rect.depthMm).toBe(500);
-    expect(entry!.support!.rect.angleDeg).toBe(90);
-    // At 90° the support's local +x runs along floor +y.
-    expect(entry!.support!.rect.centerXMm).toBeCloseTo(1000, 6);
-    expect(entry!.support!.rect.centerYMm).toBeCloseTo(2100, 6);
+    expect(entry!.supportKind).toBe("pedestal");
+    expect(entry!.hasBonnet).toBe(true);
+
+    // The WORK's entry keeps exactly the key set every other placement has.
+    const riderEntry = scene.floorObjects.find((candidate) => candidate.object.id === "fo-rider");
+    expect(riderEntry).not.toHaveProperty("supportKind");
+    expect(riderEntry).not.toHaveProperty("hasBonnet");
+    expect(riderEntry!.rect.widthMm).toBe(400);
   });
 
-  it("resolves a box monitor's default pedestal, and omits support entirely otherwise", () => {
+  it("marks a bonnet-less support and never synthesises one for a monitor", () => {
     const project = createSampleProject();
-    const floorArtwork: ArtworkFloorObject = {
+    project.floorObjects.push({
+      id: "fo-plinth",
+      kind: "support",
+      supportKind: "plinth",
+      xMm: 0,
+      yMm: 0,
+      widthMm: 900,
+      depthMm: 900,
+      rotationDeg: 0,
+      heightMm: 150,
+      wallYMm: 0
+    } satisfies SupportFloorObject);
+    // A box monitor is now an ordinary floor artwork: nothing is resolved under
+    // it, because whatever it stands on is its own object.
+    project.floorObjects.push({
       id: "fo-monitor",
       kind: "artwork",
       artworkId: "art-monitor",
@@ -605,35 +628,18 @@ describe("buildPlanScene floor objects", () => {
       heightMm: 375,
       rotationDeg: 0,
       wallYMm: 1450
-    };
-    project.floorObjects.push(floorArtwork);
+    } satisfies ArtworkFloorObject);
     const monitor = artworkRecord({ id: "art-monitor", displayAs: "monitor" });
 
-    const withJoin = buildPlanScene(project, {
+    const scene = buildPlanScene(project, {
       artworksById: new Map([[monitor.id, monitor]])
     });
-    const monitorEntry = withJoin.floorObjects.find(
-      (candidate) => candidate.object.id === "fo-monitor"
-    );
-    // Footprint locked to the cabinet, as it was before supports existed.
-    expect(monitorEntry!.support).toEqual({
-      rect: {
-        centerXMm: 1000,
-        centerYMm: 2000,
-        widthMm: 500,
-        depthMm: 450,
-        angleDeg: 0
-      },
-      hasBonnet: false,
-      kind: "pedestal"
-    });
-
-    // No join, no monitor: an ordinary placement's entry keeps exactly the key
-    // set it had before supports existed.
-    const withoutJoin = buildPlanScene(project);
     expect(
-      withoutJoin.floorObjects.find((candidate) => candidate.object.id === "fo-monitor")
-    ).not.toHaveProperty("support");
+      scene.floorObjects.find((entry) => entry.object.id === "fo-plinth")!.hasBonnet
+    ).toBe(false);
+    expect(
+      scene.floorObjects.find((entry) => entry.object.id === "fo-monitor")
+    ).not.toHaveProperty("supportKind");
   });
 
   it("emits a freestanding floor case with its own center/footprint/rotation", () => {
