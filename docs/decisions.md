@@ -15,6 +15,7 @@ Decisions of record, invariants, and traps distilled from the 2026-07-09 → 202
 - **2026-08-10** Only a full-span perimeter wall can be opened, so the action can never create an ambiguous half-wall state; an open wall stays listed for orientation but takes no artwork or openings.
 - **2026-08-10** Partitions within `PARTITION_NEIGHBOR_MAX_GAP_MM` (1200, inclusive) count as spacing neighbors for readouts, snapping, arrange, PDF dims, and the plan wall-dimension chain, which splits at a qualifying band instead of measuring through it.
 - **2026-08-10** Drag barriers past a partition stay off — placement past a partition is visual-only — USER DECISION.
+- **2026-09-17** Use as North wall relabels all four walls in stored loop order; any 4-wall room; partition faces excluded; confirms before overwriting custom names, judged on the whole ordered name pattern (hasDefaultWallNames), never name by name — a typed "Wall 12" or a duplicated compass name is custom.
 
 ## Placement, snapping and framing
 

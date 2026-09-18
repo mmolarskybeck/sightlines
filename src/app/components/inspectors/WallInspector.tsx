@@ -1,3 +1,4 @@
+import { CompassIcon } from "@phosphor-icons/react/dist/csr/Compass";
 import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
 import { DoorOpenIcon } from "@phosphor-icons/react/dist/csr/DoorOpen";
 import { WallIcon } from "@phosphor-icons/react/dist/csr/Wall";
@@ -5,7 +6,7 @@ import { LinkIcon } from "@phosphor-icons/react/dist/csr/Link";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
 import { SquareIcon } from "@phosphor-icons/react/dist/csr/Square";
 import { TextAlignLeftIcon } from "@phosphor-icons/react/dist/csr/TextAlignLeft";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import type { ResizeAnchor } from "../../../domain/geometry/editRoom";
 import type { InsertToolKind } from "../../../domain/placement/createOpening";
 import type { DisplayUnit } from "../../../domain/project";
@@ -24,6 +25,8 @@ import { InspectorNotice } from "./InspectorNotice";
 import { InspectorActionGroup } from "./InspectorActionGroup";
 import { LengthField } from "../shared/LengthField";
 import { Button } from "../ui/button";
+import { Field } from "../ui/field";
+import { Input } from "../ui/input";
 import {
   SegmentedToggleGroup,
   SegmentedToggleGroupItem
@@ -36,6 +39,7 @@ export type WallDimensionLink = {
 };
 
 export function WallInspector({
+  canSetNorth = false,
   centerlineMm,
   changedWallNames,
   dimensionLink,
@@ -46,7 +50,9 @@ export function WallInspector({
   onCommitHeight,
   onCommitLength,
   onOpenWall,
+  onRenameWall,
   onRestoreWall,
+  onSetNorthWall,
   polygonLengthEditing = false,
   roomName,
   unit,
@@ -54,6 +60,9 @@ export function WallInspector({
   wallLengthMm,
   wallName
 }: {
+  // False for any room that is not a quadrilateral — there is no compass to
+  // assign, so the action is hidden rather than offered and refused.
+  canSetNorth?: boolean;
   centerlineMm: number;
   changedWallNames: string[];
   dimensionLink: WallDimensionLink | null;
@@ -67,7 +76,9 @@ export function WallInspector({
   onCommitHeight: (heightMm: number) => Promise<void>;
   onCommitLength: (lengthMm: number, anchor: ResizeAnchor) => Promise<void>;
   onOpenWall: () => void;
+  onRenameWall: (name: string) => void;
   onRestoreWall: () => void;
+  onSetNorthWall: () => void;
   polygonLengthEditing?: boolean;
   roomName: string;
   unit: DisplayUnit;
@@ -75,6 +86,7 @@ export function WallInspector({
   wallLengthMm: number;
   wallName: string;
 }) {
+  const [nameDraft, setNameDraft] = useState(wallName);
   const [fixedLengthAnchor, setFixedLengthAnchor] = useState<ResizeAnchor>("start");
   const fixedLengthAnchorRef = useRef<ResizeAnchor>("start");
   const [lengthGroupFocused, setLengthGroupFocused] = useState(false);
@@ -106,12 +118,60 @@ export function WallInspector({
     setLengthDirty(false);
   }, [wallLengthMm, wallName, wallScope.displayUnit]);
 
+  // Resync whenever the committed name changes out from under us, the way
+  // LengthField resyncs on its value: App keys this inspector on the wall id,
+  // so a selection change remounts — but a rename from the rooms panel (or an
+  // undo, or "Use as North wall") keeps the same wall selected and must not
+  // leave a stale draft here to commit back over it.
+  useEffect(() => {
+    setNameDraft(wallName);
+  }, [wallName]);
+
+  // Same shape as LengthField's commit: blur or Enter commits, Escape restores
+  // the last committed value. A wall must always be named, so an empty field
+  // reverts instead of clearing.
+  const commitName = () => {
+    const trimmed = nameDraft.trim();
+    if (trimmed.length === 0) {
+      setNameDraft(wallName);
+      return;
+    }
+    if (trimmed === wallName) return;
+    onRenameWall(trimmed);
+  };
+
   return (
     <form
       className="inspector-form"
       onSubmit={(event) => event.preventDefault()}
     >
       <div className="inspector-sections wall-size-sections">
+        {/* The name leads: it is what the elevation header, the wall switcher
+            and every PDF page title read, so it belongs above the geometry
+            rather than buried under it. */}
+        <InspectorSection collapsible={false} title="Wall">
+          <Field label="Name">
+            <Input
+              value={nameDraft}
+              onBlur={commitName}
+              onChange={(event) => setNameDraft(event.target.value)}
+              onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+                if (event.key === "Escape") {
+                  // stopPropagation for the same reason LengthField does it: a
+                  // global deselect-on-Escape must not eat a field revert. A
+                  // clean field passes Escape through.
+                  if (nameDraft === wallName) return;
+                  event.stopPropagation();
+                  setNameDraft(wallName);
+                  return;
+                }
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                event.currentTarget.blur();
+              }}
+            />
+          </Field>
+        </InspectorSection>
         {/* Length and room height are the two anchors of a wall's geometry —
             one static (non-collapsible) section, not two separately-headed
             blocks, so they read as a single "Size" thought with one gap
@@ -341,19 +401,31 @@ export function WallInspector({
         />
       )}
 
-      {isOpenSide ? null : (
+      {isOpenSide && !canSetNorth ? null : (
         <InspectorActionGroup>
+          {/* Relabels the whole room, not just this wall — the confirm App
+              raises when custom names are at stake says so. Available on an
+              open wall too: the wall record is still in the loop, so it can
+              still be the room's north. */}
+          {canSetNorth ? (
+            <Button className="inspector-action" variant="inspector" onClick={onSetNorthWall}>
+              <CompassIcon aria-hidden="true" size={15} />
+              Use as North wall
+            </Button>
+          ) : null}
           {/* Not a TrashIcon: this doesn't delete the wall record, it removes
               the surface — the room's edge stays. `destructive-ghost` is still
               right, because the wall's contents really are destroyed. */}
-          <Button
-            className="inspector-action inspector-danger"
-            variant="destructive-ghost"
-            onClick={onOpenWall}
-          >
-            <DoorOpenIcon aria-hidden="true" size={15} />
-            Open this wall
-          </Button>
+          {isOpenSide ? null : (
+            <Button
+              className="inspector-action inspector-danger"
+              variant="destructive-ghost"
+              onClick={onOpenWall}
+            >
+              <DoorOpenIcon aria-hidden="true" size={15} />
+              Open this wall
+            </Button>
+          )}
         </InspectorActionGroup>
       )}
     </form>

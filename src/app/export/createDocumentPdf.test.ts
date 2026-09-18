@@ -22,11 +22,15 @@ import {
   reconcileDocumentExportPreferences,
   type EffectiveDocumentSettings
 } from "../../domain/export/documentSettings";
+import { deriveDocumentPageManifest } from "../../domain/export/pageComposition";
+import { loadPdfFonts } from "./pdf/embedFonts";
+import { textWidth } from "./pdf/primitives";
 import { createPolygonRoomPlacement } from "../../domain/geometry/createRoom";
 import { buildPlanScene } from "../../domain/scene2d/planScene";
 import {
   artworkPlaceholderLabel,
   createDocumentPdf,
+  fitHeaderTitles,
   formatDocumentDimension,
   resolveWallDimensionOutwardMm,
   type RenderSavedView
@@ -609,5 +613,105 @@ describe("createDocumentPdf", () => {
       expect(elevation.showMarks).toBe(true);
       expect(elevation.knob).not.toBeNull();
     });
+  });
+});
+
+// A wall name is free text and reaches the PDF as the tail of every elevation
+// page title, so the running header has to survive a long one.
+describe("running header with a long wall name", () => {
+  // 57 characters — a realistic worst case for a wall someone describes rather
+  // than numbers.
+  const LONG_WALL_NAME = "Long wall beside the freight elevator and loading dock";
+  // US Letter portrait less the header's 36pt margins: the narrowest page an
+  // elevation can land on.
+  const CONTENT_WIDTH_PT = 612 - 72;
+
+  async function measureWith(): Promise<
+    (text: string, sizePt: number) => number
+  > {
+    const pdf = await PDFDocument.create();
+    const fonts = await loadPdfFonts(pdf);
+    return (text, sizePt) => textWidth(fonts, text, sizePt, true);
+  }
+
+  function elevationPageTitle(wallName: string): string {
+    const project = createSampleProject();
+    project.floor.rooms[0]!.room.walls[0]!.name = wallName;
+    const settings = settingsFor(project);
+    settings.sections = {
+      overview: false,
+      roomPlans: false,
+      elevations: true,
+      threeDViews: false
+    };
+    settings.rooms[0]!.walls = settings.rooms[0]!.walls.map((wall, index) => ({
+      ...wall,
+      included: index === 0
+    }));
+    const manifest = deriveDocumentPageManifest(project, settings);
+    return manifest[0]!.title;
+  }
+
+  it("composes the page title from the room and the wall's live name", () => {
+    expect(elevationPageTitle(LONG_WALL_NAME)).toBe(`Main Gallery · ${LONG_WALL_NAME}`);
+  });
+
+  it("prints a long wall name in full — it still fits the narrowest page", async () => {
+    const measure = await measureWith();
+    const title = elevationPageTitle(LONG_WALL_NAME);
+
+    const fitted = fitHeaderTitles(
+      {
+        projectTitle: "Summer Rotation",
+        pageTitle: title,
+        contentWidthPt: CONTENT_WIDTH_PT,
+        dateWidthPt: 60
+      },
+      measure
+    );
+
+    expect(fitted.pageTitle).toBe(title);
+    expect(fitted.projectTitle).toBe("Summer Rotation");
+    expect(measure(fitted.pageTitle, 14)).toBeLessThanOrEqual(CONTENT_WIDTH_PT);
+  });
+
+  it("truncates a name past that rather than letting it run off the page", async () => {
+    const measure = await measureWith();
+    const title = elevationPageTitle(`${LONG_WALL_NAME} and the service corridor behind it`);
+    // The premise: this title really would overflow if drawn as-is.
+    expect(measure(title, 14)).toBeGreaterThan(CONTENT_WIDTH_PT);
+
+    const fitted = fitHeaderTitles(
+      {
+        projectTitle: "Summer Rotation",
+        pageTitle: title,
+        contentWidthPt: CONTENT_WIDTH_PT,
+        dateWidthPt: 60
+      },
+      measure
+    );
+
+    expect(fitted.pageTitle.endsWith("...")).toBe(true);
+    expect(fitted.pageTitle).toContain("Main Gallery · Long wall");
+    expect(measure(fitted.pageTitle, 14)).toBeLessThanOrEqual(CONTENT_WIDTH_PT);
+  });
+
+  // The project line yields width to the date beside it, so it fits sooner.
+  it("keeps the project title clear of the date on its row", async () => {
+    const measure = await measureWith();
+    const projectTitle = "A rotation whose title nobody thought to keep short, at all, ever";
+
+    const fitted = fitHeaderTitles(
+      {
+        projectTitle,
+        pageTitle: "Main Gallery · North wall",
+        contentWidthPt: CONTENT_WIDTH_PT,
+        dateWidthPt: 400
+      },
+      measure
+    );
+
+    expect(fitted.projectTitle.endsWith("...")).toBe(true);
+    expect(measure(fitted.projectTitle, 9)).toBeLessThanOrEqual(CONTENT_WIDTH_PT - 400);
   });
 });

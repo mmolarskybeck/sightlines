@@ -11,6 +11,7 @@ import {
   effectiveFraming,
   getArtworkRingRectsMm
 } from "../../domain/framing";
+import { ellipsizeText } from "./checklistPdf/layout";
 import { getRoomPlaceableWalls } from "../../domain/geometry/placeableWalls";
 import { getFloorPartitions } from "../../domain/geometry/freestandingWalls";
 import { selectElevationPartitions } from "../../domain/placement/partitionNeighbors";
@@ -114,6 +115,8 @@ type EmbeddedArtworkImage =
 const HEADER_PROJECT_SIZE_PT = 9;
 const HEADER_TITLE_SIZE_PT = 14;
 const HEADER_DATE_SIZE_PT = 8;
+// Minimum breathing room between the project title and the date sharing its row.
+const HEADER_GAP_PT = 12;
 const DRAWING_INSET_PT = 22;
 const DIMENSION_DRAWING_INSET_PT = 38;
 const ELEVATION_DIMENSION_INSETS_PT = {
@@ -123,6 +126,36 @@ const ELEVATION_DIMENSION_INSETS_PT = {
   top: 22
 };
 const THREE_D_RENDER_DPI = 144;
+
+// Both header lines are free text — a project name, and a page title that ends
+// in a WALL NAME the user typed — so neither may be trusted to fit. A running
+// header that walks off the page (or under the date) is worse than one that
+// ellipsizes, which is what the checklist PDF already does with its own titles.
+// The project line shares its row with the date and yields that width; the page
+// title owns its row outright.
+//
+// Measurement is injected so the fit can be asserted without producing a
+// document, the same seam checklistPdf/layout.ts uses.
+export function fitHeaderTitles(
+  input: {
+    projectTitle: string;
+    pageTitle: string;
+    contentWidthPt: number;
+    dateWidthPt: number;
+  },
+  measure: (text: string, sizePt: number) => number
+): { projectTitle: string; pageTitle: string } {
+  return {
+    projectTitle: ellipsizeText(
+      input.projectTitle,
+      input.contentWidthPt - input.dateWidthPt - HEADER_GAP_PT,
+      (candidate) => measure(candidate, HEADER_PROJECT_SIZE_PT)
+    ),
+    pageTitle: ellipsizeText(input.pageTitle, input.contentWidthPt, (candidate) =>
+      measure(candidate, HEADER_TITLE_SIZE_PT)
+    )
+  };
+}
 
 function drawHeader(
   page: PDFPage,
@@ -141,20 +174,31 @@ function drawHeader(
     day: "numeric"
   }).format(exportedAt);
 
-  drawText(page, fonts, projectTitle, {
+  const dateWidth = textWidth(fonts, date, HEADER_DATE_SIZE_PT);
+  const fitted = fitHeaderTitles(
+    {
+      projectTitle,
+      pageTitle,
+      contentWidthPt: right - left,
+      dateWidthPt: dateWidth
+    },
+    (candidate, sizePt) => textWidth(fonts, candidate, sizePt, true)
+  );
+
+  drawText(page, fonts, fitted.projectTitle, {
     x: left,
     y: height - 48,
     size: HEADER_PROJECT_SIZE_PT,
     strong: true
   });
-  drawText(page, fonts, pageTitle, {
+  drawText(page, fonts, fitted.pageTitle, {
     x: left,
     y: height - 66,
     size: HEADER_TITLE_SIZE_PT,
     strong: true
   });
   drawText(page, fonts, date, {
-    x: right - textWidth(fonts, date, HEADER_DATE_SIZE_PT),
+    x: right - dateWidth,
     y: height - 48,
     size: HEADER_DATE_SIZE_PT,
     color: COLORS.muted

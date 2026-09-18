@@ -17,6 +17,7 @@ export type DialogPayloads = {
   libraryPicker: true;
   deleteRoom: { roomId: string };
   openWall: { wallId: string };
+  setNorthWall: { roomId: string; wallId: string };
 };
 
 export type DialogName = keyof DialogPayloads;
@@ -48,7 +49,8 @@ const DIALOG_NAMES = [
   "importWizard",
   "libraryPicker",
   "deleteRoom",
-  "openWall"
+  "openWall",
+  "setNorthWall"
 ] as const satisfies readonly DialogName[];
 
 const ALL_CLOSED: DialogState = {
@@ -59,7 +61,8 @@ const ALL_CLOSED: DialogState = {
   importWizard: null,
   libraryPicker: null,
   deleteRoom: null,
-  openWall: null
+  openWall: null,
+  setNorthWall: null
 };
 
 export type DialogsHandle = {

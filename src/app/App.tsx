@@ -47,6 +47,10 @@ import type {
   WallTextWallObject
 } from "../domain/project";
 import { isDegeneratePose, resolveSavedViewRoomLabel } from "../domain/savedViews";
+import {
+  COMPASS_WALL_NAMES,
+  hasDefaultWallNames
+} from "../domain/geometry/createRoom";
 import { faceWallId, parseFaceWallId } from "../domain/geometry/freestandingWalls";
 import { getPartitionClearances } from "../domain/geometry/partitionSpacing";
 import { readDropboxShareUrl } from "./cloud/dropboxShare";
@@ -268,6 +272,8 @@ export function App() {
   const setFreestandingWallClearance = useAppStore((state) => state.setFreestandingWallClearance);
   const deleteFreestandingWall = useAppStore((state) => state.deleteFreestandingWall);
   const renameRoom = useAppStore((state) => state.renameRoom);
+  const renameWall = useAppStore((state) => state.renameWall);
+  const setRoomNorthWall = useAppStore((state) => state.setRoomNorthWall);
   const deleteRoom = useAppStore((state) => state.deleteRoom);
   const openWall = useAppStore((state) => state.openWall);
   const restoreWall = useAppStore((state) => state.restoreWall);
@@ -1358,6 +1364,21 @@ export function App() {
     if (viewMode !== "3d") setViewMode("3d");
   };
 
+  // "Use as North wall" rewrites all four names. That is free when the room
+  // still carries its birth names, and destructive as soon as one was typed —
+  // so the confirm is raised only in the second case.
+  const requestSetNorthWall = (roomId: string, wallId: string) => {
+    const placement = project.floor.rooms.find(
+      (candidate) => candidate.roomId === roomId
+    );
+    if (!placement) return;
+    // Judged on the whole ordered pattern (hasDefaultWallNames), not name by
+    // name: a typed "Wall 12" or a duplicated "East wall" is a custom name.
+    if (!hasDefaultWallNames(placement.room.walls))
+      dialogs.open("setNorthWall", { roomId, wallId });
+    else void setRoomNorthWall(roomId, wallId);
+  };
+
   // Detect package vs. project JSON by zip magic, not file extension.
   const handleImportFile = async (file: File) => {
     const buffer = await file.arrayBuffer();
@@ -1531,9 +1552,11 @@ export function App() {
             onAddRectangleRoom={() => void addRectangleRoom()}
             onDeleteRoom={deleteRoom}
             onRenameRoom={renameRoom}
+            onRenameWall={renameWall}
             onResizeWall={resizeWall}
             // List navigation, not a canvas pick — see focusWallContext.
             onSelectWall={focusWallContext}
+            onSetNorthWall={requestSetNorthWall}
           />
         ) : visibleLeftPanel === "savedViews" ? (
           <SavedViewsPanel
@@ -2455,6 +2478,14 @@ export function App() {
           ) : selectedWall ? (
             <WallInspector
               key={selectedWall.id}
+              // A partition face never reaches this inspector (it has its own),
+              // but the compass still needs a quadrilateral perimeter room.
+              canSetNorth={
+                selectedWallRoomPlacement !== null &&
+                selectedWallRoomPlacement.room.walls.length ===
+                  COMPASS_WALL_NAMES.length &&
+                parseFaceWallId(selectedWall.id) === null
+              }
               centerlineMm={project.defaultCenterlineHeightMm}
               changedWallNames={getWallNames(
                 project,
@@ -2469,7 +2500,12 @@ export function App() {
               // that wall's name, and the confirm names it again. The rule
               // protects the implicit gesture — a bare keypress — not this one.
               onOpenWall={() => dialogs.open("openWall", { wallId: selectedWall.id })}
+              onRenameWall={(name) => void renameWall(selectedWall.id, name)}
               onRestoreWall={() => void restoreWall(selectedWall.id)}
+              onSetNorthWall={() => {
+                if (!selectedWallRoomPlacement) return;
+                requestSetNorthWall(selectedWallRoomPlacement.roomId, selectedWall.id);
+              }}
               onAddCase={() => void addWallCase(selectedWall.id)}
               onAddOpening={(kind) => void addOpening(selectedWall.id, kind)}
               onCommitHeight={(heightMm) =>

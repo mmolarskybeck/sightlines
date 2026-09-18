@@ -1,4 +1,4 @@
-import type { Floor, RoomPlacement, RoomVertex, Wall } from "../project";
+import type { Floor, Room, RoomPlacement, RoomVertex, Wall } from "../project";
 import { feetToMm } from "../units/length";
 import { getFloorBounds } from "./walls";
 import { isSimplePolygon, signedAreaMm2, type Point } from "./polygon";
@@ -6,6 +6,85 @@ import { isSimplePolygon, signedAreaMm2, type Point } from "./polygon";
 // Consecutive draw points closer than this collapse to a zero-length wall, so
 // the constructor rejects them (the draw tool guards against this too).
 const MIN_VERTEX_SPACING_MM = 10;
+
+// The four names a rectangle room is born with, in stored loop order. Exported
+// so "Use as North wall" can reproduce the convention rather than re-spelling
+// it, and so the default-name test below stays in one place.
+export const COMPASS_WALL_NAMES = [
+  "North wall",
+  "East wall",
+  "South wall",
+  "West wall"
+] as const;
+
+// Polygon rooms are born "Wall 1", "Wall 2", … — the other shape a name the
+// user has never touched can take. Used to decide whether relabelling would
+// destroy something someone typed.
+const NUMBERED_WALL_NAME = /^Wall \d+$/;
+
+export function isDefaultWallName(name: string): boolean {
+  return (
+    (COMPASS_WALL_NAMES as readonly string[]).includes(name) ||
+    NUMBERED_WALL_NAME.test(name)
+  );
+}
+
+// Rename all four walls of a quadrilateral room so `wallId` becomes "North
+// wall" and the rest follow the loop. Rect rooms and normalised polygon rooms
+// share the same winding (see createPolygonRoomPlacement), so walking the
+// stored loop forward from the chosen wall reproduces the N/E/S/W order a
+// rectangle is born with — no reversal, and the array keeps its stored order
+// so every wall id stays at its own index.
+//
+// Returns null when the room is not a quadrilateral or the wall is not one of
+// its own, so the caller can no-op rather than invent a compass.
+// Whether a room still carries the names it was born with, judged on the
+// COMPLETE ordered pattern rather than string by string: "Wall 1..Wall n" in
+// stored order, or (four walls) the compass names in loop order starting
+// anywhere. A user-typed "Wall 12", a duplicated "East wall" or the compass
+// names in a scrambled order all pass isDefaultWallName individually and are
+// all custom here — which is what decides whether "Use as North wall" must
+// confirm before overwriting them.
+export function hasDefaultWallNames(walls: readonly Pick<Wall, "name">[]): boolean {
+  if (walls.every((wall, index) => wall.name === `Wall ${index + 1}`)) return true;
+  if (walls.length !== COMPASS_WALL_NAMES.length) return false;
+  const start = COMPASS_WALL_NAMES.indexOf(walls[0]!.name as (typeof COMPASS_WALL_NAMES)[number]);
+  if (start === -1) return false;
+  return walls.every(
+    (wall, index) =>
+      wall.name === COMPASS_WALL_NAMES[(start + index) % COMPASS_WALL_NAMES.length]
+  );
+}
+
+// The names the confirm dialog lists for "Use as North wall": of the names the
+// relabel would change, the ones that read as typed (fail isDefaultWallName).
+// When none does but the pattern is still custom (a typed "Wall 12", a
+// duplicated "East wall"), every changed name is listed — the dialog already
+// says all four are renamed, so the list only has to name what is at stake.
+// Empty when nothing would change or the room is not eligible.
+export function wallNamesReplacedByNorth(room: Room, wallId: string): string[] {
+  const next = relabelWallsFromNorth(room, wallId);
+  if (!next) return [];
+  const changed = room.walls
+    .filter((wall, index) => wall.name !== next[index]!.name)
+    .map((wall) => wall.name);
+  const typed = changed.filter((name) => !isDefaultWallName(name));
+  if (typed.length > 0) return typed;
+  return hasDefaultWallNames(room.walls) ? [] : changed;
+}
+
+export function relabelWallsFromNorth(room: Room, wallId: string): Wall[] | null {
+  if (room.walls.length !== COMPASS_WALL_NAMES.length) return null;
+  const northIndex = room.walls.findIndex((wall) => wall.id === wallId);
+  if (northIndex === -1) return null;
+
+  const next = room.walls.slice();
+  for (let step = 0; step < COMPASS_WALL_NAMES.length; step += 1) {
+    const index = (northIndex + step) % COMPASS_WALL_NAMES.length;
+    next[index] = { ...room.walls[index]!, name: COMPASS_WALL_NAMES[step]! };
+  }
+  return next;
+}
 
 type CreateRectangularRoomInput = {
   depthMm: number;

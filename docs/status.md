@@ -46,6 +46,7 @@ One line per round, oldest first. Full narrative for every row: `docs/archive/bu
 | 2026-08-28 → 31 | Feedback round | Windows export extensions fix, PDF dialog discoverability, CRT box monitor → four-way display model with Medium combobox, 3D hand/zoom + pointer drag. |
 | 2026-08-31 | Checklist view prefs + fixes | Sort/group stored on the project (`checklistView`), inspector Details stale-draft fix, PDF 3D mount race. |
 | 2026-09-01 | Refactor pass | Placement/shared-opening/floor-object slices, dialog registry + real-App test, export delivery helper, provider seam cleanup, Dropbox request scaffolding, R3F helpers, `store.test.ts` split, ImportWizard reducer. |
+| 2026-09-17 | Wall names | Editable wall names (rooms panel inline rename + inspector Name field) and "Use as North wall" relabelling all four walls of any quadrilateral room, with a confirm before custom names are overwritten; long names truncate in the elevation chip and the PDF running header. |
 
 ## Near-Term Order (as of 2026-09-01)
 

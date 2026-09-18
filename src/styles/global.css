@@ -2122,7 +2122,8 @@ body.panels-resizing * {
   min-height: 32px;
 }
 
-.room-rename-form {
+.room-rename-form,
+.wall-rename-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 32px 32px;
   align-items: center;
@@ -2130,12 +2131,34 @@ body.panels-resizing * {
   width: 100%;
 }
 
-.room-rename-form input {
+.room-rename-form input,
+.wall-rename-form input {
   width: 100%;
   min-height: 32px;
   padding: var(--space-6) var(--space-8);
   font-size: var(--type-sm);
   font-weight: var(--weight-semibold);
+}
+
+/* The wall row keeps its full-width navigate gesture; the rename and compass
+   actions dock beside it, in the same quiet register as the room heading's. */
+.wall-row-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.wall-row-item .wall-row {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wall-row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-4);
 }
 
 .room-dimensions {
@@ -2206,6 +2229,18 @@ body.panels-resizing * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A wall name is free text, so it is the part that yields: the length readout
+   and the Open tag keep their width, and a long name ellipsizes into whatever
+   is left. */
+.wall-row > span:first-of-type {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wall-row strong {
+  flex: 0 0 auto;
 }
 
 /* "Open" on a wall row. Same register as .checklist-tag — a quiet word between
@@ -5670,8 +5705,15 @@ body.panels-resizing * {
   line-height: var(--leading-ui);
 }
 
+/* A wall name is free text, so the chip must not grow across the canvas when
+   someone names a wall "Corridor beside the freight elevator". Same truncation
+   the switcher variant already uses for its wall line. */
 .surface-label strong {
+  max-width: 28ch;
+  overflow: hidden;
   font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The elevation chip doubles as a text-first wall switcher: the browser

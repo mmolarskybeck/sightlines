@@ -7,6 +7,10 @@ import { ArtworkLibraryPicker } from "./library/ArtworkLibrary";
 import { DeleteRoomDialog } from "./dialogs/DeleteRoomDialog";
 import { OpenWallDialog } from "./dialogs/OpenWallDialog";
 import { RecoveryDialog } from "./dialogs/RecoveryDialog";
+import {
+  SetNorthWallDialog,
+  type SetNorthWallRequest
+} from "./dialogs/SetNorthWallDialog";
 import { ShareProjectDialog } from "./dialogs/ShareProjectDialog";
 import { SharedProjectImportDialog } from "./dialogs/SharedProjectImportDialog";
 import { SyncConflictDialog } from "./dialogs/SyncConflictDialog";
@@ -17,6 +21,7 @@ import type { StoragePersistenceState } from "../hooks/useStoragePersistence";
 import type { DialogsHandle } from "../hooks/useDialogs";
 import type { UseSavedViewThumbnails } from "../hooks/useSavedViewThumbnails";
 import { useArtworksById } from "../hooks/useArtworksById";
+import { wallNamesReplacedByNorth } from "../../domain/geometry/createRoom";
 import { summarizeRoomContents } from "../roomDeletion";
 import { buildOpenWallRequest } from "../wallOpening";
 import { useAppStore, type ArtworkImportDestination } from "../store";
@@ -175,6 +180,7 @@ export function AppDialogs({
       />
       <ConnectedDeleteRoomDialog dialogs={dialogs} />
       <ConnectedOpenWallDialog dialogs={dialogs} />
+      <ConnectedSetNorthWallDialog dialogs={dialogs} />
       <ConnectedImportConflictDialog getBlob={getAssetBlob} />
       {/* The whole-project sync decision. It is deliberately NOT stacked with
           the artwork review: a pull resolves the layout question here first,
@@ -408,6 +414,44 @@ function ConnectedOpenWallDialog({ dialogs }: { dialogs: DialogsHandle }) {
       }}
       onOpenChange={(open) => {
         if (!open) dialogs.close("openWall");
+      }}
+    />
+  );
+}
+
+function ConnectedSetNorthWallDialog({ dialogs }: { dialogs: DialogsHandle }) {
+  const project = useAppStore((state) => state.project);
+  const setRoomNorthWall = useAppStore((state) => state.setRoomNorthWall);
+  // Same stale-id idiom as the two confirms above: a room or wall that went
+  // away under an undo resolves to null and closes the dialog safely.
+  const pending = dialogs.payload("setNorthWall") ?? null;
+  const placement =
+    pending && project
+      ? (project.floor.rooms.find((candidate) => candidate.roomId === pending.roomId) ?? null)
+      : null;
+  const wall = placement?.room.walls.find((candidate) => candidate.id === pending?.wallId);
+  const request: SetNorthWallRequest | null =
+    pending && placement && wall
+      ? {
+          roomId: placement.roomId,
+          wallId: wall.id,
+          wallName: wall.name,
+          roomName: placement.room.name,
+          customNames: wallNamesReplacedByNorth(placement.room, wall.id)
+        }
+      : null;
+  return (
+    <SetNorthWallDialog
+      request={request}
+      onConfirm={() => {
+        // Act on the REQUEST, so the walls relabelled are the ones the dialog
+        // just described.
+        const confirmed = request;
+        dialogs.close("setNorthWall");
+        if (confirmed) void setRoomNorthWall(confirmed.roomId, confirmed.wallId);
+      }}
+      onOpenChange={(open) => {
+        if (!open) dialogs.close("setNorthWall");
       }}
     />
   );
